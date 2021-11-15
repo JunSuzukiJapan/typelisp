@@ -1,7 +1,9 @@
+pub mod errors;
 pub mod ast;
 pub mod eval;
 pub mod read;
 
+use errors::*;
 use ast::*;
 use read::*;
 use read::reader::Reader;

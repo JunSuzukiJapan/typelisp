@@ -1,7 +1,7 @@
 use std::str::Chars;
 use std::iter::Peekable;
 
-use crate::Object;
+use crate::{Object, Error};
 
 pub struct Reader;
 
@@ -10,7 +10,7 @@ impl Reader {
         Reader {}
     }
 
-    pub fn read(&self, s: &str) -> Object {
+    pub fn read(&self, s: &str) -> Result<Object, Error> {
         let mut stream = s.chars().peekable();
         self.skip_whitespace(&mut stream);
 
@@ -33,21 +33,48 @@ impl Reader {
                     if self.is_number(ch) {
                         self.read_number(&mut stream)
                     }else{
-                        // self.read_symbol()
-                        unimplemented!()
+                        self.read_symbol(&mut stream)
                     }
                 },
             }
         }else{
-            Object::Null
+            Ok(Object::Null)
         }
     }
 
-    fn read_number(&self, stream: &mut Peekable<Chars>) -> Object {
+    fn read_symbol(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
         let mut buf = String::new();
 
-        while true {
-            let mut ch: Option<char> = None;
+        loop {
+            let ch: Option<char>;
+
+            if let Some(c) = stream.peek() {
+                if c.is_whitespace() || *c == '(' || *c ==')' {
+                    break;
+                }
+                ch = Some(*c);
+            }else{
+                break;
+            }
+
+            stream.next();
+            buf.push(ch.unwrap());
+        }
+
+        if buf == "true" {
+            Ok(Object::True)
+        }else if buf == "false" {
+            Ok(Object::False)
+        }else{
+            Ok(Object::new_symbol(buf))
+        }
+    }
+
+    fn read_number(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
+        let mut buf = String::new();
+
+        loop {
+            let ch: Option<char>;
 
             if let Some(c) = stream.peek() {
                 ch = Some(*c);
@@ -63,7 +90,7 @@ impl Reader {
         }
 
         let val: i64 = buf.parse::<i64>().unwrap();
-        Object::new_i64(val)
+        Ok(Object::new_i64(val))
     }
 
     fn is_number(&self, ch: &char) -> bool {
