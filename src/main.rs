@@ -1,3 +1,16 @@
+pub mod ast;
+pub mod eval;
+pub mod read;
+
+use ast::*;
+use read::*;
+use read::reader::Reader;
+
+fn main() {
+    let reader = Reader::new();
+}
+
+/*
 use inkwell::context::Context;
 use inkwell::OptimizationLevel;
 
@@ -40,3 +53,4 @@ fn main() {
         execution_engine.get_function::<unsafe extern "C" fn()>("main").unwrap().call();
     }
 }
+*/
