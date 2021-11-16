@@ -4,6 +4,8 @@ pub enum Error {
     IllegalEndOfString,
     IllegalEndOfEscapeSequence,
     UnmatchedParen,
+    IllegalEndWhileReadingList,
+    UnmatchedParenWhileReadingConsPair,
 }
 
 impl Error {

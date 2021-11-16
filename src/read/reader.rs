@@ -12,15 +12,18 @@ impl Reader {
 
     pub fn read(&self, s: &str) -> Result<Object, Error> {
         let mut stream = s.chars().peekable();
-        self.skip_whitespace(&mut stream);
+        self.read_from_peekable(&mut stream)
+    }
+
+    fn read_from_peekable(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
+        self.skip_whitespace(stream);
 
         if let Some(ch) = stream.peek() {
             match *ch {
-                // '(' => self.read_list(),
+                '(' => self.read_list(stream),
                 ')' => {
                     return Err(Error::UnmatchedParen);
                 },
-                '\"' => self.read_string(&mut stream),
                 // '\'' => {
                 //     self.char_stream.next(); // skip '
                 //     let obj = self.read();
@@ -29,17 +32,72 @@ impl Reader {
                 //     let cons = Object::new_cons(Rc::new(quote), Rc::new(cons));
                 //     cons
                 // },
+                '\"' => self.read_string(stream),
                 _ => {
                     if self.is_number(ch) {
-                        self.read_number(&mut stream)
+                        self.read_number(stream)
                     }else{
-                        self.read_symbol(&mut stream)
+                        self.read_symbol(stream)
                     }
                 },
             }
         }else{
             Ok(Object::Null)
         }
+    }
+
+    // fn read_quote(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
+    //     stream.next(); // skip '
+    //     let obj = self.read();
+    //     let quote = Object::new_symbol(String::from("quote"));
+    //     let cons = Object::new_cons(Rc::new(obj), Rc::new(Object::Null));
+    //     let cons = Object::new_cons(Rc::new(quote), Rc::new(cons));
+    //     cons
+    // }
+
+    fn read_list2(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
+        self.skip_whitespace(stream);
+
+        if let Some(ch) = stream.peek() {
+            if *ch == ')' {
+                stream.next(); // skip ')'
+                return Ok(Object::Null);
+            }
+
+            let obj = self.read_from_peekable(stream)?;
+
+            // check cons pair
+            self.skip_whitespace(stream);
+            if let Some(c) = stream.peek() {
+                if *c == '.' { // cons pair
+                    stream.next(); // skip '.'
+                    self.skip_whitespace(stream);
+                    let right = self.read_from_peekable(stream)?;
+
+                    self.skip_whitespace(stream);
+                    if let Some(c) = stream.peek() {
+                        if *c != ')' {
+                            return Err(Error::UnmatchedParenWhileReadingConsPair);
+                        }
+                    }else{
+                        panic!("illegal cons pair");
+                    }
+
+                    return Ok(Object::new_cons(obj, right));
+                }
+            }
+
+            let left = self.read_list2(stream)?;
+            Ok(Object::new_cons(obj, left))
+
+        }else{
+            Err(Error::IllegalEndWhileReadingList)
+        }
+    }
+
+    fn read_list(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
+        stream.next(); // skip '('
+        Ok(self.read_list2(stream)?)
     }
 
     fn read_string(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {

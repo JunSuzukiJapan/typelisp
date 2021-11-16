@@ -8,8 +8,12 @@ use ast::*;
 use read::*;
 use read::reader::Reader;
 
-fn main() {
+fn main() -> Result<(), Error> {
     let reader = Reader::new();
+    let obj = reader.read("(1 2 \"foo\")")?;
+    println!("obj: {:?}", obj);
+
+    Ok(())
 }
 
 /*
