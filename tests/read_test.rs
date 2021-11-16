@@ -35,4 +35,13 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn read_string_test() -> Result<(), Error> {
+        let mut reader = Reader::new();
+        let obj = reader.read("\"Hello, World!\"")?;
+        assert_eq!(obj, Object::String("Hello, World!".to_string()));
+
+        Ok(())
+    }
 }

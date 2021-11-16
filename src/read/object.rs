@@ -5,6 +5,7 @@ pub enum Object {
     False,
     Int(i64),
     Symbol(String),
+    String(String),
 }
 
 impl Object {
@@ -14,5 +15,9 @@ impl Object {
 
     pub fn new_symbol(s: String) -> Object {
         Object::Symbol(s)
+    }
+
+    pub fn new_string(s: String) -> Object {
+        Object::String(s)
     }
 }

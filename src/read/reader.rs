@@ -20,7 +20,7 @@ impl Reader {
                 // ')' => {
                 //     panic!("unmatched ')'");
                 // },
-                // '\"' => self.read_string(),
+                '\"' => self.read_string(&mut stream),
                 // '\'' => {
                 //     self.char_stream.next(); // skip '
                 //     let obj = self.read();
@@ -40,6 +40,39 @@ impl Reader {
         }else{
             Ok(Object::Null)
         }
+    }
+
+    fn read_string(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
+        stream.next(); // skip first '"'
+        let mut buf = String::new();
+
+        // while let Some(ch) = self.char_stream.peek() {
+        loop {
+            let ch: char;
+
+            if let Some(c) = stream.peek()  {
+                if *c == '"' {
+                    stream.next(); // skip '"'
+                    break;
+                }
+                ch = *c;
+            }else{
+                return Err(Error::IllegalEndOfString);
+            }
+
+            if ch == '\\' {
+                let c = stream.next();
+                match c {
+                    Some(c2) => buf.push(c2),
+                    None => return Err(Error::IllegalEndOfEscapeSequence),
+                }
+            }else{
+                stream.next();
+                buf.push(ch);
+            }
+        }
+
+        Ok(Object::new_string(buf))
     }
 
     fn read_symbol(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {

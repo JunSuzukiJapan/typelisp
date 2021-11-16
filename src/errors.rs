@@ -1,6 +1,8 @@
 #[derive(Debug)]
 pub enum Error {
     ReadError(String),
+    IllegalEndOfString,
+    IllegalEndOfEscapeSequence,
 }
 
 impl Error {
