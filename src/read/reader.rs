@@ -46,19 +46,19 @@ impl Reader {
         let mut buf = String::new();
 
         loop {
-            let ch: Option<char>;
+            let ch: char;
 
             if let Some(c) = stream.peek() {
                 if c.is_whitespace() || *c == '(' || *c ==')' {
                     break;
                 }
-                ch = Some(*c);
+                ch = *c;
             }else{
                 break;
             }
 
             stream.next();
-            buf.push(ch.unwrap());
+            buf.push(ch);
         }
 
         if buf == "true" {
@@ -74,19 +74,19 @@ impl Reader {
         let mut buf = String::new();
 
         loop {
-            let ch: Option<char>;
+            let ch: char;
 
             if let Some(c) = stream.peek() {
-                ch = Some(*c);
+                ch = *c;
             }else{
                 break
             }
 
-            if !self.is_number(&ch.unwrap()) {
+            if !self.is_number(&ch) {
                 break;
             }
             stream.next();
-            buf.push(ch.unwrap());
+            buf.push(ch);
         }
 
         let val: i64 = buf.parse::<i64>().unwrap();
