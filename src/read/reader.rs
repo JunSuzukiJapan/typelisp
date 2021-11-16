@@ -24,6 +24,7 @@ impl Reader {
                 ')' => {
                     return Err(Error::UnmatchedParen);
                 },
+                '\'' => self.read_quote(stream),
                 // '\'' => {
                 //     self.char_stream.next(); // skip '
                 //     let obj = self.read();
@@ -46,14 +47,14 @@ impl Reader {
         }
     }
 
-    // fn read_quote(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
-    //     stream.next(); // skip '
-    //     let obj = self.read();
-    //     let quote = Object::new_symbol(String::from("quote"));
-    //     let cons = Object::new_cons(Rc::new(obj), Rc::new(Object::Null));
-    //     let cons = Object::new_cons(Rc::new(quote), Rc::new(cons));
-    //     cons
-    // }
+    fn read_quote(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
+        stream.next(); // skip '
+        let obj = self.read_from_peekable(stream)?;
+        let quote = Object::new_symbol(String::from("quote"));
+        let cons = Object::new_cons(obj, Object::Null);
+        let cons = Object::new_cons(quote, cons);
+        Ok(cons)
+    }
 
     fn read_list2(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
         self.skip_whitespace(stream);
