@@ -17,9 +17,9 @@ impl Reader {
         if let Some(ch) = stream.peek() {
             match *ch {
                 // '(' => self.read_list(),
-                // ')' => {
-                //     panic!("unmatched ')'");
-                // },
+                ')' => {
+                    return Err(Error::UnmatchedParen);
+                },
                 '\"' => self.read_string(&mut stream),
                 // '\'' => {
                 //     self.char_stream.next(); // skip '
@@ -46,7 +46,6 @@ impl Reader {
         stream.next(); // skip first '"'
         let mut buf = String::new();
 
-        // while let Some(ch) = self.char_stream.peek() {
         loop {
             let ch: char;
 

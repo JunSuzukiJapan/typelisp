@@ -3,6 +3,7 @@ pub enum Error {
     ReadError(String),
     IllegalEndOfString,
     IllegalEndOfEscapeSequence,
+    UnmatchedParen,
 }
 
 impl Error {
