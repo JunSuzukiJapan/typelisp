@@ -105,12 +105,28 @@ mod tests {
     fn is_null_test() {
         let obj = Object::Null;
         assert!(obj.is_null());
+
+        assert!( ! obj.is_bool());
+        assert!( ! obj.is_true());
+        assert!( ! obj.is_false());
+        assert!( ! obj.is_int());
+        assert!( ! obj.is_symbol());
+        assert!( ! obj.is_string());
+        assert!( ! obj.is_cons());
     }
 
     #[test]
     fn is_int_test() {
         let obj = Object::Int(0);
         assert!(obj.is_int());
+
+        assert!( ! obj.is_null());
+        assert!( ! obj.is_bool());
+        assert!( ! obj.is_true());
+        assert!( ! obj.is_false());
+        assert!( ! obj.is_symbol());
+        assert!( ! obj.is_string());
+        assert!( ! obj.is_cons());
     }
 
     #[test]
@@ -124,23 +140,59 @@ mod tests {
         assert!(false_obj.is_bool());
         assert!( ! false_obj.is_true());
         assert!(false_obj.is_false());
+
+        assert!( ! true_obj.is_null());
+        assert!( ! true_obj.is_int());
+        assert!( ! true_obj.is_symbol());
+        assert!( ! true_obj.is_string());
+        assert!( ! true_obj.is_cons());
+
+        assert!( ! false_obj.is_null());
+        assert!( ! false_obj.is_int());
+        assert!( ! false_obj.is_symbol());
+        assert!( ! false_obj.is_string());
+        assert!( ! false_obj.is_cons());
     }
 
     #[test]
     fn is_symbol_test() {
         let obj = Object::Symbol("foo".to_string());
         assert!(obj.is_symbol());
+
+        assert!( ! obj.is_null());
+        assert!( ! obj.is_bool());
+        assert!( ! obj.is_true());
+        assert!( ! obj.is_false());
+        assert!( ! obj.is_int());
+        assert!( ! obj.is_string());
+        assert!( ! obj.is_cons());
     }
 
     #[test]
     fn is_string_test() {
         let obj = Object::String("\"Hello, World!\"".to_string());
         assert!(obj.is_string());
+
+        assert!( ! obj.is_null());
+        assert!( ! obj.is_bool());
+        assert!( ! obj.is_true());
+        assert!( ! obj.is_false());
+        assert!( ! obj.is_int());
+        assert!( ! obj.is_symbol());
+        assert!( ! obj.is_cons());
     }
 
     #[test]
     fn is_cons_test() {
         let obj = Object::Cons {car: Rc::new(Object::Null), cdr: Rc::new(Object::Null)};
         assert!(obj.is_cons());
+
+        assert!( ! obj.is_null());
+        assert!( ! obj.is_bool());
+        assert!( ! obj.is_true());
+        assert!( ! obj.is_false());
+        assert!( ! obj.is_int());
+        assert!( ! obj.is_symbol());
+        assert!( ! obj.is_string());
     }
 }
