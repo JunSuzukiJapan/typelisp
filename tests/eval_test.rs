@@ -44,4 +44,15 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn eval_string_test() -> Result<(), Error> {
+        let reader = Reader::new();
+        let evaluator = Evaluator::new();
+        let obj = reader.read("\"Hello, World!\"")?;
+        let obj = evaluator.eval(&obj)?;
+        assert_eq!(obj, Object::String("Hello, World!".to_string()));
+
+        Ok(())
+    }
 }
