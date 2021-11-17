@@ -33,4 +33,15 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn eval_symbol_test() -> Result<(), Error> {
+        let reader = Reader::new();
+        let evaluator = Evaluator::new();
+        let obj = reader.read("some_symbol")?;
+        let obj = evaluator.eval(&obj)?;
+        assert_eq!(obj, Object::Symbol("some_symbol".to_string()));
+
+        Ok(())
+    }
 }
