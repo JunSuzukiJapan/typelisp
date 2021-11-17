@@ -55,4 +55,32 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn eval_null_test() -> Result<(), Error> {
+        let reader = Reader::new();
+        let evaluator = Evaluator::new();
+
+        let obj = reader.read("null")?;
+        let obj = evaluator.eval(&obj)?;
+        assert_eq!(obj, Object::Null);
+
+        let obj = reader.read("()")?;
+        let obj = evaluator.eval(&obj)?;
+        assert_eq!(obj, Object::Null);
+
+        Ok(())
+    }
+/*
+    #[test]
+    fn eval_add_test() -> Result<(), Error> {
+        let reader = Reader::new();
+        let evaluator = Evaluator::new();
+        let obj = reader.read("(+ 1 2)")?;
+        let obj = evaluator.eval(&obj)?;
+        assert_eq!(obj, Object::Int(3));
+
+        Ok(())
+    }
+*/
 }

@@ -13,7 +13,8 @@ impl Evaluator {
             Object::True => Ok(Object::True),
             Object::False => Ok(Object::False),
             Object::Symbol(name) => Ok(Object::Symbol(name.to_string())),
-            &Object::String(ref s) => Ok(Object::String(s.clone())),
+            Object::String(s) => Ok(Object::String(s.clone())),
+            &Object::Null => Ok(Object::Null),
             _ => unimplemented!()
         }
     }

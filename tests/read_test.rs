@@ -46,6 +46,18 @@ mod tests {
     }
 
     #[test]
+    fn read_null_test() -> Result<(), Error> {
+        let reader = Reader::new();
+        let obj = reader.read("null")?;
+        assert_eq!(obj, Object::Null);
+
+        let obj = reader.read("()")?;
+        assert_eq!(obj, Object::Null);
+
+        Ok(())
+    }
+
+    #[test]
     fn read_list_test() -> Result<(), Error> {
         let reader = Reader::new();
         let obj = reader.read("(1 2 \"foo\")")?;

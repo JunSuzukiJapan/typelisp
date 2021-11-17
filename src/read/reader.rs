@@ -156,6 +156,8 @@ impl Reader {
             Ok(Object::True)
         }else if buf == "false" {
             Ok(Object::False)
+        }else if buf == "null" {
+            Ok(Object::Null)
         }else{
             Ok(Object::new_symbol(buf))
         }
