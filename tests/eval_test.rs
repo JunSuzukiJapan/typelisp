@@ -16,4 +16,21 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn eval_bool_test() -> Result<(), Error> {
+        let reader = Reader::new();
+        let evaluator = Evaluator::new();
+        let obj = reader.read("true")?;
+        let obj = evaluator.eval(&obj)?;
+        assert_eq!(obj, Object::True);
+
+        let reader = Reader::new();
+        let evaluator = Evaluator::new();
+        let obj = reader.read("false")?;
+        let obj = evaluator.eval(&obj)?;
+        assert_eq!(obj, Object::False);
+
+        Ok(())
+    }
 }

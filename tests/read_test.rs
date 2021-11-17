@@ -15,7 +15,7 @@ mod tests {
     }
 
     #[test]
-    fn read_true_test() -> Result<(), Error> {
+    fn read_bool_test() -> Result<(), Error> {
         let reader = Reader::new();
         let obj = reader.read("true")?;
         assert_eq!(obj, Object::True);
