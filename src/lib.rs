@@ -8,3 +8,4 @@ pub mod read;
 pub use errors::*;
 pub use ast::*;
 pub use read::*;
+pub use eval::*;

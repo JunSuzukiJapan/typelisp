@@ -1,0 +1,19 @@
+extern crate typelisp;
+
+use typelisp::*;
+
+mod tests {
+    use crate::*;
+
+    #[test]
+    fn eval_int_test() -> Result<(), Error> {
+        let reader = Reader::new();
+        let evaluator = Evaluator::new();
+        let obj = reader.read("123")?;
+        let obj = evaluator.eval(&obj)?;
+
+        assert_eq!(obj, Object::Int(123));
+
+        Ok(())
+    }
+}
