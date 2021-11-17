@@ -14,8 +14,18 @@ impl Evaluator {
             Object::False => Ok(Object::False),
             Object::Symbol(name) => Ok(Object::Symbol(name.to_string())),
             Object::String(s) => Ok(Object::String(s.clone())),
-            &Object::Null => Ok(Object::Null),
-            _ => unimplemented!()
+            Object::Null => Ok(Object::Null),
+            Object::Cons {car: _, cdr: _} => self.call_function_or_macro(obj),
+            // _ => unimplemented!()
+        }
+    }
+
+    fn call_function_or_macro(&self, obj: &Object) -> Result<Object, Error> {
+        if let Object::Cons {car, cdr} = obj {
+            unimplemented!()
+            
+        }else{
+            Err(Error::InternalErrorEvalNotCons)
         }
     }
 }

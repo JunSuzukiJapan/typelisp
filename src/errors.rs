@@ -6,6 +6,7 @@ pub enum Error {
     UnmatchedParen,
     IllegalEndWhileReadingList,
     UnmatchedParenWhileReadingConsPair,
+    InternalErrorEvalNotCons,
 }
 
 impl Error {

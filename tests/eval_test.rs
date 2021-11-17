@@ -71,7 +71,7 @@ mod tests {
 
         Ok(())
     }
-/*
+
     #[test]
     fn eval_add_test() -> Result<(), Error> {
         let reader = Reader::new();
@@ -82,5 +82,4 @@ mod tests {
 
         Ok(())
     }
-*/
 }
