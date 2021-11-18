@@ -15,6 +15,38 @@ impl Cons {
             cdr: Rc::new(cdr),
         }
     }
+
+    pub fn iter(&self) -> ConsIter {
+        ConsIter::new(self)
+    }
+}
+
+#[derive(PartialEq, Debug)]
+pub struct ConsIter<'a> {
+    opt_cons: Option<&'a Cons>,
+}
+
+impl<'a> ConsIter<'a> {
+    pub fn new(cons: &'a Cons) -> ConsIter<'a> {
+        ConsIter {
+            opt_cons: Some(cons)
+        }
+    }
+}
+
+impl<'a> Iterator for ConsIter<'a> {
+    type Item = &'a Object;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(cons) = self.opt_cons {
+            let result = cons.car.as_ref();
+            self.opt_cons = cons.cdr.as_ref().as_ref();
+
+            Some(result)
+        }else{
+            None
+        }
+    }
 }
 
 #[derive(PartialEq, Debug)]
