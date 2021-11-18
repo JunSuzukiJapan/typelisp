@@ -3,6 +3,21 @@
 use std::rc::Rc;
 
 #[derive(PartialEq, Debug)]
+pub struct Cons {
+    pub car: Rc<Object>,
+    pub cdr: Rc<Option<Cons>>,
+}
+
+impl Cons {
+    pub fn new_cons(car: Object, cdr: Option<Cons>) -> Cons {
+        Cons {
+            car: Rc::new(car),
+            cdr: Rc::new(cdr),
+        }
+    }
+}
+
+#[derive(PartialEq, Debug)]
 pub enum Object {
     Null,
     True,
@@ -10,7 +25,8 @@ pub enum Object {
     Int(i64),
     Symbol(String),
     String(String),
-    Cons { car: Rc<Object>, cdr: Rc<Object> }
+    List(Cons),
+    // Cons { car: Rc<Object>, cdr: Rc<Object> }
 }
 
 impl Object {
@@ -26,10 +42,17 @@ impl Object {
         Object::String(s)
     }
 
-    pub fn new_cons(car: Object, cdr: Object) -> Object {
-        Object::Cons {
-            car: Rc::new(car),
-            cdr: Rc::new(cdr),
+    pub fn new_list_from_vec(v: Vec<Object>) -> Object {
+        let mut list = None;
+
+        for o in v {
+            list = Some(Cons::new_cons(o, list));
+        }
+
+        if let Some(l) = list {
+            Object::List(l)
+        }else{
+            Object::Null
         }
     }
 
@@ -88,8 +111,8 @@ impl Object {
         }
     }
 
-    pub fn is_cons(&self) -> bool {
-        if let Object::Cons {car: _, cdr: _} = self {
+    pub fn is_list(&self) -> bool {
+        if let Object::List(_) = self {
             true
         }else{
             false
@@ -112,7 +135,7 @@ mod tests {
         assert!( ! obj.is_int());
         assert!( ! obj.is_symbol());
         assert!( ! obj.is_string());
-        assert!( ! obj.is_cons());
+        assert!( ! obj.is_list());
     }
 
     #[test]
@@ -126,7 +149,7 @@ mod tests {
         assert!( ! obj.is_false());
         assert!( ! obj.is_symbol());
         assert!( ! obj.is_string());
-        assert!( ! obj.is_cons());
+        assert!( ! obj.is_list());
     }
 
     #[test]
@@ -145,13 +168,13 @@ mod tests {
         assert!( ! true_obj.is_int());
         assert!( ! true_obj.is_symbol());
         assert!( ! true_obj.is_string());
-        assert!( ! true_obj.is_cons());
+        assert!( ! true_obj.is_list());
 
         assert!( ! false_obj.is_null());
         assert!( ! false_obj.is_int());
         assert!( ! false_obj.is_symbol());
         assert!( ! false_obj.is_string());
-        assert!( ! false_obj.is_cons());
+        assert!( ! false_obj.is_list());
     }
 
     #[test]
@@ -165,7 +188,7 @@ mod tests {
         assert!( ! obj.is_false());
         assert!( ! obj.is_int());
         assert!( ! obj.is_string());
-        assert!( ! obj.is_cons());
+        assert!( ! obj.is_list());
     }
 
     #[test]
@@ -179,13 +202,13 @@ mod tests {
         assert!( ! obj.is_false());
         assert!( ! obj.is_int());
         assert!( ! obj.is_symbol());
-        assert!( ! obj.is_cons());
+        assert!( ! obj.is_list());
     }
 
     #[test]
-    fn is_cons_test() {
-        let obj = Object::Cons {car: Rc::new(Object::Null), cdr: Rc::new(Object::Null)};
-        assert!(obj.is_cons());
+    fn is_list_test() {
+        let obj = Object::new_list_from_vec(vec![Object::new_i64(1), Object::new_string("foo".to_string())]);
+        assert!(obj.is_list());
 
         assert!( ! obj.is_null());
         assert!( ! obj.is_bool());

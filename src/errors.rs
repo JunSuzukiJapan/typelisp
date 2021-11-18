@@ -7,6 +7,9 @@ pub enum Error {
     IllegalEndWhileReadingList,
     UnmatchedParenWhileReadingConsPair,
     InternalErrorEvalNotCons,
+    CallNotFunction,
+    NoSuchFunction(String),
+    ArgIsNotCons,
 }
 
 impl Error {

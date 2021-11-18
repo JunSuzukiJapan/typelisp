@@ -62,14 +62,16 @@ mod tests {
         let reader = Reader::new();
         let obj = reader.read("(1 2 \"foo\")")?;
         assert_eq!(obj,
-            Object::new_cons(
-                Object::new_i64(1),
-                Object::new_cons(
-                    Object::new_i64(2),
-                    Object::new_cons(
-                        Object::new_string("foo".to_string()),
-                        Object::Null
-                    )
+            Object::List(
+                Cons::new_cons(
+                    Object::new_i64(1),
+                    Some(Cons::new_cons(
+                        Object::new_i64(2),
+                        Some(Cons::new_cons(
+                            Object::new_string("foo".to_string()),
+                            None
+                        ))
+                    ))
                 )
             )
         );
@@ -82,20 +84,24 @@ mod tests {
         let reader = Reader::new();
         let obj = reader.read("'(1 2 \"foo\")")?;
         assert_eq!(obj,
-            Object::new_cons(
-                Object::new_symbol("quote".to_string()),
-                Object::new_cons(
-                    Object::new_cons(
-                        Object::new_i64(1),
-                        Object::new_cons(
-                            Object::new_i64(2),
-                            Object::new_cons(
-                                Object::new_string("foo".to_string()),
-                                Object::Null
+            Object::List(
+                Cons::new_cons(
+                    Object::new_symbol("quote".to_string()),
+                    Some(Cons::new_cons(
+                        Object::List(
+                            Cons::new_cons(
+                                Object::new_i64(1),
+                                Some(Cons::new_cons(
+                                    Object::new_i64(2),
+                                    Some(Cons::new_cons(
+                                        Object::new_string("foo".to_string()),
+                                        None
+                                    ))
+                                ))
                             )
-                        )
-                    ),
-                    Object::Null
+                        ),
+                        None
+                    ))
                 )
             )
         );

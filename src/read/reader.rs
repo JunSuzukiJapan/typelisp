@@ -1,7 +1,7 @@
 use std::str::Chars;
 use std::iter::Peekable;
 
-use crate::{Object, Error};
+use crate::{Object, Cons, Error};
 
 pub struct Reader;
 
@@ -51,54 +51,35 @@ impl Reader {
         stream.next(); // skip '
         let obj = self.read_from_peekable(stream)?;
         let quote = Object::new_symbol(String::from("quote"));
-        let cons = Object::new_cons(obj, Object::Null);
-        let cons = Object::new_cons(quote, cons);
-        Ok(cons)
-    }
-
-    fn read_list2(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
-        self.skip_whitespace(stream);
-
-        if let Some(ch) = stream.peek() {
-            if *ch == ')' {
-                stream.next(); // skip ')'
-                return Ok(Object::Null);
-            }
-
-            let obj = self.read_from_peekable(stream)?;
-
-            // check cons pair
-            self.skip_whitespace(stream);
-            if let Some(c) = stream.peek() {
-                if *c == '.' { // cons pair
-                    stream.next(); // skip '.'
-                    self.skip_whitespace(stream);
-                    let right = self.read_from_peekable(stream)?;
-
-                    self.skip_whitespace(stream);
-                    if let Some(c) = stream.peek() {
-                        if *c != ')' {
-                            return Err(Error::UnmatchedParenWhileReadingConsPair);
-                        }
-                    }else{
-                        panic!("illegal cons pair");
-                    }
-
-                    return Ok(Object::new_cons(obj, right));
-                }
-            }
-
-            let left = self.read_list2(stream)?;
-            Ok(Object::new_cons(obj, left))
-
-        }else{
-            Err(Error::IllegalEndWhileReadingList)
-        }
+        let cons = Cons::new_cons(obj, None);
+        let cons = Cons::new_cons(quote, Some(cons));
+        Ok(Object::List(cons))
     }
 
     fn read_list(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
         stream.next(); // skip '('
-        Ok(self.read_list2(stream)?)
+
+        let mut cons = None;
+
+        loop {
+            self.skip_whitespace(stream);
+
+            if let Some(ch) = stream.peek() {
+                if *ch == ')' {
+                    break;
+                }
+            }else{ // None
+                break;
+            }
+
+            let obj = self.read_from_peekable(stream)?;
+            cons = Some(Cons::new_cons(obj, cons));
+        }
+
+        match cons {
+            Some(pair) => Ok(Object::List(pair)),
+            None => Ok(Object::Null),
+        }
     }
 
     fn read_string(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {

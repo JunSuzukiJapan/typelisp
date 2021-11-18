@@ -1,11 +1,27 @@
-use crate::{Object, Error};
+use std::collections::HashMap;
+use std::rc::Rc;
+use crate::{Object, Cons, Error};
 
-pub struct Evaluator;
+pub struct Evaluator {
+    fun_table: HashMap<String, Rc<dyn Fn(&Option<&Cons>) -> Result<Object, Error>>>,
+}
 
 impl Evaluator {
+    //
+    // Constructor
+    //
     pub fn new() -> Evaluator {
-        Evaluator {}
-    }    
+        let mut tbl = HashMap::new();
+        Self::init_fun_table(&mut tbl);
+
+        Evaluator {
+            fun_table: tbl,
+        }
+    }
+
+    //
+    // member functions
+    //
 
     pub fn eval(&self, obj: &Object) -> Result<Object, Error> {
         match obj {
@@ -15,17 +31,40 @@ impl Evaluator {
             Object::Symbol(name) => Ok(Object::Symbol(name.to_string())),
             Object::String(s) => Ok(Object::String(s.clone())),
             Object::Null => Ok(Object::Null),
-            Object::Cons {car: _, cdr: _} => self.call_function_or_macro(obj),
+            Object::List(l) => self.call_function_or_macro(l),
             // _ => unimplemented!()
         }
     }
 
-    fn call_function_or_macro(&self, obj: &Object) -> Result<Object, Error> {
-        if let Object::Cons {car, cdr} = obj {
+    fn call_function_or_macro(&self, obj: &Cons) -> Result<Object, Error> {
+        match obj.car.as_ref() {
+            Object::Symbol(name) => {
+                if let Some(f) = self.fun_table.get(name) {
+                    let f = f.as_ref();
+                    let args = obj.cdr.clone();
+                    f(&args.as_ref().as_ref())
+                }else{
+                    return  Err(Error::NoSuchFunction(name.clone()));
+                }
+            },
+            _ => Err(Error::CallNotFunction),
+        }
+    }
+
+    //
+    // static functions
+    //
+
+    fn init_fun_table(tbl: &mut HashMap<String, Rc<dyn Fn(&Option<&Cons>) -> Result<Object, Error>>>){
+        tbl.insert("+".to_string(), Rc::new(Self::builtin_add));
+    }
+
+    fn builtin_add(obj: &Option<&Cons>) -> Result<Object, Error> {
+        if let Some(cons) = obj {
             unimplemented!()
             
         }else{
-            Err(Error::InternalErrorEvalNotCons)
+            Ok(Object::Int(0))
         }
     }
 }
