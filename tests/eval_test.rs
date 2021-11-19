@@ -76,6 +76,18 @@ mod tests {
     fn eval_add_test() -> Result<(), Error> {
         let reader = Reader::new();
         let evaluator = Evaluator::new();
+        let obj = reader.read("(+)")?;
+        let obj = evaluator.eval(&obj)?;
+        assert_eq!(obj, Object::Int(0));
+
+        let reader = Reader::new();
+        let evaluator = Evaluator::new();
+        let obj = reader.read("(+ 1)")?;
+        let obj = evaluator.eval(&obj)?;
+        assert_eq!(obj, Object::Int(1));
+
+        let reader = Reader::new();
+        let evaluator = Evaluator::new();
         let obj = reader.read("(+ 1 2)")?;
         let obj = evaluator.eval(&obj)?;
         assert_eq!(obj, Object::Int(3));
