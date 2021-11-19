@@ -16,9 +16,14 @@ impl Cons {
         }
     }
 
+    pub fn set_cdr(&mut self, cdr: Cons) {
+        self.cdr = Rc::new(Some(cdr));
+    }
+
     pub fn iter(&self) -> ConsIter {
         ConsIter::new(self)
     }
+
 }
 
 #[derive(PartialEq, Debug)]

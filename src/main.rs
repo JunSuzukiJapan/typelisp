@@ -3,21 +3,27 @@ pub mod ast;
 pub mod eval;
 pub mod read;
 
-use errors::*;
-// use ast::*;
-use read::*;
-use read::reader::Reader;
+// use errors::*;
+// use read::*;
+// use read::reader::Reader;
+use typelisp::*;
 
 fn main() -> Result<(), Error> {
+    // let reader = Reader::new();
+    // let obj = reader.read("(1 2 \"foo\")")?;
+    // println!("obj: {:?}", obj);
+
     let reader = Reader::new();
-    let obj = reader.read("(1 2 \"foo\")")?;
+    let evaluator = Evaluator::new();
+    let obj = reader.read("(+ 1 2)")?;
+    let obj = evaluator.eval(&obj)?;
     println!("obj: {:?}", obj);
 
     Ok(())
 }
 
 /*
-use inkwell::context::Context;
+use inkwell::rontext::Context;
 use inkwell::OptimizationLevel;
 
 fn main() {

@@ -10,6 +10,7 @@ pub enum Error {
     CallNotFunction,
     NoSuchFunction(String),
     ArgIsNotCons,
+    AddNotNumber,
 }
 
 impl Error {

@@ -1,5 +1,6 @@
 use std::str::Chars;
 use std::iter::Peekable;
+use std::rc::Rc;
 
 use crate::{Object, Cons, Error};
 
@@ -56,29 +57,32 @@ impl Reader {
         Ok(Object::List(cons))
     }
 
-    fn read_list(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
-        stream.next(); // skip '('
+    fn read_cons(&self, stream: &mut Peekable<Chars>) -> Result<Option<Cons>, Error> {
+        let result: Option<Cons> = None;
 
-        let mut cons = None;
-
-        loop {
-            self.skip_whitespace(stream);
-
-            if let Some(ch) = stream.peek() {
-                if *ch == ')' {
-                    break;
-                }
-            }else{ // None
-                break;
+        self.skip_whitespace(stream);
+        if let Some(ch) = stream.peek() {
+            if *ch == ')' {
+                stream.next(); // skip ')'
+                return Ok(result);
             }
-
-            let obj = self.read_from_peekable(stream)?;
-            cons = Some(Cons::new_cons(obj, cons));
+        }else{ // None
+            return Err(Error::IllegalEndWhileReadingList);
         }
 
-        match cons {
-            Some(pair) => Ok(Object::List(pair)),
-            None => Ok(Object::Null),
+        let obj = self.read_from_peekable(stream)?;
+        let cdr = self.read_cons(stream)?;
+        Ok(Some(Cons::new_cons(obj, cdr)))
+    }
+
+    fn read_list(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
+        stream.next(); // skip '('
+        let cons = self.read_cons(stream)?;
+        if cons.is_none() {
+            Ok(Object::Null)
+        }else{
+            let l = cons.unwrap();
+            Ok(Object::List(l))
         }
     }
 

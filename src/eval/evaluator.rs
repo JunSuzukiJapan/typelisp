@@ -37,6 +37,7 @@ impl Evaluator {
     }
 
     fn call_function_or_macro(&self, obj: &Cons) -> Result<Object, Error> {
+        println!("call obj = {:?}", obj);
         match obj.car.as_ref() {
             Object::Symbol(name) => {
                 if let Some(f) = self.fun_table.get(name) {
@@ -61,7 +62,16 @@ impl Evaluator {
 
     fn builtin_add(obj: &Option<&Cons>) -> Result<Object, Error> {
         if let Some(cons) = obj {
-            unimplemented!()
+            let mut val = 0;
+
+            for i in cons.iter() {
+                if let Object::Int(num) = i {
+                    val = val + num;
+                }else{
+                    return Err(Error::AddNotNumber)
+                }
+            }
+            Ok(Object::Int(val))
             
         }else{
             Ok(Object::Int(0))
