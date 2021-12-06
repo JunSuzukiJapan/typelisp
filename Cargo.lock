@@ -237,6 +237,7 @@ name = "typelisp"
 version = "0.1.0"
 dependencies = [
  "inkwell",
+ "once_cell",
 ]
 
 [[package]]

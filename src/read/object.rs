@@ -1,23 +1,23 @@
 #![allow(dead_code)]
 
-use std::rc::Rc;
+use std::sync::Arc;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Clone, Debug)]
 pub struct Cons {
-    pub car: Rc<Object>,
-    pub cdr: Rc<Option<Cons>>,
+    pub car: Arc<Object>,
+    pub cdr: Arc<Option<Cons>>,
 }
 
 impl Cons {
     pub fn new_cons(car: Object, cdr: Option<Cons>) -> Cons {
         Cons {
-            car: Rc::new(car),
-            cdr: Rc::new(cdr),
+            car: Arc::new(car),
+            cdr: Arc::new(cdr),
         }
     }
 
     pub fn set_cdr(&mut self, cdr: Cons) {
-        self.cdr = Rc::new(Some(cdr));
+        self.cdr = Arc::new(Some(cdr));
     }
 
     pub fn iter(&self) -> ConsIter {
@@ -63,7 +63,7 @@ pub enum Object {
     Symbol(String),
     String(String),
     List(Cons),
-    // Cons { car: Rc<Object>, cdr: Rc<Object> }
+    // Cons { car: Arc<Object>, cdr: Arc<Object> }
 }
 
 impl Object {
