@@ -48,12 +48,12 @@ fn main() {
     // call my add
     let i64_type = context.i64_type();
     let add_fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-    let add_function = module.add_function("add", add_fn_type, None);
+    let _add_function = module.add_function("add", add_fn_type, None);
 
 
     // printf関数を宣言
     let printf_fn_type = i32_type.fn_type(&[i8_ptr_type.into()], true);
-    let printf_function = module.add_function("printf", printf_fn_type, None);
+    let _printf_function = module.add_function("printf", printf_fn_type, None);
 
     // main関数を宣言
     let main_fn_type = i32_type.fn_type(&[], false);
@@ -74,8 +74,8 @@ fn main() {
     builder.build_return(Some(&i32_type.const_int(0, false)));
 */
 
-    let x = i64_type.const_int(1, true);
-    let y = i64_type.const_int(2, true);
+    // let x = i64_type.const_int(1, true);
+    // let y = i64_type.const_int(2, true);
     // let ret = builder.build_call(add_function, &[x.into(), y.into()] , "add");
     // let ret_i = ret.get_called_fn_value().get_last_param().unwrap();
     // builder.build_return(Some(&ret_i));

@@ -1,11 +1,12 @@
-use once_cell::sync::Lazy;
-use std::collections::HashMap;
-use std::sync::Mutex;
-use crate::{Expr, Function, Object, Cons, Error};
+// use once_cell::sync::Lazy;
+// use std::collections::HashMap;
+// use std::sync::Mutex;
+// use crate::{Expr, Function, Object, Cons, Error};
+use crate::{Expr, Object, Cons, Error};
 
-static FUNC_TABLE: Lazy<Mutex<HashMap<String, Function>>> = Lazy::new(|| {
-    Mutex::new(HashMap::new())
-});
+// static FUNC_TABLE: Lazy<Mutex<HashMap<String, Function>>> = Lazy::new(|| {
+//     Mutex::new(HashMap::new())
+// });
 
 pub struct ASTConstructor;
 
@@ -55,7 +56,7 @@ impl ASTConstructor {
     }
 
     fn make_call_lambda_function(&self, lambda: &Cons, args: &Option<Cons>) -> Result<Expr, Error> {
-        fn check_lambda(l: &Cons) -> Result<Expr, Error> {
+        fn check_lambda(_l: &Cons) -> Result<Expr, Error> {
             unimplemented!()
 
 

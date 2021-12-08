@@ -15,7 +15,7 @@ impl Function {
     }
 }
 
-#[derive(Debug)]
+#[derive(PartialEq, Debug)]
 pub enum Expr {
     Null,
     Int(i64),

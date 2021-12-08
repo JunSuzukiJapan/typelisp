@@ -15,4 +15,20 @@ impl<'env> Env<'env> {
             fun_tbl: HashMap::new(),
         }
     }
+
+    pub fn add_function(&mut self, name: &String, expr: FunctionValue<'env>) {
+        self.fun_tbl.insert(name.clone(), expr);
+    }
+
+    pub fn add_var(&mut self, name: &String, expr: Expr) {
+        self.var_tbl.insert(name.clone(), expr);
+    }
+
+    pub fn get_function(&self, name: &String) -> Option<&FunctionValue<'env>> {
+        self.fun_tbl.get(name)
+    }
+
+    pub fn get_var(&self, name: &String) -> Option<&Expr> {
+        self.var_tbl.get(name)
+    }
 }
