@@ -57,8 +57,8 @@ impl Reader {
         Ok(Object::List(cons))
     }
 
-    fn read_cons(&self, stream: &mut Peekable<Chars>) -> Result<Option<Cons>, Error> {
-        let result: Option<Cons> = None;
+    fn read_cons(&self, stream: &mut Peekable<Chars>) -> Result<Option<Cons<Object>>, Error> {
+        let result: Option<Cons<Object>> = None;
 
         self.skip_whitespace(stream);
         if let Some(ch) = stream.peek() {

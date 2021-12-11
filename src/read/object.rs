@@ -3,44 +3,44 @@
 use std::sync::Arc;
 
 #[derive(PartialEq, Clone, Debug)]
-pub struct Cons {
-    pub car: Arc<Object>,
-    pub cdr: Arc<Option<Cons>>,
+pub struct Cons<T> {
+    pub car: Arc<T>,
+    pub cdr: Arc<Option<Cons<T>>>,
 }
 
-impl Cons {
-    pub fn new_cons(car: Object, cdr: Option<Cons>) -> Cons {
+impl<T> Cons<T> {
+    pub fn new_cons(car: T, cdr: Option<Cons<T>>) -> Cons<T> {
         Cons {
             car: Arc::new(car),
             cdr: Arc::new(cdr),
         }
     }
 
-    pub fn set_cdr(&mut self, cdr: Cons) {
+    pub fn set_cdr(&mut self, cdr: Cons<T>) {
         self.cdr = Arc::new(Some(cdr));
     }
 
-    pub fn iter(&self) -> ConsIter {
+    pub fn iter(&self) -> ConsIter<T> {
         ConsIter::new(self)
     }
 
 }
 
 #[derive(PartialEq, Debug)]
-pub struct ConsIter<'a> {
-    opt_cons: Option<&'a Cons>,
+pub struct ConsIter<'a, T> {
+    opt_cons: Option<&'a Cons<T>>,
 }
 
-impl<'a> ConsIter<'a> {
-    pub fn new(cons: &'a Cons) -> ConsIter<'a> {
+impl<'a, T> ConsIter<'a, T> {
+    pub fn new(cons: &'a Cons<T>) -> ConsIter<'a, T> {
         ConsIter {
             opt_cons: Some(cons)
         }
     }
 }
 
-impl<'a> Iterator for ConsIter<'a> {
-    type Item = &'a Object;
+impl<'a, T> Iterator for ConsIter<'a, T> {
+    type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(cons) = self.opt_cons {
@@ -62,7 +62,7 @@ pub enum Object {
     Int(i64),
     Symbol(String),
     String(String),
-    List(Cons),
+    List(Cons<Object>),
     // Cons { car: Arc<Object>, cdr: Arc<Object> }
 }
 

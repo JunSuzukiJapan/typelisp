@@ -3,7 +3,7 @@ use std::rc::Rc;
 use crate::{Object, Cons, Error};
 
 pub struct Evaluator {
-    fun_table: HashMap<String, Rc<dyn Fn(&Option<&Cons>) -> Result<Object, Error>>>,
+    fun_table: HashMap<String, Rc<dyn Fn(&Option<&Cons<Object>>) -> Result<Object, Error>>>,
 }
 
 impl Evaluator {
@@ -36,7 +36,7 @@ impl Evaluator {
         }
     }
 
-    fn call_function_or_macro(&self, obj: &Cons) -> Result<Object, Error> {
+    fn call_function_or_macro(&self, obj: &Cons<Object>) -> Result<Object, Error> {
         println!("call obj = {:?}", obj);
         match obj.car.as_ref() {
             Object::Symbol(name) => {
@@ -56,11 +56,11 @@ impl Evaluator {
     // static functions
     //
 
-    fn init_fun_table(tbl: &mut HashMap<String, Rc<dyn Fn(&Option<&Cons>) -> Result<Object, Error>>>){
+    fn init_fun_table(tbl: &mut HashMap<String, Rc<dyn Fn(&Option<&Cons<Object>>) -> Result<Object, Error>>>){
         tbl.insert("+".to_string(), Rc::new(Self::builtin_add));
     }
 
-    fn builtin_add(obj: &Option<&Cons>) -> Result<Object, Error> {
+    fn builtin_add(obj: &Option<&Cons<Object>>) -> Result<Object, Error> {
         if let Some(cons) = obj {
             let mut val = 0;
 

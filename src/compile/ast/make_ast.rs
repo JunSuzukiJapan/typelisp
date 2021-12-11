@@ -28,7 +28,7 @@ impl ASTConstructor {
         }
     }
 
-    fn make_ast_from_list(&self, pair: &Cons) -> Result<Expr, Error> {
+    fn make_ast_from_list(&self, pair: &Cons<Object>) -> Result<Expr, Error> {
         match pair.car.as_ref() {
             Object::Symbol(s) => self.make_call_function(s, pair.cdr.as_ref()),
             Object::List(l) => self.make_call_lambda_function(l, pair.cdr.as_ref()),
@@ -36,7 +36,7 @@ impl ASTConstructor {
         }
     }
 
-    fn make_args(&self, args: &Option<Cons>) -> Result<Option<Vec<Expr>>, Error> {
+    fn make_args(&self, args: &Option<Cons<Object>>) -> Result<Option<Vec<Expr>>, Error> {
         if let Some(args) = args {
             let mut v = Vec::new();
 
@@ -50,20 +50,20 @@ impl ASTConstructor {
         }        
     }
 
-    fn make_call_function(&self, name: &String, args: &Option<Cons>) -> Result<Expr, Error> {
+    fn make_call_function(&self, name: &String, args: &Option<Cons<Object>>) -> Result<Expr, Error> {
         let args = self.make_args(args)?;
         Ok(Expr::CallFunction(name.clone(), args))
     }
 
-    fn make_call_lambda_function(&self, lambda: &Cons, args: &Option<Cons>) -> Result<Expr, Error> {
-        fn check_lambda(_l: &Cons) -> Result<Expr, Error> {
+    fn make_call_lambda_function(&self, lambda: &Cons<Object>, args: &Option<Cons<Object>>) -> Result<Expr, Error> {
+        fn check_lambda(_l: &Cons<Object>) -> Result<Cons<Expr>, Error> {
             unimplemented!()
 
 
         }
 
-        check_lambda(lambda)?;
+        let lambda_function = check_lambda(lambda)?;
         let args = self.make_args(args)?;
-        Ok(Expr::CallLambdaFunction(lambda.clone(), args))
+        Ok(Expr::CallLambdaFunction(lambda_function, args))
     }
 }

@@ -24,9 +24,9 @@ pub enum Expr {
     Symbol(String),
     String(String),
     Var(String),
-    List(Cons),
+    List(Cons<Expr>),
     CallFunction(String, Option<Vec<Expr>>),
-    CallLambdaFunction(Cons, Option<Vec<Expr>>),
+    CallLambdaFunction(Cons<Expr>, Option<Vec<Expr>>),
 
     Plus(Vec<Expr>),
 }

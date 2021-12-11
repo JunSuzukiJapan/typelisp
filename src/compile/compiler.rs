@@ -1,10 +1,10 @@
 use inkwell::OptimizationLevel;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
-use inkwell::execution_engine::{ExecutionEngine, JitFunction};
+// use inkwell::execution_engine::{ExecutionEngine, JitFunction};
 use inkwell::module::Module;
 use inkwell::values::*;
-use inkwell::basic_block::BasicBlock;
+// use inkwell::basic_block::BasicBlock;
 use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex};
 use std::error::Error;
