@@ -1,4 +1,5 @@
-use crate::Cons;
+use std::error;
+use crate::{Cons, Error};
 
 #[derive(Debug)]
 pub struct Function {
@@ -29,4 +30,14 @@ pub enum Expr {
     CallLambdaFunction(Cons<Expr>, Option<Vec<Expr>>),
 
     Plus(Vec<Expr>),
+}
+
+impl Expr {
+    pub fn get_value_as_int(&self) -> Result<i64, Box<dyn error::Error>> {
+        if let Expr::Int(x) = self {
+            Ok(*x)
+        }else{
+            Err(Box::new(Error::AddNotNumber))
+        }
+    }
 }

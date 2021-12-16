@@ -1,15 +1,17 @@
+#![allow(unused_variables)]
+
 use inkwell::OptimizationLevel;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
-// use inkwell::execution_engine::{ExecutionEngine, JitFunction};
+use inkwell::execution_engine::ExecutionEngine;
 use inkwell::module::Module;
 use inkwell::values::*;
 // use inkwell::basic_block::BasicBlock;
 use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex};
-use std::error::Error;
+use std::error;
 
-use crate::{Env, Expr};
+use crate::{Env, Expr, Error};
 
 static TEMP_COUNT: Lazy<Arc<Mutex<u64>>> = Lazy::new(|| {
     Arc::new(Mutex::new(0))
@@ -48,31 +50,38 @@ pub struct Compiler<'ctx> {
     context: &'ctx Context,
     module: Module<'ctx>,
     builder: Builder<'ctx>,
-    // execution_engine: ExecutionEngine<'ctx>,
+    execution_engine: ExecutionEngine<'ctx>,
 }
 
 impl<'ctx> Compiler<'ctx> {
-    fn new(context: &'ctx Context) -> Compiler<'ctx> {
+    fn new(context: &'ctx Context) -> Result<Compiler<'ctx>, Box<dyn error::Error>> {
         let module = context.create_module("main");
         let builder = context.create_builder();
-        // let engine = module.create_execution_engine()?;
+        let engine = module.create_execution_engine()?;
 
-        Compiler {
+        let mut compiler = Compiler {
             context: context,
             module: module,
             builder: builder,
-            // execution_engine: engine,
-        }
+            execution_engine: engine,
+        };
+        compiler.init_builtin_functions();
+
+        Ok(compiler)
     }
 
-    pub fn compile_and_run(expr: &Expr, env: &mut Env) -> Result<Expr, Box<dyn Error>> {
+    fn init_builtin_functions(&mut self) {
+
+    }
+
+    pub fn compile_and_run(expr: &Expr, env: &mut Env) -> Result<Expr, Box<dyn error::Error>> {
         let context = Context::create();
         // let engine = self.module.as_ref().unwrap().create_jit_execution_engine(OptimizationLevel::None)?;
-        let compiler = Compiler::new(&context);
+        let compiler = Compiler::new(&context)?;
         let main_function = compiler.generate_function_entry_point(expr)?;
 
-        let compiled = compiler.compile_with_context(expr, env)?;
-        compiler.generate_return(&compiled);
+        let compiled = compiler.compile_with_env(expr, env)?;
+        compiler.generate_return(&compiled)?;
 
 
         let execution_engine = compiler.module.create_jit_execution_engine(OptimizationLevel::None)?;
@@ -81,7 +90,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(Expr::Int(value.as_int(true) as i64))
     }
 
-    pub fn compile_with_context(&self, expr: &Expr, env: &mut Env) -> Result<BasicValueEnum<'ctx>, Box<dyn Error>> {
+    pub fn compile_with_env(&self, expr: &Expr, env: &mut Env) -> Result<BasicValueEnum<'ctx>, Box<dyn error::Error>> {
         match expr {
             Expr::Int(value) => self.compile_int(value),
             Expr::CallFunction(name, args) => self.compile_call_function(name, args, env),
@@ -91,7 +100,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn generate_function_entry_point(&self, expr: &Expr) -> Result<FunctionValue, Box<dyn Error>> {
+    fn generate_function_entry_point(&self, expr: &Expr) -> Result<FunctionValue, Box<dyn error::Error>> {
         match expr {
             Expr::Int(_) => {
                 let i64_type = self.context.i64_type();
@@ -102,13 +111,19 @@ impl<'ctx> Compiler<'ctx> {
                 self.builder.position_at_end(entry);
                 Ok(fn_value)
             },
+            Expr::CallFunction(name, opt_args) => {
+                let function = self.module.get_function(name).ok_or(Error::NoSuchFunction(name.to_string()))?;
+
+
+                unimplemented!()
+            },
 
 
             _ => unimplemented!(),
         }
     }
 
-    fn generate_return(&self, expr: &BasicValueEnum) -> Result<(), Box<dyn Error>> {
+    fn generate_return(&self, expr: &BasicValueEnum) -> Result<(), Box<dyn error::Error>> {
         match expr {
             BasicValueEnum::IntValue(value) => {
                 self.builder.build_return(Some(value));
@@ -121,12 +136,7 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn compile_int(&self, value: &i64) -> Result<BasicValueEnum<'ctx>, Box<dyn Error>> {
-        // let v = self.context.SInt64(val as u64);
-        // let ptr = self.builder.build_alloca(self.types.int64_type);
-        // self.builder.build_store(v, ptr);
-        // self.builder.build_load(ptr)
-
+    fn compile_int(&self, value: &i64) -> Result<BasicValueEnum<'ctx>, Box<dyn error::Error>> {
         let int_64_type = self.context.i64_type();
         let const_int = int_64_type.const_int(*value as u64, false);
         let ptr = self.builder.build_alloca(self.context.i64_type(), &self.get_temp_name("int"));
@@ -134,8 +144,20 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.builder.build_load(ptr, &self.get_temp_name("int")))
     }
 
-    fn compile_call_function(&self, name: &String, args: &Option<Vec<Expr>>, env: &mut Env) -> Result<BasicValueEnum<'ctx>, Box<dyn Error>> {
+    fn compile_call_function(&self, name: &String, args: &Option<Vec<Expr>>, env: &mut Env) -> Result<BasicValueEnum<'ctx>, Box<dyn error::Error>> {
         let fun = env.get_function(name).ok_or(crate::Error::NoSuchFunction(name.clone()))?;
+
+        let params = if let Some(v) = args {
+            let mut params = Vec::new();
+
+            for e in v {
+                params.push(self.compile_with_env(e, env)?);
+            }
+
+            Some(params)
+        }else{
+            None
+        };
 
 
 

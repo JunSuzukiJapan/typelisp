@@ -1,3 +1,5 @@
+#![allow(unused_variables)]
+
 pub mod errors;
 pub mod read;
 pub mod eval;
@@ -24,17 +26,20 @@ fn main() -> Result<(), Error> {
 }
 */
 
-
+use inkwell::targets::{InitializationConfig, Target};
 use inkwell::context::Context;
 use inkwell::OptimizationLevel;
+use inkwell::support::LLVMString;
 
 
 #[no_mangle]
-pub extern "C" fn add(x: i64, y: i64) -> i64 {
+pub extern "C" fn add(x: i32, y: i32) -> i32 {
     x + y
 }
 
-fn main() {
+fn main() -> Result<(), LLVMString> {
+    Target::initialize_native(&InitializationConfig::default()).unwrap();
+
     let context = Context::create();
     // moduleを作成
     let module = context.create_module("main");
@@ -46,15 +51,14 @@ fn main() {
     let i8_type = context.i8_type();
     let i8_ptr_type = i8_type.ptr_type(inkwell::AddressSpace::Generic);
 
-    // call my add
-    let i64_type = context.i64_type();
-    let add_fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
-    let _add_function = module.add_function("add", add_fn_type, None);
-
+    // add関数を宣言
+    let i32_type = context.i32_type();
+    let add_fn_type = i32_type.fn_type(&[i32_type.into(), i32_type.into()], false);
+    let add_function = module.add_function("add", add_fn_type, None);
 
     // printf関数を宣言
-    let printf_fn_type = i32_type.fn_type(&[i8_ptr_type.into()], true);
-    let _printf_function = module.add_function("printf", printf_fn_type, None);
+    // let printf_fn_type = i32_type.fn_type(&[i8_ptr_type.into()], true);
+    // let printf_function = module.add_function("printf", printf_fn_type, None);
 
     // main関数を宣言
     let main_fn_type = i32_type.fn_type(&[], false);
@@ -66,25 +70,25 @@ fn main() {
     builder.position_at_end(entry_basic_block);
 
     // ここからmain関数に命令をビルドしていく
-/*
-    // globalに文字列を宣言
-    let hw_string_ptr = builder.build_global_string_ptr("Hello, inkwell!", "hw");
-    // printfをcall
-    builder.build_call(printf_function, &[hw_string_ptr.as_pointer_value().into()], "call");
-    // main関数は0を返す
-    builder.build_return(Some(&i32_type.const_int(0, false)));
-*/
-
-    // let x = i64_type.const_int(1, true);
-    // let y = i64_type.const_int(2, true);
-    // let ret = builder.build_call(add_function, &[x.into(), y.into()] , "add");
+    let x = i32_type.const_int(1, true);
+    let y = i32_type.const_int(2, true);
+    let ret = builder.build_call(add_function, &[x.into(), y.into()] , "call_add");
     // let ret_i = ret.get_called_fn_value().get_last_param().unwrap();
-    // builder.build_return(Some(&ret_i));
-    builder.build_return(Some(&i32_type.const_int(0, false)));
+    let ret_i = ret.try_as_basic_value().left().unwrap().into_int_value();
+    builder.build_return(Some(&ret_i));
+    // builder.build_return(Some(&i32_type.const_int(0, false)));
 
     // JIT実行エンジンを作成し、main関数を実行
-    let execution_engine = module.create_jit_execution_engine(OptimizationLevel::Aggressive).unwrap();
-    unsafe {
-        execution_engine.get_function::<unsafe extern "C" fn()>("main").unwrap().call();
-    }
+    let execution_engine = module.create_jit_execution_engine(OptimizationLevel::None)?;
+    // let execution_engine = module.create_jit_execution_engine(OptimizationLevel::Aggressive).unwrap();
+    execution_engine.add_global_mapping(&add_function, add as usize);
+
+    println!("run jit engine");
+    let result = unsafe {
+        execution_engine.get_function::<unsafe extern "C" fn() -> i32>("main").unwrap().call()
+        // execution_engine.run_function(main_function, &[]).as_int(true)
+    };
+    println!("result = {}", result);
+
+    Ok(())
 }

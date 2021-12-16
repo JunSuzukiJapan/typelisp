@@ -56,13 +56,13 @@ impl ASTConstructor {
     }
 
     fn make_call_lambda_function(&self, lambda: &Cons<Object>, args: &Option<Cons<Object>>) -> Result<Expr, Error> {
-        fn check_lambda(_l: &Cons<Object>) -> Result<Cons<Expr>, Error> {
+        fn convert_lambda(_l: &Cons<Object>) -> Result<Cons<Expr>, Error> {
             unimplemented!()
 
 
         }
 
-        let lambda_function = check_lambda(lambda)?;
+        let lambda_function = convert_lambda(lambda)?;
         let args = self.make_args(args)?;
         Ok(Expr::CallLambdaFunction(lambda_function, args))
     }

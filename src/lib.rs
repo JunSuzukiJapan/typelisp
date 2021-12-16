@@ -1,4 +1,5 @@
 extern crate inkwell;
+extern crate num_bigint;
 
 pub mod errors;
 pub mod read;

@@ -30,12 +30,10 @@ mod tests {
 
         let obj = reader.read("(+ 1 2 3)")?;
         let expr = constructor.make_ast(&obj)?;
-        assert_eq!(expr, Expr::List(Cons {
-            car: 
-        }));
+        assert_eq!(expr, Expr::CallFunction("+".to_string(), Some(vec![Expr::Int(1), Expr::Int(2), Expr::Int(3)])));
 
         let result = Compiler::compile_and_run(&expr, &mut env)?;
-        assert_eq!(result, Expr::Int(123));
+        assert_eq!(result, Expr::Int(6));
 
         Ok(())
     }
