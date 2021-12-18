@@ -98,42 +98,6 @@ impl<'ctx> Compiler<'ctx> {
         }
     }
 
-    fn generate_function_entry_point(&self, expr: &Expr) -> Result<FunctionValue, Box<dyn error::Error>> {
-        match expr {
-            Expr::Int(_) => {
-                let i64_type = self.context.i64_type();
-                let arg_types = [];
-                let fn_type = i64_type.fn_type(&arg_types, false);
-                let fn_value = self.module.add_function("main", fn_type, None);
-                let entry = self.context.append_basic_block(fn_value, "entry");
-                self.builder.position_at_end(entry);
-                Ok(fn_value)
-            },
-            Expr::CallFunction(name, opt_args) => {
-                let function = self.module.get_function(name).ok_or(Error::NoSuchFunction(name.to_string()))?;
-
-
-                unimplemented!()
-            },
-
-
-            _ => unimplemented!(),
-        }
-    }
-
-    fn generate_return(&self, expr: &BasicValueEnum) -> Result<(), Box<dyn error::Error>> {
-        match expr {
-            BasicValueEnum::IntValue(value) => {
-                self.builder.build_return(Some(value));
-                Ok(())
-            },
-
-
-
-            _ => unimplemented!(),
-        }
-    }
-
     fn compile_int(&self, value: &i64) -> Result<BasicValueEnum<'ctx>, Box<dyn error::Error>> {
         let int_64_type = self.context.i64_type();
         let const_int = int_64_type.const_int(*value as u64, false);
@@ -169,5 +133,41 @@ impl<'ctx> Compiler<'ctx> {
         let mut num = temp.lock().unwrap();
         *num += 1;
         format!("{}{}", name, *num)
+    }
+
+    fn generate_function_entry_point(&self, expr: &Expr) -> Result<FunctionValue, Box<dyn error::Error>> {
+        match expr {
+            Expr::Int(_) => {
+                let i64_type = self.context.i64_type();
+                let arg_types = [];
+                let fn_type = i64_type.fn_type(&arg_types, false);
+                let fn_value = self.module.add_function("main", fn_type, None);
+                let entry = self.context.append_basic_block(fn_value, "entry");
+                self.builder.position_at_end(entry);
+                Ok(fn_value)
+            },
+            Expr::CallFunction(name, opt_args) => {
+                let function = self.module.get_function(name).ok_or(Error::NoSuchFunction(name.to_string()))?;
+
+
+                unimplemented!()
+            },
+
+
+            _ => unimplemented!(),
+        }
+    }
+
+    fn generate_return(&self, expr: &BasicValueEnum) -> Result<(), Box<dyn error::Error>> {
+        match expr {
+            BasicValueEnum::IntValue(value) => {
+                self.builder.build_return(Some(value));
+                Ok(())
+            },
+
+
+
+            _ => unimplemented!(),
+        }
     }
 }
