@@ -57,7 +57,7 @@ impl<'ctx> Compiler<'ctx> {
     fn new(context: &'ctx Context) -> Result<Compiler<'ctx>, Box<dyn error::Error>> {
         let module = context.create_module("main");
         let builder = context.create_builder();
-        let engine = module.create_execution_engine()?;
+        let engine = module.create_jit_execution_engine(OptimizationLevel::None)?;
 
         let mut compiler = Compiler {
             context: context,
@@ -76,16 +76,13 @@ impl<'ctx> Compiler<'ctx> {
 
     pub fn compile_and_run(expr: &Expr, env: &mut Env) -> Result<Expr, Box<dyn error::Error>> {
         let context = Context::create();
-        // let engine = self.module.as_ref().unwrap().create_jit_execution_engine(OptimizationLevel::None)?;
         let compiler = Compiler::new(&context)?;
         let main_function = compiler.generate_function_entry_point(expr)?;
 
         let compiled = compiler.compile_with_env(expr, env)?;
         compiler.generate_return(&compiled)?;
 
-
-        let execution_engine = compiler.module.create_jit_execution_engine(OptimizationLevel::None)?;
-        let value = unsafe { execution_engine.run_function(main_function, &[]) };
+        let value = unsafe { compiler.execution_engine.run_function(main_function, &[]) };
 
         Ok(Expr::Int(value.as_int(true) as i64))
     }
@@ -145,19 +142,18 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     fn compile_call_function(&self, name: &String, args: &Option<Vec<Expr>>, env: &mut Env) -> Result<BasicValueEnum<'ctx>, Box<dyn error::Error>> {
-        let fun = env.get_function(name).ok_or(crate::Error::NoSuchFunction(name.clone()))?;
+        let function = env.get_function(name).ok_or(crate::Error::NoSuchFunction(name.clone()))?;
 
-        let params = if let Some(v) = args {
+        let mut params = Vec::new();
+        if let Some(v) = args {
             let mut params = Vec::new();
 
             for e in v {
                 params.push(self.compile_with_env(e, env)?);
             }
-
-            Some(params)
-        }else{
-            None
         };
+
+        self.builder.build_call(*function, &params, name);
 
 
 
