@@ -74,12 +74,13 @@ impl<'ctx> Compiler<'ctx> {
 
     }
 
-    pub fn compile_and_run(expr: &Expr, env: &mut Env) -> Result<Expr, Box<dyn error::Error>> {
+    pub fn compile_and_run(expr: &Expr) -> Result<Expr, Box<dyn error::Error>> {
         let context = Context::create();
         let compiler = Compiler::new(&context)?;
+        let mut env = Env::new();
         let main_function = compiler.generate_function_entry_point(expr)?;
 
-        let compiled = compiler.compile_with_env(expr, env)?;
+        let compiled = compiler.compile_with_env(expr, &mut env)?;
         compiler.generate_return(&compiled)?;
 
         let value = unsafe { compiler.execution_engine.run_function(main_function, &[]) };

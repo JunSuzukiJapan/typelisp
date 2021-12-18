@@ -10,13 +10,12 @@ mod tests {
     fn compile_int_test() -> Result<(), Box<dyn error::Error>> {
         let reader = Reader::new();
         let constructor = ASTConstructor::new();
-        let mut env = Env::new();
 
         let obj = reader.read("123")?;
         let expr = constructor.make_ast(&obj)?;
         assert_eq!(expr, Expr::Int(123));
 
-        let result = Compiler::compile_and_run(&expr, &mut env)?;
+        let result = Compiler::compile_and_run(&expr)?;
         assert_eq!(result, Expr::Int(123));
 
         Ok(())
@@ -26,13 +25,12 @@ mod tests {
     fn compile_add_test() -> Result<(), Box<dyn error::Error>> {
         let reader = Reader::new();
         let constructor = ASTConstructor::new();
-        let mut env = Env::new();
 
         let obj = reader.read("(+ 1 2 3)")?;
         let expr = constructor.make_ast(&obj)?;
         assert_eq!(expr, Expr::CallFunction("+".to_string(), Some(vec![Expr::Int(1), Expr::Int(2), Expr::Int(3)])));
 
-        let result = Compiler::compile_and_run(&expr, &mut env)?;
+        let result = Compiler::compile_and_run(&expr)?;
         assert_eq!(result, Expr::Int(6));
 
         Ok(())
