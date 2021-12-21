@@ -2,6 +2,7 @@ use inkwell::values::BasicValueEnum;
 
 use crate::Number;
 
+#[repr(C)]
 #[derive(Clone, Debug)]
 pub enum CompiledValue<'ctx> {
     BasicValue(BasicValueEnum<'ctx>),

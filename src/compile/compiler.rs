@@ -8,6 +8,7 @@ use inkwell::module::Module;
 use inkwell::values::*;
 // use inkwell::basic_block::BasicBlock;
 use once_cell::sync::Lazy;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::error;
 
@@ -72,12 +73,16 @@ impl<'ctx> Compiler<'ctx> {
 
     fn init_builtin_functions(&mut self) {
 
+
+
+
+
     }
 
     pub fn compile_and_run(expr: &Expr) -> Result<Expr, Box<dyn error::Error>> {
         let context = Context::create();
         let compiler = Compiler::new(&context)?;
-        let mut env = Env::new();
+        let mut env = Rc::new(Env::new());
         let main_function = compiler.generate_function_entry_point(expr)?;
 
         let compiled = compiler.compile_with_env(expr, &mut env)?;
@@ -88,7 +93,7 @@ impl<'ctx> Compiler<'ctx> {
         Ok(Expr::Int(value.as_int(true) as i64))
     }
 
-    pub fn compile_with_env(&self, expr: &Expr, env: &mut Env) -> Result<BasicValueEnum<'ctx>, Box<dyn error::Error>> {
+    pub fn compile_with_env(&self, expr: &Expr, env: &Rc<Env<'ctx>>) -> Result<BasicValueEnum<'ctx>, Box<dyn error::Error>> {
         match expr {
             Expr::Int(value) => self.compile_int(value),
             Expr::CallFunction(name, args) => self.compile_call_function(name, args, env),
@@ -106,26 +111,32 @@ impl<'ctx> Compiler<'ctx> {
         Ok(self.builder.build_load(ptr, &self.get_temp_name("int")))
     }
 
-    fn compile_call_function(&self, name: &String, args: &Option<Vec<Expr>>, env: &mut Env) -> Result<BasicValueEnum<'ctx>, Box<dyn error::Error>> {
+    fn compile_call_function(&self, name: &String, args: &Option<Vec<Expr>>, env: &Rc<Env<'ctx>>) -> Result<BasicValueEnum<'ctx>, Box<dyn error::Error>> {
         let function = env.get_function(name).ok_or(crate::Error::NoSuchFunction(name.clone()))?;
 
-        let mut params = Vec::new();
+        let mut params: Vec<BasicMetadataValueEnum> = Vec::new();
         if let Some(v) = args {
-            let mut params = Vec::new();
-
             for e in v {
-                params.push(self.compile_with_env(e, env)?);
+                let ret = self.compile_with_env(&e, env)?;
+                params.push(self.to_basic_metadata_value_enum(ret));
             }
         };
 
-        self.builder.build_call(*function, &params, name);
+        self.builder.build_call(*function, params.as_slice(), name)
+            .try_as_basic_value()
+            .left()
+            .ok_or(Box::new(crate::Error::FailInTryAsBasicValue))
+    }
 
-
-
-
-
-
-        unimplemented!()
+    fn to_basic_metadata_value_enum(&self, value: BasicValueEnum<'ctx>) -> BasicMetadataValueEnum<'ctx> {
+        match value {
+            BasicValueEnum::ArrayValue(v) => BasicMetadataValueEnum::ArrayValue(v),
+            BasicValueEnum::IntValue(v) => BasicMetadataValueEnum::IntValue(v),
+            BasicValueEnum::FloatValue(v) => BasicMetadataValueEnum::FloatValue(v),
+            BasicValueEnum::PointerValue(v) => BasicMetadataValueEnum::PointerValue(v),
+            BasicValueEnum::StructValue(v) => BasicMetadataValueEnum::StructValue(v),
+            BasicValueEnum::VectorValue(v) => BasicMetadataValueEnum::VectorValue(v),
+        }
     }
 
     fn get_temp_name(&self, name: &str) -> String {

@@ -13,6 +13,7 @@ pub enum Error {
     NoSuchFunction(String),
     ArgIsNotCons,
     AddNotNumber,
+    FailInTryAsBasicValue,
 }
 
 impl Error {
