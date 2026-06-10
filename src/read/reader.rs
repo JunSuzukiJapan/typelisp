@@ -48,6 +48,20 @@ impl Reader {
         self.read_datum(&mut cur)
     }
 
+    /// Read every top-level datum in `s` until end of input.
+    pub fn read_all(&self, s: &str) -> Result<Vec<Object>, Error> {
+        let mut cur = Cursor::new(s);
+        let mut out = Vec::new();
+        loop {
+            self.skip_atmosphere(&mut cur)?;
+            if cur.peek().is_none() {
+                break;
+            }
+            out.push(self.read_datum(&mut cur)?);
+        }
+        Ok(out)
+    }
+
     fn read_datum(&self, cur: &mut Cursor) -> Result<Object, Error> {
         self.skip_atmosphere(cur)?;
 

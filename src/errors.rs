@@ -31,6 +31,18 @@ pub enum Error {
     InvalidReceiver(String),
     InvalidLetBinding(String),
     InvalidPattern(String),
+    // --- type checking (M5) ---
+    TypeMismatch { expected: crate::Type, found: crate::Type },
+    BranchTypeMismatch(String),
+    NotNumeric(crate::Type),
+    NotMutable(String),
+    UndefinedVariable(String),
+    UnknownField { struct_name: String, field: String },
+    NoSuchMethod { recv: String, name: String },
+    AmbiguousMethod(String),
+    NotCallable(String),
+    ArityMismatch { name: String, expected: usize, found: usize },
+    DuplicateDefinition(String),
 }
 
 impl Error {
@@ -68,6 +80,25 @@ impl fmt::Display for Error {
             Error::InvalidReceiver(s) => write!(f, "invalid defmethod receiver: {}", s),
             Error::InvalidLetBinding(s) => write!(f, "invalid let binding: {}", s),
             Error::InvalidPattern(s) => write!(f, "invalid match pattern: {}", s),
+            Error::TypeMismatch { expected, found } => {
+                write!(f, "type mismatch: expected {:?}, found {:?}", expected, found)
+            }
+            Error::BranchTypeMismatch(s) => write!(f, "branches have incompatible types: {}", s),
+            Error::NotNumeric(t) => write!(f, "expected a numeric type, found {:?}", t),
+            Error::NotMutable(s) => write!(f, "cannot assign to immutable place: {}", s),
+            Error::UndefinedVariable(s) => write!(f, "undefined variable: {}", s),
+            Error::UnknownField { struct_name, field } => {
+                write!(f, "struct {} has no field {}", struct_name, field)
+            }
+            Error::NoSuchMethod { recv, name } => {
+                write!(f, "no method {} for receiver type {}", name, recv)
+            }
+            Error::AmbiguousMethod(s) => write!(f, "ambiguous method call: {}", s),
+            Error::NotCallable(s) => write!(f, "not callable: {}", s),
+            Error::ArityMismatch { name, expected, found } => {
+                write!(f, "{} expects {} argument(s), got {}", name, expected, found)
+            }
+            Error::DuplicateDefinition(s) => write!(f, "duplicate definition: {}", s),
         }
     }
 }
