@@ -1,17 +1,18 @@
 use std::error;
 use typelisp::*;
 
-/// Minimal runner: read one expression, build the AST, JIT-compile and run it.
+/// Minimal runner: read a program, type-check it, JIT-compile and run it,
+/// printing the value of the last top-level expression.
 fn main() -> Result<(), Box<dyn error::Error>> {
-    let source = "(+ 1 2 3)";
+    let source = "(defun fact ((n i64)) i64 \
+                    (if (<= n 1) 1 (* n (fact (- n 1))))) \
+                  (fact 10)";
 
-    let reader = Reader::new();
-    let constructor = ASTConstructor::new();
+    let objs = Reader::new().read_all(source)?;
+    let forms = ASTConstructor::new().make_program(&objs)?;
+    let checked = Checker::new().check_program(forms)?;
+    let result = Compiler::run_program(&checked.forms)?;
 
-    let obj = reader.read(source)?;
-    let expr = constructor.make_expr(&obj)?;
-    let result = Compiler::compile_and_run(&expr)?;
-
-    println!("{} => {}", source, result);
+    println!("(fact 10) => {}", result);
     Ok(())
 }

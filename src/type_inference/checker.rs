@@ -317,7 +317,7 @@ impl Checker {
                         }
                         None => self.synth(&mut b.init)?,
                     };
-                    self.bind(&b.name, t, false);
+                    self.bind(&b.name, t, true); // CL let bindings are assignable
                 }
                 let r = self.synth_body(body);
                 self.pop_scope();
@@ -689,7 +689,7 @@ impl Checker {
                             }
                             None => self.synth(&mut b.init)?,
                         };
-                        self.bind(&b.name, t, false);
+                        self.bind(&b.name, t, true); // CL let bindings are assignable
                     }
                     self.check_body(body, expected)
                 })();
