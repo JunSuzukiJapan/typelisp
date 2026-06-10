@@ -719,6 +719,8 @@ impl<'ctx> Compiler<'ctx> {
 
             ExprKind::Call { target, args } => self.lower_call(target, args),
 
+            ExprKind::Match { scrutinee, arms } => self.lower_match(scrutinee, arms, e),
+
             other => Err(err(&format!("codegen not yet implemented for {:?}", other))),
         }
     }
@@ -929,6 +931,122 @@ impl<'ctx> Compiler<'ctx> {
         let next = self.builder.build_int_add(cur, it.const_int(delta as u64, true), &n)?;
         self.builder.build_store(slot, next)?;
         Ok(self.unit())
+    }
+
+    // ------------------------------------------------------------------
+    // match (integer/bool/char scrutinees)
+    // ------------------------------------------------------------------
+
+    fn lower_match(
+        &mut self,
+        scrutinee: &TypedExpr,
+        arms: &[crate::MatchArm],
+        e: &TypedExpr,
+    ) -> Result<BasicValueEnum<'ctx>, CErr> {
+        let func = self.current_fn();
+        let sv = self.lower_int(scrutinee)?;
+        // hold the scrutinee in a slot so `bind` patterns can reference it
+        let it = sv.get_type();
+        let scrut_slot = self.builder.build_alloca(it, "scrut")?;
+        self.builder.build_store(scrut_slot, sv)?;
+        let scrut_ty = scrutinee.ty.clone().unwrap_or(Type::I64);
+
+        let result_ty = self.int_type_of(e);
+        let merge_bb = self.context.append_basic_block(func, "matchmerge");
+        let mut incomings: Vec<(BasicValueEnum<'ctx>, BasicBlock<'ctx>)> = Vec::new();
+
+        for arm in arms {
+            let body_bb = self.context.append_basic_block(func, "armbody");
+            let next_bb = self.context.append_basic_block(func, "armnext");
+            let test = self.arm_test(&arm.patterns, sv)?;
+            self.builder.build_conditional_branch(test, body_bb, next_bb)?;
+
+            self.builder.position_at_end(body_bb);
+            self.scopes.push(HashMap::new());
+            for p in &arm.patterns {
+                if let crate::Pattern::Bind(name) = p {
+                    self.scopes
+                        .last_mut()
+                        .unwrap()
+                        .insert(name.clone(), (scrut_slot, scrut_ty.clone()));
+                }
+            }
+            let v = self.lower_body(&arm.body)?;
+            self.scopes.pop();
+            let end = self.builder.get_insert_block().unwrap();
+            incomings.push((v, end));
+            self.builder.build_unconditional_branch(merge_bb)?;
+
+            self.builder.position_at_end(next_bb);
+        }
+        // no arm matched: default value 0
+        let dflt: BasicValueEnum = result_ty.const_int(0, true).into();
+        let dflt_end = self.builder.get_insert_block().unwrap();
+        incomings.push((dflt, dflt_end));
+        self.builder.build_unconditional_branch(merge_bb)?;
+
+        self.builder.position_at_end(merge_bb);
+        let name = self.tmp("matchphi");
+        let phi = self.builder.build_phi(result_ty, &name)?;
+        let refs: Vec<(&dyn inkwell::values::BasicValue, BasicBlock)> =
+            incomings.iter().map(|(v, b)| (v as &dyn inkwell::values::BasicValue, *b)).collect();
+        phi.add_incoming(&refs);
+        Ok(phi.as_basic_value())
+    }
+
+    /// Build the i1 test for an arm: OR over its patterns.
+    fn arm_test(&mut self, patterns: &[crate::Pattern], sv: IntValue<'ctx>) -> Result<IntValue<'ctx>, CErr> {
+        let mut acc: Option<IntValue<'ctx>> = None;
+        for p in patterns {
+            let t = self.pattern_test(p, sv)?;
+            acc = Some(match acc {
+                None => t,
+                Some(prev) => {
+                    let n = self.tmp("por");
+                    self.builder.build_or(prev, t, &n)?
+                }
+            });
+        }
+        Ok(acc.unwrap_or_else(|| self.context.bool_type().const_int(0, false)))
+    }
+
+    fn pattern_test(&mut self, p: &crate::Pattern, sv: IntValue<'ctx>) -> Result<IntValue<'ctx>, CErr> {
+        use crate::Pattern::*;
+        let it = sv.get_type();
+        let truth = self.context.bool_type().const_int(1, false);
+        match p {
+            Wildcard | Bind(_) => Ok(truth),
+            Int(v) => {
+                let n = self.tmp("peq");
+                Ok(self.builder.build_int_compare(IntPredicate::EQ, sv, it.const_int(*v as u64, true), &n)?)
+            }
+            Bool(b) => {
+                let n = self.tmp("peq");
+                Ok(self.builder.build_int_compare(IntPredicate::EQ, sv, it.const_int(*b as u64, false), &n)?)
+            }
+            Char(c) => {
+                let n = self.tmp("peq");
+                Ok(self.builder.build_int_compare(IntPredicate::EQ, sv, it.const_int(*c as u64, false), &n)?)
+            }
+            Range { lo, hi, inclusive } => {
+                let lo_ok = self.builder.build_int_compare(
+                    IntPredicate::SGE,
+                    sv,
+                    it.const_int(*lo as u64, true),
+                    "rge",
+                )?;
+                let hi_pred = if *inclusive { IntPredicate::SLE } else { IntPredicate::SLT };
+                let hi_ok = self.builder.build_int_compare(
+                    hi_pred,
+                    sv,
+                    it.const_int(*hi as u64, true),
+                    "rle",
+                )?;
+                let n = self.tmp("rand");
+                Ok(self.builder.build_and(lo_ok, hi_ok, &n)?)
+            }
+            other => Err(err(&format!("match pattern not supported in codegen yet: {:?}", other))),
+        }
     }
 
     // ------------------------------------------------------------------

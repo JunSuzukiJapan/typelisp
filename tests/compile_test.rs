@@ -157,6 +157,30 @@ mod tests {
     }
 
     #[test]
+    fn run_match() -> Result<(), Box<dyn error::Error>> {
+        // literal alternatives + wildcard
+        let prog = "(defun classify ((b i64)) i64 \
+                      (match b (0x20 | 0x09 | 0x0a => (1)) (_ => (0)))) \
+                    (classify 9)";
+        assert_eq!(run(prog)?, 1);
+        let prog0 = "(defun classify ((b i64)) i64 \
+                       (match b (0x20 | 0x09 | 0x0a => (1)) (_ => (0)))) \
+                     (classify 65)";
+        assert_eq!(run(prog0)?, 0);
+
+        // range pattern + bind
+        let prog2 = "(defun kind ((n i64)) i64 \
+                       (match n (0 => (0)) (1..=9 => (1)) (x => (x)))) \
+                     (kind 5)";
+        assert_eq!(run(prog2)?, 1);
+        let prog3 = "(defun kind ((n i64)) i64 \
+                       (match n (0 => (0)) (1..=9 => (1)) (x => (x)))) \
+                     (kind 100)";
+        assert_eq!(run(prog3)?, 100);
+        Ok(())
+    }
+
+    #[test]
     fn run_method_on_primitive() -> Result<(), Box<dyn error::Error>> {
         let prog = "(defmethod double ((self i32)) i32 (* self 2)) (double 21)";
         assert_eq!(run(prog)?, 42);
