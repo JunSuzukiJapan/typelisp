@@ -106,4 +106,52 @@ mod tests {
         assert_eq!(run(prog)?, 1);
         Ok(())
     }
+
+    #[test]
+    fn run_struct_construct_and_field() -> Result<(), Box<dyn error::Error>> {
+        let prog = "(defstruct Point (pub ((x i64) (y i64)))) \
+                    (defun getx ((a i64) (b i64)) i64 (let ((p (Point a b))) (.x p))) \
+                    (getx 3 4)";
+        assert_eq!(run(prog)?, 3);
+
+        let prog2 = "(defstruct Point (pub ((x i64) (y i64)))) \
+                     (defun gety ((a i64) (b i64)) i64 (let ((p (Point a b))) (.y p))) \
+                     (gety 3 4)";
+        assert_eq!(run(prog2)?, 4);
+        Ok(())
+    }
+
+    #[test]
+    fn run_struct_setf_field() -> Result<(), Box<dyn error::Error>> {
+        let prog = "(defstruct Point (pub ((x i64) (y i64)))) \
+                    (defun f () i64 (let ((p (Point 1 2))) (progn (setf (. p x) 10) (.x p)))) \
+                    (f)";
+        assert_eq!(run(prog)?, 10);
+        Ok(())
+    }
+
+    #[test]
+    fn run_struct_passed_to_fn() -> Result<(), Box<dyn error::Error>> {
+        let prog = "(defstruct Point (pub ((x i64) (y i64)))) \
+                    (defun sum ((p Point)) i64 (+ (.x p) (.y p))) \
+                    (defun mk () i64 (let ((p (Point 20 22))) (sum p))) \
+                    (mk)";
+        assert_eq!(run(prog)?, 42);
+        Ok(())
+    }
+
+    /// A rooted struct must survive collections triggered by allocating
+    /// megabytes of garbage in a loop (validates shadow-stack rooting).
+    #[test]
+    fn run_struct_survives_gc_pressure() -> Result<(), Box<dyn error::Error>> {
+        let prog = "(defstruct Point (pub ((x i64) (y i64)))) \
+                    (defun f () i64 \
+                      (let ((p (Point 7 9))) \
+                        (progn \
+                          (dotimes (i 300000) (let ((g (Point i i))) (.x g))) \
+                          (.x p)))) \
+                    (f)";
+        assert_eq!(run(prog)?, 7);
+        Ok(())
+    }
 }
