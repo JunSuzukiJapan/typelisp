@@ -21,6 +21,14 @@ impl ASTConstructor {
             Object::True => Ok(Expr::True),
             Object::False => Ok(Expr::False),
             Object::Int(x) => Ok(Expr::Int(*x)),
+            // Suffix dropped for now; the typed AST (M3) carries literal types.
+            Object::IntWithSuffix(x, _) => Ok(Expr::Int(*x)),
+            // No Expr variants for these yet; the typed AST lands in M3.
+            Object::Float(_) | Object::FloatWithSuffix(_, _) | Object::Char(_) => {
+                Err(Error::ReadError(
+                    "float/char literals are not yet lowered to AST (pending M3)".to_string(),
+                ))
+            }
             Object::String(s) => Ok(Expr::String(s.clone())),
             Object::Symbol(s) => Ok(Expr::Var(s.clone())),
             Object::List(p) => self.make_ast_from_list(p),

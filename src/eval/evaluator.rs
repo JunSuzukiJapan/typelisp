@@ -26,6 +26,10 @@ impl Evaluator {
     pub fn eval(&self, obj: &Object) -> Result<Object, Error> {
         match obj {
             Object::Int(val) => Ok(Object::Int(*val)),
+            Object::IntWithSuffix(val, ns) => Ok(Object::IntWithSuffix(*val, *ns)),
+            Object::Float(val) => Ok(Object::Float(*val)),
+            Object::FloatWithSuffix(val, ns) => Ok(Object::FloatWithSuffix(*val, *ns)),
+            Object::Char(c) => Ok(Object::Char(*c)),
             Object::True => Ok(Object::True),
             Object::False => Ok(Object::False),
             Object::Symbol(name) => Ok(Object::Symbol(name.to_string())),
