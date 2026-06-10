@@ -65,7 +65,7 @@ pub enum NumSuffix {
     F32, F64,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum Object {
     Null,
     True,

@@ -24,6 +24,13 @@ pub enum Error {
     // --- types (M2) ---
     InvalidTypeSyntax(String),
     UnknownType(String),
+    // --- AST construction (M3) ---
+    MalformedSpecialForm(String),
+    ExpectedSymbol(String),
+    ExpectedTypedParam(String),
+    InvalidReceiver(String),
+    InvalidLetBinding(String),
+    InvalidPattern(String),
 }
 
 impl Error {
@@ -55,6 +62,12 @@ impl fmt::Display for Error {
             Error::IllegalHashSyntax(c) => write!(f, "illegal '#' syntax: #{}", c),
             Error::InvalidTypeSyntax(s) => write!(f, "invalid type syntax: {}", s),
             Error::UnknownType(s) => write!(f, "unknown type: {}", s),
+            Error::MalformedSpecialForm(s) => write!(f, "malformed special form: {}", s),
+            Error::ExpectedSymbol(s) => write!(f, "expected a symbol: {}", s),
+            Error::ExpectedTypedParam(s) => write!(f, "expected a typed parameter (name type): {}", s),
+            Error::InvalidReceiver(s) => write!(f, "invalid defmethod receiver: {}", s),
+            Error::InvalidLetBinding(s) => write!(f, "invalid let binding: {}", s),
+            Error::InvalidPattern(s) => write!(f, "invalid match pattern: {}", s),
         }
     }
 }

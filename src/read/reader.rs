@@ -298,6 +298,12 @@ fn parse_number(buf: &str) -> Result<Object, Error> {
     let unsigned = buf.trim_start_matches(['+', '-']);
     let clean: String = unsigned.chars().filter(|c| *c != '_').collect();
 
+    // A number must contain at least one digit; otherwise tokens like ".",
+    // "-", "e" would be misread (e.g. "." normalizing to "0.0").
+    if !clean.chars().any(|c| c.is_ascii_digit()) {
+        return Err(invalid());
+    }
+
     // Radix integer literals: 0x / 0o / 0b
     let radix_prefix = if clean.len() >= 2 { Some(&clean[0..2]) } else { None };
     if let Some(pfx) = radix_prefix {

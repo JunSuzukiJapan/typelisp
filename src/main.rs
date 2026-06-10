@@ -9,9 +9,9 @@ fn main() -> Result<(), Box<dyn error::Error>> {
     let constructor = ASTConstructor::new();
 
     let obj = reader.read(source)?;
-    let expr = constructor.make_ast(&obj)?;
+    let expr = constructor.make_expr(&obj)?;
     let result = Compiler::compile_and_run(&expr)?;
 
-    println!("{} => {:?}", source, result);
+    println!("{} => {}", source, result);
     Ok(())
 }

@@ -6,7 +6,7 @@ use inkwell::module::Module;
 use inkwell::values::IntValue;
 use std::error;
 
-use crate::Expr;
+use crate::{BinOp, ExprKind, TypedExpr};
 
 /// LLVM JIT compiler.
 ///
@@ -37,8 +37,12 @@ impl<'ctx> Compiler<'ctx> {
     }
 
     /// Compile a single expression into a `main` function and JIT-run it,
-    /// returning the result as `Expr::Int`.
-    pub fn compile_and_run(expr: &Expr) -> Result<Expr, Box<dyn error::Error>> {
+    /// returning the result as a native `i64`.
+    ///
+    /// NOTE (M3 shim): only integer literals and integer arithmetic lower for
+    /// now; the full pipeline (type checker, GC, structs, ...) arrives in later
+    /// milestones.
+    pub fn compile_and_run(expr: &TypedExpr) -> Result<i64, Box<dyn error::Error>> {
         let context = Context::create();
         let compiler = Compiler::new(&context)?;
 
@@ -52,25 +56,28 @@ impl<'ctx> Compiler<'ctx> {
         compiler.builder.build_return(Some(&value))?;
 
         let result = unsafe { compiler.execution_engine.run_function(function, &[]) };
-        Ok(Expr::Int(result.as_int(true) as i64))
+        Ok(result.as_int(true) as i64)
     }
 
     /// Lower an expression to a native `i64` value.
-    fn lower(&self, expr: &Expr) -> Result<IntValue<'ctx>, Box<dyn error::Error>> {
+    fn lower(&self, expr: &TypedExpr) -> Result<IntValue<'ctx>, Box<dyn error::Error>> {
         let i64_type = self.context.i64_type();
-        match expr {
-            Expr::Int(value) => Ok(i64_type.const_int(*value as u64, true)),
-            Expr::CallFunction(name, args) if name == "+" => {
-                let mut acc = i64_type.const_int(0, true);
-                if let Some(args) = args {
-                    for e in args {
-                        let x = self.lower(e)?;
-                        acc = self.builder.build_int_add(acc, x, "add")?;
-                    }
-                }
-                Ok(acc)
+        match &expr.kind {
+            ExprKind::Int(value, _) => Ok(i64_type.const_int(*value as u64, true)),
+            ExprKind::BinOp { op, lhs, rhs } => {
+                let l = self.lower(lhs)?;
+                let r = self.lower(rhs)?;
+                let v = match op {
+                    BinOp::Add => self.builder.build_int_add(l, r, "add")?,
+                    BinOp::Sub => self.builder.build_int_sub(l, r, "sub")?,
+                    BinOp::Mul => self.builder.build_int_mul(l, r, "mul")?,
+                    BinOp::Div => self.builder.build_int_signed_div(l, r, "div")?,
+                    BinOp::Rem => self.builder.build_int_signed_rem(l, r, "rem")?,
+                    _ => unimplemented!("comparison lowering arrives in a later milestone"),
+                };
+                Ok(v)
             }
-            _ => unimplemented!(),
+            _ => unimplemented!("expression lowering arrives in later milestones"),
         }
     }
 }
