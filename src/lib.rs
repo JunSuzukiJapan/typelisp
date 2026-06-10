@@ -5,6 +5,7 @@ pub mod read;
 pub mod types;
 pub mod compile;
 pub mod type_inference;
+pub mod gc;
 
 pub use errors::*;
 pub use read::*;
