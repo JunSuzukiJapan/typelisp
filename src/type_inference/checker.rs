@@ -423,10 +423,7 @@ impl Checker {
                 Ok(Type::Unit)
             }
 
-            ExprKind::Call { target, args } => {
-                let target = target.clone();
-                self.synth_call(&target, args)
-            }
+            ExprKind::Call { target, args } => self.synth_call(target, args),
         }
     }
 
@@ -488,11 +485,10 @@ impl Checker {
         }
     }
 
-    fn synth_call(&mut self, target: &CallTarget, args: &mut [TypedExpr]) -> Result<Type, Error> {
+    fn synth_call(&mut self, target: &mut CallTarget, args: &mut [TypedExpr]) -> Result<Type, Error> {
         match target {
             CallTarget::Lambda(boxed) => {
-                let mut b = boxed.clone();
-                let ft = self.synth(&mut b)?;
+                let ft = self.synth(boxed)?;
                 if let Type::Fn(params, ret) = ft {
                     self.check_args("lambda", &params, args)?;
                     Ok(*ret)
@@ -508,6 +504,11 @@ impl Checker {
                 Ok(Type::Unit)
             }
             CallTarget::Sym(name) => {
+                // 0) a local variable of function type (a closure)
+                if let Some((Type::Fn(params, ret), _)) = self.lookup(name) {
+                    self.check_args(name, &params, args)?;
+                    return Ok(*ret);
+                }
                 // 1) ordinary function
                 if let Some(sig) = self.fns.get(name).cloned() {
                     self.check_args(name, &sig.params, args)?;

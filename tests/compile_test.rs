@@ -157,6 +157,34 @@ mod tests {
     }
 
     #[test]
+    fn run_lambda_immediate() -> Result<(), Box<dyn error::Error>> {
+        // immediately-applied, no capture
+        assert_eq!(run("((lambda ((x i64)) (* x x)) 5)")?, 25);
+        Ok(())
+    }
+
+    #[test]
+    fn run_closure_capture() -> Result<(), Box<dyn error::Error>> {
+        // lambda captures `n` from the enclosing let, stored then called
+        let prog = "(defun f ((n i64)) i64 \
+                      (let ((add (lambda ((x i64)) (+ x n)))) \
+                        (add 100))) \
+                    (f 5)";
+        assert_eq!(run(prog)?, 105);
+        Ok(())
+    }
+
+    #[test]
+    fn run_closure_param() -> Result<(), Box<dyn error::Error>> {
+        // pass a closure to a higher-order function
+        let prog = "(defun apply2 ((g (fn (i64) i64)) (x i64)) i64 (g (g x))) \
+                    (defun f () i64 (let ((inc (lambda ((x i64)) (+ x 1)))) (apply2 inc 10))) \
+                    (f)";
+        assert_eq!(run(prog)?, 12);
+        Ok(())
+    }
+
+    #[test]
     fn run_match() -> Result<(), Box<dyn error::Error>> {
         // literal alternatives + wildcard
         let prog = "(defun classify ((b i64)) i64 \

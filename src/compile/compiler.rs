@@ -576,7 +576,7 @@ impl<'ctx> Compiler<'ctx> {
     // ------------------------------------------------------------------
 
     fn is_gc_type(&self, t: &Type) -> bool {
-        matches!(t, Type::Named(n, _) if self.structs.contains_key(n))
+        matches!(t, Type::Named(n, _) if self.structs.contains_key(n)) || matches!(t, Type::Fn(_, _))
     }
 
     fn int_type(&self, t: &Type) -> Option<IntType<'ctx>> {
@@ -595,10 +595,38 @@ impl<'ctx> Compiler<'ctx> {
         if let Some(it) = self.int_type(t) {
             return Some(it.into());
         }
+        // structs, closures (Fn) -> opaque pointer to a GC object
         if self.is_gc_type(t) {
             return Some(self.ptr_ty().into());
         }
         None
+    }
+
+    /// Leak a `'static` TypeInfo for a runtime-created shape (JIT lifetime).
+    fn leak_typeinfo(&self, kind: gc::GcKind, fixed_size: usize, ptr_offsets: Vec<usize>) -> *const TypeInfo {
+        let offsets: &'static [usize] = Box::leak(ptr_offsets.into_boxed_slice());
+        let ti: &'static TypeInfo = Box::leak(Box::new(TypeInfo {
+            kind,
+            fixed_size,
+            ptr_offsets: offsets,
+            elem: None,
+        }));
+        ti as *const TypeInfo
+    }
+
+    fn gc_alloc_call(&mut self, size: u64, ti: *const TypeInfo) -> Result<PointerValue<'ctx>, CErr> {
+        let i64t = self.context.i64_type();
+        let ti_const = i64t.const_int(ti as usize as u64, false);
+        let ti_ptr = self.builder.build_int_to_ptr(ti_const, self.ptr_ty(), "ti")?;
+        let size_v = i64t.const_int(size, false);
+        let n = self.tmp("alloc");
+        Ok(self
+            .builder
+            .build_call(self.rt.gc_alloc, &[size_v.into(), ti_ptr.into()], &n)?
+            .try_as_basic_value()
+            .left()
+            .ok_or_else(|| err("gc_alloc returned void"))?
+            .into_pointer_value())
     }
 
     fn int_type_of(&self, e: &TypedExpr) -> IntType<'ctx> {
@@ -716,6 +744,8 @@ impl<'ctx> Compiler<'ctx> {
                 all.extend(args.iter().cloned());
                 self.emit_call(fv, ret, &all)
             }
+
+            ExprKind::Lambda { params, body, .. } => self.lower_lambda(params, body),
 
             ExprKind::Call { target, args } => self.lower_call(target, args),
 
@@ -1100,8 +1130,22 @@ impl<'ctx> Compiler<'ctx> {
     fn lower_call(&mut self, target: &CallTarget, args: &[TypedExpr]) -> Result<BasicValueEnum<'ctx>, CErr> {
         let name = match target {
             CallTarget::Sym(s) => s.clone(),
+            CallTarget::Lambda(boxed) => {
+                let fn_ty = boxed.ty.clone().ok_or_else(|| err("untyped lambda callee"))?;
+                let clos = self.lower(boxed)?.into_pointer_value();
+                return self.call_closure(clos, &fn_ty, args);
+            }
             other => return Err(err(&format!("codegen call target not supported yet: {:?}", other))),
         };
+        // a local variable of function type -> closure call
+        if let Some((slot, Type::Fn(p, r))) = self.lookup(&name) {
+            let fn_ty = Type::Fn(p, r);
+            let clos = self
+                .builder
+                .build_load(self.ptr_ty(), slot, "clos")?
+                .into_pointer_value();
+            return self.call_closure(clos, &fn_ty, args);
+        }
         // struct constructor?
         if self.structs.contains_key(&name) {
             return self.lower_struct_ctor(&name, args);
@@ -1149,6 +1193,202 @@ impl<'ctx> Compiler<'ctx> {
                 Ok(self.unit())
             }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Closures
+    // ------------------------------------------------------------------
+
+    fn lower_lambda(&mut self, params: &[(String, Type)], body: &[TypedExpr]) -> Result<BasicValueEnum<'ctx>, CErr> {
+        let pnames: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
+        let caps = self.free_vars(body, &pnames);
+        let ptr = self.ptr_ty();
+
+        // Compute LLVM shapes / sizes up front (immutable borrows only).
+        let cap_btys: Vec<BasicTypeEnum> = caps
+            .iter()
+            .map(|(_, t)| self.basic_type(t).ok_or_else(|| err("unsupported capture type")))
+            .collect::<Result<_, _>>()?;
+        let env_ty = self.context.struct_type(&cap_btys, false);
+        let clos_ty = self.context.struct_type(&[ptr.into(), ptr.into()], false);
+        let (env_size, env_offsets, clos_size, env_field_off) = {
+            let td = self.execution_engine.get_target_data();
+            let mut offs = Vec::new();
+            for (i, (_, t)) in caps.iter().enumerate() {
+                if self.is_gc_type(t) {
+                    if let Some(o) = td.offset_of_element(&env_ty, i as u32) {
+                        offs.push(o as usize);
+                    }
+                }
+            }
+            let es = if caps.is_empty() { 0 } else { td.get_store_size(&env_ty) as usize };
+            let cs = td.get_store_size(&clos_ty) as usize;
+            let ef = td.offset_of_element(&clos_ty, 1).unwrap_or(8) as usize;
+            (es, offs, cs, ef)
+        };
+        let ret_ty = body.last().and_then(|e| e.ty.clone()).unwrap_or(Type::I64);
+
+        // Load capture values (in the enclosing function's context).
+        let mut cap_vals: Vec<BasicValueEnum> = Vec::new();
+        for (n, t) in &caps {
+            let (slot, _) = self.lookup(n).ok_or_else(|| err("capture not in scope"))?;
+            let bt = self.basic_type(t).ok_or_else(|| err("unsupported capture type"))?;
+            let nm = self.tmp("cap");
+            cap_vals.push(self.builder.build_load(bt, slot, &nm)?);
+        }
+
+        // Allocate and fill the env object.
+        let env_ti = self.leak_typeinfo(gc::GcKind::Struct, env_size, env_offsets);
+        let env_ptr = self.gc_alloc_call(env_size as u64, env_ti)?;
+        for (i, v) in cap_vals.iter().enumerate() {
+            let g = self.builder.build_struct_gep(env_ty, env_ptr, i as u32, "capf")?;
+            self.builder.build_store(g, *v)?;
+        }
+
+        // Compile the lifted function.
+        let lifted = self.compile_lifted(params, body, &caps, env_ty, &ret_ty)?;
+
+        // Build the closure object { fn_ptr, env_ptr }.
+        let clos_ti = self.leak_typeinfo(gc::GcKind::Closure, clos_size, vec![env_field_off]);
+        let clos = self.gc_alloc_call(clos_size as u64, clos_ti)?;
+        let fnp = lifted.as_global_value().as_pointer_value();
+        let g0 = self.builder.build_struct_gep(clos_ty, clos, 0, "cf")?;
+        self.builder.build_store(g0, fnp)?;
+        let g1 = self.builder.build_struct_gep(clos_ty, clos, 1, "ce")?;
+        self.builder.build_store(g1, env_ptr)?;
+        Ok(clos.into())
+    }
+
+    fn compile_lifted(
+        &mut self,
+        params: &[(String, Type)],
+        body: &[TypedExpr],
+        caps: &[(String, Type)],
+        env_ty: StructType<'ctx>,
+        ret_ty: &Type,
+    ) -> Result<FunctionValue<'ctx>, CErr> {
+        let ptr = self.ptr_ty();
+        let mut pt: Vec<BasicMetadataTypeEnum> = vec![ptr.into()];
+        for (_, t) in params {
+            pt.push(self.basic_type(t).ok_or_else(|| err("unsupported lambda param type"))?.into());
+        }
+        let fn_type = if *ret_ty == Type::Unit {
+            self.context.void_type().fn_type(&pt, false)
+        } else {
+            self.basic_type(ret_ty).ok_or_else(|| err("unsupported lambda return type"))?.fn_type(&pt, false)
+        };
+        let name = self.tmp("lambda");
+        let function = self.module.add_function(&name, fn_type, None);
+
+        // save enclosing-function state
+        let saved_block = self.builder.get_insert_block();
+        let saved_scopes = std::mem::take(&mut self.scopes);
+        let saved_loops = std::mem::take(&mut self.loops);
+        let saved_roots = std::mem::take(&mut self.root_slots);
+        let saved_next = self.next_root;
+
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
+
+        let n_gc = caps.iter().filter(|(_, t)| self.is_gc_type(t)).count()
+            + params.iter().filter(|(_, t)| self.is_gc_type(t)).count()
+            + self.count_gc_lets(body);
+        self.begin_frame(function, n_gc)?;
+        self.scopes.push(HashMap::new());
+
+        // bind captures from the env parameter (param 0)
+        let env_arg = function.get_nth_param(0).unwrap().into_pointer_value();
+        for (i, (n, t)) in caps.iter().enumerate() {
+            let bt = self.basic_type(t).unwrap();
+            let g = self.builder.build_struct_gep(env_ty, env_arg, i as u32, "capg")?;
+            let v = self.builder.build_load(bt, g, "capv")?;
+            let slot = if self.is_gc_type(t) {
+                self.take_root_slot()
+            } else {
+                self.builder.build_alloca(bt, n)?
+            };
+            self.builder.build_store(slot, v)?;
+            self.scopes.last_mut().unwrap().insert(n.clone(), (slot, t.clone()));
+        }
+        // bind params
+        for (i, (n, t)) in params.iter().enumerate() {
+            let arg = function.get_nth_param((i + 1) as u32).unwrap();
+            let bt = self.basic_type(t).unwrap();
+            let slot = if self.is_gc_type(t) {
+                self.take_root_slot()
+            } else {
+                self.builder.build_alloca(bt, n)?
+            };
+            self.builder.build_store(slot, arg)?;
+            self.scopes.last_mut().unwrap().insert(n.clone(), (slot, t.clone()));
+        }
+
+        let mut last: BasicValueEnum = self.context.i64_type().const_int(0, true).into();
+        for e in body {
+            last = self.lower(e)?;
+        }
+        self.scopes.pop();
+        self.end_frame()?;
+        if *ret_ty == Type::Unit {
+            self.builder.build_return(None)?;
+        } else {
+            self.builder.build_return(Some(&last))?;
+        }
+
+        // restore enclosing-function state
+        self.scopes = saved_scopes;
+        self.loops = saved_loops;
+        self.root_slots = saved_roots;
+        self.next_root = saved_next;
+        if let Some(b) = saved_block {
+            self.builder.position_at_end(b);
+        }
+        Ok(function)
+    }
+
+    fn call_closure(&mut self, closure: PointerValue<'ctx>, fn_ty: &Type, args: &[TypedExpr]) -> Result<BasicValueEnum<'ctx>, CErr> {
+        let (params, ret) = match fn_ty {
+            Type::Fn(p, r) => (p.clone(), (**r).clone()),
+            _ => return Err(err("call target is not a function type")),
+        };
+        let ptr = self.ptr_ty();
+        let clos_ty = self.context.struct_type(&[ptr.into(), ptr.into()], false);
+        let fnp_gep = self.builder.build_struct_gep(clos_ty, closure, 0, "fnp")?;
+        let envp_gep = self.builder.build_struct_gep(clos_ty, closure, 1, "envp")?;
+        let fnp = self.builder.build_load(ptr, fnp_gep, "fn")?.into_pointer_value();
+        let envp = self.builder.build_load(ptr, envp_gep, "env")?.into_pointer_value();
+
+        let mut pt: Vec<BasicMetadataTypeEnum> = vec![ptr.into()];
+        for p in &params {
+            pt.push(self.basic_type(p).ok_or_else(|| err("unsupported closure param type"))?.into());
+        }
+        let fn_type = if ret == Type::Unit {
+            self.context.void_type().fn_type(&pt, false)
+        } else {
+            self.basic_type(&ret).ok_or_else(|| err("unsupported closure return type"))?.fn_type(&pt, false)
+        };
+
+        let mut av: Vec<BasicMetadataValueEnum> = vec![envp.into()];
+        for a in args {
+            av.push(self.lower(a)?.into());
+        }
+        let n = self.tmp("icall");
+        let call = self.builder.build_indirect_call(fn_type, fnp, &av, &n)?;
+        match call.try_as_basic_value().left() {
+            Some(v) => Ok(v),
+            None => Ok(self.unit()),
+        }
+    }
+
+    fn free_vars(&self, body: &[TypedExpr], params: &[String]) -> Vec<(String, Type)> {
+        let mut bound: Vec<String> = params.to_vec();
+        let mut free: Vec<String> = Vec::new();
+        for e in body {
+            collect_free(e, &mut bound, &mut free);
+        }
+        free.into_iter()
+            .filter_map(|n| self.lookup(&n).map(|(_, t)| (n, t)))
+            .collect()
     }
 
     // ------------------------------------------------------------------
@@ -1206,6 +1446,137 @@ impl<'ctx> Compiler<'ctx> {
 
 fn err(msg: &str) -> CErr {
     Box::<dyn error::Error>::from(msg.to_string())
+}
+
+/// Collect free variable names of `e` (referenced but not bound within `e`).
+/// Globals/functions are included but filtered out later by scope lookup.
+fn collect_free(e: &TypedExpr, bound: &mut Vec<String>, free: &mut Vec<String>) {
+    use ExprKind::*;
+    let push = |free: &mut Vec<String>, bound: &Vec<String>, n: &str| {
+        if !bound.iter().any(|b| b == n) && !free.iter().any(|f| f == n) {
+            free.push(n.to_string());
+        }
+    };
+    match &e.kind {
+        Var(n) => push(free, bound, n),
+        Let { bindings, body } => {
+            for b in bindings {
+                collect_free(&b.init, bound, free);
+            }
+            let start = bound.len();
+            for b in bindings {
+                bound.push(b.name.clone());
+            }
+            for x in body {
+                collect_free(x, bound, free);
+            }
+            bound.truncate(start);
+        }
+        Lambda { params, body, .. } => {
+            let start = bound.len();
+            for (n, _) in params {
+                bound.push(n.clone());
+            }
+            for x in body {
+                collect_free(x, bound, free);
+            }
+            bound.truncate(start);
+        }
+        Dotimes { var, count, body } => {
+            collect_free(count, bound, free);
+            let start = bound.len();
+            bound.push(var.clone());
+            for x in body {
+                collect_free(x, bound, free);
+            }
+            bound.truncate(start);
+        }
+        If { cond, then, els } => {
+            collect_free(cond, bound, free);
+            collect_free(then, bound, free);
+            if let Some(e) = els {
+                collect_free(e, bound, free);
+            }
+        }
+        When { cond, body } | Unless { cond, body } | While { cond, body } => {
+            collect_free(cond, bound, free);
+            for x in body {
+                collect_free(x, bound, free);
+            }
+        }
+        Loop { body } | Progn { body } => {
+            for x in body {
+                collect_free(x, bound, free);
+            }
+        }
+        Cond { clauses } => {
+            for c in clauses {
+                collect_free(&c.test, bound, free);
+                for x in &c.body {
+                    collect_free(x, bound, free);
+                }
+            }
+        }
+        Match { scrutinee, arms } => {
+            collect_free(scrutinee, bound, free);
+            for a in arms {
+                let start = bound.len();
+                for p in &a.patterns {
+                    if let crate::Pattern::Bind(n) = p {
+                        bound.push(n.clone());
+                    }
+                }
+                for x in &a.body {
+                    collect_free(x, bound, free);
+                }
+                bound.truncate(start);
+            }
+        }
+        BinOp { lhs, rhs, .. } => {
+            collect_free(lhs, bound, free);
+            collect_free(rhs, bound, free);
+        }
+        UnOp { operand, .. } => collect_free(operand, bound, free),
+        Setf { place, value } => {
+            collect_free_place(place, bound, free);
+            collect_free(value, bound, free);
+        }
+        Incf(p) | Decf(p) => collect_free_place(p, bound, free),
+        Call { target, args } => {
+            match target {
+                CallTarget::Sym(n) => push(free, bound, n),
+                CallTarget::Lambda(b) => collect_free(b, bound, free),
+                CallTarget::Path(_) => {}
+            }
+            for a in args {
+                collect_free(a, bound, free);
+            }
+        }
+        MethodCall { receiver, args, .. } => {
+            collect_free(receiver, bound, free);
+            for a in args {
+                collect_free(a, bound, free);
+            }
+        }
+        FieldAccess { object, .. } => collect_free(object, bound, free),
+        DefVarLocal(d) => collect_free(&d.init, bound, free),
+        _ => {}
+    }
+}
+
+fn collect_free_place(p: &Place, bound: &mut Vec<String>, free: &mut Vec<String>) {
+    match p {
+        Place::Var(n) => {
+            if !bound.iter().any(|b| b == n) && !free.iter().any(|f| f == n) {
+                free.push(n.clone());
+            }
+        }
+        Place::Field { object, .. } => collect_free(object, bound, free),
+        Place::Index { object, index } => {
+            collect_free(object, bound, free);
+            collect_free(index, bound, free);
+        }
+    }
 }
 
 /// Receiver-type key for method dispatch (must match the type checker's).
