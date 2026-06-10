@@ -61,19 +61,15 @@ mod tests {
     fn read_list_test() -> Result<(), Error> {
         let reader = Reader::new();
         let obj = reader.read("(1 2 \"foo\")")?;
-        assert_eq!(obj,
-            Object::List(
-                Cons::new_cons(
-                    Object::new_i64(1),
-                    Some(Cons::new_cons(
-                        Object::new_i64(2),
-                        Some(Cons::new_cons(
-                            Object::new_string("foo".to_string()),
-                            None
-                        ))
-                    ))
-                )
-            )
+        assert_eq!(
+            obj,
+            Object::List(Cons::new_cons(
+                Object::new_i64(1),
+                Some(Cons::new_cons(
+                    Object::new_i64(2),
+                    Some(Cons::new_cons(Object::new_string("foo".to_string()), None))
+                ))
+            ))
         );
 
         Ok(())
@@ -83,27 +79,21 @@ mod tests {
     fn read_quote_test() -> Result<(), Error> {
         let reader = Reader::new();
         let obj = reader.read("'(1 2 \"foo\")")?;
-        assert_eq!(obj,
-            Object::List(
-                Cons::new_cons(
-                    Object::new_symbol("quote".to_string()),
-                    Some(Cons::new_cons(
-                        Object::List(
-                            Cons::new_cons(
-                                Object::new_i64(1),
-                                Some(Cons::new_cons(
-                                    Object::new_i64(2),
-                                    Some(Cons::new_cons(
-                                        Object::new_string("foo".to_string()),
-                                        None
-                                    ))
-                                ))
-                            )
-                        ),
-                        None
-                    ))
-                )
-            )
+        assert_eq!(
+            obj,
+            Object::List(Cons::new_cons(
+                Object::new_symbol("quote".to_string()),
+                Some(Cons::new_cons(
+                    Object::List(Cons::new_cons(
+                        Object::new_i64(1),
+                        Some(Cons::new_cons(
+                            Object::new_i64(2),
+                            Some(Cons::new_cons(Object::new_string("foo".to_string()), None))
+                        ))
+                    )),
+                    None
+                ))
+            ))
         );
 
         Ok(())
