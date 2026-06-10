@@ -140,6 +140,39 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn run_instance_method() -> Result<(), Box<dyn error::Error>> {
+        let prog = "(defstruct Point (pub ((x i64) (y i64)))) \
+                    (defmethod manhattan ((self Point)) i64 (+ (.x self) (.y self))) \
+                    (defun f () i64 (let ((p (Point 20 22))) (manhattan p))) \
+                    (f)";
+        assert_eq!(run(prog)?, 42);
+        // method-call sugar form
+        let prog2 = "(defstruct Point (pub ((x i64) (y i64)))) \
+                     (defmethod manhattan ((self Point)) i64 (+ (.x self) (.y self))) \
+                     (defun f () i64 (let ((p (Point 1 9))) (.manhattan p))) \
+                     (f)";
+        assert_eq!(run(prog2)?, 10);
+        Ok(())
+    }
+
+    #[test]
+    fn run_method_on_primitive() -> Result<(), Box<dyn error::Error>> {
+        let prog = "(defmethod double ((self i32)) i32 (* self 2)) (double 21)";
+        assert_eq!(run(prog)?, 42);
+        Ok(())
+    }
+
+    #[test]
+    fn run_static_method() -> Result<(), Box<dyn error::Error>> {
+        let prog = "(defstruct Circle (pub ((radius i64)))) \
+                    (defmethod make ((Circle) (r i64)) Circle (Circle r)) \
+                    (defun f () i64 (let ((c (make 5))) (.radius c))) \
+                    (f)";
+        assert_eq!(run(prog)?, 5);
+        Ok(())
+    }
+
     /// A rooted struct must survive collections triggered by allocating
     /// megabytes of garbage in a loop (validates shadow-stack rooting).
     #[test]

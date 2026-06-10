@@ -25,7 +25,10 @@ use std::collections::HashMap;
 use std::error;
 
 use crate::gc::{self, TypeInfo};
-use crate::{BinOp, CallTarget, DefStruct, Defun, ExprKind, Form, Place, Type, TypedExpr, UnOp};
+use crate::{
+    BinOp, CallTarget, DefMethod, DefStruct, Defun, ExprKind, Form, Place, Receiver, Type,
+    TypedExpr, UnOp,
+};
 
 type CErr = Box<dyn error::Error>;
 
@@ -62,6 +65,10 @@ pub struct Compiler<'ctx> {
     execution_engine: ExecutionEngine<'ctx>,
     functions: HashMap<String, FnInfo<'ctx>>,
     structs: HashMap<String, StructLayout<'ctx>>,
+    /// (receiver type key, method name) -> (function, return type)
+    instance_methods: HashMap<(String, String), (FunctionValue<'ctx>, Type)>,
+    /// method name -> [(receiver key, function, return type)]
+    static_methods: HashMap<String, Vec<(String, FunctionValue<'ctx>, Type)>>,
     rt: RtFns<'ctx>,
     scopes: Vec<HashMap<String, (PointerValue<'ctx>, Type)>>,
     loops: Vec<(BasicBlock<'ctx>, BasicBlock<'ctx>)>,
@@ -101,6 +108,8 @@ impl<'ctx> Compiler<'ctx> {
             execution_engine,
             functions: HashMap::new(),
             structs: HashMap::new(),
+            instance_methods: HashMap::new(),
+            static_methods: HashMap::new(),
             rt: RtFns { gc_alloc, gc_push_frame, gc_pop_frame },
             scopes: Vec::new(),
             loops: Vec::new(),
@@ -148,8 +157,18 @@ impl<'ctx> Compiler<'ctx> {
             }
         }
         for form in forms {
+            if let Form::DefMethod(m) = form {
+                c.declare_method(m)?;
+            }
+        }
+        for form in forms {
             if let Form::Defun(d) = form {
                 c.compile_fn(d)?;
+            }
+        }
+        for form in forms {
+            if let Form::DefMethod(m) = form {
+                c.compile_method(m)?;
             }
         }
 
@@ -287,6 +306,113 @@ impl<'ctx> Compiler<'ctx> {
 
         self.end_frame()?;
         if d.ret == Type::Unit {
+            self.builder.build_return(None)?;
+        } else {
+            self.builder.build_return(Some(&last))?;
+        }
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Methods (static single dispatch, resolved by mangled name)
+    // ------------------------------------------------------------------
+
+    fn declare_method(&mut self, m: &DefMethod) -> Result<(), CErr> {
+        let recv_ty = match &m.recv {
+            Receiver::Instance(t) | Receiver::Static(t) => t.clone(),
+        };
+        let recv_key = type_key(&recv_ty);
+        let instance = matches!(m.recv, Receiver::Instance(_));
+
+        let mut param_tys: Vec<BasicMetadataTypeEnum> = Vec::new();
+        if instance {
+            let bt = self.basic_type(&recv_ty).ok_or_else(|| err("unsupported receiver type"))?;
+            param_tys.push(bt.into());
+        }
+        for (_, t) in &m.params {
+            param_tys.push(self.basic_type(t).ok_or_else(|| err("unsupported method param type"))?.into());
+        }
+
+        let fn_type = if m.ret == Type::Unit {
+            self.context.void_type().fn_type(&param_tys, false)
+        } else {
+            self.basic_type(&m.ret).ok_or_else(|| err("unsupported method return type"))?.fn_type(&param_tys, false)
+        };
+        let mangled = format!(
+            "tl${}${}${}",
+            if instance { "m" } else { "s" },
+            recv_key,
+            m.name
+        );
+        let value = self.module.add_function(&mangled, fn_type, None);
+        if instance {
+            self.instance_methods.insert((recv_key, m.name.clone()), (value, m.ret.clone()));
+        } else {
+            self.static_methods.entry(m.name.clone()).or_default().push((recv_key, value, m.ret.clone()));
+        }
+        Ok(())
+    }
+
+    fn compile_method(&mut self, m: &DefMethod) -> Result<(), CErr> {
+        let recv_ty = match &m.recv {
+            Receiver::Instance(t) | Receiver::Static(t) => t.clone(),
+        };
+        let instance = matches!(m.recv, Receiver::Instance(_));
+        let recv_key = type_key(&recv_ty);
+        let function = if instance {
+            self.instance_methods.get(&(recv_key, m.name.clone())).unwrap().0
+        } else {
+            self.static_methods
+                .get(&m.name)
+                .and_then(|v| v.iter().find(|(k, _, _)| *k == recv_key))
+                .unwrap()
+                .1
+        };
+
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
+
+        // root-slot budget: self (if a GC receiver) + GC params + GC lets
+        let self_gc = instance && self.is_gc_type(&recv_ty);
+        let n_gc_params = m.params.iter().filter(|(_, t)| self.is_gc_type(t)).count();
+        let n_roots = (self_gc as usize) + n_gc_params + self.count_gc_lets(&m.body);
+        self.begin_frame(function, n_roots)?;
+
+        self.scopes.push(HashMap::new());
+        let mut idx = 0u32;
+        if instance {
+            let arg = function.get_nth_param(idx).unwrap();
+            idx += 1;
+            let slot = if self.is_gc_type(&recv_ty) {
+                self.take_root_slot()
+            } else {
+                let bt = self.basic_type(&recv_ty).unwrap();
+                self.builder.build_alloca(bt, "self")?
+            };
+            self.builder.build_store(slot, arg)?;
+            self.scopes.last_mut().unwrap().insert("self".to_string(), (slot, recv_ty.clone()));
+        }
+        for (name, ty) in &m.params {
+            let arg = function.get_nth_param(idx).unwrap();
+            idx += 1;
+            let slot = if self.is_gc_type(ty) {
+                self.take_root_slot()
+            } else {
+                let bt = self.basic_type(ty).unwrap();
+                self.builder.build_alloca(bt, name)?
+            };
+            self.builder.build_store(slot, arg)?;
+            self.scopes.last_mut().unwrap().insert(name.clone(), (slot, ty.clone()));
+        }
+
+        let mut last: BasicValueEnum = self.context.i64_type().const_int(0, true).into();
+        for e in &m.body {
+            last = self.lower(e)?;
+        }
+        self.scopes.pop();
+
+        self.end_frame()?;
+        if m.ret == Type::Unit {
             self.builder.build_return(None)?;
         } else {
             self.builder.build_return(Some(&last))?;
@@ -564,7 +690,7 @@ impl<'ctx> Compiler<'ctx> {
 
             ExprKind::FieldAccess { object, field } => self.lower_field_access(object, field),
             ExprKind::MethodCall { method, receiver, args } => {
-                // `.field` sugar (no args) -> field read. Real methods: M13.
+                // `.field` sugar (no args) -> field read.
                 if args.is_empty() {
                     if let Some(Type::Named(sname, _)) = &receiver.ty {
                         if let Some(layout) = self.structs.get(sname) {
@@ -574,7 +700,21 @@ impl<'ctx> Compiler<'ctx> {
                         }
                     }
                 }
-                Err(err("method-call codegen arrives in M13"))
+                // instance method call: receiver is the first argument
+                let key = receiver
+                    .ty
+                    .as_ref()
+                    .map(type_key)
+                    .ok_or_else(|| err("method receiver has no type"))?;
+                let (fv, ret) = self
+                    .instance_methods
+                    .get(&(key, method.clone()))
+                    .cloned()
+                    .ok_or_else(|| err(&format!("no method {}", method)))?;
+                let mut all: Vec<TypedExpr> = Vec::with_capacity(args.len() + 1);
+                all.push(receiver.as_ref().clone());
+                all.extend(args.iter().cloned());
+                self.emit_call(fv, ret, &all)
             }
 
             ExprKind::Call { target, args } => self.lower_call(target, args),
@@ -848,13 +988,36 @@ impl<'ctx> Compiler<'ctx> {
         if self.structs.contains_key(&name) {
             return self.lower_struct_ctor(&name, args);
         }
-        let (fv, ret) = {
-            let info = self
-                .functions
-                .get(&name)
-                .ok_or_else(|| err(&format!("call to unknown function: {}", name)))?;
-            (info.value, info.ret.clone())
-        };
+        // ordinary function?
+        if let Some(info) = self.functions.get(&name) {
+            let (fv, ret) = (info.value, info.ret.clone());
+            return self.emit_call(fv, ret, args);
+        }
+        // static method (by name; single candidate or by receiver match)?
+        if let Some(cands) = self.static_methods.get(&name) {
+            if cands.len() == 1 {
+                let (fv, ret) = (cands[0].1, cands[0].2.clone());
+                return self.emit_call(fv, ret, args);
+            }
+        }
+        // instance method dispatching on the first argument's type?
+        if let Some(first) = args.first() {
+            if let Some(t) = &first.ty {
+                let key = type_key(t);
+                if let Some((fv, ret)) = self.instance_methods.get(&(key, name.clone())).cloned() {
+                    return self.emit_call(fv, ret, args);
+                }
+            }
+        }
+        Err(err(&format!("call to unknown function: {}", name)))
+    }
+
+    fn emit_call(
+        &mut self,
+        fv: FunctionValue<'ctx>,
+        ret: Type,
+        args: &[TypedExpr],
+    ) -> Result<BasicValueEnum<'ctx>, CErr> {
         let mut argvals: Vec<BasicMetadataValueEnum> = Vec::new();
         for a in args {
             argvals.push(self.lower(a)?.into());
@@ -925,6 +1088,15 @@ impl<'ctx> Compiler<'ctx> {
 
 fn err(msg: &str) -> CErr {
     Box::<dyn error::Error>::from(msg.to_string())
+}
+
+/// Receiver-type key for method dispatch (must match the type checker's).
+fn type_key(t: &Type) -> String {
+    match t {
+        Type::Named(n, _) => n.clone(),
+        Type::Path(segs) => segs.join("::"),
+        other => format!("{:?}", other),
+    }
 }
 
 fn int_predicate(op: BinOp, signed: bool) -> IntPredicate {
