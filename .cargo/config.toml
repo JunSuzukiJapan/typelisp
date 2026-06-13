@@ -1,5 +1,0 @@
-# LLVM toolchain for llvm-sys / inkwell (llvm18-0).
-# llvm@18 is keg-only under Homebrew; point llvm-sys at its prefix.
-[env]
-LLVM_SYS_181_PREFIX = "/usr/local/opt/llvm@18"
-LLVM_SYS_180_PREFIX = "/usr/local/opt/llvm@18"

@@ -54,27 +54,12 @@ impl<'a, T> Iterator for ConsIter<'a, T> {
     }
 }
 
-/// Numeric literal type suffix (e.g. `5u8`, `3.0f32`).
-/// Recorded only when a literal carries an explicit suffix; it fixes the
-/// literal's static type. Radix (`0x`/`0o`/`0b`) is not preserved here because
-/// it does not affect the value or type.
-#[derive(PartialEq, Clone, Copy, Debug)]
-pub enum NumSuffix {
-    I8, I16, I32, I64, Isize,
-    U8, U16, U32, U64, Usize,
-    F32, F64,
-}
-
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Debug)]
 pub enum Object {
     Null,
     True,
     False,
     Int(i64),
-    IntWithSuffix(i64, NumSuffix),
-    Float(f64),
-    FloatWithSuffix(f64, NumSuffix),
-    Char(char),
     Symbol(String),
     String(String),
     List(Cons<Object>),
@@ -84,14 +69,6 @@ pub enum Object {
 impl Object {
     pub fn new_i64(num: i64) -> Object {
         Object::Int(num)
-    }
-
-    pub fn new_float(num: f64) -> Object {
-        Object::Float(num)
-    }
-
-    pub fn new_char(c: char) -> Object {
-        Object::Char(c)
     }
 
     pub fn new_symbol(s: String) -> Object {
@@ -125,21 +102,7 @@ impl Object {
     }
 
     pub fn is_int(&self) -> bool {
-        match self {
-            Object::Int(_) | Object::IntWithSuffix(_, _) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_float(&self) -> bool {
-        match self {
-            Object::Float(_) | Object::FloatWithSuffix(_, _) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_char(&self) -> bool {
-        if let Object::Char(_) = self {
+        if let Object::Int(_) = self {
             true
         }else{
             false
