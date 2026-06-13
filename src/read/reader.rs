@@ -1,193 +1,406 @@
-use std::str::Chars;
-use std::iter::Peekable;
-// use std::rc::Rc;
+//! A Common Lisp-style reader that produces `Sexpr` values ([`Value`]).
+//!
+//! Follows the CLHS reader algorithm (2.1–2.4): skip whitespace/comments,
+//! dispatch on macro characters, otherwise accumulate a token and interpret it
+//! as a number or a (case-insensitive, interned) symbol.
+//!
+//! Cons cells, symbols and strings are allocated in a [`Heap`]. Because
+//! allocation may trigger a GC mid-read, every partially-built value is kept on
+//! the heap's root stack until it is linked into its parent, so the collector
+//! never reclaims a structure that is still being read.
+//!
+//! Supported v1 syntax: integers (decimal, `0x` hex, signed), floats, booleans
+//! `true`/`false`, strings with escapes, characters `#\a` / `#\Space`, symbols
+//! (operators, `::` paths, `Vec<T>`-style tokens), lists, dotted pairs `(a . b)`,
+//! quote `'`, and comments (`;` line, `#| ... |#` nested block).
 
-use crate::{Object, Cons, Error};
+use crate::{Error, Heap, Value};
 
 pub struct Reader;
 
 impl Reader {
     pub fn new() -> Reader {
-        Reader {}
+        Reader
     }
 
-    pub fn read(&self, s: &str) -> Result<Object, Error> {
-        let mut stream = s.chars().peekable();
-        self.read_from_peekable(&mut stream)
+    /// Read a single datum from `src`. Trailing input is ignored.
+    pub fn read(&self, heap: &mut Heap, src: &str) -> Result<Value, Error> {
+        let mut cur = Cursor::new(src);
+        read_datum(&mut cur, heap)
     }
 
-    fn read_from_peekable(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
-        self.skip_whitespace(stream);
+    /// Read every top-level datum from `src`.
+    ///
+    /// Each returned value is registered as a GC root (so later reads cannot
+    /// collect earlier results); the caller pops them when done.
+    pub fn read_all(&self, heap: &mut Heap, src: &str) -> Result<Vec<Value>, Error> {
+        let mut cur = Cursor::new(src);
+        let mut out = Vec::new();
+        loop {
+            skip_ws_comments(&mut cur);
+            if cur.at_end() {
+                break;
+            }
+            let v = read_datum(&mut cur, heap)?;
+            heap.push_root(v);
+            out.push(v);
+        }
+        Ok(out)
+    }
+}
 
-        if let Some(ch) = stream.peek() {
-            match *ch {
-                '(' => self.read_list(stream),
-                ')' => {
-                    return Err(Error::UnmatchedParen);
-                },
-                '\'' => self.read_quote(stream),
-                // '\'' => {
-                //     self.char_stream.next(); // skip '
-                //     let obj = self.read();
-                //     let quote = Object::new_symbol(String::from("quote"));
-                //     let cons = Object::new_cons(Rc::new(obj), Rc::new(Object::Null));
-                //     let cons = Object::new_cons(Rc::new(quote), Rc::new(cons));
-                //     cons
-                // },
-                '\"' => self.read_string(stream),
-                _ => {
-                    if self.is_number(ch) {
-                        self.read_number(stream)
-                    }else{
-                        self.read_symbol(stream)
+// ----------------------------------------------------------------------
+// Cursor
+// ----------------------------------------------------------------------
+
+struct Cursor {
+    chars: Vec<char>,
+    pos: usize,
+}
+
+impl Cursor {
+    fn new(s: &str) -> Cursor {
+        Cursor { chars: s.chars().collect(), pos: 0 }
+    }
+    fn peek(&self) -> Option<char> {
+        self.chars.get(self.pos).copied()
+    }
+    fn peek2(&self) -> Option<char> {
+        self.chars.get(self.pos + 1).copied()
+    }
+    fn next(&mut self) -> Option<char> {
+        let c = self.peek();
+        if c.is_some() {
+            self.pos += 1;
+        }
+        c
+    }
+    fn at_end(&self) -> bool {
+        self.pos >= self.chars.len()
+    }
+}
+
+// ----------------------------------------------------------------------
+// Character classes
+// ----------------------------------------------------------------------
+
+fn is_ws(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{0C}')
+}
+
+/// Characters that terminate a token / separate data.
+fn is_delimiter(c: char) -> bool {
+    is_ws(c) || matches!(c, '(' | ')' | '"' | '\'' | ';')
+}
+
+fn is_delim_or_eof(c: Option<char>) -> bool {
+    match c {
+        None => true,
+        Some(c) => is_delimiter(c),
+    }
+}
+
+// ----------------------------------------------------------------------
+// Whitespace & comments
+// ----------------------------------------------------------------------
+
+fn skip_ws_comments(cur: &mut Cursor) {
+    loop {
+        match cur.peek() {
+            Some(c) if is_ws(c) => {
+                cur.next();
+            }
+            Some(';') => {
+                // line comment: to end of line
+                while let Some(c) = cur.next() {
+                    if c == '\n' {
+                        break;
                     }
-                },
-            }
-        }else{
-            Ok(Object::Null)
-        }
-    }
-
-    fn read_quote(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
-        stream.next(); // skip '
-        let obj = self.read_from_peekable(stream)?;
-        let quote = Object::new_symbol(String::from("quote"));
-        let cons = Cons::new_cons(obj, None);
-        let cons = Cons::new_cons(quote, Some(cons));
-        Ok(Object::List(cons))
-    }
-
-    fn read_cons(&self, stream: &mut Peekable<Chars>) -> Result<Option<Cons<Object>>, Error> {
-        let result: Option<Cons<Object>> = None;
-
-        self.skip_whitespace(stream);
-        if let Some(ch) = stream.peek() {
-            if *ch == ')' {
-                stream.next(); // skip ')'
-                return Ok(result);
-            }
-        }else{ // None
-            return Err(Error::IllegalEndWhileReadingList);
-        }
-
-        let obj = self.read_from_peekable(stream)?;
-        let cdr = self.read_cons(stream)?;
-        Ok(Some(Cons::new_cons(obj, cdr)))
-    }
-
-    fn read_list(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
-        stream.next(); // skip '('
-        let cons = self.read_cons(stream)?;
-        if cons.is_none() {
-            Ok(Object::Null)
-        }else{
-            let l = cons.unwrap();
-            Ok(Object::List(l))
-        }
-    }
-
-    fn read_string(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
-        stream.next(); // skip first '"'
-        let mut buf = String::new();
-
-        loop {
-            let ch: char;
-
-            if let Some(c) = stream.peek()  {
-                if *c == '"' {
-                    stream.next(); // skip '"'
-                    break;
                 }
-                ch = *c;
-            }else{
-                return Err(Error::IllegalEndOfString);
             }
-
-            if ch == '\\' {
-                let c = stream.next();
-                match c {
-                    Some(c2) => buf.push(c2),
-                    None => return Err(Error::IllegalEndOfEscapeSequence),
-                }
-            }else{
-                stream.next();
-                buf.push(ch);
+            Some('#') if cur.peek2() == Some('|') => {
+                skip_block_comment(cur);
             }
+            _ => break,
         }
-
-        Ok(Object::new_string(buf))
     }
+}
 
-    fn read_symbol(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
-        let mut buf = String::new();
+/// Skip a `#| ... |#` block comment (nesting allowed). Consumes to EOF if
+/// unterminated (a following read then sees EOF).
+fn skip_block_comment(cur: &mut Cursor) {
+    cur.next(); // '#'
+    cur.next(); // '|'
+    let mut depth = 1;
+    while depth > 0 {
+        match cur.next() {
+            None => break,
+            Some('#') if cur.peek() == Some('|') => {
+                cur.next();
+                depth += 1;
+            }
+            Some('|') if cur.peek() == Some('#') => {
+                cur.next();
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+}
 
-        loop {
-            let ch: char;
+// ----------------------------------------------------------------------
+// Datum dispatch
+// ----------------------------------------------------------------------
 
-            if let Some(c) = stream.peek() {
-                if c.is_whitespace() || *c == '(' || *c ==')' {
-                    break;
-                }
-                ch = *c;
-            }else{
+fn read_datum(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
+    skip_ws_comments(cur);
+    match cur.peek() {
+        None => Err(Error::ReadError("unexpected end of input".to_string())),
+        Some('(') => read_list(cur, heap),
+        Some(')') => Err(Error::UnmatchedParen),
+        Some('\'') => read_quote(cur, heap),
+        Some('"') => read_string(cur, heap),
+        Some('#') => read_hash(cur, heap),
+        Some(_) => read_atom(cur, heap),
+    }
+}
+
+fn read_quote(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
+    cur.next(); // '\''
+    let d = read_datum(cur, heap)?;
+    heap.push_root(d);
+    let q = heap.intern_symbol("quote"); // symbols are permanent; no rooting needed
+    let result = (|| {
+        let inner = heap.cons(d, Value::Empty)?;
+        heap.push_root(inner);
+        let r = heap.cons(q, inner);
+        heap.pop_root(); // inner
+        r
+    })();
+    heap.pop_root(); // d
+    result
+}
+
+// ----------------------------------------------------------------------
+// Lists & dotted pairs
+// ----------------------------------------------------------------------
+
+fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
+    cur.next(); // '('
+    let mark = heap.root_count();
+    let mut elems: Vec<Value> = Vec::new();
+    let mut tail = Value::Empty;
+
+    loop {
+        skip_ws_comments(cur);
+        match cur.peek() {
+            None => {
+                restore_roots(heap, mark);
+                return Err(Error::IllegalEndWhileReadingList);
+            }
+            Some(')') => {
+                cur.next();
                 break;
             }
-
-            stream.next();
-            buf.push(ch);
-        }
-
-        if buf == "true" {
-            Ok(Object::True)
-        }else if buf == "false" {
-            Ok(Object::False)
-        }else if buf == "null" {
-            Ok(Object::Null)
-        }else{
-            Ok(Object::new_symbol(buf))
-        }
-    }
-
-    fn read_number(&self, stream: &mut Peekable<Chars>) -> Result<Object, Error> {
-        let mut buf = String::new();
-
-        loop {
-            let ch: char;
-
-            if let Some(c) = stream.peek() {
-                ch = *c;
-            }else{
-                break
-            }
-
-            if !self.is_number(&ch) {
+            // consing dot: a lone `.` (followed by a delimiter) after >=1 element
+            Some('.') if is_delim_or_eof(cur.peek2()) => {
+                cur.next(); // '.'
+                if elems.is_empty() {
+                    restore_roots(heap, mark);
+                    return Err(Error::ReadError("dotted pair has no car".to_string()));
+                }
+                let d = match read_datum(cur, heap) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        restore_roots(heap, mark);
+                        return Err(e);
+                    }
+                };
+                heap.push_root(d);
+                tail = d;
+                skip_ws_comments(cur);
+                if cur.peek() == Some(')') {
+                    cur.next();
+                } else {
+                    restore_roots(heap, mark);
+                    return Err(Error::ReadError("expected ) after dotted cdr".to_string()));
+                }
                 break;
             }
-            stream.next();
-            buf.push(ch);
+            Some(_) => {
+                let e = match read_datum(cur, heap) {
+                    Ok(e) => e,
+                    Err(err) => {
+                        restore_roots(heap, mark);
+                        return Err(err);
+                    }
+                };
+                heap.push_root(e); // keep alive while reading the rest / building
+                elems.push(e);
+            }
         }
-
-        let val: i64 = buf.parse::<i64>().unwrap();
-        Ok(Object::new_i64(val))
     }
 
-    fn is_number(&self, ch: &char) -> bool {
-        match *ch {
-            '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => true,
-            _ => false
+    // Build the cons chain from the back; the accumulator stays rooted so a GC
+    // triggered by `cons` cannot reclaim the part already built.
+    let mut acc = tail;
+    heap.push_root(acc);
+    for &e in elems.iter().rev() {
+        match heap.cons(e, acc) {
+            Ok(cell) => {
+                heap.pop_root(); // old acc
+                heap.push_root(cell);
+                acc = cell;
+            }
+            Err(err) => {
+                restore_roots(heap, mark);
+                return Err(err);
+            }
         }
     }
 
-    fn is_whitespace(&self, ch: &char) -> bool {
-        *ch == ' ' || *ch == ' '
-    }
+    restore_roots(heap, mark);
+    Ok(acc)
+}
 
-    fn skip_whitespace(&self, peekable: &mut Peekable<Chars>){
-        while let Some(ch) = peekable.peek() {
-            if !self.is_whitespace(ch) {
+/// Pop roots back down to `mark`.
+fn restore_roots(heap: &mut Heap, mark: usize) {
+    while heap.root_count() > mark {
+        heap.pop_root();
+    }
+}
+
+// ----------------------------------------------------------------------
+// Strings & characters
+// ----------------------------------------------------------------------
+
+fn read_string(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
+    cur.next(); // opening '"'
+    let mut s = String::new();
+    loop {
+        match cur.next() {
+            None => return Err(Error::IllegalEndOfString),
+            Some('"') => break,
+            Some('\\') => match cur.next() {
+                None => return Err(Error::IllegalEndOfEscapeSequence),
+                Some('n') => s.push('\n'),
+                Some('t') => s.push('\t'),
+                Some('r') => s.push('\r'),
+                Some('0') => s.push('\0'),
+                Some('\\') => s.push('\\'),
+                Some('"') => s.push('"'),
+                Some(other) => s.push(other),
+            },
+            Some(c) => s.push(c),
+        }
+    }
+    Ok(heap.alloc_string(s))
+}
+
+fn read_hash(cur: &mut Cursor, _heap: &mut Heap) -> Result<Value, Error> {
+    cur.next(); // '#'
+    match cur.peek() {
+        Some('\\') => {
+            cur.next(); // '\\'
+            read_char(cur)
+        }
+        other => Err(Error::ReadError(format!("unsupported # syntax: #{:?}", other))),
+    }
+}
+
+fn read_char(cur: &mut Cursor) -> Result<Value, Error> {
+    let first = cur
+        .next()
+        .ok_or_else(|| Error::ReadError("end of input after #\\".to_string()))?;
+    // A multi-letter name (e.g. Space, Newline) only if it starts alphabetic.
+    let mut name = String::new();
+    name.push(first);
+    if first.is_alphabetic() {
+        while let Some(c) = cur.peek() {
+            if c.is_alphanumeric() || c == '-' {
+                name.push(c);
+                cur.next();
+            } else {
                 break;
             }
-            peekable.next();
         }
     }
+    if name.chars().count() == 1 {
+        return Ok(Value::Char(first));
+    }
+    let ch = match name.to_lowercase().as_str() {
+        "space" => ' ',
+        "newline" | "linefeed" => '\n',
+        "tab" => '\t',
+        "return" => '\r',
+        "page" => '\u{0C}',
+        "nul" | "null" => '\0',
+        "backspace" => '\u{08}',
+        _ => return Err(Error::ReadError(format!("unknown character name: {}", name))),
+    };
+    Ok(Value::Char(ch))
+}
+
+// ----------------------------------------------------------------------
+// Atoms: numbers & symbols
+// ----------------------------------------------------------------------
+
+fn read_atom(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
+    let mut tok = String::new();
+    while let Some(c) = cur.peek() {
+        if is_delimiter(c) {
+            break;
+        }
+        tok.push(c);
+        cur.next();
+    }
+    // tok is non-empty: read_datum only dispatches here on a non-delimiter.
+    if let Some(v) = parse_number(&tok) {
+        return Ok(v);
+    }
+    match tok.to_lowercase().as_str() {
+        "true" => Ok(Value::Bool(true)),
+        "false" => Ok(Value::Bool(false)),
+        _ => Ok(heap.intern_symbol(&tok)),
+    }
+}
+
+/// Interpret a token as a number, or `None` if it is a symbol.
+fn parse_number(tok: &str) -> Option<Value> {
+    let (neg, body) = if let Some(r) = tok.strip_prefix('-') {
+        (true, r)
+    } else if let Some(r) = tok.strip_prefix('+') {
+        (false, r)
+    } else {
+        (false, tok)
+    };
+
+    // hexadecimal integer: 0x...
+    if let Some(hex) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
+        if !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            if let Ok(n) = i64::from_str_radix(hex, 16) {
+                return Some(Value::Int(if neg { -n } else { n }));
+            }
+        }
+        return None;
+    }
+
+    // decimal integer
+    if !body.is_empty() && body.chars().all(|c| c.is_ascii_digit()) {
+        if let Ok(n) = body.parse::<i64>() {
+            return Some(Value::Int(if neg { -n } else { n }));
+        }
+        return None;
+    }
+
+    // float: starts with a digit or '.', and has a '.' or exponent marker
+    let first = body.chars().next()?;
+    if (first.is_ascii_digit() || first == '.')
+        && (body.contains('.') || body.contains('e') || body.contains('E'))
+    {
+        if let Ok(f) = body.parse::<f64>() {
+            return Some(Value::Float(if neg { -f } else { f }));
+        }
+    }
+    None
 }
