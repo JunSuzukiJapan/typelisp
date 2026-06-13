@@ -34,7 +34,7 @@ fn assert_accounting(h: &Heap) {
 /// ensure capacity exceeds the length (no GC fires mid-build, since nothing
 /// is rooted yet).
 fn list_of(h: &mut Heap, items: &[i64]) -> Value {
-    let mut acc = Value::Nil;
+    let mut acc = Value::Empty;
     for &x in items.iter().rev() {
         acc = h.cons(Value::Int(x), acc).unwrap();
     }
@@ -79,7 +79,7 @@ fn cons_consumes_one_cell_and_reads_back() {
 fn accounting_holds_through_a_sequence() {
     let mut h = Heap::with_capacity(32);
     for i in 0..10 {
-        let _ = h.cons(Value::Int(i), Value::Nil).unwrap();
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap();
         assert_accounting(&h);
     }
     h.gc();
@@ -92,7 +92,7 @@ fn accounting_holds_through_a_sequence() {
 fn gc_reclaims_unrooted_cells() {
     let mut h = Heap::with_capacity(16);
     for i in 0..10 {
-        let _ = h.cons(Value::Int(i), Value::Nil).unwrap();
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap();
     }
     assert_eq!(h.live_count(), 10);
     let reclaimed = h.gc();
@@ -109,7 +109,7 @@ fn rooted_structure_survives_gc() {
     h.push_root(list);
     // allocate garbage that should be collected
     for i in 0..20 {
-        let _ = h.cons(Value::Int(i), Value::Nil).unwrap();
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap();
     }
     h.gc();
     // the 3-cell rooted list survives, garbage is gone
@@ -137,7 +137,7 @@ fn dropping_the_root_lets_it_be_collected() {
 #[test]
 fn two_cell_cycle_is_collected() {
     let mut h = Heap::with_capacity(16);
-    let a = h.cons(Value::Int(1), Value::Nil).unwrap();
+    let a = h.cons(Value::Int(1), Value::Empty).unwrap();
     let b = h.cons(Value::Int(2), a).unwrap();
     h.set_cdr(a, b).unwrap(); // a -> b -> a
     assert_eq!(h.live_count(), 2);
@@ -151,7 +151,7 @@ fn two_cell_cycle_is_collected() {
 #[test]
 fn self_cycle_is_collected() {
     let mut h = Heap::with_capacity(8);
-    let c = h.cons(Value::Nil, Value::Nil).unwrap();
+    let c = h.cons(Value::Empty, Value::Empty).unwrap();
     h.set_car(c, c).unwrap();
     h.set_cdr(c, c).unwrap(); // points to itself both ways
     h.gc();
@@ -162,7 +162,7 @@ fn self_cycle_is_collected() {
 #[test]
 fn rooted_cycle_survives_then_dies() {
     let mut h = Heap::with_capacity(16);
-    let a = h.cons(Value::Int(1), Value::Nil).unwrap();
+    let a = h.cons(Value::Int(1), Value::Empty).unwrap();
     let b = h.cons(Value::Int(2), a).unwrap();
     h.set_cdr(a, b).unwrap();
     h.push_root(a);
@@ -220,12 +220,12 @@ fn deep_list_marks_without_stack_overflow() {
 fn exhaustion_errors_when_everything_is_rooted() {
     let mut h = Heap::with_capacity(3);
     for i in 0..3 {
-        let c = h.cons(Value::Int(i), Value::Nil).unwrap();
+        let c = h.cons(Value::Int(i), Value::Empty).unwrap();
         h.push_root(c);
     }
     assert_eq!(h.free_count(), 0);
     // GC can free nothing (all rooted) -> allocation must error, not grow
-    match h.cons(Value::Int(99), Value::Nil) {
+    match h.cons(Value::Int(99), Value::Empty) {
         Err(Error::HeapExhausted) => {}
         other => panic!("expected HeapExhausted, got {:?}", other),
     }
@@ -237,11 +237,11 @@ fn exhaustion_errors_when_everything_is_rooted() {
 fn exhaustion_triggers_gc_then_succeeds_when_garbage_exists() {
     let mut h = Heap::with_capacity(3);
     for i in 0..3 {
-        let _ = h.cons(Value::Int(i), Value::Nil).unwrap(); // unrooted garbage
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap(); // unrooted garbage
     }
     assert_eq!(h.free_count(), 0);
     // the next cons should GC, reclaim the garbage, and succeed
-    let c = h.cons(Value::Int(42), Value::Nil).unwrap();
+    let c = h.cons(Value::Int(42), Value::Empty).unwrap();
     assert_eq!(h.car(c).unwrap(), Value::Int(42));
     assert_eq!(h.capacity(), 3); // still no growth
     assert_eq!(h.live_count(), 1);
@@ -255,7 +255,7 @@ fn freed_cells_are_reused_without_growing() {
     let cap = 8;
     let mut h = Heap::with_capacity(cap);
     for i in 0..cap as i64 {
-        let c = h.cons(Value::Int(i), Value::Nil).unwrap();
+        let c = h.cons(Value::Int(i), Value::Empty).unwrap();
         h.push_root(c);
     }
     assert_eq!(h.free_count(), 0);
@@ -267,7 +267,7 @@ fn freed_cells_are_reused_without_growing() {
     assert_eq!(h.free_count(), cap);
     // allocate again: must reuse, never exceed capacity
     for i in 0..cap as i64 {
-        let _ = h.cons(Value::Int(i), Value::Nil).unwrap();
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap();
     }
     assert_eq!(h.capacity(), cap);
     assert_accounting(&h);
@@ -297,19 +297,106 @@ fn dotted_pair_holds_two_arbitrary_values() {
 // ---- nil / non-cons semantics -------------------------------------------
 
 #[test]
-fn car_cdr_of_nil_is_nil() {
-    let h = Heap::with_capacity(4);
-    assert_eq!(h.car(Value::Nil).unwrap(), Value::Nil);
-    assert_eq!(h.cdr(Value::Nil).unwrap(), Value::Nil);
+fn car_cdr_of_non_cons_errors() {
+    let mut h = Heap::with_capacity(4);
+    // the empty list is not a cons: car/cdr error
+    assert!(matches!(h.car(Value::Empty), Err(Error::NotACons)));
+    assert!(matches!(h.cdr(Value::Empty), Err(Error::NotACons)));
+    assert!(matches!(h.car(Value::Int(5)), Err(Error::NotACons)));
+    assert!(matches!(h.cdr(Value::Char('a')), Err(Error::NotACons)));
+    assert!(matches!(h.set_car(Value::Int(5), Value::Empty), Err(Error::NotACons)));
+    assert!(matches!(h.set_cdr(Value::Empty, Value::Empty), Err(Error::NotACons)));
+}
+
+// ---- symbols & strings --------------------------------------------------
+
+#[test]
+fn symbols_intern_by_name() {
+    let mut h = Heap::with_capacity(8);
+    let a = h.intern_symbol("foo");
+    let b = h.intern_symbol("foo");
+    let c = h.intern_symbol("bar");
+    assert_eq!(a, b, "equal names must intern to the same symbol");
+    assert_ne!(a, c);
+    assert_eq!(h.symbol_count(), 2);
+    if let Value::Symbol(id) = a {
+        assert_eq!(h.symbol_name(id), "foo");
+    } else {
+        panic!("expected a symbol");
+    }
 }
 
 #[test]
-fn car_cdr_of_non_cons_errors() {
-    let mut h = Heap::with_capacity(4);
-    assert!(matches!(h.car(Value::Int(5)), Err(Error::NotACons)));
-    assert!(matches!(h.cdr(Value::Char('a')), Err(Error::NotACons)));
-    assert!(matches!(h.set_car(Value::Int(5), Value::Nil), Err(Error::NotACons)));
-    assert!(matches!(h.set_cdr(Value::Nil, Value::Nil), Err(Error::NotACons)));
+fn symbols_are_case_insensitive() {
+    let mut h = Heap::with_capacity(8);
+    let lower = h.intern_symbol("foo");
+    let upper = h.intern_symbol("FOO");
+    let mixed = h.intern_symbol("Foo");
+    assert_eq!(lower, upper);
+    assert_eq!(lower, mixed);
+    assert_eq!(h.symbol_count(), 1);
+    if let Value::Symbol(id) = mixed {
+        assert_eq!(h.symbol_name(id), "foo"); // canonical lowercase
+    } else {
+        panic!("expected a symbol");
+    }
+}
+
+#[test]
+fn strings_store_and_read_back() {
+    let mut h = Heap::with_capacity(8);
+    let s = h.alloc_string("hello".to_string());
+    match s {
+        Value::Str(id) => assert_eq!(h.string(id), "hello"),
+        _ => panic!("expected a string"),
+    }
+    assert_eq!(h.string_count(), 1);
+}
+
+#[test]
+fn unreachable_strings_are_collected() {
+    let mut h = Heap::with_capacity(8);
+    let _ = h.alloc_string("garbage1".to_string());
+    let _ = h.alloc_string("garbage2".to_string());
+    assert_eq!(h.string_count(), 2);
+    h.gc(); // not rooted, not in any cell -> reclaimed
+    assert_eq!(h.string_count(), 0);
+}
+
+#[test]
+fn string_reachable_via_rooted_cons_survives() {
+    let mut h = Heap::with_capacity(8);
+    let s = h.alloc_string("keep".to_string());
+    let cell = h.cons(s, Value::Empty).unwrap();
+    h.push_root(cell);
+    let _ = h.alloc_string("drop".to_string()); // unrooted garbage
+    h.gc();
+    assert_eq!(h.string_count(), 1); // only "keep" survives
+    // content still intact and reachable through the rooted cons
+    match h.car(cell).unwrap() {
+        Value::Str(id) => assert_eq!(h.string(id), "keep"),
+        _ => panic!("expected a string in car"),
+    }
+}
+
+#[test]
+fn directly_rooted_string_survives() {
+    let mut h = Heap::with_capacity(8);
+    let s = h.alloc_string("rooted".to_string());
+    h.push_root(s);
+    h.gc();
+    assert_eq!(h.string_count(), 1);
+}
+
+#[test]
+fn string_slots_are_recycled() {
+    let mut h = Heap::with_capacity(8);
+    for i in 0..100 {
+        let _ = h.alloc_string(format!("s{}", i)); // all garbage
+        h.gc();
+    }
+    // churn of 100 strings must not accumulate: at most a couple of live slots
+    assert!(h.string_count() <= 1);
 }
 
 // ---- roots bookkeeping --------------------------------------------------
@@ -318,7 +405,7 @@ fn car_cdr_of_non_cons_errors() {
 fn root_count_tracks_push_and_pop() {
     let mut h = Heap::with_capacity(8);
     assert_eq!(h.root_count(), 0);
-    let c = h.cons(Value::Nil, Value::Nil).unwrap();
+    let c = h.cons(Value::Empty, Value::Empty).unwrap();
     h.push_root(c);
     h.push_root(c);
     assert_eq!(h.root_count(), 2);
@@ -350,7 +437,7 @@ fn churn_never_leaks_or_overflows_capacity() {
     // Allocate far more cells than capacity, all immediately garbage. The
     // auto-GC on exhaustion must keep this going without ever erroring.
     for i in 0..200_000i64 {
-        let v = h.cons(Value::Int(i), Value::Nil).unwrap();
+        let v = h.cons(Value::Int(i), Value::Empty).unwrap();
         assert!(h.live_count() <= cap);
         let _ = v; // dropped -> garbage
     }

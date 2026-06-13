@@ -1,11 +1,22 @@
 //! Values and cons cells for the managed heap.
 //!
-//! A [`Value`] is a small `Copy` tagged value: either an immediate
-//! (`Nil`/`Int`/`Float`/`Char`) or a reference to a cons cell living in a
-//! [`Heap`](super::heap::Heap) arena. The cons reference ([`ConsRef`]) wraps a
-//! raw `*mut Cell`, but that pointer is **never** dereferenced outside this
-//! module — all access goes through safe `Heap` methods. Callers therefore
-//! never write `unsafe`, and never see a raw pointer.
+//! A [`Value`] is a small `Copy` tagged value. This is the runtime encoding of
+//! the reader's `Sexpr` type:
+//!
+//! ```text
+//! read : &str -> Option<Sexpr>          (None = the empty list `()`)
+//! Sexpr = Int | Float | Char | Bool | Sym | Str
+//!       | Cons(Option<Sexpr>, Option<Sexpr>)
+//! ```
+//!
+//! At the type level the empty list is `Option<Sexpr>::None`; at runtime that is
+//! encoded by [`Value::Empty`]. (`Empty` is the empty-list datum, **not** the
+//! removed language-level `nil`.)
+//!
+//! Cons cells live in a [`Heap`](super::heap::Heap) arena and are referenced
+//! through the opaque [`ConsRef`] (a raw pointer that is never dereferenced
+//! outside `mem`). Symbols and strings are stored in the heap and referenced by
+//! [`SymId`] / [`StrId`]. The public surface is entirely safe.
 
 use std::fmt;
 
@@ -22,13 +33,11 @@ pub(crate) struct Cell {
 
 impl Cell {
     pub(crate) fn blank() -> Cell {
-        Cell { car: Value::Nil, cdr: Value::Nil, mark: false, next_free: std::ptr::null_mut() }
+        Cell { car: Value::Empty, cdr: Value::Empty, mark: false, next_free: std::ptr::null_mut() }
     }
 }
 
 /// An opaque reference to a cons cell. `Copy`, compared by identity.
-///
-/// The inner pointer is private and only the `mem` module may dereference it.
 #[derive(Clone, Copy)]
 pub struct ConsRef(pub(crate) *mut Cell);
 
@@ -44,19 +53,32 @@ impl fmt::Debug for ConsRef {
     }
 }
 
-/// A Lisp value. `nil` (the empty list / false) is `Value::Nil`.
+/// Reference to an interned symbol in the heap's symbol table.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct SymId(pub(crate) u32);
+
+/// Reference to a string in the heap's string store.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct StrId(pub(crate) u32);
+
+/// A Lisp value — the runtime encoding of `Sexpr` (and `Option<Sexpr>`).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Value {
-    Nil,
+    /// The empty list `()` — runtime encoding of `Option<Sexpr>::None`.
+    Empty,
     Int(i64),
     Float(f64),
     Char(char),
+    Bool(bool),
+    Symbol(SymId),
+    Str(StrId),
     Cons(ConsRef),
 }
 
 impl Value {
-    pub fn is_nil(&self) -> bool {
-        matches!(self, Value::Nil)
+    /// True for the empty list `()`.
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Value::Empty)
     }
 
     pub fn is_cons(&self) -> bool {
