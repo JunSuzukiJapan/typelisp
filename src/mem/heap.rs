@@ -227,6 +227,23 @@ impl Heap {
         }
     }
 
+    /// Collect the elements of a proper list into a vector. Errors on an
+    /// improper list (a non-`Empty`, non-cons tail).
+    pub fn list_to_vec(&self, v: Value) -> Result<Vec<Value>, Error> {
+        let mut out = Vec::new();
+        let mut cur = v;
+        loop {
+            match cur {
+                Value::Empty => return Ok(out),
+                Value::Cons(c) => {
+                    out.push(unsafe { (*c.0).car });
+                    cur = unsafe { (*c.0).cdr };
+                }
+                _ => return Err(Error::ImproperList),
+            }
+        }
+    }
+
     // ---- collection -------------------------------------------------------
 
     /// Run a mark-sweep collection. Returns the number of cons cells reclaimed.

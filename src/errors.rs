@@ -18,6 +18,10 @@ pub enum Error {
     HeapExhausted,
     /// `car`/`cdr`/`set-car`/`set-cdr` applied to a non-cons, non-nil value.
     NotACons,
+    /// An improper list where a proper list was required.
+    ImproperList,
+    /// A malformed type expression or a type error during checking.
+    TypeError(String),
 }
 
 impl Error {
