@@ -5,7 +5,15 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+# The native compiler (LLVM via inkwell) is opt-in; the core read/eval/GC path
+# builds and tests without any LLVM toolchain installed. inkwell is intentionally
+# NOT a dependency yet: it is re-added (with a working `llvmNN-0` feature for the
+# installed LLVM) when the `compile` path is implemented. Until then `compile`
+# is an empty, declared feature so `#[cfg(feature = "compile")]` stays clean.
+default = []
+compile = []
+
 [dependencies]
-inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm12-0"] }
 once_cell = "1.8.0"
 num-bigint = "0.4"

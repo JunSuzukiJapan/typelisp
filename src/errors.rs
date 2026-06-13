@@ -14,6 +14,10 @@ pub enum Error {
     ArgIsNotCons,
     AddNotNumber,
     FailInTryAsBasicValue,
+    /// The cons arena is full and a GC could not reclaim any cell.
+    HeapExhausted,
+    /// `car`/`cdr`/`set-car`/`set-cdr` applied to a non-cons, non-nil value.
+    NotACons,
 }
 
 impl Error {
