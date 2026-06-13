@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-06-13 / ブランチ: `feature/typed-lisp-impl`
+最終更新: 2026-06-14 / ブランチ: `feature/typed-lisp-impl`
 
 このドキュメントは、再実装（read 関数から作り直し）の進捗と次回の作業を記録する。
 
@@ -41,8 +41,9 @@
 | `24199e4` | `Value` を Sexpr 表現に（`Empty`/`Bool`/`Symbol`/`Str`）、文字列 GC、シンボル大小無視 |
 | `92bd216` | CL 風 reader → Sexpr（read/read_all、rooting で GC 安全）、旧 Object/eval/旧テスト撤去 |
 | `8143242` | `Type` 表現 + 型パース（3a） |
+| （次コミット） | 型付き AST + 型検査器（3b/3c）: defun/let/if/literal/var/call/構成子/match/if-let、組み込み直和型 Option/Sexpr |
 
-**テスト**: `cargo test` で mem 28 / read 19 / type 7 = 54 件 green、警告0。
+**テスト**: `cargo test` で mem 28 / read 19 / type 7 / check 22 = 76 件 green、警告0。
 **Miri**: `cargo +nightly miri test --test mem_test`（25/25、重い2件除外）, `--test read_test`（19/19）— UB/リーク無し。
 
 ### 主要ファイル
@@ -50,8 +51,11 @@
 - `src/mem/heap.rs` — `Heap`（割当・car/cdr・set・GC・シンボル・文字列・`list_to_vec`・ルート）
 - `src/read/reader.rs` — `Reader::read` / `read_all`
 - `src/types.rs` — `Type` / `parse_type`
+- `src/check/ast.rs` — `Typed` / `Expr` / `Pattern` / `Arm`（型付き AST）
+- `src/check/registry.rs` — `AdtDef`/`Variant`/`FnSig`/`Registry`（組み込み Option/Sexpr）
+- `src/check/checker.rs` — `Checker`（`check_form` 入口、defun/let/if/call/構成子/match/if-let、双方向検査・単段具体化・網羅性）
 - `src/errors.rs` — `Error`（`HeapExhausted`/`NotACons`/`ImproperList`/`TypeError` 等）
-- `tests/{mem,read,type}_test.rs`
+- `tests/{mem,read,type,check}_test.rs`
 
 ### ビルド注意
 - `inkwell` は manifest から一旦除外（ロック可能な版に `llvm18-0` feature が無かったため）。
@@ -61,10 +65,21 @@
 
 ---
 
-## 3. 次回の作業（ステップ3：型システム + match）
+## 3. ステップ3：型システム + match（**完了**）
 
 承認済み方針「A: 型検査器の骨組み + 組み込み直和型（`Sexpr`/`Option`）+ `match`/`if-let` を最小構成」。
-**最小ゴール**: `Option`/`Sexpr` に対する `match` を型検査できる（例: `unwrap-or` が通る／非網羅・型不一致はエラー）。
+**最小ゴール達成**: `Option`/`Sexpr` に対する `match` を型検査できる（`unwrap-or` が通る／非網羅・型不一致はエラー）。
+入口は `Checker::check_form(&Heap, Value) -> Result<TopLevel, Error>`。
+
+実装メモ:
+- **双方向検査**: `check(env, v, expected: Option<&Type>)`。整数/浮動小数リテラルと構成子（特に引数なし `None`）は
+  `expected` を採用、それ以外は合成型を `expected` と突き合わせ。整数リテラル既定は `i32`、浮動小数は `f64`。
+- **`()` の二面性**: `expected` が `Option<T>` のとき空リスト `()` は `None` 構成子として検査、その他は `Unit`。
+- **単段具体化 + 単一化**: 構成子適用は `unify`/`subst_apply` でフィールド型テンプレートを実引数型と単一化し型引数を推論。
+- **網羅性**: 全構成子被覆 or `_`/束縛の包括アームを要求。`if-let` は二腕 `match`（包括アーム付き）へ脱糖。
+- 未実装: `while-let`（eval/loop 側）、`defstruct`（ユーザ定義直和型の登録 API は `Registry::add_adt` で準備済）、算術等の組み込み関数。
+
+<details><summary>当初設計（参考）</summary>
 
 ### 3b: Sexpr → 型付き AST + 検査器の骨組み
 - 型付き AST（`Sexpr` を head シンボルで振り分けて構築）:
@@ -93,10 +108,16 @@
 - ジェネリック具体化は単段で十分か（`Vec<Option<i32>>` のネストは後で）。
 - リテラルの型（整数リテラルの既定型・型注釈による上書き）の規則は eval/checker で要設計。
 - 型名は小文字正規化される点に注意（`String`→`string`, 型変数 `T`→`t`）。
+</details>
 
-## 4. その後
-- **ステップ4: eval**（型付き AST 上のツリーウォークインタプリタ。既定実行経路）。
-  実行時値の表現（インタプリタはタグ付き `Value` 系、構成子つきデータ＝構造体/直和インスタンス、クロージャ）。
+## 4. 次回の作業（ステップ4：eval）
+- **型付き AST（`check::Typed`）上のツリーウォークインタプリタ**。既定の実行経路。
+  - 実行時値の表現を設計（リテラル＝`mem::Value` 系で足りる／構成子つきデータ＝直和インスタンス＝`(タグ, フィールド…)`、
+    クロージャ）。`Sexpr`/`Option` の構成子・パターン照合を実装。
+  - `Checker` が返す `TopLevel::{Defun,Expr}` を評価。関数は `defun` レジストリ＋環境で解決。
+  - TDD: `tests/eval_test.rs`（`unwrap-or` を実際に評価して値が返る、等）。
+  - 検討: 構成子インスタンスを cons ヒープ上に表現するか、別ストアにするか（GC との整合）。
+    算術等の組み込み関数（`+` 等）の型登録＋評価をどこまで入れるか。
 - **ステップ5: compile**（明示 `compile`/`compile-file`。inkwell 再追加・LLVM コード生成。feature gate）。
 
 ---

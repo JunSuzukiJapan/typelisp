@@ -1,0 +1,107 @@
+//! Registries of data types (ADTs) and function signatures used by the checker.
+//!
+//! Type and variant names are stored lowercase because the reader case-folds all
+//! symbols. The built-in types `Option<T>` and `Sexpr` are pre-registered.
+
+use std::collections::HashMap;
+
+use crate::Type;
+
+/// One constructor of a data type: a name and its field types. Field types may
+/// reference the enclosing type's parameters as `Type::Named(param, [])`.
+#[derive(Clone, Debug)]
+pub struct Variant {
+    pub name: String,
+    pub fields: Vec<Type>,
+}
+
+/// A data-type definition (a sum type / `defstruct`-style ADT).
+#[derive(Clone, Debug)]
+pub struct AdtDef {
+    pub name: String,
+    /// Type-parameter names (lowercase), e.g. `["t"]` for `Option<T>`.
+    pub params: Vec<String>,
+    pub variants: Vec<Variant>,
+}
+
+/// A function's parameter and return types.
+#[derive(Clone, Debug)]
+pub struct FnSig {
+    pub params: Vec<Type>,
+    pub ret: Type,
+}
+
+/// The checker's symbol tables: data types, a constructor-name index, functions.
+pub struct Registry {
+    pub adts: HashMap<String, AdtDef>,
+    /// Constructor name -> (owning type name, variant index).
+    pub variant_index: HashMap<String, (String, usize)>,
+    pub fns: HashMap<String, FnSig>,
+}
+
+impl Registry {
+    /// A registry pre-loaded with the built-in `Option<T>` and `Sexpr` types.
+    pub fn with_builtins() -> Registry {
+        let mut reg = Registry {
+            adts: HashMap::new(),
+            variant_index: HashMap::new(),
+            fns: HashMap::new(),
+        };
+        reg.add_adt(option_def());
+        reg.add_adt(sexpr_def());
+        reg
+    }
+
+    /// Register a data type and index its constructors.
+    pub fn add_adt(&mut self, def: AdtDef) {
+        for (i, v) in def.variants.iter().enumerate() {
+            self.variant_index.insert(v.name.clone(), (def.name.clone(), i));
+        }
+        self.adts.insert(def.name.clone(), def);
+    }
+}
+
+/// `Option<T> = Some(T) | None`.
+fn option_def() -> AdtDef {
+    AdtDef {
+        name: "option".to_string(),
+        params: vec!["t".to_string()],
+        variants: vec![
+            Variant { name: "some".to_string(), fields: vec![tvar("t")] },
+            Variant { name: "none".to_string(), fields: vec![] },
+        ],
+    }
+}
+
+/// The built-in `Sexpr` sum type (the result type of `read`).
+///
+/// `Cons` holds two `Option<Sexpr>` fields, since `()` (the empty list, encoded
+/// as `None`) can appear as either car or cdr.
+fn sexpr_def() -> AdtDef {
+    let opt_sexpr = Type::Named("option".to_string(), vec![sexpr()]);
+    AdtDef {
+        name: "sexpr".to_string(),
+        params: vec![],
+        variants: vec![
+            Variant { name: "int".to_string(), fields: vec![Type::I64] },
+            Variant { name: "float".to_string(), fields: vec![Type::F64] },
+            Variant { name: "char".to_string(), fields: vec![Type::Char] },
+            Variant { name: "bool".to_string(), fields: vec![Type::Bool] },
+            Variant { name: "sym".to_string(), fields: vec![Type::Str] },
+            Variant { name: "str".to_string(), fields: vec![Type::Str] },
+            Variant {
+                name: "cons".to_string(),
+                fields: vec![opt_sexpr.clone(), opt_sexpr],
+            },
+        ],
+    }
+}
+
+fn sexpr() -> Type {
+    Type::Named("sexpr".to_string(), vec![])
+}
+
+/// A type-parameter reference, e.g. `t` in `Option<T>`'s field list.
+fn tvar(name: &str) -> Type {
+    Type::Named(name.to_string(), vec![])
+}
