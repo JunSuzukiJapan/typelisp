@@ -3,7 +3,7 @@
 //! Type and variant names are stored lowercase because the reader case-folds all
 //! symbols. The built-in types `Option<T>` and `Sexpr` are pre-registered.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::Type;
 
@@ -42,66 +42,109 @@ pub struct AdtDef {
     pub assoc: HashMap<String, AssocFn>,
 }
 
-/// The checker's symbol tables. Modules are namespaces; types are not (they own
-/// associated items in [`AdtDef::assoc`]). All keys are fully-qualified
-/// lowercase `::`-joined names.
-pub struct Registry {
-    pub adts: HashMap<String, AdtDef>,
-    /// Constructor name -> (owning FQ type name, variant index). Indexed under
-    /// both the bare name (first definer wins) and `fqtype::ctor`.
-    pub variant_index: HashMap<String, (String, usize)>,
+/// A namespace (module): a container of free functions, types, constructors,
+/// child modules, and `use` aliases. `Foo::Bar` is resolved by descending into
+/// the child module `Foo` and looking up `Bar` there. (Types are *not*
+/// namespaces — they own associated items in [`AdtDef::assoc`].)
+#[derive(Default)]
+pub struct Namespace {
+    /// Child modules, keyed by their (unqualified) name.
+    pub modules: HashMap<String, Namespace>,
+    /// Free functions defined directly here, keyed by unqualified name.
     pub fns: HashMap<String, FnSig>,
-    /// Known fully-qualified module paths.
-    pub modules: HashSet<String>,
-    /// `use` injections: a current-namespace-qualified name -> FQ target.
-    pub aliases: HashMap<String, String>,
+    /// Types defined directly here, keyed by unqualified name. `AdtDef::name`
+    /// holds the fully-qualified name used as the type's identity.
+    pub types: HashMap<String, AdtDef>,
+    /// Constructor (unqualified) name -> (FQ owning type, variant index).
+    pub ctors: HashMap<String, (String, usize)>,
+    /// `use` aliases: unqualified name -> absolute path (from the root).
+    pub aliases: HashMap<String, Vec<String>>,
+}
+
+impl Namespace {
+    /// Descend through child modules along `path`; `None` if any segment is not
+    /// a module.
+    pub fn module(&self, path: &[String]) -> Option<&Namespace> {
+        let mut ns = self;
+        for seg in path {
+            ns = ns.modules.get(seg)?;
+        }
+        Some(ns)
+    }
+
+    /// Descend through child modules along `path`, creating empty modules as
+    /// needed.
+    pub fn module_mut(&mut self, path: &[String]) -> &mut Namespace {
+        let mut ns = self;
+        for seg in path {
+            ns = ns.modules.entry(seg.clone()).or_default();
+        }
+        ns
+    }
+
+    /// Register a type here and index its constructors (bare ctor name — first
+    /// definer wins so built-in constructors stay reachable).
+    pub fn add_type(&mut self, def: AdtDef) {
+        for (i, v) in def.variants.iter().enumerate() {
+            self.ctors.entry(v.name.clone()).or_insert((def.name.clone(), i));
+        }
+        let local = def.name.rsplit("::").next().unwrap().to_string();
+        self.types.insert(local, def);
+    }
+}
+
+/// The checker's symbol table: a tree of namespaces rooted at [`Registry::root`].
+pub struct Registry {
+    pub root: Namespace,
 }
 
 impl Registry {
-    /// A registry pre-loaded with the built-in `Option`/`Result`/`Error`/`Sexpr`
-    /// types (all at the root namespace).
+    /// A registry whose root namespace holds the built-in `Option`/`Result`/
+    /// `Error`/`Sexpr` types and the i32 arithmetic/comparison operators.
     pub fn with_builtins() -> Registry {
-        let mut reg = Registry {
-            adts: HashMap::new(),
-            variant_index: HashMap::new(),
-            fns: HashMap::new(),
-            modules: HashSet::new(),
-            aliases: HashMap::new(),
-        };
-        reg.add_adt(option_def());
-        reg.add_adt(result_def());
-        reg.add_adt(error_def());
-        reg.add_adt(sexpr_def());
-        reg.add_builtin_fns();
-        reg
-    }
-
-    /// Register the built-in i32 arithmetic/comparison operators. (MVP: i32
-    /// only; per-type operators / generic numeric methods come later.)
-    fn add_builtin_fns(&mut self) {
+        let mut root = Namespace::default();
+        root.add_type(option_def());
+        root.add_type(result_def());
+        root.add_type(error_def());
+        root.add_type(sexpr_def());
+        // Built-in i32 operators (MVP: i32 only; per-type/generic numeric ops
+        // come later).
         let int_binop = || FnSig { params: vec![Type::I32, Type::I32], ret: Type::I32 };
         let int_cmp = || FnSig { params: vec![Type::I32, Type::I32], ret: Type::Bool };
         for op in ["+", "-", "*", "/", "mod"] {
-            self.fns.insert(op.to_string(), int_binop());
+            root.fns.insert(op.to_string(), int_binop());
         }
         for op in ["<", "<=", ">", ">=", "=", "/="] {
-            self.fns.insert(op.to_string(), int_cmp());
+            root.fns.insert(op.to_string(), int_cmp());
         }
+        Registry { root }
     }
 
-    /// Register a data type and index its constructors (bare name — first
-    /// definer wins, keeping built-in constructors reachable — plus the
-    /// fully-qualified `fqtype::ctor` key).
-    pub fn add_adt(&mut self, def: AdtDef) {
-        for (i, v) in def.variants.iter().enumerate() {
-            self.variant_index
-                .entry(v.name.clone())
-                .or_insert((def.name.clone(), i));
-            self.variant_index
-                .insert(format!("{}::{}", def.name, v.name), (def.name.clone(), i));
-        }
-        self.adts.insert(def.name.clone(), def);
+    /// Look up a type by its fully-qualified name (e.g. `geo::point`).
+    pub fn type_def(&self, fq: &str) -> Option<&AdtDef> {
+        let (path, local) = split_fq(fq);
+        self.root.module(&path)?.types.get(local)
     }
+
+    /// Mutable lookup of a type by its fully-qualified name.
+    pub fn type_def_mut(&mut self, fq: &str) -> Option<&mut AdtDef> {
+        let (path, local) = split_fq(fq);
+        self.root.module_mut(&path).types.get_mut(local)
+    }
+
+    /// Look up a free function by its fully-qualified name.
+    pub fn fn_sig(&self, fq: &str) -> Option<&FnSig> {
+        let (path, local) = split_fq(fq);
+        self.root.module(&path)?.fns.get(local)
+    }
+}
+
+/// Split a fully-qualified name into its module path and unqualified tail, e.g.
+/// `"geo::point"` -> `(["geo"], "point")`, `"option"` -> `([], "option")`.
+fn split_fq(fq: &str) -> (Vec<String>, &str) {
+    let mut segs: Vec<&str> = fq.split("::").collect();
+    let local = segs.pop().unwrap();
+    (segs.into_iter().map(|s| s.to_string()).collect(), local)
 }
 
 /// `Option<T> = Some(T) | None`.

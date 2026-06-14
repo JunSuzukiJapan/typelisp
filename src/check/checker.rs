@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{parse_type, Error, Heap, Type, Value};
 
 use super::ast::{Arm, Expr, Pattern, Typed};
-use super::registry::{AdtDef, AssocFn, FnSig, Registry, Variant};
+use super::registry::{AdtDef, AssocFn, FnSig, Namespace, Registry, Variant};
 
 /// A checked top-level form.
 #[derive(Clone, Debug, PartialEq)]
@@ -100,14 +100,14 @@ impl Checker {
         Ok(TopLevel::Expr(t))
     }
 
-    // ---- namespace helpers ------------------------------------------------
+    // ---- namespace navigation & resolution --------------------------------
 
     /// The current namespace path joined with `::` (empty at root).
     fn ns_prefix(&self) -> String {
         self.ns.join("::")
     }
 
-    /// Qualify a bare name with the current namespace.
+    /// Qualify a bare name with the current namespace path.
     fn fq(&self, name: &str) -> String {
         if self.ns.is_empty() {
             name.to_string()
@@ -116,50 +116,107 @@ impl Checker {
         }
     }
 
-    /// Candidate keys for resolving `name`: current namespace first, then root.
-    fn candidates(&self, name: &str) -> Vec<String> {
-        if self.ns.is_empty() {
-            vec![name.to_string()]
-        } else {
-            vec![self.fq(name), name.to_string()]
+    /// Split a `::`-joined name into segments.
+    fn split(name: &str) -> Vec<String> {
+        name.split("::").map(|s| s.to_string()).collect()
+    }
+
+    /// The current namespace.
+    fn cur_ns(&self) -> &Namespace {
+        self.reg.root.module(&self.ns).expect("current namespace exists")
+    }
+
+    /// Locate a child-module `path`, resolving it relative to the current
+    /// namespace first, then the root. Returns its absolute path and the module.
+    fn find_module(&self, path: &[String]) -> Option<(Vec<String>, &Namespace)> {
+        if let Some(m) = self.cur_ns().module(path) {
+            let mut abs = self.ns.clone();
+            abs.extend_from_slice(path);
+            return Some((abs, m));
         }
+        self.reg.root.module(path).map(|m| (path.to_vec(), m))
     }
 
-    /// Follow one level of `use` aliasing.
-    fn unalias(&self, key: &str) -> String {
-        self.reg.aliases.get(key).cloned().unwrap_or_else(|| key.to_string())
+    /// A `use` alias for a bare `name`, looked up current namespace then root.
+    fn lookup_alias(&self, name: &str) -> Option<Vec<String>> {
+        if let Some(p) = self.cur_ns().aliases.get(name) {
+            return Some(p.clone());
+        }
+        self.reg.root.aliases.get(name).cloned()
     }
 
-    /// Resolve a (possibly `::`-qualified) free-function name to its FQ key.
+    /// Resolve a (possibly `::`-qualified) free-function name to its absolute
+    /// `::`-joined name.
     fn resolve_fn(&self, name: &str) -> Option<String> {
-        for cand in self.candidates(name) {
-            let key = self.unalias(&cand);
-            if self.reg.fns.contains_key(&key) {
-                return Some(key);
-            }
+        if name.contains("::") {
+            return self.resolve_fn_path(&Self::split(name));
+        }
+        if let Some(path) = self.lookup_alias(name) {
+            return self.resolve_fn_path(&path);
+        }
+        if self.cur_ns().fns.contains_key(name) {
+            return Some(self.fq(name));
+        }
+        if self.reg.root.fns.contains_key(name) {
+            return Some(name.to_string());
         }
         None
     }
 
-    /// Resolve a constructor name to its `(FQ type, variant index)`.
+    /// Resolve a qualified `module::...::fn` path to its absolute name.
+    fn resolve_fn_path(&self, segs: &[String]) -> Option<String> {
+        let (mods, last) = segs.split_at(segs.len() - 1);
+        let (abs, m) = self.find_module(mods)?;
+        if m.fns.contains_key(&last[0]) {
+            let mut full = abs;
+            full.push(last[0].clone());
+            return Some(full.join("::"));
+        }
+        None
+    }
+
+    /// Resolve a constructor name to its `(FQ type, variant index)`. Bare names
+    /// search the current namespace then root; a qualified `Type::ctor` searches
+    /// the named type's variants.
     fn resolve_ctor(&self, name: &str) -> Option<(String, usize)> {
-        for cand in self.candidates(name) {
-            let key = self.unalias(&cand);
-            if let Some(hit) = self.reg.variant_index.get(&key) {
-                return Some(hit.clone());
-            }
+        if name.contains("::") {
+            let segs = Self::split(name);
+            let (tpath, ctor) = segs.split_at(segs.len() - 1);
+            let type_fq = self.resolve_type_path(tpath)?;
+            let def = self.reg.type_def(&type_fq)?;
+            let idx = def.variants.iter().position(|v| v.name == ctor[0])?;
+            return Some((type_fq, idx));
         }
-        None
+        if let Some(path) = self.lookup_alias(name) {
+            return self.resolve_ctor(&path.join("::"));
+        }
+        if let Some(hit) = self.cur_ns().ctors.get(name) {
+            return Some(hit.clone());
+        }
+        self.reg.root.ctors.get(name).cloned()
     }
 
-    /// Resolve a nominal type name to its FQ key if a matching type exists;
-    /// otherwise (type variables, not-yet-known names) return it unchanged.
+    /// Resolve a `module::...::Type` path to the type's FQ name, if it exists.
+    fn resolve_type_path(&self, segs: &[String]) -> Option<String> {
+        let (mods, local) = segs.split_at(segs.len() - 1);
+        let (_abs, m) = self.find_module(mods)?;
+        m.types.get(&local[0]).map(|d| d.name.clone())
+    }
+
+    /// Resolve a nominal type name to its FQ form if a matching type exists;
+    /// otherwise (type variables, unknown names) return it unchanged.
     fn resolve_type_name(&self, raw: &str) -> String {
-        for cand in self.candidates(raw) {
-            let key = self.unalias(&cand);
-            if self.reg.adts.contains_key(&key) {
-                return key;
+        if raw.contains("::") {
+            if let Some(fq) = self.resolve_type_path(&Self::split(raw)) {
+                return fq;
             }
+            return raw.to_string();
+        }
+        if let Some(def) = self.cur_ns().types.get(raw) {
+            return def.name.clone();
+        }
+        if let Some(def) = self.reg.root.types.get(raw) {
+            return def.name.clone();
         }
         raw.to_string()
     }
@@ -207,9 +264,10 @@ impl Checker {
         let ret = self.canon(&parse_type(heap, parts[2])?);
         let fq_name = self.fq(&name);
 
-        // Register the signature before checking the body so self-recursion works.
+        // Register the signature in the current namespace before checking the
+        // body so self-recursion works.
         let sig = FnSig { params: params.iter().map(|(_, t)| t.clone()).collect(), ret: ret.clone() };
-        self.reg.fns.insert(fq_name.clone(), sig);
+        self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
 
         let env = Env::new().extended(params.clone());
         let (body, _) = self.check_seq(heap, &env, &parts[3..], Some(&ret))?;
@@ -276,7 +334,7 @@ impl Checker {
             variants: variants.clone(),
             assoc: HashMap::new(),
         };
-        self.reg.add_adt(def);
+        self.reg.root.module_mut(&self.ns).add_type(def);
         Ok(TopLevel::Defstruct { name: fq, params: Vec::new(), variants })
     }
 
@@ -290,7 +348,8 @@ impl Checker {
             self.ns.push(s.clone());
         }
         let path = self.ns_prefix();
-        self.reg.modules.insert(path.clone());
+        // Ensure the (possibly empty) module namespace exists.
+        self.reg.root.module_mut(&self.ns);
 
         let mut body = Vec::new();
         let mut result = Ok(());
@@ -345,7 +404,7 @@ impl Checker {
             Type::Named(n, _) => n.clone(),
             _ => return Err(Error::TypeError("defmethod: receiver must be a data type".into())),
         };
-        if !self.reg.adts.contains_key(&type_fq) {
+        if self.reg.type_def(&type_fq).is_none() {
             return Err(Error::TypeError(format!("defmethod: unknown type `{}`", type_fq)));
         }
         let params = self.parse_param_pairs(heap, &sig_list[1..])?;
@@ -358,7 +417,7 @@ impl Checker {
         }
         sig_params.extend(params.iter().map(|(_, t)| t.clone()));
         let sig = FnSig { params: sig_params, ret: ret.clone() };
-        if let Some(def) = self.reg.adts.get_mut(&type_fq) {
+        if let Some(def) = self.reg.type_def_mut(&type_fq) {
             def.assoc.insert(method.clone(), AssocFn { sig, instance });
         }
 
@@ -379,12 +438,13 @@ impl Checker {
         let segs = self.path_to_segs(heap, parts[0])?;
         let target = segs.join("::");
         let bare = segs.last().cloned().unwrap();
-        if !self.reg.fns.contains_key(&target) && !self.reg.adts.contains_key(&target) {
+        // The target must resolve to a free function or a type.
+        if self.resolve_fn_path(&segs).is_none() && self.resolve_type_path(&segs).is_none() {
             return Err(Error::TypeError(format!("use: unresolved `{}`", target)));
         }
-        let alias = self.fq(&bare);
-        self.reg.aliases.insert(alias.clone(), target.clone());
-        Ok(TopLevel::Use { alias, target })
+        // Alias the bare name to the absolute target path in the current module.
+        self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
+        Ok(TopLevel::Use { alias: self.fq(&bare), target })
     }
 
     // ---- expressions ------------------------------------------------------
@@ -407,7 +467,7 @@ impl Checker {
                 // The empty list `()` is the `None` value of `Option<T>` when an
                 // option type is expected; otherwise it is the unit value.
                 if let Some(Type::Named(n, _)) = expected {
-                    if let Some((adt, idx)) = self.reg.variant_index.get("none").cloned() {
+                    if let Some((adt, idx)) = self.resolve_ctor("none") {
                         if *n == adt {
                             return self.check_construct(heap, env, &adt, idx, &[], expected);
                         }
@@ -514,7 +574,7 @@ impl Checker {
         if segs.len() >= 2 {
             let method = &segs[segs.len() - 1];
             let type_fq = self.resolve_type_name(&segs[..segs.len() - 1].join("::"));
-            if let Some(def) = self.reg.adts.get(&type_fq) {
+            if let Some(def) = self.reg.type_def(&type_fq) {
                 if let Some(af) = def.assoc.get(method) {
                     if af.instance {
                         return Err(Error::TypeError(format!(
@@ -545,7 +605,7 @@ impl Checker {
                 _ => None,
             };
             if let Some(type_fq) = type_fq {
-                if let Some(def) = self.reg.adts.get(&type_fq) {
+                if let Some(def) = self.reg.type_def(&type_fq) {
                     if def.assoc.get(method).map(|a| a.instance) == Some(true) {
                         return self
                             .check_assoc_call(heap, env, &type_fq, method, Some(recv), &args[1..]);
@@ -568,7 +628,7 @@ impl Checker {
         args: &[Value],
     ) -> Result<Typed, Error> {
         let instance = receiver.is_some();
-        let af = self.reg.adts[type_fq].assoc[method].clone();
+        let af = self.reg.type_def(type_fq).expect("assoc type exists").assoc[method].clone();
         let offset = if instance { 1 } else { 0 };
         let expected_params = &af.sig.params[offset..];
         if args.len() != expected_params.len() {
@@ -661,7 +721,7 @@ impl Checker {
         name: &str,
         args: &[Value],
     ) -> Result<Typed, Error> {
-        let sig = self.reg.fns.get(name).expect("caller checked presence").clone();
+        let sig = self.reg.fn_sig(name).expect("caller checked presence").clone();
         if args.len() != sig.params.len() {
             return Err(Error::TypeError(format!(
                 "{}: expected {} argument(s), got {}",
@@ -686,7 +746,7 @@ impl Checker {
         args: &[Value],
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
-        let def = self.reg.adts.get(adt_name).expect("indexed adt exists").clone();
+        let def = self.reg.type_def(adt_name).expect("indexed adt exists").clone();
         let fields = &def.variants[variant].fields;
         if args.len() != fields.len() {
             return Err(Error::TypeError(format!(
@@ -754,7 +814,7 @@ impl Checker {
         }
         let scrut = self.check(heap, env, args[0], None)?;
         let (adt_name, _) = self.expect_adt(&scrut.ty)?;
-        let total_variants = self.reg.adts[&adt_name].variants.len();
+        let total_variants = self.reg.type_def(&adt_name).expect("adt exists").variants.len();
 
         let mut arms = Vec::new();
         let mut covered: HashSet<usize> = HashSet::new();
@@ -874,18 +934,13 @@ impl Checker {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("pattern: constructor must be a symbol".into())),
         };
-        let (adt_name, variant) = self
-            .resolve_ctor(&ctor)
-            .ok_or_else(|| Error::TypeError(format!("unknown constructor in pattern: {}", ctor)))?;
-
-        let (exp_adt, targs) = self.expect_adt(expected)?;
-        if exp_adt != adt_name {
-            return Err(Error::TypeError(format!(
-                "constructor `{}` belongs to `{}`, but matched value has type `{}`",
-                ctor, adt_name, exp_adt
-            )));
-        }
-        let def = self.reg.adts[&adt_name].clone();
+        // The constructor is resolved against the scrutinee's type (its
+        // variants), not the namespace — the type context disambiguates it.
+        let (adt_name, targs) = self.expect_adt(expected)?;
+        let def = self.reg.type_def(&adt_name).expect("adt exists").clone();
+        let variant = def.variants.iter().position(|vr| vr.name == ctor).ok_or_else(|| {
+            Error::TypeError(format!("`{}` is not a constructor of `{}`", ctor, adt_name))
+        })?;
         let subst: HashMap<String, Type> =
             def.params.iter().cloned().zip(targs.iter().cloned()).collect();
 
@@ -945,7 +1000,7 @@ impl Checker {
     /// Require `ty` to be a registered data type, returning its name and args.
     fn expect_adt(&self, ty: &Type) -> Result<(String, Vec<Type>), Error> {
         match ty {
-            Type::Named(n, args) if self.reg.adts.contains_key(n) => Ok((n.clone(), args.clone())),
+            Type::Named(n, args) if self.reg.type_def(n).is_some() => Ok((n.clone(), args.clone())),
             other => Err(Error::TypeError(format!(
                 "expected a data type, found {:?}",
                 other
