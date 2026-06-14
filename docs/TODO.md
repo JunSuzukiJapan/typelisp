@@ -45,7 +45,7 @@
 | `aec77f3` | clippy 警告解消（Error の Display 実装、Reader の Default） |
 | （未コミット） | エラー処理（Result/Error/Never/`panic!`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
-**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 26 / error 10 / namespace 11 / eval 31 = 136 件 green、警告0（clippy 含む）。
+**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 29 / error 10 / namespace 11 / eval 36 = 144 件 green、警告0（clippy 含む）。
 **Miri**: `cargo +nightly miri test --test mem_test`（26/28、重い2件除外）— `Value::Path` 追加後も UB/リーク無し。
 
 ### 確定仕様ドキュメント
@@ -135,11 +135,13 @@
   - 実装済み（4d）: 可変ローカル変数 `setf` ＋ `while` ループ（AST に `Set`/`While`、eval 環境を `Rc<RefCell>` の可変スロット化）。
   - 実装済み（4e）: グローバル定義 `defvar`（可変）/`defconstant`（不変）。名前空間に属し（FQ パス）、関数本体からも参照可。
     AST に `Global`/`SetGlobal`、`Interp.globals`。型注釈 `(name Type)` は任意。`setf` はグローバルにも対応（定数は拒否）。
-  - TDD: `tests/eval_test.rs`（31件）／`tests/check_test.rs`（26件）。
+  - 実装済み（4f）: `lambda`/クロージャ。`RtValue::Closure`（捕捉した可変スロットを共有＝真のクロージャ）。
+    AST に `Lambda`/`Apply`。関数値の呼び出しは頭がローカル/グローバル変数・任意の式のとき `Apply` にディスパッチ。
+  - TDD: `tests/eval_test.rs`（36件）／`tests/check_test.rs`（29件）。
 - **次の候補（eval 拡充）**:
   - 組み込み関数の拡張（型ごとの算術／i64・f64、文字列・リスト・Option/Result ライブラリ関数）。カタログは [language-design.md](language-design.md) §3。
-  - 反復系の糖衣 `dotimes`/`dolist`/`loop`、`lambda`/クロージャ（関数値 = `RtValue` に関数型を追加）。
-  - クロージャ・実行時値と GC の整合（現状 `RtValue` は Rust ヒープ上で完結、cons ヒープ非依存）。
+  - 反復系の糖衣 `dotimes`/`dolist`/`loop`、名前付き関数の値化（`id` 等を高階関数に渡す）。
+  - 実行時値と GC の整合（現状 `RtValue` は Rust ヒープ上で完結、cons ヒープ非依存）。
 - **ステップ5: compile**（明示 `compile`/`compile-file`。inkwell 再追加・LLVM コード生成。feature gate）。
 
 ---

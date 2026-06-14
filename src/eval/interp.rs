@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use crate::{Expr, Path, Pattern, TopLevel, Typed};
 
-use super::value::{EvalError, RtValue};
+use super::value::{Closure, EvalError, RtValue};
 
 /// A registered function or method body with its parameter names.
 struct FnDef {
@@ -130,6 +130,32 @@ impl Interp {
             Expr::Construct { type_name, variant, args } => {
                 let fields = self.eval_args(args, env)?;
                 Ok(RtValue::Data { type_name: type_name.clone(), variant: *variant, fields })
+            }
+            Expr::Lambda { params, body } => {
+                // Capture the current environment (shared slots) for the closure.
+                let names = params.iter().map(|(n, _)| n.clone()).collect();
+                Ok(RtValue::Closure(Rc::new(Closure {
+                    params: names,
+                    body: body.clone(),
+                    env: env.clone(),
+                })))
+            }
+            Expr::Apply(callee, args) => {
+                let f = self.eval(callee, env)?;
+                let argv = self.eval_args(args, env)?;
+                match f {
+                    RtValue::Closure(c) => {
+                        if c.params.len() != argv.len() {
+                            return Err(EvalError::Internal("closure arity mismatch".into()));
+                        }
+                        let mut cenv = c.env.clone();
+                        for (n, v) in c.params.iter().zip(argv) {
+                            cenv.push((n.clone(), slot(v)));
+                        }
+                        self.eval_seq(&c.body, &cenv)
+                    }
+                    _ => Err(EvalError::Internal("apply of a non-function value".into())),
+                }
             }
             Expr::Match(scrut, arms) => {
                 let v = self.eval(scrut, env)?;

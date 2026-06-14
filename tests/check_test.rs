@@ -253,6 +253,26 @@ fn while_condition_must_be_bool_and_is_unit() {
     assert_type_error("(let ((i 0)) (while 1 (setf i 1)))");
 }
 
+// ---- lambda -----------------------------------------------------------------
+
+#[test]
+fn lambda_has_function_type() {
+    assert_eq!(
+        ty("(lambda ((x i32)) i32 x)"),
+        Type::Fn(vec![Type::I32], Box::new(Type::I32))
+    );
+}
+
+#[test]
+fn calling_a_non_function_errors() {
+    assert_type_error("(let ((x 5)) (x 1))");
+}
+
+#[test]
+fn apply_checks_argument_types() {
+    assert_type_error("((lambda ((x i32)) i32 x) true)");
+}
+
 // ---- typed AST shape --------------------------------------------------------
 
 #[test]

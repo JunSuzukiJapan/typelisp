@@ -33,6 +33,11 @@ pub enum Expr {
     Let(Vec<(String, Typed)>, Vec<Typed>),
     /// A call to a free function, identified by its fully-qualified [`Path`].
     Call(Path, Vec<Typed>),
+    /// An anonymous function `(lambda (params) ret body...)`. Its type is
+    /// [`Type::Fn`](crate::Type).
+    Lambda { params: Vec<(String, Type)>, body: Vec<Typed> },
+    /// Apply a function *value* (a closure) to arguments.
+    Apply(Box<Typed>, Vec<Typed>),
     /// A type-associated call: an instance method (`args[0]` is the receiver)
     /// or a static associated function. `type_name` is the type's [`Path`].
     Assoc {

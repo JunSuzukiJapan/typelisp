@@ -5,5 +5,5 @@
 mod value;
 mod interp;
 
-pub use value::{EvalError, RtValue};
+pub use value::{Closure, EvalError, RtValue};
 pub use interp::Interp;

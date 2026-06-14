@@ -220,6 +220,44 @@ fn factorial_via_loop() {
     assert_eq!(eval_ok(src), RtValue::Int(120));
 }
 
+// ---- lambda / closures ------------------------------------------------------
+
+#[test]
+fn lambda_called_immediately() {
+    assert_eq!(eval_ok("((lambda ((x i32)) i32 (+ x 1)) 10)"), RtValue::Int(11));
+}
+
+#[test]
+fn lambda_bound_in_let() {
+    assert_eq!(
+        eval_ok("(let ((f (lambda ((x i32)) i32 (* x x)))) (f 5))"),
+        RtValue::Int(25)
+    );
+}
+
+#[test]
+fn higher_order_function() {
+    let src = "(defun apply-twice ((f (fn (i32) i32)) (x i32)) i32 (f (f x))) \
+               (apply-twice (lambda ((n i32)) i32 (+ n 1)) 5)";
+    assert_eq!(eval_ok(src), RtValue::Int(7));
+}
+
+#[test]
+fn closure_captures_variable() {
+    let src = "(defun adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n))) \
+               (let ((add5 (adder 5))) (add5 10))";
+    assert_eq!(eval_ok(src), RtValue::Int(15));
+}
+
+#[test]
+fn closure_captures_mutable_state() {
+    // The returned closure shares the captured `c` slot across calls.
+    let src = "(defun make-counter () (fn () i32) \
+                 (let ((c 0)) (lambda () i32 (setf c (+ c 1))))) \
+               (let ((next (make-counter))) (next) (next))";
+    assert_eq!(eval_ok(src), RtValue::Int(2));
+}
+
 // ---- global definitions: defvar / defconstant ------------------------------
 
 #[test]

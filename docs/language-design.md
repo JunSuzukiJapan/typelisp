@@ -58,12 +58,15 @@
 
 脱糖の例: `when`→`if`+`progn`、`unless`→`if`、`if-let (pat val) then else`→2 腕 `match`（包括アームで網羅）。
 
-実装状況: `if` `let` `let*` `progn` `when` `unless` `and` `or` `cond` `setf` `while` `match` `if-let` `panic!`
+実装状況: `if` `let` `let*` `progn` `when` `unless` `and` `or` `cond` `setf` `while` `lambda` `match` `if-let` `panic!`
 `defstruct` `defvar` `defconstant` `module` `use` `defmethod` は実装済（[src/check/checker.rs](../src/check/checker.rs)）。
 `when`/`unless`/`and`/`or`/`cond`/`let*` は `if`/`let` への脱糖。`setf`（可変ローカル/グローバル変数）/`while` は専用 AST
 ノード（eval 環境は `Rc<RefCell>` の可変スロット）。`defvar`（可変）/`defconstant`（不変）はグローバル変数を現在の
-名前空間に登録し、型注釈 `(name Type)` は任意（省略時は値から推論）。残り（`case` `loop` `dotimes` `dolist` `do`
-`doiter` `while-let` `lambda` `the`）は今後。
+名前空間に登録し、型注釈 `(name Type)` は任意（省略時は値から推論）。
+**`lambda`** は関数を第一級の値（`RtValue::Closure`）にする: `(lambda (params) ret body...)`、型は `(fn ...)`。
+定義時の環境（可変スロット）を捕捉する真のクロージャ。関数値の呼び出しは頭がローカル変数・グローバル変数・任意の式
+（例 `((lambda ...) x)`）のとき `Expr::Apply` に。残り（`case` `loop` `dotimes` `dolist` `do` `doiter` `while-let`
+`the`、名前付き関数の値化）は今後。
 
 ---
 

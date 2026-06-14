@@ -541,9 +541,14 @@ impl Checker {
             return self.check_path_call(heap, env, &segs, args, expected);
         }
 
+        // A non-symbol head (e.g. a `lambda` literal or any expression) is
+        // evaluated and applied as a function value.
         let head = match elems[0] {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
-            _ => return Err(Error::TypeError("call head must be a symbol or path".into())),
+            _ => {
+                let callee = self.check(heap, env, elems[0], None)?;
+                return self.check_apply(heap, env, callee, args);
+            }
         };
         match head.as_str() {
             "if" => return self.check_if(heap, env, args, expected),
@@ -561,19 +566,73 @@ impl Checker {
             "cond" => return self.check_cond(heap, env, args, expected),
             "setf" => return self.check_setf(heap, env, args),
             "while" => return self.check_while(heap, env, args),
+            "lambda" => return self.check_lambda(heap, env, args),
             "match" => return self.check_match(heap, env, args, expected),
             "if-let" => return self.check_if_let(heap, env, args, expected),
             "panic!" => return self.check_panic(heap, env, args),
             _ => {}
         }
-        // Constructor, then free function, then instance-method dispatch.
+        // A local variable holding a function value is applied directly (locals
+        // shadow free functions).
+        if let Some(t) = env.get(&head) {
+            let callee = Typed { expr: Expr::Var(head.clone()), ty: t.clone() };
+            return self.check_apply(heap, env, callee, args);
+        }
+        // Constructor, then free function, then a global function value, then
+        // instance-method dispatch.
         if let Some((adt, idx)) = self.resolve_ctor(&head) {
             self.check_construct(heap, env, &adt, idx, args, expected)
         } else if let Some(fq) = self.resolve_fn(&head) {
             self.check_call(heap, env, &fq, args)
+        } else if let Some((path, vi)) = self.resolve_global(&head) {
+            let callee = Typed { expr: Expr::Global(path), ty: vi.ty };
+            self.check_apply(heap, env, callee, args)
         } else {
             self.check_instance_method(heap, env, &head, args)
         }
+    }
+
+    /// Type-check a `lambda`: `(lambda (params) ret body...)`. The body sees the
+    /// enclosing locals (a closure) plus the parameters.
+    fn check_lambda(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+        if args.len() < 2 {
+            return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
+        }
+        let params = self.parse_params(heap, args[0])?;
+        let ret = self.canon(&parse_type(heap, args[1])?);
+        let child = env.extended(params.clone());
+        let (body, _) = self.check_seq(heap, &child, &args[2..], Some(&ret))?;
+        let fn_ty = Type::Fn(
+            params.iter().map(|(_, t)| t.clone()).collect(),
+            Box::new(ret),
+        );
+        Ok(Typed { expr: Expr::Lambda { params, body }, ty: fn_ty })
+    }
+
+    /// Type-check applying a function *value* `callee` to `args`.
+    fn check_apply(
+        &self,
+        heap: &Heap,
+        env: &Env,
+        callee: Typed,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
+        let (params, ret) = match &callee.ty {
+            Type::Fn(p, r) => (p.clone(), (**r).clone()),
+            other => return Err(Error::TypeError(format!("value is not callable: {:?}", other))),
+        };
+        if args.len() != params.len() {
+            return Err(Error::TypeError(format!(
+                "function expects {} argument(s), got {}",
+                params.len(),
+                args.len()
+            )));
+        }
+        let mut typed = Vec::new();
+        for (arg, pty) in args.iter().zip(params.iter()) {
+            typed.push(self.check(heap, env, *arg, Some(pty))?);
+        }
+        Ok(Typed { expr: Expr::Apply(Box::new(callee), typed), ty: ret })
     }
 
     /// A `::`-qualified call: a module-qualified free function, or a

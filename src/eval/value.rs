@@ -1,8 +1,19 @@
 //! Runtime values and errors for the tree-walking interpreter.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::{error, fmt};
 
-use crate::Path;
+use crate::{Path, Typed};
+
+/// A closure: a lambda body with its parameter names and the lexical environment
+/// captured at creation (shared slots, so captured mutable variables persist).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Closure {
+    pub params: Vec<String>,
+    pub body: Vec<Typed>,
+    pub env: Vec<(String, Rc<RefCell<RtValue>>)>,
+}
 
 /// A runtime value. Data-type instances (constructors of `Option`/`Result`/
 /// `Sexpr`/user structs) are represented uniformly by [`RtValue::Data`].
@@ -21,6 +32,8 @@ pub enum RtValue {
         variant: usize,
         fields: Vec<RtValue>,
     },
+    /// A function value (from a `lambda`).
+    Closure(Rc<Closure>),
 }
 
 /// A runtime error. `Panic` is a deliberate `panic!`; the others are bugs that a
