@@ -4,7 +4,7 @@
 //! [`Typed`] tree: every node carries the [`Type`] it was checked at, so the
 //! later interpreter (step 4) can walk this tree without re-deriving types.
 
-use crate::Type;
+use crate::{Path, Type};
 
 /// An expression node annotated with its checked type.
 #[derive(Clone, Debug, PartialEq)]
@@ -29,20 +29,20 @@ pub enum Expr {
     If(Box<Typed>, Box<Typed>, Box<Typed>),
     /// `(let ((name val)...) body...)` — bindings, then a body sequence.
     Let(Vec<(String, Typed)>, Vec<Typed>),
-    /// A call to a named (fully-qualified) free function.
-    Call(String, Vec<Typed>),
+    /// A call to a free function, identified by its fully-qualified [`Path`].
+    Call(Path, Vec<Typed>),
     /// A type-associated call: an instance method (`args[0]` is the receiver)
-    /// or a static associated function. `type_name` is the FQ type name.
+    /// or a static associated function. `type_name` is the type's [`Path`].
     Assoc {
-        type_name: String,
+        type_name: Path,
         method: String,
         instance: bool,
         args: Vec<Typed>,
     },
     /// A data-type constructor application, e.g. `(Some x)` / `(Cons a d)`.
     Construct {
-        /// The (lowercased) nominal type name, e.g. `"option"`, `"sexpr"`.
-        type_name: String,
+        /// The nominal type's fully-qualified [`Path`], e.g. `option`, `sexpr`.
+        type_name: Path,
         /// Index of the variant within the type's definition.
         variant: usize,
         args: Vec<Typed>,
@@ -72,7 +72,7 @@ pub enum Pattern {
     Char(char),
     /// A constructor pattern, e.g. `(Some v)` / `(Cons a d)`.
     Ctor {
-        type_name: String,
+        type_name: Path,
         variant: usize,
         args: Vec<Pattern>,
     },

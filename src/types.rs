@@ -8,7 +8,68 @@
 //!
 //! Symbols are case-folded by the reader, so all type names are lowercase here.
 
+use std::fmt;
+
 use crate::{Error, Heap, Value};
+
+/// A structured, fully-qualified path identifying a type, free function, or
+/// module — a sequence of lowercase segments (e.g. `geo::point` is
+/// `["geo", "point"]`). Used instead of a joined `"a::b"` string so identity is
+/// never re-parsed; the only place `::` strings are split is the reader/parser
+/// (surface syntax). A single-segment path is also how type *variables* and
+/// root-level names are represented.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Path(Vec<String>);
+
+impl Path {
+    /// Build a path from explicit segments.
+    pub fn of(segments: &[&str]) -> Path {
+        Path(segments.iter().map(|s| s.to_string()).collect())
+    }
+
+    /// A single-segment path (a root-level name or a type variable).
+    pub fn root(name: &str) -> Path {
+        Path(vec![name.to_string()])
+    }
+
+    /// Build a path from owned segments (must be non-empty).
+    pub fn from_segments(segments: Vec<String>) -> Path {
+        debug_assert!(!segments.is_empty(), "a path must have at least one segment");
+        Path(segments)
+    }
+
+    pub fn segments(&self) -> &[String] {
+        &self.0
+    }
+
+    /// The final (unqualified) segment.
+    pub fn local(&self) -> &str {
+        self.0.last().expect("a path has at least one segment")
+    }
+
+    /// The module prefix (everything but the final segment).
+    pub fn parent(&self) -> &[String] {
+        &self.0[..self.0.len() - 1]
+    }
+
+    /// Extend the path with another segment.
+    pub fn child(&self, name: &str) -> Path {
+        let mut segments = self.0.clone();
+        segments.push(name.to_string());
+        Path(segments)
+    }
+
+    /// True for a single-segment path (a root name or type variable).
+    pub fn is_simple(&self) -> bool {
+        self.0.len() == 1
+    }
+}
+
+impl fmt::Display for Path {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0.join("::"))
+    }
+}
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Type {
@@ -34,8 +95,9 @@ pub enum Type {
     /// forms). It is compatible with — and absorbed by — any expected type.
     Never,
     /// A nominal type with type arguments: `Option<T>`, `Vec<T>`, `Sexpr`,
-    /// user structs, and (during checking) generic type variables.
-    Named(String, Vec<Type>),
+    /// user structs, and (during checking) generic type variables (a
+    /// single-segment [`Path`]).
+    Named(Path, Vec<Type>),
     /// A function type `(fn (params...) ret)`.
     Fn(Vec<Type>, Box<Type>),
 }
@@ -46,8 +108,9 @@ pub fn parse_type(heap: &Heap, v: Value) -> Result<Type, Error> {
         Value::Empty => Ok(Type::Unit),
         Value::Symbol(id) => Ok(parse_type_name(heap.symbol_name(id))),
         Value::Path(id) => {
-            // A qualified type name like `geometry::Point`: join the segments
-            // into a raw `::` name. The checker resolves it against modules.
+            // A qualified type name like `geometry::Point`. Reconstruct the
+            // surface token so `parse_type_name` can split off any generics on
+            // the last segment; it yields a structured `Path`.
             let name = heap
                 .path_segments(id)
                 .iter()
@@ -83,32 +146,37 @@ fn parse_fn_type(heap: &Heap, v: Value) -> Result<Type, Error> {
     Ok(Type::Fn(params, Box::new(ret)))
 }
 
-/// Parse a type from a (case-folded) symbol name, splitting generic arguments.
+/// Parse a type from a (case-folded) token, splitting generic arguments and
+/// `::` path segments into a structured [`Type`]/[`Path`]. This — and the
+/// reader — are the only places `::` strings are decoded.
 fn parse_type_name(name: &str) -> Type {
     let (head, args) = split_generics(name);
-    if args.is_empty() {
-        match head {
-            "i8" => Type::I8,
-            "i16" => Type::I16,
-            "i32" => Type::I32,
-            "i64" => Type::I64,
-            "isize" => Type::Isize,
-            "u8" => Type::U8,
-            "u16" => Type::U16,
-            "u32" => Type::U32,
-            "u64" => Type::U64,
-            "usize" => Type::Usize,
-            "f32" => Type::F32,
-            "f64" => Type::F64,
-            "bool" => Type::Bool,
-            "char" => Type::Char,
-            "string" => Type::Str,
-            "!" => Type::Never,
-            _ => Type::Named(head.to_string(), Vec::new()),
+    let segs: Vec<String> = head.split("::").map(|s| s.to_string()).collect();
+    if args.is_empty() && segs.len() == 1 {
+        match segs[0].as_str() {
+            "i8" => return Type::I8,
+            "i16" => return Type::I16,
+            "i32" => return Type::I32,
+            "i64" => return Type::I64,
+            "isize" => return Type::Isize,
+            "u8" => return Type::U8,
+            "u16" => return Type::U16,
+            "u32" => return Type::U32,
+            "u64" => return Type::U64,
+            "usize" => return Type::Usize,
+            "f32" => return Type::F32,
+            "f64" => return Type::F64,
+            "bool" => return Type::Bool,
+            "char" => return Type::Char,
+            "string" => return Type::Str,
+            "!" => return Type::Never,
+            _ => {}
         }
-    } else {
-        Type::Named(head.to_string(), args.iter().map(|a| parse_type_name(a)).collect())
     }
+    Type::Named(
+        Path::from_segments(segs),
+        args.iter().map(|a| parse_type_name(a)).collect(),
+    )
 }
 
 /// Split `"option<i32>"` into `("option", ["i32"])`. Non-generic names yield

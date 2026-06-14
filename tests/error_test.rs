@@ -2,7 +2,7 @@
 //! type, the `Never` (`!`) type, and the `panic!` special form.
 
 extern crate typelisp;
-use typelisp::{Checker, Error, Heap, Reader, TopLevel, Type};
+use typelisp::{Checker, Error, Heap, Path, Reader, TopLevel, Type};
 
 fn program(src: &str) -> Result<TopLevel, Error> {
     let mut h = Heap::with_capacity(4096);
@@ -72,7 +72,7 @@ fn result_ok_infers_from_return_type() {
     let src = "(defun mk () Result<i32,Error> (Ok 1))";
     match program(src).unwrap() {
         TopLevel::Defun { ret, .. } => {
-            assert_eq!(ret, Type::Named("result".into(), vec![Type::I32, error_ty()]));
+            assert_eq!(ret, Type::Named(Path::root("result"), vec![Type::I32, error_ty()]));
         }
         other => panic!("expected defun, got {:?}", other),
     }
@@ -109,5 +109,5 @@ fn match_result_arms_must_agree() {
 }
 
 fn error_ty() -> Type {
-    Type::Named("error".into(), vec![])
+    Type::Named(Path::root("error"), vec![])
 }

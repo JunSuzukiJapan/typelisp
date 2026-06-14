@@ -5,7 +5,7 @@
 //! non-exhaustive / type-mismatched forms are rejected.
 
 extern crate typelisp;
-use typelisp::{Checker, Error, Expr, Heap, Reader, TopLevel, Type, Typed};
+use typelisp::{Checker, Error, Expr, Heap, Path, Reader, TopLevel, Type, Typed};
 
 /// Read one datum and check it as a single top-level form.
 fn form(src: &str) -> Result<TopLevel, Error> {
@@ -94,7 +94,7 @@ fn unbound_variable_errors() {
 fn defun_registers_and_checks_body() {
     match program("(defun id ((x i32)) i32 x)").unwrap() {
         TopLevel::Defun { name, ret, .. } => {
-            assert_eq!(name, "id");
+            assert_eq!(name, Path::root("id"));
             assert_eq!(ret, Type::I32);
         }
         other => panic!("expected defun, got {:?}", other),
@@ -134,20 +134,20 @@ fn ty_program(src: &str) -> Type {
 
 #[test]
 fn construct_some_infers_type_argument() {
-    assert_eq!(ty("(Some 1)"), Type::Named("option".into(), vec![Type::I32]));
+    assert_eq!(ty("(Some 1)"), Type::Named(Path::root("option"), vec![Type::I32]));
 }
 
 #[test]
 fn construct_cons_yields_sexpr() {
     // (Cons (Int 1) ()) : car is Some(Sexpr), cdr is the empty list (None).
-    let sexpr = Type::Named("sexpr".into(), vec![]);
+    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
     assert_eq!(ty("(Cons (Some (Int 1)) ())"), sexpr);
 }
 
 #[test]
 fn construct_int_field_adopts_i64() {
     // Sexpr::Int holds an i64; the integer literal must adopt that type.
-    assert_eq!(ty("(Int 5)"), Type::Named("sexpr".into(), vec![]));
+    assert_eq!(ty("(Int 5)"), Type::Named(Path::root("sexpr"), vec![]));
 }
 
 // ---- match ------------------------------------------------------------------
@@ -161,7 +161,7 @@ fn match_option_exhaustive_unwrap_or() {
                    ((None) default)))";
     match program(src).unwrap() {
         TopLevel::Defun { name, ret, .. } => {
-            assert_eq!(name, "unwrap-or");
+            assert_eq!(name, Path::root("unwrap-or"));
             assert_eq!(ret, Type::I32);
         }
         other => panic!("expected defun, got {:?}", other),

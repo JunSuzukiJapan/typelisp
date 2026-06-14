@@ -2,6 +2,8 @@
 
 use std::{error, fmt};
 
+use crate::Path;
+
 /// A runtime value. Data-type instances (constructors of `Option`/`Result`/
 /// `Sexpr`/user structs) are represented uniformly by [`RtValue::Data`].
 #[derive(Clone, Debug, PartialEq)]
@@ -12,10 +14,10 @@ pub enum RtValue {
     Char(char),
     Str(String),
     Unit,
-    /// A constructor instance: the FQ type name, the variant index, and the
+    /// A constructor instance: the type's [`Path`], the variant index, and the
     /// evaluated field values.
     Data {
-        type_name: String,
+        type_name: Path,
         variant: usize,
         fields: Vec<RtValue>,
     },

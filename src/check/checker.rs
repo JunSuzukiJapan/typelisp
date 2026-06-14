@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{parse_type, Error, Heap, Type, Value};
+use crate::{parse_type, Error, Heap, Path, Type, Value};
 
 use super::ast::{Arm, Expr, Pattern, Typed};
 use super::registry::{AdtDef, AssocFn, FnSig, Namespace, Registry, Variant};
@@ -15,16 +15,16 @@ use super::registry::{AdtDef, AssocFn, FnSig, Namespace, Registry, Variant};
 /// A checked top-level form.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TopLevel {
-    /// A `defun`: fully-qualified name, typed parameters, return type, body.
+    /// A `defun`: fully-qualified [`Path`], typed parameters, return type, body.
     Defun {
-        name: String,
+        name: Path,
         params: Vec<(String, Type)>,
         ret: Type,
         body: Vec<Typed>,
     },
     /// A `defmethod`: instance or static associated function of a type.
     Defmethod {
-        type_name: String,
+        type_name: Path,
         method: String,
         instance: bool,
         /// The receiver's variable name (e.g. `self`) for instance methods.
@@ -34,11 +34,11 @@ pub enum TopLevel {
         body: Vec<Typed>,
     },
     /// A `defstruct`: a user data type.
-    Defstruct { name: String, params: Vec<String>, variants: Vec<Variant> },
+    Defstruct { name: Path, params: Vec<String>, variants: Vec<Variant> },
     /// A `module`: a namespace and its checked body forms.
-    Module { path: String, body: Vec<TopLevel> },
-    /// A `use`: a name brought into the current scope (alias -> FQ target).
-    Use { alias: String, target: String },
+    Module { path: Path, body: Vec<TopLevel> },
+    /// A `use`: a name brought into the current scope (alias -> target path).
+    Use { alias: Path, target: Path },
     /// A bare top-level expression.
     Expr(Typed),
 }
@@ -101,24 +101,16 @@ impl Checker {
     }
 
     // ---- namespace navigation & resolution --------------------------------
-
-    /// The current namespace path joined with `::` (empty at root).
-    fn ns_prefix(&self) -> String {
-        self.ns.join("::")
-    }
+    //
+    // Identities are structured `Path`s, never joined `"a::b"` strings: the only
+    // `::`-string decoding lives in the reader/parser. Resolution navigates the
+    // namespace tree, current namespace first then root.
 
     /// Qualify a bare name with the current namespace path.
-    fn fq(&self, name: &str) -> String {
-        if self.ns.is_empty() {
-            name.to_string()
-        } else {
-            format!("{}::{}", self.ns_prefix(), name)
-        }
-    }
-
-    /// Split a `::`-joined name into segments.
-    fn split(name: &str) -> Vec<String> {
-        name.split("::").map(|s| s.to_string()).collect()
+    fn fq(&self, name: &str) -> Path {
+        let mut segments = self.ns.clone();
+        segments.push(name.to_string());
+        Path::from_segments(segments)
     }
 
     /// The current namespace.
@@ -127,7 +119,7 @@ impl Checker {
     }
 
     /// Locate a child-module `path`, resolving it relative to the current
-    /// namespace first, then the root. Returns its absolute path and the module.
+    /// namespace first, then the root. Returns its absolute segments and module.
     fn find_module(&self, path: &[String]) -> Option<(Vec<String>, &Namespace)> {
         if let Some(m) = self.cur_ns().module(path) {
             let mut abs = self.ns.clone();
@@ -145,12 +137,8 @@ impl Checker {
         self.reg.root.aliases.get(name).cloned()
     }
 
-    /// Resolve a (possibly `::`-qualified) free-function name to its absolute
-    /// `::`-joined name.
-    fn resolve_fn(&self, name: &str) -> Option<String> {
-        if name.contains("::") {
-            return self.resolve_fn_path(&Self::split(name));
-        }
+    /// Resolve a bare free-function name to its absolute [`Path`].
+    fn resolve_fn(&self, name: &str) -> Option<Path> {
         if let Some(path) = self.lookup_alias(name) {
             return self.resolve_fn_path(&path);
         }
@@ -158,71 +146,63 @@ impl Checker {
             return Some(self.fq(name));
         }
         if self.reg.root.fns.contains_key(name) {
-            return Some(name.to_string());
+            return Some(Path::root(name));
         }
         None
     }
 
-    /// Resolve a qualified `module::...::fn` path to its absolute name.
-    fn resolve_fn_path(&self, segs: &[String]) -> Option<String> {
+    /// Resolve a qualified `module::...::fn` path to its absolute [`Path`].
+    fn resolve_fn_path(&self, segs: &[String]) -> Option<Path> {
         let (mods, last) = segs.split_at(segs.len() - 1);
         let (abs, m) = self.find_module(mods)?;
         if m.fns.contains_key(&last[0]) {
             let mut full = abs;
             full.push(last[0].clone());
-            return Some(full.join("::"));
+            return Some(Path::from_segments(full));
         }
         None
     }
 
-    /// Resolve a constructor name to its `(FQ type, variant index)`. Bare names
-    /// search the current namespace then root; a qualified `Type::ctor` searches
-    /// the named type's variants.
-    fn resolve_ctor(&self, name: &str) -> Option<(String, usize)> {
-        if name.contains("::") {
-            let segs = Self::split(name);
-            let (tpath, ctor) = segs.split_at(segs.len() - 1);
-            let type_fq = self.resolve_type_path(tpath)?;
-            let def = self.reg.type_def(&type_fq)?;
-            let idx = def.variants.iter().position(|v| v.name == ctor[0])?;
-            return Some((type_fq, idx));
-        }
-        if let Some(path) = self.lookup_alias(name) {
-            return self.resolve_ctor(&path.join("::"));
-        }
+    /// Resolve a bare constructor name to its `(type path, variant index)`,
+    /// searching the current namespace then root.
+    fn resolve_ctor(&self, name: &str) -> Option<(Path, usize)> {
         if let Some(hit) = self.cur_ns().ctors.get(name) {
             return Some(hit.clone());
         }
         self.reg.root.ctors.get(name).cloned()
     }
 
-    /// Resolve a `module::...::Type` path to the type's FQ name, if it exists.
-    fn resolve_type_path(&self, segs: &[String]) -> Option<String> {
+    /// Resolve a `module::...::Type` segment path to the type's [`Path`].
+    fn resolve_type_path(&self, segs: &[String]) -> Option<Path> {
         let (mods, local) = segs.split_at(segs.len() - 1);
         let (_abs, m) = self.find_module(mods)?;
         m.types.get(&local[0]).map(|d| d.name.clone())
     }
 
-    /// Resolve a nominal type name to its FQ form if a matching type exists;
-    /// otherwise (type variables, unknown names) return it unchanged.
-    fn resolve_type_name(&self, raw: &str) -> String {
-        if raw.contains("::") {
-            if let Some(fq) = self.resolve_type_path(&Self::split(raw)) {
-                return fq;
+    /// Resolve a nominal type [`Path`] to its canonical (located) form if a
+    /// matching type exists; otherwise (type variables, unknown names) return it
+    /// unchanged.
+    fn resolve_type_name(&self, path: &Path) -> Path {
+        if path.is_simple() {
+            let name = path.local();
+            if let Some(target) = self.lookup_alias(name) {
+                if let Some(tp) = self.resolve_type_path(&target) {
+                    return tp;
+                }
             }
-            return raw.to_string();
+            if let Some(def) = self.cur_ns().types.get(name) {
+                return def.name.clone();
+            }
+            if let Some(def) = self.reg.root.types.get(name) {
+                return def.name.clone();
+            }
+            return path.clone();
         }
-        if let Some(def) = self.cur_ns().types.get(raw) {
-            return def.name.clone();
-        }
-        if let Some(def) = self.reg.root.types.get(raw) {
-            return def.name.clone();
-        }
-        raw.to_string()
+        self.resolve_type_path(path.segments()).unwrap_or_else(|| path.clone())
     }
 
-    /// Canonicalize a parsed type: resolve every nominal name to its FQ form so
-    /// that types compare equal across module boundaries.
+    /// Canonicalize a parsed type: resolve every nominal name to its located
+    /// [`Path`] so that types compare equal across module boundaries.
     fn canon(&self, t: &Type) -> Type {
         match t {
             Type::Named(n, args) => Type::Named(
@@ -347,7 +327,7 @@ impl Checker {
         for s in &segs {
             self.ns.push(s.clone());
         }
-        let path = self.ns_prefix();
+        let path = Path::from_segments(self.ns.clone());
         // Ensure the (possibly empty) module namespace exists.
         self.reg.root.module_mut(&self.ns);
 
@@ -436,12 +416,12 @@ impl Checker {
             return Err(Error::TypeError("use: (use path)".into()));
         }
         let segs = self.path_to_segs(heap, parts[0])?;
-        let target = segs.join("::");
         let bare = segs.last().cloned().unwrap();
         // The target must resolve to a free function or a type.
-        if self.resolve_fn_path(&segs).is_none() && self.resolve_type_path(&segs).is_none() {
-            return Err(Error::TypeError(format!("use: unresolved `{}`", target)));
-        }
+        let target = self
+            .resolve_fn_path(&segs)
+            .or_else(|| self.resolve_type_path(&segs))
+            .ok_or_else(|| Error::TypeError(format!("use: unresolved `{}`", segs.join("::"))))?;
         // Alias the bare name to the absolute target path in the current module.
         self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
         Ok(TopLevel::Use { alias: self.fq(&bare), target })
@@ -563,30 +543,33 @@ impl Checker {
         args: &[Value],
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
-        let joined = segs.join("::");
-        if let Some(fq) = self.resolve_fn(&joined) {
+        // A module-qualified free function, e.g. `math::id`.
+        if let Some(fq) = self.resolve_fn_path(segs) {
             return self.check_call(heap, env, &fq, args);
         }
-        // A fully-qualified constructor, e.g. `geometry::point::mk`.
-        if let Some((adt, idx)) = self.resolve_ctor(&joined) {
-            return self.check_construct(heap, env, &adt, idx, args, expected);
-        }
+        // Otherwise `Type::member`: split the last segment as the member and
+        // resolve the prefix as a type. The member is a constructor or a static
+        // associated function of that type.
         if segs.len() >= 2 {
-            let method = &segs[segs.len() - 1];
-            let type_fq = self.resolve_type_name(&segs[..segs.len() - 1].join("::"));
-            if let Some(def) = self.reg.type_def(&type_fq) {
-                if let Some(af) = def.assoc.get(method) {
+            let (type_segs, member) = segs.split_at(segs.len() - 1);
+            let member = &member[0];
+            if let Some(type_fq) = self.resolve_type_path(type_segs) {
+                let def = self.reg.type_def(&type_fq).expect("resolved type exists");
+                if let Some(variant) = def.variants.iter().position(|v| &v.name == member) {
+                    return self.check_construct(heap, env, &type_fq, variant, args, expected);
+                }
+                if let Some(af) = def.assoc.get(member) {
                     if af.instance {
                         return Err(Error::TypeError(format!(
-                            "`{}` is an instance method; call it as ({} obj ...)",
-                            joined, method
+                            "`{}::{}` is an instance method; call it as ({} obj ...)",
+                            type_fq, member, member
                         )));
                     }
-                    return self.check_assoc_call(heap, env, &type_fq, method, None, args);
+                    return self.check_assoc_call(heap, env, &type_fq, member, None, args);
                 }
             }
         }
-        Err(Error::TypeError(format!("unresolved path: {}", joined)))
+        Err(Error::TypeError(format!("unresolved path: {}", segs.join("::"))))
     }
 
     /// Dispatch a bare call `(m recv args...)` as an instance method on the
@@ -622,7 +605,7 @@ impl Checker {
         &self,
         heap: &Heap,
         env: &Env,
-        type_fq: &str,
+        type_fq: &Path,
         method: &str,
         receiver: Option<Typed>,
         args: &[Value],
@@ -649,7 +632,7 @@ impl Checker {
         }
         Ok(Typed {
             expr: Expr::Assoc {
-                type_name: type_fq.to_string(),
+                type_name: type_fq.clone(),
                 method: method.to_string(),
                 instance,
                 args: typed,
@@ -718,7 +701,7 @@ impl Checker {
         &self,
         heap: &Heap,
         env: &Env,
-        name: &str,
+        name: &Path,
         args: &[Value],
     ) -> Result<Typed, Error> {
         let sig = self.reg.fn_sig(name).expect("caller checked presence").clone();
@@ -734,14 +717,14 @@ impl Checker {
         for (arg, pty) in args.iter().zip(sig.params.iter()) {
             typed.push(self.check(heap, env, *arg, Some(pty))?);
         }
-        Ok(Typed { expr: Expr::Call(name.to_string(), typed), ty: sig.ret })
+        Ok(Typed { expr: Expr::Call(name.clone(), typed), ty: sig.ret })
     }
 
     fn check_construct(
         &self,
         heap: &Heap,
         env: &Env,
-        adt_name: &str,
+        adt_name: &Path,
         variant: usize,
         args: &[Value],
         expected: Option<&Type>,
@@ -792,11 +775,11 @@ impl Checker {
         }
         Ok(Typed {
             expr: Expr::Construct {
-                type_name: adt_name.to_string(),
+                type_name: adt_name.clone(),
                 variant,
                 args: typed_args,
             },
-            ty: Type::Named(adt_name.to_string(), result_args),
+            ty: Type::Named(adt_name.clone(), result_args),
         })
     }
 
@@ -997,8 +980,8 @@ impl Checker {
         Ok((out, ty))
     }
 
-    /// Require `ty` to be a registered data type, returning its name and args.
-    fn expect_adt(&self, ty: &Type) -> Result<(String, Vec<Type>), Error> {
+    /// Require `ty` to be a registered data type, returning its path and args.
+    fn expect_adt(&self, ty: &Type) -> Result<(Path, Vec<Type>), Error> {
         match ty {
             Type::Named(n, args) if self.reg.type_def(n).is_some() => Ok((n.clone(), args.clone())),
             other => Err(Error::TypeError(format!(
@@ -1076,11 +1059,16 @@ fn float_lit_ty(expected: Option<&Type>) -> Type {
     }
 }
 
-/// Whether `t` mentions any type parameter in `params` (as `Named(p, [])`).
+/// Whether `path` is a type variable in `params` (a single-segment name).
+fn is_param(path: &crate::Path, params: &HashSet<String>) -> bool {
+    path.is_simple() && params.contains(path.local())
+}
+
+/// Whether `t` mentions any type parameter in `params`.
 fn type_has_param(t: &Type, params: &HashSet<String>) -> bool {
     match t {
         Type::Named(n, args) => {
-            (args.is_empty() && params.contains(n)) || args.iter().any(|a| type_has_param(a, params))
+            (args.is_empty() && is_param(n, params)) || args.iter().any(|a| type_has_param(a, params))
         }
         Type::Fn(ps, r) => ps.iter().any(|p| type_has_param(p, params)) || type_has_param(r, params),
         _ => false,
@@ -1090,7 +1078,7 @@ fn type_has_param(t: &Type, params: &HashSet<String>) -> bool {
 /// Replace type parameters in `t` with their bindings from `subst`.
 fn subst_apply(t: &Type, subst: &HashMap<String, Type>) -> Type {
     match t {
-        Type::Named(n, args) if args.is_empty() => match subst.get(n) {
+        Type::Named(n, args) if args.is_empty() && n.is_simple() => match subst.get(n.local()) {
             Some(bound) => bound.clone(),
             None => t.clone(),
         },
@@ -1118,15 +1106,16 @@ fn unify(
         return Ok(());
     }
     if let Type::Named(n, args) = tmpl {
-        if args.is_empty() && params.contains(n) {
-            return match subst.get(n) {
+        if args.is_empty() && is_param(n, params) {
+            let key = n.local().to_string();
+            return match subst.get(&key) {
                 Some(bound) if bound == actual => Ok(()),
                 Some(bound) => Err(Error::TypeError(format!(
                     "conflicting types for `{}`: {:?} vs {:?}",
-                    n, bound, actual
+                    key, bound, actual
                 ))),
                 None => {
-                    subst.insert(n.clone(), actual.clone());
+                    subst.insert(key, actual.clone());
                     Ok(())
                 }
             };

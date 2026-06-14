@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::{Expr, Pattern, TopLevel, Typed};
+use crate::{Expr, Path, Pattern, TopLevel, Typed};
 
 use super::value::{EvalError, RtValue};
 
@@ -21,10 +21,11 @@ struct FnDef {
 /// A lexical environment: name -> value, searched from the back (innermost).
 type Env = Vec<(String, RtValue)>;
 
-/// The interpreter state: free functions and type-associated methods.
+/// The interpreter state: free functions (by [`Path`]) and type-associated
+/// methods (by type [`Path`] and method name).
 pub struct Interp {
-    fns: HashMap<String, FnDef>,
-    methods: HashMap<(String, String), FnDef>,
+    fns: HashMap<Path, FnDef>,
+    methods: HashMap<(Path, String), FnDef>,
 }
 
 impl Interp {
@@ -91,10 +92,10 @@ impl Interp {
                 let argv = self.eval_args(args, env)?;
                 if let Some(f) = self.fns.get(name) {
                     self.apply(&f.params, &f.body, argv)
-                } else if let Some(result) = eval_builtin(name, &argv) {
+                } else if let Some(result) = name.is_simple().then(|| eval_builtin(name.local(), &argv)).flatten() {
                     result
                 } else {
-                    Err(EvalError::NoSuchFunction(name.clone()))
+                    Err(EvalError::NoSuchFunction(name.to_string()))
                 }
             }
             Expr::Assoc { type_name, method, args, .. } => {

@@ -2,7 +2,7 @@
 //! and methods (`defmethod`, instance + static dispatch).
 
 extern crate typelisp;
-use typelisp::{Checker, Error, Heap, Reader, TopLevel, Type};
+use typelisp::{Checker, Error, Heap, Path, Reader, TopLevel, Type};
 
 /// Check a sequence of forms with one checker; return the last form's result.
 fn program(src: &str) -> Result<TopLevel, Error> {
@@ -25,7 +25,7 @@ fn ty_program(src: &str) -> Type {
 }
 
 fn point_ty() -> Type {
-    Type::Named("point".into(), vec![])
+    Type::Named(Path::root("point"), vec![])
 }
 
 // ---- modules ----------------------------------------------------------------
@@ -106,7 +106,7 @@ fn cross_module_static_method_and_construct() {
                  (defstruct point (mk (x i32) (y i32))) \
                  (defmethod new (point (x i32) (y i32)) point (mk x y))) \
                (geo::point::new 1 2)";
-    assert_eq!(ty_program(src), Type::Named("geo::point".into(), vec![]));
+    assert_eq!(ty_program(src), Type::Named(Path::of(&["geo", "point"]), vec![]));
 }
 
 #[test]
@@ -123,6 +123,6 @@ fn cross_module_qualified_constructor_and_match() {
 fn builtins_still_resolve() {
     assert_eq!(
         ty_program("(Some 1)"),
-        Type::Named("option".into(), vec![Type::I32])
+        Type::Named(Path::root("option"), vec![Type::I32])
     );
 }
