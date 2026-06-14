@@ -23,8 +23,10 @@ pub enum Expr {
     Str(String),
     /// The unit value `()`.
     Unit,
-    /// A reference to a bound variable.
+    /// A reference to a bound (local) variable.
     Var(String),
+    /// A reference to a global variable/constant, by its [`Path`].
+    Global(Path),
     /// `(if cond then else)`.
     If(Box<Typed>, Box<Typed>, Box<Typed>),
     /// `(let ((name val)...) body...)` — bindings, then a body sequence.
@@ -49,8 +51,10 @@ pub enum Expr {
     },
     /// `(match scrutinee (pattern body...)...)`.
     Match(Box<Typed>, Vec<Arm>),
-    /// `(setf var value)` — assign to a bound variable; evaluates to the value.
+    /// `(setf var value)` — assign to a local variable; evaluates to the value.
     Set(String, Box<Typed>),
+    /// `(setf global value)` — assign to a global; evaluates to the value.
+    SetGlobal(Path, Box<Typed>),
     /// `(while cond body...)` — loop while `cond` holds. Has type `Unit`.
     While(Box<Typed>, Vec<Typed>),
     /// `(panic! message)` — diverges. Has type [`Type::Never`](crate::Type).

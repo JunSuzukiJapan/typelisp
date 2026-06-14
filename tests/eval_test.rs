@@ -220,6 +220,41 @@ fn factorial_via_loop() {
     assert_eq!(eval_ok(src), RtValue::Int(120));
 }
 
+// ---- global definitions: defvar / defconstant ------------------------------
+
+#[test]
+fn defvar_global_read() {
+    assert_eq!(eval_ok("(defvar g 42) g"), RtValue::Int(42));
+}
+
+#[test]
+fn defvar_visible_in_function() {
+    assert_eq!(eval_ok("(defvar g 10) (defun f () i32 g) (f)"), RtValue::Int(10));
+}
+
+#[test]
+fn defvar_is_mutable() {
+    let src = "(defvar c 0) \
+               (defun bump () i32 (setf c (+ c 1))) \
+               (bump) (bump) c";
+    assert_eq!(eval_ok(src), RtValue::Int(2));
+}
+
+#[test]
+fn defconstant_read() {
+    assert_eq!(eval_ok("(defconstant k 5) k"), RtValue::Int(5));
+}
+
+#[test]
+fn typed_defvar() {
+    assert_eq!(eval_ok("(defvar (g i32) 7) g"), RtValue::Int(7));
+}
+
+#[test]
+fn module_global_via_path() {
+    assert_eq!(eval_ok("(module m (defvar g 7)) m::g"), RtValue::Int(7));
+}
+
 #[test]
 fn cond_with_classify() {
     let src = "(defun classify ((n i32)) i32 \

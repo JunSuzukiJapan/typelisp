@@ -30,6 +30,13 @@ pub struct AssocFn {
     pub instance: bool,
 }
 
+/// A global variable/constant: its type and whether it is assignable.
+#[derive(Clone, Debug)]
+pub struct VarInfo {
+    pub ty: Type,
+    pub mutable: bool,
+}
+
 /// A data-type definition (a sum type / `defstruct`-style ADT). `name` is the
 /// fully-qualified (module-prefixed) type [`Path`] used as the type's identity.
 #[derive(Clone, Debug)]
@@ -57,6 +64,8 @@ pub struct Namespace {
     pub types: HashMap<String, AdtDef>,
     /// Constructor (unqualified) name -> (owning type path, variant index).
     pub ctors: HashMap<String, (Path, usize)>,
+    /// Global variables/constants defined directly here, by unqualified name.
+    pub vars: HashMap<String, VarInfo>,
     /// `use` aliases: unqualified name -> absolute path (from the root).
     pub aliases: HashMap<String, Vec<String>>,
 }

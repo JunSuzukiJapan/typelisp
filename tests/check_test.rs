@@ -233,6 +233,21 @@ fn setf_unbound_variable_errors() {
 }
 
 #[test]
+fn cannot_assign_to_constant() {
+    let mut h = typelisp::Heap::with_capacity(1024);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, "(defconstant k 5) (setf k 6)").unwrap();
+    let mut chk = Checker::new();
+    let mut result = Ok(());
+    for v in vs {
+        if let Err(e) = chk.check_form(&h, v) {
+            result = Err(e);
+        }
+    }
+    assert!(matches!(result, Err(Error::TypeError(_))));
+}
+
+#[test]
 fn while_condition_must_be_bool_and_is_unit() {
     assert_eq!(ty("(let ((i 0)) (while (< i 0) (setf i 1)))"), Type::Unit);
     assert_type_error("(let ((i 0)) (while 1 (setf i 1)))");

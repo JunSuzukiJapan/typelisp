@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{parse_type, Error, Heap, Path, Type, Value};
 
 use super::ast::{Arm, Expr, Pattern, Typed};
-use super::registry::{AdtDef, AssocFn, FnSig, Namespace, Registry, Variant};
+use super::registry::{AdtDef, AssocFn, FnSig, Namespace, Registry, VarInfo, Variant};
 
 /// A checked top-level form.
 #[derive(Clone, Debug, PartialEq)]
@@ -35,6 +35,8 @@ pub enum TopLevel {
     },
     /// A `defstruct`: a user data type.
     Defstruct { name: Path, params: Vec<String>, variants: Vec<Variant> },
+    /// A `defvar`/`defconstant`: a global variable (`mutable`) or constant.
+    Defvar { name: Path, ty: Type, value: Typed, mutable: bool },
     /// A `module`: a namespace and its checked body forms.
     Module { path: Path, body: Vec<TopLevel> },
     /// A `use`: a name brought into the current scope (alias -> target path).
@@ -87,6 +89,8 @@ impl Checker {
             if let Some(Value::Symbol(id)) = elems.first() {
                 match heap.symbol_name(*id) {
                     "defun" => return self.check_defun(heap, &elems[1..]),
+                    "defvar" => return self.check_defvar(heap, &elems[1..], true),
+                    "defconstant" => return self.check_defvar(heap, &elems[1..], false),
                     "defstruct" => return self.check_defstruct(heap, &elems[1..]),
                     "module" => return self.check_module(heap, &elems[1..]),
                     "defmethod" => return self.check_defmethod(heap, &elems[1..]),
@@ -199,6 +203,27 @@ impl Checker {
             return path.clone();
         }
         self.resolve_type_path(path.segments()).unwrap_or_else(|| path.clone())
+    }
+
+    /// Resolve a bare global variable/constant name to its `(path, info)`.
+    fn resolve_global(&self, name: &str) -> Option<(Path, VarInfo)> {
+        if let Some(p) = self.lookup_alias(name) {
+            return self.resolve_global_path(&p);
+        }
+        if let Some(vi) = self.cur_ns().vars.get(name) {
+            return Some((self.fq(name), vi.clone()));
+        }
+        self.reg.root.vars.get(name).map(|vi| (Path::root(name), vi.clone()))
+    }
+
+    /// Resolve a qualified `module::...::global` path to its `(path, info)`.
+    fn resolve_global_path(&self, segs: &[String]) -> Option<(Path, VarInfo)> {
+        let (mods, last) = segs.split_at(segs.len() - 1);
+        let (abs, m) = self.find_module(mods)?;
+        let vi = m.vars.get(&last[0])?.clone();
+        let mut full = abs;
+        full.push(last[0].clone());
+        Some((Path::from_segments(full), vi))
     }
 
     /// Canonicalize a parsed type: resolve every nominal name to its located
@@ -457,16 +482,26 @@ impl Checker {
             }
             Value::Symbol(id) => {
                 let name = heap.symbol_name(id);
-                match env.get(name) {
-                    Some(t) => Typed { expr: Expr::Var(name.to_string()), ty: t.clone() },
-                    None => return Err(Error::TypeError(format!("unbound variable: {}", name))),
+                if let Some(t) = env.get(name) {
+                    Typed { expr: Expr::Var(name.to_string()), ty: t.clone() }
+                } else if let Some((path, vi)) = self.resolve_global(name) {
+                    Typed { expr: Expr::Global(path), ty: vi.ty }
+                } else {
+                    return Err(Error::TypeError(format!("unbound variable: {}", name)));
                 }
             }
             Value::Cons(_) => self.check_list(heap, env, v, expected)?,
-            Value::Path(_) => {
-                // A bare `::` path as an expression (e.g. a qualified constant).
-                // Namespace/type path resolution lands in a later phase.
-                return Err(Error::TypeError("`::` paths are not yet supported here".into()));
+            Value::Path(pid) => {
+                // A bare `::` path as an expression: a qualified global.
+                let segs: Vec<String> = heap
+                    .path_segments(pid)
+                    .iter()
+                    .map(|s| heap.symbol_name(*s).to_string())
+                    .collect();
+                match self.resolve_global_path(&segs) {
+                    Some((path, vi)) => Typed { expr: Expr::Global(path), ty: vi.ty },
+                    None => return Err(Error::TypeError(format!("unresolved path: {}", segs.join("::")))),
+                }
             }
         };
         // Reconcile synthesized types against the expectation. Literal and
@@ -758,12 +793,51 @@ impl Checker {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("setf: target must be a variable".into())),
         };
-        let ty = env
-            .get(&name)
-            .cloned()
-            .ok_or_else(|| Error::TypeError(format!("setf: unbound variable: {}", name)))?;
-        let value = self.check(heap, env, args[1], Some(&ty))?;
-        Ok(Typed { expr: Expr::Set(name, Box::new(value)), ty })
+        if let Some(ty) = env.get(&name).cloned() {
+            let value = self.check(heap, env, args[1], Some(&ty))?;
+            return Ok(Typed { expr: Expr::Set(name, Box::new(value)), ty });
+        }
+        if let Some((path, vi)) = self.resolve_global(&name) {
+            if !vi.mutable {
+                return Err(Error::TypeError(format!("setf: cannot assign to constant `{}`", name)));
+            }
+            let value = self.check(heap, env, args[1], Some(&vi.ty))?;
+            return Ok(Typed { expr: Expr::SetGlobal(path, Box::new(value)), ty: vi.ty });
+        }
+        Err(Error::TypeError(format!("setf: unbound variable: {}", name)))
+    }
+
+    /// `(defvar name value)` / `(defconstant name value)`, with an optional
+    /// `(name Type)` annotation. Registers a global in the current namespace.
+    fn check_defvar(&mut self, heap: &Heap, parts: &[Value], mutable: bool) -> Result<TopLevel, Error> {
+        if parts.len() != 2 {
+            return Err(Error::TypeError("defvar/defconstant: (defvar name value)".into()));
+        }
+        let (name, ann) = match parts[0] {
+            Value::Symbol(id) => (heap.symbol_name(id).to_string(), None),
+            Value::Cons(_) => {
+                let pair = heap.list_to_vec(parts[0])?;
+                if pair.len() != 2 {
+                    return Err(Error::TypeError("defvar: typed name must be (name type)".into()));
+                }
+                let name = match pair[0] {
+                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    _ => return Err(Error::TypeError("defvar: name must be a symbol".into())),
+                };
+                (name, Some(self.canon(&parse_type(heap, pair[1])?)))
+            }
+            _ => return Err(Error::TypeError("defvar: name must be a symbol or (name type)".into())),
+        };
+        // The value is checked at the top level (no locals), but globals/fns are
+        // visible via the registry.
+        let value = self.check(heap, &Env::new(), parts[1], ann.as_ref())?;
+        let ty = ann.unwrap_or_else(|| value.ty.clone());
+        self.reg
+            .root
+            .module_mut(&self.ns)
+            .vars
+            .insert(name.clone(), VarInfo { ty: ty.clone(), mutable });
+        Ok(TopLevel::Defvar { name: self.fq(&name), ty, value, mutable })
     }
 
     /// `(while cond body...)`: loop while `cond` (a `bool`) holds; the body is

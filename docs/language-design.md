@@ -59,10 +59,11 @@
 脱糖の例: `when`→`if`+`progn`、`unless`→`if`、`if-let (pat val) then else`→2 腕 `match`（包括アームで網羅）。
 
 実装状況: `if` `let` `let*` `progn` `when` `unless` `and` `or` `cond` `setf` `while` `match` `if-let` `panic!`
-`defstruct` `module` `use` `defmethod` は実装済（[src/check/checker.rs](../src/check/checker.rs)）。
-`when`/`unless`/`and`/`or`/`cond`/`let*` は `if`/`let` への脱糖。`setf`（可変ローカル変数）/`while` は専用 AST ノード
-（eval 環境は `Rc<RefCell>` の可変スロット）。残り（`case` `loop` `dotimes` `dolist` `do` `doiter` `while-let`
-`defvar` `defconstant` `lambda` `the`）は今後。
+`defstruct` `defvar` `defconstant` `module` `use` `defmethod` は実装済（[src/check/checker.rs](../src/check/checker.rs)）。
+`when`/`unless`/`and`/`or`/`cond`/`let*` は `if`/`let` への脱糖。`setf`（可変ローカル/グローバル変数）/`while` は専用 AST
+ノード（eval 環境は `Rc<RefCell>` の可変スロット）。`defvar`（可変）/`defconstant`（不変）はグローバル変数を現在の
+名前空間に登録し、型注釈 `(name Type)` は任意（省略時は値から推論）。残り（`case` `loop` `dotimes` `dolist` `do`
+`doiter` `while-let` `lambda` `the`）は今後。
 
 ---
 

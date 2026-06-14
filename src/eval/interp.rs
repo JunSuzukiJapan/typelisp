@@ -31,16 +31,17 @@ fn slot(v: RtValue) -> Slot {
     Rc::new(RefCell::new(v))
 }
 
-/// The interpreter state: free functions (by [`Path`]) and type-associated
-/// methods (by type [`Path`] and method name).
+/// The interpreter state: free functions (by [`Path`]), type-associated methods
+/// (by type [`Path`] and method name), and global variables (by [`Path`]).
 pub struct Interp {
     fns: HashMap<Path, FnDef>,
     methods: HashMap<(Path, String), FnDef>,
+    globals: HashMap<Path, Slot>,
 }
 
 impl Interp {
     pub fn new() -> Interp {
-        Interp { fns: HashMap::new(), methods: HashMap::new() }
+        Interp { fns: HashMap::new(), methods: HashMap::new(), globals: HashMap::new() }
     }
 
     /// Execute a checked top-level form. Definitions register and return `None`;
@@ -62,6 +63,11 @@ impl Interp {
                 Ok(None)
             }
             TopLevel::Defstruct { .. } | TopLevel::Use { .. } => Ok(None),
+            TopLevel::Defvar { name, value, .. } => {
+                let v = self.eval(&value, &Env::new())?;
+                self.globals.insert(name, slot(v));
+                Ok(None)
+            }
             TopLevel::Module { body, .. } => {
                 let mut last = None;
                 for t in body {
@@ -84,6 +90,11 @@ impl Interp {
             Expr::Var(n) => env_get(env, n)
                 .map(|s| s.borrow().clone())
                 .ok_or_else(|| EvalError::Unbound(n.clone())),
+            Expr::Global(path) => self
+                .globals
+                .get(path)
+                .map(|s| s.borrow().clone())
+                .ok_or_else(|| EvalError::Unbound(path.to_string())),
             Expr::If(c, then, els) => match self.eval(c, env)? {
                 RtValue::Bool(true) => self.eval(then, env),
                 RtValue::Bool(false) => self.eval(els, env),
@@ -134,6 +145,15 @@ impl Interp {
             Expr::Set(name, value) => {
                 let v = self.eval(value, env)?;
                 let cell = env_get(env, name).ok_or_else(|| EvalError::Unbound(name.clone()))?;
+                *cell.borrow_mut() = v.clone();
+                Ok(v)
+            }
+            Expr::SetGlobal(path, value) => {
+                let v = self.eval(value, env)?;
+                let cell = self
+                    .globals
+                    .get(path)
+                    .ok_or_else(|| EvalError::Unbound(path.to_string()))?;
                 *cell.borrow_mut() = v.clone();
                 Ok(v)
             }
