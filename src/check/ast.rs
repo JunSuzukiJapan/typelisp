@@ -49,6 +49,10 @@ pub enum Expr {
     },
     /// `(match scrutinee (pattern body...)...)`.
     Match(Box<Typed>, Vec<Arm>),
+    /// `(setf var value)` — assign to a bound variable; evaluates to the value.
+    Set(String, Box<Typed>),
+    /// `(while cond body...)` — loop while `cond` holds. Has type `Unit`.
+    While(Box<Typed>, Vec<Typed>),
     /// `(panic! message)` — diverges. Has type [`Type::Never`](crate::Type).
     Panic(Box<Typed>),
 }

@@ -524,6 +524,8 @@ impl Checker {
             "and" => return self.check_and_or(heap, env, args, true),
             "or" => return self.check_and_or(heap, env, args, false),
             "cond" => return self.check_cond(heap, env, args, expected),
+            "setf" => return self.check_setf(heap, env, args),
+            "while" => return self.check_while(heap, env, args),
             "match" => return self.check_match(heap, env, args, expected),
             "if-let" => return self.check_if_let(heap, env, args, expected),
             "panic!" => return self.check_panic(heap, env, args),
@@ -744,6 +746,35 @@ impl Checker {
         let inner = self.let_star_rec(heap, &child, &binds[1..], body, expected)?;
         let ty = inner.ty.clone();
         Ok(Typed { expr: Expr::Let(vec![(name, val)], vec![inner]), ty })
+    }
+
+    /// `(setf var value)`: assign to a bound variable. The value must match the
+    /// variable's type; the expression evaluates to that value.
+    fn check_setf(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+        if args.len() != 2 {
+            return Err(Error::TypeError("setf: (setf var value)".into()));
+        }
+        let name = match args[0] {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            _ => return Err(Error::TypeError("setf: target must be a variable".into())),
+        };
+        let ty = env
+            .get(&name)
+            .cloned()
+            .ok_or_else(|| Error::TypeError(format!("setf: unbound variable: {}", name)))?;
+        let value = self.check(heap, env, args[1], Some(&ty))?;
+        Ok(Typed { expr: Expr::Set(name, Box::new(value)), ty })
+    }
+
+    /// `(while cond body...)`: loop while `cond` (a `bool`) holds; the body is
+    /// evaluated for effect. The result is `Unit`.
+    fn check_while(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+        if args.is_empty() {
+            return Err(Error::TypeError("while: (while cond body...)".into()));
+        }
+        let cond = self.check(heap, env, args[0], Some(&Type::Bool))?;
+        let (body, _) = self.check_seq(heap, env, &args[1..], None)?;
+        Ok(Typed { expr: Expr::While(Box::new(cond), body), ty: Type::Unit })
     }
 
     /// `when`/`unless`: evaluate the body for effect when the condition holds

@@ -5,7 +5,9 @@
 //! environment. Functions are not closures — a body sees only its parameters and
 //! the global definitions, matching top-level `defun`/`defmethod` semantics.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::{Expr, Path, Pattern, TopLevel, Typed};
 
@@ -18,8 +20,16 @@ struct FnDef {
     body: Vec<Typed>,
 }
 
-/// A lexical environment: name -> value, searched from the back (innermost).
-type Env = Vec<(String, RtValue)>;
+/// A mutable variable slot (shared so `setf` mutations are visible to every
+/// holder of the binding, e.g. across `while` iterations).
+type Slot = Rc<RefCell<RtValue>>;
+
+/// A lexical environment: name -> slot, searched from the back (innermost).
+type Env = Vec<(String, Slot)>;
+
+fn slot(v: RtValue) -> Slot {
+    Rc::new(RefCell::new(v))
+}
 
 /// The interpreter state: free functions (by [`Path`]) and type-associated
 /// methods (by type [`Path`] and method name).
@@ -72,7 +82,7 @@ impl Interp {
             Expr::Str(s) => Ok(RtValue::Str(s.clone())),
             Expr::Unit => Ok(RtValue::Unit),
             Expr::Var(n) => env_get(env, n)
-                .cloned()
+                .map(|s| s.borrow().clone())
                 .ok_or_else(|| EvalError::Unbound(n.clone())),
             Expr::If(c, then, els) => match self.eval(c, env)? {
                 RtValue::Bool(true) => self.eval(then, env),
@@ -84,7 +94,7 @@ impl Interp {
                 let mut child = env.clone();
                 for (name, val) in binds {
                     let v = self.eval(val, env)?;
-                    child.push((name.clone(), v));
+                    child.push((name.clone(), slot(v)));
                 }
                 self.eval_seq(body, &child)
             }
@@ -115,11 +125,25 @@ impl Interp {
                 for arm in arms {
                     if let Some(binds) = match_pattern(&arm.pat, &v) {
                         let mut child = env.clone();
-                        child.extend(binds);
+                        child.extend(binds.into_iter().map(|(n, v)| (n, slot(v))));
                         return self.eval_seq(&arm.body, &child);
                     }
                 }
                 Err(EvalError::Internal("no matching match arm".into()))
+            }
+            Expr::Set(name, value) => {
+                let v = self.eval(value, env)?;
+                let cell = env_get(env, name).ok_or_else(|| EvalError::Unbound(name.clone()))?;
+                *cell.borrow_mut() = v.clone();
+                Ok(v)
+            }
+            Expr::While(cond, body) => {
+                while matches!(self.eval(cond, env)?, RtValue::Bool(true)) {
+                    for e in body {
+                        self.eval(e, env)?;
+                    }
+                }
+                Ok(RtValue::Unit)
             }
             Expr::Panic(msg) => match self.eval(msg, env)? {
                 RtValue::Str(s) => Err(EvalError::Panic(s)),
@@ -133,7 +157,7 @@ impl Interp {
         if params.len() != args.len() {
             return Err(EvalError::Internal("arity mismatch".into()));
         }
-        let env: Env = params.iter().cloned().zip(args).collect();
+        let env: Env = params.iter().cloned().zip(args.into_iter().map(slot)).collect();
         self.eval_seq(body, &env)
     }
 
@@ -157,8 +181,8 @@ impl Default for Interp {
     }
 }
 
-fn env_get<'a>(env: &'a Env, name: &str) -> Option<&'a RtValue> {
-    env.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v)
+fn env_get<'a>(env: &'a Env, name: &str) -> Option<&'a Slot> {
+    env.iter().rev().find(|(n, _)| n == name).map(|(_, s)| s)
 }
 
 /// Evaluate a built-in i32 operator. Returns `None` if `name` is not a builtin,

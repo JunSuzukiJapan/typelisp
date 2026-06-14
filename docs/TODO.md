@@ -45,7 +45,7 @@
 | `aec77f3` | clippy 警告解消（Error の Display 実装、Reader の Default） |
 | （未コミット） | エラー処理（Result/Error/Never/`panic!`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
-**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 22 / error 10 / namespace 11 / eval 21 = 122 件 green、警告0（clippy 含む）。
+**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 25 / error 10 / namespace 11 / eval 25 = 129 件 green、警告0（clippy 含む）。
 **Miri**: `cargo +nightly miri test --test mem_test`（26/28、重い2件除外）— `Value::Path` 追加後も UB/リーク無し。
 
 ### 確定仕様ドキュメント
@@ -132,10 +132,11 @@
     `TopLevel::{Defun,Defmethod,Defstruct,Module,Use,Expr}` を `Interp::exec` で処理。関数/メソッドは FQ 名で解決。
   - 実装済み（4b）: 組み込み i32 算術/比較（`+ - * / mod < <= > >= = /=`）。`/`/`mod` のゼロ除算は panic。
   - 実装済み（4c）: 派生制御特殊形 `when`/`unless`/`and`/`or`/`cond`/`let*`（`if`/`let` へ脱糖、AST/eval 追加なし）。
-  - TDD: `tests/eval_test.rs`（21件: unwrap-or・メソッド・factorial・fib・ゼロ除算 panic・cond/and/or/let* 等）。
+  - 実装済み（4d）: 可変ローカル変数 `setf` ＋ `while` ループ（AST に `Set`/`While`、eval 環境を `Rc<RefCell>` の可変スロット化）。
+  - TDD: `tests/eval_test.rs`（25件: unwrap-or・メソッド・factorial(再帰/ループ)・fib・cond/and/or/let*・while+setf 等）。
 - **次の候補（eval 拡充）**:
   - 組み込み関数の拡張（型ごとの算術／i64・f64、文字列・リスト・Option/Result ライブラリ関数）。カタログは [language-design.md](language-design.md) §3。
-  - 反復系（`while`/`loop`/`dotimes`/`dolist`）＋可変状態（`setf`/`defvar`）、`lambda`/クロージャ。
+  - 反復系の糖衣 `dotimes`/`dolist`/`loop`、`defvar`/`defconstant`（グローバル）、`lambda`/クロージャ。
   - クロージャ・実行時値と GC の整合（現状 `RtValue` は Rust ヒープ上で完結、cons ヒープ非依存）。
 - **ステップ5: compile**（明示 `compile`/`compile-file`。inkwell 再追加・LLVM コード生成。feature gate）。
 

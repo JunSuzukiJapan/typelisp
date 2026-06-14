@@ -219,6 +219,25 @@ fn if_let_branches_must_agree() {
     assert!(matches!(program(src), Err(Error::TypeError(_))));
 }
 
+// ---- setf / while -----------------------------------------------------------
+
+#[test]
+fn setf_checks_against_variable_type() {
+    assert_eq!(ty("(let ((x 0)) (setf x 9))"), Type::I32);
+    assert_type_error("(let ((x 0)) (setf x true))");
+}
+
+#[test]
+fn setf_unbound_variable_errors() {
+    assert_type_error("(setf nope 1)");
+}
+
+#[test]
+fn while_condition_must_be_bool_and_is_unit() {
+    assert_eq!(ty("(let ((i 0)) (while (< i 0) (setf i 1)))"), Type::Unit);
+    assert_type_error("(let ((i 0)) (while 1 (setf i 1)))");
+}
+
 // ---- typed AST shape --------------------------------------------------------
 
 #[test]

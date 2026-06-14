@@ -188,6 +188,38 @@ fn let_star_binds_sequentially() {
     assert_eq!(eval_ok("(let* ((x 2) (y (* x x)) (z (+ y 1))) z)"), RtValue::Int(5));
 }
 
+// ---- mutable variables: setf + while ---------------------------------------
+
+#[test]
+fn while_loop_with_setf() {
+    let src = "(defun sum-to ((n i32)) i32 \
+                 (let ((sum 0) (i 0)) \
+                   (while (< i n) (setf sum (+ sum i)) (setf i (+ i 1))) \
+                   sum)) \
+               (sum-to 5)";
+    assert_eq!(eval_ok(src), RtValue::Int(10)); // 0+1+2+3+4
+}
+
+#[test]
+fn setf_returns_assigned_value() {
+    assert_eq!(eval_ok("(let ((x 0)) (setf x 7))"), RtValue::Int(7));
+}
+
+#[test]
+fn while_is_unit() {
+    assert_eq!(eval_ok("(let ((i 0)) (while (< i 0) (setf i 1)))"), RtValue::Unit);
+}
+
+#[test]
+fn factorial_via_loop() {
+    let src = "(defun fact ((n i32)) i32 \
+                 (let ((acc 1) (i 1)) \
+                   (while (<= i n) (setf acc (* acc i)) (setf i (+ i 1))) \
+                   acc)) \
+               (fact 5)";
+    assert_eq!(eval_ok(src), RtValue::Int(120));
+}
+
 #[test]
 fn cond_with_classify() {
     let src = "(defun classify ((n i32)) i32 \
