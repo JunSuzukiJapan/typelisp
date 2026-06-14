@@ -18,6 +18,12 @@ use crate::{Error, Heap, Value};
 
 pub struct Reader;
 
+impl Default for Reader {
+    fn default() -> Reader {
+        Reader::new()
+    }
+}
+
 impl Reader {
     pub fn new() -> Reader {
         Reader
