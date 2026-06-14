@@ -27,6 +27,8 @@ pub enum TopLevel {
         type_name: String,
         method: String,
         instance: bool,
+        /// The receiver's variable name (e.g. `self`) for instance methods.
+        self_name: Option<String>,
         params: Vec<(String, Type)>,
         ret: Type,
         body: Vec<Typed>,
@@ -367,7 +369,7 @@ impl Checker {
         binds.extend(params.clone());
         let env = Env::new().extended(binds);
         let (body, _) = self.check_seq(heap, &env, &parts[3..], Some(&ret))?;
-        Ok(TopLevel::Defmethod { type_name: type_fq, method, instance, params, ret, body })
+        Ok(TopLevel::Defmethod { type_name: type_fq, method, instance, self_name, params, ret, body })
     }
 
     fn check_use(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {

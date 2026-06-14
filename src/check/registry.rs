@@ -72,7 +72,21 @@ impl Registry {
         reg.add_adt(result_def());
         reg.add_adt(error_def());
         reg.add_adt(sexpr_def());
+        reg.add_builtin_fns();
         reg
+    }
+
+    /// Register the built-in i32 arithmetic/comparison operators. (MVP: i32
+    /// only; per-type operators / generic numeric methods come later.)
+    fn add_builtin_fns(&mut self) {
+        let int_binop = || FnSig { params: vec![Type::I32, Type::I32], ret: Type::I32 };
+        let int_cmp = || FnSig { params: vec![Type::I32, Type::I32], ret: Type::Bool };
+        for op in ["+", "-", "*", "/", "mod"] {
+            self.fns.insert(op.to_string(), int_binop());
+        }
+        for op in ["<", "<=", ">", ">=", "=", "/="] {
+            self.fns.insert(op.to_string(), int_cmp());
+        }
     }
 
     /// Register a data type and index its constructors (bare name — first

@@ -45,7 +45,7 @@
 | `aec77f3` | clippy 警告解消（Error の Display 実装、Reader の Default） |
 | （未コミット） | エラー処理（Result/Error/Never/`panic!`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
-**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 22 / error 10 / namespace 11 = 101 件 green、警告0（clippy 含む）。
+**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 22 / error 10 / namespace 11 / eval 15 = 116 件 green、警告0（clippy 含む）。
 **Miri**: `cargo +nightly miri test --test mem_test`（26/28、重い2件除外）— `Value::Path` 追加後も UB/リーク無し。
 
 ### 確定仕様ドキュメント
@@ -59,8 +59,10 @@
 - `src/check/ast.rs` — `Typed` / `Expr`（`Call`/`Assoc`/`Panic` 等）/ `Pattern` / `Arm`
 - `src/check/registry.rs` — `AdtDef`(assoc 付)/`Variant`/`FnSig`/`AssocFn`/`Registry`（組み込み Option/Result/Error/Sexpr、modules/aliases）
 - `src/check/checker.rs` — `Checker`（`check_form` 入口、`ns` 状態、名前解決 現NS→root、defun/defstruct/module/defmethod/use、双方向検査・単段具体化・網羅性・Never 適合）
+- `src/eval/value.rs` — `RtValue`（実行時値、構成子インスタンス）/ `EvalError`（`Panic` 等）
+- `src/eval/interp.rs` — `Interp`（`exec`/`eval`、関数・メソッドレジストリ、パターン照合、i32 組み込み演算）
 - `src/errors.rs` — `Error`（`HeapExhausted`/`NotACons`/`ImproperList`/`TypeError` 等、全バリアント Display 実装）
-- `tests/{mem,read,type,check,error,namespace}_test.rs`
+- `tests/{mem,read,type,check,error,namespace,eval}_test.rs`
 
 ### ビルド注意
 - `inkwell` は manifest から一旦除外（ロック可能な版に `llvm18-0` feature が無かったため）。
@@ -123,14 +125,17 @@
   インスタンス・ディスパッチ（第一引数型）と `Type::method` 静的呼び出し、裸名解決 現NS→root。
 - **未実装（後続）**: ジェネリック構造体/受け手、module 全体取り込み `use`、可視性、関数カタログの実装本体（eval 待ち）。
 
-## 4. 次回の作業（ステップ4：eval）
-- **型付き AST（`check::Typed`）上のツリーウォークインタプリタ**。既定の実行経路。
-  - 実行時値の表現を設計（リテラル＝`mem::Value` 系で足りる／構成子つきデータ＝直和インスタンス＝`(タグ, フィールド…)`、
-    クロージャ）。`Sexpr`/`Option`/`Result` の構成子・パターン照合、`panic!` の中断、メソッド（`Expr::Assoc`）の評価。
-  - `Checker` が返す `TopLevel::{Defun,Defmethod,Defstruct,Module,Use,Expr}` を評価。関数/メソッドは FQ 名で解決。
-  - TDD: `tests/eval_test.rs`（`unwrap-or` を実際に評価して値が返る、等）。
-  - 検討: 構成子インスタンスを cons ヒープ上に表現するか、別ストアにするか（GC との整合）。
-    算術等の組み込み関数（`+` 等）の型登録＋評価をどこまで入れるか（カタログは language-design.md §3）。
+## 4. ステップ4：eval（**4a/4b 実装済み**）
+- **型付き AST（`check::Typed`）上のツリーウォークインタプリタ**（`src/eval/`、既定の実行経路）。
+  - 実装済み（4a）: `RtValue`（リテラル＋構成子インスタンス `Data{type,variant,fields}`）、リテラル/`var`/`if`/`let`/
+    `call`（defun）/`construct`/`match`（パターン照合）/`assoc`（インスタンス・static メソッド）/`panic!`（`EvalError::Panic`）。
+    `TopLevel::{Defun,Defmethod,Defstruct,Module,Use,Expr}` を `Interp::exec` で処理。関数/メソッドは FQ 名で解決。
+  - 実装済み（4b）: 組み込み i32 算術/比較（`+ - * / mod < <= > >= = /=`）。`/`/`mod` のゼロ除算は panic。
+  - TDD: `tests/eval_test.rs`（15件: unwrap-or・メソッド・factorial・fib・ゼロ除算 panic 等）。
+- **次の候補（eval 拡充）**:
+  - 組み込み関数の拡張（型ごとの算術／i64・f64、文字列・リスト・Option/Result ライブラリ関数）。カタログは [language-design.md](language-design.md) §3。
+  - 残りの特殊形（`cond`/`when`/`unless`/`and`/`or`/`while`/`loop` 等）、`lambda`/クロージャ。
+  - クロージャ・実行時値と GC の整合（現状 `RtValue` は Rust ヒープ上で完結、cons ヒープ非依存）。
 - **ステップ5: compile**（明示 `compile`/`compile-file`。inkwell 再追加・LLVM コード生成。feature gate）。
 
 ---

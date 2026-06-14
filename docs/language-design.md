@@ -68,7 +68,8 @@
 **分離原則**: ヒープ/ランタイム/IO/プリミティブ演算/ネイティブ codegen を要するものは **Rust 実装**。
 それらの組合せで書けるものは **typelisp 自身で実装**（ライブラリ）。すべて型付き（引数/戻り型を明示）。
 
-> カタログの**実装本体**は eval（step4）以降。本節は仕様・シグネチャの確定が目的。
+> 実装状況: eval（step4）でツリーウォーク評価を実装済み。組み込み関数は**現状 i32 の算術/比較のみ**
+> （`+ - * / mod < <= > >= = /=`、`/`/`mod` のゼロ除算は panic）。他のカタログ項目は今後 eval 拡充で追加。
 
 ### 3.1 Rust 組み込み（primitive）
 | 種別 | 関数 | 備考 / 例 |
@@ -168,7 +169,7 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 |---|---|
 | `vector-ref`（範囲外） | panic |
 | `vector-get` | `Option<T>` |
-| `/`（ゼロ除算） | `Result` |
+| `/` `mod`（ゼロ除算） | panic（Rust の整数除算に忠実） |
 | `parse-int` / `parse-float` | `Result<_, Error>` |
 | `read` | `Result<Sexpr, Error>` |
 | `unwrap`（None/Err） | panic |
