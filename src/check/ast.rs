@@ -27,6 +27,8 @@ pub enum Expr {
     Var(String),
     /// A reference to a global variable/constant, by its [`Path`].
     Global(Path),
+    /// A named free function used as a value (reified into a function value).
+    FnRef(Path),
     /// `(if cond then else)`.
     If(Box<Typed>, Box<Typed>, Box<Typed>),
     /// `(let ((name val)...) body...)` — bindings, then a body sequence.

@@ -65,8 +65,10 @@
 名前空間に登録し、型注釈 `(name Type)` は任意（省略時は値から推論）。
 **`lambda`** は関数を第一級の値（`RtValue::Closure`）にする: `(lambda (params) ret body...)`、型は `(fn ...)`。
 定義時の環境（可変スロット）を捕捉する真のクロージャ。関数値の呼び出しは頭がローカル変数・グローバル変数・任意の式
-（例 `((lambda ...) x)`）のとき `Expr::Apply` に。残り（`case` `loop` `dotimes` `dolist` `do` `doiter` `while-let`
-`the`、名前付き関数の値化）は今後。
+（例 `((lambda ...) x)`）のとき `Expr::Apply` に。**名前付き関数も値化可能**（`id` 等を高階関数へ渡せる。`Expr::FnRef`、
+組み込みは `RtValue::Builtin`）。**`dotimes`** `(dotimes (var count) body...)` は `let`+`while`+`setf` への脱糖。
+残り（`case` `loop` `dolist` `do` `doiter` `while-let` `the`）は今後。`dolist`/`loop` は汎用リスト型 `List<T>` の実行時
+表現と `break`/`return` の非局所脱出が前提のため後回し。
 
 ---
 

@@ -226,6 +226,26 @@ impl Checker {
         Some((Path::from_segments(full), vi))
     }
 
+    /// Reify a bare free-function name as a function value (`FnRef`), if it names
+    /// one.
+    fn fn_value(&self, name: &str) -> Option<Typed> {
+        let fq = self.resolve_fn(name)?;
+        Some(self.fn_ref_node(fq))
+    }
+
+    /// Reify a qualified free-function path as a function value (`FnRef`).
+    fn fn_path_value(&self, segs: &[String]) -> Option<Typed> {
+        let fq = self.resolve_fn_path(segs)?;
+        Some(self.fn_ref_node(fq))
+    }
+
+    /// Build an `FnRef` node carrying the function's `(fn ...)` type.
+    fn fn_ref_node(&self, fq: Path) -> Typed {
+        let sig = self.reg.fn_sig(&fq).expect("resolved fn exists").clone();
+        let ty = Type::Fn(sig.params, Box::new(sig.ret));
+        Typed { expr: Expr::FnRef(fq), ty }
+    }
+
     /// Canonicalize a parsed type: resolve every nominal name to its located
     /// [`Path`] so that types compare equal across module boundaries.
     fn canon(&self, t: &Type) -> Type {
@@ -486,21 +506,27 @@ impl Checker {
                     Typed { expr: Expr::Var(name.to_string()), ty: t.clone() }
                 } else if let Some((path, vi)) = self.resolve_global(name) {
                     Typed { expr: Expr::Global(path), ty: vi.ty }
+                } else if let Some(t) = self.fn_value(name) {
+                    t
                 } else {
                     return Err(Error::TypeError(format!("unbound variable: {}", name)));
                 }
             }
             Value::Cons(_) => self.check_list(heap, env, v, expected)?,
             Value::Path(pid) => {
-                // A bare `::` path as an expression: a qualified global.
+                // A bare `::` path as an expression: a qualified global or a
+                // qualified function used as a value.
                 let segs: Vec<String> = heap
                     .path_segments(pid)
                     .iter()
                     .map(|s| heap.symbol_name(*s).to_string())
                     .collect();
-                match self.resolve_global_path(&segs) {
-                    Some((path, vi)) => Typed { expr: Expr::Global(path), ty: vi.ty },
-                    None => return Err(Error::TypeError(format!("unresolved path: {}", segs.join("::")))),
+                if let Some((path, vi)) = self.resolve_global_path(&segs) {
+                    Typed { expr: Expr::Global(path), ty: vi.ty }
+                } else if let Some(t) = self.fn_path_value(&segs) {
+                    t
+                } else {
+                    return Err(Error::TypeError(format!("unresolved path: {}", segs.join("::"))));
                 }
             }
         };
@@ -566,6 +592,7 @@ impl Checker {
             "cond" => return self.check_cond(heap, env, args, expected),
             "setf" => return self.check_setf(heap, env, args),
             "while" => return self.check_while(heap, env, args),
+            "dotimes" => return self.check_dotimes(heap, env, args),
             "lambda" => return self.check_lambda(heap, env, args),
             "match" => return self.check_match(heap, env, args, expected),
             "if-let" => return self.check_if_let(heap, env, args, expected),
@@ -908,6 +935,52 @@ impl Checker {
         let cond = self.check(heap, env, args[0], Some(&Type::Bool))?;
         let (body, _) = self.check_seq(heap, env, &args[1..], None)?;
         Ok(Typed { expr: Expr::While(Box::new(cond), body), ty: Type::Unit })
+    }
+
+    /// `(dotimes (var count) body...)`: run the body with `var` taking `0` ..
+    /// `count-1`. Desugars to `let` + `while` + `setf`. Result is `Unit`.
+    fn check_dotimes(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+        if args.is_empty() {
+            return Err(Error::TypeError("dotimes: (dotimes (var count) body...)".into()));
+        }
+        let spec = heap.list_to_vec(args[0])?;
+        if spec.len() != 2 {
+            return Err(Error::TypeError("dotimes: spec must be (var count)".into()));
+        }
+        let var = match spec[0] {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            _ => return Err(Error::TypeError("dotimes: variable must be a symbol".into())),
+        };
+        let count = self.check(heap, env, spec[1], Some(&Type::I32))?;
+        // A hidden loop-limit binding; the space makes it unwritable in source.
+        let limit = " dotimes-limit".to_string();
+        let child = env.extended(vec![(var.clone(), Type::I32), (limit.clone(), Type::I32)]);
+        let (mut body, _) = self.check_seq(heap, &child, &args[1..], None)?;
+
+        let var_ref = || Typed { expr: Expr::Var(var.clone()), ty: Type::I32 };
+        let int = |n| Typed { expr: Expr::Int(n), ty: Type::I32 };
+        let op = |name, a, b, ty| Typed {
+            expr: Expr::Call(Path::root(name), vec![a, b]),
+            ty,
+        };
+        // body... then (setf var (+ var 1))
+        let incr = Typed {
+            expr: Expr::Set(
+                var.clone(),
+                Box::new(op("+", var_ref(), int(1), Type::I32)),
+            ),
+            ty: Type::I32,
+        };
+        body.push(incr);
+        let cond = op(
+            "<",
+            var_ref(),
+            Typed { expr: Expr::Var(limit.clone()), ty: Type::I32 },
+            Type::Bool,
+        );
+        let while_node = Typed { expr: Expr::While(Box::new(cond), body), ty: Type::Unit };
+        let binds = vec![(var, int(0)), (limit, count)];
+        Ok(Typed { expr: Expr::Let(binds, vec![while_node]), ty: Type::Unit })
     }
 
     /// `when`/`unless`: evaluate the body for effect when the condition holds

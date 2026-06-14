@@ -273,6 +273,19 @@ fn apply_checks_argument_types() {
     assert_type_error("((lambda ((x i32)) i32 x) true)");
 }
 
+#[test]
+fn named_function_has_function_type() {
+    assert_eq!(
+        ty_program("(defun inc ((x i32)) i32 (+ x 1)) inc"),
+        Type::Fn(vec![Type::I32], Box::new(Type::I32))
+    );
+}
+
+#[test]
+fn dotimes_count_must_be_i32() {
+    assert_type_error("(dotimes (i true) ())");
+}
+
 // ---- typed AST shape --------------------------------------------------------
 
 #[test]

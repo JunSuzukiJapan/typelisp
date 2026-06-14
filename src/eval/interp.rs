@@ -95,6 +95,16 @@ impl Interp {
                 .get(path)
                 .map(|s| s.borrow().clone())
                 .ok_or_else(|| EvalError::Unbound(path.to_string())),
+            Expr::FnRef(path) => Ok(match self.fns.get(path) {
+                // Reify a user function as a closure with no captured environment.
+                Some(f) => RtValue::Closure(Rc::new(Closure {
+                    params: f.params.clone(),
+                    body: f.body.clone(),
+                    env: Vec::new(),
+                })),
+                // Otherwise a built-in operator (lives at the root, simple path).
+                None => RtValue::Builtin(path.local().to_string()),
+            }),
             Expr::If(c, then, els) => match self.eval(c, env)? {
                 RtValue::Bool(true) => self.eval(then, env),
                 RtValue::Bool(false) => self.eval(els, env),
@@ -154,6 +164,10 @@ impl Interp {
                         }
                         self.eval_seq(&c.body, &cenv)
                     }
+                    RtValue::Builtin(name) => match eval_builtin(&name, &argv) {
+                        Some(r) => r,
+                        None => Err(EvalError::NoSuchFunction(name)),
+                    },
                     _ => Err(EvalError::Internal("apply of a non-function value".into())),
                 }
             }

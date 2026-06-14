@@ -258,6 +258,54 @@ fn closure_captures_mutable_state() {
     assert_eq!(eval_ok(src), RtValue::Int(2));
 }
 
+// ---- named functions as values ---------------------------------------------
+
+#[test]
+fn named_function_as_value() {
+    let src = "(defun inc ((x i32)) i32 (+ x 1)) \
+               (defun call2 ((f (fn (i32) i32))) i32 (f (f 0))) \
+               (call2 inc)";
+    assert_eq!(eval_ok(src), RtValue::Int(2));
+}
+
+#[test]
+fn builtin_as_value() {
+    let src = "(defun apply2 ((f (fn (i32 i32) i32)) (a i32) (b i32)) i32 (f a b)) \
+               (apply2 + 3 4)";
+    assert_eq!(eval_ok(src), RtValue::Int(7));
+}
+
+#[test]
+fn module_function_as_value() {
+    let src = "(module m (defun inc ((x i32)) i32 (+ x 1))) \
+               (defun c ((f (fn (i32) i32))) i32 (f 9)) \
+               (c m::inc)";
+    assert_eq!(eval_ok(src), RtValue::Int(10));
+}
+
+// ---- dotimes ----------------------------------------------------------------
+
+#[test]
+fn dotimes_accumulates() {
+    assert_eq!(
+        eval_ok("(let ((sum 0)) (dotimes (i 5) (setf sum (+ sum i))) sum)"),
+        RtValue::Int(10) // 0+1+2+3+4
+    );
+}
+
+#[test]
+fn dotimes_factorial() {
+    let src = "(defun fact ((n i32)) i32 \
+                 (let ((acc 1)) (dotimes (i n) (setf acc (* acc (+ i 1)))) acc)) \
+               (fact 5)";
+    assert_eq!(eval_ok(src), RtValue::Int(120));
+}
+
+#[test]
+fn dotimes_is_unit() {
+    assert_eq!(eval_ok("(dotimes (i 3) ())"), RtValue::Unit);
+}
+
 // ---- global definitions: defvar / defconstant ------------------------------
 
 #[test]

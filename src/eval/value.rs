@@ -32,8 +32,10 @@ pub enum RtValue {
         variant: usize,
         fields: Vec<RtValue>,
     },
-    /// A function value (from a `lambda`).
+    /// A function value (from a `lambda` or a reified named function).
     Closure(Rc<Closure>),
+    /// A built-in operator used as a function value (e.g. `+`).
+    Builtin(String),
 }
 
 /// A runtime error. `Panic` is a deliberate `panic!`; the others are bugs that a
