@@ -149,3 +149,49 @@ fn divide_by_zero_panics() {
     let src = "(defun d ((a i32) (b i32)) i32 (/ a b)) (d 6 0)";
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
+
+// ---- derived control special forms -----------------------------------------
+
+#[test]
+fn when_and_unless_are_unit() {
+    assert_eq!(eval_ok("(when (< 1 2) 5)"), RtValue::Unit);
+    assert_eq!(eval_ok("(unless (< 2 1) 5)"), RtValue::Unit);
+}
+
+#[test]
+fn and_short_circuits_to_bool() {
+    assert_eq!(eval_ok("(and (< 1 2) (< 2 3))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(and (< 1 2) (< 3 2))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(and)"), RtValue::Bool(true));
+}
+
+#[test]
+fn or_short_circuits_to_bool() {
+    assert_eq!(eval_ok("(or (< 3 2) (< 1 2))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(or (< 3 2) (< 4 2))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(or)"), RtValue::Bool(false));
+}
+
+#[test]
+fn cond_selects_first_true_clause() {
+    assert_eq!(eval_ok("(cond ((< 1 2) 10) (else 20))"), RtValue::Int(10));
+    assert_eq!(
+        eval_ok("(cond ((< 3 2) 10) ((< 1 2) 20) (else 30))"),
+        RtValue::Int(20)
+    );
+    assert_eq!(eval_ok("(cond ((< 3 2) 10) (else 30))"), RtValue::Int(30));
+}
+
+#[test]
+fn let_star_binds_sequentially() {
+    assert_eq!(eval_ok("(let* ((x 1) (y (+ x 1))) y)"), RtValue::Int(2));
+    assert_eq!(eval_ok("(let* ((x 2) (y (* x x)) (z (+ y 1))) z)"), RtValue::Int(5));
+}
+
+#[test]
+fn cond_with_classify() {
+    let src = "(defun classify ((n i32)) i32 \
+                 (cond ((< n 0) (- 0 1)) ((= n 0) 0) (else 1))) \
+               (classify 7)";
+    assert_eq!(eval_ok(src), RtValue::Int(1));
+}

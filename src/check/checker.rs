@@ -513,11 +513,17 @@ impl Checker {
         match head.as_str() {
             "if" => return self.check_if(heap, env, args, expected),
             "let" => return self.check_let(heap, env, args, expected),
+            "let*" => return self.check_let_star(heap, env, args, expected),
             "progn" => {
                 let (body, ty) = self.check_seq(heap, env, args, expected)?;
                 // Represent progn as a let with no bindings.
                 return Ok(Typed { expr: Expr::Let(Vec::new(), body), ty });
             }
+            "when" => return self.check_when(heap, env, args, false),
+            "unless" => return self.check_when(heap, env, args, true),
+            "and" => return self.check_and_or(heap, env, args, true),
+            "or" => return self.check_and_or(heap, env, args, false),
+            "cond" => return self.check_cond(heap, env, args, expected),
             "match" => return self.check_match(heap, env, args, expected),
             "if-let" => return self.check_if_let(heap, env, args, expected),
             "panic!" => return self.check_panic(heap, env, args),
@@ -695,6 +701,155 @@ impl Checker {
         let child = env.extended(binds.iter().map(|(n, t)| (n.clone(), t.ty.clone())).collect());
         let (body, ty) = self.check_seq(heap, &child, &args[1..], expected)?;
         Ok(Typed { expr: Expr::Let(binds, body), ty })
+    }
+
+    /// `let*`: like `let` but each binding sees the earlier ones. Desugars to
+    /// nested single-binding `let`s.
+    fn check_let_star(
+        &self,
+        heap: &Heap,
+        env: &Env,
+        args: &[Value],
+        expected: Option<&Type>,
+    ) -> Result<Typed, Error> {
+        if args.is_empty() {
+            return Err(Error::TypeError("let*: (let* ((name val)...) body...)".into()));
+        }
+        let binds = heap.list_to_vec(args[0])?;
+        self.let_star_rec(heap, env, &binds, &args[1..], expected)
+    }
+
+    fn let_star_rec(
+        &self,
+        heap: &Heap,
+        env: &Env,
+        binds: &[Value],
+        body: &[Value],
+        expected: Option<&Type>,
+    ) -> Result<Typed, Error> {
+        if binds.is_empty() {
+            let (body, ty) = self.check_seq(heap, env, body, expected)?;
+            return Ok(Typed { expr: Expr::Let(Vec::new(), body), ty });
+        }
+        let pair = heap.list_to_vec(binds[0])?;
+        if pair.len() != 2 {
+            return Err(Error::TypeError("let*: binding must be (name val)".into()));
+        }
+        let name = match pair[0] {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            _ => return Err(Error::TypeError("let*: binding name must be a symbol".into())),
+        };
+        let val = self.check(heap, env, pair[1], None)?;
+        let child = env.extended(vec![(name.clone(), val.ty.clone())]);
+        let inner = self.let_star_rec(heap, &child, &binds[1..], body, expected)?;
+        let ty = inner.ty.clone();
+        Ok(Typed { expr: Expr::Let(vec![(name, val)], vec![inner]), ty })
+    }
+
+    /// `when`/`unless`: evaluate the body for effect when the condition holds
+    /// (`unless` negates). The result is `Unit`; the body's value is discarded.
+    fn check_when(
+        &self,
+        heap: &Heap,
+        env: &Env,
+        args: &[Value],
+        negate: bool,
+    ) -> Result<Typed, Error> {
+        if args.is_empty() {
+            return Err(Error::TypeError("when/unless: (when cond body...)".into()));
+        }
+        let cond = self.check(heap, env, args[0], Some(&Type::Bool))?;
+        let (mut body, _) = self.check_seq(heap, env, &args[1..], None)?;
+        body.push(unit_node()); // discard the body's value -> Unit
+        let guarded = Typed { expr: Expr::Let(Vec::new(), body), ty: Type::Unit };
+        let (then, els) = if negate {
+            (unit_node(), guarded)
+        } else {
+            (guarded, unit_node())
+        };
+        Ok(Typed {
+            expr: Expr::If(Box::new(cond), Box::new(then), Box::new(els)),
+            ty: Type::Unit,
+        })
+    }
+
+    /// `and`/`or`: short-circuiting boolean operators desugared to nested `if`s.
+    fn check_and_or(
+        &self,
+        heap: &Heap,
+        env: &Env,
+        args: &[Value],
+        is_and: bool,
+    ) -> Result<Typed, Error> {
+        if args.is_empty() {
+            return Ok(bool_node(is_and)); // (and) = true, (or) = false
+        }
+        let mut acc = self.check(heap, env, args[args.len() - 1], Some(&Type::Bool))?;
+        for &a in args[..args.len() - 1].iter().rev() {
+            let cond = self.check(heap, env, a, Some(&Type::Bool))?;
+            let (then, els) = if is_and {
+                (acc, bool_node(false)) // a && rest = if a then rest else false
+            } else {
+                (bool_node(true), acc) // a || rest = if a then true else rest
+            };
+            acc = Typed {
+                expr: Expr::If(Box::new(cond), Box::new(then), Box::new(els)),
+                ty: Type::Bool,
+            };
+        }
+        Ok(acc)
+    }
+
+    /// `cond`: a chain of `(test body...)` clauses with an optional final
+    /// `(else body...)`. Desugars to nested `if`s; all clause bodies must share
+    /// a type (the missing-else fall-through is `Unit`).
+    fn check_cond(
+        &self,
+        heap: &Heap,
+        env: &Env,
+        args: &[Value],
+        expected: Option<&Type>,
+    ) -> Result<Typed, Error> {
+        if args.is_empty() {
+            return Err(Error::TypeError("cond: (cond (test body...)...)".into()));
+        }
+        let clauses: Vec<Vec<Value>> =
+            args.iter().map(|c| heap.list_to_vec(*c)).collect::<Result<_, _>>()?;
+
+        // A trailing `(else body...)` provides the fall-through value.
+        let last_is_else = clauses
+            .last()
+            .and_then(|c| c.first())
+            .map(|v| is_symbol(heap, *v, "else"))
+            == Some(true);
+
+        let (mut acc, rest) = if last_is_else {
+            let els = clauses.last().unwrap();
+            let exp = expected.and_then(non_never);
+            let (body, ty) = self.check_seq(heap, env, &els[1..], exp)?;
+            (Typed { expr: Expr::Let(Vec::new(), body), ty }, &clauses[..clauses.len() - 1])
+        } else {
+            (unit_node(), &clauses[..])
+        };
+
+        for clause in rest.iter().rev() {
+            if clause.is_empty() {
+                return Err(Error::TypeError("cond: clause must be (test body...)".into()));
+            }
+            if is_symbol(heap, clause[0], "else") {
+                return Err(Error::TypeError("cond: `else` must be the last clause".into()));
+            }
+            let cond = self.check(heap, env, clause[0], Some(&Type::Bool))?;
+            let exp = non_never(&acc.ty);
+            let (body, bty) = self.check_seq(heap, env, &clause[1..], exp)?;
+            let ty = join_types(&bty, &acc.ty)?;
+            let then = Typed { expr: Expr::Let(Vec::new(), body), ty: bty };
+            acc = Typed {
+                expr: Expr::If(Box::new(cond), Box::new(then), Box::new(acc)),
+                ty,
+            };
+        }
+        Ok(acc)
     }
 
     fn check_call(
@@ -999,6 +1154,21 @@ impl Default for Checker {
 }
 
 // ---- free helpers ---------------------------------------------------------
+
+/// A typed `Unit` literal node.
+fn unit_node() -> Typed {
+    Typed { expr: Expr::Unit, ty: Type::Unit }
+}
+
+/// A typed boolean literal node.
+fn bool_node(b: bool) -> Typed {
+    Typed { expr: Expr::Bool(b), ty: Type::Bool }
+}
+
+/// Whether `v` is the symbol named `name`.
+fn is_symbol(heap: &Heap, v: Value, name: &str) -> bool {
+    matches!(v, Value::Symbol(id) if heap.symbol_name(id) == name)
+}
 
 /// `Some(t)` unless `t` is `Never` (which never constrains an expectation).
 fn non_never(t: &Type) -> Option<&Type> {

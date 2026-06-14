@@ -58,8 +58,10 @@
 
 脱糖の例: `when`→`if`+`progn`、`unless`→`if`、`if-let (pat val) then else`→2 腕 `match`（包括アームで網羅）。
 
-実装状況: `if` `let` `progn` `match` `if-let` は実装済（[src/check/checker.rs](../src/check/checker.rs)）。
-`defstruct` `module` `use` `defmethod` `panic!` は本設計で追加予定。
+実装状況: `if` `let` `let*` `progn` `when` `unless` `and` `or` `cond` `match` `if-let` `panic!`
+`defstruct` `module` `use` `defmethod` は実装済（[src/check/checker.rs](../src/check/checker.rs)）。
+`when`/`unless`/`and`/`or`/`cond`/`let*` は `if`/`let` への脱糖。残り（`case` `loop` `while` `dotimes` `dolist`
+`do` `doiter` `while-let` `setf` `defvar` `defconstant` `lambda` `the`）は今後。
 
 ---
 
