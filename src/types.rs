@@ -30,6 +30,9 @@ pub enum Type {
     Str,
     /// The unit type `()`.
     Unit,
+    /// The never / bottom type `!` (the type of `panic!` and other diverging
+    /// forms). It is compatible with — and absorbed by — any expected type.
+    Never,
     /// A nominal type with type arguments: `Option<T>`, `Vec<T>`, `Sexpr`,
     /// user structs, and (during checking) generic type variables.
     Named(String, Vec<Type>),
@@ -42,6 +45,17 @@ pub fn parse_type(heap: &Heap, v: Value) -> Result<Type, Error> {
     match v {
         Value::Empty => Ok(Type::Unit),
         Value::Symbol(id) => Ok(parse_type_name(heap.symbol_name(id))),
+        Value::Path(id) => {
+            // A qualified type name like `geometry::Point`: join the segments
+            // into a raw `::` name. The checker resolves it against modules.
+            let name = heap
+                .path_segments(id)
+                .iter()
+                .map(|s| heap.symbol_name(*s))
+                .collect::<Vec<_>>()
+                .join("::");
+            Ok(parse_type_name(&name))
+        }
         Value::Cons(_) => parse_fn_type(heap, v),
         other => Err(Error::TypeError(format!("not a type expression: {:?}", other))),
     }
@@ -89,6 +103,7 @@ fn parse_type_name(name: &str) -> Type {
             "bool" => Type::Bool,
             "char" => Type::Char,
             "string" => Type::Str,
+            "!" => Type::Never,
             _ => Type::Named(head.to_string(), Vec::new()),
         }
     } else {

@@ -41,21 +41,26 @@
 | `24199e4` | `Value` を Sexpr 表現に（`Empty`/`Bool`/`Symbol`/`Str`）、文字列 GC、シンボル大小無視 |
 | `92bd216` | CL 風 reader → Sexpr（read/read_all、rooting で GC 安全）、旧 Object/eval/旧テスト撤去 |
 | `8143242` | `Type` 表現 + 型パース（3a） |
-| （次コミット） | 型付き AST + 型検査器（3b/3c）: defun/let/if/literal/var/call/構成子/match/if-let、組み込み直和型 Option/Sexpr |
+| `8a8e211` | 型付き AST + 型検査器（3b/3c）: defun/let/if/literal/var/call/構成子/match/if-let、組み込み直和型 Option/Sexpr |
+| `aec77f3` | clippy 警告解消（Error の Display 実装、Reader の Default） |
+| （未コミット） | エラー処理（Result/Error/Never/`panic!`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
-**テスト**: `cargo test` で mem 28 / read 19 / type 7 / check 22 = 76 件 green、警告0。
-**Miri**: `cargo +nightly miri test --test mem_test`（25/25、重い2件除外）, `--test read_test`（19/19）— UB/リーク無し。
+**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 22 / error 10 / namespace 11 = 101 件 green、警告0（clippy 含む）。
+**Miri**: `cargo +nightly miri test --test mem_test`（26/28、重い2件除外）— `Value::Path` 追加後も UB/リーク無し。
+
+### 確定仕様ドキュメント
+- [language-design.md](language-design.md) — `::`/module/型の関係、特殊形・関数カタログ（Rust 組み込み vs typelisp）、defmethod、defstruct、エラー処理（Result/Never/panic!）。
 
 ### 主要ファイル
-- `src/mem/value.rs` — `Value` / `ConsRef` / `SymId` / `StrId` / `Cell`
-- `src/mem/heap.rs` — `Heap`（割当・car/cdr・set・GC・シンボル・文字列・`list_to_vec`・ルート）
-- `src/read/reader.rs` — `Reader::read` / `read_all`
-- `src/types.rs` — `Type` / `parse_type`
-- `src/check/ast.rs` — `Typed` / `Expr` / `Pattern` / `Arm`（型付き AST）
-- `src/check/registry.rs` — `AdtDef`/`Variant`/`FnSig`/`Registry`（組み込み Option/Sexpr）
-- `src/check/checker.rs` — `Checker`（`check_form` 入口、defun/let/if/call/構成子/match/if-let、双方向検査・単段具体化・網羅性）
-- `src/errors.rs` — `Error`（`HeapExhausted`/`NotACons`/`ImproperList`/`TypeError` 等）
-- `tests/{mem,read,type,check}_test.rs`
+- `src/mem/value.rs` — `Value`（`Path` 追加）/ `ConsRef` / `SymId` / `StrId` / `PathId` / `Cell`
+- `src/mem/heap.rs` — `Heap`（割当・car/cdr・set・GC・シンボル・文字列・パス intern・`list_to_vec`・ルート）
+- `src/read/reader.rs` — `Reader::read` / `read_all`（`::` を top-level で分割し `Value::Path` 生成）
+- `src/types.rs` — `Type`（`Never` 追加）/ `parse_type`（Path/`!` 対応）
+- `src/check/ast.rs` — `Typed` / `Expr`（`Call`/`Assoc`/`Panic` 等）/ `Pattern` / `Arm`
+- `src/check/registry.rs` — `AdtDef`(assoc 付)/`Variant`/`FnSig`/`AssocFn`/`Registry`（組み込み Option/Result/Error/Sexpr、modules/aliases）
+- `src/check/checker.rs` — `Checker`（`check_form` 入口、`ns` 状態、名前解決 現NS→root、defun/defstruct/module/defmethod/use、双方向検査・単段具体化・網羅性・Never 適合）
+- `src/errors.rs` — `Error`（`HeapExhausted`/`NotACons`/`ImproperList`/`TypeError` 等、全バリアント Display 実装）
+- `tests/{mem,read,type,check,error,namespace}_test.rs`
 
 ### ビルド注意
 - `inkwell` は manifest から一旦除外（ロック可能な版に `llvm18-0` feature が無かったため）。
@@ -110,14 +115,22 @@
 - 型名は小文字正規化される点に注意（`String`→`string`, 型変数 `T`→`t`）。
 </details>
 
+## 3.5 エラー処理 + 名前空間（**完了**・型検査レベル）
+確定仕様は [language-design.md](language-design.md)。実装済み（すべて型検査レベル、eval は未着手）:
+- **エラー処理**: `Result<T,E>`/`Error` 組み込み、`Never` 型(`!`)、`panic!` 特殊形（任意の期待型に適合）。`?`/try は無し。
+- **`::`/名前空間**: reader が `::` を `Value::Path` に分割。**型は名前空間でなく Rust 同様**（型は assoc 関数/メソッドを持つ）。
+  `module`/`use`、`defstruct`（直和形・非ジェネリック）、`defmethod`（インスタンス `(self T)` / static `(T ...)`）、
+  インスタンス・ディスパッチ（第一引数型）と `Type::method` 静的呼び出し、裸名解決 現NS→root。
+- **未実装（後続）**: ジェネリック構造体/受け手、module 全体取り込み `use`、可視性、関数カタログの実装本体（eval 待ち）。
+
 ## 4. 次回の作業（ステップ4：eval）
 - **型付き AST（`check::Typed`）上のツリーウォークインタプリタ**。既定の実行経路。
   - 実行時値の表現を設計（リテラル＝`mem::Value` 系で足りる／構成子つきデータ＝直和インスタンス＝`(タグ, フィールド…)`、
-    クロージャ）。`Sexpr`/`Option` の構成子・パターン照合を実装。
-  - `Checker` が返す `TopLevel::{Defun,Expr}` を評価。関数は `defun` レジストリ＋環境で解決。
+    クロージャ）。`Sexpr`/`Option`/`Result` の構成子・パターン照合、`panic!` の中断、メソッド（`Expr::Assoc`）の評価。
+  - `Checker` が返す `TopLevel::{Defun,Defmethod,Defstruct,Module,Use,Expr}` を評価。関数/メソッドは FQ 名で解決。
   - TDD: `tests/eval_test.rs`（`unwrap-or` を実際に評価して値が返る、等）。
   - 検討: 構成子インスタンスを cons ヒープ上に表現するか、別ストアにするか（GC との整合）。
-    算術等の組み込み関数（`+` 等）の型登録＋評価をどこまで入れるか。
+    算術等の組み込み関数（`+` 等）の型登録＋評価をどこまで入れるか（カタログは language-design.md §3）。
 - **ステップ5: compile**（明示 `compile`/`compile-file`。inkwell 再追加・LLVM コード生成。feature gate）。
 
 ---

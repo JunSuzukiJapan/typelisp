@@ -6,5 +6,5 @@
 pub mod value;
 pub mod heap;
 
-pub use value::{ConsRef, StrId, SymId, Value};
+pub use value::{ConsRef, PathId, StrId, SymId, Value};
 pub use heap::Heap;

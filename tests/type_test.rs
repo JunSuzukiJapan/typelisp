@@ -59,6 +59,22 @@ fn sexpr_and_user_types_are_named() {
 }
 
 #[test]
+fn never_type() {
+    assert_eq!(parse("!"), Type::Never);
+}
+
+#[test]
+fn qualified_path_types() {
+    // `geometry::Point` reads as a Path; its raw name keeps the `::`.
+    assert_eq!(parse("geometry::Point"), Type::Named("geometry::point".into(), vec![]));
+    // generics stay on the last segment
+    assert_eq!(
+        parse("geometry::Vec<String>"),
+        Type::Named("geometry::vec".into(), vec![Type::Str])
+    );
+}
+
+#[test]
 fn function_types() {
     assert_eq!(
         parse("(fn (i32 i32) i32)"),

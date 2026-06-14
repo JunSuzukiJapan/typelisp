@@ -10,18 +10,33 @@ use std::collections::{HashMap, HashSet};
 use crate::{parse_type, Error, Heap, Type, Value};
 
 use super::ast::{Arm, Expr, Pattern, Typed};
-use super::registry::{FnSig, Registry};
+use super::registry::{AdtDef, AssocFn, FnSig, Registry, Variant};
 
 /// A checked top-level form.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TopLevel {
-    /// A `defun`: name, typed parameters, return type, and checked body.
+    /// A `defun`: fully-qualified name, typed parameters, return type, body.
     Defun {
         name: String,
         params: Vec<(String, Type)>,
         ret: Type,
         body: Vec<Typed>,
     },
+    /// A `defmethod`: instance or static associated function of a type.
+    Defmethod {
+        type_name: String,
+        method: String,
+        instance: bool,
+        params: Vec<(String, Type)>,
+        ret: Type,
+        body: Vec<Typed>,
+    },
+    /// A `defstruct`: a user data type.
+    Defstruct { name: String, params: Vec<String>, variants: Vec<Variant> },
+    /// A `module`: a namespace and its checked body forms.
+    Module { path: String, body: Vec<TopLevel> },
+    /// A `use`: a name brought into the current scope (alias -> FQ target).
+    Use { alias: String, target: String },
     /// A bare top-level expression.
     Expr(Typed),
 }
@@ -49,30 +64,131 @@ impl Env {
     }
 }
 
-/// The type checker, holding the data-type and function registries.
+/// The type checker, holding the data-type and function registries plus the
+/// current namespace (module) path.
 pub struct Checker {
     reg: Registry,
+    ns: Vec<String>,
 }
 
 impl Checker {
     pub fn new() -> Checker {
-        Checker { reg: Registry::with_builtins() }
+        Checker { reg: Registry::with_builtins(), ns: Vec::new() }
     }
 
-    /// Check one top-level form. A `(defun ...)` registers its signature and
-    /// checks its body; anything else is checked as an expression.
+    /// Check one top-level form. Definition forms (`defun`/`defstruct`/`module`/
+    /// `defmethod`/`use`) register into the current namespace; anything else is
+    /// checked as an expression.
     pub fn check_form(&mut self, heap: &Heap, v: Value) -> Result<TopLevel, Error> {
         if let Value::Cons(_) = v {
             let elems = heap.list_to_vec(v)?;
             if let Some(Value::Symbol(id)) = elems.first() {
-                if heap.symbol_name(*id) == "defun" {
-                    return self.check_defun(heap, &elems[1..]);
+                match heap.symbol_name(*id) {
+                    "defun" => return self.check_defun(heap, &elems[1..]),
+                    "defstruct" => return self.check_defstruct(heap, &elems[1..]),
+                    "module" => return self.check_module(heap, &elems[1..]),
+                    "defmethod" => return self.check_defmethod(heap, &elems[1..]),
+                    "use" => return self.check_use(heap, &elems[1..]),
+                    _ => {}
                 }
             }
         }
         let env = Env::new();
         let t = self.check(heap, &env, v, None)?;
         Ok(TopLevel::Expr(t))
+    }
+
+    // ---- namespace helpers ------------------------------------------------
+
+    /// The current namespace path joined with `::` (empty at root).
+    fn ns_prefix(&self) -> String {
+        self.ns.join("::")
+    }
+
+    /// Qualify a bare name with the current namespace.
+    fn fq(&self, name: &str) -> String {
+        if self.ns.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}::{}", self.ns_prefix(), name)
+        }
+    }
+
+    /// Candidate keys for resolving `name`: current namespace first, then root.
+    fn candidates(&self, name: &str) -> Vec<String> {
+        if self.ns.is_empty() {
+            vec![name.to_string()]
+        } else {
+            vec![self.fq(name), name.to_string()]
+        }
+    }
+
+    /// Follow one level of `use` aliasing.
+    fn unalias(&self, key: &str) -> String {
+        self.reg.aliases.get(key).cloned().unwrap_or_else(|| key.to_string())
+    }
+
+    /// Resolve a (possibly `::`-qualified) free-function name to its FQ key.
+    fn resolve_fn(&self, name: &str) -> Option<String> {
+        for cand in self.candidates(name) {
+            let key = self.unalias(&cand);
+            if self.reg.fns.contains_key(&key) {
+                return Some(key);
+            }
+        }
+        None
+    }
+
+    /// Resolve a constructor name to its `(FQ type, variant index)`.
+    fn resolve_ctor(&self, name: &str) -> Option<(String, usize)> {
+        for cand in self.candidates(name) {
+            let key = self.unalias(&cand);
+            if let Some(hit) = self.reg.variant_index.get(&key) {
+                return Some(hit.clone());
+            }
+        }
+        None
+    }
+
+    /// Resolve a nominal type name to its FQ key if a matching type exists;
+    /// otherwise (type variables, not-yet-known names) return it unchanged.
+    fn resolve_type_name(&self, raw: &str) -> String {
+        for cand in self.candidates(raw) {
+            let key = self.unalias(&cand);
+            if self.reg.adts.contains_key(&key) {
+                return key;
+            }
+        }
+        raw.to_string()
+    }
+
+    /// Canonicalize a parsed type: resolve every nominal name to its FQ form so
+    /// that types compare equal across module boundaries.
+    fn canon(&self, t: &Type) -> Type {
+        match t {
+            Type::Named(n, args) => Type::Named(
+                self.resolve_type_name(n),
+                args.iter().map(|a| self.canon(a)).collect(),
+            ),
+            Type::Fn(ps, r) => Type::Fn(
+                ps.iter().map(|p| self.canon(p)).collect(),
+                Box::new(self.canon(r)),
+            ),
+            other => other.clone(),
+        }
+    }
+
+    /// The lowercase segments of a module/use path (a symbol or a `Value::Path`).
+    fn path_to_segs(&self, heap: &Heap, v: Value) -> Result<Vec<String>, Error> {
+        match v {
+            Value::Symbol(id) => Ok(vec![heap.symbol_name(id).to_string()]),
+            Value::Path(id) => Ok(heap
+                .path_segments(id)
+                .iter()
+                .map(|s| heap.symbol_name(*s).to_string())
+                .collect()),
+            _ => Err(Error::TypeError("expected a name or `::` path".into())),
+        }
     }
 
     // ---- defun ------------------------------------------------------------
@@ -86,32 +202,187 @@ impl Checker {
             _ => return Err(Error::TypeError("defun: name must be a symbol".into())),
         };
         let params = self.parse_params(heap, parts[1])?;
-        let ret = parse_type(heap, parts[2])?;
+        let ret = self.canon(&parse_type(heap, parts[2])?);
+        let fq_name = self.fq(&name);
 
         // Register the signature before checking the body so self-recursion works.
         let sig = FnSig { params: params.iter().map(|(_, t)| t.clone()).collect(), ret: ret.clone() };
-        self.reg.fns.insert(name.clone(), sig);
+        self.reg.fns.insert(fq_name.clone(), sig);
 
         let env = Env::new().extended(params.clone());
         let (body, _) = self.check_seq(heap, &env, &parts[3..], Some(&ret))?;
-        Ok(TopLevel::Defun { name, params, ret, body })
+        Ok(TopLevel::Defun { name: fq_name, params, ret, body })
     }
 
-    /// Parse a `((name type)...)` parameter list.
+    /// Parse a `((name type)...)` parameter list (types canonicalized to FQ).
     fn parse_params(&self, heap: &Heap, v: Value) -> Result<Vec<(String, Type)>, Error> {
+        let elems = heap.list_to_vec(v)?;
+        self.parse_param_pairs(heap, &elems)
+    }
+
+    /// Parse a slice of `(name type)` binding forms.
+    fn parse_param_pairs(&self, heap: &Heap, pairs: &[Value]) -> Result<Vec<(String, Type)>, Error> {
         let mut out = Vec::new();
-        for binding in heap.list_to_vec(v)? {
-            let pair = heap.list_to_vec(binding)?;
+        for binding in pairs {
+            let pair = heap.list_to_vec(*binding)?;
             if pair.len() != 2 {
-                return Err(Error::TypeError("defun: parameter must be (name type)".into()));
+                return Err(Error::TypeError("parameter must be (name type)".into()));
             }
             let name = match pair[0] {
                 Value::Symbol(id) => heap.symbol_name(id).to_string(),
-                _ => return Err(Error::TypeError("defun: parameter name must be a symbol".into())),
+                _ => return Err(Error::TypeError("parameter name must be a symbol".into())),
             };
-            out.push((name, parse_type(heap, pair[1])?));
+            out.push((name, self.canon(&parse_type(heap, pair[1])?)));
         }
         Ok(out)
+    }
+
+    // ---- defstruct / module / defmethod / use -----------------------------
+
+    fn check_defstruct(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
+        if parts.is_empty() {
+            return Err(Error::TypeError("defstruct: (defstruct Name (Ctor (field Type)...)...)".into()));
+        }
+        let name = match parts[0] {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            _ => return Err(Error::TypeError("defstruct: name must be a symbol".into())),
+        };
+        let fq = self.fq(&name);
+        let mut variants = Vec::new();
+        for vform in &parts[1..] {
+            let velems = heap.list_to_vec(*vform)?;
+            if velems.is_empty() {
+                return Err(Error::TypeError("defstruct: variant must be (Ctor (field Type)...)".into()));
+            }
+            let cname = match velems[0] {
+                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                _ => return Err(Error::TypeError("defstruct: constructor must be a symbol".into())),
+            };
+            let mut fields = Vec::new();
+            for fform in &velems[1..] {
+                let fpair = heap.list_to_vec(*fform)?;
+                if fpair.len() != 2 {
+                    return Err(Error::TypeError("defstruct: field must be (name type)".into()));
+                }
+                fields.push(self.canon(&parse_type(heap, fpair[1])?));
+            }
+            variants.push(Variant { name: cname, fields });
+        }
+        let def = AdtDef {
+            name: fq.clone(),
+            params: Vec::new(),
+            variants: variants.clone(),
+            assoc: HashMap::new(),
+        };
+        self.reg.add_adt(def);
+        Ok(TopLevel::Defstruct { name: fq, params: Vec::new(), variants })
+    }
+
+    fn check_module(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
+        if parts.is_empty() {
+            return Err(Error::TypeError("module: (module path body...)".into()));
+        }
+        let segs = self.path_to_segs(heap, parts[0])?;
+        let depth = segs.len();
+        for s in &segs {
+            self.ns.push(s.clone());
+        }
+        let path = self.ns_prefix();
+        self.reg.modules.insert(path.clone());
+
+        let mut body = Vec::new();
+        let mut result = Ok(());
+        for form in &parts[1..] {
+            match self.check_form(heap, *form) {
+                Ok(tl) => body.push(tl),
+                Err(e) => {
+                    result = Err(e);
+                    break;
+                }
+            }
+        }
+        for _ in 0..depth {
+            self.ns.pop();
+        }
+        result?;
+        Ok(TopLevel::Module { path, body })
+    }
+
+    fn check_defmethod(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
+        if parts.len() < 3 {
+            return Err(Error::TypeError(
+                "defmethod: (defmethod name (receiver params...) ret body...)".into(),
+            ));
+        }
+        let method = match parts[0] {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            _ => return Err(Error::TypeError("defmethod: name must be a symbol".into())),
+        };
+        let sig_list = heap.list_to_vec(parts[1])?;
+        if sig_list.is_empty() {
+            return Err(Error::TypeError("defmethod: needs a receiver".into()));
+        }
+        // `(self T)` -> instance method; a bare type name -> static method.
+        let (instance, self_name, type_expr) = match sig_list[0] {
+            Value::Cons(_) => {
+                let recv = heap.list_to_vec(sig_list[0])?;
+                if recv.len() != 2 {
+                    return Err(Error::TypeError("defmethod: receiver must be (self Type)".into()));
+                }
+                let sname = match recv[0] {
+                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    _ => return Err(Error::TypeError("defmethod: receiver name must be a symbol".into())),
+                };
+                (true, Some(sname), recv[1])
+            }
+            Value::Symbol(_) | Value::Path(_) => (false, None, sig_list[0]),
+            _ => return Err(Error::TypeError("defmethod: receiver must be (self Type) or a type name".into())),
+        };
+        let recv_ty = self.canon(&parse_type(heap, type_expr)?);
+        let type_fq = match &recv_ty {
+            Type::Named(n, _) => n.clone(),
+            _ => return Err(Error::TypeError("defmethod: receiver must be a data type".into())),
+        };
+        if !self.reg.adts.contains_key(&type_fq) {
+            return Err(Error::TypeError(format!("defmethod: unknown type `{}`", type_fq)));
+        }
+        let params = self.parse_param_pairs(heap, &sig_list[1..])?;
+        let ret = self.canon(&parse_type(heap, parts[2])?);
+
+        // Register the signature before checking the body (self-recursion).
+        let mut sig_params: Vec<Type> = Vec::new();
+        if instance {
+            sig_params.push(recv_ty.clone());
+        }
+        sig_params.extend(params.iter().map(|(_, t)| t.clone()));
+        let sig = FnSig { params: sig_params, ret: ret.clone() };
+        if let Some(def) = self.reg.adts.get_mut(&type_fq) {
+            def.assoc.insert(method.clone(), AssocFn { sig, instance });
+        }
+
+        let mut binds: Vec<(String, Type)> = Vec::new();
+        if let Some(s) = &self_name {
+            binds.push((s.clone(), recv_ty.clone()));
+        }
+        binds.extend(params.clone());
+        let env = Env::new().extended(binds);
+        let (body, _) = self.check_seq(heap, &env, &parts[3..], Some(&ret))?;
+        Ok(TopLevel::Defmethod { type_name: type_fq, method, instance, params, ret, body })
+    }
+
+    fn check_use(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
+        if parts.len() != 1 {
+            return Err(Error::TypeError("use: (use path)".into()));
+        }
+        let segs = self.path_to_segs(heap, parts[0])?;
+        let target = segs.join("::");
+        let bare = segs.last().cloned().unwrap();
+        if !self.reg.fns.contains_key(&target) && !self.reg.adts.contains_key(&target) {
+            return Err(Error::TypeError(format!("use: unresolved `{}`", target)));
+        }
+        let alias = self.fq(&bare);
+        self.reg.aliases.insert(alias.clone(), target.clone());
+        Ok(TopLevel::Use { alias, target })
     }
 
     // ---- expressions ------------------------------------------------------
@@ -150,12 +421,18 @@ impl Checker {
                 }
             }
             Value::Cons(_) => self.check_list(heap, env, v, expected)?,
+            Value::Path(_) => {
+                // A bare `::` path as an expression (e.g. a qualified constant).
+                // Namespace/type path resolution lands in a later phase.
+                return Err(Error::TypeError("`::` paths are not yet supported here".into()));
+            }
         };
         // Reconcile synthesized types against the expectation. Literal and
         // constructor nodes already adopted `expected`, so this only fires on a
-        // genuine mismatch.
+        // genuine mismatch. `Never` (a diverging expression) satisfies any
+        // expected type.
         if let Some(e) = expected {
-            if &typed.ty != e {
+            if typed.ty != Type::Never && &typed.ty != e {
                 return Err(Error::TypeError(format!(
                     "type mismatch: expected {:?}, found {:?}",
                     e, typed.ty
@@ -174,31 +451,149 @@ impl Checker {
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
         let elems = heap.list_to_vec(v)?;
+        let args = &elems[1..];
+
+        // A `::`-path head is a module-qualified function or a `Type::method`
+        // static associated function.
+        if let Value::Path(pid) = elems[0] {
+            let segs: Vec<String> = heap
+                .path_segments(pid)
+                .iter()
+                .map(|s| heap.symbol_name(*s).to_string())
+                .collect();
+            return self.check_path_call(heap, env, &segs, args, expected);
+        }
+
         let head = match elems[0] {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
-            _ => return Err(Error::TypeError("call head must be a symbol".into())),
+            _ => return Err(Error::TypeError("call head must be a symbol or path".into())),
         };
-        let args = &elems[1..];
         match head.as_str() {
-            "if" => self.check_if(heap, env, args, expected),
-            "let" => self.check_let(heap, env, args, expected),
+            "if" => return self.check_if(heap, env, args, expected),
+            "let" => return self.check_let(heap, env, args, expected),
             "progn" => {
                 let (body, ty) = self.check_seq(heap, env, args, expected)?;
                 // Represent progn as a let with no bindings.
-                Ok(Typed { expr: Expr::Let(Vec::new(), body), ty })
+                return Ok(Typed { expr: Expr::Let(Vec::new(), body), ty });
             }
-            "match" => self.check_match(heap, env, args, expected),
-            "if-let" => self.check_if_let(heap, env, args, expected),
-            _ => {
-                if let Some((adt, idx)) = self.reg.variant_index.get(&head).cloned() {
-                    self.check_construct(heap, env, &adt, idx, args, expected)
-                } else if self.reg.fns.contains_key(&head) {
-                    self.check_call(heap, env, &head, args)
-                } else {
-                    Err(Error::NoSuchFunction(head))
+            "match" => return self.check_match(heap, env, args, expected),
+            "if-let" => return self.check_if_let(heap, env, args, expected),
+            "panic!" => return self.check_panic(heap, env, args),
+            _ => {}
+        }
+        // Constructor, then free function, then instance-method dispatch.
+        if let Some((adt, idx)) = self.resolve_ctor(&head) {
+            self.check_construct(heap, env, &adt, idx, args, expected)
+        } else if let Some(fq) = self.resolve_fn(&head) {
+            self.check_call(heap, env, &fq, args)
+        } else {
+            self.check_instance_method(heap, env, &head, args)
+        }
+    }
+
+    /// A `::`-qualified call: a module-qualified free function, or a
+    /// `Type::method` static associated function.
+    fn check_path_call(
+        &self,
+        heap: &Heap,
+        env: &Env,
+        segs: &[String],
+        args: &[Value],
+        expected: Option<&Type>,
+    ) -> Result<Typed, Error> {
+        let joined = segs.join("::");
+        if let Some(fq) = self.resolve_fn(&joined) {
+            return self.check_call(heap, env, &fq, args);
+        }
+        // A fully-qualified constructor, e.g. `geometry::point::mk`.
+        if let Some((adt, idx)) = self.resolve_ctor(&joined) {
+            return self.check_construct(heap, env, &adt, idx, args, expected);
+        }
+        if segs.len() >= 2 {
+            let method = &segs[segs.len() - 1];
+            let type_fq = self.resolve_type_name(&segs[..segs.len() - 1].join("::"));
+            if let Some(def) = self.reg.adts.get(&type_fq) {
+                if let Some(af) = def.assoc.get(method) {
+                    if af.instance {
+                        return Err(Error::TypeError(format!(
+                            "`{}` is an instance method; call it as ({} obj ...)",
+                            joined, method
+                        )));
+                    }
+                    return self.check_assoc_call(heap, env, &type_fq, method, None, args);
                 }
             }
         }
+        Err(Error::TypeError(format!("unresolved path: {}", joined)))
+    }
+
+    /// Dispatch a bare call `(m recv args...)` as an instance method on the
+    /// static type of its first argument.
+    fn check_instance_method(
+        &self,
+        heap: &Heap,
+        env: &Env,
+        method: &str,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
+        if !args.is_empty() {
+            let recv = self.check(heap, env, args[0], None)?;
+            let type_fq = match &recv.ty {
+                Type::Named(n, _) => Some(n.clone()),
+                _ => None,
+            };
+            if let Some(type_fq) = type_fq {
+                if let Some(def) = self.reg.adts.get(&type_fq) {
+                    if def.assoc.get(method).map(|a| a.instance) == Some(true) {
+                        return self
+                            .check_assoc_call(heap, env, &type_fq, method, Some(recv), &args[1..]);
+                    }
+                }
+            }
+        }
+        Err(Error::NoSuchFunction(method.to_string()))
+    }
+
+    /// Check a call to a type-associated function. For an instance method the
+    /// already-checked `receiver` fills the first parameter slot.
+    fn check_assoc_call(
+        &self,
+        heap: &Heap,
+        env: &Env,
+        type_fq: &str,
+        method: &str,
+        receiver: Option<Typed>,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
+        let instance = receiver.is_some();
+        let af = self.reg.adts[type_fq].assoc[method].clone();
+        let offset = if instance { 1 } else { 0 };
+        let expected_params = &af.sig.params[offset..];
+        if args.len() != expected_params.len() {
+            return Err(Error::TypeError(format!(
+                "{}::{}: expected {} argument(s), got {}",
+                type_fq,
+                method,
+                expected_params.len(),
+                args.len()
+            )));
+        }
+        let mut typed = Vec::new();
+        if let Some(r) = receiver {
+            typed.push(r);
+        }
+        for (arg, pty) in args.iter().zip(expected_params.iter()) {
+            typed.push(self.check(heap, env, *arg, Some(pty))?);
+        }
+        Ok(Typed {
+            expr: Expr::Assoc {
+                type_name: type_fq.to_string(),
+                method: method.to_string(),
+                instance,
+                args: typed,
+            },
+            ty: af.sig.ret,
+        })
     }
 
     fn check_if(
@@ -213,12 +608,19 @@ impl Checker {
         }
         let cond = self.check(heap, env, args[0], Some(&Type::Bool))?;
         let then = self.check(heap, env, args[1], expected)?;
-        let then_ty = then.ty.clone();
-        let els = self.check(heap, env, args[2], Some(&then_ty))?;
-        Ok(Typed {
-            expr: Expr::If(Box::new(cond), Box::new(then), Box::new(els)),
-            ty: then_ty,
-        })
+        // A diverging (`Never`) then branch must not constrain the else branch.
+        let else_expected = non_never(&then.ty).or(expected);
+        let els = self.check(heap, env, args[2], else_expected)?;
+        let ty = join_types(&then.ty, &els.ty)?;
+        Ok(Typed { expr: Expr::If(Box::new(cond), Box::new(then), Box::new(els)), ty })
+    }
+
+    fn check_panic(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+        if args.len() != 1 {
+            return Err(Error::TypeError("panic!: (panic! message)".into()));
+        }
+        let msg = self.check(heap, env, args[0], Some(&Type::Str))?;
+        Ok(Typed { expr: Expr::Panic(Box::new(msg)), ty: Type::Never })
     }
 
     fn check_let(
@@ -371,10 +773,14 @@ impl Checker {
                 _ => {}
             }
             let arm_env = env.extended(binds);
-            let (body, body_ty) = self.check_seq(heap, &arm_env, &parts[1..], result_ty.as_ref())?;
-            if result_ty.is_none() {
-                result_ty = Some(body_ty);
-            }
+            // Diverging arms don't constrain the result type; concrete arms must
+            // all agree (Never joins with anything).
+            let arm_expected = result_ty.as_ref().and_then(non_never);
+            let (body, body_ty) = self.check_seq(heap, &arm_env, &parts[1..], arm_expected)?;
+            result_ty = Some(match result_ty {
+                None => body_ty,
+                Some(r) => join_types(&r, &body_ty)?,
+            });
             arms.push(Arm { pat, body });
         }
 
@@ -467,10 +873,7 @@ impl Checker {
             _ => return Err(Error::TypeError("pattern: constructor must be a symbol".into())),
         };
         let (adt_name, variant) = self
-            .reg
-            .variant_index
-            .get(&ctor)
-            .cloned()
+            .resolve_ctor(&ctor)
             .ok_or_else(|| Error::TypeError(format!("unknown constructor in pattern: {}", ctor)))?;
 
         let (exp_adt, targs) = self.expect_adt(expected)?;
@@ -557,6 +960,33 @@ impl Default for Checker {
 
 // ---- free helpers ---------------------------------------------------------
 
+/// `Some(t)` unless `t` is `Never` (which never constrains an expectation).
+fn non_never(t: &Type) -> Option<&Type> {
+    if *t == Type::Never {
+        None
+    } else {
+        Some(t)
+    }
+}
+
+/// Join two branch types: `Never` is absorbed by the other; otherwise the two
+/// must be equal.
+fn join_types(a: &Type, b: &Type) -> Result<Type, Error> {
+    if *a == Type::Never {
+        return Ok(b.clone());
+    }
+    if *b == Type::Never {
+        return Ok(a.clone());
+    }
+    if a == b {
+        return Ok(a.clone());
+    }
+    Err(Error::TypeError(format!(
+        "branches have incompatible types: {:?} vs {:?}",
+        a, b
+    )))
+}
+
 fn is_integer_type(t: &Type) -> bool {
     matches!(
         t,
@@ -626,6 +1056,10 @@ fn unify(
     actual: &Type,
     subst: &mut HashMap<String, Type>,
 ) -> Result<(), Error> {
+    // A diverging value (`Never`) unifies with any template without binding.
+    if *actual == Type::Never {
+        return Ok(());
+    }
     if let Type::Named(n, args) = tmpl {
         if args.is_empty() && params.contains(n) {
             return match subst.get(n) {

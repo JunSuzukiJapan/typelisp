@@ -9,5 +9,5 @@ pub mod registry;
 pub mod checker;
 
 pub use ast::{Arm, Expr, Pattern, Typed};
-pub use registry::{AdtDef, FnSig, Registry, Variant};
+pub use registry::{AdtDef, AssocFn, FnSig, Registry, Variant};
 pub use checker::{Checker, TopLevel};

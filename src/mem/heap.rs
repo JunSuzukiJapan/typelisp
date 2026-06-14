@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::ptr;
 
 use crate::Error;
-use super::value::{Cell, ConsRef, StrId, SymId, Value};
+use super::value::{Cell, ConsRef, PathId, StrId, SymId, Value};
 
 pub struct Heap {
     base: *mut Cell, // start of the cons arena; owns the allocation
@@ -37,6 +37,10 @@ pub struct Heap {
     // interned symbols (permanent)
     sym_names: Vec<String>,
     sym_ids: HashMap<String, u32>,
+
+    // interned `::` paths (permanent; reference only permanent symbols)
+    paths: Vec<Vec<SymId>>,
+    path_ids: HashMap<Vec<SymId>, u32>,
 
     // GC-managed string store
     str_slots: Vec<Option<String>>,
@@ -69,6 +73,8 @@ impl Heap {
             roots: Vec::new(),
             sym_names: Vec::new(),
             sym_ids: HashMap::new(),
+            paths: Vec::new(),
+            path_ids: HashMap::new(),
             str_slots: Vec::new(),
             str_free: Vec::new(),
             str_marks: Vec::new(),
@@ -141,6 +147,26 @@ impl Heap {
     /// The name of an interned symbol.
     pub fn symbol_name(&self, id: SymId) -> &str {
         &self.sym_names[id.0 as usize]
+    }
+
+    // ---- paths ------------------------------------------------------------
+
+    /// Intern a `::` path from its symbol segments, returning a `Value::Path`.
+    /// Paths are permanent (they reference only permanent symbols), and equal
+    /// segment sequences share one [`PathId`].
+    pub fn intern_path(&mut self, segs: &[SymId]) -> Value {
+        if let Some(&id) = self.path_ids.get(segs) {
+            return Value::Path(PathId(id));
+        }
+        let id = self.paths.len() as u32;
+        self.paths.push(segs.to_vec());
+        self.path_ids.insert(segs.to_vec(), id);
+        Value::Path(PathId(id))
+    }
+
+    /// The symbol segments of an interned path.
+    pub fn path_segments(&self, id: PathId) -> &[SymId] {
+        &self.paths[id.0 as usize]
     }
 
     // ---- strings ----------------------------------------------------------

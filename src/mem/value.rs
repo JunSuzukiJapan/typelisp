@@ -61,6 +61,10 @@ pub struct SymId(pub(crate) u32);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct StrId(pub(crate) u32);
 
+/// Reference to an interned `::` path (a sequence of symbols) in the heap.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct PathId(pub(crate) u32);
+
 /// A Lisp value — the runtime encoding of `Sexpr` (and `Option<Sexpr>`).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Value {
@@ -73,6 +77,10 @@ pub enum Value {
     Symbol(SymId),
     Str(StrId),
     Cons(ConsRef),
+    /// A `::`-qualified path such as `std::process::exit`, produced by the
+    /// reader by splitting the token into interned symbol segments. The checker
+    /// decides whether each segment names a module or a type.
+    Path(PathId),
 }
 
 impl Value {

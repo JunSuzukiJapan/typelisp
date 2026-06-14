@@ -3,25 +3,16 @@
 //! Type and variant names are stored lowercase because the reader case-folds all
 //! symbols. The built-in types `Option<T>` and `Sexpr` are pre-registered.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::Type;
 
 /// One constructor of a data type: a name and its field types. Field types may
 /// reference the enclosing type's parameters as `Type::Named(param, [])`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Variant {
     pub name: String,
     pub fields: Vec<Type>,
-}
-
-/// A data-type definition (a sum type / `defstruct`-style ADT).
-#[derive(Clone, Debug)]
-pub struct AdtDef {
-    pub name: String,
-    /// Type-parameter names (lowercase), e.g. `["t"]` for `Option<T>`.
-    pub params: Vec<String>,
-    pub variants: Vec<Variant>,
 }
 
 /// A function's parameter and return types.
@@ -31,31 +22,69 @@ pub struct FnSig {
     pub ret: Type,
 }
 
-/// The checker's symbol tables: data types, a constructor-name index, functions.
+/// A type-associated function or method (Rust-style; types are *not*
+/// namespaces). `instance` is true when the first parameter is the receiver.
+#[derive(Clone, Debug)]
+pub struct AssocFn {
+    pub sig: FnSig,
+    pub instance: bool,
+}
+
+/// A data-type definition (a sum type / `defstruct`-style ADT). `name` is the
+/// fully-qualified (module-prefixed) lowercase type name.
+#[derive(Clone, Debug)]
+pub struct AdtDef {
+    pub name: String,
+    /// Type-parameter names (lowercase), e.g. `["t"]` for `Option<T>`.
+    pub params: Vec<String>,
+    pub variants: Vec<Variant>,
+    /// Associated functions / methods, keyed by (unqualified) name.
+    pub assoc: HashMap<String, AssocFn>,
+}
+
+/// The checker's symbol tables. Modules are namespaces; types are not (they own
+/// associated items in [`AdtDef::assoc`]). All keys are fully-qualified
+/// lowercase `::`-joined names.
 pub struct Registry {
     pub adts: HashMap<String, AdtDef>,
-    /// Constructor name -> (owning type name, variant index).
+    /// Constructor name -> (owning FQ type name, variant index). Indexed under
+    /// both the bare name (first definer wins) and `fqtype::ctor`.
     pub variant_index: HashMap<String, (String, usize)>,
     pub fns: HashMap<String, FnSig>,
+    /// Known fully-qualified module paths.
+    pub modules: HashSet<String>,
+    /// `use` injections: a current-namespace-qualified name -> FQ target.
+    pub aliases: HashMap<String, String>,
 }
 
 impl Registry {
-    /// A registry pre-loaded with the built-in `Option<T>` and `Sexpr` types.
+    /// A registry pre-loaded with the built-in `Option`/`Result`/`Error`/`Sexpr`
+    /// types (all at the root namespace).
     pub fn with_builtins() -> Registry {
         let mut reg = Registry {
             adts: HashMap::new(),
             variant_index: HashMap::new(),
             fns: HashMap::new(),
+            modules: HashSet::new(),
+            aliases: HashMap::new(),
         };
         reg.add_adt(option_def());
+        reg.add_adt(result_def());
+        reg.add_adt(error_def());
         reg.add_adt(sexpr_def());
         reg
     }
 
-    /// Register a data type and index its constructors.
+    /// Register a data type and index its constructors (bare name — first
+    /// definer wins, keeping built-in constructors reachable — plus the
+    /// fully-qualified `fqtype::ctor` key).
     pub fn add_adt(&mut self, def: AdtDef) {
         for (i, v) in def.variants.iter().enumerate() {
-            self.variant_index.insert(v.name.clone(), (def.name.clone(), i));
+            self.variant_index
+                .entry(v.name.clone())
+                .or_insert((def.name.clone(), i));
+            self.variant_index
+                .insert(format!("{}::{}", def.name, v.name), (def.name.clone(), i));
         }
         self.adts.insert(def.name.clone(), def);
     }
@@ -70,6 +99,31 @@ fn option_def() -> AdtDef {
             Variant { name: "some".to_string(), fields: vec![tvar("t")] },
             Variant { name: "none".to_string(), fields: vec![] },
         ],
+        assoc: HashMap::new(),
+    }
+}
+
+/// `Result<T, E> = Ok(T) | Err(E)`.
+fn result_def() -> AdtDef {
+    AdtDef {
+        name: "result".to_string(),
+        params: vec!["t".to_string(), "e".to_string()],
+        variants: vec![
+            Variant { name: "ok".to_string(), fields: vec![tvar("t")] },
+            Variant { name: "err".to_string(), fields: vec![tvar("e")] },
+        ],
+        assoc: HashMap::new(),
+    }
+}
+
+/// The built-in generic error type carrying a message: `Error(String)`. This is
+/// the default `E` for fallible built-ins; user-defined error types come later.
+fn error_def() -> AdtDef {
+    AdtDef {
+        name: "error".to_string(),
+        params: vec![],
+        variants: vec![Variant { name: "error".to_string(), fields: vec![Type::Str] }],
+        assoc: HashMap::new(),
     }
 }
 
@@ -94,6 +148,7 @@ fn sexpr_def() -> AdtDef {
                 fields: vec![opt_sexpr.clone(), opt_sexpr],
             },
         ],
+        assoc: HashMap::new(),
     }
 }
 

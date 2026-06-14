@@ -13,6 +13,12 @@ fn show(h: &Heap, v: Value) -> String {
         Value::Char(c) => format!("#\\{}", c),
         Value::Symbol(id) => h.symbol_name(id).to_string(),
         Value::Str(id) => format!("\"{}\"", h.string(id)),
+        Value::Path(id) => h
+            .path_segments(id)
+            .iter()
+            .map(|s| h.symbol_name(*s))
+            .collect::<Vec<_>>()
+            .join("::"),
         Value::Cons(_) => {
             let mut s = String::from("(");
             let mut cur = v;
@@ -113,12 +119,38 @@ fn symbols_are_case_insensitive() {
 }
 
 #[test]
-fn operators_and_paths_are_symbols() {
+fn operators_are_symbols() {
     roundtrip("+", "+");
     roundtrip("<=", "<=");
     roundtrip("1+", "1+");
-    roundtrip("std::process::exit", "std::process::exit");
     roundtrip("Vec<String>", "vec<string>"); // single token, case-folded
+}
+
+#[test]
+fn double_colon_tokens_become_paths() {
+    let (h, v) = read1("std::process::exit");
+    match v {
+        Value::Path(id) => {
+            let segs: Vec<&str> =
+                h.path_segments(id).iter().map(|s| h.symbol_name(*s)).collect();
+            assert_eq!(segs, ["std", "process", "exit"]);
+        }
+        _ => panic!("expected Path, got {:?}", v),
+    }
+    // round-trips to the same text; segments are case-folded
+    roundtrip("std::process::exit", "std::process::exit");
+    roundtrip("Point::new", "point::new");
+    // `::` splits at top level only, so a generic arg stays in the last segment
+    roundtrip("geometry::Vec<String>", "geometry::vec<string>");
+}
+
+#[test]
+fn malformed_paths_are_errors() {
+    let mut h = Heap::with_capacity(64);
+    let r = Reader::new();
+    assert!(r.read(&mut h, "foo::").is_err());
+    assert!(r.read(&mut h, "::bar").is_err());
+    assert!(r.read(&mut h, "a::::b").is_err());
 }
 
 // ---- lists --------------------------------------------------------------

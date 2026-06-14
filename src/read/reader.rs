@@ -14,7 +14,7 @@
 //! (operators, `::` paths, `Vec<T>`-style tokens), lists, dotted pairs `(a . b)`,
 //! quote `'`, and comments (`;` line, `#| ... |#` nested block).
 
-use crate::{Error, Heap, Value};
+use crate::{Error, Heap, SymId, Value};
 
 pub struct Reader;
 
@@ -367,8 +367,55 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
     match tok.to_lowercase().as_str() {
         "true" => Ok(Value::Bool(true)),
         "false" => Ok(Value::Bool(false)),
-        _ => Ok(heap.intern_symbol(&tok)),
+        _ => {
+            // A `::`-qualified token becomes a path of interned symbol segments.
+            if let Some(parts) = split_path_top_level(&tok) {
+                if parts.iter().any(|p| p.is_empty()) {
+                    return Err(Error::ReadError(format!("malformed path: {}", tok)));
+                }
+                let mut segs: Vec<SymId> = Vec::with_capacity(parts.len());
+                for p in &parts {
+                    if let Value::Symbol(id) = heap.intern_symbol(p) {
+                        segs.push(id);
+                    }
+                }
+                return Ok(heap.intern_path(&segs));
+            }
+            Ok(heap.intern_symbol(&tok))
+        }
     }
+}
+
+/// Split a token on `::` occurring at `<>` nesting depth 0, so that
+/// `geometry::Point` and `geometry::Vec<T>` split but `Vec<a::b>` does not.
+/// Returns `None` when there is no top-level `::`.
+fn split_path_top_level(tok: &str) -> Option<Vec<&str>> {
+    let bytes = tok.as_bytes();
+    let mut depth: i32 = 0;
+    let mut parts: Vec<&str> = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    let mut found = false;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'<' => depth += 1,
+            b'>' => depth -= 1,
+            b':' if depth == 0 && i + 1 < bytes.len() && bytes[i + 1] == b':' => {
+                parts.push(&tok[start..i]);
+                i += 2;
+                start = i;
+                found = true;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if !found {
+        return None;
+    }
+    parts.push(&tok[start..]);
+    Some(parts)
 }
 
 /// Interpret a token as a number, or `None` if it is a symbol.

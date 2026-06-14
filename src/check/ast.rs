@@ -29,8 +29,16 @@ pub enum Expr {
     If(Box<Typed>, Box<Typed>, Box<Typed>),
     /// `(let ((name val)...) body...)` — bindings, then a body sequence.
     Let(Vec<(String, Typed)>, Vec<Typed>),
-    /// A call to a named function.
+    /// A call to a named (fully-qualified) free function.
     Call(String, Vec<Typed>),
+    /// A type-associated call: an instance method (`args[0]` is the receiver)
+    /// or a static associated function. `type_name` is the FQ type name.
+    Assoc {
+        type_name: String,
+        method: String,
+        instance: bool,
+        args: Vec<Typed>,
+    },
     /// A data-type constructor application, e.g. `(Some x)` / `(Cons a d)`.
     Construct {
         /// The (lowercased) nominal type name, e.g. `"option"`, `"sexpr"`.
@@ -41,6 +49,8 @@ pub enum Expr {
     },
     /// `(match scrutinee (pattern body...)...)`.
     Match(Box<Typed>, Vec<Arm>),
+    /// `(panic! message)` — diverges. Has type [`Type::Never`](crate::Type).
+    Panic(Box<Typed>),
 }
 
 /// One arm of a `match`: a pattern and the body sequence it guards.
