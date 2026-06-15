@@ -1,7 +1,7 @@
 //! Tests for the tree-walking interpreter over the typed AST (step 4a).
 
 extern crate typelisp;
-use typelisp::{Checker, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{Checker, EvalError, Heap, Interp, Path, Reader, RtValue};
 
 /// Read, type-check, and evaluate a program; return the last expression's value.
 fn run(src: &str) -> Result<RtValue, EvalError> {
@@ -304,6 +304,70 @@ fn dotimes_factorial() {
 #[test]
 fn dotimes_is_unit() {
     assert_eq!(eval_ok("(dotimes (i 3) ())"), RtValue::Unit);
+}
+
+// ---- cons / car / cdr / list / dolist ---------------------------------------
+
+fn sexpr_nil() -> RtValue {
+    RtValue::Data { type_name: Path::root("sexpr"), variant: 0, fields: vec![] }
+}
+
+fn sexpr_int(n: i64) -> RtValue {
+    RtValue::Data { type_name: Path::root("sexpr"), variant: 1, fields: vec![RtValue::Int(n)] }
+}
+
+fn sexpr_cons(car: RtValue, cdr: RtValue) -> RtValue {
+    RtValue::Data { type_name: Path::root("sexpr"), variant: 7, fields: vec![car, cdr] }
+}
+
+#[test]
+fn cons_car_cdr() {
+    assert_eq!(eval_ok("(cons (Int 1) (Nil))"), sexpr_cons(sexpr_int(1), sexpr_nil()));
+    assert_eq!(eval_ok("(car (cons (Int 1) (Nil)))"), sexpr_int(1));
+    assert_eq!(eval_ok("(cdr (cons (Int 1) (Nil)))"), sexpr_nil());
+}
+
+#[test]
+fn car_and_cdr_of_non_cons_panic() {
+    assert_eq!(run("(car (Nil))"), Err(EvalError::Panic("car: not a cons".into())));
+    assert_eq!(run("(cdr (Int 5))"), Err(EvalError::Panic("cdr: not a cons".into())));
+}
+
+#[test]
+fn list_builds_cons_chain() {
+    assert_eq!(
+        eval_ok("(list (Int 1) (Int 2))"),
+        sexpr_cons(sexpr_int(1), sexpr_cons(sexpr_int(2), sexpr_nil()))
+    );
+    assert_eq!(eval_ok("(list)"), sexpr_nil());
+}
+
+#[test]
+fn dolist_is_unit() {
+    assert_eq!(eval_ok("(dolist (x (list (Int 1))) x)"), RtValue::Unit);
+}
+
+#[test]
+fn dolist_iterates_over_each_element() {
+    let src = "(let ((count 0)) \
+                 (dolist (x (list (Int 1) (Int 2) (Int 3))) (setf count (+ count 1))) \
+                 count)";
+    assert_eq!(eval_ok(src), RtValue::Int(3));
+}
+
+#[test]
+fn dolist_over_empty_list_does_nothing() {
+    let src = "(let ((count 0)) \
+                 (dolist (x (list)) (setf count (+ count 1))) \
+                 count)";
+    assert_eq!(eval_ok(src), RtValue::Int(0));
+}
+
+#[test]
+fn cons_as_value() {
+    let src = "(defun apply2 ((f (fn (Sexpr Sexpr) Sexpr)) (a Sexpr) (b Sexpr)) Sexpr (f a b)) \
+               (apply2 cons (Int 1) (Nil))";
+    assert_eq!(eval_ok(src), sexpr_cons(sexpr_int(1), sexpr_nil()));
 }
 
 // ---- global definitions: defvar / defconstant ------------------------------

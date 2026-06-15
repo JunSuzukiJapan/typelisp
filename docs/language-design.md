@@ -17,10 +17,11 @@
   裸名のスコープ解決・各セグメントが module か型かの判定は、すべて型検査器（checker）が行う。
 - **Sexpr コアの拡張**: 読み取り結果のデータ型 `Sexpr` に `Path` を追加する。
   ```
-  Sexpr = Int | Float | Char | Bool | Sym | Str
-        | Cons(Option<Sexpr>, Option<Sexpr>)
+  Sexpr = Nil | Int | Float | Char | Bool | Sym | Str
+        | Cons(Sexpr, Sexpr)
         | Path([Sym, ...])          ; 例 'std::process::exit
   ```
+  （`Nil`/`Cons(Sexpr, Sexpr)` は確定済み。`Path` 追加は未実装。）
 - セグメントは小文字化される（シンボルと同じ正規化）。空セグメント（`foo::`, `::bar`, `a::::b`）は読み取りエラー。
 - 総称は最終セグメントに付く（`a::Vec<T>` → セグメント `[a, vec<t>]`、型は最終セグメントの `<>` を解釈）。
 
@@ -67,8 +68,9 @@
 定義時の環境（可変スロット）を捕捉する真のクロージャ。関数値の呼び出しは頭がローカル変数・グローバル変数・任意の式
 （例 `((lambda ...) x)`）のとき `Expr::Apply` に。**名前付き関数も値化可能**（`id` 等を高階関数へ渡せる。`Expr::FnRef`、
 組み込みは `RtValue::Builtin`）。**`dotimes`** `(dotimes (var count) body...)` は `let`+`while`+`setf` への脱糖。
-残り（`case` `loop` `dolist` `do` `doiter` `while-let` `the`）は今後。`dolist`/`loop` は汎用リスト型 `List<T>` の実行時
-表現と `break`/`return` の非局所脱出が前提のため後回し。
+**`list`** `(list e1 ... en)` は `(Cons e1 (Cons e2 (... (Nil))))` への脱糖（`(list)` は `(Nil)`）。**`dolist`**
+`(dolist (var list-expr) body...)` は `let`+`while`+`match` への脱糖（`Sexpr` の `Cons`/`Nil` を辿る、結果は `Unit`）。
+残り（`case` `loop` `do` `doiter` `while-let` `the`）は今後。`loop` は `break`/`return` の非局所脱出が前提のため後回し。
 
 ---
 
@@ -77,8 +79,9 @@
 **分離原則**: ヒープ/ランタイム/IO/プリミティブ演算/ネイティブ codegen を要するものは **Rust 実装**。
 それらの組合せで書けるものは **typelisp 自身で実装**（ライブラリ）。すべて型付き（引数/戻り型を明示）。
 
-> 実装状況: eval（step4）でツリーウォーク評価を実装済み。組み込み関数は**現状 i32 の算術/比較のみ**
-> （`+ - * / mod < <= > >= = /=`、`/`/`mod` のゼロ除算は panic）。他のカタログ項目は今後 eval 拡充で追加。
+> 実装状況: eval（step4）でツリーウォーク評価を実装済み。組み込み関数は**i32 の算術/比較**
+> （`+ - * / mod < <= > >= = /=`、`/`/`mod` のゼロ除算は panic）と **`Sexpr` 上の `cons`/`car`/`cdr`**
+> （`car`/`cdr` は非 `Cons`＝`Nil` 含むで panic）を実装済み。他のカタログ項目は今後 eval 拡充で追加。
 
 ### 3.1 Rust 組み込み（primitive）
 | 種別 | 関数 | 備考 / 例 |

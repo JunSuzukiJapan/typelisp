@@ -1,17 +1,16 @@
 //! Values and cons cells for the managed heap.
 //!
 //! A [`Value`] is a small `Copy` tagged value. This is the runtime encoding of
-//! the reader's `Sexpr` type:
+//! the typelisp `Sexpr` type:
 //!
 //! ```text
-//! read : &str -> Option<Sexpr>          (None = the empty list `()`)
-//! Sexpr = Int | Float | Char | Bool | Sym | Str
-//!       | Cons(Option<Sexpr>, Option<Sexpr>)
+//! Sexpr = Nil | Int | Float | Char | Bool | Sym | Str | Cons(Sexpr, Sexpr)
 //! ```
 //!
-//! At the type level the empty list is `Option<Sexpr>::None`; at runtime that is
-//! encoded by [`Value::Empty`]. (`Empty` is the empty-list datum, **not** the
-//! removed language-level `nil`.)
+//! The empty list `()` is the `Sexpr::Nil` value, encoded at runtime by
+//! [`Value::Empty`] — a peer of [`Value::Cons`] in its own right, on the same
+//! footing as the other variants (not a wrapper around them). (`Empty` is the
+//! empty-list datum, **not** the removed language-level `nil`.)
 //!
 //! Cons cells live in a [`Heap`](super::heap::Heap) arena and are referenced
 //! through the opaque [`ConsRef`] (a raw pointer that is never dereferenced
@@ -65,10 +64,10 @@ pub struct StrId(pub(crate) u32);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PathId(pub(crate) u32);
 
-/// A Lisp value — the runtime encoding of `Sexpr` (and `Option<Sexpr>`).
+/// A Lisp value — the runtime encoding of `Sexpr`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Value {
-    /// The empty list `()` — runtime encoding of `Option<Sexpr>::None`.
+    /// The empty list `()` — `Sexpr::Nil`.
     Empty,
     Int(i64),
     Float(f64),

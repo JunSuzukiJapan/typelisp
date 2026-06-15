@@ -139,9 +139,22 @@ fn construct_some_infers_type_argument() {
 
 #[test]
 fn construct_cons_yields_sexpr() {
-    // (Cons (Int 1) ()) : car is Some(Sexpr), cdr is the empty list (None).
+    // (Cons (Int 1) ()) : car and cdr are both Sexpr; `()` adopts `Nil`.
     let sexpr = Type::Named(Path::root("sexpr"), vec![]);
-    assert_eq!(ty("(Cons (Some (Int 1)) ())"), sexpr);
+    assert_eq!(ty("(Cons (Int 1) ())"), sexpr);
+}
+
+#[test]
+fn nil_constructs_sexpr() {
+    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
+    assert_eq!(ty("(Nil)"), sexpr);
+}
+
+#[test]
+fn empty_list_as_sexpr_is_nil() {
+    // `()` adopts `Sexpr::Nil` when a Sexpr is expected, just like it adopts
+    // `Option::None` when an Option<T> is expected.
+    assert_eq!(ty("(Cons () ())"), ty("(Cons (Nil) (Nil))"));
 }
 
 #[test]
@@ -284,6 +297,50 @@ fn named_function_has_function_type() {
 #[test]
 fn dotimes_count_must_be_i32() {
     assert_type_error("(dotimes (i true) ())");
+}
+
+// ---- cons / car / cdr / list / dolist ----------------------------------------
+
+#[test]
+fn car_and_cdr_yield_sexpr() {
+    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
+    assert_eq!(ty("(car (Cons (Int 1) (Nil)))"), sexpr.clone());
+    assert_eq!(ty("(cdr (Cons (Int 1) (Nil)))"), sexpr);
+}
+
+#[test]
+fn car_argument_must_be_sexpr() {
+    assert_type_error("(car 1)");
+}
+
+#[test]
+fn cons_usable_as_function_value() {
+    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
+    let src = "(defun apply2 ((f (fn (Sexpr Sexpr) Sexpr)) (a Sexpr) (b Sexpr)) Sexpr (f a b)) \
+               (apply2 cons (Int 1) (Nil))";
+    assert_eq!(ty_program(src), sexpr);
+}
+
+#[test]
+fn list_builds_sexpr_cons_chain() {
+    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
+    assert_eq!(ty("(list (Int 1) (Int 2))"), sexpr.clone());
+    assert_eq!(ty("(list)"), sexpr);
+}
+
+#[test]
+fn list_elements_must_be_sexpr() {
+    assert_type_error("(list 1 2)");
+}
+
+#[test]
+fn dolist_var_is_sexpr_and_result_is_unit() {
+    assert_eq!(ty("(dolist (x (list (Int 1) (Int 2))) x)"), Type::Unit);
+}
+
+#[test]
+fn dolist_list_expr_must_be_sexpr() {
+    assert_type_error("(dolist (x 5) x)");
 }
 
 // ---- typed AST shape --------------------------------------------------------

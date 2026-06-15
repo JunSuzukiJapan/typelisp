@@ -126,6 +126,13 @@ impl Registry {
         for op in ["<", "<=", ">", ">=", "=", "/="] {
             root.fns.insert(op.to_string(), int_cmp());
         }
+        // `cons`/`car`/`cdr` operate on `Sexpr` (the cons/nil duality at the
+        // type level). `cons` is also reachable as the `Cons` constructor;
+        // registering it as a function too lets it be used as a value
+        // (e.g. passed to a higher-order function).
+        root.fns.insert("cons".to_string(), FnSig { params: vec![sexpr(), sexpr()], ret: sexpr() });
+        root.fns.insert("car".to_string(), FnSig { params: vec![sexpr()], ret: sexpr() });
+        root.fns.insert("cdr".to_string(), FnSig { params: vec![sexpr()], ret: sexpr() });
         Registry { root }
     }
 
@@ -184,24 +191,24 @@ fn error_def() -> AdtDef {
 
 /// The built-in `Sexpr` sum type (the result type of `read`).
 ///
-/// `Cons` holds two `Option<Sexpr>` fields, since `()` (the empty list, encoded
-/// as `None`) can appear as either car or cdr.
+/// `Sexpr = Nil | Int | Float | Char | Bool | Sym | Str | Cons(Sexpr, Sexpr)`:
+/// the empty list `()` is the nullary `Nil` constructor (a `Sexpr` value in its
+/// own right, on par with `cons` cells), and `cons` holds two `Sexpr` fields —
+/// matching Lisp's `list = cons | nil` duality so `car`/`cdr` and list
+/// operations (`cons`/`car`/`cdr`/`list`/`dolist`) stay in `Sexpr` throughout.
 fn sexpr_def() -> AdtDef {
-    let opt_sexpr = Type::Named(Path::root("option"), vec![sexpr()]);
     AdtDef {
         name: Path::root("sexpr"),
         params: vec![],
         variants: vec![
+            Variant { name: "nil".to_string(), fields: vec![] },
             Variant { name: "int".to_string(), fields: vec![Type::I64] },
             Variant { name: "float".to_string(), fields: vec![Type::F64] },
             Variant { name: "char".to_string(), fields: vec![Type::Char] },
             Variant { name: "bool".to_string(), fields: vec![Type::Bool] },
             Variant { name: "sym".to_string(), fields: vec![Type::Str] },
             Variant { name: "str".to_string(), fields: vec![Type::Str] },
-            Variant {
-                name: "cons".to_string(),
-                fields: vec![opt_sexpr.clone(), opt_sexpr],
-            },
+            Variant { name: "cons".to_string(), fields: vec![sexpr(), sexpr()] },
         ],
         assoc: HashMap::new(),
     }

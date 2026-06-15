@@ -245,17 +245,44 @@ fn env_get<'a>(env: &'a Env, name: &str) -> Option<&'a Slot> {
     env.iter().rev().find(|(n, _)| n == name).map(|(_, s)| s)
 }
 
-/// Evaluate a built-in i32 operator. Returns `None` if `name` is not a builtin,
-/// so the caller can fall through to a "no such function" error. (MVP: i32 only;
-/// integer divide/mod by zero `panic!`s, matching Rust.)
+/// Variant index of `Sexpr::Cons` (see `check::registry::sexpr_def`): a
+/// 2-field constructor holding `(car, cdr)`, both `Sexpr`.
+const SEXPR_CONS: usize = 7;
+
+/// Evaluate a built-in operator. Returns `None` if `name` is not a builtin, so
+/// the caller can fall through to a "no such function" error. (MVP: i32
+/// arithmetic/comparison only; integer divide/mod by zero `panic!`s, matching
+/// Rust. `cons`/`car`/`cdr` operate on `Sexpr`; `car`/`cdr` of a non-`Cons`
+/// `Sexpr` — including `Nil` — `panic!`s.)
 fn eval_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
-    let known = matches!(
-        name,
-        "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/="
-    );
-    if !known {
-        return None;
+    match name {
+        "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+            eval_int_builtin(name, args)
+        }
+        "cons" => match (args.first(), args.get(1)) {
+            (Some(a), Some(b)) => Some(Ok(RtValue::Data {
+                type_name: Path::root("sexpr"),
+                variant: SEXPR_CONS,
+                fields: vec![a.clone(), b.clone()],
+            })),
+            _ => Some(Err(EvalError::Internal("cons: expected two arguments".into()))),
+        },
+        "car" => match args.first() {
+            Some(RtValue::Data { variant: SEXPR_CONS, fields, .. }) => Some(Ok(fields[0].clone())),
+            Some(_) => Some(Err(EvalError::Panic("car: not a cons".into()))),
+            None => Some(Err(EvalError::Internal("car: expected one argument".into()))),
+        },
+        "cdr" => match args.first() {
+            Some(RtValue::Data { variant: SEXPR_CONS, fields, .. }) => Some(Ok(fields[1].clone())),
+            Some(_) => Some(Err(EvalError::Panic("cdr: not a cons".into()))),
+            None => Some(Err(EvalError::Internal("cdr: expected one argument".into()))),
+        },
+        _ => None,
     }
+}
+
+/// Evaluate a built-in i32 arithmetic/comparison operator.
+fn eval_int_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
     let (a, b) = match (args.first(), args.get(1)) {
         (Some(RtValue::Int(a)), Some(RtValue::Int(b))) => (*a, *b),
         _ => return Some(Err(EvalError::Internal(format!("{}: expected two integers", name)))),

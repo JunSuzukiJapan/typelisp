@@ -490,11 +490,14 @@ impl Checker {
             Value::Str(s) => Typed { expr: Expr::Str(heap.string(s).to_string()), ty: Type::Str },
             Value::Empty => {
                 // The empty list `()` is the `None` value of `Option<T>` when an
-                // option type is expected; otherwise it is the unit value.
+                // option type is expected, the `Nil` value of `Sexpr` when a
+                // `Sexpr` is expected, and otherwise the unit value.
                 if let Some(Type::Named(n, _)) = expected {
-                    if let Some((adt, idx)) = self.resolve_ctor("none") {
-                        if *n == adt {
-                            return self.check_construct(heap, env, &adt, idx, &[], expected);
+                    for ctor in ["none", "nil"] {
+                        if let Some((adt, idx)) = self.resolve_ctor(ctor) {
+                            if *n == adt {
+                                return self.check_construct(heap, env, &adt, idx, &[], expected);
+                            }
                         }
                     }
                 }
@@ -593,6 +596,8 @@ impl Checker {
             "setf" => return self.check_setf(heap, env, args),
             "while" => return self.check_while(heap, env, args),
             "dotimes" => return self.check_dotimes(heap, env, args),
+            "dolist" => return self.check_dolist(heap, env, args),
+            "list" => return self.check_list_lit(heap, env, args),
             "lambda" => return self.check_lambda(heap, env, args),
             "match" => return self.check_match(heap, env, args, expected),
             "if-let" => return self.check_if_let(heap, env, args, expected),
@@ -981,6 +986,111 @@ impl Checker {
         let while_node = Typed { expr: Expr::While(Box::new(cond), body), ty: Type::Unit };
         let binds = vec![(var, int(0)), (limit, count)];
         Ok(Typed { expr: Expr::Let(binds, vec![while_node]), ty: Type::Unit })
+    }
+
+    /// `(dolist (var list-expr) body...)`: iterate over a `Sexpr` cons-list,
+    /// binding `var` to each element in turn. `list-expr` is checked against
+    /// `Sexpr` (so `()` adopts `Nil`). Desugars to `let` + `while` + `match`,
+    /// pattern-matching `Cons`/`Nil` on each step rather than unwrapping an
+    /// `Option` (the `Sexpr` cons/nil duality). Result is `Unit`.
+    fn check_dolist(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+        if args.is_empty() {
+            return Err(Error::TypeError("dolist: (dolist (var list-expr) body...)".into()));
+        }
+        let spec = heap.list_to_vec(args[0])?;
+        if spec.len() != 2 {
+            return Err(Error::TypeError("dolist: spec must be (var list-expr)".into()));
+        }
+        let var = match spec[0] {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            _ => return Err(Error::TypeError("dolist: variable must be a symbol".into())),
+        };
+        let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
+        let lst = self.check(heap, env, spec[1], Some(&sexpr_ty))?;
+        let (adt, cons_idx) = self.resolve_ctor("cons").expect("sexpr::cons is built in");
+        let (_, nil_idx) = self.resolve_ctor("nil").expect("sexpr::nil is built in");
+
+        // Hidden loop bindings; the leading space makes them unwritable in source.
+        let lstvar = " dolist-lst".to_string();
+        let restvar = " dolist-rest".to_string();
+        let lst_ref = || Typed { expr: Expr::Var(lstvar.clone()), ty: sexpr_ty.clone() };
+        let nil_node = || Typed {
+            expr: Expr::Construct { type_name: adt.clone(), variant: nil_idx, args: Vec::new() },
+            ty: sexpr_ty.clone(),
+        };
+
+        let outer = env.extended(vec![(lstvar.clone(), sexpr_ty.clone())]);
+        let body_env = outer.extended(vec![(var.clone(), sexpr_ty.clone())]);
+        let (mut body, _) = self.check_seq(heap, &body_env, &args[1..], None)?;
+
+        // body... then (setf --dolist-lst --dolist-rest), advancing the list.
+        body.push(Typed {
+            expr: Expr::Set(
+                lstvar.clone(),
+                Box::new(Typed { expr: Expr::Var(restvar.clone()), ty: sexpr_ty.clone() }),
+            ),
+            ty: sexpr_ty.clone(),
+        });
+        let step = Typed {
+            expr: Expr::Match(
+                Box::new(lst_ref()),
+                vec![
+                    Arm {
+                        pat: Pattern::Ctor {
+                            type_name: adt.clone(),
+                            variant: cons_idx,
+                            args: vec![Pattern::Bind(var), Pattern::Bind(restvar)],
+                        },
+                        body,
+                    },
+                    Arm { pat: Pattern::Wildcard, body: vec![nil_node()] },
+                ],
+            ),
+            ty: sexpr_ty.clone(),
+        };
+
+        // while condition: is `--dolist-lst` still a `Cons`?
+        let cond = Typed {
+            expr: Expr::Match(
+                Box::new(lst_ref()),
+                vec![
+                    Arm {
+                        pat: Pattern::Ctor {
+                            type_name: adt.clone(),
+                            variant: cons_idx,
+                            args: vec![Pattern::Wildcard, Pattern::Wildcard],
+                        },
+                        body: vec![bool_node(true)],
+                    },
+                    Arm { pat: Pattern::Wildcard, body: vec![bool_node(false)] },
+                ],
+            ),
+            ty: Type::Bool,
+        };
+
+        let while_node = Typed { expr: Expr::While(Box::new(cond), vec![step]), ty: Type::Unit };
+        Ok(Typed { expr: Expr::Let(vec![(lstvar, lst)], vec![while_node]), ty: Type::Unit })
+    }
+
+    /// `(list e1 e2 ... en)`: build a `Sexpr` cons-list from `Sexpr`-typed
+    /// elements (each checked against `Sexpr`, so `()` adopts `Nil`).
+    /// Desugars to nested `(Cons e1 (Cons e2 (... (Nil))))`; `(list)` is `(Nil)`.
+    fn check_list_lit(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+        let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
+        let (adt, cons_idx) = self.resolve_ctor("cons").expect("sexpr::cons is built in");
+        let (_, nil_idx) = self.resolve_ctor("nil").expect("sexpr::nil is built in");
+        let mut acc = Typed {
+            expr: Expr::Construct { type_name: adt.clone(), variant: nil_idx, args: Vec::new() },
+            ty: sexpr_ty.clone(),
+        };
+        for &elem in args.iter().rev() {
+            let e = self.check(heap, env, elem, Some(&sexpr_ty))?;
+            acc = Typed {
+                expr: Expr::Construct { type_name: adt.clone(), variant: cons_idx, args: vec![e, acc] },
+                ty: sexpr_ty.clone(),
+            };
+        }
+        Ok(acc)
     }
 
     /// `when`/`unless`: evaluate the body for effect when the condition holds

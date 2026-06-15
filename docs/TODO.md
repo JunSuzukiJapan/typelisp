@@ -13,10 +13,13 @@
   `defun`/`defstruct`/`defvar`/`defconstant`/`let`/`if`/`when`/`unless`/`cond`/`match`/`loop`/`while`/`dotimes`/`do`/`doiter`/`while-let`/`if-let`/`lambda`/`progn`/`module` 等。関数の引数・戻り型は必須、局所束縛は型推論可。
 - **真偽値は `true`/`false`**。`nil`/`t` は言語に存在しない。
 - **`nil` の代替は `Option<T>`**（`(defstruct Option (Some (value T)) (None))` 相当の直和型）。
-- **`read` の戻り値は組み込み直和型 `Sexpr`**。型レベルでは `Option<Sexpr>`（`None` = 空リスト `()`）。
-  `Sexpr = Int|Float|Char|Bool|Sym|Str|Cons(Option<Sexpr>, Option<Sexpr>)`。
-  car も cdr も `Option<Sexpr>`（`()` が要素にも来るため。例: `(defun f () ...)` の空引数列）。
-  専用の `Nil` 構成子は型レベルには持たず、実行時は `None` を `Value::Empty` で符号化。
+- **`read` の戻り値は組み込み直和型 `Sexpr`**。
+  `Sexpr = Nil|Int|Float|Char|Bool|Sym|Str|Cons(Sexpr, Sexpr)`。
+  空リスト `()` は `Sexpr` の値としての `Nil`（cons と並ぶ第一級の構成子）。car/cdr はどちらも `Sexpr`
+  （`Option` で包まない）。`cons`/`car`/`cdr`/`list`/`dolist` は cons と nil の双対のまま自然に書ける。
+  `()` は期待型が `Sexpr` のとき `Nil` に、`Option<T>` のとき `None` になる（`Unit` はその他の文脈）。
+  実行時は `Nil` を `Value::Empty` で符号化（`Cons` と対等な variant、`Option` ラッパーではない）。
+  これは言語レベルで禁止した「真偽値としての `nil`」とは別物（あくまで read データ内の空リスト表現）。
 - **大文字小文字は区別しない**（シンボルは小文字に正規化してインターン）。
 - **Rust 相互運用はしない**（`&args[1]`, `env::args().collect()` 等は対象外）。
 - **構成子パターンは S 式形** `(Some v)` / `(Cons a d)`。
@@ -45,7 +48,7 @@
 | `aec77f3` | clippy 警告解消（Error の Display 実装、Reader の Default） |
 | （未コミット） | エラー処理（Result/Error/Never/`panic!`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
-**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 31 / error 10 / namespace 11 / eval 42 = 152 件 green、警告0（clippy 含む）。
+**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 40 / error 10 / namespace 11 / eval 49 = 168 件 green、警告0（clippy 含む）。
 **Miri**: `cargo +nightly miri test --test mem_test`（26/28、重い2件除外）— `Value::Path` 追加後も UB/リーク無し。
 
 ### 確定仕様ドキュメント
@@ -138,10 +141,12 @@
   - 実装済み（4f）: `lambda`/クロージャ。`RtValue::Closure`（捕捉した可変スロットを共有＝真のクロージャ）。
     AST に `Lambda`/`Apply`。関数値の呼び出しは頭がローカル/グローバル変数・任意の式のとき `Apply` にディスパッチ。
   - 実装済み（4g）: 名前付き関数の値化（`Expr::FnRef`、組み込みは `RtValue::Builtin`）＋ `dotimes`（`let`+`while`+`setf` へ脱糖）。
-  - TDD: `tests/eval_test.rs`（42件）／`tests/check_test.rs`（31件）。
+  - 実装済み（4h）: `cons`/`car`/`cdr`（`Sexpr` 上、`FnSig` 登録で値化も可）。`car`/`cdr` は非 `Cons`（`Nil` 含む）で panic。
+    `list`（`(Cons e1 (Cons e2 (... (Nil))))` へ脱糖）／`dolist`（`let`+`while`+`match` で `Cons`/`Nil` を辿る脱糖、結果は `Unit`）。
+  - TDD: `tests/eval_test.rs`（49件）／`tests/check_test.rs`（40件）。
 - **次の候補（eval 拡充）**:
-  - 組み込み関数の拡張（型ごとの算術／i64・f64、文字列・リスト・Option/Result ライブラリ関数）。カタログは [language-design.md](language-design.md) §3。
-  - 汎用リスト型 `List<T>` の実行時表現（→ `dolist`/`map`/`filter`）、`break`/`return` の非局所脱出（→ `loop`）。
+  - 組み込み関数の拡張（型ごとの算術／i64・f64、文字列・ベクタ・Option/Result ライブラリ関数）。カタログは [language-design.md](language-design.md) §3。
+  - typelisp ライブラリ関数（`length`/`append`/`reverse`/`map`/`filter`/`foldl`/`foldr` 等、`Sexpr` 上）、`break`/`return` の非局所脱出（→ `loop`）。
   - 実行時値と GC の整合（現状 `RtValue` は Rust ヒープ上で完結、cons ヒープ非依存）。
 - **ステップ5: compile**（明示 `compile`/`compile-file`。inkwell 再追加・LLVM コード生成。feature gate）。
 
