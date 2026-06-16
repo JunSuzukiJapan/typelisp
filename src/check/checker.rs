@@ -88,12 +88,13 @@ impl Checker {
             let elems = heap.list_to_vec(v)?;
             if let Some(Value::Symbol(id)) = elems.first() {
                 match heap.symbol_name(*id) {
-                    "defun" => return self.check_defun(heap, &elems[1..]),
-                    "defvar" => return self.check_defvar(heap, &elems[1..], true),
-                    "defconstant" => return self.check_defvar(heap, &elems[1..], false),
-                    "defstruct" => return self.check_defstruct(heap, &elems[1..]),
+                    "pub" => return self.check_pub(heap, &elems[1..]),
+                    "defun" => return self.check_defun(heap, &elems[1..], false),
+                    "defvar" => return self.check_defvar(heap, &elems[1..], true, false),
+                    "defconstant" => return self.check_defvar(heap, &elems[1..], false, false),
+                    "defstruct" => return self.check_defstruct(heap, &elems[1..], false),
                     "module" => return self.check_module(heap, &elems[1..]),
-                    "defmethod" => return self.check_defmethod(heap, &elems[1..]),
+                    "defmethod" => return self.check_defmethod(heap, &elems[1..], false),
                     "use" => return self.check_use(heap, &elems[1..]),
                     _ => {}
                 }
@@ -102,6 +103,24 @@ impl Checker {
         let env = Env::new();
         let t = self.check(heap, &env, v, None)?;
         Ok(TopLevel::Expr(t))
+    }
+
+    /// `(pub defun ...)` / `(pub defstruct ...)` etc. — mark the next definition public.
+    fn check_pub(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
+        if parts.is_empty() {
+            return Err(Error::TypeError("pub: expected a definition form".into()));
+        }
+        if let Value::Symbol(id) = parts[0] {
+            match heap.symbol_name(id) {
+                "defun" => return self.check_defun(heap, &parts[1..], true),
+                "defvar" => return self.check_defvar(heap, &parts[1..], true, true),
+                "defconstant" => return self.check_defvar(heap, &parts[1..], false, true),
+                "defstruct" => return self.check_defstruct(heap, &parts[1..], true),
+                "defmethod" => return self.check_defmethod(heap, &parts[1..], true),
+                _ => {}
+            }
+        }
+        Err(Error::TypeError("pub: expected defun/defstruct/defmethod/defvar/defconstant".into()))
     }
 
     // ---- namespace navigation & resolution --------------------------------
@@ -122,15 +141,60 @@ impl Checker {
         self.reg.root.module(&self.ns).expect("current namespace exists")
     }
 
+    /// If `path` starts with an empty segment (reader-encoded `::foo` absolute
+    /// path), strip it and return `(true, rest)`.  Otherwise `(false, path)`.
+    fn split_abs<'a>(&self, path: &'a [String]) -> (bool, &'a [String]) {
+        if path.first().map(|s| s.is_empty()).unwrap_or(false) {
+            (true, &path[1..])
+        } else {
+            (false, path)
+        }
+    }
+
+    /// Whether `item_ns` is the same module as the current namespace (i.e.
+    /// same-module access; no cross-module visibility check needed).
+    fn same_module(&self, item_ns: &[String]) -> bool {
+        item_ns == self.ns.as_slice()
+    }
+
     /// Locate a child-module `path`, resolving it relative to the current
-    /// namespace first, then the root. Returns its absolute segments and module.
+    /// namespace first, then the root, then via `mod_aliases`. Handles absolute
+    /// paths (leading empty segment) by going straight to root.
+    /// Returns `(absolute_segments, &Namespace)`.
     fn find_module(&self, path: &[String]) -> Option<(Vec<String>, &Namespace)> {
-        if let Some(m) = self.cur_ns().module(path) {
+        let (is_abs, eff) = self.split_abs(path);
+        if is_abs {
+            return self.reg.root.module(eff).map(|m| (eff.to_vec(), m));
+        }
+
+        // 1. Child of the current namespace.
+        if let Some(m) = self.cur_ns().module(eff) {
             let mut abs = self.ns.clone();
-            abs.extend_from_slice(path);
+            abs.extend_from_slice(eff);
             return Some((abs, m));
         }
-        self.reg.root.module(path).map(|m| (path.to_vec(), m))
+        // 2. Child of root.
+        if let Some(m) = self.reg.root.module(eff) {
+            return Some((eff.to_vec(), m));
+        }
+        // 3. Module alias: expand the first segment via mod_aliases.
+        if !eff.is_empty() {
+            let first = &eff[0];
+            let rest = &eff[1..];
+            let alias = self
+                .cur_ns()
+                .mod_aliases
+                .get(first)
+                .or_else(|| self.reg.root.mod_aliases.get(first));
+            if let Some(base) = alias {
+                let mut expanded = base.clone();
+                expanded.extend_from_slice(rest);
+                if let Some(m) = self.reg.root.module(&expanded) {
+                    return Some((expanded, m));
+                }
+            }
+        }
+        None
     }
 
     /// A `use` alias for a bare `name`, looked up current namespace then root.
@@ -146,20 +210,30 @@ impl Checker {
         if let Some(path) = self.lookup_alias(name) {
             return self.resolve_fn_path(&path);
         }
+        // Same module — always accessible.
         if self.cur_ns().fns.contains_key(name) {
             return Some(self.fq(name));
         }
-        if self.reg.root.fns.contains_key(name) {
-            return Some(Path::root(name));
+        // Root namespace — cross-module if we are inside a submodule.
+        if let Some(sig) = self.reg.root.fns.get(name) {
+            if sig.public || self.ns.is_empty() {
+                return Some(Path::root(name));
+            }
         }
         None
     }
 
     /// Resolve a qualified `module::...::fn` path to its absolute [`Path`].
     fn resolve_fn_path(&self, segs: &[String]) -> Option<Path> {
+        if segs.is_empty() {
+            return None;
+        }
         let (mods, last) = segs.split_at(segs.len() - 1);
         let (abs, m) = self.find_module(mods)?;
-        if m.fns.contains_key(&last[0]) {
+        if let Some(sig) = m.fns.get(&last[0]) {
+            if !sig.public && !self.same_module(&abs) {
+                return None;
+            }
             let mut full = abs;
             full.push(last[0].clone());
             return Some(Path::from_segments(full));
@@ -170,17 +244,39 @@ impl Checker {
     /// Resolve a bare constructor name to its `(type path, variant index)`,
     /// searching the current namespace then root.
     fn resolve_ctor(&self, name: &str) -> Option<(Path, usize)> {
+        // Same module — always accessible.
         if let Some(hit) = self.cur_ns().ctors.get(name) {
             return Some(hit.clone());
         }
-        self.reg.root.ctors.get(name).cloned()
+        // Root — check type visibility for cross-module access.
+        if let Some(hit) = self.reg.root.ctors.get(name) {
+            if !self.ns.is_empty() {
+                let (type_path, _) = hit;
+                if let Some(def) = self.reg.type_def(type_path) {
+                    if !def.public {
+                        return None;
+                    }
+                }
+            }
+            return Some(hit.clone());
+        }
+        None
     }
 
     /// Resolve a `module::...::Type` segment path to the type's [`Path`].
     fn resolve_type_path(&self, segs: &[String]) -> Option<Path> {
+        if segs.is_empty() {
+            return None;
+        }
         let (mods, local) = segs.split_at(segs.len() - 1);
-        let (_abs, m) = self.find_module(mods)?;
-        m.types.get(&local[0]).map(|d| d.name.clone())
+        let (abs, m) = self.find_module(mods)?;
+        if let Some(def) = m.types.get(&local[0]) {
+            if !def.public && !self.same_module(&abs) {
+                return None;
+            }
+            return Some(def.name.clone());
+        }
+        None
     }
 
     /// Resolve a nominal type [`Path`] to its canonical (located) form if a
@@ -197,8 +293,11 @@ impl Checker {
             if let Some(def) = self.cur_ns().types.get(name) {
                 return def.name.clone();
             }
+            // Root types: check public if cross-module.
             if let Some(def) = self.reg.root.types.get(name) {
-                return def.name.clone();
+                if def.public || self.ns.is_empty() {
+                    return def.name.clone();
+                }
             }
             return path.clone();
         }
@@ -210,20 +309,35 @@ impl Checker {
         if let Some(p) = self.lookup_alias(name) {
             return self.resolve_global_path(&p);
         }
+        // Same module — always accessible.
         if let Some(vi) = self.cur_ns().vars.get(name) {
             return Some((self.fq(name), vi.clone()));
         }
-        self.reg.root.vars.get(name).map(|vi| (Path::root(name), vi.clone()))
+        // Root — check public for cross-module access.
+        if let Some(vi) = self.reg.root.vars.get(name) {
+            if vi.public || self.ns.is_empty() {
+                return Some((Path::root(name), vi.clone()));
+            }
+        }
+        None
     }
 
     /// Resolve a qualified `module::...::global` path to its `(path, info)`.
     fn resolve_global_path(&self, segs: &[String]) -> Option<(Path, VarInfo)> {
+        if segs.is_empty() {
+            return None;
+        }
         let (mods, last) = segs.split_at(segs.len() - 1);
         let (abs, m) = self.find_module(mods)?;
-        let vi = m.vars.get(&last[0])?.clone();
-        let mut full = abs;
-        full.push(last[0].clone());
-        Some((Path::from_segments(full), vi))
+        if let Some(vi) = m.vars.get(&last[0]) {
+            if !vi.public && !self.same_module(&abs) {
+                return None;
+            }
+            let mut full = abs;
+            full.push(last[0].clone());
+            return Some((Path::from_segments(full), vi.clone()));
+        }
+        None
     }
 
     /// Reify a bare free-function name as a function value (`FnRef`), if it names
@@ -277,7 +391,7 @@ impl Checker {
 
     // ---- defun ------------------------------------------------------------
 
-    fn check_defun(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
+    fn check_defun(&mut self, heap: &Heap, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
         if parts.len() < 3 {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
@@ -291,7 +405,7 @@ impl Checker {
 
         // Register the signature in the current namespace before checking the
         // body so self-recursion works.
-        let sig = FnSig { params: params.iter().map(|(_, t)| t.clone()).collect(), ret: ret.clone() };
+        let sig = FnSig { params: params.iter().map(|(_, t)| t.clone()).collect(), ret: ret.clone(), public };
         self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
 
         let env = Env::new().extended(params.clone());
@@ -324,7 +438,7 @@ impl Checker {
 
     // ---- defstruct / module / defmethod / use -----------------------------
 
-    fn check_defstruct(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
+    fn check_defstruct(&mut self, heap: &Heap, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("defstruct: (defstruct Name (Ctor (field Type)...)...)".into()));
         }
@@ -358,6 +472,7 @@ impl Checker {
             params: Vec::new(),
             variants: variants.clone(),
             assoc: HashMap::new(),
+            public,
         };
         self.reg.root.module_mut(&self.ns).add_type(def);
         Ok(TopLevel::Defstruct { name: fq, params: Vec::new(), variants })
@@ -394,7 +509,7 @@ impl Checker {
         Ok(TopLevel::Module { path, body })
     }
 
-    fn check_defmethod(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
+    fn check_defmethod(&mut self, heap: &Heap, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
         if parts.len() < 3 {
             return Err(Error::TypeError(
                 "defmethod: (defmethod name (receiver params...) ret body...)".into(),
@@ -441,7 +556,7 @@ impl Checker {
             sig_params.push(recv_ty.clone());
         }
         sig_params.extend(params.iter().map(|(_, t)| t.clone()));
-        let sig = FnSig { params: sig_params, ret: ret.clone() };
+        let sig = FnSig { params: sig_params, ret: ret.clone(), public };
         if let Some(def) = self.reg.type_def_mut(&type_fq) {
             def.assoc.insert(method.clone(), AssocFn { sig, instance });
         }
@@ -462,14 +577,19 @@ impl Checker {
         }
         let segs = self.path_to_segs(heap, parts[0])?;
         let bare = segs.last().cloned().unwrap();
-        // The target must resolve to a free function or a type.
-        let target = self
-            .resolve_fn_path(&segs)
-            .or_else(|| self.resolve_type_path(&segs))
-            .ok_or_else(|| Error::TypeError(format!("use: unresolved `{}`", segs.join("::"))))?;
-        // Alias the bare name to the absolute target path in the current module.
-        self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
-        Ok(TopLevel::Use { alias: self.fq(&bare), target })
+
+        // Try: free function, then type.
+        if let Some(target) = self.resolve_fn_path(&segs).or_else(|| self.resolve_type_path(&segs)) {
+            self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
+            return Ok(TopLevel::Use { alias: self.fq(&bare), target });
+        }
+        // Try: module alias — `(use std::math)` makes `math` a short name for `std::math`.
+        if let Some((abs, _)) = self.find_module(&segs) {
+            let target_path = Path::from_segments(abs.clone());
+            self.reg.root.module_mut(&self.ns).mod_aliases.insert(bare.clone(), abs);
+            return Ok(TopLevel::Use { alias: self.fq(&bare), target: target_path });
+        }
+        Err(Error::TypeError(format!("use: unresolved `{}`", segs.join("::"))))
     }
 
     // ---- expressions ------------------------------------------------------
@@ -900,7 +1020,7 @@ impl Checker {
 
     /// `(defvar name value)` / `(defconstant name value)`, with an optional
     /// `(name Type)` annotation. Registers a global in the current namespace.
-    fn check_defvar(&mut self, heap: &Heap, parts: &[Value], mutable: bool) -> Result<TopLevel, Error> {
+    fn check_defvar(&mut self, heap: &Heap, parts: &[Value], mutable: bool, public: bool) -> Result<TopLevel, Error> {
         if parts.len() != 2 {
             return Err(Error::TypeError("defvar/defconstant: (defvar name value)".into()));
         }
@@ -927,7 +1047,7 @@ impl Checker {
             .root
             .module_mut(&self.ns)
             .vars
-            .insert(name.clone(), VarInfo { ty: ty.clone(), mutable });
+            .insert(name.clone(), VarInfo { ty: ty.clone(), mutable, public });
         Ok(TopLevel::Defvar { name: self.fq(&name), ty, value, mutable })
     }
 

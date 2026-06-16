@@ -106,7 +106,7 @@ fn panic_propagates() {
 
 #[test]
 fn module_function_runs() {
-    let src = "(module m (defun id ((x i32)) i32 x)) (m::id 42)";
+    let src = "(module m (pub defun id ((x i32)) i32 x)) (m::id 42)";
     assert_eq!(eval_ok(src), RtValue::Int(42));
 }
 
@@ -277,7 +277,7 @@ fn builtin_as_value() {
 
 #[test]
 fn module_function_as_value() {
-    let src = "(module m (defun inc ((x i32)) i32 (+ x 1))) \
+    let src = "(module m (pub defun inc ((x i32)) i32 (+ x 1))) \
                (defun c ((f (fn (i32) i32))) i32 (f 9)) \
                (c m::inc)";
     assert_eq!(eval_ok(src), RtValue::Int(10));
@@ -402,7 +402,7 @@ fn typed_defvar() {
 
 #[test]
 fn module_global_via_path() {
-    assert_eq!(eval_ok("(module m (defvar g 7)) m::g"), RtValue::Int(7));
+    assert_eq!(eval_ok("(module m (pub defvar g 7)) m::g"), RtValue::Int(7));
 }
 
 #[test]

@@ -20,6 +20,8 @@ pub struct Variant {
 pub struct FnSig {
     pub params: Vec<Type>,
     pub ret: Type,
+    /// Visible outside its defining module.
+    pub public: bool,
 }
 
 /// A type-associated function or method (Rust-style; types are *not*
@@ -35,6 +37,8 @@ pub struct AssocFn {
 pub struct VarInfo {
     pub ty: Type,
     pub mutable: bool,
+    /// Visible outside its defining module.
+    pub public: bool,
 }
 
 /// A data-type definition (a sum type / `defstruct`-style ADT). `name` is the
@@ -47,6 +51,8 @@ pub struct AdtDef {
     pub variants: Vec<Variant>,
     /// Associated functions / methods, keyed by (unqualified) name.
     pub assoc: HashMap<String, AssocFn>,
+    /// Visible outside its defining module.
+    pub public: bool,
 }
 
 /// A namespace (module): a container of free functions, types, constructors,
@@ -66,8 +72,10 @@ pub struct Namespace {
     pub ctors: HashMap<String, (Path, usize)>,
     /// Global variables/constants defined directly here, by unqualified name.
     pub vars: HashMap<String, VarInfo>,
-    /// `use` aliases: unqualified name -> absolute path (from the root).
+    /// `use` aliases for items: unqualified name -> absolute path (from the root).
     pub aliases: HashMap<String, Vec<String>>,
+    /// `use` aliases for modules: short name -> absolute module path.
+    pub mod_aliases: HashMap<String, Vec<String>>,
 }
 
 impl Namespace {
@@ -118,8 +126,8 @@ impl Registry {
         root.add_type(sexpr_def());
         // Built-in i32 operators (MVP: i32 only; per-type/generic numeric ops
         // come later).
-        let int_binop = || FnSig { params: vec![Type::I32, Type::I32], ret: Type::I32 };
-        let int_cmp = || FnSig { params: vec![Type::I32, Type::I32], ret: Type::Bool };
+        let int_binop = || FnSig { params: vec![Type::I32, Type::I32], ret: Type::I32, public: true };
+        let int_cmp = || FnSig { params: vec![Type::I32, Type::I32], ret: Type::Bool, public: true };
         for op in ["+", "-", "*", "/", "mod"] {
             root.fns.insert(op.to_string(), int_binop());
         }
@@ -130,9 +138,9 @@ impl Registry {
         // type level). `cons` is also reachable as the `Cons` constructor;
         // registering it as a function too lets it be used as a value
         // (e.g. passed to a higher-order function).
-        root.fns.insert("cons".to_string(), FnSig { params: vec![sexpr(), sexpr()], ret: sexpr() });
-        root.fns.insert("car".to_string(), FnSig { params: vec![sexpr()], ret: sexpr() });
-        root.fns.insert("cdr".to_string(), FnSig { params: vec![sexpr()], ret: sexpr() });
+        root.fns.insert("cons".to_string(), FnSig { params: vec![sexpr(), sexpr()], ret: sexpr(), public: true });
+        root.fns.insert("car".to_string(), FnSig { params: vec![sexpr()], ret: sexpr(), public: true });
+        root.fns.insert("cdr".to_string(), FnSig { params: vec![sexpr()], ret: sexpr(), public: true });
         Registry { root }
     }
 
@@ -162,6 +170,7 @@ fn option_def() -> AdtDef {
             Variant { name: "none".to_string(), fields: vec![] },
         ],
         assoc: HashMap::new(),
+        public: true,
     }
 }
 
@@ -175,6 +184,7 @@ fn result_def() -> AdtDef {
             Variant { name: "err".to_string(), fields: vec![tvar("e")] },
         ],
         assoc: HashMap::new(),
+        public: true,
     }
 }
 
@@ -186,6 +196,7 @@ fn error_def() -> AdtDef {
         params: vec![],
         variants: vec![Variant { name: "error".to_string(), fields: vec![Type::Str] }],
         assoc: HashMap::new(),
+        public: true,
     }
 }
 
@@ -211,6 +222,7 @@ fn sexpr_def() -> AdtDef {
             Variant { name: "cons".to_string(), fields: vec![sexpr(), sexpr()] },
         ],
         assoc: HashMap::new(),
+        public: true,
     }
 }
 

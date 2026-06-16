@@ -149,7 +149,8 @@ fn malformed_paths_are_errors() {
     let mut h = Heap::with_capacity(64);
     let r = Reader::new();
     assert!(r.read(&mut h, "foo::").is_err());
-    assert!(r.read(&mut h, "::bar").is_err());
+    // leading `::` is now valid (absolute path), so `::bar` must succeed
+    assert!(r.read(&mut h, "::bar").is_ok());
     assert!(r.read(&mut h, "a::::b").is_err());
 }
 

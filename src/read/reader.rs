@@ -369,8 +369,11 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
         "false" => Ok(Value::Bool(false)),
         _ => {
             // A `::`-qualified token becomes a path of interned symbol segments.
+        // A leading `::` (e.g. `::foo`) encodes an absolute path: the first
+        // segment is the empty string, which the checker treats as "from root".
             if let Some(parts) = split_path_top_level(&tok) {
-                if parts.iter().any(|p| p.is_empty()) {
+                // Interior empty segments (e.g. `foo::::bar`) are malformed.
+                if parts[1..].iter().any(|p| p.is_empty()) {
                     return Err(Error::ReadError(format!("malformed path: {}", tok)));
                 }
                 let mut segs: Vec<SymId> = Vec::with_capacity(parts.len());
