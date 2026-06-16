@@ -1,41 +1,13 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-06-14 / ブランチ: `feature/typed-lisp-impl`
+最終更新: 2026-06-16 / ブランチ: `feature/typed-lisp-impl`
 
 このドキュメントは、再実装（read 関数から作り直し）の進捗と次回の作業を記録する。
+**言語仕様の確定事項は [language-design.md](language-design.md) を参照。**
 
 ---
 
-## 0. 言語仕様（確定事項）
-
-- **静的型付け**: すべての式が静的型を持つ。動的タグ付き Lisp（旧 3ab5599 の `Object`）ではない。
-- **文法は macro-lisp 準拠**: `/Users/suzukijun/Program/Rust/macro-lisp` の**構文**に従う（実装は参考にしない）。
-  `defun`/`defstruct`/`defvar`/`defconstant`/`let`/`if`/`when`/`unless`/`cond`/`match`/`loop`/`while`/`dotimes`/`do`/`doiter`/`while-let`/`if-let`/`lambda`/`progn`/`module` 等。関数の引数・戻り型は必須、局所束縛は型推論可。
-- **真偽値は `true`/`false`**。`nil`/`t` は言語に存在しない。
-- **`nil` の代替は `Option<T>`**（`(defstruct Option (Some (value T)) (None))` 相当の直和型）。
-- **`read` の戻り値は組み込み直和型 `Sexpr`**。
-  `Sexpr = Nil|Int|Float|Char|Bool|Sym|Str|Cons(Sexpr, Sexpr)`。
-  空リスト `()` は `Sexpr` の値としての `Nil`（cons と並ぶ第一級の構成子）。car/cdr はどちらも `Sexpr`
-  （`Option` で包まない）。`cons`/`car`/`cdr`/`list`/`dolist` は cons と nil の双対のまま自然に書ける。
-  `()` は期待型が `Sexpr` のとき `Nil` に、`Option<T>` のとき `None` になる（`Unit` はその他の文脈）。
-  実行時は `Nil` を `Value::Empty` で符号化（`Cons` と対等な variant、`Option` ラッパーではない）。
-  これは言語レベルで禁止した「真偽値としての `nil`」とは別物（あくまで read データ内の空リスト表現）。
-- **大文字小文字は区別しない**（シンボルは小文字に正規化してインターン）。
-- **Rust 相互運用はしない**（`&args[1]`, `env::args().collect()` 等は対象外）。
-- **構成子パターンは S 式形** `(Some v)` / `(Cons a d)`。
-- **実行モデル**: 既定はインタプリタ（eval）。**ネイティブコンパイルは明示的 `compile`/`compile-file`（CL 準拠）を呼んだ時だけ**。LLVM コンパイラは feature gate。
-
-## 1. メモリモデル / GC（確定・実装済み）
-
-- cons セルは**固定アリーナ**（起動時に確保、再確保しない＝生ポインタが安定）。将来 `--heap-cells N` で容量指定。
-- 割当はフリーリストから。空なら GC、それでも空なら **`Error::HeapExhausted`（成長しない）**。
-- **mark-sweep GC**（反復マーク＝深い構造でもスタック溢れなし、循環回収）。ルート集合 `push_root`/`pop_root`。
-- **生ポインタは `ConsRef` に隠蔽、公開 API は安全**。
-- シンボルはインターン（小文字正規化・永続）。文字列は GC 管理（到達可能のみ生存）。
-
----
-
-## 2. 進捗（コミット済み）
+## 1. 進捗（コミット済み）
 
 | コミット | 内容 |
 |---|---|
@@ -52,7 +24,7 @@
 **Miri**: `cargo +nightly miri test --test mem_test`（26/28、重い2件除外）— `Value::Path` 追加後も UB/リーク無し。
 
 ### 確定仕様ドキュメント
-- [language-design.md](language-design.md) — `::`/module/型の関係、特殊形・関数カタログ（Rust 組み込み vs typelisp）、defmethod、defstruct、エラー処理（Result/Never/panic!）。
+- [language-design.md](language-design.md) — 言語の基本方針、メモリモデル/GC、`::`/module/型の関係、特殊形・関数カタログ（Rust 組み込み vs typelisp）、defmethod、defstruct、エラー処理（Result/Never/panic!）。
 
 ### 主要ファイル
 - `src/mem/value.rs` — `Value`（`Path` 追加）/ `ConsRef` / `SymId` / `StrId` / `PathId` / `Cell`
@@ -75,7 +47,7 @@
 
 ---
 
-## 3. ステップ3：型システム + match（**完了**）
+## 2. ステップ3：型システム + match（**完了**）
 
 承認済み方針「A: 型検査器の骨組み + 組み込み直和型（`Sexpr`/`Option`）+ `match`/`if-let` を最小構成」。
 **最小ゴール達成**: `Option`/`Sexpr` に対する `match` を型検査できる（`unwrap-or` が通る／非網羅・型不一致はエラー）。
@@ -120,7 +92,7 @@
 - 型名は小文字正規化される点に注意（`String`→`string`, 型変数 `T`→`t`）。
 </details>
 
-## 3.5 エラー処理 + 名前空間（**完了**・型検査レベル）
+## 2.5 エラー処理 + 名前空間（**完了**・型検査レベル）
 確定仕様は [language-design.md](language-design.md)。実装済み（すべて型検査レベル、eval は未着手）:
 - **エラー処理**: `Result<T,E>`/`Error` 組み込み、`Never` 型(`!`)、`panic!` 特殊形（任意の期待型に適合）。`?`/try は無し。
 - **`::`/名前空間**: reader が `::` を `Value::Path` に分割。**型は名前空間でなく Rust 同様**（型は assoc 関数/メソッドを持つ）。
@@ -128,7 +100,7 @@
   インスタンス・ディスパッチ（第一引数型）と `Type::method` 静的呼び出し、裸名解決 現NS→root。
 - **未実装（後続）**: ジェネリック構造体/受け手、`use a::b`（モジュール名を現NSに alias として導入）、可視性、関数カタログの実装本体（eval 待ち）。
 
-## 4. ステップ4：eval（**4a/4b 実装済み**）
+## 3. ステップ4：eval（**4a/4b 実装済み**）
 - **型付き AST（`check::Typed`）上のツリーウォークインタプリタ**（`src/eval/`、既定の実行経路）。
   - 実装済み（4a）: `RtValue`（リテラル＋構成子インスタンス `Data{type,variant,fields}`）、リテラル/`var`/`if`/`let`/
     `call`（defun）/`construct`/`match`（パターン照合）/`assoc`（インスタンス・static メソッド）/`panic!`（`EvalError::Panic`）。
@@ -145,7 +117,7 @@
     `list`（`(Cons e1 (Cons e2 (... (Nil))))` へ脱糖）／`dolist`（`let`+`while`+`match` で `Cons`/`Nil` を辿る脱糖、結果は `Unit`）。
   - TDD: `tests/eval_test.rs`（49件）／`tests/check_test.rs`（40件）。
 - **次の候補（eval 拡充）**:
-  - 組み込み関数の拡張（型ごとの算術／i64・f64、文字列・ベクタ・Option/Result ライブラリ関数）。カタログは [language-design.md](language-design.md) §3。
+  - 組み込み関数の拡張（型ごとの算術／i64・f64、文字列・ベクタ・Option/Result ライブラリ関数）。カタログは [language-design.md](language-design.md) §4。
   - typelisp ライブラリ関数（`length`/`append`/`reverse`/`map`/`filter`/`foldl`/`foldr` 等、`Sexpr` 上）、`break`/`return` の非局所脱出（→ `loop`）。
   - 実行時値と GC の整合（現状 `RtValue` は Rust ヒープ上で完結、cons ヒープ非依存）。
 - **ステップ5: compile**（明示 `compile`/`compile-file`。inkwell 再追加・LLVM コード生成。feature gate）。

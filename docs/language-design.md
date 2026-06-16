@@ -1,16 +1,46 @@
 # typelisp 言語設計（確定仕様）
 
-最終更新: 2026-06-14 / ブランチ: `feature/typed-lisp-impl`
+最終更新: 2026-06-16 / ブランチ: `feature/typed-lisp-impl`
 
 このドキュメントは、設計で**確定した言語仕様**を後から見返せるよう記録するもの。
-実装の進捗・段取りは [TODO.md](TODO.md) を参照。基本方針（静的型付け・文法は macro-lisp 準拠・
-`true`/`false`・`nil` の代替は `Option<T>`・大小無視）は TODO.md の「0. 言語仕様」に従う。
+実装の進捗・段取りは [TODO.md](TODO.md) を参照。
 
 ---
 
-## 1. `::`・module・型の関係（Rust 流）
+## 0. 言語の基本方針
 
-### 1.1 `::` は reader が `Value::Path` に分割
+- **静的型付け**: すべての式が静的型を持つ。動的タグ付き Lisp（旧 3ab5599 の `Object`）ではない。
+- **文法は macro-lisp 準拠**: `/Users/suzukijun/Program/Rust/macro-lisp` の**構文**に従う（実装は参考にしない）。
+  `defun`/`defstruct`/`defvar`/`defconstant`/`let`/`if`/`when`/`unless`/`cond`/`match`/`loop`/`while`/`dotimes`/`do`/`doiter`/`while-let`/`if-let`/`lambda`/`progn`/`module` 等。関数の引数・戻り型は必須、局所束縛は型推論可。
+- **真偽値は `true`/`false`**。`nil`/`t` は言語に存在しない。
+- **`nil` の代替は `Option<T>`**（`(defstruct Option (Some (value T)) (None))` 相当の直和型）。
+- **`read` の戻り値は組み込み直和型 `Sexpr`**。
+  `Sexpr = Nil|Int|Float|Char|Bool|Sym|Str|Cons(Sexpr, Sexpr)`。
+  空リスト `()` は `Sexpr` の値としての `Nil`（cons と並ぶ第一級の構成子）。car/cdr はどちらも `Sexpr`
+  （`Option` で包まない）。`cons`/`car`/`cdr`/`list`/`dolist` は cons と nil の双対のまま自然に書ける。
+  `()` は期待型が `Sexpr` のとき `Nil` に、`Option<T>` のとき `None` になる（`Unit` はその他の文脈）。
+  実行時は `Nil` を `Value::Empty` で符号化（`Cons` と対等な variant、`Option` ラッパーではない）。
+  これは言語レベルで禁止した「真偽値としての `nil`」とは別物（あくまで read データ内の空リスト表現）。
+- **大文字小文字は区別しない**（シンボルは小文字に正規化してインターン）。
+- **Rust 相互運用はしない**（`&args[1]`, `env::args().collect()` 等は対象外）。
+- **構成子パターンは S 式形** `(Some v)` / `(Cons a d)`。
+- **実行モデル**: 既定はインタプリタ（eval）。**ネイティブコンパイルは明示的 `compile`/`compile-file`（CL 準拠）を呼んだ時だけ**。LLVM コンパイラは feature gate。
+
+---
+
+## 1. メモリモデル / GC
+
+- cons セルは**固定アリーナ**（起動時に確保、再確保しない＝生ポインタが安定）。将来 `--heap-cells N` で容量指定。
+- 割当はフリーリストから。空なら GC、それでも空なら **`Error::HeapExhausted`（成長しない）**。
+- **mark-sweep GC**（反復マーク＝深い構造でもスタック溢れなし、循環回収）。ルート集合 `push_root`/`pop_root`。
+- **生ポインタは `ConsRef` に隠蔽、公開 API は安全**。
+- シンボルはインターン（小文字正規化・永続）。文字列は GC 管理（到達可能のみ生存）。
+
+---
+
+## 2. `::`・module・型の関係（Rust 流）
+
+### 2.1 `::` は reader が `Value::Path` に分割
 - ソース上の `Foo::Bar` は **読み取り時に** セグメント列へ分割され、専用の `Value::Path([sym...])` になる。
   解決時に文字列を再分割しない（効率・見通しのため reader 段で構造化する）。
 - reader が行うのは**明示 `::` の分割のみ**。CL の `*package*` のような「現在の名前空間」追跡はしない。
@@ -25,7 +55,7 @@
 - セグメントは小文字化される（シンボルと同じ正規化）。空セグメント（`foo::`, `::bar`, `a::::b`）は読み取りエラー。
 - 総称は最終セグメントに付く（`a::Vec<T>` → セグメント `[a, vec<t>]`、型は最終セグメントの `<>` を解釈）。
 
-### 1.2 module は名前空間、型は名前空間ではない
+### 2.2 module は名前空間、型は名前空間ではない
 - **module = 名前空間**（`module`/`use` で扱う）。
 - **型は Rust 同様**に扱う ＝ 型は **関連関数（associated function）/メソッド** を持つ。型は名前空間ではない。
 - したがって `Foo::Bar` の意味は文脈で決まる（Rust のパス解決と同じ）:
@@ -33,7 +63,7 @@
   - `Foo` が **型** なら「型 Foo の関連関数/メソッド Bar」。
   - checker が先頭セグメントを解決し、module か型かを判定して残りを下降解決する。
 
-### 1.3 名前解決規則
+### 2.3 名前解決規則
 - **裸名（修飾なし）**: 現在の module → root（組み込み）の順。**中間の親 module は歩かない**。
   曖昧（複数候補）または未発見は `TypeError`。
 - **修飾パス `a::b::...`**: 先頭を現NS→root で解決し、module なら下降、型なら次（最終）セグメントを関連項目として解決。
@@ -47,7 +77,7 @@
 
 ---
 
-## 2. 特殊形カタログ
+## 3. 特殊形カタログ
 
 | 分類 | 特殊形 | 備考 |
 |---|---|---|
@@ -55,7 +85,7 @@
 | 束縛 | `let` `let*` | |
 | 制御 | `if` `when` `unless` `cond` `case` `match` `if-let` `while-let` `and` `or` `progn` `the` | `and`/`or` は短絡のため特殊形。`the` は型注釈 |
 | 反復 | `loop` `while` `until` `dotimes` `dolist` `do` `doiter` | |
-| その他 | `quote` `setf` `panic!` `unreachable!` `todo!` | `panic!`/`unreachable!`/`todo!` は戻り型 `!`（§6） |
+| その他 | `quote` `setf` `panic!` `unreachable!` `todo!` | `panic!`/`unreachable!`/`todo!` は戻り型 `!`（§7） |
 
 脱糖の例: `when`→`if`+`progn`、`unless`→`if`、`if-let (pat val) then else`→2 腕 `match`（包括アームで網羅）。
 
@@ -74,7 +104,7 @@
 
 ---
 
-## 3. 関数カタログ（Rust 組み込み vs typelisp ライブラリ）
+## 4. 関数カタログ（Rust 組み込み vs typelisp ライブラリ）
 
 **分離原則**: ヒープ/ランタイム/IO/プリミティブ演算/ネイティブ codegen を要するものは **Rust 実装**。
 それらの組合せで書けるものは **typelisp 自身で実装**（ライブラリ）。すべて型付き（引数/戻り型を明示）。
@@ -83,7 +113,7 @@
 > （`+ - * / mod < <= > >= = /=`、`/`/`mod` のゼロ除算は panic）と **`Sexpr` 上の `cons`/`car`/`cdr`**
 > （`car`/`cdr` は非 `Cons`＝`Nil` 含むで panic）を実装済み。他のカタログ項目は今後 eval 拡充で追加。
 
-### 3.1 Rust 組み込み（primitive）
+### 4.1 Rust 組み込み（primitive）
 | 種別 | 関数 | 備考 / 例 |
 |---|---|---|
 | 算術 | `+ - * / mod rem neg abs` | 型ごと。例 `+ : (fn (i32 i32) i32)`。`/` のゼロ除算は `Result` |
@@ -95,10 +125,10 @@
 | ベクタ | `make-vector vector-ref vector-set! vector-length vector-push! vector-get` | `vector-ref` 範囲外は panic、`vector-get : Option<T>` |
 | 解析 | `parse-int parse-float` | `Result<_, Error>` |
 | IO | `print println princ format read read-line` | `read : (fn (String) Result<Sexpr, Error>)` |
-| 発散 | `panic! unreachable! todo! exit` | 戻り型 `!`（§6） |
+| 発散 | `panic! unreachable! todo! exit` | 戻り型 `!`（§7） |
 | システム | `eval compile compile-file gc` | `compile`/`compile-file` は明示呼び出し時のみネイティブ化（feature gate） |
 
-### 3.2 typelisp ライブラリ（derived）
+### 4.2 typelisp ライブラリ（derived）
 | 種別 | 関数 |
 |---|---|
 | リスト | `list length append reverse nth last map filter foldl foldr member assoc find every some` |
@@ -109,9 +139,9 @@
 
 ---
 
-## 4. メソッド機構（defmethod）
+## 5. メソッド機構（defmethod）
 
-CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は Rust 同様に関連項目を持つ**（§1.2）。
+CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は Rust 同様に関連項目を持つ**（§2.2）。
 
 - **インスタンスメソッド**:
   ```
@@ -136,7 +166,7 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 
 ---
 
-## 5. defstruct 文法
+## 6. defstruct 文法
 
 **直和形**（メモリの `(defstruct Option (Some (value T)) (None))` 例に準拠）:
 ```
@@ -150,14 +180,14 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 
 ---
 
-## 6. エラー処理（Rust 流）
+## 7. エラー処理（Rust 流）
 
-### 6.1 Result と panic の住み分け
+### 7.1 Result と panic の住み分け
 - **回復可能な失敗** → `Result<T, E>`（`Ok(T) | Err(E)`、組み込み直和型）＋ `match`。
 - **回復不能な失敗（バグ・不変条件違反）** → `panic!`。
 - **`?`/try は導入しない**（Lisp 文法に馴染まないため）。失敗の分岐は `match` で明示する。
 
-### 6.2 `Never` 型（`!`）
+### 7.2 `Never` 型（`!`）
 - `panic!` は**特殊形**で、戻り型は `!`（Never / ボトム型）。
 - `!` は**任意の期待型に適合**する（Rust の coercion 相当）。よって分岐の一方で panic しても型検査が通る:
   ```lisp
@@ -168,15 +198,15 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   型の突き合わせ（reconcile/unify）でも Never をボトムとして任意型に適合させる。
 - `unreachable!` / `todo!` / `exit` も `!`（発散）。
 
-### 6.3 命名規則 `!`
+### 7.3 命名規則 `!`
 - `!` 接尾辞は**発散/例外的/副作用的**な操作を表す目印（命名規則）。
   例: `panic!` `set-car!` `set-cdr!` `vector-set!` `vector-push!`。
 
-### 6.4 エラー型 E
+### 7.4 エラー型 E
 - 当面は**組み込み汎用 `Error`**（メッセージ等を保持）。既定は `Result<T, Error>`。
 - 将来 trait を導入した際に、ユーザ定義エラー型も扱えるよう拡張する。
 
-### 6.5 部分関数の失敗方針（Rust 流の混在）
+### 7.5 部分関数の失敗方針（Rust 流の混在）
 | 操作 | 方針 |
 |---|---|
 | `vector-ref`（範囲外） | panic |
@@ -190,9 +220,9 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 
 ---
 
-## 7. 当面の範囲外（将来課題）
+## 8. 当面の範囲外（将来課題）
 
 - `use a::b`（モジュール名を現NSに alias として導入。個別 `use a::b::name` は対応）、ジェネリック構造体/受け手、ネスト総称の修飾型。
 - 可視性（pub/private）、絶対パス `::foo`。
 - trait / 動的ディスパッチ、ユーザ定義エラー型。
-- 関数カタログ（§3）の実装本体は eval（step4）以降。
+- 関数カタログ（§4）の実装本体は eval（step4）以降。
