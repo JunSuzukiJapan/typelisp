@@ -5,7 +5,7 @@
 //! non-exhaustive / type-mismatched forms are rejected.
 
 extern crate typelisp;
-use typelisp::{Checker, Error, Expr, Heap, Path, Reader, TopLevel, Type, Typed};
+use typelisp::{Checker, Error, Expr, Heap, Interp, Path, Reader, TopLevel, Type, Typed};
 
 /// Read one datum and check it as a single top-level form.
 fn form(src: &str) -> Result<TopLevel, Error> {
@@ -13,7 +13,8 @@ fn form(src: &str) -> Result<TopLevel, Error> {
     let r = Reader::new();
     let v = r.read(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
-    chk.check_form(&h, v)
+    let interp = Interp::new();
+    chk.check_form(&mut h, &interp, v)
 }
 
 /// Check a sequence of forms (e.g. a defun followed by a use of it), returning
@@ -23,9 +24,10 @@ fn program(src: &str) -> Result<TopLevel, Error> {
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    let interp = Interp::new();
     let mut last = None;
     for v in vs {
-        last = Some(chk.check_form(&h, v)?);
+        last = Some(chk.check_form(&mut h, &interp, v)?);
     }
     Ok(last.expect("no forms"))
 }
@@ -251,9 +253,10 @@ fn cannot_assign_to_constant() {
     let r = Reader::new();
     let vs = r.read_all(&mut h, "(defconstant k 5) (setf k 6)").unwrap();
     let mut chk = Checker::new();
+    let interp = typelisp::Interp::new();
     let mut result = Ok(());
     for v in vs {
-        if let Err(e) = chk.check_form(&h, v) {
+        if let Err(e) = chk.check_form(&mut h, &interp, v) {
             result = Err(e);
         }
     }

@@ -17,7 +17,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
-use crate::{Expr, Heap, Path, Pattern, TopLevel, Typed, Value};
+use crate::{Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Typed, Value};
 
 use super::value::{Closure, EvalError, RtValue};
 
@@ -58,6 +58,11 @@ pub struct Interp {
     /// How many roots `sync_roots` last pushed onto the heap, so it knows how
     /// many to pop before recomputing the set from scratch.
     rooted: Cell<usize>,
+    /// Monotonic counter backing `gensym`. typelisp symbols are always
+    /// interned and permanent (no uninterned-symbol concept), so `gensym`
+    /// can only offer collision-*resistant* fresh names, not CL's
+    /// unforgeable ones — see [`Self::eval_builtin`]'s `"gensym"` arm.
+    gensym_counter: Cell<u64>,
 }
 
 impl Interp {
@@ -68,6 +73,7 @@ impl Interp {
             globals: HashMap::new(),
             slots: RefCell::new(Vec::new()),
             rooted: Cell::new(0),
+            gensym_counter: Cell::new(0),
         }
     }
 
@@ -119,6 +125,13 @@ impl Interp {
                 }
                 names.extend(params.into_iter().map(|(n, _)| n));
                 self.methods.insert((type_name, method), FnDef { params: names, body });
+                Ok(None)
+            }
+            TopLevel::Defmacro { name, params, body } => {
+                // A macro's body is callable exactly like a `defun`'s — see
+                // `MacroExpander`/`Self::expand_macro` — so it's stored in
+                // the very same `fns` table; no separate macro table exists.
+                self.fns.insert(name, FnDef { params, body });
                 Ok(None)
             }
             TopLevel::Defstruct { .. } | TopLevel::Use { .. } => Ok(None),
@@ -293,6 +306,61 @@ impl Interp {
                 RtValue::Str(s) => Err(EvalError::Panic(s)),
                 _ => Err(EvalError::Panic(String::new())),
             },
+            Expr::Quote(qs) => {
+                // One `sync_roots` call up front (not nested inside
+                // `alloc_quoted`'s recursion — see its doc comment for why)
+                // covers every *other* live slot for the whole build.
+                self.sync_roots(heap);
+                let v = self.alloc_quoted(heap, qs)?;
+                Ok(RtValue::Sexpr(v))
+            }
+        }
+    }
+
+    /// Allocate a [`QuotedSexpr`] literal into the GC-managed cons heap, fresh
+    /// on every call (see [`Expr::Quote`] for why the literal is kept as an
+    /// owned tree rather than a live heap pointer). Every intermediate cons
+    /// cell built along the way is rooted via plain `push_root`/`pop_root`
+    /// (not `slot`/`sync_roots`) for exactly as long as it takes to link it
+    /// into its parent.
+    ///
+    /// Deliberately does **not** call `sync_roots` itself (unlike
+    /// `construct_sexpr`, which only ever makes one `cons` call per
+    /// invocation): `sync_roots` pops exactly as many roots as *it* last
+    /// pushed, assuming nothing else touched the stack in between. This
+    /// recursion pushes its own ad-hoc roots (`cv`/`dv` below) between
+    /// `cons` calls, so a `sync_roots` call nested in here would pop those
+    /// instead of its own bookkeeping — corrupting both. The caller
+    /// ([`Self::eval`]'s `Expr::Quote` arm) calls `sync_roots` exactly once,
+    /// before any of this recursion starts; since no slot is created or
+    /// destroyed while building a literal, that one snapshot stays valid (and
+    /// undisturbed, since every push here is popped before returning) for the
+    /// whole recursive build.
+    fn alloc_quoted(&self, heap: &mut Heap, qs: &QuotedSexpr) -> Result<Value, EvalError> {
+        match qs {
+            QuotedSexpr::Nil => Ok(Value::Empty),
+            QuotedSexpr::Int(n) => Ok(Value::Int(*n)),
+            QuotedSexpr::Float(f) => Ok(Value::Float(*f)),
+            QuotedSexpr::Char(c) => Ok(Value::Char(*c)),
+            QuotedSexpr::Bool(b) => Ok(Value::Bool(*b)),
+            QuotedSexpr::Sym(s) => Ok(heap.intern_symbol(s)),
+            QuotedSexpr::Str(s) => Ok(heap.alloc_string(s.clone())),
+            QuotedSexpr::Cons(car, cdr) => {
+                let cv = self.alloc_quoted(heap, car)?;
+                heap.push_root(cv);
+                let dv = match self.alloc_quoted(heap, cdr) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        heap.pop_root();
+                        return Err(e);
+                    }
+                };
+                heap.push_root(dv);
+                let result = heap.cons(cv, dv).map_err(|e| EvalError::Panic(e.to_string()));
+                heap.pop_root(); // dv
+                heap.pop_root(); // cv
+                result
+            }
         }
     }
 
@@ -396,11 +464,22 @@ impl Interp {
     /// builtin, so the caller can fall through to a "no such function" error.
     /// (MVP: i32 arithmetic/comparison only; integer divide/mod by zero
     /// `panic!`s, matching Rust. `cons`/`car`/`cdr` operate on `Sexpr`;
-    /// `car`/`cdr` of a non-`Cons` `Sexpr` — including `Nil` — `panic!`s.)
+    /// `car`/`cdr` of a non-`Cons` `Sexpr` — including `Nil` — `panic!`s.
+    /// `gensym` returns a fresh `Sexpr::Sym` each call.)
     fn eval_builtin(&self, heap: &mut Heap, name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
         match name {
             "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
                 eval_int_builtin(name, args)
+            }
+            "gensym" => {
+                // A leading space mirrors the hidden-binding idiom already
+                // used for `dotimes`/`dolist`'s internal variables in the
+                // checker (e.g. `" dotimes-limit"`): it can never collide
+                // with a name a user actually types, since the reader's
+                // symbol tokenizer can't produce a space mid-token.
+                let n = self.gensym_counter.get();
+                self.gensym_counter.set(n + 1);
+                Some(Ok(RtValue::Sexpr(heap.intern_symbol(&format!(" gensym-{}", n)))))
             }
             "cons" => match (args.first(), args.get(1)) {
                 (Some(RtValue::Sexpr(a)), Some(RtValue::Sexpr(b))) => {
@@ -424,6 +503,58 @@ impl Interp {
                 None => Some(Err(EvalError::Internal("cdr: expected one argument".into()))),
             },
             _ => None,
+        }
+    }
+}
+
+impl MacroExpander for Interp {
+    /// Expand one macro call: look `path` up in `fns` (a `defmacro` is stored
+    /// there exactly like a `defun` — see [`Interp::exec`]'s `Defmacro` arm),
+    /// wrap each raw (unevaluated) argument form as `RtValue::Sexpr` with no
+    /// conversion (this *is* the implicit quoting that makes macro arguments
+    /// unevaluated data), and run it like any other call.
+    ///
+    /// GC-root discipline: `apply` registers its arguments into `self.slots`
+    /// and may call `sync_roots` any number of times while evaluating the
+    /// macro body — each such call pushes fresh roots *without* popping them
+    /// at the end (by design; see `sync_roots`'s doc comment), so some number
+    /// of roots `apply` itself doesn't own may be sitting on top of the heap's
+    /// root stack when it returns. This method also pushes its own roots
+    /// (`raw_args`, via plain `push_root`, not `slot`) *underneath* whatever
+    /// `apply` adds, to protect them across `apply`'s execution. So on the
+    /// way out, the teardown order must be: pop exactly `self.rooted` entries
+    /// first (deregistering `apply`'s own bookkeeping — accurate at this
+    /// exact point, since nothing else touches the root stack during
+    /// `apply`), *then* pop `raw_args.len()` entries (which are only now back
+    /// at the top, the stack being strictly LIFO). Popping in any other order
+    /// — or letting `apply`'s leftover roots survive uncounted — corrupts
+    /// either this call's own protection or `sync_roots`' bookkeeping for the
+    /// next caller (e.g. a later top-level form), since `sync_roots` always
+    /// trusts its own `rooted` count to know how much to pop.
+    fn expand_macro(&self, heap: &mut Heap, path: &Path, raw_args: Vec<Value>) -> Result<Value, String> {
+        let f = self.fns.get(path).ok_or_else(|| format!("no such macro: {}", path))?;
+        if f.params.len() != raw_args.len() {
+            return Err(format!(
+                "expected {} argument(s), got {}",
+                f.params.len(),
+                raw_args.len()
+            ));
+        }
+        for v in &raw_args {
+            heap.push_root(*v);
+        }
+        let argv: Vec<RtValue> = raw_args.iter().map(|v| RtValue::Sexpr(*v)).collect();
+        let result = self.apply(heap, &f.params, &f.body, argv);
+        for _ in 0..self.rooted.replace(0) {
+            heap.pop_root();
+        }
+        for _ in &raw_args {
+            heap.pop_root();
+        }
+        match result {
+            Ok(RtValue::Sexpr(v)) => Ok(v),
+            Ok(_) => Err("did not expand to a Sexpr".to_string()),
+            Err(e) => Err(e.to_string()),
         }
     }
 }

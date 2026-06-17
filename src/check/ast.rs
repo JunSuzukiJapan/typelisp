@@ -75,6 +75,29 @@ pub enum Expr {
     Return(Option<Box<Typed>>),
     /// `(panic! message)` — diverges. Has type [`Type::Never`](crate::Type).
     Panic(Box<Typed>),
+    /// `(quote datum)` — the literal `datum`, unevaluated, as a `Sexpr` value.
+    /// Carries an owned [`QuotedSexpr`] rather than a raw [`Value`](crate::Value)
+    /// cons pointer: `Expr`/`Typed` trees are kept indefinitely in `Interp::fns`,
+    /// but the GC's root-walk only reaches values through live `slots`, never
+    /// through stored function bodies — so a live heap pointer baked into a
+    /// literal here would be invisible to the collector. The interpreter
+    /// reconstructs a fresh heap value from this on every evaluation.
+    Quote(QuotedSexpr),
+}
+
+/// An owned, GC-heap-independent mirror of `Sexpr`'s shape, used by
+/// [`Expr::Quote`] (see its doc comment for why this can't just hold a raw
+/// [`Value`](crate::Value)).
+#[derive(Clone, Debug, PartialEq)]
+pub enum QuotedSexpr {
+    Nil,
+    Int(i64),
+    Float(f64),
+    Char(char),
+    Bool(bool),
+    Sym(String),
+    Str(String),
+    Cons(Box<QuotedSexpr>, Box<QuotedSexpr>),
 }
 
 /// One arm of a `match`: a pattern and the body sequence it guards.

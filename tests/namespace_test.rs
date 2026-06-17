@@ -2,7 +2,7 @@
 //! and methods (`defmethod`, instance + static dispatch).
 
 extern crate typelisp;
-use typelisp::{Checker, Error, Heap, Path, Reader, TopLevel, Type};
+use typelisp::{Checker, Error, Heap, Interp, Path, Reader, TopLevel, Type};
 
 /// Check a sequence of forms with one checker; return the last form's result.
 fn program(src: &str) -> Result<TopLevel, Error> {
@@ -10,9 +10,10 @@ fn program(src: &str) -> Result<TopLevel, Error> {
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    let interp = Interp::new();
     let mut last = None;
     for v in vs {
-        last = Some(chk.check_form(&h, v)?);
+        last = Some(chk.check_form(&mut h, &interp, v)?);
     }
     Ok(last.expect("no forms"))
 }

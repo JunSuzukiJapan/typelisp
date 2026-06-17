@@ -12,7 +12,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     let mut interp = Interp::new();
     let mut last = RtValue::Unit;
     for v in vs {
-        let tl = chk.check_form(&h, v).expect("check failed");
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl)? {
             last = val;
         }
@@ -383,7 +383,7 @@ fn eval_sexpr(src: &str) -> (Heap, Value) {
     let mut interp = Interp::new();
     let mut last = RtValue::Unit;
     for v in vs {
-        let tl = chk.check_form(&h, v).expect("check failed");
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;
         }
@@ -489,9 +489,10 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
                  (car kept))";
     let vs = r.read_all(&mut src_heap, src).expect("read failed");
     let mut chk = Checker::new();
+    let check_interp = Interp::new();
     let tls: Vec<_> = vs
         .into_iter()
-        .map(|v| chk.check_form(&src_heap, v).expect("check failed"))
+        .map(|v| chk.check_form(&mut src_heap, &check_interp, v).expect("check failed"))
         .collect();
 
     let mut rt_heap = Heap::with_capacity(2);

@@ -32,6 +32,16 @@ pub struct AssocFn {
     pub instance: bool,
 }
 
+/// A `defmacro`'s signature: just an arity (every parameter and the implicit
+/// return are always `Sexpr`, so there is no per-parameter type to record —
+/// see `Checker::check_defmacro`).
+#[derive(Clone, Debug)]
+pub struct MacroDef {
+    pub arity: usize,
+    /// Visible outside its defining module.
+    pub public: bool,
+}
+
 /// A global variable/constant: its type and whether it is assignable.
 #[derive(Clone, Debug)]
 pub struct VarInfo {
@@ -65,6 +75,10 @@ pub struct Namespace {
     pub modules: HashMap<String, Namespace>,
     /// Free functions defined directly here, keyed by unqualified name.
     pub fns: HashMap<String, FnSig>,
+    /// `defmacro`s defined directly here, keyed by unqualified name. Kept
+    /// separate from `fns` so the checker's head-symbol dispatch can tell a
+    /// macro call (expand, then re-check) from an ordinary function call.
+    pub macros: HashMap<String, MacroDef>,
     /// Types defined directly here, keyed by unqualified name. `AdtDef::name`
     /// holds the fully-qualified name used as the type's identity.
     pub types: HashMap<String, AdtDef>,
@@ -141,6 +155,12 @@ impl Registry {
         root.fns.insert("cons".to_string(), FnSig { params: vec![sexpr(), sexpr()], ret: sexpr(), public: true });
         root.fns.insert("car".to_string(), FnSig { params: vec![sexpr()], ret: sexpr(), public: true });
         root.fns.insert("cdr".to_string(), FnSig { params: vec![sexpr()], ret: sexpr(), public: true });
+        // `gensym`: a fresh `Sexpr::Sym` on every call, for macro hygiene
+        // workarounds (see `Interp`'s `gensym_counter` for the caveat that
+        // these are collision-*resistant*, not truly unforgeable — typelisp
+        // symbols are always interned/permanent, there is no uninterned-symbol
+        // concept to give a CL-style absolute guarantee).
+        root.fns.insert("gensym".to_string(), FnSig { params: vec![], ret: sexpr(), public: true });
         Registry { root }
     }
 

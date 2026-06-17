@@ -71,6 +71,15 @@ fn history_path() -> PathBuf {
 /// failure (nothing left to check yet), or only after every form in the
 /// batch has been through `check_form` (whose output never retains the raw
 /// `Value`) — never pop in between, and never exec before popping.
+///
+/// One exception: a `(defmacro ...)` form is `exec`'d *immediately* once
+/// checked, right here in the check loop, instead of waiting for the batch
+/// exec pass below — a macro use later in the *same* pasted/typed batch needs
+/// the macro's body already present in `Interp` to expand during checking
+/// (see `MacroExpander`/`check::checker::check_list`). This doesn't violate
+/// the invariant above: `Interp::exec` on a `Defmacro` is just a `HashMap`
+/// insert, so it never touches the heap's root stack (unlike a real
+/// expression `exec`, which runs `sync_roots`).
 fn try_run_pending(
     heap: &mut Heap,
     reader: &Reader,
@@ -97,7 +106,10 @@ fn try_run_pending(
     let mut checked = Vec::with_capacity(forms.len());
     let mut check_err = None;
     for v in forms {
-        match checker.check_form(heap, v) {
+        match checker.check_form(heap, &*interp, v) {
+            Ok(tl @ TopLevel::Defmacro { .. }) => {
+                let _ = interp.exec(heap, tl);
+            }
             Ok(tl) => checked.push(tl),
             Err(e) => {
                 check_err = Some(e);

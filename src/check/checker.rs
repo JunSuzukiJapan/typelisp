@@ -10,8 +10,25 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{parse_type, Error, Heap, Path, Type, Value};
 
-use super::ast::{Arm, Expr, Pattern, Typed};
-use super::registry::{AdtDef, AssocFn, FnSig, Namespace, Registry, VarInfo, Variant};
+use super::ast::{Arm, Expr, Pattern, QuotedSexpr, Typed};
+use super::registry::{AdtDef, AssocFn, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};
+
+/// Expands a macro call *during* type-checking: `path` names a `defmacro`,
+/// `raw_args` are the call's unevaluated argument forms (exactly as written —
+/// this is what makes macros unhygienic/CL-style: no implicit quoting
+/// conversion is needed since `Sexpr`'s runtime representation already *is*
+/// the reader's raw `Value`). Returns the expansion to check in place of the
+/// original call.
+///
+/// Defined here (in `check`, not `eval`) and implemented by `Interp` in
+/// `eval/interp.rs`, so this module — pure static analysis otherwise — never
+/// has to name the concrete `Interp` type. `eval` already depends on
+/// `check`'s typed AST (`Expr`/`TopLevel`/`Typed`), so a direct `use
+/// crate::eval::Interp` here would make the two modules mutually dependent;
+/// this trait keeps that dependency one-directional.
+pub trait MacroExpander {
+    fn expand_macro(&self, heap: &mut Heap, path: &Path, raw_args: Vec<Value>) -> Result<Value, String>;
+}
 
 /// A checked top-level form.
 #[derive(Clone, Debug, PartialEq)]
@@ -36,6 +53,10 @@ pub enum TopLevel {
     },
     /// A `defstruct`: a user data type.
     Defstruct { name: Path, params: Vec<String>, variants: Vec<Variant> },
+    /// A `defmacro`: a compile-time, `Sexpr`-to-`Sexpr` code transformer.
+    /// Stored as an ordinary callable body — calling it (at macro-expansion
+    /// time, via [`MacroExpander`]) is identical to calling a `defun`.
+    Defmacro { name: Path, params: Vec<String>, body: Vec<Typed> },
     /// A `defvar`/`defconstant`: a global variable (`mutable`) or constant.
     Defvar { name: Path, ty: Type, value: Typed, mutable: bool },
     /// A `module`: a namespace and its checked body forms.
@@ -92,25 +113,26 @@ impl Checker {
     /// Check one top-level form. Definition forms (`defun`/`defstruct`/`module`/
     /// `defmethod`/`use`) register into the current namespace; anything else is
     /// checked as an expression.
-    pub fn check_form(&mut self, heap: &Heap, v: Value) -> Result<TopLevel, Error> {
+    pub fn check_form(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value) -> Result<TopLevel, Error> {
         if let Value::Cons(_) = v {
             let elems = heap.list_to_vec(v)?;
             if let Some(Value::Symbol(id)) = elems.first() {
                 match heap.symbol_name(*id) {
-                    "pub" => return self.check_pub(heap, &elems[1..]),
-                    "defun" => return self.check_defun(heap, &elems[1..], false),
-                    "defvar" => return self.check_defvar(heap, &elems[1..], true, false),
-                    "defconstant" => return self.check_defvar(heap, &elems[1..], false, false),
+                    "pub" => return self.check_pub(heap, interp, &elems[1..]),
+                    "defun" => return self.check_defun(heap, interp, &elems[1..], false),
+                    "defvar" => return self.check_defvar(heap, interp, &elems[1..], true, false),
+                    "defconstant" => return self.check_defvar(heap, interp, &elems[1..], false, false),
                     "defstruct" => return self.check_defstruct(heap, &elems[1..], false),
-                    "module" => return self.check_module(heap, &elems[1..]),
-                    "defmethod" => return self.check_defmethod(heap, &elems[1..], false),
+                    "defmacro" => return self.check_defmacro(heap, interp, &elems[1..], false),
+                    "module" => return self.check_module(heap, interp, &elems[1..]),
+                    "defmethod" => return self.check_defmethod(heap, interp, &elems[1..], false),
                     "use" => return self.check_use(heap, &elems[1..]),
                     _ => {}
                 }
             }
         }
         let env = Env::new();
-        let t = self.check(heap, &env, v, None)?;
+        let t = self.check(heap, interp, &env, v, None)?;
         Ok(TopLevel::Expr(t))
     }
 
@@ -122,21 +144,22 @@ impl Checker {
     }
 
     /// `(pub defun ...)` / `(pub defstruct ...)` etc. — mark the next definition public.
-    fn check_pub(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
+    fn check_pub(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value]) -> Result<TopLevel, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("pub: expected a definition form".into()));
         }
         if let Value::Symbol(id) = parts[0] {
             match heap.symbol_name(id) {
-                "defun" => return self.check_defun(heap, &parts[1..], true),
-                "defvar" => return self.check_defvar(heap, &parts[1..], true, true),
-                "defconstant" => return self.check_defvar(heap, &parts[1..], false, true),
+                "defun" => return self.check_defun(heap, interp, &parts[1..], true),
+                "defvar" => return self.check_defvar(heap, interp, &parts[1..], true, true),
+                "defconstant" => return self.check_defvar(heap, interp, &parts[1..], false, true),
                 "defstruct" => return self.check_defstruct(heap, &parts[1..], true),
-                "defmethod" => return self.check_defmethod(heap, &parts[1..], true),
+                "defmacro" => return self.check_defmacro(heap, interp, &parts[1..], true),
+                "defmethod" => return self.check_defmethod(heap, interp, &parts[1..], true),
                 _ => {}
             }
         }
-        Err(Error::TypeError("pub: expected defun/defstruct/defmethod/defvar/defconstant".into()))
+        Err(Error::TypeError("pub: expected defun/defstruct/defmacro/defmethod/defvar/defconstant".into()))
     }
 
     // ---- namespace navigation & resolution --------------------------------
@@ -253,6 +276,21 @@ impl Checker {
             let mut full = abs;
             full.push(last[0].clone());
             return Some(Path::from_segments(full));
+        }
+        None
+    }
+
+    /// Resolve a bare macro name to its absolute [`Path`] and arity (current
+    /// namespace then root — same priority as [`Self::resolve_fn`], but
+    /// without `use`-alias support, which `defmacro` doesn't have yet).
+    fn resolve_macro(&self, name: &str) -> Option<(Path, usize)> {
+        if let Some(def) = self.cur_ns().macros.get(name) {
+            return Some((self.fq(name), def.arity));
+        }
+        if let Some(def) = self.reg.root.macros.get(name) {
+            if def.public || self.ns.is_empty() {
+                return Some((Path::root(name), def.arity));
+            }
         }
         None
     }
@@ -407,7 +445,13 @@ impl Checker {
 
     // ---- defun ------------------------------------------------------------
 
-    fn check_defun(&mut self, heap: &Heap, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
+    fn check_defun(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        public: bool,
+    ) -> Result<TopLevel, Error> {
         if parts.len() < 3 {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
@@ -425,8 +469,53 @@ impl Checker {
         self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
 
         let env = Env::new().extended(params.clone());
-        let (body, _) = self.check_seq(heap, &env, &parts[3..], Some(&ret))?;
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[3..], Some(&ret))?;
         Ok(TopLevel::Defun { name: fq_name, params, ret, body })
+    }
+
+    /// `(defmacro name (p1 p2 ...) body...)`: a compile-time code
+    /// transformer. Every parameter and the implicit return are `Sexpr` — so,
+    /// unlike `defun`, the parameter list is bare names with no type
+    /// annotations (they'd always just say `Sexpr`). Registers the signature
+    /// (arity only) before checking the body, so self-recursion works,
+    /// matching [`Self::check_defun`]. The body is checked exactly like a
+    /// `defun`'s; calling it later at macro-expansion time reuses the same
+    /// machinery as calling an ordinary function (see [`MacroExpander`]) —
+    /// `Interp::exec` stores a `Defmacro` in the very same function table.
+    fn check_defmacro(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        public: bool,
+    ) -> Result<TopLevel, Error> {
+        if parts.len() < 2 {
+            return Err(Error::TypeError("defmacro: (defmacro name (params) body...)".into()));
+        }
+        let name = match parts[0] {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            _ => return Err(Error::TypeError("defmacro: name must be a symbol".into())),
+        };
+        let param_vals = heap.list_to_vec(parts[1])?;
+        let mut params = Vec::new();
+        for p in &param_vals {
+            match p {
+                Value::Symbol(id) => params.push(heap.symbol_name(*id).to_string()),
+                _ => return Err(Error::TypeError("defmacro: parameter must be a name".into())),
+            }
+        }
+        let fq_name = self.fq(&name);
+
+        self.reg
+            .root
+            .module_mut(&self.ns)
+            .macros
+            .insert(name, MacroDef { arity: params.len(), public });
+
+        let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
+        let env = Env::new().extended(params.iter().map(|p| (p.clone(), sexpr_ty.clone())).collect());
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[2..], Some(&sexpr_ty))?;
+        Ok(TopLevel::Defmacro { name: fq_name, params, body })
     }
 
     /// Parse a `((name type)...)` parameter list (types canonicalized to FQ).
@@ -494,7 +583,7 @@ impl Checker {
         Ok(TopLevel::Defstruct { name: fq, params: Vec::new(), variants })
     }
 
-    fn check_module(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
+    fn check_module(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value]) -> Result<TopLevel, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("module: (module path body...)".into()));
         }
@@ -510,7 +599,7 @@ impl Checker {
         let mut body = Vec::new();
         let mut result = Ok(());
         for form in &parts[1..] {
-            match self.check_form(heap, *form) {
+            match self.check_form(heap, interp, *form) {
                 Ok(tl) => body.push(tl),
                 Err(e) => {
                     result = Err(e);
@@ -525,7 +614,13 @@ impl Checker {
         Ok(TopLevel::Module { path, body })
     }
 
-    fn check_defmethod(&mut self, heap: &Heap, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
+    fn check_defmethod(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        public: bool,
+    ) -> Result<TopLevel, Error> {
         if parts.len() < 3 {
             return Err(Error::TypeError(
                 "defmethod: (defmethod name (receiver params...) ret body...)".into(),
@@ -583,7 +678,7 @@ impl Checker {
         }
         binds.extend(params.clone());
         let env = Env::new().extended(binds);
-        let (body, _) = self.check_seq(heap, &env, &parts[3..], Some(&ret))?;
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[3..], Some(&ret))?;
         Ok(TopLevel::Defmethod { type_name: type_fq, method, instance, self_name, params, ret, body })
     }
 
@@ -613,7 +708,8 @@ impl Checker {
     /// Check `v` as an expression, optionally against an `expected` type.
     fn check(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         v: Value,
         expected: Option<&Type>,
@@ -632,7 +728,7 @@ impl Checker {
                     for ctor in ["none", "nil"] {
                         if let Some((adt, idx)) = self.resolve_ctor(ctor) {
                             if *n == adt {
-                                return self.check_construct(heap, env, &adt, idx, &[], expected);
+                                return self.check_construct(heap, interp, env, &adt, idx, &[], expected);
                             }
                         }
                     }
@@ -651,7 +747,7 @@ impl Checker {
                     return Err(Error::TypeError(format!("unbound variable: {}", name)));
                 }
             }
-            Value::Cons(_) => self.check_list(heap, env, v, expected)?,
+            Value::Cons(_) => self.check_list(heap, interp, env, v, expected)?,
             Value::Path(pid) => {
                 // A bare `::` path as an expression: a qualified global or a
                 // qualified function used as a value.
@@ -687,7 +783,8 @@ impl Checker {
     /// Dispatch a compound form on its head symbol.
     fn check_list(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         v: Value,
         expected: Option<&Type>,
@@ -703,7 +800,7 @@ impl Checker {
                 .iter()
                 .map(|s| heap.symbol_name(*s).to_string())
                 .collect();
-            return self.check_path_call(heap, env, &segs, args, expected);
+            return self.check_path_call(heap, interp, env, &segs, args, expected);
         }
 
         // A non-symbol head (e.g. a `lambda` literal or any expression) is
@@ -711,61 +808,93 @@ impl Checker {
         let head = match elems[0] {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => {
-                let callee = self.check(heap, env, elems[0], None)?;
-                return self.check_apply(heap, env, callee, args);
+                let callee = self.check(heap, interp, env, elems[0], None)?;
+                return self.check_apply(heap, interp, env, callee, args);
             }
         };
         match head.as_str() {
-            "if" => return self.check_if(heap, env, args, expected),
-            "let" => return self.check_let(heap, env, args, expected),
-            "let*" => return self.check_let_star(heap, env, args, expected),
+            "if" => return self.check_if(heap, interp, env, args, expected),
+            "let" => return self.check_let(heap, interp, env, args, expected),
+            "let*" => return self.check_let_star(heap, interp, env, args, expected),
             "progn" => {
-                let (body, ty) = self.check_seq(heap, env, args, expected)?;
+                let (body, ty) = self.check_seq(heap, interp, env, args, expected)?;
                 // Represent progn as a let with no bindings.
                 return Ok(Typed { expr: Expr::Let(Vec::new(), body), ty });
             }
-            "when" => return self.check_when(heap, env, args, false),
-            "unless" => return self.check_when(heap, env, args, true),
-            "and" => return self.check_and_or(heap, env, args, true),
-            "or" => return self.check_and_or(heap, env, args, false),
-            "cond" => return self.check_cond(heap, env, args, expected),
-            "setf" => return self.check_setf(heap, env, args),
-            "while" => return self.check_while(heap, env, args),
-            "loop" => return self.check_loop(heap, env, args),
+            "when" => return self.check_when(heap, interp, env, args, false),
+            "unless" => return self.check_when(heap, interp, env, args, true),
+            "and" => return self.check_and_or(heap, interp, env, args, true),
+            "or" => return self.check_and_or(heap, interp, env, args, false),
+            "cond" => return self.check_cond(heap, interp, env, args, expected),
+            "setf" => return self.check_setf(heap, interp, env, args),
+            "while" => return self.check_while(heap, interp, env, args),
+            "loop" => return self.check_loop(heap, interp, env, args),
             "break" => return self.check_break(args),
-            "return" => return self.check_return(heap, env, args),
-            "dotimes" => return self.check_dotimes(heap, env, args),
-            "dolist" => return self.check_dolist(heap, env, args),
-            "list" => return self.check_list_lit(heap, env, args),
-            "lambda" => return self.check_lambda(heap, env, args),
-            "match" => return self.check_match(heap, env, args, expected),
-            "if-let" => return self.check_if_let(heap, env, args, expected),
-            "panic!" => return self.check_panic(heap, env, args),
+            "return" => return self.check_return(heap, interp, env, args),
+            "dotimes" => return self.check_dotimes(heap, interp, env, args),
+            "dolist" => return self.check_dolist(heap, interp, env, args),
+            "list" => return self.check_list_lit(heap, interp, env, args),
+            "lambda" => return self.check_lambda(heap, interp, env, args),
+            "match" => return self.check_match(heap, interp, env, args, expected),
+            "if-let" => return self.check_if_let(heap, interp, env, args, expected),
+            "panic!" => return self.check_panic(heap, interp, env, args),
+            "quote" => return self.check_quote(heap, args),
+            "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
             _ => {}
         }
         // A local variable holding a function value is applied directly (locals
         // shadow free functions).
         if let Some(t) = env.get(&head) {
             let callee = Typed { expr: Expr::Var(head.clone()), ty: t.clone() };
-            return self.check_apply(heap, env, callee, args);
+            return self.check_apply(heap, interp, env, callee, args);
+        }
+        // A macro call: expand (against the *unevaluated* argument forms,
+        // exactly as written — see `MacroExpander`) and recursively check the
+        // expansion in place, in the use site's lexical `env`. This is what
+        // makes macros unhygienic/CL-style. Checked after special forms and
+        // local-variable-as-callee (matching how a constructor/free-function
+        // call is resolved below), since a macro is a purely compile-time
+        // name with no runtime value to shadow or be shadowed by.
+        if let Some((macro_path, arity)) = self.resolve_macro(&head) {
+            if args.len() != arity {
+                return Err(Error::TypeError(format!(
+                    "macro `{}` expects {} argument(s), got {}",
+                    head,
+                    arity,
+                    args.len()
+                )));
+            }
+            let expanded = interp
+                .expand_macro(heap, &macro_path, args.to_vec())
+                .map_err(|e| Error::TypeError(format!("macro `{}`: {}", head, e)))?;
+            heap.push_root(expanded);
+            let result = self.check(heap, interp, env, expanded, expected);
+            heap.pop_root();
+            return result;
         }
         // Constructor, then free function, then a global function value, then
         // instance-method dispatch.
         if let Some((adt, idx)) = self.resolve_ctor(&head) {
-            self.check_construct(heap, env, &adt, idx, args, expected)
+            self.check_construct(heap, interp, env, &adt, idx, args, expected)
         } else if let Some(fq) = self.resolve_fn(&head) {
-            self.check_call(heap, env, &fq, args)
+            self.check_call(heap, interp, env, &fq, args)
         } else if let Some((path, vi)) = self.resolve_global(&head) {
             let callee = Typed { expr: Expr::Global(path), ty: vi.ty };
-            self.check_apply(heap, env, callee, args)
+            self.check_apply(heap, interp, env, callee, args)
         } else {
-            self.check_instance_method(heap, env, &head, args)
+            self.check_instance_method(heap, interp, env, &head, args)
         }
     }
 
     /// Type-check a `lambda`: `(lambda (params) ret body...)`. The body sees the
     /// enclosing locals (a closure) plus the parameters.
-    fn check_lambda(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+    fn check_lambda(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
         if args.len() < 2 {
             return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
         }
@@ -776,7 +905,7 @@ impl Checker {
         // outer loop through it, so it checks its body against an empty loop
         // stack (restored afterwards, even on error).
         let saved = self.loop_stack.replace(Vec::new());
-        let result = self.check_seq(heap, &child, &args[2..], Some(&ret));
+        let result = self.check_seq(heap, interp, &child, &args[2..], Some(&ret));
         self.loop_stack.replace(saved);
         let (body, _) = result?;
         let fn_ty = Type::Fn(
@@ -789,7 +918,8 @@ impl Checker {
     /// Type-check applying a function *value* `callee` to `args`.
     fn check_apply(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         callee: Typed,
         args: &[Value],
@@ -807,7 +937,7 @@ impl Checker {
         }
         let mut typed = Vec::new();
         for (arg, pty) in args.iter().zip(params.iter()) {
-            typed.push(self.check(heap, env, *arg, Some(pty))?);
+            typed.push(self.check(heap, interp, env, *arg, Some(pty))?);
         }
         Ok(Typed { expr: Expr::Apply(Box::new(callee), typed), ty: ret })
     }
@@ -816,7 +946,8 @@ impl Checker {
     /// `Type::method` static associated function.
     fn check_path_call(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         segs: &[String],
         args: &[Value],
@@ -824,7 +955,7 @@ impl Checker {
     ) -> Result<Typed, Error> {
         // A module-qualified free function, e.g. `math::id`.
         if let Some(fq) = self.resolve_fn_path(segs) {
-            return self.check_call(heap, env, &fq, args);
+            return self.check_call(heap, interp, env, &fq, args);
         }
         // Otherwise `Type::member`: split the last segment as the member and
         // resolve the prefix as a type. The member is a constructor or a static
@@ -835,7 +966,7 @@ impl Checker {
             if let Some(type_fq) = self.resolve_type_path(type_segs) {
                 let def = self.reg.type_def(&type_fq).expect("resolved type exists");
                 if let Some(variant) = def.variants.iter().position(|v| &v.name == member) {
-                    return self.check_construct(heap, env, &type_fq, variant, args, expected);
+                    return self.check_construct(heap, interp, env, &type_fq, variant, args, expected);
                 }
                 if let Some(af) = def.assoc.get(member) {
                     if af.instance {
@@ -844,7 +975,7 @@ impl Checker {
                             type_fq, member, member
                         )));
                     }
-                    return self.check_assoc_call(heap, env, &type_fq, member, None, args);
+                    return self.check_assoc_call(heap, interp, env, &type_fq, member, None, args);
                 }
             }
         }
@@ -855,13 +986,14 @@ impl Checker {
     /// static type of its first argument.
     fn check_instance_method(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         method: &str,
         args: &[Value],
     ) -> Result<Typed, Error> {
         if !args.is_empty() {
-            let recv = self.check(heap, env, args[0], None)?;
+            let recv = self.check(heap, interp, env, args[0], None)?;
             let type_fq = match &recv.ty {
                 Type::Named(n, _) => Some(n.clone()),
                 _ => None,
@@ -869,8 +1001,15 @@ impl Checker {
             if let Some(type_fq) = type_fq {
                 if let Some(def) = self.reg.type_def(&type_fq) {
                     if def.assoc.get(method).map(|a| a.instance) == Some(true) {
-                        return self
-                            .check_assoc_call(heap, env, &type_fq, method, Some(recv), &args[1..]);
+                        return self.check_assoc_call(
+                            heap,
+                            interp,
+                            env,
+                            &type_fq,
+                            method,
+                            Some(recv),
+                            &args[1..],
+                        );
                     }
                 }
             }
@@ -882,7 +1021,8 @@ impl Checker {
     /// already-checked `receiver` fills the first parameter slot.
     fn check_assoc_call(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         type_fq: &Path,
         method: &str,
@@ -907,7 +1047,7 @@ impl Checker {
             typed.push(r);
         }
         for (arg, pty) in args.iter().zip(expected_params.iter()) {
-            typed.push(self.check(heap, env, *arg, Some(pty))?);
+            typed.push(self.check(heap, interp, env, *arg, Some(pty))?);
         }
         Ok(Typed {
             expr: Expr::Assoc {
@@ -922,7 +1062,8 @@ impl Checker {
 
     fn check_if(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
         expected: Option<&Type>,
@@ -930,26 +1071,104 @@ impl Checker {
         if args.len() != 3 {
             return Err(Error::TypeError("if: (if cond then else)".into()));
         }
-        let cond = self.check(heap, env, args[0], Some(&Type::Bool))?;
-        let then = self.check(heap, env, args[1], expected)?;
+        let cond = self.check(heap, interp, env, args[0], Some(&Type::Bool))?;
+        let then = self.check(heap, interp, env, args[1], expected)?;
         // A diverging (`Never`) then branch must not constrain the else branch.
         let else_expected = non_never(&then.ty).or(expected);
-        let els = self.check(heap, env, args[2], else_expected)?;
+        let els = self.check(heap, interp, env, args[2], else_expected)?;
         let ty = join_types(&then.ty, &els.ty)?;
         Ok(Typed { expr: Expr::If(Box::new(cond), Box::new(then), Box::new(els)), ty })
     }
 
-    fn check_panic(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+    fn check_panic(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
         if args.len() != 1 {
             return Err(Error::TypeError("panic!: (panic! message)".into()));
         }
-        let msg = self.check(heap, env, args[0], Some(&Type::Str))?;
+        let msg = self.check(heap, interp, env, args[0], Some(&Type::Str))?;
         Ok(Typed { expr: Expr::Panic(Box::new(msg)), ty: Type::Never })
+    }
+
+    /// `(quote datum)`: `datum` as a literal `Sexpr` value, unevaluated. See
+    /// [`Expr::Quote`] for why this converts to an owned [`QuotedSexpr`]
+    /// rather than keeping the raw read `Value`.
+    fn check_quote(&self, heap: &Heap, args: &[Value]) -> Result<Typed, Error> {
+        if args.len() != 1 {
+            return Err(Error::TypeError("quote: (quote datum)".into()));
+        }
+        let qs = value_to_quoted(heap, args[0])?;
+        Ok(Typed { expr: Expr::Quote(qs), ty: Type::Named(Path::root("sexpr"), vec![]) })
+    }
+
+    /// `(quasiquote template)`: like `quote`, but `(unquote x)` sub-forms are
+    /// evaluated (checked as an ordinary expression in the surrounding
+    /// lexical scope, so they may reference locals) and spliced in directly.
+    /// `x` must itself be `Sexpr`-typed — no implicit coercion from `i32`/
+    /// `bool`/etc, matching the rest of the language's strict-type-matching
+    /// rules. This is the natural fit for macro-writing (a `defmacro`
+    /// parameter, or any other already-`Sexpr` sub-expression, splices in
+    /// as-is); embedding a non-`Sexpr` runtime value as quoted data needs an
+    /// explicit conversion (not provided yet — there is no `int->sexpr` etc.).
+    /// A pure syntax-to-`Expr` desugaring — same idea as `list` building
+    /// nested `Expr::Construct{Cons,..}` (`check_list_lit`) — so it needs no
+    /// runtime/macro machinery. `,@` (unquote-splicing) is not supported yet,
+    /// and a quasiquote nested inside another is treated as ordinary literal
+    /// data (no depth tracking).
+    fn check_quasiquote(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
+        if args.len() != 1 {
+            return Err(Error::TypeError("quasiquote: (quasiquote template)".into()));
+        }
+        self.check_qq_template(heap, interp, env, args[0])
+    }
+
+    /// Recursively desugar one quasiquote template node. See [`Self::check_quasiquote`].
+    fn check_qq_template(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        v: Value,
+    ) -> Result<Typed, Error> {
+        let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
+        if let Value::Cons(_) = v {
+            let car = heap.car(v)?;
+            let cdr = heap.cdr(v)?;
+            if is_symbol(heap, car, "unquote") {
+                if let Value::Cons(_) = cdr {
+                    let x = heap.car(cdr)?;
+                    if heap.cdr(cdr)?.is_empty() {
+                        return self.check(heap, interp, env, x, Some(&sexpr_ty));
+                    }
+                }
+                return Err(Error::TypeError("unquote: (unquote datum)".into()));
+            }
+            let car_t = self.check_qq_template(heap, interp, env, car)?;
+            let cdr_t = self.check_qq_template(heap, interp, env, cdr)?;
+            let (adt, cons_idx) = self.resolve_ctor("cons").expect("sexpr::cons is built in");
+            return Ok(Typed {
+                expr: Expr::Construct { type_name: adt, variant: cons_idx, args: vec![car_t, cdr_t] },
+                ty: sexpr_ty,
+            });
+        }
+        let qs = value_to_quoted(heap, v)?;
+        Ok(Typed { expr: Expr::Quote(qs), ty: sexpr_ty })
     }
 
     fn check_let(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
         expected: Option<&Type>,
@@ -968,11 +1187,11 @@ impl Checker {
                 _ => return Err(Error::TypeError("let: binding name must be a symbol".into())),
             };
             // Binding values are checked in the *outer* environment (CL `let`).
-            let val = self.check(heap, env, pair[1], None)?;
+            let val = self.check(heap, interp, env, pair[1], None)?;
             binds.push((name, val));
         }
         let child = env.extended(binds.iter().map(|(n, t)| (n.clone(), t.ty.clone())).collect());
-        let (body, ty) = self.check_seq(heap, &child, &args[1..], expected)?;
+        let (body, ty) = self.check_seq(heap, interp, &child, &args[1..], expected)?;
         Ok(Typed { expr: Expr::Let(binds, body), ty })
     }
 
@@ -980,7 +1199,8 @@ impl Checker {
     /// nested single-binding `let`s.
     fn check_let_star(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
         expected: Option<&Type>,
@@ -989,19 +1209,20 @@ impl Checker {
             return Err(Error::TypeError("let*: (let* ((name val)...) body...)".into()));
         }
         let binds = heap.list_to_vec(args[0])?;
-        self.let_star_rec(heap, env, &binds, &args[1..], expected)
+        self.let_star_rec(heap, interp, env, &binds, &args[1..], expected)
     }
 
     fn let_star_rec(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         binds: &[Value],
         body: &[Value],
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
         if binds.is_empty() {
-            let (body, ty) = self.check_seq(heap, env, body, expected)?;
+            let (body, ty) = self.check_seq(heap, interp, env, body, expected)?;
             return Ok(Typed { expr: Expr::Let(Vec::new(), body), ty });
         }
         let pair = heap.list_to_vec(binds[0])?;
@@ -1012,16 +1233,22 @@ impl Checker {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("let*: binding name must be a symbol".into())),
         };
-        let val = self.check(heap, env, pair[1], None)?;
+        let val = self.check(heap, interp, env, pair[1], None)?;
         let child = env.extended(vec![(name.clone(), val.ty.clone())]);
-        let inner = self.let_star_rec(heap, &child, &binds[1..], body, expected)?;
+        let inner = self.let_star_rec(heap, interp, &child, &binds[1..], body, expected)?;
         let ty = inner.ty.clone();
         Ok(Typed { expr: Expr::Let(vec![(name, val)], vec![inner]), ty })
     }
 
     /// `(setf var value)`: assign to a bound variable. The value must match the
     /// variable's type; the expression evaluates to that value.
-    fn check_setf(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+    fn check_setf(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
         if args.len() != 2 {
             return Err(Error::TypeError("setf: (setf var value)".into()));
         }
@@ -1030,14 +1257,14 @@ impl Checker {
             _ => return Err(Error::TypeError("setf: target must be a variable".into())),
         };
         if let Some(ty) = env.get(&name).cloned() {
-            let value = self.check(heap, env, args[1], Some(&ty))?;
+            let value = self.check(heap, interp, env, args[1], Some(&ty))?;
             return Ok(Typed { expr: Expr::Set(name, Box::new(value)), ty });
         }
         if let Some((path, vi)) = self.resolve_global(&name) {
             if !vi.mutable {
                 return Err(Error::TypeError(format!("setf: cannot assign to constant `{}`", name)));
             }
-            let value = self.check(heap, env, args[1], Some(&vi.ty))?;
+            let value = self.check(heap, interp, env, args[1], Some(&vi.ty))?;
             return Ok(Typed { expr: Expr::SetGlobal(path, Box::new(value)), ty: vi.ty });
         }
         Err(Error::TypeError(format!("setf: unbound variable: {}", name)))
@@ -1045,7 +1272,14 @@ impl Checker {
 
     /// `(defvar name value)` / `(defconstant name value)`, with an optional
     /// `(name Type)` annotation. Registers a global in the current namespace.
-    fn check_defvar(&mut self, heap: &Heap, parts: &[Value], mutable: bool, public: bool) -> Result<TopLevel, Error> {
+    fn check_defvar(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        mutable: bool,
+        public: bool,
+    ) -> Result<TopLevel, Error> {
         if parts.len() != 2 {
             return Err(Error::TypeError("defvar/defconstant: (defvar name value)".into()));
         }
@@ -1066,7 +1300,7 @@ impl Checker {
         };
         // The value is checked at the top level (no locals), but globals/fns are
         // visible via the registry.
-        let value = self.check(heap, &Env::new(), parts[1], ann.as_ref())?;
+        let value = self.check(heap, interp, &Env::new(), parts[1], ann.as_ref())?;
         let ty = ann.unwrap_or_else(|| value.ty.clone());
         self.reg
             .root
@@ -1079,20 +1313,32 @@ impl Checker {
     /// `(while cond body...)`: loop while `cond` (a `bool`) holds; the body is
     /// evaluated for effect. The result is `Unit`. `break`/`return` may exit it
     /// early; their (optional) value must then itself be `Unit`.
-    fn check_while(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+    fn check_while(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
         if args.is_empty() {
             return Err(Error::TypeError("while: (while cond body...)".into()));
         }
-        let cond = self.check(heap, env, args[0], Some(&Type::Bool))?;
-        let (body, _) = self.check_loop_body(heap, env, &args[1..], Type::Unit)?;
+        let cond = self.check(heap, interp, env, args[0], Some(&Type::Bool))?;
+        let (body, _) = self.check_loop_body(heap, interp, env, &args[1..], Type::Unit)?;
         Ok(Typed { expr: Expr::While(Box::new(cond), body), ty: Type::Unit })
     }
 
     /// `(loop body...)`: an infinite loop, exited via `break`/`return`. Its
     /// type is the join of every `break`/`return` reached directly inside it
     /// (not crossing a nested loop/lambda); `Never` if it never exits.
-    fn check_loop(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
-        let (body, ty) = self.check_loop_body(heap, env, args, Type::Never)?;
+    fn check_loop(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
+        let (body, ty) = self.check_loop_body(heap, interp, env, args, Type::Never)?;
         Ok(Typed { expr: Expr::Loop(body), ty })
     }
 
@@ -1103,13 +1349,14 @@ impl Checker {
     /// type. The frame is popped even if checking the body fails.
     fn check_loop_body(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         body: &[Value],
         seed: Type,
     ) -> Result<(Vec<Typed>, Type), Error> {
         self.loop_stack.borrow_mut().push(seed);
-        let result = self.check_seq(heap, env, body, None);
+        let result = self.check_seq(heap, interp, env, body, None);
         let ty = self.loop_stack.borrow_mut().pop().expect("pushed above");
         let (body, _) = result?;
         Ok((body, ty))
@@ -1127,7 +1374,13 @@ impl Checker {
 
     /// `(return)` / `(return value)`: exit the nearest enclosing loop,
     /// optionally with a value (`Unit` if omitted). Type `Never`.
-    fn check_return(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+    fn check_return(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
         if args.len() > 1 {
             return Err(Error::TypeError("return: (return) or (return value)".into()));
         }
@@ -1139,7 +1392,7 @@ impl Checker {
             .ok_or_else(|| Error::TypeError("return: not inside a loop".into()))?;
         let expected = non_never(&top).cloned();
         let value = match args.first() {
-            Some(v) => Some(self.check(heap, env, *v, expected.as_ref())?),
+            Some(v) => Some(self.check(heap, interp, env, *v, expected.as_ref())?),
             None => None,
         };
         let ty = value.as_ref().map(|t| t.ty.clone()).unwrap_or(Type::Unit);
@@ -1161,7 +1414,13 @@ impl Checker {
 
     /// `(dotimes (var count) body...)`: run the body with `var` taking `0` ..
     /// `count-1`. Desugars to `let` + `while` + `setf`. Result is `Unit`.
-    fn check_dotimes(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+    fn check_dotimes(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
         if args.is_empty() {
             return Err(Error::TypeError("dotimes: (dotimes (var count) body...)".into()));
         }
@@ -1173,11 +1432,11 @@ impl Checker {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("dotimes: variable must be a symbol".into())),
         };
-        let count = self.check(heap, env, spec[1], Some(&Type::I32))?;
+        let count = self.check(heap, interp, env, spec[1], Some(&Type::I32))?;
         // A hidden loop-limit binding; the space makes it unwritable in source.
         let limit = " dotimes-limit".to_string();
         let child = env.extended(vec![(var.clone(), Type::I32), (limit.clone(), Type::I32)]);
-        let (mut body, _) = self.check_loop_body(heap, &child, &args[1..], Type::Unit)?;
+        let (mut body, _) = self.check_loop_body(heap, interp, &child, &args[1..], Type::Unit)?;
 
         let var_ref = || Typed { expr: Expr::Var(var.clone()), ty: Type::I32 };
         let int = |n| Typed { expr: Expr::Int(n), ty: Type::I32 };
@@ -1210,7 +1469,13 @@ impl Checker {
     /// `Sexpr` (so `()` adopts `Nil`). Desugars to `let` + `while` + `match`,
     /// pattern-matching `Cons`/`Nil` on each step rather than unwrapping an
     /// `Option` (the `Sexpr` cons/nil duality). Result is `Unit`.
-    fn check_dolist(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+    fn check_dolist(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
         if args.is_empty() {
             return Err(Error::TypeError("dolist: (dolist (var list-expr) body...)".into()));
         }
@@ -1223,7 +1488,7 @@ impl Checker {
             _ => return Err(Error::TypeError("dolist: variable must be a symbol".into())),
         };
         let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
-        let lst = self.check(heap, env, spec[1], Some(&sexpr_ty))?;
+        let lst = self.check(heap, interp, env, spec[1], Some(&sexpr_ty))?;
         let (adt, cons_idx) = self.resolve_ctor("cons").expect("sexpr::cons is built in");
         let (_, nil_idx) = self.resolve_ctor("nil").expect("sexpr::nil is built in");
 
@@ -1238,7 +1503,7 @@ impl Checker {
 
         let outer = env.extended(vec![(lstvar.clone(), sexpr_ty.clone())]);
         let body_env = outer.extended(vec![(var.clone(), sexpr_ty.clone())]);
-        let (mut body, _) = self.check_loop_body(heap, &body_env, &args[1..], Type::Unit)?;
+        let (mut body, _) = self.check_loop_body(heap, interp, &body_env, &args[1..], Type::Unit)?;
 
         // body... then (setf --dolist-lst --dolist-rest), advancing the list.
         body.push(Typed {
@@ -1292,7 +1557,13 @@ impl Checker {
     /// `(list e1 e2 ... en)`: build a `Sexpr` cons-list from `Sexpr`-typed
     /// elements (each checked against `Sexpr`, so `()` adopts `Nil`).
     /// Desugars to nested `(Cons e1 (Cons e2 (... (Nil))))`; `(list)` is `(Nil)`.
-    fn check_list_lit(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+    fn check_list_lit(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
         let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
         let (adt, cons_idx) = self.resolve_ctor("cons").expect("sexpr::cons is built in");
         let (_, nil_idx) = self.resolve_ctor("nil").expect("sexpr::nil is built in");
@@ -1301,7 +1572,7 @@ impl Checker {
             ty: sexpr_ty.clone(),
         };
         for &elem in args.iter().rev() {
-            let e = self.check(heap, env, elem, Some(&sexpr_ty))?;
+            let e = self.check(heap, interp, env, elem, Some(&sexpr_ty))?;
             acc = Typed {
                 expr: Expr::Construct { type_name: adt.clone(), variant: cons_idx, args: vec![e, acc] },
                 ty: sexpr_ty.clone(),
@@ -1314,7 +1585,8 @@ impl Checker {
     /// (`unless` negates). The result is `Unit`; the body's value is discarded.
     fn check_when(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
         negate: bool,
@@ -1322,8 +1594,8 @@ impl Checker {
         if args.is_empty() {
             return Err(Error::TypeError("when/unless: (when cond body...)".into()));
         }
-        let cond = self.check(heap, env, args[0], Some(&Type::Bool))?;
-        let (mut body, _) = self.check_seq(heap, env, &args[1..], None)?;
+        let cond = self.check(heap, interp, env, args[0], Some(&Type::Bool))?;
+        let (mut body, _) = self.check_seq(heap, interp, env, &args[1..], None)?;
         body.push(unit_node()); // discard the body's value -> Unit
         let guarded = Typed { expr: Expr::Let(Vec::new(), body), ty: Type::Unit };
         let (then, els) = if negate {
@@ -1340,7 +1612,8 @@ impl Checker {
     /// `and`/`or`: short-circuiting boolean operators desugared to nested `if`s.
     fn check_and_or(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
         is_and: bool,
@@ -1348,9 +1621,9 @@ impl Checker {
         if args.is_empty() {
             return Ok(bool_node(is_and)); // (and) = true, (or) = false
         }
-        let mut acc = self.check(heap, env, args[args.len() - 1], Some(&Type::Bool))?;
+        let mut acc = self.check(heap, interp, env, args[args.len() - 1], Some(&Type::Bool))?;
         for &a in args[..args.len() - 1].iter().rev() {
-            let cond = self.check(heap, env, a, Some(&Type::Bool))?;
+            let cond = self.check(heap, interp, env, a, Some(&Type::Bool))?;
             let (then, els) = if is_and {
                 (acc, bool_node(false)) // a && rest = if a then rest else false
             } else {
@@ -1369,7 +1642,8 @@ impl Checker {
     /// a type (the missing-else fall-through is `Unit`).
     fn check_cond(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
         expected: Option<&Type>,
@@ -1390,7 +1664,7 @@ impl Checker {
         let (mut acc, rest) = if last_is_else {
             let els = clauses.last().unwrap();
             let exp = expected.and_then(non_never);
-            let (body, ty) = self.check_seq(heap, env, &els[1..], exp)?;
+            let (body, ty) = self.check_seq(heap, interp, env, &els[1..], exp)?;
             (Typed { expr: Expr::Let(Vec::new(), body), ty }, &clauses[..clauses.len() - 1])
         } else {
             (unit_node(), &clauses[..])
@@ -1403,9 +1677,9 @@ impl Checker {
             if is_symbol(heap, clause[0], "else") {
                 return Err(Error::TypeError("cond: `else` must be the last clause".into()));
             }
-            let cond = self.check(heap, env, clause[0], Some(&Type::Bool))?;
+            let cond = self.check(heap, interp, env, clause[0], Some(&Type::Bool))?;
             let exp = non_never(&acc.ty);
-            let (body, bty) = self.check_seq(heap, env, &clause[1..], exp)?;
+            let (body, bty) = self.check_seq(heap, interp, env, &clause[1..], exp)?;
             let ty = join_types(&bty, &acc.ty)?;
             let then = Typed { expr: Expr::Let(Vec::new(), body), ty: bty };
             acc = Typed {
@@ -1418,7 +1692,8 @@ impl Checker {
 
     fn check_call(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         name: &Path,
         args: &[Value],
@@ -1434,14 +1709,15 @@ impl Checker {
         }
         let mut typed = Vec::new();
         for (arg, pty) in args.iter().zip(sig.params.iter()) {
-            typed.push(self.check(heap, env, *arg, Some(pty))?);
+            typed.push(self.check(heap, interp, env, *arg, Some(pty))?);
         }
         Ok(Typed { expr: Expr::Call(name.clone(), typed), ty: sig.ret })
     }
 
     fn check_construct(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         adt_name: &Path,
         variant: usize,
@@ -1475,7 +1751,7 @@ impl Checker {
         for (arg, field) in args.iter().zip(fields.iter()) {
             let st = subst_apply(field, &subst);
             let exp = if type_has_param(&st, &params) { None } else { Some(st) };
-            let ta = self.check(heap, env, *arg, exp.as_ref())?;
+            let ta = self.check(heap, interp, env, *arg, exp.as_ref())?;
             unify(&params, field, &ta.ty, &mut subst)?;
             typed_args.push(ta);
         }
@@ -1506,7 +1782,8 @@ impl Checker {
 
     fn check_match(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
         expected: Option<&Type>,
@@ -1514,7 +1791,7 @@ impl Checker {
         if args.is_empty() {
             return Err(Error::TypeError("match: (match expr arms...)".into()));
         }
-        let scrut = self.check(heap, env, args[0], None)?;
+        let scrut = self.check(heap, interp, env, args[0], None)?;
         let (adt_name, _) = self.expect_adt(&scrut.ty)?;
         let total_variants = self.reg.type_def(&adt_name).expect("adt exists").variants.len();
 
@@ -1540,7 +1817,7 @@ impl Checker {
             // Diverging arms don't constrain the result type; concrete arms must
             // all agree (Never joins with anything).
             let arm_expected = result_ty.as_ref().and_then(non_never);
-            let (body, body_ty) = self.check_seq(heap, &arm_env, &parts[1..], arm_expected)?;
+            let (body, body_ty) = self.check_seq(heap, interp, &arm_env, &parts[1..], arm_expected)?;
             result_ty = Some(match result_ty {
                 None => body_ty,
                 Some(r) => join_types(&r, &body_ty)?,
@@ -1562,7 +1839,8 @@ impl Checker {
 
     fn check_if_let(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
         expected: Option<&Type>,
@@ -1574,14 +1852,14 @@ impl Checker {
         if binding.len() != 2 {
             return Err(Error::TypeError("if-let: binding must be (pattern val)".into()));
         }
-        let scrut = self.check(heap, env, binding[1], None)?;
+        let scrut = self.check(heap, interp, env, binding[1], None)?;
         self.expect_adt(&scrut.ty)?;
         let (pat, binds) = self.check_pattern(heap, &scrut.ty, binding[0])?;
 
         let then_env = env.extended(binds);
-        let then = self.check(heap, &then_env, args[1], expected)?;
+        let then = self.check(heap, interp, &then_env, args[1], expected)?;
         let then_ty = then.ty.clone();
-        let els = self.check(heap, env, args[2], Some(&then_ty))?;
+        let els = self.check(heap, interp, env, args[2], Some(&then_ty))?;
 
         // Desugar to a two-arm match; the wildcard arm makes it exhaustive.
         let arms = vec![
@@ -1673,7 +1951,8 @@ impl Checker {
     /// is checked against `expected`.
     fn check_seq(
         &self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         env: &Env,
         body: &[Value],
         expected: Option<&Type>,
@@ -1693,7 +1972,7 @@ impl Checker {
         let last = body.len() - 1;
         for (i, expr) in body.iter().enumerate() {
             let exp = if i == last { expected } else { None };
-            out.push(self.check(heap, env, *expr, exp)?);
+            out.push(self.check(heap, interp, env, *expr, exp)?);
         }
         let ty = out[last].ty.clone();
         Ok((out, ty))
@@ -1727,6 +2006,33 @@ fn unit_node() -> Typed {
 /// A typed boolean literal node.
 fn bool_node(b: bool) -> Typed {
     Typed { expr: Expr::Bool(b), ty: Type::Bool }
+}
+
+/// Recursively convert a raw read `Value` into an owned [`QuotedSexpr`] (see
+/// [`Expr::Quote`] for why `quote` can't just keep the heap pointer). A
+/// `Value::Path` (a `::`-qualified token, e.g. `a::b`, appearing inside quoted
+/// data) has no `Sexpr` counterpart yet (the built-in `Sexpr` ADT doesn't have
+/// a `Path` variant — see `docs/language-design.md` §2.1) so it is rejected.
+fn value_to_quoted(heap: &Heap, v: Value) -> Result<QuotedSexpr, Error> {
+    Ok(match v {
+        Value::Empty => QuotedSexpr::Nil,
+        Value::Int(n) => QuotedSexpr::Int(n),
+        Value::Float(f) => QuotedSexpr::Float(f),
+        Value::Char(c) => QuotedSexpr::Char(c),
+        Value::Bool(b) => QuotedSexpr::Bool(b),
+        Value::Symbol(id) => QuotedSexpr::Sym(heap.symbol_name(id).to_string()),
+        Value::Str(id) => QuotedSexpr::Str(heap.string(id).to_string()),
+        Value::Cons(_) => {
+            let car = value_to_quoted(heap, heap.car(v)?)?;
+            let cdr = value_to_quoted(heap, heap.cdr(v)?)?;
+            QuotedSexpr::Cons(Box::new(car), Box::new(cdr))
+        }
+        Value::Path(_) => {
+            return Err(Error::TypeError(
+                "quote: `::`-paths inside quoted data are not yet supported".into(),
+            ))
+        }
+    })
 }
 
 /// Whether `v` is the symbol named `name`.

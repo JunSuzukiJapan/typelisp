@@ -88,17 +88,20 @@
 
 | 分類 | 特殊形 | 備考 |
 |---|---|---|
-| 定義 | `defun` `defstruct` `defvar` `defconstant` `defmethod` `module` `use` `lambda` | 引数・戻り型は明示（局所束縛は推論可） |
+| 定義 | `defun` `defstruct` `defvar` `defconstant` `defmethod` `defmacro` `module` `use` `lambda` | 引数・戻り型は明示（局所束縛は推論可。`defmacro` は全パラメータ・戻りが `Sexpr` 固定なので型注釈なし） |
 | 束縛 | `let` `let*` | |
 | 制御 | `if` `when` `unless` `cond` `case` `match` `if-let` `while-let` `and` `or` `progn` `the` | `and`/`or` は短絡のため特殊形。`the` は型注釈 |
 | 反復 | `loop` `while` `until` `dotimes` `dolist` `do` `doiter` | |
-| その他 | `quote` `setf` `break` `return` `panic!` `unreachable!` `todo!` | `break`/`return`/`panic!`/`unreachable!`/`todo!` は戻り型 `!`（§7） |
+| マクロ/引用 | `quote` `quasiquote` (`` ` ``) `unquote` (`,`) | `quote`/`quasiquote` の戻り型は常に `Sexpr`。`,@`（unquote-splicing）は未実装 |
+| その他 | `setf` `break` `return` `panic!` `unreachable!` `todo!` | `break`/`return`/`panic!`/`unreachable!`/`todo!` は戻り型 `!`（§7） |
 
-脱糖の例: `when`→`if`+`progn`、`unless`→`if`、`if-let (pat val) then else`→2 腕 `match`（包括アームで網羅）。
+脱糖の例: `when`→`if`+`progn`、`unless`→`if`、`if-let (pat val) then else`→2 腕 `match`（包括アームで網羅）、
+`quasiquote`→`Expr::Quote`+`Expr::Construct{Cons,..}` の組合せ（`list` の脱糖と同様、ランタイムマクロ機構は使わない）。
 
 実装状況: `if` `let` `let*` `progn` `when` `unless` `and` `or` `cond` `setf` `while` `loop` `break` `return` `lambda`
-`match` `if-let` `panic!` `defstruct` `defvar` `defconstant` `module` `use` `defmethod` は実装済
-（[src/check/checker.rs](../src/check/checker.rs)）。
+`match` `if-let` `panic!` `defstruct` `defvar` `defconstant` `module` `use` `defmethod` `quote` `quasiquote` `defmacro`
+は実装済（[src/check/checker.rs](../src/check/checker.rs)）。`defmacro` は CL 流（非衛生的）— 詳細は
+[TODO.md](TODO.md) のステップ 4k を参照。
 `when`/`unless`/`and`/`or`/`cond`/`let*` は `if`/`let` への脱糖。`setf`（可変ローカル/グローバル変数）/`while` は専用 AST
 ノード（eval 環境は `Rc<RefCell>` の可変スロット）。`defvar`（可変）/`defconstant`（不変）はグローバル変数を現在の
 名前空間に登録し、型注釈 `(name Type)` は任意（省略時は値から推論）。
@@ -142,6 +145,7 @@
 | IO | `print println princ format read read-line` | `read : (fn (String) Result<Sexpr, Error>)` |
 | 発散 | `panic! unreachable! todo! exit` | 戻り型 `!`（§7） |
 | システム | `eval compile compile-file gc` | `compile`/`compile-file` は明示呼び出し時のみネイティブ化（feature gate） |
+| マクロ | `gensym` | 引数なし、フレッシュな `Sexpr::Sym` を返す。symbol は常に intern される仕様のため衝突耐性のみ（CL の unforgeable な未intern symbol ではない） |
 
 ### 4.2 typelisp ライブラリ（derived）
 | 種別 | 関数 |
@@ -241,3 +245,4 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 - 可視性（pub/private）、絶対パス `::foo`。
 - trait / 動的ディスパッチ、ユーザ定義エラー型。
 - 関数カタログ（§4）の実装本体は eval（step4）以降。
+- `,@`（unquote-splicing、`append` 実装後）、`defmacro` の `&rest`／構造化ラムダリスト、マクロの `use`-alias 解決。

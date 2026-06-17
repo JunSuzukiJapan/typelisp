@@ -12,7 +12,8 @@
 //! Supported v1 syntax: integers (decimal, `0x` hex, signed), floats, booleans
 //! `true`/`false`, strings with escapes, characters `#\a` / `#\Space`, symbols
 //! (operators, `::` paths, `Vec<T>`-style tokens), lists, dotted pairs `(a . b)`,
-//! quote `'`, and comments (`;` line, `#| ... |#` nested block).
+//! quote `'`, quasiquote `` ` ``, unquote `,` (no `,@` splicing yet), and
+//! comments (`;` line, `#| ... |#` nested block).
 
 use crate::{Error, Heap, SymId, Value};
 
@@ -95,8 +96,15 @@ fn is_ws(c: char) -> bool {
 }
 
 /// Characters that terminate a token / separate data.
+///
+/// `,` is deliberately *not* here even though it introduces `unquote`: a
+/// generic type token like `Pair<K,V>` is read as one plain symbol (split on
+/// `<>`/`,` later, in `parse_type_name` — see `types.rs`), so `,` must stay
+/// usable mid-token. `read_datum`'s dispatch on the *first* character of a
+/// fresh datum already recognizes a datum-initial `,` as unquote regardless
+/// of whether it's a delimiter; nothing relies on it being one.
 fn is_delimiter(c: char) -> bool {
-    is_ws(c) || matches!(c, '(' | ')' | '"' | '\'' | ';')
+    is_ws(c) || matches!(c, '(' | ')' | '"' | '\'' | '`' | ';')
 }
 
 fn is_delim_or_eof(c: Option<char>) -> bool {
@@ -164,18 +172,23 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
         None => Err(Error::ReadError("unexpected end of input".to_string())),
         Some('(') => read_list(cur, heap),
         Some(')') => Err(Error::UnmatchedParen),
-        Some('\'') => read_quote(cur, heap),
+        Some('\'') => read_wrapped(cur, heap, "quote"),
+        Some('`') => read_wrapped(cur, heap, "quasiquote"),
+        Some(',') => read_wrapped(cur, heap, "unquote"),
         Some('"') => read_string(cur, heap),
         Some('#') => read_hash(cur, heap),
         Some(_) => read_atom(cur, heap),
     }
 }
 
-fn read_quote(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
-    cur.next(); // '\''
+/// Read `<prefix-char><datum>` as `(<head> datum)` — the shared shape behind
+/// `'x` -> `(quote x)`, `` `x `` -> `(quasiquote x)`, `,x` -> `(unquote x)`.
+/// (`,@x` unquote-splicing is not supported yet.)
+fn read_wrapped(cur: &mut Cursor, heap: &mut Heap, head: &str) -> Result<Value, Error> {
+    cur.next(); // the prefix character
     let d = read_datum(cur, heap)?;
     heap.push_root(d);
-    let q = heap.intern_symbol("quote"); // symbols are permanent; no rooting needed
+    let q = heap.intern_symbol(head); // symbols are permanent; no rooting needed
     let result = (|| {
         let inner = heap.cons(d, Value::Empty)?;
         heap.push_root(inner);

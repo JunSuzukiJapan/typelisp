@@ -1,0 +1,287 @@
+//! Tests for `quote`/quasiquote/`gensym`/`defmacro` (CL-style macros).
+
+extern crate typelisp;
+use typelisp::{Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
+
+/// Read, type-check, and evaluate a program; return the last expression's
+/// value alongside the heap (so `Sexpr` results can be inspected).
+fn run(src: &str) -> Result<(RtValue, Heap), EvalError> {
+    run_with_capacity(src, 1 << 16)
+}
+
+fn run_with_capacity(src: &str, capacity: usize) -> Result<(RtValue, Heap), EvalError> {
+    let mut h = Heap::with_capacity(capacity);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl)? {
+            last = val;
+        }
+    }
+    Ok((last, h))
+}
+
+fn eval_ok(src: &str) -> (RtValue, Heap) {
+    run(src).expect("eval failed")
+}
+
+/// Render a heap-backed `Sexpr` value in reader syntax, for easy assertions.
+fn sexpr_to_string(heap: &Heap, v: Value) -> String {
+    match v {
+        Value::Empty => "()".to_string(),
+        Value::Int(i) => i.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Char(c) => format!("#\\{}", c),
+        Value::Symbol(id) => heap.symbol_name(id).to_string(),
+        Value::Str(id) => format!("{:?}", heap.string(id)),
+        Value::Path(_) => "<path>".to_string(),
+        Value::Cons(_) => {
+            let mut parts = Vec::new();
+            let mut cur = v;
+            loop {
+                match cur {
+                    Value::Cons(_) => {
+                        parts.push(sexpr_to_string(heap, heap.car(cur).unwrap()));
+                        cur = heap.cdr(cur).unwrap();
+                    }
+                    Value::Empty => return format!("({})", parts.join(" ")),
+                    other => return format!("({} . {})", parts.join(" "), sexpr_to_string(heap, other)),
+                }
+            }
+        }
+    }
+}
+
+fn as_sexpr_string(v: RtValue, h: &Heap) -> String {
+    match v {
+        RtValue::Sexpr(sv) => sexpr_to_string(h, sv),
+        other => panic!("expected a Sexpr value, got {:?}", other),
+    }
+}
+
+// ---- Phase A: quote ---------------------------------------------------------
+
+#[test]
+fn quote_atom() {
+    let (v, h) = eval_ok("(quote 42)");
+    assert_eq!(as_sexpr_string(v, &h), "42");
+}
+
+#[test]
+fn quote_list() {
+    let (v, h) = eval_ok("(quote (a b c))");
+    assert_eq!(as_sexpr_string(v, &h), "(a b c)");
+}
+
+#[test]
+fn quote_nested_list() {
+    let (v, h) = eval_ok("(quote (a (b c) d))");
+    assert_eq!(as_sexpr_string(v, &h), "(a (b c) d)");
+}
+
+#[test]
+fn quote_reader_shorthand() {
+    let (v, h) = eval_ok("'(1 \"hi\" true)");
+    assert_eq!(as_sexpr_string(v, &h), "(1 \"hi\" true)");
+}
+
+#[test]
+fn quote_empty_list_is_nil() {
+    let (v, h) = eval_ok("(quote ())");
+    assert_eq!(as_sexpr_string(v, &h), "()");
+}
+
+#[test]
+fn quote_survives_gc_pressure() {
+    // A tiny heap forces `Interp::alloc_quoted`'s internal `cons` calls to
+    // trigger a real mark-sweep collection partway through building a nested
+    // quoted literal, repeatedly across many iterations — this is the
+    // regression test for the push_root/pop_root discipline guarding that
+    // recursive build (each iteration's literal becomes garbage as soon as
+    // the next iteration overwrites `last`, so the heap must actually reclaim
+    // and reuse cells to keep up).
+    let (v, h) = run_with_capacity(
+        "(defun build () Sexpr (quote (a (b c) (d (e f)) g)))
+         (let ((last (quote ())))
+           (dotimes (i 500)
+             (setf last (build)))
+           last)",
+        64,
+    )
+    .expect("eval failed");
+    assert_eq!(as_sexpr_string(v, &h), "(a (b c) (d (e f)) g)");
+}
+
+// ---- Phase B: quasiquote / unquote -------------------------------------------
+
+#[test]
+fn quasiquote_no_unquote_behaves_like_quote() {
+    let (v, h) = eval_ok("`(a b c)");
+    assert_eq!(as_sexpr_string(v, &h), "(a b c)");
+}
+
+#[test]
+fn quasiquote_unquote_references_local() {
+    // `,x` requires `x` to be `Sexpr`-typed (no implicit coercion from e.g.
+    // `i32`) — exactly the shape a `defmacro` parameter has, which is the
+    // primary use case for unquote.
+    let (v, h) = eval_ok("(let ((x (quote (+ 1 2)))) `(a ,x c))");
+    assert_eq!(as_sexpr_string(v, &h), "(a (+ 1 2) c)");
+}
+
+#[test]
+fn quasiquote_unquote_at_head() {
+    let (v, h) = eval_ok("(let ((x (quote hello))) `(,x b))");
+    assert_eq!(as_sexpr_string(v, &h), "(hello b)");
+}
+
+#[test]
+fn quasiquote_dotted_unquote_tail() {
+    // `(a . ,b)` — the unquote falls in the dotted-tail position, not inside
+    // a sub-list; exercises that `check_qq_template` walks car/cdr generically
+    // regardless of how the cons structure was originally written.
+    let (v, h) = eval_ok("(let ((b (quote (x y)))) `(a . ,b))");
+    assert_eq!(as_sexpr_string(v, &h), "(a x y)");
+}
+
+// ---- Phase C: gensym ----------------------------------------------------------
+
+#[test]
+fn gensym_returns_a_symbol() {
+    let (v, h) = eval_ok("(gensym)");
+    match v {
+        RtValue::Sexpr(Value::Symbol(_)) => {}
+        other => panic!("expected a Sexpr Symbol, got {:?}", other),
+    }
+    let _ = h;
+}
+
+#[test]
+fn gensym_is_fresh_each_call() {
+    let (v, h) = eval_ok("(let ((a (gensym)) (b (gensym))) (list a b))");
+    match v {
+        RtValue::Sexpr(sv) => {
+            let a = h.car(sv).unwrap();
+            let b = h.car(h.cdr(sv).unwrap()).unwrap();
+            assert_ne!(a, b, "two `gensym` calls produced the same symbol");
+        }
+        other => panic!("expected a Sexpr, got {:?}", other),
+    }
+}
+
+#[test]
+fn quasiquote_nested_list_with_unquote() {
+    let (v, h) = eval_ok("(let ((x (quote 1)) (y (quote 2))) `(a (,x ,y) b))");
+    assert_eq!(as_sexpr_string(v, &h), "(a (1 2) b)");
+}
+
+// ---- Phase D: defmacro ---------------------------------------------------------
+
+#[test]
+fn basic_conditional_macro() {
+    let (v, _h) = eval_ok(
+        "(defmacro my-unless (test then else)
+           `(if ,test ,else ,then))
+         (my-unless (< 2 1) 99 100)",
+    );
+    // test = (< 2 1) = false -> `then` (99) runs.
+    assert_eq!(v, RtValue::Int(99));
+}
+
+#[test]
+fn macro_used_in_same_batch_as_its_definition() {
+    // Exercises that a macro's body is registered and callable for a *later*
+    // form in the very same read/check/eval batch (the eager-exec-on-check
+    // path in `main.rs`'s REPL loop; this test harness's `run` already
+    // interleaves check+exec per form, which is the same requirement).
+    let (v, _h) = eval_ok(
+        "(defmacro double (x) `(+ ,x ,x))
+         (defmacro quadruple (x) `(double (double ,x)))
+         (quadruple 3)",
+    );
+    assert_eq!(v, RtValue::Int(12));
+}
+
+#[test]
+fn macro_arity_mismatch_is_a_type_error() {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::new();
+    let vs = r
+        .read_all(&mut h, "(defmacro double (x) `(+ ,x ,x)) (double 1 2)")
+        .expect("read failed");
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    let mut last_err = None;
+    for v in vs {
+        match chk.check_form(&mut h, &interp, v) {
+            Ok(tl) => {
+                let _ = interp.exec(&mut h, tl);
+            }
+            Err(e) => {
+                last_err = Some(e);
+                break;
+            }
+        }
+    }
+    assert!(last_err.is_some(), "expected a macro-arity type error");
+}
+
+#[test]
+fn macro_is_unhygienic_and_capture_is_observable() {
+    // A naive `swap!`-style macro that introduces a literal `tmp` binding:
+    // calling it with `tmp` itself as an argument captures the macro's
+    // internal binding, silently breaking the swap. This is the defining
+    // (and documented) trade-off of CL-style non-hygienic macros.
+    let (v, _h) = eval_ok(
+        "(defmacro my-swap (a b)
+           `(let ((tmp ,a))
+              (setf ,a ,b)
+              (setf ,b tmp)))
+         (let ((tmp 1) (x 2))
+           (my-swap tmp x)
+           tmp)",
+    );
+    // A correct swap would leave `tmp` as 2; capture leaves it unchanged.
+    assert_eq!(v, RtValue::Int(1));
+}
+
+#[test]
+fn gensym_fixes_macro_hygiene() {
+    let (v, _h) = eval_ok(
+        "(defmacro my-swap-fixed (a b)
+           (let ((g (gensym)))
+             `(let ((,g ,a))
+                (setf ,a ,b)
+                (setf ,b ,g))))
+         (let ((tmp 1) (x 2))
+           (my-swap-fixed tmp x)
+           tmp)",
+    );
+    // With a gensym'd temp name instead of a literal `tmp`, the swap is
+    // correct: `tmp` (1) and `x` (2) actually exchange.
+    assert_eq!(v, RtValue::Int(2));
+}
+
+#[test]
+fn macro_expansion_survives_gc_pressure() {
+    // A tiny heap forces a real GC mid-expansion (the macro call itself
+    // allocates via quasiquote's `Expr::Construct{Cons,..}` nodes, and the
+    // expansion result must stay rooted across that) — the regression test
+    // for `Interp::expand_macro`'s push_root/pop_root discipline.
+    let (v, h) = run_with_capacity(
+        "(defmacro listify (a b c) `(list ,a ,b ,c))
+         (defun build () Sexpr (listify (quote x) (quote y) (quote z)))
+         (let ((last (quote ())))
+           (dotimes (i 500)
+             (setf last (build)))
+           last)",
+        64,
+    )
+    .expect("eval failed");
+    assert_eq!(as_sexpr_string(v, &h), "(x y z)");
+}
