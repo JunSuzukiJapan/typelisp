@@ -17,3 +17,8 @@ compile = []
 [dependencies]
 once_cell = "1.8.0"
 num-bigint = "0.4"
+rustyline = "18"
+
+[[bin]]
+name = "typl"
+path = "src/main.rs"

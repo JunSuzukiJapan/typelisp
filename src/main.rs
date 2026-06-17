@@ -1,16 +1,214 @@
-//! Minimal entry point.
-//!
-//! The native compiler (LLVM/inkwell) is opt-in behind the `compile` feature;
-//! the default binary exercises only the LLVM-free read path. A real REPL
-//! (with a `--heap-cells N` option to size the cons arena) lands later.
+//! The `typl` REPL: a read-eval-print loop over the `Reader` -> `Checker` ->
+//! `Interp` pipeline, using `rustyline` for Emacs-style line editing/history
+//! (Ctrl+P/Ctrl+N to move through history, Ctrl+R to search it, etc. — all
+//! `rustyline`'s default `EditMode::Emacs` bindings, matching bash/readline).
+
+use std::path::PathBuf;
+
+use rustyline::error::ReadlineError;
+use rustyline::DefaultEditor;
 
 use typelisp::*;
 
-fn main() -> Result<(), Error> {
+const PROMPT_PRIMARY: &str = "typl> ";
+const PROMPT_CONTINUE: &str = "...   ";
+
+fn main() -> rustyline::Result<()> {
     let mut heap = Heap::with_capacity(1 << 16);
     let reader = Reader::new();
-    let v = reader.read(&mut heap, "(defun factorial ((n i32)) i32 (if (<= n 1) 1 (* n (factorial (- n 1)))))")?;
-    heap.push_root(v);
-    println!("read ok: {} cons cells live", heap.live_count());
+    let mut checker = Checker::new();
+    let mut interp = Interp::new();
+    let mut rl = DefaultEditor::new()?;
+    let hist_path = history_path();
+    let _ = rl.load_history(&hist_path);
+
+    let mut pending = String::new();
+    loop {
+        let prompt = if pending.is_empty() { PROMPT_PRIMARY } else { PROMPT_CONTINUE };
+        match rl.readline(prompt) {
+            Ok(line) => {
+                let trimmed = line.trim();
+                if pending.is_empty() && (trimmed == ":quit" || trimmed == ":exit") {
+                    break;
+                }
+                let _ = rl.add_history_entry(line.as_str());
+                pending.push_str(&line);
+                pending.push('\n');
+                try_run_pending(&mut heap, &reader, &mut checker, &mut interp, &mut pending);
+            }
+            Err(ReadlineError::Interrupted) => {
+                pending.clear();
+                println!();
+            }
+            Err(ReadlineError::Eof) => break,
+            Err(e) => {
+                eprintln!("readline error: {}", e);
+                break;
+            }
+        }
+    }
+    let _ = rl.save_history(&hist_path);
     Ok(())
+}
+
+/// `$HOME/.typl_history`, falling back to the current directory if `HOME` is
+/// unset.
+fn history_path() -> PathBuf {
+    match std::env::var_os("HOME") {
+        Some(home) if !home.is_empty() => PathBuf::from(home).join(".typl_history"),
+        _ => PathBuf::from(".typl_history"),
+    }
+}
+
+/// Read+check+execute whatever is currently in `pending`. On a recoverable
+/// "need more input" error, leaves `pending` untouched so the caller keeps
+/// accumulating lines. On success or a real error, clears `pending`.
+///
+/// GC-root discipline: `read_all`'s temporary roots must never be left on
+/// `heap`'s root stack across an `Interp::exec` call, since `Interp`'s
+/// (private) `sync_roots` pops a self-tracked count assuming nothing else
+/// pushed on top of it. So: pop back to `mark` immediately on any read
+/// failure (nothing left to check yet), or only after every form in the
+/// batch has been through `check_form` (whose output never retains the raw
+/// `Value`) — never pop in between, and never exec before popping.
+fn try_run_pending(
+    heap: &mut Heap,
+    reader: &Reader,
+    checker: &mut Checker,
+    interp: &mut Interp,
+    pending: &mut String,
+) {
+    let mark = heap.root_count();
+    let forms = match reader.read_all(heap, pending) {
+        Ok(forms) => forms,
+        Err(e) => {
+            while heap.root_count() > mark {
+                heap.pop_root();
+            }
+            if is_incomplete(&e) {
+                return; // keep accumulating
+            }
+            eprintln!("error: {}", e);
+            pending.clear();
+            return;
+        }
+    };
+
+    let mut checked = Vec::with_capacity(forms.len());
+    let mut check_err = None;
+    for v in forms {
+        match checker.check_form(heap, v) {
+            Ok(tl) => checked.push(tl),
+            Err(e) => {
+                check_err = Some(e);
+                break;
+            }
+        }
+    }
+    while heap.root_count() > mark {
+        heap.pop_root();
+    }
+    pending.clear();
+
+    if let Some(e) = check_err {
+        eprintln!("error: {}", e);
+        return;
+    }
+
+    for tl in checked {
+        match interp.exec(heap, tl) {
+            Ok(Some(v)) => println!("{}", format_value(heap, checker.registry(), &v)),
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("error: {}", e);
+                break;
+            }
+        }
+    }
+}
+
+/// True if `e` signals "ran out of input mid-form" (need another line)
+/// rather than a real syntax error.
+fn is_incomplete(e: &Error) -> bool {
+    matches!(
+        e,
+        Error::IllegalEndWhileReadingList | Error::IllegalEndOfString | Error::IllegalEndOfEscapeSequence
+    )
+}
+
+/// Format an `RtValue` for REPL output, in the reader's own syntax where
+/// possible (so the printed form can be pasted back in).
+fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
+    match v {
+        RtValue::Int(i) => i.to_string(),
+        RtValue::Float(f) => format_float(*f),
+        RtValue::Bool(b) => b.to_string(),
+        RtValue::Char(c) => format!("#\\{}", c),
+        RtValue::Str(s) => format!("{:?}", s),
+        RtValue::Unit => "()".to_string(),
+        RtValue::Data { type_name, variant, fields } => {
+            let name = reg
+                .type_def(type_name)
+                .and_then(|d| d.variants.get(*variant))
+                .map(|v| v.name.as_str())
+                .unwrap_or("<unknown-variant>");
+            if fields.is_empty() {
+                name.to_string()
+            } else {
+                let parts: Vec<String> = fields.iter().map(|f| format_value(heap, reg, f)).collect();
+                format!("({} {})", name, parts.join(" "))
+            }
+        }
+        RtValue::Sexpr(sv) => format_sexpr(heap, *sv),
+        RtValue::Closure(_) => "#<closure>".to_string(),
+        RtValue::Builtin(name) => format!("#<builtin {}>", name),
+    }
+}
+
+/// Format a Sexpr-side `mem::Value` (the `RtValue::Sexpr` payload),
+/// recursively, in the reader's own syntax.
+fn format_sexpr(heap: &Heap, v: Value) -> String {
+    match v {
+        Value::Empty => "()".to_string(),
+        Value::Int(i) => i.to_string(),
+        Value::Float(f) => format_float(f),
+        Value::Bool(b) => b.to_string(),
+        Value::Char(c) => format!("#\\{}", c),
+        Value::Symbol(id) => heap.symbol_name(id).to_string(),
+        Value::Str(id) => format!("{:?}", heap.string(id)),
+        Value::Path(id) => heap
+            .path_segments(id)
+            .iter()
+            .map(|s| heap.symbol_name(*s))
+            .collect::<Vec<_>>()
+            .join("::"),
+        Value::Cons(_) => format_list(heap, v),
+    }
+}
+
+fn format_list(heap: &Heap, mut v: Value) -> String {
+    let mut parts = Vec::new();
+    loop {
+        match v {
+            Value::Cons(_) => {
+                // Safe: `v` was just matched as `Cons`, so `car`/`cdr` cannot
+                // return `Error::NotACons` here.
+                let car = heap.car(v).expect("cons car");
+                parts.push(format_sexpr(heap, car));
+                v = heap.cdr(v).expect("cons cdr");
+            }
+            Value::Empty => return format!("({})", parts.join(" ")),
+            other => return format!("({} . {})", parts.join(" "), format_sexpr(heap, other)),
+        }
+    }
+}
+
+/// Render an `f64` guaranteeing a decimal point, so e.g. `2.0` doesn't print
+/// as `2` (which would be confusable with an `Int`).
+fn format_float(f: f64) -> String {
+    if f.is_finite() && f == f.trunc() {
+        format!("{:.1}", f)
+    } else {
+        f.to_string()
+    }
 }

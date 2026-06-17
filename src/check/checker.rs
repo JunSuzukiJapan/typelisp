@@ -114,6 +114,13 @@ impl Checker {
         Ok(TopLevel::Expr(t))
     }
 
+    /// The type/constructor registry — exposed so a caller (e.g. the REPL)
+    /// can resolve an ADT variant's constructor name when printing a
+    /// `RtValue::Data` result.
+    pub fn registry(&self) -> &Registry {
+        &self.reg
+    }
+
     /// `(pub defun ...)` / `(pub defstruct ...)` etc. — mark the next definition public.
     fn check_pub(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
         if parts.is_empty() {
