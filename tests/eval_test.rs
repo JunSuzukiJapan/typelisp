@@ -1,7 +1,7 @@
 //! Tests for the tree-walking interpreter over the typed AST (step 4a).
 
 extern crate typelisp;
-use typelisp::{Checker, EvalError, Heap, Interp, Path, Reader, RtValue};
+use typelisp::{Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
 
 /// Read, type-check, and evaluate a program; return the last expression's value.
 fn run(src: &str) -> Result<RtValue, EvalError> {
@@ -13,7 +13,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&h, v).expect("check failed");
-        if let Some(val) = interp.exec(tl)? {
+        if let Some(val) = interp.exec(&mut h, tl)? {
             last = val;
         }
     }
@@ -306,25 +306,126 @@ fn dotimes_is_unit() {
     assert_eq!(eval_ok("(dotimes (i 3) ())"), RtValue::Unit);
 }
 
+// ---- loop / break / return ---------------------------------------------------
+
+#[test]
+fn loop_break_with_no_value_is_unit() {
+    assert_eq!(eval_ok("(loop (break))"), RtValue::Unit);
+}
+
+#[test]
+fn loop_return_yields_its_value() {
+    assert_eq!(eval_ok("(loop (return 42))"), RtValue::Int(42));
+}
+
+#[test]
+fn loop_runs_until_break_with_accumulated_state() {
+    // Sum 0..4 by hand-rolled loop+break (vs. while_loop_with_setf's while).
+    let src = "(let ((sum 0) (i 0)) \
+                 (loop (if (>= i 5) (break) ()) (setf sum (+ sum i)) (setf i (+ i 1))) \
+                 sum)";
+    assert_eq!(eval_ok(src), RtValue::Int(10));
+}
+
+#[test]
+fn loop_return_short_circuits_the_body() {
+    // `return` exits immediately, skipping the rest of the body and any
+    // further iterations.
+    let src = "(let ((i 0)) (loop (setf i (+ i 1)) (return i) (setf i 999)))";
+    assert_eq!(eval_ok(src), RtValue::Int(1));
+}
+
+#[test]
+fn break_exits_while_early() {
+    let src = "(let ((i 0)) \
+                 (while true (if (>= i 3) (break) ()) (setf i (+ i 1))) \
+                 i)";
+    assert_eq!(eval_ok(src), RtValue::Int(3));
+}
+
+#[test]
+fn return_exits_dotimes_early() {
+    let src = "(let ((i 0)) \
+                 (dotimes (n 100) (setf i n) (if (= n 2) (return) ())) \
+                 i)";
+    assert_eq!(eval_ok(src), RtValue::Int(2));
+}
+
+#[test]
+fn break_in_inner_loop_does_not_exit_outer() {
+    let src = "(let ((outer 0)) \
+                 (dotimes (i 3) (loop (break)) (setf outer (+ outer 1))) \
+                 outer)";
+    assert_eq!(eval_ok(src), RtValue::Int(3));
+}
+
+#[test]
+fn nested_loop_factorial_via_return() {
+    let src = "(defun fact ((n i32)) i32 \
+                 (let ((acc 1) (i 1)) \
+                   (loop (if (> i n) (return acc) ()) \
+                         (setf acc (* acc i)) \
+                         (setf i (+ i 1))))) \
+               (fact 5)";
+    assert_eq!(eval_ok(src), RtValue::Int(120));
+}
+
 // ---- cons / car / cdr / list / dolist ---------------------------------------
 
-fn sexpr_nil() -> RtValue {
-    RtValue::Data { type_name: Path::root("sexpr"), variant: 0, fields: vec![] }
+/// Read, check, and evaluate a program whose final value is a `Sexpr`. Returns
+/// the heap it was built in too — kept alive because the `Value` (e.g. a
+/// `Cons`) is a pointer into that heap's arena, dangling once it's dropped.
+fn eval_sexpr(src: &str) -> (Heap, Value) {
+    let mut h = Heap::with_capacity(8192);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&h, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        RtValue::Sexpr(v) => (h, v),
+        other => panic!("expected a Sexpr value, got {:?}", other),
+    }
 }
 
-fn sexpr_int(n: i64) -> RtValue {
-    RtValue::Data { type_name: Path::root("sexpr"), variant: 1, fields: vec![RtValue::Int(n)] }
+/// Structural equality for `Sexpr` values: `Value::Cons`'s derived
+/// `PartialEq` is pointer identity, so cons-shaped results need this instead.
+fn sexpr_eq(h: &Heap, a: Value, b: Value) -> bool {
+    match (a, b) {
+        (Value::Empty, Value::Empty) => true,
+        (Value::Int(x), Value::Int(y)) => x == y,
+        (Value::Float(x), Value::Float(y)) => x == y,
+        (Value::Char(x), Value::Char(y)) => x == y,
+        (Value::Bool(x), Value::Bool(y)) => x == y,
+        (Value::Symbol(x), Value::Symbol(y)) => h.symbol_name(x) == h.symbol_name(y),
+        (Value::Str(x), Value::Str(y)) => h.string(x) == h.string(y),
+        (Value::Cons(_), Value::Cons(_)) => {
+            sexpr_eq(h, h.car(a).unwrap(), h.car(b).unwrap())
+                && sexpr_eq(h, h.cdr(a).unwrap(), h.cdr(b).unwrap())
+        }
+        _ => false,
+    }
 }
 
-fn sexpr_cons(car: RtValue, cdr: RtValue) -> RtValue {
-    RtValue::Data { type_name: Path::root("sexpr"), variant: 7, fields: vec![car, cdr] }
+/// Assert that evaluating `src` yields a `Sexpr` structurally equal to the
+/// value `expected` builds (in the same heap `src` ran in).
+fn assert_sexpr_eq(src: &str, expected: impl FnOnce(&mut Heap) -> Value) {
+    let (mut h, actual) = eval_sexpr(src);
+    let want = expected(&mut h);
+    assert!(sexpr_eq(&h, actual, want), "expected {:?}, got {:?}", want, actual);
 }
 
 #[test]
 fn cons_car_cdr() {
-    assert_eq!(eval_ok("(cons (Int 1) (Nil))"), sexpr_cons(sexpr_int(1), sexpr_nil()));
-    assert_eq!(eval_ok("(car (cons (Int 1) (Nil)))"), sexpr_int(1));
-    assert_eq!(eval_ok("(cdr (cons (Int 1) (Nil)))"), sexpr_nil());
+    assert_sexpr_eq("(cons (Int 1) (Nil))", |h| h.cons(Value::Int(1), Value::Empty).unwrap());
+    assert_sexpr_eq("(car (cons (Int 1) (Nil)))", |_| Value::Int(1));
+    assert_sexpr_eq("(cdr (cons (Int 1) (Nil)))", |_| Value::Empty);
 }
 
 #[test]
@@ -335,11 +436,11 @@ fn car_and_cdr_of_non_cons_panic() {
 
 #[test]
 fn list_builds_cons_chain() {
-    assert_eq!(
-        eval_ok("(list (Int 1) (Int 2))"),
-        sexpr_cons(sexpr_int(1), sexpr_cons(sexpr_int(2), sexpr_nil()))
-    );
-    assert_eq!(eval_ok("(list)"), sexpr_nil());
+    assert_sexpr_eq("(list (Int 1) (Int 2))", |h| {
+        let tail = h.cons(Value::Int(2), Value::Empty).unwrap();
+        h.cons(Value::Int(1), tail).unwrap()
+    });
+    assert_sexpr_eq("(list)", |_| Value::Empty);
 }
 
 #[test]
@@ -367,7 +468,46 @@ fn dolist_over_empty_list_does_nothing() {
 fn cons_as_value() {
     let src = "(defun apply2 ((f (fn (Sexpr Sexpr) Sexpr)) (a Sexpr) (b Sexpr)) Sexpr (f a b)) \
                (apply2 cons (Int 1) (Nil))";
-    assert_eq!(eval_ok(src), sexpr_cons(sexpr_int(1), sexpr_nil()));
+    assert_sexpr_eq(src, |h| h.cons(Value::Int(1), Value::Empty).unwrap());
+}
+
+// ---- runtime Sexpr values share the GC-managed cons heap --------------------
+
+#[test]
+fn runtime_cons_cells_survive_gc_when_rooted() {
+    // Read/check against a generously-sized heap, then evaluate against a
+    // tiny 2-cell one: one cell permanently held by `kept`, the other cycling
+    // through garbage the loop body builds and immediately discards each
+    // iteration. With only 2 cells, every other iteration must run a GC to
+    // free the previous iteration's garbage before it can allocate again. If
+    // `kept` weren't tracked as a GC root, one of those collections would
+    // eventually reclaim and corrupt it instead of the garbage.
+    let mut src_heap = Heap::with_capacity(4096);
+    let r = Reader::new();
+    let src = "(let ((kept (cons (Int 1) (Nil)))) \
+                 (dotimes (i 50) (cons (Int 2) (Nil))) \
+                 (car kept))";
+    let vs = r.read_all(&mut src_heap, src).expect("read failed");
+    let mut chk = Checker::new();
+    let tls: Vec<_> = vs
+        .into_iter()
+        .map(|v| chk.check_form(&src_heap, v).expect("check failed"))
+        .collect();
+
+    let mut rt_heap = Heap::with_capacity(2);
+    let mut interp = Interp::new();
+    let mut last = RtValue::Unit;
+    for tl in tls {
+        if let Some(val) = interp.exec(&mut rt_heap, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    assert_eq!(last, RtValue::Sexpr(Value::Int(1)));
+    // GC is lazy (it only runs when an allocation needs space), so the final
+    // iteration's garbage cell is still live; one more collection reclaims it.
+    // `kept`'s cell — still rooted — is the only thing left afterwards.
+    rt_heap.gc();
+    assert_eq!(rt_heap.live_count(), 1);
 }
 
 // ---- global definitions: defvar / defconstant ------------------------------

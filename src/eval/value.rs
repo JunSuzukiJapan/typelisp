@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::{error, fmt};
 
-use crate::{Path, Typed};
+use crate::{Path, Typed, Value};
 
 /// A closure: a lambda body with its parameter names and the lexical environment
 /// captured at creation (shared slots, so captured mutable variables persist).
@@ -16,7 +16,9 @@ pub struct Closure {
 }
 
 /// A runtime value. Data-type instances (constructors of `Option`/`Result`/
-/// `Sexpr`/user structs) are represented uniformly by [`RtValue::Data`].
+/// user structs) are represented uniformly by [`RtValue::Data`]; `Sexpr` is
+/// the one exception — it is the cons/nil-bearing builtin the GC-managed cons
+/// heap exists for, so its values live there instead, in [`RtValue::Sexpr`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum RtValue {
     Int(i64),
@@ -32,14 +34,24 @@ pub enum RtValue {
         variant: usize,
         fields: Vec<RtValue>,
     },
+    /// A `Sexpr` value (`Nil`/`Int`/`Float`/`Char`/`Bool`/`Sym`/`Str`/`Cons`),
+    /// backed by the GC-managed cons heap shared with the reader rather than a
+    /// Rust-heap encoding — so `cons` cells built at runtime are subject to the
+    /// same mark-sweep collection as ones read from source.
+    Sexpr(Value),
     /// A function value (from a `lambda` or a reified named function).
     Closure(Rc<Closure>),
     /// A built-in operator used as a function value (e.g. `+`).
     Builtin(String),
 }
 
-/// A runtime error. `Panic` is a deliberate `panic!`; the others are bugs that a
-/// well-typed program should not produce.
+/// A runtime error. `Panic` is a deliberate `panic!`; `Break`/`Return` are not
+/// errors at all but internal non-local-exit signals (`break`/`return`
+/// unwinding to the nearest enclosing loop), reusing `Result`'s `?`-propagation
+/// to implement them; the checker guarantees they are always caught by a
+/// `while`/`loop`/etc. before they could reach [`Interp::exec`](super::Interp)
+/// — surfacing there would be a checker/interpreter bug. The remaining
+/// variants are bugs that a well-typed program should not produce.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EvalError {
     /// A `panic!` reached at runtime, carrying its message.
@@ -50,6 +62,10 @@ pub enum EvalError {
     NoSuchFunction(String),
     /// An internal invariant was violated (a checker/interpreter bug).
     Internal(String),
+    /// `break`: unwinding to the nearest enclosing loop, no value.
+    Break,
+    /// `return value`: unwinding to the nearest enclosing loop with `value`.
+    Return(Box<RtValue>),
 }
 
 impl fmt::Display for EvalError {
@@ -59,6 +75,8 @@ impl fmt::Display for EvalError {
             EvalError::Unbound(n) => write!(f, "unbound variable: {}", n),
             EvalError::NoSuchFunction(n) => write!(f, "no such function: {}", n),
             EvalError::Internal(m) => write!(f, "internal error: {}", m),
+            EvalError::Break => write!(f, "internal error: break escaped its loop"),
+            EvalError::Return(_) => write!(f, "internal error: return escaped its loop"),
         }
     }
 }

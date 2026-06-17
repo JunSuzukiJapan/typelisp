@@ -1,6 +1,6 @@
 # typelisp 言語設計（確定仕様）
 
-最終更新: 2026-06-16 / ブランチ: `feature/typed-lisp-impl`
+最終更新: 2026-06-17 / ブランチ: `feature/typed-lisp-impl`
 
 このドキュメントは、設計で**確定した言語仕様**を後から見返せるよう記録するもの。
 実装の進捗・段取りは [TODO.md](TODO.md) を参照。
@@ -35,6 +35,13 @@
 - **mark-sweep GC**（反復マーク＝深い構造でもスタック溢れなし、循環回収）。ルート集合 `push_root`/`pop_root`。
 - **生ポインタは `ConsRef` に隠蔽、公開 API は安全**。
 - シンボルはインターン（小文字正規化・永続）。文字列は GC 管理（到達可能のみ生存）。
+- **実行時 `Sexpr` 値も同じヒープ**（`RtValue::Sexpr`）: read 時のデータと eval 中にプログラムが `cons`/`list`/構成子で
+  作るデータは同一の cons アリーナ・GC を共有する（`Sexpr`/`Option`/`defstruct` 等それ以外のADTは `RtValue::Data` の
+  まま Rust ヒープ上＝GC 対象外。GC の対象は cons セル/シンボル/文字列のみという方針通り）。
+  インタプリタ側のルート管理: 生成した可変スロット（`let`/引数/クロージャ捕捉/`match` 束縛）をすべて弱参照で
+  `Interp.slots` に登録し、`heap.cons` 呼び出し直前に `sync_roots` で「今生きているスロットが持つ `Sexpr` 値」を
+  再収集してヒープのルート集合を差し替える。スロットの生存は通常の `Rc` 所有権（env フレーム/`globals`/クロージャの
+  捕捉環境）に委ねており、専用の push/pop 管理は不要。
 
 ---
 
@@ -85,12 +92,13 @@
 | 束縛 | `let` `let*` | |
 | 制御 | `if` `when` `unless` `cond` `case` `match` `if-let` `while-let` `and` `or` `progn` `the` | `and`/`or` は短絡のため特殊形。`the` は型注釈 |
 | 反復 | `loop` `while` `until` `dotimes` `dolist` `do` `doiter` | |
-| その他 | `quote` `setf` `panic!` `unreachable!` `todo!` | `panic!`/`unreachable!`/`todo!` は戻り型 `!`（§7） |
+| その他 | `quote` `setf` `break` `return` `panic!` `unreachable!` `todo!` | `break`/`return`/`panic!`/`unreachable!`/`todo!` は戻り型 `!`（§7） |
 
 脱糖の例: `when`→`if`+`progn`、`unless`→`if`、`if-let (pat val) then else`→2 腕 `match`（包括アームで網羅）。
 
-実装状況: `if` `let` `let*` `progn` `when` `unless` `and` `or` `cond` `setf` `while` `lambda` `match` `if-let` `panic!`
-`defstruct` `defvar` `defconstant` `module` `use` `defmethod` は実装済（[src/check/checker.rs](../src/check/checker.rs)）。
+実装状況: `if` `let` `let*` `progn` `when` `unless` `and` `or` `cond` `setf` `while` `loop` `break` `return` `lambda`
+`match` `if-let` `panic!` `defstruct` `defvar` `defconstant` `module` `use` `defmethod` は実装済
+（[src/check/checker.rs](../src/check/checker.rs)）。
 `when`/`unless`/`and`/`or`/`cond`/`let*` は `if`/`let` への脱糖。`setf`（可変ローカル/グローバル変数）/`while` は専用 AST
 ノード（eval 環境は `Rc<RefCell>` の可変スロット）。`defvar`（可変）/`defconstant`（不変）はグローバル変数を現在の
 名前空間に登録し、型注釈 `(name Type)` は任意（省略時は値から推論）。
@@ -100,7 +108,13 @@
 組み込みは `RtValue::Builtin`）。**`dotimes`** `(dotimes (var count) body...)` は `let`+`while`+`setf` への脱糖。
 **`list`** `(list e1 ... en)` は `(Cons e1 (Cons e2 (... (Nil))))` への脱糖（`(list)` は `(Nil)`）。**`dolist`**
 `(dolist (var list-expr) body...)` は `let`+`while`+`match` への脱糖（`Sexpr` の `Cons`/`Nil` を辿る、結果は `Unit`）。
-残り（`case` `loop` `do` `doiter` `while-let` `the`）は今後。`loop` は `break`/`return` の非局所脱出が前提のため後回し。
+**`loop`** `(loop body...)` は無限ループ。**`break`/`return`** は CL 流：どちらも**直近のループのみ**を脱出する
+（関数の早期 return ではない。`lambda` 境界は越えられない＝クロージャの中から外側のループへ break/return できない）。
+`break` は値を取らず（常に `Unit` で脱出）、`return` は `(return)`／`(return value)` で値任意。`while`/`dotimes`/
+`dolist`/`loop` いずれの内側でも使え、`loop` の型は内側で見つかった `break`/`return` の値型の join（`match`/`cond` の
+腕と同様に一致が必要）。一度も脱出しない `loop` は型 `!`（Rust の `loop {}` と同じ）。`while` 系はもともと型が `Unit`
+固定なので、その内側の `return` の値も `Unit` でなければ型エラー。
+残り（`case` `do` `doiter` `while-let` `the`）は今後。
 
 ---
 
@@ -112,6 +126,7 @@
 > 実装状況: eval（step4）でツリーウォーク評価を実装済み。組み込み関数は**i32 の算術/比較**
 > （`+ - * / mod < <= > >= = /=`、`/`/`mod` のゼロ除算は panic）と **`Sexpr` 上の `cons`/`car`/`cdr`**
 > （`car`/`cdr` は非 `Cons`＝`Nil` 含むで panic）を実装済み。他のカタログ項目は今後 eval 拡充で追加。
+> `Sexpr` の実行時値は §1 のとおり cons ヒープ（GC 管理）に統合済み。
 
 ### 4.1 Rust 組み込み（primitive）
 | 種別 | 関数 | 備考 / 例 |

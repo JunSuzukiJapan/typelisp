@@ -64,6 +64,15 @@ pub enum Expr {
     SetGlobal(Path, Box<Typed>),
     /// `(while cond body...)` — loop while `cond` holds. Has type `Unit`.
     While(Box<Typed>, Vec<Typed>),
+    /// `(loop body...)` — loop forever, exited via `break`/`return`. Its type is
+    /// the join of every `break`/`return` reached directly inside it (not
+    /// crossing a nested loop or `lambda`); `Never` if it never exits.
+    Loop(Vec<Typed>),
+    /// `(break)` — exit the nearest enclosing loop with no value. Type `Never`.
+    Break,
+    /// `(return)` / `(return value)` — exit the nearest enclosing loop,
+    /// optionally with a value (`Unit` if omitted). Type `Never`.
+    Return(Option<Box<Typed>>),
     /// `(panic! message)` — diverges. Has type [`Type::Never`](crate::Type).
     Panic(Box<Typed>),
 }

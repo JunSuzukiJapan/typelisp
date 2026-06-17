@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-06-16 / ブランチ: `feature/typed-lisp-impl`
+最終更新: 2026-06-17 / ブランチ: `feature/typed-lisp-impl`
 
 このドキュメントは、再実装（read 関数から作り直し）の進捗と次回の作業を記録する。
 **言語仕様の確定事項は [language-design.md](language-design.md) を参照。**
@@ -20,8 +20,10 @@
 | `aec77f3` | clippy 警告解消（Error の Display 実装、Reader の Default） |
 | （未コミット） | エラー処理（Result/Error/Never/`panic!`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
-**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 40 / error 10 / namespace 11 / eval 49 = 168 件 green、警告0（clippy 含む）。
+**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 50 / error 10 / namespace 19 / eval 58 = 195 件 green、警告0（clippy 含む）。
 **Miri**: `cargo +nightly miri test --test mem_test`（26/28、重い2件除外）— `Value::Path` 追加後も UB/リーク無し。
+`eval_test` はフル実行だと（再帰系テスト等で）数分単位になるため、`loop`/`break`/`return` と実行時 `Sexpr`/cons ヒープ
+連携に関わる14件を `cargo +nightly miri test --test eval_test -- <該当テスト名...>` で個別検証— 全件 green、UB/リーク無し。
 
 ### 確定仕様ドキュメント
 - [language-design.md](language-design.md) — 言語の基本方針、メモリモデル/GC、`::`/module/型の関係、特殊形・関数カタログ（Rust 組み込み vs typelisp）、defmethod、defstruct、エラー処理（Result/Never/panic!）。
@@ -34,8 +36,8 @@
 - `src/check/ast.rs` — `Typed` / `Expr`（`Call`/`Assoc`/`Panic` 等）/ `Pattern` / `Arm`
 - `src/check/registry.rs` — `AdtDef`(assoc 付)/`Variant`/`FnSig`/`AssocFn`/`Registry`（組み込み Option/Result/Error/Sexpr、modules/aliases）
 - `src/check/checker.rs` — `Checker`（`check_form` 入口、`ns` 状態、名前解決 現NS→root、defun/defstruct/module/defmethod/use、双方向検査・単段具体化・網羅性・Never 適合）
-- `src/eval/value.rs` — `RtValue`（実行時値、構成子インスタンス）/ `EvalError`（`Panic` 等）
-- `src/eval/interp.rs` — `Interp`（`exec`/`eval`、関数・メソッドレジストリ、パターン照合、i32 組み込み演算）
+- `src/eval/value.rs` — `RtValue`（実行時値、構成子インスタンス、`Sexpr` は cons ヒープ参照）/ `EvalError`（`Panic`・`Break`/`Return` 内部シグナル等）
+- `src/eval/interp.rs` — `Interp`（`exec`/`eval` は `&mut Heap` を受け取る、関数・メソッドレジストリ、パターン照合、i32 組み込み演算、スロット弱参照レジストリ + `sync_roots` で GC ルート管理）
 - `src/errors.rs` — `Error`（`HeapExhausted`/`NotACons`/`ImproperList`/`TypeError` 等、全バリアント Display 実装）
 - `tests/{mem,read,type,check,error,namespace,eval}_test.rs`
 
@@ -115,11 +117,25 @@
   - 実装済み（4g）: 名前付き関数の値化（`Expr::FnRef`、組み込みは `RtValue::Builtin`）＋ `dotimes`（`let`+`while`+`setf` へ脱糖）。
   - 実装済み（4h）: `cons`/`car`/`cdr`（`Sexpr` 上、`FnSig` 登録で値化も可）。`car`/`cdr` は非 `Cons`（`Nil` 含む）で panic。
     `list`（`(Cons e1 (Cons e2 (... (Nil))))` へ脱糖）／`dolist`（`let`+`while`+`match` で `Cons`/`Nil` を辿る脱糖、結果は `Unit`）。
-  - TDD: `tests/eval_test.rs`（49件）／`tests/check_test.rs`（40件）。
+  - 実装済み（4i）: `loop`/`break`/`return` の非局所脱出（CL 流: 両方とも**直近のループのみ**を脱出。`break` は値なし、
+    `return [value]` は値任意で `loop`/`while`/`dotimes`/`dolist` いずれも脱出可。`lambda` 境界は越えない）。
+    `Checker.loop_stack`（`break`/`return` の値型を `join_types` で蓄積、`while`系は `Unit` で seed、`loop` は `Never` で
+    seed）、eval は `EvalError::Break`/`Return` を内部シグナルとして `?` 伝播、`while`/`loop` だけがそれを捕捉して
+    `Step::{Value,Exit}` に解決（`eval_loop_step`/`eval_loop_body`）。
+  - 実装済み（4j）: 実行時 `Sexpr` 値を cons ヒープへ統合。`RtValue::Sexpr(mem::Value)` を追加し、`Sexpr` の
+    `Construct`/`Match`/`cons`/`car`/`cdr` はすべて `Heap` 経由（`mem::Value` が `Sexpr` と同型なのでスカラー変種は
+    そのまま、`Cons`/`Str`/`Sym` は `heap.cons`/`alloc_string`/`intern_symbol`）。GC ルート管理は「全スロットを弱参照で
+    登録 → `heap.cons` 直前に `sync_roots` で生存スロットから `Sexpr` 値を再収集してルート差し替え」方式
+    （`Interp.slots: Vec<Weak<..>>` + `rooted: Cell<usize>`）。`eval_args` は評価した各引数をスロットに包んで返し
+    （`(Vec<RtValue>, Vec<Slot>)`）、呼び出し元がそのスロット列を保持する間だけ GC 安全になる。
+    Sexpr 以外のADT（`Option`/`Result`/`defstruct`）は従来通り `RtValue::Data`（Rust ヒープ）のまま
+    （設計上 GC 対象は cons セル/シンボル/文字列のみ）。
+  - TDD: `tests/eval_test.rs`（58件、`runtime_cons_cells_survive_gc_when_rooted` で 2 セルの極小ヒープに対して
+    GC を強制発生させルート保護を実地検証）／`tests/check_test.rs`（50件）。
 - **次の候補（eval 拡充）**:
   - 組み込み関数の拡張（型ごとの算術／i64・f64、文字列・ベクタ・Option/Result ライブラリ関数）。カタログは [language-design.md](language-design.md) §4。
-  - typelisp ライブラリ関数（`length`/`append`/`reverse`/`map`/`filter`/`foldl`/`foldr` 等、`Sexpr` 上）、`break`/`return` の非局所脱出（→ `loop`）。
-  - 実行時値と GC の整合（現状 `RtValue` は Rust ヒープ上で完結、cons ヒープ非依存）。
+  - typelisp ライブラリ関数（`length`/`append`/`reverse`/`map`/`filter`/`foldl`/`foldr` 等、`Sexpr` 上）。
+  - `case`/`do`/`doiter`/`while-let`/`the` は未実装。
 - **ステップ5: compile**（明示 `compile`/`compile-file`。inkwell 再追加・LLVM コード生成。feature gate）。
 
 ---

@@ -343,6 +343,63 @@ fn dolist_list_expr_must_be_sexpr() {
     assert_type_error("(dolist (x 5) x)");
 }
 
+// ---- loop / break / return ---------------------------------------------------
+
+#[test]
+fn loop_with_only_break_is_unit() {
+    assert_eq!(ty("(loop (break))"), Type::Unit);
+}
+
+#[test]
+fn loop_with_return_value_takes_that_type() {
+    assert_eq!(ty("(loop (return 5))"), Type::I32);
+}
+
+#[test]
+fn loop_with_no_exit_is_never() {
+    assert_eq!(ty("(loop 1)"), Type::Never);
+}
+
+#[test]
+fn loop_break_and_return_must_agree() {
+    assert_type_error("(if true (loop (break)) (loop (return 5)))");
+}
+
+#[test]
+fn break_outside_loop_errors() {
+    assert_type_error("(break)");
+}
+
+#[test]
+fn return_outside_loop_errors() {
+    assert_type_error("(return 1)");
+}
+
+#[test]
+fn break_takes_no_arguments() {
+    assert_type_error("(loop (break 1))");
+}
+
+#[test]
+fn return_inside_while_must_be_unit() {
+    assert_type_error("(while true (return 1))");
+    assert_eq!(ty("(while true (return))"), Type::Unit);
+}
+
+#[test]
+fn break_does_not_cross_lambda_boundary() {
+    assert_type_error("(loop ((lambda () () (break))))");
+}
+
+#[test]
+fn nested_loop_break_targets_innermost() {
+    // The inner loop's `break` exits the inner loop only; it must not
+    // contribute to the outer loop's exit type (which here comes solely from
+    // the outer `return`). If it leaked, this would be a type error (Unit vs
+    // i32).
+    assert_eq!(ty("(loop (loop (break)) (return 5))"), Type::I32);
+}
+
 // ---- typed AST shape --------------------------------------------------------
 
 #[test]

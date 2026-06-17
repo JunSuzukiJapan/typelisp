@@ -5,6 +5,7 @@
 //! integer type and a nullary `None` learns its type argument), while everything
 //! else synthesizes its own type and is reconciled against the expectation.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use crate::{parse_type, Error, Heap, Path, Type, Value};
@@ -73,11 +74,19 @@ impl Env {
 pub struct Checker {
     reg: Registry,
     ns: Vec<String>,
+    /// Stack of enclosing loops' accumulated exit type, innermost last.
+    /// `break`/`return` unify their (optional) value's type into the top
+    /// frame; `while`/`dotimes`/`dolist` seed it with `Unit` (their fixed
+    /// result type), `loop` seeds it with `Never` (refined by any exit found).
+    /// `lambda` bodies see an empty stack — `break`/`return` cannot cross a
+    /// function boundary (there is no labelled non-local exit in this
+    /// language, only "nearest enclosing loop").
+    loop_stack: RefCell<Vec<Type>>,
 }
 
 impl Checker {
     pub fn new() -> Checker {
-        Checker { reg: Registry::with_builtins(), ns: Vec::new() }
+        Checker { reg: Registry::with_builtins(), ns: Vec::new(), loop_stack: RefCell::new(Vec::new()) }
     }
 
     /// Check one top-level form. Definition forms (`defun`/`defstruct`/`module`/
@@ -715,6 +724,9 @@ impl Checker {
             "cond" => return self.check_cond(heap, env, args, expected),
             "setf" => return self.check_setf(heap, env, args),
             "while" => return self.check_while(heap, env, args),
+            "loop" => return self.check_loop(heap, env, args),
+            "break" => return self.check_break(args),
+            "return" => return self.check_return(heap, env, args),
             "dotimes" => return self.check_dotimes(heap, env, args),
             "dolist" => return self.check_dolist(heap, env, args),
             "list" => return self.check_list_lit(heap, env, args),
@@ -753,7 +765,13 @@ impl Checker {
         let params = self.parse_params(heap, args[0])?;
         let ret = self.canon(&parse_type(heap, args[1])?);
         let child = env.extended(params.clone());
-        let (body, _) = self.check_seq(heap, &child, &args[2..], Some(&ret))?;
+        // A lambda is a new function boundary: `break`/`return` cannot reach an
+        // outer loop through it, so it checks its body against an empty loop
+        // stack (restored afterwards, even on error).
+        let saved = self.loop_stack.replace(Vec::new());
+        let result = self.check_seq(heap, &child, &args[2..], Some(&ret));
+        self.loop_stack.replace(saved);
+        let (body, _) = result?;
         let fn_ty = Type::Fn(
             params.iter().map(|(_, t)| t.clone()).collect(),
             Box::new(ret),
@@ -1052,14 +1070,86 @@ impl Checker {
     }
 
     /// `(while cond body...)`: loop while `cond` (a `bool`) holds; the body is
-    /// evaluated for effect. The result is `Unit`.
+    /// evaluated for effect. The result is `Unit`. `break`/`return` may exit it
+    /// early; their (optional) value must then itself be `Unit`.
     fn check_while(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
         if args.is_empty() {
             return Err(Error::TypeError("while: (while cond body...)".into()));
         }
         let cond = self.check(heap, env, args[0], Some(&Type::Bool))?;
-        let (body, _) = self.check_seq(heap, env, &args[1..], None)?;
+        let (body, _) = self.check_loop_body(heap, env, &args[1..], Type::Unit)?;
         Ok(Typed { expr: Expr::While(Box::new(cond), body), ty: Type::Unit })
+    }
+
+    /// `(loop body...)`: an infinite loop, exited via `break`/`return`. Its
+    /// type is the join of every `break`/`return` reached directly inside it
+    /// (not crossing a nested loop/lambda); `Never` if it never exits.
+    fn check_loop(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+        let (body, ty) = self.check_loop_body(heap, env, args, Type::Never)?;
+        Ok(Typed { expr: Expr::Loop(body), ty })
+    }
+
+    /// Check a loop body sequence with a fresh loop-stack frame seeded at
+    /// `seed` (the loop's known result type if fixed, e.g. `Unit` for
+    /// `while`/`dotimes`/`dolist`; `Never` for `loop`, refined by any
+    /// `break`/`return` found). Returns the checked body and the frame's final
+    /// type. The frame is popped even if checking the body fails.
+    fn check_loop_body(
+        &self,
+        heap: &Heap,
+        env: &Env,
+        body: &[Value],
+        seed: Type,
+    ) -> Result<(Vec<Typed>, Type), Error> {
+        self.loop_stack.borrow_mut().push(seed);
+        let result = self.check_seq(heap, env, body, None);
+        let ty = self.loop_stack.borrow_mut().pop().expect("pushed above");
+        let (body, _) = result?;
+        Ok((body, ty))
+    }
+
+    /// `(break)`: exit the nearest enclosing loop with no value (`Unit`). Type
+    /// `Never` (diverges; satisfies any expectation).
+    fn check_break(&self, args: &[Value]) -> Result<Typed, Error> {
+        if !args.is_empty() {
+            return Err(Error::TypeError("break: (break), takes no arguments".into()));
+        }
+        self.contribute_loop_exit(Type::Unit)?;
+        Ok(Typed { expr: Expr::Break, ty: Type::Never })
+    }
+
+    /// `(return)` / `(return value)`: exit the nearest enclosing loop,
+    /// optionally with a value (`Unit` if omitted). Type `Never`.
+    fn check_return(&self, heap: &Heap, env: &Env, args: &[Value]) -> Result<Typed, Error> {
+        if args.len() > 1 {
+            return Err(Error::TypeError("return: (return) or (return value)".into()));
+        }
+        let top = self
+            .loop_stack
+            .borrow()
+            .last()
+            .cloned()
+            .ok_or_else(|| Error::TypeError("return: not inside a loop".into()))?;
+        let expected = non_never(&top).cloned();
+        let value = match args.first() {
+            Some(v) => Some(self.check(heap, env, *v, expected.as_ref())?),
+            None => None,
+        };
+        let ty = value.as_ref().map(|t| t.ty.clone()).unwrap_or(Type::Unit);
+        self.contribute_loop_exit(ty)?;
+        Ok(Typed { expr: Expr::Return(value.map(Box::new)), ty: Type::Never })
+    }
+
+    /// Unify a `break`/`return` value's type into the nearest enclosing loop's
+    /// accumulated exit type, erroring if there is no enclosing loop or the
+    /// types disagree (mirrors how `match`/`cond` arms must agree).
+    fn contribute_loop_exit(&self, ty: Type) -> Result<(), Error> {
+        let mut stack = self.loop_stack.borrow_mut();
+        let top = stack
+            .last_mut()
+            .ok_or_else(|| Error::TypeError("break/return: not inside a loop".into()))?;
+        *top = join_types(&*top, &ty)?;
+        Ok(())
     }
 
     /// `(dotimes (var count) body...)`: run the body with `var` taking `0` ..
@@ -1080,7 +1170,7 @@ impl Checker {
         // A hidden loop-limit binding; the space makes it unwritable in source.
         let limit = " dotimes-limit".to_string();
         let child = env.extended(vec![(var.clone(), Type::I32), (limit.clone(), Type::I32)]);
-        let (mut body, _) = self.check_seq(heap, &child, &args[1..], None)?;
+        let (mut body, _) = self.check_loop_body(heap, &child, &args[1..], Type::Unit)?;
 
         let var_ref = || Typed { expr: Expr::Var(var.clone()), ty: Type::I32 };
         let int = |n| Typed { expr: Expr::Int(n), ty: Type::I32 };
@@ -1141,7 +1231,7 @@ impl Checker {
 
         let outer = env.extended(vec![(lstvar.clone(), sexpr_ty.clone())]);
         let body_env = outer.extended(vec![(var.clone(), sexpr_ty.clone())]);
-        let (mut body, _) = self.check_seq(heap, &body_env, &args[1..], None)?;
+        let (mut body, _) = self.check_loop_body(heap, &body_env, &args[1..], Type::Unit)?;
 
         // body... then (setf --dolist-lst --dolist-rest), advancing the list.
         body.push(Typed {
