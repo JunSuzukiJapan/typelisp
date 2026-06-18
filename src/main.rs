@@ -174,6 +174,7 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
         RtValue::Sexpr(sv) => format_sexpr(heap, *sv),
         RtValue::Closure(_) => "#<closure>".to_string(),
         RtValue::Builtin(name) => format!("#<builtin {}>", name),
+        RtValue::HashTable(map) => format!("#<hashtable count={}>", map.borrow().len()),
     }
 }
 

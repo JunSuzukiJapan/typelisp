@@ -1,10 +1,40 @@
 //! Runtime values and errors for the tree-walking interpreter.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::{error, fmt};
 
 use crate::{Path, Typed, Value};
+
+/// A `HashTable<K,V>` key. Restricted to the scalar `RtValue` variants with a
+/// natural, total `Eq`/`Hash` (notably excluding `Float` — `f64` has no `Eq`
+/// because of `NaN` — and any reference-counted variant, where a structural
+/// notion of equality wouldn't be meaningful). See [`HashKey::from_rtvalue`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum HashKey {
+    Int(i64),
+    Bool(bool),
+    Char(char),
+    Str(String),
+}
+
+impl HashKey {
+    /// Converts a key argument at the `HashTable` method boundary. The type
+    /// checker can't express a "hashable" bound (no traits in this language),
+    /// so an unsupported key type — `Float`/`Closure`/`HashTable` itself, or a
+    /// user `Data` instance — is a runtime panic, the same fallback used for
+    /// e.g. `car`/`cdr` on a non-`Cons` `Sexpr`.
+    pub fn from_rtvalue(v: &RtValue) -> Result<HashKey, EvalError> {
+        match v {
+            RtValue::Int(n) => Ok(HashKey::Int(*n)),
+            RtValue::Bool(b) => Ok(HashKey::Bool(*b)),
+            RtValue::Char(c) => Ok(HashKey::Char(*c)),
+            RtValue::Str(s) => Ok(HashKey::Str(s.clone())),
+            other => Err(EvalError::Panic(format!("HashTable: unsupported key type {:?}", other))),
+        }
+    }
+}
 
 /// A closure: a lambda body with its parameter names and the lexical environment
 /// captured at creation (shared slots, so captured mutable variables persist).
@@ -43,6 +73,17 @@ pub enum RtValue {
     Closure(Rc<Closure>),
     /// A built-in operator used as a function value (e.g. `+`).
     Builtin(String),
+    /// A `HashTable<K,V>`. Lives in ordinary Rust-managed memory
+    /// (`Rc<RefCell<..>>`, reclaimed by reference counting), not the
+    /// GC-managed cons heap — the same pattern [`RtValue::Data`] and
+    /// [`Closure::env`]'s captured slots already use; see
+    /// `crate::eval::interp::collect_sexpr_roots` for how a `Sexpr` value
+    /// nested inside one stays rooted. A `HashTable` holding itself (directly
+    /// or through a cycle of values) leaks rather than being collected —
+    /// the same accepted trade-off `Closure`'s captured-slot cycles already
+    /// have; mark-sweep cycle collection is deliberately only for the cons
+    /// heap (`Sexpr`/`cons`/strings).
+    HashTable(Rc<RefCell<HashMap<HashKey, RtValue>>>),
 }
 
 /// A runtime error. `Panic` is a deliberate `panic`; `Break`/`Return` are not

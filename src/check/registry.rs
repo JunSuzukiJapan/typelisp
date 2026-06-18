@@ -143,6 +143,7 @@ impl Registry {
         root.add_type(result_def());
         root.add_type(error_def());
         root.add_type(sexpr_def());
+        root.add_type(hashtable_def());
         // Primitive value types (i8..usize/f32/f64/bool/char/string) get an
         // (initially empty) method table too, so `defmethod` can target them
         // (see `check_defmethod`/`check_instance_method`, which map a
@@ -261,6 +262,63 @@ fn sexpr_def() -> AdtDef {
 
 fn sexpr() -> Type {
     Type::Named(Path::root("sexpr"), vec![])
+}
+
+fn hashtable_ty() -> Type {
+    Type::Named(Path::root("hashtable"), vec![tvar("k"), tvar("v")])
+}
+
+fn option_of(t: Type) -> Type {
+    Type::Named(Path::root("option"), vec![t])
+}
+
+/// `HashTable<K, V>`: a builtin (Rust-implemented) mutable hash map, with no
+/// constructors of its own (built via the static `new`, not pattern-matched).
+/// All methods here are metadata only — there is no `defmethod` body to
+/// check; the runtime implementation lives in `eval_builtin_method` in
+/// `crate::eval::interp`.
+fn hashtable_def() -> AdtDef {
+    let mut assoc = HashMap::new();
+    assoc.insert(
+        "new".to_string(),
+        AssocFn { sig: FnSig { params: vec![], ret: hashtable_ty(), public: true }, instance: false },
+    );
+    assoc.insert(
+        "get".to_string(),
+        AssocFn {
+            sig: FnSig { params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true },
+            instance: true,
+        },
+    );
+    assoc.insert(
+        "set".to_string(),
+        AssocFn {
+            sig: FnSig { params: vec![hashtable_ty(), tvar("k"), tvar("v")], ret: Type::Unit, public: true },
+            instance: true,
+        },
+    );
+    assoc.insert(
+        "remove".to_string(),
+        AssocFn {
+            sig: FnSig { params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true },
+            instance: true,
+        },
+    );
+    assoc.insert(
+        "count".to_string(),
+        AssocFn { sig: FnSig { params: vec![hashtable_ty()], ret: Type::I32, public: true }, instance: true },
+    );
+    assoc.insert(
+        "clear".to_string(),
+        AssocFn { sig: FnSig { params: vec![hashtable_ty()], ret: Type::Unit, public: true }, instance: true },
+    );
+    AdtDef {
+        name: Path::root("hashtable"),
+        params: vec!["k".to_string(), "v".to_string()],
+        variants: vec![],
+        assoc,
+        public: true,
+    }
 }
 
 /// A type-parameter reference, e.g. `t` in `Option<T>`'s field list.

@@ -20,7 +20,8 @@
 | `aec77f3` | clippy 警告解消（Error の Display 実装、Reader の Default） |
 | （未コミット） | エラー処理（Result/Error/Never/`panic`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
-**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 50 / error 10 / namespace 25 / eval 58 / macro 25 = 226 件 green、警告0（clippy 含む）。
+**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 50 / error 10 / namespace 25 / eval 58 / macro 25 /
+hashtable 12 = 238 件 green、警告0（clippy 含む）。
 旧来あった3件の既存警告（`check_assoc_call`/`check_construct` の too_many_arguments、`alloc_quoted` の
 only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(adt_name, variant)` をタプル1引数に
 まとめてアリティを減らし、後者は `self` を使わず再帰のみに使っていたため `Interp` のメソッドから
@@ -111,7 +112,18 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
   マップし、`Registry::with_builtins` がそれぞれの空 `AdtDef` を事前登録、`check_defmethod`/
   `check_instance_method` が `Type::Named` と同様にこの `Path` で解決する。trait/動的ディスパッチは
   導入せず、既存の「受け手の静的型で一意に解決する」仕組みを対象範囲だけ広げたもの。
-- **未実装（後続）**: ジェネリック構造体/受け手、`use a::b`（モジュール名を現NSに alias として導入）、可視性、関数カタログの実装本体（eval 待ち）。
+- **assoc呼び出しのジェネリック受け手対応**（[cl-equivalence-catalog.md](cl-equivalence-catalog.md) ステップ3a）:
+  `check_assoc_call`（[src/check/checker.rs](../src/check/checker.rs)）が、`check_construct` と同型の
+  `subst`/`subst_apply` で、メソッド署名中の型変数（受け手の `def.params`、例 `HashTable<K,V>` の
+  `k`/`v`）を具体型へ代入するようになった。インスタンス呼び出しは受け手の確定型から、引数からは
+  何も推論できない static 呼び出し（`HashTable::new` 等）は呼び出し元の `expected`（戻り値の期待型）
+  から代入元を得る（field-less構成子 `None` が `expected` から型引数を学ぶのと同じ要領）。
+  受け手/expected/メソッド識別子は `AssocCall` 構造体にまとめてアリティを抑えている。
+- **未実装（後続）**: **ユーザ定義のジェネリック `defstruct`**（`check_defstruct` は常に `params:
+  Vec::new()` で構造体に型パラメータを宣言する構文がまだ無い — 上記の受け手側 generic 代入とは別物。
+  `HashTable<K,V>` 等の組み込み型は `registry.rs` で直接 `AdtDef.params` を設定するため、この制約の
+  影響を受けていない）、`use a::b`（モジュール名を現NSに alias として導入）、可視性、関数カタログの
+  実装本体（eval 待ち）。
 
 ## 3. ステップ4：eval（**4a/4b 実装済み**）
 - **型付き AST（`check::Typed`）上のツリーウォークインタプリタ**（`src/eval/`、既定の実行経路）。
@@ -181,6 +193,34 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       `Sexpr` リストとして束縛する。`apply` 自体は不変（params/argsを1:1で zip するのみ）。
     - TDD: `tests/macro_test.rs` に6件追加（固定引数なし/ありでの収集、空 `&rest`、引数不足のエラー、
       `&rest` が末尾以外だとエラー、GC強制発生下での収集の回帰テスト）。
+  - 実装済み（4m）: `HashTable<K,V>`（[cl-equivalence-catalog.md](cl-equivalence-catalog.md) ステップ3b）。
+    - 型登録: `registry.rs` の `hashtable_def()` が `Option`/`Result` と同型で `params: ["k","v"]`、
+      `variants: []`、`assoc` に `new`（static）/`get`/`set`/`remove`/`count`/`clear`（instance）の
+      メタデータを直接登録（`defmethod` の本体は無い、組み込み）。
+    - ランタイム表現: `RtValue::HashTable(Rc<RefCell<HashMap<HashKey, RtValue>>>)`。GC管理の cons
+      ヒープには一切触れず、`Option`/`Result`/ユーザ `defstruct`（`RtValue::Data`）と同じ「Rustの
+      通常の所有権で管理」という既存方針をそのまま踏襲（`mem::Heap` 自体の変更は不要だった —
+      カタログが想定していたより GC統合は大幅に小さく済んだ）。キーは `HashKey`
+      （`Int`/`Bool`/`Char`/`Str` の4種のみ。`f64` は `Eq` が無いため、`Closure`/`HashTable`自身等は
+      構造的等価性が無意味なため対象外）に限定し、非対応のキー型は `EvalError::Panic`（`car`/`cdr` が
+      非Consでpanicするのと同じ「型システムが追い切れない所はランタイムpanic」という既存方針）。
+    - 実行時ディスパッチ: `Expr::Assoc` の評価は従来 `Interp::methods`（ユーザの`defmethod`）しか
+      見ていなかったので、`eval_builtin`（自由関数の組み込み実装）と同型の新規 `eval_builtin_method`
+      をフォールバックとして追加（ユーザ定義 → 組み込みの優先順位は `Expr::Call` と同じ）。
+    - GC統合: `collect_sexpr_roots`（`sync_roots` が使う再帰関数）に `RtValue::HashTable` のケースを
+      1つ追加し、値に含まれる `RtValue::Sexpr` を再帰的に辿るだけで済んだ（キー側は `HashKey` が
+      `Sexpr` を持ち得ないため不要）。GC強制発生下でのテストで検証済み（一旦このケースを外して
+      テストが実際に失敗する/値が壊れることを確認した上で復元——`tests/hashtable_test.rs` の
+      `sexpr_values_survive_gc_pressure`）。
+    - 既知の制約（対応しない、ドキュメントに明記）: `Rc<RefCell<..>>` 方式のため、HashTableが自分
+      自身を値として保持する等の循環参照はmark-sweepと違い回収されない —
+      既存の`RtValue::Closure`の捕捉環境（同じ`Rc<RefCell<Slot>>`方式）が元から持つ制約と同じで、
+      新規に持ち込むものではない。`to-list`/`keys`/`values` は対象外（`V`が任意の`RtValue`のため
+      `Sexpr`への汎用変換が部分関数になり、カタログ自身も「最小限プリミティブ」と留保しているため、
+      本筋のCRUDと独立に後続で検討）。
+    - これに先立ち、ステップ3aで `check_assoc_call` にジェネリック受け手対応を追加済み（上記2.5節）。
+    - TDD: 新規 `tests/hashtable_test.rs`（12件。CRUD一式、static呼び出しの型推論、K/Vが異なる複数
+      インスタンスの相互非干渉、キー型不一致の型エラー、GC回帰テスト）。
 - **次の候補（eval 拡充）**:
   - 組み込み関数の拡張（型ごとの算術／i64・f64、文字列・ベクタ・Option/Result ライブラリ関数）。カタログは [cl-equivalence-catalog.md](cl-equivalence-catalog.md) §4。
   - typelisp ライブラリ関数（`length`/`append`/`reverse`/`map`/`filter`/`foldl`/`foldr` 等、`Sexpr` 上）。`append` 実装後、

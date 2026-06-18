@@ -19,7 +19,7 @@ use std::rc::{Rc, Weak};
 
 use crate::{Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Typed, Value};
 
-use super::value::{Closure, EvalError, RtValue};
+use super::value::{Closure, EvalError, HashKey, RtValue};
 
 /// A registered function or method body with its parameter names.
 struct FnDef {
@@ -210,11 +210,14 @@ impl Interp {
             }
             Expr::Assoc { type_name, method, args, .. } => {
                 let (argv, _slots) = self.eval_args(heap, args, env)?;
-                let m = self
-                    .methods
-                    .get(&(type_name.clone(), method.clone()))
-                    .ok_or_else(|| EvalError::NoSuchFunction(format!("{}::{}", type_name, method)))?;
-                self.apply(heap, &m.params, &m.body, argv)
+                if let Some(m) = self.methods.get(&(type_name.clone(), method.clone())) {
+                    self.apply(heap, &m.params, &m.body, argv)
+                } else {
+                    match eval_builtin_method(type_name, method, &argv) {
+                        Some(result) => result,
+                        None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
+                    }
+                }
             }
             Expr::Construct { type_name, variant, args } => {
                 if is_sexpr_type(type_name) {
@@ -616,13 +619,20 @@ fn is_sexpr_type(type_name: &Path) -> bool {
 }
 
 /// Recursively gather every `Sexpr` value reachable from `v` through nested
-/// `Data` fields (a `Closure`'s captured environment is covered separately,
-/// since each of its slots is already registered in [`Interp::slots`]).
+/// `Data` fields or `HashTable` values (a `Closure`'s captured environment is
+/// covered separately, since each of its slots is already registered in
+/// [`Interp::slots`]). `HashTable` keys never need walking — [`HashKey`] is
+/// restricted to scalar variants that can't carry a `Sexpr`.
 fn collect_sexpr_roots(v: &RtValue, out: &mut Vec<Value>) {
     match v {
         RtValue::Sexpr(val) => out.push(*val),
         RtValue::Data { fields, .. } => {
             for f in fields {
+                collect_sexpr_roots(f, out);
+            }
+        }
+        RtValue::HashTable(map) => {
+            for f in map.borrow().values() {
                 collect_sexpr_roots(f, out);
             }
         }
@@ -713,6 +723,74 @@ fn eval_int_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Eval
         _ => unreachable!(),
     };
     Some(Ok(v))
+}
+
+/// Built-in (Rust-implemented) instance/static methods for nominal types that
+/// have no `defmethod` body to run — currently just `HashTable<K,V>`
+/// (`crate::check::registry`'s `hashtable_def`). Mirrors `Interp::eval_builtin`
+/// for free functions: `Expr::Assoc`'s eval arm tries `Interp::methods`
+/// (user `defmethod`s) first, falling back to this. Argument count/types are
+/// trusted (the checker already validated them against `hashtable_def`'s
+/// signatures), so arms index `args` directly rather than re-checking shape.
+fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+    if *type_name != Path::root("hashtable") {
+        return None;
+    }
+    match method {
+        "new" => Some(Ok(RtValue::HashTable(Rc::new(RefCell::new(HashMap::new()))))),
+        "get" => Some(hashtable_get(args)),
+        "set" => Some(hashtable_set(args)),
+        "remove" => Some(hashtable_remove(args)),
+        "count" => Some(hashtable_count(args)),
+        "clear" => Some(hashtable_clear(args)),
+        _ => None,
+    }
+}
+
+fn expect_hashtable(v: &RtValue) -> Result<&Rc<RefCell<HashMap<HashKey, RtValue>>>, EvalError> {
+    match v {
+        RtValue::HashTable(m) => Ok(m),
+        other => Err(EvalError::Internal(format!("expected a HashTable, got {:?}", other))),
+    }
+}
+
+/// `Some(v)`/`None` as an `RtValue::Data`, matching `option_def`'s variant
+/// order (`some` = 0, `none` = 1).
+fn option_value(v: Option<RtValue>) -> RtValue {
+    match v {
+        Some(x) => RtValue::Data { type_name: Path::root("option"), variant: 0, fields: vec![x] },
+        None => RtValue::Data { type_name: Path::root("option"), variant: 1, fields: vec![] },
+    }
+}
+
+fn hashtable_get(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let map = expect_hashtable(&args[0])?;
+    let key = HashKey::from_rtvalue(&args[1])?;
+    Ok(option_value(map.borrow().get(&key).cloned()))
+}
+
+fn hashtable_set(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let map = expect_hashtable(&args[0])?;
+    let key = HashKey::from_rtvalue(&args[1])?;
+    map.borrow_mut().insert(key, args[2].clone());
+    Ok(RtValue::Unit)
+}
+
+fn hashtable_remove(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let map = expect_hashtable(&args[0])?;
+    let key = HashKey::from_rtvalue(&args[1])?;
+    Ok(option_value(map.borrow_mut().remove(&key)))
+}
+
+fn hashtable_count(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let map = expect_hashtable(&args[0])?;
+    Ok(RtValue::Int(map.borrow().len() as i64))
+}
+
+fn hashtable_clear(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let map = expect_hashtable(&args[0])?;
+    map.borrow_mut().clear();
+    Ok(RtValue::Unit)
 }
 
 /// Try to match a pattern against a value, returning the bindings on success.
