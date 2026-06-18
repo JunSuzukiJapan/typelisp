@@ -8,7 +8,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
-use crate::{parse_type, Error, Heap, Path, Type, Value};
+use crate::{parse_type, prim_type_path, Error, Heap, Path, Type, Value};
 
 use super::ast::{Arm, Expr, Pattern, QuotedSexpr, Typed};
 use super::registry::{AdtDef, AssocFn, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};
@@ -653,7 +653,10 @@ impl Checker {
         let recv_ty = self.canon(&parse_type(heap, type_expr)?);
         let type_fq = match &recv_ty {
             Type::Named(n, _) => n.clone(),
-            _ => return Err(Error::TypeError("defmethod: receiver must be a data type".into())),
+            other => match prim_type_path(other) {
+                Some(p) => p,
+                None => return Err(Error::TypeError("defmethod: receiver must be a data type".into())),
+            },
         };
         if self.reg.type_def(&type_fq).is_none() {
             return Err(Error::TypeError(format!("defmethod: unknown type `{}`", type_fq)));
@@ -996,7 +999,7 @@ impl Checker {
             let recv = self.check(heap, interp, env, args[0], None)?;
             let type_fq = match &recv.ty {
                 Type::Named(n, _) => Some(n.clone()),
-                _ => None,
+                other => prim_type_path(other),
             };
             if let Some(type_fq) = type_fq {
                 if let Some(def) = self.reg.type_def(&type_fq) {

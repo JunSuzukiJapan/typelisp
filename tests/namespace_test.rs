@@ -77,6 +77,47 @@ fn instance_method_on_wrong_type_errors() {
     assert!(program(src).is_err());
 }
 
+// ---- defmethod on primitive receivers ---------------------------------------
+// `i32`/`i64`/`f64`/`char`/`bool`/`Str`/etc. are primitive `Type` variants, not
+// `Type::Named`, but are still valid `defmethod` receivers (see
+// `crate::prim_type_path`).
+
+#[test]
+fn instance_method_on_i32() {
+    let src = "(defmethod double ((self i32)) i32 (+ self self)) (double 3)";
+    assert_eq!(ty_program(src), Type::I32);
+}
+
+#[test]
+fn instance_method_on_bool() {
+    let src = "(defmethod id ((self bool)) bool self) (id true)";
+    assert_eq!(ty_program(src), Type::Bool);
+}
+
+#[test]
+fn instance_method_on_char() {
+    let src = r"(defmethod id ((self char)) char self) (id #\a)";
+    assert_eq!(ty_program(src), Type::Char);
+}
+
+#[test]
+fn instance_method_on_str() {
+    let src = r#"(defmethod id ((self string)) string self) (id "hi")"#;
+    assert_eq!(ty_program(src), Type::Str);
+}
+
+#[test]
+fn static_method_on_primitive_via_path() {
+    let src = "(defmethod zero (i32) i32 0) (i32::zero)";
+    assert_eq!(ty_program(src), Type::I32);
+}
+
+#[test]
+fn instance_method_on_primitive_wrong_type_errors() {
+    let src = "(defmethod double ((self i32)) i32 (+ self self)) (double true)";
+    assert!(program(src).is_err());
+}
+
 // ---- static / associated methods -------------------------------------------
 
 #[test]

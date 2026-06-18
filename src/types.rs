@@ -102,6 +102,44 @@ pub enum Type {
     Fn(Vec<Type>, Box<Type>),
 }
 
+/// All primitive value types that can be a `defmethod` receiver (every
+/// variant [`prim_type_path`] maps to a `Path`). Used to pre-register each
+/// one's (empty) method table in [`crate::Registry::with_builtins`].
+pub fn primitive_types() -> Vec<Type> {
+    vec![
+        Type::I8, Type::I16, Type::I32, Type::I64, Type::Isize,
+        Type::U8, Type::U16, Type::U32, Type::U64, Type::Usize,
+        Type::F32, Type::F64, Type::Bool, Type::Char, Type::Str,
+    ]
+}
+
+/// The registry [`Path`] a primitive `Type` is addressed by when used as a
+/// `defmethod` receiver (e.g. `Type::I32` -> `i32`). Mirrors the surface
+/// keywords [`parse_type_name`] recognizes, so `(defmethod m ((self i32)) ...)`
+/// and this lookup agree on the same name. `None` for `Unit`/`Never`/`Named`/
+/// `Fn`, which are not primitive value types with their own method table here.
+pub fn prim_type_path(ty: &Type) -> Option<Path> {
+    let name = match ty {
+        Type::I8 => "i8",
+        Type::I16 => "i16",
+        Type::I32 => "i32",
+        Type::I64 => "i64",
+        Type::Isize => "isize",
+        Type::U8 => "u8",
+        Type::U16 => "u16",
+        Type::U32 => "u32",
+        Type::U64 => "u64",
+        Type::Usize => "usize",
+        Type::F32 => "f32",
+        Type::F64 => "f64",
+        Type::Bool => "bool",
+        Type::Char => "char",
+        Type::Str => "string",
+        Type::Unit | Type::Never | Type::Named(..) | Type::Fn(..) => return None,
+    };
+    Some(Path::root(name))
+}
+
 /// Parse a type expression (a read `Value`) into a [`Type`].
 pub fn parse_type(heap: &Heap, v: Value) -> Result<Type, Error> {
     match v {

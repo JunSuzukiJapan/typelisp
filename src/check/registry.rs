@@ -138,6 +138,14 @@ impl Registry {
         root.add_type(result_def());
         root.add_type(error_def());
         root.add_type(sexpr_def());
+        // Primitive value types (i8..usize/f32/f64/bool/char/string) get an
+        // (initially empty) method table too, so `defmethod` can target them
+        // (see `check_defmethod`/`check_instance_method`, which map a
+        // primitive `Type` to its registry `Path` via `prim_type_path`).
+        for ty in crate::types::primitive_types() {
+            let name = crate::types::prim_type_path(&ty).expect("primitive_types() are all prim_type_path-mappable");
+            root.add_type(AdtDef { name, params: Vec::new(), variants: Vec::new(), assoc: HashMap::new(), public: true });
+        }
         // Built-in i32 operators (MVP: i32 only; per-type/generic numeric ops
         // come later).
         let int_binop = || FnSig { params: vec![Type::I32, Type::I32], ret: Type::I32, public: true };

@@ -20,7 +20,9 @@
 | `aec77f3` | clippy 警告解消（Error の Display 実装、Reader の Default） |
 | （未コミット） | エラー処理（Result/Error/Never/`panic`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
-**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 50 / error 10 / namespace 19 / eval 58 / macro 19 = 214 件 green、警告0（clippy 含む）。
+**テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 50 / error 10 / namespace 25 / eval 58 / macro 19 = 220 件 green。
+clippy は本変更とは無関係な既存警告3件のみ（`check_assoc_call`/`check_construct` の too_many_arguments、
+`alloc_quoted` の only_used_in_recursion。本変更前から存在）。
 **Miri**: `cargo +nightly miri test --test mem_test`（26/28、重い2件除外）— `Value::Path` 追加後も UB/リーク無し。
 `eval_test` はフル実行だと（再帰系テスト等で）数分単位になるため、`loop`/`break`/`return` と実行時 `Sexpr`/cons ヒープ
 連携に関わる14件を `cargo +nightly miri test --test eval_test -- <該当テスト名...>` で個別検証— 全件 green、UB/リーク無し。
@@ -100,6 +102,13 @@
 - **`::`/名前空間**: reader が `::` を `Value::Path` に分割。**型は名前空間でなく Rust 同様**（型は assoc 関数/メソッドを持つ）。
   `module`/`use`、`defstruct`（直和形・非ジェネリック）、`defmethod`（インスタンス `(self T)` / static `(T ...)`）、
   インスタンス・ディスパッチ（第一引数型）と `Type::method` 静的呼び出し、裸名解決 現NS→root。
+- **プリミティブ型への `defmethod` 拡張**（[cl-equivalence-catalog.md](cl-equivalence-catalog.md) §0.1）:
+  `i8`/`i16`/`i32`/`i64`/`isize`/`u8`/`u16`/`u32`/`u64`/`usize`/`f32`/`f64`/`bool`/`char`/`string`
+  （`Type` の全プリミティブ variant、`Unit`/`Never` 除く）も `defmethod` の受け手になれる。
+  `types::prim_type_path` がプリミティブ `Type` をレジストリ上の `Path`（例 `Type::I32 → i32`）に
+  マップし、`Registry::with_builtins` がそれぞれの空 `AdtDef` を事前登録、`check_defmethod`/
+  `check_instance_method` が `Type::Named` と同様にこの `Path` で解決する。trait/動的ディスパッチは
+  導入せず、既存の「受け手の静的型で一意に解決する」仕組みを対象範囲だけ広げたもの。
 - **未実装（後続）**: ジェネリック構造体/受け手、`use a::b`（モジュール名を現NSに alias として導入）、可視性、関数カタログの実装本体（eval 待ち）。
 
 ## 3. ステップ4：eval（**4a/4b 実装済み**）
