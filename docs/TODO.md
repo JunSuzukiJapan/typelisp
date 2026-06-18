@@ -21,7 +21,7 @@
 | （未コミット） | エラー処理（Result/Error/Never/`panic`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
 **テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 50 / error 10 / namespace 25 / eval 58 / macro 25 /
-hashtable 12 / vector 15 / string 24 / numeric 20 / prelude 53 = 350 件 green、警告0（clippy 含む）。
+hashtable 12 / vector 15 / string 24 / numeric 20 / prelude 62 = 359 件 green、警告0（clippy 含む）。
 旧来あった3件の既存警告（`check_assoc_call`/`check_construct` の too_many_arguments、`alloc_quoted` の
 only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(adt_name, variant)` をタプル1引数に
 まとめてアリティを減らし、後者は `self` を使わず再帰のみに使っていたため `Interp` のメソッドから
@@ -356,9 +356,27 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
     - TDD: `tests/prelude_test.rs`に31件追加（53件中）。各関数の基本動作、空リスト/範囲外の
       境界、非リストへのpanic、`foldl`/`foldr`の畳み込み方向の違い（ドット対チェーンで検証）。
       既存350件への影響無し。
+  - 実装済み（4s）: `set-car`/`set-cdr`（CL `rplaca`/`rplacd`）+ `nconc`/`nreverse`（破壊的版
+    `append`/`reverse`）。**ユーザから優先順位の指摘を受けて7cから前倒しした**
+    （[[feedback-impl-priority]]: 「Xが前提」と書いた時点でXの方が影響範囲が広いので先にやる
+    べき、という補強）。
+    - `mem::Heap::set_car`/`set_cdr`は**既に実装済みだった**（`rplaca`/`rplacd`相当、
+      [src/mem/heap.rs:235](../src/mem/heap.rs)）が、言語レベル（registry/eval）に配線されて
+      いなかった。`registry.rs`に自由関数として登録（`(Sexpr,Sexpr)->Unit`）、
+      `eval_builtin`に`heap.set_car`/`set_cdr`を呼ぶ分岐を追加するだけで済んだ。
+      非Consでpanic（`car`/`cdr`と同じ方針）。
+    - `nconc`/`nreverse`は`prelude.rs`に追記（Rust側追加コード無し）。`nconc`は`last`+
+      `set-cdr`で末尾を繋ぎ替え、`nreverse`は`nreverse-onto`補助関数で3ポインタ方式の
+      in-place反転（パターンマッチで元のcdrを先に取得してから書き換える順序が必須）。
+      どちらも既存のコンスセルを再利用するため、別の参照からも変更が見える
+      （aliasing。`set_car_overwrites_in_place`等のテストで検証）。
+    - **重要**: `set_car`/`set_cdr`の`unsafe`コードは実装済みだったが言語経由で一度も
+      実行されておらず、miriでの検証も今回が初めて。
+    - TDD: `tests/prelude_test.rs`に9件追加（62件中）。in-place変更の別参照からの可視性、
+      非Consでのpanic、`nconc`の空リスト時の挙動、`nreverse`の空/単一要素ケース。
 - **次の候補（eval 拡充）**:
   - TypeLispライブラリ関数 ステップ7c以降（prelude.rsに追記していく）: `sort`、
-    `gcd`/`lcm`/`signum`、`nconc`/`nreverse`（`set-car`/`set-cdr`が前提、未実装）、`assoc`、
+    `gcd`/`lcm`/`signum`、`assoc`、
     Option/Result補助（`unwrap`/`unwrap-or`/`is-some`/`map-option`等）、
     高階（`identity`/`const`/`compose`/`flip`——`defun`にジェネリック型パラメータが無いため
     要設計）、数値補助（`min`/`max`/`sum`/`range`/`even?`等）。

@@ -186,6 +186,14 @@ impl Registry {
         root.fns.insert("cons".to_string(), FnSig { params: vec![sexpr(), sexpr()], ret: sexpr(), public: true });
         root.fns.insert("car".to_string(), FnSig { params: vec![sexpr()], ret: sexpr(), public: true });
         root.fns.insert("cdr".to_string(), FnSig { params: vec![sexpr()], ret: sexpr(), public: true });
+        // `set-car`/`set-cdr` (CL `rplaca`/`rplacd`): in-place mutation of an
+        // existing cons cell, backed by `mem::Heap::set_car`/`set_cdr` (already
+        // implemented at the heap layer, just not wired up to a language-level
+        // name until now). Panics on a non-`Cons` `Sexpr`, matching `car`/`cdr`.
+        // This is the prerequisite `nconc`/`nreverse` (the prelude's destructive
+        // list operations) build on.
+        root.fns.insert("set-car".to_string(), FnSig { params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true });
+        root.fns.insert("set-cdr".to_string(), FnSig { params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true });
         // `gensym`: a fresh `Sexpr::Sym` on every call, for macro hygiene
         // workarounds (see `Interp`'s `gensym_counter` for the caveat that
         // these are collision-*resistant*, not truly unforgeable — typelisp

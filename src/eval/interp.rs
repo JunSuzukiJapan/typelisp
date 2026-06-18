@@ -507,6 +507,22 @@ impl Interp {
                 Some(_) => Some(Err(EvalError::Internal("cdr: expected a Sexpr argument".into()))),
                 None => Some(Err(EvalError::Internal("cdr: expected one argument".into()))),
             },
+            "set-car" => match (args.first(), args.get(1)) {
+                (Some(RtValue::Sexpr(c)), Some(RtValue::Sexpr(v))) => Some(
+                    heap.set_car(*c, *v)
+                        .map(|_| RtValue::Unit)
+                        .map_err(|_| EvalError::Panic("set-car: not a cons".into())),
+                ),
+                _ => Some(Err(EvalError::Internal("set-car: expected two Sexpr arguments".into()))),
+            },
+            "set-cdr" => match (args.first(), args.get(1)) {
+                (Some(RtValue::Sexpr(c)), Some(RtValue::Sexpr(v))) => Some(
+                    heap.set_cdr(*c, *v)
+                        .map(|_| RtValue::Unit)
+                        .map_err(|_| EvalError::Panic("set-cdr: not a cons".into())),
+                ),
+                _ => Some(Err(EvalError::Internal("set-cdr: expected two Sexpr arguments".into()))),
+            },
             _ => None,
         }
     }

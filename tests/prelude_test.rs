@@ -365,3 +365,72 @@ fn foldr_accumulates_right_to_left() {
                (equal (foldr step (quote ()) (quote (a b c))) (quote (a b c)))";
     eval_true(src);
 }
+
+// ---- set-car / set-cdr / nconc / nreverse (destructive operations) -------------
+
+#[test]
+fn set_car_overwrites_in_place() {
+    // Mutating through a second reference (`tail`, an alias to the same cons
+    // cell `lst`'s cdr points at) must be visible through `lst` too — proof
+    // this is a true in-place mutation, not a copy.
+    let src = "(defun f () bool
+                 (let ((lst (quote (a b c))))
+                   (let ((tail (cdr lst)))
+                     (progn
+                       (set-car tail (quote z))
+                       (equal lst (quote (a z c)))))))
+               (f)";
+    eval_true(src);
+}
+
+#[test]
+fn set_cdr_overwrites_in_place() {
+    let src = "(defun f () bool
+                 (let ((lst (quote (a b c))))
+                   (progn
+                     (set-cdr lst (quote (z)))
+                     (equal lst (quote (a z))))))
+               (f)";
+    eval_true(src);
+}
+
+#[test]
+fn set_car_panics_on_a_non_cons() {
+    assert!(matches!(run("(set-car (quote a) (quote z))"), Err(EvalError::Panic(_))));
+}
+
+#[test]
+fn set_cdr_panics_on_a_non_cons() {
+    assert!(matches!(run("(set-cdr (quote a) (quote z))"), Err(EvalError::Panic(_))));
+}
+
+#[test]
+fn nconc_concatenates_and_mutates_the_first_list_in_place() {
+    let src = "(defun f () bool
+                 (let ((a (quote (1 2))))
+                   (let ((result (nconc a (quote (3 4)))))
+                     (and (equal result (quote (1 2 3 4)))
+                          (equal a (quote (1 2 3 4)))))))
+               (f)";
+    eval_true(src);
+}
+
+#[test]
+fn nconc_with_an_empty_first_list_returns_the_second_unchanged() {
+    eval_true("(equal (nconc (quote ()) (quote (1 2))) (quote (1 2)))");
+}
+
+#[test]
+fn nreverse_reverses_a_list() {
+    eval_true("(equal (nreverse (quote (1 2 3))) (quote (3 2 1)))");
+}
+
+#[test]
+fn nreverse_of_nil_is_nil() {
+    eval_true("(null (nreverse (quote ())))");
+}
+
+#[test]
+fn nreverse_of_a_single_element_list_is_unchanged() {
+    eval_true("(equal (nreverse (quote (1))) (quote (1)))");
+}

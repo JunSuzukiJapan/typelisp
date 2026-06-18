@@ -31,11 +31,14 @@ use crate::{Checker, Heap, Interp, Reader};
 /// `eql` test); their `-if` counterparts take a `(fn (Sexpr) bool)` instead.
 /// Helper functions a later definition depends on are placed earlier in this
 /// string — `defun` (like `defmacro`) has no forward-reference support, only
-/// self-recursion (see `Checker::check_defun`'s doc comment). Deferred to a
-/// later step (7c): `sort`, `gcd`/`lcm`/`signum`, `nconc`/`nreverse`
-/// (need `set-car`/`set-cdr`, not yet implemented), `assoc`, Option/Result
-/// helpers, and higher-order helpers (`identity`/`compose`/`flip` would need
-/// generic `defun` type parameters, which don't exist yet).
+/// self-recursion (see `Checker::check_defun`'s doc comment).
+///
+/// `nconc`/`nreverse` are destructive (mutate existing cons cells via
+/// `set-car`/`set-cdr` instead of allocating new ones — see those functions'
+/// own comment below). Deferred to a later step (7c): `sort`, `gcd`/`lcm`/
+/// `signum`, `assoc`, Option/Result helpers, and higher-order helpers
+/// (`identity`/`compose`/`flip` would need generic `defun` type parameters,
+/// which don't exist yet).
 pub const SOURCE: &str = r#"
 (defun consp ((s Sexpr)) bool (match s ((Cons _ _) true) (_ false)))
 (defun null ((s Sexpr)) bool (match s ((Nil) true) (_ false)))
@@ -193,6 +196,25 @@ pub const SOURCE: &str = r#"
     ((Nil) init)
     ((Cons h t) (f h (foldr f init t)))
     (_ (panic "foldr: not a proper list"))))
+
+;; Destructive (mutating) list operations, built on `set-car`/`set-cdr`
+;; (`crate::eval::interp`'s `eval_builtin`, wrapping `mem::Heap::set_car`/
+;; `set_cdr` — CL's `rplaca`/`rplacd`). Unlike every function above, these
+;; reuse existing cons cells instead of allocating new ones, so any other
+;; reference to the same cells observes the mutation too (aliasing) —
+;; exactly CL's `nconc`/`nreverse` contract.
+(defun nconc ((a Sexpr) (b Sexpr)) Sexpr
+  (match a
+    ((Nil) b)
+    ((Cons _ _) (progn (set-cdr (last a) b) a))
+    (_ (panic "nconc: not a proper list"))))
+
+(defun nreverse-onto ((lst Sexpr) (prev Sexpr)) Sexpr
+  (match lst
+    ((Nil) prev)
+    ((Cons _ d) (progn (set-cdr lst prev) (nreverse-onto d lst)))
+    (_ (panic "nreverse: not a proper list"))))
+(defun nreverse ((lst Sexpr)) Sexpr (nreverse-onto lst ()))
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,
