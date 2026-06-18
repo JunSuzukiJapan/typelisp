@@ -167,6 +167,7 @@ impl Registry {
                 Type::I32 => int_assoc(Type::I32),
                 Type::I64 => int_assoc(Type::I64),
                 Type::F64 => float_assoc(),
+                Type::Bool => bool_assoc(),
                 _ => HashMap::new(),
             };
             root.add_type(AdtDef { name, params: Vec::new(), variants: Vec::new(), assoc, public: true });
@@ -174,6 +175,10 @@ impl Registry {
         // `random`: the only numeric builtin with no natural receiver to
         // dispatch on (like `gensym`), so it stays a free function.
         root.fns.insert("random".to_string(), FnSig { params: vec![Type::I32], ret: Type::I32, public: true });
+        // `not`: a plain unary function (no short-circuiting needed, unlike
+        // `and`/`or`), so — unlike those two — it doesn't need special-form
+        // treatment.
+        root.fns.insert("not".to_string(), FnSig { params: vec![Type::Bool], ret: Type::Bool, public: true });
         // `cons`/`car`/`cdr` operate on `Sexpr` (the cons/nil duality at the
         // type level). `cons` is also reachable as the `Cons` constructor;
         // registering it as a function too lets it be used as a value
@@ -267,9 +272,35 @@ fn sexpr_def() -> AdtDef {
             Variant { name: "str".to_string(), fields: vec![Type::Str] },
             Variant { name: "cons".to_string(), fields: vec![sexpr(), sexpr()] },
         ],
-        assoc: HashMap::new(),
+        assoc: sexpr_assoc(),
         public: true,
     }
+}
+
+/// `eq`: identity/structural-scalar equality on `Sexpr`, matching CL's `eq`
+/// for the cases this representation can express cheaply — comparing the
+/// underlying `mem::Value` directly (`crate::eval::interp`'s
+/// `eval_builtin_method`) means two `Cons` cells are equal only if they're
+/// the *same* heap cell (true `eq` identity), while two scalar `Sexpr`s
+/// (`Int`/`Char`/`Sym`/...) compare by value — `Sym` is still correct under
+/// `eq` since symbols are always interned (same name -> same id). The one
+/// case this can't get right structurally is two separately-built `Str`
+/// `Sexpr`s with equal content (different heap allocations, not `eq` in
+/// CL either) — `equal` (the prelude's recursive structural comparison)
+/// special-cases `Str` to compare content instead.
+fn sexpr_assoc() -> HashMap<String, AssocFn> {
+    let mut m = HashMap::new();
+    m.insert("eq".to_string(), AssocFn { sig: FnSig { params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true }, instance: true });
+    m
+}
+
+fn bool_assoc() -> HashMap<String, AssocFn> {
+    let mut m = HashMap::new();
+    m.insert(
+        "eq".to_string(),
+        AssocFn { sig: FnSig { params: vec![Type::Bool, Type::Bool], ret: Type::Bool, public: true }, instance: true },
+    );
+    m
 }
 
 fn sexpr() -> Type {
@@ -444,6 +475,10 @@ fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
     }
+    // `eq` is an alias for `=` here (no identity/value distinction for a
+    // scalar) — registered separately so `case`/`equal` can call `eq`
+    // uniformly across every type (see `cl-equivalence-catalog.md` §2.1).
+    m.insert("eq".to_string(), cmp());
     m
 }
 
@@ -467,6 +502,8 @@ fn float_assoc() -> HashMap<String, AssocFn> {
     for op in ["sqrt", "floor", "ceiling", "round", "truncate"] {
         m.insert(op.to_string(), unary());
     }
+    // See `int_assoc`'s `eq` comment — same alias-for-`=` rationale.
+    m.insert("eq".to_string(), cmp());
     m
 }
 

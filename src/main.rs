@@ -18,6 +18,7 @@ fn main() -> rustyline::Result<()> {
     let reader = Reader::new();
     let mut checker = Checker::new();
     let mut interp = Interp::new();
+    load_prelude(&mut heap, &mut checker, &mut interp);
     let mut rl = DefaultEditor::new()?;
     let hist_path = history_path();
     let _ = rl.load_history(&hist_path);

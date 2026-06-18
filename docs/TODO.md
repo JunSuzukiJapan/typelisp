@@ -21,7 +21,7 @@
 | （未コミット） | エラー処理（Result/Error/Never/`panic`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
 **テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 50 / error 10 / namespace 25 / eval 58 / macro 25 /
-hashtable 12 / vector 15 / string 24 / numeric 20 = 297 件 green、警告0（clippy 含む）。
+hashtable 12 / vector 15 / string 24 / numeric 20 / prelude 22 = 319 件 green、警告0（clippy 含む）。
 旧来あった3件の既存警告（`check_assoc_call`/`check_construct` の too_many_arguments、`alloc_quoted` の
 only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(adt_name, variant)` をタプル1引数に
 まとめてアリティを減らし、後者は `self` を使わず再帰のみに使っていたため `Interp` のメソッドから
@@ -299,10 +299,48 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       `builtin_as_value`/`dotimes`系がi32の回帰カバレッジを継続。miri green
       （20/20、`MIRIFLAGS=-Zmiri-disable-isolation`が必要——`random`の`SystemTime::now()`が
       デフォルトのmiri isolationでブロックされるため、デフォルト実行はエラーになる点に注意）。
+  - 実装済み（4q）: TypeLispライブラリ関数 ステップ7a（基盤+基礎述語のみ。シーケンス操作/sort/
+    gcd/lcm/signum/リスト一式/Option・Result補助/高階関数/数値補助は7b以降へ先送り——
+    範囲が非常に広いため、まず土台と`case`(ステップ8)等が前提とする`eq`/`equal`を固めた）。
+    - **新規基盤: prelude機構**（[src/prelude.rs](../src/prelude.rs)）。これまで「TypeLisp側
+      ライブラリ関数」は定義しても自動では使えなかった（`Checker::new`/`Interp::new`は
+      組み込みメタデータのみで、`defun`等を事前ロードする仕組みが無かった）。`prelude::SOURCE`
+      （typelisp自身で書いた`defun`定義の文字列）+ `prelude::load(heap, chk, interp)`
+      （read_all→check_form→exec を回すだけ）を追加し、`lib.rs`で`load_prelude`としてpub use。
+      REPL（`main.rs`）はheap/checker/interp生成直後に呼ぶ。既存12個のテストファイルは
+      ライブラリ関数を使わないため未変更（後続でprelude依存が増えたら個別に retrofit する）、
+      新規`tests/prelude_test.rs`が自前のハーネスで`load_prelude`を呼ぶ。prelude自体は固定の
+      既知ソースなので、読み込み失敗は`.expect`でpanicする設計（呼び出し側にResultを持たせない）。
+    - **`eq`の全型対応**（カタログ§2.1の「型ごとに`defmethod`」を完成）: `bool`用に新規
+      `bool_assoc()`、`i32`/`i64`/`f64`は既存の`int_assoc`/`float_assoc`に`=`と同じ`cmp()`を
+      `eq`という別キーで追加登録（"型による値の同一性に違いが無いスカラーは`=`のエイリアス"）。
+      `Sexpr`用に新規`sexpr_assoc()`（`sexpr_def`にこれまで無かった`assoc`を追加）— `Value`の
+      `derive(PartialEq)`をそのまま使うことで**CLの`eq`と完全に一致するセマンティクス**が
+      ノーコストで得られた: `Cons`は同一heapセルかどうか（真の識別子比較）、`Sym`はシンボルが
+      常にinternされるため名前が同じなら必ず一致、`Int`/`Float`/`Char`/`Bool`はスカラー値比較
+      （`Str`だけ要注意——別々に確保された同内容の`Sexpr::Str`は`StrId`が異なるため`eq`はfalse
+      になる。CLでも文字列の`eq`は識別子比較なので、これは仕様どおりの挙動）。
+      `char`/`string`の`eq`はステップ5で既に実装済み。
+    - **`not`**（Rust組み込み自由関数、`(bool)->bool`。`and`/`or`と違って短絡評価が要らないので
+      特殊形にする必要は無い）。
+    - **`consp`/`null`/`atom`/`equal`**（typelispのprelude、`match`一発または再帰で書ける）:
+      `consp`/`null`は`Sexpr`の`Cons`/`Nil`構成子を`match`するだけ、`atom`は`(not (consp s))`。
+      `equal`は`eq`の再帰的構造版——`Cons`は両辺を`car`/`cdr`で再帰比較、`Str`は中身を比較する
+      必要があるため`Sexpr::Str`の`match`で取り出した値（型は中身の`string`プリミティブ型その
+      もの）に対して**string型自身の`eq`**（内容比較）を呼ぶことで対応、それ以外（Nil/Int/
+      Float/Char/Bool/Sym）は`Sexpr`の`eq`がすでに正しい結果を返すのでそのまま使う。
+    - TDD: 新規`tests/prelude_test.rs`（22件。not、eqの全対応型（bool/i32/i64/f64/char/string/
+      sexpr atom/sexpr cons-is-identity-not-structural）、consp/null/atomの基本ケース、equalの
+      再帰比較・長さ不一致・文字列内容比較・型不一致エラー）。既存319件への影響無し
+      （リグレッション無し、新規追加のみ）。
 - **次の候補（eval 拡充）**:
-  - 組み込み関数の拡張（型ごとの算術／i64・f64、文字列・ベクタ・Option/Result ライブラリ関数）。カタログは [cl-equivalence-catalog.md](cl-equivalence-catalog.md) §4。
-  - typelisp ライブラリ関数（`length`/`append`/`reverse`/`map`/`filter`/`foldl`/`foldr` 等、`Sexpr` 上）。`append` 実装後、
-    マクロの `,@`（unquote-splicing）を追加できる。
+  - TypeLispライブラリ関数 ステップ7b以降（prelude.rsに追記していく）: シーケンス操作
+    （`remove`/`remove-if`/`count`/`position`/`copy-list`/`nthcdr`/`butlast`/`elt`/`subseq`）、
+    `length`/`append`/`reverse`/`nth`/`last`/`map`/`filter`/`foldl`/`foldr`/`member`/`find`/
+    `every`/`some`、`nconc`/`nreverse`（`set-car`/`set-cdr`が前提、未実装）、`sort`、
+    `gcd`/`lcm`/`signum`、Option/Result補助（`unwrap`/`unwrap-or`/`is-some`/`map-option`等）、
+    高階（`identity`/`const`/`compose`/`flip`）、数値補助（`min`/`max`/`sum`/`range`/`even?`等）。
+    `append`実装後、マクロの`,@`（unquote-splicing）を追加できる。
   - `case`/`do`/`doiter`/`while-let`/`the` は未実装（`defmacro` の `&rest` は実装済みなので前提は満たした。
     `case` はさらに型ごとの `eq` が前提）。`defun`/`lambda` の型付き `&rest`／`apply` も未実装。
 - **ステップ5: compile**（明示 `compile`/`compile-file`。inkwell 再追加・LLVM コード生成。feature gate）。

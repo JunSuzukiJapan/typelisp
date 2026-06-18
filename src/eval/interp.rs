@@ -475,6 +475,7 @@ impl Interp {
     fn eval_builtin(&self, heap: &mut Heap, name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
         match name {
             "random" => Some(eval_random(args)),
+            "not" => Some(expect_bool(&args[0]).map(|b| RtValue::Bool(!b))),
             "gensym" => {
                 // A leading space mirrors the hidden-binding idiom already
                 // used for `dotimes`/`dolist`'s internal variables in the
@@ -887,6 +888,8 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
                 eval_int_builtin(method, args)
             }
+            // `eq` is registered as an alias for `=` (see `registry::int_assoc`).
+            "eq" => eval_int_builtin("=", args),
             _ => None,
         };
     }
@@ -895,12 +898,25 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
                 eval_float_builtin(method, args)
             }
+            "eq" => eval_float_builtin("=", args),
             "expt" => Some(float_expt(args)),
             "sqrt" => Some(float_unary(args, f64::sqrt)),
             "floor" => Some(float_unary(args, f64::floor)),
             "ceiling" => Some(float_unary(args, f64::ceil)),
             "round" => Some(float_unary(args, f64::round)),
             "truncate" => Some(float_unary(args, f64::trunc)),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("bool") {
+        return match method {
+            "eq" => Some(bool_eq(args)),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("sexpr") {
+        return match method {
+            "eq" => Some(sexpr_eq(args)),
             _ => None,
         };
     }
@@ -1071,6 +1087,24 @@ fn char_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
 
 fn char_lt(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Bool(expect_char(&args[0])? < expect_char(&args[1])?))
+}
+
+fn expect_bool(v: &RtValue) -> Result<bool, EvalError> {
+    match v {
+        RtValue::Bool(b) => Ok(*b),
+        other => Err(EvalError::Internal(format!("expected a Bool, got {:?}", other))),
+    }
+}
+
+fn bool_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bool(expect_bool(&args[0])? == expect_bool(&args[1])?))
+}
+
+/// `eq` on `Sexpr`: compares the underlying `mem::Value` directly (see
+/// `registry::sexpr_assoc`'s doc comment for why this matches CL's `eq`
+/// semantics — cons identity, scalar/symbol value equality).
+fn sexpr_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bool(rt_sexpr(&args[0])? == rt_sexpr(&args[1])?))
 }
 
 /// Try to match a pattern against a value, returning the bindings on success.
