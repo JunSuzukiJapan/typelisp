@@ -145,13 +145,23 @@ impl Registry {
         root.add_type(sexpr_def());
         root.add_type(hashtable_def());
         root.add_type(vector_def());
-        // Primitive value types (i8..usize/f32/f64/bool/char/string) get an
-        // (initially empty) method table too, so `defmethod` can target them
-        // (see `check_defmethod`/`check_instance_method`, which map a
-        // primitive `Type` to its registry `Path` via `prim_type_path`).
+        // Primitive value types (i8..usize/f32/f64/bool/char/string) get a
+        // method table too, so `defmethod` can target them (see
+        // `check_defmethod`/`check_instance_method`, which map a primitive
+        // `Type` to its registry `Path` via `prim_type_path`). `string`/`char`
+        // additionally get a built-in method set (no `defmethod` body to
+        // check; the runtime implementation lives in `eval_builtin_method` in
+        // `crate::eval::interp`, the same metadata-only pattern as
+        // `hashtable_def`/`vector_def`) — every other primitive's table
+        // starts empty.
         for ty in crate::types::primitive_types() {
             let name = crate::types::prim_type_path(&ty).expect("primitive_types() are all prim_type_path-mappable");
-            root.add_type(AdtDef { name, params: Vec::new(), variants: Vec::new(), assoc: HashMap::new(), public: true });
+            let assoc = match ty {
+                Type::Str => string_assoc(),
+                Type::Char => char_assoc(),
+                _ => HashMap::new(),
+            };
+            root.add_type(AdtDef { name, params: Vec::new(), variants: Vec::new(), assoc, public: true });
         }
         // Built-in i32 operators (MVP: i32 only; per-type/generic numeric ops
         // come later).
@@ -376,6 +386,44 @@ fn vector_def() -> AdtDef {
         },
     );
     AdtDef { name: Path::root("vector"), params: vec!["t".to_string()], variants: vec![], assoc, public: true }
+}
+
+/// Built-in `String` instance methods ([cl-equivalence-catalog.md](../../../docs/cl-equivalence-catalog.md)
+/// §2.2 d). All char/index arguments and `length` count Unicode scalar values
+/// (`char`s), not bytes. `ref`/`substring` panic on an out-of-range index —
+/// the type system can't express the bound, the same precedent as
+/// `car`/`cdr` on a non-`Cons` `Sexpr`. `upcase`/`downcase` are ASCII-only
+/// (`str::to_ascii_uppercase`/`lowercase`), avoiding Unicode case mappings
+/// that can change a string's length (e.g. German `ß` -> `SS`).
+fn string_assoc() -> HashMap<String, AssocFn> {
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { params, ret, public: true }, instance: true };
+    let mut m = HashMap::new();
+    m.insert("upcase".to_string(), method(vec![Type::Str], Type::Str));
+    m.insert("downcase".to_string(), method(vec![Type::Str], Type::Str));
+    m.insert("length".to_string(), method(vec![Type::Str], Type::I32));
+    m.insert("ref".to_string(), method(vec![Type::Str, Type::I32], Type::Char));
+    m.insert("substring".to_string(), method(vec![Type::Str, Type::I32, Type::I32], Type::Str));
+    m.insert("append".to_string(), method(vec![Type::Str, Type::Str], Type::Str));
+    m.insert("eq".to_string(), method(vec![Type::Str, Type::Str], Type::Bool));
+    m.insert("lt".to_string(), method(vec![Type::Str, Type::Str], Type::Bool));
+    m
+}
+
+/// Built-in `char` instance methods (same catalog section as
+/// [`string_assoc`]). `upcase`/`downcase` are ASCII-only, for the same
+/// reason as `string_assoc`'s (a non-ASCII char's case mapping isn't
+/// necessarily a single char). `alpha?`/`digit?` classify ASCII letters/
+/// digits only (CL's `alpha-char-p`/`digit-char-p` without a radix).
+fn char_assoc() -> HashMap<String, AssocFn> {
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { params, ret, public: true }, instance: true };
+    let mut m = HashMap::new();
+    m.insert("upcase".to_string(), method(vec![Type::Char], Type::Char));
+    m.insert("downcase".to_string(), method(vec![Type::Char], Type::Char));
+    m.insert("eq".to_string(), method(vec![Type::Char, Type::Char], Type::Bool));
+    m.insert("lt".to_string(), method(vec![Type::Char, Type::Char], Type::Bool));
+    m.insert("alpha?".to_string(), method(vec![Type::Char], Type::Bool));
+    m.insert("digit?".to_string(), method(vec![Type::Char], Type::Bool));
+    m
 }
 
 /// A type-parameter reference, e.g. `t` in `Option<T>`'s field list.

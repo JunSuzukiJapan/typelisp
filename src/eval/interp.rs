@@ -762,6 +762,30 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             _ => None,
         };
     }
+    if *type_name == Path::root("string") {
+        return match method {
+            "upcase" => Some(expect_str(&args[0]).map(|s| RtValue::Str(s.to_ascii_uppercase()))),
+            "downcase" => Some(expect_str(&args[0]).map(|s| RtValue::Str(s.to_ascii_lowercase()))),
+            "length" => Some(string_length(args)),
+            "ref" => Some(string_ref(args)),
+            "substring" => Some(string_substring(args)),
+            "append" => Some(string_append(args)),
+            "eq" => Some(string_eq(args)),
+            "lt" => Some(string_lt(args)),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("char") {
+        return match method {
+            "upcase" => Some(expect_char(&args[0]).map(|c| RtValue::Char(c.to_ascii_uppercase()))),
+            "downcase" => Some(expect_char(&args[0]).map(|c| RtValue::Char(c.to_ascii_lowercase()))),
+            "eq" => Some(char_eq(args)),
+            "lt" => Some(char_lt(args)),
+            "alpha?" => Some(expect_char(&args[0]).map(|c| RtValue::Bool(c.is_ascii_alphabetic()))),
+            "digit?" => Some(expect_char(&args[0]).map(|c| RtValue::Bool(c.is_ascii_digit()))),
+            _ => None,
+        };
+    }
     None
 }
 
@@ -871,6 +895,64 @@ fn vector_push(args: &[RtValue]) -> Result<RtValue, EvalError> {
 fn vector_pop(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let v = expect_vector(&args[0])?;
     Ok(option_value(v.borrow_mut().pop()))
+}
+
+fn expect_str(v: &RtValue) -> Result<&str, EvalError> {
+    match v {
+        RtValue::Str(s) => Ok(s.as_str()),
+        other => Err(EvalError::Internal(format!("expected a Str, got {:?}", other))),
+    }
+}
+
+fn expect_char(v: &RtValue) -> Result<char, EvalError> {
+    match v {
+        RtValue::Char(c) => Ok(*c),
+        other => Err(EvalError::Internal(format!("expected a Char, got {:?}", other))),
+    }
+}
+
+fn string_length(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Int(expect_str(&args[0])?.chars().count() as i64))
+}
+
+fn string_ref(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let chars: Vec<char> = expect_str(&args[0])?.chars().collect();
+    let i = rt_i64(&args[1])?;
+    match vector_index(i, chars.len()) {
+        Some(idx) => Ok(RtValue::Char(chars[idx])),
+        None => Err(EvalError::Panic(format!("ref: index {} out of range (length {})", i, chars.len()))),
+    }
+}
+
+fn string_substring(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let chars: Vec<char> = expect_str(&args[0])?.chars().collect();
+    let start = rt_i64(&args[1])?;
+    let end = rt_i64(&args[2])?;
+    let len = chars.len() as i64;
+    if start < 0 || end > len || start > end {
+        return Err(EvalError::Panic(format!("substring: invalid range {}..{} (length {})", start, end, len)));
+    }
+    Ok(RtValue::Str(chars[start as usize..end as usize].iter().collect()))
+}
+
+fn string_append(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Str(format!("{}{}", expect_str(&args[0])?, expect_str(&args[1])?)))
+}
+
+fn string_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bool(expect_str(&args[0])? == expect_str(&args[1])?))
+}
+
+fn string_lt(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bool(expect_str(&args[0])? < expect_str(&args[1])?))
+}
+
+fn char_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bool(expect_char(&args[0])? == expect_char(&args[1])?))
+}
+
+fn char_lt(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bool(expect_char(&args[0])? < expect_char(&args[1])?))
 }
 
 /// Try to match a pattern against a value, returning the bindings on success.

@@ -21,7 +21,7 @@
 | （未コミット） | エラー処理（Result/Error/Never/`panic`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
 **テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 50 / error 10 / namespace 25 / eval 58 / macro 25 /
-hashtable 12 / vector 15 = 253 件 green、警告0（clippy 含む）。
+hashtable 12 / vector 15 / string 24 = 277 件 green、警告0（clippy 含む）。
 旧来あった3件の既存警告（`check_assoc_call`/`check_construct` の too_many_arguments、`alloc_quoted` の
 only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(adt_name, variant)` をタプル1引数に
 まとめてアリティを減らし、後者は `self` を使わず再帰のみに使っていたため `Interp` のメソッドから
@@ -243,6 +243,29 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
     - TDD: 新規 `tests/vector_test.rs`（15件。CRUD一式、static呼び出しの型推論、範囲外/負数
       インデックスのpanic、要素型が異なる複数インスタンスの相互非干渉、要素型不一致の型エラー、
       GC回帰テスト）。
+  - 実装済み（4o）: 文字列・char の基本プリミティブ（[cl-equivalence-catalog.md](cl-equivalence-catalog.md)
+    §2.2 d、ステップ5）。HashTable/Vectorと同じ「メタデータのみのassoc登録 + `eval_builtin_method`
+    へのディスパッチ追加」パターンだが、`string`/`char`は**ジェネリックでない既存の組み込み型**
+    （ステップ1で受け手として`defmethod`対応済み）なのでステップ3aのような`subst`代入は不要、
+    GC統合も不要（`RtValue::Str`/`Char`は`Sexpr`を保持し得ないため`collect_sexpr_roots`の変更なし）
+    — ステップ3/4よりさらに単純だった。
+    - 型登録: `registry.rs`の`string_assoc()`/`char_assoc()`が、`with_builtins`のプリミティブ登録
+      ループ内で`Type::Str`/`Type::Char`の場合だけ非空の`assoc`を渡す（他のプリミティブは従来通り
+      空）。`string`: `upcase`/`downcase`/`length`/`ref`/`substring`/`append`/`eq`/`lt`。
+      `char`: `upcase`/`downcase`/`eq`/`lt`/`alpha?`/`digit?`。
+    - 意図的な設計判断: `length`/`ref`/`substring`の添字は**Unicodeスカラー値(char)単位**
+      （バイト単位ではない）。`upcase`/`downcase`はASCII限定
+      （`to_ascii_uppercase`/`lowercase`、独語`ß`→`SS`のような長さが変わるUnicode大小変換を回避）。
+      `alpha?`/`digit?`もASCII限定（CLの`alpha-char-p`/`digit-char-p`の進数無し版に相当）。
+      `ref`/`substring`は範囲外（負数含む）・`start > end`をランタイムpanic
+      （`car`/`cdr`の非Consと同じ「型システムが追えない所はpanic」方針）。
+    - 実行時ディスパッチ: `eval_builtin_method`を`string`/`char`の2分岐をさらに追加（既存の
+      `hashtable`/`vector`と並列）。
+    - TDD: 新規`tests/string_test.rs`（24件。各メソッドの基本動作、範囲外/不正範囲のpanic、
+      `string`/`char`それぞれにしか無いメソッド（`alpha?`等）が他方の受け手では型エラーになる
+      こと、`eq`等の同名メソッドが型ごとに別テーブルで衝突しないことの回帰）。miri green
+      （24/24、898秒、UB/リーク無し——GC非依存のため時間のほとんどはmiriのインタプリタ
+      オーバーヘッド自体）。
 - **次の候補（eval 拡充）**:
   - 組み込み関数の拡張（型ごとの算術／i64・f64、文字列・ベクタ・Option/Result ライブラリ関数）。カタログは [cl-equivalence-catalog.md](cl-equivalence-catalog.md) §4。
   - typelisp ライブラリ関数（`length`/`append`/`reverse`/`map`/`filter`/`foldl`/`foldr` 等、`Sexpr` 上）。`append` 実装後、
