@@ -88,7 +88,7 @@
 
 | 分類 | 特殊形 | 備考 |
 |---|---|---|
-| 定義 | `defun` `defstruct` `defvar` `defconstant` `defmethod` `defmacro` `module` `use` `lambda` | 引数・戻り型は明示（局所束縛は推論可。`defmacro` は全パラメータ・戻りが `Sexpr` 固定なので型注釈なし） |
+| 定義 | `defun` `defstruct` `defvar` `defconstant` `defmethod` `defmacro` `module` `use` `lambda` | 引数・戻り型は明示（局所束縛は推論可。`defmacro` は全パラメータ・戻りが `Sexpr` 固定なので型注釈なし、末尾 `&rest name` で可変長対応） |
 | 束縛 | `let` `let*` | |
 | 制御 | `if` `when` `unless` `cond` `case` `match` `if-let` `while-let` `and` `or` `progn` `the` | `and`/`or` は短絡のため特殊形。`the` は型注釈 |
 | 反復 | `loop` `while` `until` `dotimes` `dolist` `do` `doiter` | |
@@ -249,4 +249,5 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 - 可視性（pub/private）、絶対パス `::foo`。
 - trait / 動的ディスパッチ、ユーザ定義エラー型。
 - 関数カタログ（§4）の実装本体は eval（step4）以降。
-- `,@`（unquote-splicing、`append` 実装後）、`defmacro` の `&rest`／構造化ラムダリスト、マクロの `use`-alias 解決。
+- `,@`（unquote-splicing、`append` 実装後）、`defmacro` の構造化ラムダリスト（`&rest` のみ実装済み、`&optional`/`&key` は対象外）、マクロの `use`-alias 解決。
+- `defun`/`lambda` の**型付き** `&rest`（`apply` と合わせて設計、`defmacro` の `&rest` とは別物）。

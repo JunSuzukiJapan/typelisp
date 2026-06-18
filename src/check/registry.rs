@@ -32,12 +32,17 @@ pub struct AssocFn {
     pub instance: bool,
 }
 
-/// A `defmacro`'s signature: just an arity (every parameter and the implicit
-/// return are always `Sexpr`, so there is no per-parameter type to record —
-/// see `Checker::check_defmacro`).
+/// A `defmacro`'s signature: an arity and whether it's variadic (every
+/// parameter and the implicit return are always `Sexpr`, so there is no
+/// per-parameter type to record — see `Checker::check_defmacro`).
 #[derive(Clone, Debug)]
 pub struct MacroDef {
+    /// The number of fixed (non-`&rest`) parameters.
     pub arity: usize,
+    /// Whether the parameter list ends in `&rest name` — a call then needs
+    /// only *at least* `arity` arguments, with the trailing ones collected
+    /// into a single `Sexpr` list bound to the last parameter.
+    pub rest: bool,
     /// Visible outside its defining module.
     pub public: bool,
 }

@@ -55,8 +55,10 @@ pub enum TopLevel {
     Defstruct { name: Path, params: Vec<String>, variants: Vec<Variant> },
     /// A `defmacro`: a compile-time, `Sexpr`-to-`Sexpr` code transformer.
     /// Stored as an ordinary callable body — calling it (at macro-expansion
-    /// time, via [`MacroExpander`]) is identical to calling a `defun`.
-    Defmacro { name: Path, params: Vec<String>, body: Vec<Typed> },
+    /// time, via [`MacroExpander`]) is identical to calling a `defun`. `params`
+    /// includes the `&rest` parameter's name last (with the `&rest` marker
+    /// itself dropped) when `rest` is true; see [`Checker::check_defmacro`].
+    Defmacro { name: Path, params: Vec<String>, body: Vec<Typed>, rest: bool },
     /// A `defvar`/`defconstant`: a global variable (`mutable`) or constant.
     Defvar { name: Path, ty: Type, value: Typed, mutable: bool },
     /// A `module`: a namespace and its checked body forms.
@@ -280,16 +282,17 @@ impl Checker {
         None
     }
 
-    /// Resolve a bare macro name to its absolute [`Path`] and arity (current
-    /// namespace then root — same priority as [`Self::resolve_fn`], but
-    /// without `use`-alias support, which `defmacro` doesn't have yet).
-    fn resolve_macro(&self, name: &str) -> Option<(Path, usize)> {
+    /// Resolve a bare macro name to its absolute [`Path`], fixed arity, and
+    /// whether it's variadic (`&rest`) (current namespace then root — same
+    /// priority as [`Self::resolve_fn`], but without `use`-alias support,
+    /// which `defmacro` doesn't have yet).
+    fn resolve_macro(&self, name: &str) -> Option<(Path, usize, bool)> {
         if let Some(def) = self.cur_ns().macros.get(name) {
-            return Some((self.fq(name), def.arity));
+            return Some((self.fq(name), def.arity, def.rest));
         }
         if let Some(def) = self.reg.root.macros.get(name) {
             if def.public || self.ns.is_empty() {
-                return Some((Path::root(name), def.arity));
+                return Some((Path::root(name), def.arity, def.rest));
             }
         }
         None
@@ -497,25 +500,41 @@ impl Checker {
             _ => return Err(Error::TypeError("defmacro: name must be a symbol".into())),
         };
         let param_vals = heap.list_to_vec(parts[1])?;
-        let mut params = Vec::new();
+        let mut names = Vec::new();
         for p in &param_vals {
             match p {
-                Value::Symbol(id) => params.push(heap.symbol_name(*id).to_string()),
+                Value::Symbol(id) => names.push(heap.symbol_name(*id).to_string()),
                 _ => return Err(Error::TypeError("defmacro: parameter must be a name".into())),
             }
         }
+        // `&rest name` collects every argument from that point on into a
+        // single `Sexpr` list bound to `name`; it must be the last two
+        // lambda-list items (CL-style, but `&rest` only — no `&optional`/`&key`).
+        let (params, rest) = match names.iter().position(|n| n == "&rest") {
+            Some(i) => {
+                if i + 2 != names.len() {
+                    return Err(Error::TypeError(
+                        "defmacro: &rest must be followed by exactly one parameter name, as the last item in the parameter list".into(),
+                    ));
+                }
+                names.remove(i); // drop the `&rest` marker, keeping the rest-param name in place
+                (names, true)
+            }
+            None => (names, false),
+        };
+        let arity = if rest { params.len() - 1 } else { params.len() };
         let fq_name = self.fq(&name);
 
         self.reg
             .root
             .module_mut(&self.ns)
             .macros
-            .insert(name, MacroDef { arity: params.len(), public });
+            .insert(name, MacroDef { arity, rest, public });
 
         let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
         let env = Env::new().extended(params.iter().map(|p| (p.clone(), sexpr_ty.clone())).collect());
         let (body, _) = self.check_seq(heap, interp, &env, &parts[2..], Some(&sexpr_ty))?;
-        Ok(TopLevel::Defmacro { name: fq_name, params, body })
+        Ok(TopLevel::Defmacro { name: fq_name, params, body, rest })
     }
 
     /// Parse a `((name type)...)` parameter list (types canonicalized to FQ).
@@ -858,8 +877,17 @@ impl Checker {
         // local-variable-as-callee (matching how a constructor/free-function
         // call is resolved below), since a macro is a purely compile-time
         // name with no runtime value to shadow or be shadowed by.
-        if let Some((macro_path, arity)) = self.resolve_macro(&head) {
-            if args.len() != arity {
+        if let Some((macro_path, arity, rest)) = self.resolve_macro(&head) {
+            if rest {
+                if args.len() < arity {
+                    return Err(Error::TypeError(format!(
+                        "macro `{}` expects at least {} argument(s), got {}",
+                        head,
+                        arity,
+                        args.len()
+                    )));
+                }
+            } else if args.len() != arity {
                 return Err(Error::TypeError(format!(
                     "macro `{}` expects {} argument(s), got {}",
                     head,

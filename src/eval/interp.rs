@@ -26,6 +26,10 @@ struct FnDef {
     /// Parameter names, including the receiver name first for instance methods.
     params: Vec<String>,
     body: Vec<Typed>,
+    /// Only ever set for a `defmacro` with a trailing `&rest` parameter (see
+    /// [`Interp::expand_macro`]); always `false` for `defun`/`defmethod`,
+    /// which `apply` calls 1:1 regardless.
+    rest: bool,
 }
 
 /// A mutable variable slot (shared so `setf` mutations are visible to every
@@ -115,7 +119,7 @@ impl Interp {
         match tl {
             TopLevel::Defun { name, params, body, .. } => {
                 let params = params.into_iter().map(|(n, _)| n).collect();
-                self.fns.insert(name, FnDef { params, body });
+                self.fns.insert(name, FnDef { params, body, rest: false });
                 Ok(None)
             }
             TopLevel::Defmethod { type_name, method, self_name, params, body, .. } => {
@@ -124,14 +128,14 @@ impl Interp {
                     names.push(s);
                 }
                 names.extend(params.into_iter().map(|(n, _)| n));
-                self.methods.insert((type_name, method), FnDef { params: names, body });
+                self.methods.insert((type_name, method), FnDef { params: names, body, rest: false });
                 Ok(None)
             }
-            TopLevel::Defmacro { name, params, body } => {
+            TopLevel::Defmacro { name, params, body, rest } => {
                 // A macro's body is callable exactly like a `defun`'s — see
                 // `MacroExpander`/`Self::expand_macro` — so it's stored in
                 // the very same `fns` table; no separate macro table exists.
-                self.fns.insert(name, FnDef { params, body });
+                self.fns.insert(name, FnDef { params, body, rest });
                 Ok(None)
             }
             TopLevel::Defstruct { .. } | TopLevel::Use { .. } => Ok(None),
@@ -435,6 +439,34 @@ impl Interp {
         self.eval_seq(heap, body, &env)
     }
 
+    /// Build the argument vector for a macro call: the first `fixed` raw
+    /// forms map 1:1 to `RtValue::Sexpr`; if `f.rest`, every remaining raw
+    /// form is collected into a single heap-allocated `Sexpr` list (built
+    /// back-to-front, like `Self::alloc_quoted`'s `Cons` case) bound to the
+    /// last parameter. Each element is already rooted by the caller (it's in
+    /// `raw_args`, individually pushed in `Self::expand_macro`); only the
+    /// growing `list` accumulator needs protecting around each `cons` call.
+    fn bind_macro_args(
+        &self,
+        heap: &mut Heap,
+        f: &FnDef,
+        raw_args: &[Value],
+        fixed: usize,
+    ) -> Result<Vec<RtValue>, EvalError> {
+        let mut argv: Vec<RtValue> = raw_args[..fixed].iter().map(|v| RtValue::Sexpr(*v)).collect();
+        if f.rest {
+            let mut list = Value::Empty;
+            for v in raw_args[fixed..].iter().rev() {
+                heap.push_root(list);
+                let consed = heap.cons(*v, list);
+                heap.pop_root();
+                list = consed.map_err(|e| EvalError::Panic(e.to_string()))?;
+            }
+            argv.push(RtValue::Sexpr(list));
+        }
+        Ok(argv)
+    }
+
     /// Evaluate each argument in turn, returning the values alongside the
     /// slots they were registered in. The caller must keep the returned
     /// `Vec<Slot>` alive (even if unused) for as long as it still needs the
@@ -533,7 +565,12 @@ impl MacroExpander for Interp {
     /// trusts its own `rooted` count to know how much to pop.
     fn expand_macro(&self, heap: &mut Heap, path: &Path, raw_args: Vec<Value>) -> Result<Value, String> {
         let f = self.fns.get(path).ok_or_else(|| format!("no such macro: {}", path))?;
-        if f.params.len() != raw_args.len() {
+        let fixed = if f.rest { f.params.len() - 1 } else { f.params.len() };
+        if f.rest {
+            if raw_args.len() < fixed {
+                return Err(format!("expected at least {} argument(s), got {}", fixed, raw_args.len()));
+            }
+        } else if f.params.len() != raw_args.len() {
             return Err(format!(
                 "expected {} argument(s), got {}",
                 f.params.len(),
@@ -543,8 +580,10 @@ impl MacroExpander for Interp {
         for v in &raw_args {
             heap.push_root(*v);
         }
-        let argv: Vec<RtValue> = raw_args.iter().map(|v| RtValue::Sexpr(*v)).collect();
-        let result = self.apply(heap, &f.params, &f.body, argv);
+        let result = match self.bind_macro_args(heap, f, &raw_args, fixed) {
+            Ok(argv) => self.apply(heap, &f.params, &f.body, argv),
+            Err(e) => Err(e),
+        };
         for _ in 0..self.rooted.replace(0) {
             heap.pop_root();
         }

@@ -285,3 +285,94 @@ fn macro_expansion_survives_gc_pressure() {
     .expect("eval failed");
     assert_eq!(as_sexpr_string(v, &h), "(x y z)");
 }
+
+// ---- Phase E: defmacro &rest -------------------------------------------------
+
+#[test]
+fn rest_only_macro_collects_args_into_a_list() {
+    // No fixed params at all: every call argument is collected into `body`.
+    let (v, _h) = eval_ok(
+        "(defmacro my-progn (&rest body) (cons (quote progn) body))
+         (my-progn 1 2 3)",
+    );
+    assert_eq!(v, RtValue::Int(3));
+}
+
+#[test]
+fn rest_args_bind_to_a_proper_list() {
+    // A fixed param (`a`) plus `&rest`: quoting `rest` back shows exactly
+    // what it binds — a proper `Sexpr` list of the unevaluated trailing call
+    // forms, with `a`'s own argument excluded. (The expansion must itself be
+    // a valid form, so `rest`'s *value* — not `rest` used bare, which would
+    // try to run `(2 3)` as code — is wrapped in `quote`.)
+    let (v, h) = eval_ok(
+        "(defmacro capture (a &rest rest) `(quote ,rest))
+         (capture 1 2 3)",
+    );
+    assert_eq!(as_sexpr_string(v, &h), "(2 3)");
+}
+
+#[test]
+fn rest_macro_can_be_called_with_no_extra_args() {
+    let (v, h) = eval_ok(
+        "(defmacro capture (a &rest rest) `(quote ,rest))
+         (capture 1)",
+    );
+    assert_eq!(as_sexpr_string(v, &h), "()");
+}
+
+#[test]
+fn rest_macro_too_few_fixed_args_is_a_type_error() {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::new();
+    let vs = r
+        .read_all(&mut h, "(defmacro capture (a &rest rest) rest) (capture)")
+        .expect("read failed");
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    let mut last_err = None;
+    for v in vs {
+        match chk.check_form(&mut h, &interp, v) {
+            Ok(tl) => {
+                let _ = interp.exec(&mut h, tl);
+            }
+            Err(e) => {
+                last_err = Some(e);
+                break;
+            }
+        }
+    }
+    assert!(last_err.is_some(), "expected a macro-arity type error");
+}
+
+#[test]
+fn rest_arg_list_construction_survives_gc_pressure() {
+    // The `&rest` binding builds a fresh cons chain via `Heap::cons` inside
+    // `Interp::bind_macro_args` — a small heap forces a real GC mid-build,
+    // exercising that loop's push_root/pop_root discipline around the
+    // growing `list` accumulator (analogous to `macro_expansion_survives_gc_pressure`
+    // above, but targeting `&rest` collection specifically). The 5 trailing
+    // args are bare symbols (not `(quote x)` forms) so the captured list is
+    // a flat 5-cell spine, matching `listify`'s per-iteration cost above.
+    let (v, h) = run_with_capacity(
+        "(defmacro capture (a &rest rest) `(quote ,rest))
+         (defun build () Sexpr (capture 0 a b c d e))
+         (let ((last (quote ())))
+           (dotimes (i 500)
+             (setf last (build)))
+           last)",
+        96,
+    )
+    .expect("eval failed");
+    assert_eq!(as_sexpr_string(v, &h), "(a b c d e)");
+}
+
+#[test]
+fn rest_must_be_the_last_parameter() {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::new();
+    let v = r.read(&mut h, "(defmacro bad (&rest xs a) xs)").expect("read failed");
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    assert!(chk.check_form(&mut h, &interp, v).is_err());
+}
