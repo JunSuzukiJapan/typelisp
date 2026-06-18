@@ -73,7 +73,7 @@ pub enum Expr {
     /// `(return)` / `(return value)` — exit the nearest enclosing loop,
     /// optionally with a value (`Unit` if omitted). Type `Never`.
     Return(Option<Box<Typed>>),
-    /// `(panic! message)` — diverges. Has type [`Type::Never`](crate::Type).
+    /// `(panic message)` — diverges. Has type [`Type::Never`](crate::Type).
     Panic(Box<Typed>),
     /// `(quote datum)` — the literal `datum`, unevaluated, as a `Sexpr` value.
     /// Carries an owned [`QuotedSexpr`] rather than a raw [`Value`](crate::Value)

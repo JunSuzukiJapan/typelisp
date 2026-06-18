@@ -45,7 +45,7 @@ pub enum RtValue {
     Builtin(String),
 }
 
-/// A runtime error. `Panic` is a deliberate `panic!`; `Break`/`Return` are not
+/// A runtime error. `Panic` is a deliberate `panic`; `Break`/`Return` are not
 /// errors at all but internal non-local-exit signals (`break`/`return`
 /// unwinding to the nearest enclosing loop), reusing `Result`'s `?`-propagation
 /// to implement them; the checker guarantees they are always caught by a
@@ -54,7 +54,7 @@ pub enum RtValue {
 /// variants are bugs that a well-typed program should not produce.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EvalError {
-    /// A `panic!` reached at runtime, carrying its message.
+    /// A `panic` reached at runtime, carrying its message.
     Panic(String),
     /// Reference to an unbound variable (should not happen post-checking).
     Unbound(String),

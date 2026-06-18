@@ -70,7 +70,7 @@ fn unwrap_or_none() {
 #[test]
 fn result_match() {
     let prog = "(defun unwrap-i ((r Result<i32,Error>)) i32 \
-                  (match r ((Ok v) v) ((Err e) (panic! \"err\")))) ";
+                  (match r ((Ok v) v) ((Err e) (panic \"err\")))) ";
     assert_eq!(eval_ok(&format!("{} (unwrap-i (Ok 9))", prog)), RtValue::Int(9));
     assert_eq!(
         run(&format!("{} (unwrap-i (Err (Error \"boom\")))", prog)),
@@ -100,7 +100,7 @@ fn static_method() {
 
 #[test]
 fn panic_propagates() {
-    let src = "(defun boom () i32 (panic! \"kaboom\")) (boom)";
+    let src = "(defun boom () i32 (panic \"kaboom\")) (boom)";
     assert_eq!(run(src), Err(EvalError::Panic("kaboom".into())));
 }
 

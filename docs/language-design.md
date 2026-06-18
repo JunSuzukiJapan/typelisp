@@ -93,13 +93,13 @@
 | 制御 | `if` `when` `unless` `cond` `case` `match` `if-let` `while-let` `and` `or` `progn` `the` | `and`/`or` は短絡のため特殊形。`the` は型注釈 |
 | 反復 | `loop` `while` `until` `dotimes` `dolist` `do` `doiter` | |
 | マクロ/引用 | `quote` `quasiquote` (`` ` ``) `unquote` (`,`) | `quote`/`quasiquote` の戻り型は常に `Sexpr`。`,@`（unquote-splicing）は未実装 |
-| その他 | `setf` `break` `return` `panic!` `unreachable!` `todo!` | `break`/`return`/`panic!`/`unreachable!`/`todo!` は戻り型 `!`（§7） |
+| その他 | `setf` `break` `return` `panic` `unreachable` `todo` | `break`/`return`/`panic`/`unreachable`/`todo` は戻り型 `!`（§7） |
 
 脱糖の例: `when`→`if`+`progn`、`unless`→`if`、`if-let (pat val) then else`→2 腕 `match`（包括アームで網羅）、
 `quasiquote`→`Expr::Quote`+`Expr::Construct{Cons,..}` の組合せ（`list` の脱糖と同様、ランタイムマクロ機構は使わない）。
 
 実装状況: `if` `let` `let*` `progn` `when` `unless` `and` `or` `cond` `setf` `while` `loop` `break` `return` `lambda`
-`match` `if-let` `panic!` `defstruct` `defvar` `defconstant` `module` `use` `defmethod` `quote` `quasiquote` `defmacro`
+`match` `if-let` `panic` `defstruct` `defvar` `defconstant` `module` `use` `defmethod` `quote` `quasiquote` `defmacro`
 は実装済（[src/check/checker.rs](../src/check/checker.rs)）。`defmacro` は CL 流（非衛生的）— 詳細は
 [TODO.md](TODO.md) のステップ 4k を参照。
 `when`/`unless`/`and`/`or`/`cond`/`let*` は `if`/`let` への脱糖。`setf`（可変ローカル/グローバル変数）/`while` は専用 AST
@@ -137,13 +137,13 @@
 | 算術 | `+ - * / mod rem neg abs` | 型ごと。例 `+ : (fn (i32 i32) i32)`。`/` のゼロ除算は `Result` |
 | 比較 | `= /= < <= > >=` | |
 | 論理 | `not` | `and`/`or` は短絡で特殊形 |
-| cons | `cons car cdr set-car! set-cdr! consp atom eq` | |
+| cons | `cons car cdr set-car set-cdr consp atom eq` | |
 | 変換 | `int->float float->int char->int int->char symbol->string string->symbol` | |
 | 文字列 | `string-length string-append string-ref substring string=?` | |
-| ベクタ | `make-vector vector-ref vector-set! vector-length vector-push! vector-get` | `vector-ref` 範囲外は panic、`vector-get : Option<T>` |
+| ベクタ | `make-vector vector-ref vector-set vector-length vector-push vector-get` | `vector-ref` 範囲外は panic、`vector-get : Option<T>` |
 | 解析 | `parse-int parse-float` | `Result<_, Error>` |
 | IO | `print println princ format read read-line` | `read : (fn (String) Result<Sexpr, Error>)` |
-| 発散 | `panic! unreachable! todo! exit` | 戻り型 `!`（§7） |
+| 発散 | `panic unreachable todo exit` | 戻り型 `!`（§7） |
 | システム | `eval compile compile-file gc` | `compile`/`compile-file` は明示呼び出し時のみネイティブ化（feature gate） |
 | マクロ | `gensym` | 引数なし、フレッシュな `Sexpr::Sym` を返す。symbol は常に intern される仕様のため衝突耐性のみ（CL の unforgeable な未intern symbol ではない） |
 
@@ -203,23 +203,27 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 
 ### 7.1 Result と panic の住み分け
 - **回復可能な失敗** → `Result<T, E>`（`Ok(T) | Err(E)`、組み込み直和型）＋ `match`。
-- **回復不能な失敗（バグ・不変条件違反）** → `panic!`。
+- **回復不能な失敗（バグ・不変条件違反）** → `panic`。
 - **`?`/try は導入しない**（Lisp 文法に馴染まないため）。失敗の分岐は `match` で明示する。
 
 ### 7.2 `Never` 型（`!`）
-- `panic!` は**特殊形**で、戻り型は `!`（Never / ボトム型）。
+- `panic` は**特殊形**で、戻り型は `!`（Never / ボトム型）。
 - `!` は**任意の期待型に適合**する（Rust の coercion 相当）。よって分岐の一方で panic しても型検査が通る:
   ```lisp
   (defun f ((x i32)) i32
-    (if (< x 0) (panic! "neg") x))   ; else 枝は ! → i32 に適合
+    (if (< x 0) (panic "neg") x))   ; else 枝は ! → i32 に適合
   ```
 - 型検査器での扱い: `if`/`match` の枝結合では Never 側は結果型を拘束しない（両方 Never なら Never）。
   型の突き合わせ（reconcile/unify）でも Never をボトムとして任意型に適合させる。
-- `unreachable!` / `todo!` / `exit` も `!`（発散）。
+- `unreachable` / `todo` / `exit` も `!`（発散）。
 
 ### 7.3 命名規則 `!`
-- `!` 接尾辞は**発散/例外的/副作用的**な操作を表す目印（命名規則）。
-  例: `panic!` `set-car!` `set-cdr!` `vector-set!` `vector-push!`。
+- typelisp の関数・特殊形の名前には `!` を接尾辞として使わない（CL に倣う）。発散する操作
+  （`panic`/`unreachable`/`todo`）も破壊的（mutating）操作（`set-car`/`set-cdr`/`vector-set`/
+  `vector-push` 等）も同様に `!` なしの名前にする。`!` による操作名のマーキングは Scheme の作法
+  （`set!`/`vector-set!` 等）であり、CL 同等の表現力を目指す typelisp では採用しない。
+- `!` という記号自体は **`Never` 型の表記**（§7.2、例 `(fn (i32) !)`）としてのみ使われ、命名規則上の
+  接尾辞ではない。
 
 ### 7.4 エラー型 E
 - 当面は**組み込み汎用 `Error`**（メッセージ等を保持）。既定は `Result<T, Error>`。

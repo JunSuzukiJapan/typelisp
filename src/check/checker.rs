@@ -837,7 +837,7 @@ impl Checker {
             "lambda" => return self.check_lambda(heap, interp, env, args),
             "match" => return self.check_match(heap, interp, env, args, expected),
             "if-let" => return self.check_if_let(heap, interp, env, args, expected),
-            "panic!" => return self.check_panic(heap, interp, env, args),
+            "panic" => return self.check_panic(heap, interp, env, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
             _ => {}
@@ -1088,7 +1088,7 @@ impl Checker {
         args: &[Value],
     ) -> Result<Typed, Error> {
         if args.len() != 1 {
-            return Err(Error::TypeError("panic!: (panic! message)".into()));
+            return Err(Error::TypeError("panic: (panic message)".into()));
         }
         let msg = self.check(heap, interp, env, args[0], Some(&Type::Str))?;
         Ok(Typed { expr: Expr::Panic(Box::new(msg)), ty: Type::Never })

@@ -91,7 +91,7 @@ pub enum Type {
     Str,
     /// The unit type `()`.
     Unit,
-    /// The never / bottom type `!` (the type of `panic!` and other diverging
+    /// The never / bottom type `!` (the type of `panic` and other diverging
     /// forms). It is compatible with — and absorbed by — any expected type.
     Never,
     /// A nominal type with type arguments: `Option<T>`, `Vec<T>`, `Sexpr`,

@@ -463,8 +463,8 @@ impl Interp {
     /// Evaluate a built-in operator. Returns `None` if `name` is not a
     /// builtin, so the caller can fall through to a "no such function" error.
     /// (MVP: i32 arithmetic/comparison only; integer divide/mod by zero
-    /// `panic!`s, matching Rust. `cons`/`car`/`cdr` operate on `Sexpr`;
-    /// `car`/`cdr` of a non-`Cons` `Sexpr` — including `Nil` — `panic!`s.
+    /// panics, matching Rust. `cons`/`car`/`cdr` operate on `Sexpr`;
+    /// `car`/`cdr` of a non-`Cons` `Sexpr` — including `Nil` — panics.
     /// `gensym` returns a fresh `Sexpr::Sym` each call.)
     fn eval_builtin(&self, heap: &mut Heap, name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
         match name {

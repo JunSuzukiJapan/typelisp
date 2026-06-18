@@ -1,5 +1,5 @@
 //! Tests for error-handling primitives: `Result<T,E>`, the built-in `Error`
-//! type, the `Never` (`!`) type, and the `panic!` special form.
+//! type, the `Never` (`!`) type, and the `panic` special form.
 
 extern crate typelisp;
 use typelisp::{Checker, Error, Heap, Interp, Path, Reader, TopLevel, Type};
@@ -31,35 +31,35 @@ fn assert_type_error(src: &str) {
     }
 }
 
-// ---- Never / panic! ---------------------------------------------------------
+// ---- Never / panic ---------------------------------------------------------
 
 #[test]
 fn panic_has_never_type() {
-    assert_eq!(ty("(panic! \"boom\")"), Type::Never);
+    assert_eq!(ty("(panic \"boom\")"), Type::Never);
 }
 
 #[test]
 fn panic_message_must_be_string() {
-    assert_type_error("(panic! 42)");
+    assert_type_error("(panic 42)");
 }
 
 #[test]
 fn if_branch_may_panic() {
     // The else branch diverges; the if still has the then branch's type.
-    assert_eq!(ty("(if true 1 (panic! \"x\"))"), Type::I32);
-    assert_eq!(ty("(if true (panic! \"x\") 2)"), Type::I32);
+    assert_eq!(ty("(if true 1 (panic \"x\"))"), Type::I32);
+    assert_eq!(ty("(if true (panic \"x\") 2)"), Type::I32);
 }
 
 #[test]
 fn defun_branch_may_panic() {
-    let src = "(defun f ((b bool) (x i32)) i32 (if b (panic! \"neg\") x))";
+    let src = "(defun f ((b bool) (x i32)) i32 (if b (panic \"neg\") x))";
     assert!(matches!(program(src), Ok(TopLevel::Defun { .. })));
 }
 
 #[test]
 fn parses_never_type_annotation() {
     // A function whose body always diverges has return type `!`.
-    let src = "(defun boom () ! (panic! \"always\"))";
+    let src = "(defun boom () ! (panic \"always\"))";
     match program(src).unwrap() {
         TopLevel::Defun { ret, .. } => assert_eq!(ret, Type::Never),
         other => panic!("expected defun, got {:?}", other),
@@ -89,7 +89,7 @@ fn result_err_takes_error_value() {
 fn match_result_exhaustive_with_panic_arm() {
     // Unwrapping a Result: the Err arm diverges, so the match has type i32.
     let src = "(defun unwrap-i ((r Result<i32,Error>)) i32 \
-                 (match r ((Ok v) v) ((Err e) (panic! \"unwrap on Err\"))))";
+                 (match r ((Ok v) v) ((Err e) (panic \"unwrap on Err\"))))";
     match program(src).unwrap() {
         TopLevel::Defun { ret, .. } => assert_eq!(ret, Type::I32),
         other => panic!("expected defun, got {:?}", other),
