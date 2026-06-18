@@ -144,6 +144,7 @@ impl Registry {
         root.add_type(error_def());
         root.add_type(sexpr_def());
         root.add_type(hashtable_def());
+        root.add_type(vector_def());
         // Primitive value types (i8..usize/f32/f64/bool/char/string) get an
         // (initially empty) method table too, so `defmethod` can target them
         // (see `check_defmethod`/`check_instance_method`, which map a
@@ -319,6 +320,62 @@ fn hashtable_def() -> AdtDef {
         assoc,
         public: true,
     }
+}
+
+fn vector_ty() -> Type {
+    Type::Named(Path::root("vector"), vec![tvar("t")])
+}
+
+/// `Vector<T>`: a builtin (Rust-implemented) growable, indexable array, with no
+/// constructors of its own (built via the static `new`, not pattern-matched).
+/// All methods here are metadata only — there is no `defmethod` body to
+/// check; the runtime implementation lives in `eval_builtin_method` in
+/// `crate::eval::interp`. `get`/`set` return/take `T` directly rather than
+/// `Option<T>` — an out-of-range index is a runtime panic (see
+/// `cl-equivalence-catalog.md` §2.2 b), matching `car`/`cdr`'s "type system
+/// can't express the bound, so it's a panic" precedent.
+fn vector_def() -> AdtDef {
+    let mut assoc = HashMap::new();
+    assoc.insert(
+        "new".to_string(),
+        AssocFn {
+            sig: FnSig { params: vec![Type::I32, tvar("t")], ret: vector_ty(), public: true },
+            instance: false,
+        },
+    );
+    assoc.insert(
+        "get".to_string(),
+        AssocFn {
+            sig: FnSig { params: vec![vector_ty(), Type::I32], ret: tvar("t"), public: true },
+            instance: true,
+        },
+    );
+    assoc.insert(
+        "set".to_string(),
+        AssocFn {
+            sig: FnSig { params: vec![vector_ty(), Type::I32, tvar("t")], ret: Type::Unit, public: true },
+            instance: true,
+        },
+    );
+    assoc.insert(
+        "length".to_string(),
+        AssocFn { sig: FnSig { params: vec![vector_ty()], ret: Type::I32, public: true }, instance: true },
+    );
+    assoc.insert(
+        "push".to_string(),
+        AssocFn {
+            sig: FnSig { params: vec![vector_ty(), tvar("t")], ret: Type::Unit, public: true },
+            instance: true,
+        },
+    );
+    assoc.insert(
+        "pop".to_string(),
+        AssocFn {
+            sig: FnSig { params: vec![vector_ty()], ret: option_of(tvar("t")), public: true },
+            instance: true,
+        },
+    );
+    AdtDef { name: Path::root("vector"), params: vec!["t".to_string()], variants: vec![], assoc, public: true }
 }
 
 /// A type-parameter reference, e.g. `t` in `Option<T>`'s field list.

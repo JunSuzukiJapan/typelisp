@@ -21,7 +21,7 @@
 | （未コミット） | エラー処理（Result/Error/Never/`panic`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
 **テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 50 / error 10 / namespace 25 / eval 58 / macro 25 /
-hashtable 12 = 238 件 green、警告0（clippy 含む）。
+hashtable 12 / vector 15 = 253 件 green、警告0（clippy 含む）。
 旧来あった3件の既存警告（`check_assoc_call`/`check_construct` の too_many_arguments、`alloc_quoted` の
 only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(adt_name, variant)` をタプル1引数に
 まとめてアリティを減らし、後者は `self` を使わず再帰のみに使っていたため `Interp` のメソッドから
@@ -221,6 +221,28 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
     - これに先立ち、ステップ3aで `check_assoc_call` にジェネリック受け手対応を追加済み（上記2.5節）。
     - TDD: 新規 `tests/hashtable_test.rs`（12件。CRUD一式、static呼び出しの型推論、K/Vが異なる複数
       インスタンスの相互非干渉、キー型不一致の型エラー、GC回帰テスト）。
+  - 実装済み（4n）: `Vector<T>`（[cl-equivalence-catalog.md](cl-equivalence-catalog.md) ステップ4）。
+    HashTableと完全に同型のパターンで実装（ステップ3で確立した「組み込みnominal型は`registry.rs`に
+    `AdtDef`を直書き + `RtValue`に`Rc<RefCell<..>>`変種を追加 + `eval_builtin_method`にディスパッチを
+    1分岐追加 + `collect_sexpr_roots`に1ケース追加」という型に3a/3bのインフラがそのまま乗った）。
+    - 型登録: `registry.rs` の `vector_def()`、`params: ["t"]`、`assoc` に `new(i32,t)->Vector<t>`
+      （static）/ `get(Vector<t>,i32)->t` / `set(Vector<t>,i32,t)->()` / `length(Vector<t>)->i32` /
+      `push(Vector<t>,t)->()` / `pop(Vector<t>)->Option<t>`（instance）。`get`/`set`は`Option`で
+      包まずTを直接返す/受ける — 範囲外（負数含む）は`car`/`cdr`の非Consと同じ「型システムが
+      追えない所はランタイムpanic」方針でpanic。
+    - ランタイム表現: `RtValue::Vector(Rc<RefCell<Vec<RtValue>>>)`。HashTableと同じくRustの通常の
+      所有権で管理、`mem::Heap`は無変更。
+    - 実行時ディスパッチ: `eval_builtin_method`を`hashtable`/`vector`の2分岐に拡張（共通の
+      ユーザ定義→組み込みフォールバック順序は`Expr::Assoc`評価側で既存のまま）。
+    - GC統合: `collect_sexpr_roots`に`RtValue::Vector`のケースを1つ追加（要素を再帰的に辿る）。
+      HashTableと同じ手順でテストが実際に修正前は失敗する/値が壊れることを確認した上で復元
+      （`tests/vector_test.rs`の`sexpr_values_survive_gc_pressure`）。
+    - 既知の制約: HashTableと同じ循環参照リークの受容、`to-list`/`from-list`は対象外
+      （要素型`T`が任意の`RtValue`になり得るため`Sexpr`への汎用変換が部分関数になる、という
+      HashTableの`to-list`/`keys`/`values`除外と同じ理由）。
+    - TDD: 新規 `tests/vector_test.rs`（15件。CRUD一式、static呼び出しの型推論、範囲外/負数
+      インデックスのpanic、要素型が異なる複数インスタンスの相互非干渉、要素型不一致の型エラー、
+      GC回帰テスト）。
 - **次の候補（eval 拡充）**:
   - 組み込み関数の拡張（型ごとの算術／i64・f64、文字列・ベクタ・Option/Result ライブラリ関数）。カタログは [cl-equivalence-catalog.md](cl-equivalence-catalog.md) §4。
   - typelisp ライブラリ関数（`length`/`append`/`reverse`/`map`/`filter`/`foldl`/`foldr` 等、`Sexpr` 上）。`append` 実装後、

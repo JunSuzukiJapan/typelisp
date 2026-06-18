@@ -84,6 +84,9 @@ pub enum RtValue {
     /// have; mark-sweep cycle collection is deliberately only for the cons
     /// heap (`Sexpr`/`cons`/strings).
     HashTable(Rc<RefCell<HashMap<HashKey, RtValue>>>),
+    /// A `Vector<T>`. Same `Rc<RefCell<..>>`/Rust-ownership pattern, and the
+    /// same cycle-leak trade-off, as [`RtValue::HashTable`].
+    Vector(Rc<RefCell<Vec<RtValue>>>),
 }
 
 /// A runtime error. `Panic` is a deliberate `panic`; `Break`/`Return` are not

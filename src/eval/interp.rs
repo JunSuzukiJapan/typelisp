@@ -619,10 +619,11 @@ fn is_sexpr_type(type_name: &Path) -> bool {
 }
 
 /// Recursively gather every `Sexpr` value reachable from `v` through nested
-/// `Data` fields or `HashTable` values (a `Closure`'s captured environment is
-/// covered separately, since each of its slots is already registered in
-/// [`Interp::slots`]). `HashTable` keys never need walking — [`HashKey`] is
-/// restricted to scalar variants that can't carry a `Sexpr`.
+/// `Data` fields, `HashTable` values, or `Vector` elements (a `Closure`'s
+/// captured environment is covered separately, since each of its slots is
+/// already registered in [`Interp::slots`]). `HashTable` keys never need
+/// walking — [`HashKey`] is restricted to scalar variants that can't carry a
+/// `Sexpr`.
 fn collect_sexpr_roots(v: &RtValue, out: &mut Vec<Value>) {
     match v {
         RtValue::Sexpr(val) => out.push(*val),
@@ -633,6 +634,11 @@ fn collect_sexpr_roots(v: &RtValue, out: &mut Vec<Value>) {
         }
         RtValue::HashTable(map) => {
             for f in map.borrow().values() {
+                collect_sexpr_roots(f, out);
+            }
+        }
+        RtValue::Vector(vec) => {
+            for f in vec.borrow().iter() {
                 collect_sexpr_roots(f, out);
             }
         }
@@ -726,25 +732,37 @@ fn eval_int_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Eval
 }
 
 /// Built-in (Rust-implemented) instance/static methods for nominal types that
-/// have no `defmethod` body to run — currently just `HashTable<K,V>`
-/// (`crate::check::registry`'s `hashtable_def`). Mirrors `Interp::eval_builtin`
-/// for free functions: `Expr::Assoc`'s eval arm tries `Interp::methods`
-/// (user `defmethod`s) first, falling back to this. Argument count/types are
-/// trusted (the checker already validated them against `hashtable_def`'s
-/// signatures), so arms index `args` directly rather than re-checking shape.
+/// have no `defmethod` body to run — currently `HashTable<K,V>` and
+/// `Vector<T>` (`crate::check::registry`'s `hashtable_def`/`vector_def`).
+/// Mirrors `Interp::eval_builtin` for free functions: `Expr::Assoc`'s eval arm
+/// tries `Interp::methods` (user `defmethod`s) first, falling back to this.
+/// Argument count/types are trusted (the checker already validated them
+/// against the type's `AdtDef` signatures), so arms index `args` directly
+/// rather than re-checking shape.
 fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
-    if *type_name != Path::root("hashtable") {
-        return None;
+    if *type_name == Path::root("hashtable") {
+        return match method {
+            "new" => Some(Ok(RtValue::HashTable(Rc::new(RefCell::new(HashMap::new()))))),
+            "get" => Some(hashtable_get(args)),
+            "set" => Some(hashtable_set(args)),
+            "remove" => Some(hashtable_remove(args)),
+            "count" => Some(hashtable_count(args)),
+            "clear" => Some(hashtable_clear(args)),
+            _ => None,
+        };
     }
-    match method {
-        "new" => Some(Ok(RtValue::HashTable(Rc::new(RefCell::new(HashMap::new()))))),
-        "get" => Some(hashtable_get(args)),
-        "set" => Some(hashtable_set(args)),
-        "remove" => Some(hashtable_remove(args)),
-        "count" => Some(hashtable_count(args)),
-        "clear" => Some(hashtable_clear(args)),
-        _ => None,
+    if *type_name == Path::root("vector") {
+        return match method {
+            "new" => Some(vector_new(args)),
+            "get" => Some(vector_get(args)),
+            "set" => Some(vector_set(args)),
+            "length" => Some(vector_length(args)),
+            "push" => Some(vector_push(args)),
+            "pop" => Some(vector_pop(args)),
+            _ => None,
+        };
     }
+    None
 }
 
 fn expect_hashtable(v: &RtValue) -> Result<&Rc<RefCell<HashMap<HashKey, RtValue>>>, EvalError> {
@@ -791,6 +809,68 @@ fn hashtable_clear(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let map = expect_hashtable(&args[0])?;
     map.borrow_mut().clear();
     Ok(RtValue::Unit)
+}
+
+fn expect_vector(v: &RtValue) -> Result<&Rc<RefCell<Vec<RtValue>>>, EvalError> {
+    match v {
+        RtValue::Vector(v) => Ok(v),
+        other => Err(EvalError::Internal(format!("expected a Vector, got {:?}", other))),
+    }
+}
+
+/// Resolve an `i32` index against a vector's current length: out of range
+/// (including negative) is `None`, the caller turns that into a panic — the
+/// type system can't express the bound, the same "runtime panic for what
+/// types can't catch" precedent as `car`/`cdr` on a non-`Cons` `Sexpr`.
+fn vector_index(i: i64, len: usize) -> Option<usize> {
+    if i >= 0 && (i as usize) < len { Some(i as usize) } else { None }
+}
+
+fn vector_new(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let n = rt_i64(&args[0])?;
+    if n < 0 {
+        return Err(EvalError::Panic(format!("Vector::new: negative length {}", n)));
+    }
+    Ok(RtValue::Vector(Rc::new(RefCell::new(vec![args[1].clone(); n as usize]))))
+}
+
+fn vector_get(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let v = expect_vector(&args[0])?;
+    let i = rt_i64(&args[1])?;
+    let vec = v.borrow();
+    match vector_index(i, vec.len()) {
+        Some(idx) => Ok(vec[idx].clone()),
+        None => Err(EvalError::Panic(format!("Vector::get: index {} out of range (length {})", i, vec.len()))),
+    }
+}
+
+fn vector_set(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let v = expect_vector(&args[0])?;
+    let i = rt_i64(&args[1])?;
+    let mut vec = v.borrow_mut();
+    match vector_index(i, vec.len()) {
+        Some(idx) => {
+            vec[idx] = args[2].clone();
+            Ok(RtValue::Unit)
+        }
+        None => Err(EvalError::Panic(format!("Vector::set: index {} out of range (length {})", i, vec.len()))),
+    }
+}
+
+fn vector_length(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let v = expect_vector(&args[0])?;
+    Ok(RtValue::Int(v.borrow().len() as i64))
+}
+
+fn vector_push(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let v = expect_vector(&args[0])?;
+    v.borrow_mut().push(args[1].clone());
+    Ok(RtValue::Unit)
+}
+
+fn vector_pop(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let v = expect_vector(&args[0])?;
+    Ok(option_value(v.borrow_mut().pop()))
 }
 
 /// Try to match a pattern against a value, returning the bindings on success.
