@@ -92,6 +92,20 @@ impl Env {
     }
 }
 
+/// Bundles [`Checker::check_assoc_call`]'s arguments to keep its arity down.
+struct AssocCall<'a> {
+    type_fq: &'a Path,
+    method: &'a str,
+    /// `Some` for an instance call (already-checked receiver, fills the
+    /// method's first parameter slot); `None` for a static call.
+    receiver: Option<Typed>,
+    /// The call site's expected type. Only consulted for a static call with
+    /// no receiver to read concrete type arguments from (e.g. `HashTable::new`
+    /// learning `K`/`V` the same way a field-less constructor like `None`
+    /// learns its type argument from `expected`).
+    expected: Option<&'a Type>,
+}
+
 /// The type checker, holding the data-type and function registries plus the
 /// current namespace (module) path.
 pub struct Checker {
@@ -1006,7 +1020,13 @@ impl Checker {
                             type_fq, member, member
                         )));
                     }
-                    return self.check_assoc_call(heap, interp, env, (&type_fq, member.as_str()), None, args);
+                    return self.check_assoc_call(
+                        heap,
+                        interp,
+                        env,
+                        AssocCall { type_fq: &type_fq, method: member.as_str(), receiver: None, expected },
+                        args,
+                    );
                 }
             }
         }
@@ -1036,8 +1056,7 @@ impl Checker {
                             heap,
                             interp,
                             env,
-                            (&type_fq, method),
-                            Some(recv),
+                            AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None },
                             &args[1..],
                         );
                     }
@@ -1048,23 +1067,55 @@ impl Checker {
     }
 
     /// Check a call to a type-associated function. For an instance method the
-    /// already-checked `receiver` fills the first parameter slot. `assoc` is
-    /// `(type path, method name)`, bundled into one parameter to keep the
-    /// arity down.
+    /// already-checked `receiver` fills the first parameter slot. `call` bundles
+    /// `(type path, method name)`, the receiver, and the call site's expected
+    /// type into one parameter to keep the arity down.
+    ///
+    /// Generic owners (e.g. the built-in `HashTable<K,V>`): the method's
+    /// signature template mentions `def.params` (`k`/`v`) as type variables,
+    /// the same way a constructor's field templates do (see
+    /// [`Self::check_construct`]). The concrete bindings come from wherever
+    /// they're available — an instance call already knows them from the
+    /// receiver's resolved type, `Type::Named(type_fq, concrete_args)`; a
+    /// static call with no receiver (e.g. `HashTable::new`, which has no
+    /// argument to infer `K`/`V` from either) instead seeds them from
+    /// `expected`, exactly like a field-less constructor such as `None`
+    /// learns its type argument from `expected`. If a parameter is bound by
+    /// neither, it's left as a free type variable and surfaces as a normal
+    /// "cannot infer" error, matching `check_construct`.
     fn check_assoc_call(
         &self,
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        assoc: (&Path, &str),
-        receiver: Option<Typed>,
+        call: AssocCall,
         args: &[Value],
     ) -> Result<Typed, Error> {
-        let (type_fq, method) = assoc;
+        let AssocCall { type_fq, method, receiver, expected } = call;
         let instance = receiver.is_some();
-        let af = self.reg.type_def(type_fq).expect("assoc type exists").assoc[method].clone();
+        let def = self.reg.type_def(type_fq).expect("assoc type exists").clone();
+        let af = def.assoc[method].clone();
+
+        let mut subst: HashMap<String, Type> = HashMap::new();
+        let concrete_args: Option<&[Type]> = match (&receiver, expected) {
+            (Some(r), _) => match &r.ty {
+                Type::Named(n, args) if n == type_fq => Some(args.as_slice()),
+                _ => None,
+            },
+            (None, Some(Type::Named(n, args))) if n == type_fq => Some(args.as_slice()),
+            (None, _) => None,
+        };
+        if let Some(args) = concrete_args {
+            if args.len() == def.params.len() {
+                for (p, a) in def.params.iter().zip(args.iter()) {
+                    subst.insert(p.clone(), a.clone());
+                }
+            }
+        }
+
         let offset = if instance { 1 } else { 0 };
-        let expected_params = &af.sig.params[offset..];
+        let expected_params: Vec<Type> =
+            af.sig.params[offset..].iter().map(|t| subst_apply(t, &subst)).collect();
         if args.len() != expected_params.len() {
             return Err(Error::TypeError(format!(
                 "{}::{}: expected {} argument(s), got {}",
@@ -1081,6 +1132,14 @@ impl Checker {
         for (arg, pty) in args.iter().zip(expected_params.iter()) {
             typed.push(self.check(heap, interp, env, *arg, Some(pty))?);
         }
+        for p in &def.params {
+            if !subst.contains_key(p) {
+                return Err(Error::TypeError(format!(
+                    "cannot infer type argument `{}` for `{}::{}`",
+                    p, type_fq, method
+                )));
+            }
+        }
         Ok(Typed {
             expr: Expr::Assoc {
                 type_name: type_fq.clone(),
@@ -1088,7 +1147,7 @@ impl Checker {
                 instance,
                 args: typed,
             },
-            ty: af.sig.ret,
+            ty: subst_apply(&af.sig.ret, &subst),
         })
     }
 
