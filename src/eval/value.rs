@@ -71,8 +71,11 @@ pub enum RtValue {
     Sexpr(Value),
     /// A function value (from a `lambda` or a reified named function).
     Closure(Rc<Closure>),
-    /// A built-in operator used as a function value (e.g. `+`).
+    /// A built-in *free* function used as a function value (e.g. `gensym`).
     Builtin(String),
+    /// A built-in *instance method* used as a function value (e.g. `+` on
+    /// `i32` — see [`Expr::MethodRef`](crate::Expr::MethodRef)).
+    BuiltinMethod(Path, String),
     /// A `HashTable<K,V>`. Lives in ordinary Rust-managed memory
     /// (`Rc<RefCell<..>>`, reclaimed by reference counting), not the
     /// GC-managed cons heap — the same pattern [`RtValue::Data`] and

@@ -431,6 +431,35 @@ impl Checker {
         Typed { expr: Expr::FnRef(fq), ty }
     }
 
+    /// Reify a bare name as an *instance method* value (`MethodRef`), e.g.
+    /// `+` where a `(fn (i32 i32) i32)` is expected (see
+    /// [`builtin_as_value`](../../../tests/eval_test.rs)-style usage of
+    /// `registry::int_assoc`'s arithmetic). Unlike a real call site, there is
+    /// no receiver expression to dispatch on, so the receiver type is read
+    /// off `expected`'s first parameter instead — this only resolves
+    /// non-generic instance methods (the receiver's own type fully
+    /// determines the method's signature with no substitution needed), which
+    /// covers `i32`/`i64`/`f64`/`string`/`char`; a generic method (e.g.
+    /// `HashTable::get`) can't be reified this way since there's no call-site
+    /// type argument to substitute, and simply fails to match below.
+    fn method_value(&self, name: &str, expected: Option<&Type>) -> Option<Typed> {
+        let Type::Fn(params, _) = expected? else { return None };
+        let type_fq = match params.first()? {
+            Type::Named(n, _) => n.clone(),
+            other => prim_type_path(other)?,
+        };
+        let def = self.reg.type_def(&type_fq)?;
+        let af = def.assoc.get(name)?;
+        if !af.instance {
+            return None;
+        }
+        let ty = Type::Fn(af.sig.params.clone(), Box::new(af.sig.ret.clone()));
+        if &ty != expected.unwrap() {
+            return None;
+        }
+        Some(Typed { expr: Expr::MethodRef { type_name: type_fq, method: name.to_string() }, ty })
+    }
+
     /// Canonicalize a parsed type: resolve every nominal name to its located
     /// [`Path`] so that types compare equal across module boundaries.
     fn canon(&self, t: &Type) -> Type {
@@ -778,6 +807,8 @@ impl Checker {
                 } else if let Some((path, vi)) = self.resolve_global(name) {
                     Typed { expr: Expr::Global(path), ty: vi.ty }
                 } else if let Some(t) = self.fn_value(name) {
+                    t
+                } else if let Some(t) = self.method_value(name, expected) {
                     t
                 } else {
                     return Err(Error::TypeError(format!("unbound variable: {}", name)));
@@ -1531,8 +1562,13 @@ impl Checker {
 
         let var_ref = || Typed { expr: Expr::Var(var.clone()), ty: Type::I32 };
         let int = |n| Typed { expr: Expr::Int(n), ty: Type::I32 };
-        let op = |name, a, b, ty| Typed {
-            expr: Expr::Call(Path::root(name), vec![a, b]),
+        // `+`/`<` are `i32` instance methods, not free functions (see
+        // `registry::int_assoc`) — this hidden desugaring builds the
+        // `Expr::Assoc` node directly rather than going through
+        // `check_instance_method`, since there's no source-level call to
+        // recursively check.
+        let op = |name: &str, a, b, ty| Typed {
+            expr: Expr::Assoc { type_name: Path::root("i32"), method: name.to_string(), instance: true, args: vec![a, b] },
             ty,
         };
         // body... then (setf var (+ var 1))

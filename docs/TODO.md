@@ -21,7 +21,7 @@
 | （未コミット） | エラー処理（Result/Error/Never/`panic`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
 **テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 50 / error 10 / namespace 25 / eval 58 / macro 25 /
-hashtable 12 / vector 15 / string 24 = 277 件 green、警告0（clippy 含む）。
+hashtable 12 / vector 15 / string 24 / numeric 20 = 297 件 green、警告0（clippy 含む）。
 旧来あった3件の既存警告（`check_assoc_call`/`check_construct` の too_many_arguments、`alloc_quoted` の
 only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(adt_name, variant)` をタプル1引数に
 まとめてアリティを減らし、後者は `self` を使わず再帰のみに使っていたため `Interp` のメソッドから
@@ -266,6 +266,39 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       こと、`eq`等の同名メソッドが型ごとに別テーブルで衝突しないことの回帰）。miri green
       （24/24、898秒、UB/リーク無し——GC非依存のため時間のほとんどはmiriのインタプリタ
       オーバーヘッド自体）。
+  - 実装済み（4p）: 数値拡張（[cl-equivalence-catalog.md](cl-equivalence-catalog.md) §2.2 f、
+    ステップ6）。`gcd`/`lcm`/`signum`はTypeLisp実装に回すステップ7へ先送り（カタログの分類どおり）。
+    - **設計変更（破壊的、ただし振る舞いは保存）**: 既存の`i32`算術/比較演算子（`+ - * / mod
+      < <= > >= = /=`）を自由関数から**`i32`のインスタンスメソッド**（`registry::int_assoc`）へ
+      移行し、同じシンボルを`i64`/`f64`でも使えるようにした（受け手の型で単一静的ディスパッチ
+      ——`HashTable::get`等と全く同じ仕組み）。自由関数のままだと1シンボルにつき1シグネチャしか
+      持てず、`i64`/`f64`版を追加できなかったため。`int_assoc(ty: Type)`は`i32`/`i64`で共通
+      （`RtValue::Int(i64)`がどちらも同じランタイム表現のため、`eval_int_builtin`もそのまま共用）。
+      `float_assoc()`が`f64`の`+ - * / mod`/比較に加え`expt`/`sqrt`/`floor`/`ceiling`/`round`/
+      `truncate`を提供。整数の`/`/`mod`は0除算でpanic（既存どおり）、浮動小数は0除算でも
+      panicせずIEEE-754の`inf`/`NaN`を返す（仕様の違いを明記）。
+    - **移行で発覚した2件のレグレッションと修正**:
+      1. `check_dotimes`の内部脱糖（ループ変数の`+1`・上限比較`<`）が`Expr::Call`を直接構築して
+         いたため、自由関数テーブルから外れた`+`/`<`が`NoSuchFunction`になった。
+         `Expr::Assoc{type_name: i32, instance: true, ...}`を直接構築するよう修正。
+      2. `+`を高階関数へ値として渡すテスト（`builtin_as_value`、`RtValue::Builtin`経由）が
+         `+`が自由関数で無くなったことで「unbound variable」エラーに。新規`Expr::MethodRef`
+         （`FnRef`のインスタンスメソッド版、受け手型を`expected`の関数型から読む）と
+         `RtValue::BuiltinMethod(Path, String)`を追加し、`Checker::method_value`が
+         `Value::Symbol`解決のフォールバックとして担う形で復旧——`i32`だけでなく`f64`等にも
+         汎用化されている（`tests/numeric_test.rs`の`f64_operator_as_a_value`で確認）。
+         ジェネリックなメソッド（`HashTable::get`等）はこの経路では値化できない
+         （呼び出し元の型引数が無いため代入できず、単に解決失敗するだけ）。
+    - `random`: 唯一の自然な受け手を持たないので`gensym`と同様に自由関数のまま。
+      `(random n)`は`[0, n)`の`i32`を返し、`n <= 0`はpanic。OS乱数源は使わず、
+      `std::sync::atomic::AtomicU64`によるプロセス全体共有のxorshift64*（`SystemTime`で
+      遅延シード）——暗号学的安全性は無く、`gensym`の「衝突耐性のみ」と同じ位置づけ。
+    - TDD: 新規`tests/numeric_test.rs`（20件。i64/f64の四則・比較、整数0除算のpanicと浮動小数
+      0除算のinf、expt/sqrt/floor/ceiling/round/truncate、random の範囲内/可変性/非正の境界
+      panic、f64でのoperator-as-value）。既存`tests/eval_test.rs`の`arithmetic`/`comparison`/
+      `builtin_as_value`/`dotimes`系がi32の回帰カバレッジを継続。miri green
+      （20/20、`MIRIFLAGS=-Zmiri-disable-isolation`が必要——`random`の`SystemTime::now()`が
+      デフォルトのmiri isolationでブロックされるため、デフォルト実行はエラーになる点に注意）。
 - **次の候補（eval 拡充）**:
   - 組み込み関数の拡張（型ごとの算術／i64・f64、文字列・ベクタ・Option/Result ライブラリ関数）。カタログは [cl-equivalence-catalog.md](cl-equivalence-catalog.md) §4。
   - typelisp ライブラリ関数（`length`/`append`/`reverse`/`map`/`filter`/`foldl`/`foldr` 等、`Sexpr` 上）。`append` 実装後、
@@ -281,6 +314,7 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
 cargo test                                   # core（LLVM 不要）
 cargo +nightly miri test --test mem_test     # GC/ポインタの UB・リーク検査
 cargo +nightly miri test --test read_test
+MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test --test numeric_test  # random が SystemTime を使うため isolation 解除が必要
 cargo run                                    # 最小 main（defun を read）
 ```
 旧実装参照: `git log backup/typed-lisp-m14` / 構文参照: `/Users/suzukijun/Program/Rust/macro-lisp`

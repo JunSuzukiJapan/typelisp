@@ -181,6 +181,16 @@ impl Interp {
                 // Otherwise a built-in operator (lives at the root, simple path).
                 None => RtValue::Builtin(path.local().to_string()),
             }),
+            Expr::MethodRef { type_name, method } => {
+                Ok(match self.methods.get(&(type_name.clone(), method.clone())) {
+                    Some(m) => RtValue::Closure(Rc::new(Closure {
+                        params: m.params.clone(),
+                        body: m.body.clone(),
+                        env: Vec::new(),
+                    })),
+                    None => RtValue::BuiltinMethod(type_name.clone(), method.clone()),
+                })
+            }
             Expr::If(c, then, els) => match self.eval(heap, c, env)? {
                 RtValue::Bool(true) => self.eval(heap, then, env),
                 RtValue::Bool(false) => self.eval(heap, els, env),
@@ -254,6 +264,12 @@ impl Interp {
                         Some(r) => r,
                         None => Err(EvalError::NoSuchFunction(name)),
                     },
+                    RtValue::BuiltinMethod(type_name, method) => {
+                        match eval_builtin_method(&type_name, &method, &argv) {
+                            Some(r) => r,
+                            None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
+                        }
+                    }
                     _ => Err(EvalError::Internal("apply of a non-function value".into())),
                 }
             }
@@ -450,15 +466,15 @@ impl Interp {
 
     /// Evaluate a built-in operator. Returns `None` if `name` is not a
     /// builtin, so the caller can fall through to a "no such function" error.
-    /// (MVP: i32 arithmetic/comparison only; integer divide/mod by zero
-    /// panics, matching Rust. `cons`/`car`/`cdr` operate on `Sexpr`;
-    /// `car`/`cdr` of a non-`Cons` `Sexpr` — including `Nil` — panics.
-    /// `gensym` returns a fresh `Sexpr::Sym` each call.)
+    /// (Arithmetic/comparison operators are *instance* methods, not free
+    /// functions — see `eval_builtin_method` — so they don't appear here.
+    /// `cons`/`car`/`cdr` operate on `Sexpr`; `car`/`cdr` of a non-`Cons`
+    /// `Sexpr` — including `Nil` — panics. `gensym` returns a fresh
+    /// `Sexpr::Sym` each call. `random` has no natural receiver to dispatch
+    /// on, so it stays a free function too.)
     fn eval_builtin(&self, heap: &mut Heap, name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
         match name {
-            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
-                eval_int_builtin(name, args)
-            }
+            "random" => Some(eval_random(args)),
             "gensym" => {
                 // A leading space mirrors the hidden-binding idiom already
                 // used for `dotimes`/`dolist`'s internal variables in the
@@ -698,7 +714,9 @@ const SEXPR_SYM: usize = 5;
 const SEXPR_STR: usize = 6;
 const SEXPR_CONS: usize = 7;
 
-/// Evaluate a built-in i32 arithmetic/comparison operator.
+/// Evaluate a built-in `i32`/`i64` arithmetic/comparison instance method
+/// (`registry::int_assoc`) — shared by both widths since `RtValue::Int`
+/// represents every integer type uniformly as `i64`.
 fn eval_int_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
     let (a, b) = match (args.first(), args.get(1)) {
         (Some(RtValue::Int(a)), Some(RtValue::Int(b))) => (*a, *b),
@@ -729,6 +747,84 @@ fn eval_int_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Eval
         _ => unreachable!(),
     };
     Some(Ok(v))
+}
+
+fn expect_float(v: &RtValue) -> Result<f64, EvalError> {
+    match v {
+        RtValue::Float(f) => Ok(*f),
+        other => Err(EvalError::Internal(format!("expected a Float, got {:?}", other))),
+    }
+}
+
+/// Evaluate a built-in `f64` arithmetic/comparison instance method
+/// (`registry::float_assoc`). Unlike [`eval_int_builtin`], `/`/`mod` never
+/// panic on a zero divisor — IEEE-754 division yields `inf`/`NaN` instead,
+/// the natural float semantics (no "can't express nonzero" gap to plug).
+fn eval_float_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+    let (a, b) = match (args.first(), args.get(1)) {
+        (Some(RtValue::Float(a)), Some(RtValue::Float(b))) => (*a, *b),
+        _ => return Some(Err(EvalError::Internal(format!("{}: expected two floats", name)))),
+    };
+    let v = match name {
+        "+" => RtValue::Float(a + b),
+        "-" => RtValue::Float(a - b),
+        "*" => RtValue::Float(a * b),
+        "/" => RtValue::Float(a / b),
+        "mod" => RtValue::Float(a % b),
+        "<" => RtValue::Bool(a < b),
+        "<=" => RtValue::Bool(a <= b),
+        ">" => RtValue::Bool(a > b),
+        ">=" => RtValue::Bool(a >= b),
+        "=" => RtValue::Bool(a == b),
+        "/=" => RtValue::Bool(a != b),
+        _ => unreachable!(),
+    };
+    Some(Ok(v))
+}
+
+fn float_unary(args: &[RtValue], f: fn(f64) -> f64) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Float(f(expect_float(&args[0])?)))
+}
+
+fn float_expt(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Float(expect_float(&args[0])?.powf(expect_float(&args[1])?)))
+}
+
+/// A small global xorshift64* generator backing `random`. Not
+/// cryptographically secure and not reseedable from typelisp — sufficient
+/// for an MVP `(random n)`, matching `gensym`'s "collision-resistant, not
+/// unforgeable" precedent for what a builtin without a real entropy/hygiene
+/// API can promise. Lazily seeded from the system clock on first use.
+/// Process-global (shared by every `Interp` instance and thread, e.g.
+/// parallel `cargo test` threads) rather than per-`Interp` — `Relaxed`
+/// atomics keep concurrent access memory-safe, at the cost of two threads
+/// occasionally racing to the same draw (no correctness issue for an MVP
+/// PRNG with no uniqueness guarantee to begin with).
+static RNG_STATE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn next_random_u64() -> u64 {
+    use std::sync::atomic::Ordering;
+    let mut x = RNG_STATE.load(Ordering::Relaxed);
+    if x == 0 {
+        x = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(1)
+            | 1;
+    }
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    RNG_STATE.store(x, Ordering::Relaxed);
+    x
+}
+
+fn eval_random(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let n = rt_i64(&args[0])?;
+    if n <= 0 {
+        return Err(EvalError::Panic(format!("random: bound must be positive, got {}", n)));
+    }
+    Ok(RtValue::Int((next_random_u64() % n as u64) as i64))
 }
 
 /// Built-in (Rust-implemented) instance/static methods for nominal types that
@@ -783,6 +879,28 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             "lt" => Some(char_lt(args)),
             "alpha?" => Some(expect_char(&args[0]).map(|c| RtValue::Bool(c.is_ascii_alphabetic()))),
             "digit?" => Some(expect_char(&args[0]).map(|c| RtValue::Bool(c.is_ascii_digit()))),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("i32") || *type_name == Path::root("i64") {
+        return match method {
+            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+                eval_int_builtin(method, args)
+            }
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("f64") {
+        return match method {
+            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+                eval_float_builtin(method, args)
+            }
+            "expt" => Some(float_expt(args)),
+            "sqrt" => Some(float_unary(args, f64::sqrt)),
+            "floor" => Some(float_unary(args, f64::floor)),
+            "ceiling" => Some(float_unary(args, f64::ceil)),
+            "round" => Some(float_unary(args, f64::round)),
+            "truncate" => Some(float_unary(args, f64::trunc)),
             _ => None,
         };
     }

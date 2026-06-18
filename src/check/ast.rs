@@ -29,6 +29,12 @@ pub enum Expr {
     Global(Path),
     /// A named free function used as a value (reified into a function value).
     FnRef(Path),
+    /// A named *instance* method used as a value, e.g. passing `+` (an `i32`
+    /// instance method, see `registry::int_assoc`) where a `(fn (i32 i32)
+    /// i32)` is expected — the receiver type is resolved from that expected
+    /// function type at the use site (`Checker::method_value`), since there's
+    /// no receiver expression to dispatch on.
+    MethodRef { type_name: Path, method: String },
     /// `(if cond then else)`.
     If(Box<Typed>, Box<Typed>, Box<Typed>),
     /// `(let ((name val)...) body...)` — bindings, then a body sequence.

@@ -148,31 +148,32 @@ impl Registry {
         // Primitive value types (i8..usize/f32/f64/bool/char/string) get a
         // method table too, so `defmethod` can target them (see
         // `check_defmethod`/`check_instance_method`, which map a primitive
-        // `Type` to its registry `Path` via `prim_type_path`). `string`/`char`
-        // additionally get a built-in method set (no `defmethod` body to
-        // check; the runtime implementation lives in `eval_builtin_method` in
-        // `crate::eval::interp`, the same metadata-only pattern as
-        // `hashtable_def`/`vector_def`) — every other primitive's table
-        // starts empty.
+        // `Type` to its registry `Path` via `prim_type_path`). `string`/`char`/
+        // `i32`/`i64`/`f64` additionally get a built-in method set (no
+        // `defmethod` body to check; the runtime implementation lives in
+        // `eval_builtin_method` in `crate::eval::interp`, the same
+        // metadata-only pattern as `hashtable_def`/`vector_def`) — every
+        // other primitive's table starts empty. Arithmetic/comparison
+        // operators are *instance* methods (not free functions) precisely so
+        // the same symbol (`+`, `<`, ...) can be overloaded per receiver
+        // type — `i32`/`i64` share one `+` symbol, and `f64` another,
+        // resolved by `check_instance_method` on the first argument's static
+        // type exactly like `(get h k)` resolves to `HashTable`'s `get`.
         for ty in crate::types::primitive_types() {
             let name = crate::types::prim_type_path(&ty).expect("primitive_types() are all prim_type_path-mappable");
             let assoc = match ty {
                 Type::Str => string_assoc(),
                 Type::Char => char_assoc(),
+                Type::I32 => int_assoc(Type::I32),
+                Type::I64 => int_assoc(Type::I64),
+                Type::F64 => float_assoc(),
                 _ => HashMap::new(),
             };
             root.add_type(AdtDef { name, params: Vec::new(), variants: Vec::new(), assoc, public: true });
         }
-        // Built-in i32 operators (MVP: i32 only; per-type/generic numeric ops
-        // come later).
-        let int_binop = || FnSig { params: vec![Type::I32, Type::I32], ret: Type::I32, public: true };
-        let int_cmp = || FnSig { params: vec![Type::I32, Type::I32], ret: Type::Bool, public: true };
-        for op in ["+", "-", "*", "/", "mod"] {
-            root.fns.insert(op.to_string(), int_binop());
-        }
-        for op in ["<", "<=", ">", ">=", "=", "/="] {
-            root.fns.insert(op.to_string(), int_cmp());
-        }
+        // `random`: the only numeric builtin with no natural receiver to
+        // dispatch on (like `gensym`), so it stays a free function.
+        root.fns.insert("random".to_string(), FnSig { params: vec![Type::I32], ret: Type::I32, public: true });
         // `cons`/`car`/`cdr` operate on `Sexpr` (the cons/nil duality at the
         // type level). `cons` is also reachable as the `Cons` constructor;
         // registering it as a function too lets it be used as a value
@@ -423,6 +424,49 @@ fn char_assoc() -> HashMap<String, AssocFn> {
     m.insert("lt".to_string(), method(vec![Type::Char, Type::Char], Type::Bool));
     m.insert("alpha?".to_string(), method(vec![Type::Char], Type::Bool));
     m.insert("digit?".to_string(), method(vec![Type::Char], Type::Bool));
+    m
+}
+
+/// Built-in arithmetic/comparison instance methods for an integer type
+/// (`i32`/`i64`): `+ - * / mod` (binary, same-type) and `< <= > >= = /=`
+/// (binary, `Bool`-valued). `/`/`mod` panic on a zero divisor at runtime
+/// (`crate::eval::interp::eval_int_builtin`) — the type system can't express
+/// "nonzero", the same precedent as `car`/`cdr` on a non-`Cons` `Sexpr`.
+/// Shared by both integer widths since the operation set and panic policy
+/// are identical; only the receiver/param `Type` differs.
+fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
+    let binop = || AssocFn { sig: FnSig { params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true }, instance: true };
+    let cmp = || AssocFn { sig: FnSig { params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true }, instance: true };
+    let mut m = HashMap::new();
+    for op in ["+", "-", "*", "/", "mod"] {
+        m.insert(op.to_string(), binop());
+    }
+    for op in ["<", "<=", ">", ">=", "=", "/="] {
+        m.insert(op.to_string(), cmp());
+    }
+    m
+}
+
+/// Built-in arithmetic/comparison/transcendental instance methods for `f64`:
+/// the same binary operator set as [`int_assoc`] (unlike integer division,
+/// `/`/`mod` follow IEEE-754 — a zero divisor yields `inf`/`NaN`, no panic),
+/// plus `expt`(binary, `f64::powf`) and the unary rounding/root family
+/// `sqrt`/`floor`/`ceiling`/`round`/`truncate`.
+fn float_assoc() -> HashMap<String, AssocFn> {
+    let binop = || AssocFn { sig: FnSig { params: vec![Type::F64, Type::F64], ret: Type::F64, public: true }, instance: true };
+    let cmp = || AssocFn { sig: FnSig { params: vec![Type::F64, Type::F64], ret: Type::Bool, public: true }, instance: true };
+    let unary = || AssocFn { sig: FnSig { params: vec![Type::F64], ret: Type::F64, public: true }, instance: true };
+    let mut m = HashMap::new();
+    for op in ["+", "-", "*", "/", "mod"] {
+        m.insert(op.to_string(), binop());
+    }
+    for op in ["<", "<=", ">", ">=", "=", "/="] {
+        m.insert(op.to_string(), cmp());
+    }
+    m.insert("expt".to_string(), binop());
+    for op in ["sqrt", "floor", "ceiling", "round", "truncate"] {
+        m.insert(op.to_string(), unary());
+    }
     m
 }
 
