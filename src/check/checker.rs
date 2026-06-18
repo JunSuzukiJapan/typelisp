@@ -750,7 +750,7 @@ impl Checker {
                     for ctor in ["none", "nil"] {
                         if let Some((adt, idx)) = self.resolve_ctor(ctor) {
                             if *n == adt {
-                                return self.check_construct(heap, interp, env, &adt, idx, &[], expected);
+                                return self.check_construct(heap, interp, env, (&adt, idx), &[], expected);
                             }
                         }
                     }
@@ -906,7 +906,7 @@ impl Checker {
         // Constructor, then free function, then a global function value, then
         // instance-method dispatch.
         if let Some((adt, idx)) = self.resolve_ctor(&head) {
-            self.check_construct(heap, interp, env, &adt, idx, args, expected)
+            self.check_construct(heap, interp, env, (&adt, idx), args, expected)
         } else if let Some(fq) = self.resolve_fn(&head) {
             self.check_call(heap, interp, env, &fq, args)
         } else if let Some((path, vi)) = self.resolve_global(&head) {
@@ -997,7 +997,7 @@ impl Checker {
             if let Some(type_fq) = self.resolve_type_path(type_segs) {
                 let def = self.reg.type_def(&type_fq).expect("resolved type exists");
                 if let Some(variant) = def.variants.iter().position(|v| &v.name == member) {
-                    return self.check_construct(heap, interp, env, &type_fq, variant, args, expected);
+                    return self.check_construct(heap, interp, env, (&type_fq, variant), args, expected);
                 }
                 if let Some(af) = def.assoc.get(member) {
                     if af.instance {
@@ -1006,7 +1006,7 @@ impl Checker {
                             type_fq, member, member
                         )));
                     }
-                    return self.check_assoc_call(heap, interp, env, &type_fq, member, None, args);
+                    return self.check_assoc_call(heap, interp, env, (&type_fq, member.as_str()), None, args);
                 }
             }
         }
@@ -1036,8 +1036,7 @@ impl Checker {
                             heap,
                             interp,
                             env,
-                            &type_fq,
-                            method,
+                            (&type_fq, method),
                             Some(recv),
                             &args[1..],
                         );
@@ -1049,17 +1048,19 @@ impl Checker {
     }
 
     /// Check a call to a type-associated function. For an instance method the
-    /// already-checked `receiver` fills the first parameter slot.
+    /// already-checked `receiver` fills the first parameter slot. `assoc` is
+    /// `(type path, method name)`, bundled into one parameter to keep the
+    /// arity down.
     fn check_assoc_call(
         &self,
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        type_fq: &Path,
-        method: &str,
+        assoc: (&Path, &str),
         receiver: Option<Typed>,
         args: &[Value],
     ) -> Result<Typed, Error> {
+        let (type_fq, method) = assoc;
         let instance = receiver.is_some();
         let af = self.reg.type_def(type_fq).expect("assoc type exists").assoc[method].clone();
         let offset = if instance { 1 } else { 0 };
@@ -1745,16 +1746,18 @@ impl Checker {
         Ok(Typed { expr: Expr::Call(name.clone(), typed), ty: sig.ret })
     }
 
+    /// `ctor` is `(type path, variant index)` — the same pair [`Self::resolve_ctor`]
+    /// returns, bundled into one parameter to keep the arity down.
     fn check_construct(
         &self,
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        adt_name: &Path,
-        variant: usize,
+        ctor: (&Path, usize),
         args: &[Value],
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
+        let (adt_name, variant) = ctor;
         let def = self.reg.type_def(adt_name).expect("indexed adt exists").clone();
         let fields = &def.variants[variant].fields;
         if args.len() != fields.len() {

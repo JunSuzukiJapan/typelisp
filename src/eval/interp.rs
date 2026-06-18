@@ -315,55 +315,8 @@ impl Interp {
                 // `alloc_quoted`'s recursion — see its doc comment for why)
                 // covers every *other* live slot for the whole build.
                 self.sync_roots(heap);
-                let v = self.alloc_quoted(heap, qs)?;
+                let v = alloc_quoted(heap, qs)?;
                 Ok(RtValue::Sexpr(v))
-            }
-        }
-    }
-
-    /// Allocate a [`QuotedSexpr`] literal into the GC-managed cons heap, fresh
-    /// on every call (see [`Expr::Quote`] for why the literal is kept as an
-    /// owned tree rather than a live heap pointer). Every intermediate cons
-    /// cell built along the way is rooted via plain `push_root`/`pop_root`
-    /// (not `slot`/`sync_roots`) for exactly as long as it takes to link it
-    /// into its parent.
-    ///
-    /// Deliberately does **not** call `sync_roots` itself (unlike
-    /// `construct_sexpr`, which only ever makes one `cons` call per
-    /// invocation): `sync_roots` pops exactly as many roots as *it* last
-    /// pushed, assuming nothing else touched the stack in between. This
-    /// recursion pushes its own ad-hoc roots (`cv`/`dv` below) between
-    /// `cons` calls, so a `sync_roots` call nested in here would pop those
-    /// instead of its own bookkeeping — corrupting both. The caller
-    /// ([`Self::eval`]'s `Expr::Quote` arm) calls `sync_roots` exactly once,
-    /// before any of this recursion starts; since no slot is created or
-    /// destroyed while building a literal, that one snapshot stays valid (and
-    /// undisturbed, since every push here is popped before returning) for the
-    /// whole recursive build.
-    fn alloc_quoted(&self, heap: &mut Heap, qs: &QuotedSexpr) -> Result<Value, EvalError> {
-        match qs {
-            QuotedSexpr::Nil => Ok(Value::Empty),
-            QuotedSexpr::Int(n) => Ok(Value::Int(*n)),
-            QuotedSexpr::Float(f) => Ok(Value::Float(*f)),
-            QuotedSexpr::Char(c) => Ok(Value::Char(*c)),
-            QuotedSexpr::Bool(b) => Ok(Value::Bool(*b)),
-            QuotedSexpr::Sym(s) => Ok(heap.intern_symbol(s)),
-            QuotedSexpr::Str(s) => Ok(heap.alloc_string(s.clone())),
-            QuotedSexpr::Cons(car, cdr) => {
-                let cv = self.alloc_quoted(heap, car)?;
-                heap.push_root(cv);
-                let dv = match self.alloc_quoted(heap, cdr) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        heap.pop_root();
-                        return Err(e);
-                    }
-                };
-                heap.push_root(dv);
-                let result = heap.cons(cv, dv).map_err(|e| EvalError::Panic(e.to_string()));
-                heap.pop_root(); // dv
-                heap.pop_root(); // cv
-                result
             }
         }
     }
@@ -606,6 +559,53 @@ impl Default for Interp {
 
 fn env_get<'a>(env: &'a Env, name: &str) -> Option<&'a Slot> {
     env.iter().rev().find(|(n, _)| n == name).map(|(_, s)| s)
+}
+
+/// Allocate a [`QuotedSexpr`] literal into the GC-managed cons heap, fresh on
+/// every call (see [`Expr::Quote`] for why the literal is kept as an owned
+/// tree rather than a live heap pointer). Every intermediate cons cell built
+/// along the way is rooted via plain `push_root`/`pop_root` (not
+/// `slot`/`sync_roots`) for exactly as long as it takes to link it into its
+/// parent. A free function, not an `Interp` method — it never touches `self`,
+/// only recurses on itself.
+///
+/// Deliberately does **not** call `sync_roots` itself (unlike
+/// `construct_sexpr`, which only ever makes one `cons` call per invocation):
+/// `sync_roots` pops exactly as many roots as *it* last pushed, assuming
+/// nothing else touched the stack in between. This recursion pushes its own
+/// ad-hoc roots (`cv`/`dv` below) between `cons` calls, so a `sync_roots`
+/// call nested in here would pop those instead of its own bookkeeping —
+/// corrupting both. The caller ([`Interp::eval`]'s `Expr::Quote` arm) calls
+/// `sync_roots` exactly once, before any of this recursion starts; since no
+/// slot is created or destroyed while building a literal, that one snapshot
+/// stays valid (and undisturbed, since every push here is popped before
+/// returning) for the whole recursive build.
+fn alloc_quoted(heap: &mut Heap, qs: &QuotedSexpr) -> Result<Value, EvalError> {
+    match qs {
+        QuotedSexpr::Nil => Ok(Value::Empty),
+        QuotedSexpr::Int(n) => Ok(Value::Int(*n)),
+        QuotedSexpr::Float(f) => Ok(Value::Float(*f)),
+        QuotedSexpr::Char(c) => Ok(Value::Char(*c)),
+        QuotedSexpr::Bool(b) => Ok(Value::Bool(*b)),
+        QuotedSexpr::Sym(s) => Ok(heap.intern_symbol(s)),
+        QuotedSexpr::Str(s) => Ok(heap.alloc_string(s.clone())),
+        QuotedSexpr::Cons(car, cdr) => {
+            let cv = alloc_quoted(heap, car)?;
+            heap.push_root(cv);
+            let dv = match alloc_quoted(heap, cdr) {
+                Ok(v) => v,
+                Err(e) => {
+                    heap.pop_root();
+                    return Err(e);
+                }
+            };
+            heap.push_root(dv);
+            let result = heap.cons(cv, dv).map_err(|e| EvalError::Panic(e.to_string()));
+            heap.pop_root(); // dv
+            heap.pop_root(); // cv
+            result
+        }
+    }
 }
 
 /// Whether `type_name` is the built-in `Sexpr` type, whose values are
