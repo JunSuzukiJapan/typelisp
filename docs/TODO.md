@@ -21,7 +21,7 @@
 | （未コミット） | エラー処理（Result/Error/Never/`panic`）+ 名前空間（`::`→`Value::Path`、module/use、Rust 流の型/メソッド: defstruct/defmethod、インスタンス・static ディスパッチ） |
 
 **テスト**: `cargo test` で mem 28 / read 21 / type 9 / check 50 / error 10 / namespace 25 / eval 58 / macro 25 /
-hashtable 12 / vector 15 / string 24 / numeric 20 / prelude 22 = 319 件 green、警告0（clippy 含む）。
+hashtable 12 / vector 15 / string 24 / numeric 20 / prelude 53 = 350 件 green、警告0（clippy 含む）。
 旧来あった3件の既存警告（`check_assoc_call`/`check_construct` の too_many_arguments、`alloc_quoted` の
 only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(adt_name, variant)` をタプル1引数に
 まとめてアリティを減らし、後者は `self` を使わず再帰のみに使っていたため `Interp` のメソッドから
@@ -333,14 +333,36 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       sexpr atom/sexpr cons-is-identity-not-structural）、consp/null/atomの基本ケース、equalの
       再帰比較・長さ不一致・文字列内容比較・型不一致エラー）。既存319件への影響無し
       （リグレッション無し、新規追加のみ）。
+  - 実装済み（4r）: TypeLispライブラリ関数 ステップ7b（`Sexpr`リスト操作一式。`prelude.rs`の
+    `SOURCE`に追記、新規Rust側コードは無し——preludeローダーがそのまま使えた）。
+    `length`/`append`/`reverse`(`reverse-onto`補助)/`nthcdr`/`nth`/`elt`/`last`/`butlast`/
+    `take`/`subseq`/`copy-list`/`member`/`find-if`/`every`/`some?`/`count-if`/`count`/
+    `position-if`(`position-if-from`補助)/`position`/`remove-if`/`remove-if-not`/`remove`/
+    `map`/`filter`/`foldl`/`foldr`（29関数）。
+    - **設計判断**: `Sexpr`は単一の具象型なので`Vector<T>`/`HashTable<K,V>`と違いジェネリクスは
+      一切不要（リストはすでに`Sexpr`そのもの）。アイテム指定版（`member`/`remove`/`count`/
+      `position`）は`eq`で比較（CL既定の`eql`相当）、`-if`版は`(fn (Sexpr) bool)`の述語を取る。
+      `defun`は`defmacro`と同様に前方参照不可・自己再帰のみ可能なため、依存される補助関数を
+      `SOURCE`内で先に定義する順序に注意した。
+    - **命名衝突の発見**: CL流に`some`という名前にしたところ、`Option`の`Some`構成子と
+      （シンボルが大文字小文字無視のため）名前が一致し、コンストラクタ解決が自由関数解決より
+      優先されるため`(some pred lst)`が常に`Option::Some`を構築しようとしてエラーになった。
+      `some?`にリネームして解決（既存の`alpha?`/`digit?`と同じ`?`接尾辞の述語命名規則）。
+    - **`Sexpr`は任意の値を表すため「ちゃんとしたリストである」という制約を型で表現できない** ——
+      `Cons`/`Nil`しか想定しない再帰関数はすべて`_`のワイルドカードアームを追加し、それ以外の
+      バリアント（Int/Float/Char/Bool/Sym/Str）が来たら`panic`する設計にした（`car`/`cdr`の
+      非Consでpanicする既存方針と統一）。最初の実装ではワイルドカードを忘れて
+      `non-exhaustive match`エラーになった——TDDで即座に検出。
+    - TDD: `tests/prelude_test.rs`に31件追加（53件中）。各関数の基本動作、空リスト/範囲外の
+      境界、非リストへのpanic、`foldl`/`foldr`の畳み込み方向の違い（ドット対チェーンで検証）。
+      既存350件への影響無し。
 - **次の候補（eval 拡充）**:
-  - TypeLispライブラリ関数 ステップ7b以降（prelude.rsに追記していく）: シーケンス操作
-    （`remove`/`remove-if`/`count`/`position`/`copy-list`/`nthcdr`/`butlast`/`elt`/`subseq`）、
-    `length`/`append`/`reverse`/`nth`/`last`/`map`/`filter`/`foldl`/`foldr`/`member`/`find`/
-    `every`/`some`、`nconc`/`nreverse`（`set-car`/`set-cdr`が前提、未実装）、`sort`、
-    `gcd`/`lcm`/`signum`、Option/Result補助（`unwrap`/`unwrap-or`/`is-some`/`map-option`等）、
-    高階（`identity`/`const`/`compose`/`flip`）、数値補助（`min`/`max`/`sum`/`range`/`even?`等）。
-    `append`実装後、マクロの`,@`（unquote-splicing）を追加できる。
+  - TypeLispライブラリ関数 ステップ7c以降（prelude.rsに追記していく）: `sort`、
+    `gcd`/`lcm`/`signum`、`nconc`/`nreverse`（`set-car`/`set-cdr`が前提、未実装）、`assoc`、
+    Option/Result補助（`unwrap`/`unwrap-or`/`is-some`/`map-option`等）、
+    高階（`identity`/`const`/`compose`/`flip`——`defun`にジェネリック型パラメータが無いため
+    要設計）、数値補助（`min`/`max`/`sum`/`range`/`even?`等）。
+    `append`実装済みなので、マクロの`,@`（unquote-splicing）を追加できる。
   - `case`/`do`/`doiter`/`while-let`/`the` は未実装（`defmacro` の `&rest` は実装済みなので前提は満たした。
     `case` はさらに型ごとの `eq` が前提）。`defun`/`lambda` の型付き `&rest`／`apply` も未実装。
 - **ステップ5: compile**（明示 `compile`/`compile-file`。inkwell 再追加・LLVM コード生成。feature gate）。
