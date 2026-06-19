@@ -50,6 +50,9 @@ use crate::{Checker, Heap, Interp, Reader};
 ///
 /// `until`/`while-let` (roadmap step 8b, catalog §1.1) are the first real
 /// use of `,@` (unquote-splicing, step 8a) — see their own comments below.
+/// `case` (step 8c) additionally builds its expansion dynamically (mapping
+/// over `&rest clauses`) rather than from one fixed template — see its own
+/// comment for the key-quoting design decision this forces.
 pub const SOURCE: &str = r#"
 (defun consp ((s Sexpr)) bool (match s ((Cons _ _) true) (_ false)))
 (defun null ((s Sexpr)) bool (match s ((Nil) true) (_ false)))
@@ -352,6 +355,33 @@ pub const SOURCE: &str = r#"
   (let ((pattern (car binding))
         (val (car (cdr binding))))
     `(loop (match ,val (,pattern ,@body) (_ (break))))))
+
+;; `case` (roadmap step 8c, catalog §1.1): `(case expr (key1 body1...)
+;; (key2 body2...) ... (else default...))` expands to `(cond ((eq tmp key1)
+;; body1...) ((eq tmp key2) body2...) ... (else default...))`, where `tmp` is
+;; a `gensym`-fresh binding for `expr`'s value — `expr` is evaluated exactly
+;; once (matching CL's `case`), not once per clause, and `gensym` keeps the
+;; binding from capturing/being captured by a same-named variable at the use
+;; site (this macro's only hygiene concern, since every other name it
+;; introduces — `cond`/`eq`/`let` — is a keyword or builtin, not a binding
+;; the call site could collide with).
+;;
+;; Unlike CL, a clause's `key` is **not** implicitly quoted — `case` is a
+;; `defmacro`, which only ever sees `clauses` as unevaluated `Sexpr` forms
+;; with no static type (typelisp has no dynamic `eql`-across-any-type the
+;; way CL does), so there's no way to know at expansion time whether `expr`
+;; is e.g. `i32` (where `key` must stay a bare literal like `1`) or `Sexpr`
+;; (where a symbol key needs an explicit `'sym` — written by the caller,
+;; same as any other quoted symbol). This means `(case x (1 ...))` works
+;; directly, but a symbol-keyed clause must be written `(case x ('a ...))`.
+(defmacro case (expr &rest clauses)
+  (let ((tmp (gensym)))
+    `(let ((,tmp ,expr))
+       (cond ,@(map (lambda ((c Sexpr)) Sexpr
+                       (if (eq (car c) (quote else))
+                           c
+                           (cons (list (quote eq) tmp (car c)) (cdr c))))
+                     clauses)))))
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,

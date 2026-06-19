@@ -738,3 +738,35 @@ fn while_let_does_not_run_the_body_when_the_pattern_never_matches() {
     "#;
     assert_eq!(eval_ok(src), RtValue::Bool(false));
 }
+
+// ---- case (step 8c) ----------------------------------------------------------
+
+#[test]
+fn case_matches_the_first_equal_clause() {
+    assert_eq!(eval_ok("(case 1 (1 100) (2 200) (else 999))"), RtValue::Int(100));
+}
+
+#[test]
+fn case_matches_a_later_clause() {
+    assert_eq!(eval_ok("(case 2 (1 100) (2 200) (else 999))"), RtValue::Int(200));
+}
+
+#[test]
+fn case_falls_through_to_else_when_nothing_matches() {
+    assert_eq!(eval_ok("(case 3 (1 100) (2 200) (else 999))"), RtValue::Int(999));
+}
+
+#[test]
+fn case_matches_explicitly_quoted_symbol_keys() {
+    assert_eq!(eval_ok("(case (quote b) ('a 1) ('b 2) (else 0))"), RtValue::Int(2));
+}
+
+#[test]
+fn case_evaluates_its_expr_exactly_once() {
+    let src = r#"
+        (defvar calls 0)
+        (defun next-call () i32 (progn (setf calls (+ calls 1)) calls))
+        (progn (case (next-call) (1 100) (else 0)) calls)
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Int(1));
+}
