@@ -550,3 +550,84 @@ fn flip_swaps_the_argument_order() {
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(7)); // sub(10, 3) = 7
 }
+
+// ---- remaining numeric/list helpers (step 7c) -------------------------------
+
+#[test]
+fn abs_negates_only_negative_numbers() {
+    assert_eq!(eval_ok("(abs (- 0 5))"), RtValue::Int(5));
+    assert_eq!(eval_ok("(abs 5)"), RtValue::Int(5));
+    assert_eq!(eval_ok("(abs 0)"), RtValue::Int(0));
+}
+
+#[test]
+fn gcd_of_coprime_numbers_is_one() {
+    assert_eq!(eval_ok("(gcd 12 18)"), RtValue::Int(6));
+    assert_eq!(eval_ok("(gcd 7 13)"), RtValue::Int(1));
+}
+
+#[test]
+fn gcd_ignores_argument_sign() {
+    assert_eq!(eval_ok("(gcd -12 18)"), RtValue::Int(6));
+    assert_eq!(eval_ok("(gcd 12 -18)"), RtValue::Int(6));
+}
+
+#[test]
+fn gcd_with_zero_is_the_other_argument() {
+    assert_eq!(eval_ok("(gcd 0 5)"), RtValue::Int(5));
+}
+
+#[test]
+fn lcm_of_four_and_six_is_twelve() {
+    assert_eq!(eval_ok("(lcm 4 6)"), RtValue::Int(12));
+}
+
+#[test]
+fn lcm_with_zero_is_zero() {
+    assert_eq!(eval_ok("(lcm 0 5)"), RtValue::Int(0));
+}
+
+#[test]
+fn signum_classifies_positive_negative_and_zero() {
+    assert_eq!(eval_ok("(signum 5)"), RtValue::Int(1));
+    assert_eq!(eval_ok("(signum -5)"), RtValue::Int(-1));
+    assert_eq!(eval_ok("(signum 0)"), RtValue::Int(0));
+}
+
+/// `(< x y)` over `Sexpr` integers, for use as `sort`'s comparator below —
+/// `Sexpr` itself has no `<` (only `eq`), so every test supplies its own.
+const SEXPR_INT_LT: &str = r#"
+    (defun sexpr-lt ((a Sexpr) (b Sexpr)) bool
+      (match a ((Int x) (match b ((Int y) (< x y)) (_ false))) (_ false)))
+"#;
+
+#[test]
+fn sort_orders_a_list_ascending() {
+    let src = format!("{} (equal (sort sexpr-lt (quote (3 1 2))) (quote (1 2 3)))", SEXPR_INT_LT);
+    eval_true(&src);
+}
+
+#[test]
+fn sort_of_an_empty_list_is_empty() {
+    let src = format!("{} (null (sort sexpr-lt (quote ())))", SEXPR_INT_LT);
+    eval_true(&src);
+}
+
+#[test]
+fn sort_keeps_duplicate_elements() {
+    let src = format!(
+        "{} (equal (sort sexpr-lt (quote (3 1 2 1 5 1))) (quote (1 1 1 2 3 5)))",
+        SEXPR_INT_LT
+    );
+    eval_true(&src);
+}
+
+#[test]
+fn assoc_finds_the_matching_pair() {
+    eval_true("(equal (assoc (quote b) (quote ((a . 1) (b . 2)))) (quote (b . 2)))");
+}
+
+#[test]
+fn assoc_returns_nil_when_absent() {
+    eval_true("(null (assoc (quote z) (quote ((a . 1) (b . 2)))))");
+}

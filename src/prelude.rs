@@ -42,8 +42,11 @@ use crate::{Checker, Heap, Interp, Reader};
 /// comment above their definitions below for why. `identity`/`const`/
 /// `compose`/`flip` are generic `defun`s — see the comment above their
 /// definitions for why those, unlike the accessors, fit `defun` rather than
-/// `defmethod`. Still deferred to a later step (7c): `sort`, `gcd`/`lcm`/
-/// `signum`, `assoc`, and other numeric helpers (`min`/`max`/range, etc).
+/// `defmethod`. `gcd`/`lcm`/`signum`/`abs` (catalog §2.2f), `sort` (§2.2c,
+/// `Sexpr` lists only — the `Vector<T>` variant is deferred, see its own
+/// comment below), and `assoc` (§4.2's list section) round out step 7c —
+/// `min`/`max`/`range` are not in the catalog, so they're left undone rather
+/// than guessed at.
 pub const SOURCE: &str = r#"
 (defun consp ((s Sexpr)) bool (match s ((Cons _ _) true) (_ false)))
 (defun null ((s Sexpr)) bool (match s ((Nil) true) (_ false)))
@@ -262,6 +265,50 @@ pub const SOURCE: &str = r#"
   (lambda ((x A)) C (f (g x))))
 (defun (flip A B C) ((f (fn (A B) C))) (fn (B A) C)
   (lambda ((y B) (x A)) C (f x y)))
+
+;; Remaining numeric helpers (roadmap step 7c, catalog §2.2f): `gcd`/`lcm` via
+;; Euclid's algorithm, `signum` via comparisons. Not generic — `<`/`mod` are
+;; `i32` instance methods resolved at check time from a *concrete* receiver
+;; type, so a generic `defun`'s unresolved type variable `T` can't reach them
+;; (no trait-bound mechanism exists to require "T has `<`"); i32-only is the
+;; same scope the catalog gives these.
+(defun abs ((x i32)) i32 (if (< x 0) (- 0 x) x))
+(defun gcd-pos ((a i32) (b i32)) i32 (if (= b 0) a (gcd-pos b (mod a b))))
+(defun gcd ((a i32) (b i32)) i32 (gcd-pos (abs a) (abs b)))
+(defun lcm ((a i32) (b i32)) i32
+  (if (or (= a 0) (= b 0)) 0 (/ (abs (* a b)) (gcd a b))))
+(defun signum ((x i32)) i32 (if (> x 0) 1 (if (< x 0) -1 0)))
+
+;; `sort` (catalog §2.2c): insertion sort over `Sexpr` lists, taking a
+;; comparator `(fn (Sexpr Sexpr) bool)` (CL's default `<`-style predicate).
+;; Non-destructive (builds a new list), unlike `nconc`/`nreverse` above —
+;; there's no existing-cons-cell structure to reuse for a sorted result.
+;; The catalog's `Vector<T>` sort variant is deferred: the catalog itself
+;; flags a name-collision risk (`sort` as a free function would shadow a
+;; same-named `Vector<T>` instance method per `check_list`'s free-function-
+;; first dispatch), unresolved here.
+(defun insert-sorted ((cmp (fn (Sexpr Sexpr) bool)) (item Sexpr) (lst Sexpr)) Sexpr
+  (match lst
+    ((Nil) (cons item ()))
+    ((Cons h t) (if (cmp item h) (cons item lst) (cons h (insert-sorted cmp item t))))
+    (_ (panic "sort: not a proper list"))))
+(defun sort ((cmp (fn (Sexpr Sexpr) bool)) (lst Sexpr)) Sexpr
+  (match lst
+    ((Nil) ())
+    ((Cons h t) (insert-sorted cmp h (sort cmp t)))
+    (_ (panic "sort: not a proper list"))))
+
+;; `assoc` (catalog §4.2's list section): search an alist (a list of
+;; `(key . value)` cons cells) for the first pair whose `car` is `eq` to
+;; `key`. Returns the pair itself (CL semantics) or `()` if absent — `Sexpr`,
+;; not `Option<Sexpr>`, matching `member`'s convention above (`Sexpr` already
+;; has a nil-like absent value, so wrapping it adds nothing — `position`
+;; wraps in `Option<i32>` only because `i32` has no such value).
+(defun assoc ((key Sexpr) (alist Sexpr)) Sexpr
+  (match alist
+    ((Nil) ())
+    ((Cons pair rest) (if (eq key (car pair)) pair (assoc key rest)))
+    (_ (panic "assoc: not a proper list"))))
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,
