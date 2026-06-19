@@ -283,10 +283,11 @@ pub const SOURCE: &str = r#"
 ;; comparator `(fn (Sexpr Sexpr) bool)` (CL's default `<`-style predicate).
 ;; Non-destructive (builds a new list), unlike `nconc`/`nreverse` above —
 ;; there's no existing-cons-cell structure to reuse for a sorted result.
-;; The catalog's `Vector<T>` sort variant is deferred: the catalog itself
-;; flags a name-collision risk (`sort` as a free function would shadow a
-;; same-named `Vector<T>` instance method per `check_list`'s free-function-
-;; first dispatch), unresolved here.
+;; The catalog's `Vector<T>` sort variant is still not implemented here, but
+;; the name-collision risk it flagged no longer applies: `check_list` now
+;; tries a receiver-typed instance method before this free function (see
+;; `Checker::try_instance_method`), so a future `Vector<T>` `sort` method
+;; could share this name safely.
 (defun insert-sorted ((cmp (fn (Sexpr Sexpr) bool)) (item Sexpr) (lst Sexpr)) Sexpr
   (match lst
     ((Nil) (cons item ()))
