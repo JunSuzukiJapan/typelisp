@@ -770,3 +770,33 @@ fn case_evaluates_its_expr_exactly_once() {
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(1));
 }
+
+// ---- do (step 8d) -------------------------------------------------------------
+
+#[test]
+fn do_runs_its_body_and_steps_a_single_binding() {
+    let src = "(let ((acc 0)) (do ((i 0 (+ i 1))) ((= i 5) acc) (setf acc (+ acc i))) acc)";
+    // 0 + 1 + 2 + 3 + 4 = 10
+    assert_eq!(eval_ok(src), RtValue::Int(10));
+}
+
+#[test]
+fn do_returns_the_result_forms_value() {
+    assert_eq!(eval_ok("(do ((i 0 (+ i 1))) ((= i 3) (* i 100)) ())"), RtValue::Int(300));
+}
+
+#[test]
+fn do_does_not_run_the_body_when_the_test_is_already_true() {
+    let src = "(let ((ran false)) (do ((i 0 (+ i 1))) ((= i 0) 0) (setf ran true)) ran)";
+    assert_eq!(eval_ok(src), RtValue::Bool(false));
+}
+
+#[test]
+fn do_steps_multiple_bindings_in_parallel() {
+    // Fibonacci via two parallel bindings: each step must see the *old*
+    // values of both `a` and `b`, not a half-updated state — `b`'s step
+    // (`(+ a b)`) needs `a`'s pre-step value even though `a` is listed
+    // first and could otherwise have already been reassigned.
+    let src = "(do ((a 0 b) (b 1 (+ a b)) (n 0 (+ n 1))) ((= n 6) a) ())";
+    assert_eq!(eval_ok(src), RtValue::Int(8));
+}

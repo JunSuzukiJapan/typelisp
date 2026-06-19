@@ -52,7 +52,9 @@ use crate::{Checker, Heap, Interp, Reader};
 /// use of `,@` (unquote-splicing, step 8a) — see their own comments below.
 /// `case` (step 8c) additionally builds its expansion dynamically (mapping
 /// over `&rest clauses`) rather than from one fixed template — see its own
-/// comment for the key-quoting design decision this forces.
+/// comment for the key-quoting design decision this forces. `do` (step 8d)
+/// completes the roadmap's step-8 macro set, parallel-stepping multiple
+/// bindings via `gensym`-fresh temporaries (see its own comment).
 pub const SOURCE: &str = r#"
 (defun consp ((s Sexpr)) bool (match s ((Cons _ _) true) (_ false)))
 (defun null ((s Sexpr)) bool (match s ((Nil) true) (_ false)))
@@ -382,6 +384,40 @@ pub const SOURCE: &str = r#"
                            c
                            (cons (list (quote eq) tmp (car c)) (cdr c))))
                      clauses)))))
+
+;; `do` (roadmap step 8d, catalog §1.1): `(do ((var1 init1 step1)
+;; (var2 init2 step2) ...) (test result...) body...)`. Each binding's `step`
+;; is required (no CL-style "omit step to leave the variable unstepped" —
+;; not in the catalog, so left unimplemented rather than guessed at).
+;;
+;; Expands to `(let ((var1 init1) (var2 init2) ...) (while (not test) body...
+;; <parallel step update>) result...)`. The step update must be *parallel*
+;; (CL semantics: every step expression is evaluated against the *old*
+;; values before any variable is updated — `(do ((a 0 b) (b 1 (+ a b))) ...)`
+;; must see `b`'s old value when computing the new `a`, not the just-updated
+;; one), so each step's value is first evaluated into a `gensym`-fresh
+;; temporary, and only then assigned back with `setf` — a sequential
+;; `(setf var1 step1) (setf var2 step2)` would let `step2` observe `var1`'s
+;; *new* value, breaking parallelism.
+;;
+;; Building this means mapping over `bindings` three different ways (the
+;; `(var init)` pairs for the `let`, the `(temp step)` pairs for computing
+;; new values, and the `(var temp)` pairs for assigning them back) — `map`
+;; only takes one list, so rather than three separate `gensym` calls per
+;; binding needing to line up across three passes, `temps` is computed once
+;; up front as `((temp1 var1 step1) (temp2 var2 step2) ...)` and each later
+;; pass just projects the two fields it needs out of that same triple.
+(defmacro do (bindings test-result &rest body)
+  (let ((test (car test-result))
+        (result (cdr test-result))
+        (temps (map (lambda ((b Sexpr)) Sexpr (list (gensym) (car b) (car (cdr (cdr b)))))
+                     bindings)))
+    `(let ,(map (lambda ((b Sexpr)) Sexpr (list (car b) (car (cdr b)))) bindings)
+       (while (not ,test)
+         ,@body
+         (let ,(map (lambda ((tr Sexpr)) Sexpr (list (car tr) (car (cdr (cdr tr))))) temps)
+           ,@(map (lambda ((tr Sexpr)) Sexpr (list (quote setf) (car (cdr tr)) (car tr))) temps)))
+       ,@result)))
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,
