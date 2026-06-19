@@ -39,11 +39,11 @@ use crate::{Checker, Heap, Interp, Reader};
 ///
 /// `Option<T>`/`Result<T,E>` accessors (`unwrap`/`unwrap-or`/`is-some?`/
 /// `is-none?`/`is-ok?`/`is-err?`) are `defmethod`, not `defun` — see the
-/// comment above their definitions below for why. Still deferred to a later
-/// step (7c): `sort`, `gcd`/`lcm`/`signum`, `assoc`, and higher-order helpers
-/// (`identity`/`compose`/`flip`, now buildable as generic `defun`s — see
-/// `Checker::check_call`'s `unify`/`subst_apply` integration — just not
-/// written yet).
+/// comment above their definitions below for why. `identity`/`const`/
+/// `compose`/`flip` are generic `defun`s — see the comment above their
+/// definitions for why those, unlike the accessors, fit `defun` rather than
+/// `defmethod`. Still deferred to a later step (7c): `sort`, `gcd`/`lcm`/
+/// `signum`, `assoc`, and other numeric helpers (`min`/`max`/range, etc).
 pub const SOURCE: &str = r#"
 (defun consp ((s Sexpr)) bool (match s ((Cons _ _) true) (_ false)))
 (defun null ((s Sexpr)) bool (match s ((Nil) true) (_ false)))
@@ -249,6 +249,19 @@ pub const SOURCE: &str = r#"
   (match self ((ok _) true) ((err _) false)))
 (defmethod is-err? ((self Result<T,E>)) bool
   (not (is-ok? self)))
+
+;; Higher-order helpers (roadmap step 7c) — the motivating use case for
+;; `defun`'s generic type parameters (`Checker::check_call`'s `unify`/
+;; `subst_apply` integration): each is plain `defun`, not `defmethod`, since
+;; none of them is a method "on" a receiver type — they operate purely on
+;; function values. `compose`/`flip` return a `lambda`, which closes over the
+;; outer defun's parameters (`f`/`g`) the same way any nested lambda would.
+(defun (identity T) ((x T)) T x)
+(defun (const A B) ((x A) (y B)) A x)
+(defun (compose A B C) ((f (fn (B) C)) (g (fn (A) B))) (fn (A) C)
+  (lambda ((x A)) C (f (g x))))
+(defun (flip A B C) ((f (fn (A B) C))) (fn (B A) C)
+  (lambda ((y B) (x A)) C (f x y)))
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,

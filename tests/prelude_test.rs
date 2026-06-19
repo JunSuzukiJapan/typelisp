@@ -518,3 +518,35 @@ fn unwrap_resolves_to_the_correct_method_per_receiver_type() {
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(7));
 }
+
+// ---- higher-order helpers (step 7c) -----------------------------------------
+
+#[test]
+fn identity_returns_its_argument_at_any_type() {
+    assert_eq!(eval_ok("(identity 42)"), RtValue::Int(42));
+    eval_true("(identity true)");
+}
+
+#[test]
+fn const_ignores_its_second_argument() {
+    assert_eq!(eval_ok("(const 7 true)"), RtValue::Int(7));
+}
+
+#[test]
+fn compose_applies_g_then_f() {
+    let src = r#"
+        (defun add1 ((n i32)) i32 (+ n 1))
+        (defun double ((n i32)) i32 (* n 2))
+        ((compose double add1) 5)
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Int(12)); // double(add1(5)) = double(6) = 12
+}
+
+#[test]
+fn flip_swaps_the_argument_order() {
+    let src = r#"
+        (defun sub ((a i32) (b i32)) i32 (- a b))
+        ((flip sub) 3 10)
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Int(7)); // sub(10, 3) = 7
+}
