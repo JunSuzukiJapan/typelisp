@@ -201,6 +201,20 @@ fn quote_expands_to_quote_form() {
     roundtrip("'(1 2)", "(quote (1 2))");
 }
 
+#[test]
+fn quasiquote_and_unquote_expand_to_their_forms() {
+    roundtrip("`x", "(quasiquote x)");
+    roundtrip(",x", "(unquote x)");
+    roundtrip("`(a ,b)", "(quasiquote (a (unquote b)))");
+}
+
+#[test]
+fn unquote_splicing_expands_to_its_form() {
+    roundtrip(",@xs", "(unquote-splicing xs)");
+    roundtrip("`(a ,@xs)", "(quasiquote (a (unquote-splicing xs)))");
+    roundtrip(",@(quote (1 2))", "(unquote-splicing (quote (1 2)))");
+}
+
 // ---- comments & whitespace ----------------------------------------------
 
 #[test]

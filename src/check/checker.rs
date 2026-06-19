@@ -1339,9 +1339,11 @@ impl Checker {
     /// explicit conversion (not provided yet — there is no `int->sexpr` etc.).
     /// A pure syntax-to-`Expr` desugaring — same idea as `list` building
     /// nested `Expr::Construct{Cons,..}` (`check_list_lit`) — so it needs no
-    /// runtime/macro machinery. `,@` (unquote-splicing) is not supported yet,
-    /// and a quasiquote nested inside another is treated as ordinary literal
-    /// data (no depth tracking).
+    /// new runtime machinery; `(unquote-splicing x)` (`,@x`) is the one
+    /// exception, desugaring to a call to the prelude's `append` (see
+    /// `check_qq_template`'s doc comment) since the spliced list's length
+    /// isn't known until runtime. A quasiquote nested inside another is
+    /// treated as ordinary literal data (no depth tracking).
     fn check_quasiquote(
         &self,
         heap: &mut Heap,
@@ -1356,6 +1358,22 @@ impl Checker {
     }
 
     /// Recursively desugar one quasiquote template node. See [`Self::check_quasiquote`].
+    ///
+    /// `(unquote-splicing x)` (`,@x`) as a list *element* (i.e. `car` of the
+    /// cons being processed) splices `x`'s elements into the result in place,
+    /// rather than nesting `x` itself as one element — CL/Scheme's usual
+    /// `,@` semantics, used so a macro's `&rest body` (already one `Sexpr`
+    /// list) can be spliced into a template as multiple sibling forms
+    /// (e.g. `` `(progn ,@body) `` for a `body` of three forms expands to a
+    /// 3-element `progn`, not a `progn` wrapping one 3-element list). Since
+    /// `x`'s length isn't known until runtime, this can't be expressed as a
+    /// static `cons` nest like the non-splicing case — it desugars to a call
+    /// to the prelude's `append` (`Checker::resolve_fn`, the same lookup
+    /// `check_call`'s caller uses), joining `x` with the recursively
+    /// desugared rest of the list. This means `,@` requires the prelude to
+    /// be loaded (`append` registered) — acceptable since the macros that
+    /// actually need `,@` (`until`/`while-let`/`case`/`do`, roadmap step 8)
+    /// live in the prelude themselves.
     fn check_qq_template(
         &self,
         heap: &mut Heap,
@@ -1375,6 +1393,30 @@ impl Checker {
                     }
                 }
                 return Err(Error::TypeError("unquote: (unquote datum)".into()));
+            }
+            if let Value::Cons(_) = car {
+                let car_car = heap.car(car)?;
+                if is_symbol(heap, car_car, "unquote-splicing") {
+                    let car_cdr = heap.cdr(car)?;
+                    if let Value::Cons(_) = car_cdr {
+                        let x = heap.car(car_cdr)?;
+                        if heap.cdr(car_cdr)?.is_empty() {
+                            let spliced = self.check(heap, interp, env, x, Some(&sexpr_ty))?;
+                            let rest = self.check_qq_template(heap, interp, env, cdr)?;
+                            let append_fq = self.resolve_fn("append").ok_or_else(|| {
+                                Error::TypeError(
+                                    "unquote-splicing (,@) requires the prelude's `append` to be loaded"
+                                        .into(),
+                                )
+                            })?;
+                            return Ok(Typed {
+                                expr: Expr::Call(append_fq, vec![spliced, rest]),
+                                ty: sexpr_ty,
+                            });
+                        }
+                    }
+                    return Err(Error::TypeError("unquote-splicing: (unquote-splicing datum)".into()));
+                }
             }
             let car_t = self.check_qq_template(heap, interp, env, car)?;
             let cdr_t = self.check_qq_template(heap, interp, env, cdr)?;

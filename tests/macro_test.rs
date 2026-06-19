@@ -1,7 +1,7 @@
 //! Tests for `quote`/quasiquote/`gensym`/`defmacro` (CL-style macros).
 
 extern crate typelisp;
-use typelisp::{Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
+use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
 
 /// Read, type-check, and evaluate a program; return the last expression's
 /// value alongside the heap (so `Sexpr` results can be inspected).
@@ -27,6 +27,30 @@ fn run_with_capacity(src: &str, capacity: usize) -> Result<(RtValue, Heap), Eval
 
 fn eval_ok(src: &str) -> (RtValue, Heap) {
     run(src).expect("eval failed")
+}
+
+/// Like `run`, but with the prelude loaded first — `,@` (unquote-splicing)
+/// desugars to a call to the prelude's `append` (`Checker::check_qq_template`),
+/// so any test exercising it needs this instead of plain `run`.
+fn run_with_prelude(src: &str) -> Result<(RtValue, Heap), EvalError> {
+    let mut h = Heap::with_capacity(1 << 16);
+    let r = Reader::new();
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl)? {
+            last = val;
+        }
+    }
+    Ok((last, h))
+}
+
+fn eval_ok_with_prelude(src: &str) -> (RtValue, Heap) {
+    run_with_prelude(src).expect("eval failed")
 }
 
 /// Render a heap-backed `Sexpr` value in reader syntax, for easy assertions.
@@ -372,6 +396,61 @@ fn rest_must_be_the_last_parameter() {
     let mut h = Heap::with_capacity(4096);
     let r = Reader::new();
     let v = r.read(&mut h, "(defmacro bad (&rest xs a) xs)").expect("read failed");
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    assert!(chk.check_form(&mut h, &interp, v).is_err());
+}
+
+// ---- unquote-splicing (`,@`, roadmap step 8a) -------------------------------
+
+#[test]
+fn splice_in_the_middle_of_a_template() {
+    let (v, h) = eval_ok_with_prelude("(let ((xs (quote (2 3)))) `(1 ,@xs 4))");
+    assert_eq!(as_sexpr_string(v, &h), "(1 2 3 4)");
+}
+
+#[test]
+fn splice_at_the_end_of_a_template() {
+    let (v, h) = eval_ok_with_prelude("(let ((xs (quote (2 3)))) `(1 ,@xs))");
+    assert_eq!(as_sexpr_string(v, &h), "(1 2 3)");
+}
+
+#[test]
+fn splicing_an_empty_list_contributes_nothing() {
+    let (v, h) = eval_ok_with_prelude("(let ((xs (quote ()))) `(1 ,@xs 2))");
+    assert_eq!(as_sexpr_string(v, &h), "(1 2)");
+}
+
+#[test]
+fn splice_without_a_surrounding_quote_requires_the_prelude() {
+    // The whole point of `,@`: a macro's `&rest body` (one `Sexpr` list of
+    // forms) splices into a template as multiple sibling forms, not as one
+    // nested list — `my-progn`'s expansion is a flat `(progn 1 2 3)`, which
+    // evaluates to the *last* form's value, not a single 3-element list.
+    let (v, _) = eval_ok_with_prelude(
+        "(defmacro my-progn (&rest body) `(progn ,@body)) (my-progn 1 2 3)",
+    );
+    assert_eq!(v, RtValue::Int(3));
+}
+
+#[test]
+fn splicing_the_same_rest_param_twice_runs_its_forms_twice() {
+    let (v, _) = eval_ok_with_prelude(
+        "(defmacro twice (&rest body) `(progn ,@body ,@body))
+         (let ((x 0)) (twice (setf x (+ x 1))) x)",
+    );
+    assert_eq!(v, RtValue::Int(2));
+}
+
+#[test]
+fn unquote_splicing_without_the_prelude_loaded_is_a_clean_type_error() {
+    // `,@` desugars to a call to the prelude's `append` — without the
+    // prelude loaded, that name doesn't resolve, and `check_qq_template`
+    // reports this directly rather than panicking or producing a confusing
+    // "no such function" at eval time.
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::new();
+    let v = r.read(&mut h, "(let ((xs (quote (1)))) `(,@xs))").expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
     assert!(chk.check_form(&mut h, &interp, v).is_err());

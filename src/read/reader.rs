@@ -12,7 +12,7 @@
 //! Supported v1 syntax: integers (decimal, `0x` hex, signed), floats, booleans
 //! `true`/`false`, strings with escapes, characters `#\a` / `#\Space`, symbols
 //! (operators, `::` paths, `Vec<T>`-style tokens), lists, dotted pairs `(a . b)`,
-//! quote `'`, quasiquote `` ` ``, unquote `,` (no `,@` splicing yet), and
+//! quote `'`, quasiquote `` ` ``, unquote `,`, unquote-splicing `,@`, and
 //! comments (`;` line, `#| ... |#` nested block).
 
 use crate::{Error, Heap, SymId, Value};
@@ -174,7 +174,15 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
         Some(')') => Err(Error::UnmatchedParen),
         Some('\'') => read_wrapped(cur, heap, "quote"),
         Some('`') => read_wrapped(cur, heap, "quasiquote"),
-        Some(',') => read_wrapped(cur, heap, "unquote"),
+        Some(',') => {
+            cur.next(); // the ','
+            if cur.peek() == Some('@') {
+                cur.next(); // the '@'
+                read_wrapped_body(cur, heap, "unquote-splicing")
+            } else {
+                read_wrapped_body(cur, heap, "unquote")
+            }
+        }
         Some('"') => read_string(cur, heap),
         Some('#') => read_hash(cur, heap),
         Some(_) => read_atom(cur, heap),
@@ -182,10 +190,20 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
 }
 
 /// Read `<prefix-char><datum>` as `(<head> datum)` — the shared shape behind
-/// `'x` -> `(quote x)`, `` `x `` -> `(quasiquote x)`, `,x` -> `(unquote x)`.
-/// (`,@x` unquote-splicing is not supported yet.)
+/// `'x` -> `(quote x)`, `` `x `` -> `(quasiquote x)`, `,x` -> `(unquote x)`,
+/// `,@x` -> `(unquote-splicing x)`. Consumes the single prefix character
+/// itself, then delegates the rest (reading `datum` and building the
+/// 2-element list) to [`read_wrapped_body`] — `,@` needs to consume *two*
+/// prefix characters (`,` then `@`), so its caller in [`read_datum`] does
+/// that part itself and calls `read_wrapped_body` directly.
 fn read_wrapped(cur: &mut Cursor, heap: &mut Heap, head: &str) -> Result<Value, Error> {
     cur.next(); // the prefix character
+    read_wrapped_body(cur, heap, head)
+}
+
+/// Read `datum` and build `(head datum)`, the shared tail of [`read_wrapped`]
+/// — assumes any prefix character(s) have already been consumed.
+fn read_wrapped_body(cur: &mut Cursor, heap: &mut Heap, head: &str) -> Result<Value, Error> {
     let d = read_datum(cur, heap)?;
     heap.push_root(d);
     let q = heap.intern_symbol(head); // symbols are permanent; no rooting needed
