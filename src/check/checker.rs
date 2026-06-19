@@ -986,10 +986,21 @@ impl Checker {
             heap.pop_root();
             return result;
         }
-        // Constructor, then free function, then a global function value, then
-        // instance-method dispatch.
+        // Constructor, then a receiver-typed instance method on the first
+        // argument's type, then the free function, then a global function
+        // value, then instance-method dispatch again (for the error message
+        // when nothing at all matches). The instance method is tried *before*
+        // the free function — CLOS precedent: a type-specific method takes
+        // precedence over a same-named ordinary function, which only serves
+        // as the generic function's implicit default when no type-specific
+        // method matches the call's argument type (see `try_instance_method`'s
+        // doc comment). This lets e.g. `Vector<T>`'s `length` and the
+        // `Sexpr`-list prelude's free-function `length` share a name without
+        // either having to be renamed.
         if let Some((adt, idx)) = self.resolve_ctor(&head) {
             self.check_construct(heap, interp, env, (&adt, idx), args, expected)
+        } else if let Some(result) = self.try_instance_method(heap, interp, env, &head, args) {
+            result
         } else if let Some(fq) = self.resolve_fn(&head) {
             self.check_call(heap, interp, env, &fq, args)
         } else if let Some((path, vi)) = self.resolve_global(&head) {
@@ -1104,6 +1115,58 @@ impl Checker {
 
     /// Dispatch a bare call `(m recv args...)` as an instance method on the
     /// static type of its first argument.
+    /// Try resolving `(method args...)` as a call to an instance method on
+    /// the first argument's type. Returns `None` — not an error — when no
+    /// such method exists for that type, so `check_list` can fall back to a
+    /// free function of the same name: this mirrors CLOS, where a
+    /// type-specific method takes precedence over an ordinary function of
+    /// the same name, and that ordinary function only acts as the generic
+    /// function's default when no type-specific method matches the call's
+    /// argument type (an existing `defun` becomes the default method when a
+    /// same-named `defgeneric`/`defmethod` is introduced later).
+    ///
+    /// The first argument is checked once here with `expected: None`, purely
+    /// to learn its type — if that doesn't resolve to a method, `check_list`'s
+    /// free-function fallback re-checks it against the free function's real
+    /// parameter type, so e.g. an integer literal still gets that parameter's
+    /// exact width rather than the throwaway default this `check` would have
+    /// given it. Any error checking the first argument (e.g. an unbound
+    /// variable) also yields `None`: it isn't a real "no such method"
+    /// failure, but the free-function fallback (or, if none exists either,
+    /// the final `check_instance_method` call in `check_list`) re-checks the
+    /// same argument and surfaces the real error there instead.
+    fn try_instance_method(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        method: &str,
+        args: &[Value],
+    ) -> Option<Result<Typed, Error>> {
+        let recv = self.check(heap, interp, env, *args.first()?, None).ok()?;
+        let type_fq = match &recv.ty {
+            Type::Named(n, _) => Some(n.clone()),
+            other => prim_type_path(other),
+        }?;
+        let def = self.reg.type_def(&type_fq)?;
+        if def.assoc.get(method).map(|a| a.instance) != Some(true) {
+            return None;
+        }
+        Some(self.check_assoc_call(
+            heap,
+            interp,
+            env,
+            AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None },
+            &args[1..],
+        ))
+    }
+
+    /// The final fallback when nothing else matched `(method args...)` in
+    /// `check_list`: re-derives the same instance-method lookup
+    /// `try_instance_method` does, but — since there's no free function left
+    /// to defer to — propagates a real error from checking the first
+    /// argument instead of swallowing it, and reports `NoSuchFunction` if no
+    /// matching method exists either.
     fn check_instance_method(
         &self,
         heap: &mut Heap,
