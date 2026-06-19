@@ -631,3 +631,67 @@ fn assoc_finds_the_matching_pair() {
 fn assoc_returns_nil_when_absent() {
     eval_true("(null (assoc (quote z) (quote ((a . 1) (b . 2)))))");
 }
+
+// ---- Vector<T> sort (step 7c follow-up) -------------------------------------
+//
+// `(sort v cmp)` for a `Vector<T>` receiver resolves to the `defmethod`
+// below the `Sexpr`-list `sort` in src/prelude.rs — see `dispatch_test.rs`
+// for the dedicated tests confirming both share the name `sort` safely.
+// Construction goes through helper `defun`s (not a `let`-bound
+// `Vector::new` call) because `check_let`'s binding values are checked with
+// `expected: None`, which can't seed `Vector::new`'s type parameter `T` —
+// the same constraint `vector_test.rs` works around.
+
+const LT_I32: &str = "(defun lt-i32 ((a i32) (b i32)) bool (< a b))";
+
+#[test]
+fn vector_sort_orders_ascending_in_place() {
+    let src = format!(
+        "{}
+         (defun make-v () Vector<i32> (Vector::new 5 0))
+         (defun fill5 ((v Vector<i32>) (a i32) (b i32) (c i32) (d i32) (e i32)) Vector<i32>
+           (progn (set v 0 a) (set v 1 b) (set v 2 c) (set v 3 d) (set v 4 e) v))
+         (let ((v (fill5 (make-v) 3 1 4 1 5)))
+           (sort v lt-i32)
+           (+ (* 10000 (get v 0)) (+ (* 1000 (get v 1)) (+ (* 100 (get v 2)) (+ (* 10 (get v 3)) (get v 4))))))",
+        LT_I32
+    );
+    // sorted: 1 1 3 4 5
+    assert_eq!(eval_ok(&src), RtValue::Int(11345));
+}
+
+#[test]
+fn vector_sort_of_an_already_sorted_vector_is_unchanged() {
+    let src = format!(
+        "{}
+         (defun make-v () Vector<i32> (Vector::new 3 0))
+         (defun fill3 ((v Vector<i32>) (a i32) (b i32) (c i32)) Vector<i32>
+           (progn (set v 0 a) (set v 1 b) (set v 2 c) v))
+         (let ((v (fill3 (make-v) 1 2 3)))
+           (sort v lt-i32)
+           (+ (* 100 (get v 0)) (+ (* 10 (get v 1)) (get v 2))))",
+        LT_I32
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(123));
+}
+
+#[test]
+fn vector_sort_mutates_the_receiver_in_place() {
+    // `sort` returns `()` (Unit) and the caller observes the mutation
+    // through the original `v` binding, confirming it's destructive (CL
+    // semantics) rather than building a new Vector.
+    let src = format!(
+        "{}
+         (defun make-v () Vector<i32> (Vector::new 2 0))
+         (defun fill2 ((v Vector<i32>) (a i32) (b i32)) Vector<i32>
+           (progn (set v 0 a) (set v 1 b) v))
+         (let ((v (fill2 (make-v) 9 1)))
+           (sort v lt-i32)
+           v)",
+        LT_I32
+    );
+    match eval_ok(&src) {
+        RtValue::Vector(cell) => assert_eq!(*cell.borrow(), vec![RtValue::Int(1), RtValue::Int(9)]),
+        other => panic!("expected a Vector, got {:?}", other),
+    }
+}

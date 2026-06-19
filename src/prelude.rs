@@ -42,11 +42,11 @@ use crate::{Checker, Heap, Interp, Reader};
 /// comment above their definitions below for why. `identity`/`const`/
 /// `compose`/`flip` are generic `defun`s — see the comment above their
 /// definitions for why those, unlike the accessors, fit `defun` rather than
-/// `defmethod`. `gcd`/`lcm`/`signum`/`abs` (catalog §2.2f), `sort` (§2.2c,
-/// `Sexpr` lists only — the `Vector<T>` variant is deferred, see its own
-/// comment below), and `assoc` (§4.2's list section) round out step 7c —
-/// `min`/`max`/`range` are not in the catalog, so they're left undone rather
-/// than guessed at.
+/// `defmethod`. `gcd`/`lcm`/`signum`/`abs` (catalog §2.2f), `sort` (§2.2b/c,
+/// both the `Sexpr`-list free function and the `Vector<T>` instance method —
+/// see their own comments below for how they share the name safely), and
+/// `assoc` (§4.2's list section) round out step 7c — `min`/`max`/`range` are
+/// not in the catalog, so they're left undone rather than guessed at.
 pub const SOURCE: &str = r#"
 (defun consp ((s Sexpr)) bool (match s ((Cons _ _) true) (_ false)))
 (defun null ((s Sexpr)) bool (match s ((Nil) true) (_ false)))
@@ -283,11 +283,11 @@ pub const SOURCE: &str = r#"
 ;; comparator `(fn (Sexpr Sexpr) bool)` (CL's default `<`-style predicate).
 ;; Non-destructive (builds a new list), unlike `nconc`/`nreverse` above —
 ;; there's no existing-cons-cell structure to reuse for a sorted result.
-;; The catalog's `Vector<T>` sort variant is still not implemented here, but
-;; the name-collision risk it flagged no longer applies: `check_list` now
-;; tries a receiver-typed instance method before this free function (see
-;; `Checker::try_instance_method`), so a future `Vector<T>` `sort` method
-;; could share this name safely.
+;; This free function and the `Vector<T>` `defmethod` below share the name
+;; `sort` safely: `check_list` tries a receiver-typed instance method before
+;; the free function (`Checker::try_instance_method`), so a `Vector<T>`
+;; receiver reaches the method below and any other type falls through to
+;; this one.
 (defun insert-sorted ((cmp (fn (Sexpr Sexpr) bool)) (item Sexpr) (lst Sexpr)) Sexpr
   (match lst
     ((Nil) (cons item ()))
@@ -298,6 +298,22 @@ pub const SOURCE: &str = r#"
     ((Nil) ())
     ((Cons h t) (insert-sorted cmp h (sort cmp t)))
     (_ (panic "sort: not a proper list"))))
+
+;; `Vector<T>` `sort` (catalog §2.2b): destructive in-place insertion sort
+;; via `get`/`set` (the catalog's suggested primitive-plus-algorithm split —
+;; the primitives are Rust, the algorithm is TypeLisp). Unlike the `Sexpr`
+;; version above, this mutates `self` and returns `()` (CL's `sort` is
+;; likewise destructive) — there's no Vector equivalent of "build a new cons
+;; structure" since `Vector<T>` has no persistent/structural-sharing
+;; representation to begin with.
+(defmethod sort ((self Vector<T>) (cmp (fn (T T) bool))) ()
+  (dotimes (i (length self))
+    (let ((j i))
+      (while (and (> j 0) (cmp (get self j) (get self (- j 1))))
+        (let ((tmp (get self j)))
+          (set self j (get self (- j 1)))
+          (set self (- j 1) tmp))
+        (setf j (- j 1))))))
 
 ;; `assoc` (catalog §4.2's list section): search an alist (a list of
 ;; `(key . value)` cons cells) for the first pair whose `car` is `eq` to

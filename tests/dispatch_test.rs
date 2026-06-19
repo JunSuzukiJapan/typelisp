@@ -124,3 +124,32 @@ fn unbound_variable_in_first_argument_position_still_surfaces_the_real_error() {
         other => panic!("expected an unbound-variable TypeError, got {:?}", other),
     }
 }
+
+#[test]
+fn sort_resolves_to_vector_instance_method_for_a_vector_receiver() {
+    // `sort` is defined both as the `Sexpr`-list free function and as a
+    // `Vector<T>` `defmethod` (src/prelude.rs) — this is the same
+    // name-collision scenario `length`/`remove`/`count` above test, this
+    // time for a `defmethod` introduced *after* this dispatch fix rather
+    // than retrofitted onto pre-existing built-in methods.
+    let src = r#"
+        (defun lt-i32 ((a i32) (b i32)) bool (< a b))
+        (defun make-v () Vector<i32> (Vector::new 3 0))
+        (defun fill3 ((v Vector<i32>) (a i32) (b i32) (c i32)) Vector<i32>
+          (progn (set v 0 a) (set v 1 b) (set v 2 c) v))
+        (let ((v (fill3 (make-v) 3 1 2)))
+          (sort v lt-i32)
+          (+ (* 100 (get v 0)) (+ (* 10 (get v 1)) (get v 2))))
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Int(123));
+}
+
+#[test]
+fn sort_still_resolves_to_the_free_function_for_a_sexpr_receiver() {
+    let src = r#"
+        (defun sexpr-lt ((a Sexpr) (b Sexpr)) bool
+          (match a ((Int x) (match b ((Int y) (< x y)) (_ false))) (_ false)))
+        (equal (sort sexpr-lt (quote (3 1 2))) (quote (1 2 3)))
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Bool(true));
+}
