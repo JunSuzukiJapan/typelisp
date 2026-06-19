@@ -98,8 +98,13 @@ pub enum Type {
     /// user structs, and (during checking) generic type variables (a
     /// single-segment [`Path`]).
     Named(Path, Vec<Type>),
-    /// A function type `(fn (params...) ret)`.
-    Fn(Vec<Type>, Box<Type>),
+    /// A function type `(fn (params...) ret)`, or — when the second field is
+    /// `Some` — a variadic function type `(fn (params... &rest elem) ret)`:
+    /// every call-site argument from that point on must have type `elem`
+    /// (see `Checker::check_call`/`check_apply`/`apply`'s desugaring, and
+    /// `Checker::parse_params_rest` for the parallel `defun`/`lambda`
+    /// parameter-list syntax).
+    Fn(Vec<Type>, Option<Box<Type>>, Box<Type>),
 }
 
 /// All primitive value types that can be a `defmethod` receiver (every
@@ -162,7 +167,9 @@ pub fn parse_type(heap: &Heap, v: Value) -> Result<Type, Error> {
     }
 }
 
-/// Parse a `(fn (param-types...) ret-type)` list.
+/// Parse a `(fn (param-types...) ret-type)` list. The parameter-type list may
+/// end in `&rest elem-type` to write a variadic function type, mirroring
+/// `Checker::parse_params_rest`'s `defun`/`lambda` parameter syntax.
 fn parse_fn_type(heap: &Heap, v: Value) -> Result<Type, Error> {
     let elems = heap.list_to_vec(v)?;
     if elems.len() != 3 {
@@ -172,16 +179,38 @@ fn parse_fn_type(heap: &Heap, v: Value) -> Result<Type, Error> {
         Value::Symbol(id) if heap.symbol_name(id) == "fn" => {}
         _ => return Err(Error::TypeError("expected fn type".to_string())),
     }
-    let params = match elems[1] {
-        Value::Empty => Vec::new(),
-        Value::Cons(_) => {
-            let ps = heap.list_to_vec(elems[1])?;
-            ps.into_iter().map(|p| parse_type(heap, p)).collect::<Result<_, _>>()?
-        }
+    let (params, rest) = match elems[1] {
+        Value::Empty => (Vec::new(), None),
+        Value::Cons(_) => parse_fn_params(heap, &heap.list_to_vec(elems[1])?)?,
         _ => return Err(Error::TypeError("fn parameter list must be a list".to_string())),
     };
     let ret = parse_type(heap, elems[2])?;
-    Ok(Type::Fn(params, Box::new(ret)))
+    Ok(Type::Fn(params, rest, Box::new(ret)))
+}
+
+/// Split a `(fn ...)` type's parameter-type list into fixed types and an
+/// optional trailing `&rest elem-type` (the type of each variadic argument) —
+/// the type-expression counterpart of `Checker::parse_params_rest`.
+fn parse_fn_params(heap: &Heap, ps: &[Value]) -> Result<(Vec<Type>, Option<Box<Type>>), Error> {
+    let rest_marker = ps
+        .iter()
+        .position(|p| matches!(p, Value::Symbol(id) if heap.symbol_name(*id) == "&rest"));
+    match rest_marker {
+        Some(i) => {
+            if i + 2 != ps.len() {
+                return Err(Error::TypeError(
+                    "fn type: &rest must be followed by exactly one type, as the last item in the parameter list".to_string(),
+                ));
+            }
+            let params = ps[..i].iter().map(|p| parse_type(heap, *p)).collect::<Result<_, _>>()?;
+            let rest = parse_type(heap, ps[i + 1])?;
+            Ok((params, Some(Box::new(rest))))
+        }
+        None => {
+            let params = ps.iter().map(|p| parse_type(heap, *p)).collect::<Result<_, _>>()?;
+            Ok((params, None))
+        }
+    }
 }
 
 /// Parse a type from a (case-folded) token, splitting generic arguments and

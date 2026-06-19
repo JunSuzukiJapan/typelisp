@@ -38,6 +38,9 @@ pub enum TopLevel {
     /// (empty for an ordinary, non-generic function) — kept here for parity
     /// with `Defstruct`'s `params`, though the evaluator ignores them (type
     /// information is erased before execution; see `Checker::check_call`).
+    /// `params` includes a trailing `&rest` parameter's name last (bound to
+    /// `Vector<elem>`), exactly like `Defmacro::params` — see
+    /// `Checker::check_defun`/`parse_params_rest`.
     Defun {
         name: Path,
         type_params: Vec<String>,
@@ -73,6 +76,10 @@ pub enum TopLevel {
     /// A bare top-level expression.
     Expr(Typed),
 }
+
+/// The result of [`Checker::parse_params_rest`]: fixed `(name, type)` params,
+/// plus the `&rest` parameter's `(name, elem-type)` if the list ends in one.
+type ParamsAndRest = (Vec<(String, Type)>, Option<(String, Type)>);
 
 /// A lexical environment mapping variable names to their types.
 #[derive(Clone)]
@@ -432,7 +439,7 @@ impl Checker {
     /// Build an `FnRef` node carrying the function's `(fn ...)` type.
     fn fn_ref_node(&self, fq: Path) -> Typed {
         let sig = self.reg.fn_sig(&fq).expect("resolved fn exists").clone();
-        let ty = Type::Fn(sig.params, Box::new(sig.ret));
+        let ty = Type::Fn(sig.params, sig.rest.map(Box::new), Box::new(sig.ret));
         Typed { expr: Expr::FnRef(fq), ty }
     }
 
@@ -448,7 +455,7 @@ impl Checker {
     /// `HashTable::get`) can't be reified this way since there's no call-site
     /// type argument to substitute, and simply fails to match below.
     fn method_value(&self, name: &str, expected: Option<&Type>) -> Option<Typed> {
-        let Type::Fn(params, _) = expected? else { return None };
+        let Type::Fn(params, _, _) = expected? else { return None };
         let type_fq = match params.first()? {
             Type::Named(n, _) => n.clone(),
             other => prim_type_path(other)?,
@@ -458,7 +465,7 @@ impl Checker {
         if !af.instance {
             return None;
         }
-        let ty = Type::Fn(af.sig.params.clone(), Box::new(af.sig.ret.clone()));
+        let ty = Type::Fn(af.sig.params.clone(), af.sig.rest.clone().map(Box::new), Box::new(af.sig.ret.clone()));
         if &ty != expected.unwrap() {
             return None;
         }
@@ -473,8 +480,9 @@ impl Checker {
                 self.resolve_type_name(n),
                 args.iter().map(|a| self.canon(a)).collect(),
             ),
-            Type::Fn(ps, r) => Type::Fn(
+            Type::Fn(ps, rest, r) => Type::Fn(
                 ps.iter().map(|p| self.canon(p)).collect(),
+                rest.as_ref().map(|t| Box::new(self.canon(t))),
                 Box::new(self.canon(r)),
             ),
             other => other.clone(),
@@ -507,7 +515,7 @@ impl Checker {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
-        let params = self.parse_params(heap, parts[1])?;
+        let (params, rest) = self.parse_params_rest(heap, parts[1])?;
         let ret = self.canon(&parse_type(heap, parts[2])?);
         let fq_name = self.fq(&name);
 
@@ -518,9 +526,21 @@ impl Checker {
             params: params.iter().map(|(_, t)| t.clone()).collect(),
             ret: ret.clone(),
             public,
+            rest: rest.as_ref().map(|(_, t)| t.clone()),
         };
         self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
 
+        // The body additionally sees the `&rest` parameter (if any) bound to
+        // a `Vector<elem>` collecting every variadic argument — the call-site
+        // desugaring (`Self::check_call`) always supplies exactly one such
+        // `Vector` as the last actual argument, so the stored `params` below
+        // (consumed only for its *names* by `Interp::exec`) already lines up
+        // 1:1 with arguments at runtime; mirrors `TopLevel::Defmacro::params`
+        // including its `&rest` name last.
+        let mut params = params;
+        if let Some((rname, relemty)) = &rest {
+            params.push((rname.clone(), vector_of(relemty.clone())));
+        }
         let env = Env::new().extended(params.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &parts[3..], Some(&ret))?;
         Ok(TopLevel::Defun { name: fq_name, type_params, params, ret, body })
@@ -622,6 +642,34 @@ impl Checker {
     fn parse_params(&self, heap: &Heap, v: Value) -> Result<Vec<(String, Type)>, Error> {
         let elems = heap.list_to_vec(v)?;
         self.parse_param_pairs(heap, &elems)
+    }
+
+    /// Parse a `((name type)... [&rest (name elem-type)])` parameter list for
+    /// `defun`/`lambda`: an optional trailing `&rest (name elem-type)` marks
+    /// the function variadic — every call-site argument from that position on
+    /// must have type `elem-type`, individually checked, then collected into
+    /// a single `Vector<elem-type>` bound to `name` inside the body (see
+    /// `Self::check_defun`/`Self::check_lambda`). Typed, unlike
+    /// `Self::check_defmacro`'s bare `&rest name` (always `Sexpr`), since
+    /// `defun`/`lambda` parameters always carry an explicit type.
+    fn parse_params_rest(&self, heap: &Heap, v: Value) -> Result<ParamsAndRest, Error> {
+        let elems = heap.list_to_vec(v)?;
+        let rest_marker = elems
+            .iter()
+            .position(|p| matches!(p, Value::Symbol(id) if heap.symbol_name(*id) == "&rest"));
+        match rest_marker {
+            Some(i) => {
+                if i + 2 != elems.len() {
+                    return Err(Error::TypeError(
+                        "&rest must be followed by exactly one parameter, as the last item in the parameter list".into(),
+                    ));
+                }
+                let params = self.parse_param_pairs(heap, &elems[..i])?;
+                let mut rest = self.parse_param_pairs(heap, &elems[i + 1..])?;
+                Ok((params, Some(rest.remove(0))))
+            }
+            None => Ok((self.parse_param_pairs(heap, &elems)?, None)),
+        }
     }
 
     /// Parse a slice of `(name type)` binding forms.
@@ -770,7 +818,7 @@ impl Checker {
             sig_params.push(recv_ty.clone());
         }
         sig_params.extend(params.iter().map(|(_, t)| t.clone()));
-        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public };
+        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public, rest: None };
         if let Some(def) = self.reg.type_def_mut(&type_fq) {
             def.assoc.insert(method.clone(), AssocFn { sig, instance });
         }
@@ -941,6 +989,7 @@ impl Checker {
             "list" => return self.check_list_lit(heap, interp, env, args),
             "lambda" => return self.check_lambda(heap, interp, env, args),
             "labels" => return self.check_labels(heap, interp, env, args, expected),
+            "apply" => return self.check_apply_form(heap, interp, env, args),
             "match" => return self.check_match(heap, interp, env, args, expected),
             "if-let" => return self.check_if_let(heap, interp, env, args, expected),
             "panic" => return self.check_panic(heap, interp, env, args),
@@ -1024,8 +1073,19 @@ impl Checker {
         if args.len() < 2 {
             return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
         }
-        let params = self.parse_params(heap, args[0])?;
+        let (params, rest) = self.parse_params_rest(heap, args[0])?;
         let ret = self.canon(&parse_type(heap, args[1])?);
+        let fn_ty = Type::Fn(
+            params.iter().map(|(_, t)| t.clone()).collect(),
+            rest.as_ref().map(|(_, t)| Box::new(t.clone())),
+            Box::new(ret.clone()),
+        );
+        // The body additionally sees the `&rest` parameter (if any) bound to
+        // a `Vector<elem>` — see `Self::check_defun`'s identical treatment.
+        let mut params = params;
+        if let Some((rname, relemty)) = rest {
+            params.push((rname, vector_of(relemty)));
+        }
         let child = env.extended(params.clone());
         // A lambda is a new function boundary: `break`/`return` cannot reach an
         // outer loop through it, so it checks its body against an empty loop
@@ -1034,10 +1094,6 @@ impl Checker {
         let result = self.check_seq(heap, interp, &child, &args[2..], Some(&ret));
         self.loop_stack.replace(saved);
         let (body, _) = result?;
-        let fn_ty = Type::Fn(
-            params.iter().map(|(_, t)| t.clone()).collect(),
-            Box::new(ret),
-        );
         Ok(Typed { expr: Expr::Lambda { params, body }, ty: fn_ty })
     }
 
@@ -1086,7 +1142,7 @@ impl Checker {
             };
             let params = self.parse_params(heap, parts[1])?;
             let ret = self.canon(&parse_type(heap, parts[2])?);
-            let fn_ty = Type::Fn(params.iter().map(|(_, t)| t.clone()).collect(), Box::new(ret.clone()));
+            let fn_ty = Type::Fn(params.iter().map(|(_, t)| t.clone()).collect(), None, Box::new(ret.clone()));
             sigs.push((name.clone(), fn_ty));
             parsed.push(Spec { name, params, ret, raw_body: parts[3..].to_vec() });
         }
@@ -1110,7 +1166,12 @@ impl Checker {
         Ok(Typed { expr: Expr::Labels { defs, body }, ty })
     }
 
-    /// Type-check applying a function *value* `callee` to `args`.
+    /// Type-check applying a function *value* `callee` to `args`. If
+    /// `callee`'s type is variadic (`Type::Fn`'s `rest` is `Some`), every
+    /// argument past the fixed parameters is checked against the rest
+    /// element type and collected into a single `Vector<elem>` actual
+    /// argument — the value-level counterpart of `Self::check_call`'s
+    /// desugaring for a named function.
     fn check_apply(
         &self,
         heap: &mut Heap,
@@ -1119,21 +1180,85 @@ impl Checker {
         callee: Typed,
         args: &[Value],
     ) -> Result<Typed, Error> {
-        let (params, ret) = match &callee.ty {
-            Type::Fn(p, r) => (p.clone(), (**r).clone()),
+        let (params, rest, ret) = match &callee.ty {
+            Type::Fn(p, r, ret) => (p.clone(), r.clone(), (**ret).clone()),
             other => return Err(Error::TypeError(format!("value is not callable: {:?}", other))),
         };
-        if args.len() != params.len() {
+        let fixed = params.len();
+        match &rest {
+            None if args.len() != fixed => {
+                return Err(Error::TypeError(format!(
+                    "function expects {} argument(s), got {}",
+                    fixed,
+                    args.len()
+                )));
+            }
+            Some(_) if args.len() < fixed => {
+                return Err(Error::TypeError(format!(
+                    "function expects at least {} argument(s), got {}",
+                    fixed,
+                    args.len()
+                )));
+            }
+            _ => {}
+        }
+        let mut typed = Vec::new();
+        for (arg, pty) in args[..fixed].iter().zip(params.iter()) {
+            typed.push(self.check(heap, interp, env, *arg, Some(pty))?);
+        }
+        if let Some(elem_ty) = &rest {
+            let mut rest_typed = Vec::new();
+            for arg in &args[fixed..] {
+                rest_typed.push(self.check(heap, interp, env, *arg, Some(elem_ty))?);
+            }
+            typed.push(Typed { expr: Expr::Vector(rest_typed), ty: vector_of((**elem_ty).clone()) });
+        }
+        Ok(Typed { expr: Expr::Apply(Box::new(callee), typed), ty: ret })
+    }
+
+    /// `(apply f arg1 ... argN rest-list)`: call the *variadic* function
+    /// value `f` — its type must be `(fn (T1..Tn) &rest Te) R)` — with
+    /// `arg1..argN` bound to its fixed parameters and `rest-list` (already a
+    /// `Vector<Te>`, built at runtime) passed straight through as its `&rest`
+    /// argument, instead of `Self::check_apply`'s usual one-by-one collection
+    /// from individually-typed trailing expressions. Desugars to the very
+    /// same `Expr::Apply` shape `check_apply` produces for
+    /// `(f arg1 .. argN e1 e2 e3)` if `rest-list` were three literal elements
+    /// `e1 e2 e3` instead of one dynamic list — so the interpreter needs no
+    /// `apply`-specific evaluation at all.
+    fn check_apply_form(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
+        if args.len() < 2 {
+            return Err(Error::TypeError("apply: (apply function arg... rest-list)".into()));
+        }
+        let callee = self.check(heap, interp, env, args[0], None)?;
+        let (params, elem_ty, ret) = match &callee.ty {
+            Type::Fn(p, Some(r), ret) => (p.clone(), (**r).clone(), (**ret).clone()),
+            Type::Fn(_, None, _) => {
+                return Err(Error::TypeError(
+                    "apply: function has no `&rest` parameter to apply a list to".into(),
+                ))
+            }
+            other => return Err(Error::TypeError(format!("apply: value is not callable: {:?}", other))),
+        };
+        let (fixed_args, list_arg) = args[1..].split_at(args.len() - 2);
+        if fixed_args.len() != params.len() {
             return Err(Error::TypeError(format!(
-                "function expects {} argument(s), got {}",
+                "apply: expected {} fixed argument(s) before the rest list, got {}",
                 params.len(),
-                args.len()
+                fixed_args.len()
             )));
         }
         let mut typed = Vec::new();
-        for (arg, pty) in args.iter().zip(params.iter()) {
+        for (arg, pty) in fixed_args.iter().zip(params.iter()) {
             typed.push(self.check(heap, interp, env, *arg, Some(pty))?);
         }
+        typed.push(self.check(heap, interp, env, list_arg[0], Some(&vector_of(elem_ty)))?);
         Ok(Typed { expr: Expr::Apply(Box::new(callee), typed), ty: ret })
     }
 
@@ -2039,13 +2164,25 @@ impl Checker {
         args: &[Value],
     ) -> Result<Typed, Error> {
         let sig = self.reg.fn_sig(name).expect("caller checked presence").clone();
-        if args.len() != sig.params.len() {
-            return Err(Error::TypeError(format!(
-                "{}: expected {} argument(s), got {}",
-                name,
-                sig.params.len(),
-                args.len()
-            )));
+        let fixed = sig.params.len();
+        match &sig.rest {
+            None if args.len() != fixed => {
+                return Err(Error::TypeError(format!(
+                    "{}: expected {} argument(s), got {}",
+                    name,
+                    fixed,
+                    args.len()
+                )));
+            }
+            Some(_) if args.len() < fixed => {
+                return Err(Error::TypeError(format!(
+                    "{}: expected at least {} argument(s), got {}",
+                    name,
+                    fixed,
+                    args.len()
+                )));
+            }
+            _ => {}
         }
         // Non-generic functions (the overwhelming majority) take the fast
         // path: `params`/`subst` stay empty, so `subst_apply`/`type_has_param`
@@ -2056,12 +2193,29 @@ impl Checker {
         let params: HashSet<String> = sig.type_params.iter().cloned().collect();
         let mut subst: HashMap<String, Type> = HashMap::new();
         let mut typed = Vec::new();
-        for (arg, pty) in args.iter().zip(sig.params.iter()) {
+        for (arg, pty) in args[..fixed].iter().zip(sig.params.iter()) {
             let st = subst_apply(pty, &subst);
             let exp = if type_has_param(&st, &params) { None } else { Some(st) };
             let ta = self.check(heap, interp, env, *arg, exp.as_ref())?;
             unify(&params, pty, &ta.ty, &mut subst)?;
             typed.push(ta);
+        }
+        // A variadic function: every remaining argument is individually
+        // checked against the (possibly still-generic) rest element type,
+        // then collected into a single `Vector<elem>` actual argument — see
+        // `Type::Fn`'s doc comment and `Self::check_apply`'s value-level
+        // counterpart.
+        if let Some(elem_ty) = &sig.rest {
+            let mut rest_typed = Vec::new();
+            for arg in &args[fixed..] {
+                let st = subst_apply(elem_ty, &subst);
+                let exp = if type_has_param(&st, &params) { None } else { Some(st) };
+                let ta = self.check(heap, interp, env, *arg, exp.as_ref())?;
+                unify(&params, elem_ty, &ta.ty, &mut subst)?;
+                rest_typed.push(ta);
+            }
+            let resolved = subst_apply(elem_ty, &subst);
+            typed.push(Typed { expr: Expr::Vector(rest_typed), ty: vector_of(resolved) });
         }
         for p in &sig.type_params {
             if !subst.contains_key(p) {
@@ -2429,6 +2583,14 @@ fn join_types(a: &Type, b: &Type) -> Result<Type, Error> {
     )))
 }
 
+/// `Vector<elem>` — the type a `&rest` parameter's collected arguments are
+/// bound as inside a `defun`/`lambda` body, and the type `apply`'s trailing
+/// list argument must have (see `Checker::parse_params_rest`/`check_call`/
+/// `check_apply_form`).
+fn vector_of(elem: Type) -> Type {
+    Type::Named(Path::root("vector"), vec![elem])
+}
+
 fn is_integer_type(t: &Type) -> bool {
     matches!(
         t,
@@ -2472,7 +2634,11 @@ fn type_has_param(t: &Type, params: &HashSet<String>) -> bool {
         Type::Named(n, args) => {
             (args.is_empty() && is_param(n, params)) || args.iter().any(|a| type_has_param(a, params))
         }
-        Type::Fn(ps, r) => ps.iter().any(|p| type_has_param(p, params)) || type_has_param(r, params),
+        Type::Fn(ps, rest, r) => {
+            ps.iter().any(|p| type_has_param(p, params))
+                || matches!(rest, Some(t) if type_has_param(t, params))
+                || type_has_param(r, params)
+        }
         _ => false,
     }
 }
@@ -2487,8 +2653,9 @@ fn subst_apply(t: &Type, subst: &HashMap<String, Type>) -> Type {
         Type::Named(n, args) => {
             Type::Named(n.clone(), args.iter().map(|a| subst_apply(a, subst)).collect())
         }
-        Type::Fn(ps, r) => Type::Fn(
+        Type::Fn(ps, rest, r) => Type::Fn(
             ps.iter().map(|p| subst_apply(p, subst)).collect(),
+            rest.as_ref().map(|t| Box::new(subst_apply(t, subst))),
             Box::new(subst_apply(r, subst)),
         ),
         other => other.clone(),
@@ -2530,9 +2697,19 @@ fn unify(
             }
             Ok(())
         }
-        (Type::Fn(p1, r1), Type::Fn(p2, r2)) if p1.len() == p2.len() => {
+        (Type::Fn(p1, rest1, r1), Type::Fn(p2, rest2, r2)) if p1.len() == p2.len() => {
             for (t, a) in p1.iter().zip(p2.iter()) {
                 unify(params, t, a, subst)?;
+            }
+            match (rest1, rest2) {
+                (Some(t1), Some(t2)) => unify(params, t1, t2, subst)?,
+                (None, None) => {}
+                _ => {
+                    return Err(Error::TypeError(format!(
+                        "type mismatch: expected {:?}, found {:?}",
+                        tmpl, actual
+                    )))
+                }
             }
             unify(params, r1, r2, subst)
         }

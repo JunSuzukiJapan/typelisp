@@ -61,6 +61,12 @@ pub enum Expr {
     Labels { defs: Vec<LabelDef>, body: Vec<Typed> },
     /// Apply a function *value* (a closure) to arguments.
     Apply(Box<Typed>, Vec<Typed>),
+    /// Build a fresh `Vector<T>` from these evaluated elements, in order.
+    /// Not surface syntax — synthesized by the checker to desugar a `&rest`
+    /// parameter's trailing call-site arguments (`Checker::check_call`/
+    /// `check_apply`/`check_apply_form`) into the single runtime argument a
+    /// variadic function's `&rest` slot expects.
+    Vector(Vec<Typed>),
     /// A type-associated call: an instance method (`args[0]` is the receiver)
     /// or a static associated function. `type_name` is the type's [`Path`].
     Assoc {

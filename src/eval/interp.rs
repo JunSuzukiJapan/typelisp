@@ -295,6 +295,10 @@ impl Interp {
                     _ => Err(EvalError::Internal("apply of a non-function value".into())),
                 }
             }
+            Expr::Vector(elems) => {
+                let (vs, _slots) = self.eval_args(heap, elems, env)?;
+                Ok(RtValue::Vector(Rc::new(RefCell::new(vs))))
+            }
             Expr::Match(scrut, arms) => {
                 let v = self.eval(heap, scrut, env)?;
                 for arm in arms {

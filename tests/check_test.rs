@@ -275,7 +275,7 @@ fn while_condition_must_be_bool_and_is_unit() {
 fn lambda_has_function_type() {
     assert_eq!(
         ty("(lambda ((x i32)) i32 x)"),
-        Type::Fn(vec![Type::I32], Box::new(Type::I32))
+        Type::Fn(vec![Type::I32], None, Box::new(Type::I32))
     );
 }
 
@@ -293,7 +293,7 @@ fn apply_checks_argument_types() {
 fn named_function_has_function_type() {
     assert_eq!(
         ty_program("(defun inc ((x i32)) i32 (+ x 1)) inc"),
-        Type::Fn(vec![Type::I32], Box::new(Type::I32))
+        Type::Fn(vec![Type::I32], None, Box::new(Type::I32))
     );
 }
 
@@ -311,7 +311,7 @@ fn labels_function_has_function_type_in_its_own_body() {
     // `lambda` can't close.
     assert_eq!(
         ty("(labels ((fact ((n i32)) i32 (if (= n 0) 1 (* n (fact (- n 1)))))) fact)"),
-        Type::Fn(vec![Type::I32], Box::new(Type::I32))
+        Type::Fn(vec![Type::I32], None, Box::new(Type::I32))
     );
 }
 
@@ -323,6 +323,112 @@ fn labels_rejects_a_call_with_the_wrong_argument_type() {
 #[test]
 fn break_does_not_cross_labels_boundary() {
     assert_type_error("(loop (labels ((f () () (break))) (f)))");
+}
+
+// ---- &rest / apply (variadic functions) --------------------------------------
+
+#[test]
+fn defun_rest_has_a_variadic_function_type() {
+    assert_eq!(
+        ty_program("(defun f ((a i32) &rest (xs i32)) i32 a) f"),
+        Type::Fn(vec![Type::I32], Some(Box::new(Type::I32)), Box::new(Type::I32))
+    );
+}
+
+#[test]
+fn defun_rest_with_no_fixed_params_has_a_variadic_function_type() {
+    assert_eq!(
+        ty_program("(defun f (&rest (xs i32)) i32 0) f"),
+        Type::Fn(vec![], Some(Box::new(Type::I32)), Box::new(Type::I32))
+    );
+}
+
+#[test]
+fn lambda_rest_has_a_variadic_function_type() {
+    assert_eq!(
+        ty("(lambda ((a i32) &rest (xs i32)) i32 a)"),
+        Type::Fn(vec![Type::I32], Some(Box::new(Type::I32)), Box::new(Type::I32))
+    );
+}
+
+#[test]
+fn rest_param_is_seen_as_a_vector_inside_the_body() {
+    // `length` only dispatches to a `Vector<T>` receiver — type-checking
+    // succeeds, proving `xs` is bound to `Vector<i32>` inside the body.
+    assert!(matches!(
+        form("(defun f ((a i32) &rest (xs i32)) i32 (length xs))"),
+        Ok(TopLevel::Defun { .. })
+    ));
+}
+
+#[test]
+fn calling_a_rest_function_with_only_the_fixed_arguments_is_fine() {
+    assert!(program("(defun f ((a i32) &rest (xs i32)) i32 a) (f 1)").is_ok());
+}
+
+#[test]
+fn calling_a_rest_function_with_extra_arguments_is_fine() {
+    assert!(program("(defun f ((a i32) &rest (xs i32)) i32 a) (f 1 2 3)").is_ok());
+}
+
+#[test]
+fn calling_a_rest_function_with_too_few_fixed_arguments_is_a_type_error() {
+    assert!(matches!(
+        program("(defun f ((a i32) &rest (xs i32)) i32 a) (f)"),
+        Err(Error::TypeError(_))
+    ));
+}
+
+#[test]
+fn calling_a_rest_function_with_a_wrong_typed_extra_argument_is_a_type_error() {
+    assert!(matches!(
+        program("(defun f ((a i32) &rest (xs i32)) i32 a) (f 1 true)"),
+        Err(Error::TypeError(_))
+    ));
+}
+
+#[test]
+fn rest_must_be_followed_by_exactly_one_parameter_in_a_defun() {
+    assert!(matches!(
+        program("(defun f (&rest (xs i32) (y i32)) i32 0)"),
+        Err(Error::TypeError(_))
+    ));
+}
+
+#[test]
+fn generic_rest_function_infers_the_element_type() {
+    assert_eq!(ty_program("(defun (firstn T) ((a T) &rest (xs T)) T a) (firstn 1 2 3)"), Type::I32);
+}
+
+#[test]
+fn apply_calls_a_variadic_function_with_a_runtime_vector() {
+    let src = "(defun f ((a i32) &rest (xs i32)) i32 a) \
+               (apply f 1 (Vector::new 0 0))";
+    assert_eq!(ty_program(src), Type::I32);
+}
+
+#[test]
+fn apply_on_a_non_variadic_function_is_a_type_error() {
+    assert!(matches!(
+        program("(apply (lambda ((a i32)) i32 a) 1)"),
+        Err(Error::TypeError(_))
+    ));
+}
+
+#[test]
+fn apply_with_the_wrong_number_of_fixed_arguments_is_a_type_error() {
+    assert!(matches!(
+        program("(apply (lambda ((a i32) &rest (xs i32)) i32 a) (Vector::new 0 0))"),
+        Err(Error::TypeError(_))
+    ));
+}
+
+#[test]
+fn apply_with_a_non_vector_rest_argument_is_a_type_error() {
+    assert!(matches!(
+        program("(apply (lambda ((a i32) &rest (xs i32)) i32 a) 1 (quote ()))"),
+        Err(Error::TypeError(_))
+    ));
 }
 
 // ---- cons / car / cdr / list / dolist ----------------------------------------
