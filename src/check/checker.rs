@@ -34,8 +34,13 @@ pub trait MacroExpander {
 #[derive(Clone, Debug, PartialEq)]
 pub enum TopLevel {
     /// A `defun`: fully-qualified [`Path`], typed parameters, return type, body.
+    /// `type_params` are the names declared by `(defun (name T1 T2...) ...)`
+    /// (empty for an ordinary, non-generic function) — kept here for parity
+    /// with `Defstruct`'s `params`, though the evaluator ignores them (type
+    /// information is erased before execution; see `Checker::check_call`).
     Defun {
         name: Path,
+        type_params: Vec<String>,
         params: Vec<(String, Type)>,
         ret: Type,
         body: Vec<Typed>,
@@ -501,22 +506,55 @@ impl Checker {
         if parts.len() < 3 {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
-        let name = match parts[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
-            _ => return Err(Error::TypeError("defun: name must be a symbol".into())),
-        };
+        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
         let params = self.parse_params(heap, parts[1])?;
         let ret = self.canon(&parse_type(heap, parts[2])?);
         let fq_name = self.fq(&name);
 
         // Register the signature in the current namespace before checking the
         // body so self-recursion works.
-        let sig = FnSig { params: params.iter().map(|(_, t)| t.clone()).collect(), ret: ret.clone(), public };
+        let sig = FnSig {
+            type_params: type_params.clone(),
+            params: params.iter().map(|(_, t)| t.clone()).collect(),
+            ret: ret.clone(),
+            public,
+        };
         self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
 
         let env = Env::new().extended(params.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &parts[3..], Some(&ret))?;
-        Ok(TopLevel::Defun { name: fq_name, params, ret, body })
+        Ok(TopLevel::Defun { name: fq_name, type_params, params, ret, body })
+    }
+
+    /// `parts[0]` of a `defun` form: a bare symbol names an ordinary
+    /// function; `(name T1 T2...)` additionally declares generic type
+    /// parameter names — mirroring `defmethod`'s `(self Type)` receiver-list
+    /// syntax. Type parameter names are just ordinary (lowercase, after
+    /// reader case-folding) identifiers; `Checker::check_call` resolves them
+    /// against actual argument/expected types with the same `unify`/
+    /// `subst_apply` machinery `check_construct` uses for an ADT's `params`.
+    fn parse_defun_name(&self, heap: &Heap, v: Value) -> Result<(String, Vec<String>), Error> {
+        match v {
+            Value::Symbol(id) => Ok((heap.symbol_name(id).to_string(), Vec::new())),
+            Value::Cons(_) => {
+                let elems = heap.list_to_vec(v)?;
+                let name = match elems.first() {
+                    Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+                    _ => return Err(Error::TypeError("defun: name must be a symbol".into())),
+                };
+                let mut type_params = Vec::new();
+                for tp in &elems[1..] {
+                    match tp {
+                        Value::Symbol(id) => type_params.push(heap.symbol_name(*id).to_string()),
+                        _ => return Err(Error::TypeError("defun: type parameter must be a symbol".into())),
+                    }
+                }
+                Ok((name, type_params))
+            }
+            _ => Err(Error::TypeError(
+                "defun: name must be a symbol or (name type-params...)".into(),
+            )),
+        }
     }
 
     /// `(defmacro name (p1 p2 ...) body...)`: a compile-time code
@@ -732,7 +770,7 @@ impl Checker {
             sig_params.push(recv_ty.clone());
         }
         sig_params.extend(params.iter().map(|(_, t)| t.clone()));
-        let sig = FnSig { params: sig_params, ret: ret.clone(), public };
+        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public };
         if let Some(def) = self.reg.type_def_mut(&type_fq) {
             def.assoc.insert(method.clone(), AssocFn { sig, instance });
         }
@@ -1834,11 +1872,31 @@ impl Checker {
                 args.len()
             )));
         }
+        // Non-generic functions (the overwhelming majority) take the fast
+        // path: `params`/`subst` stay empty, so `subst_apply`/`type_has_param`
+        // below are no-ops and behavior is identical to before generics were
+        // added. Generic functions resolve `sig.type_params` against the
+        // actual argument types with the same `unify`/`subst_apply` accumulation
+        // `check_construct` uses for an ADT's `params`.
+        let params: HashSet<String> = sig.type_params.iter().cloned().collect();
+        let mut subst: HashMap<String, Type> = HashMap::new();
         let mut typed = Vec::new();
         for (arg, pty) in args.iter().zip(sig.params.iter()) {
-            typed.push(self.check(heap, interp, env, *arg, Some(pty))?);
+            let st = subst_apply(pty, &subst);
+            let exp = if type_has_param(&st, &params) { None } else { Some(st) };
+            let ta = self.check(heap, interp, env, *arg, exp.as_ref())?;
+            unify(&params, pty, &ta.ty, &mut subst)?;
+            typed.push(ta);
         }
-        Ok(Typed { expr: Expr::Call(name.clone(), typed), ty: sig.ret })
+        for p in &sig.type_params {
+            if !subst.contains_key(p) {
+                return Err(Error::TypeError(format!(
+                    "cannot infer type parameter `{}` for `{}`",
+                    p, name
+                )));
+            }
+        }
+        Ok(Typed { expr: Expr::Call(name.clone(), typed), ty: subst_apply(&sig.ret, &subst) })
     }
 
     /// `ctor` is `(type path, variant index)` — the same pair [`Self::resolve_ctor`]

@@ -18,6 +18,11 @@ pub struct Variant {
 /// A function's parameter and return types.
 #[derive(Clone, Debug)]
 pub struct FnSig {
+    /// Type parameter names declared by `(defun (name T1 T2...) ...)`. Empty
+    /// for an ordinary (non-generic) function — callers resolve these against
+    /// the actual argument/expected types the same way `check_construct`
+    /// resolves an ADT's `params` (see `Checker::check_call`).
+    pub type_params: Vec<String>,
     pub params: Vec<Type>,
     pub ret: Type,
     /// Visible outside its defining module.
@@ -174,32 +179,32 @@ impl Registry {
         }
         // `random`: the only numeric builtin with no natural receiver to
         // dispatch on (like `gensym`), so it stays a free function.
-        root.fns.insert("random".to_string(), FnSig { params: vec![Type::I32], ret: Type::I32, public: true });
+        root.fns.insert("random".to_string(), FnSig { type_params: vec![], params: vec![Type::I32], ret: Type::I32, public: true });
         // `not`: a plain unary function (no short-circuiting needed, unlike
         // `and`/`or`), so — unlike those two — it doesn't need special-form
         // treatment.
-        root.fns.insert("not".to_string(), FnSig { params: vec![Type::Bool], ret: Type::Bool, public: true });
+        root.fns.insert("not".to_string(), FnSig { type_params: vec![], params: vec![Type::Bool], ret: Type::Bool, public: true });
         // `cons`/`car`/`cdr` operate on `Sexpr` (the cons/nil duality at the
         // type level). `cons` is also reachable as the `Cons` constructor;
         // registering it as a function too lets it be used as a value
         // (e.g. passed to a higher-order function).
-        root.fns.insert("cons".to_string(), FnSig { params: vec![sexpr(), sexpr()], ret: sexpr(), public: true });
-        root.fns.insert("car".to_string(), FnSig { params: vec![sexpr()], ret: sexpr(), public: true });
-        root.fns.insert("cdr".to_string(), FnSig { params: vec![sexpr()], ret: sexpr(), public: true });
+        root.fns.insert("cons".to_string(), FnSig { type_params: vec![], params: vec![sexpr(), sexpr()], ret: sexpr(), public: true });
+        root.fns.insert("car".to_string(), FnSig { type_params: vec![], params: vec![sexpr()], ret: sexpr(), public: true });
+        root.fns.insert("cdr".to_string(), FnSig { type_params: vec![], params: vec![sexpr()], ret: sexpr(), public: true });
         // `set-car`/`set-cdr` (CL `rplaca`/`rplacd`): in-place mutation of an
         // existing cons cell, backed by `mem::Heap::set_car`/`set_cdr` (already
         // implemented at the heap layer, just not wired up to a language-level
         // name until now). Panics on a non-`Cons` `Sexpr`, matching `car`/`cdr`.
         // This is the prerequisite `nconc`/`nreverse` (the prelude's destructive
         // list operations) build on.
-        root.fns.insert("set-car".to_string(), FnSig { params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true });
-        root.fns.insert("set-cdr".to_string(), FnSig { params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true });
+        root.fns.insert("set-car".to_string(), FnSig { type_params: vec![], params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true });
+        root.fns.insert("set-cdr".to_string(), FnSig { type_params: vec![], params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true });
         // `gensym`: a fresh `Sexpr::Sym` on every call, for macro hygiene
         // workarounds (see `Interp`'s `gensym_counter` for the caveat that
         // these are collision-*resistant*, not truly unforgeable — typelisp
         // symbols are always interned/permanent, there is no uninterned-symbol
         // concept to give a CL-style absolute guarantee).
-        root.fns.insert("gensym".to_string(), FnSig { params: vec![], ret: sexpr(), public: true });
+        root.fns.insert("gensym".to_string(), FnSig { type_params: vec![], params: vec![], ret: sexpr(), public: true });
         Registry { root }
     }
 
@@ -298,7 +303,7 @@ fn sexpr_def() -> AdtDef {
 /// special-cases `Str` to compare content instead.
 fn sexpr_assoc() -> HashMap<String, AssocFn> {
     let mut m = HashMap::new();
-    m.insert("eq".to_string(), AssocFn { sig: FnSig { params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true }, instance: true });
+    m.insert("eq".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true }, instance: true });
     m
 }
 
@@ -306,7 +311,7 @@ fn bool_assoc() -> HashMap<String, AssocFn> {
     let mut m = HashMap::new();
     m.insert(
         "eq".to_string(),
-        AssocFn { sig: FnSig { params: vec![Type::Bool, Type::Bool], ret: Type::Bool, public: true }, instance: true },
+        AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Bool, Type::Bool], ret: Type::Bool, public: true }, instance: true },
     );
     m
 }
@@ -332,36 +337,36 @@ fn hashtable_def() -> AdtDef {
     let mut assoc = HashMap::new();
     assoc.insert(
         "new".to_string(),
-        AssocFn { sig: FnSig { params: vec![], ret: hashtable_ty(), public: true }, instance: false },
+        AssocFn { sig: FnSig { type_params: vec![], params: vec![], ret: hashtable_ty(), public: true }, instance: false },
     );
     assoc.insert(
         "get".to_string(),
         AssocFn {
-            sig: FnSig { params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true },
+            sig: FnSig { type_params: vec![], params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true },
             instance: true,
         },
     );
     assoc.insert(
         "set".to_string(),
         AssocFn {
-            sig: FnSig { params: vec![hashtable_ty(), tvar("k"), tvar("v")], ret: Type::Unit, public: true },
+            sig: FnSig { type_params: vec![], params: vec![hashtable_ty(), tvar("k"), tvar("v")], ret: Type::Unit, public: true },
             instance: true,
         },
     );
     assoc.insert(
         "remove".to_string(),
         AssocFn {
-            sig: FnSig { params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true },
+            sig: FnSig { type_params: vec![], params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true },
             instance: true,
         },
     );
     assoc.insert(
         "count".to_string(),
-        AssocFn { sig: FnSig { params: vec![hashtable_ty()], ret: Type::I32, public: true }, instance: true },
+        AssocFn { sig: FnSig { type_params: vec![], params: vec![hashtable_ty()], ret: Type::I32, public: true }, instance: true },
     );
     assoc.insert(
         "clear".to_string(),
-        AssocFn { sig: FnSig { params: vec![hashtable_ty()], ret: Type::Unit, public: true }, instance: true },
+        AssocFn { sig: FnSig { type_params: vec![], params: vec![hashtable_ty()], ret: Type::Unit, public: true }, instance: true },
     );
     AdtDef {
         name: Path::root("hashtable"),
@@ -389,39 +394,39 @@ fn vector_def() -> AdtDef {
     assoc.insert(
         "new".to_string(),
         AssocFn {
-            sig: FnSig { params: vec![Type::I32, tvar("t")], ret: vector_ty(), public: true },
+            sig: FnSig { type_params: vec![], params: vec![Type::I32, tvar("t")], ret: vector_ty(), public: true },
             instance: false,
         },
     );
     assoc.insert(
         "get".to_string(),
         AssocFn {
-            sig: FnSig { params: vec![vector_ty(), Type::I32], ret: tvar("t"), public: true },
+            sig: FnSig { type_params: vec![], params: vec![vector_ty(), Type::I32], ret: tvar("t"), public: true },
             instance: true,
         },
     );
     assoc.insert(
         "set".to_string(),
         AssocFn {
-            sig: FnSig { params: vec![vector_ty(), Type::I32, tvar("t")], ret: Type::Unit, public: true },
+            sig: FnSig { type_params: vec![], params: vec![vector_ty(), Type::I32, tvar("t")], ret: Type::Unit, public: true },
             instance: true,
         },
     );
     assoc.insert(
         "length".to_string(),
-        AssocFn { sig: FnSig { params: vec![vector_ty()], ret: Type::I32, public: true }, instance: true },
+        AssocFn { sig: FnSig { type_params: vec![], params: vec![vector_ty()], ret: Type::I32, public: true }, instance: true },
     );
     assoc.insert(
         "push".to_string(),
         AssocFn {
-            sig: FnSig { params: vec![vector_ty(), tvar("t")], ret: Type::Unit, public: true },
+            sig: FnSig { type_params: vec![], params: vec![vector_ty(), tvar("t")], ret: Type::Unit, public: true },
             instance: true,
         },
     );
     assoc.insert(
         "pop".to_string(),
         AssocFn {
-            sig: FnSig { params: vec![vector_ty()], ret: option_of(tvar("t")), public: true },
+            sig: FnSig { type_params: vec![], params: vec![vector_ty()], ret: option_of(tvar("t")), public: true },
             instance: true,
         },
     );
@@ -436,7 +441,7 @@ fn vector_def() -> AdtDef {
 /// (`str::to_ascii_uppercase`/`lowercase`), avoiding Unicode case mappings
 /// that can change a string's length (e.g. German `ß` -> `SS`).
 fn string_assoc() -> HashMap<String, AssocFn> {
-    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { params, ret, public: true }, instance: true };
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], params, ret, public: true }, instance: true };
     let mut m = HashMap::new();
     m.insert("upcase".to_string(), method(vec![Type::Str], Type::Str));
     m.insert("downcase".to_string(), method(vec![Type::Str], Type::Str));
@@ -455,7 +460,7 @@ fn string_assoc() -> HashMap<String, AssocFn> {
 /// necessarily a single char). `alpha?`/`digit?` classify ASCII letters/
 /// digits only (CL's `alpha-char-p`/`digit-char-p` without a radix).
 fn char_assoc() -> HashMap<String, AssocFn> {
-    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { params, ret, public: true }, instance: true };
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], params, ret, public: true }, instance: true };
     let mut m = HashMap::new();
     m.insert("upcase".to_string(), method(vec![Type::Char], Type::Char));
     m.insert("downcase".to_string(), method(vec![Type::Char], Type::Char));
@@ -474,8 +479,8 @@ fn char_assoc() -> HashMap<String, AssocFn> {
 /// Shared by both integer widths since the operation set and panic policy
 /// are identical; only the receiver/param `Type` differs.
 fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig { params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true }, instance: true };
-    let cmp = || AssocFn { sig: FnSig { params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true }, instance: true };
+    let binop = || AssocFn { sig: FnSig { type_params: vec![], params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true }, instance: true };
+    let cmp = || AssocFn { sig: FnSig { type_params: vec![], params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true }, instance: true };
     let mut m = HashMap::new();
     for op in ["+", "-", "*", "/", "mod"] {
         m.insert(op.to_string(), binop());
@@ -496,9 +501,9 @@ fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
 /// plus `expt`(binary, `f64::powf`) and the unary rounding/root family
 /// `sqrt`/`floor`/`ceiling`/`round`/`truncate`.
 fn float_assoc() -> HashMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig { params: vec![Type::F64, Type::F64], ret: Type::F64, public: true }, instance: true };
-    let cmp = || AssocFn { sig: FnSig { params: vec![Type::F64, Type::F64], ret: Type::Bool, public: true }, instance: true };
-    let unary = || AssocFn { sig: FnSig { params: vec![Type::F64], ret: Type::F64, public: true }, instance: true };
+    let binop = || AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::F64, Type::F64], ret: Type::F64, public: true }, instance: true };
+    let cmp = || AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::F64, Type::F64], ret: Type::Bool, public: true }, instance: true };
+    let unary = || AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::F64], ret: Type::F64, public: true }, instance: true };
     let mut m = HashMap::new();
     for op in ["+", "-", "*", "/", "mod"] {
         m.insert(op.to_string(), binop());
