@@ -434,3 +434,87 @@ fn nreverse_of_nil_is_nil() {
 fn nreverse_of_a_single_element_list_is_unchanged() {
     eval_true("(equal (nreverse (quote (1))) (quote (1)))");
 }
+
+// ---- Option<T>/Result<T,E> accessors (step 7c) ------------------------------
+//
+// `(none)`/`(ok ..)`/`(err ..)` constructed with no surrounding type context
+// can't infer every type parameter on their own (e.g. `(none)` alone can't
+// learn its `T`) — this is `check_construct`'s ordinary inference limit, not
+// specific to these methods, so every case below goes through a `defun` with
+// an explicit return type to give the constructor an `expected` type to seed
+// from (matching `check_call`'s "non-generic param implies a concrete
+// `expected`" path).
+
+#[test]
+fn unwrap_returns_the_some_payload() {
+    assert_eq!(eval_ok("(unwrap (some 5))"), RtValue::Int(5));
+}
+
+#[test]
+fn unwrap_panics_on_none() {
+    let src = "(defun get-opt () Option<i32> (none)) (unwrap (get-opt))";
+    assert!(matches!(run(src), Err(EvalError::Panic(_))));
+}
+
+#[test]
+fn unwrap_or_returns_the_payload_when_some() {
+    assert_eq!(eval_ok("(unwrap-or (some 5) 9)"), RtValue::Int(5));
+}
+
+#[test]
+fn unwrap_or_returns_the_default_when_none() {
+    let src = "(defun get-opt () Option<i32> (none)) (unwrap-or (get-opt) 9)";
+    assert_eq!(eval_ok(src), RtValue::Int(9));
+}
+
+#[test]
+fn is_some_question_mark_distinguishes_some_from_none() {
+    eval_true("(is-some? (some 1))");
+    let src = "(defun get-opt () Option<i32> (none)) (is-some? (get-opt))";
+    assert_eq!(eval_ok(src), RtValue::Bool(false));
+}
+
+#[test]
+fn is_none_question_mark_distinguishes_none_from_some() {
+    let src = "(defun get-opt () Option<i32> (none)) (is-none? (get-opt))";
+    eval_true(src);
+    assert_eq!(eval_ok("(is-none? (some 1))"), RtValue::Bool(false));
+}
+
+#[test]
+fn result_unwrap_returns_the_ok_payload() {
+    let src = "(defun get-r () Result<i32,Error> (ok 7)) (unwrap (get-r))";
+    assert_eq!(eval_ok(src), RtValue::Int(7));
+}
+
+#[test]
+fn result_unwrap_panics_on_err() {
+    let src = r#"(defun get-r () Result<i32,Error> (err (error "boom"))) (unwrap (get-r))"#;
+    assert!(matches!(run(src), Err(EvalError::Panic(_))));
+}
+
+#[test]
+fn result_unwrap_or_returns_the_default_on_err() {
+    let src = r#"(defun get-r () Result<i32,Error> (err (error "boom"))) (unwrap-or (get-r) 99)"#;
+    assert_eq!(eval_ok(src), RtValue::Int(99));
+}
+
+#[test]
+fn result_is_ok_question_mark_and_is_err_question_mark() {
+    let ok_src = "(defun get-r () Result<i32,Error> (ok 7)) (is-ok? (get-r))";
+    let err_src = r#"(defun get-r () Result<i32,Error> (err (error "x"))) (is-err? (get-r))"#;
+    eval_true(ok_src);
+    eval_true(err_src);
+}
+
+#[test]
+fn unwrap_resolves_to_the_correct_method_per_receiver_type() {
+    // `unwrap` is defined on both `Option<T>` and `Result<T,E>` — same name,
+    // disambiguated by `Checker::check_instance_method` from each call's
+    // receiver type, like `Vector<T>`/`HashTable<K,V>`'s shared method names.
+    let src = r#"
+        (defun get-r () Result<i32,Error> (ok 3))
+        (+ (unwrap (some 4)) (unwrap (get-r)))
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Int(7));
+}

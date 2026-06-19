@@ -35,10 +35,15 @@ use crate::{Checker, Heap, Interp, Reader};
 ///
 /// `nconc`/`nreverse` are destructive (mutate existing cons cells via
 /// `set-car`/`set-cdr` instead of allocating new ones — see those functions'
-/// own comment below). Deferred to a later step (7c): `sort`, `gcd`/`lcm`/
-/// `signum`, `assoc`, Option/Result helpers, and higher-order helpers
-/// (`identity`/`compose`/`flip` would need generic `defun` type parameters,
-/// which don't exist yet).
+/// own comment below).
+///
+/// `Option<T>`/`Result<T,E>` accessors (`unwrap`/`unwrap-or`/`is-some?`/
+/// `is-none?`/`is-ok?`/`is-err?`) are `defmethod`, not `defun` — see the
+/// comment above their definitions below for why. Still deferred to a later
+/// step (7c): `sort`, `gcd`/`lcm`/`signum`, `assoc`, and higher-order helpers
+/// (`identity`/`compose`/`flip`, now buildable as generic `defun`s — see
+/// `Checker::check_call`'s `unify`/`subst_apply` integration — just not
+/// written yet).
 pub const SOURCE: &str = r#"
 (defun consp ((s Sexpr)) bool (match s ((Cons _ _) true) (_ false)))
 (defun null ((s Sexpr)) bool (match s ((Nil) true) (_ false)))
@@ -215,6 +220,35 @@ pub const SOURCE: &str = r#"
     ((Cons _ d) (progn (set-cdr lst prev) (nreverse-onto d lst)))
     (_ (panic "nreverse: not a proper list"))))
 (defun nreverse ((lst Sexpr)) Sexpr (nreverse-onto lst ()))
+
+;; Option<T>/Result<T,E> accessors (roadmap step 7c). Written as `defmethod`,
+;; not `defun`: `unwrap`/`unwrap-or` need the same name on both `Option<T>`
+;; and `Result<T,E>`, which only an instance method's per-receiver-type assoc
+;; table allows (a free function has exactly one signature for its name —
+;; see registry::int_assoc's step-6 comment for the same constraint on `+`).
+;; `(unwrap opt)` resolves via `Checker::check_instance_method`: it checks
+;; `opt` first, then looks up `unwrap` in *its* type's assoc table, so the
+;; same call syntax reaches `Option`'s or `Result`'s method independently.
+;; The receiver's type parameter (`T`/`E` here) is resolved per call site
+;; from the receiver's concrete type, exactly like `Vector<T>`/`HashTable<K,V>`
+;; methods — no relation to `defun`'s separate generic-parameter syntax.
+(defmethod unwrap ((self Option<T>)) T
+  (match self ((some x) x) ((none) (panic "unwrap: called on none"))))
+(defmethod unwrap-or ((self Option<T>) (default T)) T
+  (match self ((some x) x) ((none) default)))
+(defmethod is-some? ((self Option<T>)) bool
+  (match self ((some _) true) ((none) false)))
+(defmethod is-none? ((self Option<T>)) bool
+  (not (is-some? self)))
+
+(defmethod unwrap ((self Result<T,E>)) T
+  (match self ((ok x) x) ((err _) (panic "unwrap: called on err"))))
+(defmethod unwrap-or ((self Result<T,E>) (default T)) T
+  (match self ((ok x) x) ((err _) default)))
+(defmethod is-ok? ((self Result<T,E>)) bool
+  (match self ((ok _) true) ((err _) false)))
+(defmethod is-err? ((self Result<T,E>)) bool
+  (not (is-ok? self)))
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,
