@@ -47,6 +47,9 @@ use crate::{Checker, Heap, Interp, Reader};
 /// see their own comments below for how they share the name safely), and
 /// `assoc` (§4.2's list section) round out step 7c — `min`/`max`/`range` are
 /// not in the catalog, so they're left undone rather than guessed at.
+///
+/// `until`/`while-let` (roadmap step 8b, catalog §1.1) are the first real
+/// use of `,@` (unquote-splicing, step 8a) — see their own comments below.
 pub const SOURCE: &str = r#"
 (defun consp ((s Sexpr)) bool (match s ((Cons _ _) true) (_ false)))
 (defun null ((s Sexpr)) bool (match s ((Nil) true) (_ false)))
@@ -326,6 +329,29 @@ pub const SOURCE: &str = r#"
     ((Nil) ())
     ((Cons pair rest) (if (eq key (car pair)) pair (assoc key rest)))
     (_ (panic "assoc: not a proper list"))))
+
+;; `until`/`while-let` (roadmap step 8b, cl-equivalence-catalog.md §1.1):
+;; pure template expansions, the first real use of `,@` (unquote-splicing,
+;; step 8a) — `&rest body` is one `Sexpr` list of forms, and `,@body` splices
+;; them into the expansion as multiple sibling forms rather than nesting that
+;; list as a single (mistyped) form.
+;;
+;; `until` is `while` with the condition negated.
+(defmacro until (test &rest body) `(while (not ,test) ,@body))
+;;
+;; `while-let` loops for as long as `binding`'s pattern matches `val`,
+;; re-evaluating `val` each iteration (so it can be a call like `(next i)`
+;; that observes mutated state) — same idea `if-let` uses
+;; (`Checker::check_if_let`: a `match` whose non-matching arm is the "false"
+;; branch), but built from `loop`/`match`/`break` rather than checker-level
+;; machinery, and looping instead of running once. `binding` is `(pattern
+;; val)`; `pattern` must be a constructor pattern (e.g. `(some x)`) to
+;; usefully narrow `val`'s type — a bare variable would match unconditionally
+;; (binding the whole scrutinee) and the macro would loop forever.
+(defmacro while-let (binding &rest body)
+  (let ((pattern (car binding))
+        (val (car (cdr binding))))
+    `(loop (match ,val (,pattern ,@body) (_ (break))))))
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,

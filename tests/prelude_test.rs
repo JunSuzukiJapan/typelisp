@@ -695,3 +695,46 @@ fn vector_sort_mutates_the_receiver_in_place() {
         other => panic!("expected a Vector, got {:?}", other),
     }
 }
+
+// ---- until / while-let (step 8b) --------------------------------------------
+
+#[test]
+fn until_runs_the_body_while_the_test_is_false() {
+    assert_eq!(
+        eval_ok("(let ((i 0)) (until (= i 5) (setf i (+ i 1))) i)"),
+        RtValue::Int(5)
+    );
+}
+
+#[test]
+fn until_does_not_run_the_body_when_the_test_is_already_true() {
+    assert_eq!(
+        eval_ok("(let ((i 9)) (until (= i 9) (setf i 0)) i)"),
+        RtValue::Int(9)
+    );
+}
+
+#[test]
+fn while_let_drains_an_option_producing_call_until_none() {
+    let src = r#"
+        (defun next ((n i32)) Option<i32> (if (> n 0) (some n) (none)))
+        (let ((i 5) (sum 0))
+          (while-let ((some x) (next i))
+            (setf sum (+ sum x))
+            (setf i (- i 1)))
+          sum)
+    "#;
+    // 5 + 4 + 3 + 2 + 1 = 15
+    assert_eq!(eval_ok(src), RtValue::Int(15));
+}
+
+#[test]
+fn while_let_does_not_run_the_body_when_the_pattern_never_matches() {
+    let src = r#"
+        (defun get-opt () Option<i32> (none))
+        (let ((ran false))
+          (while-let ((some x) (get-opt)) (setf ran true))
+          ran)
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Bool(false));
+}
