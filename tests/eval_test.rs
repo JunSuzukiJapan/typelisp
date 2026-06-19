@@ -553,3 +553,41 @@ fn cond_with_classify() {
                (classify 7)";
     assert_eq!(eval_ok(src), RtValue::Int(1));
 }
+
+// ---- labels (roadmap step 9) -------------------------------------------------
+
+#[test]
+fn labels_self_recursion() {
+    let src = "(labels ((fact ((n i32)) i32 (if (= n 0) 1 (* n (fact (- n 1)))))) (fact 5))";
+    assert_eq!(eval_ok(src), RtValue::Int(120));
+}
+
+#[test]
+fn labels_mutual_recursion() {
+    let src = "(labels ((is-even ((n i32)) bool (if (= n 0) true (is-odd (- n 1))))
+                        (is-odd ((n i32)) bool (if (= n 0) false (is-even (- n 1)))))
+                 (is-even 10))";
+    assert_eq!(eval_ok(src), RtValue::Bool(true));
+}
+
+#[test]
+fn labels_trailing_body_can_call_multiple_functions() {
+    let src = "(labels ((double ((n i32)) i32 (* n 2))) (+ (double 3) (double 4)))";
+    assert_eq!(eval_ok(src), RtValue::Int(14));
+}
+
+#[test]
+fn labels_nested_inside_a_defun_still_self_recurses() {
+    let src = "(defun run-it () i32
+                  (labels ((sum-to ((n i32)) i32 (if (= n 0) 0 (+ n (sum-to (- n 1))))))
+                    (sum-to 4)))
+                (run-it)";
+    assert_eq!(eval_ok(src), RtValue::Int(10));
+}
+
+#[test]
+fn labels_function_can_be_bound_to_a_variable_like_any_other() {
+    let src = "(labels ((add1 ((n i32)) i32 (+ n 1)))
+                  (let ((f add1)) (f 10)))";
+    assert_eq!(eval_ok(src), RtValue::Int(11));
+}

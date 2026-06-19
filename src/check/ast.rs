@@ -13,6 +13,10 @@ pub struct Typed {
     pub ty: Type,
 }
 
+/// One function definition inside `Expr::Labels`: its name, typed
+/// parameters, and checked body.
+pub type LabelDef = (String, Vec<(String, Type)>, Vec<Typed>);
+
 /// An expression. Children are [`Typed`] so the whole tree stays annotated.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
@@ -44,6 +48,17 @@ pub enum Expr {
     /// An anonymous function `(lambda (params) ret body...)`. Its type is
     /// [`Type::Fn`](crate::Type).
     Lambda { params: Vec<(String, Type)>, body: Vec<Typed> },
+    /// `(labels ((name (params) ret body...)...) body...)`: mutually (and
+    /// self-) recursive local function definitions. Unlike `lambda`, each
+    /// function's body — and the trailing `body` — sees every name in `defs`
+    /// in scope, so they can call themselves or each other. Evaluated by
+    /// giving each function a placeholder slot before any closure is built,
+    /// then having every closure capture an environment containing all the
+    /// slots (including its own) and only afterwards filling each slot in —
+    /// the same `Rc<RefCell<..>>` self-reference trick the interpreter has no
+    /// existing precedent for elsewhere (`Closure`'s captured environment is
+    /// otherwise acyclic).
+    Labels { defs: Vec<LabelDef>, body: Vec<Typed> },
     /// Apply a function *value* (a closure) to arguments.
     Apply(Box<Typed>, Vec<Typed>),
     /// A type-associated call: an instance method (`args[0]` is the receiver)

@@ -940,6 +940,7 @@ impl Checker {
             "dolist" => return self.check_dolist(heap, interp, env, args),
             "list" => return self.check_list_lit(heap, interp, env, args),
             "lambda" => return self.check_lambda(heap, interp, env, args),
+            "labels" => return self.check_labels(heap, interp, env, args, expected),
             "match" => return self.check_match(heap, interp, env, args, expected),
             "if-let" => return self.check_if_let(heap, interp, env, args, expected),
             "panic" => return self.check_panic(heap, interp, env, args),
@@ -1038,6 +1039,75 @@ impl Checker {
             Box::new(ret),
         );
         Ok(Typed { expr: Expr::Lambda { params, body }, ty: fn_ty })
+    }
+
+    /// `(labels ((name (params) ret body...)...) body...)`: like several
+    /// `lambda`s, except each one — and the trailing `body` — can call any
+    /// of them by name, including itself (CL's `labels`; addresses the
+    /// catalog's "no self-referencing local function" gap, since a bare
+    /// `lambda` only sees its *enclosing* scope, not a `let`-bound name for
+    /// itself). Every function's signature is registered as a local
+    /// variable of `Type::Fn` *before* any body is checked (mirroring
+    /// `check_defun`'s self-recursion registration), so all of them —
+    /// including the trailing `body` — see each other regardless of
+    /// definition order.
+    fn check_labels(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        expected: Option<&Type>,
+    ) -> Result<Typed, Error> {
+        if args.is_empty() {
+            return Err(Error::TypeError(
+                "labels: (labels ((name (params) ret body...)...) body...)".into(),
+            ));
+        }
+        let specs = heap.list_to_vec(args[0])?;
+        struct Spec {
+            name: String,
+            params: Vec<(String, Type)>,
+            ret: Type,
+            raw_body: Vec<Value>,
+        }
+        let mut parsed = Vec::new();
+        let mut sigs: Vec<(String, Type)> = Vec::new();
+        for spec in specs {
+            let parts = heap.list_to_vec(spec)?;
+            if parts.len() < 3 {
+                return Err(Error::TypeError(
+                    "labels: binding must be (name (params) ret body...)".into(),
+                ));
+            }
+            let name = match parts[0] {
+                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                _ => return Err(Error::TypeError("labels: name must be a symbol".into())),
+            };
+            let params = self.parse_params(heap, parts[1])?;
+            let ret = self.canon(&parse_type(heap, parts[2])?);
+            let fn_ty = Type::Fn(params.iter().map(|(_, t)| t.clone()).collect(), Box::new(ret.clone()));
+            sigs.push((name.clone(), fn_ty));
+            parsed.push(Spec { name, params, ret, raw_body: parts[3..].to_vec() });
+        }
+        // Every function's name is visible to every body (including its
+        // own) and to the trailing `body` — registered up front, like
+        // `check_defun`'s pre-body signature insert.
+        let labels_env = env.extended(sigs);
+
+        let mut defs = Vec::new();
+        for Spec { name, params, ret, raw_body } in parsed {
+            let fn_env = labels_env.extended(params.clone());
+            // A new function boundary, same as `lambda`: `break`/`return`
+            // can't reach an outer loop through it.
+            let saved = self.loop_stack.replace(Vec::new());
+            let result = self.check_seq(heap, interp, &fn_env, &raw_body, Some(&ret));
+            self.loop_stack.replace(saved);
+            let (body, _) = result?;
+            defs.push((name, params, body));
+        }
+        let (body, ty) = self.check_seq(heap, interp, &labels_env, &args[1..], expected)?;
+        Ok(Typed { expr: Expr::Labels { defs, body }, ty })
     }
 
     /// Type-check applying a function *value* `callee` to `args`.

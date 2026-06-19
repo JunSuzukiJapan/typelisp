@@ -205,6 +205,28 @@ impl Interp {
                 }
                 self.eval_seq(heap, body, &child)
             }
+            Expr::Labels { defs, body } => {
+                // Give every function a placeholder slot *before* building any
+                // closure, so each closure's captured environment (`child`)
+                // already contains all of them — including its own slot, the
+                // self-reference `lambda` has no way to express. Only once
+                // `child` is complete does each slot get overwritten with the
+                // real closure that captured it.
+                let mut child = env.clone();
+                let slots: Vec<Slot> = defs.iter().map(|_| self.slot(RtValue::Unit)).collect();
+                for ((name, _, _), slot) in defs.iter().zip(&slots) {
+                    child.push((name.clone(), slot.clone()));
+                }
+                for ((_, params, fbody), slot) in defs.iter().zip(&slots) {
+                    let names = params.iter().map(|(n, _)| n.clone()).collect();
+                    *slot.borrow_mut() = RtValue::Closure(Rc::new(Closure {
+                        params: names,
+                        body: fbody.clone(),
+                        env: child.clone(),
+                    }));
+                }
+                self.eval_seq(heap, body, &child)
+            }
             Expr::Call(name, args) => {
                 let (argv, _slots) = self.eval_args(heap, args, env)?;
                 if let Some(f) = self.fns.get(name) {

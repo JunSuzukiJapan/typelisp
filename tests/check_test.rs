@@ -302,6 +302,29 @@ fn dotimes_count_must_be_i32() {
     assert_type_error("(dotimes (i true) ())");
 }
 
+// ---- labels -------------------------------------------------------------------
+
+#[test]
+fn labels_function_has_function_type_in_its_own_body() {
+    // `fact` calling itself recursively type-checks, proving its own name is
+    // visible (with a function type) inside its own body — the gap a bare
+    // `lambda` can't close.
+    assert_eq!(
+        ty("(labels ((fact ((n i32)) i32 (if (= n 0) 1 (* n (fact (- n 1)))))) fact)"),
+        Type::Fn(vec![Type::I32], Box::new(Type::I32))
+    );
+}
+
+#[test]
+fn labels_rejects_a_call_with_the_wrong_argument_type() {
+    assert_type_error("(labels ((f ((n i32)) i32 n)) (f true))");
+}
+
+#[test]
+fn break_does_not_cross_labels_boundary() {
+    assert_type_error("(loop (labels ((f () () (break))) (f)))");
+}
+
 // ---- cons / car / cdr / list / dolist ----------------------------------------
 
 #[test]
