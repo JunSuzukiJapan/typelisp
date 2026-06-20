@@ -920,8 +920,8 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             "downcase" => Some(expect_char(&args[0]).map(|c| RtValue::Char(c.to_ascii_lowercase()))),
             "eq" => Some(char_eq(args)),
             "lt" => Some(char_lt(args)),
-            "alpha?" => Some(expect_char(&args[0]).map(|c| RtValue::Bool(c.is_ascii_alphabetic()))),
-            "digit?" => Some(expect_char(&args[0]).map(|c| RtValue::Bool(c.is_ascii_digit()))),
+            "alphap" => Some(expect_char(&args[0]).map(|c| RtValue::Bool(c.is_ascii_alphabetic()))),
+            "digitp" => Some(expect_char(&args[0]).map(|c| RtValue::Bool(c.is_ascii_digit()))),
             _ => None,
         };
     }

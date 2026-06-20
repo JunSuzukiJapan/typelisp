@@ -37,8 +37,8 @@ use crate::{Checker, Heap, Interp, Reader};
 /// `set-car`/`set-cdr` instead of allocating new ones — see those functions'
 /// own comment below).
 ///
-/// `Option<T>`/`Result<T,E>` accessors (`unwrap`/`unwrap-or`/`is-some?`/
-/// `is-none?`/`is-ok?`/`is-err?`) are `defmethod`, not `defun` — see the
+/// `Option<T>`/`Result<T,E>` accessors (`unwrap`/`unwrap-or`/`is-some`/
+/// `is-none`/`is-ok`/`is-err`) are `defmethod`, not `defun` — see the
 /// comment above their definitions below for why. `identity`/`const`/
 /// `compose`/`flip` are generic `defun`s — see the comment above their
 /// definitions for why those, unlike the accessors, fit `defun` rather than
@@ -147,15 +147,18 @@ pub const SOURCE: &str = r#"
     ((Cons h t) (and (pred h) (every pred t)))
     (_ (panic "every: not a proper list"))))
 
-;; Named `some?`, not CL's `some` — that name collides with `Option`'s
+;; Named `any`, not CL's `some` — that name collides with `Option`'s
 ;; `Some` constructor (symbols are case-folded, so `Some`/`some` are the
 ;; same identifier; `resolve_ctor` is tried before a free function of the
 ;; same name, so `(some ...)` would always try to build an `Option` value).
-(defun some? ((pred (fn (Sexpr) bool)) (lst Sexpr)) bool
+;; `any` (Rust's `Iterator::any`) sidesteps the collision and also avoids a
+;; `?` suffix, which typelisp doesn't use for predicate names (see
+;; language-design.md §7.3).
+(defun any ((pred (fn (Sexpr) bool)) (lst Sexpr)) bool
   (match lst
     ((Nil) false)
-    ((Cons h t) (or (pred h) (some? pred t)))
-    (_ (panic "some?: not a proper list"))))
+    ((Cons h t) (or (pred h) (any pred t)))
+    (_ (panic "any: not a proper list"))))
 
 (defun count-if ((pred (fn (Sexpr) bool)) (lst Sexpr)) i32
   (match lst
@@ -247,19 +250,19 @@ pub const SOURCE: &str = r#"
   (match self ((some x) x) ((none) (panic "unwrap: called on none"))))
 (defmethod unwrap-or ((self Option<T>) (default T)) T
   (match self ((some x) x) ((none) default)))
-(defmethod is-some? ((self Option<T>)) bool
+(defmethod is-some ((self Option<T>)) bool
   (match self ((some _) true) ((none) false)))
-(defmethod is-none? ((self Option<T>)) bool
-  (not (is-some? self)))
+(defmethod is-none ((self Option<T>)) bool
+  (not (is-some self)))
 
 (defmethod unwrap ((self Result<T,E>)) T
   (match self ((ok x) x) ((err _) (panic "unwrap: called on err"))))
 (defmethod unwrap-or ((self Result<T,E>) (default T)) T
   (match self ((ok x) x) ((err _) default)))
-(defmethod is-ok? ((self Result<T,E>)) bool
+(defmethod is-ok ((self Result<T,E>)) bool
   (match self ((ok _) true) ((err _) false)))
-(defmethod is-err? ((self Result<T,E>)) bool
-  (not (is-ok? self)))
+(defmethod is-err ((self Result<T,E>)) bool
+  (not (is-ok self)))
 
 ;; Higher-order helpers (roadmap step 7c) — the motivating use case for
 ;; `defun`'s generic type parameters (`Checker::check_call`'s `unify`/

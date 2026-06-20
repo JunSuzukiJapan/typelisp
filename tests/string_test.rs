@@ -145,30 +145,30 @@ fn char_lt_compares_by_code_point() {
 
 #[test]
 fn char_alpha_is_true_for_letters() {
-    assert_eq!(eval_ok(r"(alpha? #\a)"), RtValue::Bool(true));
+    assert_eq!(eval_ok(r"(alphap #\a)"), RtValue::Bool(true));
 }
 
 #[test]
 fn char_alpha_is_false_for_digits() {
-    assert_eq!(eval_ok(r"(alpha? #\5)"), RtValue::Bool(false));
+    assert_eq!(eval_ok(r"(alphap #\5)"), RtValue::Bool(false));
 }
 
 #[test]
 fn char_digit_is_true_for_digits() {
-    assert_eq!(eval_ok(r"(digit? #\5)"), RtValue::Bool(true));
+    assert_eq!(eval_ok(r"(digitp #\5)"), RtValue::Bool(true));
 }
 
 #[test]
 fn char_digit_is_false_for_letters() {
-    assert_eq!(eval_ok(r"(digit? #\a)"), RtValue::Bool(false));
+    assert_eq!(eval_ok(r"(digitp #\a)"), RtValue::Bool(false));
 }
 
 #[test]
 fn char_only_method_on_a_string_is_a_type_error() {
-    // `alpha?` exists only in `char_assoc`, not `string_assoc` — unlike
+    // `alphap` exists only in `char_assoc`, not `string_assoc` — unlike
     // `upcase`/`downcase`/`eq`/`lt`, which both tables define, so a `Str`
     // receiver can't fall back to it.
-    type_error(r#"(alpha? "a")"#);
+    type_error(r#"(alphap "a")"#);
 }
 
 // ---- dispatch does not cross-contaminate between string and char --------------

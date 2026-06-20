@@ -288,10 +288,10 @@ fn every_is_true_only_if_all_elements_match() {
 }
 
 #[test]
-fn some_question_mark_is_true_if_any_element_matches() {
-    let src = "(defun is-b ((x Sexpr)) bool (eq x (quote b))) (some? is-b (quote (a b c)))";
+fn any_is_true_if_any_element_matches() {
+    let src = "(defun is-b ((x Sexpr)) bool (eq x (quote b))) (any is-b (quote (a b c)))";
     assert_eq!(eval_ok(src), RtValue::Bool(true));
-    let src2 = "(defun is-z ((x Sexpr)) bool (eq x (quote z))) (some? is-z (quote (a b c)))";
+    let src2 = "(defun is-z ((x Sexpr)) bool (eq x (quote z))) (any is-z (quote (a b c)))";
     assert_eq!(eval_ok(src2), RtValue::Bool(false));
 }
 
@@ -468,17 +468,17 @@ fn unwrap_or_returns_the_default_when_none() {
 }
 
 #[test]
-fn is_some_question_mark_distinguishes_some_from_none() {
-    eval_true("(is-some? (some 1))");
-    let src = "(defun get-opt () Option<i32> (none)) (is-some? (get-opt))";
+fn is_some_distinguishes_some_from_none() {
+    eval_true("(is-some (some 1))");
+    let src = "(defun get-opt () Option<i32> (none)) (is-some (get-opt))";
     assert_eq!(eval_ok(src), RtValue::Bool(false));
 }
 
 #[test]
-fn is_none_question_mark_distinguishes_none_from_some() {
-    let src = "(defun get-opt () Option<i32> (none)) (is-none? (get-opt))";
+fn is_none_distinguishes_none_from_some() {
+    let src = "(defun get-opt () Option<i32> (none)) (is-none (get-opt))";
     eval_true(src);
-    assert_eq!(eval_ok("(is-none? (some 1))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(is-none (some 1))"), RtValue::Bool(false));
 }
 
 #[test]
@@ -500,9 +500,9 @@ fn result_unwrap_or_returns_the_default_on_err() {
 }
 
 #[test]
-fn result_is_ok_question_mark_and_is_err_question_mark() {
-    let ok_src = "(defun get-r () Result<i32,Error> (ok 7)) (is-ok? (get-r))";
-    let err_src = r#"(defun get-r () Result<i32,Error> (err (error "x"))) (is-err? (get-r))"#;
+fn result_is_ok_and_is_err() {
+    let ok_src = "(defun get-r () Result<i32,Error> (ok 7)) (is-ok (get-r))";
+    let err_src = r#"(defun get-r () Result<i32,Error> (err (error "x"))) (is-err (get-r))"#;
     eval_true(ok_src);
     eval_true(err_src);
 }

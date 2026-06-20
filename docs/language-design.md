@@ -1,6 +1,6 @@
 # typelisp 言語設計（確定仕様）
 
-最終更新: 2026-06-17 / ブランチ: `feature/typed-lisp-impl`
+最終更新: 2026-06-20 / ブランチ: `feature/typed-lisp-impl`
 
 このドキュメントは、設計で**確定した言語仕様**を後から見返せるよう記録するもの。
 実装の進捗・段取りは [TODO.md](TODO.md) を参照。
@@ -25,6 +25,9 @@
 - **Rust 相互運用はしない**（`&args[1]`, `env::args().collect()` 等は対象外）。
 - **構成子パターンは S 式形** `(Some v)` / `(Cons a d)`。
 - **実行モデル**: 既定はインタプリタ（eval）。**ネイティブコンパイルは明示的 `compile`/`compile-file`（CL 準拠）を呼んだ時だけ**。LLVM コンパイラは feature gate。
+- **ファイル拡張子**: ソースファイルは `.typl`。`compile-file`/`compile` が生成するコンパイル済みファイル・関数
+  （ネイティブコード）は `.typlc`（CL の `.fasl` 相当）。
+- **命名規則 `!`/`?`**: 関数名の末尾に `!`（破壊的操作）や `?`（述語）を接尾辞として使わない（詳細・理由は §7.3）。
 
 ---
 
@@ -139,22 +142,22 @@
 | 論理 | `not` | `and`/`or` は短絡で特殊形 |
 | cons | `cons car cdr set-car set-cdr consp atom eq` | |
 | 変換 | `int->float float->int char->int int->char symbol->string string->symbol` | |
-| 文字列 | `string-length string-append string-ref substring string=?` | |
+| 文字列 | `string-length string-append string-ref substring string=` | |
 | ベクタ | `make-vector vector-ref vector-set vector-length vector-push vector-get` | `vector-ref` 範囲外は panic、`vector-get : Option<T>` |
 | 解析 | `parse-int parse-float` | `Result<_, Error>` |
 | IO | `print println princ format read read-line` | `read : (fn (String) Result<Sexpr, Error>)` |
 | 発散 | `panic unreachable todo exit` | 戻り型 `!`（§7） |
-| システム | `eval compile compile-file gc` | `compile`/`compile-file` は明示呼び出し時のみネイティブ化（feature gate） |
+| システム | `eval compile compile-file gc` | `compile`/`compile-file` は明示呼び出し時のみネイティブ化（feature gate）。出力は `.typlc`（§0） |
 | マクロ | `gensym` | 引数なし、フレッシュな `Sexpr::Sym` を返す。symbol は常に intern される仕様のため衝突耐性のみ（CL の unforgeable な未intern symbol ではない） |
 
 ### 4.2 typelisp ライブラリ（derived）
 | 種別 | 関数 |
 |---|---|
-| リスト | `list length append reverse nth last map filter foldl foldr member assoc find every some` |
+| リスト | `list length append reverse nth last map filter foldl foldr member assoc find every any` |
 | Option | `unwrap`(None で panic) `unwrap-or is-some is-none map-option and-then or-else` |
 | Result | `is-ok is-err ok-or unwrap-or-else map-result` |
 | 高階 | `identity const compose flip apply` |
-| 数値補助 | `min max sum product range iota even? odd? zero?` |
+| 数値補助 | `min max sum product range iota evenp oddp zerop` |
 
 ---
 
@@ -217,13 +220,19 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   型の突き合わせ（reconcile/unify）でも Never をボトムとして任意型に適合させる。
 - `unreachable` / `todo` / `exit` も `!`（発散）。
 
-### 7.3 命名規則 `!`
+### 7.3 命名規則 `!`/`?`
 - typelisp の関数・特殊形の名前には `!` を接尾辞として使わない（CL に倣う）。発散する操作
   （`panic`/`unreachable`/`todo`）も破壊的（mutating）操作（`set-car`/`set-cdr`/`vector-set`/
   `vector-push` 等）も同様に `!` なしの名前にする。`!` による操作名のマーキングは Scheme の作法
   （`set!`/`vector-set!` 等）であり、CL 同等の表現力を目指す typelisp では採用しない。
-- `!` という記号自体は **`Never` 型の表記**（§7.2、例 `(fn (i32) !)`）としてのみ使われ、命名規則上の
-  接尾辞ではない。
+- 同様に `?` も接尾辞として使わない（Scheme の述語命名 `even?`/`null?` 等の作法）。述語は CL 流の
+  `-p`／`p` 接尾辞（`zerop`/`evenp`/`oddp`/`consp`/`atom`/`alphap`/`digitp`）または `is-` 前置
+  （`is-some`/`is-none`/`is-ok`/`is-err`）で命名する（§4.1/§4.2）。
+  CL の `some`（リストの述語）は typelisp では使えない（`Option` の `Some` 構成子とシンボルが
+  大文字小文字無視で一致し、構成子解決が自由関数解決より優先されるため）。代わりに `?` 接尾辞
+  （`some?`）に逃げず、衝突しない別名 **`any`**（Rust の `Iterator::any` 相当）を使う。
+- `!` という記号自体は **`Never` 型の表記**（§7.2、例 `(fn (i32) !)`）として構文上の意味を持つ。
+  `?` は現時点で構文上の意味を持たない。いずれも命名規則上の接尾辞としては使わない。
 
 ### 7.4 エラー型 E
 - 当面は**組み込み汎用 `Error`**（メッセージ等を保持）。既定は `Result<T, Error>`。

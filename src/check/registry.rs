@@ -463,7 +463,7 @@ fn string_assoc() -> HashMap<String, AssocFn> {
 /// Built-in `char` instance methods (same catalog section as
 /// [`string_assoc`]). `upcase`/`downcase` are ASCII-only, for the same
 /// reason as `string_assoc`'s (a non-ASCII char's case mapping isn't
-/// necessarily a single char). `alpha?`/`digit?` classify ASCII letters/
+/// necessarily a single char). `alphap`/`digitp` classify ASCII letters/
 /// digits only (CL's `alpha-char-p`/`digit-char-p` without a radix).
 fn char_assoc() -> HashMap<String, AssocFn> {
     let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true }, instance: true };
@@ -472,8 +472,8 @@ fn char_assoc() -> HashMap<String, AssocFn> {
     m.insert("downcase".to_string(), method(vec![Type::Char], Type::Char));
     m.insert("eq".to_string(), method(vec![Type::Char, Type::Char], Type::Bool));
     m.insert("lt".to_string(), method(vec![Type::Char, Type::Char], Type::Bool));
-    m.insert("alpha?".to_string(), method(vec![Type::Char], Type::Bool));
-    m.insert("digit?".to_string(), method(vec![Type::Char], Type::Bool));
+    m.insert("alphap".to_string(), method(vec![Type::Char], Type::Bool));
+    m.insert("digitp".to_string(), method(vec![Type::Char], Type::Bool));
     m
 }
 

@@ -170,7 +170,7 @@ IO系（`print`/`println`/`princ`/`format`/`read`/`read-line`）・型変換・i
 | 比較 | `(eq s1 s2)` | **Rust** | §0.1拡張で `Str` にも `eq` を定義（§1.1 `case` の前提と共通） |
 | 大小比較 | `(lt s1 s2)` 等 | **Rust** | |
 | trim/split | `(trim s)` / `(split s sep)` | **TypeLisp**（`defmethod`） | `ref`/`substring` の組合せで実装可能 |
-| 文字判定 | `(alpha? c)` / `(digit? c)`（`c: char`） | **Rust** | 文字コード操作はプリミティブ |
+| 文字判定 | `(alphap c)` / `(digitp c)`（`c: char`） | **Rust** | 文字コード操作はプリミティブ |
 | 文字列⇔リスト変換 | `(to-list s)` / `Str::from-list` | **Rust** | 内部表現の変換は直接アクセスが要る |
 
 #### e. シーケンス操作拡張（リスト、`Sexpr` 向けの自由関数のまま）

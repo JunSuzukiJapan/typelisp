@@ -252,17 +252,18 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
     - 型登録: `registry.rs`の`string_assoc()`/`char_assoc()`が、`with_builtins`のプリミティブ登録
       ループ内で`Type::Str`/`Type::Char`の場合だけ非空の`assoc`を渡す（他のプリミティブは従来通り
       空）。`string`: `upcase`/`downcase`/`length`/`ref`/`substring`/`append`/`eq`/`lt`。
-      `char`: `upcase`/`downcase`/`eq`/`lt`/`alpha?`/`digit?`。
+      `char`: `upcase`/`downcase`/`eq`/`lt`/`alphap`/`digitp`（命名は2026-06-20に`alpha?`/`digit?`
+      から`?`接尾辞を廃して訂正、§7.3参照）。
     - 意図的な設計判断: `length`/`ref`/`substring`の添字は**Unicodeスカラー値(char)単位**
       （バイト単位ではない）。`upcase`/`downcase`はASCII限定
       （`to_ascii_uppercase`/`lowercase`、独語`ß`→`SS`のような長さが変わるUnicode大小変換を回避）。
-      `alpha?`/`digit?`もASCII限定（CLの`alpha-char-p`/`digit-char-p`の進数無し版に相当）。
+      `alphap`/`digitp`もASCII限定（CLの`alpha-char-p`/`digit-char-p`の進数無し版に相当）。
       `ref`/`substring`は範囲外（負数含む）・`start > end`をランタイムpanic
       （`car`/`cdr`の非Consと同じ「型システムが追えない所はpanic」方針）。
     - 実行時ディスパッチ: `eval_builtin_method`を`string`/`char`の2分岐をさらに追加（既存の
       `hashtable`/`vector`と並列）。
     - TDD: 新規`tests/string_test.rs`（24件。各メソッドの基本動作、範囲外/不正範囲のpanic、
-      `string`/`char`それぞれにしか無いメソッド（`alpha?`等）が他方の受け手では型エラーになる
+      `string`/`char`それぞれにしか無いメソッド（`alphap`等）が他方の受け手では型エラーになる
       こと、`eq`等の同名メソッドが型ごとに別テーブルで衝突しないことの回帰）。miri green
       （24/24、898秒、UB/リーク無し——GC非依存のため時間のほとんどはmiriのインタプリタ
       オーバーヘッド自体）。
@@ -336,7 +337,7 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
   - 実装済み（4r）: TypeLispライブラリ関数 ステップ7b（`Sexpr`リスト操作一式。`prelude.rs`の
     `SOURCE`に追記、新規Rust側コードは無し——preludeローダーがそのまま使えた）。
     `length`/`append`/`reverse`(`reverse-onto`補助)/`nthcdr`/`nth`/`elt`/`last`/`butlast`/
-    `take`/`subseq`/`copy-list`/`member`/`find-if`/`every`/`some?`/`count-if`/`count`/
+    `take`/`subseq`/`copy-list`/`member`/`find-if`/`every`/`any`/`count-if`/`count`/
     `position-if`(`position-if-from`補助)/`position`/`remove-if`/`remove-if-not`/`remove`/
     `map`/`filter`/`foldl`/`foldr`（29関数）。
     - **設計判断**: `Sexpr`は単一の具象型なので`Vector<T>`/`HashTable<K,V>`と違いジェネリクスは
@@ -347,7 +348,11 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
     - **命名衝突の発見**: CL流に`some`という名前にしたところ、`Option`の`Some`構成子と
       （シンボルが大文字小文字無視のため）名前が一致し、コンストラクタ解決が自由関数解決より
       優先されるため`(some pred lst)`が常に`Option::Some`を構築しようとしてエラーになった。
-      `some?`にリネームして解決（既存の`alpha?`/`digit?`と同じ`?`接尾辞の述語命名規則）。
+      当初は`some?`にリネームして解決（既存の`alpha?`/`digit?`と同じ`?`接尾辞の述語命名規則）。
+      **訂正（2026-06-20）**: `!`/`?`接尾辞を使わない命名規則を確定（§7.3）したため、
+      `some?`/`alpha?`/`digit?`/`is-some?`/`is-none?`/`is-ok?`/`is-err?`をそれぞれ
+      `any`/`alphap`/`digitp`/`is-some`/`is-none`/`is-ok`/`is-err`にリネーム
+      （`any`は`some`との衝突を避けつつ`?`も使わない名前、Rustの`Iterator::any`相当）。
     - **`Sexpr`は任意の値を表すため「ちゃんとしたリストである」という制約を型で表現できない** ——
       `Cons`/`Nil`しか想定しない再帰関数はすべて`_`のワイルドカードアームを追加し、それ以外の
       バリアント（Int/Float/Char/Bool/Sym/Str）が来たら`panic`する設計にした（`car`/`cdr`の
@@ -379,7 +384,7 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
     `gcd`/`lcm`/`signum`、`assoc`、
     Option/Result補助（`unwrap`/`unwrap-or`/`is-some`/`map-option`等）、
     高階（`identity`/`const`/`compose`/`flip`——`defun`にジェネリック型パラメータが無いため
-    要設計）、数値補助（`min`/`max`/`sum`/`range`/`even?`等）。
+    要設計）、数値補助（`min`/`max`/`sum`/`range`/`evenp`等）。
     `append`実装済みなので、マクロの`,@`（unquote-splicing）を追加できる。
   - `case`/`do`/`doiter`/`while-let`/`the` は未実装（`defmacro` の `&rest` は実装済みなので前提は満たした。
     `case` はさらに型ごとの `eq` が前提）。`defun`/`lambda` の型付き `&rest`／`apply` も未実装。
