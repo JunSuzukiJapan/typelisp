@@ -47,10 +47,15 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
 - `tests/{mem,read,type,check,error,namespace,eval}_test.rs`
 
 ### ビルド注意
-- `inkwell` は manifest から一旦除外（ロック可能な版に `llvm18-0` feature が無かったため）。
-  `compile` 経路を実装するとき、インストール済み LLVM に合う `llvmNN-0` で再追加する。
-- `compile` feature は現状 空（宣言のみ）。旧 `src/compile/*` は `#[cfg(feature="compile")]` 配下で
-  既定ビルドから除外（中身は旧 Object 前提なので将来書き直し対象）。
+- `compile` feature（既定では無効）は `inkwell = { version = "0.9", features = ["llvm17-0"] }` に依存。
+  crates.io の inkwell 0.9.0（最新安定版）は `llvm11-0`〜`llvm17-0` のみ対応（18 以降は inkwell 本家
+  master でも未対応、2026-06-20 確認）。`brew install llvm@17` 済みなら `llvm-config` は自動検出され
+  追加設定なしで `cargo build --features compile` が通る（`/usr/local/opt/llvm@17/bin` が見えない構成の
+  場合のみ `LLVM_SYS_170_PREFIX=$(brew --prefix llvm@17)` を指定）。
+- 旧 `src/compile/*`（動的タグ付き旧 `Object` 値モデル前提・未完成プロトタイプ、再利用不可と確認済み）は
+  削除済み。新コンパイラ基盤の設計は本ファイル「ステップ5: compile」を参照。
+- `cargo build`/`cargo test`（feature 無し）は `compile` feature 追加後も無関係・無依存のまま
+  （LLVM/inkwell は `compile` feature を付けない限りビルドに一切関与しない）。
 
 ---
 
@@ -388,7 +393,16 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
     `append`実装済みなので、マクロの`,@`（unquote-splicing）を追加できる。
   - `case`/`do`/`doiter`/`while-let`/`the` は未実装（`defmacro` の `&rest` は実装済みなので前提は満たした。
     `case` はさらに型ごとの `eq` が前提）。`defun`/`lambda` の型付き `&rest`／`apply` も未実装。
-- **ステップ5: compile**（明示 `compile`/`compile-file`。inkwell 再追加・LLVM コード生成。feature gate）。
+- **ステップ5: compile**（明示 `compile`/`compile-file`。コンパイラ本体は **typelisp で書く**、Rust は
+  LLVM バインディング（inkwell）・ASTブリッジ・ランタイム支援ライブラリのみ提供。「コンパイル済みバイトコード」
+  は **LLVM IR** とする。feature gate。段階的ロードマップ・ABI（`TlValue`）設計は別途記録予定
+  （2026-06-20 方針確定、ブランチ `feature/compiler`）。
+  - 実装済み（5a/Phase 0）: `brew install llvm@17` + `inkwell`(`llvm17-0`) を `compile` feature 下に追加、
+    旧 `src/compile/*`（再利用不可と確認済み）を削除して smoke test（`Context`/`Module`生成・`verify`）に
+    置き換え。`tests/compile_test.rs`（feature gate）で検証、既定ビルド（feature無し）への影響なしを確認。
+  - 次（Phase 1）: 関数単位コンパイラの最初の縦スライス——`TlValue` ABI定義、最小限のLLVM builder
+    ビルトイン、型付きASTのtypelisp側ブリッジ、`compile`ビルトイン、JITした関数をインタプリタから
+    透過的に呼べることを1関数（例: `max2`）で実証。
 
 ---
 
