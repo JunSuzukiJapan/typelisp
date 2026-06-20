@@ -1,7 +1,13 @@
 //! LLVM ベースのコンパイラ基盤（feature = "compile"）。
 //! 設計・段階的ロードマップは docs/TODO.md「ステップ5: compile」を参照。
-//! 現時点は LLVM ツールチェイン（inkwell + llvm17-0）のリンクが通ることを
-//! 確認するための smoke test のみ。
+//!
+//! コンパイラ本体（`compile`）は **typelisp で書く**（[`compiler_source`]）。
+//! Rust が提供するのは LLVM バインディング（`check::registry`に登録された
+//! `LlvmModule`/`LlvmBuilder`等の組み込み型、実装は`eval::interp`）と、
+//! 型付きASTをtypelisp側に橋渡しする [`ast_bridge`] のみ。
+
+pub mod ast_bridge;
+pub mod compiler_source;
 
 use inkwell::context::Context;
 

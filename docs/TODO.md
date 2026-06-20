@@ -400,9 +400,49 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
   - 実装済み（5a/Phase 0）: `brew install llvm@17` + `inkwell`(`llvm17-0`) を `compile` feature 下に追加、
     旧 `src/compile/*`（再利用不可と確認済み）を削除して smoke test（`Context`/`Module`生成・`verify`）に
     置き換え。`tests/compile_test.rs`（feature gate）で検証、既定ビルド（feature無し）への影響なしを確認。
-  - 次（Phase 1）: 関数単位コンパイラの最初の縦スライス——`TlValue` ABI定義、最小限のLLVM builder
-    ビルトイン、型付きASTのtypelisp側ブリッジ、`compile`ビルトイン、JITした関数をインタプリタから
-    透過的に呼べることを1関数（例: `max2`）で実証。
+  - 実装済み（Phase 1）: 関数単位コンパイラ`compile`の最初の縦スライス——全引数・戻り値が`i64`の
+    関数のみ対象（スカラーのみ、`if`は末尾位置限定）。
+    - **`compile`本体はtypelispで書いた**（`src/compile/compiler_source.rs::SOURCE`、`prelude.rs`と
+      同じ「typelisp定義をread→check→execで読み込む」ロード機構）。`compile-value`/`compile-tail`が
+      `AstExpr`を辿ってLLVM builderビルトインを呼びIRを組み立てる。`if`は末尾位置のみ対応
+      （then/else各ブロックに個別の`ret`を置くだけで済み、phi/alloca-load-storeのマージ機構が
+      不要——`compile-value`（値位置）は`if`に当たると明示的にpanicしてVer1の範囲外と分かるようにした）。
+    - **ASTブリッジ**: `Interp::fn_body`/`fn_signature`（新規public、`FnDef`に`sig: Option<(Vec<Type>,
+      Type)>`を追加——`defmethod`/`defmacro`は`None`）と、`src/compile/ast_bridge.rs::typed_to_ast`
+      （`check::ast::Expr`→新規組み込み直和型`AstExpr`の変換、対応外のExpr variantは`None`を返し
+      「コンパイル不可」を明示）。`registry.rs`に`AstExpr`（`AInt`/`ABool`/`AVar`/`AIf`/`ABinOp`の5
+      variant）・ビルトイン自由関数`ast-params`/`ast-body`（いずれも対象関数が全`i64`でなければ`None`）
+      を追加。
+    - **LLVMバインディング**: `RtValue`に`LlvmModule`/`LlvmBuilder`/`LlvmFunction`/`LlvmBasicBlock`/
+      `LlvmValue`を追加（すべて`#[cfg(feature="compile")]`）。`Module`/`Builder`はinkwellの`'ctx`
+      ライフタイムを持つため、プロセス全体で1つの`Context`を`Box::leak`して`'static`化する手法を
+      採用（`eval::interp::llvm_context`）——複数の`compile`呼び出し間で同じ型世界を共有できる。
+      `registry.rs`に`LlvmModule`/`LlvmFunction`/`LlvmBuilder`/`LlvmBasicBlock`/`LlvmValue`型と
+      そのメソッド（`add-function`/`verify`/`dump`、`get-param`/`append-block`、`position-at-end`/
+      `build-op`/`build-cond-br`/`build-br`/`build-ret`）を`hashtable_def`/`vector_def`と同型の
+      メタデータのみ登録で追加、`eval::interp::eval_llvm_builtin_method`が実行時実装を担当
+      （`Expr::Assoc`評価が`eval_builtin_method`に続けてこちらにもフォールバックする）。
+      `build-op`は`+ - * / mod < <= > >= = /=`を1つのビルトインで受ける（`AstExpr`の`ABinOp`が
+      運ぶ演算子文字列をそのまま渡せるよう、typelisp側に演算子ディスパッチ表を持たせない設計）。
+    - **インタプリタ統合**: `Interp.compiled: HashMap<Path, CompiledFn>`（`CompiledFn`は0〜3引数
+      それぞれの`extern "C" fn(...) -> i64`+ JIT実行エンジンの`Rc`を保持するenum——Phase 1は
+      統一バイトコード仕様（呼び出し規約）を導入せず、対象を全`i64`スカラーに絞ることでネイティブの
+      固定シグネチャのまま済ませた、という簡略化）。`Expr::Call`の既存ディスパッチの先頭に
+      `self.compiled`参照を1行追加するだけで、コンパイル済み関数は呼び出し元から見て完全に透過的
+      （`tests/compile_test.rs`の`compiles_and_calls_an_all_i64_function`で実証）。
+    - `llvm-finish-compile`ビルトイン（JIT実行エンジン生成→関数アドレス取得→`Interp.compiled`へ登録）
+      の戻り値は`Result<bool,Error>`（`Result<(),Error>`ではない——`()`はリスト区切り文字の対なので
+      ジェネリクスの`<...>`内に書けず、ソーステキスト上で書けないため、`compile`自身の宣言型として
+      書ける形を採った）。
+    - 既知の制約（次フェーズへ）: 統一呼び出し規約（`TlValue` ABI）は未導入、`Sexpr`/`HashTable`/
+      `Vector`/`Closure`/`f64`/`bool`/`char`は未対応、コンパイル済み関数から未コンパイルの関数を
+      呼ぶことは不可（逆方向のみ対応）、複数スレッドからの`compile`同時呼び出しは未対応
+      （プロセス全体で1つの`Context`をunsafe `Sync`/`Send`実装で共有しているのみ——現状テストが
+      並列に`compile`を呼ばないため実害なし、と明記）。
+    - TDD: 新規`tests/compile_test.rs`（4件: smoke test、`max2`コンパイル後呼び出しの往復2件、
+      全`i64`でない関数のコンパイル拒否）。既存テスト・featureなしビルドへの影響なし
+      （`cargo build`/`cargo test`は無変更、`cargo clippy --all-targets`は両構成（あり/なし）で
+      警告0）。
 
 ---
 

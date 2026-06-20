@@ -211,6 +211,8 @@ impl Registry {
         // symbols are always interned/permanent, there is no uninterned-symbol
         // concept to give a CL-style absolute guarantee).
         root.fns.insert("gensym".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: sexpr(), public: true });
+        #[cfg(feature = "compile")]
+        register_compile_builtins(&mut root);
         Registry { root }
     }
 
@@ -529,4 +531,170 @@ fn float_assoc() -> HashMap<String, AssocFn> {
 /// A type-parameter reference, e.g. `t` in `Option<T>`'s field list.
 fn tvar(name: &str) -> Type {
     Type::Named(Path::root(name), vec![])
+}
+
+#[cfg(feature = "compile")]
+fn result_of(t: Type, e: Type) -> Type {
+    Type::Named(Path::root("result"), vec![t, e])
+}
+
+#[cfg(feature = "compile")]
+fn error_ty() -> Type {
+    Type::Named(Path::root("error"), vec![])
+}
+
+/// `AstExpr`: a typelisp-inspectable mirror of (a Phase-1 subset of)
+/// `check::ast::Expr`, used so the typelisp-written compiler
+/// (`crate::compile::compiler_source`) can `match` over a function's checked
+/// body — see `crate::compile::ast_bridge::typed_to_ast`, whose variant
+/// indices must match this definition's `variants` order exactly. Phase 1
+/// ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) only bridges integer/bool
+/// literals, parameter references, `if`, and `i64`'s binary
+/// arithmetic/comparison instance methods — just enough to compile a function
+/// like `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))`.
+#[cfg(feature = "compile")]
+fn ast_expr_def() -> AdtDef {
+    let t = ast_expr_ty();
+    AdtDef {
+        name: Path::root("astexpr"),
+        params: vec![],
+        variants: vec![
+            Variant { name: "aint".to_string(), fields: vec![Type::I64] },
+            Variant { name: "abool".to_string(), fields: vec![Type::Bool] },
+            Variant { name: "avar".to_string(), fields: vec![Type::Str] },
+            Variant { name: "aif".to_string(), fields: vec![t.clone(), t.clone(), t.clone()] },
+            Variant { name: "abinop".to_string(), fields: vec![Type::Str, t.clone(), t] },
+        ],
+        assoc: HashMap::new(),
+        public: true,
+    }
+}
+
+#[cfg(feature = "compile")]
+fn ast_expr_ty() -> Type {
+    Type::Named(Path::root("astexpr"), vec![])
+}
+
+#[cfg(feature = "compile")]
+fn llvm_module_ty() -> Type {
+    Type::Named(Path::root("llvmmodule"), vec![])
+}
+
+#[cfg(feature = "compile")]
+fn llvm_builder_ty() -> Type {
+    Type::Named(Path::root("llvmbuilder"), vec![])
+}
+
+#[cfg(feature = "compile")]
+fn llvm_function_ty() -> Type {
+    Type::Named(Path::root("llvmfunction"), vec![])
+}
+
+#[cfg(feature = "compile")]
+fn llvm_basic_block_ty() -> Type {
+    Type::Named(Path::root("llvmbasicblock"), vec![])
+}
+
+#[cfg(feature = "compile")]
+fn llvm_value_ty() -> Type {
+    Type::Named(Path::root("llvmvalue"), vec![])
+}
+
+/// `LlvmModule`: a builtin (Rust-implemented, inkwell-backed) opaque handle.
+/// All methods are metadata only — the runtime implementation lives in
+/// `eval_llvm_builtin_method` in `crate::eval::interp`, the same
+/// metadata-only pattern as [`hashtable_def`]/[`vector_def`].
+#[cfg(feature = "compile")]
+fn llvm_module_def() -> AdtDef {
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true }, instance: true };
+    let mut assoc = HashMap::new();
+    assoc.insert("add-function".to_string(), method(vec![llvm_module_ty(), Type::Str, Type::I32], llvm_function_ty()));
+    assoc.insert("verify".to_string(), method(vec![llvm_module_ty()], result_of(Type::Unit, error_ty())));
+    assoc.insert("dump".to_string(), method(vec![llvm_module_ty()], Type::Unit));
+    AdtDef { name: Path::root("llvmmodule"), params: vec![], variants: vec![], assoc, public: true }
+}
+
+/// `LlvmFunction`: a builtin opaque handle to a declared/defined LLVM function.
+/// Same metadata-only pattern as [`llvm_module_def`].
+#[cfg(feature = "compile")]
+fn llvm_function_def() -> AdtDef {
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true }, instance: true };
+    let mut assoc = HashMap::new();
+    assoc.insert("get-param".to_string(), method(vec![llvm_function_ty(), Type::I32], llvm_value_ty()));
+    assoc.insert("append-block".to_string(), method(vec![llvm_function_ty(), Type::Str], llvm_basic_block_ty()));
+    AdtDef { name: Path::root("llvmfunction"), params: vec![], variants: vec![], assoc, public: true }
+}
+
+/// `LlvmBuilder`: a builtin opaque handle wrapping an LLVM IR builder
+/// positioned at some basic block. `build-op` covers both `i64` arithmetic
+/// (`+ - * / mod`) and comparison (`< <= > >= = /=`) — the same operator
+/// strings `crate::compile::ast_bridge`'s `abinop` carries — so the
+/// typelisp-written compiler can forward an operator string straight through
+/// without its own dispatch table; see `crate::eval::interp::llvm_builder_build_op`.
+#[cfg(feature = "compile")]
+fn llvm_builder_def() -> AdtDef {
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true }, instance: true };
+    let mut assoc = HashMap::new();
+    assoc.insert("position-at-end".to_string(), method(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit));
+    assoc.insert("build-op".to_string(), method(vec![llvm_builder_ty(), Type::Str, llvm_value_ty(), llvm_value_ty()], llvm_value_ty()));
+    assoc.insert(
+        "build-cond-br".to_string(),
+        method(vec![llvm_builder_ty(), llvm_value_ty(), llvm_basic_block_ty(), llvm_basic_block_ty()], Type::Unit),
+    );
+    assoc.insert("build-br".to_string(), method(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit));
+    assoc.insert("build-ret".to_string(), method(vec![llvm_builder_ty(), llvm_value_ty()], Type::Unit));
+    AdtDef { name: Path::root("llvmbuilder"), params: vec![], variants: vec![], assoc, public: true }
+}
+
+/// `LlvmBasicBlock`/`LlvmValue`: opaque handles with no methods of their own
+/// (Phase 1 only ever passes them as arguments to `LlvmFunction`/`LlvmBuilder`
+/// methods) — registered purely so they have a type identity to check against.
+#[cfg(feature = "compile")]
+fn llvm_basic_block_def() -> AdtDef {
+    AdtDef { name: Path::root("llvmbasicblock"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true }
+}
+
+#[cfg(feature = "compile")]
+fn llvm_value_def() -> AdtDef {
+    AdtDef { name: Path::root("llvmvalue"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true }
+}
+
+/// Registers the LLVM-compiler builtins (types and free functions) into
+/// `root`. Split out of [`Registry::with_builtins`] purely for readability —
+/// this is the one block of registration calls gated by the `compile`
+/// feature. See `crate::compile` and [docs/TODO.md](../../docs/TODO.md)
+/// 「ステップ5」for the overall design.
+#[cfg(feature = "compile")]
+fn register_compile_builtins(root: &mut Namespace) {
+    root.add_type(ast_expr_def());
+    root.add_type(llvm_module_def());
+    root.add_type(llvm_function_def());
+    root.add_type(llvm_builder_def());
+    root.add_type(llvm_basic_block_def());
+    root.add_type(llvm_value_def());
+
+    let free = |params: Vec<Type>, ret: Type| FnSig { type_params: vec![], rest: None, params, ret, public: true };
+    // `ast-params`/`ast-body`: the typed-AST bridge (`compile::ast_bridge`).
+    // `None` means "not a `defun`, or not all-`i64` params/return" (Phase 1's
+    // restricted scope) — `compile` then refuses the function outright.
+    root.fns.insert(
+        "ast-params".to_string(),
+        free(vec![Type::Str], option_of(Type::Named(Path::root("vector"), vec![Type::Str]))),
+    );
+    root.fns.insert("ast-body".to_string(), free(vec![Type::Str], option_of(ast_expr_ty())));
+    root.fns.insert("llvm-new-module".to_string(), free(vec![Type::Str], llvm_module_ty()));
+    root.fns.insert("llvm-new-builder".to_string(), free(vec![], llvm_builder_ty()));
+    root.fns.insert("llvm-const-i64".to_string(), free(vec![Type::I64], llvm_value_ty()));
+    // `llvm-finish-compile`: JITs `module` and registers `name` (a
+    // `arity`-ary, all-`i64` function) so ordinary calls to it dispatch to
+    // the compiled native code instead of tree-walking — see
+    // `Interp::call_compiled`. Returns `bool` rather than `Unit` so `compile`
+    // (`crate::compile::compiler_source`) can write its own return type as
+    // plain text (`Result<bool,Error>` — `Result<(),Error>` cannot be
+    // written in source, since `()` is a list-delimiter pair, not a token
+    // character, so it can't appear inside a generic's `<...>` symbol token).
+    root.fns.insert(
+        "llvm-finish-compile".to_string(),
+        free(vec![llvm_module_ty(), Type::Str, Type::I32], result_of(Type::Bool, error_ty())),
+    );
 }

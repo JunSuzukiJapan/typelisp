@@ -17,9 +17,11 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
-use crate::{Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Typed, Value};
+use crate::{Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
 
 use super::value::{Closure, EvalError, HashKey, RtValue};
+#[cfg(feature = "compile")]
+use super::value::LlvmBuilderHandle;
 
 /// A registered function or method body with its parameter names.
 struct FnDef {
@@ -30,6 +32,14 @@ struct FnDef {
     /// [`Interp::expand_macro`]); always `false` for `defun`/`defmethod`,
     /// which `apply` calls 1:1 regardless.
     rest: bool,
+    /// Parameter/return types, for a `defun` only (`None` for `defmethod`
+    /// — its receiver type isn't included in `params` — and `defmacro`,
+    /// whose parameters are always `Sexpr` with no per-parameter type
+    /// recorded). Lets [`Interp::fn_signature`] hand the compiler's
+    /// typed-AST bridge (`crate::compile::ast_bridge`) a function's
+    /// signature without `Interp` needing a reference to the checker's
+    /// `Registry`.
+    sig: Option<(Vec<Type>, Type)>,
 }
 
 /// A mutable variable slot (shared so `setf` mutations are visible to every
@@ -67,6 +77,12 @@ pub struct Interp {
     /// can only offer collision-*resistant* fresh names, not CL's
     /// unforgeable ones — see [`Self::eval_builtin`]'s `"gensym"` arm.
     gensym_counter: Cell<u64>,
+    /// Functions JIT-compiled by `compile` (`crate::compile::compiler_source`),
+    /// by their fully-qualified [`Path`] — checked first in `Expr::Call`'s
+    /// dispatch (see [`Self::call_compiled`]) so a compiled function is
+    /// called exactly like any other, transparently to its callers.
+    #[cfg(feature = "compile")]
+    compiled: RefCell<HashMap<Path, CompiledFn>>,
 }
 
 impl Interp {
@@ -78,7 +94,26 @@ impl Interp {
             slots: RefCell::new(Vec::new()),
             rooted: Cell::new(0),
             gensym_counter: Cell::new(0),
+            #[cfg(feature = "compile")]
+            compiled: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// The checked body of a `defun` (`None` for a `defmethod`/`defmacro` of
+    /// the same name, or if no such function exists) — used by the
+    /// compiler's typed-AST bridge (`crate::compile::ast_bridge`) to walk a
+    /// function without `Interp` exposing its internal `FnDef` representation.
+    pub fn fn_body(&self, path: &Path) -> Option<&[Typed]> {
+        self.fns.get(path).map(|f| f.body.as_slice())
+    }
+
+    /// A `defun`'s parameter names alongside its parameter/return types
+    /// (`None` for a `defmethod`/`defmacro` of the same name, or if no such
+    /// function exists — see [`FnDef::sig`]).
+    pub fn fn_signature(&self, path: &Path) -> Option<(&[String], &[Type], &Type)> {
+        let f = self.fns.get(path)?;
+        let (params, ret) = f.sig.as_ref()?;
+        Some((&f.params, params, ret))
     }
 
     /// Wrap `v` in a fresh mutable slot and register it (weakly) for GC
@@ -117,9 +152,10 @@ impl Interp {
     /// a bare expression returns `Some(value)`.
     pub fn exec(&mut self, heap: &mut Heap, tl: TopLevel) -> Result<Option<RtValue>, EvalError> {
         match tl {
-            TopLevel::Defun { name, params, body, .. } => {
+            TopLevel::Defun { name, params, ret, body, .. } => {
+                let sig = Some((params.iter().map(|(_, t)| t.clone()).collect(), ret));
                 let params = params.into_iter().map(|(n, _)| n).collect();
-                self.fns.insert(name, FnDef { params, body, rest: false });
+                self.fns.insert(name, FnDef { params, body, rest: false, sig });
                 Ok(None)
             }
             TopLevel::Defmethod { type_name, method, self_name, params, body, .. } => {
@@ -128,14 +164,14 @@ impl Interp {
                     names.push(s);
                 }
                 names.extend(params.into_iter().map(|(n, _)| n));
-                self.methods.insert((type_name, method), FnDef { params: names, body, rest: false });
+                self.methods.insert((type_name, method), FnDef { params: names, body, rest: false, sig: None });
                 Ok(None)
             }
             TopLevel::Defmacro { name, params, body, rest } => {
                 // A macro's body is callable exactly like a `defun`'s — see
                 // `MacroExpander`/`Self::expand_macro` — so it's stored in
                 // the very same `fns` table; no separate macro table exists.
-                self.fns.insert(name, FnDef { params, body, rest });
+                self.fns.insert(name, FnDef { params, body, rest, sig: None });
                 Ok(None)
             }
             TopLevel::Defstruct { .. } | TopLevel::Use { .. } => Ok(None),
@@ -229,6 +265,10 @@ impl Interp {
             }
             Expr::Call(name, args) => {
                 let (argv, _slots) = self.eval_args(heap, args, env)?;
+                #[cfg(feature = "compile")]
+                if let Some(result) = self.call_compiled(name, &argv) {
+                    return result;
+                }
                 if let Some(f) = self.fns.get(name) {
                     self.apply(heap, &f.params, &f.body, argv)
                 } else if name.is_simple() {
@@ -245,7 +285,9 @@ impl Interp {
                 if let Some(m) = self.methods.get(&(type_name.clone(), method.clone())) {
                     self.apply(heap, &m.params, &m.body, argv)
                 } else {
-                    match eval_builtin_method(type_name, method, &argv) {
+                    let result = eval_builtin_method(type_name, method, &argv)
+                        .or_else(|| eval_llvm_builtin_method_fallback(type_name, method, &argv));
+                    match result {
                         Some(result) => result,
                         None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
                     }
@@ -549,9 +591,437 @@ impl Interp {
                 ),
                 _ => Some(Err(EvalError::Internal("set-cdr: expected two Sexpr arguments".into()))),
             },
+            #[cfg(feature = "compile")]
+            other => self.eval_compile_builtin(other, args),
+            #[cfg(not(feature = "compile"))]
             _ => None,
         }
     }
+}
+
+/// `compile`'s builtins (`crate::compile::compiler_source`'s LLVM-builder
+/// bindings and typed-AST bridge), kept in their own `impl` block since every
+/// item here is `#[cfg(feature = "compile")]` — see
+/// [docs/TODO.md](../../docs/TODO.md)「ステップ5」for the overall design and
+/// [`Self::call_compiled`]/[`Self::eval_compile_builtin`]'s doc comments for
+/// how this plugs into the ordinary tree-walking dispatch.
+#[cfg(feature = "compile")]
+impl Interp {
+    /// Free functions for `compile` not already handled by [`Self::eval_builtin`]
+    /// (this is that method's fallback arm, only reached for an unrecognized
+    /// name). `ast-params`/`ast-body` need `&self` (to read `self.fns`);
+    /// `llvm-finish-compile` needs it too (to write `self.compiled`) — the
+    /// pure LLVM-IR-construction free functions (`llvm-new-module` etc.) are
+    /// plain functions below that happen not to need it.
+    fn eval_compile_builtin(&self, name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+        match name {
+            "ast-params" => Some(self.builtin_ast_params(args)),
+            "ast-body" => Some(self.builtin_ast_body(args)),
+            "llvm-new-module" => Some(llvm_module_new(args)),
+            "llvm-new-builder" => Some(llvm_builder_new(args)),
+            "llvm-const-i64" => Some(llvm_const_i64(args)),
+            "llvm-finish-compile" => Some(self.builtin_llvm_finish_compile(args)),
+            _ => None,
+        }
+    }
+
+    /// `(ast-params name) -> Option<Vector<string>>`: a `defun`'s parameter
+    /// names, or `None` if `name` isn't a `defun` or isn't all-`i64`
+    /// (Phase 1's restricted scope — see `crate::compile::ast_bridge`).
+    fn builtin_ast_params(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
+        let name = expect_str(&args[0])?;
+        match self.fn_signature(&Path::root(name)) {
+            Some((names, types, ret)) if is_i64_scalar_signature(types, ret) => {
+                let v: Vec<RtValue> = names.iter().map(|n| RtValue::Str(n.clone())).collect();
+                Ok(option_value(Some(RtValue::Vector(Rc::new(RefCell::new(v))))))
+            }
+            _ => Ok(option_value(None)),
+        }
+    }
+
+    /// `(ast-body name) -> Option<AstExpr>`: the bridged form of `name`'s
+    /// (single-expression — Phase 1 doesn't support multi-form bodies, i.e.
+    /// `let`-bound locals, yet) checked body, or `None` if `name` isn't a
+    /// `defun`, isn't all-`i64`, has other than one body expression, or its
+    /// body uses an `Expr` form `crate::compile::ast_bridge::typed_to_ast`
+    /// doesn't (yet) bridge.
+    fn builtin_ast_body(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
+        let name = expect_str(&args[0])?;
+        let path = Path::root(name);
+        let all_i64 = matches!(self.fn_signature(&path), Some((_, types, ret)) if is_i64_scalar_signature(types, ret));
+        if !all_i64 {
+            return Ok(option_value(None));
+        }
+        match self.fn_body(&path) {
+            Some([only]) => Ok(option_value(crate::compile::ast_bridge::typed_to_ast(only))),
+            _ => Ok(option_value(None)),
+        }
+    }
+
+    /// `(llvm-finish-compile module name arity) -> Result<bool, Error>`:
+    /// JITs `module` (already built and verified by the typelisp-written
+    /// `compile`) and registers `name` as a compiled, `arity`-ary, all-`i64`
+    /// function — see [`Self::call_compiled`]. The `ExecutionEngine` is kept
+    /// alive for as long as `name` stays registered (its `Rc` is cloned into
+    /// every arity variant of [`CompiledFn`]), since the JIT'd machine code
+    /// is only valid while it lives.
+    fn builtin_llvm_finish_compile(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
+        let module = expect_llvm_module(&args[0])?;
+        let name = expect_str(&args[1])?;
+        let arity = rt_i64(&args[2])?;
+        let engine = module
+            .borrow()
+            .create_jit_execution_engine(inkwell::OptimizationLevel::None)
+            .map_err(|e| EvalError::Panic(format!("compile: {}", e)))?;
+        let addr = engine
+            .get_function_address(name)
+            .map_err(|e| EvalError::Panic(format!("compile: {}", e)))?;
+        let engine = Rc::new(engine);
+        // SAFETY: `addr` is the address LLVM's JIT compiled `name`'s body to,
+        // for a function whose declared LLVM type is exactly `arity` `i64`
+        // parameters returning `i64` (built that way by `add-function`,
+        // `check::registry::llvm_module_def` — every `compile`d function in
+        // Phase 1 is all-`i64`), so transmuting it to the matching
+        // `extern "C" fn(i64, ...) -> i64` pointer type matches the actual
+        // machine code's calling convention.
+        let cf = unsafe {
+            match arity {
+                0 => CompiledFn::Arity0(std::mem::transmute::<usize, extern "C" fn() -> i64>(addr), engine),
+                1 => CompiledFn::Arity1(std::mem::transmute::<usize, extern "C" fn(i64) -> i64>(addr), engine),
+                2 => CompiledFn::Arity2(std::mem::transmute::<usize, extern "C" fn(i64, i64) -> i64>(addr), engine),
+                3 => CompiledFn::Arity3(std::mem::transmute::<usize, extern "C" fn(i64, i64, i64) -> i64>(addr), engine),
+                _ => return Err(EvalError::Panic(format!("compile: unsupported arity {} (Phase 1 supports 0-3)", arity))),
+            }
+        };
+        self.compiled.borrow_mut().insert(Path::root(name), cf);
+        Ok(ok_bool(true))
+    }
+
+    /// Checked first in `Expr::Call`'s dispatch: `None` if `name` isn't a
+    /// compiled function (the ordinary `self.fns`/`eval_builtin` dispatch
+    /// then runs exactly as before — compiling a function is meant to be
+    /// completely transparent to its callers).
+    fn call_compiled(&self, name: &Path, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+        let compiled = self.compiled.borrow();
+        let cf = compiled.get(name)?;
+        let ints: Vec<i64> = match args.iter().map(rt_i64).collect() {
+            Ok(v) => v,
+            Err(e) => return Some(Err(e)),
+        };
+        let result = match (cf, ints.as_slice()) {
+            (CompiledFn::Arity0(f, _), []) => f(),
+            (CompiledFn::Arity1(f, _), [a]) => f(*a),
+            (CompiledFn::Arity2(f, _), [a, b]) => f(*a, *b),
+            (CompiledFn::Arity3(f, _), [a, b, c]) => f(*a, *b, *c),
+            _ => return Some(Err(EvalError::Internal("compiled function: arity mismatch".into()))),
+        };
+        Some(Ok(RtValue::Int(result)))
+    }
+}
+
+/// A function JIT-compiled by `compile`, restricted (Phase 1) to all-`i64`
+/// scalar parameters/return — see [`Interp::call_compiled`]. The
+/// `Rc<ExecutionEngine>` keeps the JIT'd machine code alive — `call_compiled`
+/// only ever reads the `extern "C" fn` pointer, never the engine itself, so
+/// rustc considers that field dead code; it is not.
+#[cfg(feature = "compile")]
+#[allow(dead_code)]
+enum CompiledFn {
+    Arity0(extern "C" fn() -> i64, Rc<inkwell::execution_engine::ExecutionEngine<'static>>),
+    Arity1(extern "C" fn(i64) -> i64, Rc<inkwell::execution_engine::ExecutionEngine<'static>>),
+    Arity2(extern "C" fn(i64, i64) -> i64, Rc<inkwell::execution_engine::ExecutionEngine<'static>>),
+    Arity3(extern "C" fn(i64, i64, i64) -> i64, Rc<inkwell::execution_engine::ExecutionEngine<'static>>),
+}
+
+/// Whether a `defun`'s parameter/return types are all `i64` — Phase 1's
+/// restricted scope (`crate::compile::ast_bridge`'s doc comment).
+#[cfg(feature = "compile")]
+fn is_i64_scalar_signature(param_types: &[Type], ret: &Type) -> bool {
+    *ret == Type::I64 && param_types.iter().all(|t| *t == Type::I64)
+}
+
+/// The process-wide LLVM `Context`, leaked once for the life of the process
+/// so every `Module`/`Builder`/value built from it can be `'static` —
+/// otherwise inkwell's `'ctx` lifetime parameter would have to appear on
+/// `RtValue` itself, which (unlike every other variant) is meant to be
+/// freely cloned/stored without any borrow tracking. A single shared context
+/// (rather than one per `compile` call) also lets JIT'd functions from
+/// different `compile` calls in the same session call each other (LLVM does
+/// not allow mixing types from different `Context`s in one module).
+/// `inkwell::context::Context` is `!Sync` (it wraps a raw LLVM pointer), but a
+/// `static` must be `Sync`. This wrapper asserts it anyway: Phase 1 only ever
+/// exercises the compiler from a single test function (no parallel `#[test]`s
+/// touching LLVM yet), so there is no actual concurrent access today — revisit
+/// with a real `Mutex` guard around LLVM-IR-construction call sites if/when
+/// more than one `compile`-using test runs in parallel.
+#[cfg(feature = "compile")]
+struct LlvmContextHandle(*const inkwell::context::Context);
+#[cfg(feature = "compile")]
+unsafe impl Sync for LlvmContextHandle {}
+#[cfg(feature = "compile")]
+unsafe impl Send for LlvmContextHandle {}
+
+#[cfg(feature = "compile")]
+fn llvm_context() -> &'static inkwell::context::Context {
+    static CONTEXT: once_cell::sync::OnceCell<LlvmContextHandle> = once_cell::sync::OnceCell::new();
+    let handle = CONTEXT.get_or_init(|| {
+        let ctx: &'static inkwell::context::Context = Box::leak(Box::new(inkwell::context::Context::create()));
+        LlvmContextHandle(ctx)
+    });
+    unsafe { &*handle.0 }
+}
+
+#[cfg(feature = "compile")]
+fn llvm_module_new(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let name = expect_str(&args[0])?;
+    Ok(RtValue::LlvmModule(Rc::new(RefCell::new(llvm_context().create_module(name)))))
+}
+
+#[cfg(feature = "compile")]
+fn llvm_builder_new(_args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::LlvmBuilder(LlvmBuilderHandle(Rc::new(RefCell::new(llvm_context().create_builder())))))
+}
+
+#[cfg(feature = "compile")]
+fn llvm_const_i64(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let n = rt_i64(&args[0])?;
+    Ok(RtValue::LlvmValue(llvm_context().i64_type().const_int(n as u64, true)))
+}
+
+#[cfg(feature = "compile")]
+fn expect_llvm_module(v: &RtValue) -> Result<&Rc<RefCell<inkwell::module::Module<'static>>>, EvalError> {
+    match v {
+        RtValue::LlvmModule(m) => Ok(m),
+        other => Err(EvalError::Internal(format!("expected a LlvmModule, got {:?}", other))),
+    }
+}
+
+#[cfg(feature = "compile")]
+fn expect_llvm_builder(v: &RtValue) -> Result<&LlvmBuilderHandle, EvalError> {
+    match v {
+        RtValue::LlvmBuilder(b) => Ok(b),
+        other => Err(EvalError::Internal(format!("expected a LlvmBuilder, got {:?}", other))),
+    }
+}
+
+#[cfg(feature = "compile")]
+fn expect_llvm_function(v: &RtValue) -> Result<&inkwell::values::FunctionValue<'static>, EvalError> {
+    match v {
+        RtValue::LlvmFunction(f) => Ok(f),
+        other => Err(EvalError::Internal(format!("expected a LlvmFunction, got {:?}", other))),
+    }
+}
+
+#[cfg(feature = "compile")]
+fn expect_llvm_basic_block(v: &RtValue) -> Result<&inkwell::basic_block::BasicBlock<'static>, EvalError> {
+    match v {
+        RtValue::LlvmBasicBlock(b) => Ok(b),
+        other => Err(EvalError::Internal(format!("expected a LlvmBasicBlock, got {:?}", other))),
+    }
+}
+
+#[cfg(feature = "compile")]
+fn expect_llvm_value(v: &RtValue) -> Result<&inkwell::values::IntValue<'static>, EvalError> {
+    match v {
+        RtValue::LlvmValue(v) => Ok(v),
+        other => Err(EvalError::Internal(format!("expected a LlvmValue, got {:?}", other))),
+    }
+}
+
+/// `Ok(b)`/`Err(Error(msg))` as an `RtValue::Data`, matching `result_def`'s
+/// variant order (`ok` = 0, `err` = 1) — used by `compile`'s builtins, which
+/// return `Result<bool, Error>` (not `Result<Unit, Error>`: `()` cannot be
+/// written inside a generic's `<...>` in source text, since it's a pair of
+/// list-delimiter characters, not token characters — see
+/// `check::registry::register_compile_builtins`'s doc comment on
+/// `llvm-finish-compile`).
+#[cfg(feature = "compile")]
+fn ok_bool(b: bool) -> RtValue {
+    RtValue::Data { type_name: Path::root("result"), variant: 0, fields: vec![RtValue::Bool(b)] }
+}
+
+#[cfg(feature = "compile")]
+fn err_error(msg: String) -> RtValue {
+    let err_val = RtValue::Data { type_name: Path::root("error"), variant: 0, fields: vec![RtValue::Str(msg)] };
+    RtValue::Data { type_name: Path::root("result"), variant: 1, fields: vec![err_val] }
+}
+
+/// Built-in instance methods for `LlvmModule`/`LlvmFunction`/`LlvmBuilder`
+/// (`check::registry::llvm_module_def`/`llvm_function_def`/`llvm_builder_def`)
+/// — `compile`'s LLVM-IR-construction primitives, called from
+/// `crate::compile::compiler_source`. Mirrors [`eval_builtin_method`]'s
+/// dispatch shape exactly (outer match on the type, inner on the method
+/// name); `Expr::Assoc`'s eval arm falls back here only after both
+/// `Interp::methods` (user `defmethod`s) and [`eval_builtin_method`] miss.
+#[cfg(feature = "compile")]
+fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+    if *type_name == Path::root("llvmmodule") {
+        return match method {
+            "add-function" => Some(llvm_module_add_function(args)),
+            "verify" => Some(llvm_module_verify(args)),
+            "dump" => Some(llvm_module_dump(args)),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("llvmfunction") {
+        return match method {
+            "get-param" => Some(llvm_function_get_param(args)),
+            "append-block" => Some(llvm_function_append_block(args)),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("llvmbuilder") {
+        return match method {
+            "position-at-end" => Some(llvm_builder_position_at_end(args)),
+            "build-op" => Some(llvm_builder_build_op(args)),
+            "build-cond-br" => Some(llvm_builder_build_cond_br(args)),
+            "build-br" => Some(llvm_builder_build_br(args)),
+            "build-ret" => Some(llvm_builder_build_ret(args)),
+            _ => None,
+        };
+    }
+    None
+}
+
+#[cfg(feature = "compile")]
+fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let module = expect_llvm_module(&args[0])?;
+    let name = expect_str(&args[1])?;
+    let arity = rt_i64(&args[2])?;
+    if !(0..=3).contains(&arity) {
+        return Err(EvalError::Panic(format!("add-function: unsupported arity {} (Phase 1 supports 0-3)", arity)));
+    }
+    let i64_ty = llvm_context().i64_type();
+    let param_types: Vec<inkwell::types::BasicMetadataTypeEnum> = (0..arity).map(|_| i64_ty.into()).collect();
+    let fn_type = i64_ty.fn_type(&param_types, false);
+    let function = module.borrow().add_function(name, fn_type, None);
+    Ok(RtValue::LlvmFunction(function))
+}
+
+#[cfg(feature = "compile")]
+fn llvm_module_verify(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let module = expect_llvm_module(&args[0])?;
+    match module.borrow().verify() {
+        Ok(()) => Ok(ok_bool(true)),
+        Err(e) => Ok(err_error(e.to_string())),
+    }
+}
+
+#[cfg(feature = "compile")]
+fn llvm_module_dump(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let module = expect_llvm_module(&args[0])?;
+    eprintln!("{}", module.borrow().print_to_string().to_string());
+    Ok(RtValue::Unit)
+}
+
+#[cfg(feature = "compile")]
+fn llvm_function_get_param(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let f = expect_llvm_function(&args[0])?;
+    let i = rt_i64(&args[1])?;
+    let v = std::convert::TryInto::<u32>::try_into(i)
+        .ok()
+        .and_then(|i: u32| f.get_nth_param(i))
+        .ok_or_else(|| EvalError::Internal("get-param: index out of range".into()))?;
+    Ok(RtValue::LlvmValue(v.into_int_value()))
+}
+
+#[cfg(feature = "compile")]
+fn llvm_function_append_block(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let f = expect_llvm_function(&args[0])?;
+    let name = expect_str(&args[1])?;
+    Ok(RtValue::LlvmBasicBlock(llvm_context().append_basic_block(*f, name)))
+}
+
+#[cfg(feature = "compile")]
+fn llvm_builder_position_at_end(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let b = expect_llvm_builder(&args[0])?;
+    let block = expect_llvm_basic_block(&args[1])?;
+    b.0.borrow().position_at_end(*block);
+    Ok(RtValue::Unit)
+}
+
+/// `op` is one of `+ - * / mod < <= > >= = /=` — the same set `i64`'s
+/// `int_assoc` registers and `crate::compile::ast_bridge::typed_to_ast`
+/// bridges into an `abinop` node, forwarded here verbatim by
+/// `crate::compile::compiler_source`'s `compile-value` so neither side needs
+/// its own operator-name dispatch table.
+#[cfg(feature = "compile")]
+fn llvm_builder_build_op(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let b = expect_llvm_builder(&args[0])?;
+    let op = expect_str(&args[1])?;
+    let lhs = *expect_llvm_value(&args[2])?;
+    let rhs = *expect_llvm_value(&args[3])?;
+    let builder = b.0.borrow();
+    let result = match op {
+        "+" => builder.build_int_add(lhs, rhs, "addtmp"),
+        "-" => builder.build_int_sub(lhs, rhs, "subtmp"),
+        "*" => builder.build_int_mul(lhs, rhs, "multmp"),
+        "/" => builder.build_int_signed_div(lhs, rhs, "divtmp"),
+        "mod" => builder.build_int_signed_rem(lhs, rhs, "modtmp"),
+        "<" => return llvm_icmp(&builder, inkwell::IntPredicate::SLT, lhs, rhs),
+        "<=" => return llvm_icmp(&builder, inkwell::IntPredicate::SLE, lhs, rhs),
+        ">" => return llvm_icmp(&builder, inkwell::IntPredicate::SGT, lhs, rhs),
+        ">=" => return llvm_icmp(&builder, inkwell::IntPredicate::SGE, lhs, rhs),
+        "=" => return llvm_icmp(&builder, inkwell::IntPredicate::EQ, lhs, rhs),
+        "/=" => return llvm_icmp(&builder, inkwell::IntPredicate::NE, lhs, rhs),
+        _ => return Err(EvalError::Internal(format!("build-op: unknown operator {}", op))),
+    };
+    result.map(RtValue::LlvmValue).map_err(|e| EvalError::Panic(format!("build-op: {}", e)))
+}
+
+#[cfg(feature = "compile")]
+fn llvm_icmp(
+    builder: &inkwell::builder::Builder<'static>,
+    pred: inkwell::IntPredicate,
+    lhs: inkwell::values::IntValue<'static>,
+    rhs: inkwell::values::IntValue<'static>,
+) -> Result<RtValue, EvalError> {
+    builder
+        .build_int_compare(pred, lhs, rhs, "cmptmp")
+        .map(RtValue::LlvmValue)
+        .map_err(|e| EvalError::Panic(format!("build-op: {}", e)))
+}
+
+#[cfg(feature = "compile")]
+fn llvm_builder_build_cond_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let b = expect_llvm_builder(&args[0])?;
+    let cond = *expect_llvm_value(&args[1])?;
+    let then_block = *expect_llvm_basic_block(&args[2])?;
+    let else_block = *expect_llvm_basic_block(&args[3])?;
+    b.0.borrow()
+        .build_conditional_branch(cond, then_block, else_block)
+        .map(|_| RtValue::Unit)
+        .map_err(|e| EvalError::Panic(format!("build-cond-br: {}", e)))
+}
+
+#[cfg(feature = "compile")]
+fn llvm_builder_build_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let b = expect_llvm_builder(&args[0])?;
+    let block = expect_llvm_basic_block(&args[1])?;
+    b.0.borrow()
+        .build_unconditional_branch(*block)
+        .map(|_| RtValue::Unit)
+        .map_err(|e| EvalError::Panic(format!("build-br: {}", e)))
+}
+
+#[cfg(feature = "compile")]
+fn llvm_builder_build_ret(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let b = expect_llvm_builder(&args[0])?;
+    let v = expect_llvm_value(&args[1])?;
+    b.0.borrow()
+        .build_return(Some(v))
+        .map(|_| RtValue::Unit)
+        .map_err(|e| EvalError::Panic(format!("build-ret: {}", e)))
+}
+
+#[cfg(feature = "compile")]
+fn eval_llvm_builtin_method_fallback(type_name: &Path, method: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+    eval_llvm_builtin_method(type_name, method, args)
+}
+
+#[cfg(not(feature = "compile"))]
+fn eval_llvm_builtin_method_fallback(_type_name: &Path, _method: &str, _args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+    None
 }
 
 impl MacroExpander for Interp {

@@ -7,6 +7,24 @@ use std::{error, fmt};
 
 use crate::{Path, Typed, Value};
 
+/// A wrapper around an LLVM IR builder so [`RtValue`] can derive `PartialEq`
+/// uniformly: `inkwell::builder::Builder` itself has no `PartialEq` impl
+/// (unlike `Module`/`FunctionValue`/`BasicBlock`/`IntValue`, which all do),
+/// so this newtype supplies one by pointer identity instead — two builder
+/// values are only ever the same builder, never structurally compared, in
+/// practice (no `eq` method is registered for `LlvmBuilder` — see
+/// `check::registry::llvm_builder_def`).
+#[cfg(feature = "compile")]
+#[derive(Clone, Debug)]
+pub struct LlvmBuilderHandle(pub(crate) Rc<RefCell<inkwell::builder::Builder<'static>>>);
+
+#[cfg(feature = "compile")]
+impl PartialEq for LlvmBuilderHandle {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
 /// A `HashTable<K,V>` key. Restricted to the scalar `RtValue` variants with a
 /// natural, total `Eq`/`Hash` (notably excluding `Float` — `f64` has no `Eq`
 /// because of `NaN` — and any reference-counted variant, where a structural
@@ -90,6 +108,27 @@ pub enum RtValue {
     /// A `Vector<T>`. Same `Rc<RefCell<..>>`/Rust-ownership pattern, and the
     /// same cycle-leak trade-off, as [`RtValue::HashTable`].
     Vector(Rc<RefCell<Vec<RtValue>>>),
+    /// An LLVM `Module` under construction (`compile`'s LLVM-builder
+    /// bindings, see `check::registry::llvm_module_def`). Bound to the
+    /// process-wide `'static` `Context` (`eval::interp::llvm_context`), so it
+    /// can live in an `RtValue` with no lifetime parameter of its own.
+    #[cfg(feature = "compile")]
+    LlvmModule(Rc<RefCell<inkwell::module::Module<'static>>>),
+    /// An LLVM IR builder positioned at some basic block.
+    #[cfg(feature = "compile")]
+    LlvmBuilder(LlvmBuilderHandle),
+    /// A declared/defined LLVM function (`Copy` in inkwell already, unlike
+    /// `Module`/`Builder` — no `Rc<RefCell<..>>` needed).
+    #[cfg(feature = "compile")]
+    LlvmFunction(inkwell::values::FunctionValue<'static>),
+    /// An LLVM basic block (`Copy` in inkwell already).
+    #[cfg(feature = "compile")]
+    LlvmBasicBlock(inkwell::basic_block::BasicBlock<'static>),
+    /// An LLVM IR value. Narrowed to `IntValue` for now — Phase 1
+    /// ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) only ever produces
+    /// `i64`/`i1` values; widens to `BasicValueEnum` once `f64`/`bool` join.
+    #[cfg(feature = "compile")]
+    LlvmValue(inkwell::values::IntValue<'static>),
 }
 
 /// A runtime error. `Panic` is a deliberate `panic`; `Break`/`Return` are not
