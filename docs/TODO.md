@@ -443,12 +443,47 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       全`i64`でない関数のコンパイル拒否）。既存テスト・featureなしビルドへの影響なし
       （`cargo build`/`cargo test`は無変更、`cargo clippy --all-targets`は両構成（あり/なし）で
       警告0）。
+  - **次の作業（Phase 2以降、ブランチ`feature/compiler`で継続。Phase 1完了の縦スライスを土台に、
+    1ステップずつ拡張する——これまでの`ステップ4a..4s`等と同じ「小さく検証可能な単位で進める」
+    方針を踏襲）**:
+    - **Phase 2（呼び出し規約の一般化・スカラー拡充）**: 現状`CompiledFn`はネイティブのi64固定
+      シグネチャ（`extern "C" fn(i64,...) -> i64`、0〜3引数のみ）に頼っているが、これはPhase1限定の
+      簡略化。統一呼び出し規約として`#[repr(C)] struct TlValue { tag: u8, payload: union{i64,f64,
+      bool,char,ptr} }`（16バイト、`{i64,i64}`としてLLVM側にも定義しレイアウトを一致させる）を
+      新設し、すべての関数を`extern "C" fn(*const TlValue, u32, *mut TlValue) -> i32`という単一
+      シグネチャへ寄せる（アリティ違いごとに別の関数ポインタ型を作らずに済む）。これに合わせて
+      `f64`/`bool`/`char`のリテラル・演算・`let`を`AstExpr`/`compile-value`/`compile-tail`に追加。
+      コンパイル済み関数同士の直接呼び出し（`(compiled? name)`的なチェックを`compile`に追加し、
+      未コンパイルの呼び出し先があれば明示的にコンパイル拒否する——逆方向〈コンパイル済みから
+      未コンパイルを呼ぶ〉はトランポリンが必要でより難しいため後回し）。
+    - **Phase 3（Sexpr/HashTable/Vector対応）**: 既存Rust実装（`mem::Heap`の cons/GC、
+      `eval::interp`のhashtable/vector操作）を`extern "C"`シムで薄くラップした「ランタイム支援
+      ライブラリ」層を新設し、コンパイル後コードはこれらの操作をすべて呼び出し経由で行う
+      （直接cons cellの形を読まない——当面`Sexpr`はオパーク）。**未解決のリスクとして明記**:
+      コンパイル後コードのレジスタ/スタック上の値をmark-sweep GCのルート走査が辿れない問題。
+      Phase3では「ランタイム呼び出しの瞬間だけGCが起こり、その結果は即座にrootingする」という
+      限定的回避で進め、本格対応（stack map等）は対象外として記録する。
+    - **Phase 4（クロージャ/高階関数、優先度低）**: GCルーティングの難度がさらに増すため、
+      Phase 5（ファイルコンパイラ）より後でもよい。
+    - **Phase 5（`compile-file`）**: ファイル全体の`defun`を1つのLLVM `Module`にまとめ
+      （同一ファイル内呼び出しは直接`call`命令になる）、`TargetMachine::write_to_file`でオブジェクト
+      ファイル出力→システムの`cc`をサブプロセス起動してリンク。既存Rust実装（cons heap/GC/
+      HashTable/Vector等）を`extern "C"`シムでラップした静的ランタイムライブラリ（`libtlrt.a`、
+      `Cargo.toml`に`[lib] crate-type = ["lib","staticlib"]`を追加し`typl`自身のビルド時に
+      一緒に作る）を`cc`でリンクし、**typelisp/LLVMインストール無しで動く実行ファイル/共有
+      ライブラリ**を生成する（ユーザー要求の核心）。実行ファイル化はエントリポイント規約として
+      `main`という名前の関数（`(fn () i32)`等）を探す（CL/C慣習）。共有ライブラリ化は既存の
+      `FnSig::public`（`pub` defun）をエクスポートシンボルの基準に流用。
+    - **Phase 6（並行）**: 各Phase完了の都度、`TlValue` ABI仕様や`compile-file`のセマンティクスを
+      `docs/language-design.md`に「確定仕様」として追記していく（このTODO.mdは進捗の記録、
+      language-design.mdは確定した言語仕様という既存の役割分担を継続）。
 
 ---
 
 ## 開発コマンド
 ```sh
 cargo test                                   # core（LLVM 不要）
+cargo test --features compile                # compile（LLVM要、brew install llvm@17 済みなら追加設定不要）
 cargo +nightly miri test --test mem_test     # GC/ポインタの UB・リーク検査
 cargo +nightly miri test --test read_test
 MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test --test numeric_test  # random が SystemTime を使うため isolation 解除が必要
