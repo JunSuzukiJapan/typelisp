@@ -618,11 +618,14 @@ impl Interp {
             "ast-params" => Some(self.builtin_ast_params(args)),
             "ast-body" => Some(self.builtin_ast_body(args)),
             "param-is-bool" => Some(self.builtin_param_is_bool(args)),
+            "param-is-f64" => Some(self.builtin_param_is_f64(args)),
             "ret-is-bool" => Some(self.builtin_ret_is_bool(args)),
+            "ret-is-f64" => Some(self.builtin_ret_is_f64(args)),
             "llvm-new-module" => Some(llvm_module_new(args)),
             "llvm-new-builder" => Some(llvm_builder_new(args)),
             "llvm-const-i64" => Some(llvm_const_i64(args)),
             "llvm-const-bool" => Some(llvm_const_bool(args)),
+            "llvm-const-f64" => Some(llvm_const_f64(args)),
             "llvm-finish-compile" => Some(self.builtin_llvm_finish_compile(args)),
             _ => None,
         }
@@ -662,28 +665,49 @@ impl Interp {
         }
     }
 
-    /// `(param-is-bool name i) -> bool`: whether `name`'s `i`-th parameter is
-    /// `bool` (vs. `i64`) — lets the typelisp-written `compile` pick
-    /// `load-arg` vs `load-arg-bool` per parameter without `AstExpr` needing
-    /// to carry per-node type tags (Phase 2b, mixed `i64`/`bool` signatures).
-    fn builtin_param_is_bool(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    /// Shared by `builtin_param_is_bool`/`builtin_param_is_f64`: whether
+    /// `name`'s `i`-th parameter is exactly `want` — lets the
+    /// typelisp-written `compile` pick `load-arg`/`load-arg-bool`/
+    /// `load-arg-f64` per parameter without `AstExpr` needing to carry
+    /// per-node type tags (Phase 2b/2c, mixed `i64`/`bool`/`f64` signatures).
+    fn param_has_type(&self, args: &[RtValue], want: &Type) -> Result<RtValue, EvalError> {
         let name = expect_str(&args[0])?;
         let i = rt_i64(&args[1])?;
-        let is_bool = match self.fn_signature(&Path::root(name)) {
-            Some((_, types, _)) => i >= 0 && types.get(i as usize) == Some(&Type::Bool),
+        let matches = match self.fn_signature(&Path::root(name)) {
+            Some((_, types, _)) => i >= 0 && types.get(i as usize) == Some(want),
             None => false,
         };
-        Ok(RtValue::Bool(is_bool))
+        Ok(RtValue::Bool(matches))
     }
 
-    /// `(ret-is-bool name) -> bool`: whether `name`'s return type is `bool`
-    /// (vs. `i64`) — same role as [`Self::builtin_param_is_bool`] but for the
-    /// function's own return, letting `compile` pick `build-ret` vs
-    /// `build-ret-bool` once per function.
-    fn builtin_ret_is_bool(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    /// `(param-is-bool name i) -> bool`: see [`Self::param_has_type`].
+    fn builtin_param_is_bool(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
+        self.param_has_type(args, &Type::Bool)
+    }
+
+    /// `(param-is-f64 name i) -> bool`: see [`Self::param_has_type`].
+    fn builtin_param_is_f64(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
+        self.param_has_type(args, &Type::F64)
+    }
+
+    /// Shared by `builtin_ret_is_bool`/`builtin_ret_is_f64`: whether `name`'s
+    /// return type is exactly `want` — same role as [`Self::param_has_type`]
+    /// but for the function's own return, letting `compile` pick
+    /// `build-ret`/`build-ret-bool`/`build-ret-f64` once per function.
+    fn ret_has_type(&self, args: &[RtValue], want: &Type) -> Result<RtValue, EvalError> {
         let name = expect_str(&args[0])?;
-        let is_bool = matches!(self.fn_signature(&Path::root(name)), Some((_, _, ret)) if *ret == Type::Bool);
-        Ok(RtValue::Bool(is_bool))
+        let matches = matches!(self.fn_signature(&Path::root(name)), Some((_, _, ret)) if ret == want);
+        Ok(RtValue::Bool(matches))
+    }
+
+    /// `(ret-is-bool name) -> bool`: see [`Self::ret_has_type`].
+    fn builtin_ret_is_bool(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
+        self.ret_has_type(args, &Type::Bool)
+    }
+
+    /// `(ret-is-f64 name) -> bool`: see [`Self::ret_has_type`].
+    fn builtin_ret_is_f64(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
+        self.ret_has_type(args, &Type::F64)
     }
 
     /// `(llvm-finish-compile module name arity) -> Result<bool, Error>`:
@@ -751,13 +775,15 @@ impl Interp {
         if status != 0 {
             return Some(Err(EvalError::Panic(format!("compiled function: returned status {}", status))));
         }
-        // Phase 2b's `build-ret`/`build-ret-bool` tag the result correctly
-        // (`f64`/`char` land in a follow-up step — see
+        // `build-ret`/`build-ret-bool`/`build-ret-f64` tag the result
+        // correctly (`char`/pointers land in a follow-up step — see
         // [docs/TODO.md](../../docs/TODO.md)「ステップ5・Phase 2」), so unlike
         // the arguments above, `out.tag` is meaningful here and decides how
         // to decode `out.payload` back into an `RtValue`.
         let result = if out.tag == TlTag::Bool as u8 {
             RtValue::Bool(unsafe { out.payload.i64_ } != 0)
+        } else if out.tag == TlTag::F64 as u8 {
+            RtValue::Float(unsafe { out.payload.f64_ })
         } else {
             RtValue::Int(unsafe { out.payload.i64_ })
         };
@@ -766,12 +792,13 @@ impl Interp {
 }
 
 /// Converts one argument `RtValue` into the [`TlValue`] `call_compiled` packs
-/// into the outgoing array — `i64`/`bool` only (Phase 2b's scope).
+/// into the outgoing array — `i64`/`bool`/`f64` only (Phase 2b/2c's scope).
 #[cfg(feature = "compile")]
 fn to_tlvalue_arg(v: &RtValue) -> Result<TlValue, EvalError> {
     match v {
         RtValue::Int(n) => Ok(TlValue::from_i64(*n)),
         RtValue::Bool(b) => Ok(TlValue::from_i64(*b as i64)),
+        RtValue::Float(n) => Ok(TlValue::from_f64(*n)),
         other => Err(EvalError::Internal(format!("compiled function: unsupported argument {:?}", other))),
     }
 }
@@ -801,15 +828,23 @@ impl TlValue {
         TlValue { tag: TlTag::I64 as u8, payload: TlPayload { i64_: n } }
     }
 
+    /// Sets the union's `f64_` field directly (not a cast of some `i64`) so
+    /// the payload's raw bit pattern is the IEEE-754 encoding of `n` — what
+    /// the JIT'd side's `bitcast i64 to double` expects to find when it later
+    /// reads this slot as `f64` (see `load_arg_f64_payload`/`build-ret-f64`).
+    fn from_f64(n: f64) -> TlValue {
+        TlValue { tag: TlTag::F64 as u8, payload: TlPayload { f64_: n } }
+    }
+
     fn zeroed() -> TlValue {
         TlValue { tag: 0, payload: TlPayload { i64_: 0 } }
     }
 }
 
-/// [`TlValue`]'s payload — only the `i64_` field is produced/read anywhere
-/// yet (Phase 2a); `f64_`/`bool_`/`char_`/`ptr` exist now so the union's
-/// layout (and therefore [`TlValue`]'s size) doesn't change shape again when
-/// Phase 2's `f64`/`bool`/`char` support lands.
+/// [`TlValue`]'s payload — `bool_`/`char_`/`ptr` aren't produced/read
+/// anywhere yet (Phase 2b/2c cover `i64`/`bool`/`f64`; `char`/pointers are a
+/// follow-up step) but exist now so the union's layout (and therefore
+/// [`TlValue`]'s size) doesn't change shape again when they land.
 #[cfg(feature = "compile")]
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -845,14 +880,14 @@ struct CompiledFn {
     _engine: Rc<inkwell::execution_engine::ExecutionEngine<'static>>,
 }
 
-/// Whether a `defun`'s parameter/return types are all `i64`/`bool` —
-/// Phase 2b's restricted scope (`crate::compile::ast_bridge`'s doc comment).
+/// Whether a `defun`'s parameter/return types are all `i64`/`bool`/`f64` —
+/// Phase 2c's restricted scope (`crate::compile::ast_bridge`'s doc comment).
 /// Phase 1/2a required every one of them to be `i64`; mixing in `bool`
 /// (Phase 2b) is what makes predicate functions like `(a i64) (b i64) ->
-/// bool` compilable at all.
+/// bool` compilable at all, and `f64` (Phase 2c) floating-point ones.
 #[cfg(feature = "compile")]
 fn is_supported_scalar_type(t: &Type) -> bool {
-    matches!(t, Type::I64 | Type::Bool)
+    matches!(t, Type::I64 | Type::Bool | Type::F64)
 }
 
 #[cfg(feature = "compile")]
@@ -935,7 +970,7 @@ fn llvm_builder_new(_args: &[RtValue]) -> Result<RtValue, EvalError> {
 fn llvm_const_i64(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
     let n = rt_i64(&args[0])?;
-    Ok(RtValue::LlvmValue(llvm_context().i64_type().const_int(n as u64, true)))
+    Ok(RtValue::LlvmValue(llvm_context().i64_type().const_int(n as u64, true).into()))
 }
 
 /// `(llvm-const-bool b) -> LlvmValue`: an `i1` constant — Phase 2b's `bool`
@@ -944,7 +979,16 @@ fn llvm_const_i64(args: &[RtValue]) -> Result<RtValue, EvalError> {
 fn llvm_const_bool(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
     let b = rt_bool(&args[0])?;
-    Ok(RtValue::LlvmValue(llvm_context().bool_type().const_int(b as u64, false)))
+    Ok(RtValue::LlvmValue(llvm_context().bool_type().const_int(b as u64, false).into()))
+}
+
+/// `(llvm-const-f64 n) -> LlvmValue`: an `f64` constant — Phase 2c's `f64`
+/// literal support (`AstExpr::AFloat`/`compile-value`).
+#[cfg(feature = "compile")]
+fn llvm_const_f64(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let n = rt_f64(&args[0])?;
+    Ok(RtValue::LlvmValue(llvm_context().f64_type().const_float(n).into()))
 }
 
 #[cfg(feature = "compile")]
@@ -980,10 +1024,33 @@ fn expect_llvm_basic_block(v: &RtValue) -> Result<&inkwell::basic_block::BasicBl
 }
 
 #[cfg(feature = "compile")]
-fn expect_llvm_value(v: &RtValue) -> Result<&inkwell::values::IntValue<'static>, EvalError> {
+fn expect_llvm_basic_value(v: &RtValue) -> Result<&inkwell::values::BasicValueEnum<'static>, EvalError> {
     match v {
         RtValue::LlvmValue(v) => Ok(v),
         other => Err(EvalError::Internal(format!("expected a LlvmValue, got {:?}", other))),
+    }
+}
+
+/// Narrows an `LlvmValue` to its `IntValue` (`i64`/`i1`) case — used wherever
+/// a builtin only ever expects an integer-kind operand (e.g. `load-arg`'s
+/// payload, `build-cond-br`'s condition). Returns an `EvalError::Internal`
+/// rather than the raw inkwell panic `BasicValueEnum::into_int_value` would
+/// give on a kind mismatch.
+#[cfg(feature = "compile")]
+fn expect_llvm_int_value(v: &RtValue) -> Result<inkwell::values::IntValue<'static>, EvalError> {
+    match expect_llvm_basic_value(v)? {
+        inkwell::values::BasicValueEnum::IntValue(v) => Ok(*v),
+        other => Err(EvalError::Internal(format!("expected an int LlvmValue, got {:?}", other))),
+    }
+}
+
+/// Narrows an `LlvmValue` to its `FloatValue` (`f64`) case — Phase 2c's `f64`
+/// counterpart to [`expect_llvm_int_value`].
+#[cfg(feature = "compile")]
+fn expect_llvm_float_value(v: &RtValue) -> Result<inkwell::values::FloatValue<'static>, EvalError> {
+    match expect_llvm_basic_value(v)? {
+        inkwell::values::BasicValueEnum::FloatValue(v) => Ok(*v),
+        other => Err(EvalError::Internal(format!("expected a float LlvmValue, got {:?}", other))),
     }
 }
 
@@ -1033,11 +1100,13 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "position-at-end" => Some(llvm_builder_position_at_end(args)),
             "load-arg" => Some(llvm_builder_load_arg(args)),
             "load-arg-bool" => Some(llvm_builder_load_arg_bool(args)),
+            "load-arg-f64" => Some(llvm_builder_load_arg_f64(args)),
             "build-op" => Some(llvm_builder_build_op(args)),
             "build-cond-br" => Some(llvm_builder_build_cond_br(args)),
             "build-br" => Some(llvm_builder_build_br(args)),
             "build-ret" => Some(llvm_builder_build_ret(args)),
             "build-ret-bool" => Some(llvm_builder_build_ret_bool(args)),
+            "build-ret-f64" => Some(llvm_builder_build_ret_f64(args)),
             _ => None,
         };
     }
@@ -1137,8 +1206,9 @@ fn load_arg_payload(
 }
 
 /// `(load-arg b f i) -> LlvmValue`: logical argument `i`, as a plain `i64`.
-/// `bool` arguments need [`llvm_builder_load_arg_bool`] instead (Phase 2b);
-/// `f64`/`char` are a follow-up step.
+/// `bool`/`f64` arguments need [`llvm_builder_load_arg_bool`]/
+/// [`llvm_builder_load_arg_f64`] instead (Phase 2b/2c); `char` is a
+/// follow-up step.
 #[cfg(feature = "compile")]
 fn llvm_builder_load_arg(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
@@ -1146,7 +1216,7 @@ fn llvm_builder_load_arg(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let f = expect_llvm_function(&args[1])?;
     let i = rt_i64(&args[2])?;
     let payload = load_arg_payload(&b.0.borrow(), f, i)?;
-    Ok(RtValue::LlvmValue(payload))
+    Ok(RtValue::LlvmValue(payload.into()))
 }
 
 /// `(load-arg-bool b f i) -> LlvmValue`: logical argument `i`, narrowed
@@ -1163,37 +1233,78 @@ fn llvm_builder_load_arg_bool(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let narrowed = builder
         .build_int_truncate(payload, llvm_context().bool_type(), "argbool")
         .map_err(|e| EvalError::Panic(format!("load-arg-bool: {}", e)))?;
-    Ok(RtValue::LlvmValue(narrowed))
+    Ok(RtValue::LlvmValue(narrowed.into()))
+}
+
+/// `(load-arg-f64 b f i) -> LlvmValue`: logical argument `i`, reinterpreted
+/// (`build_bit_cast`, not a numeric conversion) from the raw `i64` payload's
+/// bits to `f64` — Phase 2c's `f64`-parameter support, the counterpart to
+/// [`llvm_builder_load_arg`]. A bit-cast (not truncate/zext) is correct here
+/// because [`TlValue::from_f64`] writes `n`'s IEEE-754 bit pattern straight
+/// into the same 8-byte slot `i64_` occupies, the same relationship
+/// `build-ret-f64` uses in reverse.
+#[cfg(feature = "compile")]
+fn llvm_builder_load_arg_f64(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let b = expect_llvm_builder(&args[0])?;
+    let f = expect_llvm_function(&args[1])?;
+    let i = rt_i64(&args[2])?;
+    let builder = b.0.borrow();
+    let payload = load_arg_payload(&builder, f, i)?;
+    let reinterpreted = builder
+        .build_bit_cast(payload, llvm_context().f64_type(), "argf64")
+        .map_err(|e| EvalError::Panic(format!("load-arg-f64: {}", e)))?;
+    Ok(RtValue::LlvmValue(reinterpreted))
 }
 
 /// `op` is one of `+ - * / mod < <= > >= = /=` — the same set `i64`'s
 /// `int_assoc` registers and `crate::compile::ast_bridge::typed_to_ast`
 /// bridges into an `abinop` node, forwarded here verbatim by
 /// `crate::compile::compiler_source`'s `compile-value` so neither side needs
-/// its own operator-name dispatch table.
+/// its own operator-name dispatch table. `lhs`/`rhs`'s actual `LlvmValue` kind
+/// (set by which `AstExpr` leaf produced them — `f64` only ever flows from
+/// `f64`'s own `Assoc` methods, per `ast_bridge`) decides int vs. float ops;
+/// a kind mismatch between them would be a checker/bridge bug, not a
+/// user-reachable error.
 #[cfg(feature = "compile")]
 fn llvm_builder_build_op(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
     let b = expect_llvm_builder(&args[0])?;
     let op = expect_str(&args[1])?;
-    let lhs = *expect_llvm_value(&args[2])?;
-    let rhs = *expect_llvm_value(&args[3])?;
     let builder = b.0.borrow();
+    match (expect_llvm_basic_value(&args[2])?, expect_llvm_basic_value(&args[3])?) {
+        (inkwell::values::BasicValueEnum::IntValue(lhs), inkwell::values::BasicValueEnum::IntValue(rhs)) => {
+            llvm_builder_build_int_op(&builder, op, *lhs, *rhs)
+        }
+        (inkwell::values::BasicValueEnum::FloatValue(lhs), inkwell::values::BasicValueEnum::FloatValue(rhs)) => {
+            llvm_builder_build_float_op(&builder, op, *lhs, *rhs)
+        }
+        (lhs, rhs) => Err(EvalError::Internal(format!("build-op: mismatched operand kinds {:?}/{:?}", lhs, rhs))),
+    }
+}
+
+#[cfg(feature = "compile")]
+fn llvm_builder_build_int_op(
+    builder: &inkwell::builder::Builder<'static>,
+    op: &str,
+    lhs: inkwell::values::IntValue<'static>,
+    rhs: inkwell::values::IntValue<'static>,
+) -> Result<RtValue, EvalError> {
     let result = match op {
         "+" => builder.build_int_add(lhs, rhs, "addtmp"),
         "-" => builder.build_int_sub(lhs, rhs, "subtmp"),
         "*" => builder.build_int_mul(lhs, rhs, "multmp"),
         "/" => builder.build_int_signed_div(lhs, rhs, "divtmp"),
         "mod" => builder.build_int_signed_rem(lhs, rhs, "modtmp"),
-        "<" => return llvm_icmp(&builder, inkwell::IntPredicate::SLT, lhs, rhs),
-        "<=" => return llvm_icmp(&builder, inkwell::IntPredicate::SLE, lhs, rhs),
-        ">" => return llvm_icmp(&builder, inkwell::IntPredicate::SGT, lhs, rhs),
-        ">=" => return llvm_icmp(&builder, inkwell::IntPredicate::SGE, lhs, rhs),
-        "=" => return llvm_icmp(&builder, inkwell::IntPredicate::EQ, lhs, rhs),
-        "/=" => return llvm_icmp(&builder, inkwell::IntPredicate::NE, lhs, rhs),
+        "<" => return llvm_icmp(builder, inkwell::IntPredicate::SLT, lhs, rhs),
+        "<=" => return llvm_icmp(builder, inkwell::IntPredicate::SLE, lhs, rhs),
+        ">" => return llvm_icmp(builder, inkwell::IntPredicate::SGT, lhs, rhs),
+        ">=" => return llvm_icmp(builder, inkwell::IntPredicate::SGE, lhs, rhs),
+        "=" => return llvm_icmp(builder, inkwell::IntPredicate::EQ, lhs, rhs),
+        "/=" => return llvm_icmp(builder, inkwell::IntPredicate::NE, lhs, rhs),
         _ => return Err(EvalError::Internal(format!("build-op: unknown operator {}", op))),
     };
-    result.map(RtValue::LlvmValue).map_err(|e| EvalError::Panic(format!("build-op: {}", e)))
+    result.map(|v| RtValue::LlvmValue(v.into())).map_err(|e| EvalError::Panic(format!("build-op: {}", e)))
 }
 
 #[cfg(feature = "compile")]
@@ -1205,7 +1316,51 @@ fn llvm_icmp(
 ) -> Result<RtValue, EvalError> {
     builder
         .build_int_compare(pred, lhs, rhs, "cmptmp")
-        .map(RtValue::LlvmValue)
+        .map(|v| RtValue::LlvmValue(v.into()))
+        .map_err(|e| EvalError::Panic(format!("build-op: {}", e)))
+}
+
+/// `f64`'s arithmetic (`fadd`/`fsub`/`fmul`/`fdiv`/`frem`) and *ordered*
+/// comparison (`fcmp` with `O*`/`UNE` predicates — false for any operand that
+/// is `NaN`, except `/=` which (matching Rust's own `f64: PartialEq`) is true
+/// for `NaN` since it is never equal to anything) — Phase 2c's float
+/// counterpart to [`llvm_builder_build_int_op`]. Comparisons still produce a
+/// plain `i1` `IntValue` (`fcmp`'s result type, just like `icmp`'s), wrapped
+/// the same way `bool` always is, not a `FloatValue`.
+#[cfg(feature = "compile")]
+fn llvm_builder_build_float_op(
+    builder: &inkwell::builder::Builder<'static>,
+    op: &str,
+    lhs: inkwell::values::FloatValue<'static>,
+    rhs: inkwell::values::FloatValue<'static>,
+) -> Result<RtValue, EvalError> {
+    let result = match op {
+        "+" => builder.build_float_add(lhs, rhs, "faddtmp"),
+        "-" => builder.build_float_sub(lhs, rhs, "fsubtmp"),
+        "*" => builder.build_float_mul(lhs, rhs, "fmultmp"),
+        "/" => builder.build_float_div(lhs, rhs, "fdivtmp"),
+        "mod" => builder.build_float_rem(lhs, rhs, "fmodtmp"),
+        "<" => return llvm_fcmp(builder, inkwell::FloatPredicate::OLT, lhs, rhs),
+        "<=" => return llvm_fcmp(builder, inkwell::FloatPredicate::OLE, lhs, rhs),
+        ">" => return llvm_fcmp(builder, inkwell::FloatPredicate::OGT, lhs, rhs),
+        ">=" => return llvm_fcmp(builder, inkwell::FloatPredicate::OGE, lhs, rhs),
+        "=" => return llvm_fcmp(builder, inkwell::FloatPredicate::OEQ, lhs, rhs),
+        "/=" => return llvm_fcmp(builder, inkwell::FloatPredicate::UNE, lhs, rhs),
+        _ => return Err(EvalError::Internal(format!("build-op: unknown operator {}", op))),
+    };
+    result.map(|v| RtValue::LlvmValue(v.into())).map_err(|e| EvalError::Panic(format!("build-op: {}", e)))
+}
+
+#[cfg(feature = "compile")]
+fn llvm_fcmp(
+    builder: &inkwell::builder::Builder<'static>,
+    pred: inkwell::FloatPredicate,
+    lhs: inkwell::values::FloatValue<'static>,
+    rhs: inkwell::values::FloatValue<'static>,
+) -> Result<RtValue, EvalError> {
+    builder
+        .build_float_compare(pred, lhs, rhs, "fcmptmp")
+        .map(|v| RtValue::LlvmValue(v.into()))
         .map_err(|e| EvalError::Panic(format!("build-op: {}", e)))
 }
 
@@ -1213,7 +1368,7 @@ fn llvm_icmp(
 fn llvm_builder_build_cond_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
     let b = expect_llvm_builder(&args[0])?;
-    let cond = *expect_llvm_value(&args[1])?;
+    let cond = expect_llvm_int_value(&args[1])?;
     let then_block = *expect_llvm_basic_block(&args[2])?;
     let else_block = *expect_llvm_basic_block(&args[3])?;
     b.0.borrow()
@@ -1272,14 +1427,15 @@ fn out_ptr_of(f: &inkwell::values::FunctionValue<'static>) -> Result<inkwell::va
 }
 
 /// `(build-ret b f v) -> Unit`: returns `v` (a plain `i64`) as `TlTag::I64`.
-/// `bool` returns need [`llvm_builder_build_ret_bool`] instead (Phase 2b);
-/// `f64`/`char` are a follow-up step.
+/// `bool`/`f64` returns need [`llvm_builder_build_ret_bool`]/
+/// [`llvm_builder_build_ret_f64`] instead (Phase 2b/2c); `char` is a
+/// follow-up step.
 #[cfg(feature = "compile")]
 fn llvm_builder_build_ret(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
     let b = expect_llvm_builder(&args[0])?;
     let f = expect_llvm_function(&args[1])?;
-    let v = *expect_llvm_value(&args[2])?;
+    let v = expect_llvm_int_value(&args[2])?;
     let builder = b.0.borrow();
     let out_ptr = out_ptr_of(f)?;
     build_ret_tlvalue(&builder, out_ptr, TlTag::I64, v)
@@ -1293,13 +1449,33 @@ fn llvm_builder_build_ret_bool(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
     let b = expect_llvm_builder(&args[0])?;
     let f = expect_llvm_function(&args[1])?;
-    let v = *expect_llvm_value(&args[2])?;
+    let v = expect_llvm_int_value(&args[2])?;
     let builder = b.0.borrow();
     let widened = builder
         .build_int_z_extend(v, llvm_context().i64_type(), "retbool")
         .map_err(|e| EvalError::Panic(format!("build-ret-bool: {}", e)))?;
     let out_ptr = out_ptr_of(f)?;
     build_ret_tlvalue(&builder, out_ptr, TlTag::Bool, widened)
+}
+
+/// `(build-ret-f64 b f v) -> Unit`: reinterprets `v` (`build_bit_cast`, not a
+/// numeric conversion) as an `i64`'s worth of raw bits and returns it as
+/// `TlTag::F64` — Phase 2c's `f64`-return support, the counterpart to
+/// [`llvm_builder_build_ret`]; see [`llvm_builder_load_arg_f64`] for the
+/// matching reverse direction.
+#[cfg(feature = "compile")]
+fn llvm_builder_build_ret_f64(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let b = expect_llvm_builder(&args[0])?;
+    let f = expect_llvm_function(&args[1])?;
+    let v = expect_llvm_float_value(&args[2])?;
+    let builder = b.0.borrow();
+    let bits = builder
+        .build_bit_cast(v, llvm_context().i64_type(), "retf64")
+        .map_err(|e| EvalError::Panic(format!("build-ret-f64: {}", e)))?
+        .into_int_value();
+    let out_ptr = out_ptr_of(f)?;
+    build_ret_tlvalue(&builder, out_ptr, TlTag::F64, bits)
 }
 
 #[cfg(feature = "compile")]

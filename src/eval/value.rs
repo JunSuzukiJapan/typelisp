@@ -124,11 +124,14 @@ pub enum RtValue {
     /// An LLVM basic block (`Copy` in inkwell already).
     #[cfg(feature = "compile")]
     LlvmBasicBlock(inkwell::basic_block::BasicBlock<'static>),
-    /// An LLVM IR value. Narrowed to `IntValue` for now — Phase 1
-    /// ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) only ever produces
-    /// `i64`/`i1` values; widens to `BasicValueEnum` once `f64`/`bool` join.
+    /// An LLVM IR value — `IntValue` (`i64`/`i1`, covering `i64` and `bool`)
+    /// or `FloatValue` (`f64`), per [`BasicValueEnum`](inkwell::values::BasicValueEnum)
+    /// — see `eval::interp::{expect_llvm_int_value,expect_llvm_float_value}`
+    /// for the typed extractors callers actually use (Phase 2,
+    /// [docs/TODO.md](../../docs/TODO.md)「ステップ5」: `bool` joined in
+    /// Phase 2b, `f64` in Phase 2c).
     #[cfg(feature = "compile")]
-    LlvmValue(inkwell::values::IntValue<'static>),
+    LlvmValue(inkwell::values::BasicValueEnum<'static>),
 }
 
 /// A runtime error. `Panic` is a deliberate `panic`; `Break`/`Return` are not

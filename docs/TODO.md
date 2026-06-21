@@ -515,14 +515,45 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
     - 未対応として残った範囲: `f64`/`char`（リテラル・演算・パラメータ・戻り値）、`let`束縛
       （`ast-body`は依然「単一式の本体のみ」)、`bool`同士の`eq`等のメソッド呼び出し
       （`and`/`or`は`if`へ脱糖されるため不要だが、明示的な`bool::eq`呼び出しは未橋渡し）。
+  - 実装済み（Phase 2c/`f64`対応）: `i64`/`bool`に加え`f64`も任意混在できるようにした——
+    `(defun quad ((a f64) (b f64)) f64 (* (+ a b) 2.0))`のような浮動小数演算関数、
+    `i64`の比較で分岐しつつ`f64`を返す関数（`tests/compile_test.rs`の
+    `compiles_a_function_mixing_i64_and_f64`）がコンパイル対象になった。
+    - **`bool`と違い真に新しいLLVM値種別が必要**: `inkwell::values::FloatValue`は整数の
+      `IntValue`とは別のRust型のため、`RtValue::LlvmValue`の表現を`IntValue`単独から
+      `inkwell::values::BasicValueEnum`（IntValue/FloatValueを両方包む列挙体、inkwell組み込み）に
+      広げた——`eval::value.rs`のdocコメントが当初から「widens to BasicValueEnum once f64/bool
+      join」と予告していた設計に合わせた形（個別の`RtValue::LlvmFloatValue`variantを増設する
+      案より、既存の型変換系inkwell APIをそのまま使えてRust側の分岐も1箇所に閉じるため）。
+      旧`expect_llvm_value`は`expect_llvm_basic_value`+`expect_llvm_int_value`/
+      `expect_llvm_float_value`（kind不一致はinkwellの`into_int_value`等の生パニックではなく
+      `EvalError::Internal`を返す）に分割。
+    - **`build-op`は実引数の実際のkind（IntValue/FloatValue）で内部分岐**
+      （`llvm_builder_build_int_op`/`llvm_builder_build_float_op`に分離、`AstExpr`自体は
+      演算子文字列以外の型情報を持たないため、operandの実際の値から判断するほうが自然）。
+      浮動小数比較（`fcmp`）は整数比較と同じく常に`i1`の`IntValue`を返す（`FloatValue`にはならない）
+      点に注意——`bool`は終始`IntValue`表現という既存方針と整合。比較predicateは
+      Rustの`f64: PartialEq/PartialOrd`と一致させ「`<`/`<=`/`>`/`>=`/`=`はNaN関与で常にfalse
+      （ordered: OLT/OLE/OGT/OGE/OEQ）、`/=`はNaN関与で常にtrue（unordered: UNE）」を採用。
+    - **`load-arg-f64`/`build-ret-f64`は`build_bit_cast`で生ビット列を再解釈**（truncate/zext
+      ではない——`TlValue::from_f64`がunionの`f64_`フィールドに直接書き込むことでIEEE-754の
+      ビットパターンをそのまま`i64_`スロットへ重ね書きしており、読み出し側もビット再解釈で
+      対応する必要があるため）。
+    - **`param-is-bool`/`ret-is-bool`と同型の`param-is-f64`/`ret-is-f64`を追加**し、
+      typelisp側`fill-param-values`/`compile-tail`を2値分岐から`cond`による3値分岐
+      （bool/f64/その他=i64）に拡張。Rust側は`param_has_type`/`ret_has_type`という
+      共通ヘルパに集約し、4関数間の重複を排除。
+    - `AstExpr`に`afloat`variantを追加（既存`aint`/`abool`/`avar`/`aif`/`abinop`の並びに
+      割り込ませず**末尾に追記**——これらのindexは`ast_bridge.rs`の定数と1:1対応する
+      ワイヤフォーマットであり、既存variantの並び順を変えると動いていたものが壊れるため）。
+      `ast_bridge::typed_to_ast`の`I64_BINOPS`は`f64`の同名演算子も同じ文字列集合なので
+      `BINOPS`に改名し受け手の型チェック（`i64`または`f64`）を追加するだけで済んだ。
+    - TDD: `tests/compile_test.rs`に4件追加（14件中）——`f64`算術、`f64`述語（比較→bool）、
+      `f64`リテラル返却、`i64`/`f64`混在（`i64`の比較結果で`f64`の2計算を分岐——言語に
+      暗黙の数値変換が無いため、`i64`と`f64`を同一`Assoc`呼び出し内で混在させることはできない
+      ことを確認する意味も持つ）。既存10件は無変更でgreen。並行実行でのSIGSEGV再発無し
+      （10回連続green）。既定ビルド・`cargo clippy --all-targets`（両構成）への影響なし。
   - **次の作業（Phase 2残り、ブランチ`feature/compiler`で継続）**:
-    - **Phase 2c（`f64`対応）**: `f64`のリテラル・算術/比較・パラメータ・戻り値を`AstExpr`/
-      `compile-value`/`compile-tail`に追加。`bool`と違い真に新しいLLVM値種別
-      （`inkwell::values::FloatValue`、整数の`IntValue`とは別のRust型）が必要になる点が
-      Phase2bとの違い——`build-op`/`load-arg`/`build-ret`それぞれに浮動小数版
-      （`build_float_*`系のinkwell API、`load-arg`は payload の生i64ビット列を`f64`へ
-      `build_bit_cast`で再解釈、`build-ret`はその逆）を追加する作業が中心。`TlValue`の
-      `payload`union自体はPhase2aで既に`f64_`フィールドを持つ形にしてあるのでABI自体は無変更。
     - **Phase 2d（`char`対応、優先度低）**: `char`は算術が無く主に等値比較のみなので
       `f64`より軽量——`i64`/`bool`と同じ「i64スロットに格納し境界でのみ幅変換」方式でよい
       （`u32`へ`truncate`/`zext`、ただし32bit）。

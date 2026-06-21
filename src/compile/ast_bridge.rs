@@ -4,26 +4,32 @@
 //! over a function's body with the language's own `match`.
 //!
 //! Phase 1/2 ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) only bridges the
-//! narrow `i64`/`bool`-scalar subset needed to compile a function like
+//! narrow `i64`/`bool`/`f64`-scalar subset needed to compile a function like
 //! `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))` or `(defun gt ((a
-//! i64) (b i64)) bool (> a b))`: integer/bool literals, parameter references,
-//! `if`, and `i64`'s binary arithmetic/comparison instance methods. Anything
-//! else returns `None` — `compile` then refuses the function outright rather
-//! than miscompiling it (see `Interp::builtin_ast_body` in `src/eval/interp.rs`).
+//! i64) (b i64)) bool (> a b))`: integer/bool/float literals, parameter
+//! references, `if`, and `i64`'s/`f64`'s binary arithmetic/comparison
+//! instance methods. Anything else returns `None` — `compile` then refuses
+//! the function outright rather than miscompiling it (see
+//! `Interp::builtin_ast_body` in `src/eval/interp.rs`).
 
 use crate::{Expr, Path, RtValue, Type, Typed};
 
 /// Variant indices of `AstExpr`'s constructors — must match
-/// `check::registry::ast_expr_def`'s `variants` order exactly.
+/// `check::registry::ast_expr_def`'s `variants` order exactly. `A_FLOAT` is
+/// appended last (Phase 2c) rather than grouped with the other literals —
+/// see `ast_expr_def`'s doc comment on why these indices are append-only.
 const A_INT: usize = 0;
 const A_BOOL: usize = 1;
 const A_VAR: usize = 2;
 const A_IF: usize = 3;
 const A_BINOP: usize = 4;
+const A_FLOAT: usize = 5;
 
-/// `i64`'s binary arithmetic/comparison instance methods (`registry::int_assoc`)
-/// — the only `Expr::Assoc` shape Phase 1 bridges.
-const I64_BINOPS: [&str; 9] = ["+", "-", "*", "<", "<=", ">", ">=", "=", "/="];
+/// `i64`'s and `f64`'s binary arithmetic/comparison instance methods
+/// (`registry::int_assoc`/`float_assoc`) — the only `Expr::Assoc` shapes
+/// Phase 1/2c bridge. Both types register the same operator strings, so one
+/// list covers either receiver type.
+const BINOPS: [&str; 9] = ["+", "-", "*", "<", "<=", ">", ">=", "=", "/="];
 
 fn data(variant: usize, fields: Vec<RtValue>) -> RtValue {
     RtValue::Data { type_name: Path::root("astexpr"), variant, fields }
@@ -35,13 +41,16 @@ pub(crate) fn typed_to_ast(t: &Typed) -> Option<RtValue> {
     match &t.expr {
         Expr::Int(n) => Some(data(A_INT, vec![RtValue::Int(*n)])),
         Expr::Bool(b) => Some(data(A_BOOL, vec![RtValue::Bool(*b)])),
-        // A `Var`'s own `Expr` doesn't carry its type — Phase 1/2b only ever
-        // bind `i64`/`bool` parameters (no `let`-bound locals are bridged
-        // yet), so checking the wrapping `Typed.ty` here is how a stray
-        // unsupported-type variable (impossible today, but not by
+        Expr::Float(n) => Some(data(A_FLOAT, vec![RtValue::Float(*n)])),
+        // A `Var`'s own `Expr` doesn't carry its type — Phase 1/2c only ever
+        // bind `i64`/`bool`/`f64` parameters (no `let`-bound locals are
+        // bridged yet), so checking the wrapping `Typed.ty` here is how a
+        // stray unsupported-type variable (impossible today, but not by
         // construction) would be caught rather than silently mistyped
         // downstream.
-        Expr::Var(name) if matches!(t.ty, Type::I64 | Type::Bool) => Some(data(A_VAR, vec![RtValue::Str(name.clone())])),
+        Expr::Var(name) if matches!(t.ty, Type::I64 | Type::Bool | Type::F64) => {
+            Some(data(A_VAR, vec![RtValue::Str(name.clone())]))
+        }
         Expr::If(c, then, els) => {
             let c = typed_to_ast(c)?;
             let then = typed_to_ast(then)?;
@@ -49,7 +58,9 @@ pub(crate) fn typed_to_ast(t: &Typed) -> Option<RtValue> {
             Some(data(A_IF, vec![c, then, els]))
         }
         Expr::Assoc { type_name, method, instance: true, args }
-            if *type_name == Path::root("i64") && args.len() == 2 && I64_BINOPS.contains(&method.as_str()) =>
+            if (*type_name == Path::root("i64") || *type_name == Path::root("f64"))
+                && args.len() == 2
+                && BINOPS.contains(&method.as_str()) =>
         {
             let lhs = typed_to_ast(&args[0])?;
             let rhs = typed_to_ast(&args[1])?;

@@ -543,15 +543,19 @@ fn error_ty() -> Type {
     Type::Named(Path::root("error"), vec![])
 }
 
-/// `AstExpr`: a typelisp-inspectable mirror of (a Phase-1 subset of)
+/// `AstExpr`: a typelisp-inspectable mirror of (a Phase-1/2 subset of)
 /// `check::ast::Expr`, used so the typelisp-written compiler
 /// (`crate::compile::compiler_source`) can `match` over a function's checked
 /// body — see `crate::compile::ast_bridge::typed_to_ast`, whose variant
-/// indices must match this definition's `variants` order exactly. Phase 1
-/// ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) only bridges integer/bool
-/// literals, parameter references, `if`, and `i64`'s binary
+/// indices must match this definition's `variants` order exactly. Phase 1/2c
+/// ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) only bridges integer/
+/// bool/float literals, parameter references, `if`, and `i64`/`f64`'s binary
 /// arithmetic/comparison instance methods — just enough to compile a function
-/// like `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))`.
+/// like `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))`. `afloat` is
+/// appended last (Phase 2c) rather than inserted in literal-grouping order
+/// with `aint`/`abool`, since these indices are a stable wire format between
+/// this definition and `ast_bridge`'s constants — reordering existing ones
+/// would silently break already-working variants.
 #[cfg(feature = "compile")]
 fn ast_expr_def() -> AdtDef {
     let t = ast_expr_ty();
@@ -564,6 +568,7 @@ fn ast_expr_def() -> AdtDef {
             Variant { name: "avar".to_string(), fields: vec![Type::Str] },
             Variant { name: "aif".to_string(), fields: vec![t.clone(), t.clone(), t.clone()] },
             Variant { name: "abinop".to_string(), fields: vec![Type::Str, t.clone(), t] },
+            Variant { name: "afloat".to_string(), fields: vec![Type::F64] },
         ],
         assoc: HashMap::new(),
         public: true,
@@ -648,6 +653,9 @@ fn llvm_function_def() -> AdtDef {
 /// `load-arg-bool`/`build-ret-bool` are their `bool`-narrowing counterparts
 /// (Phase 2b, mixed `i64`/`bool` signatures) — see
 /// `crate::eval::interp::{llvm_builder_load_arg_bool,llvm_builder_build_ret_bool}`.
+/// `load-arg-f64`/`build-ret-f64` are the `f64`-reinterpreting counterparts
+/// (Phase 2c) — see
+/// `crate::eval::interp::{llvm_builder_load_arg_f64,llvm_builder_build_ret_f64}`.
 #[cfg(feature = "compile")]
 fn llvm_builder_def() -> AdtDef {
     let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true }, instance: true };
@@ -655,6 +663,7 @@ fn llvm_builder_def() -> AdtDef {
     assoc.insert("position-at-end".to_string(), method(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit));
     assoc.insert("load-arg".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty()));
     assoc.insert("load-arg-bool".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty()));
+    assoc.insert("load-arg-f64".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty()));
     assoc.insert("build-op".to_string(), method(vec![llvm_builder_ty(), Type::Str, llvm_value_ty(), llvm_value_ty()], llvm_value_ty()));
     assoc.insert(
         "build-cond-br".to_string(),
@@ -663,6 +672,7 @@ fn llvm_builder_def() -> AdtDef {
     assoc.insert("build-br".to_string(), method(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit));
     assoc.insert("build-ret".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
     assoc.insert("build-ret-bool".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
+    assoc.insert("build-ret-f64".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
     AdtDef { name: Path::root("llvmbuilder"), params: vec![], variants: vec![], assoc, public: true }
 }
 
@@ -703,16 +713,21 @@ fn register_compile_builtins(root: &mut Namespace) {
         free(vec![Type::Str], option_of(Type::Named(Path::root("vector"), vec![Type::Str]))),
     );
     root.fns.insert("ast-body".to_string(), free(vec![Type::Str], option_of(ast_expr_ty())));
-    // `param-is-bool`/`ret-is-bool`: Phase 2b's per-parameter/return type tag
-    // (`AstExpr` itself carries no type info per node), letting `compile`
-    // pick `load-arg`/`build-ret` vs their `-bool` counterparts — see
-    // `crate::eval::interp::{Interp::builtin_param_is_bool,Interp::builtin_ret_is_bool}`.
+    // `param-is-bool`/`ret-is-bool` (Phase 2b) and `param-is-f64`/`ret-is-f64`
+    // (Phase 2c): per-parameter/return type tags (`AstExpr` itself carries no
+    // type info per node), letting `compile` pick `load-arg`/`build-ret` vs
+    // their `-bool`/`-f64` counterparts — see
+    // `crate::eval::interp::Interp::{builtin_param_is_bool,builtin_ret_is_bool,
+    // builtin_param_is_f64,builtin_ret_is_f64}`.
     root.fns.insert("param-is-bool".to_string(), free(vec![Type::Str, Type::I32], Type::Bool));
     root.fns.insert("ret-is-bool".to_string(), free(vec![Type::Str], Type::Bool));
+    root.fns.insert("param-is-f64".to_string(), free(vec![Type::Str, Type::I32], Type::Bool));
+    root.fns.insert("ret-is-f64".to_string(), free(vec![Type::Str], Type::Bool));
     root.fns.insert("llvm-new-module".to_string(), free(vec![Type::Str], llvm_module_ty()));
     root.fns.insert("llvm-new-builder".to_string(), free(vec![], llvm_builder_ty()));
     root.fns.insert("llvm-const-i64".to_string(), free(vec![Type::I64], llvm_value_ty()));
     root.fns.insert("llvm-const-bool".to_string(), free(vec![Type::Bool], llvm_value_ty()));
+    root.fns.insert("llvm-const-f64".to_string(), free(vec![Type::F64], llvm_value_ty()));
     // `llvm-finish-compile`: JITs `module` and registers `name` (a
     // `arity`-ary, all-`i64` function) so ordinary calls to it dispatch to
     // the compiled native code instead of tree-walking — see

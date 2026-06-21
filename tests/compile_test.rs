@@ -135,6 +135,73 @@ fn compiles_a_function_returning_a_bool_literal() {
     assert_eq!(run(src), RtValue::Bool(true));
 }
 
+/// Phase 2c: `f64` arithmetic, mixed in with `i64`-style scalar functions.
+/// Exercises `+`/`*` (`build_float_add`/`build_float_mul`) and confirms the
+/// JIT'd float result round-trips correctly through `TlValue`'s raw-bit-cast
+/// boundary (`load-arg-f64`/`build-ret-f64`).
+#[test]
+fn compiles_an_f64_arithmetic_function() {
+    let src = r#"
+        (defun quad ((a f64) (b f64)) f64 (* (+ a b) 2.0))
+        (compile "quad")
+        (quad 3.0 4.0)
+    "#;
+    assert_eq!(run(src), RtValue::Float(14.0));
+}
+
+/// `f64` comparison (`fcmp`) still produces a plain `bool`/`i1` result, not a
+/// `FloatValue` — mixing an `f64`-typed parameter with a `bool` return.
+#[test]
+fn compiles_an_f64_predicate_function() {
+    let src = r#"
+        (defun flt ((a f64) (b f64)) bool (< a b))
+        (compile "flt")
+        (flt 1.5 2.5)
+    "#;
+    assert_eq!(run(src), RtValue::Bool(true));
+    let src2 = r#"
+        (defun flt ((a f64) (b f64)) bool (< a b))
+        (compile "flt")
+        (flt 2.5 1.5)
+    "#;
+    assert_eq!(run(src2), RtValue::Bool(false));
+}
+
+/// A bare `f64` literal as the function's entire body (return value),
+/// exercising `AstExpr::AFloat`/`llvm-const-f64` directly.
+#[test]
+fn compiles_a_function_returning_an_f64_literal() {
+    let src = r#"
+        (defun pi-ish () f64 3.5)
+        (compile "pi-ish")
+        (pi-ish)
+    "#;
+    assert_eq!(run(src), RtValue::Float(3.5));
+}
+
+/// `i64`/`f64` mixed within one signature, with the `i64` parameter driving
+/// an `i64`-only comparison (`typelisp` has no implicit numeric coercion, so
+/// `i64` and `f64` values are never combined in one `Assoc` call — each
+/// stays within its own type's binops) whose `bool` result picks between two
+/// `f64` computations — the fully general case Phase 2's per-parameter
+/// `param-is-bool`/`param-is-f64` dispatch (rather than one signature-wide
+/// flag) is designed to support.
+#[test]
+fn compiles_a_function_mixing_i64_and_f64() {
+    let src = r#"
+        (defun pick ((a i64) (b f64)) f64 (if (> a 5) b (+ b 1.0)))
+        (compile "pick")
+        (pick 10 2.5)
+    "#;
+    assert_eq!(run(src), RtValue::Float(2.5));
+    let src2 = r#"
+        (defun pick ((a i64) (b f64)) f64 (if (> a 5) b (+ b 1.0)))
+        (compile "pick")
+        (pick 1 2.5)
+    "#;
+    assert_eq!(run(src2), RtValue::Float(3.5));
+}
+
 #[test]
 fn refuses_to_compile_a_non_i64_function() {
     let src = r#"
