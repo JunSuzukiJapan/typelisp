@@ -4,11 +4,12 @@
 //! `crate::compile::ast_bridge`) — the same "library written in typelisp
 //! calling Rust builtins" shape as [`crate::prelude`], not a Rust special form.
 //!
-//! Phase 1/2f ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) restricts
+//! Phase 1/2d ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) restricts
 //! `compile` to functions whose every parameter and return type is `i64`,
-//! `bool`, or `f64` (any mix — e.g. `(defun gt ((a i64) (b i64)) bool (> a
-//! b))`), with a body built from integer/bool/float literals, parameter
-//! references, `i64`/`f64` arithmetic/comparison, `let`, `if`, and calls to
+//! `bool`, `f64`, or `char` (any mix — e.g. `(defun gt ((a i64) (b i64))
+//! bool (> a b))`), with a body built from integer/bool/float/char literals,
+//! parameter references, `i64`/`f64` arithmetic/comparison, `char`'s
+//! `eq`/`lt`, `let`, `if`, and calls to
 //! *other already-compiled* functions (Phase 2f — a call to one not yet
 //! compiled fails the AST bridge, refusing `compile` outright, rather than
 //! reaching `compile-value` with no callee to call; self/mutual recursion
@@ -82,6 +83,7 @@ pub const SOURCE: &str = r#"
       ((AInt n) (llvm-const-i64 n))
       ((ABool flag) (llvm-const-bool flag))
       ((AFloat n) (llvm-const-f64 n))
+      ((AChar c) (llvm-const-char c))
       ((AVar name) (get vals (param-index params name)))
       ((ABinOp op lhs rhs) (build-op b op (compile-value module b params vals lhs) (compile-value module b params vals rhs)))
       ((ALet names values body)
@@ -92,14 +94,15 @@ pub const SOURCE: &str = r#"
       ;; A call to another (already-compiled — `ast_bridge::typed_to_ast`
       ;; refused to bridge it otherwise, Phase 2f) function: evaluate its
       ;; arguments in the *current* scope, resolve its declaration in this
-      ;; module, and dispatch to `build-call`/`-bool`/`-f64` per its known
-      ;; return type (the same `ret-is-bool`/`ret-is-f64` side-query
-      ;; `compile` itself uses for its own return).
+      ;; module, and dispatch to `build-call`/`-bool`/`-f64`/`-char` per its
+      ;; known return type (the same `ret-is-bool`/`ret-is-f64`/`ret-is-char`
+      ;; side-query `compile` itself uses for its own return).
       ((ACall name call-args)
        (let* ((arg-vals (eval-args 0 (length call-args) call-args (Vector::new 0 (llvm-const-i64 0))))
               (callee (get-or-declare-function module name)))
          (cond ((ret-is-bool name) (build-call-bool b callee arg-vals))
                ((ret-is-f64 name) (build-call-f64 b callee arg-vals))
+               ((ret-is-char name) (build-call-char b callee arg-vals))
                (else (build-call b callee arg-vals)))))
       (_ (panic "compile: `if` is only supported in tail position (Phase 1)")))))
 
@@ -109,40 +112,42 @@ pub const SOURCE: &str = r#"
 ;; operation (`load-arg`/`load-arg-bool`/`load-arg-f64`, needs `b` positioned
 ;; at `entry`) rather than a pure metadata lookup (Phase 1's `get-param`).
 ;; `name` is the function being compiled, needed so `param-is-bool`/
-;; `param-is-f64` can tell which of the three to use for each position
-;; (Phase 2b/2c, mixed `i64`/`bool`/`f64` signatures).
+;; `param-is-f64`/`param-is-char` can tell which of the four to use for each
+;; position (Phase 2b/2c/2d, mixed `i64`/`bool`/`f64`/`char` signatures).
 (defun fill-param-values ((name string) (f LlvmFunction) (b LlvmBuilder) (i i32) (n i32) (out Vector<LlvmValue>)) Vector<LlvmValue>
   (if (>= i n)
       out
       (progn (push out (cond ((param-is-bool name i) (load-arg-bool b f i))
                               ((param-is-f64 name i) (load-arg-f64 b f i))
+                              ((param-is-char name i) (load-arg-char b f i))
                               (else (load-arg b f i))))
              (fill-param-values name f b (+ i 1) n out))))
 
 (defun make-param-values ((name string) (f LlvmFunction) (b LlvmBuilder) (n i32)) Vector<LlvmValue>
   (fill-param-values name f b 0 n (Vector::new 0 (llvm-const-i64 0))))
 
-;; `bool-ret`/`f64-ret` (the function's own return type, computed once by
-;; `compile` via `ret-is-bool`/`ret-is-f64`) pick `build-ret`/`build-ret-bool`/
-;; `build-ret-f64` at every tail leaf — every leaf returns the same
-;; statically-known type regardless of which `if` branch is taken, so two
-;; flags threaded through suffice (Phase 2b/2c; mutually exclusive, since a
-;; function's return type is exactly one of `i64`/`bool`/`f64`).
+;; `bool-ret`/`f64-ret`/`char-ret` (the function's own return type, computed
+;; once by `compile` via `ret-is-bool`/`ret-is-f64`/`ret-is-char`) pick
+;; `build-ret`/`build-ret-bool`/`build-ret-f64`/`build-ret-char` at every
+;; tail leaf — every leaf returns the same statically-known type regardless
+;; of which `if` branch is taken, so three flags threaded through suffice
+;; (Phase 2b/2c/2d; mutually exclusive, since a function's return type is
+;; exactly one of `i64`/`bool`/`f64`/`char`).
 ;; `ACall` has no arm of its own here — the `_` arm already calls
-;; `compile-value` and feeds its result to `build-ret`/`-bool`/`-f64`, which
-;; is exactly right for a call in tail position too (Phase 2f) — only
-;; control-flow-splitting forms (`AIf`/`ALet`, which build more than one
-;; basic block) need their own `compile-tail` arm.
-(defun compile-tail ((module LlvmModule) (bool-ret bool) (f64-ret bool) (f LlvmFunction) (b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>) (e AstExpr)) ()
+;; `compile-value` and feeds its result to `build-ret`/`-bool`/`-f64`/
+;; `-char`, which is exactly right for a call in tail position too (Phase
+;; 2f) — only control-flow-splitting forms (`AIf`/`ALet`, which build more
+;; than one basic block) need their own `compile-tail` arm.
+(defun compile-tail ((module LlvmModule) (bool-ret bool) (f64-ret bool) (char-ret bool) (f LlvmFunction) (b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>) (e AstExpr)) ()
   (match e
     ((AIf c then els)
      (let ((then-block (append-block f "then"))
            (else-block (append-block f "else")))
        (build-cond-br b (compile-value module b params vals c) then-block else-block)
        (position-at-end b then-block)
-       (compile-tail module bool-ret f64-ret f b params vals then)
+       (compile-tail module bool-ret f64-ret char-ret f b params vals then)
        (position-at-end b else-block)
-       (compile-tail module bool-ret f64-ret f b params vals els)))
+       (compile-tail module bool-ret f64-ret char-ret f b params vals els)))
     ((ALet names values body)
      (labels ((eval-bindings ((i i32) (n i32) (exprs Vector<AstExpr>) (out Vector<LlvmValue>)) Vector<LlvmValue>
                 (if (>= i n)
@@ -151,7 +156,7 @@ pub const SOURCE: &str = r#"
                            (eval-bindings (+ i 1) n exprs out))))
               (eval-body-tail ((i i32) (n i32) (forms Vector<AstExpr>) (p2 Vector<string>) (v2 Vector<LlvmValue>)) ()
                 (if (>= (+ i 1) n)
-                    (compile-tail module bool-ret f64-ret f b p2 v2 (get forms i))
+                    (compile-tail module bool-ret f64-ret char-ret f b p2 v2 (get forms i))
                     (progn (compile-value module b p2 v2 (get forms i))
                            (eval-body-tail (+ i 1) n forms p2 v2)))))
        (let* ((bound-vals (eval-bindings 0 (length values) values (Vector::new 0 (llvm-const-i64 0))))
@@ -160,11 +165,12 @@ pub const SOURCE: &str = r#"
          (eval-body-tail 0 (length body) body new-params new-vals))))
     (_ (cond (bool-ret (build-ret-bool b f (compile-value module b params vals e)))
              (f64-ret (build-ret-f64 b f (compile-value module b params vals e)))
+             (char-ret (build-ret-char b f (compile-value module b params vals e)))
              (else (build-ret b f (compile-value module b params vals e)))))))
 
 (defun compile ((name string)) Result<bool,Error>
   (match (ast-params name)
-    ((None) (Err (Error "compile: unsupported function (must take/return only i64, bool, or f64)")))
+    ((None) (Err (Error "compile: unsupported function (must take/return only i64, bool, f64, or char)")))
     ((Some params)
      (match (ast-body name)
        ((None) (Err (Error "compile: unsupported function body")))
@@ -172,13 +178,14 @@ pub const SOURCE: &str = r#"
         (let* ((arity (length params))
                (bool-ret (ret-is-bool name))
                (f64-ret (ret-is-f64 name))
+               (char-ret (ret-is-char name))
                (module (llvm-new-module name))
                (f (add-function module name))
                (entry (append-block f "entry"))
                (b (llvm-new-builder)))
           (position-at-end b entry)
           (let ((vals (make-param-values name f b arity)))
-            (compile-tail module bool-ret f64-ret f b params vals body)
+            (compile-tail module bool-ret f64-ret char-ret f b params vals body)
             (match (verify module)
               ((Err e) (Err e))
               ((Ok _) (llvm-finish-compile module name arity))))))))))

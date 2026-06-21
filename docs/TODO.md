@@ -656,10 +656,39 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       未コンパイルの関数を呼ぶ関数のコンパイル拒否。既存21件は無変更でgreen。
       並行実行でのSIGSEGV再発無し（10回連続green）。既定ビルド・`cargo clippy --all-targets`
       （両構成）への影響なし。
+  - 実装済み（Phase 2d/`char`対応）: `i64`/`bool`/`f64`に加え`char`も任意混在できるように
+    した——`char`リテラルを返す関数、`char`パラメータを`char::eq`/`char::lt`で比較する関数
+    （`(defun min-char ((a char)(b char)) char (if (lt a b) a b))`）、`char`を引数・戻り値に
+    取るコンパイル済み関数の直接呼び出しがコンパイル対象になった。
+    - **`char`は算術が無いため`bool`と同じ「終始i32幅のIntValueとして扱い、`TlValue`境界
+      （`load-arg-char`/`build-ret-char`/`build-call-char`）でのみi64スロットとの幅変換
+      （`truncate`/`zext`）を行う」設計**（`bool`がi1なのに対し`char`はi32——Unicodeの
+      最大コードポイントU+10FFFFは21bitで32bitに余裕で収まるため、符号付き/符号なしの
+      違いを気にせず安全に格納できる）。新規Rust関数は既存`-bool`系と完全に同型
+      （`llvm_builder_load_arg_char`/`llvm_builder_build_ret_char`/
+      `llvm_builder_build_call_char`、`llvm_const_char`、`param-is-char`/`ret-is-char`）。
+    - **`char::eq`/`char::lt`は新しい演算子を`build-op`に追加するのではなく、既存の
+      `=`/`<`演算子文字列にast_bridge側で変換**: `char`値は終始i32幅の`IntValue`なので、
+      i64用に実装済みの`icmp`ロジック（符号付き比較だが、Unicodeコードポイントは常に
+      非負なので実害なし）がそのまま使える。メソッド名(`eq`/`lt`)と演算子文字列(`=`/`<`)が
+      異なる唯一のケースで、`build-op`側に新しい名前を教えるのではなく
+      `ast_bridge::typed_to_ast`側で変換する方を選んだ——`build-op`は「`AstExpr::ABinOp`が
+      運ぶ演算子文字列をそのまま使う」という既存の単純さを保てる。
+    - `RtValue::Char`の`call_compiled`戻り値デコードは`char::from_u32`を経由
+      （無効なコードポイントは`EvalError::Internal`——コンパイル後コードが書き込む値は
+      常にリテラル/`load-arg-char`由来の有効な`char`なので実際には到達しない）。
+    - `compile-tail`のシグネチャに`char-ret`フラグを追加（`bool-ret`/`f64-ret`と並ぶ3つ目、
+      4分岐の`cond`に拡張）、`compile-value`の`ACall`分岐・`fill-param-values`の`cond`も
+      同様に4分岐へ拡張。
+    - `AstExpr`に`achar`variant追加（既存の並びに割り込ませず**末尾に追記**）。
+      1フィールド構成`(c: char)`。
+    - TDD: `tests/compile_test.rs`に4件追加（30件中）——`char`リテラルを返す関数、
+      `char::eq`で比較する関数、`char::lt`+`if`で小さい方を返す関数、`char`を介して
+      別のコンパイル済み関数を呼ぶ関数（および橋渡し対象外の`upcase`呼び出しが
+      正しく拒否されることの確認）。既存26件は無変更でgreen。並行実行でのSIGSEGV
+      再発無し（10回連続green）。既定ビルド・`cargo clippy --all-targets`
+      （両構成）への影響なし。
   - **次の作業（Phase 2残り、ブランチ`feature/compiler`で継続）**:
-    - **Phase 2d（`char`対応、優先度低）**: `char`は算術が無く主に等値比較のみなので
-      `f64`より軽量——`i64`/`bool`と同じ「i64スロットに格納し境界でのみ幅変換」方式でよい
-      （`u32`へ`truncate`/`zext`、ただし32bit）。
     - 自己再帰・相互再帰のコンパイル対応（Phase 2fでは明示的に対象外とした）: `name`自身を
       `compile`完了前に`self.compiled`へ仮登録する、または呼び出し先解決を`get-or-declare-
       function`＋`add_global_mapping`ではなく単純な`call`に倒せる「同一モジュール内の

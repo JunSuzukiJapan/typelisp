@@ -557,9 +557,9 @@ fn error_ty() -> Type {
 /// bool/float literals, parameter references, `if`, `let`, and `i64`/`f64`'s
 /// binary arithmetic/comparison instance methods — just enough to compile a
 /// function like `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))`.
-/// `afloat`/`alet`/`acall` are appended last (Phase 2c/2e/2f) rather than
-/// inserted in literal-grouping order with `aint`/`abool`, since these
-/// indices are a stable wire format between this definition and
+/// `afloat`/`alet`/`acall`/`achar` are appended last (Phase 2c/2e/2f/2d)
+/// rather than inserted in literal-grouping order with `aint`/`abool`, since
+/// these indices are a stable wire format between this definition and
 /// `ast_bridge`'s constants — reordering existing ones would silently break
 /// already-working variants.
 /// `alet`'s three `Vector` fields are parallel: `names[i]`'s value is
@@ -590,6 +590,7 @@ fn ast_expr_def() -> AdtDef {
                 fields: vec![vector_of(Type::Str), vector_of(t.clone()), vector_of(t.clone())],
             },
             Variant { name: "acall".to_string(), fields: vec![Type::Str, vector_of(t)] },
+            Variant { name: "achar".to_string(), fields: vec![Type::Char] },
         ],
         assoc: HashMap::new(),
         public: true,
@@ -695,6 +696,11 @@ fn llvm_builder_def() -> AdtDef {
     assoc.insert("load-arg".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty()));
     assoc.insert("load-arg-bool".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty()));
     assoc.insert("load-arg-f64".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty()));
+    // `load-arg-char`/`build-ret-char` (Phase 2d): `char`'s `i32`-narrowing
+    // counterparts to `load-arg`/`build-ret`, the same truncate/zext shape
+    // `-bool` uses (`bool` truncates/zext to `i1`, `char` to `i32`) — see
+    // `crate::eval::interp::{llvm_builder_load_arg_char,llvm_builder_build_ret_char}`.
+    assoc.insert("load-arg-char".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty()));
     assoc.insert("build-op".to_string(), method(vec![llvm_builder_ty(), Type::Str, llvm_value_ty(), llvm_value_ty()], llvm_value_ty()));
     assoc.insert(
         "build-cond-br".to_string(),
@@ -704,7 +710,8 @@ fn llvm_builder_def() -> AdtDef {
     assoc.insert("build-ret".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
     assoc.insert("build-ret-bool".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
     assoc.insert("build-ret-f64".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
-    // `build-call`/`build-call-bool`/`build-call-f64` (Phase 2f): packs `args`
+    assoc.insert("build-ret-char".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
+    // `build-call`/`build-call-bool`/`build-call-f64`/`build-call-char` (Phase 2f/2d): packs `args`
     // into a stack-allocated `TlValue` array and emits a direct `call` to
     // `callee` (a declaration from `LlvmModule::get-or-declare-function`)
     // under the unified ABI, then unpacks the `out` slot per the callee's
@@ -719,6 +726,10 @@ fn llvm_builder_def() -> AdtDef {
     );
     assoc.insert(
         "build-call-f64".to_string(),
+        method(vec![llvm_builder_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
+    );
+    assoc.insert(
+        "build-call-char".to_string(),
         method(vec![llvm_builder_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
     );
     AdtDef { name: Path::root("llvmbuilder"), params: vec![], variants: vec![], assoc, public: true }
@@ -771,11 +782,18 @@ fn register_compile_builtins(root: &mut Namespace) {
     root.fns.insert("ret-is-bool".to_string(), free(vec![Type::Str], Type::Bool));
     root.fns.insert("param-is-f64".to_string(), free(vec![Type::Str, Type::I32], Type::Bool));
     root.fns.insert("ret-is-f64".to_string(), free(vec![Type::Str], Type::Bool));
+    // `param-is-char`/`ret-is-char` (Phase 2d): same role as the `-bool`/
+    // `-f64` pairs above, for `char` (stored as an `i32`-wide `IntValue`,
+    // narrowed/widened only at the `TlValue` boundary — see
+    // `crate::eval::interp::Interp::{builtin_param_is_char,builtin_ret_is_char}`).
+    root.fns.insert("param-is-char".to_string(), free(vec![Type::Str, Type::I32], Type::Bool));
+    root.fns.insert("ret-is-char".to_string(), free(vec![Type::Str], Type::Bool));
     root.fns.insert("llvm-new-module".to_string(), free(vec![Type::Str], llvm_module_ty()));
     root.fns.insert("llvm-new-builder".to_string(), free(vec![], llvm_builder_ty()));
     root.fns.insert("llvm-const-i64".to_string(), free(vec![Type::I64], llvm_value_ty()));
     root.fns.insert("llvm-const-bool".to_string(), free(vec![Type::Bool], llvm_value_ty()));
     root.fns.insert("llvm-const-f64".to_string(), free(vec![Type::F64], llvm_value_ty()));
+    root.fns.insert("llvm-const-char".to_string(), free(vec![Type::Char], llvm_value_ty()));
     // `llvm-finish-compile`: JITs `module` and registers `name` (a
     // `arity`-ary, all-`i64` function) so ordinary calls to it dispatch to
     // the compiled native code instead of tree-walking — see

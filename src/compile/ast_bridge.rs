@@ -4,12 +4,13 @@
 //! over a function's body with the language's own `match`.
 //!
 //! Phase 1/2 ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) only bridges the
-//! narrow `i64`/`bool`/`f64`-scalar subset needed to compile a function like
-//! `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))` or `(defun gt ((a
-//! i64) (b i64)) bool (> a b))`: integer/bool/float literals, parameter
-//! references, `if`, `let`, and `i64`'s/`f64`'s binary arithmetic/comparison
-//! instance methods. Anything else returns `None` — `compile` then refuses
-//! the function outright rather than miscompiling it (see
+//! narrow `i64`/`bool`/`f64`/`char`-scalar subset needed to compile a
+//! function like `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))` or
+//! `(defun gt ((a i64) (b i64)) bool (> a b))`: integer/bool/float/char
+//! literals, parameter references, `if`, `let`, calls to other compiled
+//! functions, `i64`'s/`f64`'s binary arithmetic/comparison instance methods,
+//! and `char`'s `eq`/`lt`. Anything else returns `None` — `compile` then
+//! refuses the function outright rather than miscompiling it (see
 //! `Interp::builtin_ast_body` in `src/eval/interp.rs`).
 
 use std::cell::RefCell;
@@ -19,9 +20,9 @@ use crate::{Expr, Interp, Path, RtValue, Type, Typed};
 
 /// Variant indices of `AstExpr`'s constructors — must match
 /// `check::registry::ast_expr_def`'s `variants` order exactly. `A_FLOAT`/
-/// `A_LET`/`A_CALL` are appended last (Phase 2c/2e/2f) rather than grouped
-/// with related variants — see `ast_expr_def`'s doc comment on why these
-/// indices are append-only.
+/// `A_LET`/`A_CALL`/`A_CHAR` are appended last (Phase 2c/2e/2f/2d) rather
+/// than grouped with related variants — see `ast_expr_def`'s doc comment on
+/// why these indices are append-only.
 const A_INT: usize = 0;
 const A_BOOL: usize = 1;
 const A_VAR: usize = 2;
@@ -30,12 +31,20 @@ const A_BINOP: usize = 4;
 const A_FLOAT: usize = 5;
 const A_LET: usize = 6;
 const A_CALL: usize = 7;
+const A_CHAR: usize = 8;
 
 /// `i64`'s and `f64`'s binary arithmetic/comparison instance methods
 /// (`registry::int_assoc`/`float_assoc`) — the only `Expr::Assoc` shapes
 /// Phase 1/2c bridge. Both types register the same operator strings, so one
 /// list covers either receiver type.
 const BINOPS: [&str; 9] = ["+", "-", "*", "<", "<=", ">", ">=", "=", "/="];
+
+/// The scalar types bridged at all (Phase 1/2b/2c/2d) — shared by every
+/// guard that needs to tell "a value this narrow scope can carry" from
+/// "something `compile` must refuse" (`Var`'s/`Call`'s wrapping `Typed.ty`).
+fn is_bridgeable_scalar_type(t: &Type) -> bool {
+    matches!(t, Type::I64 | Type::Bool | Type::F64 | Type::Char)
+}
 
 fn data(variant: usize, fields: Vec<RtValue>) -> RtValue {
     RtValue::Data { type_name: Path::root("astexpr"), variant, fields }
@@ -54,13 +63,14 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp) -> Option<RtValue> {
         Expr::Int(n) => Some(data(A_INT, vec![RtValue::Int(*n)])),
         Expr::Bool(b) => Some(data(A_BOOL, vec![RtValue::Bool(*b)])),
         Expr::Float(n) => Some(data(A_FLOAT, vec![RtValue::Float(*n)])),
+        Expr::Char(c) => Some(data(A_CHAR, vec![RtValue::Char(*c)])),
         // A `Var`'s own `Expr` doesn't carry its type — Phase 1/2 only ever
-        // bind `i64`/`bool`/`f64` parameters *or* `let`-bound locals (Phase
-        // 2e) of those same types, so checking the wrapping `Typed.ty` here
-        // is how a stray unsupported-type variable (impossible today, but
+        // bind `i64`/`bool`/`f64`/`char` parameters *or* `let`-bound locals
+        // (Phase 2e) of those same types, so checking the wrapping `Typed.ty`
+        // here is how a stray unsupported-type variable (impossible today,
         // not by construction) would be caught rather than silently
         // mistyped downstream.
-        Expr::Var(name) if matches!(t.ty, Type::I64 | Type::Bool | Type::F64) => {
+        Expr::Var(name) if is_bridgeable_scalar_type(&t.ty) => {
             Some(data(A_VAR, vec![RtValue::Str(name.clone())]))
         }
         Expr::If(c, then, els) => {
@@ -77,6 +87,20 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp) -> Option<RtValue> {
             let lhs = typed_to_ast(&args[0], interp)?;
             let rhs = typed_to_ast(&args[1], interp)?;
             Some(data(A_BINOP, vec![RtValue::Str(method.clone()), lhs, rhs]))
+        }
+        // `char`'s `eq`/`lt` (`registry::char_assoc`, Phase 2d) — `char` is
+        // stored as a plain `i32`-wide `IntValue` throughout IR construction,
+        // so the same `icmp`-lowering `build-op` already does for `i64`'s
+        // `=`/`<` works unchanged; only the *method name* differs from the
+        // operator string `build-op` expects, so it's translated here rather
+        // than teaching `build-op` a second name for the same operation.
+        Expr::Assoc { type_name, method, instance: true, args }
+            if *type_name == Path::root("char") && args.len() == 2 && (method == "eq" || method == "lt") =>
+        {
+            let op = if method == "eq" { "=" } else { "<" };
+            let lhs = typed_to_ast(&args[0], interp)?;
+            let rhs = typed_to_ast(&args[1], interp)?;
+            Some(data(A_BINOP, vec![RtValue::Str(op.to_string()), lhs, rhs]))
         }
         // `let` (CL parallel-binding semantics — every `val` is checked
         // against the *outer* scope, never an earlier sibling binding;
@@ -107,7 +131,7 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp) -> Option<RtValue> {
         // calling back into uncompiled/tree-walked code) needs a trampoline
         // and stays unsupported — see [docs/TODO.md](../../docs/TODO.md)
         // 「ステップ5・Phase 2f」.
-        Expr::Call(path, call_args) if path.is_simple() && interp.is_compiled(path) && matches!(t.ty, Type::I64 | Type::Bool | Type::F64) => {
+        Expr::Call(path, call_args) if path.is_simple() && interp.is_compiled(path) && is_bridgeable_scalar_type(&t.ty) => {
             let args = call_args.iter().map(|a| typed_to_ast(a, interp)).collect::<Option<Vec<_>>>()?;
             Some(data(A_CALL, vec![RtValue::Str(path.local().to_string()), rt_vector(args)]))
         }

@@ -391,6 +391,73 @@ fn refuses_to_compile_a_function_calling_an_uncompiled_function() {
     }
 }
 
+/// Phase 2d: a bare `char` literal as the function's entire body, and as an
+/// `if`'s tail condition (`AstExpr::AChar`/`llvm-const-char`).
+#[test]
+fn compiles_a_function_returning_a_char_literal() {
+    let src = r#"
+        (defun letter-a () char #\a)
+        (compile "letter-a")
+        (letter-a)
+    "#;
+    assert_eq!(run(src), RtValue::Char('a'));
+}
+
+/// A `char` parameter compared with `char::eq` (bridged onto the same `=`
+/// `build-op` already implements for `i64`/`f64` — see `ast_bridge`).
+#[test]
+fn compiles_a_function_comparing_char_parameters_with_eq() {
+    let src = r#"
+        (defun same-letter ((a char) (b char)) bool (eq a b))
+        (compile "same-letter")
+        (same-letter #\x #\x)
+    "#;
+    assert_eq!(run(src), RtValue::Bool(true));
+    let src2 = r#"
+        (defun same-letter ((a char) (b char)) bool (eq a b))
+        (compile "same-letter")
+        (same-letter #\x #\y)
+    "#;
+    assert_eq!(run(src2), RtValue::Bool(false));
+}
+
+/// `char::lt` bridged onto `<`, and a `char` parameter returned directly
+/// from an `if`'s tail branches — exercises `load-arg-char`/`build-ret-char`'s
+/// narrow/widen round-trip through the `TlValue` boundary.
+#[test]
+fn compiles_a_function_picking_the_smaller_of_two_chars() {
+    let src = r#"
+        (defun min-char ((a char) (b char)) char (if (lt a b) a b))
+        (compile "min-char")
+        (min-char #\z #\a)
+    "#;
+    assert_eq!(run(src), RtValue::Char('a'));
+}
+
+/// A compiled function calling another compiled function through a `char`
+/// parameter/return — exercises `build-call-char`/`ret-is-char`.
+#[test]
+fn compiles_a_function_calling_a_char_returning_compiled_function() {
+    let src = r#"
+        (defun upcase-a ((c char)) char (upcase c))
+        (compile "upcase-a")
+    "#;
+    // `upcase` isn't bridged (Phase 2d only covers `eq`/`lt`), so this must
+    // be refused rather than miscompiled.
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 1, "expected Err, not Ok"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+    let src2 = r#"
+        (defun first-char ((a char) (b char)) char a)
+        (compile "first-char")
+        (defun pick-first ((a char) (b char)) char (first-char a b))
+        (compile "pick-first")
+        (pick-first #\p #\q)
+    "#;
+    assert_eq!(run(src2), RtValue::Char('p'));
+}
+
 #[test]
 fn refuses_to_compile_a_non_i64_function() {
     let src = r#"
