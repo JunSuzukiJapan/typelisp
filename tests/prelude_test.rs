@@ -18,7 +18,7 @@ use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Rt
 // it, so cross-test name reuse (e.g. `f`, `is-a`) never observes a stale
 // definition from another test.
 thread_local! {
-    static CTX: RefCell<Option<(Heap, Checker, Interp)>> = RefCell::new(None);
+    static CTX: RefCell<Option<(Heap, Checker, Interp)>> = const { RefCell::new(None) };
 }
 
 fn with_ctx<R>(f: impl FnOnce(&mut Heap, &mut Checker, &mut Interp) -> R) -> R {
