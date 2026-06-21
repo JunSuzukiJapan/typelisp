@@ -53,6 +53,22 @@ fn compiled_function_still_works_the_other_way_round() {
     assert_eq!(run(src), RtValue::Int(9));
 }
 
+/// Phase 1's `CompiledFn` was a native `extern "C" fn(i64, ...) -> i64`
+/// pointer with one variant per arity, hand-capped at 3 parameters. Phase 2's
+/// unified `TlValue` ABI (`extern "C" fn(*const TlValue, u32, *mut TlValue)
+/// -> i32`) passes arguments through an array instead of fixed positional
+/// registers, so arity is no longer bounded by how many `CompiledFn` variants
+/// exist — this exercises a 5-argument function to demonstrate that.
+#[test]
+fn compiles_a_function_with_more_than_three_arguments() {
+    let src = r#"
+        (defun sum5 ((a i64) (b i64) (c i64) (d i64) (e i64)) i64 (+ a (+ b (+ c (+ d e)))))
+        (compile "sum5")
+        (sum5 1 2 3 4 5)
+    "#;
+    assert_eq!(run(src), RtValue::Int(15));
+}
+
 #[test]
 fn refuses_to_compile_a_non_i64_function() {
     let src = r#"

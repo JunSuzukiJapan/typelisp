@@ -660,12 +660,13 @@ impl Interp {
 
     /// `(llvm-finish-compile module name arity) -> Result<bool, Error>`:
     /// JITs `module` (already built and verified by the typelisp-written
-    /// `compile`) and registers `name` as a compiled, `arity`-ary, all-`i64`
-    /// function — see [`Self::call_compiled`]. The `ExecutionEngine` is kept
-    /// alive for as long as `name` stays registered (its `Rc` is cloned into
-    /// every arity variant of [`CompiledFn`]), since the JIT'd machine code
-    /// is only valid while it lives.
+    /// `compile`) and registers `name` as a compiled, `arity`-ary function —
+    /// see [`Self::call_compiled`]. The `ExecutionEngine` is kept alive for as
+    /// long as `name` stays registered (its `Rc` is cloned into
+    /// [`CompiledFn::_engine`]), since the JIT'd machine code is only valid
+    /// while it lives.
     fn builtin_llvm_finish_compile(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
+        let _guard = compile_lock().lock().unwrap();
         let module = expect_llvm_module(&args[0])?;
         let name = expect_str(&args[1])?;
         let arity = rt_i64(&args[2])?;
@@ -678,21 +679,14 @@ impl Interp {
             .map_err(|e| EvalError::Panic(format!("compile: {}", e)))?;
         let engine = Rc::new(engine);
         // SAFETY: `addr` is the address LLVM's JIT compiled `name`'s body to,
-        // for a function whose declared LLVM type is exactly `arity` `i64`
-        // parameters returning `i64` (built that way by `add-function`,
-        // `check::registry::llvm_module_def` — every `compile`d function in
-        // Phase 1 is all-`i64`), so transmuting it to the matching
-        // `extern "C" fn(i64, ...) -> i64` pointer type matches the actual
-        // machine code's calling convention.
-        let cf = unsafe {
-            match arity {
-                0 => CompiledFn::Arity0(std::mem::transmute::<usize, extern "C" fn() -> i64>(addr), engine),
-                1 => CompiledFn::Arity1(std::mem::transmute::<usize, extern "C" fn(i64) -> i64>(addr), engine),
-                2 => CompiledFn::Arity2(std::mem::transmute::<usize, extern "C" fn(i64, i64) -> i64>(addr), engine),
-                3 => CompiledFn::Arity3(std::mem::transmute::<usize, extern "C" fn(i64, i64, i64) -> i64>(addr), engine),
-                _ => return Err(EvalError::Panic(format!("compile: unsupported arity {} (Phase 1 supports 0-3)", arity))),
-            }
-        };
+        // declared (by `add-function`, `check::registry::llvm_module_def`)
+        // with the one unified `TlValue` ABI signature every compiled
+        // function shares regardless of its logical arity —
+        // `extern "C" fn(*const TlValue, u32, *mut TlValue) -> i32` — so
+        // transmuting it to that single function-pointer type is always
+        // correct (Phase 2, [docs/TODO.md](../../docs/TODO.md)「ステップ5」).
+        let f = unsafe { std::mem::transmute::<usize, extern "C" fn(*const TlValue, u32, *mut TlValue) -> i32>(addr) };
+        let cf = CompiledFn { f, arity: arity as usize, _engine: engine };
         self.compiled.borrow_mut().insert(Path::root(name), cf);
         Ok(ok_bool(true))
     }
@@ -700,37 +694,106 @@ impl Interp {
     /// Checked first in `Expr::Call`'s dispatch: `None` if `name` isn't a
     /// compiled function (the ordinary `self.fns`/`eval_builtin` dispatch
     /// then runs exactly as before — compiling a function is meant to be
-    /// completely transparent to its callers).
+    /// completely transparent to its callers). Marshals `args` into a
+    /// `TlValue` array and back per the unified ABI (see [`TlValue`]) — Phase
+    /// 2's calling convention generalization, replacing Phase 1's
+    /// arity-specific native `extern "C" fn` pointers.
     fn call_compiled(&self, name: &Path, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
         let compiled = self.compiled.borrow();
         let cf = compiled.get(name)?;
-        let ints: Vec<i64> = match args.iter().map(rt_i64).collect() {
+        if args.len() != cf.arity {
+            return Some(Err(EvalError::Internal("compiled function: arity mismatch".into())));
+        }
+        let tl_args: Vec<TlValue> = match args.iter().map(|a| rt_i64(a).map(TlValue::from_i64)).collect() {
             Ok(v) => v,
             Err(e) => return Some(Err(e)),
         };
-        let result = match (cf, ints.as_slice()) {
-            (CompiledFn::Arity0(f, _), []) => f(),
-            (CompiledFn::Arity1(f, _), [a]) => f(*a),
-            (CompiledFn::Arity2(f, _), [a, b]) => f(*a, *b),
-            (CompiledFn::Arity3(f, _), [a, b, c]) => f(*a, *b, *c),
-            _ => return Some(Err(EvalError::Internal("compiled function: arity mismatch".into()))),
-        };
+        let mut out = TlValue::zeroed();
+        // SAFETY: `cf.f` was JIT-compiled (by `builtin_llvm_finish_compile`)
+        // from a function declared with exactly this `(*const TlValue, u32,
+        // *mut TlValue) -> i32` signature, `tl_args` has length `cf.arity`
+        // (checked above) matching the array `cf.f` expects, and `out` is a
+        // single live `TlValue` for it to write its result into.
+        let status = (cf.f)(tl_args.as_ptr(), tl_args.len() as u32, &mut out);
+        if status != 0 {
+            return Some(Err(EvalError::Panic(format!("compiled function: returned status {}", status))));
+        }
+        // Phase 2a (calling-convention generalization) keeps every compiled
+        // function all-`i64` — `f64`/`bool`/`char` land in a follow-up step
+        // (see [docs/TODO.md](../../docs/TODO.md)「ステップ5・Phase 2」) — so
+        // the tag is always `TlTag::I64` here.
+        let result = unsafe { out.payload.i64_ };
         Some(Ok(RtValue::Int(result)))
     }
 }
 
-/// A function JIT-compiled by `compile`, restricted (Phase 1) to all-`i64`
-/// scalar parameters/return — see [`Interp::call_compiled`]. The
-/// `Rc<ExecutionEngine>` keeps the JIT'd machine code alive — `call_compiled`
-/// only ever reads the `extern "C" fn` pointer, never the engine itself, so
-/// rustc considers that field dead code; it is not.
+/// The unified calling-convention value (Phase 2,
+/// [docs/TODO.md](../../docs/TODO.md)「ステップ5」): every compiled function
+/// shares the one signature `extern "C" fn(*const TlValue, u32, *mut TlValue)
+/// -> i32` (args array, arg count, out slot, status) regardless of its
+/// logical arity or argument types, replacing Phase 1's per-arity native
+/// `extern "C" fn(i64, ...) -> i64` pointers. 16 bytes, laid out so the LLVM
+/// side can define the identical shape as the literal struct type `{i64,
+/// i64}` (`crate::eval::interp::tlvalue_llvm_type`): `tag` occupies the low
+/// byte of the first 8-byte slot (the rest is alignment padding, written as
+/// zero from the LLVM side), `payload` is the second 8-byte slot reinterpreted
+/// per `tag`.
+#[cfg(feature = "compile")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct TlValue {
+    tag: u8,
+    payload: TlPayload,
+}
+
+#[cfg(feature = "compile")]
+impl TlValue {
+    fn from_i64(n: i64) -> TlValue {
+        TlValue { tag: TlTag::I64 as u8, payload: TlPayload { i64_: n } }
+    }
+
+    fn zeroed() -> TlValue {
+        TlValue { tag: 0, payload: TlPayload { i64_: 0 } }
+    }
+}
+
+/// [`TlValue`]'s payload — only the `i64_` field is produced/read anywhere
+/// yet (Phase 2a); `f64_`/`bool_`/`char_`/`ptr` exist now so the union's
+/// layout (and therefore [`TlValue`]'s size) doesn't change shape again when
+/// Phase 2's `f64`/`bool`/`char` support lands.
+#[cfg(feature = "compile")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+union TlPayload {
+    i64_: i64,
+    f64_: f64,
+    bool_: bool,
+    char_: u32,
+    ptr: *mut u8,
+}
+
+/// [`TlValue::tag`]'s possible values.
+#[cfg(feature = "compile")]
+#[repr(u8)]
+#[allow(dead_code)]
+enum TlTag {
+    I64 = 0,
+    F64 = 1,
+    Bool = 2,
+    Char = 3,
+    Ptr = 4,
+}
+
+/// A function JIT-compiled by `compile`, called through the unified
+/// [`TlValue`] ABI — see [`Interp::call_compiled`]. The `Rc<ExecutionEngine>`
+/// keeps the JIT'd machine code alive — `call_compiled` only ever reads `f`,
+/// never `_engine` itself, so rustc considers that field dead code; it is not.
 #[cfg(feature = "compile")]
 #[allow(dead_code)]
-enum CompiledFn {
-    Arity0(extern "C" fn() -> i64, Rc<inkwell::execution_engine::ExecutionEngine<'static>>),
-    Arity1(extern "C" fn(i64) -> i64, Rc<inkwell::execution_engine::ExecutionEngine<'static>>),
-    Arity2(extern "C" fn(i64, i64) -> i64, Rc<inkwell::execution_engine::ExecutionEngine<'static>>),
-    Arity3(extern "C" fn(i64, i64, i64) -> i64, Rc<inkwell::execution_engine::ExecutionEngine<'static>>),
+struct CompiledFn {
+    f: extern "C" fn(*const TlValue, u32, *mut TlValue) -> i32,
+    arity: usize,
+    _engine: Rc<inkwell::execution_engine::ExecutionEngine<'static>>,
 }
 
 /// Whether a `defun`'s parameter/return types are all `i64` — Phase 1's
@@ -749,11 +812,12 @@ fn is_i64_scalar_signature(param_types: &[Type], ret: &Type) -> bool {
 /// different `compile` calls in the same session call each other (LLVM does
 /// not allow mixing types from different `Context`s in one module).
 /// `inkwell::context::Context` is `!Sync` (it wraps a raw LLVM pointer), but a
-/// `static` must be `Sync`. This wrapper asserts it anyway: Phase 1 only ever
-/// exercises the compiler from a single test function (no parallel `#[test]`s
-/// touching LLVM yet), so there is no actual concurrent access today — revisit
-/// with a real `Mutex` guard around LLVM-IR-construction call sites if/when
-/// more than one `compile`-using test runs in parallel.
+/// `static` must be `Sync`. This wrapper asserts it anyway: every LLVM-IR-
+/// construction entry point ([`compile_lock`]) takes a process-wide `Mutex`
+/// before touching the context, so two `compile`-using tests running on
+/// different threads (as `cargo test`'s default runner does) never mutate it
+/// concurrently — only raw machine-code calls through an already-JIT'd
+/// [`CompiledFn`] (no LLVM API involved) run outside that lock.
 #[cfg(feature = "compile")]
 struct LlvmContextHandle(*const inkwell::context::Context);
 #[cfg(feature = "compile")]
@@ -771,19 +835,48 @@ fn llvm_context() -> &'static inkwell::context::Context {
     unsafe { &*handle.0 }
 }
 
+/// Guards every operation that touches the shared [`llvm_context`] (type/IR
+/// construction, JIT compilation) — LLVM's C API is not safe to call
+/// concurrently from multiple threads against one `Context` without external
+/// synchronization. Acquired by each LLVM-touching builtin individually
+/// (rather than once for a whole `compile` call) since `compile` itself is
+/// ordinary typelisp making many separate builtin calls, not one Rust call —
+/// serializing each individual LLVM C API call is what actually prevents
+/// concurrent mutation of the context's internal state (e.g. type-uniquing
+/// tables), regardless of how two different threads' `compile` calls
+/// interleave between those individual calls.
+#[cfg(feature = "compile")]
+fn compile_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: once_cell::sync::OnceCell<std::sync::Mutex<()>> = once_cell::sync::OnceCell::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// The LLVM-side mirror of [`TlValue`]'s layout: a literal (structurally
+/// uniqued, so safe to build fresh on every call) `{i64, i64}` struct type —
+/// field 0 is the tag (stored as a full `i64`, even though only its low byte
+/// is meaningful from the Rust side), field 1 is the raw payload bits.
+#[cfg(feature = "compile")]
+fn tlvalue_llvm_type() -> inkwell::types::StructType<'static> {
+    let i64_ty = llvm_context().i64_type();
+    llvm_context().struct_type(&[i64_ty.into(), i64_ty.into()], false)
+}
+
 #[cfg(feature = "compile")]
 fn llvm_module_new(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
     let name = expect_str(&args[0])?;
     Ok(RtValue::LlvmModule(Rc::new(RefCell::new(llvm_context().create_module(name)))))
 }
 
 #[cfg(feature = "compile")]
 fn llvm_builder_new(_args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
     Ok(RtValue::LlvmBuilder(LlvmBuilderHandle(Rc::new(RefCell::new(llvm_context().create_builder())))))
 }
 
 #[cfg(feature = "compile")]
 fn llvm_const_i64(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
     let n = rt_i64(&args[0])?;
     Ok(RtValue::LlvmValue(llvm_context().i64_type().const_int(n as u64, true)))
 }
@@ -865,7 +958,6 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
     }
     if *type_name == Path::root("llvmfunction") {
         return match method {
-            "get-param" => Some(llvm_function_get_param(args)),
             "append-block" => Some(llvm_function_append_block(args)),
             _ => None,
         };
@@ -873,6 +965,7 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
     if *type_name == Path::root("llvmbuilder") {
         return match method {
             "position-at-end" => Some(llvm_builder_position_at_end(args)),
+            "load-arg" => Some(llvm_builder_load_arg(args)),
             "build-op" => Some(llvm_builder_build_op(args)),
             "build-cond-br" => Some(llvm_builder_build_cond_br(args)),
             "build-br" => Some(llvm_builder_build_br(args)),
@@ -883,23 +976,27 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
     None
 }
 
+/// Declares `name` with the one LLVM-level signature every compiled function
+/// shares under the unified `TlValue` ABI (Phase 2): `i32 (ptr args, i32
+/// argc, ptr out)`. Unlike Phase 1's per-arity `i64 (i64, i64, ...)`, this
+/// type doesn't depend on `name`'s logical arity at all, so `add-function`
+/// no longer takes one (see `check::registry::llvm_module_def`).
 #[cfg(feature = "compile")]
 fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(&args[1])?;
-    let arity = rt_i64(&args[2])?;
-    if !(0..=3).contains(&arity) {
-        return Err(EvalError::Panic(format!("add-function: unsupported arity {} (Phase 1 supports 0-3)", arity)));
-    }
-    let i64_ty = llvm_context().i64_type();
-    let param_types: Vec<inkwell::types::BasicMetadataTypeEnum> = (0..arity).map(|_| i64_ty.into()).collect();
-    let fn_type = i64_ty.fn_type(&param_types, false);
+    let ctx = llvm_context();
+    let ptr_ty = ctx.ptr_type(inkwell::AddressSpace::default());
+    let i32_ty = ctx.i32_type();
+    let fn_type = i32_ty.fn_type(&[ptr_ty.into(), i32_ty.into(), ptr_ty.into()], false);
     let function = module.borrow().add_function(name, fn_type, None);
     Ok(RtValue::LlvmFunction(function))
 }
 
 #[cfg(feature = "compile")]
 fn llvm_module_verify(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
     let module = expect_llvm_module(&args[0])?;
     match module.borrow().verify() {
         Ok(()) => Ok(ok_bool(true)),
@@ -909,24 +1006,15 @@ fn llvm_module_verify(args: &[RtValue]) -> Result<RtValue, EvalError> {
 
 #[cfg(feature = "compile")]
 fn llvm_module_dump(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
     let module = expect_llvm_module(&args[0])?;
     eprintln!("{}", module.borrow().print_to_string().to_string());
     Ok(RtValue::Unit)
 }
 
 #[cfg(feature = "compile")]
-fn llvm_function_get_param(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let f = expect_llvm_function(&args[0])?;
-    let i = rt_i64(&args[1])?;
-    let v = std::convert::TryInto::<u32>::try_into(i)
-        .ok()
-        .and_then(|i: u32| f.get_nth_param(i))
-        .ok_or_else(|| EvalError::Internal("get-param: index out of range".into()))?;
-    Ok(RtValue::LlvmValue(v.into_int_value()))
-}
-
-#[cfg(feature = "compile")]
 fn llvm_function_append_block(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
     let f = expect_llvm_function(&args[0])?;
     let name = expect_str(&args[1])?;
     Ok(RtValue::LlvmBasicBlock(llvm_context().append_basic_block(*f, name)))
@@ -934,10 +1022,50 @@ fn llvm_function_append_block(args: &[RtValue]) -> Result<RtValue, EvalError> {
 
 #[cfg(feature = "compile")]
 fn llvm_builder_position_at_end(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
     let b = expect_llvm_builder(&args[0])?;
     let block = expect_llvm_basic_block(&args[1])?;
     b.0.borrow().position_at_end(*block);
     Ok(RtValue::Unit)
+}
+
+/// `(load-arg b f i) -> LlvmValue`: reads logical argument `i` out of `f`'s
+/// `args` parameter (the unified ABI's first LLVM-level parameter, a pointer
+/// to a contiguous array of `TlValue`s — see [`TlValue`]/[`tlvalue_llvm_type`])
+/// — indexes to the `i`-th element, loads the whole struct, and extracts its
+/// payload field. Phase 2a only ever produces/consumes the `i64` payload;
+/// `f64`/`bool`/`char` arguments are a follow-up step.
+#[cfg(feature = "compile")]
+fn llvm_builder_load_arg(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let b = expect_llvm_builder(&args[0])?;
+    let f = expect_llvm_function(&args[1])?;
+    let i = rt_i64(&args[2])?;
+    let builder = b.0.borrow();
+    let tlvalue_ty = tlvalue_llvm_type();
+    let args_ptr = f
+        .get_nth_param(0)
+        .ok_or_else(|| EvalError::Internal("load-arg: function has no args parameter".into()))?
+        .into_pointer_value();
+    let idx = llvm_context().i64_type().const_int(i as u64, false);
+    // SAFETY: `args_ptr` points to a contiguous array of (at least) `arity`
+    // `TlValue`s, built by `Interp::call_compiled` right before invoking this
+    // function; `i` is checked by the typelisp-written `compile` against the
+    // function's own declared arity before it's ever used as an index here.
+    let elem_ptr = unsafe {
+        builder
+            .build_gep(tlvalue_ty, args_ptr, &[idx], "argptr")
+            .map_err(|e| EvalError::Panic(format!("load-arg: {}", e)))?
+    };
+    let loaded = builder
+        .build_load(tlvalue_ty, elem_ptr, "argstruct")
+        .map_err(|e| EvalError::Panic(format!("load-arg: {}", e)))?
+        .into_struct_value();
+    let payload = builder
+        .build_extract_value(loaded, 1, "payload")
+        .map_err(|e| EvalError::Panic(format!("load-arg: {}", e)))?
+        .into_int_value();
+    Ok(RtValue::LlvmValue(payload))
 }
 
 /// `op` is one of `+ - * / mod < <= > >= = /=` — the same set `i64`'s
@@ -947,6 +1075,7 @@ fn llvm_builder_position_at_end(args: &[RtValue]) -> Result<RtValue, EvalError> 
 /// its own operator-name dispatch table.
 #[cfg(feature = "compile")]
 fn llvm_builder_build_op(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
     let b = expect_llvm_builder(&args[0])?;
     let op = expect_str(&args[1])?;
     let lhs = *expect_llvm_value(&args[2])?;
@@ -984,6 +1113,7 @@ fn llvm_icmp(
 
 #[cfg(feature = "compile")]
 fn llvm_builder_build_cond_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
     let b = expect_llvm_builder(&args[0])?;
     let cond = *expect_llvm_value(&args[1])?;
     let then_block = *expect_llvm_basic_block(&args[2])?;
@@ -996,6 +1126,7 @@ fn llvm_builder_build_cond_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
 
 #[cfg(feature = "compile")]
 fn llvm_builder_build_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
     let b = expect_llvm_builder(&args[0])?;
     let block = expect_llvm_basic_block(&args[1])?;
     b.0.borrow()
@@ -1004,12 +1135,37 @@ fn llvm_builder_build_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .map_err(|e| EvalError::Panic(format!("build-br: {}", e)))
 }
 
+/// `(build-ret b f v) -> Unit`: packs `v` into a `TlValue{tag=I64, payload=v}`
+/// (Phase 2a is still all-`i64`), stores it through `f`'s `out` parameter
+/// (the unified ABI's third LLVM-level parameter), and emits the function's
+/// terminal `ret i32 0` (status "ok") — the one and only return instruction
+/// every compiled function ends with, replacing Phase 1's direct `ret <value>`.
 #[cfg(feature = "compile")]
 fn llvm_builder_build_ret(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
     let b = expect_llvm_builder(&args[0])?;
-    let v = expect_llvm_value(&args[1])?;
-    b.0.borrow()
-        .build_return(Some(v))
+    let f = expect_llvm_function(&args[1])?;
+    let v = *expect_llvm_value(&args[2])?;
+    let builder = b.0.borrow();
+    let tlvalue_ty = tlvalue_llvm_type();
+    let out_ptr = f
+        .get_nth_param(2)
+        .ok_or_else(|| EvalError::Internal("build-ret: function has no out parameter".into()))?
+        .into_pointer_value();
+    let tag = llvm_context().i64_type().const_int(TlTag::I64 as u64, false);
+    let packed = tlvalue_ty.get_undef();
+    let packed = builder
+        .build_insert_value(packed, tag, 0, "tagged")
+        .map_err(|e| EvalError::Panic(format!("build-ret: {}", e)))?;
+    let packed = builder
+        .build_insert_value(packed, v, 1, "withpayload")
+        .map_err(|e| EvalError::Panic(format!("build-ret: {}", e)))?;
+    builder
+        .build_store(out_ptr, packed.into_struct_value())
+        .map_err(|e| EvalError::Panic(format!("build-ret: {}", e)))?;
+    let status = llvm_context().i32_type().const_int(0, false);
+    builder
+        .build_return(Some(&status))
         .map(|_| RtValue::Unit)
         .map_err(|e| EvalError::Panic(format!("build-ret: {}", e)))
 }

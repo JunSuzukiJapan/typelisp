@@ -32,13 +32,18 @@ pub const SOURCE: &str = r#"
     ((ABinOp op lhs rhs) (build-op b op (compile-value b params vals lhs) (compile-value b params vals rhs)))
     (_ (panic "compile: `if` is only supported in tail position (Phase 1)"))))
 
-(defun fill-param-values ((f LlvmFunction) (i i32) (n i32) (out Vector<LlvmValue>)) Vector<LlvmValue>
+;; Under the unified `TlValue` ABI (Phase 2), a function's logical arguments
+;; are no longer separate LLVM-level parameters — they live in the `args`
+;; array (`f`'s first real parameter), so reading one is an IR-building
+;; operation (`load-arg`, needs `b` positioned at `entry`) rather than a pure
+;; metadata lookup (Phase 1's `get-param`).
+(defun fill-param-values ((f LlvmFunction) (b LlvmBuilder) (i i32) (n i32) (out Vector<LlvmValue>)) Vector<LlvmValue>
   (if (>= i n)
       out
-      (progn (push out (get-param f i)) (fill-param-values f (+ i 1) n out))))
+      (progn (push out (load-arg b f i)) (fill-param-values f b (+ i 1) n out))))
 
-(defun make-param-values ((f LlvmFunction) (n i32)) Vector<LlvmValue>
-  (fill-param-values f 0 n (Vector::new 0 (llvm-const-i64 0))))
+(defun make-param-values ((f LlvmFunction) (b LlvmBuilder) (n i32)) Vector<LlvmValue>
+  (fill-param-values f b 0 n (Vector::new 0 (llvm-const-i64 0))))
 
 (defun compile-tail ((f LlvmFunction) (b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>) (e AstExpr)) ()
   (match e
@@ -50,7 +55,7 @@ pub const SOURCE: &str = r#"
        (compile-tail f b params vals then)
        (position-at-end b else-block)
        (compile-tail f b params vals els)))
-    (_ (build-ret b (compile-value b params vals e)))))
+    (_ (build-ret b f (compile-value b params vals e)))))
 
 (defun compile ((name string)) Result<bool,Error>
   (match (ast-params name)
@@ -61,15 +66,15 @@ pub const SOURCE: &str = r#"
        ((Some body)
         (let* ((arity (length params))
                (module (llvm-new-module name))
-               (f (add-function module name arity))
+               (f (add-function module name))
                (entry (append-block f "entry"))
-               (b (llvm-new-builder))
-               (vals (make-param-values f arity)))
+               (b (llvm-new-builder)))
           (position-at-end b entry)
-          (compile-tail f b params vals body)
-          (match (verify module)
-            ((Err e) (Err e))
-            ((Ok _) (llvm-finish-compile module name arity)))))))))
+          (let ((vals (make-param-values f b arity)))
+            (compile-tail f b params vals body)
+            (match (verify module)
+              ((Err e) (Err e))
+              ((Ok _) (llvm-finish-compile module name arity))))))))))
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,

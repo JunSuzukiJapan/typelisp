@@ -443,19 +443,54 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       全`i64`でない関数のコンパイル拒否）。既存テスト・featureなしビルドへの影響なし
       （`cargo build`/`cargo test`は無変更、`cargo clippy --all-targets`は両構成（あり/なし）で
       警告0）。
-  - **次の作業（Phase 2以降、ブランチ`feature/compiler`で継続。Phase 1完了の縦スライスを土台に、
-    1ステップずつ拡張する——これまでの`ステップ4a..4s`等と同じ「小さく検証可能な単位で進める」
-    方針を踏襲）**:
-    - **Phase 2（呼び出し規約の一般化・スカラー拡充）**: 現状`CompiledFn`はネイティブのi64固定
-      シグネチャ（`extern "C" fn(i64,...) -> i64`、0〜3引数のみ）に頼っているが、これはPhase1限定の
-      簡略化。統一呼び出し規約として`#[repr(C)] struct TlValue { tag: u8, payload: union{i64,f64,
-      bool,char,ptr} }`（16バイト、`{i64,i64}`としてLLVM側にも定義しレイアウトを一致させる）を
-      新設し、すべての関数を`extern "C" fn(*const TlValue, u32, *mut TlValue) -> i32`という単一
-      シグネチャへ寄せる（アリティ違いごとに別の関数ポインタ型を作らずに済む）。これに合わせて
-      `f64`/`bool`/`char`のリテラル・演算・`let`を`AstExpr`/`compile-value`/`compile-tail`に追加。
-      コンパイル済み関数同士の直接呼び出し（`(compiled? name)`的なチェックを`compile`に追加し、
-      未コンパイルの呼び出し先があれば明示的にコンパイル拒否する——逆方向〈コンパイル済みから
-      未コンパイルを呼ぶ〉はトランポリンが必要でより難しいため後回し）。
+  - 実装済み（Phase 2a/呼び出し規約の一般化）: Phase 1の`CompiledFn`はネイティブのi64固定
+    シグネチャ（`extern "C" fn(i64,...) -> i64`、0〜3引数のみ）に頼っていたが、これをPhase1限定の
+    簡略化として置き換え、統一呼び出し規約`#[repr(C)] struct TlValue { tag: u8, payload: union{i64,
+    f64,bool,char,ptr} }`（16バイト、LLVM側は`{i64,i64}`の無名struct型として
+    `eval::interp::tlvalue_llvm_type`が定義しレイアウトを一致させる）を新設し、すべての関数を
+    `extern "C" fn(*const TlValue, u32, *mut TlValue) -> i32`という単一シグネチャへ寄せた
+    （アリティ違いごとに別の関数ポインタ型を作る必要がなくなった——`CompiledFn`は4バリアントの
+    enumから`{f, arity, _engine}`の1構造体に縮退）。
+    - **`add-function`**はもうアリティを取らない（LLVM型自体がアリティに依存しないため）。
+      代わりに引数は`LlvmFunction`の第1引数（`args: TlValue*`配列）に入るようになったので、
+      論理引数`i`を読むのは純粋なメタデータ取得ではなくIR構築操作になった——新規
+      `LlvmBuilder::load-arg`（GEP→struct全体load→`build_extract_value`でpayloadフィールド取り出し）
+      が旧`LlvmFunction::get-param`を置き換え。`build-ret`も`LlvmFunction`を追加引数に取るようになり、
+      結果を`TlValue{tag=I64,payload=v}`に詰めて第3引数（`out: TlValue*`）へstoreした上で
+      `ret i32 0`を発行する（旧`ret <value>`の直接returnを置き換え）。
+    - typelisp側（`compiler_source.rs`）は`fill-param-values`/`make-param-values`が`get-param`から
+      `load-arg`呼び出しに変わった（IR構築のため`b`をビルダー位置決め後に呼ぶ必要があり、`compile`内の
+      `let*`の束縛順序を「`b`を`position-at-end`した後で`vals`を計算する」よう入れ替えた）以外は
+      Phase1のロジックを保持。
+    - **副産物としてPhase1の「0〜3引数まで」制約も自然に解消**（引数が配列経由になったため、
+      関数ポインタ型をアリティ数だけ用意する必要がなくなった）——`tests/compile_test.rs`に
+      5引数関数のコンパイル・呼び出しを確認する回帰テストを追加。
+    - **並行テスト実行で発覚したLLVM Contextの競合バグを修正**: 複数の`compile`呼び出しが別スレッドで
+      同時にLLVM C APIを呼ぶと（`struct_type`の型ユニーク化テーブル等の内部状態が競合し）
+      非決定的にSIGSEGVするようになった（Phase1時点でも理論上のリスクとして`LlvmContextHandle`の
+      docコメントに記録されていたが、Phase1の操作が単純すぎて実際には踏んでいなかった——Phase2aの
+      GEP/struct操作の増加で実際に発生するようになった）。プロセス全体で1つの`compile_lock`
+      （`std::sync::Mutex<()>`）を新設し、LLVMコンテキストに触れる各Rust関数（`llvm_module_new`等、
+      呼び出しの起点ごと）の先頭で取得するようにして解消（`compile`自体はtypelispの通常の関数呼び出し
+      の積み重ねなので、1回の`compile`呼び出し全体ではなく個々のLLVM C API呼び出し単位でロックする
+      ことで、2つの`compile`呼び出しがどんな順序でインターリーブしても個々のLLVM操作自体は競合しない
+      ようにしている）。修正前は`cargo test --features compile`を10回に1〜2回の頻度でSIGSEGVしていたが、
+      修正後は25回連続green（通常実行15回＋新規テスト追加後10回）。
+    - TDD: `tests/compile_test.rs`に1件追加（5引数関数）、既存4件は無変更で green
+      （`compiled_function_still_works_the_other_way_round`等、外部から見た挙動はPhase1と同一を確認）。
+      既定ビルド（feature無し）への影響なし、`cargo clippy --all-targets`は両構成で警告0
+      （`compile`featureあり構成の既存警告1件は本セッション開始時から未コミットで残っていた
+      `tests/prelude_test.rs`のmiriリーク対策実験によるもので、Phase2の変更とは無関係）。
+  - **次の作業（Phase 2残り、ブランチ`feature/compiler`で継続）**:
+    - **Phase 2b（スカラー拡充）**: `f64`/`bool`/`char`のリテラル・演算・`let`を`AstExpr`/
+      `compile-value`/`compile-tail`に追加。`TlValue`の`payload`union自体はPhase2aで既に
+      `f64`/`bool`/`char`/`ptr`フィールドを持つ形にしてあるので、ABI自体の変更は不要——
+      `ast_bridge::typed_to_ast`が`Expr::Float`/`f64`の`Assoc`演算を`AstExpr`へ橋渡しできるよう
+      `AFloat`等のvariantを追加し、`compile-value`/`llvm_builder_build_op`がタグに応じて
+      `build_float_*`系のinkwell APIを呼ぶよう分岐を増やす作業が中心。
+    - **Phase 2c（コンパイル済み関数同士の直接呼び出し）**: `(compiled? name)`的なチェックを
+      `compile`に追加し、未コンパイルの呼び出し先があれば明示的にコンパイル拒否する
+      ——逆方向〈コンパイル済みから未コンパイルを呼ぶ〉はトランポリンが必要でより難しいため後回し。
     - **Phase 3（Sexpr/HashTable/Vector対応）**: 既存Rust実装（`mem::Heap`の cons/GC、
       `eval::interp`のhashtable/vector操作）を`extern "C"`シムで薄くラップした「ランタイム支援
       ライブラリ」層を新設し、コンパイル後コードはこれらの操作をすべて呼び出し経由で行う

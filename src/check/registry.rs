@@ -604,23 +604,31 @@ fn llvm_value_ty() -> Type {
 /// All methods are metadata only — the runtime implementation lives in
 /// `eval_llvm_builtin_method` in `crate::eval::interp`, the same
 /// metadata-only pattern as [`hashtable_def`]/[`vector_def`].
+///
+/// `add-function` no longer takes an arity: since Phase 2
+/// ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) every compiled function
+/// shares one LLVM-level signature regardless of its logical arity — the
+/// unified `TlValue` ABI `i32 (ptr args, i32 argc, ptr out)` — so there is no
+/// per-arity type to build (see `crate::eval::interp::llvm_module_add_function`).
 #[cfg(feature = "compile")]
 fn llvm_module_def() -> AdtDef {
     let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true }, instance: true };
     let mut assoc = HashMap::new();
-    assoc.insert("add-function".to_string(), method(vec![llvm_module_ty(), Type::Str, Type::I32], llvm_function_ty()));
+    assoc.insert("add-function".to_string(), method(vec![llvm_module_ty(), Type::Str], llvm_function_ty()));
     assoc.insert("verify".to_string(), method(vec![llvm_module_ty()], result_of(Type::Unit, error_ty())));
     assoc.insert("dump".to_string(), method(vec![llvm_module_ty()], Type::Unit));
     AdtDef { name: Path::root("llvmmodule"), params: vec![], variants: vec![], assoc, public: true }
 }
 
 /// `LlvmFunction`: a builtin opaque handle to a declared/defined LLVM function.
-/// Same metadata-only pattern as [`llvm_module_def`].
+/// Same metadata-only pattern as [`llvm_module_def`]. No more `get-param` —
+/// under the `TlValue` ABI a function's logical arguments aren't separate
+/// LLVM-level parameters anymore, so reading one is an IR-building operation
+/// (`LlvmBuilder::load-arg`), not a pure metadata lookup.
 #[cfg(feature = "compile")]
 fn llvm_function_def() -> AdtDef {
     let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true }, instance: true };
     let mut assoc = HashMap::new();
-    assoc.insert("get-param".to_string(), method(vec![llvm_function_ty(), Type::I32], llvm_value_ty()));
     assoc.insert("append-block".to_string(), method(vec![llvm_function_ty(), Type::Str], llvm_basic_block_ty()));
     AdtDef { name: Path::root("llvmfunction"), params: vec![], variants: vec![], assoc, public: true }
 }
@@ -631,18 +639,25 @@ fn llvm_function_def() -> AdtDef {
 /// strings `crate::compile::ast_bridge`'s `abinop` carries — so the
 /// typelisp-written compiler can forward an operator string straight through
 /// without its own dispatch table; see `crate::eval::interp::llvm_builder_build_op`.
+///
+/// `load-arg`/`build-ret` both take an `LlvmFunction` alongside the builder:
+/// under the unified `TlValue` ABI (Phase 2), reading argument `i` means
+/// indexing the function's first (`args`) parameter, and returning means
+/// writing through its third (`out`) parameter — see
+/// `crate::eval::interp::{llvm_builder_load_arg,llvm_builder_build_ret}`.
 #[cfg(feature = "compile")]
 fn llvm_builder_def() -> AdtDef {
     let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true }, instance: true };
     let mut assoc = HashMap::new();
     assoc.insert("position-at-end".to_string(), method(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit));
+    assoc.insert("load-arg".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty()));
     assoc.insert("build-op".to_string(), method(vec![llvm_builder_ty(), Type::Str, llvm_value_ty(), llvm_value_ty()], llvm_value_ty()));
     assoc.insert(
         "build-cond-br".to_string(),
         method(vec![llvm_builder_ty(), llvm_value_ty(), llvm_basic_block_ty(), llvm_basic_block_ty()], Type::Unit),
     );
     assoc.insert("build-br".to_string(), method(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit));
-    assoc.insert("build-ret".to_string(), method(vec![llvm_builder_ty(), llvm_value_ty()], Type::Unit));
+    assoc.insert("build-ret".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
     AdtDef { name: Path::root("llvmbuilder"), params: vec![], variants: vec![], assoc, public: true }
 }
 
