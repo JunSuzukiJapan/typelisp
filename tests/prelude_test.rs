@@ -5,23 +5,49 @@
 //! coverage gaps it closes (`sexpr`/`bool`/`i32`/`i64`/`f64`).
 
 extern crate typelisp;
+use std::cell::RefCell;
 use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue};
 
+// Every test below shares one (Heap, Checker, Interp) per thread instead of
+// reloading the prelude from scratch each time — loading it ~100+ times is
+// negligible under a normal `cargo test` but dominates runtime under `cargo
+// miri test` (where each instruction is far more expensive). Reusing state
+// is safe here because `defun`/`defmethod` registration is a plain
+// `HashMap::insert` (last definition wins) and every test that needs a
+// helper function defines it itself in the same source string before using
+// it, so cross-test name reuse (e.g. `f`, `is-a`) never observes a stale
+// definition from another test.
+thread_local! {
+    static CTX: RefCell<Option<(Heap, Checker, Interp)>> = RefCell::new(None);
+}
+
+fn with_ctx<R>(f: impl FnOnce(&mut Heap, &mut Checker, &mut Interp) -> R) -> R {
+    CTX.with(|cell| {
+        let mut opt = cell.borrow_mut();
+        let (h, chk, interp) = opt.get_or_insert_with(|| {
+            let mut h = Heap::with_capacity(1 << 16);
+            let mut chk = Checker::new();
+            let mut interp = Interp::new();
+            load_prelude(&mut h, &mut chk, &mut interp);
+            (h, chk, interp)
+        });
+        f(h, chk, interp)
+    })
+}
+
 fn run(src: &str) -> Result<RtValue, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let r = Reader::new();
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl)? {
-            last = val;
+    with_ctx(|h, chk, interp| {
+        let r = Reader::new();
+        let vs = r.read_all(h, src).expect("read failed");
+        let mut last = RtValue::Unit;
+        for v in vs {
+            let tl = chk.check_form(h, &*interp, v).expect("check failed");
+            if let Some(val) = interp.exec(h, tl)? {
+                last = val;
+            }
         }
-    }
-    Ok(last)
+        Ok(last)
+    })
 }
 
 fn eval_ok(src: &str) -> RtValue {
@@ -29,20 +55,18 @@ fn eval_ok(src: &str) -> RtValue {
 }
 
 fn type_error(src: &str) {
-    let mut h = Heap::with_capacity(8192);
-    let r = Reader::new();
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut result: Result<_, Error> = Ok(());
-    for v in vs {
-        if let Err(e) = chk.check_form(&mut h, &interp, v) {
-            result = Err(e);
-            break;
+    with_ctx(|h, chk, interp| {
+        let r = Reader::new();
+        let vs = r.read_all(h, src).expect("read failed");
+        let mut result: Result<_, Error> = Ok(());
+        for v in vs {
+            if let Err(e) = chk.check_form(h, &*interp, v) {
+                result = Err(e);
+                break;
+            }
         }
-    }
-    assert!(result.is_err(), "expected a type error");
+        assert!(result.is_err(), "expected a type error");
+    })
 }
 
 // ---- not --------------------------------------------------------------------
