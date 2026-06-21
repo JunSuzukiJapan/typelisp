@@ -557,15 +557,21 @@ fn error_ty() -> Type {
 /// bool/float literals, parameter references, `if`, `let`, and `i64`/`f64`'s
 /// binary arithmetic/comparison instance methods — just enough to compile a
 /// function like `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))`.
-/// `afloat`/`alet` are appended last (Phase 2c/2e) rather than inserted in
-/// literal-grouping order with `aint`/`abool`, since these indices are a
-/// stable wire format between this definition and `ast_bridge`'s constants —
-/// reordering existing ones would silently break already-working variants.
+/// `afloat`/`alet`/`acall` are appended last (Phase 2c/2e/2f) rather than
+/// inserted in literal-grouping order with `aint`/`abool`, since these
+/// indices are a stable wire format between this definition and
+/// `ast_bridge`'s constants — reordering existing ones would silently break
+/// already-working variants.
 /// `alet`'s three `Vector` fields are parallel: `names[i]`'s value is
 /// `values[i]` (all checked against the **outer** scope, CL `let`
 /// semantics — `crate::compile::ast_bridge`'s doc comment), then `body`
 /// (one or more forms, only the last one's value escapes the `let`) is
 /// checked with all of `names` newly in scope.
+/// `acall`'s callee is always a top-level `defun` already registered in
+/// `Interp.compiled` by the time `ast_bridge::typed_to_ast` bridges it
+/// (Phase 2f) — see that function's doc comment on why an uncompiled callee
+/// makes the whole bridge fail (`None`) rather than reaching `compile-value`
+/// at all.
 #[cfg(feature = "compile")]
 fn ast_expr_def() -> AdtDef {
     let t = ast_expr_ty();
@@ -581,8 +587,9 @@ fn ast_expr_def() -> AdtDef {
             Variant { name: "afloat".to_string(), fields: vec![Type::F64] },
             Variant {
                 name: "alet".to_string(),
-                fields: vec![vector_of(Type::Str), vector_of(t.clone()), vector_of(t)],
+                fields: vec![vector_of(Type::Str), vector_of(t.clone()), vector_of(t.clone())],
             },
+            Variant { name: "acall".to_string(), fields: vec![Type::Str, vector_of(t)] },
         ],
         assoc: HashMap::new(),
         public: true,
@@ -629,11 +636,21 @@ fn llvm_value_ty() -> Type {
 /// shares one LLVM-level signature regardless of its logical arity — the
 /// unified `TlValue` ABI `i32 (ptr args, i32 argc, ptr out)` — so there is no
 /// per-arity type to build (see `crate::eval::interp::llvm_module_add_function`).
+///
+/// `get-or-declare-function` (Phase 2f, direct calls between compiled
+/// functions): returns the existing declaration if `name` was already
+/// added to this module (so calling the same callee twice from one compiled
+/// function reuses one declaration instead of LLVM renaming a second one),
+/// otherwise declares it fresh with the same unified signature `add-function`
+/// uses, but with no entry block — a bare external declaration `compile`
+/// later resolves to the callee's real JIT'd address (see
+/// `Interp::builtin_llvm_finish_compile`'s `add_global_mapping` pass).
 #[cfg(feature = "compile")]
 fn llvm_module_def() -> AdtDef {
     let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true }, instance: true };
     let mut assoc = HashMap::new();
     assoc.insert("add-function".to_string(), method(vec![llvm_module_ty(), Type::Str], llvm_function_ty()));
+    assoc.insert("get-or-declare-function".to_string(), method(vec![llvm_module_ty(), Type::Str], llvm_function_ty()));
     assoc.insert("verify".to_string(), method(vec![llvm_module_ty()], result_of(Type::Unit, error_ty())));
     assoc.insert("dump".to_string(), method(vec![llvm_module_ty()], Type::Unit));
     AdtDef { name: Path::root("llvmmodule"), params: vec![], variants: vec![], assoc, public: true }
@@ -687,6 +704,23 @@ fn llvm_builder_def() -> AdtDef {
     assoc.insert("build-ret".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
     assoc.insert("build-ret-bool".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
     assoc.insert("build-ret-f64".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
+    // `build-call`/`build-call-bool`/`build-call-f64` (Phase 2f): packs `args`
+    // into a stack-allocated `TlValue` array and emits a direct `call` to
+    // `callee` (a declaration from `LlvmModule::get-or-declare-function`)
+    // under the unified ABI, then unpacks the `out` slot per the callee's
+    // known return type — see `crate::eval::interp::llvm_builder_build_call`.
+    assoc.insert(
+        "build-call".to_string(),
+        method(vec![llvm_builder_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
+    );
+    assoc.insert(
+        "build-call-bool".to_string(),
+        method(vec![llvm_builder_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
+    );
+    assoc.insert(
+        "build-call-f64".to_string(),
+        method(vec![llvm_builder_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
+    );
     AdtDef { name: Path::root("llvmbuilder"), params: vec![], variants: vec![], assoc, public: true }
 }
 

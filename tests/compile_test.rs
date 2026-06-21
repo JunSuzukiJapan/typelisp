@@ -303,6 +303,94 @@ fn compiles_a_function_whose_let_binding_value_sees_the_outer_scope() {
     assert_eq!(run(src), RtValue::Int(5));
 }
 
+/// Phase 2f: a compiled function directly calling another already-compiled
+/// function — `square` must be compiled *before* `sum-of-squares` is, since
+/// `ast_bridge::typed_to_ast` only bridges an `Expr::Call` whose callee is
+/// already in `Interp.compiled`.
+#[test]
+fn compiles_a_function_calling_another_compiled_function() {
+    let src = r#"
+        (defun square ((x i64)) i64 (* x x))
+        (compile "square")
+        (defun sum-of-squares ((a i64) (b i64)) i64 (+ (square a) (square b)))
+        (compile "sum-of-squares")
+        (sum-of-squares 3 4)
+    "#;
+    assert_eq!(run(src), RtValue::Int(25));
+}
+
+/// The same callee invoked **twice** from one caller — exercises
+/// `get-or-declare-function`'s reuse path (a second `add-function` call
+/// with a colliding name would otherwise get silently renamed by LLVM,
+/// leaving the second `call` site pointing at an undeclared/unmapped
+/// function).
+#[test]
+fn compiles_a_function_calling_the_same_compiled_function_twice() {
+    let src = r#"
+        (defun half ((x f64)) f64 (/ x 2.0))
+        (compile "half")
+        (defun quarter ((x f64)) f64 (half (half x)))
+        (compile "quarter")
+        (quarter 8.0)
+    "#;
+    assert_eq!(run(src), RtValue::Float(2.0));
+}
+
+/// A `bool`-returning callee, called from an `if` condition in the caller —
+/// exercises `build-call-bool`'s narrowing path.
+#[test]
+fn compiles_a_function_calling_a_bool_returning_compiled_function() {
+    let src = r#"
+        (defun is-positive ((x i64)) bool (> x 0))
+        (compile "is-positive")
+        (defun classify ((x i64)) i64 (if (is-positive x) 1 0))
+        (compile "classify")
+        (classify 5)
+    "#;
+    assert_eq!(run(src), RtValue::Int(1));
+    let src2 = r#"
+        (defun is-positive ((x i64)) bool (> x 0))
+        (compile "is-positive")
+        (defun classify ((x i64)) i64 (if (is-positive x) 1 0))
+        (compile "classify")
+        (classify -5)
+    "#;
+    assert_eq!(run(src2), RtValue::Int(0));
+}
+
+/// A call inside a `let` binding's value, and the `let`-bound result fed
+/// into a second call — exercises `compile-value`'s `ACall`/`ALet`
+/// interaction (both share the same `eval-args` `labels` helper).
+#[test]
+fn compiles_a_function_calling_a_compiled_function_inside_let() {
+    let src = r#"
+        (defun inc ((x i64)) i64 (+ x 1))
+        (compile "inc")
+        (defun twice-inc ((x i64)) i64 (let ((y (inc x))) (inc y)))
+        (compile "twice-inc")
+        (twice-inc 5)
+    "#;
+    assert_eq!(run(src), RtValue::Int(7));
+}
+
+/// Calling a function that hasn't been `compile`d yet is refused outright
+/// (`ast-body` fails to bridge the call, so `compile` itself returns `Err`)
+/// — the function is *not* JIT'd by silently falling back to the tree-walked
+/// callee, which the unified `TlValue` ABI's compiled-call path has no
+/// mechanism for at all.
+#[test]
+fn refuses_to_compile_a_function_calling_an_uncompiled_function() {
+    let src = r#"
+        (defun foo ((x i64)) i64 (+ x 1))
+        (defun bar ((x i64)) i64 (foo x))
+        (compile "bar")
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 1, "expected Err, not Ok"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+}
+
 #[test]
 fn refuses_to_compile_a_non_i64_function() {
     let src = r#"

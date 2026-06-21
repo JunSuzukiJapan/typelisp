@@ -600,13 +600,70 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       tail-if枝での使用、シャドーイング、並行束縛セマンティクス。既存14件は無変更でgreen。
       並行実行でのSIGSEGV再発無し（10回連続green）。既定ビルド・`cargo clippy --all-targets`
       （両構成）への影響なし。
+  - 実装済み（Phase 2f/コンパイル済み関数同士の直接呼び出し）: `(defun square ((x i64)) i64 (*
+    x x)) (compile "square") (defun sum-of-squares ((a i64) (b i64)) i64 (+ (square a) (square
+    b))) (compile "sum-of-squares")`のように、既に`compile`済みの別関数を呼ぶ関数がコンパイル
+    対象になった——逆方向（コンパイル済みから未コンパイルを呼ぶ）はトランポリンが必要で
+    対象外のまま、自己再帰・相互再帰も対象外（理由は下記）。
+    - **未コンパイルの呼び出し先はASTブリッジ自体を拒否（`None`）、`compile-value`での
+      panicにはしない**: `ast_bridge::typed_to_ast`に`interp: &Interp`を渡すよう変更し、
+      `Expr::Call`に遭遇した際`interp.is_compiled(path)`（新規`Interp`メソッド、
+      `self.compiled.borrow().contains_key(name)`）を見て、コンパイル済みでなければ`None`を
+      返す。これにより`compile`の既存`(ast-body name)`の`(None) -> Err(...)`アームが
+      自然に「呼び出し先未コンパイル」もハンドルする——typelisp側`compile-value`に
+      `compiled?`チェック＋`panic`を書く案より、既存の「未対応構文は`ast-body`がNoneを返す」
+      という設計哲学と一貫する。副作用として**自己再帰・相互再帰の呼び出しは対象外**
+      （`compile`が`name`自身をビルド完了するまで`self.compiled`に登録しないため、
+      自分自身を呼ぶ`Expr::Call`は常に「未コンパイル」と判定されブリッジが失敗する——
+      これは意図的な制約として明記、将来別Phaseで対応）。
+    - **呼び出し先関数は新モジュールに宣言のみ追加し、JITエンジン作成後に実アドレスへ
+      マッピング**: 各`compile`呼び出しは独立した`Module`/`ExecutionEngine`を持つ
+      （ヘッダの`LlvmContextHandle`は1つだが、JITエンジンは呼び出しごとに別）ため、
+      呼び出し先の関数本体を新モジュールに直接持ち込むことはできない。新規
+      `LlvmModule::get-or-declare-function`（モジュール内に同名関数が既にあれば取得、
+      なければ`add-function`と同じ統一ABI型`i32 (ptr args, i32 argc, ptr out)`で
+      **本体なし（`append-block`を呼ばない）**の宣言だけ追加）でモジュール内に呼び出し先の
+      シンボルを用意し、`Interp::builtin_llvm_finish_compile`がJITエンジンを作った直後に
+      モジュール内の「本体なし（`count_basic_blocks() == 0`）」関数を走査して
+      `self.compiled`から対応する関数ポインタを検索し`ExecutionEngine::add_global_mapping`
+      で実アドレスを教える、という2段階の設計。`get-or-declare-function`が「既にあれば
+      取得」を行う理由は、同じ呼び出し先を1つの関数から複数回呼ぶケース（`add-function`を
+      同名で2回呼ぶとLLVMが2番目を黙ってリネームしてしまい、2番目の呼び出し箇所が
+      宣言を見つけられなくなる）に対応するため。
+    - **`build-call`/`build-call-bool`/`build-call-f64`（`LlvmBuilder`新規メソッド）**:
+      引数の`Vector<LlvmValue>`をスタック上の`[argc x TlValue]`（`alloca`）に詰め、
+      各要素は`build-ret`系と共通化した`pack_tlvalue`ヘルパでtag/payloadをpack。
+      各引数のtag判定は`build-op`と同じ「`AstExpr`自体は型タグを持たないので実際の
+      `BasicValueEnum`のkindを見る」方式（`i1`→bool・他幅`IntValue`→i64・`FloatValue`→f64、
+      新規共通ヘルパ`tlvalue_tag_and_payload`）。`out`用`TlValue`もスタックに`alloca`し、
+      統一ABIの`call`命令を発行→`out`をloadしてpayload（生i64ビット列）を取り出すところまでを
+      共通化（`llvm_builder_build_call_payload`）、3つの公開関数がそこからの解釈
+      （i64のまま／truncateしてbool／bit-castしてf64）だけを分担——既存
+      `load-arg`/`load-arg-bool`/`load-arg-f64`、`build-ret`/`-bool`/`-f64`と同型の3分岐。
+    - typelisp側（`compiler_source.rs`）: `compile-value`/`compile-tail`の両方に
+      `module: LlvmModule`引数を追加（`ACall`が`get-or-declare-function`を呼ぶのに必要）。
+      `compile-value`の`labels`を`ALet`専用から「`ALet`と`ACall`が共有する`eval-args`」
+      （「`Vector<AstExpr>`を現在のスコープで評価して`Vector<LlvmValue>`にする」処理は
+      束縛値の評価も呼び出し引数の評価も全く同じ形）に統合。**`compile-tail`は`ACall`用の
+      専用アームを持たない**——既存の`_`アーム（`compile-value`を呼んで`build-ret`系に渡す）
+      が複数の基本ブロックに分岐しない「ただの値を作るAstExpr」全てを正しく処理できる
+      ことに気づいたため（`AIf`/`ALet`だけが基本ブロック分岐を伴うので専用アームが必要）。
+    - `AstExpr`に`acall`variant追加（`alet`と同じく既存の並びに割り込ませず**末尾に追記**）。
+      2フィールド構成`(name: string, args: Vector<AstExpr>)`。
+    - TDD: `tests/compile_test.rs`に5件追加（26件中）——別の既コンパイル関数を呼ぶ関数、
+      同じ呼び出し先を1関数から2回呼ぶ関数（`get-or-declare-function`の再利用パス検証）、
+      `bool`を返す呼び出し先を`if`条件に使う関数、`let`束縛の値の中で呼び出す関数、
+      未コンパイルの関数を呼ぶ関数のコンパイル拒否。既存21件は無変更でgreen。
+      並行実行でのSIGSEGV再発無し（10回連続green）。既定ビルド・`cargo clippy --all-targets`
+      （両構成）への影響なし。
   - **次の作業（Phase 2残り、ブランチ`feature/compiler`で継続）**:
     - **Phase 2d（`char`対応、優先度低）**: `char`は算術が無く主に等値比較のみなので
       `f64`より軽量——`i64`/`bool`と同じ「i64スロットに格納し境界でのみ幅変換」方式でよい
       （`u32`へ`truncate`/`zext`、ただし32bit）。
-    - **Phase 2f（コンパイル済み関数同士の直接呼び出し）**: `(compiled? name)`的なチェックを
-      `compile`に追加し、未コンパイルの呼び出し先があれば明示的にコンパイル拒否する
-      ——逆方向〈コンパイル済みから未コンパイルを呼ぶ〉はトランポリンが必要でより難しいため後回し。
+    - 自己再帰・相互再帰のコンパイル対応（Phase 2fでは明示的に対象外とした）: `name`自身を
+      `compile`完了前に`self.compiled`へ仮登録する、または呼び出し先解決を`get-or-declare-
+      function`＋`add_global_mapping`ではなく単純な`call`に倒せる「同一モジュール内の
+      自己呼び出し」を特別扱いする、といった方向性が考えられるが優先度未定。
     - **Phase 3（Sexpr/HashTable/Vector対応）**: 既存Rust実装（`mem::Heap`の cons/GC、
       `eval::interp`のhashtable/vector操作）を`extern "C"`シムで薄くラップした「ランタイム支援
       ライブラリ」層を新設し、コンパイル後コードはこれらの操作をすべて呼び出し経由で行う

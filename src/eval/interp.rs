@@ -660,9 +660,17 @@ impl Interp {
             return Ok(option_value(None));
         }
         match self.fn_body(&path) {
-            Some([only]) => Ok(option_value(crate::compile::ast_bridge::typed_to_ast(only))),
+            Some([only]) => Ok(option_value(crate::compile::ast_bridge::typed_to_ast(only, self))),
             _ => Ok(option_value(None)),
         }
+    }
+
+    /// Whether `name` is already JIT-compiled (`self.compiled`) — checked by
+    /// `crate::compile::ast_bridge::typed_to_ast` so a call to an
+    /// as-yet-uncompiled function fails the AST bridge outright (Phase 2f)
+    /// rather than reaching `compile-value` with no way to build IR for it.
+    pub(crate) fn is_compiled(&self, name: &Path) -> bool {
+        self.compiled.borrow().contains_key(name)
     }
 
     /// Shared by `builtin_param_is_bool`/`builtin_param_is_f64`: whether
@@ -726,6 +734,24 @@ impl Interp {
             .borrow()
             .create_jit_execution_engine(inkwell::OptimizationLevel::None)
             .map_err(|e| EvalError::Panic(format!("compile: {}", e)))?;
+        // Phase 2f: every callee `LlvmModule::get-or-declare-function` added
+        // for a direct `build-call` is a bare declaration (no basic blocks)
+        // in *this* module/engine, distinct from the `ExecutionEngine` that
+        // actually JIT'd its body (a separate `compile` call, separate
+        // module). `add_global_mapping` tells this engine to resolve any
+        // `call` to that declaration straight to the callee's already-JIT'd
+        // address instead of trying (and failing) to find a body for it in
+        // this module — `ast_bridge::typed_to_ast` already refused to bridge
+        // a call to anything not in `self.compiled` yet, so every such
+        // declaration is guaranteed to have an entry here.
+        for f in module.borrow().get_functions() {
+            if f.count_basic_blocks() == 0 {
+                let callee_name = f.get_name().to_str().map_err(|e| EvalError::Internal(e.to_string()))?;
+                if let Some(cf) = self.compiled.borrow().get(&Path::root(callee_name)) {
+                    engine.add_global_mapping(&f, cf.f as usize);
+                }
+            }
+        }
         let addr = engine
             .get_function_address(name)
             .map_err(|e| EvalError::Panic(format!("compile: {}", e)))?;
@@ -1084,6 +1110,7 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
     if *type_name == Path::root("llvmmodule") {
         return match method {
             "add-function" => Some(llvm_module_add_function(args)),
+            "get-or-declare-function" => Some(llvm_module_get_or_declare_function(args)),
             "verify" => Some(llvm_module_verify(args)),
             "dump" => Some(llvm_module_dump(args)),
             _ => None,
@@ -1107,10 +1134,26 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-ret" => Some(llvm_builder_build_ret(args)),
             "build-ret-bool" => Some(llvm_builder_build_ret_bool(args)),
             "build-ret-f64" => Some(llvm_builder_build_ret_f64(args)),
+            "build-call" => Some(llvm_builder_build_call(args)),
+            "build-call-bool" => Some(llvm_builder_build_call_bool(args)),
+            "build-call-f64" => Some(llvm_builder_build_call_f64(args)),
             _ => None,
         };
     }
     None
+}
+
+/// The one LLVM-level function type every compiled function shares under the
+/// unified `TlValue` ABI (Phase 2): `i32 (ptr args, i32 argc, ptr out)` —
+/// shared by [`llvm_module_add_function`] (defining a function's own body)
+/// and [`llvm_module_get_or_declare_function`] (Phase 2f, declaring a
+/// *callee* with no body so a direct `call` to it can be emitted).
+#[cfg(feature = "compile")]
+fn tlvalue_fn_type() -> inkwell::types::FunctionType<'static> {
+    let ctx = llvm_context();
+    let ptr_ty = ctx.ptr_type(inkwell::AddressSpace::default());
+    let i32_ty = ctx.i32_type();
+    i32_ty.fn_type(&[ptr_ty.into(), i32_ty.into(), ptr_ty.into()], false)
 }
 
 /// Declares `name` with the one LLVM-level signature every compiled function
@@ -1123,11 +1166,28 @@ fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(&args[1])?;
-    let ctx = llvm_context();
-    let ptr_ty = ctx.ptr_type(inkwell::AddressSpace::default());
-    let i32_ty = ctx.i32_type();
-    let fn_type = i32_ty.fn_type(&[ptr_ty.into(), i32_ty.into(), ptr_ty.into()], false);
-    let function = module.borrow().add_function(name, fn_type, None);
+    let function = module.borrow().add_function(name, tlvalue_fn_type(), None);
+    Ok(RtValue::LlvmFunction(function))
+}
+
+/// `(get-or-declare-function module name) -> LlvmFunction` (Phase 2f, direct
+/// calls between compiled functions): returns `name`'s existing declaration
+/// in `module` if `build-call` already added one for an earlier call to the
+/// same callee (LLVM would otherwise rename a second `add_function` call
+/// with a colliding name instead of returning the first one), otherwise
+/// declares it fresh — a bare external declaration with no basic blocks,
+/// later resolved to the callee's real JIT'd address by
+/// `Interp::builtin_llvm_finish_compile`'s `add_global_mapping` pass.
+#[cfg(feature = "compile")]
+fn llvm_module_get_or_declare_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let module = expect_llvm_module(&args[0])?;
+    let name = expect_str(&args[1])?;
+    let m = module.borrow();
+    if let Some(f) = m.get_function(name) {
+        return Ok(RtValue::LlvmFunction(f));
+    }
+    let function = m.add_function(name, tlvalue_fn_type(), None);
     Ok(RtValue::LlvmFunction(function))
 }
 
@@ -1388,6 +1448,29 @@ fn llvm_builder_build_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .map_err(|e| EvalError::Panic(format!("build-br: {}", e)))
 }
 
+/// Packs `tag`/`payload` into a `TlValue` struct value — shared by
+/// [`build_ret_tlvalue`] (returning it through a function's `out` parameter)
+/// and [`llvm_builder_build_call_payload`] (Phase 2f, writing one into a
+/// stack-allocated outgoing argument array). Does not itself take
+/// [`compile_lock`] — callers must already hold it.
+#[cfg(feature = "compile")]
+fn pack_tlvalue(
+    builder: &inkwell::builder::Builder<'static>,
+    tag: TlTag,
+    payload: inkwell::values::IntValue<'static>,
+) -> Result<inkwell::values::StructValue<'static>, EvalError> {
+    let tlvalue_ty = tlvalue_llvm_type();
+    let tag_v = llvm_context().i64_type().const_int(tag as u64, false);
+    let packed = tlvalue_ty.get_undef();
+    let packed = builder
+        .build_insert_value(packed, tag_v, 0, "tagged")
+        .map_err(|e| EvalError::Panic(format!("build-tlvalue: {}", e)))?;
+    let packed = builder
+        .build_insert_value(packed, payload, 1, "withpayload")
+        .map_err(|e| EvalError::Panic(format!("build-tlvalue: {}", e)))?;
+    Ok(packed.into_struct_value())
+}
+
 /// Shared by [`llvm_builder_build_ret`]/[`llvm_builder_build_ret_bool`]: packs
 /// `tag`/`payload` into a `TlValue`, stores it through `out_ptr`, and emits
 /// the function's terminal `ret i32 0` (status "ok") — the one and only
@@ -1400,23 +1483,153 @@ fn build_ret_tlvalue(
     tag: TlTag,
     payload: inkwell::values::IntValue<'static>,
 ) -> Result<RtValue, EvalError> {
-    let tlvalue_ty = tlvalue_llvm_type();
-    let tag_v = llvm_context().i64_type().const_int(tag as u64, false);
-    let packed = tlvalue_ty.get_undef();
-    let packed = builder
-        .build_insert_value(packed, tag_v, 0, "tagged")
-        .map_err(|e| EvalError::Panic(format!("build-ret: {}", e)))?;
-    let packed = builder
-        .build_insert_value(packed, payload, 1, "withpayload")
-        .map_err(|e| EvalError::Panic(format!("build-ret: {}", e)))?;
+    let packed = pack_tlvalue(builder, tag, payload)?;
     builder
-        .build_store(out_ptr, packed.into_struct_value())
+        .build_store(out_ptr, packed)
         .map_err(|e| EvalError::Panic(format!("build-ret: {}", e)))?;
     let status = llvm_context().i32_type().const_int(0, false);
     builder
         .build_return(Some(&status))
         .map(|_| RtValue::Unit)
         .map_err(|e| EvalError::Panic(format!("build-ret: {}", e)))
+}
+
+/// Picks `(TlTag, raw i64 bits)` for one outgoing call argument from its
+/// actual LLVM value kind (Phase 2f — `AstExpr` carries no per-argument type
+/// tag, so, like [`llvm_builder_build_op`], this inspects the value itself):
+/// an `i1` widens to `TlTag::Bool`, any other-width `IntValue` is `TlTag::I64`
+/// as-is, and a `FloatValue` bit-casts to `TlTag::F64` (matching
+/// [`llvm_builder_build_ret_f64`]'s reinterpret-don't-convert convention).
+/// Does not itself take [`compile_lock`] — callers must already hold it.
+#[cfg(feature = "compile")]
+fn tlvalue_tag_and_payload(
+    builder: &inkwell::builder::Builder<'static>,
+    v: inkwell::values::BasicValueEnum<'static>,
+) -> Result<(TlTag, inkwell::values::IntValue<'static>), EvalError> {
+    match v {
+        inkwell::values::BasicValueEnum::IntValue(iv) if iv.get_type().get_bit_width() == 1 => {
+            let widened = builder
+                .build_int_z_extend(iv, llvm_context().i64_type(), "argbool")
+                .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?;
+            Ok((TlTag::Bool, widened))
+        }
+        inkwell::values::BasicValueEnum::IntValue(iv) => Ok((TlTag::I64, iv)),
+        inkwell::values::BasicValueEnum::FloatValue(fv) => {
+            let bits = builder
+                .build_bit_cast(fv, llvm_context().i64_type(), "argf64")
+                .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?
+                .into_int_value();
+            Ok((TlTag::F64, bits))
+        }
+        other => Err(EvalError::Internal(format!("build-call: unsupported argument kind {:?}", other))),
+    }
+}
+
+/// Shared by [`llvm_builder_build_call`]/[`llvm_builder_build_call_bool`]/
+/// [`llvm_builder_build_call_f64`] (Phase 2f): packs `args` into a
+/// stack-allocated `[argc x TlValue]` array, emits a direct `call` to
+/// `callee` (the unified ABI's `i32 (ptr args, i32 argc, ptr out)`) through a
+/// stack-allocated `out` slot, and returns the raw `i64` bits of `out`'s
+/// payload — callers narrow/reinterpret that per the callee's known return
+/// type (`ret-is-bool`/`ret-is-f64`, looked up by the typelisp-written
+/// `compile` since `AstExpr` itself carries no type tags).
+#[cfg(feature = "compile")]
+fn llvm_builder_build_call_payload(args: &[RtValue]) -> Result<inkwell::values::IntValue<'static>, EvalError> {
+    let b = expect_llvm_builder(&args[0])?;
+    let callee = expect_llvm_function(&args[1])?;
+    let call_args = expect_vector(&args[2])?;
+    let builder = b.0.borrow();
+    let tlvalue_ty = tlvalue_llvm_type();
+    let call_args = call_args.borrow();
+    let argc = call_args.len();
+    let array_ty = tlvalue_ty.array_type(argc as u32);
+    let args_alloca = builder
+        .build_alloca(array_ty, "callargs")
+        .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?;
+    let i32_ty = llvm_context().i32_type();
+    let zero = i32_ty.const_int(0, false);
+    for (i, v) in call_args.iter().enumerate() {
+        let basic_v = *expect_llvm_basic_value(v)?;
+        let (tag, payload) = tlvalue_tag_and_payload(&builder, basic_v)?;
+        let packed = pack_tlvalue(&builder, tag, payload)?;
+        let idx = i32_ty.const_int(i as u64, false);
+        // SAFETY: `args_alloca` is a fresh `[argc x TlValue]` alloca created
+        // just above, and `i < argc` (this loop is over `call_args` itself),
+        // so this GEP stays in bounds.
+        let elem_ptr = unsafe {
+            builder
+                .build_gep(array_ty, args_alloca, &[zero, idx], "argelem")
+                .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?
+        };
+        builder
+            .build_store(elem_ptr, packed)
+            .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?;
+    }
+    drop(call_args);
+    let out_alloca = builder
+        .build_alloca(tlvalue_ty, "callout")
+        .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?;
+    // SAFETY: `args_alloca` is `[argc x TlValue]`; a `[0, 0]` GEP yields a
+    // pointer to its first element — the flat `*TlValue` shape the unified
+    // ABI's `args` parameter expects (matching what `Interp::call_compiled`
+    // passes from the Rust side).
+    let args_ptr = unsafe {
+        builder
+            .build_gep(array_ty, args_alloca, &[zero, zero], "argsptr")
+            .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?
+    };
+    let argc_v = i32_ty.const_int(argc as u64, false);
+    builder
+        .build_call(*callee, &[args_ptr.into(), argc_v.into(), out_alloca.into()], "call")
+        .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?;
+    let loaded = builder
+        .build_load(tlvalue_ty, out_alloca, "callresult")
+        .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?
+        .into_struct_value();
+    builder
+        .build_extract_value(loaded, 1, "callpayload")
+        .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))
+        .map(|v| v.into_int_value())
+}
+
+/// `(build-call b callee args) -> LlvmValue`: calls `callee` and returns its
+/// result as a plain `i64`. `bool`/`f64`-returning callees need
+/// [`llvm_builder_build_call_bool`]/[`llvm_builder_build_call_f64`] instead.
+#[cfg(feature = "compile")]
+fn llvm_builder_build_call(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let payload = llvm_builder_build_call_payload(args)?;
+    Ok(RtValue::LlvmValue(payload.into()))
+}
+
+/// `(build-call-bool b callee args) -> LlvmValue`: as [`llvm_builder_build_call`],
+/// narrowing (`build_int_truncate`) the raw `i64` payload down to `i1`.
+#[cfg(feature = "compile")]
+fn llvm_builder_build_call_bool(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let payload = llvm_builder_build_call_payload(args)?;
+    let b = expect_llvm_builder(&args[0])?;
+    let truncated = b
+        .0
+        .borrow()
+        .build_int_truncate(payload, llvm_context().bool_type(), "callbool")
+        .map_err(|e| EvalError::Panic(format!("build-call-bool: {}", e)))?;
+    Ok(RtValue::LlvmValue(truncated.into()))
+}
+
+/// `(build-call-f64 b callee args) -> LlvmValue`: as [`llvm_builder_build_call`],
+/// bit-casting (not converting) the raw `i64` payload back to `f64`.
+#[cfg(feature = "compile")]
+fn llvm_builder_build_call_f64(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let payload = llvm_builder_build_call_payload(args)?;
+    let b = expect_llvm_builder(&args[0])?;
+    let bits = b
+        .0
+        .borrow()
+        .build_bit_cast(payload, llvm_context().f64_type(), "callf64")
+        .map_err(|e| EvalError::Panic(format!("build-call-f64: {}", e)))?;
+    Ok(RtValue::LlvmValue(bits))
 }
 
 #[cfg(feature = "compile")]

@@ -4,17 +4,23 @@
 //! `crate::compile::ast_bridge`) — the same "library written in typelisp
 //! calling Rust builtins" shape as [`crate::prelude`], not a Rust special form.
 //!
-//! Phase 1/2e ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) restricts
+//! Phase 1/2f ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) restricts
 //! `compile` to functions whose every parameter and return type is `i64`,
 //! `bool`, or `f64` (any mix — e.g. `(defun gt ((a i64) (b i64)) bool (> a
 //! b))`), with a body built from integer/bool/float literals, parameter
-//! references, `i64`/`f64` arithmetic/comparison, `let`, and `if` — and `if`
-//! only in **tail position** (the value an enclosing `if`/the function
-//! itself returns), not as a nested sub-expression: `compile-tail` lowers a
-//! tail `if` to two basic blocks each ending in their own `ret`,
-//! sidestepping the need for a phi node or alloca/load/store merge this
-//! narrow first slice doesn't need yet (see `compile-value`'s fallback
-//! `panic` for the case this restriction rules out).
+//! references, `i64`/`f64` arithmetic/comparison, `let`, `if`, and calls to
+//! *other already-compiled* functions (Phase 2f — a call to one not yet
+//! compiled fails the AST bridge, refusing `compile` outright, rather than
+//! reaching `compile-value` with no callee to call; self/mutual recursion
+//! between compiled functions isn't supported yet for the same reason: a
+//! function isn't registered as compiled until *after* `compile` finishes
+//! building it). `if` is only supported in **tail position** (the value an
+//! enclosing `if`/the function itself returns), not as a nested
+//! sub-expression: `compile-tail` lowers a tail `if` to two basic blocks
+//! each ending in their own `ret`, sidestepping the need for a phi node or
+//! alloca/load/store merge this narrow first slice doesn't need yet (see
+//! `compile-value`'s fallback `panic` for the case this restriction rules
+//! out).
 
 use crate::{Checker, Heap, Interp, Reader};
 
@@ -50,34 +56,52 @@ pub const SOURCE: &str = r#"
 (defun extend-values ((base Vector<LlvmValue>) (extra Vector<LlvmValue>)) Vector<LlvmValue>
   (copy-values extra 0 (length extra) (copy-values base 0 (length base) (Vector::new 0 (llvm-const-i64 0)))))
 
-;; `ALet`'s `eval-bindings`/`eval-body` helpers are `labels`-local (not their
-;; own top-level `defun`s) because they call `compile-value` — a `defun` may
-;; only call itself or an *already-defined* `defun`, never one defined later,
-;; so a separate top-level helper calling back into `compile-value` (still
-;; being defined) would be a forward reference `labels` sidesteps (the helper
-;; is local to `compile-value`'s own body, which is already in scope by the
-;; time it's checked, exactly like ordinary self-recursion).
-(defun compile-value ((b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>) (e AstExpr)) LlvmValue
-  (match e
-    ((AInt n) (llvm-const-i64 n))
-    ((ABool flag) (llvm-const-bool flag))
-    ((AFloat n) (llvm-const-f64 n))
-    ((AVar name) (get vals (param-index params name)))
-    ((ABinOp op lhs rhs) (build-op b op (compile-value b params vals lhs) (compile-value b params vals rhs)))
-    ((ALet names values body)
-     (labels ((eval-bindings ((i i32) (n i32) (exprs Vector<AstExpr>) (out Vector<LlvmValue>)) Vector<LlvmValue>
-                (if (>= i n)
-                    out
-                    (progn (push out (compile-value b params vals (get exprs i)))
-                           (eval-bindings (+ i 1) n exprs out))))
-              (eval-body ((i i32) (n i32) (forms Vector<AstExpr>) (p2 Vector<string>) (v2 Vector<LlvmValue>)) LlvmValue
-                (let ((r (compile-value b p2 v2 (get forms i))))
-                  (if (>= (+ i 1) n) r (eval-body (+ i 1) n forms p2 v2)))))
-       (let* ((bound-vals (eval-bindings 0 (length values) values (Vector::new 0 (llvm-const-i64 0))))
+;; `ALet`/`ACall`'s local helpers (`eval-args`/`eval-body`) are `labels`-local
+;; (not their own top-level `defun`s) because they call `compile-value` — a
+;; `defun` may only call itself or an *already-defined* `defun`, never one
+;; defined later, so a separate top-level helper calling back into
+;; `compile-value` (still being defined) would be a forward reference
+;; `labels` sidesteps (the helper is local to `compile-value`'s own body,
+;; which is already in scope by the time it's checked, exactly like ordinary
+;; self-recursion). `eval-args` is shared by `ALet` (evaluating binding
+;; values) and `ACall` (evaluating call arguments) — both are just "turn a
+;; `Vector<AstExpr>` into a `Vector<LlvmValue>` in the *current* scope".
+;;
+;; `module` (Phase 2f) is threaded through purely so `ACall` can resolve its
+;; callee via `get-or-declare-function` — every other arm ignores it.
+(defun compile-value ((module LlvmModule) (b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>) (e AstExpr)) LlvmValue
+  (labels ((eval-args ((i i32) (n i32) (exprs Vector<AstExpr>) (out Vector<LlvmValue>)) Vector<LlvmValue>
+             (if (>= i n)
+                 out
+                 (progn (push out (compile-value module b params vals (get exprs i)))
+                        (eval-args (+ i 1) n exprs out))))
+           (eval-body ((i i32) (n i32) (forms Vector<AstExpr>) (p2 Vector<string>) (v2 Vector<LlvmValue>)) LlvmValue
+             (let ((r (compile-value module b p2 v2 (get forms i))))
+               (if (>= (+ i 1) n) r (eval-body (+ i 1) n forms p2 v2)))))
+    (match e
+      ((AInt n) (llvm-const-i64 n))
+      ((ABool flag) (llvm-const-bool flag))
+      ((AFloat n) (llvm-const-f64 n))
+      ((AVar name) (get vals (param-index params name)))
+      ((ABinOp op lhs rhs) (build-op b op (compile-value module b params vals lhs) (compile-value module b params vals rhs)))
+      ((ALet names values body)
+       (let* ((bound-vals (eval-args 0 (length values) values (Vector::new 0 (llvm-const-i64 0))))
               (new-params (extend-strs params names))
               (new-vals (extend-values vals bound-vals)))
-         (eval-body 0 (length body) body new-params new-vals))))
-    (_ (panic "compile: `if` is only supported in tail position (Phase 1)"))))
+         (eval-body 0 (length body) body new-params new-vals)))
+      ;; A call to another (already-compiled — `ast_bridge::typed_to_ast`
+      ;; refused to bridge it otherwise, Phase 2f) function: evaluate its
+      ;; arguments in the *current* scope, resolve its declaration in this
+      ;; module, and dispatch to `build-call`/`-bool`/`-f64` per its known
+      ;; return type (the same `ret-is-bool`/`ret-is-f64` side-query
+      ;; `compile` itself uses for its own return).
+      ((ACall name call-args)
+       (let* ((arg-vals (eval-args 0 (length call-args) call-args (Vector::new 0 (llvm-const-i64 0))))
+              (callee (get-or-declare-function module name)))
+         (cond ((ret-is-bool name) (build-call-bool b callee arg-vals))
+               ((ret-is-f64 name) (build-call-f64 b callee arg-vals))
+               (else (build-call b callee arg-vals)))))
+      (_ (panic "compile: `if` is only supported in tail position (Phase 1)")))))
 
 ;; Under the unified `TlValue` ABI (Phase 2), a function's logical arguments
 ;; are no longer separate LLVM-level parameters — they live in the `args`
@@ -104,34 +128,39 @@ pub const SOURCE: &str = r#"
 ;; statically-known type regardless of which `if` branch is taken, so two
 ;; flags threaded through suffice (Phase 2b/2c; mutually exclusive, since a
 ;; function's return type is exactly one of `i64`/`bool`/`f64`).
-(defun compile-tail ((bool-ret bool) (f64-ret bool) (f LlvmFunction) (b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>) (e AstExpr)) ()
+;; `ACall` has no arm of its own here — the `_` arm already calls
+;; `compile-value` and feeds its result to `build-ret`/`-bool`/`-f64`, which
+;; is exactly right for a call in tail position too (Phase 2f) — only
+;; control-flow-splitting forms (`AIf`/`ALet`, which build more than one
+;; basic block) need their own `compile-tail` arm.
+(defun compile-tail ((module LlvmModule) (bool-ret bool) (f64-ret bool) (f LlvmFunction) (b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>) (e AstExpr)) ()
   (match e
     ((AIf c then els)
      (let ((then-block (append-block f "then"))
            (else-block (append-block f "else")))
-       (build-cond-br b (compile-value b params vals c) then-block else-block)
+       (build-cond-br b (compile-value module b params vals c) then-block else-block)
        (position-at-end b then-block)
-       (compile-tail bool-ret f64-ret f b params vals then)
+       (compile-tail module bool-ret f64-ret f b params vals then)
        (position-at-end b else-block)
-       (compile-tail bool-ret f64-ret f b params vals els)))
+       (compile-tail module bool-ret f64-ret f b params vals els)))
     ((ALet names values body)
      (labels ((eval-bindings ((i i32) (n i32) (exprs Vector<AstExpr>) (out Vector<LlvmValue>)) Vector<LlvmValue>
                 (if (>= i n)
                     out
-                    (progn (push out (compile-value b params vals (get exprs i)))
+                    (progn (push out (compile-value module b params vals (get exprs i)))
                            (eval-bindings (+ i 1) n exprs out))))
               (eval-body-tail ((i i32) (n i32) (forms Vector<AstExpr>) (p2 Vector<string>) (v2 Vector<LlvmValue>)) ()
                 (if (>= (+ i 1) n)
-                    (compile-tail bool-ret f64-ret f b p2 v2 (get forms i))
-                    (progn (compile-value b p2 v2 (get forms i))
+                    (compile-tail module bool-ret f64-ret f b p2 v2 (get forms i))
+                    (progn (compile-value module b p2 v2 (get forms i))
                            (eval-body-tail (+ i 1) n forms p2 v2)))))
        (let* ((bound-vals (eval-bindings 0 (length values) values (Vector::new 0 (llvm-const-i64 0))))
               (new-params (extend-strs params names))
               (new-vals (extend-values vals bound-vals)))
          (eval-body-tail 0 (length body) body new-params new-vals))))
-    (_ (cond (bool-ret (build-ret-bool b f (compile-value b params vals e)))
-             (f64-ret (build-ret-f64 b f (compile-value b params vals e)))
-             (else (build-ret b f (compile-value b params vals e)))))))
+    (_ (cond (bool-ret (build-ret-bool b f (compile-value module b params vals e)))
+             (f64-ret (build-ret-f64 b f (compile-value module b params vals e)))
+             (else (build-ret b f (compile-value module b params vals e)))))))
 
 (defun compile ((name string)) Result<bool,Error>
   (match (ast-params name)
@@ -149,7 +178,7 @@ pub const SOURCE: &str = r#"
                (b (llvm-new-builder)))
           (position-at-end b entry)
           (let ((vals (make-param-values name f b arity)))
-            (compile-tail bool-ret f64-ret f b params vals body)
+            (compile-tail module bool-ret f64-ret f b params vals body)
             (match (verify module)
               ((Err e) (Err e))
               ((Ok _) (llvm-finish-compile module name arity))))))))))
