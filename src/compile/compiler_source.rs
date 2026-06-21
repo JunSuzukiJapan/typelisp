@@ -4,9 +4,10 @@
 //! `crate::compile::ast_bridge`) — the same "library written in typelisp
 //! calling Rust builtins" shape as [`crate::prelude`], not a Rust special form.
 //!
-//! Phase 1 ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) restricts `compile`
-//! to functions whose every parameter and return type is `i64`, with a body
-//! built from integer/bool literals, parameter references, `i64`
+//! Phase 1/2b ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) restricts
+//! `compile` to functions whose every parameter and return type is `i64` or
+//! `bool` (any mix — e.g. `(defun gt ((a i64) (b i64)) bool (> a b))`), with
+//! a body built from integer/bool literals, parameter references, `i64`
 //! arithmetic/comparison, and `if` — and `if` only in **tail position** (the
 //! value an enclosing `if`/the function itself returns), not as a nested
 //! sub-expression: `compile-tail` lowers a tail `if` to two basic blocks each
@@ -28,6 +29,7 @@ pub const SOURCE: &str = r#"
 (defun compile-value ((b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>) (e AstExpr)) LlvmValue
   (match e
     ((AInt n) (llvm-const-i64 n))
+    ((ABool flag) (llvm-const-bool flag))
     ((AVar name) (get vals (param-index params name)))
     ((ABinOp op lhs rhs) (build-op b op (compile-value b params vals lhs) (compile-value b params vals rhs)))
     (_ (panic "compile: `if` is only supported in tail position (Phase 1)"))))
@@ -35,43 +37,53 @@ pub const SOURCE: &str = r#"
 ;; Under the unified `TlValue` ABI (Phase 2), a function's logical arguments
 ;; are no longer separate LLVM-level parameters — they live in the `args`
 ;; array (`f`'s first real parameter), so reading one is an IR-building
-;; operation (`load-arg`, needs `b` positioned at `entry`) rather than a pure
-;; metadata lookup (Phase 1's `get-param`).
-(defun fill-param-values ((f LlvmFunction) (b LlvmBuilder) (i i32) (n i32) (out Vector<LlvmValue>)) Vector<LlvmValue>
+;; operation (`load-arg`/`load-arg-bool`, needs `b` positioned at `entry`)
+;; rather than a pure metadata lookup (Phase 1's `get-param`). `name` is the
+;; function being compiled, needed so `param-is-bool` can tell which of the
+;; two to use for each position (Phase 2b, mixed `i64`/`bool` signatures).
+(defun fill-param-values ((name string) (f LlvmFunction) (b LlvmBuilder) (i i32) (n i32) (out Vector<LlvmValue>)) Vector<LlvmValue>
   (if (>= i n)
       out
-      (progn (push out (load-arg b f i)) (fill-param-values f b (+ i 1) n out))))
+      (progn (push out (if (param-is-bool name i) (load-arg-bool b f i) (load-arg b f i)))
+             (fill-param-values name f b (+ i 1) n out))))
 
-(defun make-param-values ((f LlvmFunction) (b LlvmBuilder) (n i32)) Vector<LlvmValue>
-  (fill-param-values f b 0 n (Vector::new 0 (llvm-const-i64 0))))
+(defun make-param-values ((name string) (f LlvmFunction) (b LlvmBuilder) (n i32)) Vector<LlvmValue>
+  (fill-param-values name f b 0 n (Vector::new 0 (llvm-const-i64 0))))
 
-(defun compile-tail ((f LlvmFunction) (b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>) (e AstExpr)) ()
+;; `bool-ret` (the function's own return type, computed once by `compile` via
+;; `ret-is-bool`) picks `build-ret` vs `build-ret-bool` at every tail leaf —
+;; every leaf returns the same statically-known type regardless of which `if`
+;; branch is taken, so one flag threaded through suffices (Phase 2b).
+(defun compile-tail ((bool-ret bool) (f LlvmFunction) (b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>) (e AstExpr)) ()
   (match e
     ((AIf c then els)
      (let ((then-block (append-block f "then"))
            (else-block (append-block f "else")))
        (build-cond-br b (compile-value b params vals c) then-block else-block)
        (position-at-end b then-block)
-       (compile-tail f b params vals then)
+       (compile-tail bool-ret f b params vals then)
        (position-at-end b else-block)
-       (compile-tail f b params vals els)))
-    (_ (build-ret b f (compile-value b params vals e)))))
+       (compile-tail bool-ret f b params vals els)))
+    (_ (if bool-ret
+           (build-ret-bool b f (compile-value b params vals e))
+           (build-ret b f (compile-value b params vals e))))))
 
 (defun compile ((name string)) Result<bool,Error>
   (match (ast-params name)
-    ((None) (Err (Error "compile: unsupported function (must take/return only i64)")))
+    ((None) (Err (Error "compile: unsupported function (must take/return only i64 or bool)")))
     ((Some params)
      (match (ast-body name)
        ((None) (Err (Error "compile: unsupported function body")))
        ((Some body)
         (let* ((arity (length params))
+               (bool-ret (ret-is-bool name))
                (module (llvm-new-module name))
                (f (add-function module name))
                (entry (append-block f "entry"))
                (b (llvm-new-builder)))
           (position-at-end b entry)
-          (let ((vals (make-param-values f b arity)))
-            (compile-tail f b params vals body)
+          (let ((vals (make-param-values name f b arity)))
+            (compile-tail bool-ret f b params vals body)
             (match (verify module)
               ((Err e) (Err e))
               ((Ok _) (llvm-finish-compile module name arity))))))))))

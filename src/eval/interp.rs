@@ -617,21 +617,25 @@ impl Interp {
         match name {
             "ast-params" => Some(self.builtin_ast_params(args)),
             "ast-body" => Some(self.builtin_ast_body(args)),
+            "param-is-bool" => Some(self.builtin_param_is_bool(args)),
+            "ret-is-bool" => Some(self.builtin_ret_is_bool(args)),
             "llvm-new-module" => Some(llvm_module_new(args)),
             "llvm-new-builder" => Some(llvm_builder_new(args)),
             "llvm-const-i64" => Some(llvm_const_i64(args)),
+            "llvm-const-bool" => Some(llvm_const_bool(args)),
             "llvm-finish-compile" => Some(self.builtin_llvm_finish_compile(args)),
             _ => None,
         }
     }
 
     /// `(ast-params name) -> Option<Vector<string>>`: a `defun`'s parameter
-    /// names, or `None` if `name` isn't a `defun` or isn't all-`i64`
-    /// (Phase 1's restricted scope — see `crate::compile::ast_bridge`).
+    /// names, or `None` if `name` isn't a `defun` or its parameters/return
+    /// aren't all `i64`/`bool` (Phase 2b's restricted scope — see
+    /// `crate::compile::ast_bridge`).
     fn builtin_ast_params(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
         let name = expect_str(&args[0])?;
         match self.fn_signature(&Path::root(name)) {
-            Some((names, types, ret)) if is_i64_scalar_signature(types, ret) => {
+            Some((names, types, ret)) if is_supported_scalar_signature(types, ret) => {
                 let v: Vec<RtValue> = names.iter().map(|n| RtValue::Str(n.clone())).collect();
                 Ok(option_value(Some(RtValue::Vector(Rc::new(RefCell::new(v))))))
             }
@@ -640,22 +644,46 @@ impl Interp {
     }
 
     /// `(ast-body name) -> Option<AstExpr>`: the bridged form of `name`'s
-    /// (single-expression — Phase 1 doesn't support multi-form bodies, i.e.
+    /// (single-expression — Phase 1/2 don't support multi-form bodies, i.e.
     /// `let`-bound locals, yet) checked body, or `None` if `name` isn't a
-    /// `defun`, isn't all-`i64`, has other than one body expression, or its
-    /// body uses an `Expr` form `crate::compile::ast_bridge::typed_to_ast`
+    /// `defun`, isn't all `i64`/`bool`, has other than one body expression,
+    /// or its body uses an `Expr` form `crate::compile::ast_bridge::typed_to_ast`
     /// doesn't (yet) bridge.
     fn builtin_ast_body(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
         let name = expect_str(&args[0])?;
         let path = Path::root(name);
-        let all_i64 = matches!(self.fn_signature(&path), Some((_, types, ret)) if is_i64_scalar_signature(types, ret));
-        if !all_i64 {
+        let supported = matches!(self.fn_signature(&path), Some((_, types, ret)) if is_supported_scalar_signature(types, ret));
+        if !supported {
             return Ok(option_value(None));
         }
         match self.fn_body(&path) {
             Some([only]) => Ok(option_value(crate::compile::ast_bridge::typed_to_ast(only))),
             _ => Ok(option_value(None)),
         }
+    }
+
+    /// `(param-is-bool name i) -> bool`: whether `name`'s `i`-th parameter is
+    /// `bool` (vs. `i64`) — lets the typelisp-written `compile` pick
+    /// `load-arg` vs `load-arg-bool` per parameter without `AstExpr` needing
+    /// to carry per-node type tags (Phase 2b, mixed `i64`/`bool` signatures).
+    fn builtin_param_is_bool(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
+        let name = expect_str(&args[0])?;
+        let i = rt_i64(&args[1])?;
+        let is_bool = match self.fn_signature(&Path::root(name)) {
+            Some((_, types, _)) => i >= 0 && types.get(i as usize) == Some(&Type::Bool),
+            None => false,
+        };
+        Ok(RtValue::Bool(is_bool))
+    }
+
+    /// `(ret-is-bool name) -> bool`: whether `name`'s return type is `bool`
+    /// (vs. `i64`) — same role as [`Self::builtin_param_is_bool`] but for the
+    /// function's own return, letting `compile` pick `build-ret` vs
+    /// `build-ret-bool` once per function.
+    fn builtin_ret_is_bool(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
+        let name = expect_str(&args[0])?;
+        let is_bool = matches!(self.fn_signature(&Path::root(name)), Some((_, _, ret)) if *ret == Type::Bool);
+        Ok(RtValue::Bool(is_bool))
     }
 
     /// `(llvm-finish-compile module name arity) -> Result<bool, Error>`:
@@ -704,7 +732,12 @@ impl Interp {
         if args.len() != cf.arity {
             return Some(Err(EvalError::Internal("compiled function: arity mismatch".into())));
         }
-        let tl_args: Vec<TlValue> = match args.iter().map(|a| rt_i64(a).map(TlValue::from_i64)).collect() {
+        // The JIT'd code reads each argument's payload as a plain `i64`
+        // (`load-arg`) or truncates it to `i1` itself (`load-arg-bool`) based
+        // on what `compile` baked into the IR for that parameter position —
+        // so the *tag* written into each outgoing `TlValue` here is never
+        // read back by the callee, only the payload bits matter.
+        let tl_args: Vec<TlValue> = match args.iter().map(to_tlvalue_arg).collect() {
             Ok(v) => v,
             Err(e) => return Some(Err(e)),
         };
@@ -718,12 +751,28 @@ impl Interp {
         if status != 0 {
             return Some(Err(EvalError::Panic(format!("compiled function: returned status {}", status))));
         }
-        // Phase 2a (calling-convention generalization) keeps every compiled
-        // function all-`i64` — `f64`/`bool`/`char` land in a follow-up step
-        // (see [docs/TODO.md](../../docs/TODO.md)「ステップ5・Phase 2」) — so
-        // the tag is always `TlTag::I64` here.
-        let result = unsafe { out.payload.i64_ };
-        Some(Ok(RtValue::Int(result)))
+        // Phase 2b's `build-ret`/`build-ret-bool` tag the result correctly
+        // (`f64`/`char` land in a follow-up step — see
+        // [docs/TODO.md](../../docs/TODO.md)「ステップ5・Phase 2」), so unlike
+        // the arguments above, `out.tag` is meaningful here and decides how
+        // to decode `out.payload` back into an `RtValue`.
+        let result = if out.tag == TlTag::Bool as u8 {
+            RtValue::Bool(unsafe { out.payload.i64_ } != 0)
+        } else {
+            RtValue::Int(unsafe { out.payload.i64_ })
+        };
+        Some(Ok(result))
+    }
+}
+
+/// Converts one argument `RtValue` into the [`TlValue`] `call_compiled` packs
+/// into the outgoing array — `i64`/`bool` only (Phase 2b's scope).
+#[cfg(feature = "compile")]
+fn to_tlvalue_arg(v: &RtValue) -> Result<TlValue, EvalError> {
+    match v {
+        RtValue::Int(n) => Ok(TlValue::from_i64(*n)),
+        RtValue::Bool(b) => Ok(TlValue::from_i64(*b as i64)),
+        other => Err(EvalError::Internal(format!("compiled function: unsupported argument {:?}", other))),
     }
 }
 
@@ -796,11 +845,19 @@ struct CompiledFn {
     _engine: Rc<inkwell::execution_engine::ExecutionEngine<'static>>,
 }
 
-/// Whether a `defun`'s parameter/return types are all `i64` — Phase 1's
-/// restricted scope (`crate::compile::ast_bridge`'s doc comment).
+/// Whether a `defun`'s parameter/return types are all `i64`/`bool` —
+/// Phase 2b's restricted scope (`crate::compile::ast_bridge`'s doc comment).
+/// Phase 1/2a required every one of them to be `i64`; mixing in `bool`
+/// (Phase 2b) is what makes predicate functions like `(a i64) (b i64) ->
+/// bool` compilable at all.
 #[cfg(feature = "compile")]
-fn is_i64_scalar_signature(param_types: &[Type], ret: &Type) -> bool {
-    *ret == Type::I64 && param_types.iter().all(|t| *t == Type::I64)
+fn is_supported_scalar_type(t: &Type) -> bool {
+    matches!(t, Type::I64 | Type::Bool)
+}
+
+#[cfg(feature = "compile")]
+fn is_supported_scalar_signature(param_types: &[Type], ret: &Type) -> bool {
+    is_supported_scalar_type(ret) && param_types.iter().all(is_supported_scalar_type)
 }
 
 /// The process-wide LLVM `Context`, leaked once for the life of the process
@@ -879,6 +936,15 @@ fn llvm_const_i64(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
     let n = rt_i64(&args[0])?;
     Ok(RtValue::LlvmValue(llvm_context().i64_type().const_int(n as u64, true)))
+}
+
+/// `(llvm-const-bool b) -> LlvmValue`: an `i1` constant — Phase 2b's `bool`
+/// literal support (`AstExpr::ABool`/`compile-value`).
+#[cfg(feature = "compile")]
+fn llvm_const_bool(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let b = rt_bool(&args[0])?;
+    Ok(RtValue::LlvmValue(llvm_context().bool_type().const_int(b as u64, false)))
 }
 
 #[cfg(feature = "compile")]
@@ -966,10 +1032,12 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
         return match method {
             "position-at-end" => Some(llvm_builder_position_at_end(args)),
             "load-arg" => Some(llvm_builder_load_arg(args)),
+            "load-arg-bool" => Some(llvm_builder_load_arg_bool(args)),
             "build-op" => Some(llvm_builder_build_op(args)),
             "build-cond-br" => Some(llvm_builder_build_cond_br(args)),
             "build-br" => Some(llvm_builder_build_br(args)),
             "build-ret" => Some(llvm_builder_build_ret(args)),
+            "build-ret-bool" => Some(llvm_builder_build_ret_bool(args)),
             _ => None,
         };
     }
@@ -1029,19 +1097,20 @@ fn llvm_builder_position_at_end(args: &[RtValue]) -> Result<RtValue, EvalError> 
     Ok(RtValue::Unit)
 }
 
-/// `(load-arg b f i) -> LlvmValue`: reads logical argument `i` out of `f`'s
-/// `args` parameter (the unified ABI's first LLVM-level parameter, a pointer
-/// to a contiguous array of `TlValue`s — see [`TlValue`]/[`tlvalue_llvm_type`])
-/// — indexes to the `i`-th element, loads the whole struct, and extracts its
-/// payload field. Phase 2a only ever produces/consumes the `i64` payload;
-/// `f64`/`bool`/`char` arguments are a follow-up step.
+/// Shared by [`llvm_builder_load_arg`]/[`llvm_builder_load_arg_bool`]: reads
+/// logical argument `i` out of `f`'s `args` parameter (the unified ABI's
+/// first LLVM-level parameter, a pointer to a contiguous array of
+/// `TlValue`s — see [`TlValue`]/[`tlvalue_llvm_type`]) — indexes to the
+/// `i`-th element, loads the whole struct, and extracts its raw `i64`
+/// payload field (always `i64`-width regardless of the argument's logical
+/// type — `bool` is narrowed by the caller, see [`llvm_builder_load_arg_bool`]).
+/// Does not itself take [`compile_lock`] — callers must already hold it.
 #[cfg(feature = "compile")]
-fn llvm_builder_load_arg(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let _guard = compile_lock().lock().unwrap();
-    let b = expect_llvm_builder(&args[0])?;
-    let f = expect_llvm_function(&args[1])?;
-    let i = rt_i64(&args[2])?;
-    let builder = b.0.borrow();
+fn load_arg_payload(
+    builder: &inkwell::builder::Builder<'static>,
+    f: &inkwell::values::FunctionValue<'static>,
+    i: i64,
+) -> Result<inkwell::values::IntValue<'static>, EvalError> {
     let tlvalue_ty = tlvalue_llvm_type();
     let args_ptr = f
         .get_nth_param(0)
@@ -1061,11 +1130,40 @@ fn llvm_builder_load_arg(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .build_load(tlvalue_ty, elem_ptr, "argstruct")
         .map_err(|e| EvalError::Panic(format!("load-arg: {}", e)))?
         .into_struct_value();
-    let payload = builder
+    builder
         .build_extract_value(loaded, 1, "payload")
-        .map_err(|e| EvalError::Panic(format!("load-arg: {}", e)))?
-        .into_int_value();
+        .map_err(|e| EvalError::Panic(format!("load-arg: {}", e)))
+        .map(|v| v.into_int_value())
+}
+
+/// `(load-arg b f i) -> LlvmValue`: logical argument `i`, as a plain `i64`.
+/// `bool` arguments need [`llvm_builder_load_arg_bool`] instead (Phase 2b);
+/// `f64`/`char` are a follow-up step.
+#[cfg(feature = "compile")]
+fn llvm_builder_load_arg(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let b = expect_llvm_builder(&args[0])?;
+    let f = expect_llvm_function(&args[1])?;
+    let i = rt_i64(&args[2])?;
+    let payload = load_arg_payload(&b.0.borrow(), f, i)?;
     Ok(RtValue::LlvmValue(payload))
+}
+
+/// `(load-arg-bool b f i) -> LlvmValue`: logical argument `i`, narrowed
+/// (`build_int_truncate`) from the raw `i64` payload down to `i1` — Phase
+/// 2b's `bool`-parameter support, the counterpart to [`llvm_builder_load_arg`].
+#[cfg(feature = "compile")]
+fn llvm_builder_load_arg_bool(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let b = expect_llvm_builder(&args[0])?;
+    let f = expect_llvm_function(&args[1])?;
+    let i = rt_i64(&args[2])?;
+    let builder = b.0.borrow();
+    let payload = load_arg_payload(&builder, f, i)?;
+    let narrowed = builder
+        .build_int_truncate(payload, llvm_context().bool_type(), "argbool")
+        .map_err(|e| EvalError::Panic(format!("load-arg-bool: {}", e)))?;
+    Ok(RtValue::LlvmValue(narrowed))
 }
 
 /// `op` is one of `+ - * / mod < <= > >= = /=` — the same set `i64`'s
@@ -1135,30 +1233,26 @@ fn llvm_builder_build_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .map_err(|e| EvalError::Panic(format!("build-br: {}", e)))
 }
 
-/// `(build-ret b f v) -> Unit`: packs `v` into a `TlValue{tag=I64, payload=v}`
-/// (Phase 2a is still all-`i64`), stores it through `f`'s `out` parameter
-/// (the unified ABI's third LLVM-level parameter), and emits the function's
-/// terminal `ret i32 0` (status "ok") — the one and only return instruction
-/// every compiled function ends with, replacing Phase 1's direct `ret <value>`.
+/// Shared by [`llvm_builder_build_ret`]/[`llvm_builder_build_ret_bool`]: packs
+/// `tag`/`payload` into a `TlValue`, stores it through `out_ptr`, and emits
+/// the function's terminal `ret i32 0` (status "ok") — the one and only
+/// return instruction every compiled function ends with. Does not itself
+/// take [`compile_lock`] — callers must already hold it.
 #[cfg(feature = "compile")]
-fn llvm_builder_build_ret(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let _guard = compile_lock().lock().unwrap();
-    let b = expect_llvm_builder(&args[0])?;
-    let f = expect_llvm_function(&args[1])?;
-    let v = *expect_llvm_value(&args[2])?;
-    let builder = b.0.borrow();
+fn build_ret_tlvalue(
+    builder: &inkwell::builder::Builder<'static>,
+    out_ptr: inkwell::values::PointerValue<'static>,
+    tag: TlTag,
+    payload: inkwell::values::IntValue<'static>,
+) -> Result<RtValue, EvalError> {
     let tlvalue_ty = tlvalue_llvm_type();
-    let out_ptr = f
-        .get_nth_param(2)
-        .ok_or_else(|| EvalError::Internal("build-ret: function has no out parameter".into()))?
-        .into_pointer_value();
-    let tag = llvm_context().i64_type().const_int(TlTag::I64 as u64, false);
+    let tag_v = llvm_context().i64_type().const_int(tag as u64, false);
     let packed = tlvalue_ty.get_undef();
     let packed = builder
-        .build_insert_value(packed, tag, 0, "tagged")
+        .build_insert_value(packed, tag_v, 0, "tagged")
         .map_err(|e| EvalError::Panic(format!("build-ret: {}", e)))?;
     let packed = builder
-        .build_insert_value(packed, v, 1, "withpayload")
+        .build_insert_value(packed, payload, 1, "withpayload")
         .map_err(|e| EvalError::Panic(format!("build-ret: {}", e)))?;
     builder
         .build_store(out_ptr, packed.into_struct_value())
@@ -1168,6 +1262,44 @@ fn llvm_builder_build_ret(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .build_return(Some(&status))
         .map(|_| RtValue::Unit)
         .map_err(|e| EvalError::Panic(format!("build-ret: {}", e)))
+}
+
+#[cfg(feature = "compile")]
+fn out_ptr_of(f: &inkwell::values::FunctionValue<'static>) -> Result<inkwell::values::PointerValue<'static>, EvalError> {
+    Ok(f.get_nth_param(2)
+        .ok_or_else(|| EvalError::Internal("build-ret: function has no out parameter".into()))?
+        .into_pointer_value())
+}
+
+/// `(build-ret b f v) -> Unit`: returns `v` (a plain `i64`) as `TlTag::I64`.
+/// `bool` returns need [`llvm_builder_build_ret_bool`] instead (Phase 2b);
+/// `f64`/`char` are a follow-up step.
+#[cfg(feature = "compile")]
+fn llvm_builder_build_ret(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let b = expect_llvm_builder(&args[0])?;
+    let f = expect_llvm_function(&args[1])?;
+    let v = *expect_llvm_value(&args[2])?;
+    let builder = b.0.borrow();
+    let out_ptr = out_ptr_of(f)?;
+    build_ret_tlvalue(&builder, out_ptr, TlTag::I64, v)
+}
+
+/// `(build-ret-bool b f v) -> Unit`: widens `v` (an `i1`) to `i64`
+/// (`build_int_z_extend`) and returns it as `TlTag::Bool` — Phase 2b's
+/// `bool`-return support, the counterpart to [`llvm_builder_build_ret`].
+#[cfg(feature = "compile")]
+fn llvm_builder_build_ret_bool(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let b = expect_llvm_builder(&args[0])?;
+    let f = expect_llvm_function(&args[1])?;
+    let v = *expect_llvm_value(&args[2])?;
+    let builder = b.0.borrow();
+    let widened = builder
+        .build_int_z_extend(v, llvm_context().i64_type(), "retbool")
+        .map_err(|e| EvalError::Panic(format!("build-ret-bool: {}", e)))?;
+    let out_ptr = out_ptr_of(f)?;
+    build_ret_tlvalue(&builder, out_ptr, TlTag::Bool, widened)
 }
 
 #[cfg(feature = "compile")]

@@ -645,12 +645,16 @@ fn llvm_function_def() -> AdtDef {
 /// indexing the function's first (`args`) parameter, and returning means
 /// writing through its third (`out`) parameter — see
 /// `crate::eval::interp::{llvm_builder_load_arg,llvm_builder_build_ret}`.
+/// `load-arg-bool`/`build-ret-bool` are their `bool`-narrowing counterparts
+/// (Phase 2b, mixed `i64`/`bool` signatures) — see
+/// `crate::eval::interp::{llvm_builder_load_arg_bool,llvm_builder_build_ret_bool}`.
 #[cfg(feature = "compile")]
 fn llvm_builder_def() -> AdtDef {
     let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true }, instance: true };
     let mut assoc = HashMap::new();
     assoc.insert("position-at-end".to_string(), method(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit));
     assoc.insert("load-arg".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty()));
+    assoc.insert("load-arg-bool".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty()));
     assoc.insert("build-op".to_string(), method(vec![llvm_builder_ty(), Type::Str, llvm_value_ty(), llvm_value_ty()], llvm_value_ty()));
     assoc.insert(
         "build-cond-br".to_string(),
@@ -658,6 +662,7 @@ fn llvm_builder_def() -> AdtDef {
     );
     assoc.insert("build-br".to_string(), method(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit));
     assoc.insert("build-ret".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
+    assoc.insert("build-ret-bool".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
     AdtDef { name: Path::root("llvmbuilder"), params: vec![], variants: vec![], assoc, public: true }
 }
 
@@ -690,16 +695,24 @@ fn register_compile_builtins(root: &mut Namespace) {
 
     let free = |params: Vec<Type>, ret: Type| FnSig { type_params: vec![], rest: None, params, ret, public: true };
     // `ast-params`/`ast-body`: the typed-AST bridge (`compile::ast_bridge`).
-    // `None` means "not a `defun`, or not all-`i64` params/return" (Phase 1's
-    // restricted scope) — `compile` then refuses the function outright.
+    // `None` means "not a `defun`, or not all `i64`/`bool` params/return"
+    // (Phase 2b's restricted scope) — `compile` then refuses the function
+    // outright.
     root.fns.insert(
         "ast-params".to_string(),
         free(vec![Type::Str], option_of(Type::Named(Path::root("vector"), vec![Type::Str]))),
     );
     root.fns.insert("ast-body".to_string(), free(vec![Type::Str], option_of(ast_expr_ty())));
+    // `param-is-bool`/`ret-is-bool`: Phase 2b's per-parameter/return type tag
+    // (`AstExpr` itself carries no type info per node), letting `compile`
+    // pick `load-arg`/`build-ret` vs their `-bool` counterparts — see
+    // `crate::eval::interp::{Interp::builtin_param_is_bool,Interp::builtin_ret_is_bool}`.
+    root.fns.insert("param-is-bool".to_string(), free(vec![Type::Str, Type::I32], Type::Bool));
+    root.fns.insert("ret-is-bool".to_string(), free(vec![Type::Str], Type::Bool));
     root.fns.insert("llvm-new-module".to_string(), free(vec![Type::Str], llvm_module_ty()));
     root.fns.insert("llvm-new-builder".to_string(), free(vec![], llvm_builder_ty()));
     root.fns.insert("llvm-const-i64".to_string(), free(vec![Type::I64], llvm_value_ty()));
+    root.fns.insert("llvm-const-bool".to_string(), free(vec![Type::Bool], llvm_value_ty()));
     // `llvm-finish-compile`: JITs `module` and registers `name` (a
     // `arity`-ary, all-`i64` function) so ordinary calls to it dispatch to
     // the compiled native code instead of tree-walking — see

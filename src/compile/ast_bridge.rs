@@ -3,13 +3,13 @@
 //! the typelisp-written compiler (`compile::compiler_source`) can pattern-match
 //! over a function's body with the language's own `match`.
 //!
-//! Phase 1 ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) only bridges the
-//! narrow all-`i64`-scalar subset needed to compile a function like
-//! `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))`: integer/bool
-//! literals, parameter references, `if`, and `i64`'s binary
-//! arithmetic/comparison instance methods. Anything else returns `None` —
-//! `compile` then refuses the function outright rather than miscompiling it
-//! (see `Interp::builtin_ast_body` in `src/eval/interp.rs`).
+//! Phase 1/2 ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) only bridges the
+//! narrow `i64`/`bool`-scalar subset needed to compile a function like
+//! `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))` or `(defun gt ((a
+//! i64) (b i64)) bool (> a b))`: integer/bool literals, parameter references,
+//! `if`, and `i64`'s binary arithmetic/comparison instance methods. Anything
+//! else returns `None` — `compile` then refuses the function outright rather
+//! than miscompiling it (see `Interp::builtin_ast_body` in `src/eval/interp.rs`).
 
 use crate::{Expr, Path, RtValue, Type, Typed};
 
@@ -30,17 +30,18 @@ fn data(variant: usize, fields: Vec<RtValue>) -> RtValue {
 }
 
 /// Converts one checked expression into an `AstExpr` value, or `None` if it
-/// uses a construct outside Phase 1's scope.
+/// uses a construct outside Phase 1/2's scope.
 pub(crate) fn typed_to_ast(t: &Typed) -> Option<RtValue> {
     match &t.expr {
         Expr::Int(n) => Some(data(A_INT, vec![RtValue::Int(*n)])),
         Expr::Bool(b) => Some(data(A_BOOL, vec![RtValue::Bool(*b)])),
-        // A `Var`'s own `Expr` doesn't carry its type — Phase 1 only ever
-        // binds `i64` parameters (no `let`/non-`i64` locals are bridged yet),
-        // so checking the wrapping `Typed.ty` here is how a stray non-`i64`
-        // variable (impossible today, but not by construction) would be
-        // caught rather than silently mistyped as `i64` downstream.
-        Expr::Var(name) if t.ty == Type::I64 => Some(data(A_VAR, vec![RtValue::Str(name.clone())])),
+        // A `Var`'s own `Expr` doesn't carry its type — Phase 1/2b only ever
+        // bind `i64`/`bool` parameters (no `let`-bound locals are bridged
+        // yet), so checking the wrapping `Typed.ty` here is how a stray
+        // unsupported-type variable (impossible today, but not by
+        // construction) would be caught rather than silently mistyped
+        // downstream.
+        Expr::Var(name) if matches!(t.ty, Type::I64 | Type::Bool) => Some(data(A_VAR, vec![RtValue::Str(name.clone())])),
         Expr::If(c, then, els) => {
             let c = typed_to_ast(c)?;
             let then = typed_to_ast(then)?;

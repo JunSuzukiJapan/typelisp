@@ -481,14 +481,55 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       既定ビルド（feature無し）への影響なし、`cargo clippy --all-targets`は両構成で警告0
       （`compile`featureあり構成の既存警告1件は本セッション開始時から未コミットで残っていた
       `tests/prelude_test.rs`のmiriリーク対策実験によるもので、Phase2の変更とは無関係）。
+  - 実装済み（Phase 2b/`i64`・`bool`混在シグネチャ）: Phase 1/2aは「全引数・戻り値が`i64`」のみ
+    対象だったが、これを「各引数・戻り値が`i64`または`bool`（任意の混在可）」に拡張した——
+    `(defun gt ((a i64) (b i64)) bool (> a b))`のような述語関数（`i64`引数+`bool`戻り値、
+    現実のコードで最も典型的な形）が初めてコンパイル対象になった。
+    - `is_i64_scalar_signature`を`is_supported_scalar_signature`（+ `is_supported_scalar_type`）に
+      一般化（`eval::interp`）、`ast_bridge::typed_to_ast`の`Expr::Var`ガードを`Type::I64`単独から
+      `Type::I64 | Type::Bool`に拡大。`AstExpr::ABool`自体はPhase1から登録済みだったが
+      `compile-value`が未対応で`_`アームに落ちてpanicしていたのを今回初めて配線。
+    - **`bool`は終始i1幅のLLVM値として扱い、`TlValue`境界（`load-arg`/`build-ret`）でのみ
+      `i64`スロットとの幅変換を行う**設計（`build-op`の引数として`bool`値が混ざることはない——
+      `i64`の二項演算は`ast_bridge`がi64の`Assoc`にしか反応しないため、幅の食い違いは原理的に
+      発生しない）。新規Rust関数: `llvm_builder_load_arg_bool`（payload読み出し共通化した
+      `load_arg_payload`へ`build_int_truncate`を追加）、`llvm_builder_build_ret_bool`
+      （`build_int_z_extend`でi64へ拡張後、共通化した`build_ret_tlvalue`で`tag=Bool`を書き込む）、
+      `llvm_const_bool`（`bool_type().const_int`）。既存`load-arg`/`build-ret`は共通ヘルパ
+      （`load_arg_payload`/`build_ret_tlvalue`/`out_ptr_of`)抽出のリファクタのみで動作は不変。
+    - **`AstExpr`自体は引数の型を持たない**（各ノードに型タグが無い）ため、`compile`が
+      「このパラメータ位置・戻り値はbool型か」を問い合わせる新規Rust関数`param-is-bool`/
+      `ret-is-bool`（`fn_signature`の型情報を参照）を追加し、typelisp側の`fill-param-values`/
+      `compile-tail`がそれぞれ`load-arg`系/`build-ret`系のどちらを呼ぶか分岐するようにした
+      （`Vector<i32>`等の並行した型タグ列を新設する案より既存`ast-params`/`ast-body`を不変に
+      保てるため、この副問い合わせ方式を採用）。
+    - `call_compiled`（Rust側の呼び出し）も、引数を`RtValue::Int`/`RtValue::Bool`どちらからでも
+      `TlValue`へ詰められるよう`to_tlvalue_arg`を新設（引数側のtagは呼び出し先IRから読まれない
+      ので実質どちらでもよいが一貫性のため正しく設定）、戻り値は`out.tag`を見て`RtValue::Int`/
+      `RtValue::Bool`を分けて構築するよう変更（Phase2aは`tag`を無視して常に`Int`化していた）。
+    - TDD: `tests/compile_test.rs`に5件追加（10件中）——`i64`引数+`bool`戻り値の述語関数、
+      `bool`引数を`if`条件に直接使う関数、`bool`リテラルを条件に使う0引数関数、`bool`リテラルを
+      そのまま返す関数。既存5件は無変更でgreen。並行実行でのSIGSEGV再発無し（10回連続green）。
+      既定ビルド・`cargo clippy --all-targets`（両構成）への影響なし（警告0、既存の
+      `prelude_test.rs`由来の1件のみで無関係）。
+    - 未対応として残った範囲: `f64`/`char`（リテラル・演算・パラメータ・戻り値）、`let`束縛
+      （`ast-body`は依然「単一式の本体のみ」)、`bool`同士の`eq`等のメソッド呼び出し
+      （`and`/`or`は`if`へ脱糖されるため不要だが、明示的な`bool::eq`呼び出しは未橋渡し）。
   - **次の作業（Phase 2残り、ブランチ`feature/compiler`で継続）**:
-    - **Phase 2b（スカラー拡充）**: `f64`/`bool`/`char`のリテラル・演算・`let`を`AstExpr`/
-      `compile-value`/`compile-tail`に追加。`TlValue`の`payload`union自体はPhase2aで既に
-      `f64`/`bool`/`char`/`ptr`フィールドを持つ形にしてあるので、ABI自体の変更は不要——
-      `ast_bridge::typed_to_ast`が`Expr::Float`/`f64`の`Assoc`演算を`AstExpr`へ橋渡しできるよう
-      `AFloat`等のvariantを追加し、`compile-value`/`llvm_builder_build_op`がタグに応じて
-      `build_float_*`系のinkwell APIを呼ぶよう分岐を増やす作業が中心。
-    - **Phase 2c（コンパイル済み関数同士の直接呼び出し）**: `(compiled? name)`的なチェックを
+    - **Phase 2c（`f64`対応）**: `f64`のリテラル・算術/比較・パラメータ・戻り値を`AstExpr`/
+      `compile-value`/`compile-tail`に追加。`bool`と違い真に新しいLLVM値種別
+      （`inkwell::values::FloatValue`、整数の`IntValue`とは別のRust型）が必要になる点が
+      Phase2bとの違い——`build-op`/`load-arg`/`build-ret`それぞれに浮動小数版
+      （`build_float_*`系のinkwell API、`load-arg`は payload の生i64ビット列を`f64`へ
+      `build_bit_cast`で再解釈、`build-ret`はその逆）を追加する作業が中心。`TlValue`の
+      `payload`union自体はPhase2aで既に`f64_`フィールドを持つ形にしてあるのでABI自体は無変更。
+    - **Phase 2d（`char`対応、優先度低）**: `char`は算術が無く主に等値比較のみなので
+      `f64`より軽量——`i64`/`bool`と同じ「i64スロットに格納し境界でのみ幅変換」方式でよい
+      （`u32`へ`truncate`/`zext`、ただし32bit）。
+    - **Phase 2e（`let`束縛）**: `ast-body`を「単一式」制約から「複数フォーム+let」へ拡張。
+      `compile-value`/`compile-tail`がローカル変数を`alloca`+`load`/`store`で持つか、
+      もしくは値レベルのSSA変数表（`Vector<LlvmValue>`を`params`同様に拡張）で持つかの設計が必要。
+    - **Phase 2f（コンパイル済み関数同士の直接呼び出し）**: `(compiled? name)`的なチェックを
       `compile`に追加し、未コンパイルの呼び出し先があれば明示的にコンパイル拒否する
       ——逆方向〈コンパイル済みから未コンパイルを呼ぶ〉はトランポリンが必要でより難しいため後回し。
     - **Phase 3（Sexpr/HashTable/Vector対応）**: 既存Rust実装（`mem::Heap`の cons/GC、

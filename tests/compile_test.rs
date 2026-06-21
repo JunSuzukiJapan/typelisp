@@ -69,6 +69,72 @@ fn compiles_a_function_with_more_than_three_arguments() {
     assert_eq!(run(src), RtValue::Int(15));
 }
 
+/// Phase 2b: `i64`/`bool` can mix freely within one signature, the realistic
+/// case Phase 1/2a's all-`i64` restriction ruled out entirely (a predicate
+/// like this — `i64` params, `bool` return — is the most common shape that
+/// restriction blocked).
+#[test]
+fn compiles_a_predicate_function_returning_bool() {
+    let src = r#"
+        (defun gt ((a i64) (b i64)) bool (> a b))
+        (compile "gt")
+        (gt 7 3)
+    "#;
+    assert_eq!(run(src), RtValue::Bool(true));
+}
+
+#[test]
+fn compiled_predicate_function_returns_false_too() {
+    let src = r#"
+        (defun gt ((a i64) (b i64)) bool (> a b))
+        (compile "gt")
+        (gt 2 9)
+    "#;
+    assert_eq!(run(src), RtValue::Bool(false));
+}
+
+/// A `bool` parameter used directly as an `if` condition — `load-arg-bool`
+/// truncates the `i64`-wide `TlValue` payload down to `i1` so it can feed
+/// `build-cond-br` without further conversion.
+#[test]
+fn compiles_a_function_taking_a_bool_parameter() {
+    let src = r#"
+        (defun choose ((c bool) (a i64) (b i64)) i64 (if c a b))
+        (compile "choose")
+        (choose true 11 22)
+    "#;
+    assert_eq!(run(src), RtValue::Int(11));
+    let src2 = r#"
+        (defun choose ((c bool) (a i64) (b i64)) i64 (if c a b))
+        (compile "choose")
+        (choose false 11 22)
+    "#;
+    assert_eq!(run(src2), RtValue::Int(22));
+}
+
+/// A bare `bool` literal as the `if` condition (`AstExpr::ABool` /
+/// `llvm-const-bool`), in a 0-argument function.
+#[test]
+fn compiles_a_function_with_a_bool_literal_condition() {
+    let src = r#"
+        (defun always-one () i64 (if true 1 2))
+        (compile "always-one")
+        (always-one)
+    "#;
+    assert_eq!(run(src), RtValue::Int(1));
+}
+
+/// A bare `bool` literal as the function's entire body (return value).
+#[test]
+fn compiles_a_function_returning_a_bool_literal() {
+    let src = r#"
+        (defun yes () bool true)
+        (compile "yes")
+        (yes)
+    "#;
+    assert_eq!(run(src), RtValue::Bool(true));
+}
+
 #[test]
 fn refuses_to_compile_a_non_i64_function() {
     let src = r#"
