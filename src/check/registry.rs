@@ -557,11 +557,11 @@ fn error_ty() -> Type {
 /// bool/float literals, parameter references, `if`, `let`, and `i64`/`f64`'s
 /// binary arithmetic/comparison instance methods — just enough to compile a
 /// function like `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))`.
-/// `afloat`/`alet`/`acall`/`achar` are appended last (Phase 2c/2e/2f/2d)
-/// rather than inserted in literal-grouping order with `aint`/`abool`, since
-/// these indices are a stable wire format between this definition and
-/// `ast_bridge`'s constants — reordering existing ones would silently break
-/// already-working variants.
+/// `afloat`/`alet`/`acall`/`achar`/`anil`/`acons`/`acar`/`acdr`/`anullp` are
+/// appended last (Phase 2c/2e/2f/2d/3) rather than inserted in
+/// literal-grouping order with `aint`/`abool`, since these indices are a
+/// stable wire format between this definition and `ast_bridge`'s constants
+/// — reordering existing ones would silently break already-working variants.
 /// `alet`'s three `Vector` fields are parallel: `names[i]`'s value is
 /// `values[i]` (all checked against the **outer** scope, CL `let`
 /// semantics — `crate::compile::ast_bridge`'s doc comment), then `body`
@@ -571,7 +571,9 @@ fn error_ty() -> Type {
 /// `Interp.compiled` by the time `ast_bridge::typed_to_ast` bridges it
 /// (Phase 2f) — see that function's doc comment on why an uncompiled callee
 /// makes the whole bridge fail (`None`) rather than reaching `compile-value`
-/// at all.
+/// at all. `anil`/`acons`/`acar`/`acdr`/`anullp` (Phase 3) are `Sexpr`'s
+/// `Nil` literal and `cons`/`car`/`cdr`/`null?` — the only `Value` shapes
+/// `compile` supports (see `crate::eval::interp::value_to_ptr`'s doc comment).
 #[cfg(feature = "compile")]
 fn ast_expr_def() -> AdtDef {
     let t = ast_expr_ty();
@@ -589,8 +591,13 @@ fn ast_expr_def() -> AdtDef {
                 name: "alet".to_string(),
                 fields: vec![vector_of(Type::Str), vector_of(t.clone()), vector_of(t.clone())],
             },
-            Variant { name: "acall".to_string(), fields: vec![Type::Str, vector_of(t)] },
+            Variant { name: "acall".to_string(), fields: vec![Type::Str, vector_of(t.clone())] },
             Variant { name: "achar".to_string(), fields: vec![Type::Char] },
+            Variant { name: "anil".to_string(), fields: vec![] },
+            Variant { name: "acons".to_string(), fields: vec![t.clone(), t.clone()] },
+            Variant { name: "acar".to_string(), fields: vec![t.clone()] },
+            Variant { name: "acdr".to_string(), fields: vec![t.clone()] },
+            Variant { name: "anullp".to_string(), fields: vec![t] },
         ],
         assoc: HashMap::new(),
         public: true,
@@ -701,6 +708,13 @@ fn llvm_builder_def() -> AdtDef {
     // `-bool` uses (`bool` truncates/zext to `i1`, `char` to `i32`) — see
     // `crate::eval::interp::{llvm_builder_load_arg_char,llvm_builder_build_ret_char}`.
     assoc.insert("load-arg-char".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty()));
+    // `load-arg-sexpr`/`build-ret-sexpr` (Phase 3): `Sexpr`'s pointer-
+    // reinterpreting counterparts to `load-arg`/`build-ret`, the same
+    // bit-reinterpret (not narrow/widen) shape `-f64` uses (`int_to_ptr`/
+    // `ptr_to_int` instead of `bitcast`, since LLVM has no pointer<->i64
+    // bitcast) — see
+    // `crate::eval::interp::{llvm_builder_load_arg_sexpr,llvm_builder_build_ret_sexpr}`.
+    assoc.insert("load-arg-sexpr".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty()));
     assoc.insert("build-op".to_string(), method(vec![llvm_builder_ty(), Type::Str, llvm_value_ty(), llvm_value_ty()], llvm_value_ty()));
     assoc.insert(
         "build-cond-br".to_string(),
@@ -711,6 +725,7 @@ fn llvm_builder_def() -> AdtDef {
     assoc.insert("build-ret-bool".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
     assoc.insert("build-ret-f64".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
     assoc.insert("build-ret-char".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
+    assoc.insert("build-ret-sexpr".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
     // `build-call`/`build-call-bool`/`build-call-f64`/`build-call-char` (Phase 2f/2d): packs `args`
     // into a stack-allocated `TlValue` array and emits a direct `call` to
     // `callee` (a declaration from `LlvmModule::get-or-declare-function`)
@@ -732,6 +747,41 @@ fn llvm_builder_def() -> AdtDef {
         "build-call-char".to_string(),
         method(vec![llvm_builder_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
     );
+    assoc.insert(
+        "build-call-sexpr".to_string(),
+        method(vec![llvm_builder_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
+    );
+    // `build-cons`/`build-car`/`build-cdr`/`push-root`/`pop-root` (Phase 3):
+    // `Sexpr`'s cons-cell operations and GC-rooting primitives, each a
+    // direct `call` to a fixed Rust runtime shim rather than inline IR
+    // (`cons` may trigger a GC; `car`/`cdr` never do but go through the same
+    // shim layer so JIT'd IR never has to know `Cell`'s layout) — see
+    // `crate::eval::interp::{llvm_builder_build_cons,llvm_builder_build_car,
+    // llvm_builder_build_cdr,llvm_builder_build_push_root,llvm_builder_build_pop_root}`.
+    // `module`/`f` are needed alongside the builder: `module` to declare the
+    // shim (reusing an existing declaration if `compile` already added one),
+    // `f` to read the enclosing function's `heap` parameter (the unified
+    // ABI's fourth parameter, `crate::eval::interp::heap_param_of`).
+    assoc.insert(
+        "build-cons".to_string(),
+        method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty()),
+    );
+    assoc.insert(
+        "build-car".to_string(),
+        method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty()], llvm_value_ty()),
+    );
+    assoc.insert(
+        "build-cdr".to_string(),
+        method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty()], llvm_value_ty()),
+    );
+    // `build-nullp` needs neither `module` nor `f` — it's a plain
+    // pointer-null comparison, never touching the heap or a runtime shim.
+    assoc.insert("build-nullp".to_string(), method(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty()));
+    assoc.insert(
+        "push-root".to_string(),
+        method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit),
+    );
+    assoc.insert("pop-root".to_string(), method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty()], Type::Unit));
     AdtDef { name: Path::root("llvmbuilder"), params: vec![], variants: vec![], assoc, public: true }
 }
 
@@ -788,12 +838,25 @@ fn register_compile_builtins(root: &mut Namespace) {
     // `crate::eval::interp::Interp::{builtin_param_is_char,builtin_ret_is_char}`).
     root.fns.insert("param-is-char".to_string(), free(vec![Type::Str, Type::I32], Type::Bool));
     root.fns.insert("ret-is-char".to_string(), free(vec![Type::Str], Type::Bool));
+    // `param-is-sexpr`/`ret-is-sexpr` (Phase 3): same role as the pairs
+    // above, for `Sexpr` (stored as a plain pointer, narrowed/widened only
+    // at the `TlValue` boundary — see
+    // `crate::eval::interp::Interp::{builtin_param_is_sexpr,builtin_ret_is_sexpr}`).
+    root.fns.insert("param-is-sexpr".to_string(), free(vec![Type::Str, Type::I32], Type::Bool));
+    root.fns.insert("ret-is-sexpr".to_string(), free(vec![Type::Str], Type::Bool));
     root.fns.insert("llvm-new-module".to_string(), free(vec![Type::Str], llvm_module_ty()));
     root.fns.insert("llvm-new-builder".to_string(), free(vec![], llvm_builder_ty()));
     root.fns.insert("llvm-const-i64".to_string(), free(vec![Type::I64], llvm_value_ty()));
     root.fns.insert("llvm-const-bool".to_string(), free(vec![Type::Bool], llvm_value_ty()));
     root.fns.insert("llvm-const-f64".to_string(), free(vec![Type::F64], llvm_value_ty()));
     root.fns.insert("llvm-const-char".to_string(), free(vec![Type::Char], llvm_value_ty()));
+    root.fns.insert("llvm-const-nil".to_string(), free(vec![], llvm_value_ty()));
+    // `is-sexpr-value` (Phase 3): whether an `LlvmValue`'s actual LLVM kind
+    // is a pointer — `compile`'s rooting discipline uses this to find which
+    // entries of a `Vector<LlvmValue>` (parameters/`let` bindings) need
+    // `push-root`/`pop-root` around `Sexpr`-allocating operations — see
+    // `crate::eval::interp::llvm_value_is_sexpr`.
+    root.fns.insert("is-sexpr-value".to_string(), free(vec![llvm_value_ty()], Type::Bool));
     // `llvm-finish-compile`: JITs `module` and registers `name` (a
     // `arity`-ary, all-`i64` function) so ordinary calls to it dispatch to
     // the compiled native code instead of tree-walking — see

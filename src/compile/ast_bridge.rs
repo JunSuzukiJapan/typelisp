@@ -3,26 +3,31 @@
 //! the typelisp-written compiler (`compile::compiler_source`) can pattern-match
 //! over a function's body with the language's own `match`.
 //!
-//! Phase 1/2 ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) only bridges the
-//! narrow `i64`/`bool`/`f64`/`char`-scalar subset needed to compile a
-//! function like `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))` or
-//! `(defun gt ((a i64) (b i64)) bool (> a b))`: integer/bool/float/char
-//! literals, parameter references, `if`, `let`, calls to other compiled
-//! functions, `i64`'s/`f64`'s binary arithmetic/comparison instance methods,
-//! and `char`'s `eq`/`lt`. Anything else returns `None` — `compile` then
-//! refuses the function outright rather than miscompiling it (see
-//! `Interp::builtin_ast_body` in `src/eval/interp.rs`).
+//! Phase 1/2/3 ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) only bridges
+//! the narrow `i64`/`bool`/`f64`/`char`/`Sexpr`-scalar subset needed to
+//! compile a function like `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b
+//! a))` or `(defun gt ((a i64) (b i64)) bool (> a b))`: integer/bool/float/
+//! char literals, the `Nil` `Sexpr` literal, parameter references, `if`,
+//! `let`, calls to other compiled functions, `i64`'s/`f64`'s binary
+//! arithmetic/comparison instance methods, `char`'s `eq`/`lt`, and
+//! `cons`/`car`/`cdr`/`null` (Phase 3 — a `Sexpr` value is only bridged at
+//! all if it's `Nil` or `Cons`; see `crate::eval::interp::value_to_ptr`'s
+//! doc comment for what happens if a *runtime* value falls outside that).
+//! Anything else returns `None` — `compile` then refuses the function
+//! outright rather than miscompiling it (see `Interp::builtin_ast_body` in
+//! `src/eval/interp.rs`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::{Expr, Interp, Path, RtValue, Type, Typed};
+use crate::{Expr, Interp, Path, QuotedSexpr, RtValue, Type, Typed};
 
 /// Variant indices of `AstExpr`'s constructors — must match
 /// `check::registry::ast_expr_def`'s `variants` order exactly. `A_FLOAT`/
-/// `A_LET`/`A_CALL`/`A_CHAR` are appended last (Phase 2c/2e/2f/2d) rather
-/// than grouped with related variants — see `ast_expr_def`'s doc comment on
-/// why these indices are append-only.
+/// `A_LET`/`A_CALL`/`A_CHAR`/`A_NIL`/`A_CONS`/`A_CAR`/`A_CDR`/`A_NULLP` are
+/// appended last (Phase 2c/2e/2f/2d/3) rather than grouped with related
+/// variants — see `ast_expr_def`'s doc comment on why these indices are
+/// append-only.
 const A_INT: usize = 0;
 const A_BOOL: usize = 1;
 const A_VAR: usize = 2;
@@ -32,6 +37,11 @@ const A_FLOAT: usize = 5;
 const A_LET: usize = 6;
 const A_CALL: usize = 7;
 const A_CHAR: usize = 8;
+const A_NIL: usize = 9;
+const A_CONS: usize = 10;
+const A_CAR: usize = 11;
+const A_CDR: usize = 12;
+const A_NULLP: usize = 13;
 
 /// `i64`'s and `f64`'s binary arithmetic/comparison instance methods
 /// (`registry::int_assoc`/`float_assoc`) — the only `Expr::Assoc` shapes
@@ -39,11 +49,18 @@ const A_CHAR: usize = 8;
 /// list covers either receiver type.
 const BINOPS: [&str; 9] = ["+", "-", "*", "<", "<=", ">", ">=", "=", "/="];
 
-/// The scalar types bridged at all (Phase 1/2b/2c/2d) — shared by every
+/// The scalar types bridged at all (Phase 1/2b/2c/2d/3) — shared by every
 /// guard that needs to tell "a value this narrow scope can carry" from
 /// "something `compile` must refuse" (`Var`'s/`Call`'s wrapping `Typed.ty`).
 fn is_bridgeable_scalar_type(t: &Type) -> bool {
-    matches!(t, Type::I64 | Type::Bool | Type::F64 | Type::Char)
+    matches!(t, Type::I64 | Type::Bool | Type::F64 | Type::Char) || is_sexpr_value_type(t)
+}
+
+/// Whether `t` is the `Sexpr` type itself — `compile`'s `Sexpr` support
+/// (Phase 3) only ever sees this one type (no type parameters: `Sexpr` is
+/// not generic), unlike e.g. `Vector<T>`.
+fn is_sexpr_value_type(t: &Type) -> bool {
+    matches!(t, Type::Named(p, params) if params.is_empty() && *p == Path::root("sexpr"))
 }
 
 fn data(variant: usize, fields: Vec<RtValue>) -> RtValue {
@@ -64,6 +81,13 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp) -> Option<RtValue> {
         Expr::Bool(b) => Some(data(A_BOOL, vec![RtValue::Bool(*b)])),
         Expr::Float(n) => Some(data(A_FLOAT, vec![RtValue::Float(*n)])),
         Expr::Char(c) => Some(data(A_CHAR, vec![RtValue::Char(*c)])),
+        // `Sexpr`'s `Nil` literal (Phase 3) — `()`/`(quote ())`. Every other
+        // `QuotedSexpr` shape (`Int`/`Float`/`Char`/`Bool`/`Sym`/`Str`/`Cons`)
+        // stays unbridged: a non-empty quoted literal would need `cons`-ing
+        // a whole structure at compile time, which `compile-value` has no
+        // primitive for (only `cons`/`car`/`cdr` at *runtime*, see `A_CONS`
+        // below).
+        Expr::Quote(QuotedSexpr::Nil) => Some(data(A_NIL, vec![])),
         // A `Var`'s own `Expr` doesn't carry its type — Phase 1/2 only ever
         // bind `i64`/`bool`/`f64`/`char` parameters *or* `let`-bound locals
         // (Phase 2e) of those same types, so checking the wrapping `Typed.ty`
@@ -118,6 +142,34 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp) -> Option<RtValue> {
             }
             let body = body.iter().map(|f| typed_to_ast(f, interp)).collect::<Option<Vec<_>>>()?;
             Some(data(A_LET, vec![rt_vector(names), rt_vector(values), rt_vector(body)]))
+        }
+        // `cons`/`car`/`cdr` (Phase 3): always `Interp::eval_builtin`
+        // (Rust-implemented) free functions, never entries in
+        // `Interp.compiled`, so they need their own name-based bridging
+        // ahead of the general `ACall` case below rather than its
+        // `interp.is_compiled` guard.
+        Expr::Call(path, call_args) if path.is_simple() && path.local() == "cons" && call_args.len() == 2 => {
+            let lhs = typed_to_ast(&call_args[0], interp)?;
+            let rhs = typed_to_ast(&call_args[1], interp)?;
+            Some(data(A_CONS, vec![lhs, rhs]))
+        }
+        Expr::Call(path, call_args) if path.is_simple() && path.local() == "car" && call_args.len() == 1 => {
+            let v = typed_to_ast(&call_args[0], interp)?;
+            Some(data(A_CAR, vec![v]))
+        }
+        Expr::Call(path, call_args) if path.is_simple() && path.local() == "cdr" && call_args.len() == 1 => {
+            let v = typed_to_ast(&call_args[0], interp)?;
+            Some(data(A_CDR, vec![v]))
+        }
+        // `null` (Phase 3): an ordinary typelisp `defun` in `prelude.rs`
+        // (`(match s ((Nil) true) (_ false)))`), bridged directly onto the
+        // `Nil`-pointer-check primitive instead of requiring this bridge to
+        // understand `match` at all — `consp`/`atom` (also prelude `defun`s,
+        // built from `null`/`not`) stay unbridged for the same reason and
+        // are a follow-up step.
+        Expr::Call(path, call_args) if path.is_simple() && path.local() == "null" && call_args.len() == 1 => {
+            let v = typed_to_ast(&call_args[0], interp)?;
+            Some(data(A_NULLP, vec![v]))
         }
         // A call to another `defun` (Phase 2f, direct calls between compiled
         // functions): only bridged if `path` is a simple top-level name (the

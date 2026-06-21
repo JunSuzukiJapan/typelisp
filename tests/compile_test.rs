@@ -16,7 +16,15 @@ fn llvm_toolchain_links_and_runs() {
 }
 
 fn run(src: &str) -> RtValue {
-    let mut h = Heap::with_capacity(1 << 16);
+    run_with_heap(Heap::with_capacity(1 << 16), src)
+}
+
+/// Like [`run`], but with a caller-supplied heap — Phase 3's rooting tests
+/// use a tiny cons arena so `Heap::cons` is forced to run a real GC
+/// mid-compiled-function-call, exercising `compile`'s
+/// `push-root`/`pop-root` discipline rather than just its happy path (where
+/// the arena never fills up at all).
+fn run_with_heap(mut h: Heap, src: &str) -> RtValue {
     let r = Reader::new();
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -456,6 +464,115 @@ fn compiles_a_function_calling_a_char_returning_compiled_function() {
         (pick-first #\p #\q)
     "#;
     assert_eq!(run(src2), RtValue::Char('p'));
+}
+
+/// Phase 3: `car`/`cdr` never allocate, so this exercises the simplest
+/// `Sexpr` round-trip (`load-arg-sexpr`/`build-cdr`/`build-car`/
+/// `build-ret-sexpr`) with no rooting concerns at all — every element of
+/// `s` is `Nil`/`Cons`, the only `Value` shapes Phase 3 bridges.
+#[test]
+fn compiles_a_function_using_car_and_cdr() {
+    let src = r#"
+        (defun second ((s Sexpr)) Sexpr (car (cdr s)))
+        (compile "second")
+        (null (second (cons () (cons () ()))))
+    "#;
+    assert_eq!(run(src), RtValue::Bool(true));
+}
+
+/// `cons` (Phase 3) actually allocates — `build-cons` must root its operands
+/// around the underlying `Heap::cons` call so a GC mid-call can't reclaim
+/// either one.
+#[test]
+fn compiles_a_function_that_builds_a_cons_cell() {
+    let src = r#"
+        (defun pair ((a Sexpr) (b Sexpr)) Sexpr (cons a b))
+        (compile "pair")
+        (consp (pair () ()))
+    "#;
+    assert_eq!(run(src), RtValue::Bool(true));
+}
+
+/// `null` (Phase 3) bridges directly onto the `Nil`-pointer-check primitive
+/// (`build-nullp`) even though it's an ordinary `match`-based typelisp
+/// `defun` in `prelude.rs`, not a Rust builtin.
+#[test]
+fn compiles_a_function_checking_for_nil() {
+    let src = r#"
+        (defun is-empty ((s Sexpr)) bool (null s))
+        (compile "is-empty")
+        (is-empty ())
+    "#;
+    assert_eq!(run(src), RtValue::Bool(true));
+    let src2 = r#"
+        (defun is-empty ((s Sexpr)) bool (null s))
+        (compile "is-empty")
+        (is-empty (cons (Int 1) (Int 2)))
+    "#;
+    assert_eq!(run(src2), RtValue::Bool(false));
+}
+
+/// A bare `Nil` literal (`()`) as the function's entire body —
+/// `AstExpr::ANil`/`llvm-const-nil`.
+#[test]
+fn compiles_a_function_returning_nil() {
+    let src = r#"
+        (defun make-nil () Sexpr ())
+        (compile "make-nil")
+        (null (make-nil))
+    "#;
+    assert_eq!(run(src), RtValue::Bool(true));
+}
+
+/// The rooting discipline's actual reason to exist: two nested `let`s each
+/// `cons`-ing their own pair, then `cons`-ing those two pairs together. If
+/// `x` (the first `let`'s result) weren't rooted for the duration of the
+/// *second* `let`'s `cons` call, a GC triggered by that second call could
+/// reclaim it before the final `(cons x y)` ever runs.
+#[test]
+fn compiles_a_function_with_nested_lets_each_consing() {
+    let src = r#"
+        (defun build ((a Sexpr) (b Sexpr) (c Sexpr) (d Sexpr)) Sexpr
+          (let ((x (cons a b)))
+            (let ((y (cons c d)))
+              (cons x y))))
+        (compile "build")
+        (let* ((r (build () () () ())))
+          (consp r))
+    "#;
+    assert_eq!(run(src), RtValue::Bool(true));
+}
+
+/// The same nested-`let`-and-`cons` shape as
+/// `compiles_a_function_with_nested_lets_each_consing`, but run against a
+/// cons arena so small that `Heap::cons` is forced to actually run a
+/// collection partway through the compiled function's execution — the only
+/// way to exercise the rooting discipline's reason to exist rather than
+/// just its happy path. Calls the compiled function repeatedly (each call
+/// allocates 3 fresh cells) so the arena fills up and a real GC fires
+/// mid-call; if `push-root`/`pop-root` were missing or miscounted, the
+/// `x`/`y` intermediates would be vulnerable to reclamation and this would
+/// either panic (`HeapExhausted`/`NotACons`) or abort the process.
+#[test]
+fn compiled_cons_chain_survives_a_gc_mid_call() {
+    let src = r#"
+        (defun build ((a Sexpr) (b Sexpr) (c Sexpr) (d Sexpr)) Sexpr
+          (let ((x (cons a b)))
+            (let ((y (cons c d)))
+              (cons x y))))
+        (compile "build")
+        (let ((result (Nil)))
+          (dotimes (i 500) (setf result (build () () () ())))
+          (consp result))
+    "#;
+    // `dotimes` runs in the tree-walking interpreter as a plain Rust `loop`
+    // (not recursion — see `Interp`'s `While`/`Loop` evaluation), calling
+    // the compiled `build` 500 times — far more cons cells than this small
+    // arena can hold without collecting, several times over (most of the
+    // arena's cells go to loading `prelude.rs`/`compiler_source.rs`
+    // themselves; the loop's 1500 cells then force several real
+    // collections).
+    assert_eq!(run_with_heap(Heap::with_capacity(4096), src), RtValue::Bool(true));
 }
 
 #[test]

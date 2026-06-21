@@ -688,18 +688,111 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       正しく拒否されることの確認）。既存26件は無変更でgreen。並行実行でのSIGSEGV
       再発無し（10回連続green）。既定ビルド・`cargo clippy --all-targets`
       （両構成）への影響なし。
-  - **次の作業（Phase 2残り、ブランチ`feature/compiler`で継続）**:
+  - 実装済み（Phase 3/`Sexpr`対応——`cons`/`car`/`cdr`/`null`、ブランチ`feature/compiler`）:
+    `Sexpr`（`Nil`/`Cons`のみ、`Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Path`形式の
+    `Sexpr`値はスコープ外）がi64/bool/f64/charと任意混在できるようになった——
+    `(defun second ((s Sexpr)) Sexpr (car (cdr s)))`、`(defun pair ((a Sexpr) (b Sexpr))
+    Sexpr (cons a b))`、`null`（preludeの`match`ベース`defun`だが直接`Nil`ポインタ判定に
+    橋渡し）が対象。HashTable/Vectorは当初Phase3として一括りにされていたが、調査の結果
+    実際にはRust管理（`Rc<RefCell<..>>`、GCヒープ対象外）と判明したため、GC関連リスクが
+    本当に存在する`Sexpr`を先に実装し、HashTable/Vectorは別途切り出した（次の作業参照）。
+    - **`Value`(Sexprの内部表現)は16バイト（タグ8バイト+ペイロード8バイト）で、`TlValue`の
+      8バイトpayloadには直接収まらない**ことを実測確認（`size_of::<Value>()`）。これを
+      回避するため、コンパイル対象の`Sexpr`値を「`Nil`=nullポインタ、`Cons`=cons cellへの
+      生ポインタ」という1ワード表現に限定し、`TlValue::Ptr`タグ（既存）のpayloadへそのまま
+      乗せる設計にした——Int/Float/Char/Bool/Symbol/Str/Pathの`Sexpr`値はこの1ワード表現に
+      収まらないため、初手からコンパイル対象外と確定。
+      `crate::eval::interp::value_to_ptr`/`ptr_to_value`が変換を担う。
+    - **GCは`Heap::cons`呼び出し時（フリーリスト枯渇時）にしか発動しない**ことを実装から
+      確認——`car`/`cdr`（読み取りのみ）は完全に安全にコンパイルできるが、`cons`
+      （構築）には正しいrooting設計が必要。「直前の引数だけをroot登録する」単純な実装では
+      不十分（`(let ((x (cons a b))) (let ((y (cons c d))) (cons x y)))`のような
+      ネストしたlet+複数consの組み合わせで、2番目のconsを評価中にxがroot漏れし、
+      GCで誤って回収される危険がある）と判断し、**関数のスコープ全体で「現在生きている
+      `Sexpr`型変数」を継続的にheapのrootスタックに積み続ける**設計（tree-walking
+      インタプリタの`Interp::sync_roots`に相当する処理をコンパイル時に静的に組み込む）を
+      採用した。
+    - **統一ABIにHeapポインタを第4引数として追加**: `extern "C" fn(*const TlValue, u32,
+      *mut TlValue, *mut Heap) -> i32`（既存のi64/bool/f64/char関数のシグネチャにも
+      影響するが、使わない関数は単に無視するだけで実害なし）。`Interp::call_compiled`が
+      `heap: &mut Heap`を第4引数として渡すよう変更（`Expr::Call`評価時のheapをそのまま
+      ブリッジ）。
+    - **`build-cons`/`build-car`/`build-cdr`/`push-root`/`pop-root`は全て固定名の
+      Rustランタイムシム（`tl_sexpr_cons`/`tl_sexpr_car`/`tl_sexpr_cdr`/
+      `tl_heap_push_root`/`tl_heap_pop_root`、`extern "C" fn`）への直接`call`として実装**
+      （`#[no_mangle]`不要——同一Rustバイナリ内なので`as usize`キャストで関数アドレスを
+      直接取得できる、`runtime_shim_address`）。呼び出し先関数の宣言・解決は、Phase 2fの
+      「コンパイル済みtypelisp関数同士の直接呼び出し」と全く同じ2段階構成（モジュールに
+      本体なし宣言を追加→JITエンジン作成後に`add_global_mapping`で実アドレス解決）を
+      再利用——対象が「別compile呼び出しでJIT済みの関数」か「固定のRust関数」かの違いのみ。
+      `tl_sexpr_cons`は内部でcar/cdrをpush_root→`Heap::cons`→pop_rootする（ここが
+      唯一GCが発動しうる箇所）。`Heap::car`/`Heap::cdr`が返す値が`Nil`/`Cons`以外
+      （`value_to_ptr`が想定しないスコープ外のSexpr内部要素）だった場合、シムは
+      `std::process::abort()`する設計にした——`*mut u8`の戻り値スロットにはエラーを
+      返す余地がなく、`compile-value`の既存`panic`フォールバック（未対応AstExprへの
+      対応）と同じ「静的に起こらないはずのケースに対するassert」という位置づけ。
+    - **関数全体のrooting管理（`compile`本体・`compile-tail`の`pushed`パラメータ）**:
+      関数entry時、`Sexpr`型パラメータを全て`push-root`し、その個数を`pushed`として
+      `compile-tail`に渡す。`compile-tail`の`ALet`アーム（tail位置）は新しい`Sexpr`型
+      束縛を`push-root`して`pushed`に積算するが**自分ではpopしない**——制御フローは
+      最終的に`compile-tail`の`_`アーム（実際に`build-ret*`を呼ぶ箇所）まで素通りし、
+      そこで累積した`pushed`を一括`pop-root`してから返す、という設計（tail位置の`let`は
+      スコープを抜けた後も関数自体がreturnするだけなので、個別にpopする必要がない）。
+      一方`compile-value`の`ALet`アーム（値位置）は、本体評価後に呼び出し元へ制御が
+      戻るため、**その場で自分のpushを必ずpop**する非対称設計（compile-tail/compile-value
+      の役割分担はPhase 1から一貫しているパターン）。
+      **重大な実装ミスを実装中に発見・修正**: 当初`compile-tail`の`_`アームで
+      「`pop-root`を先に呼んでから`compile-value`で結果を評価する」という順序で書いて
+      しまい、tail位置で`(cons x y)`のような式を返す際に`x`/`y`がpopされた後に評価
+      されてしまう（保護が外れた状態でconsを呼ぶ）バグになっていた。「結果を先に評価
+      → pop-root（GCトリガーなし） → build-ret*（GCトリガーなし）」の順に修正——
+      pop-rootとbuild-ret*はどちらもGCを発動させないため、両者の間に新たなGCが
+      割り込む心配がないことを利用した正しい順序。
+    - **「`Sexpr`型かどうか」の判定は型情報を別途持たず、LLVM値の実際のkind
+      （`PointerValue`かどうか）で動的に判定**（新規`is-sexpr-value`ビルトイン）——
+      `build-op`がIntValue/FloatValueのkindで分岐するのと同じ「値自身に聞く」設計を
+      継承。新規`count-and-push-sexpr`/`pop-roots`（typelisp側ヘルパ）が
+      `Vector<LlvmValue>`を走査してこの判定を使う。
+    - `char::eq`/`lt`と同様、`null`（preludeの`(defun null ((s Sexpr)) bool (match s
+      ((Nil) true) (_ false)))`、`match`ベース）は`match`サポートをこのブリッジに
+      追加するのではなく、`Expr::Call`の名前ベース特別扱いで直接`build-nullp`
+      （ポインタのnull比較）に橋渡しした——`consp`/`atom`（`null`/`not`から組み立てる
+      preludeの`defun`）は同じ理由で対象外、follow-up。`cons`/`car`/`cdr`も同様に
+      名前ベース特別扱い（これらはRustの`eval_builtin`内ビルトインで、`Interp.compiled`
+      には登録されないため、Phase 2fの`ACall`ガードとは別の経路が必要だった）。
+    - `AstExpr`に`anil`/`acons`/`acar`/`acdr`/`anullp`の5variant追加（末尾に追記）。
+    - TDD: `tests/compile_test.rs`に6件追加（36件中）——car/cdrの単純な往復、cons構築、
+      null判定（true/false）、nilリテラル返却、ネストしたlet+複数consの組み合わせ
+      （rootingの正しさを検証する核心テスト）、**16セルの極小ヒープ+`dotimes`500回で
+      実際にGCを複数回発動させながらcons済み構造が破損しないことを確認するストレス
+      テスト**（`compiled_cons_chain_survives_a_gc_mid_call`——当初200回の再帰
+      `defun`で書いてスタックオーバーフローしたため、`dotimes`ループに書き直した。
+      これはtypelisp既存の制約——再帰`defun`はRust呼び出しスタックを消費し末尾呼び出し
+      最適化がない——であり今回の実装のバグではない）。既存30件は無変更でgreen。
+      並行実行でのSIGSEGV再発無し（15回連続green）。
+      **`cargo +nightly miri test`は`compile`feature配下では実行不可能と確認**
+      （LLVM JIT実行を含むテストが180秒タイムアウトしても完了しなかった——miriは
+      LLVM C APIのような複雑な外部ライブラリFFIをそもそもサポートしない。これは
+      想定された結果であり、`compile`feature関連コードの安全性検証は並行実行の
+      繰り返しとGCを跨ぐ実地テストに依存する）。既定ビルド・`cargo clippy
+      --all-targets`（両構成）への影響なし。
+  - **次の作業（ブランチ`feature/compiler`で継続）**:
     - 自己再帰・相互再帰のコンパイル対応（Phase 2fでは明示的に対象外とした）: `name`自身を
       `compile`完了前に`self.compiled`へ仮登録する、または呼び出し先解決を`get-or-declare-
       function`＋`add_global_mapping`ではなく単純な`call`に倒せる「同一モジュール内の
       自己呼び出し」を特別扱いする、といった方向性が考えられるが優先度未定。
-    - **Phase 3（Sexpr/HashTable/Vector対応）**: 既存Rust実装（`mem::Heap`の cons/GC、
-      `eval::interp`のhashtable/vector操作）を`extern "C"`シムで薄くラップした「ランタイム支援
-      ライブラリ」層を新設し、コンパイル後コードはこれらの操作をすべて呼び出し経由で行う
-      （直接cons cellの形を読まない——当面`Sexpr`はオパーク）。**未解決のリスクとして明記**:
-      コンパイル後コードのレジスタ/スタック上の値をmark-sweep GCのルート走査が辿れない問題。
-      Phase3では「ランタイム呼び出しの瞬間だけGCが起こり、その結果は即座にrootingする」という
-      限定的回避で進め、本格対応（stack map等）は対象外として記録する。
+    - **Sexprのスコープ拡張**: `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Path`形式の
+      `Sexpr`値（現在は`value_to_ptr`がエラー→ランタイムシムが`abort`）への対応、
+      `consp`/`atom`（`null`/`not`の合成）、`set-car`/`set-cdr`。
+    - **ループ構文（`while`/`loop`/`break`/`return`）のコンパイル対応**: Vector/HashTable
+      処理の典型コード（`prelude.rs`の`sort`等）はほぼ全て`while`/`dotimes`ベースの
+      命令的ループで書かれており、再帰ではない。Vector/HashTable対応を実用的にするには
+      事実上の前提条件になる。GCの観点では`while`/`loop`自体はリスクを増やさない
+      （control-flowの分岐パターンが増えるだけ）。
+    - **HashTable/Vector対応**: 当初Phase3として`Sexpr`と一括りにされていたが、実際には
+      `Rc<RefCell<..>>`によるRust管理（GCヒープ対象外）と判明したため、GCのrooting
+      問題は無関係。ループ構文対応と組み合わせれば実用的な処理（合計・検索等）が
+      コンパイル対象になる。
     - **Phase 4（クロージャ/高階関数、優先度低）**: GCルーティングの難度がさらに増すため、
       Phase 5（ファイルコンパイラ）より後でもよい。
     - **Phase 5（`compile-file`）**: ファイル全体の`defun`を1つのLLVM `Module`にまとめ
