@@ -539,6 +539,11 @@ fn result_of(t: Type, e: Type) -> Type {
 }
 
 #[cfg(feature = "compile")]
+fn vector_of(t: Type) -> Type {
+    Type::Named(Path::root("vector"), vec![t])
+}
+
+#[cfg(feature = "compile")]
 fn error_ty() -> Type {
     Type::Named(Path::root("error"), vec![])
 }
@@ -547,15 +552,20 @@ fn error_ty() -> Type {
 /// `check::ast::Expr`, used so the typelisp-written compiler
 /// (`crate::compile::compiler_source`) can `match` over a function's checked
 /// body — see `crate::compile::ast_bridge::typed_to_ast`, whose variant
-/// indices must match this definition's `variants` order exactly. Phase 1/2c
+/// indices must match this definition's `variants` order exactly. Phase 1/2e
 /// ([docs/TODO.md](../../docs/TODO.md)「ステップ5」) only bridges integer/
-/// bool/float literals, parameter references, `if`, and `i64`/`f64`'s binary
-/// arithmetic/comparison instance methods — just enough to compile a function
-/// like `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))`. `afloat` is
-/// appended last (Phase 2c) rather than inserted in literal-grouping order
-/// with `aint`/`abool`, since these indices are a stable wire format between
-/// this definition and `ast_bridge`'s constants — reordering existing ones
-/// would silently break already-working variants.
+/// bool/float literals, parameter references, `if`, `let`, and `i64`/`f64`'s
+/// binary arithmetic/comparison instance methods — just enough to compile a
+/// function like `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))`.
+/// `afloat`/`alet` are appended last (Phase 2c/2e) rather than inserted in
+/// literal-grouping order with `aint`/`abool`, since these indices are a
+/// stable wire format between this definition and `ast_bridge`'s constants —
+/// reordering existing ones would silently break already-working variants.
+/// `alet`'s three `Vector` fields are parallel: `names[i]`'s value is
+/// `values[i]` (all checked against the **outer** scope, CL `let`
+/// semantics — `crate::compile::ast_bridge`'s doc comment), then `body`
+/// (one or more forms, only the last one's value escapes the `let`) is
+/// checked with all of `names` newly in scope.
 #[cfg(feature = "compile")]
 fn ast_expr_def() -> AdtDef {
     let t = ast_expr_ty();
@@ -567,8 +577,12 @@ fn ast_expr_def() -> AdtDef {
             Variant { name: "abool".to_string(), fields: vec![Type::Bool] },
             Variant { name: "avar".to_string(), fields: vec![Type::Str] },
             Variant { name: "aif".to_string(), fields: vec![t.clone(), t.clone(), t.clone()] },
-            Variant { name: "abinop".to_string(), fields: vec![Type::Str, t.clone(), t] },
+            Variant { name: "abinop".to_string(), fields: vec![Type::Str, t.clone(), t.clone()] },
             Variant { name: "afloat".to_string(), fields: vec![Type::F64] },
+            Variant {
+                name: "alet".to_string(),
+                fields: vec![vector_of(Type::Str), vector_of(t.clone()), vector_of(t)],
+            },
         ],
         assoc: HashMap::new(),
         public: true,

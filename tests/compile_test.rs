@@ -202,6 +202,107 @@ fn compiles_a_function_mixing_i64_and_f64() {
     assert_eq!(run(src2), RtValue::Float(3.5));
 }
 
+/// Phase 2e: a `let`-bound local as the function's entire body.
+#[test]
+fn compiles_a_function_with_a_single_let_binding() {
+    let src = r#"
+        (defun double ((x i64)) i64 (let ((y (* x 2))) y))
+        (compile "double")
+        (double 21)
+    "#;
+    assert_eq!(run(src), RtValue::Int(42));
+}
+
+/// Multiple bindings in one `let`, plus extra body forms before the last
+/// (their values are computed — emitted as IR — but discarded; only the
+/// last form's value is the `let`'s own value).
+#[test]
+fn compiles_a_function_with_multiple_let_bindings_and_extra_body_forms() {
+    let src = r#"
+        (defun combo ((a i64) (b i64)) i64
+          (let ((x (* a 2)) (y (* b 3)))
+            (+ x 0)
+            (+ x y)))
+        (compile "combo")
+        (combo 5 4)
+    "#;
+    assert_eq!(run(src), RtValue::Int(22));
+}
+
+/// A `let` nested inside another `let`'s body.
+#[test]
+fn compiles_a_function_with_nested_let() {
+    let src = r#"
+        (defun nested ((a i64)) i64
+          (let ((b (+ a 1)))
+            (let ((c (+ b 1)))
+              (+ a (+ b c)))))
+        (compile "nested")
+        (nested 10)
+    "#;
+    assert_eq!(run(src), RtValue::Int(33));
+}
+
+/// A `let` used in **value position** — nested inside an arithmetic
+/// expression rather than as the function's whole body or a tail-`if` branch.
+#[test]
+fn compiles_a_function_using_let_in_value_position() {
+    let src = r#"
+        (defun let-in-value ((a i64)) i64 (+ (let ((x (* a 2))) x) 1))
+        (compile "let-in-value")
+        (let-in-value 5)
+    "#;
+    assert_eq!(run(src), RtValue::Int(11));
+}
+
+/// A `let` as one tail-`if` branch (`compile-tail`'s `ALet` arm, not
+/// `compile-value`'s).
+#[test]
+fn compiles_a_function_using_let_in_an_if_branch() {
+    let src = r#"
+        (defun let-in-if ((a i64)) i64 (if (> a 0) (let ((x (* a 2))) x) 0))
+        (compile "let-in-if")
+        (let-in-if 5)
+    "#;
+    assert_eq!(run(src), RtValue::Int(10));
+    let src2 = r#"
+        (defun let-in-if ((a i64)) i64 (if (> a 0) (let ((x (* a 2))) x) 0))
+        (compile "let-in-if")
+        (let-in-if -5)
+    "#;
+    assert_eq!(run(src2), RtValue::Int(0));
+}
+
+/// A `let`-bound name shadowing the function's own parameter: looking it up
+/// from the `let`'s body must find the *inner* binding, not the outer
+/// parameter — exercises `param-index`'s backward (innermost-first) search,
+/// since `extend-strs` appends the shadowing name *after* the parameter's
+/// own entry.
+#[test]
+fn compiles_a_function_with_a_shadowing_let_binding() {
+    let src = r#"
+        (defun shadow ((a i64)) i64 (let ((a (+ a 1))) a))
+        (compile "shadow")
+        (shadow 5)
+    "#;
+    assert_eq!(run(src), RtValue::Int(6));
+}
+
+/// CL `let`'s parallel-binding semantics: every binding's value expression
+/// sees only the *outer* scope, never a sibling binding — even one that
+/// shadows the same name. `b`'s value here is the parameter `a` (5),
+/// unaffected by the sibling binding that shadows `a` to `a + 1`; a
+/// (incorrect) sequential/`let*`-like evaluation would instead see `b` as 6.
+#[test]
+fn compiles_a_function_whose_let_binding_value_sees_the_outer_scope() {
+    let src = r#"
+        (defun parallel ((a i64)) i64 (let ((a (+ a 1)) (b a)) b))
+        (compile "parallel")
+        (parallel 5)
+    "#;
+    assert_eq!(run(src), RtValue::Int(5));
+}
+
 #[test]
 fn refuses_to_compile_a_non_i64_function() {
     let src = r#"

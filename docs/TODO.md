@@ -553,13 +553,57 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       暗黙の数値変換が無いため、`i64`と`f64`を同一`Assoc`呼び出し内で混在させることはできない
       ことを確認する意味も持つ）。既存10件は無変更でgreen。並行実行でのSIGSEGV再発無し
       （10回連続green）。既定ビルド・`cargo clippy --all-targets`（両構成）への影響なし。
+  - 実装済み（Phase 2e/`let`束縛）: `(defun double ((x i64)) i64 (let ((y (* x 2))) y))`のような
+    ローカル変数を持つ関数がコンパイル対象になった。当初想定（`ast-body`の「単一式」制約を
+    「複数フォーム+let」へ拡張する必要があるかもしれない、という`alloca`+`load`/`store`方式の
+    検討）は**実際には不要だった**——`defun`の本体がまるごと1個の`(let (...) ...)`式である場合、
+    `ast-body`から見ればこれは元々「単一式」のまま（その式の中身が`let`なだけ）なので、既存の
+    「本体は1フォームのみ」制約に一切触れずに済んだ。必要だったのは`Expr::Let`を`AstExpr`へ
+    橋渡しすることだけ。
+    - **`alloca`/`load`/`store`は不要、値レベルのSSA変数表で十分**: `let`束縛は不変
+      （`defun`の`let`に再代入は無い）なので、既存の`params: Vector<string>`/
+      `vals: Vector<LlvmValue>`という「名前→LLVM値」表をそのまま流用し、束縛が増えるたびに
+      名前と値を**末尾に追加**した新しいVectorを作って子スコープに渡すだけで済む
+      （メモリ上のスタック変数を介さず、SSA値を直接持ち運ぶ——LLVM最適化前提のIRとして自然な形）。
+      新規`copy-strs`/`extend-strs`（`Vector<string>`用）・`copy-values`/`extend-values`
+      （`Vector<LlvmValue>`用）が「base要素の後にextra要素を追加した**新しい**Vectorを作る」役。
+      既存の`params`/`vals`への`push`による直接破壊的拡張は**しない**——`Vector`の変更は
+      共有（`Rc<RefCell<..>>`）なので、`if`の片方の枝や`let`脱出後のコードがまだ参照する
+      古い`params`/`vals`を書き換えてしまうため。
+    - **シャドーイングのため`param-index`の探索方向を末尾から先頭へ反転**: `extend-strs`は
+      新しい束縛をVectorの**末尾**に追加するため、外側の名前を内側の同名束縛が覆い隠す
+      （shadow）には「末尾から探して最初に見つかった方を使う」必要がある——変更前の
+      先頭からの探索（パラメータ一覧のみだった頃は重複名が無かったため問題にならなかった）
+      のままだと外側の束縛が常に勝ってしまうバグになる。`tests/compile_test.rs`の
+      `compiles_a_function_with_a_shadowing_let_binding`（`(let ((a (+ a 1))) a)`が
+      6を返すこと、5を返してしまわないこと）で実地検証。
+    - **CL `let`の並行束縛セマンティクス（各束縛の値式は外側スコープのみを見る、兄弟束縛は
+      見えない）を保持**: 値側（`eval-bindings`）は常に**外側の`params`/`vals`**に対して
+      `compile-value`するのに対し、本体側（`eval-body`/`eval-body-tail`）だけが拡張後の
+      `new-params`/`new-vals`を使う、という非対称な設計で実現（`check_let`/`eval`側の既存
+      実装と同じ非対称性をコンパイラ側にも持たせた形）。`compiles_a_function_whose_let_binding_
+      value_sees_the_outer_scope`（`(let ((a (+ a 1)) (b a)) b)`が`a+1`ではなく元の`a`を
+      返すこと）で実地検証——これが`let*`ではなく`let`であることの直接的な証拠。
+    - **`labels`で前方参照制約を回避**: `ALet`の処理（束縛値の評価ループ・本体フォームの
+      評価ループ）は`compile-value`/`compile-tail`自身を呼び出す必要があるが、別の
+      トップレベル`defun`として書くと「`defun`は自己再帰のみ可・他のまだ定義されていない
+      `defun`への前方参照は不可」という既存制約に抵触する（`compile-value`→新規ヘルパ→
+      `compile-value`という相互参照になってしまう）。`labels`（CLの局所関数定義、ステップ9で
+      実装済み）でヘルパを`compile-value`/`compile-tail`それぞれの本体内**局所**に定義する
+      ことで回避——局所関数は定義時点で外側の`compile-value`/`compile-tail`が（自己再帰と
+      同じ理由で）既にスコープに存在するため、前方参照にならない。
+    - `AstExpr`に`alet`variantを追加（`afloat`と同じく既存variantの並びに割り込ませず**末尾に
+      追記**）。3フィールド構成`(names: Vector<string>, values: Vector<AstExpr>, body:
+      Vector<AstExpr>)`——`ast_bridge::typed_to_ast`が`Expr::Let`をこの形に変換。
+    - TDD: `tests/compile_test.rs`に7件追加（21件中）——単純な束縛、複数束縛+複数本体フォーム
+      （最後だけが値になる）、`let`の入れ子、`let`の値位置での使用（算術式の中）、`let`の
+      tail-if枝での使用、シャドーイング、並行束縛セマンティクス。既存14件は無変更でgreen。
+      並行実行でのSIGSEGV再発無し（10回連続green）。既定ビルド・`cargo clippy --all-targets`
+      （両構成）への影響なし。
   - **次の作業（Phase 2残り、ブランチ`feature/compiler`で継続）**:
     - **Phase 2d（`char`対応、優先度低）**: `char`は算術が無く主に等値比較のみなので
       `f64`より軽量——`i64`/`bool`と同じ「i64スロットに格納し境界でのみ幅変換」方式でよい
       （`u32`へ`truncate`/`zext`、ただし32bit）。
-    - **Phase 2e（`let`束縛）**: `ast-body`を「単一式」制約から「複数フォーム+let」へ拡張。
-      `compile-value`/`compile-tail`がローカル変数を`alloca`+`load`/`store`で持つか、
-      もしくは値レベルのSSA変数表（`Vector<LlvmValue>`を`params`同様に拡張）で持つかの設計が必要。
     - **Phase 2f（コンパイル済み関数同士の直接呼び出し）**: `(compiled? name)`的なチェックを
       `compile`に追加し、未コンパイルの呼び出し先があれば明示的にコンパイル拒否する
       ——逆方向〈コンパイル済みから未コンパイルを呼ぶ〉はトランポリンが必要でより難しいため後回し。
