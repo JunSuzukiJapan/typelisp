@@ -124,11 +124,20 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
   何も推論できない static 呼び出し（`HashTable::new` 等）は呼び出し元の `expected`（戻り値の期待型）
   から代入元を得る（field-less構成子 `None` が `expected` から型引数を学ぶのと同じ要領）。
   受け手/expected/メソッド識別子は `AssocCall` 構造体にまとめてアリティを抑えている。
-- **未実装（後続）**: **ユーザ定義のジェネリック `defstruct`**（`check_defstruct` は常に `params:
-  Vec::new()` で構造体に型パラメータを宣言する構文がまだ無い — 上記の受け手側 generic 代入とは別物。
-  `HashTable<K,V>` 等の組み込み型は `registry.rs` で直接 `AdtDef.params` を設定するため、この制約の
-  影響を受けていない）、`use a::b`（モジュール名を現NSに alias として導入）、可視性、関数カタログの
-  実装本体（eval 待ち）。
+- **未実装（後続、影響範囲の大きさで優先順位付け——[[feedback-impl-priority]]）**:
+  1. **ユーザ定義のジェネリック `defstruct`**（`check_defstruct` は常に `params: Vec::new()` で
+     構造体に型パラメータを宣言する構文がまだ無い — 上記の受け手側 generic 代入とは別物。
+     `HashTable<K,V>` 等の組み込み型は `registry.rs` で直接 `AdtDef.params` を設定するため、この
+     制約の影響を受けていない）。型システムの拡張で影響範囲が最も広いため最優先
+     （関連: 下記「次の候補（eval 拡充）」の `defun` ジェネリック型パラメータも同種の課題）。
+  2. **`use a::b`**（モジュール名を現NSに alias として導入）。名前空間機能で、モジュール分割が
+     進むほど影響範囲が広がるため次点。
+  3. **可視性**（`FnSig::public` 等のフィールドは既に存在するが常に `true` で実効性なし。
+     ステップ5 Phase 5 の共有ライブラリ化が `pub` を export 基準に使う計画があるが、現状は
+     何もブロックしていない）。
+  4. **関数カタログの実装本体（eval 待ち）**: 本節執筆当時（名前空間完成時点）は eval 未着手
+     だったための記述で、現在は4a–4sで大半が実装済み。残りは下記「次の候補（eval 拡充）」に
+     引き継がれているため、独立項目としては実質解消済み。
 
 ## 3. ステップ4：eval（**4a/4b 実装済み**）
 - **型付き AST（`check::Typed`）上のツリーウォークインタプリタ**（`src/eval/`、既定の実行経路）。
@@ -384,15 +393,22 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       実行されておらず、miriでの検証も今回が初めて。
     - TDD: `tests/prelude_test.rs`に9件追加（62件中）。in-place変更の別参照からの可視性、
       非Consでのpanic、`nconc`の空リスト時の挙動、`nreverse`の空/単一要素ケース。
-- **次の候補（eval 拡充）**:
-  - TypeLispライブラリ関数 ステップ7c以降（prelude.rsに追記していく）: `sort`、
-    `gcd`/`lcm`/`signum`、`assoc`、
-    Option/Result補助（`unwrap`/`unwrap-or`/`is-some`/`map-option`等）、
-    高階（`identity`/`const`/`compose`/`flip`——`defun`にジェネリック型パラメータが無いため
-    要設計）、数値補助（`min`/`max`/`sum`/`range`/`evenp`等）。
-    `append`実装済みなので、マクロの`,@`（unquote-splicing）を追加できる。
-  - `case`/`do`/`doiter`/`while-let`/`the` は未実装（`defmacro` の `&rest` は実装済みなので前提は満たした。
-    `case` はさらに型ごとの `eq` が前提）。`defun`/`lambda` の型付き `&rest`／`apply` も未実装。
+- **次の候補（eval 拡充、影響範囲の大きさで優先順位付け——[[feedback-impl-priority]]）**:
+  1. **`defun` にジェネリック型パラメータを追加**（現状は組み込み型のみ `registry.rs` で直接
+     `params` を設定できるが、ユーザ `defun` は単相のみ）。下記5の高階関数（`identity`/`const`/
+     `compose`/`flip`）の前提であり、型システムの拡張で影響範囲が最も広いため最優先。
+  2. **`defun`/`lambda` の型付き `&rest`／`apply`**: 関数呼び出し機構の拡張で、可変長引数を
+     使う将来の関数・ライブラリ全般に影響するため次点。
+  3. **`case`/`do`/`doiter`/`while-let`/`the`**: 特殊形・checker拡張（前提はいずれも満たされて
+     いる——`defmacro` の `&rest` は実装済み、`case` が必要とする型ごとの `eq` も実装済み）。
+     `the` は型注釈として他コードからも汎用的に使われうるため、下記のライブラリ関数本体より先にやる。
+  4. **マクロの `,@`（unquote-splicing）**: `append` 実装済みのため着手可能。マクロ機能の拡張で
+     今後のマクロ実装全般に効くが、特殊形（3）より影響範囲は狭い。
+  5. **TypeLispライブラリ関数 ステップ7c以降**（`prelude.rs` に追記していく、最も影響範囲が
+     狭いリーフ機能のため最後）: `sort`、`gcd`/`lcm`/`signum`、`assoc`、Option/Result補助
+     （`unwrap`/`unwrap-or`/`is-some`/`map-option`等）、高階（`identity`/`const`/`compose`/
+     `flip`——1のジェネリック型パラメータが前提）、数値補助（`min`/`max`/`sum`/`range`/
+     `evenp`等）。
 - **ステップ5: compile**（明示 `compile`/`compile-file`。コンパイラ本体は **typelisp で書く**、Rust は
   LLVM バインディング（inkwell）・ASTブリッジ・ランタイム支援ライブラリのみ提供。「コンパイル済みバイトコード」
   は **LLVM IR** とする。feature gate。段階的ロードマップ・ABI（`TlValue`）設計は別途記録予定
@@ -833,33 +849,38 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       修正の副作用で、square/sum-of-squares等の既存テストも今回初めて**実際に**コンパイル
       経由で実行されるようになったことを確認済み）。並行実行5回連続green。既定ビルド・
       `cargo clippy --all-targets`（両構成）への影響なし。
-  - **次の作業（ブランチ`feature/compiler`で継続）**:
-    - **Sexprのスコープ拡張**: `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Path`形式の
-      `Sexpr`値（現在は`value_to_ptr`がエラー→ランタイムシムが`abort`）への対応、
-      `consp`/`atom`（`null`/`not`の合成）、`set-car`/`set-cdr`。
-    - **ループ構文（`while`/`loop`/`break`/`return`）のコンパイル対応**: Vector/HashTable
-      処理の典型コード（`prelude.rs`の`sort`等）はほぼ全て`while`/`dotimes`ベースの
-      命令的ループで書かれており、再帰ではない。Vector/HashTable対応を実用的にするには
-      事実上の前提条件になる。GCの観点では`while`/`loop`自体はリスクを増やさない
-      （control-flowの分岐パターンが増えるだけ）。
-    - **HashTable/Vector対応**: 当初Phase3として`Sexpr`と一括りにされていたが、実際には
-      `Rc<RefCell<..>>`によるRust管理（GCヒープ対象外）と判明したため、GCのrooting
-      問題は無関係。ループ構文対応と組み合わせれば実用的な処理（合計・検索等）が
-      コンパイル対象になる。
-    - **Phase 4（クロージャ/高階関数、優先度低）**: GCルーティングの難度がさらに増すため、
-      Phase 5（ファイルコンパイラ）より後でもよい。
-    - **Phase 5（`compile-file`）**: ファイル全体の`defun`を1つのLLVM `Module`にまとめ
-      （同一ファイル内呼び出しは直接`call`命令になる）、`TargetMachine::write_to_file`でオブジェクト
-      ファイル出力→システムの`cc`をサブプロセス起動してリンク。既存Rust実装（cons heap/GC/
-      HashTable/Vector等）を`extern "C"`シムでラップした静的ランタイムライブラリ（`libtlrt.a`、
-      `Cargo.toml`に`[lib] crate-type = ["lib","staticlib"]`を追加し`typl`自身のビルド時に
-      一緒に作る）を`cc`でリンクし、**typelisp/LLVMインストール無しで動く実行ファイル/共有
-      ライブラリ**を生成する（ユーザー要求の核心）。実行ファイル化はエントリポイント規約として
-      `main`という名前の関数（`(fn () i32)`等）を探す（CL/C慣習）。共有ライブラリ化は既存の
-      `FnSig::public`（`pub` defun）をエクスポートシンボルの基準に流用。
-    - **Phase 6（並行）**: 各Phase完了の都度、`TlValue` ABI仕様や`compile-file`のセマンティクスを
-      `docs/language-design.md`に「確定仕様」として追記していく（このTODO.mdは進捗の記録、
-      language-design.mdは確定した言語仕様という既存の役割分担を継続）。
+  - **次の作業（ブランチ`feature/compiler`で継続、影響範囲の大きさで優先順位付け
+    ——[[feedback-impl-priority]]）**:
+    1. **ループ構文（`while`/`loop`/`break`/`return`）のコンパイル対応**: Vector/HashTable
+       処理の典型コード（`prelude.rs`の`sort`等）はほぼ全て`while`/`dotimes`ベースの
+       命令的ループで書かれており、再帰ではない。Vector/HashTable対応を実用的にするには
+       事実上の前提条件になる——前提になっている側ほど影響範囲が広いため、HashTable/Vector
+       対応より先にやる。GCの観点では`while`/`loop`自体はリスクを増やさない
+       （control-flowの分岐パターンが増えるだけ）。
+    2. **HashTable/Vector対応**: 当初Phase3として`Sexpr`と一括りにされていたが、実際には
+       `Rc<RefCell<..>>`によるRust管理（GCヒープ対象外）と判明したため、GCのrooting
+       問題は無関係。1のループ構文対応に依存する。組み合わせれば実用的な処理
+       （合計・検索等）がコンパイル対象になる。
+    3. **Sexprのスコープ拡張**: `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Path`形式の
+       `Sexpr`値（現在は`value_to_ptr`がエラー→ランタイムシムが`abort`）への対応、
+       `consp`/`atom`（`null`/`not`の合成）、`set-car`/`set-cdr`。既存Phase3（`Nil`/`Cons`のみ）
+       の対応範囲を広げるだけで他フェーズの前提にはなっていないため、1・2より後でよい。
+    4. **Phase 4（クロージャ/高階関数、優先度低）**: GCルーティングの難度がさらに増すため、
+       Phase 5（ファイルコンパイラ）より後でもよい。
+    5. **Phase 5（`compile-file`）**: ファイル全体の`defun`を1つのLLVM `Module`にまとめ
+       （同一ファイル内呼び出しは直接`call`命令になる）、`TargetMachine::write_to_file`でオブジェクト
+       ファイル出力→システムの`cc`をサブプロセス起動してリンク。既存Rust実装（cons heap/GC/
+       HashTable/Vector等）を`extern "C"`シムでラップした静的ランタイムライブラリ（`libtlrt.a`、
+       `Cargo.toml`に`[lib] crate-type = ["lib","staticlib"]`を追加し`typl`自身のビルド時に
+       一緒に作る）を`cc`でリンクし、**typelisp/LLVMインストール無しで動く実行ファイル/共有
+       ライブラリ**を生成する（ユーザー要求の核心）。実行ファイル化はエントリポイント規約として
+       `main`という名前の関数（`(fn () i32)`等）を探す（CL/C慣習）。共有ライブラリ化は既存の
+       `FnSig::public`（`pub` defun）をエクスポートシンボルの基準に流用。1・2（HashTable/Vector
+       含む既存機能のラップ対象）に依存するため最後。
+    6. **Phase 6（並行）**: 各Phase完了の都度、`TlValue` ABI仕様や`compile-file`のセマンティクスを
+       `docs/language-design.md`に「確定仕様」として追記していく（このTODO.mdは進捗の記録、
+       language-design.mdは確定した言語仕様という既存の役割分担を継続）。1〜5の各完了に合わせて
+       並行して行うため独立した優先順位は無い。
 
 ---
 
