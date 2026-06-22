@@ -89,8 +89,6 @@ pub enum Expr {
     Set(String, Box<Typed>),
     /// `(setf global value)` — assign to a global; evaluates to the value.
     SetGlobal(Path, Box<Typed>),
-    /// `(while cond body...)` — loop while `cond` holds. Has type `Unit`.
-    While(Box<Typed>, Vec<Typed>),
     /// `(loop body...)` — loop forever, exited via `break`/`return`. Its type is
     /// the join of every `break`/`return` reached directly inside it (not
     /// crossing a nested loop or `lambda`); `Never` if it never exits.

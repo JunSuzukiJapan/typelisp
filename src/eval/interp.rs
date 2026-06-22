@@ -45,17 +45,18 @@ struct FnDef {
 }
 
 /// A mutable variable slot (shared so `setf` mutations are visible to every
-/// holder of the binding, e.g. across `while` iterations).
+/// holder of the binding, e.g. across `loop` iterations).
 type Slot = Rc<RefCell<RtValue>>;
 
 /// A lexical environment: name -> slot, searched from the back (innermost).
 type Env = Vec<(String, Slot)>;
 
-/// The outcome of evaluating one step inside a loop body: either a plain
-/// value, or a `break`/`return` already resolved to the value the loop should
-/// exit with (see [`Interp::eval_loop_step`]).
+/// The outcome of evaluating one step inside a loop body: either an
+/// ordinary value (discarded — only whether a step exited matters, not what
+/// it returned along the way), or a `break`/`return` already resolved to the
+/// value the loop should exit with (see [`Interp::eval_loop_step`]).
 enum Step {
-    Value(RtValue),
+    Continue,
     Exit(RtValue),
 }
 
@@ -369,19 +370,6 @@ impl Interp {
                 *cell.borrow_mut() = v.clone();
                 Ok(v)
             }
-            Expr::While(cond, body) => loop {
-                match self.eval_loop_step(heap, cond, env)? {
-                    Step::Exit(v) => return Ok(v),
-                    Step::Value(RtValue::Bool(true)) => {}
-                    Step::Value(RtValue::Bool(false)) => return Ok(RtValue::Unit),
-                    Step::Value(_) => {
-                        return Err(EvalError::Internal("while condition is not a bool".into()))
-                    }
-                }
-                if let Some(v) = self.eval_loop_body(heap, body, env)? {
-                    return Ok(v);
-                }
-            },
             Expr::Loop(body) => loop {
                 if let Some(v) = self.eval_loop_body(heap, body, env)? {
                     return Ok(v);
@@ -442,12 +430,12 @@ impl Interp {
         Ok(RtValue::Sexpr(v))
     }
 
-    /// The outcome of evaluating one step (the condition or a body
-    /// expression) of a `while`/`loop`: either an ordinary value, or a
-    /// `break`/`return` signal already resolved to the loop's exit value.
+    /// The outcome of evaluating one step (a body expression) of a `loop`:
+    /// either an ordinary value, or a `break`/`return` signal already
+    /// resolved to the loop's exit value.
     fn eval_loop_step(&self, heap: &mut Heap, t: &Typed, env: &Env) -> Result<Step, EvalError> {
         match self.eval(heap, t, env) {
-            Ok(v) => Ok(Step::Value(v)),
+            Ok(_) => Ok(Step::Continue),
             Err(EvalError::Break) => Ok(Step::Exit(RtValue::Unit)),
             Err(EvalError::Return(v)) => Ok(Step::Exit(*v)),
             Err(e) => Err(e),

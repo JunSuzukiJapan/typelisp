@@ -5,7 +5,7 @@
 //! non-exhaustive / type-mismatched forms are rejected.
 
 extern crate typelisp;
-use typelisp::{Checker, Error, Expr, Heap, Interp, Path, Reader, TopLevel, Type, Typed};
+use typelisp::{load_prelude, Checker, Error, Expr, Heap, Interp, Path, Reader, TopLevel, Type, Typed};
 
 /// Read one datum and check it as a single top-level form.
 fn form(src: &str) -> Result<TopLevel, Error> {
@@ -32,6 +32,24 @@ fn program(src: &str) -> Result<TopLevel, Error> {
     Ok(last.expect("no forms"))
 }
 
+/// Like [`program`], but with the prelude loaded first — needed for `while`/
+/// `dotimes`/`dolist`/`when`/`unless`/`and`/`or`/`cond`/`if-let`, which are
+/// `defmacro`s in `src/prelude.rs` rather than checker-native special forms
+/// (see that file's "loop/branch primitive reduction" comment).
+fn program_with_prelude(src: &str) -> Result<TopLevel, Error> {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = None;
+    for v in vs {
+        last = Some(chk.check_form(&mut h, &interp, v)?);
+    }
+    Ok(last.expect("no forms"))
+}
+
 /// The synthesized type of a single expression form.
 fn ty(src: &str) -> Type {
     match form(src).expect("check failed") {
@@ -40,9 +58,26 @@ fn ty(src: &str) -> Type {
     }
 }
 
+/// Like [`ty`], but with the prelude loaded first — see [`program_with_prelude`].
+fn ty_with_prelude(src: &str) -> Type {
+    match program_with_prelude(src).expect("check failed") {
+        TopLevel::Expr(t) => t.ty,
+        other => panic!("expected expression, got {:?}", other),
+    }
+}
+
 /// Assert that checking `src` fails with a `TypeError`.
 fn assert_type_error(src: &str) {
     match form(src) {
+        Err(Error::TypeError(_)) => {}
+        other => panic!("expected TypeError, got {:?}", other),
+    }
+}
+
+/// Like [`assert_type_error`], but with the prelude loaded first — see
+/// [`program_with_prelude`].
+fn assert_type_error_with_prelude(src: &str) {
+    match program_with_prelude(src) {
         Err(Error::TypeError(_)) => {}
         other => panic!("expected TypeError, got {:?}", other),
     }
@@ -224,14 +259,14 @@ fn if_let_binds_in_then_branch() {
     // if-let binding is `(pattern value)`: here pattern `(Some v)`, value `opt`.
     let src = "(defun f ((opt Option<i32>)) i32 \
                  (if-let ((Some v) opt) v 0))";
-    assert!(matches!(program(src), Ok(TopLevel::Defun { .. })));
+    assert!(matches!(program_with_prelude(src), Ok(TopLevel::Defun { .. })));
 }
 
 #[test]
 fn if_let_branches_must_agree() {
     let src = "(defun f ((opt Option<i32>)) i32 \
                  (if-let ((Some v) opt) v true))";
-    assert!(matches!(program(src), Err(Error::TypeError(_))));
+    assert!(matches!(program_with_prelude(src), Err(Error::TypeError(_))));
 }
 
 // ---- setf / while -----------------------------------------------------------
@@ -265,8 +300,8 @@ fn cannot_assign_to_constant() {
 
 #[test]
 fn while_condition_must_be_bool_and_is_unit() {
-    assert_eq!(ty("(let ((i 0)) (while (< i 0) (setf i 1)))"), Type::Unit);
-    assert_type_error("(let ((i 0)) (while 1 (setf i 1)))");
+    assert_eq!(ty_with_prelude("(let ((i 0)) (while (< i 0) (setf i 1)))"), Type::Unit);
+    assert_type_error_with_prelude("(let ((i 0)) (while 1 (setf i 1)))");
 }
 
 // ---- lambda -----------------------------------------------------------------
@@ -299,7 +334,7 @@ fn named_function_has_function_type() {
 
 #[test]
 fn dotimes_count_must_be_i32() {
-    assert_type_error("(dotimes (i true) ())");
+    assert_type_error_with_prelude("(dotimes (i true) ())");
 }
 
 // ---- labels -------------------------------------------------------------------
@@ -467,12 +502,12 @@ fn list_elements_must_be_sexpr() {
 
 #[test]
 fn dolist_var_is_sexpr_and_result_is_unit() {
-    assert_eq!(ty("(dolist (x (list (Int 1) (Int 2))) x)"), Type::Unit);
+    assert_eq!(ty_with_prelude("(dolist (x (list (Int 1) (Int 2))) x)"), Type::Unit);
 }
 
 #[test]
 fn dolist_list_expr_must_be_sexpr() {
-    assert_type_error("(dolist (x 5) x)");
+    assert_type_error_with_prelude("(dolist (x 5) x)");
 }
 
 // ---- loop / break / return ---------------------------------------------------
@@ -514,8 +549,8 @@ fn break_takes_no_arguments() {
 
 #[test]
 fn return_inside_while_must_be_unit() {
-    assert_type_error("(while true (return 1))");
-    assert_eq!(ty("(while true (return))"), Type::Unit);
+    assert_type_error_with_prelude("(while true (return 1))");
+    assert_eq!(ty_with_prelude("(while true (return))"), Type::Unit);
 }
 
 #[test]

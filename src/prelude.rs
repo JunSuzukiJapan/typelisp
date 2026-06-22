@@ -48,8 +48,9 @@ use crate::{Checker, Heap, Interp, Reader};
 /// `assoc` (§4.2's list section) round out step 7c — `min`/`max`/`range` are
 /// not in the catalog, so they're left undone rather than guessed at.
 ///
-/// `until`/`while-let` (roadmap step 8b, catalog §1.1) are the first real
-/// use of `,@` (unquote-splicing, step 8a) — see their own comments below.
+/// `until`/`while-let` (roadmap step 8b, catalog §1.1) use `,@`
+/// (unquote-splicing, step 8a, by now already exercised by the loop/branch
+/// primitive reduction set further up) — see their own comments below.
 /// `case` (step 8c) additionally builds its expansion dynamically (mapping
 /// over `&rest clauses`) rather than from one fixed template — see its own
 /// comment for the key-quoting design decision this forces. `do` (step 8d)
@@ -59,6 +60,57 @@ pub const SOURCE: &str = r#"
 (defun consp ((s Sexpr)) bool (match s ((Cons _ _) true) (_ false)))
 (defun null ((s Sexpr)) bool (match s ((Nil) true) (_ false)))
 (defun atom ((s Sexpr)) bool (not (consp s)))
+
+;; Loop/branch primitive reduction (LLVMコンパイラ作業に先立つ整理): `loop`/
+;; `break`/`return` (looping) and `if`/`match` (branching) are the only forms
+;; the checker/interpreter/compiler need to understand natively going
+;; forward — `while`/`dotimes`/`dolist`/`when`/`unless`/`and`/`or`/`cond`/
+;; `if-let` used to be hand-rolled `Expr`-producing Rust functions in
+;; `Checker::check_list` (`check_while`/`check_dotimes`/`check_dolist`/
+;; `check_when`/`check_and_or`/`check_cond`/`check_if_let`), each duplicating
+;; logic the *macro* system can express directly, the same way `until`/
+;; `while-let`/`case`/`do` already do further down. Moving them to `defmacro`
+;; means the checker only ever sees `if`/`match`/`loop`/`break`/`return` as
+;; the irreducible control-flow primitives — fewer `Expr` variants for both
+;; the tree-walking interpreter and (especially) the LLVM compiler
+;; (`src/compile/`) to special-case. Most of the set (`while`/`dotimes`/
+;; `dolist`/`when`/`unless`/`cond`/`if-let`) lives further down, right after
+;; `append` — `,@` (unquote-splicing) always desugars through a call to
+;; `append` (`Checker::check_qq_template`), even when nothing follows the
+;; splice in the same list, so any macro using `,@` needs `append` already
+;; registered. `and`/`or` are the exception, kept here: `equal` (just below)
+;; already calls `and`, so they must be registered before it — and unlike
+;; the others, their recursive-descent shape never needs to splice a `&rest`
+;; list into a *partially-built* template, only to `cons` one fixed element
+;; onto the front of it, which needs no `append` at all.
+
+;; `and`/`or`: a self-recursive macro — each expansion peels off one
+;; argument and re-emits a (shorter) `(and ...)`/`(or ...)` call, which the
+;; checker re-expands the same way it already re-expands `case`'s `cond`
+;; output (`Checker::check_list`'s macro arm recursively re-`check`s its own
+;; expansion) — this is the first macro in the prelude whose expansion
+;; mentions *itself* by name rather than a different macro, but the
+;; mechanism is identical; termination follows from `cdr`/`null` shrinking
+;; `args` by one each step. `(quote true)`/`(quote false)` rather than bare
+;; `true`/`false`: a macro's `Sexpr`-typed result can only come from a
+;; quasiquote template or `(quote ..)` (both go through `value_to_quoted`)
+;; — `Checker::check`'s own literal arms (`Value::Bool` etc.) do *not*
+;; coerce to `Sexpr` the way bare `()` does (`Value::Empty`'s special-cased
+;; `none`/`nil` lookup), so a raw `false` returned directly from a macro
+;; body would fail to check against the macro body's `Sexpr`-expected type.
+(defmacro and (&rest args)
+  (if (null args)
+      (quote true)
+      (if (null (cdr args))
+          (car args)
+          (list (quote if) (car args) (cons (quote and) (cdr args)) (quote false)))))
+(defmacro or (&rest args)
+  (if (null args)
+      (quote false)
+      (if (null (cdr args))
+          (car args)
+          (list (quote if) (car args) (quote true) (cons (quote or) (cdr args))))))
+
 (defun equal ((a Sexpr) (b Sexpr)) bool
   (match a
     ((Cons a1 a2) (match b ((Cons b1 b2) (and (equal a1 b1) (equal a2 b2))) (_ false)))
@@ -76,6 +128,75 @@ pub const SOURCE: &str = r#"
     ((Nil) b)
     ((Cons h t) (cons h (append t b)))
     (_ (panic "append: not a proper list"))))
+
+;; The rest of the loop/branch primitive reduction set (see the comment by
+;; `and`/`or` above) — placed here, right after `append`, since every one of
+;; these uses `,@` (unquote-splicing) somewhere in its expansion, and `,@`
+;; always desugars through a call to `append` (`Checker::check_qq_template`).
+
+;; `while`: the *first* layer of sugar over `loop`. `if` always takes
+;; exactly 3 arguments (`Checker::check_if`, no CL-style implicit-`Unit`
+;; 2-arg form), so the early-exit check needs an explicit `()` else branch —
+;; `(break)` carries no value, so `(if (not test) (break) ())` is always
+;; `Unit`-typed, matching `while`'s own `Unit` result —
+;; `Checker::check_loop`'s `Never`-seeded `join_types` widens to `Unit`
+;; automatically once this `break` is found, with no special-casing needed
+;; (unlike the old `check_while`, which seeded the loop-stack frame with
+;; `Unit` directly).
+(defmacro while (test &rest body) `(loop (if (not ,test) (break) ()) ,@body))
+
+;; `dotimes`: `gensym` replaces the old `check_dotimes`'s "leading-space,
+;; unwritable-in-source" hidden binding trick with the macro system's own
+;; (already-proven, see `case`'s `tmp`) hygiene mechanism.
+(defmacro dotimes (spec &rest body)
+  (let ((var (car spec)) (count-expr (car (cdr spec))) (limit (gensym)))
+    `(let ((,var 0) (,limit ,count-expr))
+       (while (< ,var ,limit) ,@body (setf ,var (+ ,var 1))))))
+
+;; `dolist`: same hidden-binding replacement as `dotimes`, but stepping a
+;; `Sexpr` list with `consp`/`car`/`cdr` instead of comparing an `i32`
+;; counter — what `check_dolist` did with `Pattern::Ctor` `match` arms
+;; directly, this does with already-existing library functions instead.
+(defmacro dolist (spec &rest body)
+  (let ((var (car spec)) (lst-expr (car (cdr spec))) (lst (gensym)))
+    `(let ((,lst ,lst-expr))
+       (while (consp ,lst)
+         (let ((,var (car ,lst)))
+           ,@body
+           (setf ,lst (cdr ,lst)))))))
+
+;; `when`/`unless`: single-armed `if`. The taken side ends in a trailing
+;; `()` (after `body`, not instead of it) so its value is always `Unit`,
+;; discarding whatever `body`'s own last form would otherwise evaluate to —
+;; matching the old `check_when`'s explicit `body.push(unit_node())`. The
+;; *untaken* side is bare `()` too; both resolve to `Unit` (not `Sexpr::Nil`)
+;; via `Checker::check`'s `Value::Empty` special case, the same two-faced
+;; `()` the rest of the language already relies on (see
+;; `docs/language-design.md`) — without the taken side's trailing `()`,
+;; `if`'s `then`/`els` types would only agree by coincidence (e.g. `(when c
+;; 5)` would try to unify `i32` against `els`'s `Unit` and fail to check).
+(defmacro when (test &rest body) `(if ,test (progn ,@body ()) ()))
+(defmacro unless (test &rest body) `(if ,test () (progn ,@body ())))
+
+;; `cond`: nested `if`s, one clause peeled off per recursive expansion (same
+;; self-recursion shape as `and`/`or` above). `else`-detection mirrors
+;; `case`'s own `(eq (car c) (quote else))`.
+(defmacro cond (&rest clauses)
+  (if (null clauses)
+      ()
+      (let ((clause (car clauses)))
+        (if (eq (car clause) (quote else))
+            `(progn ,@(cdr clause))
+            `(if ,(car clause) (progn ,@(cdr clause)) (cond ,@(cdr clauses)))))))
+
+;; `if-let`: exactly the two-armed `match` `Checker::check_if_let` used to
+;; build directly (a constructor-pattern arm plus a wildcard `else` arm) —
+;; the same shape `while-let` (further down) uses for its own loop
+;; condition. Uses no `,@`, so it could have lived next to `and`/`or`
+;; instead — kept here purely to group the whole reduction set together.
+(defmacro if-let (binding then els)
+  (let ((pattern (car binding)) (val (car (cdr binding))))
+    `(match ,val (,pattern ,then) (_ ,els))))
 
 (defun reverse-onto ((lst Sexpr) (acc Sexpr)) Sexpr
   (match lst
@@ -339,10 +460,10 @@ pub const SOURCE: &str = r#"
     (_ (panic "assoc: not a proper list"))))
 
 ;; `until`/`while-let` (roadmap step 8b, cl-equivalence-catalog.md §1.1):
-;; pure template expansions, the first real use of `,@` (unquote-splicing,
-;; step 8a) — `&rest body` is one `Sexpr` list of forms, and `,@body` splices
-;; them into the expansion as multiple sibling forms rather than nesting that
-;; list as a single (mistyped) form.
+;; pure template expansions using `,@` (unquote-splicing, step 8a) —
+;; `&rest body` is one `Sexpr` list of forms, and `,@body` splices them into
+;; the expansion as multiple sibling forms rather than nesting that list as
+;; a single (mistyped) form.
 ;;
 ;; `until` is `while` with the condition negated.
 (defmacro until (test &rest body) `(while (not ,test) ,@body))

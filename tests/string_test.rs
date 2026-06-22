@@ -7,7 +7,7 @@
 //! same pattern as `HashTable`/`Vector`.
 
 extern crate typelisp;
-use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue};
 
 fn run(src: &str) -> Result<RtValue, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -27,6 +27,29 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
 
 fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
+}
+
+/// Like [`run`], but with the prelude loaded first — needed for `and` (a
+/// `defmacro` in `src/prelude.rs`, not a checker-native special form).
+fn run_with_prelude(src: &str) -> Result<RtValue, EvalError> {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl)? {
+            last = val;
+        }
+    }
+    Ok(last)
+}
+
+fn eval_ok_with_prelude(src: &str) -> RtValue {
+    run_with_prelude(src).expect("eval failed")
 }
 
 fn type_error(src: &str) {
@@ -180,5 +203,5 @@ fn eq_dispatches_separately_per_receiver_type() {
     // type) — calling both in the same program is a regression check that
     // they don't collide.
     let src = r#"(defun f () bool (and (eq "x" "x") (eq #\x #\x))) (f)"#;
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok_with_prelude(src), RtValue::Bool(true));
 }

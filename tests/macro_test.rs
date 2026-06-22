@@ -53,6 +53,53 @@ fn eval_ok_with_prelude(src: &str) -> (RtValue, Heap) {
     run_with_prelude(src).expect("eval failed")
 }
 
+/// Like [`run_with_capacity`], but checks against a separate, generously
+/// sized heap with the prelude loaded — needed for `dotimes`/`while` (now
+/// `defmacro`s in `src/prelude.rs`, expanded during checking, not
+/// checker-native special forms) — while still *executing* against a heap
+/// of exactly `capacity` cells, so a small `capacity` still stresses the GC
+/// the way `run_with_capacity` alone would. Safe because the expansion only
+/// ever bottoms out in builtins (`loop`/`if`/`break`/`setf`/...), never a
+/// prelude-*defined* function the runtime `Interp` would also need
+/// registered.
+///
+/// All but the *last* form are also `exec`'d (cloned first) against
+/// `check_interp`/`check_heap` as they're checked, not just collected —
+/// `src` may itself define a macro (e.g. `listify`) used by a later form
+/// (e.g. `build`), and `MacroExpander::expand_macro` needs that macro
+/// already registered in `check_interp` *before* the form using it is
+/// checked, the same per-form check-then-exec interleaving
+/// `crate::prelude::load` itself uses. The last form (the actual
+/// GC-stress loop) is deliberately left un-exec'd here — it only ever
+/// needs to run once, against the tiny heap below.
+fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(RtValue, Heap), EvalError> {
+    let mut check_heap = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut check_interp = Interp::new();
+    load_prelude(&mut check_heap, &mut chk, &mut check_interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut check_heap, src).expect("read failed");
+    let n = vs.len();
+    let mut tls = Vec::with_capacity(n);
+    for (i, v) in vs.into_iter().enumerate() {
+        let tl = chk.check_form(&mut check_heap, &check_interp, v).expect("check failed");
+        if i + 1 < n {
+            check_interp.exec(&mut check_heap, tl.clone()).expect("eval failed");
+        }
+        tls.push(tl);
+    }
+
+    let mut h = Heap::with_capacity(capacity);
+    let mut interp = Interp::new();
+    let mut last = RtValue::Unit;
+    for tl in tls {
+        if let Some(val) = interp.exec(&mut h, tl)? {
+            last = val;
+        }
+    }
+    Ok((last, h))
+}
+
 /// Render a heap-backed `Sexpr` value in reader syntax, for easy assertions.
 fn sexpr_to_string(heap: &Heap, v: Value) -> String {
     match v {
@@ -129,7 +176,7 @@ fn quote_survives_gc_pressure() {
     // recursive build (each iteration's literal becomes garbage as soon as
     // the next iteration overwrites `last`, so the heap must actually reclaim
     // and reuse cells to keep up).
-    let (v, h) = run_with_capacity(
+    let (v, h) = run_with_capacity_and_prelude(
         "(defun build () Sexpr (quote (a (b c) (d (e f)) g)))
          (let ((last (quote ())))
            (dotimes (i 500)
@@ -297,7 +344,7 @@ fn macro_expansion_survives_gc_pressure() {
     // allocates via quasiquote's `Expr::Construct{Cons,..}` nodes, and the
     // expansion result must stay rooted across that) — the regression test
     // for `Interp::expand_macro`'s push_root/pop_root discipline.
-    let (v, h) = run_with_capacity(
+    let (v, h) = run_with_capacity_and_prelude(
         "(defmacro listify (a b c) `(list ,a ,b ,c))
          (defun build () Sexpr (listify (quote x) (quote y) (quote z)))
          (let ((last (quote ())))
@@ -378,7 +425,7 @@ fn rest_arg_list_construction_survives_gc_pressure() {
     // above, but targeting `&rest` collection specifically). The 5 trailing
     // args are bare symbols (not `(quote x)` forms) so the captured list is
     // a flat 5-cell spine, matching `listify`'s per-iteration cost above.
-    let (v, h) = run_with_capacity(
+    let (v, h) = run_with_capacity_and_prelude(
         "(defmacro capture (a &rest rest) `(quote ,rest))
          (defun build () Sexpr (capture 0 a b c d e))
          (let ((last (quote ())))
@@ -454,4 +501,60 @@ fn unquote_splicing_without_the_prelude_loaded_is_a_clean_type_error() {
     let mut chk = Checker::new();
     let interp = Interp::new();
     assert!(chk.check_form(&mut h, &interp, v).is_err());
+}
+
+// ---- loop/branch primitive reduction (src/prelude.rs) -----------------------
+//
+// `while`/`dotimes`/`dolist`/`when`/`unless`/`cond`/`and`/`or`/`if-let` are
+// `defmacro`s over `loop`/`if`/`match` now, rather than checker-native
+// special forms — see `src/prelude.rs`'s "loop/branch primitive reduction"
+// comment. Most of their *behavioral* correctness is already exercised by
+// `tests/eval_test.rs` (which predates this change and was retargeted to
+// load the prelude); the tests below focus on what's specific to *this*
+// file: `if-let` (not exercised at the eval level anywhere else) and
+// `cond`'s self-recursive expansion (the first prelude macro whose own
+// expansion mentions itself by name — see that macro's comment).
+
+#[test]
+fn if_let_binds_in_then_branch_and_falls_through_to_else() {
+    // `default` (rather than a bare literal in the `else` branch) sidesteps
+    // integer literals' `i32` default conflicting with `x`'s `i64` in the
+    // `then` branch — `-1` here is a normal *call argument*, checked
+    // against `f`'s own declared `i64` parameter type, so it adopts `i64`
+    // directly with no such conflict.
+    let (v, _) = eval_ok_with_prelude(
+        "(defun f ((o Option<i64>) (default i64)) i64 (if-let ((Some x) o) (+ x 1) default))
+         (f (Some 41) -1)",
+    );
+    assert_eq!(v, RtValue::Int(42));
+    let (v2, _) = eval_ok_with_prelude(
+        "(defun f ((o Option<i64>) (default i64)) i64 (if-let ((Some x) o) (+ x 1) default))
+         (f (None) -1)",
+    );
+    assert_eq!(v2, RtValue::Int(-1));
+}
+
+#[test]
+fn cond_with_several_clauses_selects_the_first_true_one() {
+    // 4 non-`else` clauses, so `cond`'s self-recursive expansion
+    // (`Checker::check_list`'s macro arm re-expanding its own output,
+    // peeling off one clause per recursion) must unwind correctly more
+    // than once, not just the 1-clause base case.
+    let src = "(defun band ((n i64)) string
+                 (cond ((< n 0) \"neg\")
+                       ((= n 0) \"zero\")
+                       ((< n 10) \"small\")
+                       ((< n 100) \"medium\")
+                       (else \"large\")))";
+    assert_eq!(eval_ok_with_prelude(&format!("{src} (band -1)")).0, RtValue::Str("neg".into()));
+    assert_eq!(eval_ok_with_prelude(&format!("{src} (band 0)")).0, RtValue::Str("zero".into()));
+    assert_eq!(eval_ok_with_prelude(&format!("{src} (band 5)")).0, RtValue::Str("small".into()));
+    assert_eq!(eval_ok_with_prelude(&format!("{src} (band 50)")).0, RtValue::Str("medium".into()));
+    assert_eq!(eval_ok_with_prelude(&format!("{src} (band 500)")).0, RtValue::Str("large".into()));
+}
+
+#[test]
+fn cond_with_no_matching_clause_and_no_else_is_unit() {
+    let (v, _) = eval_ok_with_prelude("(cond ((= 1 2) ()))");
+    assert_eq!(v, RtValue::Unit);
 }

@@ -4,7 +4,7 @@
 //! `tests/hashtable_test.rs` for the sibling test suite this one mirrors).
 
 extern crate typelisp;
-use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, RtValue, Value};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue, Value};
 
 /// Read, type-check, and evaluate a program; return the last expression's
 /// value alongside the heap (so `Sexpr` results can be inspected).
@@ -30,6 +30,45 @@ fn run_with_capacity(src: &str, capacity: usize) -> Result<(RtValue, Heap), Eval
 
 fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed").0
+}
+
+/// Like [`run_with_capacity`], but checks against a separate, generously
+/// sized heap with the prelude loaded — needed for `dotimes` (a `defmacro`
+/// in `src/prelude.rs`, expanded during checking, not a checker-native
+/// special form) — while still *executing* against a heap of exactly
+/// `capacity` cells, so a small `capacity` still stresses the GC the way
+/// `run_with_capacity` alone would. All but the *last* form are also
+/// `exec`'d (cloned first) against `check_interp`/`check_heap` as they're
+/// checked — `src` may define its own helper `defun`s used by a later
+/// form, the same per-form check-then-exec interleaving
+/// `crate::prelude::load` itself uses (see `tests/hashtable_test.rs`'s
+/// identical helper).
+fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(RtValue, Heap), EvalError> {
+    let mut check_heap = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut check_interp = Interp::new();
+    load_prelude(&mut check_heap, &mut chk, &mut check_interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut check_heap, src).expect("read failed");
+    let n = vs.len();
+    let mut tls = Vec::with_capacity(n);
+    for (i, v) in vs.into_iter().enumerate() {
+        let tl = chk.check_form(&mut check_heap, &check_interp, v).expect("check failed");
+        if i + 1 < n {
+            check_interp.exec(&mut check_heap, tl.clone()).expect("eval failed");
+        }
+        tls.push(tl);
+    }
+
+    let mut h = Heap::with_capacity(capacity);
+    let mut interp = Interp::new();
+    let mut last = RtValue::Unit;
+    for tl in tls {
+        if let Some(val) = interp.exec(&mut h, tl)? {
+            last = val;
+        }
+    }
+    Ok((last, h))
 }
 
 /// Render a heap-backed `Sexpr` value in reader syntax, for exact-content
@@ -246,7 +285,7 @@ fn sexpr_values_survive_gc_pressure() {
                      (set v 1 (quote (x y z))))
                    (get v 0)))
                (f)";
-    let (v, h) = run_with_capacity(src, 96).expect("eval failed");
+    let (v, h) = run_with_capacity_and_prelude(src, 96).expect("eval failed");
     match v {
         RtValue::Sexpr(sv) => assert_eq!(sexpr_to_string(&h, sv), "(a b c d e)"),
         other => panic!("expected a Sexpr value, got {:?}", other),

@@ -146,14 +146,23 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
     `TopLevel::{Defun,Defmethod,Defstruct,Module,Use,Expr}` を `Interp::exec` で処理。関数/メソッドは FQ 名で解決。
   - 実装済み（4b）: 組み込み i32 算術/比較（`+ - * / mod < <= > >= = /=`）。`/`/`mod` のゼロ除算は panic。
   - 実装済み（4c）: 派生制御特殊形 `when`/`unless`/`and`/`or`/`cond`/`let*`（`if`/`let` へ脱糖、AST/eval 追加なし）。
+    **訂正（2026-06-22）**: `when`/`unless`/`and`/`or`/`cond`（`let*`を除く）はステップ5
+    Phase4でchecker特殊形から`prelude.rs`の`defmacro`へ移行済み——「`if`/`let`へ脱糖」という
+    挙動自体は変わらないが、脱糖を行う場所がRustの`check_*`関数からtypelispのマクロ展開に移った。
   - 実装済み（4d）: 可変ローカル変数 `setf` ＋ `while` ループ（AST に `Set`/`While`、eval 環境を `Rc<RefCell>` の可変スロット化）。
+    **訂正（2026-06-22）**: `while`はステップ5 Phase4で`loop`+`if`+`break`への`defmacro`に
+    移行し、AST の`Expr::While`バリアント自体を削除した（`setf`/`Expr::Set`は不変）。
   - 実装済み（4e）: グローバル定義 `defvar`（可変）/`defconstant`（不変）。名前空間に属し（FQ パス）、関数本体からも参照可。
     AST に `Global`/`SetGlobal`、`Interp.globals`。型注釈 `(name Type)` は任意。`setf` はグローバルにも対応（定数は拒否）。
   - 実装済み（4f）: `lambda`/クロージャ。`RtValue::Closure`（捕捉した可変スロットを共有＝真のクロージャ）。
     AST に `Lambda`/`Apply`。関数値の呼び出しは頭がローカル/グローバル変数・任意の式のとき `Apply` にディスパッチ。
   - 実装済み（4g）: 名前付き関数の値化（`Expr::FnRef`、組み込みは `RtValue::Builtin`）＋ `dotimes`（`let`+`while`+`setf` へ脱糖）。
+    **訂正（2026-06-22）**: `dotimes`もPhase4で`defmacro`化（`let`+`while`マクロの組み合わせ、
+    `gensym`で上限変数を作る）。
   - 実装済み（4h）: `cons`/`car`/`cdr`（`Sexpr` 上、`FnSig` 登録で値化も可）。`car`/`cdr` は非 `Cons`（`Nil` 含む）で panic。
     `list`（`(Cons e1 (Cons e2 (... (Nil))))` へ脱糖）／`dolist`（`let`+`while`+`match` で `Cons`/`Nil` を辿る脱糖、結果は `Unit`）。
+    **訂正（2026-06-22）**: `dolist`もPhase4で`defmacro`化（`consp`/`car`/`cdr`を使う
+    `let`+`while`マクロ、`match`は使わなくなった）。
   - 実装済み（4i）: `loop`/`break`/`return` の非局所脱出（CL 流: 両方とも**直近のループのみ**を脱出。`break` は値なし、
     `return [value]` は値任意で `loop`/`while`/`dotimes`/`dolist` いずれも脱出可。`lambda` 境界は越えない）。
     `Checker.loop_stack`（`break`/`return` の値型を `join_types` で蓄積、`while`系は `Unit` で seed、`loop` は `Never` で
@@ -399,11 +408,14 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
      `compose`/`flip`）の前提であり、型システムの拡張で影響範囲が最も広いため最優先。
   2. **`defun`/`lambda` の型付き `&rest`／`apply`**: 関数呼び出し機構の拡張で、可変長引数を
      使う将来の関数・ライブラリ全般に影響するため次点。
-  3. **`case`/`do`/`doiter`/`while-let`/`the`**: 特殊形・checker拡張（前提はいずれも満たされて
-     いる——`defmacro` の `&rest` は実装済み、`case` が必要とする型ごとの `eq` も実装済み）。
-     `the` は型注釈として他コードからも汎用的に使われうるため、下記のライブラリ関数本体より先にやる。
-  4. **マクロの `,@`（unquote-splicing）**: `append` 実装済みのため着手可能。マクロ機能の拡張で
-     今後のマクロ実装全般に効くが、特殊形（3）より影響範囲は狭い。
+  3. **`doiter`**: 特殊形・checker拡張。`case`/`do`/`while-let`は別途実装済み（下記**訂正**参照）。
+  4. **`the`**: 型注釈として他コードからも汎用的に使われうるため、下記のライブラリ関数本体より先にやる。
+  - **訂正（2026-06-22）**: 本リストの旧3「`case`/`do`/`while-let`」と旧4「マクロの`,@`」は
+    この節を書いた時点では未着手だったが、**実際には既に実装済みだった**（`,@`は`append`を
+    使う形で`prelude.rs`に`case`/`do`/`while-let`を追加する際に同時実装、いずれも本TODO本文中
+    「実装済み（4r以前のどこか、`prelude.rs`参照）」として個別の記録が無いまま反映されており、
+    本節だけが古い情報のまま取り残されていた）。`,@`/`gensym`は[[typelisp-llvm-compiler]]の
+    Phase4（ステップ5節）で`while`/`dotimes`/`dolist`等のマクロ化にもそのまま使われている。
   5. **TypeLispライブラリ関数 ステップ7c以降**（`prelude.rs` に追記していく、最も影響範囲が
      狭いリーフ機能のため最後）: `sort`、`gcd`/`lcm`/`signum`、`assoc`、Option/Result補助
      （`unwrap`/`unwrap-or`/`is-some`/`map-option`等）、高階（`identity`/`const`/`compose`/

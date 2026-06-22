@@ -1,7 +1,7 @@
 //! Tests for the tree-walking interpreter over the typed AST (step 4a).
 
 extern crate typelisp;
-use typelisp::{Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
+use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
 
 /// Read, type-check, and evaluate a program; return the last expression's value.
 fn run(src: &str) -> Result<RtValue, EvalError> {
@@ -22,6 +22,31 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
 
 fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
+}
+
+/// Like [`run`], but with the prelude loaded first — needed for `while`/
+/// `dotimes`/`dolist`/`when`/`unless`/`and`/`or`/`cond`/`if-let`, which are
+/// `defmacro`s in `src/prelude.rs` rather than checker-native special forms
+/// (see that file's "loop/branch primitive reduction" comment).
+fn run_with_prelude(src: &str) -> Result<RtValue, EvalError> {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl)? {
+            last = val;
+        }
+    }
+    Ok(last)
+}
+
+fn eval_ok_with_prelude(src: &str) -> RtValue {
+    run_with_prelude(src).expect("eval failed")
 }
 
 // ---- literals / control -----------------------------------------------------
@@ -154,32 +179,32 @@ fn divide_by_zero_panics() {
 
 #[test]
 fn when_and_unless_are_unit() {
-    assert_eq!(eval_ok("(when (< 1 2) 5)"), RtValue::Unit);
-    assert_eq!(eval_ok("(unless (< 2 1) 5)"), RtValue::Unit);
+    assert_eq!(eval_ok_with_prelude("(when (< 1 2) 5)"), RtValue::Unit);
+    assert_eq!(eval_ok_with_prelude("(unless (< 2 1) 5)"), RtValue::Unit);
 }
 
 #[test]
 fn and_short_circuits_to_bool() {
-    assert_eq!(eval_ok("(and (< 1 2) (< 2 3))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(and (< 1 2) (< 3 2))"), RtValue::Bool(false));
-    assert_eq!(eval_ok("(and)"), RtValue::Bool(true));
+    assert_eq!(eval_ok_with_prelude("(and (< 1 2) (< 2 3))"), RtValue::Bool(true));
+    assert_eq!(eval_ok_with_prelude("(and (< 1 2) (< 3 2))"), RtValue::Bool(false));
+    assert_eq!(eval_ok_with_prelude("(and)"), RtValue::Bool(true));
 }
 
 #[test]
 fn or_short_circuits_to_bool() {
-    assert_eq!(eval_ok("(or (< 3 2) (< 1 2))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(or (< 3 2) (< 4 2))"), RtValue::Bool(false));
-    assert_eq!(eval_ok("(or)"), RtValue::Bool(false));
+    assert_eq!(eval_ok_with_prelude("(or (< 3 2) (< 1 2))"), RtValue::Bool(true));
+    assert_eq!(eval_ok_with_prelude("(or (< 3 2) (< 4 2))"), RtValue::Bool(false));
+    assert_eq!(eval_ok_with_prelude("(or)"), RtValue::Bool(false));
 }
 
 #[test]
 fn cond_selects_first_true_clause() {
-    assert_eq!(eval_ok("(cond ((< 1 2) 10) (else 20))"), RtValue::Int(10));
+    assert_eq!(eval_ok_with_prelude("(cond ((< 1 2) 10) (else 20))"), RtValue::Int(10));
     assert_eq!(
-        eval_ok("(cond ((< 3 2) 10) ((< 1 2) 20) (else 30))"),
+        eval_ok_with_prelude("(cond ((< 3 2) 10) ((< 1 2) 20) (else 30))"),
         RtValue::Int(20)
     );
-    assert_eq!(eval_ok("(cond ((< 3 2) 10) (else 30))"), RtValue::Int(30));
+    assert_eq!(eval_ok_with_prelude("(cond ((< 3 2) 10) (else 30))"), RtValue::Int(30));
 }
 
 #[test]
@@ -197,7 +222,7 @@ fn while_loop_with_setf() {
                    (while (< i n) (setf sum (+ sum i)) (setf i (+ i 1))) \
                    sum)) \
                (sum-to 5)";
-    assert_eq!(eval_ok(src), RtValue::Int(10)); // 0+1+2+3+4
+    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(10)); // 0+1+2+3+4
 }
 
 #[test]
@@ -207,7 +232,7 @@ fn setf_returns_assigned_value() {
 
 #[test]
 fn while_is_unit() {
-    assert_eq!(eval_ok("(let ((i 0)) (while (< i 0) (setf i 1)))"), RtValue::Unit);
+    assert_eq!(eval_ok_with_prelude("(let ((i 0)) (while (< i 0) (setf i 1)))"), RtValue::Unit);
 }
 
 #[test]
@@ -217,7 +242,7 @@ fn factorial_via_loop() {
                    (while (<= i n) (setf acc (* acc i)) (setf i (+ i 1))) \
                    acc)) \
                (fact 5)";
-    assert_eq!(eval_ok(src), RtValue::Int(120));
+    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(120));
 }
 
 // ---- lambda / closures ------------------------------------------------------
@@ -288,7 +313,7 @@ fn module_function_as_value() {
 #[test]
 fn dotimes_accumulates() {
     assert_eq!(
-        eval_ok("(let ((sum 0)) (dotimes (i 5) (setf sum (+ sum i))) sum)"),
+        eval_ok_with_prelude("(let ((sum 0)) (dotimes (i 5) (setf sum (+ sum i))) sum)"),
         RtValue::Int(10) // 0+1+2+3+4
     );
 }
@@ -298,12 +323,12 @@ fn dotimes_factorial() {
     let src = "(defun fact ((n i32)) i32 \
                  (let ((acc 1)) (dotimes (i n) (setf acc (* acc (+ i 1)))) acc)) \
                (fact 5)";
-    assert_eq!(eval_ok(src), RtValue::Int(120));
+    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(120));
 }
 
 #[test]
 fn dotimes_is_unit() {
-    assert_eq!(eval_ok("(dotimes (i 3) ())"), RtValue::Unit);
+    assert_eq!(eval_ok_with_prelude("(dotimes (i 3) ())"), RtValue::Unit);
 }
 
 // ---- loop / break / return ---------------------------------------------------
@@ -340,7 +365,7 @@ fn break_exits_while_early() {
     let src = "(let ((i 0)) \
                  (while true (if (>= i 3) (break) ()) (setf i (+ i 1))) \
                  i)";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(3));
 }
 
 #[test]
@@ -348,7 +373,7 @@ fn return_exits_dotimes_early() {
     let src = "(let ((i 0)) \
                  (dotimes (n 100) (setf i n) (if (= n 2) (return) ())) \
                  i)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(2));
 }
 
 #[test]
@@ -356,7 +381,7 @@ fn break_in_inner_loop_does_not_exit_outer() {
     let src = "(let ((outer 0)) \
                  (dotimes (i 3) (loop (break)) (setf outer (+ outer 1))) \
                  outer)";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(3));
 }
 
 #[test]
@@ -445,7 +470,7 @@ fn list_builds_cons_chain() {
 
 #[test]
 fn dolist_is_unit() {
-    assert_eq!(eval_ok("(dolist (x (list (Int 1))) x)"), RtValue::Unit);
+    assert_eq!(eval_ok_with_prelude("(dolist (x (list (Int 1))) x)"), RtValue::Unit);
 }
 
 #[test]
@@ -453,7 +478,7 @@ fn dolist_iterates_over_each_element() {
     let src = "(let ((count 0)) \
                  (dolist (x (list (Int 1) (Int 2) (Int 3))) (setf count (+ count 1))) \
                  count)";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(3));
 }
 
 #[test]
@@ -461,7 +486,7 @@ fn dolist_over_empty_list_does_nothing() {
     let src = "(let ((count 0)) \
                  (dolist (x (list)) (setf count (+ count 1))) \
                  count)";
-    assert_eq!(eval_ok(src), RtValue::Int(0));
+    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(0));
 }
 
 #[test]
@@ -489,7 +514,13 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
                  (car kept))";
     let vs = r.read_all(&mut src_heap, src).expect("read failed");
     let mut chk = Checker::new();
-    let check_interp = Interp::new();
+    let mut check_interp = Interp::new();
+    // `dotimes` is a `defmacro` (see `src/prelude.rs`), expanded during
+    // checking — `check_interp` needs the prelude actually `exec`'d (not
+    // just checked) for `MacroExpander::expand_macro` to find it. The
+    // expansion bottoms out in builtins only (`loop`/`if`/`break`/`setf`/
+    // `cons`/`<`/`+`/`not`), so the *runtime* `interp` below doesn't need it.
+    load_prelude(&mut src_heap, &mut chk, &mut check_interp);
     let tls: Vec<_> = vs
         .into_iter()
         .map(|v| chk.check_form(&mut src_heap, &check_interp, v).expect("check failed"))
@@ -551,7 +582,7 @@ fn cond_with_classify() {
     let src = "(defun classify ((n i32)) i32 \
                  (cond ((< n 0) (- 0 1)) ((= n 0) 0) (else 1))) \
                (classify 7)";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(1));
 }
 
 // ---- labels (roadmap step 9) -------------------------------------------------

@@ -974,24 +974,15 @@ impl Checker {
                 // Represent progn as a let with no bindings.
                 return Ok(Typed { expr: Expr::Let(Vec::new(), body), ty });
             }
-            "when" => return self.check_when(heap, interp, env, args, false),
-            "unless" => return self.check_when(heap, interp, env, args, true),
-            "and" => return self.check_and_or(heap, interp, env, args, true),
-            "or" => return self.check_and_or(heap, interp, env, args, false),
-            "cond" => return self.check_cond(heap, interp, env, args, expected),
             "setf" => return self.check_setf(heap, interp, env, args),
-            "while" => return self.check_while(heap, interp, env, args),
             "loop" => return self.check_loop(heap, interp, env, args),
             "break" => return self.check_break(args),
             "return" => return self.check_return(heap, interp, env, args),
-            "dotimes" => return self.check_dotimes(heap, interp, env, args),
-            "dolist" => return self.check_dolist(heap, interp, env, args),
             "list" => return self.check_list_lit(heap, interp, env, args),
             "lambda" => return self.check_lambda(heap, interp, env, args),
             "labels" => return self.check_labels(heap, interp, env, args, expected),
             "apply" => return self.check_apply_form(heap, interp, env, args),
             "match" => return self.check_match(heap, interp, env, args, expected),
-            "if-let" => return self.check_if_let(heap, interp, env, args, expected),
             "panic" => return self.check_panic(heap, interp, env, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
@@ -1770,24 +1761,6 @@ impl Checker {
         Ok(TopLevel::Defvar { name: self.fq(&name), ty, value, mutable })
     }
 
-    /// `(while cond body...)`: loop while `cond` (a `bool`) holds; the body is
-    /// evaluated for effect. The result is `Unit`. `break`/`return` may exit it
-    /// early; their (optional) value must then itself be `Unit`.
-    fn check_while(
-        &self,
-        heap: &mut Heap,
-        interp: &dyn MacroExpander,
-        env: &Env,
-        args: &[Value],
-    ) -> Result<Typed, Error> {
-        if args.is_empty() {
-            return Err(Error::TypeError("while: (while cond body...)".into()));
-        }
-        let cond = self.check(heap, interp, env, args[0], Some(&Type::Bool))?;
-        let (body, _) = self.check_loop_body(heap, interp, env, &args[1..], Type::Unit)?;
-        Ok(Typed { expr: Expr::While(Box::new(cond), body), ty: Type::Unit })
-    }
-
     /// `(loop body...)`: an infinite loop, exited via `break`/`return`. Its
     /// type is the join of every `break`/`return` reached directly inside it
     /// (not crossing a nested loop/lambda); `Never` if it never exits.
@@ -1872,153 +1845,6 @@ impl Checker {
         Ok(())
     }
 
-    /// `(dotimes (var count) body...)`: run the body with `var` taking `0` ..
-    /// `count-1`. Desugars to `let` + `while` + `setf`. Result is `Unit`.
-    fn check_dotimes(
-        &self,
-        heap: &mut Heap,
-        interp: &dyn MacroExpander,
-        env: &Env,
-        args: &[Value],
-    ) -> Result<Typed, Error> {
-        if args.is_empty() {
-            return Err(Error::TypeError("dotimes: (dotimes (var count) body...)".into()));
-        }
-        let spec = heap.list_to_vec(args[0])?;
-        if spec.len() != 2 {
-            return Err(Error::TypeError("dotimes: spec must be (var count)".into()));
-        }
-        let var = match spec[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
-            _ => return Err(Error::TypeError("dotimes: variable must be a symbol".into())),
-        };
-        let count = self.check(heap, interp, env, spec[1], Some(&Type::I32))?;
-        // A hidden loop-limit binding; the space makes it unwritable in source.
-        let limit = " dotimes-limit".to_string();
-        let child = env.extended(vec![(var.clone(), Type::I32), (limit.clone(), Type::I32)]);
-        let (mut body, _) = self.check_loop_body(heap, interp, &child, &args[1..], Type::Unit)?;
-
-        let var_ref = || Typed { expr: Expr::Var(var.clone()), ty: Type::I32 };
-        let int = |n| Typed { expr: Expr::Int(n), ty: Type::I32 };
-        // `+`/`<` are `i32` instance methods, not free functions (see
-        // `registry::int_assoc`) — this hidden desugaring builds the
-        // `Expr::Assoc` node directly rather than going through
-        // `check_instance_method`, since there's no source-level call to
-        // recursively check.
-        let op = |name: &str, a, b, ty| Typed {
-            expr: Expr::Assoc { type_name: Path::root("i32"), method: name.to_string(), instance: true, args: vec![a, b] },
-            ty,
-        };
-        // body... then (setf var (+ var 1))
-        let incr = Typed {
-            expr: Expr::Set(
-                var.clone(),
-                Box::new(op("+", var_ref(), int(1), Type::I32)),
-            ),
-            ty: Type::I32,
-        };
-        body.push(incr);
-        let cond = op(
-            "<",
-            var_ref(),
-            Typed { expr: Expr::Var(limit.clone()), ty: Type::I32 },
-            Type::Bool,
-        );
-        let while_node = Typed { expr: Expr::While(Box::new(cond), body), ty: Type::Unit };
-        let binds = vec![(var, int(0)), (limit, count)];
-        Ok(Typed { expr: Expr::Let(binds, vec![while_node]), ty: Type::Unit })
-    }
-
-    /// `(dolist (var list-expr) body...)`: iterate over a `Sexpr` cons-list,
-    /// binding `var` to each element in turn. `list-expr` is checked against
-    /// `Sexpr` (so `()` adopts `Nil`). Desugars to `let` + `while` + `match`,
-    /// pattern-matching `Cons`/`Nil` on each step rather than unwrapping an
-    /// `Option` (the `Sexpr` cons/nil duality). Result is `Unit`.
-    fn check_dolist(
-        &self,
-        heap: &mut Heap,
-        interp: &dyn MacroExpander,
-        env: &Env,
-        args: &[Value],
-    ) -> Result<Typed, Error> {
-        if args.is_empty() {
-            return Err(Error::TypeError("dolist: (dolist (var list-expr) body...)".into()));
-        }
-        let spec = heap.list_to_vec(args[0])?;
-        if spec.len() != 2 {
-            return Err(Error::TypeError("dolist: spec must be (var list-expr)".into()));
-        }
-        let var = match spec[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
-            _ => return Err(Error::TypeError("dolist: variable must be a symbol".into())),
-        };
-        let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
-        let lst = self.check(heap, interp, env, spec[1], Some(&sexpr_ty))?;
-        let (adt, cons_idx) = self.resolve_ctor("cons").expect("sexpr::cons is built in");
-        let (_, nil_idx) = self.resolve_ctor("nil").expect("sexpr::nil is built in");
-
-        // Hidden loop bindings; the leading space makes them unwritable in source.
-        let lstvar = " dolist-lst".to_string();
-        let restvar = " dolist-rest".to_string();
-        let lst_ref = || Typed { expr: Expr::Var(lstvar.clone()), ty: sexpr_ty.clone() };
-        let nil_node = || Typed {
-            expr: Expr::Construct { type_name: adt.clone(), variant: nil_idx, args: Vec::new() },
-            ty: sexpr_ty.clone(),
-        };
-
-        let outer = env.extended(vec![(lstvar.clone(), sexpr_ty.clone())]);
-        let body_env = outer.extended(vec![(var.clone(), sexpr_ty.clone())]);
-        let (mut body, _) = self.check_loop_body(heap, interp, &body_env, &args[1..], Type::Unit)?;
-
-        // body... then (setf --dolist-lst --dolist-rest), advancing the list.
-        body.push(Typed {
-            expr: Expr::Set(
-                lstvar.clone(),
-                Box::new(Typed { expr: Expr::Var(restvar.clone()), ty: sexpr_ty.clone() }),
-            ),
-            ty: sexpr_ty.clone(),
-        });
-        let step = Typed {
-            expr: Expr::Match(
-                Box::new(lst_ref()),
-                vec![
-                    Arm {
-                        pat: Pattern::Ctor {
-                            type_name: adt.clone(),
-                            variant: cons_idx,
-                            args: vec![Pattern::Bind(var), Pattern::Bind(restvar)],
-                        },
-                        body,
-                    },
-                    Arm { pat: Pattern::Wildcard, body: vec![nil_node()] },
-                ],
-            ),
-            ty: sexpr_ty.clone(),
-        };
-
-        // while condition: is `--dolist-lst` still a `Cons`?
-        let cond = Typed {
-            expr: Expr::Match(
-                Box::new(lst_ref()),
-                vec![
-                    Arm {
-                        pat: Pattern::Ctor {
-                            type_name: adt.clone(),
-                            variant: cons_idx,
-                            args: vec![Pattern::Wildcard, Pattern::Wildcard],
-                        },
-                        body: vec![bool_node(true)],
-                    },
-                    Arm { pat: Pattern::Wildcard, body: vec![bool_node(false)] },
-                ],
-            ),
-            ty: Type::Bool,
-        };
-
-        let while_node = Typed { expr: Expr::While(Box::new(cond), vec![step]), ty: Type::Unit };
-        Ok(Typed { expr: Expr::Let(vec![(lstvar, lst)], vec![while_node]), ty: Type::Unit })
-    }
-
     /// `(list e1 e2 ... en)`: build a `Sexpr` cons-list from `Sexpr`-typed
     /// elements (each checked against `Sexpr`, so `()` adopts `Nil`).
     /// Desugars to nested `(Cons e1 (Cons e2 (... (Nil))))`; `(list)` is `(Nil)`.
@@ -2041,115 +1867,6 @@ impl Checker {
             acc = Typed {
                 expr: Expr::Construct { type_name: adt.clone(), variant: cons_idx, args: vec![e, acc] },
                 ty: sexpr_ty.clone(),
-            };
-        }
-        Ok(acc)
-    }
-
-    /// `when`/`unless`: evaluate the body for effect when the condition holds
-    /// (`unless` negates). The result is `Unit`; the body's value is discarded.
-    fn check_when(
-        &self,
-        heap: &mut Heap,
-        interp: &dyn MacroExpander,
-        env: &Env,
-        args: &[Value],
-        negate: bool,
-    ) -> Result<Typed, Error> {
-        if args.is_empty() {
-            return Err(Error::TypeError("when/unless: (when cond body...)".into()));
-        }
-        let cond = self.check(heap, interp, env, args[0], Some(&Type::Bool))?;
-        let (mut body, _) = self.check_seq(heap, interp, env, &args[1..], None)?;
-        body.push(unit_node()); // discard the body's value -> Unit
-        let guarded = Typed { expr: Expr::Let(Vec::new(), body), ty: Type::Unit };
-        let (then, els) = if negate {
-            (unit_node(), guarded)
-        } else {
-            (guarded, unit_node())
-        };
-        Ok(Typed {
-            expr: Expr::If(Box::new(cond), Box::new(then), Box::new(els)),
-            ty: Type::Unit,
-        })
-    }
-
-    /// `and`/`or`: short-circuiting boolean operators desugared to nested `if`s.
-    fn check_and_or(
-        &self,
-        heap: &mut Heap,
-        interp: &dyn MacroExpander,
-        env: &Env,
-        args: &[Value],
-        is_and: bool,
-    ) -> Result<Typed, Error> {
-        if args.is_empty() {
-            return Ok(bool_node(is_and)); // (and) = true, (or) = false
-        }
-        let mut acc = self.check(heap, interp, env, args[args.len() - 1], Some(&Type::Bool))?;
-        for &a in args[..args.len() - 1].iter().rev() {
-            let cond = self.check(heap, interp, env, a, Some(&Type::Bool))?;
-            let (then, els) = if is_and {
-                (acc, bool_node(false)) // a && rest = if a then rest else false
-            } else {
-                (bool_node(true), acc) // a || rest = if a then true else rest
-            };
-            acc = Typed {
-                expr: Expr::If(Box::new(cond), Box::new(then), Box::new(els)),
-                ty: Type::Bool,
-            };
-        }
-        Ok(acc)
-    }
-
-    /// `cond`: a chain of `(test body...)` clauses with an optional final
-    /// `(else body...)`. Desugars to nested `if`s; all clause bodies must share
-    /// a type (the missing-else fall-through is `Unit`).
-    fn check_cond(
-        &self,
-        heap: &mut Heap,
-        interp: &dyn MacroExpander,
-        env: &Env,
-        args: &[Value],
-        expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
-        if args.is_empty() {
-            return Err(Error::TypeError("cond: (cond (test body...)...)".into()));
-        }
-        let clauses: Vec<Vec<Value>> =
-            args.iter().map(|c| heap.list_to_vec(*c)).collect::<Result<_, _>>()?;
-
-        // A trailing `(else body...)` provides the fall-through value.
-        let last_is_else = clauses
-            .last()
-            .and_then(|c| c.first())
-            .map(|v| is_symbol(heap, *v, "else"))
-            == Some(true);
-
-        let (mut acc, rest) = if last_is_else {
-            let els = clauses.last().unwrap();
-            let exp = expected.and_then(non_never);
-            let (body, ty) = self.check_seq(heap, interp, env, &els[1..], exp)?;
-            (Typed { expr: Expr::Let(Vec::new(), body), ty }, &clauses[..clauses.len() - 1])
-        } else {
-            (unit_node(), &clauses[..])
-        };
-
-        for clause in rest.iter().rev() {
-            if clause.is_empty() {
-                return Err(Error::TypeError("cond: clause must be (test body...)".into()));
-            }
-            if is_symbol(heap, clause[0], "else") {
-                return Err(Error::TypeError("cond: `else` must be the last clause".into()));
-            }
-            let cond = self.check(heap, interp, env, clause[0], Some(&Type::Bool))?;
-            let exp = non_never(&acc.ty);
-            let (body, bty) = self.check_seq(heap, interp, env, &clause[1..], exp)?;
-            let ty = join_types(&bty, &acc.ty)?;
-            let then = Typed { expr: Expr::Let(Vec::new(), body), ty: bty };
-            acc = Typed {
-                expr: Expr::If(Box::new(cond), Box::new(then), Box::new(acc)),
-                ty,
             };
         }
         Ok(acc)
@@ -2353,38 +2070,6 @@ impl Checker {
         Ok(Typed { expr: Expr::Match(Box::new(scrut), arms), ty })
     }
 
-    fn check_if_let(
-        &self,
-        heap: &mut Heap,
-        interp: &dyn MacroExpander,
-        env: &Env,
-        args: &[Value],
-        expected: Option<&Type>,
-    ) -> Result<Typed, Error> {
-        if args.len() != 3 {
-            return Err(Error::TypeError("if-let: (if-let (pattern val) then else)".into()));
-        }
-        let binding = heap.list_to_vec(args[0])?;
-        if binding.len() != 2 {
-            return Err(Error::TypeError("if-let: binding must be (pattern val)".into()));
-        }
-        let scrut = self.check(heap, interp, env, binding[1], None)?;
-        self.expect_adt(&scrut.ty)?;
-        let (pat, binds) = self.check_pattern(heap, &scrut.ty, binding[0])?;
-
-        let then_env = env.extended(binds);
-        let then = self.check(heap, interp, &then_env, args[1], expected)?;
-        let then_ty = then.ty.clone();
-        let els = self.check(heap, interp, env, args[2], Some(&then_ty))?;
-
-        // Desugar to a two-arm match; the wildcard arm makes it exhaustive.
-        let arms = vec![
-            Arm { pat, body: vec![then] },
-            Arm { pat: Pattern::Wildcard, body: vec![els] },
-        ];
-        Ok(Typed { expr: Expr::Match(Box::new(scrut), arms), ty: then_ty })
-    }
-
     /// Check a pattern against the type of the value it matches, returning the
     /// pattern and the variable bindings it introduces.
     fn check_pattern(
@@ -2513,16 +2198,6 @@ impl Default for Checker {
 }
 
 // ---- free helpers ---------------------------------------------------------
-
-/// A typed `Unit` literal node.
-fn unit_node() -> Typed {
-    Typed { expr: Expr::Unit, ty: Type::Unit }
-}
-
-/// A typed boolean literal node.
-fn bool_node(b: bool) -> Typed {
-    Typed { expr: Expr::Bool(b), ty: Type::Bool }
-}
 
 /// Recursively convert a raw read `Value` into an owned [`QuotedSexpr`] (see
 /// [`Expr::Quote`] for why `quote` can't just keep the heap pointer). A
