@@ -862,7 +862,15 @@ fn compiles_a_while_loop_reading_a_sexpr_parameter_without_mutating_it() {
 /// same "refuse, don't guess" discipline every other unsupported construct
 /// gets.
 #[test]
-fn refuses_to_compile_a_while_loop_using_break() {
+fn compiles_a_while_loop_using_break() {
+    // `break` is bridged now (ループ・分岐構文の整理: `AstExpr::abreak`,
+    // `compile-value`'s `ABreak` arm) — `while`'s own macro expansion over
+    // `loop` (`src/prelude.rs`) means this `break` is really inside an
+    // `Expr::Loop`, and the `if` guarding it is a genuine statement-position
+    // `if` (one branch diverges via `break`, the other falls through via
+    // `setf`) — exactly the case the value-position `if` redesign exists
+    // for. `i` is read *after* the loop, via the loop's per-variable exit
+    // phi (`copy-into`d back into the outer `vals`).
     let src = r#"
         (defun first-ge ((n i64)) i64
           (let ((i (- n n)))
@@ -872,9 +880,29 @@ fn refuses_to_compile_a_while_loop_using_break() {
         (compile "first-ge")
     "#;
     match run(src) {
-        RtValue::Data { variant, .. } => assert_eq!(variant, 1, "expected Err, not Ok"),
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
         other => panic!("expected a Result value, got {:?}", other),
     }
+    let src2 = r#"
+        (defun first-ge ((n i64)) i64
+          (let ((i (- n n)))
+            (while (< i n)
+              (if (= i 3) (break) (setf i (+ i 1))))
+            i))
+        (compile "first-ge")
+        (first-ge 10)
+    "#;
+    assert_eq!(run(src2), RtValue::Int(3));
+    let src3 = r#"
+        (defun first-ge ((n i64)) i64
+          (let ((i (- n n)))
+            (while (< i n)
+              (if (= i 3) (break) (setf i (+ i 1))))
+            i))
+        (compile "first-ge")
+        (first-ge 2)
+    "#;
+    assert_eq!(run(src3), RtValue::Int(2));
 }
 
 /// `setf` of a `Sexpr`-typed variable isn't bridged (see
@@ -895,4 +923,282 @@ fn refuses_to_compile_a_setf_of_a_sexpr_variable() {
         RtValue::Data { variant, .. } => assert_eq!(variant, 1, "expected Err, not Ok"),
         other => panic!("expected a Result value, got {:?}", other),
     }
+}
+
+// ---- ループ・分岐構文の整理: value-position `if` ------------------------------
+
+/// The simplest value-position `if`: its result feeds a binary operator,
+/// not a `build-ret*` — exercises `compile-value`'s new `AIf` arm
+/// (continuation block + phi) rather than `compile-tail`'s old
+/// tail-only one.
+#[test]
+fn compiles_a_function_using_if_in_value_position() {
+    let src = r#"
+        (defun f ((a i64) (b i64)) i64 (+ (if (< a b) a b) 1))
+        (compile "f")
+        (f 3 7)
+    "#;
+    assert_eq!(run(src), RtValue::Int(4));
+}
+
+/// An `if` used as a `let` binding's initializer — exercises the merge
+/// phi's result flowing through `eval-args`/`ALet`'s `bound-vals`.
+#[test]
+fn compiles_a_function_using_if_as_a_let_binding_value() {
+    let src = r#"
+        (defun f ((a i64) (b i64)) i64 (let ((m (if (< a b) a b))) (* m 10)))
+        (compile "f")
+        (f 3 7)
+    "#;
+    assert_eq!(run(src), RtValue::Int(30));
+}
+
+/// An `if` nested inside another `if`'s branch, in value position —
+/// exercises `current-block` for the outer `if`'s `then-end`/`els-end`
+/// (the inner `if` leaves `b` positioned at *its own* continuation block,
+/// not the block the outer `if` itself `append-block`-ed).
+#[test]
+fn compiles_a_function_with_nested_if_in_value_position() {
+    // Returns one of `a`/`b`/`c` (always `i64`, sidestepping bare integer
+    // literals defaulting to `i32` deep inside a binop's first-argument
+    // position — see the other tests in this file for that convention).
+    let src = r#"
+        (defun classify ((a i64) (b i64) (c i64)) i64
+          (+ (if (< a b) (if (< b c) a b) (if (< a c) a c)) 100))
+        (compile "classify")
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+    let cases = [((1, 2, 3), 101), ((1, 2, 0), 102), ((5, 1, 9), 105), ((5, 1, 0), 100)];
+    for ((a, b, c), expected) in cases {
+        let src2 = format!(
+            r#"
+            (defun classify ((a i64) (b i64) (c i64)) i64
+              (+ (if (< a b) (if (< b c) a b) (if (< a c) a c)) 100))
+            (compile "classify")
+            (classify {a} {b} {c})
+        "#
+        );
+        assert_eq!(run(&src2), RtValue::Int(expected), "a={a} b={b} c={c}");
+    }
+}
+
+/// A regression test for the exact bug found while designing this: each
+/// `if` branch must compile against its *own copy* of `vals`, not the
+/// shared one directly — otherwise `then`'s `setf` would leak into `els`'s
+/// *compiled code* even though only one of them ever actually runs.
+/// `acc` is read identically in both branches, so a leak would make this
+/// return the wrong (always-mutated) value regardless of which branch the
+/// condition actually selects.
+#[test]
+fn compiles_a_function_where_setf_in_one_if_branch_does_not_leak_into_the_other() {
+    let src = r#"
+        (defun f ((flag bool) (start i64)) i64
+          (let ((acc start))
+            (if flag (setf acc (+ acc 100)) acc)
+            acc))
+        (compile "f")
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+    let src_true = r#"
+        (defun f ((flag bool) (start i64)) i64
+          (let ((acc start))
+            (if flag (setf acc (+ acc 100)) acc)
+            acc))
+        (compile "f")
+        (f true 5)
+    "#;
+    assert_eq!(run(src_true), RtValue::Int(105));
+    let src_false = r#"
+        (defun f ((flag bool) (start i64)) i64
+          (let ((acc start))
+            (if flag (setf acc (+ acc 100)) acc)
+            acc))
+        (compile "f")
+        (f false 5)
+    "#;
+    assert_eq!(run(src_false), RtValue::Int(5));
+}
+
+/// A value-position `if` with one branch diverging via `panic`
+/// (`then_diverges`/`els_diverges`, computed from the branch's own checked
+/// type being `Never`) — the merge at `cont-block` must skip the
+/// diverging branch entirely rather than trying to treat its absent value
+/// as a real one. Only the non-panicking path is actually exercised at
+/// runtime (calling this with a negative `a` would abort the process).
+#[test]
+fn compiles_a_function_with_a_divergent_if_branch() {
+    let src = r#"
+        (defun f ((a i64)) i64 (+ (if (< a 0) (panic "negative") a) 1))
+        (compile "f")
+        (f 9)
+    "#;
+    assert_eq!(run(src), RtValue::Int(10));
+}
+
+/// `cond`/`when`/`unless`/`and`/`or` are `defmacro`s over `if` now (see
+/// `src/prelude.rs`'s "loop/branch primitive reduction" comment) — by the
+/// time `ast_bridge::typed_to_ast` ever sees these functions' bodies,
+/// they've already been expanded into plain `if`/`Unit` forms, so this is
+/// really exercising the same `AIf`/`AUnit` machinery, just confirming the
+/// macro layer composes with it correctly end to end.
+#[test]
+fn compiles_a_function_using_cond_when_unless_and_and_or() {
+    let src = r#"
+        (defun classify ((n i64)) i64
+          (cond ((< n 0) (- (- n n) 1)) ((= n 0) (- n n)) (else (+ (- n n) 1))))
+        (defun side-effect ((flag bool) (start i64)) i64
+          (let ((acc start))
+            (when flag (setf acc (+ acc 1)))
+            (unless flag (setf acc (+ acc 100)))
+            acc))
+        (defun combine ((a bool) (b bool)) bool (and a (or b false)))
+        (compile "classify")
+        (compile "side-effect")
+        (compile "combine")
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+    assert_eq!(run(&format!("{src}\n(classify -5)")), RtValue::Int(-1));
+    assert_eq!(run(&format!("{src}\n(classify 0)")), RtValue::Int(0));
+    assert_eq!(run(&format!("{src}\n(classify 5)")), RtValue::Int(1));
+    assert_eq!(run(&format!("{src}\n(side-effect true 0)")), RtValue::Int(1));
+    assert_eq!(run(&format!("{src}\n(side-effect false 0)")), RtValue::Int(100));
+    assert_eq!(run(&format!("{src}\n(combine true true)")), RtValue::Bool(true));
+    assert_eq!(run(&format!("{src}\n(combine true false)")), RtValue::Bool(false));
+    assert_eq!(run(&format!("{src}\n(combine false true)")), RtValue::Bool(false));
+}
+
+// ---- ループ・分岐構文の整理: `loop`/`break`/`return` ---------------------------
+
+/// The simplest `loop`+`return`: a single exit site carrying a value —
+/// exercises `ALoop`'s eagerly-built `exit-result-phi` with exactly one
+/// incoming edge.
+#[test]
+fn compiles_a_function_with_a_loop_returning_a_value() {
+    let src = r#"
+        (defun f ((n i64)) i64
+          (let ((i (- n n)))
+            (loop
+              (if (>= i n) (return i) (setf i (+ i 1))))))
+        (compile "f")
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+    assert_eq!(run(&format!("{src}\n(f 7)")), RtValue::Int(7));
+    assert_eq!(run(&format!("{src}\n(f 0)")), RtValue::Int(0));
+}
+
+/// A `loop` with *two* distinct `return` sites, each contributing its own
+/// incoming edge to the same `exit-result-phi` — the part `while`'s
+/// single-predecessor `exit` never needed to handle.
+#[test]
+fn compiles_a_function_with_multiple_return_sites() {
+    let src = r#"
+        (defun classify ((n i64)) i64
+          (let ((i (- n n)))
+            (loop
+              (if (= i n) (return (- (- n n) 1)) ())
+              (if (= i 3) (return 99) ())
+              (setf i (+ i 1)))))
+        (compile "classify")
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+    // Hits the `i == 3` return site first.
+    assert_eq!(run(&format!("{src}\n(classify 10)")), RtValue::Int(99));
+    // Never reaches `i == 3`; falls out via the `i == n` return site.
+    assert_eq!(run(&format!("{src}\n(classify 2)")), RtValue::Int(-1));
+}
+
+/// `break` with no value, alongside `setf`-mutated loop-carried state read
+/// after the loop exits — `exit-vals-phis` must reflect the value as of
+/// the `break` site, not the loop header's stale pre-iteration one.
+#[test]
+fn compiles_a_function_with_loop_and_break_accumulating_state() {
+    let src = r#"
+        (defun f ((n i64)) i64
+          (let ((i (- n n)) (acc (- n n)))
+            (loop
+              (if (>= i n) (break) ())
+              (setf acc (+ acc i))
+              (setf i (+ i 1)))
+            acc))
+        (compile "f")
+        (f 5)
+    "#;
+    assert_eq!(run(src), RtValue::Int(10));
+}
+
+/// `loop` nested inside another `loop`'s body, each with its own `break` —
+/// `ABreak`/`AReturn` must target the *nearest* enclosing loop's exit (the
+/// inner one), never the outer one, and `current-block` must correctly
+/// identify the inner loop's `exit` block as the outer loop's actual
+/// latch predecessor (the same nested-control-flow case `AWhile` handled,
+/// now for two genuine `loop`s instead of one `while`).
+#[test]
+fn compiles_a_function_with_nested_loops_and_breaks() {
+    let src = r#"
+        (defun f ((n i64)) i64
+          (let ((total (- n n)) (i (- n n)))
+            (loop
+              (if (>= i n) (break) ())
+              (let ((j (- n n)))
+                (loop
+                  (if (>= j n) (break) ())
+                  (setf total (+ total 1))
+                  (setf j (+ j 1))))
+              (setf i (+ i 1)))
+            total))
+        (compile "f")
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+    assert_eq!(run(&format!("{src}\n(f 3)")), RtValue::Int(9));
+    assert_eq!(run(&format!("{src}\n(f 0)")), RtValue::Int(0));
+}
+
+/// `return` from inside a `loop` nested inside a `while` (itself now a
+/// `defmacro` over `loop`) — the inner `return` must target the inner
+/// `loop`'s exit, not bubble out through the outer `while`'s own `loop`.
+/// Each outer iteration re-binds a fresh `j` and runs the inner `loop` to
+/// completion (`j` counting 0..3, `return`ing once it hits 3), accumulating
+/// into `total` — `f(n)` is `3 * n`, simple enough to verify by hand while
+/// still genuinely exercising both the inner loop's own back edge *and*
+/// the outer `while`'s, with one nested inside the other's body.
+#[test]
+fn compiles_a_function_with_return_inside_a_loop_nested_in_a_while() {
+    let src = r#"
+        (defun f ((n i64)) i64
+          (let ((k (- n n)) (total (- n n)))
+            (while (< k n)
+              (let ((j (- n n)))
+                (setf total
+                      (+ total
+                         (loop
+                           (if (>= j 3) (return j) ())
+                           (setf j (+ j 1))))))
+              (setf k (+ k 1)))
+            total))
+        (compile "f")
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+    assert_eq!(run(&format!("{src}\n(f 2)")), RtValue::Int(6));
+    assert_eq!(run(&format!("{src}\n(f 0)")), RtValue::Int(0));
 }

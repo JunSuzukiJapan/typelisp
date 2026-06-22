@@ -19,30 +19,34 @@
 //! `LlvmFunction` declaration is added to one shared module *before* any
 //! body is built, so a call to a not-yet-finished sibling resolves to an
 //! ordinary intra-module `call`, with no JIT/global-mapping step needed at
-//! all — see `ast_bridge::typed_to_ast`'s doc comment on `group`). `if` is
-//! only supported in **tail
-//! position** (the value an enclosing `if`/the function itself returns),
-//! not as a nested sub-expression: `compile-tail` lowers a tail `if` to two
-//! basic blocks each ending in their own `ret`, sidestepping the need for a
-//! phi node or alloca/load/store merge this narrow first slice doesn't need
-//! yet (see `compile-value`'s fallback `panic` for the case this
-//! restriction rules out).
+//! all — see `ast_bridge::typed_to_ast`'s doc comment on `group`).
 //!
-//! **ループ構文**: `while` (any number of loop-carried `i64`/`bool`/`f64`/
-//! `char` variables, mutated via local `setf`) is also supported, via a
-//! phi node at the loop header for *every* currently in-scope variable
-//! (not just the ones a body actually mutates — see `make-phis`'s doc
-//! comment on why precise mutation analysis isn't worth it here). `break`/
-//! `return`/`loop` aren't bridged yet (a `while` whose body uses them, or a
-//! `setf` of a `Sexpr`-typed variable, fails the AST bridge outright —
-//! see `ast_bridge::typed_to_ast`'s `Expr::Set` arm on why `Sexpr` is
-//! excluded). This is the one other place (besides `if`) where `compile`
-//! builds more than a single straight-line basic block, but unlike `if` it
-//! genuinely needs phi nodes rather than sidestepping them: a loop's back
-//! edge means a loop-carried variable's value at the header has two
-//! possible predecessors (the preheader, on the first pass, or the latch,
-//! on every subsequent one) that can't both be made to end in their own
-//! `ret`/fall straight through the way `if`'s two branches can.
+//! **ループ・分岐構文の整理**（[docs/TODO.md](../../docs/TODO.md)「ステップ5」）:
+//! `if` is now supported in **any position**, not just tail — `compile-value`'s
+//! `AIf` arm builds a continuation block and merges both branches' results
+//! (and every in-scope variable's possibly-`setf`-mutated value — see
+//! `merge-vals-phis`'s doc comment on why *that* needed its own fix too)
+//! via phi nodes, skipping a branch's contribution entirely if it
+//! diverges (`then-diverges`/`els-diverges`, computed once in
+//! `ast_bridge::typed_to_ast` from the branch's own checked type being
+//! `Never`). `compile-tail` no longer has a dedicated `AIf` arm at all —
+//! a tail-position `if` just flows through the same `compile-value` path
+//! and gets `build-ret*`-ed by the generic `_` arm, exactly like any other
+//! value-producing `AstExpr`. `loop`/`break`/`return` are also bridged now
+//! (results restricted to `i64`/`bool`/`f64`/`char`, not `Sexpr` — see
+//! `ast_bridge::typed_to_ast`'s `Expr::Loop` arm), superseding the old
+//! `while`-specific `AWhile` compilation from a previous revision —
+//! `while`/`dotimes`/`dolist`/`when`/`unless`/`cond`/`and`/`or`/`if-let`
+//! are `defmacro`s over `if`/`match`/`loop` now (see `src/prelude.rs`'s
+//! "loop/branch primitive reduction" comment), so they reach this module
+//! already expanded into the forms it bridges natively. `compile-value`'s
+//! signature grew three parameters (`loop-exit`/`loop-exit-vals`/
+//! `loop-exit-result`) threaded through every recursive call to identify
+//! the *nearest enclosing* loop's exit block and merge-phis, for `break`/
+//! `return` to target — see `ALoop`'s arm for the full design (a loop's
+//! `exit` can have many predecessors, one per `break`/`return` site,
+//! unlike `if`'s fixed two, so it needs its own per-variable *and*
+//! per-result phis, built eagerly before the body is compiled).
 //!
 //! **Phase 3's GC-rooting discipline.** `Sexpr` values are pointers into the
 //! mark-sweep cons heap (`crate::mem::Heap`), and `Heap::cons` may trigger a
@@ -140,6 +144,53 @@ pub const SOURCE: &str = r#"
 (defun copy-into ((dst Vector<LlvmValue>) (src Vector<LlvmValue>) (i i32) (n i32)) ()
   (if (>= i n) () (progn (set dst i (get src i)) (copy-into dst src (+ i 1) n))))
 
+;; `if`'s per-variable merge (ループ・分岐構文の整理, `compile-value`'s `AIf`
+;; arm): `then`/`els` each compile against their *own copy* of `vals` (see
+;; `AIf`'s comment on why a shared `vals` would let one branch's `setf`
+;; leak into the other, even though only one of them ever actually runs) —
+;; this rejoins them at the continuation block, one phi per variable,
+;; mirroring `ALoop`'s `entry`-header phis but for two predecessors
+;; (`then-end`/`els-end`) instead of one (the back edge). A diverging
+;; branch contributes no incoming edge at all (same reasoning as
+;; `merge-if-results` below, just per-variable) — `then-end`/`els-end` are
+;; read via `current-block` rather than assumed to be `then-block`/
+;; `else-block`, since either branch may itself contain further control
+;; flow (a nested `if`/`loop`) that leaves `b` positioned elsewhere by the
+;; time it finishes.
+(defun merge-vals-phis ((b LlvmBuilder) (then-vals Vector<LlvmValue>) (then-end LlvmBasicBlock) (then-diverges bool)
+                         (els-vals Vector<LlvmValue>) (els-end LlvmBasicBlock) (els-diverges bool)
+                         (i i32) (n i32) (out Vector<LlvmValue>)) Vector<LlvmValue>
+  (if (>= i n)
+      out
+      (progn
+        (push out (cond ((and then-diverges els-diverges) (get then-vals i))
+                         (then-diverges (get els-vals i))
+                         (els-diverges (get then-vals i))
+                         (else (let ((phi (build-phi b (get then-vals i))))
+                                 (progn (add-incoming b phi (get then-vals i) then-end)
+                                        (add-incoming b phi (get els-vals i) els-end)
+                                        phi)))))
+        (merge-vals-phis b then-vals then-end then-diverges els-vals els-end els-diverges (+ i 1) n out))))
+
+;; `if`'s own value merge (ループ・分岐構文の整理) — the same 3-way shape as
+;; each step of `merge-vals-phis` above (kept separate rather than
+;; expressed in terms of it: wrapping/unwrapping a length-1 `Vector` just to
+;; reuse it would add more indirection than the four lines it'd save), but
+;; for the `if` expression's *own* result rather than a loop-carried
+;; variable. When both branches diverge, `cont-block` is unreachable and
+;; the returned value is a placeholder nothing ever reads (the same
+;; "harmless dummy" pattern `AUnit`/a never-exiting `ALoop` already rely
+;; on).
+(defun merge-if-results ((b LlvmBuilder) (then-val LlvmValue) (then-end LlvmBasicBlock) (then-diverges bool)
+                          (els-val LlvmValue) (els-end LlvmBasicBlock) (els-diverges bool)) LlvmValue
+  (cond ((and then-diverges els-diverges) then-val)
+        (then-diverges els-val)
+        (els-diverges then-val)
+        (else (let ((phi (build-phi b then-val)))
+                (progn (add-incoming b phi then-val then-end)
+                       (add-incoming b phi els-val els-end)
+                       phi)))))
+
 ;; Phase 3's rooting discipline (see this module's doc comment): pushes a GC
 ;; root for every `Sexpr`-typed (`is-sexpr-value`) entry of `vs` — typically
 ;; one function's whole parameter list or one `let`'s freshly-bound values —
@@ -165,21 +216,41 @@ pub const SOURCE: &str = r#"
 ;; which is already in scope by the time it's checked, exactly like ordinary
 ;; self-recursion). `eval-args` is shared by `ALet` (evaluating binding
 ;; values) and `ACall` (evaluating call arguments) — both are just "turn a
-;; `Vector<AstExpr>` into a `Vector<LlvmValue>` in the *current* scope".
+;; `Vector<AstExpr>` into a `Vector<LlvmValue>` in the *current* scope", so
+;; it always closes over `compile-value`'s own `loop-exit`/`loop-exit-vals`/
+;; `loop-exit-result` unchanged (neither introduces a new loop). `eval-body`
+;; takes its own `le`/`lev`/`ler` instead of closing over them, because
+;; `ALoop` (below) *does* need to run a body against a *different*
+;; (its own, freshly built) loop-exit context than whatever was passed in —
+;; `ALet`'s tail-position-equivalent use of it just passes the closed-over
+;; ones straight through unchanged.
 ;;
 ;; `module`/`f` are threaded through purely so `ACall` can resolve its callee
 ;; via `get-or-declare-function` and `ACons`/`ACar`/`ACdr`/`push-root`/
 ;; `pop-root` (Phase 3) can reach the enclosing function's `heap` parameter
-;; — every other arm ignores them.
-(defun compile-value ((module LlvmModule) (b LlvmBuilder) (f LlvmFunction) (params Vector<string>) (vals Vector<LlvmValue>) (e AstExpr)) LlvmValue
+;; — every other arm ignores them. `loop-exit`/`loop-exit-vals`/
+;; `loop-exit-result` (ループ・分岐構文の整理) identify the *nearest
+;; enclosing* loop's exit block, its per-variable merge phis, and its own
+;; result merge phi — only `ABreak`/`AReturn` read them (to jump there and
+;; contribute an incoming edge to each), and only `ALoop` ever changes them
+;; (to its own freshly built ones, for compiling its own body) rather than
+;; threading them through unchanged. At the function's top level there is
+;; no enclosing loop at all; `compile`/`build-one` pass harmless placeholder
+;; values that `break`/`return` outside any loop could never actually reach
+;; (the checker already rejects that source program, so the AST bridge
+;; never produces an `ABreak`/`AReturn` node there in the first place).
+(defun compile-value ((module LlvmModule) (b LlvmBuilder) (f LlvmFunction) (params Vector<string>) (vals Vector<LlvmValue>)
+                       (loop-exit LlvmBasicBlock) (loop-exit-vals Vector<LlvmValue>) (loop-exit-result LlvmValue)
+                       (e AstExpr)) LlvmValue
   (labels ((eval-args ((i i32) (n i32) (exprs Vector<AstExpr>) (out Vector<LlvmValue>)) Vector<LlvmValue>
              (if (>= i n)
                  out
-                 (progn (push out (compile-value module b f params vals (get exprs i)))
+                 (progn (push out (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result (get exprs i)))
                         (eval-args (+ i 1) n exprs out))))
-           (eval-body ((i i32) (n i32) (forms Vector<AstExpr>) (p2 Vector<string>) (v2 Vector<LlvmValue>)) LlvmValue
-             (let ((r (compile-value module b f p2 v2 (get forms i))))
-               (if (>= (+ i 1) n) r (eval-body (+ i 1) n forms p2 v2)))))
+           (eval-body ((i i32) (n i32) (forms Vector<AstExpr>) (p2 Vector<string>) (v2 Vector<LlvmValue>)
+                       (le LlvmBasicBlock) (lev Vector<LlvmValue>) (ler LlvmValue)) LlvmValue
+             (let ((r (compile-value module b f p2 v2 le lev ler (get forms i))))
+               (if (>= (+ i 1) n) r (eval-body (+ i 1) n forms p2 v2 le lev ler)))))
     (match e
       ((AInt n) (llvm-const-i64 n))
       ((ABool flag) (llvm-const-bool flag))
@@ -187,16 +258,32 @@ pub const SOURCE: &str = r#"
       ((AChar c) (llvm-const-char c))
       ((ANil) (llvm-const-nil))
       ((AVar name) (get vals (param-index params name)))
-      ((ABinOp op lhs rhs) (build-op b op (compile-value module b f params vals lhs) (compile-value module b f params vals rhs)))
+      ((ABinOp op lhs rhs)
+       (build-op b op (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result lhs)
+                 (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result rhs)))
       ;; `cons`/`car`/`cdr` (Phase 3): `build-cons` itself roots its two
       ;; operands around the underlying (possibly GC-triggering)
       ;; `Heap::cons` call — see `build_cons`'s doc comment
       ;; (`crate::eval::interp::llvm_builder_build_cons`) — so no extra
       ;; rooting is needed here. `car`/`cdr` never allocate at all.
-      ((ACons lhs rhs) (build-cons b module f (compile-value module b f params vals lhs) (compile-value module b f params vals rhs)))
-      ((ACar v) (build-car b module f (compile-value module b f params vals v)))
-      ((ACdr v) (build-cdr b module f (compile-value module b f params vals v)))
-      ((ANullp v) (build-nullp b (compile-value module b f params vals v)))
+      ((ACons lhs rhs)
+       (build-cons b module f (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result lhs)
+                   (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result rhs)))
+      ((ACar v) (build-car b module f (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result v)))
+      ((ACdr v) (build-cdr b module f (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result v)))
+      ((ANullp v) (build-nullp b (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result v)))
+      ;; `()` as a value (ループ・分岐構文の整理) — `Unit` has no
+      ;; representable `TlValue` payload, so this placeholder is never
+      ;; actually read by anything (the checker guarantees a `Unit`-typed
+      ;; value is only ever discarded, e.g. by `eval-body`'s "keep only the
+      ;; last form" sequencing).
+      ((AUnit) (llvm-const-i64 0))
+      ;; `panic` (ループ・分岐構文の整理) — see `crate::eval::interp::tl_panic`'s
+      ;; doc comment on why the message isn't bridged/used. `build-panic`
+      ;; itself ends in `build-unreachable`, so nothing after this call in
+      ;; the current block is ever reachable — the returned placeholder is
+      ;; never read, exactly like `AUnit`'s.
+      ((APanic) (progn (build-panic b module) (llvm-const-i64 0)))
       ;; `let` in *value* position: unlike `compile-tail`'s `ALet` (below),
       ;; control returns to *this* call's caller once `body` is evaluated
       ;; rather than falling through to a `build-ret*`, so any `Sexpr`-typed
@@ -208,25 +295,27 @@ pub const SOURCE: &str = r#"
       ;; could be observed from outside it, so `new-vals` (an *extended
       ;; copy* of `vals` — see `extend-values`) never needed writing back.
       ;; Now that `setf` can mutate a binding from several scopes further
-      ;; in (e.g. a `while` nested inside this `let`'s body, itself
+      ;; in (e.g. a `loop` nested inside this `let`'s body, itself
       ;; `setf`-ing one of *this* scope's outer variables), this copies
       ;; every inherited index's possibly-updated value back into `vals` —
       ;; the same `Vector` instance every sibling form before/after this
-      ;; `let`, or an enclosing `while`'s own loop-body scope, shares — so
-      ;; the mutation becomes visible there too. `new-vals`'s *own* fresh
+      ;; `let`, or an enclosing loop's own body scope, shares — so the
+      ;; mutation becomes visible there too. `new-vals`'s *own* fresh
       ;; bindings (indices `>= (length vals)`) have nowhere to copy back
       ;; to, nor would it mean anything if they did (they don't exist
       ;; outside this `let`), so only the first `(length vals)` entries
       ;; are copied. This is recursive in effect: a `let` nested inside
       ;; another `let` copies back into its immediate parent, which then
       ;; copies *that* back into *its* parent, and so on out to wherever
-      ;; the mutated variable actually lives.
+      ;; the mutated variable actually lives. `eval-body` is passed the
+      ;; *outer* `loop-exit`/`loop-exit-vals`/`loop-exit-result` unchanged
+      ;; — a `let` never introduces a new loop.
       ((ALet names values body)
        (let* ((bound-vals (eval-args 0 (length values) values (Vector::new 0 (llvm-const-i64 0))))
               (new-params (extend-strs params names))
               (new-vals (extend-values vals bound-vals))
               (pushed (count-and-push-sexpr b module f bound-vals 0 (length bound-vals) 0))
-              (result (eval-body 0 (length body) body new-params new-vals)))
+              (result (eval-body 0 (length body) body new-params new-vals loop-exit loop-exit-vals loop-exit-result)))
          (progn (copy-into vals new-vals 0 (length vals)) (pop-roots b module f pushed) result)))
       ;; A call to another already-compiled function (Phase 2f) *or* a
       ;; member of the same self/mutual-recursion group (Phase 2g) —
@@ -250,68 +339,178 @@ pub const SOURCE: &str = r#"
                (else (build-call b callee f arg-vals)))))
       ;; `setf` on a local (ループ構文): evaluate the new value in the
       ;; *current* scope, then mutate `vals` in place at `name`'s index —
-      ;; safe because every sibling form in the same body sequence
-      ;; (`eval-body`/`eval-body-tail`, in `compile-value`/`compile-tail`)
-      ;; is handed this exact same `Vector` instance, so the mutation is
-      ;; visible to whatever runs next without needing to thread an
-      ;; "updated vals" back out through a return value. This only holds
-      ;; for straight-line code — across `AWhile`'s loop back-edge, the
-      ;; analogous "make a later read see an earlier setf" job is done by
-      ;; a phi node instead (see `AWhile` below for why a plain in-place
-      ;; mutation isn't enough there).
+      ;; safe because every sibling form in the same *straight-line* body
+      ;; sequence (`eval-body`/`eval-body-tail`) is handed this exact same
+      ;; `Vector` instance, so the mutation is visible to whatever runs next
+      ;; without needing to thread an "updated vals" back out through a
+      ;; return value. Across a loop's back edge, or between an `if`'s two
+      ;; branches, a plain in-place mutation isn't enough on its own — see
+      ;; `ALoop`'s and `AIf`'s own arms for why each gives the relevant
+      ;; scope(s) their own copy of `vals` and merges back via phi instead
+      ;; of letting this mutation alias across them.
       ((ASet name value)
-       (let ((v (compile-value module b f params vals value)))
+       (let ((v (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result value)))
          (progn (set vals (param-index params name) v) v)))
-      ;; `while` (ループ構文): phi-node loop compilation. `while`'s own type
-      ;; is always `Unit`, so the placeholder `(llvm-const-i64 0)` results
-      ;; below are never actually consumed by anything but `eval-body`'s
-      ;; "discard every form but the last" sequencing — what matters is the
-      ;; side effects (`ASet` mutations) and the final `copy-into`, which
-      ;; makes every sibling form *after* the loop see each loop-carried
-      ;; variable's correctly-merged post-loop value.
-      ;;
-      ;; `preheader` is captured *before* branching away, since by the time
-      ;; we're back here for `add-incoming`'s preheader edge, `b` would
-      ;; otherwise have moved on (see `current-block`'s doc comment).
-      ;; `phis` (one per `vals` entry, unconditionally — see `make-phis`'s
-      ;; doc comment) are built right after `position-at-end`ing `header`,
-      ;; before `cond` is compiled, since LLVM requires every phi in a
-      ;; block to precede non-phi instructions. `cond`/`body` are compiled
-      ;; using `phis` as their scope's `vals` (not the outer `vals`), so
-      ;; they see *this iteration's* merged values, not the stale
-      ;; pre-loop ones. `body` runs against its own fresh copy of `phis`
-      ;; (`body-vals`) rather than mutating `phis` itself, so `ASet`
-      ;; inside the loop can't corrupt the header's own phi handles.
-      ;; `latch` (like `preheader`) is read via `current-block` rather
-      ;; than assumed to be `body-block`, so a nested loop (or any other
-      ;; future construct that leaves `b` positioned somewhere else by the
-      ;; end of `body`) still wires the back edge to the *actual*
-      ;; predecessor. Finally, `copy-into` overwrites the *original* `vals`
-      ;; with `phis` at `exit` — `header` dominates `exit` (its only
-      ;; predecessor), so this is the one place reading a loop-carried
-      ;; variable's value is always valid, on both the zero-iteration and
-      ;; the looped path.
-      ((AWhile cond body)
-       (let* ((preheader (current-block b))
-              (header (append-block f "while.header"))
-              (body-block (append-block f "while.body"))
-              (exit (append-block f "while.exit")))
+      ;; `if` (ループ・分岐構文の整理): now supported in *any* position, not
+      ;; just tail (see this module's doc comment). `then`/`els` each run
+      ;; against their *own copy* of `vals` (`then-vals`/`els-vals`) rather
+      ;; than the shared one directly — without this, a `setf` inside one
+      ;; branch would alias into the other branch's *compiled code* even
+      ;; though only one of them ever actually runs (the classic
+      ;; mutually-exclusive-paths-must-not-share-mutable-state bug; `when`/
+      ;; `unless`/`cond` are now ordinary `defmacro`s over `if`, so this
+      ;; would otherwise be hit by completely ordinary code like `(while
+      ;; (< i n) (when done (setf acc (+ acc 1))) (setf i (+ i 1)))`).
+      ;; `merge-vals-phis` rejoins them at `cont-block`, one phi per
+      ;; variable (mirroring `ALoop`'s header phis, but for two
+      ;; predecessors instead of a back edge), and the result is copied
+      ;; back into the *original* `vals` — visible to whatever runs after
+      ;; this `if`, exactly like `ALet`'s own `copy-into`.
+      ;; `then-end`/`els-end` are read via `current-block` rather than
+      ;; assumed to be `then-block`/`else-block`, since either branch may
+      ;; itself contain further control flow that leaves `b` positioned
+      ;; elsewhere by the time it finishes — see `current-block`'s doc
+      ;; comment. `merge-if-results` does the analogous merge for the `if`
+      ;; expression's own value, skipping a diverging branch's contribution
+      ;; entirely (it never reaches `cont-block` at all — no `build-br` is
+      ;; emitted for it below, the same divergent-branch handling
+      ;; `compile-tail`'s old `AIf` arm never needed since each of *its*
+      ;; branches ended in its own `ret` instead of falling through
+      ;; anywhere).
+      ((AIf c then then-diverges els els-diverges)
+       (let* ((then-block (append-block f "then"))
+              (else-block (append-block f "else"))
+              (cont-block (append-block f "ifcont")))
          (progn
-           (build-br b header)
-           (position-at-end b header)
-           (let ((phis (make-phis b vals 0 (length vals) (Vector::new 0 (llvm-const-i64 0)))))
+           (build-cond-br b (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result c) then-block else-block)
+           (position-at-end b then-block)
+           (let* ((then-vals (copy-values vals 0 (length vals) (Vector::new 0 (llvm-const-i64 0))))
+                  (then-val (compile-value module b f params then-vals loop-exit loop-exit-vals loop-exit-result then))
+                  (then-end (current-block b)))
              (progn
-               (add-incoming-all b phis vals preheader 0 (length vals))
-               (build-cond-br b (compile-value module b f params phis cond) body-block exit)
-               (position-at-end b body-block)
-               (let ((body-vals (copy-values phis 0 (length phis) (Vector::new 0 (llvm-const-i64 0)))))
+               (if then-diverges () (build-br b cont-block))
+               (position-at-end b else-block)
+               (let* ((els-vals (copy-values vals 0 (length vals) (Vector::new 0 (llvm-const-i64 0))))
+                      (els-val (compile-value module b f params els-vals loop-exit loop-exit-vals loop-exit-result els))
+                      (els-end (current-block b)))
                  (progn
-                   (if (> (length body) 0) (eval-body 0 (length body) body params body-vals) (llvm-const-i64 0))
-                   (let ((latch (current-block b)))
-                     (progn (add-incoming-all b phis body-vals latch 0 (length phis)) (build-br b header)))))
-               (position-at-end b exit)
-               (progn (copy-into vals phis 0 (length vals)) (llvm-const-i64 0)))))))
-      (_ (panic "compile: `if` is only supported in tail position (Phase 1)")))))
+                   (if els-diverges () (build-br b cont-block))
+                   (position-at-end b cont-block)
+                   (let ((merged (merge-vals-phis b then-vals then-end then-diverges els-vals els-end els-diverges 0 (length vals)
+                                                   (Vector::new 0 (llvm-const-i64 0)))))
+                     (progn
+                       (copy-into vals merged 0 (length vals))
+                       (merge-if-results b then-val then-end then-diverges els-val els-end els-diverges))))))))))
+      ;; `loop` (ループ・分岐構文の整理): like `if`, the one other construct
+      ;; that builds more than a single straight-line basic block — but a
+      ;; loop's `exit` can have *many* predecessors (one per `break`/
+      ;; `return` site reached inside it), not a fixed two, so its
+      ;; per-variable and per-result merge phis (`exit-vals-phis`/
+      ;; `exit-result-phi`) must be built *eagerly*, before the body is
+      ;; compiled at all — `ABreak`/`AReturn` (below) just `add-incoming`
+      ;; to whichever ones are already there when they're reached, however
+      ;; many times that ends up being (zero, for a loop that never exits
+      ;; through one of them at all, all the way up to once per syntactic
+      ;; `break`/`return` in the source).
+      ;;
+      ;; `exit-vals-phis` are seeded from the *pre-loop* `vals` (the same
+      ;; seeds `entry-phis` uses) — they're the same variables, just merged
+      ;; at a different point. `exit-result-phi` is seeded from a dummy
+      ;; constant of whichever kind `result-is-bool`/`result-is-f64`/
+      ;; `result-is-char` says (computed once, in `ast_bridge.rs`, from the
+      ;; loop's own checked type — see `ast_expr_def`'s `aloop` comment) —
+      ;; defaulting to `i64` covers `Unit`/`Never` too, where this phi (if
+      ;; it ends up with any incoming edges at all) is a placeholder
+      ;; nothing reads, same as `AUnit`'s.
+      ;;
+      ;; `body-vals` (a *copy* of `entry-phis`, not `entry-phis` itself) is
+      ;; what the body actually runs against, mutated directly by its own
+      ;; `ASet` calls — by the time the body finishes, `body-vals` holds
+      ;; exactly "each variable's value after one pass through the body",
+      ;; precisely what the back edge's `add-incoming-all` needs as the
+      ;; *value* side of each edge. `entry-phis` itself must stay untouched
+      ;; throughout, since `add-incoming` needs the original phi
+      ;; *instruction* reference, not whatever value ended up logically
+      ;; "in" that variable — `ASet`'s in-place `vals` mutation is exactly
+      ;; right for straight-line sequencing (each statement seeing the
+      ;; previous one's effect) but would otherwise destroy the one
+      ;; reference back-edge wiring needs. (`if`'s `then`/`els` don't share
+      ;; this problem the same way: their merge phis are built *fresh*,
+      ;; after both branches' final values are already known, never reusing
+      ;; a stale phi reference as a value.) `preheader`/`latch` are read via
+      ;; `current-block`, not assumed to be any particular `append-block`
+      ;; result, for the same nested-control-flow reason `AWhile` (the
+      ;; predecessor this replaces) used it for.
+      ;;
+      ;; Finally, at `exit`, `exit-vals-phis` are copied back into the
+      ;; *original* `vals` (visible to whatever runs after the loop) and
+      ;; `exit-result-phi` becomes `ALoop`'s own value — `header`/`exit`'s
+      ;; phis are valid on every path that reaches them (the zero-iteration
+      ;; path through `entry-phis` if the body never runs at all, *and*
+      ;; every `break`/`return` path), unlike a body-computed value, which
+      ;; wouldn't dominate `exit` on paths that never ran the body.
+      ((ALoop body result-is-bool result-is-f64 result-is-char)
+       (let* ((preheader (current-block b))
+              (header (append-block f "loop.header"))
+              (exit (append-block f "loop.exit")))
+         (progn
+           (position-at-end b exit)
+           (let* ((exit-vals-phis (make-phis b vals 0 (length vals) (Vector::new 0 (llvm-const-i64 0))))
+                  (result-seed (cond (result-is-bool (llvm-const-bool false))
+                                      (result-is-f64 (llvm-const-f64 0.0))
+                                      (result-is-char (llvm-const-char #\a))
+                                      (else (llvm-const-i64 0))))
+                  (exit-result-phi (build-phi b result-seed)))
+             (progn
+               (position-at-end b preheader)
+               (build-br b header)
+               (position-at-end b header)
+               (let ((entry-phis (make-phis b vals 0 (length vals) (Vector::new 0 (llvm-const-i64 0)))))
+                 (progn
+                   (add-incoming-all b entry-phis vals preheader 0 (length vals))
+                   (let ((body-vals (copy-values entry-phis 0 (length entry-phis) (Vector::new 0 (llvm-const-i64 0)))))
+                     (progn
+                       (if (> (length body) 0)
+                           (eval-body 0 (length body) body params body-vals exit exit-vals-phis exit-result-phi)
+                           (llvm-const-i64 0))
+                       (let ((latch (current-block b)))
+                         (progn (add-incoming-all b entry-phis body-vals latch 0 (length entry-phis)) (build-br b header)))))
+                   (position-at-end b exit)
+                   (progn (copy-into vals exit-vals-phis 0 (length vals)) exit-result-phi))))))))
+      ;; `break` (ループ・分岐構文の整理): always `Unit`-valued, so the
+      ;; incoming edge it contributes to `loop-exit-result` is a dummy —
+      ;; harmless, since a loop a `break` can be reached from always has
+      ;; type `Unit` (`Checker::contribute_loop_exit`'s `join_types` forces
+      ;; this — `Unit` only unifies with `Unit`/`Never`), meaning nothing
+      ;; ever actually reads `loop-exit-result`'s merged value on this path
+      ;; anyway. `vals` (this scope's current variable values, possibly
+      ;; `setf`-mutated up to this point) feeds `loop-exit-vals`'s
+      ;; per-variable incoming edges — the same "current `vals`, whichever
+      ;; copy is in scope here" the `AIf`/`ALoop` arms thread through.
+      ((ABreak)
+       (let ((latch (current-block b)))
+         (progn
+           (add-incoming-all b loop-exit-vals vals latch 0 (length vals))
+           (add-incoming b loop-exit-result (llvm-const-i64 0) latch)
+           (build-br b loop-exit)
+           (llvm-const-i64 0))))
+      ;; `return` (ループ・分岐構文の整理): like `break`, but may carry a
+      ;; value — computed *before* reading `current-block` for `latch`,
+      ;; since evaluating it (e.g. a call, or a nested `if`) may itself
+      ;; move `b` to a different block first. `(return)` (no value)
+      ;; contributes the same harmless dummy `break` does — the enclosing
+      ;; loop's type is then `Unit` for the same `join_types` reason, so
+      ;; nothing reads it.
+      ((AReturn maybe-value)
+       (let* ((result-val (match maybe-value
+                             ((Some v) (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result v))
+                             ((None) (llvm-const-i64 0))))
+              (latch (current-block b)))
+         (progn
+           (add-incoming-all b loop-exit-vals vals latch 0 (length vals))
+           (add-incoming b loop-exit-result result-val latch)
+           (build-br b loop-exit)
+           result-val))))))
 
 ;; Under the unified `TlValue` ABI (Phase 2), a function's logical arguments
 ;; are no longer separate LLVM-level parameters — they live in the `args`
@@ -349,25 +548,29 @@ pub const SOURCE: &str = r#"
 ;; every enclosing tail-position `let`'s `Sexpr` bindings) — see this
 ;; module's doc comment on the rooting discipline. The one `_` arm that
 ;; actually builds a `ret` pops all of them right before doing so.
-;; `ACall` has no arm of its own here — the `_` arm already calls
-;; `compile-value` and feeds its result to `build-ret`/`-bool`/`-f64`/
-;; `-char`/`-sexpr`, which is exactly right for a call in tail position too
-;; (Phase 2f) — only control-flow-splitting forms (`AIf`/`ALet`, which build
-;; more than one basic block) need their own `compile-tail` arm.
-(defun compile-tail ((module LlvmModule) (bool-ret bool) (f64-ret bool) (char-ret bool) (sexpr-ret bool) (pushed i32) (f LlvmFunction) (b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>) (e AstExpr)) ()
+;; `ACall`/`AIf`/`ALoop`/etc. have no dedicated arm of their own here
+;; anymore (ループ・分岐構文の整理) — the `_` arm already calls
+;; `compile-value`, which now handles `if`/`loop`/`break`/`return` in any
+;; position via its own phi-based merging, and feeds the result to
+;; `build-ret`/`-bool`/`-f64`/`-char`/`-sexpr`, exactly right for a
+;; tail-position value of *any* shape. Only `ALet` keeps its own
+;; `compile-tail` arm — it's the one form whose *tail*-position behavior
+;; (push but never pop, see below) genuinely differs from its
+;; `compile-value` one. `loop-exit`/`loop-exit-vals`/`loop-exit-result`
+;; thread straight through unchanged everywhere in this function — neither
+;; `compile-tail` itself nor `ALet` ever introduces a new loop, only
+;; `compile-value`'s `ALoop` arm does, and `compile-tail` never appears
+;; nested inside a loop's body at all (a loop's body is always compiled via
+;; `compile-value`/`eval-body`, never `compile-tail` — see this module's doc
+;; comment).
+(defun compile-tail ((module LlvmModule) (bool-ret bool) (f64-ret bool) (char-ret bool) (sexpr-ret bool) (pushed i32) (f LlvmFunction) (b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>)
+                      (loop-exit LlvmBasicBlock) (loop-exit-vals Vector<LlvmValue>) (loop-exit-result LlvmValue)
+                      (e AstExpr)) ()
   (match e
-    ((AIf c then els)
-     (let ((then-block (append-block f "then"))
-           (else-block (append-block f "else")))
-       (build-cond-br b (compile-value module b f params vals c) then-block else-block)
-       (position-at-end b then-block)
-       (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed f b params vals then)
-       (position-at-end b else-block)
-       (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed f b params vals els)))
     ;; `let` in *tail* position: pushes its `Sexpr`-typed bindings (added to
     ;; `pushed`'s running total) but never pops them itself — control falls
     ;; straight through `eval-body-tail`'s last form into a deeper
-    ;; `compile-tail` call (possibly through more nested `if`/`let`s) that
+    ;; `compile-tail` call (possibly through more nested `let`s) that
     ;; eventually reaches this very `_` arm, which pops *everything*
     ;; (`pushed` plus whatever this `let` and any others added) in one shot
     ;; right before its `build-ret*` — see this module's doc comment.
@@ -375,12 +578,12 @@ pub const SOURCE: &str = r#"
      (labels ((eval-bindings ((i i32) (n i32) (exprs Vector<AstExpr>) (out Vector<LlvmValue>)) Vector<LlvmValue>
                 (if (>= i n)
                     out
-                    (progn (push out (compile-value module b f params vals (get exprs i)))
+                    (progn (push out (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result (get exprs i)))
                            (eval-bindings (+ i 1) n exprs out))))
               (eval-body-tail ((i i32) (n i32) (forms Vector<AstExpr>) (p2 Vector<string>) (v2 Vector<LlvmValue>) (pushed2 i32)) ()
                 (if (>= (+ i 1) n)
-                    (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed2 f b p2 v2 (get forms i))
-                    (progn (compile-value module b f p2 v2 (get forms i))
+                    (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed2 f b p2 v2 loop-exit loop-exit-vals loop-exit-result (get forms i))
+                    (progn (compile-value module b f p2 v2 loop-exit loop-exit-vals loop-exit-result (get forms i))
                            (eval-body-tail (+ i 1) n forms p2 v2 pushed2)))))
        (let* ((bound-vals (eval-bindings 0 (length values) values (Vector::new 0 (llvm-const-i64 0))))
               (new-params (extend-strs params names))
@@ -395,7 +598,7 @@ pub const SOURCE: &str = r#"
     ;; call to produce) is it safe to pop everything and `build-ret*` —
     ;; neither `pop-root` nor `build-ret*` themselves ever trigger a GC, so
     ;; nothing can reclaim `result` in between.
-    (_ (let ((result (compile-value module b f params vals e)))
+    (_ (let ((result (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result e)))
          (progn (pop-roots b module f pushed)
                 (cond (bool-ret (build-ret-bool b f result))
                       (f64-ret (build-ret-f64 b f result))
@@ -437,7 +640,14 @@ pub const SOURCE: &str = r#"
             (position-at-end b entry)
             (let* ((vals (make-param-values name f b arity))
                    (pushed (count-and-push-sexpr b module f vals 0 (length vals) 0)))
-              (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed f b params vals body)
+              ;; No enclosing loop at the function's own top level — `entry`/
+              ;; an empty `Vector`/a dummy `i64` are harmless placeholders
+              ;; `ABreak`/`AReturn` could never actually reach here (the
+              ;; checker already rejects `break`/`return` outside any loop,
+              ;; so `ast_bridge::typed_to_ast` never even produces one at
+              ;; this level) — see `compile-value`'s doc comment.
+              (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed f b params vals
+                             entry (Vector::new 0 (llvm-const-i64 0)) (llvm-const-i64 0) body)
               (match (verify module)
                 ((Err e) (Err e))
                 ((Ok _) (llvm-finish-compile module name arity))))))))))
@@ -484,7 +694,8 @@ pub const SOURCE: &str = r#"
             (position-at-end b entry)
             (let* ((vals (make-param-values name f b arity))
                    (pushed (count-and-push-sexpr b module f vals 0 (length vals) 0)))
-              (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed f b params vals body)
+              (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed f b params vals
+                             entry (Vector::new 0 (llvm-const-i64 0)) (llvm-const-i64 0) body)
               (Ok true)))))))))
 
 (defun build-all ((names Vector<string>) (module LlvmModule) (b LlvmBuilder) (i i32) (n i32)) Result<bool,Error>

@@ -913,33 +913,104 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       `compiled_cons_chain_survives_a_gc_mid_call`の固定ヒープ容量4096→8192——`compiler_source.rs`
       のSOURCE増加分だけ読み込み時のセル消費が増えたための調整、ロジック自体は無変更）。並行
       実行10回連続green。既定ビルド・`cargo clippy --all-targets`（両構成）への影響なし。
+  - 実装済み（Phase 4/ループ・分岐構文の整理 — 原始形の縮小 + `if`値位置対応 +
+    `loop`/`break`/`return`、優先順位リスト1番目）: 「ループ・分岐構文の種類が多すぎて
+    コンパイラ実装・意味解析の負担が大きい、原始形をできるだけ少なく（理想は1種類）し、
+    それ以外はマクロで書き直してからコンパイル対応すべき」というユーザー方針転換を受けた
+    全面再設計（承認済み計画 `reflective-discovering-fog`）。Phase 3bの`AstExpr::AWhile`
+    専用コンパイル対応は、`while`がマクロ展開で消えるため**削除して`loop`/`break`/`return`
+    向けに作り直した**——前フェーズの記述どおりの「次の作業」項目だが、実施した手段は
+    当初想定（`AWhile`はそのまま残し`loop`系を別途追加）より大きく、`AWhile`自体を撤去する
+    破壊的なものになった。
+    - **Stage 1（マクロ書き換え、`src/prelude.rs`）**: `while`/`dotimes`/`dolist`/`when`/
+      `unless`/`and`/`or`/`cond`/`if-let`の9つを、checker特殊形からCL流`defmacro`へ移行
+      （既存の`until`/`while-let`/`case`/`do`と同じ機構）。`while`は`loop`+`if`+`break`、
+      `dotimes`/`dolist`は`gensym`で衝突しない補助変数を作った上での`while`（マクロ）、
+      `when`/`unless`/`cond`/`and`/`or`は`if`への脱糖、`if-let`は`while-let`と同型の
+      `match`への脱糖。`and`/`or`/`cond`は**マクロが自分自身を再帰的に呼ぶ**初めての例
+      （`case`が`cond`を呼ぶのとは違い`cond`が`cond`自身を呼ぶ）だが、既存の自己再帰可能な
+      `defmacro`機構のまま問題なく動作。
+    - **Stage 1で見つけた2件の脱糖バグ**: ① `while`はこの言語の`if`が常に3引数必須
+      （2引数の暗黙else形が無い）ため、当初の2引数`if`案では型検査が通らず`(if (not test)
+      (break) ())`という明示的な`()`else腕が必要だった。② `when`/`unless`は旧
+      `check_when`が本体の最後に明示的に`Unit`を差し込んでいた（本体の実際の最後の式の値を
+      捨てる）挙動を再現するため、`(progn ,@body ())`という末尾`()`が必要——無いと本体の
+      最後の式の型がそのまま`when`/`unless`自体の型になってしまい、既存の「`when`/`unless`
+      は常に`Unit`」という前提に反する。
+    - **`src/check/checker.rs`から削除**: `check_list`の`when`/`unless`/`and`/`or`/`cond`/
+      `while`/`dotimes`/`dolist`/`if-let`の9行のディスパッチと、対応する関数本体
+      （`check_when`/`check_and_or`/`check_cond`/`check_while`/`check_dotimes`/
+      `check_dolist`/`check_if_let`）を丸ごと削除（`loop`/`break`/`return`/`setf`/`let`は
+      非局所脱出・可変束縛という他のマクロでは代替できない機構のため原始形のまま維持）。
+      これに伴い`src/check/ast.rs`の`Expr::While`バリアントと`src/eval/interp.rs`の対応する
+      評価アームも削除（`grep`で他に`Expr::While`を構築する箇所が無いことを確認済み）。
+    - **Stage 3a（`if`値位置対応）**: `AstExpr::aif`を`[cond, then, then_diverges, els,
+      els_diverges]`（`then_diverges`/`els_diverges`は各枝の`Typed.ty == Type::Never`から
+      ブリッジ時に静的計算）に拡張し、`compile-value`に新規`AIf`アームを追加（continuation
+      ブロック+`build-phi`/`add-incoming`、Phase 3bの`while`実装で確立した手法の再利用）。
+      `compile-tail`の専用`AIf`アームは削除し既存の汎用`_`アームに統一。
+    - **設計バグとその修正（`if`の両枝が`vals`を共有してはならない）**: 当初実装は`then`/
+      `els`を同じ`vals`ベクタに対して直接コンパイルしていたが、これは誤り——
+      コンパイル時に両枝とも同じ`vals`に対して順にコードを生成するため、`then`内の`setf`が
+      `els`の*コンパイル結果のIR自体*に漏れてしまう（実行時にどちらか一方しか走らない
+      にもかかわらず）。各枝を`copy-values`した**独立したコピー**に対してコンパイルし、
+      continuationブロックで`merge-vals-phis`（変数ごと）・`merge-if-results`（`if`自身の
+      結果値、両枝generative/片方のみdivergent/両方divergentの3パターンを処理）で合流する
+      よう修正。
+    - **Stage 3b（`aunit`/`apanic`）**: `Expr::Unit`（`when`/`unless`/`cond`の脱糖先に
+      残る）を`aunit`としてブリッジ（プレースホルダー値`llvm-const-i64 0`）。`Expr::Panic`を
+      `apanic`としてブリッジし、新規ビルトイン`build-panic`（固定`tl_panic`シム呼び出し→
+      `abort`+`build_unreachable`）を配線。
+    - **Stage 3c（`aloop`/`abreak`/`areturn`、今回の核心）**: `loop`の`exit`は`break`/
+      `return`各サイトを先行ブロックとして持ちうる（`while`の`exit`が`header`1つだけを
+      先行ブロックに持っていたのとは違う）ため、`entry`（loop-carried変数の継続値、
+      `while`の`header`相当）と`exit`（脱出時点の変数値＋ループ自身の結果値、`break`/
+      `return`の各サイトごとに1本のincoming edge）の**2段のphi**が必要になった。
+      `compile-value`の引数を`loop-exit`/`loop-exit-vals`/`loop-exit-result`の3つ追加した
+      9引数に拡張し、既存の全呼び出し箇所（`eval-args`/`eval-body`/`ALet`/`AIf`）に素通し。
+    - **設計バグとその修正（`entry-phis`を「現在値」として再利用してはならない）**:
+      当初実装はループ本体を`entry`のphiベクタに直接`setf`で書き込み、back edgeの
+      `add-incoming`もその同じベクタを使っていたが、これは誤り——本体の`setf`で上書きされた
+      後の`entry-phis`の要素は、もはやphiインスタンスではなく「直前に計算したただのSSA値」
+      になっており、`add-incoming`（phiインスタンス参照が必須）に渡すと
+      `"add-incoming: value is not a phi"`で失敗する。本体は`entry-phis`の**コピー**
+      （`body-vals`）に対して実行し、back edgeの`add-incoming-all`は「`entry-phis`
+      （不変のphi参照）へ`body-vals`（本体実行後の値）を加える」形に修正——`if`の両枝が
+      `vals`を共有してはならないのと対の教訓（こちらは「phi参照」と「現在値」を同じ
+      ベクタで混同してはならない、という逆方向の話）。
+    - **`ABreak`/`AReturn`**: 独立した`compile-value`アームではなく、`loop-exit-vals`/
+      `loop-exit-result`へ`add-incoming-all`/`add-incoming`した上で`loop-exit`へ`build-br`
+      する処理として実装（ネストした`loop`では`current-block`が常に**直近の**
+      `loop`の`exit`を指すため、特別な追跡無しに正しいネストが成立）。
+    - **`not`のブリッジ漏れ修正**: `while`マクロの展開が条件を`(not test)`で包むため、
+      `ast_bridge.rs`に`not`（Rust組み込み自由関数、従来`Interp.compiled`を経由しないため
+      ブリッジ不能だった）を`ABinOp("=", x, ABool(false))`へ変換する特殊ケースを追加。
+    - 副次的に解消した既知の限定事項（Phase 3bの「次の作業」項目2）: `let`を挟んだ`setf`の
+      回帰テスト不在は、今回追加した`compiles_a_function_with_nested_loops_and_breaks`
+      （`outer let`の`total`を、ループ内側の`let`を挟んだ`setf`で更新）で解消。
+    - TDD: `tests/compile_test.rs`に11件追加（58件中。値位置if単体/let初期値/ネストif/
+      divergent枝/setf非リーク回帰、`cond`/`when`/`unless`/`and`/`or`の展開後コンパイル、
+      `loop`+`return`単一/複数サイト、`break`+状態蓄積、ネストした`loop`、`loop`を挟んだ
+      `while`）。既存の`refuses_to_compile_a_while_loop_using_break`は`break`が今回
+      正式対応となったため`compiles_a_while_loop_using_break`（`Ok`+実値検証）に転換。
+      `tests/macro_test.rs`に4件追加（34件中。`if-let`の評価結果、`cond`の自己再帰展開が
+      3クローズ以上でも正しく巻き戻ること、`else`無し不一致時の`Unit`)。
+      `tests/eval_test.rs`等の既存マクロ利用テストは挙動不変でgreen（マクロ化前後で
+      評価結果は保存、エラーメッセージの文言のみ変わりうる旨は計画どおり）。並行実行
+      8回連続green（`cargo test --features compile`、`--test-threads=8`）。既定ビルド・
+      `cargo clippy --all-targets`（両構成）への影響なし、警告0。
   - **次の作業（ブランチ`feature/compiler`で継続、影響範囲の大きさで優先順位付け
     ——[[feedback-impl-priority]]）**:
-    1. **ループ構文の残り: `break`/`return`/`loop`（非局所脱出・値を持つループ）**。
-       `while`+`setf`（上記Phase 3b）は完了済み。`break`/`return`はいずれも「直近のループ
-       のみ」を脱出する非局所脱出で、`while`内では型上`Unit`固定（`return`に値を書いても
-       `join_types`が`Unit`以外を拒否する）だが、`loop`は`break`/`return`の値の合流型を持ち
-       うる（`Never`から開始し`join_types`で拡張）——`AWhile`のように「ヘッダーのphiへ
-       書き戻す」だけでは済まず、ループの`exit`ブロック自体にも合流用のphiが要る（`break`/
-       `return`の脱出元ブロックは1つではないため）。また`break`/`return`は`if`の片方の枝
-       （`(if cond (break) ...)`）に置かれるのが実用上ほぼ必須なので、文位置（値を使わない
-       statement位置）の`if`コンパイル——両ブロックが共通の継続ブロックへ`br`で合流する形——
-       も今回スコープ外のまま必要になる。
-    2. **既知の限定事項として残った「`let`を挟んだ`setf`」の直接的な回帰テスト追加**:
-       上記`ALet`の`copy-into`書き戻し自体は実装済みだが、専用のテスト
-       （`(while ... (let (...) (setf outer-var v)) ...)`のような形）はまだ無い。
-    3. **HashTable/Vector対応**: 当初Phase3として`Sexpr`と一括りにされていたが、実際には
-       `Rc<RefCell<..>>`によるRust管理（GCヒープ対象外）と判明したため、GCのrooting
-       問題は無関係。`while`+`setf`（実装済み）があれば合計・線形探索等の典型コードは
-       コンパイル対象になる——`break`（項目1）は早期終了する探索を効率化できるが、
-       無くても（最後まで回せば）動作自体は可能なので必須の前提ではない。
-    4. **Sexprのスコープ拡張**: `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Path`形式の
+    1. **HashTable/Vector対応**: `Rc<RefCell<..>>`によるRust管理（GCヒープ対象外）と判明
+       済みのため、GCのrootingは無関係。`loop`/`break`/`return`（実装済み）があれば合計・
+       線形探索等の典型コードはコンパイル対象になる。
+    2. **Sexprのスコープ拡張**: `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Path`形式の
        `Sexpr`値（現在は`value_to_ptr`がエラー→ランタイムシムが`abort`）への対応、
-       `consp`/`atom`（`null`/`not`の合成）、`set-car`/`set-cdr`。既存Phase3（`Nil`/`Cons`のみ）
-       の対応範囲を広げるだけで他フェーズの前提にはなっていないため、1・3より後でよい。
-    5. **Phase 4（クロージャ/高階関数、優先度低）**: GCルーティングの難度がさらに増すため、
-       Phase 5（ファイルコンパイラ）より後でもよい。
-    6. **Phase 5（`compile-file`）**: ファイル全体の`defun`を1つのLLVM `Module`にまとめ
+       `consp`/`atom`（`null`/`not`の合成）、`set-car`/`set-cdr`、`Sexpr`型変数への`setf`
+       （GC rooting機構の拡張が前提）。
+    3. **Phase（クロージャ/高階関数、優先度低）**: GCルーティングの難度がさらに増すため、
+       ファイルコンパイラより後でもよい。
+    4. **`compile-file`**: ファイル全体の`defun`を1つのLLVM `Module`にまとめ
        （同一ファイル内呼び出しは直接`call`命令になる）、`TargetMachine::write_to_file`でオブジェクト
        ファイル出力→システムの`cc`をサブプロセス起動してリンク。既存Rust実装（cons heap/GC/
        HashTable/Vector等）を`extern "C"`シムでラップした静的ランタイムライブラリ（`libtlrt.a`、
@@ -947,12 +1018,11 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
        一緒に作る）を`cc`でリンクし、**typelisp/LLVMインストール無しで動く実行ファイル/共有
        ライブラリ**を生成する（ユーザー要求の核心）。実行ファイル化はエントリポイント規約として
        `main`という名前の関数（`(fn () i32)`等）を探す（CL/C慣習）。共有ライブラリ化は既存の
-       `FnSig::public`（`pub` defun）をエクスポートシンボルの基準に流用。1・3（HashTable/Vector
-       含む既存機能のラップ対象）に依存するため最後。
-    7. **Phase 6（並行）**: 各Phase完了の都度、`TlValue` ABI仕様や`compile-file`のセマンティクスを
+       `FnSig::public`（`pub` defun）をエクスポートシンボルの基準に流用。1（HashTable/Vector
+       含む既存機能のラップ対象）に依存するため後回し。
+    5. **並行（各Phase完了の都度）**: `TlValue` ABI仕様や`compile-file`のセマンティクスを
        `docs/language-design.md`に「確定仕様」として追記していく（このTODO.mdは進捗の記録、
-       language-design.mdは確定した言語仕様という既存の役割分担を継続）。1〜6の各完了に合わせて
-       並行して行うため独立した優先順位は無い。
+       language-design.mdは確定した言語仕様という既存の役割分担を継続）。独立した優先順位は無い。
 
 ---
 

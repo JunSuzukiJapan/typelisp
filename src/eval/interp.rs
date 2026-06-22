@@ -1346,6 +1346,7 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "current-block" => Some(llvm_builder_current_block(args)),
             "build-phi" => Some(llvm_builder_build_phi(args)),
             "add-incoming" => Some(llvm_builder_add_incoming(args)),
+            "build-panic" => Some(llvm_builder_build_panic(args)),
             _ => None,
         };
     }
@@ -1467,6 +1468,18 @@ extern "C" fn tl_heap_pop_root(heap: *mut Heap) {
     heap.pop_root();
 }
 
+/// `(panic msg)`'s compiled-code shim (ループ・分岐構文の整理) — `msg` itself
+/// isn't passed through at all (see `ast_bridge::typed_to_ast`'s `Expr::Panic`
+/// arm): this is the minimal "diverge without a value" primitive needed to
+/// make a `then_diverges`/`els_diverges` branch (`compile-value`'s `AIf` arm)
+/// reachable and testable, not a faithful reproduction of `panic`'s message
+/// (displaying it would need `Sexpr`'s `string` type bridged too, which
+/// nothing else in `compile` needs yet).
+#[cfg(feature = "compile")]
+extern "C" fn tl_panic() {
+    std::process::abort();
+}
+
 /// [`value_to_ptr`], aborting instead of returning an error — used by the
 /// runtime shims above, which have no `Result`-shaped slot to report a
 /// bridge-scope violation through (see [`tl_sexpr_cons`]'s doc comment).
@@ -1489,6 +1502,7 @@ fn runtime_shim_address(name: &str) -> Option<usize> {
         "tl_sexpr_cdr" => Some(tl_sexpr_cdr as usize),
         "tl_heap_push_root" => Some(tl_heap_push_root as usize),
         "tl_heap_pop_root" => Some(tl_heap_pop_root as usize),
+        "tl_panic" => Some(tl_panic as usize),
         _ => None,
     }
 }
@@ -1541,6 +1555,13 @@ fn runtime_push_root_fn_type() -> inkwell::types::FunctionType<'static> {
 fn runtime_pop_root_fn_type() -> inkwell::types::FunctionType<'static> {
     let ptr_ty = llvm_context().ptr_type(inkwell::AddressSpace::default());
     llvm_context().void_type().fn_type(&[ptr_ty.into()], false)
+}
+
+/// `void ()` — [`tl_panic`]'s LLVM-level type (no arguments at all, unlike
+/// every other runtime shim — `panic` touches no `Sexpr`/`Heap` state).
+#[cfg(feature = "compile")]
+fn runtime_noarg_void_fn_type() -> inkwell::types::FunctionType<'static> {
+    llvm_context().void_type().fn_type(&[], false)
 }
 
 /// Declares one of the fixed-name Phase 3 runtime shims
@@ -2066,6 +2087,27 @@ fn llvm_builder_add_incoming(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let phi_value = PhiValue::try_from(instr)
         .map_err(|_| EvalError::Internal("add-incoming: value is not a phi".into()))?;
     phi_value.add_incoming(&[(val as &dyn BasicValue, *block)]);
+    Ok(RtValue::Unit)
+}
+
+/// `(build-panic b module) -> Unit`: emits a `call` to the [`tl_panic`]
+/// runtime shim followed by `build_unreachable` — see [`tl_panic`]'s doc
+/// comment and `check::registry::llvm_builder_def`'s `build-panic` entry.
+/// Unlike `build-cons` etc., no `f`/`heap` argument is needed — `tl_panic`
+/// touches no `Sexpr`/`Heap` state at all.
+#[cfg(feature = "compile")]
+fn llvm_builder_build_panic(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let b = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let builder = b.0.borrow();
+    let shim = get_or_declare_runtime_fn(&module.borrow(), "tl_panic", runtime_noarg_void_fn_type());
+    builder
+        .build_call(shim, &[], "panic")
+        .map_err(|e| EvalError::Panic(format!("build-panic: {}", e)))?;
+    builder
+        .build_unreachable()
+        .map_err(|e| EvalError::Panic(format!("build-panic: {}", e)))?;
     Ok(RtValue::Unit)
 }
 

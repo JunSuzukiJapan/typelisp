@@ -558,20 +558,24 @@ fn error_ty() -> Type {
 /// binary arithmetic/comparison instance methods — just enough to compile a
 /// function like `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))`.
 /// `afloat`/`alet`/`acall`/`achar`/`anil`/`acons`/`acar`/`acdr`/`anullp`/
-/// `awhile`/`aset` are appended last (Phase 2c/2e/2f/2d/3/ループ構文) rather
-/// than inserted in literal-grouping order with `aint`/`abool`, since these
-/// indices are a stable wire format between this definition and
-/// `ast_bridge`'s constants — reordering existing ones would silently break
-/// already-working variants.
-/// `awhile`'s `body` (ループ構文 — [docs/TODO.md](../../docs/TODO.md)「ステップ5」)
-/// is evaluated purely for effect (`while`'s own type is always `Unit`), via
-/// `compile-value`'s phi-node-based loop compilation — see
-/// `crate::compile::compiler_source`'s doc comment. `aset` is a local
-/// `setf` (`Expr::Set`); `Expr::SetGlobal` (globals) isn't bridged yet, and
-/// neither is a `Sexpr`-typed `aset` (see `ast_bridge::typed_to_ast`'s doc
-/// comment on why). `break`/`return`/`loop` aren't bridged yet either — a
-/// `while` whose body uses them fails the bridge (`None`) like any other
-/// unsupported construct.
+/// `aset`/`aunit`/`apanic`/`aloop`/`abreak`/`areturn` are appended after the
+/// first five (Phase 2c/2e/2f/2d/3/ループ構文) rather than inserted in
+/// literal-grouping order with `aint`/`abool`, since these indices are a
+/// stable wire format between this definition and `ast_bridge`'s constants
+/// — reordering existing ones would silently break already-working
+/// variants (this set was renumbered once already, when `awhile` —
+/// superseded by `aloop` once `while` became a `defmacro` over `loop`, see
+/// `src/prelude.rs`'s "loop/branch primitive reduction" comment — was
+/// dropped; `compile` is still an experimental `feature`-gated subsystem
+/// with no external wire-format consumers, so this was judged safe to do
+/// once rather than carry a permanently-unused slot).
+/// `aset` is a local `setf` (`Expr::Set`); `Expr::SetGlobal` (globals) isn't
+/// bridged yet, and neither is a `Sexpr`-typed `aset` (see
+/// `ast_bridge::typed_to_ast`'s doc comment on why). `aloop`/`abreak`/
+/// `areturn` (ループ構文) are `loop`/`break`/`return` — see `compile-value`'s
+/// `ALoop` arm for the header-phi-plus-exit-phi design this needs (more
+/// involved than `if`'s, since a loop's `exit` can have many predecessors,
+/// one per `break`/`return` site, rather than `if`'s fixed two).
 /// `alet`'s three `Vector` fields are parallel: `names[i]`'s value is
 /// `values[i]` (all checked against the **outer** scope, CL `let`
 /// semantics — `crate::compile::ast_bridge`'s doc comment), then `body`
@@ -594,7 +598,19 @@ fn ast_expr_def() -> AdtDef {
             Variant { name: "aint".to_string(), fields: vec![Type::I64] },
             Variant { name: "abool".to_string(), fields: vec![Type::Bool] },
             Variant { name: "avar".to_string(), fields: vec![Type::Str] },
-            Variant { name: "aif".to_string(), fields: vec![t.clone(), t.clone(), t.clone()] },
+            // `then_diverges`/`els_diverges` (ループ・分岐構文の整理): whether
+            // that branch's own checked type was `Never` (computed in
+            // `ast_bridge::typed_to_ast` from `Typed.ty`, not derivable at
+            // typelisp level since `AstExpr` carries no type info per node).
+            // A diverging branch's compiled code never falls through to the
+            // `if`'s continuation block (it already ended in a `break`/
+            // `return`-style jump, or — once bridged — a `panic`), so
+            // `compile-value`'s merge logic skips it instead of trying to
+            // treat its absent value as a real one.
+            Variant {
+                name: "aif".to_string(),
+                fields: vec![t.clone(), t.clone(), Type::Bool, t.clone(), Type::Bool],
+            },
             Variant { name: "abinop".to_string(), fields: vec![Type::Str, t.clone(), t.clone()] },
             Variant { name: "afloat".to_string(), fields: vec![Type::F64] },
             Variant {
@@ -608,8 +624,43 @@ fn ast_expr_def() -> AdtDef {
             Variant { name: "acar".to_string(), fields: vec![t.clone()] },
             Variant { name: "acdr".to_string(), fields: vec![t.clone()] },
             Variant { name: "anullp".to_string(), fields: vec![t.clone()] },
-            Variant { name: "awhile".to_string(), fields: vec![t.clone(), vector_of(t.clone())] },
-            Variant { name: "aset".to_string(), fields: vec![Type::Str, t] },
+            // `Expr::Set` (local `setf`) — restricted to `i64`/`bool`/`f64`/
+            // `char` in `ast_bridge.rs` (not `Sexpr`; see that file's doc
+            // comment on why a reassigned pointer can't yet gain its own GC
+            // root).
+            Variant { name: "aset".to_string(), fields: vec![Type::Str, t.clone()] },
+            // `Expr::Unit` — `()` used as a value (e.g. `when`/`unless`/
+            // `cond`'s un-taken-branch, now that those are `defmacro`s over
+            // `if` rather than checker-native forms — see
+            // `src/prelude.rs`'s "loop/branch primitive reduction" comment).
+            Variant { name: "aunit".to_string(), fields: vec![] },
+            // `Expr::Panic` — message is bridged but not evaluated/displayed
+            // by the compiled code (see `compile-value`'s `APanic` arm):
+            // just enough to make a `Never`-typed branch (`then_diverges`/
+            // `els_diverges` above) reachable and testable without needing
+            // `Sexpr`'s string type bridged too.
+            Variant { name: "apanic".to_string(), fields: vec![] },
+            // `Expr::Loop` — `result_is_bool`/`result_is_f64`/`result_is_char`
+            // mirror `compile`'s own `ret-is-bool`/`ret-is-f64`/`ret-is-char`
+            // side-queries, but computed directly from the loop's own
+            // checked `Typed.ty` in `ast_bridge.rs` (no name-based registry
+            // lookup needed, since the bridge already has the type in
+            // hand) — they pick which `LlvmValue` kind seeds the loop's
+            // `exit`-block result phi (see `compile-value`'s `ALoop` arm).
+            // A loop whose result type is `Sexpr` isn't bridged (`None`) —
+            // same reasoning as `aset`'s `Sexpr` exclusion.
+            Variant {
+                name: "aloop".to_string(),
+                fields: vec![vector_of(t.clone()), Type::Bool, Type::Bool, Type::Bool],
+            },
+            // `Expr::Break` — always contributes `Unit` to the loop's type;
+            // no fields needed.
+            Variant { name: "abreak".to_string(), fields: vec![] },
+            // `Expr::Return` — `None` (no value) is `(return)`; the loop's
+            // own bridging already establishes the value's type can't be
+            // `Sexpr` (see `aloop`'s comment), so no separate check is
+            // needed here.
+            Variant { name: "areturn".to_string(), fields: vec![option_of(t)] },
         ],
         assoc: HashMap::new(),
         public: true,
@@ -818,6 +869,15 @@ fn llvm_builder_def() -> AdtDef {
         "add-incoming".to_string(),
         method(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty(), llvm_basic_block_ty()], Type::Unit),
     );
+    // `build-panic` (ループ・分岐構文の整理, `APanic`): emits a `call` to the
+    // fixed `tl_panic` runtime shim (`std::process::abort`, the same
+    // "fixed-name Rust function, resolved later via `add_global_mapping`"
+    // pattern `build-cons` etc. already use) followed by `build-unreachable`
+    // — LLVM's way of saying "control provably never returns here", which
+    // is true since the shim never returns. `module` is only needed to
+    // declare the shim in the right module; unlike `build-cons`, no `f`/
+    // `heap` argument is needed at all (the shim touches no `Sexpr` state).
+    assoc.insert("build-panic".to_string(), method(vec![llvm_builder_ty(), llvm_module_ty()], Type::Unit));
     AdtDef { name: Path::root("llvmbuilder"), params: vec![], variants: vec![], assoc, public: true }
 }
 
