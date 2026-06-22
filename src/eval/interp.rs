@@ -636,6 +636,7 @@ impl Interp {
             "llvm-const-nil" => Some(llvm_const_nil(args)),
             "is-sexpr-value" => Some(llvm_value_is_sexpr(args)),
             "llvm-finish-compile" => Some(self.builtin_llvm_finish_compile(args)),
+            "llvm-finish-compile-group" => Some(self.builtin_llvm_finish_compile_group(args)),
             _ => None,
         }
     }
@@ -655,12 +656,17 @@ impl Interp {
         }
     }
 
-    /// `(ast-body name) -> Option<AstExpr>`: the bridged form of `name`'s
-    /// (single-expression — Phase 1/2 don't support multi-form bodies, i.e.
-    /// `let`-bound locals, yet) checked body, or `None` if `name` isn't a
-    /// `defun`, isn't all `i64`/`bool`, has other than one body expression,
-    /// or its body uses an `Expr` form `crate::compile::ast_bridge::typed_to_ast`
-    /// doesn't (yet) bridge.
+    /// `(ast-body name group) -> Option<AstExpr>`: the bridged form of
+    /// `name`'s (single-expression — Phase 1/2 don't support multi-form
+    /// bodies, i.e. `let`-bound locals, yet) checked body, or `None` if
+    /// `name` isn't a `defun`, isn't all `i64`/`bool`, has other than one
+    /// body expression, or its body uses an `Expr` form
+    /// `crate::compile::ast_bridge::typed_to_ast` doesn't (yet) bridge.
+    /// `group` (Phase 2g, self/mutual recursion) is the list of function
+    /// names being compiled together in the same module as `name` — see
+    /// `typed_to_ast`'s doc comment. `compile`'s singleton call site passes
+    /// `[name]` so an ordinary single-function compile gets self-recursion
+    /// bridging for free; `compile-group` passes the whole group.
     fn builtin_ast_body(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
         let name = expect_str(&args[0])?;
         let path = Path::root(name);
@@ -668,8 +674,14 @@ impl Interp {
         if !supported {
             return Ok(option_value(None));
         }
+        let group_vec = expect_vector(&args[1])?;
+        let group = group_vec
+            .borrow()
+            .iter()
+            .map(|v| expect_str(v).map(Path::root))
+            .collect::<Result<Vec<_>, _>>()?;
         match self.fn_body(&path) {
-            Some([only]) => Ok(option_value(crate::compile::ast_bridge::typed_to_ast(only, self))),
+            Some([only]) => Ok(option_value(crate::compile::ast_bridge::typed_to_ast(only, self, &group))),
             _ => Ok(option_value(None)),
         }
     }
@@ -747,6 +759,42 @@ impl Interp {
         self.ret_has_type(args, &Type::Named(Path::root("sexpr"), vec![]))
     }
 
+    /// Patches every bare (no-body) function declaration in `module` to the
+    /// real address of whatever it refers to — another already-compiled
+    /// typelisp function (`self.compiled`) or a fixed Rust runtime shim
+    /// (`runtime_shim_address`) — by registering it with `engine`. Shared by
+    /// [`Self::builtin_llvm_finish_compile`] and
+    /// [`Self::builtin_llvm_finish_compile_group`] (Phase 2g): every callee
+    /// `LlvmModule::get-or-declare-function`/`get-or-declare-runtime-fn`
+    /// added for a direct `build-call` or a `Sexpr` runtime shim
+    /// (`build-cons`/`build-car`/`build-cdr`/`push-root`/`pop-root`) is a
+    /// bare declaration (no basic blocks) in *this* module/engine, distinct
+    /// from wherever its body actually lives — another `compile` call's
+    /// separate `ExecutionEngine` for a typelisp callee, or a fixed Rust
+    /// function for a runtime shim. A declaration neither resolves (Phase
+    /// 2g: another member of the same self/mutual-recursion group, not
+    /// registered into `self.compiled` yet) is simply left unmapped here —
+    /// [`Self::builtin_llvm_finish_compile_group`] patches every group
+    /// member's own address in immediately afterward, before this module's
+    /// code is ever actually executed.
+    fn resolve_external_declarations(
+        &self,
+        module: &inkwell::module::Module<'static>,
+        engine: &inkwell::execution_engine::ExecutionEngine<'static>,
+    ) -> Result<(), EvalError> {
+        for f in module.get_functions() {
+            if f.count_basic_blocks() == 0 {
+                let callee_name = f.get_name().to_str().map_err(|e| EvalError::Internal(e.to_string()))?;
+                if let Some(cf) = self.compiled.borrow().get(&Path::root(callee_name)) {
+                    engine.add_global_mapping(&f, cf.f as usize);
+                } else if let Some(addr) = runtime_shim_address(callee_name) {
+                    engine.add_global_mapping(&f, addr);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// `(llvm-finish-compile module name arity) -> Result<bool, Error>`:
     /// JITs `module` (already built and verified by the typelisp-written
     /// `compile`) and registers `name` as a compiled, `arity`-ary function —
@@ -763,30 +811,7 @@ impl Interp {
             .borrow()
             .create_jit_execution_engine(inkwell::OptimizationLevel::None)
             .map_err(|e| EvalError::Panic(format!("compile: {}", e)))?;
-        // Phase 2f/3: every callee `LlvmModule::get-or-declare-function`/
-        // `get-or-declare-runtime-fn` added for a direct `build-call` or a
-        // `Sexpr` runtime shim (`build-cons`/`build-car`/`build-cdr`/
-        // `push-root`/`pop-root`) is a bare declaration (no basic blocks) in
-        // *this* module/engine, distinct from wherever its body actually
-        // lives — another `compile` call's separate `ExecutionEngine` for a
-        // typelisp callee, or a fixed Rust function for a runtime shim.
-        // `add_global_mapping` tells this engine to resolve any `call` to
-        // that declaration straight to the real address instead of trying
-        // (and failing) to find a body for it in this module —
-        // `ast_bridge::typed_to_ast` already refused to bridge a call to
-        // anything not in `self.compiled`, and every shim name comes from a
-        // fixed set `runtime_shim_address` always resolves, so every such
-        // declaration is guaranteed to have an entry here.
-        for f in module.borrow().get_functions() {
-            if f.count_basic_blocks() == 0 {
-                let callee_name = f.get_name().to_str().map_err(|e| EvalError::Internal(e.to_string()))?;
-                if let Some(cf) = self.compiled.borrow().get(&Path::root(callee_name)) {
-                    engine.add_global_mapping(&f, cf.f as usize);
-                } else if let Some(addr) = runtime_shim_address(callee_name) {
-                    engine.add_global_mapping(&f, addr);
-                }
-            }
-        }
+        self.resolve_external_declarations(&module.borrow(), &engine)?;
         let addr = engine
             .get_function_address(name)
             .map_err(|e| EvalError::Panic(format!("compile: {}", e)))?;
@@ -806,6 +831,45 @@ impl Interp {
         };
         let cf = CompiledFn { f, arity: arity as usize, _engine: engine };
         self.compiled.borrow_mut().insert(Path::root(name), cf);
+        Ok(ok_bool(true))
+    }
+
+    /// `(llvm-finish-compile-group module names) -> Result<bool, Error>`
+    /// (Phase 2g, self/mutual recursion): the `compile-group` counterpart to
+    /// [`Self::builtin_llvm_finish_compile`]. A `Module` can only ever be
+    /// handed to *one* `ExecutionEngine`, so a whole self/mutual-recursion
+    /// group sharing one module (`compile-group` builds every member's body
+    /// into it before this runs) must be JIT'd and registered together in a
+    /// single call, rather than once per member — unlike the single-function
+    /// path, `arity` isn't passed in from typelisp for each name; it's read
+    /// back from `self.fn_signature`, since every name here is already a
+    /// registered `defun`.
+    fn builtin_llvm_finish_compile_group(&self, args: &[RtValue]) -> Result<RtValue, EvalError> {
+        let _guard = compile_lock().lock().unwrap();
+        let module = expect_llvm_module(&args[0])?;
+        let names_vec = expect_vector(&args[1])?;
+        let names = names_vec.borrow().iter().map(|v| expect_str(v).map(|s| s.to_string())).collect::<Result<Vec<_>, _>>()?;
+        let engine = module
+            .borrow()
+            .create_jit_execution_engine(inkwell::OptimizationLevel::None)
+            .map_err(|e| EvalError::Panic(format!("compile-group: {}", e)))?;
+        self.resolve_external_declarations(&module.borrow(), &engine)?;
+        let engine = Rc::new(engine);
+        for name in &names {
+            let arity = self
+                .fn_signature(&Path::root(name))
+                .map(|(_, types, _)| types.len())
+                .ok_or_else(|| EvalError::Internal(format!("compile-group: unknown function {}", name)))?;
+            let addr = engine
+                .get_function_address(name)
+                .map_err(|e| EvalError::Panic(format!("compile-group: {}", e)))?;
+            // SAFETY: see `builtin_llvm_finish_compile`.
+            let f = unsafe {
+                std::mem::transmute::<usize, extern "C" fn(*const TlValue, u32, *mut TlValue, *mut Heap) -> i32>(addr)
+            };
+            let cf = CompiledFn { f, arity, _engine: engine.clone() };
+            self.compiled.borrow_mut().insert(Path::root(name), cf);
+        }
         Ok(ok_bool(true))
     }
 
@@ -2033,8 +2097,15 @@ fn tlvalue_tag_and_payload(
 /// Shared by [`llvm_builder_build_call`]/[`llvm_builder_build_call_bool`]/
 /// [`llvm_builder_build_call_f64`] (Phase 2f): packs `args` into a
 /// stack-allocated `[argc x TlValue]` array, emits a direct `call` to
-/// `callee` (the unified ABI's `i32 (ptr args, i32 argc, ptr out)`) through a
-/// stack-allocated `out` slot, and returns the raw `i64` bits of `out`'s
+/// `callee` (the unified ABI's `i32 (ptr args, i32 argc, ptr out, ptr heap)`
+/// — `f` is the function *currently being compiled* (the caller, not the
+/// callee), needed solely to forward *its own* `heap` parameter
+/// ([`heap_param_of`]) as the call's 4th argument, the same way
+/// `build-cons`/`build-car`/`build-cdr`/`push-root`/`pop-root` already do;
+/// every compiled function takes a `heap` parameter regardless of whether
+/// its own body touches `Sexpr` at all, precisely so a call between two
+/// arbitrary compiled functions never has a signature mismatch here) through
+/// a stack-allocated `out` slot, and returns the raw `i64` bits of `out`'s
 /// payload — callers narrow/reinterpret that per the callee's known return
 /// type (`ret-is-bool`/`ret-is-f64`, looked up by the typelisp-written
 /// `compile` since `AstExpr` itself carries no type tags).
@@ -2042,7 +2113,9 @@ fn tlvalue_tag_and_payload(
 fn llvm_builder_build_call_payload(args: &[RtValue]) -> Result<inkwell::values::IntValue<'static>, EvalError> {
     let b = expect_llvm_builder(&args[0])?;
     let callee = expect_llvm_function(&args[1])?;
-    let call_args = expect_vector(&args[2])?;
+    let f = expect_llvm_function(&args[2])?;
+    let heap_param = heap_param_of(f)?;
+    let call_args = expect_vector(&args[3])?;
     let builder = b.0.borrow();
     let tlvalue_ty = tlvalue_llvm_type();
     let call_args = call_args.borrow();
@@ -2085,7 +2158,7 @@ fn llvm_builder_build_call_payload(args: &[RtValue]) -> Result<inkwell::values::
     };
     let argc_v = i32_ty.const_int(argc as u64, false);
     builder
-        .build_call(*callee, &[args_ptr.into(), argc_v.into(), out_alloca.into()], "call")
+        .build_call(*callee, &[args_ptr.into(), argc_v.into(), out_alloca.into(), heap_param.into()], "call")
         .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?;
     let loaded = builder
         .build_load(tlvalue_ty, out_alloca, "callresult")
@@ -2097,8 +2170,8 @@ fn llvm_builder_build_call_payload(args: &[RtValue]) -> Result<inkwell::values::
         .map(|v| v.into_int_value())
 }
 
-/// `(build-call b callee args) -> LlvmValue`: calls `callee` and returns its
-/// result as a plain `i64`. `bool`/`f64`-returning callees need
+/// `(build-call b callee f args) -> LlvmValue`: calls `callee` and returns
+/// its result as a plain `i64`. `bool`/`f64`-returning callees need
 /// [`llvm_builder_build_call_bool`]/[`llvm_builder_build_call_f64`] instead.
 #[cfg(feature = "compile")]
 fn llvm_builder_build_call(args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -2107,7 +2180,7 @@ fn llvm_builder_build_call(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::LlvmValue(payload.into()))
 }
 
-/// `(build-call-bool b callee args) -> LlvmValue`: as [`llvm_builder_build_call`],
+/// `(build-call-bool b callee f args) -> LlvmValue`: as [`llvm_builder_build_call`],
 /// narrowing (`build_int_truncate`) the raw `i64` payload down to `i1`.
 #[cfg(feature = "compile")]
 fn llvm_builder_build_call_bool(args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -2122,7 +2195,7 @@ fn llvm_builder_build_call_bool(args: &[RtValue]) -> Result<RtValue, EvalError> 
     Ok(RtValue::LlvmValue(truncated.into()))
 }
 
-/// `(build-call-f64 b callee args) -> LlvmValue`: as [`llvm_builder_build_call`],
+/// `(build-call-f64 b callee f args) -> LlvmValue`: as [`llvm_builder_build_call`],
 /// bit-casting (not converting) the raw `i64` payload back to `f64`.
 #[cfg(feature = "compile")]
 fn llvm_builder_build_call_f64(args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -2137,7 +2210,7 @@ fn llvm_builder_build_call_f64(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::LlvmValue(bits))
 }
 
-/// `(build-call-char b callee args) -> LlvmValue`: as [`llvm_builder_build_call`],
+/// `(build-call-char b callee f args) -> LlvmValue`: as [`llvm_builder_build_call`],
 /// narrowing (`build_int_truncate`) the raw `i64` payload down to `i32`.
 #[cfg(feature = "compile")]
 fn llvm_builder_build_call_char(args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -2152,7 +2225,7 @@ fn llvm_builder_build_call_char(args: &[RtValue]) -> Result<RtValue, EvalError> 
     Ok(RtValue::LlvmValue(truncated.into()))
 }
 
-/// `(build-call-sexpr b callee args) -> LlvmValue`: as [`llvm_builder_build_call`],
+/// `(build-call-sexpr b callee f args) -> LlvmValue`: as [`llvm_builder_build_call`],
 /// reinterpreting (`build_int_to_ptr`) the raw `i64` payload back to a pointer.
 #[cfg(feature = "compile")]
 fn llvm_builder_build_call_sexpr(args: &[RtValue]) -> Result<RtValue, EvalError> {

@@ -586,3 +586,114 @@ fn refuses_to_compile_a_non_i64_function() {
         other => panic!("expected a Result value, got {:?}", other),
     }
 }
+
+/// Phase 2g (self-recursion): a self-recursive call now bridges into an
+/// `ACall` whose callee is the very function `compile` is building —
+/// `add-function` already added it to `module` *before* the body is walked,
+/// so the call resolves to an ordinary intra-module `call`, ahead of `name`
+/// ever being registered in `Interp.compiled` (`compile`'s singleton
+/// `group`, see `ast_bridge::typed_to_ast`'s doc comment). Asserts `compile`
+/// itself returns `Ok` (not just that the *answer* is right) — a function
+/// `compile` refuses still runs correctly via the tree-walking fallback, so
+/// only the answer would *not* catch a regression back to "self-recursion
+/// is refused".
+#[test]
+fn compiles_a_self_recursive_function() {
+    let src = r#"
+        (defun fact ((n i64)) i64 (if (<= n 1) 1 (* n (fact (- n 1)))))
+        (compile "fact")
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+    let src2 = r#"
+        (defun fact ((n i64)) i64 (if (<= n 1) 1 (* n (fact (- n 1)))))
+        (compile "fact")
+        (fact 6)
+    "#;
+    assert_eq!(run(src2), RtValue::Int(720));
+}
+
+/// The same self-recursion bridging, but with the recursive call in **tail**
+/// position — exercised separately since `compile-tail`'s catch-all `_` arm
+/// (which calls `compile-value` then `build-ret`) is a different code path
+/// from `compile-value`'s own dedicated `ACall` arm
+/// (`compiles_a_self_recursive_function` above only exercises the latter,
+/// since `(fact (- n 1))` sits inside `(* n ...)`, a value position). 1000
+/// frames of genuine native recursion (no tail-call optimization at
+/// `OptimizationLevel::None`) — far more than would survive through the
+/// tree-walking interpreter's own call stack for a recursive *caller*, so a
+/// silent fallback to tree-walking would be expected to behave differently,
+/// not just compute a wrong answer.
+#[test]
+fn compiles_a_tail_self_recursive_function() {
+    let src = r#"
+        (defun count-down ((n i64)) i64 (if (<= n 0) n (count-down (- n 1))))
+        (compile "count-down")
+        (count-down 1000)
+    "#;
+    assert_eq!(run(src), RtValue::Int(0));
+}
+
+/// Phase 2g (mutual-recursion infrastructure): `compile-group` batches
+/// several `defun`s into *one* shared `LlvmModule`/`ExecutionEngine` — every
+/// member's bare declaration is added to it before any body is built, so a
+/// call to a sibling resolves to an ordinary intra-module `call` even though
+/// *neither* function is registered in `Interp.compiled` until the whole
+/// group finishes (unlike two separate `(compile ...)` calls, where the
+/// callee must finish compiling *first*, Phase 2f). `helper` is
+/// self-recursive (the same `group`-membership trick `compile`'s own
+/// singleton group uses) and `caller` calls it.
+///
+/// Note genuine A-calls-B-calls-A recursion between two distinct *top-level*
+/// `defun`s isn't expressible in this language at all: a `defun` may only
+/// call itself or an already-*defined* `defun` (`crate::compile::ast_bridge`
+/// /`Checker::check_defun`), and top-level forms are read/checked/executed
+/// one at a time with no forward declarations, so `helper` could never
+/// reference a `caller` defined after it. The shape this test exercises — a
+/// forward-referencing caller plus a self-recursive callee, compiled
+/// *together* in one pass instead of two separate `compile` calls — is the
+/// realistic scope `compile-group` actually covers today.
+#[test]
+fn compile_group_compiles_several_functions_into_one_module() {
+    let src = r#"
+        (defun helper ((n i64)) i64 (if (<= n 0) 0 (+ n (helper (- n 1)))))
+        (defun caller ((n i64)) i64 (helper n))
+        (defun two-names ((a string) (b string) (out Vector<string>)) Vector<string>
+          (progn (push out a) (push out b) out))
+        (compile-group (two-names "helper" "caller" (Vector::new 0 "")))
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+    let src2 = r#"
+        (defun helper ((n i64)) i64 (if (<= n 0) 0 (+ n (helper (- n 1)))))
+        (defun caller ((n i64)) i64 (helper n))
+        (defun two-names ((a string) (b string) (out Vector<string>)) Vector<string>
+          (progn (push out a) (push out b) out))
+        (compile-group (two-names "helper" "caller" (Vector::new 0 "")))
+        (caller 5)
+    "#;
+    assert_eq!(run(src2), RtValue::Int(15));
+}
+
+/// A group member calling a function neither in the group nor already
+/// compiled is refused outright, the same way Phase 2f refuses a plain
+/// `compile` of such a function — `compile-group`'s `group` widens what
+/// `ast_bridge::typed_to_ast` accepts, it doesn't remove the check entirely.
+#[test]
+fn compile_group_refuses_a_call_outside_the_group() {
+    let src = r#"
+        (defun foo ((x i64)) i64 (+ x 1))
+        (defun bar ((x i64)) i64 (foo x))
+        (defun one-name ((a string) (out Vector<string>)) Vector<string>
+          (progn (push out a) out))
+        (compile-group (one-name "bar" (Vector::new 0 "")))
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 1, "expected Err, not Ok"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+}

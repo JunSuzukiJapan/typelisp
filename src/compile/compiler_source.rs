@@ -12,10 +12,15 @@
 //! arithmetic/comparison, `char`'s `eq`/`lt`, `cons`/`car`/`cdr`/`null`,
 //! `let`, `if`, and calls to *other already-compiled* functions (Phase 2f —
 //! a call to one not yet compiled fails the AST bridge, refusing `compile`
-//! outright, rather than reaching `compile-value` with no callee to call;
-//! self/mutual recursion between compiled functions isn't supported yet for
-//! the same reason: a function isn't registered as compiled until *after*
-//! `compile` finishes building it). `if` is only supported in **tail
+//! outright, rather than reaching `compile-value` with no callee to call)
+//! *or* to a function in the same self/mutual-recursion group (Phase 2g —
+//! `compile`'s own `name` for plain self-recursion, or `compile-group`'s
+//! whole list of names for mutual recursion: every group member's bare
+//! `LlvmFunction` declaration is added to one shared module *before* any
+//! body is built, so a call to a not-yet-finished sibling resolves to an
+//! ordinary intra-module `call`, with no JIT/global-mapping step needed at
+//! all — see `ast_bridge::typed_to_ast`'s doc comment on `group`). `if` is
+//! only supported in **tail
 //! position** (the value an enclosing `if`/the function itself returns),
 //! not as a nested sub-expression: `compile-tail` lowers a tail `if` to two
 //! basic blocks each ending in their own `ret`, sidestepping the need for a
@@ -152,21 +157,26 @@ pub const SOURCE: &str = r#"
               (pushed (count-and-push-sexpr b module f bound-vals 0 (length bound-vals) 0))
               (result (eval-body 0 (length body) body new-params new-vals)))
          (progn (pop-roots b module f pushed) result)))
-      ;; A call to another (already-compiled — `ast_bridge::typed_to_ast`
-      ;; refused to bridge it otherwise, Phase 2f) function: evaluate its
-      ;; arguments in the *current* scope, resolve its declaration in this
-      ;; module, and dispatch to `build-call`/`-bool`/`-f64`/`-char`/`-sexpr`
-      ;; per its known return type (the same
+      ;; A call to another already-compiled function (Phase 2f) *or* a
+      ;; member of the same self/mutual-recursion group (Phase 2g) —
+      ;; `ast_bridge::typed_to_ast` refused to bridge it otherwise. Evaluate
+      ;; its arguments in the *current* scope, resolve its declaration in
+      ;; this module, and dispatch to `build-call`/`-bool`/`-f64`/`-char`/
+      ;; `-sexpr` per its known return type (the same
       ;; `ret-is-bool`/`ret-is-f64`/`ret-is-char`/`ret-is-sexpr` side-query
-      ;; `compile` itself uses for its own return).
+      ;; `compile` itself uses for its own return). `f` (the function
+      ;; *currently* being compiled, not `callee`) is passed through so
+      ;; `build-call*` can forward its own `heap` parameter as the call's
+      ;; 4th ABI argument — every compiled function takes one regardless of
+      ;; whether its own body touches `Sexpr`.
       ((ACall name call-args)
        (let* ((arg-vals (eval-args 0 (length call-args) call-args (Vector::new 0 (llvm-const-i64 0))))
               (callee (get-or-declare-function module name)))
-         (cond ((ret-is-bool name) (build-call-bool b callee arg-vals))
-               ((ret-is-f64 name) (build-call-f64 b callee arg-vals))
-               ((ret-is-char name) (build-call-char b callee arg-vals))
-               ((ret-is-sexpr name) (build-call-sexpr b callee arg-vals))
-               (else (build-call b callee arg-vals)))))
+         (cond ((ret-is-bool name) (build-call-bool b callee f arg-vals))
+               ((ret-is-f64 name) (build-call-f64 b callee f arg-vals))
+               ((ret-is-char name) (build-call-char b callee f arg-vals))
+               ((ret-is-sexpr name) (build-call-sexpr b callee f arg-vals))
+               (else (build-call b callee f arg-vals)))))
       (_ (panic "compile: `if` is only supported in tail position (Phase 1)")))))
 
 ;; Under the unified `TlValue` ABI (Phase 2), a function's logical arguments
@@ -259,29 +269,108 @@ pub const SOURCE: &str = r#"
                       (sexpr-ret (build-ret-sexpr b f result))
                       (else (build-ret b f result))))))))
 
+;; `singleton-group` builds the one-element `Vector<string>` `compile` passes
+;; to `ast-body` for plain self-recursion bridging (Phase 2g). It takes the
+;; destination vector as a parameter rather than building one with
+;; `Vector::new` directly in a `let` binding: a `let` binding's initializer
+;; is always checked with no expected type (`Checker::check_let` hardcodes
+;; `None`), and `Vector::new` is a *static* call whose type parameter `t` is
+;; only ever inferred from an expected type, never from its own arguments —
+;; so `(let ((g (Vector::new 0 "")) ...)` fails to type-check, while passing
+;; the same `(Vector::new 0 "")` as a call *argument* to an already-concrete
+;; parameter type (as every other `Vector::new` site in this file already
+;; does, e.g. `extend-strs`/`make-param-values`) lets it pick up that
+;; parameter's declared type as its expected type instead.
+(defun singleton-group ((name string) (out Vector<string>)) Vector<string>
+  (progn (push out name) out))
+
 (defun compile ((name string)) Result<bool,Error>
   (match (ast-params name)
     ((None) (Err (Error "compile: unsupported function (must take/return only i64, bool, f64, char, or Sexpr)")))
     ((Some params)
-     (match (ast-body name)
+     (match (ast-body name (singleton-group name (Vector::new 0 "")))
        ((None) (Err (Error "compile: unsupported function body")))
        ((Some body)
-        (let* ((arity (length params))
-               (bool-ret (ret-is-bool name))
-               (f64-ret (ret-is-f64 name))
-               (char-ret (ret-is-char name))
-               (sexpr-ret (ret-is-sexpr name))
-               (module (llvm-new-module name))
-               (f (add-function module name))
-               (entry (append-block f "entry"))
-               (b (llvm-new-builder)))
-          (position-at-end b entry)
-          (let* ((vals (make-param-values name f b arity))
-                 (pushed (count-and-push-sexpr b module f vals 0 (length vals) 0)))
-            (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed f b params vals body)
-            (match (verify module)
-              ((Err e) (Err e))
-              ((Ok _) (llvm-finish-compile module name arity))))))))))
+          (let* ((arity (length params))
+                 (bool-ret (ret-is-bool name))
+                 (f64-ret (ret-is-f64 name))
+                 (char-ret (ret-is-char name))
+                 (sexpr-ret (ret-is-sexpr name))
+                 (module (llvm-new-module name))
+                 (f (add-function module name))
+                 (entry (append-block f "entry"))
+                 (b (llvm-new-builder)))
+            (position-at-end b entry)
+            (let* ((vals (make-param-values name f b arity))
+                   (pushed (count-and-push-sexpr b module f vals 0 (length vals) 0)))
+              (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed f b params vals body)
+              (match (verify module)
+                ((Err e) (Err e))
+                ((Ok _) (llvm-finish-compile module name arity))))))))))
+
+;; `compile-group` (Phase 2g, mutual recursion): compiles several `defun`s
+;; *together* into one shared `LlvmModule`, so each can call any other
+;; before any of them is registered in `Interp.compiled` — the same trick
+;; `compile`'s singleton `group` above uses for plain self-recursion,
+;; generalized to an arbitrary list of mutually-calling names.
+;;
+;; `declare-all` adds every name's bare `LlvmFunction` declaration to
+;; `module` *before* any body is built, so that when member `i`'s body
+;; (built by `build-one`) calls member `j` (`i` < or > `j`, order doesn't
+;; matter), `get-or-declare-function` always finds `j`'s declaration already
+;; present — exactly the forward-reference LLVM IR allows (a `call` to a
+;; declared-but-not-yet-defined function is legal as long as a body is
+;; eventually attached, which `build-one` does for every member by the time
+;; `compile-group` returns).
+(defun declare-all ((names Vector<string>) (module LlvmModule) (i i32) (n i32)) ()
+  (if (>= i n)
+      ()
+      (progn (add-function module (get names i)) (declare-all names module (+ i 1) n))))
+
+;; Builds member `i`'s entry block and body — the same steps `compile`
+;; performs for its one function, except the `LlvmFunction` comes from
+;; `get-or-declare-function` (reusing `declare-all`'s declaration) instead of
+;; a fresh `add-function`, and `ast-body`'s `group` is the *whole* `names`
+;; list rather than a singleton.
+(defun build-one ((names Vector<string>) (module LlvmModule) (b LlvmBuilder) (i i32)) Result<bool,Error>
+  (let* ((name (get names i)))
+    (match (ast-params name)
+      ((None) (Err (Error "compile-group: unsupported function (must take/return only i64, bool, f64, char, or Sexpr)")))
+      ((Some params)
+       (match (ast-body name names)
+         ((None) (Err (Error "compile-group: unsupported function body")))
+         ((Some body)
+          (let* ((arity (length params))
+                 (bool-ret (ret-is-bool name))
+                 (f64-ret (ret-is-f64 name))
+                 (char-ret (ret-is-char name))
+                 (sexpr-ret (ret-is-sexpr name))
+                 (f (get-or-declare-function module name))
+                 (entry (append-block f "entry")))
+            (position-at-end b entry)
+            (let* ((vals (make-param-values name f b arity))
+                   (pushed (count-and-push-sexpr b module f vals 0 (length vals) 0)))
+              (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed f b params vals body)
+              (Ok true)))))))))
+
+(defun build-all ((names Vector<string>) (module LlvmModule) (b LlvmBuilder) (i i32) (n i32)) Result<bool,Error>
+  (if (>= i n)
+      (Ok true)
+      (match (build-one names module b i)
+        ((Err e) (Err e))
+        ((Ok _) (build-all names module b (+ i 1) n)))))
+
+(defun compile-group ((names Vector<string>)) Result<bool,Error>
+  (let* ((module (llvm-new-module (get names 0)))
+         (b (llvm-new-builder))
+         (n (length names)))
+    (declare-all names module 0 n)
+    (match (build-all names module b 0 n)
+      ((Err e) (Err e))
+      ((Ok _)
+       (match (verify module)
+         ((Err e) (Err e))
+         ((Ok _) (llvm-finish-compile-group module names)))))))
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,

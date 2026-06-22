@@ -726,30 +726,35 @@ fn llvm_builder_def() -> AdtDef {
     assoc.insert("build-ret-f64".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
     assoc.insert("build-ret-char".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
     assoc.insert("build-ret-sexpr".to_string(), method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit));
-    // `build-call`/`build-call-bool`/`build-call-f64`/`build-call-char` (Phase 2f/2d): packs `args`
-    // into a stack-allocated `TlValue` array and emits a direct `call` to
+    // `build-call`/`build-call-bool`/`build-call-f64`/`build-call-char`/
+    // `build-call-sexpr` (Phase 2f/2d/3): packs `args` into a
+    // stack-allocated `TlValue` array and emits a direct `call` to
     // `callee` (a declaration from `LlvmModule::get-or-declare-function`)
     // under the unified ABI, then unpacks the `out` slot per the callee's
     // known return type — see `crate::eval::interp::llvm_builder_build_call`.
+    // The second `LlvmFunction` (`f`) is the function *currently being
+    // compiled* (the caller, not `callee`) — needed solely to forward its
+    // own `heap` parameter as the call's 4th ABI argument, the same way
+    // `build-cons`/`push-root`/etc. already read it via `f`.
     assoc.insert(
         "build-call".to_string(),
-        method(vec![llvm_builder_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
+        method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
     );
     assoc.insert(
         "build-call-bool".to_string(),
-        method(vec![llvm_builder_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
+        method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
     );
     assoc.insert(
         "build-call-f64".to_string(),
-        method(vec![llvm_builder_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
+        method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
     );
     assoc.insert(
         "build-call-char".to_string(),
-        method(vec![llvm_builder_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
+        method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
     );
     assoc.insert(
         "build-call-sexpr".to_string(),
-        method(vec![llvm_builder_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
+        method(vec![llvm_builder_ty(), llvm_function_ty(), llvm_function_ty(), vector_of(llvm_value_ty())], llvm_value_ty()),
     );
     // `build-cons`/`build-car`/`build-cdr`/`push-root`/`pop-root` (Phase 3):
     // `Sexpr`'s cons-cell operations and GC-rooting primitives, each a
@@ -821,7 +826,15 @@ fn register_compile_builtins(root: &mut Namespace) {
         "ast-params".to_string(),
         free(vec![Type::Str], option_of(Type::Named(Path::root("vector"), vec![Type::Str]))),
     );
-    root.fns.insert("ast-body".to_string(), free(vec![Type::Str], option_of(ast_expr_ty())));
+    // `ast-body`'s second parameter (Phase 2g, self/mutual recursion): the
+    // list of function names being compiled together in the same module as
+    // the one being introspected — see `crate::compile::ast_bridge::typed_to_ast`'s
+    // doc comment. `compile`'s singleton call site passes `[name]` so an
+    // ordinary single-function compile gets self-recursion for free.
+    root.fns.insert(
+        "ast-body".to_string(),
+        free(vec![Type::Str, vector_of(Type::Str)], option_of(ast_expr_ty())),
+    );
     // `param-is-bool`/`ret-is-bool` (Phase 2b) and `param-is-f64`/`ret-is-f64`
     // (Phase 2c): per-parameter/return type tags (`AstExpr` itself carries no
     // type info per node), letting `compile` pick `load-arg`/`build-ret` vs
@@ -868,5 +881,14 @@ fn register_compile_builtins(root: &mut Namespace) {
     root.fns.insert(
         "llvm-finish-compile".to_string(),
         free(vec![llvm_module_ty(), Type::Str, Type::I32], result_of(Type::Bool, error_ty())),
+    );
+    // `llvm-finish-compile-group` (Phase 2g, self/mutual recursion):
+    // `llvm-finish-compile`'s `compile-group` counterpart — JITs `module`
+    // once and registers every name in the `Vector<string>` as compiled,
+    // sharing one `ExecutionEngine` (a `Module` can only ever be handed to
+    // one) — see `Interp::builtin_llvm_finish_compile_group`.
+    root.fns.insert(
+        "llvm-finish-compile-group".to_string(),
+        free(vec![llvm_module_ty(), vector_of(Type::Str)], result_of(Type::Bool, error_ty())),
     );
 }

@@ -75,7 +75,17 @@ fn rt_vector(items: Vec<RtValue>) -> RtValue {
 /// uses a construct outside Phase 1/2's scope. Takes `interp` (Phase 2f)
 /// solely to check `Expr::Call`'s callee against `Interp.compiled` — every
 /// other case is a pure tree conversion with no interpreter state involved.
-pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp) -> Option<RtValue> {
+/// `group` (Phase 2g, self/mutual recursion) is the set of function names
+/// currently being compiled *together* in the same `LlvmModule` as `t`'s own
+/// function — `compile`'s singleton `[name]` for an ordinary single-function
+/// compile (making a self-recursive call bridgeable), or `compile-group`'s
+/// full list for several functions compiled together so they can call each
+/// other before any of them is registered in `Interp.compiled`. A callee in
+/// `group` hasn't finished compiling yet (no JIT'd address exists), but its
+/// `LlvmFunction` declaration already exists in the shared module by the time
+/// any group member's body is built (`compile-group` declares all of them
+/// up front) — see `crate::compile::compiler_source`'s doc comment.
+pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp, group: &[Path]) -> Option<RtValue> {
     match &t.expr {
         Expr::Int(n) => Some(data(A_INT, vec![RtValue::Int(*n)])),
         Expr::Bool(b) => Some(data(A_BOOL, vec![RtValue::Bool(*b)])),
@@ -98,9 +108,9 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp) -> Option<RtValue> {
             Some(data(A_VAR, vec![RtValue::Str(name.clone())]))
         }
         Expr::If(c, then, els) => {
-            let c = typed_to_ast(c, interp)?;
-            let then = typed_to_ast(then, interp)?;
-            let els = typed_to_ast(els, interp)?;
+            let c = typed_to_ast(c, interp, group)?;
+            let then = typed_to_ast(then, interp, group)?;
+            let els = typed_to_ast(els, interp, group)?;
             Some(data(A_IF, vec![c, then, els]))
         }
         Expr::Assoc { type_name, method, instance: true, args }
@@ -108,8 +118,8 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp) -> Option<RtValue> {
                 && args.len() == 2
                 && BINOPS.contains(&method.as_str()) =>
         {
-            let lhs = typed_to_ast(&args[0], interp)?;
-            let rhs = typed_to_ast(&args[1], interp)?;
+            let lhs = typed_to_ast(&args[0], interp, group)?;
+            let rhs = typed_to_ast(&args[1], interp, group)?;
             Some(data(A_BINOP, vec![RtValue::Str(method.clone()), lhs, rhs]))
         }
         // `char`'s `eq`/`lt` (`registry::char_assoc`, Phase 2d) — `char` is
@@ -122,8 +132,8 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp) -> Option<RtValue> {
             if *type_name == Path::root("char") && args.len() == 2 && (method == "eq" || method == "lt") =>
         {
             let op = if method == "eq" { "=" } else { "<" };
-            let lhs = typed_to_ast(&args[0], interp)?;
-            let rhs = typed_to_ast(&args[1], interp)?;
+            let lhs = typed_to_ast(&args[0], interp, group)?;
+            let rhs = typed_to_ast(&args[1], interp, group)?;
             Some(data(A_BINOP, vec![RtValue::Str(op.to_string()), lhs, rhs]))
         }
         // `let` (CL parallel-binding semantics — every `val` is checked
@@ -138,9 +148,9 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp) -> Option<RtValue> {
             let mut values = Vec::with_capacity(bindings.len());
             for (name, val) in bindings {
                 names.push(RtValue::Str(name.clone()));
-                values.push(typed_to_ast(val, interp)?);
+                values.push(typed_to_ast(val, interp, group)?);
             }
-            let body = body.iter().map(|f| typed_to_ast(f, interp)).collect::<Option<Vec<_>>>()?;
+            let body = body.iter().map(|f| typed_to_ast(f, interp, group)).collect::<Option<Vec<_>>>()?;
             Some(data(A_LET, vec![rt_vector(names), rt_vector(values), rt_vector(body)]))
         }
         // `cons`/`car`/`cdr` (Phase 3): always `Interp::eval_builtin`
@@ -149,16 +159,16 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp) -> Option<RtValue> {
         // ahead of the general `ACall` case below rather than its
         // `interp.is_compiled` guard.
         Expr::Call(path, call_args) if path.is_simple() && path.local() == "cons" && call_args.len() == 2 => {
-            let lhs = typed_to_ast(&call_args[0], interp)?;
-            let rhs = typed_to_ast(&call_args[1], interp)?;
+            let lhs = typed_to_ast(&call_args[0], interp, group)?;
+            let rhs = typed_to_ast(&call_args[1], interp, group)?;
             Some(data(A_CONS, vec![lhs, rhs]))
         }
         Expr::Call(path, call_args) if path.is_simple() && path.local() == "car" && call_args.len() == 1 => {
-            let v = typed_to_ast(&call_args[0], interp)?;
+            let v = typed_to_ast(&call_args[0], interp, group)?;
             Some(data(A_CAR, vec![v]))
         }
         Expr::Call(path, call_args) if path.is_simple() && path.local() == "cdr" && call_args.len() == 1 => {
-            let v = typed_to_ast(&call_args[0], interp)?;
+            let v = typed_to_ast(&call_args[0], interp, group)?;
             Some(data(A_CDR, vec![v]))
         }
         // `null` (Phase 3): an ordinary typelisp `defun` in `prelude.rs`
@@ -168,14 +178,22 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp) -> Option<RtValue> {
         // built from `null`/`not`) stay unbridged for the same reason and
         // are a follow-up step.
         Expr::Call(path, call_args) if path.is_simple() && path.local() == "null" && call_args.len() == 1 => {
-            let v = typed_to_ast(&call_args[0], interp)?;
+            let v = typed_to_ast(&call_args[0], interp, group)?;
             Some(data(A_NULLP, vec![v]))
         }
         // A call to another `defun` (Phase 2f, direct calls between compiled
-        // functions): only bridged if `path` is a simple top-level name (the
-        // only shape `compile`'s other introspection builtins — `ast-params`/
-        // `param-is-bool`/`ret-is-bool`/etc — support) *and* it's already
-        // compiled (`Interp.compiled`) — calling an as-yet-uncompiled
+        // functions; Phase 2g, self/mutual recursion): only bridged if `path`
+        // is a simple top-level name (the only shape `compile`'s other
+        // introspection builtins — `ast-params`/`param-is-bool`/`ret-is-bool`/
+        // etc — support) *and* it's either already compiled (`Interp.compiled`,
+        // Phase 2f — its `LlvmFunction` lives in some *other*, already-JIT'd
+        // module, resolved later by `add_global_mapping`) *or* a member of
+        // `group` (Phase 2g — its `LlvmFunction` is a bare declaration already
+        // present in *this same* module by construction, resolved by an
+        // ordinary intra-module `call` with no JIT/global-mapping step
+        // needed at all, regardless of whether that group member's own body
+        // has been built yet — see `crate::compile::compiler_source`'s doc
+        // comment on `compile-group`). Calling an uncompiled, non-group
         // function is refused by failing the bridge here (`None`), the same
         // way an unsupported-type binding refuses the whole function,
         // **not** by emitting an `ACall` that `compile-value` would have to
@@ -183,8 +201,12 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp) -> Option<RtValue> {
         // calling back into uncompiled/tree-walked code) needs a trampoline
         // and stays unsupported — see [docs/TODO.md](../../docs/TODO.md)
         // 「ステップ5・Phase 2f」.
-        Expr::Call(path, call_args) if path.is_simple() && interp.is_compiled(path) && is_bridgeable_scalar_type(&t.ty) => {
-            let args = call_args.iter().map(|a| typed_to_ast(a, interp)).collect::<Option<Vec<_>>>()?;
+        Expr::Call(path, call_args)
+            if path.is_simple()
+                && (interp.is_compiled(path) || group.contains(path))
+                && is_bridgeable_scalar_type(&t.ty) =>
+        {
+            let args = call_args.iter().map(|a| typed_to_ast(a, interp, group)).collect::<Option<Vec<_>>>()?;
             Some(data(A_CALL, vec![RtValue::Str(path.local().to_string()), rt_vector(args)]))
         }
         _ => None,

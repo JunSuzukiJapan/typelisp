@@ -776,11 +776,64 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       想定された結果であり、`compile`feature関連コードの安全性検証は並行実行の
       繰り返しとGCを跨ぐ実地テストに依存する）。既定ビルド・`cargo clippy
       --all-targets`（両構成）への影響なし。
+  - 実装済み（Phase 2g/自己再帰・相互再帰対応）: `(defun fact ((n i64)) i64 (if (<= n 1) 1 (*
+    n (fact (- n 1)))))`のような自己再帰`defun`が`compile`対象になった。「相互再帰」は
+    `compile-group`という新規エントリポイント（複数`defun`名の`Vector<string>`を取り、
+    1つの`LlvmModule`にまとめてコンパイル）として追加したが、**この言語では top-level
+    `defun`同士の真の双方向再帰（AがBを呼び、BがAを呼ぶ）はソースレベルで構成不可能**
+    という制約を実装中に確認した——フォーム は1つずつ read→check→exec されるため
+    （`defun`は自己再帰か*既に定義済みの* `defun`のみ呼べる、前方参照不可）、`compile-group`
+    が実際に対応する範囲は「複数の（自己再帰を含む）`defun`を1回のJITパスにまとめる」
+    ことに留まる（例: 自己再帰の`helper`と、それを呼ぶ`caller`を1つの`compile-group`
+    呼び出しでまとめてコンパイル）。
+    - **設計**: `ast_bridge::typed_to_ast`に`group: &[Path]`引数を追加し、`Expr::Call`の
+      ブリッジ可否を`interp.is_compiled(path) || group.contains(path)`に拡張（既存の
+      Phase 2f条件はそのまま）。`compile`単体呼び出しは`ast-body`に渡す`group`を`[name]`
+      （自分自身のみ）の単集合とすることで、自己再帰が「他の既にコンパイル済み関数を呼ぶ」
+      ケースと全く同じ仕組みに乗った——`add-function`が`module`に`name`自身を**本体構築前に**
+      登録済みなので、自己呼び出しは`get-or-declare-function`がそれを見つけて素直な
+      モジュール内`call`になり、JIT/`add_global_mapping`は一切不要（`self.compiled`への
+      登録は`compile`完了後のままで構わない）。
+    - **`ast-body`のシグネチャ変更**: `(ast-body name) -> Option<AstExpr>`から`(ast-body
+      name group) -> Option<AstExpr>`へ（`group: Vector<string>`）。`compile`の呼び出し
+      箇所は単集合を作る必要があるが、`Vector::new`は**static呼び出しのジェネリック型引数
+      が`expected`型からしか推論されない**ため`let`束縛の初期値には書けない
+      （`Checker::check_let`が束縛値を常に`expected=None`でcheckするため）——既存の
+      `extend-strs`等と同じ「具体型パラメータを持つ関数呼び出しの**引数位置**に直接書く」
+      回避策に倣い、新規`singleton-group`（`(name out) -> Vector<string>`、`out`を受け取って
+      `push`して返す）を介して`(singleton-group name (Vector::new 0 ""))`の形にした。
+    - **`compile-group`**: `declare-all`（全名を先に`add-function`で空宣言だけ追加——
+      メンバーiの本体構築中にメンバーjを呼ぶとき、定義順に関係なく`get-or-declare-function`
+      が必ず既存宣言を見つけられるようにする、LLVM IRが許す前方参照そのもの）→`build-all`
+      （各メンバーの本体を`compile`単体と同じ手順で構築、`ast-body`に渡す`group`は
+      `names`全体）→`verify`→新規`llvm-finish-compile-group`（**1つの`Module`は1つの
+      `ExecutionEngine`にしか渡せない**ため、メンバーごとに別エンジンを作るのではなく
+      全員分を1回のJIT＋`self.compiled`登録でまとめる。`arity`は呼び出し側から渡さず
+      `Interp::fn_signature`から逆引き）。
+    - **副次的に発見・修正した既存バグ（Phase 2f以来、Phase 3で潜在化）**:
+      `llvm_builder_build_call_payload`（`build-call`/`-bool`/`-f64`/`-char`/`-sexpr`共通の
+      呼び出しIR構築）が、Phase 3で統一ABIに`heap`引数（4番目）が追加された後も**3引数
+      （`args, argc, out`のみ）で`call`命令を発行し続けていた**——コンパイル済み関数同士の
+      直接呼び出し（Phase 2f、`compiles_a_function_calling_another_compiled_function`等）
+      は実際には毎回`verify`が「引数個数不一致」で失敗して`compile`が`Err`を返し、後続の
+      関数呼び出しがツリーウォーク評価へ**サイレントにフォールバック**していたため、
+      回答の値だけを見るテストでは何年も検出されなかった（自己再帰の新規テストで`compile`
+      の戻り値を明示的に`Ok`チェックして初めて発覚）。修正は`build-call`系全部に新規引数
+      `f`（callee ではなく**呼び出し元自身**の`LlvmFunction`）を追加し、`heap_param_of(f)`
+      で呼び出し元自身の`heap`引数を読んで4番目の実引数として転送するだけ（`build-cons`等
+      が既に同じ理由で`f`を取っていたのと同じ形）。**教訓**: `compile`の「ポジティブ」テストは
+      `(compile name)`の戻り値が`Err`でも後続呼び出しがフォールバックして正解を返してしまう
+      ことがあるため、新規テストでは答えの値だけでなく`compile`自身の`Result`も明示的に
+      `Ok`チェックするようにした（既存テストは未変更——遡って全部修正するのは別作業）。
+    - TDD: `tests/compile_test.rs`に4件追加（40件中）——自己再帰（`fact`、`compile`の戻り値
+      `Ok`チェック込み）、tail位置の自己再帰（`count-down`、1000段の実ネイティブ再帰で
+      ツリーウォークへのフォールバックでは到達しない深さを実証）、`compile-group`での
+      複数関数バッチコンパイル（自己再帰`helper`+それを呼ぶ`caller`、`Ok`チェック込み）、
+      グループ外の未コンパイル関数呼び出しの拒否。既存36件は無変更でgreen（`build-call`
+      修正の副作用で、square/sum-of-squares等の既存テストも今回初めて**実際に**コンパイル
+      経由で実行されるようになったことを確認済み）。並行実行5回連続green。既定ビルド・
+      `cargo clippy --all-targets`（両構成）への影響なし。
   - **次の作業（ブランチ`feature/compiler`で継続）**:
-    - 自己再帰・相互再帰のコンパイル対応（Phase 2fでは明示的に対象外とした）: `name`自身を
-      `compile`完了前に`self.compiled`へ仮登録する、または呼び出し先解決を`get-or-declare-
-      function`＋`add_global_mapping`ではなく単純な`call`に倒せる「同一モジュール内の
-      自己呼び出し」を特別扱いする、といった方向性が考えられるが優先度未定。
     - **Sexprのスコープ拡張**: `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Path`形式の
       `Sexpr`値（現在は`value_to_ptr`がエラー→ランタイムシムが`abort`）への対応、
       `consp`/`atom`（`null`/`not`の合成）、`set-car`/`set-cdr`。
