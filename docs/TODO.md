@@ -849,25 +849,85 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       修正の副作用で、square/sum-of-squares等の既存テストも今回初めて**実際に**コンパイル
       経由で実行されるようになったことを確認済み）。並行実行5回連続green。既定ビルド・
       `cargo clippy --all-targets`（両構成）への影響なし。
+  - 実装済み（Phase 3b/ループ構文 — `while`+`setf`、優先順位リスト1番目の前半）:
+    `(defun sum-to ((n i64)) i64 (let ((acc (- n n)) (i (- n n))) (while (< i n) (setf acc (+
+    acc i)) (setf i (+ i 1))) acc))`のような、`let`束縛のローカル変数を`setf`で更新する
+    `while`ループがコンパイル対象になった。ネストした`while`、`f64`/`bool`/`char`の
+    loop-carried変数、ループ内で読むだけ（`setf`しない）の`Sexpr`パラメータも対象——
+    `break`/`return`/`loop`（非局所脱出・値を持つループ）は対象外（次の作業参照）。
+    - **設計**: ループの先頭ブロックに、スコープ内の**全変数**（ループが実際に触れるかは
+      問わない）に対してphiノードを1つずつ作る（`make-phis`）。「実際に`setf`される変数だけ
+      を静的解析で特定する」より単純で、`setf`されない変数のphiは2本の入力辺が同じ値になる
+      だけで実害が無い（このコンパイラはLLVM最適化パスを一切走らせないため、`mem2reg`的な
+      無駄の解消もそもそも期待していない）。`if`がtail位置限定で済ませ続けてきたphi/alloca
+      回避は、ループの back edge には適用できない（ヘッダーの値は「初回（preheader経由）」
+      「2回目以降（latch経由）」の2つの先行ブロックを持ち、両方が同じ`ret`に収束する形には
+      できないため）——`if`以外でこのコンパイラが複数ブロックを作る初めての構文。
+    - **新規Rustビルトイン3つ**（`LlvmBuilder`、`eval::interp`）: `current-block`
+      （`Builder::get_insert_block`）、`build-phi`（`seed`の型で`Builder::build_phi`、結果は
+      既存の`RtValue::LlvmValue(BasicValueEnum)`にそのまま収まる——phi専用のRtValue variant
+      は追加していない）、`add-incoming`（`BasicValueEnum::as_instruction_value`→
+      `PhiValue::try_from`で“phiインスタンスへ戻して”`add_incoming`を呼ぶ）。
+    - **`current-block`を使う理由（`body-block`を決め打ちにしない）**: ループ本体やpreheader
+      側の式が、ループ本体の最後に`while`/`if`等で*さらに*ブロックを作ると、`b`の現在位置は
+      `append-block`した直後のブロックとは限らない（ネストした`while`がその実例——内側の
+      ループの`exit`ブロックが、外側ループにとっての実際のlatchになる）。preheader/latch双方
+      を`current-block`で都度問い合わせることで、ネストしたループが特別扱い無しに動く。
+    - **`copy-into`（`vals`への書き戻し）**: `AWhile`はループの`exit`で、ヘッダーのphi値を
+      *元の*`vals`（関数本体・外側`let`の同じ`Vector`インスタンス、`while`の前後の兄弟フォーム
+      が共有している）へ書き戻す。`header`は`exit`の唯一の先行ブロックなので、ここでのphi値は
+      0回・複数回どちらの実行経路でも正しい——ループ本体が一度も走らなくても、本体が計算した
+      （dominanceの効かない）SSA値ではなく、ヘッダーのphiを経由した値だけが`exit`以降から見える。
+    - **副次的に見つけた既存ギャップ（`ALet`への同型の書き戻しを追加）**: `setf`がこの段階で
+      初めて存在するようになったため、「`let`の中の`setf`が、その`let`を抜けた後のコードから
+      見えるか」という問いも初めて発生した。`compile-value`の`ALet`アームは元々`new-vals`
+      （`vals`の拡張コピー）を作るだけで*書き戻さなかった*ため、`while`がネストした`let`を挟む
+      （例: `(let ((j 0)) (while ...))`のように追加の束縛を作る形）と、内側の`setf`が外側に
+      伝わらない。`AWhile`と同じ`copy-into`を`ALet`の`compile-value`アームの戻り際にも追加し
+      （`new-vals`の先頭`(length vals)`要素を`vals`へ書き戻す）、再帰的に効くようにした
+      （`let`が`let`を挟んでも、1段ずつ親へ伝播する）。`compile-tail`の`ALet`アームは関数が
+      その場で`return`するため対象外（書き戻し先を見るコードが存在しない）。テストは追加の
+      `let`を挟まない形（既存の`let`に必要な変数を全部並べる）でネストループを書いており、この
+      ギャップ自体の回帰テストは無い——次の作業の項目として明記。
+    - **`Sexpr`の`setf`は対象外**（`ast_bridge::typed_to_ast`の`Expr::Set`アームが`i64`/
+      `bool`/`f64`/`char`のみ許可）: 再代入後の新しいポインタに対して、その束縛のスコープ全体
+      をカバーする新たなGC rootを張る仕組みがまだ無い（Phase 3のrooting規律は束縛の*初期値*
+      を一度だけrootする設計のため）。**読むだけ**（`setf`しない）の`Sexpr`変数がループのphiを
+      経由するのは安全（初期ポインタは既にrootされており、phiは同じポインタを指す別レジスタを
+      増やすだけ）。
+    - TDD: `tests/compile_test.rs`に7件追加（47件中）——基本のsum-to（`compile`の`Ok`チェック
+      込み）、ゼロ回実行パス、ネストした`while`、`f64`+`bool`、読むだけの`Sexpr`パラメータ、
+      `break`使用時の拒否、`Sexpr`への`setf`の拒否。既存40件は無変更でgreen（GCストレステスト
+      `compiled_cons_chain_survives_a_gc_mid_call`の固定ヒープ容量4096→8192——`compiler_source.rs`
+      のSOURCE増加分だけ読み込み時のセル消費が増えたための調整、ロジック自体は無変更）。並行
+      実行10回連続green。既定ビルド・`cargo clippy --all-targets`（両構成）への影響なし。
   - **次の作業（ブランチ`feature/compiler`で継続、影響範囲の大きさで優先順位付け
     ——[[feedback-impl-priority]]）**:
-    1. **ループ構文（`while`/`loop`/`break`/`return`）のコンパイル対応**: Vector/HashTable
-       処理の典型コード（`prelude.rs`の`sort`等）はほぼ全て`while`/`dotimes`ベースの
-       命令的ループで書かれており、再帰ではない。Vector/HashTable対応を実用的にするには
-       事実上の前提条件になる——前提になっている側ほど影響範囲が広いため、HashTable/Vector
-       対応より先にやる。GCの観点では`while`/`loop`自体はリスクを増やさない
-       （control-flowの分岐パターンが増えるだけ）。
-    2. **HashTable/Vector対応**: 当初Phase3として`Sexpr`と一括りにされていたが、実際には
+    1. **ループ構文の残り: `break`/`return`/`loop`（非局所脱出・値を持つループ）**。
+       `while`+`setf`（上記Phase 3b）は完了済み。`break`/`return`はいずれも「直近のループ
+       のみ」を脱出する非局所脱出で、`while`内では型上`Unit`固定（`return`に値を書いても
+       `join_types`が`Unit`以外を拒否する）だが、`loop`は`break`/`return`の値の合流型を持ち
+       うる（`Never`から開始し`join_types`で拡張）——`AWhile`のように「ヘッダーのphiへ
+       書き戻す」だけでは済まず、ループの`exit`ブロック自体にも合流用のphiが要る（`break`/
+       `return`の脱出元ブロックは1つではないため）。また`break`/`return`は`if`の片方の枝
+       （`(if cond (break) ...)`）に置かれるのが実用上ほぼ必須なので、文位置（値を使わない
+       statement位置）の`if`コンパイル——両ブロックが共通の継続ブロックへ`br`で合流する形——
+       も今回スコープ外のまま必要になる。
+    2. **既知の限定事項として残った「`let`を挟んだ`setf`」の直接的な回帰テスト追加**:
+       上記`ALet`の`copy-into`書き戻し自体は実装済みだが、専用のテスト
+       （`(while ... (let (...) (setf outer-var v)) ...)`のような形）はまだ無い。
+    3. **HashTable/Vector対応**: 当初Phase3として`Sexpr`と一括りにされていたが、実際には
        `Rc<RefCell<..>>`によるRust管理（GCヒープ対象外）と判明したため、GCのrooting
-       問題は無関係。1のループ構文対応に依存する。組み合わせれば実用的な処理
-       （合計・検索等）がコンパイル対象になる。
-    3. **Sexprのスコープ拡張**: `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Path`形式の
+       問題は無関係。`while`+`setf`（実装済み）があれば合計・線形探索等の典型コードは
+       コンパイル対象になる——`break`（項目1）は早期終了する探索を効率化できるが、
+       無くても（最後まで回せば）動作自体は可能なので必須の前提ではない。
+    4. **Sexprのスコープ拡張**: `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Path`形式の
        `Sexpr`値（現在は`value_to_ptr`がエラー→ランタイムシムが`abort`）への対応、
        `consp`/`atom`（`null`/`not`の合成）、`set-car`/`set-cdr`。既存Phase3（`Nil`/`Cons`のみ）
-       の対応範囲を広げるだけで他フェーズの前提にはなっていないため、1・2より後でよい。
-    4. **Phase 4（クロージャ/高階関数、優先度低）**: GCルーティングの難度がさらに増すため、
+       の対応範囲を広げるだけで他フェーズの前提にはなっていないため、1・3より後でよい。
+    5. **Phase 4（クロージャ/高階関数、優先度低）**: GCルーティングの難度がさらに増すため、
        Phase 5（ファイルコンパイラ）より後でもよい。
-    5. **Phase 5（`compile-file`）**: ファイル全体の`defun`を1つのLLVM `Module`にまとめ
+    6. **Phase 5（`compile-file`）**: ファイル全体の`defun`を1つのLLVM `Module`にまとめ
        （同一ファイル内呼び出しは直接`call`命令になる）、`TargetMachine::write_to_file`でオブジェクト
        ファイル出力→システムの`cc`をサブプロセス起動してリンク。既存Rust実装（cons heap/GC/
        HashTable/Vector等）を`extern "C"`シムでラップした静的ランタイムライブラリ（`libtlrt.a`、
@@ -875,11 +935,11 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
        一緒に作る）を`cc`でリンクし、**typelisp/LLVMインストール無しで動く実行ファイル/共有
        ライブラリ**を生成する（ユーザー要求の核心）。実行ファイル化はエントリポイント規約として
        `main`という名前の関数（`(fn () i32)`等）を探す（CL/C慣習）。共有ライブラリ化は既存の
-       `FnSig::public`（`pub` defun）をエクスポートシンボルの基準に流用。1・2（HashTable/Vector
+       `FnSig::public`（`pub` defun）をエクスポートシンボルの基準に流用。1・3（HashTable/Vector
        含む既存機能のラップ対象）に依存するため最後。
-    6. **Phase 6（並行）**: 各Phase完了の都度、`TlValue` ABI仕様や`compile-file`のセマンティクスを
+    7. **Phase 6（並行）**: 各Phase完了の都度、`TlValue` ABI仕様や`compile-file`のセマンティクスを
        `docs/language-design.md`に「確定仕様」として追記していく（このTODO.mdは進捗の記録、
-       language-design.mdは確定した言語仕様という既存の役割分担を継続）。1〜5の各完了に合わせて
+       language-design.mdは確定した言語仕様という既存の役割分担を継続）。1〜6の各完了に合わせて
        並行して行うため独立した優先順位は無い。
 
 ---

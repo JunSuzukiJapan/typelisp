@@ -8,7 +8,7 @@
 
 #![cfg(feature = "compile")]
 
-use typelisp::{compiler_source, load_prelude, Checker, Heap, Interp, Reader, RtValue};
+use typelisp::{compiler_source, load_prelude, Checker, Heap, Interp, Reader, RtValue, Value};
 
 #[test]
 fn llvm_toolchain_links_and_runs() {
@@ -572,7 +572,7 @@ fn compiled_cons_chain_survives_a_gc_mid_call() {
     // arena's cells go to loading `prelude.rs`/`compiler_source.rs`
     // themselves; the loop's 1500 cells then force several real
     // collections).
-    assert_eq!(run_with_heap(Heap::with_capacity(4096), src), RtValue::Bool(true));
+    assert_eq!(run_with_heap(Heap::with_capacity(8192), src), RtValue::Bool(true));
 }
 
 #[test]
@@ -691,6 +691,205 @@ fn compile_group_refuses_a_call_outside_the_group() {
         (defun one-name ((a string) (out Vector<string>)) Vector<string>
           (progn (push out a) out))
         (compile-group (one-name "bar" (Vector::new 0 "")))
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 1, "expected Err, not Ok"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+}
+
+/// ループ構文: the canonical `while`+`setf` accumulator loop — two `let`-
+/// bound loop-carried variables (`acc`/`i`), mutated via `setf` each
+/// iteration, with the final answer (`acc`) read *after* the loop exits.
+/// Reading it correctly depends on `AWhile`'s header phi nodes (not the
+/// loop body's raw, dominance-unsafe SSA values) being what post-loop code
+/// actually sees — see `compiler_source`'s doc comment.
+#[test]
+fn compiles_a_function_with_a_while_loop_summing_to_n() {
+    let src = r#"
+        (defun sum-to ((n i64)) i64
+          (let ((acc (- n n)) (i (- n n)))
+            (while (< i n)
+              (setf acc (+ acc i))
+              (setf i (+ i 1)))
+            acc))
+        (compile "sum-to")
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+    let src2 = r#"
+        (defun sum-to ((n i64)) i64
+          (let ((acc (- n n)) (i (- n n)))
+            (while (< i n)
+              (setf acc (+ acc i))
+              (setf i (+ i 1)))
+            acc))
+        (compile "sum-to")
+        (sum-to 5)
+    "#;
+    assert_eq!(run(src2), RtValue::Int(10));
+}
+
+/// The loop body never runs at all (`n <= 0`) — the zero-iteration path
+/// through the header straight to `exit`, never visiting `body-block`. This
+/// is exactly the path that would be broken by a naive "just mutate `vals`
+/// in place, no phi" implementation: `exit`'s predecessor is `header`, not
+/// `body-block`, so any post-loop read must come from the header's phi
+/// (valid on *every* path into `exit`), not a value the loop body computed
+/// (which, on this path, never even ran).
+#[test]
+fn compiles_a_while_loop_that_never_runs_its_body() {
+    let src = r#"
+        (defun sum-to ((n i64)) i64
+          (let ((acc (- n n)) (i (- n n)))
+            (while (< i n)
+              (setf acc (+ acc i))
+              (setf i (+ i 1)))
+            acc))
+        (compile "sum-to")
+        (sum-to 0)
+    "#;
+    assert_eq!(run(src), RtValue::Int(0));
+}
+
+/// Two `while` loops, one nested inside the other's body, sharing every
+/// loop-carried variable from one `let` (no intervening `let` between
+/// either loop and the other's `vals` — see `compile-value`'s `ALet` arm's
+/// doc comment on why a `setf` from inside a *nested let* needs its own
+/// `copy-into` to be visible further out; this test deliberately avoids
+/// that by declaring `j` up front instead). Exercises `current-block`
+/// (rather than an assumed `body-block`) for the *outer* loop's own
+/// preheader/latch: by the time the outer loop's body finishes (having run
+/// the whole inner loop), `b` is positioned at the inner loop's `exit`
+/// block, not the outer loop's own `body-block`.
+#[test]
+fn compiles_a_function_with_a_nested_while_loop() {
+    let src = r#"
+        (defun nested-sum ((n i64)) i64
+          (let ((total (- n n)) (i (- n n)) (j (- n n)))
+            (while (< i n)
+              (setf j 0)
+              (while (< j n)
+                (setf total (+ total 1))
+                (setf j (+ j 1)))
+              (setf i (+ i 1)))
+            total))
+        (compile "nested-sum")
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+    let src2 = r#"
+        (defun nested-sum ((n i64)) i64
+          (let ((total (- n n)) (i (- n n)) (j (- n n)))
+            (while (< i n)
+              (setf j 0)
+              (while (< j n)
+                (setf total (+ total 1))
+                (setf j (+ j 1)))
+              (setf i (+ i 1)))
+            total))
+        (compile "nested-sum")
+        (nested-sum 3)
+    "#;
+    assert_eq!(run(src2), RtValue::Int(9));
+}
+
+/// `f64`/`bool` loop-carried variables go through the very same phi
+/// mechanism as `i64` (`build-phi` is seeded from whatever LLVM kind the
+/// variable's current value happens to be) — this exercises an `f64`
+/// accumulator and a `bool` flag both threaded through one loop's header.
+#[test]
+fn compiles_a_while_loop_with_an_f64_accumulator_and_a_bool_flag() {
+    let src = r#"
+        (defun sum-to-f64 ((n i64)) f64
+          (let ((acc 0.0) (i (- n n)) (seen-any false))
+            (while (< i n)
+              (setf acc (+ acc 1.0))
+              (setf seen-any true)
+              (setf i (+ i 1)))
+            (if seen-any acc 0.0)))
+        (compile "sum-to-f64")
+        (sum-to-f64 4)
+    "#;
+    assert_eq!(run(src), RtValue::Float(4.0));
+}
+
+/// A `Sexpr`-typed *parameter* may flow unmodified through a `while` loop's
+/// phi nodes (read-only — `s` itself is never `setf`'d, only an unrelated
+/// `i64` counter is) without compromising GC safety: the parameter's
+/// initial pointer is already rooted for the function's whole lifetime
+/// (Phase 3's `count-and-push-sexpr` at `entry`), and `s`'s phi (built
+/// unconditionally for *every* in-scope variable — see `make-phis`'s doc
+/// comment) merely creates an additional register that aliases that same
+/// already-rooted pointer on every iteration. See
+/// `ast_bridge::typed_to_ast`'s `Expr::Set` arm doc comment on why actually
+/// *reassigning* a `Sexpr`-typed variable (as opposed to just reading one
+/// unchanged through the loop, like this test does) is the part that isn't
+/// safe yet, and so isn't bridged.
+#[test]
+fn compiles_a_while_loop_reading_a_sexpr_parameter_without_mutating_it() {
+    let src = r#"
+        (defun spin-then-return ((s Sexpr) (n i64)) Sexpr
+          (let ((i (- n n)))
+            (while (< i n)
+              (setf i (+ i 1)))
+            s))
+        (compile "spin-then-return")
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+    let src2 = r#"
+        (defun spin-then-return ((s Sexpr) (n i64)) Sexpr
+          (let ((i (- n n)))
+            (while (< i n)
+              (setf i (+ i 1)))
+            s))
+        (compile "spin-then-return")
+        (car (spin-then-return (cons (Int 7) ()) 3))
+    "#;
+    assert_eq!(run(src2), RtValue::Sexpr(Value::Int(7)));
+}
+
+/// `break`/`return`/`loop` aren't bridged yet (no `ABreak`/`AReturn`/`ALoop`
+/// `AstExpr` variant) — a `while` body using `break` fails the whole AST
+/// bridge, refusing `compile` outright rather than miscompiling it, the
+/// same "refuse, don't guess" discipline every other unsupported construct
+/// gets.
+#[test]
+fn refuses_to_compile_a_while_loop_using_break() {
+    let src = r#"
+        (defun first-ge ((n i64)) i64
+          (let ((i (- n n)))
+            (while (< i n)
+              (if (= i 3) (break) (setf i (+ i 1))))
+            i))
+        (compile "first-ge")
+    "#;
+    match run(src) {
+        RtValue::Data { variant, .. } => assert_eq!(variant, 1, "expected Err, not Ok"),
+        other => panic!("expected a Result value, got {:?}", other),
+    }
+}
+
+/// `setf` of a `Sexpr`-typed variable isn't bridged (see
+/// `ast_bridge::typed_to_ast`'s `Expr::Set` arm doc comment) — `compile`
+/// refuses outright rather than risk an unrooted pointer.
+#[test]
+fn refuses_to_compile_a_setf_of_a_sexpr_variable() {
+    let src = r#"
+        (defun loses-the-front ((s Sexpr) (n i64)) Sexpr
+          (let ((i (- n n)) (cur s))
+            (while (< i n)
+              (setf cur (cdr cur))
+              (setf i (+ i 1)))
+            cur))
+        (compile "loses-the-front")
     "#;
     match run(src) {
         RtValue::Data { variant, .. } => assert_eq!(variant, 1, "expected Err, not Ok"),

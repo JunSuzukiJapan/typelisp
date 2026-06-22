@@ -28,6 +28,22 @@
 //! yet (see `compile-value`'s fallback `panic` for the case this
 //! restriction rules out).
 //!
+//! **ループ構文**: `while` (any number of loop-carried `i64`/`bool`/`f64`/
+//! `char` variables, mutated via local `setf`) is also supported, via a
+//! phi node at the loop header for *every* currently in-scope variable
+//! (not just the ones a body actually mutates — see `make-phis`'s doc
+//! comment on why precise mutation analysis isn't worth it here). `break`/
+//! `return`/`loop` aren't bridged yet (a `while` whose body uses them, or a
+//! `setf` of a `Sexpr`-typed variable, fails the AST bridge outright —
+//! see `ast_bridge::typed_to_ast`'s `Expr::Set` arm on why `Sexpr` is
+//! excluded). This is the one other place (besides `if`) where `compile`
+//! builds more than a single straight-line basic block, but unlike `if` it
+//! genuinely needs phi nodes rather than sidestepping them: a loop's back
+//! edge means a loop-carried variable's value at the header has two
+//! possible predecessors (the preheader, on the first pass, or the latch,
+//! on every subsequent one) that can't both be made to end in their own
+//! `ret`/fall straight through the way `if`'s two branches can.
+//!
 //! **Phase 3's GC-rooting discipline.** `Sexpr` values are pointers into the
 //! mark-sweep cons heap (`crate::mem::Heap`), and `Heap::cons` may trigger a
 //! collection whenever its free list is empty — but JIT'd machine code's
@@ -87,6 +103,42 @@ pub const SOURCE: &str = r#"
 
 (defun extend-values ((base Vector<LlvmValue>) (extra Vector<LlvmValue>)) Vector<LlvmValue>
   (copy-values extra 0 (length extra) (copy-values base 0 (length base) (Vector::new 0 (llvm-const-i64 0)))))
+
+;; `while`'s phi-node-based loop compilation (ループ構文, `compile-value`'s
+;; `AWhile` arm below): rather than analyzing a loop's body to find which of
+;; the currently in-scope variables it actually mutates via `setf`, every
+;; one of them gets a phi node at the loop header, unconditionally — for a
+;; variable the body never touches, both incoming edges are simply the same
+;; value, which is correct (if a little redundant — this compiler never runs
+;; any LLVM optimization passes, so there's no `mem2reg`-style cleanup to
+;; lose anyway) and far simpler than a precise mutation analysis.
+;; `make-phis` builds one (still incoming-edge-less) phi per entry of
+;; `seeds`, via `build-phi`. Must be called immediately after
+;; `position-at-end`ing the loop header, before anything else is built
+;; there (LLVM requires every phi in a block to precede non-phi
+;; instructions).
+(defun make-phis ((b LlvmBuilder) (seeds Vector<LlvmValue>) (i i32) (n i32) (out Vector<LlvmValue>)) Vector<LlvmValue>
+  (if (>= i n) out (progn (push out (build-phi b (get seeds i))) (make-phis b seeds (+ i 1) n out))))
+
+;; Adds one `(value, block)` incoming edge to each of `phis`, pairing them
+;; index-for-index with `vals` — the values live at `block`, the
+;; predecessor the edge comes from (either the preheader, with the
+;; pre-loop values, or the loop's actual latch block, with whatever each
+;; variable holds after one pass through the body).
+(defun add-incoming-all ((b LlvmBuilder) (phis Vector<LlvmValue>) (vals Vector<LlvmValue>) (block LlvmBasicBlock) (i i32) (n i32)) ()
+  (if (>= i n)
+      ()
+      (progn (add-incoming b (get phis i) (get vals i) block) (add-incoming-all b phis vals block (+ i 1) n))))
+
+;; Overwrites `dst`'s entries in place with `src`'s, index for index —
+;; `AWhile` uses this once at the loop's `exit` block to make the *original*
+;; `vals` (the very `Vector` instance every sibling form before/after the
+;; `while` in the same body sequence shares — see `compile-value`'s `ALet`
+;; arm) reflect the header's phi-resolved post-loop values, without
+;; replacing `vals`'s identity (which sibling forms still hold a reference
+;; to).
+(defun copy-into ((dst Vector<LlvmValue>) (src Vector<LlvmValue>) (i i32) (n i32)) ()
+  (if (>= i n) () (progn (set dst i (get src i)) (copy-into dst src (+ i 1) n))))
 
 ;; Phase 3's rooting discipline (see this module's doc comment): pushes a GC
 ;; root for every `Sexpr`-typed (`is-sexpr-value`) entry of `vs` — typically
@@ -150,13 +202,32 @@ pub const SOURCE: &str = r#"
       ;; rather than falling through to a `build-ret*`, so any `Sexpr`-typed
       ;; bindings this scope pushed must be popped again right here, before
       ;; returning — see this module's doc comment.
+      ;;
+      ;; `copy-into vals new-vals ...` (ループ構文, `ASet`'s sibling fix):
+      ;; before this arm existed pre-`setf`, nothing inside a `let`'s body
+      ;; could be observed from outside it, so `new-vals` (an *extended
+      ;; copy* of `vals` — see `extend-values`) never needed writing back.
+      ;; Now that `setf` can mutate a binding from several scopes further
+      ;; in (e.g. a `while` nested inside this `let`'s body, itself
+      ;; `setf`-ing one of *this* scope's outer variables), this copies
+      ;; every inherited index's possibly-updated value back into `vals` —
+      ;; the same `Vector` instance every sibling form before/after this
+      ;; `let`, or an enclosing `while`'s own loop-body scope, shares — so
+      ;; the mutation becomes visible there too. `new-vals`'s *own* fresh
+      ;; bindings (indices `>= (length vals)`) have nowhere to copy back
+      ;; to, nor would it mean anything if they did (they don't exist
+      ;; outside this `let`), so only the first `(length vals)` entries
+      ;; are copied. This is recursive in effect: a `let` nested inside
+      ;; another `let` copies back into its immediate parent, which then
+      ;; copies *that* back into *its* parent, and so on out to wherever
+      ;; the mutated variable actually lives.
       ((ALet names values body)
        (let* ((bound-vals (eval-args 0 (length values) values (Vector::new 0 (llvm-const-i64 0))))
               (new-params (extend-strs params names))
               (new-vals (extend-values vals bound-vals))
               (pushed (count-and-push-sexpr b module f bound-vals 0 (length bound-vals) 0))
               (result (eval-body 0 (length body) body new-params new-vals)))
-         (progn (pop-roots b module f pushed) result)))
+         (progn (copy-into vals new-vals 0 (length vals)) (pop-roots b module f pushed) result)))
       ;; A call to another already-compiled function (Phase 2f) *or* a
       ;; member of the same self/mutual-recursion group (Phase 2g) —
       ;; `ast_bridge::typed_to_ast` refused to bridge it otherwise. Evaluate
@@ -177,6 +248,69 @@ pub const SOURCE: &str = r#"
                ((ret-is-char name) (build-call-char b callee f arg-vals))
                ((ret-is-sexpr name) (build-call-sexpr b callee f arg-vals))
                (else (build-call b callee f arg-vals)))))
+      ;; `setf` on a local (ループ構文): evaluate the new value in the
+      ;; *current* scope, then mutate `vals` in place at `name`'s index —
+      ;; safe because every sibling form in the same body sequence
+      ;; (`eval-body`/`eval-body-tail`, in `compile-value`/`compile-tail`)
+      ;; is handed this exact same `Vector` instance, so the mutation is
+      ;; visible to whatever runs next without needing to thread an
+      ;; "updated vals" back out through a return value. This only holds
+      ;; for straight-line code — across `AWhile`'s loop back-edge, the
+      ;; analogous "make a later read see an earlier setf" job is done by
+      ;; a phi node instead (see `AWhile` below for why a plain in-place
+      ;; mutation isn't enough there).
+      ((ASet name value)
+       (let ((v (compile-value module b f params vals value)))
+         (progn (set vals (param-index params name) v) v)))
+      ;; `while` (ループ構文): phi-node loop compilation. `while`'s own type
+      ;; is always `Unit`, so the placeholder `(llvm-const-i64 0)` results
+      ;; below are never actually consumed by anything but `eval-body`'s
+      ;; "discard every form but the last" sequencing — what matters is the
+      ;; side effects (`ASet` mutations) and the final `copy-into`, which
+      ;; makes every sibling form *after* the loop see each loop-carried
+      ;; variable's correctly-merged post-loop value.
+      ;;
+      ;; `preheader` is captured *before* branching away, since by the time
+      ;; we're back here for `add-incoming`'s preheader edge, `b` would
+      ;; otherwise have moved on (see `current-block`'s doc comment).
+      ;; `phis` (one per `vals` entry, unconditionally — see `make-phis`'s
+      ;; doc comment) are built right after `position-at-end`ing `header`,
+      ;; before `cond` is compiled, since LLVM requires every phi in a
+      ;; block to precede non-phi instructions. `cond`/`body` are compiled
+      ;; using `phis` as their scope's `vals` (not the outer `vals`), so
+      ;; they see *this iteration's* merged values, not the stale
+      ;; pre-loop ones. `body` runs against its own fresh copy of `phis`
+      ;; (`body-vals`) rather than mutating `phis` itself, so `ASet`
+      ;; inside the loop can't corrupt the header's own phi handles.
+      ;; `latch` (like `preheader`) is read via `current-block` rather
+      ;; than assumed to be `body-block`, so a nested loop (or any other
+      ;; future construct that leaves `b` positioned somewhere else by the
+      ;; end of `body`) still wires the back edge to the *actual*
+      ;; predecessor. Finally, `copy-into` overwrites the *original* `vals`
+      ;; with `phis` at `exit` — `header` dominates `exit` (its only
+      ;; predecessor), so this is the one place reading a loop-carried
+      ;; variable's value is always valid, on both the zero-iteration and
+      ;; the looped path.
+      ((AWhile cond body)
+       (let* ((preheader (current-block b))
+              (header (append-block f "while.header"))
+              (body-block (append-block f "while.body"))
+              (exit (append-block f "while.exit")))
+         (progn
+           (build-br b header)
+           (position-at-end b header)
+           (let ((phis (make-phis b vals 0 (length vals) (Vector::new 0 (llvm-const-i64 0)))))
+             (progn
+               (add-incoming-all b phis vals preheader 0 (length vals))
+               (build-cond-br b (compile-value module b f params phis cond) body-block exit)
+               (position-at-end b body-block)
+               (let ((body-vals (copy-values phis 0 (length phis) (Vector::new 0 (llvm-const-i64 0)))))
+                 (progn
+                   (if (> (length body) 0) (eval-body 0 (length body) body params body-vals) (llvm-const-i64 0))
+                   (let ((latch (current-block b)))
+                     (progn (add-incoming-all b phis body-vals latch 0 (length phis)) (build-br b header)))))
+               (position-at-end b exit)
+               (progn (copy-into vals phis 0 (length vals)) (llvm-const-i64 0)))))))
       (_ (panic "compile: `if` is only supported in tail position (Phase 1)")))))
 
 ;; Under the unified `TlValue` ABI (Phase 2), a function's logical arguments

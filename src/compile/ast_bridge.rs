@@ -12,7 +12,10 @@
 //! arithmetic/comparison instance methods, `char`'s `eq`/`lt`, and
 //! `cons`/`car`/`cdr`/`null` (Phase 3 — a `Sexpr` value is only bridged at
 //! all if it's `Nil` or `Cons`; see `crate::eval::interp::value_to_ptr`'s
-//! doc comment for what happens if a *runtime* value falls outside that).
+//! doc comment for what happens if a *runtime* value falls outside that),
+//! and `while`/local `setf` on `i64`/`bool`/`f64`/`char` (ループ構文 —
+//! [docs/TODO.md](../../docs/TODO.md)「ステップ5」; *not* `Sexpr` — see the
+//! `Expr::Set` arm below). `break`/`return`/`loop` aren't bridged yet.
 //! Anything else returns `None` — `compile` then refuses the function
 //! outright rather than miscompiling it (see `Interp::builtin_ast_body` in
 //! `src/eval/interp.rs`).
@@ -24,10 +27,10 @@ use crate::{Expr, Interp, Path, QuotedSexpr, RtValue, Type, Typed};
 
 /// Variant indices of `AstExpr`'s constructors — must match
 /// `check::registry::ast_expr_def`'s `variants` order exactly. `A_FLOAT`/
-/// `A_LET`/`A_CALL`/`A_CHAR`/`A_NIL`/`A_CONS`/`A_CAR`/`A_CDR`/`A_NULLP` are
-/// appended last (Phase 2c/2e/2f/2d/3) rather than grouped with related
-/// variants — see `ast_expr_def`'s doc comment on why these indices are
-/// append-only.
+/// `A_LET`/`A_CALL`/`A_CHAR`/`A_NIL`/`A_CONS`/`A_CAR`/`A_CDR`/`A_NULLP`/
+/// `A_WHILE`/`A_SET` are appended last (Phase 2c/2e/2f/2d/3/ループ構文) rather
+/// than grouped with related variants — see `ast_expr_def`'s doc comment on
+/// why these indices are append-only.
 const A_INT: usize = 0;
 const A_BOOL: usize = 1;
 const A_VAR: usize = 2;
@@ -42,6 +45,8 @@ const A_CONS: usize = 10;
 const A_CAR: usize = 11;
 const A_CDR: usize = 12;
 const A_NULLP: usize = 13;
+const A_WHILE: usize = 14;
+const A_SET: usize = 15;
 
 /// `i64`'s and `f64`'s binary arithmetic/comparison instance methods
 /// (`registry::int_assoc`/`float_assoc`) — the only `Expr::Assoc` shapes
@@ -152,6 +157,37 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp, group: &[Path]) -> Option
             }
             let body = body.iter().map(|f| typed_to_ast(f, interp, group)).collect::<Option<Vec<_>>>()?;
             Some(data(A_LET, vec![rt_vector(names), rt_vector(values), rt_vector(body)]))
+        }
+        // `while` (ループ構文): `cond`/`body` bridge exactly like `if`/`let`'s
+        // own sub-expressions. `while`'s own type is always `Unit` (the
+        // checker enforces this — `check_while`), so `compile-value`'s
+        // `AWhile` arm only ever needs to produce a placeholder result;
+        // what matters is the loop's *side effects* (`ASet` mutations) and
+        // making any loop-carried variable's post-loop value visible to
+        // code after the loop (phi-node merging, see `compiler_source`'s
+        // doc comment). `break`/`return`/`loop` inside `body` aren't
+        // bridged (no `Expr::Break`/`Expr::Return`/`Expr::Loop` arm below),
+        // so a `while` using them fails the whole bridge here, the same
+        // "refuse rather than miscompile" discipline as every other
+        // unsupported construct.
+        Expr::While(cond, body) => {
+            let cond = typed_to_ast(cond, interp, group)?;
+            let body = body.iter().map(|f| typed_to_ast(f, interp, group)).collect::<Option<Vec<_>>>()?;
+            Some(data(A_WHILE, vec![cond, rt_vector(body)]))
+        }
+        // `setf` on a local (`Expr::Set` — `Expr::SetGlobal`, globals,
+        // isn't bridged yet). Restricted to `i64`/`bool`/`f64`/`char`
+        // (*not* `Sexpr`, unlike `is_bridgeable_scalar_type`'s general
+        // allowance): a `Sexpr`-typed `setf` would need the reassigned
+        // pointer to gain its *own* GC root for the rest of its binding's
+        // scope, but `compile`'s rooting discipline (Phase 3) only ever
+        // roots a binding's *initial* value, once, at `let`/parameter-bind
+        // time — reassigning it would leave the new pointer unrooted. Left
+        // as a follow-up alongside `Sexpr`-typed `while`-loop variables in
+        // general.
+        Expr::Set(name, value) if matches!(value.ty, Type::I64 | Type::Bool | Type::F64 | Type::Char) => {
+            let v = typed_to_ast(value, interp, group)?;
+            Some(data(A_SET, vec![RtValue::Str(name.clone()), v]))
         }
         // `cons`/`car`/`cdr` (Phase 3): always `Interp::eval_builtin`
         // (Rust-implemented) free functions, never entries in

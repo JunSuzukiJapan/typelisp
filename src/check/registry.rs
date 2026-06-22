@@ -557,11 +557,21 @@ fn error_ty() -> Type {
 /// bool/float literals, parameter references, `if`, `let`, and `i64`/`f64`'s
 /// binary arithmetic/comparison instance methods — just enough to compile a
 /// function like `(defun max2 ((a i64) (b i64)) i64 (if (< a b) b a))`.
-/// `afloat`/`alet`/`acall`/`achar`/`anil`/`acons`/`acar`/`acdr`/`anullp` are
-/// appended last (Phase 2c/2e/2f/2d/3) rather than inserted in
-/// literal-grouping order with `aint`/`abool`, since these indices are a
-/// stable wire format between this definition and `ast_bridge`'s constants
-/// — reordering existing ones would silently break already-working variants.
+/// `afloat`/`alet`/`acall`/`achar`/`anil`/`acons`/`acar`/`acdr`/`anullp`/
+/// `awhile`/`aset` are appended last (Phase 2c/2e/2f/2d/3/ループ構文) rather
+/// than inserted in literal-grouping order with `aint`/`abool`, since these
+/// indices are a stable wire format between this definition and
+/// `ast_bridge`'s constants — reordering existing ones would silently break
+/// already-working variants.
+/// `awhile`'s `body` (ループ構文 — [docs/TODO.md](../../docs/TODO.md)「ステップ5」)
+/// is evaluated purely for effect (`while`'s own type is always `Unit`), via
+/// `compile-value`'s phi-node-based loop compilation — see
+/// `crate::compile::compiler_source`'s doc comment. `aset` is a local
+/// `setf` (`Expr::Set`); `Expr::SetGlobal` (globals) isn't bridged yet, and
+/// neither is a `Sexpr`-typed `aset` (see `ast_bridge::typed_to_ast`'s doc
+/// comment on why). `break`/`return`/`loop` aren't bridged yet either — a
+/// `while` whose body uses them fails the bridge (`None`) like any other
+/// unsupported construct.
 /// `alet`'s three `Vector` fields are parallel: `names[i]`'s value is
 /// `values[i]` (all checked against the **outer** scope, CL `let`
 /// semantics — `crate::compile::ast_bridge`'s doc comment), then `body`
@@ -597,7 +607,9 @@ fn ast_expr_def() -> AdtDef {
             Variant { name: "acons".to_string(), fields: vec![t.clone(), t.clone()] },
             Variant { name: "acar".to_string(), fields: vec![t.clone()] },
             Variant { name: "acdr".to_string(), fields: vec![t.clone()] },
-            Variant { name: "anullp".to_string(), fields: vec![t] },
+            Variant { name: "anullp".to_string(), fields: vec![t.clone()] },
+            Variant { name: "awhile".to_string(), fields: vec![t.clone(), vector_of(t.clone())] },
+            Variant { name: "aset".to_string(), fields: vec![Type::Str, t] },
         ],
         assoc: HashMap::new(),
         public: true,
@@ -787,6 +799,25 @@ fn llvm_builder_def() -> AdtDef {
         method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit),
     );
     assoc.insert("pop-root".to_string(), method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty()], Type::Unit));
+    // `current-block`/`build-phi`/`add-incoming` (ループ構文 — `while`'s
+    // phi-node-based loop compilation, see `compiler_source`'s doc comment):
+    // `current-block` reads `b`'s current insertion block (needed to know a
+    // loop's actual preheader/latch predecessor, which may not be the block
+    // `compile`/`compile-tail` originally `append-block`-ed if the loop body
+    // itself contains further control flow, e.g. a nested `while`).
+    // `build-phi` creates an (initially incoming-edge-less) phi node typed
+    // from `seed`'s own LLVM type, positioned at `b`'s current block — must
+    // be called before any non-phi instruction in that block (LLVM requires
+    // every phi to precede other instructions). `add-incoming` adds one
+    // `(value, predecessor block)` edge to a phi previously returned by
+    // `build-phi` (see `crate::eval::interp::{llvm_builder_current_block,
+    // llvm_builder_build_phi,llvm_builder_add_incoming}`).
+    assoc.insert("current-block".to_string(), method(vec![llvm_builder_ty()], llvm_basic_block_ty()));
+    assoc.insert("build-phi".to_string(), method(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty()));
+    assoc.insert(
+        "add-incoming".to_string(),
+        method(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty(), llvm_basic_block_ty()], Type::Unit),
+    );
     AdtDef { name: Path::root("llvmbuilder"), params: vec![], variants: vec![], assoc, public: true }
 }
 

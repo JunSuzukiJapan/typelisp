@@ -1355,6 +1355,9 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-nullp" => Some(llvm_builder_build_nullp(args)),
             "push-root" => Some(llvm_builder_build_push_root(args)),
             "pop-root" => Some(llvm_builder_build_pop_root(args)),
+            "current-block" => Some(llvm_builder_current_block(args)),
+            "build-phi" => Some(llvm_builder_build_phi(args)),
+            "add-incoming" => Some(llvm_builder_add_incoming(args)),
             _ => None,
         };
     }
@@ -2009,6 +2012,73 @@ fn llvm_builder_build_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .build_unconditional_branch(*block)
         .map(|_| RtValue::Unit)
         .map_err(|e| EvalError::Panic(format!("build-br: {}", e)))
+}
+
+/// `(current-block b) -> LlvmBasicBlock` (ループ構文): `b`'s current
+/// insertion block. `while`'s loop compilation (`compile::compiler_source`)
+/// uses this rather than assuming the block it itself `append-block`-ed is
+/// still where the builder ends up after compiling a loop's preheader
+/// expression or body — both may contain further control flow (e.g. a
+/// nested `while`) that leaves `b` positioned somewhere else by the time
+/// control "falls through" to the back edge.
+#[cfg(feature = "compile")]
+fn llvm_builder_current_block(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let b = expect_llvm_builder(&args[0])?;
+    let block = b
+        .0
+        .borrow()
+        .get_insert_block()
+        .ok_or_else(|| EvalError::Internal("current-block: builder has no current block".into()))?;
+    Ok(RtValue::LlvmBasicBlock(block))
+}
+
+/// `(build-phi b seed) -> LlvmValue` (ループ構文): an empty phi node — no
+/// incoming edges yet, see [`llvm_builder_add_incoming`] — typed to match
+/// `seed`'s own LLVM type, positioned at `b`'s current block. Must be called
+/// before any non-phi instruction is built in that block: LLVM requires
+/// every phi in a basic block to precede all other instructions, which is
+/// why `compile-value`'s `AWhile` arm builds every loop-carried variable's
+/// phi immediately after `position-at-end`ing the loop header, before even
+/// compiling the loop condition.
+#[cfg(feature = "compile")]
+fn llvm_builder_build_phi(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let b = expect_llvm_builder(&args[0])?;
+    let seed = expect_llvm_basic_value(&args[1])?;
+    let phi = b
+        .0
+        .borrow()
+        .build_phi(seed.get_type(), "phi")
+        .map_err(|e| EvalError::Panic(format!("build-phi: {}", e)))?;
+    Ok(RtValue::LlvmValue(phi.as_basic_value()))
+}
+
+/// `(add-incoming b phi val block) -> Unit` (ループ構文): adds one `(val,
+/// block)` incoming edge to `phi` (an [`RtValue::LlvmValue`] previously
+/// returned by [`llvm_builder_build_phi`] — `phi` is reconstructed back into
+/// an `inkwell::values::PhiValue` via `as_instruction_value`/`TryFrom`,
+/// since `RtValue::LlvmValue` only ever stores the `BasicValueEnum` shape
+/// every other LLVM value uses, not a separate phi-specific variant). `b`
+/// itself isn't used (`add_incoming` is a property of the phi instruction,
+/// not the builder's position) but is taken anyway for consistency with
+/// every other `LlvmBuilder` method.
+#[cfg(feature = "compile")]
+fn llvm_builder_add_incoming(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    use inkwell::values::{BasicValue, PhiValue};
+    use std::convert::TryFrom;
+
+    let _guard = compile_lock().lock().unwrap();
+    let phi = expect_llvm_basic_value(&args[1])?;
+    let val = expect_llvm_basic_value(&args[2])?;
+    let block = expect_llvm_basic_block(&args[3])?;
+    let instr = phi
+        .as_instruction_value()
+        .ok_or_else(|| EvalError::Internal("add-incoming: phi is not an instruction".into()))?;
+    let phi_value = PhiValue::try_from(instr)
+        .map_err(|_| EvalError::Internal("add-incoming: value is not a phi".into()))?;
+    phi_value.add_incoming(&[(val as &dyn BasicValue, *block)]);
+    Ok(RtValue::Unit)
 }
 
 /// Packs `tag`/`payload` into a `TlValue` struct value — shared by
