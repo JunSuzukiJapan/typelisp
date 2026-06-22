@@ -1001,15 +1001,35 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       `cargo clippy --all-targets`（両構成）への影響なし、警告0。
   - **次の作業（ブランチ`feature/compiler`で継続、影響範囲の大きさで優先順位付け
     ——[[feedback-impl-priority]]）**:
-    1. **HashTable/Vector対応**: `Rc<RefCell<..>>`によるRust管理（GCヒープ対象外）と判明
+    - **「影響範囲」の判断基準（2026-06-22 確認）**: 「今これを実装すると一度にどれだけの
+      コードが動くようになるか」（実装のカバレッジの広さ）と「これを実装すると将来の他の
+      機能にどれだけ影響するか・前提になるか」（影響範囲）は**別の軸**であり、優先順位は
+      常に後者で決める。前者はあくまで「実装のお得感」の指標で、優先順位の根拠にはならない。
+      以下1・2の順序はこの基準に基づく（HashTable/Vector対応の方が「今すぐ動くコードの幅」
+      は広いが、既存のRust管理`Rc<RefCell<..>>`シムパターンの延長で閉じた変更であり他機能の
+      前提にはならない——Sexprのスコープ拡張、特に`setf`対応はGC rooting機構そのものの拡張で、
+      将来クロージャ等が同種のミュータブルなGCポインタ捕捉を必要とする際の前提になるため、
+      「今すぐ動く範囲は狭いが将来の設計の土台になる」という意味で影響範囲が広いと判断した）。
+    1. **Sexprのスコープ拡張**（HashTable/Vectorより先——上記の判断基準参照）:
+       `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Path`形式の`Sexpr`値（現在は
+       `value_to_ptr`がエラー→ランタイムシムが`abort`）への対応、`consp`/`atom`
+       （`null`/`not`の合成）、`set-car`/`set-cdr`は既存の固定名シムパターン（Phase3参照）の
+       延長で機械的。**核心は`Sexpr`型変数への`setf`対応**——現行のrooting設計は「束縛の
+       *初期値*を一度だけ`push-root`し、束縛が生きている間ずっと同じポインタをrootし続ける」
+       前提（Phase3で確立）だが、`setf`はループの各反復で指す先が変わるポインタを生み出す
+       ため、再代入ごとに「古い値のrootを外し新しい値をrootする」（もしくは「スタックスロット
+       自体をGCが走査するroot集合に含める」）設計拡張が必要——スカラー値のphi
+       （Phase3b/4で確立、`entry-phis`/`body-vals`の分離）と同型の「ループ内のphiが現在値を
+       持つ」発想を、GCポインタという「生きている限りrootされ続けなければならない」制約の
+       下でどう両立させるかが設計上の核心になる。
+    2. **HashTable/Vector対応**: `Rc<RefCell<..>>`によるRust管理（GCヒープ対象外）と判明
        済みのため、GCのrootingは無関係。`loop`/`break`/`return`（実装済み）があれば合計・
-       線形探索等の典型コードはコンパイル対象になる。
-    2. **Sexprのスコープ拡張**: `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Path`形式の
-       `Sexpr`値（現在は`value_to_ptr`がエラー→ランタイムシムが`abort`）への対応、
-       `consp`/`atom`（`null`/`not`の合成）、`set-car`/`set-cdr`、`Sexpr`型変数への`setf`
-       （GC rooting機構の拡張が前提）。
+       線形探索等の典型コードはコンパイル対象になる——既存のPhase3のシムパターン
+       （固定名`extern "C"`関数を2段階解決で呼ぶ）をそのまま転用できる、閉じた変更。
     3. **Phase（クロージャ/高階関数、優先度低）**: GCルーティングの難度がさらに増すため、
-       ファイルコンパイラより後でもよい。
+       ファイルコンパイラより後でもよい。**1（Sexprの`setf`対応）が事実上の前提**——クロージャが
+       捕捉する変数自体が`setf`される場合、同じ「再代入ごとに変わるGCポインタの安全な追跡」
+       問題に直面するため。
     4. **`compile-file`**: ファイル全体の`defun`を1つのLLVM `Module`にまとめ
        （同一ファイル内呼び出しは直接`call`命令になる）、`TargetMachine::write_to_file`でオブジェクト
        ファイル出力→システムの`cc`をサブプロセス起動してリンク。既存Rust実装（cons heap/GC/
@@ -1018,7 +1038,7 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
        一緒に作る）を`cc`でリンクし、**typelisp/LLVMインストール無しで動く実行ファイル/共有
        ライブラリ**を生成する（ユーザー要求の核心）。実行ファイル化はエントリポイント規約として
        `main`という名前の関数（`(fn () i32)`等）を探す（CL/C慣習）。共有ライブラリ化は既存の
-       `FnSig::public`（`pub` defun）をエクスポートシンボルの基準に流用。1（HashTable/Vector
+       `FnSig::public`（`pub` defun）をエクスポートシンボルの基準に流用。2（HashTable/Vector
        含む既存機能のラップ対象）に依存するため後回し。
     5. **並行（各Phase完了の都度）**: `TlValue` ABI仕様や`compile-file`のセマンティクスを
        `docs/language-design.md`に「確定仕様」として追記していく（このTODO.mdは進捗の記録、
