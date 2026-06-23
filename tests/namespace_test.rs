@@ -1,5 +1,5 @@
-//! Tests for namespaces (`module`/`use`), `::` paths, user types (`defstruct`),
-//! and methods (`defmethod`, instance + static dispatch).
+//! Tests for namespaces (`module`/`use`), `::` paths, and methods
+//! (`defmethod`, instance + static dispatch).
 
 extern crate typelisp;
 use typelisp::{Checker, Error, Heap, Interp, Path, Reader, TopLevel, Type};
@@ -25,10 +25,6 @@ fn ty_program(src: &str) -> Type {
     }
 }
 
-fn point_ty() -> Type {
-    Type::Named(Path::root("point"), vec![])
-}
-
 // ---- modules ----------------------------------------------------------------
 
 #[test]
@@ -51,31 +47,13 @@ fn unknown_qualified_path_errors() {
     assert!(program("(nosuch::fn 1)").is_err());
 }
 
-// ---- defstruct + constructors ----------------------------------------------
-
-#[test]
-fn defstruct_and_construct() {
-    let src = "(defstruct point (mk (x i32) (y i32))) (mk 1 2)";
-    assert_eq!(ty_program(src), point_ty());
-}
-
 // ---- instance methods -------------------------------------------------------
-
-#[test]
-fn instance_method_dispatch() {
-    let src = "(defstruct point (mk (x i32) (y i32))) \
-               (defmethod norm ((self point)) i32 (match self ((mk a b) a))) \
-               (norm (mk 1 2))";
-    assert_eq!(ty_program(src), Type::I32);
-}
-
-#[test]
-fn instance_method_on_wrong_type_errors() {
-    let src = "(defstruct point (mk (x i32) (y i32))) \
-               (defmethod norm ((self point)) i32 (match self ((mk a b) a))) \
-               (norm 5)";
-    assert!(program(src).is_err());
-}
+//
+// `defmethod` on a user-defined type's own dedicated instance-method-
+// dispatch test used `defstruct` as its receiver type — `defstruct` no
+// longer exists (see docs/TODO.md), so that scenario is no longer
+// expressible; `defmethod` on built-in/primitive receivers (below) still
+// exercises the same dispatch machinery.
 
 // ---- defmethod on primitive receivers ---------------------------------------
 // `i32`/`i64`/`f64`/`char`/`bool`/`Str`/etc. are primitive `Type` variants, not
@@ -120,13 +98,8 @@ fn instance_method_on_primitive_wrong_type_errors() {
 
 // ---- static / associated methods -------------------------------------------
 
-#[test]
-fn static_method_via_path() {
-    let src = "(defstruct point (mk (x i32) (y i32))) \
-               (defmethod new (point (x i32) (y i32)) point (mk x y)) \
-               (point::new 1 2)";
-    assert_eq!(ty_program(src), point_ty());
-}
+// `static_method_on_primitive_via_path` above already exercises a static
+// method invoked via `Type::method` path syntax without needing `defstruct`.
 
 // ---- use --------------------------------------------------------------------
 
@@ -138,26 +111,11 @@ fn use_injects_name_into_current_scope() {
     assert_eq!(ty_program(src), Type::I32);
 }
 
-// ---- cross-module -----------------------------------------------------------
-
-#[test]
-fn cross_module_static_method_and_construct() {
-    // Define a type + static method in a module, then use both from the root
-    // via fully-qualified paths.
-    let src = "(module geo \
-                 (pub defstruct point (mk (x i32) (y i32))) \
-                 (pub defmethod new (point (x i32) (y i32)) point (mk x y))) \
-               (geo::point::new 1 2)";
-    assert_eq!(ty_program(src), Type::Named(Path::of(&["geo", "point"]), vec![]));
-}
-
-#[test]
-fn cross_module_qualified_constructor_and_match() {
-    let src = "(module geo (pub defstruct point (mk (x i32) (y i32)))) \
-               (defun getx ((p geo::Point)) i32 (match p ((mk a b) a))) \
-               (getx (geo::point::mk 1 2))";
-    assert_eq!(ty_program(src), Type::I32);
-}
+// `cross_module_static_method_and_construct`/`cross_module_qualified_constructor_and_match`
+// used to define a type + static method inside a module via `defstruct` and
+// resolve both via fully-qualified paths — `defstruct` no longer exists (see
+// docs/TODO.md); cross-module *function* resolution is still covered below
+// (`use_module_alias`/`use_module_then_item`/`absolute_path_*`).
 
 // ---- regression: builtins still resolve at root ----------------------------
 
@@ -178,12 +136,6 @@ fn private_fn_inaccessible_cross_module() {
     assert!(program(src).is_err());
 }
 
-#[test]
-fn private_struct_inaccessible_cross_module() {
-    // defstruct without `pub` is private
-    let src = "(module m (defstruct point (mk (x i32) (y i32)))) (m::point::mk 1 2)";
-    assert!(program(src).is_err());
-}
 
 #[test]
 fn pub_fn_accessible_cross_module() {

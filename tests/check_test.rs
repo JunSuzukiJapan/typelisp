@@ -387,11 +387,12 @@ fn lambda_rest_has_a_variadic_function_type() {
 }
 
 #[test]
-fn rest_param_is_seen_as_a_vector_inside_the_body() {
-    // `length` only dispatches to a `Vector<T>` receiver — type-checking
-    // succeeds, proving `xs` is bound to `Vector<i32>` inside the body.
+fn rest_param_is_seen_as_a_sexpr_inside_the_body() {
+    // `car` only accepts a `Sexpr` argument — type-checking succeeds,
+    // proving `xs` is bound to plain `Sexpr` (an ordinary Lisp list) inside
+    // the body, not some homogeneous array type.
     assert!(matches!(
-        form("(defun f ((a i32) &rest (xs i32)) i32 (length xs))"),
+        form("(defun f ((a i32) &rest (xs i32)) Sexpr (car xs))"),
         Ok(TopLevel::Defun { .. })
     ));
 }
@@ -436,9 +437,9 @@ fn generic_rest_function_infers_the_element_type() {
 }
 
 #[test]
-fn apply_calls_a_variadic_function_with_a_runtime_vector() {
+fn apply_calls_a_variadic_function_with_a_runtime_sexpr_list() {
     let src = "(defun f ((a i32) &rest (xs i32)) i32 a) \
-               (apply f 1 (Vector::new 0 0))";
+               (apply f 1 (quote (2 3)))";
     assert_eq!(ty_program(src), Type::I32);
 }
 
@@ -452,16 +453,18 @@ fn apply_on_a_non_variadic_function_is_a_type_error() {
 
 #[test]
 fn apply_with_the_wrong_number_of_fixed_arguments_is_a_type_error() {
+    // The lambda needs exactly one fixed argument (`a`) before the rest
+    // list; this supplies zero.
     assert!(matches!(
-        program("(apply (lambda ((a i32) &rest (xs i32)) i32 a) (Vector::new 0 0))"),
+        program("(apply (lambda ((a i32) &rest (xs i32)) i32 a) (quote ()))"),
         Err(Error::TypeError(_))
     ));
 }
 
 #[test]
-fn apply_with_a_non_vector_rest_argument_is_a_type_error() {
+fn apply_with_a_non_sexpr_rest_argument_is_a_type_error() {
     assert!(matches!(
-        program("(apply (lambda ((a i32) &rest (xs i32)) i32 a) 1 (quote ()))"),
+        program("(apply (lambda ((a i32) &rest (xs i32)) i32 a) 1 2)"),
         Err(Error::TypeError(_))
     ));
 }

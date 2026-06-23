@@ -4,7 +4,7 @@
 //! (`check_instance_method`'s `prim_type_path` dispatch) — these are
 //! metadata-only `AssocFn`s (`registry::string_assoc`/`char_assoc`) with no
 //! `defmethod` body, falling back to `eval_builtin_method` at runtime, the
-//! same pattern as `HashTable`/`Vector`.
+//! same pattern as `HashTable`.
 
 extern crate typelisp;
 use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue};

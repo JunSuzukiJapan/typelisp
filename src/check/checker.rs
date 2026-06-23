@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{parse_type, prim_type_path, Error, Heap, Path, Type, Value};
 
 use super::ast::{Arm, Expr, Pattern, QuotedSexpr, Typed};
-use super::registry::{AdtDef, AssocFn, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};
+use super::registry::{AssocFn, FnSig, MacroDef, Namespace, Registry, VarInfo};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
 /// `raw_args` are the call's unevaluated argument forms (exactly as written —
@@ -39,7 +39,7 @@ pub enum TopLevel {
     /// with `Defstruct`'s `params`, though the evaluator ignores them (type
     /// information is erased before execution; see `Checker::check_call`).
     /// `params` includes a trailing `&rest` parameter's name last (bound to
-    /// `Vector<elem>`), exactly like `Defmacro::params` — see
+    /// a plain `Sexpr` list), exactly like `Defmacro::params` — see
     /// `Checker::check_defun`/`parse_params_rest`.
     Defun {
         name: Path,
@@ -59,8 +59,6 @@ pub enum TopLevel {
         ret: Type,
         body: Vec<Typed>,
     },
-    /// A `defstruct`: a user data type.
-    Defstruct { name: Path, params: Vec<String>, variants: Vec<Variant> },
     /// A `defmacro`: a compile-time, `Sexpr`-to-`Sexpr` code transformer.
     /// Stored as an ordinary callable body — calling it (at macro-expansion
     /// time, via [`MacroExpander`]) is identical to calling a `defun`. `params`
@@ -138,7 +136,7 @@ impl Checker {
         Checker { reg: Registry::with_builtins(), ns: Vec::new(), loop_stack: RefCell::new(Vec::new()) }
     }
 
-    /// Check one top-level form. Definition forms (`defun`/`defstruct`/`module`/
+    /// Check one top-level form. Definition forms (`defun`/`module`/
     /// `defmethod`/`use`) register into the current namespace; anything else is
     /// checked as an expression.
     pub fn check_form(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value) -> Result<TopLevel, Error> {
@@ -150,7 +148,6 @@ impl Checker {
                     "defun" => return self.check_defun(heap, interp, &elems[1..], false),
                     "defvar" => return self.check_defvar(heap, interp, &elems[1..], true, false),
                     "defconstant" => return self.check_defvar(heap, interp, &elems[1..], false, false),
-                    "defstruct" => return self.check_defstruct(heap, &elems[1..], false),
                     "defmacro" => return self.check_defmacro(heap, interp, &elems[1..], false),
                     "module" => return self.check_module(heap, interp, &elems[1..]),
                     "defmethod" => return self.check_defmethod(heap, interp, &elems[1..], false),
@@ -171,7 +168,7 @@ impl Checker {
         &self.reg
     }
 
-    /// `(pub defun ...)` / `(pub defstruct ...)` etc. — mark the next definition public.
+    /// `(pub defun ...)` / `(pub defmethod ...)` etc. — mark the next definition public.
     fn check_pub(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value]) -> Result<TopLevel, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("pub: expected a definition form".into()));
@@ -181,13 +178,12 @@ impl Checker {
                 "defun" => return self.check_defun(heap, interp, &parts[1..], true),
                 "defvar" => return self.check_defvar(heap, interp, &parts[1..], true, true),
                 "defconstant" => return self.check_defvar(heap, interp, &parts[1..], false, true),
-                "defstruct" => return self.check_defstruct(heap, &parts[1..], true),
                 "defmacro" => return self.check_defmacro(heap, interp, &parts[1..], true),
                 "defmethod" => return self.check_defmethod(heap, interp, &parts[1..], true),
                 _ => {}
             }
         }
-        Err(Error::TypeError("pub: expected defun/defstruct/defmacro/defmethod/defvar/defconstant".into()))
+        Err(Error::TypeError("pub: expected defun/defmacro/defmethod/defvar/defconstant".into()))
     }
 
     // ---- namespace navigation & resolution --------------------------------
@@ -344,6 +340,50 @@ impl Checker {
             return Some(hit.clone());
         }
         None
+    }
+
+    /// Wraps an already-checked `&rest` element `e` (statically `elem_ty`,
+    /// already resolved to a concrete type — see [`Self::cons_rest_list`])
+    /// as a `Sexpr` value, so a sequence of them can be `cons`-ed into a
+    /// plain list — see [`sexpr_ty`]'s doc comment. `elem_ty` itself needs no
+    /// wrapping (already `Sexpr`); every other supported element type goes
+    /// through its own `Sexpr` constructor (`sexpr_ctor_for`) exactly as if
+    /// the caller had written e.g. `(Int e)` by hand — `construct_sexpr`
+    /// (`crate::eval::interp`) only ever reads the field's *runtime* value
+    /// (an `i32`/`i64` argument both evaluate to the same `RtValue::Int`),
+    /// so this never goes through the normal field-type validation
+    /// `check_construct` would otherwise apply, but is sound for the same
+    /// reason. An `elem_ty` with no `Sexpr` encoding (e.g. `Option<T>`) is a
+    /// `TypeError` here, not a panic — unlike most of `&rest`'s checking,
+    /// this can't happen any earlier than this, since a generic `&rest`'s
+    /// declared type may only resolve to something concrete at a given call
+    /// site (see `Self::check_call`'s `subst_apply`).
+    fn wrap_rest_elem(&self, elem_ty: &Type, e: Typed) -> Result<Typed, Error> {
+        if *elem_ty == sexpr_ty() {
+            return Ok(e);
+        }
+        let ctor = sexpr_ctor_for(elem_ty).ok_or_else(|| {
+            Error::TypeError(format!(
+                "&rest: element type {:?} has no Sexpr encoding (use one of i32/i64/f64/bool/char/string/Sexpr)",
+                elem_ty
+            ))
+        })?;
+        let (type_name, variant) = self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
+        Ok(Typed { expr: Expr::Construct { type_name, variant, args: vec![e] }, ty: sexpr_ty() })
+    }
+
+    /// Collects already-checked `&rest` elements into one `Sexpr` list
+    /// expression, back-to-front (mirroring `Interp::bind_macro_args`'s
+    /// runtime construction of `defmacro`'s own `&rest` list) — `(cons
+    /// (wrap e1) (cons (wrap e2) ... ()))`. The empty case is the `Nil`
+    /// literal, reusing the same `Expr::Quote(QuotedSexpr::Nil)` shape `()`
+    /// itself checks to.
+    fn cons_rest_list(&self, elem_ty: &Type, items: Vec<Typed>) -> Result<Typed, Error> {
+        let cons_path = Path::root("cons");
+        items.into_iter().rev().try_fold(Typed { expr: Expr::Quote(QuotedSexpr::Nil), ty: sexpr_ty() }, |acc, item| {
+            let item = self.wrap_rest_elem(elem_ty, item)?;
+            Ok(Typed { expr: Expr::Call(cons_path.clone(), vec![item, acc]), ty: sexpr_ty() })
+        })
     }
 
     /// Resolve a `module::...::Type` segment path to the type's [`Path`].
@@ -531,15 +571,16 @@ impl Checker {
         self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
 
         // The body additionally sees the `&rest` parameter (if any) bound to
-        // a `Vector<elem>` collecting every variadic argument — the call-site
-        // desugaring (`Self::check_call`) always supplies exactly one such
-        // `Vector` as the last actual argument, so the stored `params` below
-        // (consumed only for its *names* by `Interp::exec`) already lines up
-        // 1:1 with arguments at runtime; mirrors `TopLevel::Defmacro::params`
+        // a plain `Sexpr` list collecting every variadic argument (see
+        // `sexpr_ty`'s doc comment) — the call-site desugaring
+        // (`Self::check_call`) always supplies exactly one such list as the
+        // last actual argument, so the stored `params` below (consumed only
+        // for its *names* by `Interp::exec`) already lines up 1:1 with
+        // arguments at runtime; mirrors `TopLevel::Defmacro::params`
         // including its `&rest` name last.
         let mut params = params;
-        if let Some((rname, relemty)) = &rest {
-            params.push((rname.clone(), vector_of(relemty.clone())));
+        if let Some((rname, _)) = &rest {
+            params.push((rname.clone(), sexpr_ty()));
         }
         let env = Env::new().extended(params.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &parts[3..], Some(&ret))?;
@@ -648,10 +689,13 @@ impl Checker {
     /// `defun`/`lambda`: an optional trailing `&rest (name elem-type)` marks
     /// the function variadic — every call-site argument from that position on
     /// must have type `elem-type`, individually checked, then collected into
-    /// a single `Vector<elem-type>` bound to `name` inside the body (see
-    /// `Self::check_defun`/`Self::check_lambda`). Typed, unlike
-    /// `Self::check_defmacro`'s bare `&rest name` (always `Sexpr`), since
-    /// `defun`/`lambda` parameters always carry an explicit type.
+    /// a single `Sexpr` list bound to `name` inside the body (see
+    /// `Self::check_defun`/`Self::check_lambda`) — like every Lisp's `&rest`
+    /// parameter, an ordinary list, never a homogeneous array type; unlike
+    /// `Self::check_defmacro`'s bare `&rest name` (always untyped `Sexpr`),
+    /// `defun`/`lambda` additionally check each element against `elem-type`
+    /// at every call site, since `defun`/`lambda` parameters always carry an
+    /// explicit type.
     fn parse_params_rest(&self, heap: &Heap, v: Value) -> Result<ParamsAndRest, Error> {
         let elems = heap.list_to_vec(v)?;
         let rest_marker = elems
@@ -666,6 +710,13 @@ impl Checker {
                 }
                 let params = self.parse_param_pairs(heap, &elems[..i])?;
                 let mut rest = self.parse_param_pairs(heap, &elems[i + 1..])?;
+                // `&rest`'s declared element type isn't validated against
+                // `sexpr_ctor_for` here: a generic `defun` (e.g. `(defun
+                // (f T) ((a T) &rest (xs T)) ...)`) may declare it as a bare
+                // type parameter, only resolved to something concrete once a
+                // call site's actual arguments are checked — see
+                // `Checker::wrap_rest_elem`, which validates the *resolved*
+                // type instead, every time the list is actually collected.
                 Ok((params, Some(rest.remove(0))))
             }
             None => Ok((self.parse_param_pairs(heap, &elems)?, None)),
@@ -689,47 +740,7 @@ impl Checker {
         Ok(out)
     }
 
-    // ---- defstruct / module / defmethod / use -----------------------------
-
-    fn check_defstruct(&mut self, heap: &Heap, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
-        if parts.is_empty() {
-            return Err(Error::TypeError("defstruct: (defstruct Name (Ctor (field Type)...)...)".into()));
-        }
-        let name = match parts[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
-            _ => return Err(Error::TypeError("defstruct: name must be a symbol".into())),
-        };
-        let fq = self.fq(&name);
-        let mut variants = Vec::new();
-        for vform in &parts[1..] {
-            let velems = heap.list_to_vec(*vform)?;
-            if velems.is_empty() {
-                return Err(Error::TypeError("defstruct: variant must be (Ctor (field Type)...)".into()));
-            }
-            let cname = match velems[0] {
-                Value::Symbol(id) => heap.symbol_name(id).to_string(),
-                _ => return Err(Error::TypeError("defstruct: constructor must be a symbol".into())),
-            };
-            let mut fields = Vec::new();
-            for fform in &velems[1..] {
-                let fpair = heap.list_to_vec(*fform)?;
-                if fpair.len() != 2 {
-                    return Err(Error::TypeError("defstruct: field must be (name type)".into()));
-                }
-                fields.push(self.canon(&parse_type(heap, fpair[1])?));
-            }
-            variants.push(Variant { name: cname, fields });
-        }
-        let def = AdtDef {
-            name: fq.clone(),
-            params: Vec::new(),
-            variants: variants.clone(),
-            assoc: HashMap::new(),
-            public,
-        };
-        self.reg.root.module_mut(&self.ns).add_type(def);
-        Ok(TopLevel::Defstruct { name: fq, params: Vec::new(), variants })
-    }
+    // ---- module / defmethod / use -----------------------------------------
 
     fn check_module(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value]) -> Result<TopLevel, Error> {
         if parts.is_empty() {
@@ -1035,9 +1046,9 @@ impl Checker {
         // precedence over a same-named ordinary function, which only serves
         // as the generic function's implicit default when no type-specific
         // method matches the call's argument type (see `try_instance_method`'s
-        // doc comment). This lets e.g. `Vector<T>`'s `length` and the
-        // `Sexpr`-list prelude's free-function `length` share a name without
-        // either having to be renamed.
+        // doc comment). This lets e.g. `HashTable<K,V>`'s `remove`/`count` and
+        // the `Sexpr`-list prelude's free-function `remove`/`count` share a
+        // name without either having to be renamed.
         if let Some((adt, idx)) = self.resolve_ctor(&head) {
             self.check_construct(heap, interp, env, (&adt, idx), args, expected)
         } else if let Some(result) = self.try_instance_method(heap, interp, env, &head, args) {
@@ -1072,10 +1083,10 @@ impl Checker {
             Box::new(ret.clone()),
         );
         // The body additionally sees the `&rest` parameter (if any) bound to
-        // a `Vector<elem>` — see `Self::check_defun`'s identical treatment.
+        // a plain `Sexpr` list — see `Self::check_defun`'s identical treatment.
         let mut params = params;
-        if let Some((rname, relemty)) = rest {
-            params.push((rname, vector_of(relemty)));
+        if let Some((rname, _)) = rest {
+            params.push((rname, sexpr_ty()));
         }
         let child = env.extended(params.clone());
         // A lambda is a new function boundary: `break`/`return` cannot reach an
@@ -1160,7 +1171,7 @@ impl Checker {
     /// Type-check applying a function *value* `callee` to `args`. If
     /// `callee`'s type is variadic (`Type::Fn`'s `rest` is `Some`), every
     /// argument past the fixed parameters is checked against the rest
-    /// element type and collected into a single `Vector<elem>` actual
+    /// element type and collected into a single `Sexpr` list actual
     /// argument — the value-level counterpart of `Self::check_call`'s
     /// desugaring for a named function.
     fn check_apply(
@@ -1202,7 +1213,7 @@ impl Checker {
             for arg in &args[fixed..] {
                 rest_typed.push(self.check(heap, interp, env, *arg, Some(elem_ty))?);
             }
-            typed.push(Typed { expr: Expr::Vector(rest_typed), ty: vector_of((**elem_ty).clone()) });
+            typed.push(self.cons_rest_list(elem_ty, rest_typed)?);
         }
         Ok(Typed { expr: Expr::Apply(Box::new(callee), typed), ty: ret })
     }
@@ -1210,13 +1221,17 @@ impl Checker {
     /// `(apply f arg1 ... argN rest-list)`: call the *variadic* function
     /// value `f` — its type must be `(fn (T1..Tn) &rest Te) R)` — with
     /// `arg1..argN` bound to its fixed parameters and `rest-list` (already a
-    /// `Vector<Te>`, built at runtime) passed straight through as its `&rest`
-    /// argument, instead of `Self::check_apply`'s usual one-by-one collection
-    /// from individually-typed trailing expressions. Desugars to the very
-    /// same `Expr::Apply` shape `check_apply` produces for
-    /// `(f arg1 .. argN e1 e2 e3)` if `rest-list` were three literal elements
-    /// `e1 e2 e3` instead of one dynamic list — so the interpreter needs no
-    /// `apply`-specific evaluation at all.
+    /// plain `Sexpr` list, e.g. a `quote`d list or one built by `cons`)
+    /// passed straight through as its `&rest` argument, instead of
+    /// `Self::check_apply`'s usual one-by-one collection from individually-
+    /// typed trailing expressions. Note `rest-list`'s elements are *not*
+    /// checked against `Te` here — same as CL's `apply`, which never checks a
+    /// list's contents either; the callee's own body is responsible for
+    /// whatever it does with each element. Desugars to the very same
+    /// `Expr::Apply` shape `check_apply` produces for `(f arg1 .. argN e1 e2
+    /// e3)` if `rest-list` were three literal elements `e1 e2 e3` instead of
+    /// one dynamic list — so the interpreter needs no `apply`-specific
+    /// evaluation at all.
     fn check_apply_form(
         &self,
         heap: &mut Heap,
@@ -1228,8 +1243,8 @@ impl Checker {
             return Err(Error::TypeError("apply: (apply function arg... rest-list)".into()));
         }
         let callee = self.check(heap, interp, env, args[0], None)?;
-        let (params, elem_ty, ret) = match &callee.ty {
-            Type::Fn(p, Some(r), ret) => (p.clone(), (**r).clone(), (**ret).clone()),
+        let (params, ret) = match &callee.ty {
+            Type::Fn(p, Some(_), ret) => (p.clone(), (**ret).clone()),
             Type::Fn(_, None, _) => {
                 return Err(Error::TypeError(
                     "apply: function has no `&rest` parameter to apply a list to".into(),
@@ -1249,7 +1264,7 @@ impl Checker {
         for (arg, pty) in fixed_args.iter().zip(params.iter()) {
             typed.push(self.check(heap, interp, env, *arg, Some(pty))?);
         }
-        typed.push(self.check(heap, interp, env, list_arg[0], Some(&vector_of(elem_ty)))?);
+        typed.push(self.check(heap, interp, env, list_arg[0], Some(&sexpr_ty()))?);
         Ok(Typed { expr: Expr::Apply(Box::new(callee), typed), ty: ret })
     }
 
@@ -1919,8 +1934,8 @@ impl Checker {
         }
         // A variadic function: every remaining argument is individually
         // checked against the (possibly still-generic) rest element type,
-        // then collected into a single `Vector<elem>` actual argument — see
-        // `Type::Fn`'s doc comment and `Self::check_apply`'s value-level
+        // then collected into a single `Sexpr` list actual argument — see
+        // `sexpr_ty`'s doc comment and `Self::check_apply`'s value-level
         // counterpart.
         if let Some(elem_ty) = &sig.rest {
             let mut rest_typed = Vec::new();
@@ -1932,7 +1947,7 @@ impl Checker {
                 rest_typed.push(ta);
             }
             let resolved = subst_apply(elem_ty, &subst);
-            typed.push(Typed { expr: Expr::Vector(rest_typed), ty: vector_of(resolved) });
+            typed.push(self.cons_rest_list(&resolved, rest_typed)?);
         }
         for p in &sig.type_params {
             if !subst.contains_key(p) {
@@ -2258,12 +2273,32 @@ fn join_types(a: &Type, b: &Type) -> Result<Type, Error> {
     )))
 }
 
-/// `Vector<elem>` — the type a `&rest` parameter's collected arguments are
-/// bound as inside a `defun`/`lambda` body, and the type `apply`'s trailing
-/// list argument must have (see `Checker::parse_params_rest`/`check_call`/
-/// `check_apply_form`).
-fn vector_of(elem: Type) -> Type {
-    Type::Named(Path::root("vector"), vec![elem])
+/// `Sexpr` — the type a `&rest` parameter's collected arguments are bound as
+/// inside a `defun`/`lambda` body, and the type `apply`'s trailing list
+/// argument must have (see `Checker::parse_params_rest`/`check_call`/
+/// `check_apply_form`). Every Lisp's `&rest` parameter is an ordinary list
+/// (built from cons cells), never a homogeneous array type — `defmacro`'s own
+/// `&rest` already works this way unconditionally (`Interp::bind_macro_args`);
+/// `defun`/`lambda`'s `&rest` now matches it, just with an added call-site
+/// check (below) that every individual variadic argument satisfies the
+/// declared element type before it's wrapped into the list.
+fn sexpr_ty() -> Type {
+    Type::Named(Path::root("sexpr"), vec![])
+}
+
+/// The `Sexpr` constructor name that exactly represents a value of `elem_ty`
+/// (`Sexpr` itself needs no wrapping — see [`Checker::wrap_rest_elem`]).
+/// `&rest`'s declared element type must be one of these (or `Sexpr`) since
+/// nothing else has a lossless `Sexpr` encoding to collect into a list with.
+fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
+    match elem_ty {
+        Type::I64 | Type::I32 => Some("int"),
+        Type::F64 => Some("float"),
+        Type::Char => Some("char"),
+        Type::Bool => Some("bool"),
+        Type::Str => Some("str"),
+        _ => None,
+    }
 }
 
 fn is_integer_type(t: &Type) -> bool {

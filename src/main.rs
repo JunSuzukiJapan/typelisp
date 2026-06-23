@@ -177,17 +177,6 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
         RtValue::Builtin(name) => format!("#<builtin {}>", name),
         RtValue::BuiltinMethod(type_name, method) => format!("#<builtin {}::{}>", type_name, method),
         RtValue::HashTable(map) => format!("#<hashtable count={}>", map.borrow().len()),
-        RtValue::Vector(vec) => format!("#<vector length={}>", vec.borrow().len()),
-        #[cfg(feature = "compile")]
-        RtValue::LlvmModule(_) => "#<llvm-module>".to_string(),
-        #[cfg(feature = "compile")]
-        RtValue::LlvmBuilder(_) => "#<llvm-builder>".to_string(),
-        #[cfg(feature = "compile")]
-        RtValue::LlvmFunction(_) => "#<llvm-function>".to_string(),
-        #[cfg(feature = "compile")]
-        RtValue::LlvmBasicBlock(_) => "#<llvm-basic-block>".to_string(),
-        #[cfg(feature = "compile")]
-        RtValue::LlvmValue(_) => "#<llvm-value>".to_string(),
     }
 }
 

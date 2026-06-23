@@ -103,24 +103,6 @@ fn result_match() {
     );
 }
 
-// ---- methods ----------------------------------------------------------------
-
-#[test]
-fn instance_method() {
-    let src = "(defstruct point (mk (x i32) (y i32))) \
-               (defmethod getx ((self point)) i32 (match self ((mk a b) a))) \
-               (getx (mk 7 9))";
-    assert_eq!(eval_ok(src), RtValue::Int(7));
-}
-
-#[test]
-fn static_method() {
-    let src = "(defstruct pair (mk (a i32) (b i32))) \
-               (defmethod swap (pair (a i32) (b i32)) pair (mk b a)) \
-               (match (pair::swap 1 2) ((mk a b) a))";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
-}
-
 // ---- panic ------------------------------------------------------------------
 
 #[test]
@@ -624,38 +606,70 @@ fn labels_function_can_be_bound_to_a_variable_like_any_other() {
 }
 
 // ---- &rest / apply (roadmap step 10) -----------------------------------------
+//
+// `&rest`'s collected arguments are bound to a plain `Sexpr` list (an
+// ordinary Lisp list of cons cells, like every Lisp's `&rest` parameter —
+// never a homogeneous array type), with each element wrapped in its
+// `Sexpr` constructor (`(Int n)` for an `i32`/`i64` element here) — see
+// `Checker::wrap_rest_elem`'s doc comment. These tests use `run`/`eval_ok`
+// (no prelude loaded), so list length/indexing is done directly via
+// `match`/`car`/`cdr` rather than the prelude's `length`/`nth`.
+
+const LEN_HELPER: &str =
+    "(defun len ((s Sexpr)) i32 (match s ((Nil) 0) ((Cons _ d) (+ 1 (len d))) (_ (panic \"len: not a proper list\"))))";
 
 #[test]
-fn defun_rest_collects_extra_arguments_into_a_vector() {
-    let src = "(defun count-extra ((a i32) &rest (xs i32)) i32 (length xs))
-               (count-extra 1 2 3 4)";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+fn defun_rest_collects_extra_arguments_into_a_list() {
+    let src = format!(
+        "{}
+         (defun count-extra ((a i32) &rest (xs i32)) i32 (len xs))
+         (count-extra 1 2 3 4)",
+        LEN_HELPER
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(3));
 }
 
 #[test]
-fn defun_rest_with_no_extra_arguments_is_an_empty_vector() {
-    let src = "(defun count-extra ((a i32) &rest (xs i32)) i32 (length xs))
-               (count-extra 1)";
-    assert_eq!(eval_ok(src), RtValue::Int(0));
+fn defun_rest_with_no_extra_arguments_is_an_empty_list() {
+    let src = format!(
+        "{}
+         (defun count-extra ((a i32) &rest (xs i32)) i32 (len xs))
+         (count-extra 1)",
+        LEN_HELPER
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(0));
 }
 
 #[test]
 fn defun_rest_with_no_fixed_params_collects_every_argument() {
-    let src = "(defun count-all (&rest (xs i32)) i32 (length xs)) (count-all 1 2 3)";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+    let src = format!(
+        "{}
+         (defun count-all (&rest (xs i32)) i32 (len xs)) (count-all 1 2 3)",
+        LEN_HELPER
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(3));
 }
 
 #[test]
 fn defun_rest_elements_keep_their_order_and_values() {
-    let src = "(defun second-extra ((a i32) &rest (xs i32)) i32 (get xs 1))
+    // `Sexpr`'s own `Int` constructor always holds an `i64` (regardless of
+    // whether the `&rest` element type was declared `i32` or `i64` — both
+    // wrap into the same `Sexpr` variant, see `sexpr_ctor_for`), so
+    // extracting one back out via `match` yields `i64`, not `i32`.
+    let src = "(defun second-extra ((a i32) &rest (xs i32)) i64
+                 (match (car (cdr xs)) ((Int n) n) (_ (panic \"not an Int\"))))
                (second-extra 1 10 20 30)";
     assert_eq!(eval_ok(src), RtValue::Int(20));
 }
 
 #[test]
-fn lambda_rest_collects_extra_arguments_into_a_vector() {
-    let src = "((lambda ((a i32) &rest (xs i32)) i32 (length xs)) 1 2 3)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+fn lambda_rest_collects_extra_arguments_into_a_list() {
+    let src = format!(
+        "{}
+         ((lambda ((a i32) &rest (xs i32)) i32 (len xs)) 1 2 3)",
+        LEN_HELPER
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(2));
 }
 
 #[test]
@@ -666,33 +680,31 @@ fn generic_rest_function_works_at_different_element_types() {
 }
 
 #[test]
-fn apply_calls_a_named_variadic_function_with_a_runtime_vector() {
-    let src = "(defun first-extra ((a i32) &rest (xs i32)) i32 (get xs 0))
-               (defun make-v () Vector<i32> (Vector::new 0 0))
-               (let ((v (make-v)))
-                 (push v 10)
-                 (push v 20)
-                 (apply first-extra 1 v))";
+fn apply_calls_a_named_variadic_function_with_a_runtime_list() {
+    let src = "(defun first-extra ((a i32) &rest (xs i32)) i64
+                 (match (car xs) ((Int n) n) (_ (panic \"not an Int\"))))
+               (apply first-extra 1 (quote (10 20)))";
     assert_eq!(eval_ok(src), RtValue::Int(10));
 }
 
 #[test]
 fn apply_calls_a_variadic_lambda_value() {
-    let src = "(defun make-v () Vector<i32> (Vector::new 2 0))
-               (let ((f (lambda ((a i32) &rest (xs i32)) i32 (+ a (length xs))))
-                     (v (make-v)))
-                 (apply f 10 v))";
-    assert_eq!(eval_ok(src), RtValue::Int(12));
+    let src = format!(
+        "{}
+         (let ((f (lambda ((a i32) &rest (xs i32)) i32 (+ a (len xs)))))
+           (apply f 10 (quote (1 2))))",
+        LEN_HELPER
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(12));
 }
 
 #[test]
-fn apply_with_no_fixed_arguments_passes_the_whole_vector_as_rest() {
-    let src = "(defun count-all (&rest (xs i32)) i32 (length xs))
-               (defun make-v () Vector<i32> (Vector::new 0 0))
-               (let ((v (make-v)))
-                 (push v 1)
-                 (push v 2)
-                 (push v 3)
-                 (apply count-all v))";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+fn apply_with_no_fixed_arguments_passes_the_whole_list_as_rest() {
+    let src = format!(
+        "{}
+         (defun count-all (&rest (xs i32)) i32 (len xs))
+         (apply count-all (quote (1 2 3)))",
+        LEN_HELPER
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(3));
 }

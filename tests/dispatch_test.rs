@@ -1,18 +1,18 @@
 //! Tests for `Checker::check_list`'s name-resolution order between a free
 //! function and a same-named instance method on a builtin generic type
-//! (`Vector<T>`/`HashTable<K,V>`).
+//! (`HashTable<K,V>`).
 //!
 //! Before this, a free function with the same name as an instance method
-//! (e.g. the prelude's `Sexpr`-list `length`/`remove`/`count` vs.
-//! `Vector<T>`'s `length` or `HashTable<K,V>`'s `remove`/`count`) always won,
-//! regardless of the call's actual argument type — calling `(length v)` for
-//! a `Vector<T>` `v` failed with a type mismatch instead of reaching
-//! `Vector`'s method. `Checker::try_instance_method` now tries a
-//! receiver-typed instance method on the first argument's type *before* the
-//! free function, falling back to the free function only when no
-//! type-specific method matches — mirroring CLOS, where an existing
-//! ordinary function of the same name becomes a generic function's default
-//! method, used only when no method's specializer matches the call.
+//! (e.g. the prelude's `Sexpr`-list `remove`/`count` vs. `HashTable<K,V>`'s
+//! `remove`/`count`) always won, regardless of the call's actual argument
+//! type — calling `(remove h k)` for a `HashTable<K,V>` `h` failed with a
+//! type mismatch instead of reaching `HashTable`'s method.
+//! `Checker::try_instance_method` now tries a receiver-typed instance method
+//! on the first argument's type *before* the free function, falling back to
+//! the free function only when no type-specific method matches — mirroring
+//! CLOS, where an existing ordinary function of the same name becomes a
+//! generic function's default method, used only when no method's
+//! specializer matches the call.
 
 extern crate typelisp;
 use typelisp::{load_prelude, Checker, Error, Heap, Interp, Reader, RtValue};
@@ -36,12 +36,6 @@ fn run(src: &str) -> Result<RtValue, String> {
 
 fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
-}
-
-#[test]
-fn length_resolves_to_vector_instance_method_for_a_vector_receiver() {
-    let src = "(defun make-v () Vector<i32> (Vector::new 3 0)) (length (make-v))";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
 }
 
 #[test]
@@ -123,25 +117,6 @@ fn unbound_variable_in_first_argument_position_still_surfaces_the_real_error() {
         Err(Error::TypeError(msg)) => assert!(msg.contains("unbound"), "unexpected message: {}", msg),
         other => panic!("expected an unbound-variable TypeError, got {:?}", other),
     }
-}
-
-#[test]
-fn sort_resolves_to_vector_instance_method_for_a_vector_receiver() {
-    // `sort` is defined both as the `Sexpr`-list free function and as a
-    // `Vector<T>` `defmethod` (src/prelude.rs) — this is the same
-    // name-collision scenario `length`/`remove`/`count` above test, this
-    // time for a `defmethod` introduced *after* this dispatch fix rather
-    // than retrofitted onto pre-existing built-in methods.
-    let src = r#"
-        (defun lt-i32 ((a i32) (b i32)) bool (< a b))
-        (defun make-v () Vector<i32> (Vector::new 3 0))
-        (defun fill3 ((v Vector<i32>) (a i32) (b i32) (c i32)) Vector<i32>
-          (progn (set v 0 a) (set v 1 b) (set v 2 c) v))
-        (let ((v (fill3 (make-v) 3 1 2)))
-          (sort v lt-i32)
-          (+ (* 100 (get v 0)) (+ (* 10 (get v 1)) (get v 2))))
-    "#;
-    assert_eq!(eval_ok(src), RtValue::Int(123));
 }
 
 #[test]
