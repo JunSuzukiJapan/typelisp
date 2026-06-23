@@ -1202,3 +1202,138 @@ fn compiles_a_function_with_return_inside_a_loop_nested_in_a_while() {
     assert_eq!(run(&format!("{src}\n(f 2)")), RtValue::Int(6));
     assert_eq!(run(&format!("{src}\n(f 0)")), RtValue::Int(0));
 }
+
+// ---- Phase 5: full `Sexpr` variant coverage ------------------------------
+//
+// Phase 3 only ever bridged `Sexpr`'s `Nil`/`Cons` values (`value_to_ptr`
+// aborted on anything else reaching JIT'd code). Phase 5 widened every
+// in-flight `Sexpr` value from a bare pointer to a `{tag, payload}` struct
+// (the same shape as the ABI's own `TlValue`) so `Int`/`Float`/`Char`/`Bool`/
+// `Symbol`/`Str` (every variant reachable from ordinary typelisp source —
+// `Path` has no `Sexpr` constructor at all, see `Checker::value_to_quoted`,
+// so it stays untested here even though `value_to_tag_payload` handles it)
+// can flow through `cons`/`car`/`cdr`/parameters/returns/calls too.
+
+/// An `Int` extracted from a cons chain built *outside* the compiled
+/// function and read back via `car`/`cdr` — the most basic non-`Nil`/`Cons`
+/// payload round trip.
+#[test]
+fn compiles_a_function_extracting_a_non_nil_int_via_car_and_cdr() {
+    let src = r#"
+        (defun second ((s Sexpr)) Sexpr (car (cdr s)))
+        (compile "second")
+        (second (cons (Int 1) (cons (Int 42) ())))
+    "#;
+    assert_eq!(run(src), RtValue::Sexpr(Value::Int(42)));
+}
+
+/// `Float`/`Char`/`Bool` `Sexpr` parameters pass straight through an identity
+/// function (no `cons`/`car` involved at all) — exercises `load-arg-sexpr`/
+/// `build-ret-sexpr` directly carrying a non-`Cons` tag across the ABI
+/// boundary.
+#[test]
+fn compiles_a_function_passing_through_a_float_sexpr_value() {
+    let src = r#"
+        (defun identity-sexpr ((s Sexpr)) Sexpr s)
+        (compile "identity-sexpr")
+        (identity-sexpr (Float 2.5))
+    "#;
+    assert_eq!(run(src), RtValue::Sexpr(Value::Float(2.5)));
+}
+
+#[test]
+fn compiles_a_function_passing_through_a_char_sexpr_value() {
+    let src = r#"
+        (defun identity-sexpr ((s Sexpr)) Sexpr s)
+        (compile "identity-sexpr")
+        (identity-sexpr (Char #\z))
+    "#;
+    assert_eq!(run(src), RtValue::Sexpr(Value::Char('z')));
+}
+
+#[test]
+fn compiles_a_function_passing_through_a_bool_sexpr_value() {
+    let src = r#"
+        (defun identity-sexpr ((s Sexpr)) Sexpr s)
+        (compile "identity-sexpr")
+        (identity-sexpr (Bool true))
+    "#;
+    assert_eq!(run(src), RtValue::Sexpr(Value::Bool(true)));
+}
+
+/// `Symbol`/`Str` are interned (their `Sexpr` payload is an id, not the
+/// content itself), so identity is checked structurally (`match` + `eq`)
+/// rather than by comparing the returned `RtValue` directly against a
+/// hardcoded id.
+#[test]
+fn compiles_a_function_passing_through_a_symbol_sexpr_value() {
+    let src = r#"
+        (defun identity-sexpr ((s Sexpr)) Sexpr s)
+        (compile "identity-sexpr")
+        (match (identity-sexpr (Sym "greeting")) ((Sym name) (eq name "greeting")) (_ false))
+    "#;
+    assert_eq!(run(src), RtValue::Bool(true));
+}
+
+/// `Str` is the one `Sexpr` scalar the GC actually collects (see
+/// `Heap::gc`'s string sweep) — run under a tiny arena with a forced GC mid
+/// loop to confirm a `Str`-tagged `Sexpr` value survives passing through
+/// compiled code repeatedly without `compile`'s rooting discipline needing
+/// any change for it (the same `push-root`/`pop-root` shim now just
+/// reconstructs a `Value::Str` instead of refusing to).
+#[test]
+fn compiles_a_function_passing_through_a_string_sexpr_value_under_gc_pressure() {
+    let src = r#"
+        (defun identity-sexpr ((s Sexpr)) Sexpr s)
+        (compile "identity-sexpr")
+        (let ((result (Nil)))
+          (dotimes (i 500) (setf result (identity-sexpr (Str "hello"))))
+          (match result ((Str s) (eq s "hello")) (_ false)))
+    "#;
+    assert_eq!(run_with_heap(Heap::with_capacity(8192), src), RtValue::Bool(true));
+}
+
+/// `consp`/`atom` (Phase 5) — `prelude.rs` `defun`s built on `match`, bridged
+/// directly onto a tag-equality check the same way `null` already is.
+#[test]
+fn compiles_a_function_using_consp_and_atom() {
+    let src = r#"
+        (defun classify ((s Sexpr)) bool (consp s))
+        (compile "classify")
+        (classify (cons (Int 1) ()))
+    "#;
+    assert_eq!(run(src), RtValue::Bool(true));
+    let src2 = r#"
+        (defun classify ((s Sexpr)) bool (consp s))
+        (compile "classify")
+        (classify (Int 1))
+    "#;
+    assert_eq!(run(src2), RtValue::Bool(false));
+    let src3 = r#"
+        (defun is-atom ((s Sexpr)) bool (atom s))
+        (compile "is-atom")
+        (and (is-atom (Int 1)) (not (is-atom (cons (Int 1) ()))))
+    "#;
+    assert_eq!(run(src3), RtValue::Bool(true));
+}
+
+/// `set-car`/`set-cdr` (Phase 5) — in-place mutation of an existing cons
+/// cell, visible through another reference to the same cell (the same
+/// aliasing `tests/prelude_test.rs`'s `set_car_overwrites_in_place` checks
+/// for the tree-walking interpreter, here exercised through compiled code).
+/// The new value (`Int 99`) is a non-`Cons` `Sexpr`, exercising the same
+/// widened representation as the round-trip tests above.
+#[test]
+fn compiles_a_function_using_set_car_and_set_cdr() {
+    let src = r#"
+        (defun mutate ((cell Sexpr)) Sexpr (progn (set-car cell (Int 99)) (set-cdr cell (Int 100)) cell))
+        (compile "mutate")
+        (let* ((pair (cons (Int 1) (Int 2)))
+               (alias pair))
+          (mutate pair)
+          (match (car alias)
+            ((Int n) (match (cdr alias) ((Int m) (and (= n 99) (= m 100))) (_ false)))
+            (_ false)))
+    "#;
+    assert_eq!(run(src), RtValue::Bool(true));
+}

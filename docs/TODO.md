@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-06-17 / ブランチ: `feature/typed-lisp-impl`
+最終更新: 2026-06-23 / ブランチ: `feature/typed-lisp-impl`
 
 このドキュメントは、再実装（read 関数から作り直し）の進捗と次回の作業を記録する。
 **言語仕様の確定事項は [language-design.md](language-design.md) を参照。**
@@ -999,6 +999,71 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       評価結果は保存、エラーメッセージの文言のみ変わりうる旨は計画どおり）。並行実行
       8回連続green（`cargo test --features compile`、`--test-threads=8`）。既定ビルド・
       `cargo clippy --all-targets`（両構成）への影響なし、警告0。
+  - 実装済み（Phase 5a/Sexprスコープ拡張 — 全variant対応 + `consp`/`atom` + `set-car`/
+    `set-cdr`、優先順位リスト1番目の前半）: `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`形式の
+    `Sexpr`値（`Path`はSexprのコンストラクタが無く言語レベルで構築不可能なため対象外、
+    `value_to_tag_payload`は変換自体は対応済み・未テスト）が`cons`/`car`/`cdr`/関数の
+    引数・戻り値・関数間呼び出しを問わず任意混在できるようになった——
+    `(defun second ((s Sexpr)) Sexpr (car (cdr s)))`に`(cons (Int 1) (cons (Int 42) ()))`
+    を渡すと`Int 42`が取れる、`(defun identity-sexpr ((s Sexpr)) Sexpr s)`が`Float`/`Char`/
+    `Bool`/`Symbol`/`Str`値をそのまま素通しできる、といったケースが対象。`consp`/`atom`
+    （`null`同様`prelude.rs`の`match`ベース`defun`を名前ベースで直接プリミティブに橋渡し）、
+    `set-car`/`set-cdr`（既存の固定名シムパターンの延長）も同時に実装——TODOの記述どおり
+    「機械的」だったのはこの3点のみで、**全variant対応自体は機械的ではなく
+    `Sexpr`の中間表現（IR上の値の持ち方）そのものの再設計が必要だった**（詳細は次項）。
+    - **核心の発見: `Sexpr`をIR上で「裸のポインタ」として運ぶ既存設計（Phase 3、
+      `Nil`=nullポインタ／`Cons`=cons cellへの生ポインタの1ワード表現）は、
+      `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`を運ぶには原理的に不十分**——これらは
+      ポインタ的な値ではなく、`Sexpr`自体が「9バリアントの動的型」である以上、
+      コンパイル時の静的型情報だけでは「今この`Sexpr`値が実際にどのバリアントか」を
+      区別できない（型システムからは`Sexpr`型としか分からない）。これを回避するため、
+      **IR上の「Sexpr値」の持ち方を「裸のポインタ1語」から「ABI境界で既に使っていた
+      `TlValue`と全く同じ形の`{tag: i64, payload: i64}`構造体」へ拡張**した——
+      新しい設計ではなく、既存の`TlValue`という概念をABI境界専用から「IR内を流れる
+      Sexpr値そのものの表現」へ一般化しただけ、という位置づけ。
+    - **`TlTag`を拡張し、ABI境界の型タグとSexprの動的variantタグを同じ`tag`バイトで
+      表現**（二重のタグ管理を避ける）: `param-is-sexpr`/`ret-is-sexpr`が既に
+      「このスロットの静的型はSexpr」をアウトオブバンドで伝えているため、`TlValue.tag`
+      フィールド自体を「Sexprのときは動的variant（`SexprNil`/`SexprInt`/`SexprFloat`/
+      `SexprChar`/`SexprBool`/`SexprSymbol`/`SexprStr`/`SexprCons`/`SexprPath`の9種）を
+      運ぶ」という役割にオーバーロードした（既存の`I64`/`F64`/`Bool`/`Char`はそのまま）。
+      旧`TlTag::Ptr`（Nil/Cons共用の1ビット表現）は廃止、`value_to_ptr`/`ptr_to_value`
+      （`Nil`/`Cons`限定、エラーを返す部分関数）は`value_to_tag_payload`/
+      `tag_payload_to_value`/`value_to_tlvalue`（9variant全対応、全関数）に置き換え。
+      `Float`は`f64::to_bits`で`i64`へビット保存（IR層は終始bitを素通しするだけで
+      reinterpretしないため、`f64`のABI境界が使う`build_bit_cast`はここでは不要——
+      Rust側の変換だけで済む）。`Symbol`/`Str`は`SymId`/`StrId`(`u32`)をそのまま
+      widenするだけ（heapの intern テーブルへの参照は安定なので変換は対称的かつ無損失）。
+    - **`build-cons`/`build-car`/`build-cdr`/`push-root`等のRustシムは「16バイト構造体を
+      値渡しする」ABIを避け、既存の`(args, argc, out)`パターンと同じ「スカラー引数 +
+      out引数ポインタ」方式に統一**（`tl_sexpr_cons(heap, car_tag, car_payload, cdr_tag,
+      cdr_payload, out: *mut TlValue)`等）——LLVM/Rust間で16バイト構造体を値で渡す/返す
+      ABIが正しく一致する保証に頼るより、すでにPhase 2で実証済みの「out引数ポインタ」
+      パターンを使う方が安全と判断（既存の`build-call*`系もこの方式）。
+    - **`build-nullp`の意味論修正**: 旧実装は「ポインタがnullか」を見ていたが、
+      `Int(0)`等もペイロードが0になり得るため、これは全variant対応後は誤った判定になる
+      （`Nil`かどうかは**タグ**で判定すべき、ペイロードの値とは無関係）。
+      `llvm_builder_build_tag_eq`という汎用ヘルパに切り出し、`build-nullp`
+      （`SexprNil`と比較）と新規`build-consp`（`SexprCons`と比較）の両方がこれを共有。
+    - **`load-arg-sexpr`/`build-ret-sexpr`/`build-call-sexpr`の簡略化**:
+      Sexprの中間表現が最初からABIの`TlValue`と同型になったことで、これらは
+      「`i64`ペイロードを取り出して`int_to_ptr`/`ptr_to_int`で再解釈する」という
+      Phase 3の処理が不要になり、「構造体をそのままload/store/素通しする」だけに
+      単純化された（`tlvalue_tag_and_payload`の`StructValue`分岐は構造体を
+      分解して転送するだけ、再導出が一切不要）。
+    - TDD: `tests/compile_test.rs`に8件追加（66件中）——`cons`/`car`/`cdr`経由での
+      `Int`非Nil値の往復、`Float`/`Char`/`Bool`の関数引数・戻り値での素通し、
+      `Symbol`/`Str`の素通し（`StrId`/`SymId`はheap依存で実行毎に変わるため`match`+`eq`で
+      内容比較）、小ヒープ+`dotimes`500回でGC強制発生下での`Str`タグ付きSexpr値の生存
+      確認（StrはGC対象のため、Sexprスコープ拡張で初めて到達する新しいrooting経路）、
+      `consp`/`atom`、`set-car`/`set-cdr`（既存セルへの別名参照からの可視性込み）。
+      既存58件は無変更でgreen（リファクタが既存のNil/Cons限定の挙動を一切変えていないことを
+      確認）。並行実行5回連続green（`--test-threads=8`）。既定ビルド・
+      `cargo clippy --all-targets`（両構成）への影響なし、警告0。
+    - 未対応として残った範囲（次の作業参照）: `Sexpr`型変数への`setf`（core challenge、
+      下記参照）、`Path`のテスト（言語レベルで構築不可能なため——`quote`が`::`パスを含む
+      データを拒否する制約、`Checker::value_to_quoted`参照——構築可能になった時点で
+      追加すべき）。
   - **次の作業（ブランチ`feature/compiler`で継続、影響範囲の大きさで優先順位付け
     ——[[feedback-impl-priority]]）**:
     - **「影響範囲」の判断基準（2026-06-22 確認）**: 「今これを実装すると一度にどれだけの
@@ -1010,18 +1075,19 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       前提にはならない——Sexprのスコープ拡張、特に`setf`対応はGC rooting機構そのものの拡張で、
       将来クロージャ等が同種のミュータブルなGCポインタ捕捉を必要とする際の前提になるため、
       「今すぐ動く範囲は狭いが将来の設計の土台になる」という意味で影響範囲が広いと判断した）。
-    1. **Sexprのスコープ拡張**（HashTable/Vectorより先——上記の判断基準参照）:
-       `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Path`形式の`Sexpr`値（現在は
-       `value_to_ptr`がエラー→ランタイムシムが`abort`）への対応、`consp`/`atom`
-       （`null`/`not`の合成）、`set-car`/`set-cdr`は既存の固定名シムパターン（Phase3参照）の
-       延長で機械的。**核心は`Sexpr`型変数への`setf`対応**——現行のrooting設計は「束縛の
+    1. **`Sexpr`型変数への`setf`対応**（Phase 5aで残った核心、HashTable/Vectorより先——
+       上記の判断基準参照）: 現行のrooting設計は「束縛の
        *初期値*を一度だけ`push-root`し、束縛が生きている間ずっと同じポインタをrootし続ける」
        前提（Phase3で確立）だが、`setf`はループの各反復で指す先が変わるポインタを生み出す
        ため、再代入ごとに「古い値のrootを外し新しい値をrootする」（もしくは「スタックスロット
        自体をGCが走査するroot集合に含める」）設計拡張が必要——スカラー値のphi
        （Phase3b/4で確立、`entry-phis`/`body-vals`の分離）と同型の「ループ内のphiが現在値を
        持つ」発想を、GCポインタという「生きている限りrootされ続けなければならない」制約の
-       下でどう両立させるかが設計上の核心になる。
+       下でどう両立させるかが設計上の核心になる。Phase 5aで`Sexpr`のIR内表現が
+       `{tag, payload}`構造体になったため、再代入されたポインタを安全にrootし直す処理は
+       「タグ付き構造体からpayloadを取り出し`push-root`/`pop-root`する」という既存の
+       `count-and-push-sexpr`と同型の操作にはなるが、**いつ古いrootを外すか**
+       （setfの直前？ループのbackedge？）が未設計のまま残っている。
     2. **HashTable/Vector対応**: `Rc<RefCell<..>>`によるRust管理（GCヒープ対象外）と判明
        済みのため、GCのrootingは無関係。`loop`/`break`/`return`（実装済み）があれば合計・
        線形探索等の典型コードはコンパイル対象になる——既存のPhase3のシムパターン

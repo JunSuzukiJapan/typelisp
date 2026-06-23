@@ -272,6 +272,19 @@ pub const SOURCE: &str = r#"
       ((ACar v) (build-car b module f (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result v)))
       ((ACdr v) (build-cdr b module f (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result v)))
       ((ANullp v) (build-nullp b (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result v)))
+      ;; `consp` (Phase 5): see `build-nullp`'s comment — same tag-check
+      ;; shape, just against `SexprCons` instead of `SexprNil`.
+      ((AConsp v) (build-consp b (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result v)))
+      ;; `set-car`/`set-cdr` (Phase 5): in-place mutation, `Unit`-valued —
+      ;; like `AUnit`/`APanic`, the placeholder result is never actually read.
+      ((ASetCar cell val)
+       (progn (build-set-car b module f (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result cell)
+                              (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result val))
+              (llvm-const-i64 0)))
+      ((ASetCdr cell val)
+       (progn (build-set-cdr b module f (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result cell)
+                              (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result val))
+              (llvm-const-i64 0)))
       ;; `()` as a value (ループ・分岐構文の整理) — `Unit` has no
       ;; representable `TlValue` payload, so this placeholder is never
       ;; actually read by anything (the checker guarantees a `Unit`-typed

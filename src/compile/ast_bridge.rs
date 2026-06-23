@@ -58,6 +58,9 @@ const A_PANIC: usize = 16;
 const A_LOOP: usize = 17;
 const A_BREAK: usize = 18;
 const A_RETURN: usize = 19;
+const A_CONSP: usize = 20;
+const A_SETCAR: usize = 21;
+const A_SETCDR: usize = 22;
 
 /// `i64`'s and `f64`'s binary arithmetic/comparison instance methods
 /// (`registry::int_assoc`/`float_assoc`) — the only `Expr::Assoc` shapes
@@ -316,15 +319,47 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp, group: &[Path]) -> Option
             let v = typed_to_ast(&call_args[0], interp, group)?;
             Some(data(A_CDR, vec![v]))
         }
-        // `null` (Phase 3): an ordinary typelisp `defun` in `prelude.rs`
-        // (`(match s ((Nil) true) (_ false)))`), bridged directly onto the
-        // `Nil`-pointer-check primitive instead of requiring this bridge to
-        // understand `match` at all — `consp`/`atom` (also prelude `defun`s,
-        // built from `null`/`not`) stay unbridged for the same reason and
-        // are a follow-up step.
+        // `null`/`consp` (Phase 3/5): ordinary typelisp `defun`s in
+        // `prelude.rs` (`(match s ((Nil) true) (_ false))` /
+        // `(match s ((Cons _ _) true) (_ false))`), each bridged directly
+        // onto its own tag-check primitive (`A_NULLP`/`A_CONSP`,
+        // `compile-value`'s `build-nullp`/`build-consp`) instead of requiring
+        // this bridge to understand `match` at all — and not merely for
+        // convenience: since neither `null` nor `consp` could be `compile`d
+        // on their own (no `AMatch` `AstExpr` variant exists), the general
+        // "call an already-compiled function" `Expr::Call` arm below could
+        // never bridge a call to either of them regardless.
         Expr::Call(path, call_args) if path.is_simple() && path.local() == "null" && call_args.len() == 1 => {
             let v = typed_to_ast(&call_args[0], interp, group)?;
             Some(data(A_NULLP, vec![v]))
+        }
+        Expr::Call(path, call_args) if path.is_simple() && path.local() == "consp" && call_args.len() == 1 => {
+            let v = typed_to_ast(&call_args[0], interp, group)?;
+            Some(data(A_CONSP, vec![v]))
+        }
+        // `atom` (Phase 5): `prelude.rs`'s `(defun atom ((s Sexpr)) bool (not
+        // (consp s)))` — translated straight to `(= (consp s) false)` (the
+        // same existing `ABinOp` `not`'s own arm above builds), since `atom`
+        // is no more compilable on its own than `consp` is (it calls
+        // `consp`, which the general `ACall` arm could only bridge if
+        // `consp` were itself already compiled — and `consp` never can be).
+        Expr::Call(path, call_args) if path.is_simple() && path.local() == "atom" && call_args.len() == 1 => {
+            let v = typed_to_ast(&call_args[0], interp, group)?;
+            let consp = data(A_CONSP, vec![v]);
+            Some(data(A_BINOP, vec![RtValue::Str("=".to_string()), consp, data(A_BOOL, vec![RtValue::Bool(false)])]))
+        }
+        // `set-car`/`set-cdr` (Phase 5): like `cons`/`car`/`cdr`, always
+        // `Interp::eval_builtin` free functions, never entries in
+        // `Interp.compiled`.
+        Expr::Call(path, call_args) if path.is_simple() && path.local() == "set-car" && call_args.len() == 2 => {
+            let cell = typed_to_ast(&call_args[0], interp, group)?;
+            let val = typed_to_ast(&call_args[1], interp, group)?;
+            Some(data(A_SETCAR, vec![cell, val]))
+        }
+        Expr::Call(path, call_args) if path.is_simple() && path.local() == "set-cdr" && call_args.len() == 2 => {
+            let cell = typed_to_ast(&call_args[0], interp, group)?;
+            let val = typed_to_ast(&call_args[1], interp, group)?;
+            Some(data(A_SETCDR, vec![cell, val]))
         }
         // A call to another `defun` (Phase 2f, direct calls between compiled
         // functions; Phase 2g, self/mutual recursion): only bridged if `path`

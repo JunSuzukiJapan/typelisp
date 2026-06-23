@@ -660,7 +660,19 @@ fn ast_expr_def() -> AdtDef {
             // own bridging already establishes the value's type can't be
             // `Sexpr` (see `aloop`'s comment), so no separate check is
             // needed here.
-            Variant { name: "areturn".to_string(), fields: vec![option_of(t)] },
+            Variant { name: "areturn".to_string(), fields: vec![option_of(t.clone())] },
+            // `consp` (Phase 5, [docs/TODO.md](../../docs/TODO.md)「ステップ5」)
+            // — `crate::prelude`'s `(defun consp ((s Sexpr)) bool (match s
+            // ((Cons _ _) true) (_ false)))`, bridged directly onto the
+            // `Cons`-tag-check primitive (`build-consp`) the same way `null`
+            // is onto `build-nullp`, rather than teaching this bridge `match`.
+            Variant { name: "aconsp".to_string(), fields: vec![t.clone()] },
+            // `set-car`/`set-cdr` (Phase 5) — in-place mutation of an
+            // existing cons cell; both fields may be any `Sexpr` variant now
+            // that Phase 5 widened `Sexpr`'s runtime representation beyond
+            // `Nil`/`Cons`.
+            Variant { name: "asetcar".to_string(), fields: vec![t.clone(), t.clone()] },
+            Variant { name: "asetcdr".to_string(), fields: vec![t.clone(), t] },
         ],
         assoc: HashMap::new(),
         public: true,
@@ -842,9 +854,26 @@ fn llvm_builder_def() -> AdtDef {
         "build-cdr".to_string(),
         method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty()], llvm_value_ty()),
     );
-    // `build-nullp` needs neither `module` nor `f` — it's a plain
-    // pointer-null comparison, never touching the heap or a runtime shim.
+    // `build-set-car`/`build-set-cdr` (Phase 5): in-place mutation of an
+    // existing cons cell, the same shim-call shape as `build-car`/`build-cdr`
+    // but taking a second `Sexpr` operand (the new value) and returning
+    // `Unit` instead of a result — see
+    // `crate::eval::interp::{llvm_builder_build_set_car,llvm_builder_build_set_cdr}`.
+    assoc.insert(
+        "build-set-car".to_string(),
+        method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty(), llvm_value_ty()], Type::Unit),
+    );
+    assoc.insert(
+        "build-set-cdr".to_string(),
+        method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty(), llvm_value_ty()], Type::Unit),
+    );
+    // `build-nullp`/`build-consp` need neither `module` nor `f` — both are a
+    // plain tag-equality comparison against the operand's in-flight struct
+    // (Phase 5; Phase 3's `build-nullp` was a pointer-null comparison
+    // instead), never touching the heap or a runtime shim — see
+    // `crate::eval::interp::llvm_builder_build_tag_eq`.
     assoc.insert("build-nullp".to_string(), method(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty()));
+    assoc.insert("build-consp".to_string(), method(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty()));
     assoc.insert(
         "push-root".to_string(),
         method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit),

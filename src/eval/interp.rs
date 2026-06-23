@@ -19,7 +19,7 @@ use std::rc::{Rc, Weak};
 
 use crate::{Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
 #[cfg(feature = "compile")]
-use crate::ConsRef;
+use crate::{ConsRef, PathId, StrId, SymId};
 
 use super::value::{Closure, EvalError, HashKey, RtValue};
 #[cfg(feature = "compile")]
@@ -903,7 +903,9 @@ impl Interp {
         // `build-ret`/`build-ret-bool`/`build-ret-f64`/`build-ret-char`/
         // `build-ret-sexpr` tag the result correctly, so unlike the
         // arguments above, `out.tag` is meaningful here and decides how to
-        // decode `out.payload` back into an `RtValue`.
+        // decode `out.payload` back into an `RtValue`. A `Sexpr`-typed return
+        // (Phase 5, [docs/TODO.md](../../docs/TODO.md)「ステップ5」) carries one
+        // of the `SexprXxx` tags instead of `Ptr` — see [`tag_payload_to_value`].
         let result = if out.tag == TlTag::Bool as u8 {
             RtValue::Bool(unsafe { out.payload.i64_ } != 0)
         } else if out.tag == TlTag::F64 as u8 {
@@ -914,10 +916,13 @@ impl Interp {
                 Some(c) => RtValue::Char(c),
                 None => return Some(Err(EvalError::Internal(format!("compiled function: invalid char code {}", code)))),
             }
-        } else if out.tag == TlTag::Ptr as u8 {
-            RtValue::Sexpr(ptr_to_value(unsafe { out.payload.ptr }))
-        } else {
+        } else if out.tag == TlTag::I64 as u8 {
             RtValue::Int(unsafe { out.payload.i64_ })
+        } else {
+            match tag_payload_to_value(out.tag, unsafe { out.payload.i64_ }) {
+                Some(v) => RtValue::Sexpr(v),
+                None => return Some(Err(EvalError::Internal(format!("compiled function: invalid TlValue tag {}", out.tag)))),
+            }
         };
         Some(Ok(result))
     }
@@ -925,46 +930,91 @@ impl Interp {
 
 /// Converts one argument `RtValue` into the [`TlValue`] `call_compiled` packs
 /// into the outgoing array — `i64`/`bool`/`f64`/`char`/`Sexpr` only (Phase
-/// 2b/2c/2d/3's scope).
+/// 2b/2c/2d/3's scope). `RtValue::Sexpr` (Phase 5) always succeeds now — every
+/// `Value` variant has a `TlValue` encoding, see [`value_to_tlvalue`].
 #[cfg(feature = "compile")]
 fn to_tlvalue_arg(v: &RtValue) -> Result<TlValue, EvalError> {
     match v {
         RtValue::Int(n) => Ok(TlValue::from_i64(*n)),
         RtValue::Bool(b) => Ok(TlValue::from_i64(*b as i64)),
         RtValue::Float(n) => Ok(TlValue::from_f64(*n)),
-        RtValue::Sexpr(v) => Ok(TlValue::from_ptr(value_to_ptr(*v)?)),
+        RtValue::Sexpr(v) => Ok(value_to_tlvalue(*v)),
         RtValue::Char(c) => Ok(TlValue::from_i64(*c as i64)),
         other => Err(EvalError::Internal(format!("compiled function: unsupported argument {:?}", other))),
     }
 }
 
-/// `Sexpr`'s `TlValue` encoding (Phase 3): null for `Value::Empty` (`Nil`),
-/// otherwise `Value::Cons`'s raw cell pointer. Only these two variants are
-/// bridged ([`crate::compile::ast_bridge`]'s doc comment) — `compile` refuses
-/// any function whose body could produce another `Value` variant before this
-/// is ever called from JIT'd code, but `call_compiled` also reaches it for
-/// values supplied straight from the interpreter (a `Sexpr` argument to a
-/// compiled function isn't bridge-checked the way a function *body* is), so
-/// it still reports an error rather than panicking on a stray
-/// `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Path` value.
+/// `Sexpr`'s full `TlValue` encoding (Phase 5,
+/// [docs/TODO.md](../../docs/TODO.md)「ステップ5」: widened from Phase 3's
+/// `Nil`/`Cons`-only, pointer-shaped encoding to cover every `Value` variant.
+/// Each variant gets its own `TlTag::SexprXxx` tag and an `i64`-wide payload —
+/// `Int`/`Char`/`Bool` fit directly, `Float` round-trips through
+/// [`f64::to_bits`] (an exact bit-reinterpretation, like the `f64` ABI
+/// boundary's own `build_bit_cast`, just done in Rust instead of LLVM IR since
+/// this conversion never needs to be *arithmetic* inside JIT'd code — a
+/// `Sexpr`'s payload is opaque bits to the IR layer, only ever unpacked back
+/// into a real `Value` here or in the runtime shims below), `Symbol`/`Str`/
+/// `Path` widen their `u32` id, and `Cons` widens its cell pointer — the same
+/// representation [`crate::compile::ast_bridge`] no longer needs to restrict
+/// `Sexpr`-typed parameters/returns/`cons`/`car`/`cdr` to `Nil`/`Cons` for.
 #[cfg(feature = "compile")]
-fn value_to_ptr(v: Value) -> Result<*mut u8, EvalError> {
+fn value_to_tag_payload(v: Value) -> (TlTag, i64) {
     match v {
-        Value::Empty => Ok(std::ptr::null_mut()),
-        Value::Cons(c) => Ok(c.0 as *mut u8),
-        other => Err(EvalError::Internal(format!("compiled function: unsupported Sexpr value {:?}", other))),
+        Value::Empty => (TlTag::SexprNil, 0),
+        Value::Int(n) => (TlTag::SexprInt, n),
+        Value::Float(n) => (TlTag::SexprFloat, n.to_bits() as i64),
+        Value::Char(c) => (TlTag::SexprChar, c as i64),
+        Value::Bool(b) => (TlTag::SexprBool, b as i64),
+        Value::Symbol(SymId(id)) => (TlTag::SexprSymbol, id as i64),
+        Value::Str(StrId(id)) => (TlTag::SexprStr, id as i64),
+        Value::Cons(ConsRef(p)) => (TlTag::SexprCons, p as i64),
+        Value::Path(PathId(id)) => (TlTag::SexprPath, id as i64),
     }
 }
 
-/// The reverse of [`value_to_ptr`]: null decodes back to `Value::Empty`,
-/// any other pointer to the `Value::Cons` it was built from.
+/// The reverse of [`value_to_tag_payload`]: `None` for any `tag` that isn't
+/// one of the `SexprXxx` tags (or, for `SexprChar`, an invalid Unicode scalar
+/// value — never actually produced by [`value_to_tag_payload`] itself, but
+/// `call_compiled` also reaches this for a tag written by JIT'd code, so it
+/// reports failure rather than panicking on a corrupted payload).
 #[cfg(feature = "compile")]
-fn ptr_to_value(p: *mut u8) -> Value {
-    if p.is_null() {
-        Value::Empty
+fn tag_payload_to_value(tag: u8, payload: i64) -> Option<Value> {
+    if tag == TlTag::SexprNil as u8 {
+        Some(Value::Empty)
+    } else if tag == TlTag::SexprInt as u8 {
+        Some(Value::Int(payload))
+    } else if tag == TlTag::SexprFloat as u8 {
+        Some(Value::Float(f64::from_bits(payload as u64)))
+    } else if tag == TlTag::SexprChar as u8 {
+        char::from_u32(payload as u32).map(Value::Char)
+    } else if tag == TlTag::SexprBool as u8 {
+        Some(Value::Bool(payload != 0))
+    } else if tag == TlTag::SexprSymbol as u8 {
+        Some(Value::Symbol(SymId(payload as u32)))
+    } else if tag == TlTag::SexprStr as u8 {
+        Some(Value::Str(StrId(payload as u32)))
+    } else if tag == TlTag::SexprCons as u8 {
+        Some(Value::Cons(ConsRef(payload as *mut crate::mem::value::Cell)))
+    } else if tag == TlTag::SexprPath as u8 {
+        Some(Value::Path(PathId(payload as u32)))
     } else {
-        Value::Cons(ConsRef(p as *mut crate::mem::value::Cell))
+        None
     }
+}
+
+/// [`value_to_tag_payload`], packed into a [`TlValue`].
+#[cfg(feature = "compile")]
+fn value_to_tlvalue(v: Value) -> TlValue {
+    let (tag, bits) = value_to_tag_payload(v);
+    TlValue { tag: tag as u8, payload: TlPayload { i64_: bits } }
+}
+
+/// [`tag_payload_to_value`], aborting instead of returning `None` — used by
+/// the runtime shims below, which have no `Result`-shaped slot to report a
+/// corrupted tag through (mirrors `value_to_ptr_or_abort`'s old role).
+#[cfg(feature = "compile")]
+fn value_from_tag_payload_or_abort(tag: i64, payload: i64) -> Value {
+    tag_payload_to_value(tag as u8, payload).unwrap_or_else(|| std::process::abort())
 }
 
 /// The unified calling-convention value (Phase 2,
@@ -1000,22 +1050,15 @@ impl TlValue {
         TlValue { tag: TlTag::F64 as u8, payload: TlPayload { f64_: n } }
     }
 
-    /// `Sexpr` (Phase 3): `p` is `Value::Empty`'s/`Value::Cons`'s
-    /// representation per [`value_to_ptr`] — null for `Nil`, a `ConsRef`'s
-    /// raw cell pointer otherwise. Other `Value` variants (`Int`/`Float`/
-    /// `Char`/`Bool`/`Symbol`/`Str`/`Path`) aren't bridged yet (see
-    /// `crate::compile::ast_bridge`'s doc comment).
-    fn from_ptr(p: *mut u8) -> TlValue {
-        TlValue { tag: TlTag::Ptr as u8, payload: TlPayload { ptr: p } }
-    }
-
     fn zeroed() -> TlValue {
         TlValue { tag: 0, payload: TlPayload { i64_: 0 } }
     }
 }
 
 /// [`TlValue`]'s payload — `i64_`/`f64_`/`bool_`/`char_` cover `i64`/`f64`/
-/// `bool`/`char` (Phase 2), `ptr` covers `Sexpr` (Phase 3, [`TlValue::from_ptr`]).
+/// `bool`/`char` (Phase 2); `Sexpr` (Phase 5) always rides in `i64_` too (every
+/// `SexprXxx` tag's payload — pointer, `u32` id, or scalar bits — fits an
+/// `i64`, see [`value_to_tag_payload`]), so there is no separate `ptr` field.
 #[cfg(feature = "compile")]
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -1024,10 +1067,16 @@ union TlPayload {
     f64_: f64,
     bool_: bool,
     char_: u32,
-    ptr: *mut u8,
 }
 
-/// [`TlValue::tag`]'s possible values.
+/// [`TlValue::tag`]'s possible values. `I64`/`F64`/`Bool`/`Char` (Phase 2) tag
+/// a function's *own* statically-typed argument/return slot; the `SexprXxx`
+/// tags (Phase 5, replacing Phase 3's single pointer-shaped `Ptr` tag) instead
+/// tag the *runtime* variant of a `Sexpr`-typed value — `param-is-sexpr`/
+/// `ret-is-sexpr` already convey "this slot's static type is `Sexpr`"
+/// out-of-band, so reusing the same tag byte to carry the dynamic variant
+/// inside it (rather than introducing a second, parallel tag) needs no extra
+/// bookkeeping anywhere `TlValue` already flows.
 #[cfg(feature = "compile")]
 #[repr(u8)]
 #[allow(dead_code)]
@@ -1036,7 +1085,15 @@ enum TlTag {
     F64 = 1,
     Bool = 2,
     Char = 3,
-    Ptr = 4,
+    SexprNil = 4,
+    SexprInt = 5,
+    SexprFloat = 6,
+    SexprChar = 7,
+    SexprBool = 8,
+    SexprSymbol = 9,
+    SexprStr = 10,
+    SexprCons = 11,
+    SexprPath = 12,
 }
 
 /// A function JIT-compiled by `compile`, called through the unified
@@ -1186,16 +1243,30 @@ fn llvm_const_char(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::LlvmValue(llvm_context().i32_type().const_int(c as u64, false).into()))
 }
 
-/// `(llvm-const-nil) -> LlvmValue`: a null pointer constant — `Sexpr`'s
-/// `Nil` literal (Phase 3, `AstExpr::ANil`/`compile-value`). [`value_to_ptr`]
-/// encodes `Value::Empty` as null, so this is the one `Sexpr` literal
-/// `compile-value` ever needs to construct directly (`Value::Cons` only ever
-/// comes from `cons`/parameters/`car`/`cdr` — see `crate::compile::ast_bridge`).
+/// `(llvm-const-nil) -> LlvmValue`: the constant `{tag: SexprNil, payload: 0}`
+/// struct — `Sexpr`'s `Nil` literal (`AstExpr::ANil`/`compile-value`). Phase 5
+/// widened every in-flight `Sexpr` value from a bare pointer (Phase 3: null
+/// for `Nil`, a cons cell address otherwise) to this tagged struct (the same
+/// shape as the ABI's own `TlValue`, see [`tlvalue_llvm_type`]) so a `Sexpr`
+/// can carry any [`Value`] variant, not just `Nil`/`Cons` — see
+/// [`value_to_tag_payload`].
 #[cfg(feature = "compile")]
 fn llvm_const_nil(_args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
-    let ptr_ty = llvm_context().ptr_type(inkwell::AddressSpace::default());
-    Ok(RtValue::LlvmValue(ptr_ty.const_null().into()))
+    Ok(RtValue::LlvmValue(const_tlvalue_struct(TlTag::SexprNil, 0).into()))
+}
+
+/// Builds a *constant* `TlValue`-shaped struct (no builder/insertion point
+/// needed, unlike [`pack_tlvalue`] — a plain LLVM constant, unlike a phi or
+/// any other runtime-computed struct value) with a fixed, Rust-compile-time-
+/// known `tag` — used by [`llvm_const_nil`] (and, once other `Sexpr` literals
+/// are bridged, any other constant `Sexpr` leaf).
+#[cfg(feature = "compile")]
+fn const_tlvalue_struct(tag: TlTag, payload: i64) -> inkwell::values::StructValue<'static> {
+    let i64_ty = llvm_context().i64_type();
+    let tag_v = i64_ty.const_int(tag as u64, false);
+    let payload_v = i64_ty.const_int(payload as u64, true);
+    tlvalue_llvm_type().const_named_struct(&[tag_v.into(), payload_v.into()])
 }
 
 #[cfg(feature = "compile")]
@@ -1261,17 +1332,42 @@ fn expect_llvm_float_value(v: &RtValue) -> Result<inkwell::values::FloatValue<'s
     }
 }
 
-/// Narrows an `LlvmValue` to its `PointerValue` case — Phase 3's `Sexpr`
-/// counterpart to [`expect_llvm_int_value`]/[`expect_llvm_float_value`]
-/// (`Sexpr` is represented as a plain pointer throughout IR construction —
-/// null for `Nil`, a cons cell address otherwise — never bit-cast or
-/// truncated like `f64`/`bool`/`char`).
+/// Narrows an `LlvmValue` to its `StructValue` case — `Sexpr`'s counterpart to
+/// [`expect_llvm_int_value`]/[`expect_llvm_float_value`] (Phase 5: every
+/// in-flight `Sexpr` value is a `{tag, payload}` struct — the same shape as
+/// the ABI's own `TlValue`, see [`tlvalue_llvm_type`] — not a bare pointer
+/// like Phase 3's `Nil`/`Cons`-only representation; no other `AstExpr` shape
+/// this compiler builds ever produces a `StructValue`, so this is
+/// unambiguously "is this a `Sexpr`").
 #[cfg(feature = "compile")]
-fn expect_llvm_pointer_value(v: &RtValue) -> Result<inkwell::values::PointerValue<'static>, EvalError> {
+fn expect_llvm_struct_value(v: &RtValue) -> Result<inkwell::values::StructValue<'static>, EvalError> {
     match expect_llvm_basic_value(v)? {
-        inkwell::values::BasicValueEnum::PointerValue(v) => Ok(*v),
-        other => Err(EvalError::Internal(format!("expected a pointer LlvmValue, got {:?}", other))),
+        inkwell::values::BasicValueEnum::StructValue(v) => Ok(*v),
+        other => Err(EvalError::Internal(format!("expected a struct LlvmValue, got {:?}", other))),
     }
+}
+
+/// Splits an in-flight `Sexpr` struct value into its `(tag, payload)` fields
+/// — shared by every `Sexpr` runtime-shim call site (`build-cons`/`build-car`/
+/// `build-cdr`/`build-nullp`/`build-consp`/`push-root`/`build-set-car`/
+/// `build-set-cdr`/`build-ret-sexpr`/outgoing `build-call*` arguments), which
+/// all need to hand a `Sexpr`'s *dynamic* variant to a shim or pack it back
+/// into the ABI's own `TlValue` rather than treat it as an opaque pointer.
+/// Does not itself take [`compile_lock`] — callers must already hold it.
+#[cfg(feature = "compile")]
+fn split_tlvalue_struct(
+    builder: &inkwell::builder::Builder<'static>,
+    v: inkwell::values::StructValue<'static>,
+) -> Result<(inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>), EvalError> {
+    let tag = builder
+        .build_extract_value(v, 0, "sexprtag")
+        .map_err(|e| EvalError::Panic(format!("sexpr: {}", e)))?
+        .into_int_value();
+    let payload = builder
+        .build_extract_value(v, 1, "sexprpayload")
+        .map_err(|e| EvalError::Panic(format!("sexpr: {}", e)))?
+        .into_int_value();
+    Ok((tag, payload))
 }
 
 /// `Ok(b)`/`Err(Error(msg))` as an `RtValue::Data`, matching `result_def`'s
@@ -1340,7 +1436,10 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-cons" => Some(llvm_builder_build_cons(args)),
             "build-car" => Some(llvm_builder_build_car(args)),
             "build-cdr" => Some(llvm_builder_build_cdr(args)),
+            "build-set-car" => Some(llvm_builder_build_set_car(args)),
+            "build-set-cdr" => Some(llvm_builder_build_set_cdr(args)),
             "build-nullp" => Some(llvm_builder_build_nullp(args)),
+            "build-consp" => Some(llvm_builder_build_consp(args)),
             "push-root" => Some(llvm_builder_build_push_root(args)),
             "pop-root" => Some(llvm_builder_build_pop_root(args)),
             "current-block" => Some(llvm_builder_current_block(args)),
@@ -1386,14 +1485,14 @@ fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::LlvmFunction(function))
 }
 
-/// Runtime shims (Phase 3) compiled code calls directly for `Sexpr`
-/// operations it can't safely build as inline IR: `cons` may trigger a GC
-/// (`Heap::cons` runs one whenever the free list is empty), so the shim
-/// roots `car`/`cdr` around the call exactly like the interpreter's own
-/// `"cons"` builtin does (`self.sync_roots`-then-`heap.cons` in
-/// [`Interp::eval_builtin`]) before handing the values to [`Heap::cons`].
-/// `car`/`cdr` never allocate, so they need no rooting, but go through the
-/// same shim layer anyway so JIT'd IR never has to know `Cell`'s layout.
+/// Runtime shims compiled code calls directly for `Sexpr` operations it can't
+/// safely build as inline IR: `cons` may trigger a GC (`Heap::cons` runs one
+/// whenever the free list is empty), so the shim roots `car`/`cdr` around the
+/// call exactly like the interpreter's own `"cons"` builtin does
+/// (`self.sync_roots`-then-`heap.cons` in [`Interp::eval_builtin`]) before
+/// handing the values to [`Heap::cons`]. `car`/`cdr`/`set-car`/`set-cdr` never
+/// allocate, so they need no rooting, but go through the same shim layer
+/// anyway so JIT'd IR never has to know `Cell`'s layout.
 /// [`runtime_shim_address`] resolves each by name to its function-item
 /// address (a plain `as usize` cast — no `#[no_mangle]`/dynamic symbol
 /// lookup needed, since the cast happens in the same Rust binary) for
@@ -1402,50 +1501,87 @@ fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// function* (Phase 2f), just pointing at a fixed Rust function instead of
 /// one a `compile` call JIT'd.
 ///
-/// Every Phase 3 `Value` not bridged (`Int`/`Float`/`Char`/`Bool`/`Symbol`/
-/// `Str`/`Path` — see `crate::compile::ast_bridge`'s doc comment) makes
-/// `value_to_ptr` fail; rather than smuggle that error back through a
-/// `*mut u8` return slot (and force every IR call site to branch on it),
-/// these shims abort the process outright — the same "this should be
-/// statically impossible by construction" stance `compile-value`'s fallback
-/// `panic` takes for unsupported `AstExpr` shapes, just enforced at the
-/// runtime-value level instead of the AST level since a `Sexpr` carries no
-/// static guarantee its *contents* stay within the bridged subset.
+/// Phase 5 widened every one of these shims from a bare-pointer calling
+/// convention (Phase 3: only `Nil`/`Cons` representable) to the full `(tag,
+/// payload)` pair every `Value` variant has (see [`value_to_tag_payload`]) —
+/// operands are passed as two `i64`s each rather than one pointer, and a
+/// result (if any) is written through a trailing `out: *mut TlValue` rather
+/// than returned by value, mirroring the unified ABI's own `out` parameter
+/// rather than relying on a 16-byte by-value struct return/argument's ABI
+/// lowering. A tag [`tag_payload_to_value`] doesn't recognize is a corrupted
+/// payload from JIT'd code — there is no `Result`-shaped slot to report that
+/// through here, so [`value_from_tag_payload_or_abort`] aborts the process
+/// outright, the same "this should be statically impossible by construction"
+/// stance `compile-value`'s fallback `panic` takes for unsupported `AstExpr`
+/// shapes.
 #[cfg(feature = "compile")]
-extern "C" fn tl_sexpr_cons(heap: *mut Heap, car: *mut u8, cdr: *mut u8) -> *mut u8 {
-    // SAFETY: `heap` is `Interp::call_compiled`'s fourth ABI parameter,
-    // passed straight from a live `&mut Heap` for the duration of this call.
+extern "C" fn tl_sexpr_cons(heap: *mut Heap, car_tag: i64, car_payload: i64, cdr_tag: i64, cdr_payload: i64, out: *mut TlValue) {
+    // SAFETY: `heap`/`out` are `build-cons`'s IR — `heap` is the unified
+    // ABI's fourth parameter, passed straight from a live `&mut Heap` for the
+    // duration of this call; `out` is a fresh stack slot `build-cons` itself
+    // allocates right before this call and loads right after it returns.
     let heap = unsafe { &mut *heap };
-    let car_v = ptr_to_value(car);
-    let cdr_v = ptr_to_value(cdr);
+    let car_v = value_from_tag_payload_or_abort(car_tag, car_payload);
+    let cdr_v = value_from_tag_payload_or_abort(cdr_tag, cdr_payload);
     heap.push_root(car_v);
     heap.push_root(cdr_v);
     let result = heap.cons(car_v, cdr_v);
     heap.pop_root();
     heap.pop_root();
-    match result {
-        Ok(v) => value_to_ptr_or_abort(v),
+    let tl = match result {
+        Ok(v) => value_to_tlvalue(v),
         Err(_) => std::process::abort(),
+    };
+    unsafe { *out = tl };
+}
+
+#[cfg(feature = "compile")]
+extern "C" fn tl_sexpr_car(heap: *mut Heap, v_tag: i64, v_payload: i64, out: *mut TlValue) {
+    // SAFETY: see [`tl_sexpr_cons`].
+    let heap = unsafe { &*heap };
+    let v = value_from_tag_payload_or_abort(v_tag, v_payload);
+    let tl = match heap.car(v) {
+        Ok(r) => value_to_tlvalue(r),
+        Err(_) => std::process::abort(),
+    };
+    unsafe { *out = tl };
+}
+
+#[cfg(feature = "compile")]
+extern "C" fn tl_sexpr_cdr(heap: *mut Heap, v_tag: i64, v_payload: i64, out: *mut TlValue) {
+    // SAFETY: see [`tl_sexpr_cons`].
+    let heap = unsafe { &*heap };
+    let v = value_from_tag_payload_or_abort(v_tag, v_payload);
+    let tl = match heap.cdr(v) {
+        Ok(r) => value_to_tlvalue(r),
+        Err(_) => std::process::abort(),
+    };
+    unsafe { *out = tl };
+}
+
+/// `(set-car cell val)`/`(set-cdr cell val)`'s compiled-code shims — in-place
+/// mutation of an existing cons cell ([`Heap::set_car`]/[`Heap::set_cdr`]),
+/// never allocating, so (like `car`/`cdr`) no rooting is needed around the
+/// call. No `out` parameter: `set-car`/`set-cdr` return `Unit`.
+#[cfg(feature = "compile")]
+extern "C" fn tl_sexpr_set_car(heap: *mut Heap, cell_tag: i64, cell_payload: i64, val_tag: i64, val_payload: i64) {
+    // SAFETY: see [`tl_sexpr_cons`].
+    let heap = unsafe { &mut *heap };
+    let cell = value_from_tag_payload_or_abort(cell_tag, cell_payload);
+    let val = value_from_tag_payload_or_abort(val_tag, val_payload);
+    if heap.set_car(cell, val).is_err() {
+        std::process::abort();
     }
 }
 
 #[cfg(feature = "compile")]
-extern "C" fn tl_sexpr_car(heap: *mut Heap, v: *mut u8) -> *mut u8 {
+extern "C" fn tl_sexpr_set_cdr(heap: *mut Heap, cell_tag: i64, cell_payload: i64, val_tag: i64, val_payload: i64) {
     // SAFETY: see [`tl_sexpr_cons`].
-    let heap = unsafe { &*heap };
-    match heap.car(ptr_to_value(v)) {
-        Ok(r) => value_to_ptr_or_abort(r),
-        Err(_) => std::process::abort(),
-    }
-}
-
-#[cfg(feature = "compile")]
-extern "C" fn tl_sexpr_cdr(heap: *mut Heap, v: *mut u8) -> *mut u8 {
-    // SAFETY: see [`tl_sexpr_cons`].
-    let heap = unsafe { &*heap };
-    match heap.cdr(ptr_to_value(v)) {
-        Ok(r) => value_to_ptr_or_abort(r),
-        Err(_) => std::process::abort(),
+    let heap = unsafe { &mut *heap };
+    let cell = value_from_tag_payload_or_abort(cell_tag, cell_payload);
+    let val = value_from_tag_payload_or_abort(val_tag, val_payload);
+    if heap.set_cdr(cell, val).is_err() {
+        std::process::abort();
     }
 }
 
@@ -1455,10 +1591,10 @@ extern "C" fn tl_sexpr_cdr(heap: *mut Heap, v: *mut u8) -> *mut u8 {
 /// parameter/`let` binding is pushed on entry to its scope and popped before
 /// every exit, so any `cons` call anywhere in that scope sees it).
 #[cfg(feature = "compile")]
-extern "C" fn tl_heap_push_root(heap: *mut Heap, v: *mut u8) {
+extern "C" fn tl_heap_push_root(heap: *mut Heap, v_tag: i64, v_payload: i64) {
     // SAFETY: see [`tl_sexpr_cons`].
     let heap = unsafe { &mut *heap };
-    heap.push_root(ptr_to_value(v));
+    heap.push_root(value_from_tag_payload_or_abort(v_tag, v_payload));
 }
 
 #[cfg(feature = "compile")]
@@ -1480,26 +1616,21 @@ extern "C" fn tl_panic() {
     std::process::abort();
 }
 
-/// [`value_to_ptr`], aborting instead of returning an error — used by the
-/// runtime shims above, which have no `Result`-shaped slot to report a
-/// bridge-scope violation through (see [`tl_sexpr_cons`]'s doc comment).
-#[cfg(feature = "compile")]
-fn value_to_ptr_or_abort(v: Value) -> *mut u8 {
-    value_to_ptr(v).unwrap_or_else(|_| std::process::abort())
-}
-
 /// Resolves a [`tl_sexpr_cons`]-style runtime shim's address by name, for
 /// `Interp::builtin_llvm_finish_compile`'s `add_global_mapping` pass — the
 /// fallback checked after `self.compiled` (a direct call to another
 /// compiled *typelisp* function) comes up empty, so a bare declaration left
-/// in the module by `build-cons`/`build-car`/`build-cdr`/`push-root`/
-/// `pop-root` resolves to one of these fixed Rust functions instead.
+/// in the module by `build-cons`/`build-car`/`build-cdr`/`build-set-car`/
+/// `build-set-cdr`/`push-root`/`pop-root` resolves to one of these fixed
+/// Rust functions instead.
 #[cfg(feature = "compile")]
 fn runtime_shim_address(name: &str) -> Option<usize> {
     match name {
         "tl_sexpr_cons" => Some(tl_sexpr_cons as usize),
         "tl_sexpr_car" => Some(tl_sexpr_car as usize),
         "tl_sexpr_cdr" => Some(tl_sexpr_cdr as usize),
+        "tl_sexpr_set_car" => Some(tl_sexpr_set_car as usize),
+        "tl_sexpr_set_cdr" => Some(tl_sexpr_set_cdr as usize),
         "tl_heap_push_root" => Some(tl_heap_push_root as usize),
         "tl_heap_pop_root" => Some(tl_heap_pop_root as usize),
         "tl_panic" => Some(tl_panic as usize),
@@ -1528,26 +1659,46 @@ fn llvm_module_get_or_declare_function(args: &[RtValue]) -> Result<RtValue, Eval
     Ok(RtValue::LlvmFunction(function))
 }
 
-/// `ptr (ptr heap, ptr a, ptr b)` — [`tl_sexpr_cons`]'s LLVM-level type.
+/// `void (ptr heap, i64 car_tag, i64 car_payload, i64 cdr_tag, i64
+/// cdr_payload, ptr out)` — [`tl_sexpr_cons`]'s LLVM-level type.
 #[cfg(feature = "compile")]
-fn runtime_binary_ptr_fn_type() -> inkwell::types::FunctionType<'static> {
+fn runtime_cons_fn_type() -> inkwell::types::FunctionType<'static> {
     let ptr_ty = llvm_context().ptr_type(inkwell::AddressSpace::default());
-    ptr_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), ptr_ty.into()], false)
+    let i64_ty = llvm_context().i64_type();
+    llvm_context().void_type().fn_type(
+        &[ptr_ty.into(), i64_ty.into(), i64_ty.into(), i64_ty.into(), i64_ty.into(), ptr_ty.into()],
+        false,
+    )
 }
 
-/// `ptr (ptr heap, ptr v)` — [`tl_sexpr_car`]/[`tl_sexpr_cdr`]'s LLVM-level
-/// type, and (modulo the `void` return) [`tl_heap_push_root`]'s.
+/// `void (ptr heap, i64 tag, i64 payload, ptr out)` —
+/// [`tl_sexpr_car`]/[`tl_sexpr_cdr`]'s LLVM-level type.
 #[cfg(feature = "compile")]
-fn runtime_unary_ptr_fn_type() -> inkwell::types::FunctionType<'static> {
+fn runtime_unary_sexpr_fn_type() -> inkwell::types::FunctionType<'static> {
     let ptr_ty = llvm_context().ptr_type(inkwell::AddressSpace::default());
-    ptr_ty.fn_type(&[ptr_ty.into(), ptr_ty.into()], false)
+    let i64_ty = llvm_context().i64_type();
+    llvm_context().void_type().fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into(), ptr_ty.into()], false)
 }
 
-/// `void (ptr heap, ptr v)` — [`tl_heap_push_root`]'s LLVM-level type.
+/// `void (ptr heap, i64 cell_tag, i64 cell_payload, i64 val_tag, i64
+/// val_payload)` — [`tl_sexpr_set_car`]/[`tl_sexpr_set_cdr`]'s LLVM-level
+/// type: the same four scalar operands as [`runtime_cons_fn_type`], but with
+/// no trailing `out` (`set-car`/`set-cdr` return `Unit`).
+#[cfg(feature = "compile")]
+fn runtime_set_car_cdr_fn_type() -> inkwell::types::FunctionType<'static> {
+    let ptr_ty = llvm_context().ptr_type(inkwell::AddressSpace::default());
+    let i64_ty = llvm_context().i64_type();
+    llvm_context()
+        .void_type()
+        .fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into(), i64_ty.into(), i64_ty.into()], false)
+}
+
+/// `void (ptr heap, i64 tag, i64 payload)` — [`tl_heap_push_root`]'s LLVM-level type.
 #[cfg(feature = "compile")]
 fn runtime_push_root_fn_type() -> inkwell::types::FunctionType<'static> {
     let ptr_ty = llvm_context().ptr_type(inkwell::AddressSpace::default());
-    llvm_context().void_type().fn_type(&[ptr_ty.into(), ptr_ty.into()], false)
+    let i64_ty = llvm_context().i64_type();
+    llvm_context().void_type().fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into()], false)
 }
 
 /// `void (ptr heap)` — [`tl_heap_pop_root`]'s LLVM-level type.
@@ -1600,48 +1751,66 @@ fn heap_param_of(f: &inkwell::values::FunctionValue<'static>) -> Result<inkwell:
 /// the shim and read the enclosing function's `heap` parameter — see
 /// [`get_or_declare_runtime_fn`]/[`heap_param_of`]). The shim itself handles
 /// rooting `car`/`cdr` around the underlying `Heap::cons` call (which may
-/// trigger a GC) — `build-cons` itself doesn't need to.
+/// trigger a GC) — `build-cons` itself doesn't need to. `car`/`cdr` are split
+/// into their own `(tag, payload)` pairs ([`split_tlvalue_struct`]) before the
+/// call (Phase 5: the shim takes four scalars, not two structs, to avoid
+/// relying on by-value-struct call-argument ABI lowering), and the result is
+/// written through a stack `out` slot, then loaded back as the in-flight
+/// `Sexpr` struct (the same shape [`llvm_builder_build_call_result`] already
+/// uses for a direct call's own `out`).
 #[cfg(feature = "compile")]
 fn llvm_builder_build_cons(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
     let b = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
     let f = expect_llvm_function(&args[2])?;
-    let car = expect_llvm_pointer_value(&args[3])?;
-    let cdr = expect_llvm_pointer_value(&args[4])?;
+    let car = expect_llvm_struct_value(&args[3])?;
+    let cdr = expect_llvm_struct_value(&args[4])?;
     let builder = b.0.borrow();
+    let (car_tag, car_payload) = split_tlvalue_struct(&builder, car)?;
+    let (cdr_tag, cdr_payload) = split_tlvalue_struct(&builder, cdr)?;
     let heap_param = heap_param_of(f)?;
-    let shim = get_or_declare_runtime_fn(&module.borrow(), "tl_sexpr_cons", runtime_binary_ptr_fn_type());
-    let call = builder
-        .build_call(shim, &[heap_param.into(), car.into(), cdr.into()], "cons")
+    let shim = get_or_declare_runtime_fn(&module.borrow(), "tl_sexpr_cons", runtime_cons_fn_type());
+    let tlvalue_ty = tlvalue_llvm_type();
+    let out_alloca =
+        builder.build_alloca(tlvalue_ty, "consout").map_err(|e| EvalError::Panic(format!("build-cons: {}", e)))?;
+    builder
+        .build_call(
+            shim,
+            &[heap_param.into(), car_tag.into(), car_payload.into(), cdr_tag.into(), cdr_payload.into(), out_alloca.into()],
+            "cons",
+        )
         .map_err(|e| EvalError::Panic(format!("build-cons: {}", e)))?;
-    let result = call
-        .try_as_basic_value()
-        .basic()
-        .ok_or_else(|| EvalError::Internal("build-cons: shim returned no value".into()))?;
+    let result = builder
+        .build_load(tlvalue_ty, out_alloca, "consresult")
+        .map_err(|e| EvalError::Panic(format!("build-cons: {}", e)))?;
     Ok(RtValue::LlvmValue(result))
 }
 
 /// Shared by [`llvm_builder_build_car`]/[`llvm_builder_build_cdr`]: emits a
 /// direct `call` to `shim_name` (`tl_sexpr_car`/`tl_sexpr_cdr`), which never
 /// triggers a GC (`Heap::car`/`Heap::cdr` only read), so no rooting is
-/// needed around the call.
+/// needed around the call. See [`llvm_builder_build_cons`]'s doc comment for
+/// why the operand is split and the result goes through a stack `out` slot.
 #[cfg(feature = "compile")]
 fn llvm_builder_build_unary_sexpr_op(args: &[RtValue], shim_name: &str) -> Result<RtValue, EvalError> {
     let b = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
     let f = expect_llvm_function(&args[2])?;
-    let v = expect_llvm_pointer_value(&args[3])?;
+    let v = expect_llvm_struct_value(&args[3])?;
     let builder = b.0.borrow();
+    let (tag, payload) = split_tlvalue_struct(&builder, v)?;
     let heap_param = heap_param_of(f)?;
-    let shim = get_or_declare_runtime_fn(&module.borrow(), shim_name, runtime_unary_ptr_fn_type());
-    let call = builder
-        .build_call(shim, &[heap_param.into(), v.into()], shim_name)
+    let shim = get_or_declare_runtime_fn(&module.borrow(), shim_name, runtime_unary_sexpr_fn_type());
+    let tlvalue_ty = tlvalue_llvm_type();
+    let out_alloca =
+        builder.build_alloca(tlvalue_ty, "sexprout").map_err(|e| EvalError::Panic(format!("{}: {}", shim_name, e)))?;
+    builder
+        .build_call(shim, &[heap_param.into(), tag.into(), payload.into(), out_alloca.into()], shim_name)
         .map_err(|e| EvalError::Panic(format!("{}: {}", shim_name, e)))?;
-    let result = call
-        .try_as_basic_value()
-        .basic()
-        .ok_or_else(|| EvalError::Internal(format!("{}: shim returned no value", shim_name)))?;
+    let result = builder
+        .build_load(tlvalue_ty, out_alloca, "sexprresult")
+        .map_err(|e| EvalError::Panic(format!("{}: {}", shim_name, e)))?;
     Ok(RtValue::LlvmValue(result))
 }
 
@@ -1659,53 +1828,121 @@ fn llvm_builder_build_cdr(args: &[RtValue]) -> Result<RtValue, EvalError> {
     llvm_builder_build_unary_sexpr_op(args, "tl_sexpr_cdr")
 }
 
-/// `(build-nullp b v) -> LlvmValue`: whether `v` (a `Sexpr`) is `Nil` —
-/// a plain pointer-null comparison (`build_is_null`), no runtime shim or
-/// `heap`/`module` needed since it never touches the heap at all.
+/// Shared by [`llvm_builder_build_set_car`]/[`llvm_builder_build_set_cdr`]:
+/// emits a direct `call` to `shim_name` (`tl_sexpr_set_car`/`tl_sexpr_set_cdr`)
+/// — in-place mutation, never allocating, so no rooting is needed, and no
+/// result to load back (`set-car`/`set-cdr` return `Unit`).
 #[cfg(feature = "compile")]
-fn llvm_builder_build_nullp(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let _guard = compile_lock().lock().unwrap();
+fn llvm_builder_build_set_car_cdr(args: &[RtValue], shim_name: &str) -> Result<RtValue, EvalError> {
     let b = expect_llvm_builder(&args[0])?;
-    let v = expect_llvm_pointer_value(&args[1])?;
+    let module = expect_llvm_module(&args[1])?;
+    let f = expect_llvm_function(&args[2])?;
+    let cell = expect_llvm_struct_value(&args[3])?;
+    let val = expect_llvm_struct_value(&args[4])?;
     let builder = b.0.borrow();
+    let (cell_tag, cell_payload) = split_tlvalue_struct(&builder, cell)?;
+    let (val_tag, val_payload) = split_tlvalue_struct(&builder, val)?;
+    let heap_param = heap_param_of(f)?;
+    let shim = get_or_declare_runtime_fn(&module.borrow(), shim_name, runtime_set_car_cdr_fn_type());
+    builder
+        .build_call(
+            shim,
+            &[heap_param.into(), cell_tag.into(), cell_payload.into(), val_tag.into(), val_payload.into()],
+            shim_name,
+        )
+        .map_err(|e| EvalError::Panic(format!("{}: {}", shim_name, e)))?;
+    Ok(RtValue::Unit)
+}
+
+/// `(build-set-car b module f cell val) -> Unit`: see [`llvm_builder_build_set_car_cdr`].
+#[cfg(feature = "compile")]
+fn llvm_builder_build_set_car(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    llvm_builder_build_set_car_cdr(args, "tl_sexpr_set_car")
+}
+
+/// `(build-set-cdr b module f cell val) -> Unit`: see [`llvm_builder_build_set_car_cdr`].
+#[cfg(feature = "compile")]
+fn llvm_builder_build_set_cdr(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    llvm_builder_build_set_car_cdr(args, "tl_sexpr_set_cdr")
+}
+
+/// Shared by [`llvm_builder_build_nullp`]/[`llvm_builder_build_consp`]:
+/// whether `v` (a `Sexpr`)'s own dynamic tag equals `want` — a plain integer
+/// comparison against the tag field extracted from `v`'s in-flight struct
+/// (Phase 5; Phase 3's `build-nullp` instead compared the whole value to a
+/// null pointer, which stopped being a valid "is this `Nil`" test once
+/// `Sexpr` could carry variants — e.g. `Int(0)` — whose payload is zero but
+/// whose tag isn't `SexprNil`).
+#[cfg(feature = "compile")]
+fn llvm_builder_build_tag_eq(args: &[RtValue], want: TlTag) -> Result<RtValue, EvalError> {
+    let b = expect_llvm_builder(&args[0])?;
+    let v = expect_llvm_struct_value(&args[1])?;
+    let builder = b.0.borrow();
+    let tag = builder
+        .build_extract_value(v, 0, "sexprtag")
+        .map_err(|e| EvalError::Panic(format!("build-tag-eq: {}", e)))?
+        .into_int_value();
     let result = builder
-        .build_is_null(v, "nullp")
-        .map_err(|e| EvalError::Panic(format!("build-nullp: {}", e)))?;
+        .build_int_compare(inkwell::IntPredicate::EQ, tag, const_tag(want), "tageq")
+        .map_err(|e| EvalError::Panic(format!("build-tag-eq: {}", e)))?;
     Ok(RtValue::LlvmValue(result.into()))
 }
 
-/// `(is-sexpr-value v) -> bool`: whether `v`'s actual LLVM kind is a pointer
-/// — `Sexpr` values are the only `AstExpr` shape `compile-value` ever
-/// produces as a `PointerValue` (Phase 3), so this lets the typelisp-written
-/// `compile`'s rooting discipline (`crate::compile::compiler_source`'s doc
-/// comment) tell which entries of a `Vector<LlvmValue>` need
-/// `push-root`/`pop-root` without `AstExpr` itself carrying per-node type
-/// tags — the same "ask the value its own kind" approach `build-op` uses for
-/// int-vs-float dispatch.
+/// `(build-nullp b v) -> LlvmValue`: whether `v` (a `Sexpr`) is `Nil`.
+#[cfg(feature = "compile")]
+fn llvm_builder_build_nullp(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    llvm_builder_build_tag_eq(args, TlTag::SexprNil)
+}
+
+/// `(build-consp b v) -> LlvmValue`: whether `v` (a `Sexpr`) is a `Cons` —
+/// `consp`'s compiled counterpart to `null`'s [`llvm_builder_build_nullp`]
+/// (`crate::prelude`'s `(defun consp ((s Sexpr)) bool (match s ((Cons _ _)
+/// true) (_ false)))`, bridged directly onto this primitive by name, the same
+/// way `null` is — see `crate::compile::ast_bridge`).
+#[cfg(feature = "compile")]
+fn llvm_builder_build_consp(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    llvm_builder_build_tag_eq(args, TlTag::SexprCons)
+}
+
+/// `(is-sexpr-value v) -> bool`: whether `v`'s actual LLVM kind is a struct —
+/// `Sexpr` values are the only `AstExpr` shape `compile-value` ever produces
+/// as a `StructValue` (Phase 5: every in-flight `Sexpr` is a `{tag, payload}`
+/// struct, not a bare pointer like Phase 3's `Nil`/`Cons`-only
+/// representation), so this lets the typelisp-written `compile`'s rooting
+/// discipline (`crate::compile::compiler_source`'s doc comment) tell which
+/// entries of a `Vector<LlvmValue>` need `push-root`/`pop-root` without
+/// `AstExpr` itself carrying per-node type tags — the same "ask the value its
+/// own kind" approach `build-op` uses for int-vs-float dispatch.
 #[cfg(feature = "compile")]
 fn llvm_value_is_sexpr(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
     let v = expect_llvm_basic_value(&args[0])?;
-    Ok(RtValue::Bool(matches!(v, inkwell::values::BasicValueEnum::PointerValue(_))))
+    Ok(RtValue::Bool(matches!(v, inkwell::values::BasicValueEnum::StructValue(_))))
 }
 
 /// `(push-root b module f v) -> Unit`: emits a direct `call` to the
 /// [`tl_heap_push_root`] runtime shim — see
 /// `crate::compile::compiler_source`'s rooting discipline for when/why
 /// `compile-value`/`compile-tail` emit this around every `Sexpr`
-/// parameter/`let` binding's scope.
+/// parameter/`let` binding's scope. `v` is split into its own `(tag,
+/// payload)` pair first — see [`llvm_builder_build_cons`]'s doc comment.
 #[cfg(feature = "compile")]
 fn llvm_builder_build_push_root(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
     let b = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
     let f = expect_llvm_function(&args[2])?;
-    let v = expect_llvm_pointer_value(&args[3])?;
+    let v = expect_llvm_struct_value(&args[3])?;
     let builder = b.0.borrow();
+    let (tag, payload) = split_tlvalue_struct(&builder, v)?;
     let heap_param = heap_param_of(f)?;
     let shim = get_or_declare_runtime_fn(&module.borrow(), "tl_heap_push_root", runtime_push_root_fn_type());
     builder
-        .build_call(shim, &[heap_param.into(), v.into()], "pushroot")
+        .build_call(shim, &[heap_param.into(), tag.into(), payload.into()], "pushroot")
         .map_err(|e| EvalError::Panic(format!("push-root: {}", e)))?;
     Ok(RtValue::Unit)
 }
@@ -1761,20 +1998,22 @@ fn llvm_builder_position_at_end(args: &[RtValue]) -> Result<RtValue, EvalError> 
     Ok(RtValue::Unit)
 }
 
-/// Shared by [`llvm_builder_load_arg`]/[`llvm_builder_load_arg_bool`]: reads
-/// logical argument `i` out of `f`'s `args` parameter (the unified ABI's
-/// first LLVM-level parameter, a pointer to a contiguous array of
-/// `TlValue`s — see [`TlValue`]/[`tlvalue_llvm_type`]) — indexes to the
-/// `i`-th element, loads the whole struct, and extracts its raw `i64`
-/// payload field (always `i64`-width regardless of the argument's logical
-/// type — `bool` is narrowed by the caller, see [`llvm_builder_load_arg_bool`]).
-/// Does not itself take [`compile_lock`] — callers must already hold it.
+/// Shared by every `load-arg*` builtin: reads logical argument `i` out of
+/// `f`'s `args` parameter (the unified ABI's first LLVM-level parameter, a
+/// pointer to a contiguous array of `TlValue`s — see [`TlValue`]/
+/// [`tlvalue_llvm_type`]) — indexes to the `i`-th element and loads the whole
+/// struct. [`load_arg_payload`] additionally extracts just the raw `i64`
+/// payload field, for `load-arg`/`-bool`/`-char`/`-f64`; `load-arg-sexpr`
+/// (Phase 5) instead keeps the whole struct (a `Sexpr`'s in-flight
+/// representation *is* its `(tag, payload)` pair — see
+/// [`llvm_builder_load_arg_sexpr`]). Does not itself take [`compile_lock`] —
+/// callers must already hold it.
 #[cfg(feature = "compile")]
-fn load_arg_payload(
+fn load_arg_struct(
     builder: &inkwell::builder::Builder<'static>,
     f: &inkwell::values::FunctionValue<'static>,
     i: i64,
-) -> Result<inkwell::values::IntValue<'static>, EvalError> {
+) -> Result<inkwell::values::StructValue<'static>, EvalError> {
     let tlvalue_ty = tlvalue_llvm_type();
     let args_ptr = f
         .get_nth_param(0)
@@ -1790,10 +2029,23 @@ fn load_arg_payload(
             .build_gep(tlvalue_ty, args_ptr, &[idx], "argptr")
             .map_err(|e| EvalError::Panic(format!("load-arg: {}", e)))?
     };
-    let loaded = builder
+    builder
         .build_load(tlvalue_ty, elem_ptr, "argstruct")
-        .map_err(|e| EvalError::Panic(format!("load-arg: {}", e)))?
-        .into_struct_value();
+        .map_err(|e| EvalError::Panic(format!("load-arg: {}", e)))
+        .map(|v| v.into_struct_value())
+}
+
+/// [`load_arg_struct`], narrowed to just its raw `i64` payload field (always
+/// `i64`-width regardless of the argument's logical type — `bool` is
+/// narrowed further by the caller, see [`llvm_builder_load_arg_bool`]). Does
+/// not itself take [`compile_lock`] — callers must already hold it.
+#[cfg(feature = "compile")]
+fn load_arg_payload(
+    builder: &inkwell::builder::Builder<'static>,
+    f: &inkwell::values::FunctionValue<'static>,
+    i: i64,
+) -> Result<inkwell::values::IntValue<'static>, EvalError> {
+    let loaded = load_arg_struct(builder, f, i)?;
     builder
         .build_extract_value(loaded, 1, "payload")
         .map_err(|e| EvalError::Panic(format!("load-arg: {}", e)))
@@ -1850,12 +2102,16 @@ fn llvm_builder_load_arg_char(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::LlvmValue(narrowed.into()))
 }
 
-/// `(load-arg-sexpr b f i) -> LlvmValue`: logical argument `i`, reinterpreted
-/// (`build_int_to_ptr`) from the raw `i64` payload to a pointer — Phase 3's
-/// `Sexpr`-parameter support, the counterpart to [`llvm_builder_load_arg`].
-/// Like `f64`'s bit-cast, this is a reinterpretation of the same bits
-/// (`TlValue::from_ptr`/[`value_to_ptr`] write the pointer's raw bytes into
-/// the `i64_` slot), not a numeric conversion.
+/// `(load-arg-sexpr b f i) -> LlvmValue`: logical argument `i`, kept as the
+/// *whole* loaded `TlValue` struct — Phase 5's `Sexpr`-parameter support, the
+/// counterpart to [`llvm_builder_load_arg`]. Unlike `bool`/`f64`/`char`
+/// (which narrow/reinterpret just the payload field, their own static type
+/// already fixing what the tag *would* say), a `Sexpr` argument's dynamic
+/// variant is only known at runtime — `Interp::to_tlvalue_arg` already wrote
+/// the right `SexprXxx` tag alongside the payload (see
+/// [`value_to_tag_payload`]), so this simply keeps both fields together,
+/// exactly as `load-arg-sexpr`'s callers (`build-cons`/`build-car`/
+/// `build-nullp`/etc. via [`split_tlvalue_struct`]) expect.
 #[cfg(feature = "compile")]
 fn llvm_builder_load_arg_sexpr(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
@@ -1863,12 +2119,8 @@ fn llvm_builder_load_arg_sexpr(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let f = expect_llvm_function(&args[1])?;
     let i = rt_i64(&args[2])?;
     let builder = b.0.borrow();
-    let payload = load_arg_payload(&builder, f, i)?;
-    let ptr_ty = llvm_context().ptr_type(inkwell::AddressSpace::default());
-    let ptr = builder
-        .build_int_to_ptr(payload, ptr_ty, "argsexpr")
-        .map_err(|e| EvalError::Panic(format!("load-arg-sexpr: {}", e)))?;
-    Ok(RtValue::LlvmValue(ptr.into()))
+    let loaded = load_arg_struct(&builder, f, i)?;
+    Ok(RtValue::LlvmValue(loaded.into()))
 }
 
 /// `(load-arg-f64 b f i) -> LlvmValue`: logical argument `i`, reinterpreted
@@ -2111,22 +2363,35 @@ fn llvm_builder_build_panic(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Unit)
 }
 
+/// A constant `IntValue` holding one of [`TlTag`]'s Rust-compile-time-known
+/// values — used wherever the tag is fixed by which builtin is being called
+/// (`build-ret`/`-bool`/`-f64`/`-char`, the non-`Sexpr` arms of
+/// [`tlvalue_tag_and_payload`]), as opposed to a `Sexpr`'s own dynamic tag
+/// (read out of its in-flight struct via [`split_tlvalue_struct`] instead).
+#[cfg(feature = "compile")]
+fn const_tag(tag: TlTag) -> inkwell::values::IntValue<'static> {
+    llvm_context().i64_type().const_int(tag as u64, false)
+}
+
 /// Packs `tag`/`payload` into a `TlValue` struct value — shared by
 /// [`build_ret_tlvalue`] (returning it through a function's `out` parameter)
 /// and [`llvm_builder_build_call_payload`] (Phase 2f, writing one into a
-/// stack-allocated outgoing argument array). Does not itself take
-/// [`compile_lock`] — callers must already hold it.
+/// stack-allocated outgoing argument array). `tag` is itself an `IntValue`
+/// (Phase 5) rather than a Rust-level [`TlTag`] — a `Sexpr` argument/return's
+/// tag is only known at JIT'd-code runtime (its own struct's field 0, via
+/// [`split_tlvalue_struct`]), unlike `i64`/`bool`/`f64`/`char`'s fixed
+/// [`const_tag`]. Does not itself take [`compile_lock`] — callers must
+/// already hold it.
 #[cfg(feature = "compile")]
 fn pack_tlvalue(
     builder: &inkwell::builder::Builder<'static>,
-    tag: TlTag,
+    tag: inkwell::values::IntValue<'static>,
     payload: inkwell::values::IntValue<'static>,
 ) -> Result<inkwell::values::StructValue<'static>, EvalError> {
     let tlvalue_ty = tlvalue_llvm_type();
-    let tag_v = llvm_context().i64_type().const_int(tag as u64, false);
     let packed = tlvalue_ty.get_undef();
     let packed = builder
-        .build_insert_value(packed, tag_v, 0, "tagged")
+        .build_insert_value(packed, tag, 0, "tagged")
         .map_err(|e| EvalError::Panic(format!("build-tlvalue: {}", e)))?;
     let packed = builder
         .build_insert_value(packed, payload, 1, "withpayload")
@@ -2143,7 +2408,7 @@ fn pack_tlvalue(
 fn build_ret_tlvalue(
     builder: &inkwell::builder::Builder<'static>,
     out_ptr: inkwell::values::PointerValue<'static>,
-    tag: TlTag,
+    tag: inkwell::values::IntValue<'static>,
     payload: inkwell::values::IntValue<'static>,
 ) -> Result<RtValue, EvalError> {
     let packed = pack_tlvalue(builder, tag, payload)?;
@@ -2157,39 +2422,37 @@ fn build_ret_tlvalue(
         .map_err(|e| EvalError::Panic(format!("build-ret: {}", e)))
 }
 
-/// Picks `(TlTag, raw i64 bits)` for one outgoing call argument from its
-/// actual LLVM value kind (Phase 2f — `AstExpr` carries no per-argument type
-/// tag, so, like [`llvm_builder_build_op`], this inspects the value itself):
-/// an `i1` widens to `TlTag::Bool`, any other-width `IntValue` is `TlTag::I64`
-/// as-is, and a `FloatValue` bit-casts to `TlTag::F64` (matching
-/// [`llvm_builder_build_ret_f64`]'s reinterpret-don't-convert convention).
-/// Does not itself take [`compile_lock`] — callers must already hold it.
+/// Picks `(tag, raw i64 bits)` for one outgoing call argument from its actual
+/// LLVM value kind (Phase 2f — `AstExpr` carries no per-argument type tag, so,
+/// like [`llvm_builder_build_op`], this inspects the value itself): an `i1`
+/// widens to `TlTag::Bool`, any other-width `IntValue` is `TlTag::I64` as-is,
+/// a `FloatValue` bit-casts to `TlTag::F64` (matching
+/// [`llvm_builder_build_ret_f64`]'s reinterpret-don't-convert convention), and
+/// a `StructValue` (Phase 5: a `Sexpr` in-flight value) is already a `(tag,
+/// payload)` pair — split it apart ([`split_tlvalue_struct`]) and forward both
+/// verbatim, no re-derivation needed. Does not itself take [`compile_lock`] —
+/// callers must already hold it.
 #[cfg(feature = "compile")]
 fn tlvalue_tag_and_payload(
     builder: &inkwell::builder::Builder<'static>,
     v: inkwell::values::BasicValueEnum<'static>,
-) -> Result<(TlTag, inkwell::values::IntValue<'static>), EvalError> {
+) -> Result<(inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>), EvalError> {
     match v {
         inkwell::values::BasicValueEnum::IntValue(iv) if iv.get_type().get_bit_width() == 1 => {
             let widened = builder
                 .build_int_z_extend(iv, llvm_context().i64_type(), "argbool")
                 .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?;
-            Ok((TlTag::Bool, widened))
+            Ok((const_tag(TlTag::Bool), widened))
         }
-        inkwell::values::BasicValueEnum::IntValue(iv) => Ok((TlTag::I64, iv)),
+        inkwell::values::BasicValueEnum::IntValue(iv) => Ok((const_tag(TlTag::I64), iv)),
         inkwell::values::BasicValueEnum::FloatValue(fv) => {
             let bits = builder
                 .build_bit_cast(fv, llvm_context().i64_type(), "argf64")
                 .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?
                 .into_int_value();
-            Ok((TlTag::F64, bits))
+            Ok((const_tag(TlTag::F64), bits))
         }
-        inkwell::values::BasicValueEnum::PointerValue(pv) => {
-            let bits = builder
-                .build_ptr_to_int(pv, llvm_context().i64_type(), "argsexpr")
-                .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?;
-            Ok((TlTag::Ptr, bits))
-        }
+        inkwell::values::BasicValueEnum::StructValue(sv) => split_tlvalue_struct(builder, sv),
         other => Err(EvalError::Internal(format!("build-call: unsupported argument kind {:?}", other))),
     }
 }
@@ -2205,12 +2468,14 @@ fn tlvalue_tag_and_payload(
 /// every compiled function takes a `heap` parameter regardless of whether
 /// its own body touches `Sexpr` at all, precisely so a call between two
 /// arbitrary compiled functions never has a signature mismatch here) through
-/// a stack-allocated `out` slot, and returns the raw `i64` bits of `out`'s
-/// payload — callers narrow/reinterpret that per the callee's known return
-/// type (`ret-is-bool`/`ret-is-f64`, looked up by the typelisp-written
-/// `compile` since `AstExpr` itself carries no type tags).
+/// a stack-allocated `out` slot, and returns the *whole* loaded `TlValue`
+/// struct — callers extract just the payload and narrow/reinterpret it per
+/// the callee's known return type (`ret-is-bool`/`ret-is-f64`, looked up by
+/// the typelisp-written `compile` since `AstExpr` itself carries no type
+/// tags), except [`llvm_builder_build_call_sexpr`] (Phase 5), which needs the
+/// tag too and so keeps the struct whole.
 #[cfg(feature = "compile")]
-fn llvm_builder_build_call_payload(args: &[RtValue]) -> Result<inkwell::values::IntValue<'static>, EvalError> {
+fn llvm_builder_build_call_result(args: &[RtValue]) -> Result<inkwell::values::StructValue<'static>, EvalError> {
     let b = expect_llvm_builder(&args[0])?;
     let callee = expect_llvm_function(&args[1])?;
     let f = expect_llvm_function(&args[2])?;
@@ -2260,10 +2525,20 @@ fn llvm_builder_build_call_payload(args: &[RtValue]) -> Result<inkwell::values::
     builder
         .build_call(*callee, &[args_ptr.into(), argc_v.into(), out_alloca.into(), heap_param.into()], "call")
         .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?;
-    let loaded = builder
+    builder
         .build_load(tlvalue_ty, out_alloca, "callresult")
-        .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))?
-        .into_struct_value();
+        .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))
+        .map(|v| v.into_struct_value())
+}
+
+/// Extracts field 1 (the raw payload) of a loaded `TlValue` struct — shared by
+/// every [`llvm_builder_build_call_result`] caller except
+/// [`llvm_builder_build_call_sexpr`] (Phase 5), which needs the tag too.
+#[cfg(feature = "compile")]
+fn extract_tlvalue_payload(
+    builder: &inkwell::builder::Builder<'static>,
+    loaded: inkwell::values::StructValue<'static>,
+) -> Result<inkwell::values::IntValue<'static>, EvalError> {
     builder
         .build_extract_value(loaded, 1, "callpayload")
         .map_err(|e| EvalError::Panic(format!("build-call: {}", e)))
@@ -2276,7 +2551,9 @@ fn llvm_builder_build_call_payload(args: &[RtValue]) -> Result<inkwell::values::
 #[cfg(feature = "compile")]
 fn llvm_builder_build_call(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
-    let payload = llvm_builder_build_call_payload(args)?;
+    let loaded = llvm_builder_build_call_result(args)?;
+    let b = expect_llvm_builder(&args[0])?;
+    let payload = extract_tlvalue_payload(&b.0.borrow(), loaded)?;
     Ok(RtValue::LlvmValue(payload.into()))
 }
 
@@ -2285,11 +2562,11 @@ fn llvm_builder_build_call(args: &[RtValue]) -> Result<RtValue, EvalError> {
 #[cfg(feature = "compile")]
 fn llvm_builder_build_call_bool(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
-    let payload = llvm_builder_build_call_payload(args)?;
+    let loaded = llvm_builder_build_call_result(args)?;
     let b = expect_llvm_builder(&args[0])?;
-    let truncated = b
-        .0
-        .borrow()
+    let builder = b.0.borrow();
+    let payload = extract_tlvalue_payload(&builder, loaded)?;
+    let truncated = builder
         .build_int_truncate(payload, llvm_context().bool_type(), "callbool")
         .map_err(|e| EvalError::Panic(format!("build-call-bool: {}", e)))?;
     Ok(RtValue::LlvmValue(truncated.into()))
@@ -2300,11 +2577,11 @@ fn llvm_builder_build_call_bool(args: &[RtValue]) -> Result<RtValue, EvalError> 
 #[cfg(feature = "compile")]
 fn llvm_builder_build_call_f64(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
-    let payload = llvm_builder_build_call_payload(args)?;
+    let loaded = llvm_builder_build_call_result(args)?;
     let b = expect_llvm_builder(&args[0])?;
-    let bits = b
-        .0
-        .borrow()
+    let builder = b.0.borrow();
+    let payload = extract_tlvalue_payload(&builder, loaded)?;
+    let bits = builder
         .build_bit_cast(payload, llvm_context().f64_type(), "callf64")
         .map_err(|e| EvalError::Panic(format!("build-call-f64: {}", e)))?;
     Ok(RtValue::LlvmValue(bits))
@@ -2315,30 +2592,26 @@ fn llvm_builder_build_call_f64(args: &[RtValue]) -> Result<RtValue, EvalError> {
 #[cfg(feature = "compile")]
 fn llvm_builder_build_call_char(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
-    let payload = llvm_builder_build_call_payload(args)?;
+    let loaded = llvm_builder_build_call_result(args)?;
     let b = expect_llvm_builder(&args[0])?;
-    let truncated = b
-        .0
-        .borrow()
+    let builder = b.0.borrow();
+    let payload = extract_tlvalue_payload(&builder, loaded)?;
+    let truncated = builder
         .build_int_truncate(payload, llvm_context().i32_type(), "callchar")
         .map_err(|e| EvalError::Panic(format!("build-call-char: {}", e)))?;
     Ok(RtValue::LlvmValue(truncated.into()))
 }
 
 /// `(build-call-sexpr b callee f args) -> LlvmValue`: as [`llvm_builder_build_call`],
-/// reinterpreting (`build_int_to_ptr`) the raw `i64` payload back to a pointer.
+/// keeping the loaded `TlValue` struct whole (Phase 5) — a `Sexpr`'s in-flight
+/// representation *is* its `(tag, payload)` pair, so no further unpacking is
+/// needed (unlike `-bool`/`-f64`/`-char`, which only ever care about `out`'s
+/// payload since their own static return type already fixes the tag).
 #[cfg(feature = "compile")]
 fn llvm_builder_build_call_sexpr(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
-    let payload = llvm_builder_build_call_payload(args)?;
-    let b = expect_llvm_builder(&args[0])?;
-    let ptr_ty = llvm_context().ptr_type(inkwell::AddressSpace::default());
-    let ptr = b
-        .0
-        .borrow()
-        .build_int_to_ptr(payload, ptr_ty, "callsexpr")
-        .map_err(|e| EvalError::Panic(format!("build-call-sexpr: {}", e)))?;
-    Ok(RtValue::LlvmValue(ptr.into()))
+    let loaded = llvm_builder_build_call_result(args)?;
+    Ok(RtValue::LlvmValue(loaded.into()))
 }
 
 #[cfg(feature = "compile")]
@@ -2360,7 +2633,7 @@ fn llvm_builder_build_ret(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let v = expect_llvm_int_value(&args[2])?;
     let builder = b.0.borrow();
     let out_ptr = out_ptr_of(f)?;
-    build_ret_tlvalue(&builder, out_ptr, TlTag::I64, v)
+    build_ret_tlvalue(&builder, out_ptr, const_tag(TlTag::I64), v)
 }
 
 /// `(build-ret-bool b f v) -> Unit`: widens `v` (an `i1`) to `i64`
@@ -2377,7 +2650,7 @@ fn llvm_builder_build_ret_bool(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .build_int_z_extend(v, llvm_context().i64_type(), "retbool")
         .map_err(|e| EvalError::Panic(format!("build-ret-bool: {}", e)))?;
     let out_ptr = out_ptr_of(f)?;
-    build_ret_tlvalue(&builder, out_ptr, TlTag::Bool, widened)
+    build_ret_tlvalue(&builder, out_ptr, const_tag(TlTag::Bool), widened)
 }
 
 /// `(build-ret-f64 b f v) -> Unit`: reinterprets `v` (`build_bit_cast`, not a
@@ -2397,7 +2670,7 @@ fn llvm_builder_build_ret_f64(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .map_err(|e| EvalError::Panic(format!("build-ret-f64: {}", e)))?
         .into_int_value();
     let out_ptr = out_ptr_of(f)?;
-    build_ret_tlvalue(&builder, out_ptr, TlTag::F64, bits)
+    build_ret_tlvalue(&builder, out_ptr, const_tag(TlTag::F64), bits)
 }
 
 /// `(build-ret-char b f v) -> Unit`: widens `v` (an `i32`) to `i64`
@@ -2416,26 +2689,26 @@ fn llvm_builder_build_ret_char(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .build_int_z_extend(v, llvm_context().i64_type(), "retchar")
         .map_err(|e| EvalError::Panic(format!("build-ret-char: {}", e)))?;
     let out_ptr = out_ptr_of(f)?;
-    build_ret_tlvalue(&builder, out_ptr, TlTag::Char, widened)
+    build_ret_tlvalue(&builder, out_ptr, const_tag(TlTag::Char), widened)
 }
 
-/// `(build-ret-sexpr b f v) -> Unit`: reinterprets `v` (`build_ptr_to_int`,
-/// not a numeric conversion) as an `i64`'s worth of raw bits and returns it
-/// as `TlTag::Ptr` — Phase 3's `Sexpr`-return support, the counterpart to
-/// [`llvm_builder_build_ret`]; see [`llvm_builder_load_arg_sexpr`] for the
-/// matching reverse direction.
+/// `(build-ret-sexpr b f v) -> Unit`: forwards `v`'s own `(tag, payload)`
+/// pair straight into the `out` slot (Phase 5) — a `Sexpr`'s in-flight
+/// representation already *is* a `TlValue`-shaped struct (see
+/// [`expect_llvm_struct_value`]/[`split_tlvalue_struct`]), so unlike
+/// `-bool`/`-f64`/`-char` (whose tag is fixed by which builtin this is),
+/// nothing needs reinterpreting — the counterpart to [`llvm_builder_build_ret`];
+/// see [`llvm_builder_load_arg_sexpr`] for the matching reverse direction.
 #[cfg(feature = "compile")]
 fn llvm_builder_build_ret_sexpr(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let _guard = compile_lock().lock().unwrap();
     let b = expect_llvm_builder(&args[0])?;
     let f = expect_llvm_function(&args[1])?;
-    let v = expect_llvm_pointer_value(&args[2])?;
+    let v = expect_llvm_struct_value(&args[2])?;
     let builder = b.0.borrow();
-    let bits = builder
-        .build_ptr_to_int(v, llvm_context().i64_type(), "retsexpr")
-        .map_err(|e| EvalError::Panic(format!("build-ret-sexpr: {}", e)))?;
+    let (tag, payload) = split_tlvalue_struct(&builder, v)?;
     let out_ptr = out_ptr_of(f)?;
-    build_ret_tlvalue(&builder, out_ptr, TlTag::Ptr, bits)
+    build_ret_tlvalue(&builder, out_ptr, tag, payload)
 }
 
 #[cfg(feature = "compile")]
