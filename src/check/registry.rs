@@ -570,8 +570,9 @@ fn error_ty() -> Type {
 /// with no external wire-format consumers, so this was judged safe to do
 /// once rather than carry a permanently-unused slot).
 /// `aset` is a local `setf` (`Expr::Set`); `Expr::SetGlobal` (globals) isn't
-/// bridged yet, and neither is a `Sexpr`-typed `aset` (see
-/// `ast_bridge::typed_to_ast`'s doc comment on why). `aloop`/`abreak`/
+/// bridged yet. A `Sexpr`-typed `aset` is bridged too (Phase 5b — see
+/// `ast_bridge::typed_to_ast`'s doc comment on how its reassigned pointer
+/// gets re-rooted). `aloop`/`abreak`/
 /// `areturn` (ループ構文) are `loop`/`break`/`return` — see `compile-value`'s
 /// `ALoop` arm for the header-phi-plus-exit-phi design this needs (more
 /// involved than `if`'s, since a loop's `exit` can have many predecessors,
@@ -624,10 +625,9 @@ fn ast_expr_def() -> AdtDef {
             Variant { name: "acar".to_string(), fields: vec![t.clone()] },
             Variant { name: "acdr".to_string(), fields: vec![t.clone()] },
             Variant { name: "anullp".to_string(), fields: vec![t.clone()] },
-            // `Expr::Set` (local `setf`) — restricted to `i64`/`bool`/`f64`/
-            // `char` in `ast_bridge.rs` (not `Sexpr`; see that file's doc
-            // comment on why a reassigned pointer can't yet gain its own GC
-            // root).
+            // `Expr::Set` (local `setf`) — `i64`/`bool`/`f64`/`char`/`Sexpr`
+            // (Phase 5b added `Sexpr`; see `ast_bridge.rs`'s doc comment on
+            // how a reassigned pointer gets its own re-rooted slot).
             Variant { name: "aset".to_string(), fields: vec![Type::Str, t.clone()] },
             // `Expr::Unit` — `()` used as a value (e.g. `when`/`unless`/
             // `cond`'s un-taken-branch, now that those are `defmacro`s over
@@ -647,8 +647,11 @@ fn ast_expr_def() -> AdtDef {
             // lookup needed, since the bridge already has the type in
             // hand) — they pick which `LlvmValue` kind seeds the loop's
             // `exit`-block result phi (see `compile-value`'s `ALoop` arm).
-            // A loop whose result type is `Sexpr` isn't bridged (`None`) —
-            // same reasoning as `aset`'s `Sexpr` exclusion.
+            // A loop whose result type is `Sexpr` still isn't bridged
+            // (`None`), even after Phase 5b's `aset` — see
+            // `ast_bridge::loop_result_kind`'s doc comment on why an
+            // *anonymous* merged value is a different problem than a
+            // *named* binding's `setf`.
             Variant {
                 name: "aloop".to_string(),
                 fields: vec![vector_of(t.clone()), Type::Bool, Type::Bool, Type::Bool],
@@ -879,6 +882,15 @@ fn llvm_builder_def() -> AdtDef {
         method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty()], Type::Unit),
     );
     assoc.insert("pop-root".to_string(), method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty()], Type::Unit));
+    // `set-root` (Phase 5b, `setf` on a `Sexpr`-typed local): overwrites an
+    // already-rooted stack slot in place — `idx` is a plain `i32` (not an
+    // `LlvmValue`), since every root index is known at typelisp-compiler-
+    // execution time, never a JIT'd-code runtime value — see
+    // `crate::eval::interp::llvm_builder_build_set_root`.
+    assoc.insert(
+        "set-root".to_string(),
+        method(vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), Type::I32, llvm_value_ty()], Type::Unit),
+    );
     // `current-block`/`build-phi`/`add-incoming` (ループ構文 — `while`'s
     // phi-node-based loop compilation, see `compiler_source`'s doc comment):
     // `current-block` reads `b`'s current insertion block (needed to know a
@@ -938,6 +950,12 @@ fn register_compile_builtins(root: &mut Namespace) {
     root.add_type(llvm_value_def());
 
     let free = |params: Vec<Type>, ret: Type| FnSig { type_params: vec![], rest: None, params, ret, public: true };
+    // `root-count` (Phase 5b, `setf` on a `Sexpr`-typed local): the current
+    // GC root-stack height, queried once before `compile` pushes any of its
+    // own roots, so it can compute each `Sexpr`-typed binding's *absolute*
+    // root index (`base + relative offset`) — see
+    // `crate::eval::interp::root_count`.
+    root.fns.insert("root-count".to_string(), free(vec![], Type::I32));
     // `ast-params`/`ast-body`: the typed-AST bridge (`compile::ast_bridge`).
     // `None` means "not a `defun`, or not all `i64`/`bool` params/return"
     // (Phase 2b's restricted scope) — `compile` then refuses the function

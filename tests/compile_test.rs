@@ -909,20 +909,75 @@ fn compiles_a_while_loop_using_break() {
 /// `ast_bridge::typed_to_ast`'s `Expr::Set` arm doc comment) — `compile`
 /// refuses outright rather than risk an unrooted pointer.
 #[test]
-fn refuses_to_compile_a_setf_of_a_sexpr_variable() {
+fn compiles_a_setf_of_a_sexpr_variable() {
+    // `setf` on a `Sexpr`-typed local is bridged now (Phase 5b): `cur`'s
+    // root slot (established once when the `let` binds it) is overwritten
+    // in place — via `set-root` — on every iteration's `(setf cur (cdr
+    // cur))`, rather than the old behavior of refusing to compile at all.
     let src = r#"
-        (defun loses-the-front ((s Sexpr) (n i64)) Sexpr
+        (defun drop-n ((s Sexpr) (n i64)) Sexpr
           (let ((i (- n n)) (cur s))
             (while (< i n)
               (setf cur (cdr cur))
               (setf i (+ i 1)))
             cur))
-        (compile "loses-the-front")
+        (compile "drop-n")
     "#;
     match run(src) {
-        RtValue::Data { variant, .. } => assert_eq!(variant, 1, "expected Err, not Ok"),
+        RtValue::Data { variant, .. } => assert_eq!(variant, 0, "expected Ok, not Err"),
         other => panic!("expected a Result value, got {:?}", other),
     }
+    let src2 = r#"
+        (defun drop-n ((s Sexpr) (n i64)) Sexpr
+          (let ((i (- n n)) (cur s))
+            (while (< i n)
+              (setf cur (cdr cur))
+              (setf i (+ i 1)))
+            cur))
+        (compile "drop-n")
+        (car (drop-n (cons (Int 1) (cons (Int 2) (cons (Int 3) (cons (Int 4) (cons (Int 5) ()))))) 2))
+    "#;
+    assert_eq!(run(src2), RtValue::Sexpr(Value::Int(3)));
+}
+
+/// `setf` reassigns a `Sexpr`-typed local *while building new cons cells* on
+/// a tiny arena, forcing a real GC mid-loop — the rooting discipline's
+/// actual reason to exist (Phase 5b's counterpart to
+/// `compiled_cons_chain_survives_a_gc_mid_call`). Each iteration `cons`es a
+/// fresh pair onto an accumulator local (`acc`) and reassigns it via `setf`;
+/// if `acc`'s root slot weren't kept live across reassignment (still
+/// pointing at a stale value, or not updated at all), the accumulator built
+/// so far would be vulnerable to reclamation by the very next iteration's
+/// `cons` call.
+#[test]
+fn compiles_a_setf_of_a_sexpr_variable_surviving_a_gc_mid_loop() {
+    let src = r#"
+        (defun build-list ((n i64)) Sexpr
+          (let ((i (- n n)) (acc (Nil)))
+            (while (< i n)
+              (setf acc (cons (Int 1) acc))
+              (setf i (+ i 1)))
+            acc))
+        (compile "build-list")
+        ;; Iterative (`while`, not recursion) — the tree-walking interpreter
+        ;; has no tail-call optimization, so a *recursive* 500-deep checker
+        ;; here would itself risk a stack overflow unrelated to anything
+        ;; this test is actually trying to exercise. `n0` (rather than a
+        ;; bare `0` literal in the `let`, which `let` always checks with no
+        ;; expected type and so would default to `i32`) gives `n` an `i64`
+        ;; zero to start from, the same "derive from an existing same-typed
+        ;; value" idiom `compile-value` itself uses (`(- n n)`).
+        (defun list-length ((s Sexpr) (n0 i64)) i64
+          (let ((cur s) (n n0))
+            (while (consp cur)
+              (setf cur (cdr cur))
+              (setf n (+ n 1)))
+            n))
+    "#;
+    assert_eq!(
+        run_with_heap(Heap::with_capacity(8192), &format!("{src}\n(list-length (build-list 500) 0)")),
+        RtValue::Int(500)
+    );
 }
 
 // ---- ループ・分岐構文の整理: value-position `if` ------------------------------
@@ -1336,4 +1391,50 @@ fn compiles_a_function_using_set_car_and_set_cdr() {
             (_ false)))
     "#;
     assert_eq!(run(src), RtValue::Bool(true));
+}
+
+/// `setf` on a `Sexpr`-typed local inside one `if`-branch only — the
+/// `Sexpr` counterpart to `compiles_a_function_where_setf_in_one_if_branch_does_not_leak_into_the_other`.
+/// `set-root`'s call sites live inside each branch's own compiled code (see
+/// `compile-value`'s `ASet`/`AIf` arms), not behind any shared merge step,
+/// so unlike `vals` itself this needs no special "own copy per branch"
+/// handling to stay correct — confirmed here by taking the *unset* path and
+/// observing `cur` is unchanged.
+#[test]
+fn compiles_a_function_where_a_sexpr_setf_in_one_if_branch_does_not_leak_into_the_other() {
+    let src = r#"
+        (defun maybe-advance ((flag bool) (cur Sexpr)) Sexpr
+          (progn (if flag (setf cur (cdr cur)) cur) cur))
+        (compile "maybe-advance")
+        (car (maybe-advance false (cons (Int 1) (cons (Int 2) ()))))
+    "#;
+    assert_eq!(run(src), RtValue::Sexpr(Value::Int(1)));
+    let src2 = r#"
+        (defun maybe-advance ((flag bool) (cur Sexpr)) Sexpr
+          (progn (if flag (setf cur (cdr cur)) cur) cur))
+        (compile "maybe-advance")
+        (car (maybe-advance true (cons (Int 1) (cons (Int 2) ()))))
+    "#;
+    assert_eq!(run(src2), RtValue::Sexpr(Value::Int(2)));
+}
+
+/// `setf` on a `Sexpr`-typed local bound by a `let` *nested inside another
+/// `let`* — exercises `push-sexpr-roots`' "seed with a copy of the outer
+/// `roots`, then keep appending" extension path (the inner `let`'s own
+/// binding gets a root position *after* the outer `let`'s, in the same
+/// extended table) rather than just the outermost-parameter case every
+/// other `setf`-on-`Sexpr` test above already covers.
+#[test]
+fn compiles_a_function_with_a_setf_of_a_sexpr_local_in_a_nested_let() {
+    let src = r#"
+        (defun advance-twice ((outer Sexpr)) Sexpr
+          (let ((unused (Int 0)))
+            (let ((inner outer))
+              (setf inner (cdr inner))
+              (setf inner (cdr inner))
+              inner)))
+        (compile "advance-twice")
+        (car (advance-twice (cons (Int 1) (cons (Int 2) (cons (Int 3) ())))))
+    "#;
+    assert_eq!(run(src), RtValue::Sexpr(Value::Int(3)));
 }

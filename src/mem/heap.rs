@@ -125,6 +125,20 @@ impl Heap {
         self.roots.len()
     }
 
+    /// Overwrites the root at absolute stack position `idx` in place — unlike
+    /// [`push_root`](Self::push_root)/[`pop_root`](Self::pop_root) (strict
+    /// LIFO), this lets a caller that already knows a specific root's stack
+    /// position (recorded once when that root was first pushed, e.g. a
+    /// `let`/parameter binding's own slot) replace *just that one* root's
+    /// value — e.g. when a compiled `setf` reassigns a `Sexpr`-typed local:
+    /// the binding keeps the same stack slot for its whole lifetime, only the
+    /// pointer stored there changes. Panics on an out-of-bounds `idx`, like
+    /// indexing a `Vec` directly — `idx` is always a value `root_count()`
+    /// itself returned earlier in the same dynamic scope, never user input.
+    pub fn set_root(&mut self, idx: usize, v: Value) {
+        self.roots[idx] = v;
+    }
+
     // ---- symbols ----------------------------------------------------------
 
     /// Intern a symbol by name, returning its `Value::Symbol`.

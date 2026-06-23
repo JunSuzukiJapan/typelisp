@@ -582,6 +582,8 @@ impl Interp {
                 _ => Some(Err(EvalError::Internal("set-cdr: expected two Sexpr arguments".into()))),
             },
             #[cfg(feature = "compile")]
+            "root-count" => Some(root_count(heap, args)),
+            #[cfg(feature = "compile")]
             other => self.eval_compile_builtin(other, args),
             #[cfg(not(feature = "compile"))]
             _ => None,
@@ -1442,6 +1444,7 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-consp" => Some(llvm_builder_build_consp(args)),
             "push-root" => Some(llvm_builder_build_push_root(args)),
             "pop-root" => Some(llvm_builder_build_pop_root(args)),
+            "set-root" => Some(llvm_builder_build_set_root(args)),
             "current-block" => Some(llvm_builder_current_block(args)),
             "build-phi" => Some(llvm_builder_build_phi(args)),
             "add-incoming" => Some(llvm_builder_add_incoming(args)),
@@ -1604,6 +1607,21 @@ extern "C" fn tl_heap_pop_root(heap: *mut Heap) {
     heap.pop_root();
 }
 
+/// `(set-root b module f idx v) -> Unit`'s shim — overwrites an *already
+/// rooted* stack slot in place (`Heap::set_root`), rather than pushing a new
+/// one (Phase 5b, `setf` on a `Sexpr`-typed local). `idx` is an absolute
+/// position in `Heap`'s root stack, computed once by the typelisp-written
+/// `compile` when the binding was first rooted (`compiler_source.rs`'s
+/// `count-and-push-sexpr`/root-index bookkeeping) and reused unchanged for
+/// every `setf` of that same binding for the rest of its lexical scope — the
+/// binding's *slot* never moves, only the pointer stored in it does.
+#[cfg(feature = "compile")]
+extern "C" fn tl_heap_set_root(heap: *mut Heap, idx: i64, v_tag: i64, v_payload: i64) {
+    // SAFETY: see [`tl_sexpr_cons`].
+    let heap = unsafe { &mut *heap };
+    heap.set_root(idx as usize, value_from_tag_payload_or_abort(v_tag, v_payload));
+}
+
 /// `(panic msg)`'s compiled-code shim (ループ・分岐構文の整理) — `msg` itself
 /// isn't passed through at all (see `ast_bridge::typed_to_ast`'s `Expr::Panic`
 /// arm): this is the minimal "diverge without a value" primitive needed to
@@ -1633,6 +1651,7 @@ fn runtime_shim_address(name: &str) -> Option<usize> {
         "tl_sexpr_set_cdr" => Some(tl_sexpr_set_cdr as usize),
         "tl_heap_push_root" => Some(tl_heap_push_root as usize),
         "tl_heap_pop_root" => Some(tl_heap_pop_root as usize),
+        "tl_heap_set_root" => Some(tl_heap_set_root as usize),
         "tl_panic" => Some(tl_panic as usize),
         _ => None,
     }
@@ -1706,6 +1725,15 @@ fn runtime_push_root_fn_type() -> inkwell::types::FunctionType<'static> {
 fn runtime_pop_root_fn_type() -> inkwell::types::FunctionType<'static> {
     let ptr_ty = llvm_context().ptr_type(inkwell::AddressSpace::default());
     llvm_context().void_type().fn_type(&[ptr_ty.into()], false)
+}
+
+/// `void (ptr heap, i64 idx, i64 tag, i64 payload)` — [`tl_heap_set_root`]'s
+/// LLVM-level type.
+#[cfg(feature = "compile")]
+fn runtime_set_root_fn_type() -> inkwell::types::FunctionType<'static> {
+    let ptr_ty = llvm_context().ptr_type(inkwell::AddressSpace::default());
+    let i64_ty = llvm_context().i64_type();
+    llvm_context().void_type().fn_type(&[ptr_ty.into(), i64_ty.into(), i64_ty.into(), i64_ty.into()], false)
 }
 
 /// `void ()` — [`tl_panic`]'s LLVM-level type (no arguments at all, unlike
@@ -1961,6 +1989,46 @@ fn llvm_builder_build_pop_root(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .build_call(shim, &[heap_param.into()], "poproot")
         .map_err(|e| EvalError::Panic(format!("pop-root: {}", e)))?;
     Ok(RtValue::Unit)
+}
+
+/// `(set-root b module f idx v) -> Unit` (Phase 5b, `setf` on a `Sexpr`-typed
+/// local): emits a direct `call` to the [`tl_heap_set_root`] runtime shim —
+/// overwrites an already-rooted stack slot in place rather than pushing a new
+/// one, see `crate::compile::compiler_source`'s root-index bookkeeping for
+/// how `idx` (a plain `i32`, not an `LlvmValue` — every root index is known
+/// at typelisp-compiler-execution time, never a JIT'd-code runtime value) is
+/// computed once per binding and reused across every `setf` of it.
+#[cfg(feature = "compile")]
+fn llvm_builder_build_set_root(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _guard = compile_lock().lock().unwrap();
+    let b = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let f = expect_llvm_function(&args[2])?;
+    let idx = rt_i64(&args[3])?;
+    let v = expect_llvm_struct_value(&args[4])?;
+    let builder = b.0.borrow();
+    let (tag, payload) = split_tlvalue_struct(&builder, v)?;
+    let heap_param = heap_param_of(f)?;
+    let idx_v = llvm_context().i64_type().const_int(idx as u64, false);
+    let shim = get_or_declare_runtime_fn(&module.borrow(), "tl_heap_set_root", runtime_set_root_fn_type());
+    builder
+        .build_call(shim, &[heap_param.into(), idx_v.into(), tag.into(), payload.into()], "setroot")
+        .map_err(|e| EvalError::Panic(format!("set-root: {}", e)))?;
+    Ok(RtValue::Unit)
+}
+
+/// `(root-count) -> i32`: the current number of registered GC roots — Phase
+/// 5b's way for the typelisp-written `compile` to learn the *base* index its
+/// own `Sexpr`-typed parameters/`let` bindings will start rooting at, before
+/// it pushes any of its own (other compiled functions further up the dynamic
+/// call stack, or the tree-walking interpreter's own locals, may already have
+/// pushed roots — `compile` never assumes it starts from an empty stack).
+/// Reads `interp`'s `heap` directly rather than going through any
+/// `LlvmBuilder`/IR construction at all — this is queried once, before any IR
+/// is even built, not from inside JIT'd code.
+#[cfg(feature = "compile")]
+fn root_count(heap: &Heap, _args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Int(heap.root_count() as i64))
 }
 
 #[cfg(feature = "compile")]

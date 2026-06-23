@@ -11,11 +11,14 @@
 //! (any position, not just tail — see the `Expr::If` arm below),
 //! `let`, calls to other compiled functions, `i64`'s/`f64`'s binary
 //! arithmetic/comparison instance methods, `char`'s `eq`/`lt`, and
-//! `cons`/`car`/`cdr`/`null` (Phase 3 — a `Sexpr` value is only bridged at
-//! all if it's `Nil` or `Cons`; see `crate::eval::interp::value_to_ptr`'s
-//! doc comment for what happens if a *runtime* value falls outside that),
-//! local `setf` on `i64`/`bool`/`f64`/`char` (*not* `Sexpr` — see the
-//! `Expr::Set` arm below), `Expr::Unit`, a minimal `panic` (message not
+//! `cons`/`car`/`cdr`/`null`/`consp`/`atom`/`set-car`/`set-cdr` (Phase 5
+//! widened every `Sexpr` value's bridged variants from `Nil`/`Cons` only to
+//! all of `Int`/`Float`/`Char`/`Bool`/`Symbol`/`Str`/`Cons`/`Nil` — see
+//! `crate::eval::interp::value_to_tag_payload`'s doc comment; `Path` has no
+//! `Sexpr` constructor at the language level at all, so it stays untested),
+//! local `setf` on `i64`/`bool`/`f64`/`char`/`Sexpr` (Phase 5b added
+//! `Sexpr` — see the `Expr::Set` arm below for how its reassigned pointer
+//! gets re-rooted), `Expr::Unit`, a minimal `panic` (message not
 //! bridged — see the `Expr::Panic` arm), and `loop`/`break`/`return` on
 //! `i64`/`bool`/`f64`/`char` results (ループ・分岐構文の整理 —
 //! [docs/TODO.md](../../docs/TODO.md)「ステップ5」; `while`/`dotimes`/
@@ -101,11 +104,14 @@ fn option_value(v: Option<RtValue>) -> RtValue {
 }
 
 /// The `i64`/`bool`/`f64`/`char` subset `aloop`/`areturn` restrict a loop's
-/// own result type to (excluding `Sexpr` — a loop's `exit`-block result phi
-/// would need the same kind of fresh GC root `aset` doesn't have yet for a
-/// reassigned `Sexpr` pointer, see that arm's doc comment). Returns `None`
-/// for anything else (including `Unit`/`Never`, which never actually need a
-/// real phi — see `compile-value`'s `ALoop` arm).
+/// own result type to (still excluding `Sexpr`, even after Phase 5b added
+/// `Sexpr` `setf` support for *named* bindings — see `Expr::Set`'s arm
+/// below): a loop's `exit`-block result phi merges an *anonymous* value with
+/// no binding name/position of its own to look up in `roots`, so the
+/// per-variable `roots`-table mechanism `aset` relies on doesn't apply to it
+/// at all; rooting it would need a different mechanism, left as a
+/// follow-up). Returns `None` for anything else (including `Unit`/`Never`,
+/// which never actually need a real phi — see `compile-value`'s `ALoop` arm).
 fn loop_result_kind(t: &Type) -> Option<(bool, bool, bool)> {
     match t {
         Type::I64 => Some((false, false, false)),
@@ -213,16 +219,18 @@ pub(crate) fn typed_to_ast(t: &Typed, interp: &Interp, group: &[Path]) -> Option
             let body = body.iter().map(|f| typed_to_ast(f, interp, group)).collect::<Option<Vec<_>>>()?;
             Some(data(A_LET, vec![rt_vector(names), rt_vector(values), rt_vector(body)]))
         }
-        // `setf` on a local (`Expr::Set` — `Expr::SetGlobal`, globals,
-        // isn't bridged yet). Restricted to `i64`/`bool`/`f64`/`char`
-        // (*not* `Sexpr`, unlike `is_bridgeable_scalar_type`'s general
-        // allowance): a `Sexpr`-typed `setf` would need the reassigned
-        // pointer to gain its *own* GC root for the rest of its binding's
-        // scope, but `compile`'s rooting discipline (Phase 3) only ever
-        // roots a binding's *initial* value, once, at `let`/parameter-bind
-        // time — reassigning it would leave the new pointer unrooted. Left
-        // as a follow-up alongside `Sexpr`-typed loop-result values below.
-        Expr::Set(name, value) if matches!(value.ty, Type::I64 | Type::Bool | Type::F64 | Type::Char) => {
+        // `setf` on a local (`Expr::Set` — `Expr::SetGlobal`, globals, isn't
+        // bridged yet). `Sexpr` is allowed now too (Phase 5b,
+        // [docs/TODO.md](../../docs/TODO.md)「ステップ5」) — the *same*
+        // restriction `is_bridgeable_scalar_type` already applies everywhere
+        // else, no longer narrower than it for this one case. A reassigned
+        // `Sexpr` pointer gets its *own* `Heap`-root slot kept live for the
+        // rest of its binding's scope via `compile-value`/`compile-tail`'s
+        // `roots`/`set-root` bookkeeping (`compiler_source.rs`'s doc
+        // comment) — Phase 3's rooting discipline only ever rooted a
+        // binding's *initial* value once, which is what made this
+        // unbridgeable before.
+        Expr::Set(name, value) if is_bridgeable_scalar_type(&value.ty) => {
             let v = typed_to_ast(value, interp, group)?;
             Some(data(A_SET, vec![RtValue::Str(name.clone()), v]))
         }

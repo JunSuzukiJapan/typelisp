@@ -1060,43 +1060,75 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
       既存58件は無変更でgreen（リファクタが既存のNil/Cons限定の挙動を一切変えていないことを
       確認）。並行実行5回連続green（`--test-threads=8`）。既定ビルド・
       `cargo clippy --all-targets`（両構成）への影響なし、警告0。
-    - 未対応として残った範囲（次の作業参照）: `Sexpr`型変数への`setf`（core challenge、
-      下記参照）、`Path`のテスト（言語レベルで構築不可能なため——`quote`が`::`パスを含む
+    - 未対応として残った範囲（Phase 5bで解消、下記参照）: `Sexpr`型変数への`setf`。
+      `Path`のテストは依然未対応（言語レベルで構築不可能なため——`quote`が`::`パスを含む
       データを拒否する制約、`Checker::value_to_quoted`参照——構築可能になった時点で
       追加すべき）。
+  - 実装済み（Phase 5b/`Sexpr`型変数への`setf`対応 — Phase 5aで残った核心、優先順位リスト
+    1番目）: `(defun drop-n ((s Sexpr) (n i64)) Sexpr (let ((i (- n n)) (cur s)) (while (< i n)
+    (setf cur (cdr cur)) (setf i (+ i 1))) cur))`のような、`Sexpr`型ローカル変数を`while`の
+    各反復で再代入する関数がコンパイル対象になった（`refuses_to_compile_a_setf_of_a_sexpr_variable`
+    がPhase4の`break`同様`compiles_a_setf_of_a_sexpr_variable`に転換）。
+    - **核心の設計判断: root-stack上の「位置」と「内容」を分離した**——
+      `Heap.roots`はpush/popしかできないLIFOスタックだが、`setf`が必要とするのは
+      「束縛が生きている間ずっと同じスタック位置を使い、再代入時はその位置の*内容だけ*を
+      書き換える」操作。これは**束縛の生成時（`let`/パラメータbind時）に一度だけ決まる
+      「絶対position」さえ覚えておけば、その後は何度でも安全に上書きできる**ことに気づいた
+      のが鍵——ループの反復・`if`の分岐によってSSA値（`vals`）はphiで都度作り直される一方、
+      対応するroot位置は**全く変化しない**（位置を決めるのは束縛の生成時点だけで、
+      ループの各反復やどちらの`if`分岐が実際に走るかには依存しない）。この分離により、
+      Phase3b/4で確立した「ループ内のphiが現在値を持つ」仕組み（`entry-phis`/`body-vals`の
+      分離）に**一切触れずに済んだ**——`roots`という`params`/`vals`と並行する新しい
+      `Vector<i32>`テーブル（`params[i]`が現在rootされていれば絶対position、
+      でなければ`-1`）を追加し、`params`と全く同じ運び方（`if`の両枝で共有・コピー不要、
+      `let`でのみ拡張）をするだけで済んだ。
+    - **新規Rust側プリミティブ**: `Heap::set_root(idx, v)`（指定absolute positionを直接
+      上書き、push/popと違い任意位置に書ける）、`root-count()`（既存、現在のスタック高さを
+      読む）、`tl_heap_set_root`シム+`set-root`（`LlvmBuilder`新規メソッド、
+      `crate::eval::interp::llvm_builder_build_set_root`）——`idx`は`LlvmValue`ではなく
+      生の`i32`（root位置はtypelisp-written `compile`自身の実行時に確定する値であり、
+      JIT後のコード側が実行時に知る必要がない、という`load-arg`系とは逆の非対称性）。
+    - **`push-sexpr-roots`（旧`count-and-push-sexpr`を置き換え）が「pushしつつ各pushの
+      絶対positionを記録する」+「外側スコープの`roots`をコピーした上に追記することで
+      *extend*操作も同時に行う」の2つを1パスに融合**——`extend-strs`/`extend-values`が
+      「コピーのみ」なのに対し、こちらは「コピー+push」を同時にやることで別の`extend-roots`
+      関数が不要になった。`count-rooted`（開始indexを指定できる、`(length roots)`から
+      数えれば「このスコープ自身が新たに積んだ分だけ」を数えられる）が既存の`pushed`
+      カウンタの代替。
+    - **`ASet`への変更が核心そのもの**: `(get roots idx)`が`-1`以上なら`set-root`を呼んで
+      その位置を上書き、その後`vals`を更新——`vals`の更新（phi/copy機構で精密な管理が
+      必要）と全く非対称に、`set-root`は**条件分岐の中に直接埋め込まれた、無条件の
+      副作用**でよい。`if`の両枝で`vals`はコピーが必要だったが、`set-root`の呼び出し自体は
+      各枝の*コンパイル済みコード内*に独立して存在するため、実行時にどちらかの枝しか
+      実際には走らない以上、`vals`のような「漏れ」の心配が原理的に発生しない
+      （`compiles_a_function_where_a_sexpr_setf_in_one_if_branch_does_not_leak_into_the_other`
+      で検証）。
+    - **スコープ外の制約（意図的、未対応）**: `aloop`（ループ自身の戻り値、`return`/`break`で
+      合流する*無名*の値）が`Sexpr`型であることは依然非対応——`roots`テーブルは
+      *名前付き束縛*のpositionしか持たないため、merge地点で生成される無名の値には
+      適用できない（`ast_bridge::loop_result_kind`のコメント参照）。
+    - TDD: `tests/compile_test.rs`に4件追加（69件中、旧`refuses_to_compile_a_setf_of_a_sexpr_variable`
+      の転換含む）——基本のsetf（`drop-n`、実際にリストをcdrで辿れることを確認）、
+      小ヒープ+`dotimes`相当の`while`500回で実際にGCを複数回発動させながら`setf`で
+      再代入され続ける`Sexpr`アキュムレータが破損しないことを確認するストレステスト
+      （rooting設計の正しさを検証する核心テスト、Phase3の`compiled_cons_chain_survives_a_gc_mid_call`
+      の`setf`版）、`if`の片方の枝だけで`setf`した場合に他方の枝へ漏れないこと、
+      ネストした`let`内側の束縛への`setf`（`roots`の拡張パスを検証）。既存65件は無変更で
+      green。並行実行10回連続green（`--test-threads=8`）。既定ビルド・
+      `cargo clippy --all-targets`（両構成）への影響なし、警告0。
   - **次の作業（ブランチ`feature/compiler`で継続、影響範囲の大きさで優先順位付け
     ——[[feedback-impl-priority]]）**:
-    - **「影響範囲」の判断基準（2026-06-22 確認）**: 「今これを実装すると一度にどれだけの
-      コードが動くようになるか」（実装のカバレッジの広さ）と「これを実装すると将来の他の
-      機能にどれだけ影響するか・前提になるか」（影響範囲）は**別の軸**であり、優先順位は
-      常に後者で決める。前者はあくまで「実装のお得感」の指標で、優先順位の根拠にはならない。
-      以下1・2の順序はこの基準に基づく（HashTable/Vector対応の方が「今すぐ動くコードの幅」
-      は広いが、既存のRust管理`Rc<RefCell<..>>`シムパターンの延長で閉じた変更であり他機能の
-      前提にはならない——Sexprのスコープ拡張、特に`setf`対応はGC rooting機構そのものの拡張で、
-      将来クロージャ等が同種のミュータブルなGCポインタ捕捉を必要とする際の前提になるため、
-      「今すぐ動く範囲は狭いが将来の設計の土台になる」という意味で影響範囲が広いと判断した）。
-    1. **`Sexpr`型変数への`setf`対応**（Phase 5aで残った核心、HashTable/Vectorより先——
-       上記の判断基準参照）: 現行のrooting設計は「束縛の
-       *初期値*を一度だけ`push-root`し、束縛が生きている間ずっと同じポインタをrootし続ける」
-       前提（Phase3で確立）だが、`setf`はループの各反復で指す先が変わるポインタを生み出す
-       ため、再代入ごとに「古い値のrootを外し新しい値をrootする」（もしくは「スタックスロット
-       自体をGCが走査するroot集合に含める」）設計拡張が必要——スカラー値のphi
-       （Phase3b/4で確立、`entry-phis`/`body-vals`の分離）と同型の「ループ内のphiが現在値を
-       持つ」発想を、GCポインタという「生きている限りrootされ続けなければならない」制約の
-       下でどう両立させるかが設計上の核心になる。Phase 5aで`Sexpr`のIR内表現が
-       `{tag, payload}`構造体になったため、再代入されたポインタを安全にrootし直す処理は
-       「タグ付き構造体からpayloadを取り出し`push-root`/`pop-root`する」という既存の
-       `count-and-push-sexpr`と同型の操作にはなるが、**いつ古いrootを外すか**
-       （setfの直前？ループのbackedge？）が未設計のまま残っている。
-    2. **HashTable/Vector対応**: `Rc<RefCell<..>>`によるRust管理（GCヒープ対象外）と判明
+    1. **HashTable/Vector対応**: `Rc<RefCell<..>>`によるRust管理（GCヒープ対象外）と判明
        済みのため、GCのrootingは無関係。`loop`/`break`/`return`（実装済み）があれば合計・
        線形探索等の典型コードはコンパイル対象になる——既存のPhase3のシムパターン
        （固定名`extern "C"`関数を2段階解決で呼ぶ）をそのまま転用できる、閉じた変更。
-    3. **Phase（クロージャ/高階関数、優先度低）**: GCルーティングの難度がさらに増すため、
-       ファイルコンパイラより後でもよい。**1（Sexprの`setf`対応）が事実上の前提**——クロージャが
-       捕捉する変数自体が`setf`される場合、同じ「再代入ごとに変わるGCポインタの安全な追跡」
-       問題に直面するため。
-    4. **`compile-file`**: ファイル全体の`defun`を1つのLLVM `Module`にまとめ
+    2. **Phase（クロージャ/高階関数、優先度低）**: GCルーティングの難度がさらに増すため、
+       ファイルコンパイラより後でもよい。Phase 5bの`roots`テーブル設計（名前付き束縛の
+       position管理）がクロージャの捕捉変数にもそのまま使える可能性があるが未検証
+       （クロージャの捕捉スロット自体は`Rc<RefCell<Slot>>`というツリーウォーク評価器の
+       既存機構に依存しており、コンパイル時の`roots`テーブルとは別物の橋渡しが必要になる
+       見込み）。
+    3. **`compile-file`**: ファイル全体の`defun`を1つのLLVM `Module`にまとめ
        （同一ファイル内呼び出しは直接`call`命令になる）、`TargetMachine::write_to_file`でオブジェクト
        ファイル出力→システムの`cc`をサブプロセス起動してリンク。既存Rust実装（cons heap/GC/
        HashTable/Vector等）を`extern "C"`シムでラップした静的ランタイムライブラリ（`libtlrt.a`、
@@ -1104,9 +1136,9 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
        一緒に作る）を`cc`でリンクし、**typelisp/LLVMインストール無しで動く実行ファイル/共有
        ライブラリ**を生成する（ユーザー要求の核心）。実行ファイル化はエントリポイント規約として
        `main`という名前の関数（`(fn () i32)`等）を探す（CL/C慣習）。共有ライブラリ化は既存の
-       `FnSig::public`（`pub` defun）をエクスポートシンボルの基準に流用。2（HashTable/Vector
+       `FnSig::public`（`pub` defun）をエクスポートシンボルの基準に流用。1（HashTable/Vector
        含む既存機能のラップ対象）に依存するため後回し。
-    5. **並行（各Phase完了の都度）**: `TlValue` ABI仕様や`compile-file`のセマンティクスを
+    4. **並行（各Phase完了の都度）**: `TlValue` ABI仕様や`compile-file`のセマンティクスを
        `docs/language-design.md`に「確定仕様」として追記していく（このTODO.mdは進捗の記録、
        language-design.mdは確定した言語仕様という既存の役割分担を継続）。独立した優先順位は無い。
 

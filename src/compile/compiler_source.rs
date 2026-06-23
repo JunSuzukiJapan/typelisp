@@ -73,6 +73,24 @@
 //! `compile-value`'s `ALet` arm, used in non-tail/value position, pops its
 //! own pushes immediately after evaluating its body, since control returns
 //! to its caller rather than falling through to a `ret`).
+//!
+//! **Phase 5b's `setf`-on-`Sexpr` rooting extension.** The discipline above
+//! only ever roots a binding's *initial* value, once — reassigning it via
+//! `setf` would leave the new pointer unrooted while the stale one stayed
+//! "protected" for no reason. The fix: `push-sexpr-roots` records each
+//! pushed root's own absolute `Heap`-root-stack *position* (not just a count)
+//! into a new `roots: Vector<i32>` threaded alongside `params`/`vals`
+//! (`-1` for a non-`Sexpr`/unrooted binding); `ASet`'s arm below looks up
+//! that position and calls `set-root` to overwrite the *same* slot in place
+//! whenever the reassigned value is `Sexpr`-typed. A binding's root *slot*
+//! is fixed for its whole lexical lifetime once assigned — only the pointer
+//! stored there changes — so `roots` itself needs none of `vals`' careful
+//! per-`if`-branch-copy/per-loop-iteration-phi handling (`compile-value`'s
+//! `AIf`/`ALoop`/`ASet` arms elaborate on why). This is still narrower than
+//! full `Sexpr` support: a loop's own *anonymous* result value (`aloop`'s
+//! `exit`-phi, as opposed to a *named* `setf`-able binding) has no position
+//! in `roots` to use, so a loop whose result type is `Sexpr` still isn't
+//! bridged (`ast_bridge::loop_result_kind`).
 
 use crate::{Checker, Heap, Interp, Reader};
 
@@ -191,18 +209,49 @@ pub const SOURCE: &str = r#"
                        (add-incoming b phi els-val els-end)
                        phi)))))
 
-;; Phase 3's rooting discipline (see this module's doc comment): pushes a GC
-;; root for every `Sexpr`-typed (`is-sexpr-value`) entry of `vs` — typically
-;; one function's whole parameter list or one `let`'s freshly-bound values —
-;; and returns how many it pushed, so the caller knows how many to
-;; `pop-root` later (`vs`'s non-`Sexpr` entries need no rooting at all,
-;; since only pointers into the cons heap are ever collected).
-(defun count-and-push-sexpr ((b LlvmBuilder) (module LlvmModule) (f LlvmFunction) (vs Vector<LlvmValue>) (i i32) (n i32) (acc i32)) i32
+;; Phase 3/5b's rooting discipline (see this module's doc comment): pushes a
+;; GC root for every `Sexpr`-typed (`is-sexpr-value`) entry of `vs` —
+;; typically one function's whole parameter list or one `let`'s freshly-bound
+;; values. Unlike Phase 3's `count-and-push-sexpr` (which this replaces),
+;; `push-sexpr-roots` *also* records each pushed root's own absolute
+;; `Heap`-root-stack position into `out` (`-1` for a non-`Sexpr` entry, no
+;; rooting needed) — `setf` on a `Sexpr`-typed local (Phase 5b) needs this
+;; position later to overwrite (`set-root`) the *same* slot in place, rather
+;; than push a new one, when the binding is reassigned.
+;;
+;; `out` doubles as the *seed* this extends: a fresh empty `Vector` for a
+;; function's own parameters (no outer scope to inherit from), or a *copy* of
+;; the enclosing scope's `roots` (`copy-i32s`) for a `let`'s newly-bound
+;; values — exactly the same "seed with a copy of the outer scope, then keep
+;; appending" shape `extend-strs`/`extend-values` already use for
+;; `params`/`vals`, just fused into the same pass that does the pushing
+;; (`next-idx` only ever needs to be the *first* new root's position,
+;; `(root-count)` queried once by the caller before any of `vs`'s own values
+;; are pushed — every successfully pushed root after that occupies the next
+;; consecutive slot, since `push-root` only ever grows the stack by one).
+(defun push-sexpr-roots ((b LlvmBuilder) (module LlvmModule) (f LlvmFunction) (vs Vector<LlvmValue>) (i i32) (n i32)
+                          (next-idx i32) (out Vector<i32>)) Vector<i32>
   (if (>= i n)
-      acc
+      out
       (if (is-sexpr-value (get vs i))
-          (progn (push-root b module f (get vs i)) (count-and-push-sexpr b module f vs (+ i 1) n (+ acc 1)))
-          (count-and-push-sexpr b module f vs (+ i 1) n acc))))
+          (progn (push-root b module f (get vs i))
+                 (push out next-idx)
+                 (push-sexpr-roots b module f vs (+ i 1) n (+ next-idx 1) out))
+          (progn (push out -1) (push-sexpr-roots b module f vs (+ i 1) n next-idx out)))))
+
+(defun copy-i32s ((src Vector<i32>) (i i32) (n i32) (out Vector<i32>)) Vector<i32>
+  (if (>= i n) out (progn (push out (get src i)) (copy-i32s src (+ i 1) n out))))
+
+;; Counts how many of `idxs`' entries from `i` (inclusive) to `n` (exclusive)
+;; are actual root positions (`>= 0`, not the `-1` "not `Sexpr`" placeholder)
+;; — used with `i = (length roots)` to count only a `let`'s *own* newly
+;; pushed roots (the entries `push-sexpr-roots` appended after the copied-in
+;; outer-scope prefix), for the existing `pushed`/`pop-roots` accounting
+;; (untouched by Phase 5b — it only ever needs a count, never the individual
+;; positions), or with `i = 0` for a function's own top-level parameters
+;; (no outer prefix to skip).
+(defun count-rooted ((idxs Vector<i32>) (i i32) (n i32) (acc i32)) i32
+  (if (>= i n) acc (count-rooted idxs (+ i 1) n (if (>= (get idxs i) 0) (+ acc 1) acc))))
 
 (defun pop-roots ((b LlvmBuilder) (module LlvmModule) (f LlvmFunction) (n i32)) ()
   (if (<= n 0) () (progn (pop-root b module f) (pop-roots b module f (- n 1)))))
@@ -227,30 +276,48 @@ pub const SOURCE: &str = r#"
 ;;
 ;; `module`/`f` are threaded through purely so `ACall` can resolve its callee
 ;; via `get-or-declare-function` and `ACons`/`ACar`/`ACdr`/`push-root`/
-;; `pop-root` (Phase 3) can reach the enclosing function's `heap` parameter
-;; — every other arm ignores them. `loop-exit`/`loop-exit-vals`/
-;; `loop-exit-result` (ループ・分岐構文の整理) identify the *nearest
-;; enclosing* loop's exit block, its per-variable merge phis, and its own
-;; result merge phi — only `ABreak`/`AReturn` read them (to jump there and
-;; contribute an incoming edge to each), and only `ALoop` ever changes them
-;; (to its own freshly built ones, for compiling its own body) rather than
-;; threading them through unchanged. At the function's top level there is
-;; no enclosing loop at all; `compile`/`build-one` pass harmless placeholder
-;; values that `break`/`return` outside any loop could never actually reach
-;; (the checker already rejects that source program, so the AST bridge
-;; never produces an `ABreak`/`AReturn` node there in the first place).
-(defun compile-value ((module LlvmModule) (b LlvmBuilder) (f LlvmFunction) (params Vector<string>) (vals Vector<LlvmValue>)
+;; `pop-root`/`set-root` (Phase 3/5b) can reach the enclosing function's
+;; `heap` parameter — every other arm ignores them. `roots` (Phase 5b) is a
+;; `Vector<i32>` parallel to `params`/`vals`: `(get roots i)` is `params[i]`'s
+;; absolute `Heap`-root-stack position if it's currently a rooted `Sexpr`
+;; binding, or `-1` if not (`push-sexpr-roots`'s doc comment). Unlike `vals`,
+;; `roots` is *never copied* per `if`-branch or phi'd per loop iteration — a
+;; binding's root *slot* is fixed for its whole lexical lifetime once
+;; assigned (only the *value* stored there changes, via `ASet`'s `set-root`
+;; call below), so every arm here either passes `roots` straight through
+;; unchanged or (`ALet`) extends it with newly-pushed positions, exactly
+;; paralleling how `params` itself (as opposed to `vals`) is threaded.
+;; `loop-exit`/`loop-exit-vals`/`loop-exit-result` (ループ・分岐構文の整理)
+;; identify the *nearest enclosing* loop's exit block, its per-variable merge
+;; phis, and its own result merge phi — only `ABreak`/`AReturn` read them (to
+;; jump there and contribute an incoming edge to each), and only `ALoop` ever
+;; changes them (to its own freshly built ones, for compiling its own body)
+;; rather than threading them through unchanged. At the function's top level
+;; there is no enclosing loop at all; `compile`/`build-one` pass harmless
+;; placeholder values that `break`/`return` outside any loop could never
+;; actually reach (the checker already rejects that source program, so the
+;; AST bridge never produces an `ABreak`/`AReturn` node there in the first
+;; place).
+(defun compile-value ((module LlvmModule) (b LlvmBuilder) (f LlvmFunction) (params Vector<string>) (vals Vector<LlvmValue>) (roots Vector<i32>)
                        (loop-exit LlvmBasicBlock) (loop-exit-vals Vector<LlvmValue>) (loop-exit-result LlvmValue)
                        (e AstExpr)) LlvmValue
   (labels ((eval-args ((i i32) (n i32) (exprs Vector<AstExpr>) (out Vector<LlvmValue>)) Vector<LlvmValue>
              (if (>= i n)
                  out
-                 (progn (push out (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result (get exprs i)))
+                 (progn (push out (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result (get exprs i)))
                         (eval-args (+ i 1) n exprs out))))
-           (eval-body ((i i32) (n i32) (forms Vector<AstExpr>) (p2 Vector<string>) (v2 Vector<LlvmValue>)
+           ;; `r2` (Phase 5b): unlike `module`/`b`/`f`/`loop-exit*` (always
+           ;; closed over from the enclosing `compile-value` unchanged),
+           ;; `eval-body` needs its *own* explicit roots argument — `ALet`
+           ;; calls it with `new-roots` (paired with `new-params`/`new-vals`,
+           ;; the let's own extended scope), while `ALoop` calls it with the
+           ;; unchanged outer `roots` (paired with `params`/`body-vals` — a
+           ;; loop never introduces new bindings of its own, only `setf`s
+           ;; existing ones, see `ASet`'s comment below).
+           (eval-body ((i i32) (n i32) (forms Vector<AstExpr>) (p2 Vector<string>) (v2 Vector<LlvmValue>) (r2 Vector<i32>)
                        (le LlvmBasicBlock) (lev Vector<LlvmValue>) (ler LlvmValue)) LlvmValue
-             (let ((r (compile-value module b f p2 v2 le lev ler (get forms i))))
-               (if (>= (+ i 1) n) r (eval-body (+ i 1) n forms p2 v2 le lev ler)))))
+             (let ((r (compile-value module b f p2 v2 r2 le lev ler (get forms i))))
+               (if (>= (+ i 1) n) r (eval-body (+ i 1) n forms p2 v2 r2 le lev ler)))))
     (match e
       ((AInt n) (llvm-const-i64 n))
       ((ABool flag) (llvm-const-bool flag))
@@ -259,31 +326,31 @@ pub const SOURCE: &str = r#"
       ((ANil) (llvm-const-nil))
       ((AVar name) (get vals (param-index params name)))
       ((ABinOp op lhs rhs)
-       (build-op b op (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result lhs)
-                 (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result rhs)))
+       (build-op b op (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result lhs)
+                 (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result rhs)))
       ;; `cons`/`car`/`cdr` (Phase 3): `build-cons` itself roots its two
       ;; operands around the underlying (possibly GC-triggering)
       ;; `Heap::cons` call — see `build_cons`'s doc comment
       ;; (`crate::eval::interp::llvm_builder_build_cons`) — so no extra
       ;; rooting is needed here. `car`/`cdr` never allocate at all.
       ((ACons lhs rhs)
-       (build-cons b module f (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result lhs)
-                   (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result rhs)))
-      ((ACar v) (build-car b module f (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result v)))
-      ((ACdr v) (build-cdr b module f (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result v)))
-      ((ANullp v) (build-nullp b (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result v)))
+       (build-cons b module f (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result lhs)
+                   (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result rhs)))
+      ((ACar v) (build-car b module f (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result v)))
+      ((ACdr v) (build-cdr b module f (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result v)))
+      ((ANullp v) (build-nullp b (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result v)))
       ;; `consp` (Phase 5): see `build-nullp`'s comment — same tag-check
       ;; shape, just against `SexprCons` instead of `SexprNil`.
-      ((AConsp v) (build-consp b (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result v)))
+      ((AConsp v) (build-consp b (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result v)))
       ;; `set-car`/`set-cdr` (Phase 5): in-place mutation, `Unit`-valued —
       ;; like `AUnit`/`APanic`, the placeholder result is never actually read.
       ((ASetCar cell val)
-       (progn (build-set-car b module f (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result cell)
-                              (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result val))
+       (progn (build-set-car b module f (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result cell)
+                              (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result val))
               (llvm-const-i64 0)))
       ((ASetCdr cell val)
-       (progn (build-set-cdr b module f (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result cell)
-                              (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result val))
+       (progn (build-set-cdr b module f (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result cell)
+                              (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result val))
               (llvm-const-i64 0)))
       ;; `()` as a value (ループ・分岐構文の整理) — `Unit` has no
       ;; representable `TlValue` payload, so this placeholder is never
@@ -323,12 +390,25 @@ pub const SOURCE: &str = r#"
       ;; the mutated variable actually lives. `eval-body` is passed the
       ;; *outer* `loop-exit`/`loop-exit-vals`/`loop-exit-result` unchanged
       ;; — a `let` never introduces a new loop.
+      ;;
+      ;; `new-roots` (Phase 5b): `push-sexpr-roots` is seeded with `(copy-i32s
+      ;; roots ...)` — a safe copy of the *outer* roots table (never mutate
+      ;; `roots` itself in place, for the same reason `params`/`vals` never
+      ;; are — sibling scopes still hold a reference to it) — so it both
+      ;; pushes this `let`'s own `Sexpr` bindings' roots *and* ends up as the
+      ;; full extended roots table in one pass, no separate "extend" step
+      ;; needed (contrast `extend-strs`/`extend-values`, which only ever
+      ;; copy, never push). `pushed` only counts the *new* suffix
+      ;; (`count-rooted`'s start index `(length roots)` skips the copied-in
+      ;; prefix) — unchanged in spirit from Phase 3's `count-and-push-sexpr`.
       ((ALet names values body)
        (let* ((bound-vals (eval-args 0 (length values) values (Vector::new 0 (llvm-const-i64 0))))
               (new-params (extend-strs params names))
               (new-vals (extend-values vals bound-vals))
-              (pushed (count-and-push-sexpr b module f bound-vals 0 (length bound-vals) 0))
-              (result (eval-body 0 (length body) body new-params new-vals loop-exit loop-exit-vals loop-exit-result)))
+              (new-roots (push-sexpr-roots b module f bound-vals 0 (length bound-vals) (root-count)
+                                            (copy-i32s roots 0 (length roots) (Vector::new 0 -1))))
+              (pushed (count-rooted new-roots (length roots) (length new-roots) 0))
+              (result (eval-body 0 (length body) body new-params new-vals new-roots loop-exit loop-exit-vals loop-exit-result)))
          (progn (copy-into vals new-vals 0 (length vals)) (pop-roots b module f pushed) result)))
       ;; A call to another already-compiled function (Phase 2f) *or* a
       ;; member of the same self/mutual-recursion group (Phase 2g) —
@@ -350,8 +430,8 @@ pub const SOURCE: &str = r#"
                ((ret-is-char name) (build-call-char b callee f arg-vals))
                ((ret-is-sexpr name) (build-call-sexpr b callee f arg-vals))
                (else (build-call b callee f arg-vals)))))
-      ;; `setf` on a local (ループ構文): evaluate the new value in the
-      ;; *current* scope, then mutate `vals` in place at `name`'s index —
+      ;; `setf` on a local (ループ構文 + Phase 5b): evaluate the new value in
+      ;; the *current* scope, then mutate `vals` in place at `name`'s index —
       ;; safe because every sibling form in the same *straight-line* body
       ;; sequence (`eval-body`/`eval-body-tail`) is handed this exact same
       ;; `Vector` instance, so the mutation is visible to whatever runs next
@@ -361,9 +441,27 @@ pub const SOURCE: &str = r#"
       ;; `ALoop`'s and `AIf`'s own arms for why each gives the relevant
       ;; scope(s) their own copy of `vals` and merges back via phi instead
       ;; of letting this mutation alias across them.
+      ;;
+      ;; **Phase 5b's core addition**: if `name`'s binding is `Sexpr`-typed
+      ;; (`root-idx >= 0` — `roots`' entry for it, set once when the binding
+      ;; was first pushed), `set-root` overwrites that *same* `Heap`-root
+      ;; slot with the new value's pointer *before* `vals` is updated —
+      ;; unlike `vals` itself, this is a direct, unconditional side effect on
+      ;; `Heap`'s actual root stack, not mediated by any phi/copy machinery,
+      ;; so it needs no special handling across `if`-branches or loop
+      ;; iterations: whichever branch's compiled code actually runs at
+      ;; runtime is the only one whose `set-root` call ever executes, and a
+      ;; loop's back edge just re-runs the same `ASet` (hence the same
+      ;; `set-root` call, same fixed `root-idx`) once per iteration. A
+      ;; non-`Sexpr` binding's `root-idx` is always `-1` (never rooted in the
+      ;; first place), so no `set-root` call is made for it at all.
       ((ASet name value)
-       (let ((v (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result value)))
-         (progn (set vals (param-index params name) v) v)))
+       (let* ((idx (param-index params name))
+              (v (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result value))
+              (root-idx (get roots idx)))
+         (progn (if (>= root-idx 0) (set-root b module f root-idx v) ())
+                (set vals idx v)
+                v)))
       ;; `if` (ループ・分岐構文の整理): now supported in *any* position, not
       ;; just tail (see this module's doc comment). `then`/`els` each run
       ;; against their *own copy* of `vals` (`then-vals`/`els-vals`) rather
@@ -374,7 +472,12 @@ pub const SOURCE: &str = r#"
       ;; `unless`/`cond` are now ordinary `defmacro`s over `if`, so this
       ;; would otherwise be hit by completely ordinary code like `(while
       ;; (< i n) (when done (setf acc (+ acc 1))) (setf i (+ i 1)))`).
-      ;; `merge-vals-phis` rejoins them at `cont-block`, one phi per
+      ;; `roots` itself needs no such per-branch copy (Phase 5b) — a
+      ;; binding's root *slot* doesn't depend on which branch runs, only the
+      ;; *value* `set-root` writes there does, and that write is already
+      ;; branch-local by construction (see `ASet`'s comment) — so both
+      ;; branches simply share the same `roots` unchanged.
+      ;; `merge-vals-phis` rejoins `vals` at `cont-block`, one phi per
       ;; variable (mirroring `ALoop`'s header phis, but for two
       ;; predecessors instead of a back edge), and the result is copied
       ;; back into the *original* `vals` — visible to whatever runs after
@@ -395,16 +498,16 @@ pub const SOURCE: &str = r#"
               (else-block (append-block f "else"))
               (cont-block (append-block f "ifcont")))
          (progn
-           (build-cond-br b (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result c) then-block else-block)
+           (build-cond-br b (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result c) then-block else-block)
            (position-at-end b then-block)
            (let* ((then-vals (copy-values vals 0 (length vals) (Vector::new 0 (llvm-const-i64 0))))
-                  (then-val (compile-value module b f params then-vals loop-exit loop-exit-vals loop-exit-result then))
+                  (then-val (compile-value module b f params then-vals roots loop-exit loop-exit-vals loop-exit-result then))
                   (then-end (current-block b)))
              (progn
                (if then-diverges () (build-br b cont-block))
                (position-at-end b else-block)
                (let* ((els-vals (copy-values vals 0 (length vals) (Vector::new 0 (llvm-const-i64 0))))
-                      (els-val (compile-value module b f params els-vals loop-exit loop-exit-vals loop-exit-result els))
+                      (els-val (compile-value module b f params els-vals roots loop-exit loop-exit-vals loop-exit-result els))
                       (els-end (current-block b)))
                  (progn
                    (if els-diverges () (build-br b cont-block))
@@ -484,7 +587,7 @@ pub const SOURCE: &str = r#"
                    (let ((body-vals (copy-values entry-phis 0 (length entry-phis) (Vector::new 0 (llvm-const-i64 0)))))
                      (progn
                        (if (> (length body) 0)
-                           (eval-body 0 (length body) body params body-vals exit exit-vals-phis exit-result-phi)
+                           (eval-body 0 (length body) body params body-vals roots exit exit-vals-phis exit-result-phi)
                            (llvm-const-i64 0))
                        (let ((latch (current-block b)))
                          (progn (add-incoming-all b entry-phis body-vals latch 0 (length entry-phis)) (build-br b header)))))
@@ -516,7 +619,7 @@ pub const SOURCE: &str = r#"
       ;; nothing reads it.
       ((AReturn maybe-value)
        (let* ((result-val (match maybe-value
-                             ((Some v) (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result v))
+                             ((Some v) (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result v))
                              ((None) (llvm-const-i64 0))))
               (latch (current-block b)))
          (progn
@@ -576,33 +679,37 @@ pub const SOURCE: &str = r#"
 ;; nested inside a loop's body at all (a loop's body is always compiled via
 ;; `compile-value`/`eval-body`, never `compile-tail` — see this module's doc
 ;; comment).
-(defun compile-tail ((module LlvmModule) (bool-ret bool) (f64-ret bool) (char-ret bool) (sexpr-ret bool) (pushed i32) (f LlvmFunction) (b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>)
+(defun compile-tail ((module LlvmModule) (bool-ret bool) (f64-ret bool) (char-ret bool) (sexpr-ret bool) (pushed i32) (f LlvmFunction) (b LlvmBuilder) (params Vector<string>) (vals Vector<LlvmValue>) (roots Vector<i32>)
                       (loop-exit LlvmBasicBlock) (loop-exit-vals Vector<LlvmValue>) (loop-exit-result LlvmValue)
                       (e AstExpr)) ()
   (match e
     ;; `let` in *tail* position: pushes its `Sexpr`-typed bindings (added to
-    ;; `pushed`'s running total) but never pops them itself — control falls
-    ;; straight through `eval-body-tail`'s last form into a deeper
-    ;; `compile-tail` call (possibly through more nested `let`s) that
-    ;; eventually reaches this very `_` arm, which pops *everything*
-    ;; (`pushed` plus whatever this `let` and any others added) in one shot
-    ;; right before its `build-ret*` — see this module's doc comment.
+    ;; `pushed`'s running total, and to `roots` via `new-roots` — Phase 5b,
+    ;; same `push-sexpr-roots`-seeded-with-a-copy shape as `compile-value`'s
+    ;; `ALet` arm) but never pops them itself — control falls straight
+    ;; through `eval-body-tail`'s last form into a deeper `compile-tail` call
+    ;; (possibly through more nested `let`s) that eventually reaches this
+    ;; very `_` arm, which pops *everything* (`pushed` plus whatever this
+    ;; `let` and any others added) in one shot right before its
+    ;; `build-ret*` — see this module's doc comment.
     ((ALet names values body)
      (labels ((eval-bindings ((i i32) (n i32) (exprs Vector<AstExpr>) (out Vector<LlvmValue>)) Vector<LlvmValue>
                 (if (>= i n)
                     out
-                    (progn (push out (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result (get exprs i)))
+                    (progn (push out (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result (get exprs i)))
                            (eval-bindings (+ i 1) n exprs out))))
-              (eval-body-tail ((i i32) (n i32) (forms Vector<AstExpr>) (p2 Vector<string>) (v2 Vector<LlvmValue>) (pushed2 i32)) ()
+              (eval-body-tail ((i i32) (n i32) (forms Vector<AstExpr>) (p2 Vector<string>) (v2 Vector<LlvmValue>) (r2 Vector<i32>) (pushed2 i32)) ()
                 (if (>= (+ i 1) n)
-                    (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed2 f b p2 v2 loop-exit loop-exit-vals loop-exit-result (get forms i))
-                    (progn (compile-value module b f p2 v2 loop-exit loop-exit-vals loop-exit-result (get forms i))
-                           (eval-body-tail (+ i 1) n forms p2 v2 pushed2)))))
+                    (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed2 f b p2 v2 r2 loop-exit loop-exit-vals loop-exit-result (get forms i))
+                    (progn (compile-value module b f p2 v2 r2 loop-exit loop-exit-vals loop-exit-result (get forms i))
+                           (eval-body-tail (+ i 1) n forms p2 v2 r2 pushed2)))))
        (let* ((bound-vals (eval-bindings 0 (length values) values (Vector::new 0 (llvm-const-i64 0))))
               (new-params (extend-strs params names))
               (new-vals (extend-values vals bound-vals))
-              (new-pushed (count-and-push-sexpr b module f bound-vals 0 (length bound-vals) pushed)))
-         (eval-body-tail 0 (length body) body new-params new-vals new-pushed))))
+              (new-roots (push-sexpr-roots b module f bound-vals 0 (length bound-vals) (root-count)
+                                            (copy-i32s roots 0 (length roots) (Vector::new 0 -1))))
+              (new-pushed (+ pushed (count-rooted new-roots (length roots) (length new-roots) 0))))
+         (eval-body-tail 0 (length body) body new-params new-vals new-roots new-pushed))))
     ;; The result must be fully evaluated *before* `pop-root`-ing anything —
     ;; evaluating `e` may itself call `build-cons` (e.g. a tail-position
     ;; `(cons x y)`), which needs every still-live `Sexpr` value (including
@@ -611,7 +718,7 @@ pub const SOURCE: &str = r#"
     ;; call to produce) is it safe to pop everything and `build-ret*` —
     ;; neither `pop-root` nor `build-ret*` themselves ever trigger a GC, so
     ;; nothing can reclaim `result` in between.
-    (_ (let ((result (compile-value module b f params vals loop-exit loop-exit-vals loop-exit-result e)))
+    (_ (let ((result (compile-value module b f params vals roots loop-exit loop-exit-vals loop-exit-result e)))
          (progn (pop-roots b module f pushed)
                 (cond (bool-ret (build-ret-bool b f result))
                       (f64-ret (build-ret-f64 b f result))
@@ -652,14 +759,21 @@ pub const SOURCE: &str = r#"
                  (b (llvm-new-builder)))
             (position-at-end b entry)
             (let* ((vals (make-param-values name f b arity))
-                   (pushed (count-and-push-sexpr b module f vals 0 (length vals) 0)))
+                   ;; `(root-count)` queried *before* any of this function's
+                   ;; own parameters are pushed (Phase 5b) — other compiled
+                   ;; functions further up the dynamic call stack may already
+                   ;; have roots of their own on the same `Heap`-wide stack,
+                   ;; so this function's own roots never assume they start at
+                   ;; absolute position 0.
+                   (root-idxs (push-sexpr-roots b module f vals 0 (length vals) (root-count) (Vector::new 0 -1)))
+                   (pushed (count-rooted root-idxs 0 (length root-idxs) 0)))
               ;; No enclosing loop at the function's own top level — `entry`/
               ;; an empty `Vector`/a dummy `i64` are harmless placeholders
               ;; `ABreak`/`AReturn` could never actually reach here (the
               ;; checker already rejects `break`/`return` outside any loop,
               ;; so `ast_bridge::typed_to_ast` never even produces one at
               ;; this level) — see `compile-value`'s doc comment.
-              (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed f b params vals
+              (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed f b params vals root-idxs
                              entry (Vector::new 0 (llvm-const-i64 0)) (llvm-const-i64 0) body)
               (match (verify module)
                 ((Err e) (Err e))
@@ -706,8 +820,9 @@ pub const SOURCE: &str = r#"
                  (entry (append-block f "entry")))
             (position-at-end b entry)
             (let* ((vals (make-param-values name f b arity))
-                   (pushed (count-and-push-sexpr b module f vals 0 (length vals) 0)))
-              (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed f b params vals
+                   (root-idxs (push-sexpr-roots b module f vals 0 (length vals) (root-count) (Vector::new 0 -1)))
+                   (pushed (count-rooted root-idxs 0 (length root-idxs) 0)))
+              (compile-tail module bool-ret f64-ret char-ret sexpr-ret pushed f b params vals root-idxs
                              entry (Vector::new 0 (llvm-const-i64 0)) (llvm-const-i64 0) body)
               (Ok true)))))))))
 
