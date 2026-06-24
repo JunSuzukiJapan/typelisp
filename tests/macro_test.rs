@@ -524,12 +524,12 @@ fn if_let_binds_in_then_branch_and_falls_through_to_else() {
     // directly with no such conflict.
     let (v, _) = eval_ok_with_prelude(
         "(defun f ((o Option<i64>) (default i64)) i64 (if-let ((Some x) o) (+ x 1) default))
-         (f (Some 41) -1)",
+         (f (option::some 41) -1)",
     );
     assert_eq!(v, RtValue::Int(42));
     let (v2, _) = eval_ok_with_prelude(
         "(defun f ((o Option<i64>) (default i64)) i64 (if-let ((Some x) o) (+ x 1) default))
-         (f (None) -1)",
+         (f (option::none) -1)",
     );
     assert_eq!(v2, RtValue::Int(-1));
 }

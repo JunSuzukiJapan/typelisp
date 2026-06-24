@@ -292,8 +292,8 @@ pub const SOURCE: &str = r#"
 
 (defun position-if-from ((i i32) (pred (fn (Sexpr) bool)) (lst Sexpr)) Option<i32>
   (match lst
-    ((Nil) (None))
-    ((Cons h t) (if (pred h) (Some i) (position-if-from (+ i 1) pred t)))
+    ((Nil) (option::none))
+    ((Cons h t) (if (pred h) (option::some i) (position-if-from (+ i 1) pred t)))
     (_ (panic "position-if: not a proper list"))))
 (defun position-if ((pred (fn (Sexpr) bool)) (lst Sexpr)) Option<i32>
   (position-if-from 0 pred lst))
@@ -532,6 +532,9 @@ pub fn load(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
     let forms = r.read_all(heap, SOURCE).expect("prelude: read failed");
     for v in forms {
         let tl = chk.check_form(heap, &*interp, v).expect("prelude: check failed");
+        for w in chk.take_warnings() {
+            eprintln!("{}", w);
+        }
         interp.exec(heap, tl).expect("prelude: eval failed");
     }
 }

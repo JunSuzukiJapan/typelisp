@@ -45,6 +45,21 @@ pub struct Closure {
     pub env: Vec<(String, Rc<RefCell<RtValue>>)>,
 }
 
+/// A `defstruct` instance's fields, behind the `Rc<RefCell<..>>` that gives
+/// [`RtValue::Struct`] its reference (not value) semantics. `type_name` is a
+/// plain `String`, not a [`Path`] like [`RtValue::Data`]'s — name resolution
+/// is finished by check time, so a runtime value only ever needs this for
+/// display (`Debug`/the REPL printer), never to look anything back up (see
+/// that field's doc comment for why `Data` itself doesn't actually need a
+/// `Path` either). Fields are positional, not named — `Checker::check_defstruct`
+/// resolves a field name to its index once, at check time (`Expr::FieldGet`/
+/// `FieldSet`), so the runtime representation doesn't need to carry names.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StructData {
+    pub type_name: String,
+    pub fields: Vec<RtValue>,
+}
+
 /// A runtime value. Data-type instances (constructors of `Option`/`Result`/
 /// user structs) are represented uniformly by [`RtValue::Data`]; `Sexpr` is
 /// the one exception — it is the cons/nil-bearing builtin the GC-managed cons
@@ -87,6 +102,12 @@ pub enum RtValue {
     /// have; mark-sweep cycle collection is deliberately only for the cons
     /// heap (`Sexpr`/`cons`/strings).
     HashTable(Rc<RefCell<HashMap<HashKey, RtValue>>>),
+    /// A `defstruct` instance — mutable, reference-identity-bearing, unlike
+    /// `Data`'s value semantics (see [`StructData`]'s doc comment for why
+    /// this needed its own variant rather than reusing `Data`). Lives in
+    /// ordinary Rust-managed memory, the same `Rc<RefCell<..>>` pattern as
+    /// `HashTable` above (and the same accepted cycle-leak trade-off).
+    Struct(Rc<RefCell<StructData>>),
 }
 
 /// A runtime error. `Panic` is a deliberate `panic`; `Break`/`Return` are not

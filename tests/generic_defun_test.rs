@@ -102,7 +102,7 @@ fn unwrap_option_propagates_bound_type_through_match() {
     let src = r#"
         (defun (unwrap T) ((opt Option<T>)) T
           (match opt ((some x) x) ((none) (panic "unwrap: None"))))
-        (unwrap (some 5))
+        (unwrap (option::some 5))
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(5));
 }
@@ -110,7 +110,7 @@ fn unwrap_option_propagates_bound_type_through_match() {
 #[test]
 fn generic_defun_returning_option() {
     let src = r#"
-        (defun (wrap T) ((x T)) Option<T> (some x))
+        (defun (wrap T) ((x T)) Option<T> (option::some x))
         (match (wrap 9) ((some x) x) ((none) 0))
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(9));
@@ -123,7 +123,7 @@ fn unused_type_param_is_uninferable() {
     // `T` appears only in the return type, with no argument and no expected
     // type to seed it from — `check_construct` has the same "cannot infer"
     // failure mode for an ADT's unconstrained params.
-    assert_type_error("(defun (make-none T) () Option<T> (none)) (make-none)");
+    assert_type_error("(defun (make-none T) () Option<T> (option::none)) (make-none)");
 }
 
 #[test]

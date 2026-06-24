@@ -471,62 +471,62 @@ fn nreverse_of_a_single_element_list_is_unchanged() {
 
 #[test]
 fn unwrap_returns_the_some_payload() {
-    assert_eq!(eval_ok("(unwrap (some 5))"), RtValue::Int(5));
+    assert_eq!(eval_ok("(unwrap (option::some 5))"), RtValue::Int(5));
 }
 
 #[test]
 fn unwrap_panics_on_none() {
-    let src = "(defun get-opt () Option<i32> (none)) (unwrap (get-opt))";
+    let src = "(defun get-opt () Option<i32> (option::none)) (unwrap (get-opt))";
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn unwrap_or_returns_the_payload_when_some() {
-    assert_eq!(eval_ok("(unwrap-or (some 5) 9)"), RtValue::Int(5));
+    assert_eq!(eval_ok("(unwrap-or (option::some 5) 9)"), RtValue::Int(5));
 }
 
 #[test]
 fn unwrap_or_returns_the_default_when_none() {
-    let src = "(defun get-opt () Option<i32> (none)) (unwrap-or (get-opt) 9)";
+    let src = "(defun get-opt () Option<i32> (option::none)) (unwrap-or (get-opt) 9)";
     assert_eq!(eval_ok(src), RtValue::Int(9));
 }
 
 #[test]
 fn is_some_distinguishes_some_from_none() {
-    eval_true("(is-some (some 1))");
-    let src = "(defun get-opt () Option<i32> (none)) (is-some (get-opt))";
+    eval_true("(is-some (option::some 1))");
+    let src = "(defun get-opt () Option<i32> (option::none)) (is-some (get-opt))";
     assert_eq!(eval_ok(src), RtValue::Bool(false));
 }
 
 #[test]
 fn is_none_distinguishes_none_from_some() {
-    let src = "(defun get-opt () Option<i32> (none)) (is-none (get-opt))";
+    let src = "(defun get-opt () Option<i32> (option::none)) (is-none (get-opt))";
     eval_true(src);
-    assert_eq!(eval_ok("(is-none (some 1))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(is-none (option::some 1))"), RtValue::Bool(false));
 }
 
 #[test]
 fn result_unwrap_returns_the_ok_payload() {
-    let src = "(defun get-r () Result<i32,Error> (ok 7)) (unwrap (get-r))";
+    let src = "(defun get-r () Result<i32,Error> (result::ok 7)) (unwrap (get-r))";
     assert_eq!(eval_ok(src), RtValue::Int(7));
 }
 
 #[test]
 fn result_unwrap_panics_on_err() {
-    let src = r#"(defun get-r () Result<i32,Error> (err (error "boom"))) (unwrap (get-r))"#;
+    let src = r#"(defun get-r () Result<i32,Error> (result::err (error::error "boom"))) (unwrap (get-r))"#;
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn result_unwrap_or_returns_the_default_on_err() {
-    let src = r#"(defun get-r () Result<i32,Error> (err (error "boom"))) (unwrap-or (get-r) 99)"#;
+    let src = r#"(defun get-r () Result<i32,Error> (result::err (error::error "boom"))) (unwrap-or (get-r) 99)"#;
     assert_eq!(eval_ok(src), RtValue::Int(99));
 }
 
 #[test]
 fn result_is_ok_and_is_err() {
-    let ok_src = "(defun get-r () Result<i32,Error> (ok 7)) (is-ok (get-r))";
-    let err_src = r#"(defun get-r () Result<i32,Error> (err (error "x"))) (is-err (get-r))"#;
+    let ok_src = "(defun get-r () Result<i32,Error> (result::ok 7)) (is-ok (get-r))";
+    let err_src = r#"(defun get-r () Result<i32,Error> (result::err (error::error "x"))) (is-err (get-r))"#;
     eval_true(ok_src);
     eval_true(err_src);
 }
@@ -537,8 +537,8 @@ fn unwrap_resolves_to_the_correct_method_per_receiver_type() {
     // disambiguated by `Checker::check_instance_method` from each call's
     // receiver type, like any other type's instance methods.
     let src = r#"
-        (defun get-r () Result<i32,Error> (ok 3))
-        (+ (unwrap (some 4)) (unwrap (get-r)))
+        (defun get-r () Result<i32,Error> (result::ok 3))
+        (+ (unwrap (option::some 4)) (unwrap (get-r)))
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(7));
 }
@@ -677,7 +677,7 @@ fn until_does_not_run_the_body_when_the_test_is_already_true() {
 #[test]
 fn while_let_drains_an_option_producing_call_until_none() {
     let src = r#"
-        (defun next ((n i32)) Option<i32> (if (> n 0) (some n) (none)))
+        (defun next ((n i32)) Option<i32> (if (> n 0) (option::some n) (option::none)))
         (let ((i 5) (sum 0))
           (while-let ((some x) (next i))
             (setf sum (+ sum x))
@@ -691,7 +691,7 @@ fn while_let_drains_an_option_producing_call_until_none() {
 #[test]
 fn while_let_does_not_run_the_body_when_the_pattern_never_matches() {
     let src = r#"
-        (defun get-opt () Option<i32> (none))
+        (defun get-opt () Option<i32> (option::none))
         (let ((ran false))
           (while-let ((some x) (get-opt)) (setf ran true))
           ran)

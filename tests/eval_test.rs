@@ -80,7 +80,7 @@ fn defun_and_call() {
 fn unwrap_or_some() {
     let src = "(defun unwrap-or ((o Option<i32>) (d i32)) i32 \
                  (match o ((Some v) v) ((None) d))) \
-               (unwrap-or (Some 5) 0)";
+               (unwrap-or (option::some 5) 0)";
     assert_eq!(eval_ok(src), RtValue::Int(5));
 }
 
@@ -88,7 +88,7 @@ fn unwrap_or_some() {
 fn unwrap_or_none() {
     let src = "(defun unwrap-or ((o Option<i32>) (d i32)) i32 \
                  (match o ((Some v) v) ((None) d))) \
-               (unwrap-or (None) 9)";
+               (unwrap-or (option::none) 9)";
     assert_eq!(eval_ok(src), RtValue::Int(9));
 }
 
@@ -96,9 +96,9 @@ fn unwrap_or_none() {
 fn result_match() {
     let prog = "(defun unwrap-i ((r Result<i32,Error>)) i32 \
                   (match r ((Ok v) v) ((Err e) (panic \"err\")))) ";
-    assert_eq!(eval_ok(&format!("{} (unwrap-i (Ok 9))", prog)), RtValue::Int(9));
+    assert_eq!(eval_ok(&format!("{} (unwrap-i (result::ok 9))", prog)), RtValue::Int(9));
     assert_eq!(
-        run(&format!("{} (unwrap-i (Err (Error \"boom\")))", prog)),
+        run(&format!("{} (unwrap-i (result::err (error::error \"boom\")))", prog)),
         Err(EvalError::Panic("err".into()))
     );
 }

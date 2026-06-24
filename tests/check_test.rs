@@ -171,7 +171,7 @@ fn ty_program(src: &str) -> Type {
 
 #[test]
 fn construct_some_infers_type_argument() {
-    assert_eq!(ty("(Some 1)"), Type::Named(Path::root("option"), vec![Type::I32]));
+    assert_eq!(ty("(option::some 1)"), Type::Named(Path::root("option"), vec![Type::I32]));
 }
 
 #[test]

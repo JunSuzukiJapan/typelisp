@@ -34,6 +34,11 @@ pub struct FnSig {
     /// Lisp list, like every Lisp's `&rest` parameter) — see
     /// `Checker::check_call`.
     pub rest: Option<Type>,
+    /// Registered by `Registry::with_builtins` (Rust-implemented), as opposed
+    /// to a user (or prelude) `defun` — see [`Definable`]/`Checker::check_redef`.
+    /// Redefining a builtin is always an error; redefining anything else
+    /// follows the configurable [`crate::check::checker::RedefPolicy`].
+    pub builtin: bool,
 }
 
 /// A type-associated function or method (Rust-style; types are *not*
@@ -42,6 +47,8 @@ pub struct FnSig {
 pub struct AssocFn {
     pub sig: FnSig,
     pub instance: bool,
+    /// See [`FnSig::builtin`].
+    pub builtin: bool,
 }
 
 /// A `defmacro`'s signature: an arity and whether it's variadic (every
@@ -57,6 +64,10 @@ pub struct MacroDef {
     pub rest: bool,
     /// Visible outside its defining module.
     pub public: bool,
+    /// See [`FnSig::builtin`]. Always `false` today — `with_builtins`
+    /// registers no macros — kept for uniformity with the other four
+    /// `Definable` impls so `Checker::check_redef` has one shape to call.
+    pub builtin: bool,
 }
 
 /// A global variable/constant: its type and whether it is assignable.
@@ -66,6 +77,23 @@ pub struct VarInfo {
     pub mutable: bool,
     /// Visible outside its defining module.
     pub public: bool,
+    /// See [`FnSig::builtin`]. Always `false` today — `with_builtins`
+    /// registers no global variables.
+    pub builtin: bool,
+}
+
+/// Distinguishes a multi-variant sum type (`Option`/`Result`/`Sexpr`/a future
+/// user ADT) from a `defstruct` product type. The two are otherwise the same
+/// `AdtDef`/`Variant` machinery (a struct registers exactly one variant,
+/// named `"new"` — see `Checker::check_defstruct`), but only a `Struct`
+/// constructs a mutable [`crate::eval::RtValue::Struct`] instead of an
+/// immutable [`crate::eval::RtValue::Data`] (`Checker::check_construct`
+/// decides which by this field) — see [`AdtDef::field_names`] for the other
+/// `Struct`-only piece of metadata.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdtKind {
+    Sum,
+    Struct,
 }
 
 /// A built-in data-type definition (a sum type, e.g. `Option`/`Result`/
@@ -81,6 +109,17 @@ pub struct AdtDef {
     pub assoc: HashMap<String, AssocFn>,
     /// Visible outside its defining module.
     pub public: bool,
+    /// See [`FnSig::builtin`].
+    pub builtin: bool,
+    /// See [`AdtKind`]. `Sum` for every built-in ADT; only `defstruct`
+    /// produces `Struct`.
+    pub kind: AdtKind,
+    /// Field names, in declaration order — empty for every `Sum`-kind type
+    /// (`Variant::fields` there is positional only, e.g. `Some(T)`'s field
+    /// has no name). Non-empty only for a `Struct`, where it backs field
+    /// accessor/setter generation (`Checker::check_defstruct`) — the
+    /// `Variant`'s own `fields: Vec<Type>` still holds the parallel types.
+    pub field_names: Vec<String>,
 }
 
 /// A namespace (module): a container of free functions, types, constructors,
@@ -108,6 +147,14 @@ pub struct Namespace {
     pub aliases: HashMap<String, Vec<String>>,
     /// `use` aliases for modules: short name -> absolute module path.
     pub mod_aliases: HashMap<String, Vec<String>>,
+    /// Bare names snapshotted from a `(use Type)` of a type's *static*
+    /// associated functions (`instance: false`, e.g. `HashTable::new`) —
+    /// unqualified name -> (owning type path, method name). Mirrors `ctors`
+    /// (which plays the same role for a type's *constructors*) but kept
+    /// separate since a constructor and a static method are looked up
+    /// through different machinery (`check_construct` vs `check_assoc_call`)
+    /// — see `Checker::check_use`/`Checker::check_list`.
+    pub static_uses: HashMap<String, (Path, String)>,
 }
 
 impl Namespace {
@@ -131,14 +178,26 @@ impl Namespace {
         ns
     }
 
-    /// Register a type here and index its constructors (bare ctor name — first
-    /// definer wins so built-in constructors stay reachable).
+    /// Register a type here. Does *not* index its constructors as bare names
+    /// — a type's constructors are only reachable as `Type::ctor` (or after
+    /// `use Type`, see `Checker::check_use`) unless the caller separately
+    /// calls [`Self::register_ctors`] (only done for `Sexpr`, the one
+    /// exception — see `Registry::with_builtins`).
     pub fn add_type(&mut self, def: AdtDef) {
-        for (i, v) in def.variants.iter().enumerate() {
-            self.ctors.entry(v.name.clone()).or_insert((def.name.clone(), i));
-        }
         let local = def.name.local().to_string();
         self.types.insert(local, def);
+    }
+
+    /// Indexes `variants` as bare constructor names (first definer wins, so
+    /// builtins stay reachable even if a later `use` snapshots the same
+    /// name). Called explicitly — unlike the old `add_type`, this is no
+    /// longer automatic — by `with_builtins` (for `Sexpr` only) and by
+    /// `Checker::check_use` (to snapshot a `use`d type's constructors into
+    /// the current namespace).
+    pub fn register_ctors(&mut self, type_path: &Path, variants: &[Variant]) {
+        for (i, v) in variants.iter().enumerate() {
+            self.ctors.entry(v.name.clone()).or_insert((type_path.clone(), i));
+        }
     }
 }
 
@@ -155,7 +214,14 @@ impl Registry {
         root.add_type(option_def());
         root.add_type(result_def());
         root.add_type(error_def());
-        root.add_type(sexpr_def());
+        // `Sexpr` is the one type whose constructors (`nil`/`cons`/...) stay
+        // reachable as bare names without a `use` — Lisp's list operations
+        // (`car`/`cdr`/`cons`/list literals) would be unworkably verbose
+        // otherwise. `Option`/`Result`/`Error` constructors are `Type::ctor`
+        // (or `use`d) only — see `Checker::check_use`.
+        let def = sexpr_def();
+        root.register_ctors(&def.name, &def.variants);
+        root.add_type(def);
         root.add_type(hashtable_def());
         // Primitive value types (i8..usize/f32/f64/bool/char/string) get a
         // method table too, so `defmethod` can target them (see
@@ -182,36 +248,45 @@ impl Registry {
                 Type::Bool => bool_assoc(),
                 _ => HashMap::new(),
             };
-            root.add_type(AdtDef { name, params: Vec::new(), variants: Vec::new(), assoc, public: true });
+            root.add_type(AdtDef {
+                name,
+                params: Vec::new(),
+                variants: Vec::new(),
+                assoc,
+                public: true,
+                builtin: true,
+                kind: AdtKind::Sum,
+                field_names: Vec::new(),
+            });
         }
         // `random`: the only numeric builtin with no natural receiver to
         // dispatch on (like `gensym`), so it stays a free function.
-        root.fns.insert("random".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::I32, public: true });
+        root.fns.insert("random".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::I32, public: true, builtin: true });
         // `not`: a plain unary function (no short-circuiting needed, unlike
         // `and`/`or`), so — unlike those two — it doesn't need special-form
         // treatment.
-        root.fns.insert("not".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Bool], ret: Type::Bool, public: true });
+        root.fns.insert("not".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Bool], ret: Type::Bool, public: true, builtin: true });
         // `cons`/`car`/`cdr` operate on `Sexpr` (the cons/nil duality at the
         // type level). `cons` is also reachable as the `Cons` constructor;
         // registering it as a function too lets it be used as a value
         // (e.g. passed to a higher-order function).
-        root.fns.insert("cons".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: sexpr(), public: true });
-        root.fns.insert("car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true });
-        root.fns.insert("cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true });
+        root.fns.insert("cons".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: sexpr(), public: true, builtin: true });
+        root.fns.insert("car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true, builtin: true });
+        root.fns.insert("cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true, builtin: true });
         // `set-car`/`set-cdr` (CL `rplaca`/`rplacd`): in-place mutation of an
         // existing cons cell, backed by `mem::Heap::set_car`/`set_cdr` (already
         // implemented at the heap layer, just not wired up to a language-level
         // name until now). Panics on a non-`Cons` `Sexpr`, matching `car`/`cdr`.
         // This is the prerequisite `nconc`/`nreverse` (the prelude's destructive
         // list operations) build on.
-        root.fns.insert("set-car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true });
-        root.fns.insert("set-cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true });
+        root.fns.insert("set-car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true, builtin: true });
+        root.fns.insert("set-cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true, builtin: true });
         // `gensym`: a fresh `Sexpr::Sym` on every call, for macro hygiene
         // workarounds (see `Interp`'s `gensym_counter` for the caveat that
         // these are collision-*resistant*, not truly unforgeable — typelisp
         // symbols are always interned/permanent, there is no uninterned-symbol
         // concept to give a CL-style absolute guarantee).
-        root.fns.insert("gensym".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: sexpr(), public: true });
+        root.fns.insert("gensym".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: sexpr(), public: true, builtin: true });
         Registry { root }
     }
 
@@ -242,6 +317,9 @@ fn option_def() -> AdtDef {
         ],
         assoc: HashMap::new(),
         public: true,
+        builtin: true,
+        kind: AdtKind::Sum,
+        field_names: Vec::new(),
     }
 }
 
@@ -256,6 +334,9 @@ fn result_def() -> AdtDef {
         ],
         assoc: HashMap::new(),
         public: true,
+        builtin: true,
+        kind: AdtKind::Sum,
+        field_names: Vec::new(),
     }
 }
 
@@ -268,6 +349,9 @@ fn error_def() -> AdtDef {
         variants: vec![Variant { name: "error".to_string(), fields: vec![Type::Str] }],
         assoc: HashMap::new(),
         public: true,
+        builtin: true,
+        kind: AdtKind::Sum,
+        field_names: Vec::new(),
     }
 }
 
@@ -294,6 +378,9 @@ fn sexpr_def() -> AdtDef {
         ],
         assoc: sexpr_assoc(),
         public: true,
+        builtin: true,
+        kind: AdtKind::Sum,
+        field_names: Vec::new(),
     }
 }
 
@@ -310,7 +397,10 @@ fn sexpr_def() -> AdtDef {
 /// special-cases `Str` to compare content instead.
 fn sexpr_assoc() -> HashMap<String, AssocFn> {
     let mut m = HashMap::new();
-    m.insert("eq".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true }, instance: true });
+    m.insert(
+        "eq".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true, builtin: true }, instance: true, builtin: true },
+    );
     m
 }
 
@@ -318,7 +408,7 @@ fn bool_assoc() -> HashMap<String, AssocFn> {
     let mut m = HashMap::new();
     m.insert(
         "eq".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bool, Type::Bool], ret: Type::Bool, public: true }, instance: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bool, Type::Bool], ret: Type::Bool, public: true, builtin: true }, instance: true, builtin: true },
     );
     m
 }
@@ -344,36 +434,39 @@ fn hashtable_def() -> AdtDef {
     let mut assoc = HashMap::new();
     assoc.insert(
         "new".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: hashtable_ty(), public: true }, instance: false },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: hashtable_ty(), public: true, builtin: true }, instance: false, builtin: true },
     );
     assoc.insert(
         "get".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true, builtin: true },
             instance: true,
+            builtin: true,
         },
     );
     assoc.insert(
         "set".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k"), tvar("v")], ret: Type::Unit, public: true },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k"), tvar("v")], ret: Type::Unit, public: true, builtin: true },
             instance: true,
+            builtin: true,
         },
     );
     assoc.insert(
         "remove".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true, builtin: true },
             instance: true,
+            builtin: true,
         },
     );
     assoc.insert(
         "count".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::I32, public: true }, instance: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::I32, public: true, builtin: true }, instance: true, builtin: true },
     );
     assoc.insert(
         "clear".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Unit, public: true }, instance: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Unit, public: true, builtin: true }, instance: true, builtin: true },
     );
     AdtDef {
         name: Path::root("hashtable"),
@@ -381,6 +474,9 @@ fn hashtable_def() -> AdtDef {
         variants: vec![],
         assoc,
         public: true,
+        builtin: true,
+        kind: AdtKind::Sum,
+        field_names: Vec::new(),
     }
 }
 
@@ -393,7 +489,7 @@ fn hashtable_def() -> AdtDef {
 /// (`str::to_ascii_uppercase`/`lowercase`), avoiding Unicode case mappings
 /// that can change a string's length (e.g. German `ß` -> `SS`).
 fn string_assoc() -> HashMap<String, AssocFn> {
-    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true }, instance: true };
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true }, instance: true, builtin: true };
     let mut m = HashMap::new();
     m.insert("upcase".to_string(), method(vec![Type::Str], Type::Str));
     m.insert("downcase".to_string(), method(vec![Type::Str], Type::Str));
@@ -412,7 +508,7 @@ fn string_assoc() -> HashMap<String, AssocFn> {
 /// necessarily a single char). `alphap`/`digitp` classify ASCII letters/
 /// digits only (CL's `alpha-char-p`/`digit-char-p` without a radix).
 fn char_assoc() -> HashMap<String, AssocFn> {
-    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true }, instance: true };
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true }, instance: true, builtin: true };
     let mut m = HashMap::new();
     m.insert("upcase".to_string(), method(vec![Type::Char], Type::Char));
     m.insert("downcase".to_string(), method(vec![Type::Char], Type::Char));
@@ -431,8 +527,8 @@ fn char_assoc() -> HashMap<String, AssocFn> {
 /// Shared by both integer widths since the operation set and panic policy
 /// are identical; only the receiver/param `Type` differs.
 fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true }, instance: true };
-    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true }, instance: true };
+    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true, builtin: true }, instance: true, builtin: true };
+    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true, builtin: true }, instance: true, builtin: true };
     let mut m = HashMap::new();
     for op in ["+", "-", "*", "/", "mod"] {
         m.insert(op.to_string(), binop());
@@ -453,9 +549,9 @@ fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
 /// plus `expt`(binary, `f64::powf`) and the unary rounding/root family
 /// `sqrt`/`floor`/`ceiling`/`round`/`truncate`.
 fn float_assoc() -> HashMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64, Type::F64], ret: Type::F64, public: true }, instance: true };
-    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64, Type::F64], ret: Type::Bool, public: true }, instance: true };
-    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::F64, public: true }, instance: true };
+    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64, Type::F64], ret: Type::F64, public: true, builtin: true }, instance: true, builtin: true };
+    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64, Type::F64], ret: Type::Bool, public: true, builtin: true }, instance: true, builtin: true };
+    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::F64, public: true, builtin: true }, instance: true, builtin: true };
     let mut m = HashMap::new();
     for op in ["+", "-", "*", "/", "mod"] {
         m.insert(op.to_string(), binop());

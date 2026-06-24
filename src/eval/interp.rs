@@ -19,7 +19,7 @@ use std::rc::{Rc, Weak};
 
 use crate::{Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Typed, Value};
 
-use super::value::{Closure, EvalError, HashKey, RtValue};
+use super::value::{Closure, EvalError, HashKey, RtValue, StructData};
 
 /// A registered function or method body with its parameter names.
 struct FnDef {
@@ -140,6 +140,11 @@ impl Interp {
                 Ok(None)
             }
             TopLevel::Use { .. } => Ok(None),
+            // The type was already registered in the checker's `Registry` at
+            // check time; there's nothing for the interpreter to do, the
+            // same as `Option`/`Result` needing no runtime registration of
+            // their own — see `TopLevel::Defstruct`'s doc comment.
+            TopLevel::Defstruct { .. } => Ok(None),
             TopLevel::Defvar { name, value, .. } => {
                 let v = self.eval(heap, &value, &Env::new())?;
                 self.globals.insert(name, self.slot(v));
@@ -252,9 +257,15 @@ impl Interp {
                     }
                 }
             }
-            Expr::Construct { type_name, variant, args } => {
+            Expr::Construct { type_name, variant, args, mutable } => {
                 if is_sexpr_type(type_name) {
                     self.construct_sexpr(heap, *variant, args, env)
+                } else if *mutable {
+                    let (fields, _slots) = self.eval_args(heap, args, env)?;
+                    Ok(RtValue::Struct(Rc::new(RefCell::new(StructData {
+                        type_name: type_name.to_string(),
+                        fields,
+                    }))))
                 } else {
                     let (fields, _slots) = self.eval_args(heap, args, env)?;
                     Ok(RtValue::Data { type_name: type_name.clone(), variant: *variant, fields })
@@ -296,6 +307,18 @@ impl Interp {
                     _ => Err(EvalError::Internal("apply of a non-function value".into())),
                 }
             }
+            Expr::FieldGet(obj, idx) => match self.eval(heap, obj, env)? {
+                RtValue::Struct(s) => Ok(s.borrow().fields[*idx].clone()),
+                other => Err(EvalError::Internal(format!("FieldGet on a non-Struct value: {:?}", other))),
+            },
+            Expr::FieldSet(obj, idx, value) => match self.eval(heap, obj, env)? {
+                RtValue::Struct(s) => {
+                    let v = self.eval(heap, value, env)?;
+                    s.borrow_mut().fields[*idx] = v;
+                    Ok(RtValue::Unit)
+                }
+                other => Err(EvalError::Internal(format!("FieldSet on a non-Struct value: {:?}", other))),
+            },
             Expr::Match(scrut, arms) => {
                 let v = self.eval(heap, scrut, env)?;
                 for arm in arms {
@@ -676,6 +699,11 @@ fn collect_sexpr_roots(v: &RtValue, out: &mut Vec<Value>) {
         }
         RtValue::HashTable(map) => {
             for f in map.borrow().values() {
+                collect_sexpr_roots(f, out);
+            }
+        }
+        RtValue::Struct(s) => {
+            for f in &s.borrow().fields {
                 collect_sexpr_roots(f, out);
             }
         }
@@ -1086,6 +1114,17 @@ fn match_pattern(heap: &Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(String,
             RtValue::Data { variant: vv, fields, .. } if vv == variant && fields.len() == args.len() => {
                 let mut binds = Vec::new();
                 for (p, f) in args.iter().zip(fields.iter()) {
+                    binds.extend(match_pattern(heap, p, f)?);
+                }
+                Some(binds)
+            }
+            // A `defstruct` has exactly one variant (`"new"`, index 0), so
+            // `variant` always matches here — only the field count/pattern
+            // shape can fail. Reads a clone of each field out of the
+            // `RefCell`, same as `Expr::FieldGet`.
+            RtValue::Struct(s) if *variant == 0 && s.borrow().fields.len() == args.len() => {
+                let mut binds = Vec::new();
+                for (p, f) in args.iter().zip(s.borrow().fields.iter()) {
                     binds.extend(match_pattern(heap, p, f)?);
                 }
                 Some(binds)

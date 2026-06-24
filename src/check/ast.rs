@@ -76,7 +76,28 @@ pub enum Expr {
         /// Index of the variant within the type's definition.
         variant: usize,
         args: Vec<Typed>,
+        /// Whether the type is `AdtKind::Struct` (a `defstruct`) rather than
+        /// `AdtKind::Sum` — set by `Checker::check_construct` from the
+        /// resolved `AdtDef::kind`. Chooses the interpreter's runtime
+        /// representation: `true` builds a mutable, reference-semantics
+        /// `RtValue::Struct`; `false` (every built-in ADT) builds the
+        /// existing value-semantics `RtValue::Data`, unchanged.
+        mutable: bool,
     },
+    /// Reads field `.1` of a `defstruct` instance (`RtValue::Struct`) by
+    /// position. Synthesized only by `Checker::check_defstruct` as a field
+    /// accessor's body (the `p::x` surface syntax desugars to an ordinary
+    /// instance-method call on that accessor, `Expr::Assoc` — see
+    /// `Checker::check`'s `Value::Path` case — so this node itself is never
+    /// produced directly from user-written source).
+    FieldGet(Box<Typed>, usize),
+    /// Writes field `.1` of a `defstruct` instance in place, evaluating to
+    /// `Unit`. Synthesized only by `Checker::check_defstruct` as a field
+    /// setter's body — `(setf p::x v)` desugars to an ordinary instance-
+    /// method call on that setter (`Expr::Assoc`), the same way `p::x` reads
+    /// desugar to the getter call (see `Expr::FieldGet`'s doc comment and
+    /// `Checker::check_setf`).
+    FieldSet(Box<Typed>, usize, Box<Typed>),
     /// `(match scrutinee (pattern body...)...)`.
     Match(Box<Typed>, Vec<Arm>),
     /// `(setf var value)` — assign to a local variable; evaluates to the value.

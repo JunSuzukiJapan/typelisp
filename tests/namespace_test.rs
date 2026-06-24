@@ -121,10 +121,69 @@ fn use_injects_name_into_current_scope() {
 
 #[test]
 fn builtins_still_resolve() {
+    // `Option`'s constructors are type-scoped (`Option::some`, not a bare
+    // `some`) — see `Registry::add_type`/`Checker::check_use` — but the
+    // type itself, and `Type::ctor` construction, still resolve with no
+    // setup needed.
     assert_eq!(
-        ty_program("(Some 1)"),
+        ty_program("(option::some 1)"),
         Type::Named(Path::root("option"), vec![Type::I32])
     );
+}
+
+#[test]
+fn bare_option_constructors_no_longer_resolve() {
+    // The flip side of `builtins_still_resolve`: a bare `some`/`none` is
+    // *not* a free function/global, so it's the "unbound variable" error
+    // path, not the construct-then-typecheck path `Some` used to take.
+    assert!(program("(some 1)").is_err());
+    assert!(program("(none)").is_err());
+}
+
+#[test]
+fn bare_result_and_error_constructors_no_longer_resolve() {
+    assert!(program("(ok 1)").is_err());
+    assert!(program(r#"(err (error::error "x"))"#).is_err());
+    assert!(program(r#"(error "x")"#).is_err());
+}
+
+// ---- use Type: snapshotting a type's constructors/static methods bare -----
+
+#[test]
+fn use_option_makes_constructors_callable_bare() {
+    assert_eq!(
+        ty_program("(use option) (some 1)"),
+        Type::Named(Path::root("option"), vec![Type::I32])
+    );
+    // `none` has no fields, so — same limitation as `option::none` alone,
+    // see `prelude_test.rs`'s comment on this — it needs a declared return
+    // type to seed `T` from; bare `(none)` with no context can't infer it.
+    let src = "(use option) (defun f () Option<i32> (none)) (f)";
+    assert_eq!(ty_program(src), Type::Named(Path::root("option"), vec![Type::I32]));
+}
+
+#[test]
+fn use_hashtable_makes_its_static_new_callable_bare() {
+    // `new` is a static (`instance: false`) associated function, not a
+    // constructor — exercises `Namespace::static_uses`/`resolve_static_use`,
+    // not `ctors`. A declared return type seeds `K`/`V` the same way any
+    // `HashTable::new`/`Vector::new` call needs one (`let`'s binding value
+    // is checked with `expected: None`, so `new` can't be inferred there).
+    let src = "(use hashtable) (defun f () HashTable<i32,i32> (new)) (f)";
+    assert!(matches!(program(src), Ok(TopLevel::Expr(_))));
+}
+
+#[test]
+fn use_is_scoped_to_its_own_namespace() {
+    // `use`d inside `m`, `some` stays bare-unresolved at the root.
+    let src = "(module m (use option) (defun f () Option<i32> (some 1))) (some 1)";
+    assert!(program(src).is_err());
+}
+
+#[test]
+fn use_inside_a_module_does_not_leak_to_a_sibling_module() {
+    let src = "(module a (use option)) (module b (defun f () Option<i32> (some 1)))";
+    assert!(program(src).is_err());
 }
 
 // ---- visibility: private items are inaccessible from outside ----------------

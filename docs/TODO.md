@@ -103,11 +103,13 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
 確定仕様は [language-design.md](language-design.md)。実装済み（すべて型検査レベル、eval は未着手）:
 - **エラー処理**: `Result<T,E>`/`Error` 組み込み、`Never` 型(`!`)、`panic` 特殊形（任意の期待型に適合）。`?`/try は無し。
 - **`::`/名前空間**: reader が `::` を `Value::Path` に分割。**型は名前空間でなく Rust 同様**（型は assoc 関数/メソッドを持つ）。
-  `module`/`use`、`defstruct`（直和形・非ジェネリック、**2026-06-23に全面削除・後日再設計予定**——
-  フィールドの読み書き手段が無い不完全な設計と判明、[[typelisp-vector-defstruct-revert]]参照）、
-  `defmethod`（インスタンス `(self T)` / static `(T ...)`、`defstruct` 削除後も Option/Result/
-  プリミティブ型向けには維持）、インスタンス・ディスパッチ（第一引数型）と `Type::method` 静的呼び出し、
-  裸名解決 現NS→root。
+  `module`/`use`、`defstruct`（2026-06-23に全面削除後、**再設計・再実装完了**——単一variant
+  `"new"`固定・`AdtKind::Struct`・`RtValue::Struct`(`Rc<RefCell<..>>`で可変)、フィールド読み書きは
+  `変数::フィールド名`/`(setf 変数::フィールド名 v)`、ジェネリック`defstruct`も対応、
+  [[typelisp-vector-defstruct-revert]]参照）、`defmethod`（インスタンス `(self T)` / static
+  `(T ...)`）、インスタンス・ディスパッチ（第一引数型）と `Type::method` 静的呼び出し、
+  裸名解決 現NS→root。`Option`/`Result`/`Error`のコンストラクタも同型スコープ化済み
+  （`Option::some`等、`(use Option)`で裸名展開可能、`Sexpr`の`nil`/`cons`のみ例外的に裸名維持）。
 - **プリミティブ型への `defmethod` 拡張**（[cl-equivalence-catalog.md](cl-equivalence-catalog.md) §0.1）:
   `i8`/`i16`/`i32`/`i64`/`isize`/`u8`/`u16`/`u32`/`u64`/`usize`/`f32`/`f64`/`bool`/`char`/`string`
   （`Type` の全プリミティブ variant、`Unit`/`Never` 除く）も `defmethod` の受け手になれる。
@@ -123,11 +125,8 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
   から代入元を得る（field-less構成子 `None` が `expected` から型引数を学ぶのと同じ要領）。
   受け手/expected/メソッド識別子は `AssocCall` 構造体にまとめてアリティを抑えている。
 - **未実装（後続、影響範囲の大きさで優先順位付け——[[feedback-impl-priority]]）**:
-  1. **ユーザ定義のジェネリック `defstruct`**（`check_defstruct` は常に `params: Vec::new()` で
-     構造体に型パラメータを宣言する構文がまだ無い — 上記の受け手側 generic 代入とは別物。
-     `HashTable<K,V>` 等の組み込み型は `registry.rs` で直接 `AdtDef.params` を設定するため、この
-     制約の影響を受けていない）。型システムの拡張で影響範囲が最も広いため最優先
-     （関連: 下記「次の候補（eval 拡充）」の `defun` ジェネリック型パラメータも同種の課題）。
+  1. ~~**ユーザ定義のジェネリック `defstruct`**~~ — **完了**（`defstruct`再設計の一部、
+     `(defstruct (Name T...) (field Type)...)`、`check_defun`の型パラメータ構文を踏襲）。
   2. **`use a::b`**（モジュール名を現NSに alias として導入）。名前空間機能で、モジュール分割が
      進むほど影響範囲が広がるため次点。
   3. **可視性**（`FnSig::public` 等のフィールドは既に存在するが常に `true` で実効性なし。

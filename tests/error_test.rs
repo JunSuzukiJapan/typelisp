@@ -70,7 +70,7 @@ fn parses_never_type_annotation() {
 
 #[test]
 fn result_ok_infers_from_return_type() {
-    let src = "(defun mk () Result<i32,Error> (Ok 1))";
+    let src = "(defun mk () Result<i32,Error> (result::ok 1))";
     match program(src).unwrap() {
         TopLevel::Defun { ret, .. } => {
             assert_eq!(ret, Type::Named(Path::root("result"), vec![Type::I32, error_ty()]));
@@ -81,7 +81,7 @@ fn result_ok_infers_from_return_type() {
 
 #[test]
 fn result_err_takes_error_value() {
-    let src = "(defun bad () Result<i32,Error> (Err (Error \"boom\")))";
+    let src = "(defun bad () Result<i32,Error> (result::err (error::error \"boom\")))";
     assert!(matches!(program(src), Ok(TopLevel::Defun { .. })));
 }
 

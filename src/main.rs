@@ -17,6 +17,7 @@ fn main() -> rustyline::Result<()> {
     let mut heap = Heap::with_capacity(1 << 16);
     let reader = Reader::new();
     let mut checker = Checker::new();
+    checker.set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut checker, &mut interp);
     let mut rl = DefaultEditor::new()?;
@@ -50,6 +51,26 @@ fn main() -> rustyline::Result<()> {
     }
     let _ = rl.save_history(&hist_path);
     Ok(())
+}
+
+/// Parses `--on-redefine=warn|error|silent` from the process arguments
+/// (defaults to `RedefPolicy::Warn` if absent or unrecognized — no `clap`
+/// dependency for one flag, hand-rolled like the rest of this small CLI).
+fn parse_redef_policy() -> RedefPolicy {
+    for arg in std::env::args().skip(1) {
+        if let Some(v) = arg.strip_prefix("--on-redefine=") {
+            return match v {
+                "warn" => RedefPolicy::Warn,
+                "error" => RedefPolicy::Error,
+                "silent" => RedefPolicy::Silent,
+                other => {
+                    eprintln!("unknown --on-redefine value `{}` (expected warn/error/silent), using warn", other);
+                    RedefPolicy::Warn
+                }
+            };
+        }
+    }
+    RedefPolicy::Warn
 }
 
 /// `$HOME/.typl_history`, falling back to the current directory if `HOME` is
@@ -107,7 +128,11 @@ fn try_run_pending(
     let mut checked = Vec::with_capacity(forms.len());
     let mut check_err = None;
     for v in forms {
-        match checker.check_form(heap, &*interp, v) {
+        let result = checker.check_form(heap, &*interp, v);
+        for w in checker.take_warnings() {
+            eprintln!("{}", w);
+        }
+        match result {
             Ok(tl @ TopLevel::Defmacro { .. }) => {
                 let _ = interp.exec(heap, tl);
             }
@@ -177,6 +202,17 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
         RtValue::Builtin(name) => format!("#<builtin {}>", name),
         RtValue::BuiltinMethod(type_name, method) => format!("#<builtin {}::{}>", type_name, method),
         RtValue::HashTable(map) => format!("#<hashtable count={}>", map.borrow().len()),
+        RtValue::Struct(s) => {
+            // Positional, not named — `StructData` deliberately doesn't
+            // carry field names at runtime (see its doc comment), and this
+            // printer has no module-qualified `Path` to look the type's
+            // `AdtDef::field_names` back up by (`type_name` is a bare
+            // `String`), so it stays consistent with that and prints values
+            // only, like `RtValue::Data`'s field list above.
+            let s = s.borrow();
+            let parts: Vec<String> = s.fields.iter().map(|f| format_value(heap, reg, f)).collect();
+            format!("#<{} {}>", s.type_name, parts.join(" "))
+        }
     }
 }
 

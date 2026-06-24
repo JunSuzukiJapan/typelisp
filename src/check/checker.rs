@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{parse_type, prim_type_path, Error, Heap, Path, Type, Value};
 
 use super::ast::{Arm, Expr, Pattern, QuotedSexpr, Typed};
-use super::registry::{AssocFn, FnSig, MacroDef, Namespace, Registry, VarInfo};
+use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
 /// `raw_args` are the call's unevaluated argument forms (exactly as written —
@@ -35,9 +35,9 @@ pub trait MacroExpander {
 pub enum TopLevel {
     /// A `defun`: fully-qualified [`Path`], typed parameters, return type, body.
     /// `type_params` are the names declared by `(defun (name T1 T2...) ...)`
-    /// (empty for an ordinary, non-generic function) — kept here for parity
-    /// with `Defstruct`'s `params`, though the evaluator ignores them (type
-    /// information is erased before execution; see `Checker::check_call`).
+    /// (empty for an ordinary, non-generic function) — the evaluator ignores
+    /// them (type information is erased before execution; see
+    /// `Checker::check_call`).
     /// `params` includes a trailing `&rest` parameter's name last (bound to
     /// a plain `Sexpr` list), exactly like `Defmacro::params` — see
     /// `Checker::check_defun`/`parse_params_rest`.
@@ -71,6 +71,15 @@ pub enum TopLevel {
     Module { path: Path, body: Vec<TopLevel> },
     /// A `use`: a name brought into the current scope (alias -> target path).
     Use { alias: Path, target: Path },
+    /// A `defstruct`: registers a single-variant `AdtKind::Struct` type
+    /// (`Checker::check_defstruct`). Carries only the name — unlike
+    /// `Defun`/`Defmethod`, there's no body to run; the registry mutation
+    /// already happened at check time, and the constructor/field accessors
+    /// are ordinary `Type::ctor`/`defmethod` machinery reached through
+    /// `Expr::Construct`/`Assoc` at use sites, not through this node.
+    /// `Interp::exec` treats it as a no-op, the same as `Option`/`Result`
+    /// needing no runtime registration of their own.
+    Defstruct { name: Path },
     /// A bare top-level expression.
     Expr(Typed),
 }
@@ -116,6 +125,54 @@ struct AssocCall<'a> {
     expected: Option<&'a Type>,
 }
 
+/// What happens when a `defun`/`defmethod`/`defmacro`/`defvar`/`defstruct`
+/// reuses a name already defined by *non-builtin* code (the same module, in
+/// the same namespace). Redefining a builtin (`with_builtins`-registered) is
+/// always an error, regardless of this setting — see [`Checker::check_redef`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum RedefPolicy {
+    /// Allow the redefinition, but record a warning (`Checker::take_warnings`).
+    #[default]
+    Warn,
+    /// Reject the redefinition with a `TypeError`.
+    Error,
+    /// Allow the redefinition silently.
+    Silent,
+}
+
+/// Anything that can occupy a name in one of a [`Namespace`]'s tables (or a
+/// type's `assoc` table), so [`Checker::check_redef`] can be written once and
+/// shared by every `check_def*` instead of duplicating the warn/error/silent
+/// decision at each call site.
+trait Definable {
+    fn builtin(&self) -> bool;
+}
+impl Definable for FnSig {
+    fn builtin(&self) -> bool {
+        self.builtin
+    }
+}
+impl Definable for MacroDef {
+    fn builtin(&self) -> bool {
+        self.builtin
+    }
+}
+impl Definable for VarInfo {
+    fn builtin(&self) -> bool {
+        self.builtin
+    }
+}
+impl Definable for AdtDef {
+    fn builtin(&self) -> bool {
+        self.builtin
+    }
+}
+impl Definable for AssocFn {
+    fn builtin(&self) -> bool {
+        self.builtin
+    }
+}
+
 /// The type checker, holding the data-type and function registries plus the
 /// current namespace (module) path.
 pub struct Checker {
@@ -129,11 +186,71 @@ pub struct Checker {
     /// function boundary (there is no labelled non-local exit in this
     /// language, only "nearest enclosing loop").
     loop_stack: RefCell<Vec<Type>>,
+    /// What to do when a `defun`/`defmethod`/`defmacro`/`defvar`/`defstruct`
+    /// reuses a non-builtin name — see [`RedefPolicy`]. Defaults to `Warn`;
+    /// override with [`Self::set_redef_policy`] (e.g. from a CLI flag).
+    redef_policy: RedefPolicy,
+    /// Non-fatal diagnostics accumulated by [`Self::check_redef`] (currently
+    /// just `RedefPolicy::Warn` redefinitions); drained by [`Self::take_warnings`].
+    warnings: RefCell<Vec<String>>,
 }
 
 impl Checker {
     pub fn new() -> Checker {
-        Checker { reg: Registry::with_builtins(), ns: Vec::new(), loop_stack: RefCell::new(Vec::new()) }
+        Checker {
+            reg: Registry::with_builtins(),
+            ns: Vec::new(),
+            loop_stack: RefCell::new(Vec::new()),
+            redef_policy: RedefPolicy::default(),
+            warnings: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// Overrides the default [`RedefPolicy`] (`Warn`) for non-builtin
+    /// redefinitions. Redefining a builtin is always an error regardless.
+    pub fn set_redef_policy(&mut self, policy: RedefPolicy) {
+        self.redef_policy = policy;
+    }
+
+    /// Drains and returns every warning recorded so far (e.g. by a
+    /// `RedefPolicy::Warn` redefinition) — call after each `check_form` to
+    /// surface them (see `main.rs`/`prelude.rs`).
+    pub fn take_warnings(&self) -> Vec<String> {
+        std::mem::take(&mut *self.warnings.borrow_mut())
+    }
+
+    /// The one place the warn/error/silent (and "never touch a builtin")
+    /// decision actually lives, given only whether the name already in use
+    /// is a builtin. [`Self::check_redef`] (the `Definable`-generic path used
+    /// by `defun`/`defmethod`/`defmacro`/`defvar`/`defstruct`) and
+    /// `check_use`'s constructor/static-method snapshot (whose tables,
+    /// `Namespace::ctors`/`static_uses`, are plain `(Path, ..)` tuples with
+    /// no `Definable` impl of their own — "builtin" there means "owned by a
+    /// builtin type") both reduce to calling this.
+    fn check_redef_outcome(&self, kind: &str, name: &str, is_builtin: bool) -> Result<(), Error> {
+        if is_builtin {
+            return Err(Error::TypeError(format!("cannot redefine built-in {} `{}`", kind, name)));
+        }
+        match self.redef_policy {
+            RedefPolicy::Error => Err(Error::TypeError(format!("{} `{}` is already defined", kind, name))),
+            RedefPolicy::Warn => {
+                self.warnings.borrow_mut().push(format!("warning: redefining {} `{}`", kind, name));
+                Ok(())
+            }
+            RedefPolicy::Silent => Ok(()),
+        }
+    }
+
+    /// The one place that decides whether a `defun`/`defmethod`/`defmacro`/
+    /// `defvar`/`defstruct` may reuse `name` (already a `kind`, e.g.
+    /// `"function"`/`"type"`), given whatever already occupies that name in
+    /// the table it's about to be inserted into (`None` if the name is free).
+    /// A builtin is never redefinable; anything else follows `redef_policy`.
+    fn check_redef<T: Definable>(&self, kind: &str, name: &str, existing: Option<&T>) -> Result<(), Error> {
+        match existing {
+            None => Ok(()),
+            Some(e) => self.check_redef_outcome(kind, name, e.builtin()),
+        }
     }
 
     /// Check one top-level form. Definition forms (`defun`/`module`/
@@ -151,6 +268,7 @@ impl Checker {
                     "defmacro" => return self.check_defmacro(heap, interp, &elems[1..], false),
                     "module" => return self.check_module(heap, interp, &elems[1..]),
                     "defmethod" => return self.check_defmethod(heap, interp, &elems[1..], false),
+                    "defstruct" => return self.check_defstruct(heap, &elems[1..], false),
                     "use" => return self.check_use(heap, &elems[1..]),
                     _ => {}
                 }
@@ -180,10 +298,11 @@ impl Checker {
                 "defconstant" => return self.check_defvar(heap, interp, &parts[1..], false, true),
                 "defmacro" => return self.check_defmacro(heap, interp, &parts[1..], true),
                 "defmethod" => return self.check_defmethod(heap, interp, &parts[1..], true),
+                "defstruct" => return self.check_defstruct(heap, &parts[1..], true),
                 _ => {}
             }
         }
-        Err(Error::TypeError("pub: expected defun/defmacro/defmethod/defvar/defconstant".into()))
+        Err(Error::TypeError("pub: expected defun/defmacro/defmethod/defstruct/defvar/defconstant".into()))
     }
 
     // ---- namespace navigation & resolution --------------------------------
@@ -342,6 +461,17 @@ impl Checker {
         None
     }
 
+    /// Resolve a bare name snapshotted by `(use Type)` (see `Self::check_use`)
+    /// to the `(type path, method name)` of the static associated function it
+    /// names — the static-method counterpart of [`Self::resolve_ctor`],
+    /// checked the same way (current namespace then root).
+    fn resolve_static_use(&self, name: &str) -> Option<(Path, String)> {
+        if let Some(hit) = self.cur_ns().static_uses.get(name) {
+            return Some(hit.clone());
+        }
+        self.reg.root.static_uses.get(name).cloned()
+    }
+
     /// Wraps an already-checked `&rest` element `e` (statically `elem_ty`,
     /// already resolved to a concrete type — see [`Self::cons_rest_list`])
     /// as a `Sexpr` value, so a sequence of them can be `cons`-ed into a
@@ -369,7 +499,7 @@ impl Checker {
             ))
         })?;
         let (type_name, variant) = self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
-        Ok(Typed { expr: Expr::Construct { type_name, variant, args: vec![e] }, ty: sexpr_ty() })
+        Ok(Typed { expr: Expr::Construct { type_name, variant, args: vec![e], mutable: false }, ty: sexpr_ty() })
     }
 
     /// Collects already-checked `&rest` elements into one `Sexpr` list
@@ -512,6 +642,52 @@ impl Checker {
         Some(Typed { expr: Expr::MethodRef { type_name: type_fq, method: name.to_string() }, ty })
     }
 
+    /// `var::field`: if `segs` is `[recv, method]` and `recv` names a bound
+    /// local or global whose type has an *instance* associated function
+    /// called `method` (in practice always a `defstruct` field accessor —
+    /// see `Checker::check_defstruct` — though this doesn't care how the
+    /// method came to exist), produces the same `Expr::Assoc` node a
+    /// `(method recv)` call would. `None` (not an error) for any other
+    /// shape, so the caller falls back to ordinary module/type-path
+    /// resolution (`Checker::check`'s `Value::Path` case).
+    /// Delegates to `Checker::check_assoc_call` (instead of building the
+    /// `Expr::Assoc` node directly) so a *generic* `defstruct`'s field type
+    /// gets the receiver's concrete type arguments substituted in exactly
+    /// the way any other instance-method call already does — building the
+    /// node by hand here once produced an unsubstituted type variable as
+    /// the field's type (caught by `generic_defstruct_setf_works` in
+    /// `tests/struct_test.rs`, since a bare type variable can't satisfy a
+    /// real expected type downstream, even though the type-erased runtime
+    /// value was already correct).
+    fn try_field_access(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        segs: &[String],
+    ) -> Option<Result<Typed, Error>> {
+        let [recv_name, method] = segs else { return None };
+        let recv = if let Some(t) = env.get(recv_name) {
+            Typed { expr: Expr::Var(recv_name.clone()), ty: t.clone() }
+        } else {
+            let (path, vi) = self.resolve_global(recv_name)?;
+            Typed { expr: Expr::Global(path), ty: vi.ty }
+        };
+        let Type::Named(type_fq, _) = &recv.ty else { return None };
+        let af = self.reg.type_def(type_fq)?.assoc.get(method)?;
+        if !af.instance {
+            return None;
+        }
+        let type_fq = type_fq.clone();
+        Some(self.check_assoc_call(
+            heap,
+            interp,
+            env,
+            AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None },
+            &[],
+        ))
+    }
+
     /// Canonicalize a parsed type: resolve every nominal name to its located
     /// [`Path`] so that types compare equal across module boundaries.
     fn canon(&self, t: &Type) -> Type {
@@ -561,12 +737,14 @@ impl Checker {
 
         // Register the signature in the current namespace before checking the
         // body so self-recursion works.
+        self.check_redef("function", &name, self.cur_ns().fns.get(&name))?;
         let sig = FnSig {
             type_params: type_params.clone(),
             params: params.iter().map(|(_, t)| t.clone()).collect(),
             ret: ret.clone(),
             public,
             rest: rest.as_ref().map(|(_, t)| t.clone()),
+            builtin: false,
         };
         self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
 
@@ -667,11 +845,12 @@ impl Checker {
         let arity = if rest { params.len() - 1 } else { params.len() };
         let fq_name = self.fq(&name);
 
+        self.check_redef("macro", &name, self.cur_ns().macros.get(&name))?;
         self.reg
             .root
             .module_mut(&self.ns)
             .macros
-            .insert(name, MacroDef { arity, rest, public });
+            .insert(name, MacroDef { arity, rest, public, builtin: false });
 
         let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
         let env = Env::new().extended(params.iter().map(|p| (p.clone(), sexpr_ty.clone())).collect());
@@ -829,9 +1008,10 @@ impl Checker {
             sig_params.push(recv_ty.clone());
         }
         sig_params.extend(params.iter().map(|(_, t)| t.clone()));
-        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public, rest: None };
+        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public, rest: None, builtin: false };
+        self.check_redef("method", &method, self.reg.type_def(&type_fq).and_then(|d| d.assoc.get(&method)))?;
         if let Some(def) = self.reg.type_def_mut(&type_fq) {
-            def.assoc.insert(method.clone(), AssocFn { sig, instance });
+            def.assoc.insert(method.clone(), AssocFn { sig, instance, builtin: false });
         }
 
         let mut binds: Vec<(String, Type)> = Vec::new();
@@ -844,6 +1024,123 @@ impl Checker {
         Ok(TopLevel::Defmethod { type_name: type_fq, method, instance, self_name, params, ret, body })
     }
 
+    /// `(defstruct Name (field Type)...)` — or, generically,
+    /// `(defstruct (Name T1 T2...) (field Type)...)`, the name position
+    /// parsed exactly like `(defun (name T1 T2...) ...)`'s
+    /// (`Checker::parse_defun_name`, reused as-is) — a mutable product type:
+    /// a single constructor, deliberately named `"new"` rather than `Name`
+    /// itself, so `Type::new` resolves through the existing `Type::ctor`
+    /// branch of `check_path_call` with no new constructor-resolution logic,
+    /// and never occupies a bare/flat name (the "don't pollute the
+    /// namespace" design goal this whole redesign was scoped around).
+    /// `check_construct` builds instances (reading `AdtKind::Struct` to
+    /// choose `RtValue::Struct` over `Data`) — generic substitution there
+    /// (and in `match`'s `check_ctor_pattern`) is already `AdtDef.params`-
+    /// generic, shared with `Option`/`Result`/`HashTable`, so a generic
+    /// `defstruct` needs no changes to either.
+    ///
+    /// Beyond registering the type, this synthesizes one getter and one
+    /// setter `defmethod` per field: `f` reads `fields[i]` (`Expr::FieldGet`)
+    /// and `set-f` writes it (`Expr::FieldSet`, `set-car`/`set-cdr`'s prefix
+    /// convention, no `!`), so `(f instance)`/`(set-f instance v)` — and,
+    /// through `Checker::check`'s `Value::Path` sugar and `Checker::check_setf`,
+    /// `instance::f`/`(setf instance::f v)` — work immediately; no separate
+    /// accessor-declaration step exists. `check_form`'s signature is
+    /// `Result<TopLevel, Error>` (one node per top-level form), so the type
+    /// registration and every accessor `TopLevel::Defmethod` are bundled into
+    /// one `TopLevel::Module` — purely as a grouping device: `Interp::exec`'s
+    /// `Module` arm just runs `body` in order and never reads `path`, so this
+    /// carries none of an actual `(module ...)`'s namespace-nesting semantics.
+    fn check_defstruct(&mut self, heap: &Heap, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
+        if parts.is_empty() {
+            return Err(Error::TypeError("defstruct: (defstruct name (field type)...)".into()));
+        }
+        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
+        let fields = self.parse_param_pairs(heap, &parts[1..])?;
+        if fields.is_empty() {
+            return Err(Error::TypeError("defstruct: needs at least one field".into()));
+        }
+        let field_names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+        let field_types: Vec<Type> = fields.iter().map(|(_, t)| t.clone()).collect();
+        for (i, n) in field_names.iter().enumerate() {
+            if field_names[..i].contains(n) {
+                return Err(Error::TypeError(format!("defstruct: duplicate field `{}`", n)));
+            }
+        }
+
+        self.check_redef("type", &name, self.cur_ns().types.get(&name))?;
+        let type_fq = self.fq(&name);
+        let recv_targs: Vec<Type> = type_params.iter().map(|p| Type::Named(Path::root(p), Vec::new())).collect();
+        let recv_ty = Type::Named(type_fq.clone(), recv_targs);
+
+        let mut assoc = HashMap::new();
+        let mut accessors = Vec::with_capacity(fields.len() * 2);
+        for (i, (field_name, field_ty)) in fields.iter().enumerate() {
+            let getter_sig = FnSig {
+                type_params: vec![],
+                params: vec![recv_ty.clone()],
+                ret: field_ty.clone(),
+                public,
+                rest: None,
+                builtin: false,
+            };
+            assoc.insert(field_name.clone(), AssocFn { sig: getter_sig, instance: true, builtin: false });
+            let self_var = Typed { expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
+            accessors.push(TopLevel::Defmethod {
+                type_name: type_fq.clone(),
+                method: field_name.clone(),
+                instance: true,
+                self_name: Some("self".to_string()),
+                params: Vec::new(),
+                ret: field_ty.clone(),
+                body: vec![Typed { expr: Expr::FieldGet(Box::new(self_var), i), ty: field_ty.clone() }],
+            });
+
+            // Setter (`set-car`/`set-cdr`'s `set-` prefix, no `!` — see
+            // `Checker::check_setf`, which calls this via `(setf p::x v)`).
+            let setter_name = format!("set-{}", field_name);
+            let setter_sig = FnSig {
+                type_params: vec![],
+                params: vec![recv_ty.clone(), field_ty.clone()],
+                ret: Type::Unit,
+                public,
+                rest: None,
+                builtin: false,
+            };
+            assoc.insert(setter_name.clone(), AssocFn { sig: setter_sig, instance: true, builtin: false });
+            let self_var = Typed { expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
+            let value_var = Typed { expr: Expr::Var("value".to_string()), ty: field_ty.clone() };
+            accessors.push(TopLevel::Defmethod {
+                type_name: type_fq.clone(),
+                method: setter_name,
+                instance: true,
+                self_name: Some("self".to_string()),
+                params: vec![("value".to_string(), field_ty.clone())],
+                ret: Type::Unit,
+                body: vec![Typed {
+                    expr: Expr::FieldSet(Box::new(self_var), i, Box::new(value_var)),
+                    ty: Type::Unit,
+                }],
+            });
+        }
+
+        let def = AdtDef {
+            name: type_fq.clone(),
+            params: type_params,
+            variants: vec![Variant { name: "new".to_string(), fields: field_types }],
+            assoc,
+            public,
+            builtin: false,
+            kind: AdtKind::Struct,
+            field_names,
+        };
+        self.reg.root.module_mut(&self.ns).add_type(def);
+
+        let mut body = vec![TopLevel::Defstruct { name: type_fq.clone() }];
+        body.extend(accessors);
+        Ok(TopLevel::Module { path: type_fq, body })
+    }
+
     fn check_use(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
         if parts.len() != 1 {
             return Err(Error::TypeError("use: (use path)".into()));
@@ -851,9 +1148,55 @@ impl Checker {
         let segs = self.path_to_segs(heap, parts[0])?;
         let bare = segs.last().cloned().unwrap();
 
-        // Try: free function, then type.
-        if let Some(target) = self.resolve_fn_path(&segs).or_else(|| self.resolve_type_path(&segs)) {
+        // Try: free function.
+        if let Some(target) = self.resolve_fn_path(&segs) {
             self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
+            return Ok(TopLevel::Use { alias: self.fq(&bare), target });
+        }
+        // Try: type. Beyond the usual alias (so the bare name also resolves
+        // in a type-annotation position, e.g. `(x Option)` — see
+        // `resolve_type_name`), this snapshots the type's *current*
+        // constructors and public static methods as bare names in the
+        // current namespace — e.g. `(use option)` makes `some`/`none`
+        // callable bare, exactly like `option::some`/`option::none` (see
+        // `check_path_call`, which already treats a variant and a
+        // non-instance `assoc` entry as the same kind of "static member").
+        if let Some(target) = self.resolve_type_path(&segs) {
+            self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
+            let def = self.reg.type_def(&target).expect("resolved type exists").clone();
+            for (i, v) in def.variants.iter().enumerate() {
+                let is_builtin = self
+                    .cur_ns()
+                    .ctors
+                    .get(&v.name)
+                    .and_then(|(owner, _)| self.reg.type_def(owner))
+                    .map(|d| d.builtin)
+                    .unwrap_or(false);
+                if self.cur_ns().ctors.contains_key(&v.name) {
+                    self.check_redef_outcome("constructor", &v.name, is_builtin)?;
+                }
+                self.reg.root.module_mut(&self.ns).ctors.insert(v.name.clone(), (target.clone(), i));
+            }
+            for (name, af) in def.assoc.iter() {
+                if af.instance || !af.sig.public {
+                    continue;
+                }
+                let is_builtin = self
+                    .cur_ns()
+                    .static_uses
+                    .get(name)
+                    .and_then(|(owner, m)| self.reg.type_def(owner).and_then(|d| d.assoc.get(m)))
+                    .map(|af| af.builtin)
+                    .unwrap_or(false);
+                if self.cur_ns().static_uses.contains_key(name) {
+                    self.check_redef_outcome("static method", name, is_builtin)?;
+                }
+                self.reg
+                    .root
+                    .module_mut(&self.ns)
+                    .static_uses
+                    .insert(name.clone(), (target.clone(), name.clone()));
+            }
             return Ok(TopLevel::Use { alias: self.fq(&bare), target });
         }
         // Try: module alias — `(use std::math)` makes `math` a short name for `std::math`.
@@ -887,11 +1230,22 @@ impl Checker {
                 // option type is expected, the `Nil` value of `Sexpr` when a
                 // `Sexpr` is expected, and otherwise the unit value.
                 if let Some(Type::Named(n, _)) = expected {
-                    for ctor in ["none", "nil"] {
-                        if let Some((adt, idx)) = self.resolve_ctor(ctor) {
-                            if *n == adt {
-                                return self.check_construct(heap, interp, env, (&adt, idx), &[], expected);
-                            }
+                    if *n == Path::root("option") {
+                        // `Option`'s constructors moved to `Option::`/`use
+                        // option` (no more bare `none`), but `()` denoting
+                        // `None` is a language-core inference rule, not a
+                        // name-visibility one — it must keep working
+                        // regardless of `use` status, so this bypasses
+                        // `resolve_ctor` and goes straight to the known
+                        // builtin path/variant index.
+                        return self.check_construct(heap, interp, env, (&Path::root("option"), 1), &[], expected);
+                    }
+                    // `nil` stays a bare-resolvable name (`Sexpr` is exempt
+                    // from the use-gated constructor visibility rule), so
+                    // this one keeps going through `resolve_ctor` unchanged.
+                    if let Some((adt, idx)) = self.resolve_ctor("nil") {
+                        if *n == adt {
+                            return self.check_construct(heap, interp, env, (&adt, idx), &[], expected);
                         }
                     }
                 }
@@ -920,7 +1274,15 @@ impl Checker {
                     .iter()
                     .map(|s| heap.symbol_name(*s).to_string())
                     .collect();
-                if let Some((path, vi)) = self.resolve_global_path(&segs) {
+                // `var::field` — sugar for `(field var)`, a field accessor's
+                // ordinary instance-method call (`Checker::check_defstruct`
+                // synthesizes one getter `defmethod` per field). Tried first:
+                // `segs[0]` here names a *value* (a bound local/global), not
+                // a module/type segment the way `resolve_global_path`/
+                // `fn_path_value` below expect.
+                if let Some(result) = self.try_field_access(heap, interp, env, &segs) {
+                    result?
+                } else if let Some((path, vi)) = self.resolve_global_path(&segs) {
                     Typed { expr: Expr::Global(path), ty: vi.ty }
                 } else if let Some(t) = self.fn_path_value(&segs) {
                     t
@@ -1051,6 +1413,14 @@ impl Checker {
         // name without either having to be renamed.
         if let Some((adt, idx)) = self.resolve_ctor(&head) {
             self.check_construct(heap, interp, env, (&adt, idx), args, expected)
+        } else if let Some((type_fq, method)) = self.resolve_static_use(&head) {
+            self.check_assoc_call(
+                heap,
+                interp,
+                env,
+                AssocCall { type_fq: &type_fq, method: &method, receiver: None, expected },
+                args,
+            )
         } else if let Some(result) = self.try_instance_method(heap, interp, env, &head, args) {
             result
         } else if let Some(fq) = self.resolve_fn(&head) {
@@ -1623,7 +1993,7 @@ impl Checker {
             let cdr_t = self.check_qq_template(heap, interp, env, cdr)?;
             let (adt, cons_idx) = self.resolve_ctor("cons").expect("sexpr::cons is built in");
             return Ok(Typed {
-                expr: Expr::Construct { type_name: adt, variant: cons_idx, args: vec![car_t, cdr_t] },
+                expr: Expr::Construct { type_name: adt, variant: cons_idx, args: vec![car_t, cdr_t], mutable: false },
                 ty: sexpr_ty,
             });
         }
@@ -1718,6 +2088,14 @@ impl Checker {
         if args.len() != 2 {
             return Err(Error::TypeError("setf: (setf var value)".into()));
         }
+        if let Value::Path(pid) = args[0] {
+            let segs: Vec<String> = heap
+                .path_segments(pid)
+                .iter()
+                .map(|s| heap.symbol_name(*s).to_string())
+                .collect();
+            return self.check_field_set(heap, interp, env, &segs, args[1]);
+        }
         let name = match args[0] {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("setf: target must be a variable".into())),
@@ -1734,6 +2112,54 @@ impl Checker {
             return Ok(Typed { expr: Expr::SetGlobal(path, Box::new(value)), ty: vi.ty });
         }
         Err(Error::TypeError(format!("setf: unbound variable: {}", name)))
+    }
+
+    /// `(setf var::field value)`: the write counterpart of
+    /// `Checker::try_field_access` — resolves `var`'s type's `set-field`
+    /// setter (synthesized by `Checker::check_defstruct` alongside the
+    /// getter) and delegates to `Checker::check_assoc_call` exactly like
+    /// `try_field_access` does, so a generic `defstruct`'s field type gets
+    /// the receiver's concrete type arguments substituted (see that
+    /// function's doc comment for why building the `Expr::Assoc` node by
+    /// hand here once got this wrong).
+    fn check_field_set(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        segs: &[String],
+        value: Value,
+    ) -> Result<Typed, Error> {
+        let [recv_name, field] = segs else {
+            return Err(Error::TypeError(format!("setf: unresolved path: {}", segs.join("::"))));
+        };
+        let recv = if let Some(t) = env.get(recv_name) {
+            Typed { expr: Expr::Var(recv_name.clone()), ty: t.clone() }
+        } else if let Some((path, vi)) = self.resolve_global(recv_name) {
+            Typed { expr: Expr::Global(path), ty: vi.ty }
+        } else {
+            return Err(Error::TypeError(format!("setf: unbound variable: {}", recv_name)));
+        };
+        let Type::Named(type_fq, _) = &recv.ty else {
+            return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", recv_name, field)));
+        };
+        let setter = format!("set-{}", field);
+        let is_field_setter = self
+            .reg
+            .type_def(type_fq)
+            .and_then(|d| d.assoc.get(&setter))
+            .is_some_and(|af| af.instance);
+        if !is_field_setter {
+            return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", type_fq, field)));
+        }
+        let type_fq = type_fq.clone();
+        self.check_assoc_call(
+            heap,
+            interp,
+            env,
+            AssocCall { type_fq: &type_fq, method: &setter, receiver: Some(recv), expected: None },
+            std::slice::from_ref(&value),
+        )
     }
 
     /// `(defvar name value)` / `(defconstant name value)`, with an optional
@@ -1768,11 +2194,12 @@ impl Checker {
         // visible via the registry.
         let value = self.check(heap, interp, &Env::new(), parts[1], ann.as_ref())?;
         let ty = ann.unwrap_or_else(|| value.ty.clone());
+        self.check_redef("variable", &name, self.cur_ns().vars.get(&name))?;
         self.reg
             .root
             .module_mut(&self.ns)
             .vars
-            .insert(name.clone(), VarInfo { ty: ty.clone(), mutable, public });
+            .insert(name.clone(), VarInfo { ty: ty.clone(), mutable, public, builtin: false });
         Ok(TopLevel::Defvar { name: self.fq(&name), ty, value, mutable })
     }
 
@@ -1874,13 +2301,13 @@ impl Checker {
         let (adt, cons_idx) = self.resolve_ctor("cons").expect("sexpr::cons is built in");
         let (_, nil_idx) = self.resolve_ctor("nil").expect("sexpr::nil is built in");
         let mut acc = Typed {
-            expr: Expr::Construct { type_name: adt.clone(), variant: nil_idx, args: Vec::new() },
+            expr: Expr::Construct { type_name: adt.clone(), variant: nil_idx, args: Vec::new(), mutable: false },
             ty: sexpr_ty.clone(),
         };
         for &elem in args.iter().rev() {
             let e = self.check(heap, interp, env, elem, Some(&sexpr_ty))?;
             acc = Typed {
-                expr: Expr::Construct { type_name: adt.clone(), variant: cons_idx, args: vec![e, acc] },
+                expr: Expr::Construct { type_name: adt.clone(), variant: cons_idx, args: vec![e, acc], mutable: false },
                 ty: sexpr_ty.clone(),
             };
         }
@@ -2021,6 +2448,7 @@ impl Checker {
                 type_name: adt_name.clone(),
                 variant,
                 args: typed_args,
+                mutable: def.kind == AdtKind::Struct,
             },
             ty: Type::Named(adt_name.clone(), result_args),
         })
