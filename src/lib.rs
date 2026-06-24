@@ -1,3 +1,5 @@
+pub mod compile;
+pub mod compiler;
 pub mod errors;
 pub mod read;
 pub mod mem;
@@ -13,3 +15,4 @@ pub use types::*;
 pub use check::*;
 pub use eval::*;
 pub use prelude::load as load_prelude;
+pub use compiler::load as load_compiler;

@@ -471,10 +471,22 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
 
 ## 開発コマンド
 ```sh
-cargo test                                   # 全体（compile feature は撤去済み、2026-06-23）
+cargo test                                   # 全体
 cargo +nightly miri test --test mem_test     # GC/ポインタの UB・リーク検査
 cargo +nightly miri test --test read_test
 MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test --test numeric_test  # random が SystemTime を使うため isolation 解除が必要
 cargo run                                    # 最小 main（defun を read）
 ```
+
+### compile機能のビルド（2026-06-24再着手、`feature/compiler`ブランチ）
+`inkwell`（LLVM 17バインディング）に依存するため、`LLVM_SYS_170_PREFIX`が必要
+（`brew install llvm@17`済みが前提）。**このパスはマシンごとに異なるため、
+リポジトリ内のどのファイルにも絶対パスをハードコードしない** —
+`scripts/with-llvm-env.sh`が`brew --prefix llvm@17`で都度動的解決する:
+```sh
+scripts/with-llvm-env.sh cargo build
+scripts/with-llvm-env.sh cargo test
+```
+`LLVM_SYS_170_PREFIX`を自分のシェルで既にexport済みなら、素の`cargo build`/
+`cargo test`でも動く（このスクリプトは便宜上のラッパーであり必須ではない）。
 旧実装参照: `git log backup/typed-lisp-m14` / 構文参照: `/Users/suzukijun/Program/Rust/macro-lisp`

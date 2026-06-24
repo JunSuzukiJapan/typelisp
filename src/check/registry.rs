@@ -223,6 +223,18 @@ impl Registry {
         root.register_ctors(&def.name, &def.variants);
         root.add_type(def);
         root.add_type(hashtable_def());
+        // The (typelisp-hosted) `compile`/`compile-file` compiler's view of
+        // LLVM: four more builtin types, metadata-only like `hashtable_def`
+        // (the runtime implementation lives in `eval_llvm_builtin_method` in
+        // `crate::eval::interp`). `llvm-basic-block` has no methods of its
+        // own yet — it's only ever produced by `add-block` and consumed by
+        // `position-at-end` — but still needs registering as a type so it
+        // has a `Path` to appear as a parameter/return type.
+        root.add_type(llvm_module_def());
+        root.add_type(llvm_function_def());
+        root.add_type(llvm_builder_def());
+        root.add_type(llvm_basic_block_def());
+        root.add_type(llvm_value_def());
         // Primitive value types (i8..usize/f32/f64/bool/char/string) get a
         // method table too, so `defmethod` can target them (see
         // `check_defmethod`/`check_instance_method`, which map a primitive
@@ -480,6 +492,73 @@ fn hashtable_def() -> AdtDef {
     }
 }
 
+
+fn llvm_module_ty() -> Type {
+    Type::Named(Path::root("llvm-module"), vec![])
+}
+
+fn llvm_function_ty() -> Type {
+    Type::Named(Path::root("llvm-function"), vec![])
+}
+
+fn llvm_basic_block_ty() -> Type {
+    Type::Named(Path::root("llvm-basic-block"), vec![])
+}
+
+fn llvm_builder_ty() -> Type {
+    Type::Named(Path::root("llvm-builder"), vec![])
+}
+
+fn llvm_value_ty() -> Type {
+    Type::Named(Path::root("llvm-value"), vec![])
+}
+
+fn assoc_fn(params: Vec<Type>, ret: Type, instance: bool) -> AssocFn {
+    AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true }, instance, builtin: true }
+}
+
+/// An in-progress LLVM module (Phase 0: just enough to build a single
+/// constant-returning function and inspect the result — `add-function`
+/// always declares a zero-parameter function returning `i64`; parameter
+/// lists and other return types are a later phase's concern).
+fn llvm_module_def() -> AdtDef {
+    let mut assoc = HashMap::new();
+    assoc.insert("create".to_string(), assoc_fn(vec![Type::Str], llvm_module_ty(), false));
+    assoc.insert("add-function".to_string(), assoc_fn(vec![llvm_module_ty(), Type::Str], llvm_function_ty(), true));
+    assoc.insert("verify".to_string(), assoc_fn(vec![llvm_module_ty()], Type::Bool, true));
+    assoc.insert("to-string".to_string(), assoc_fn(vec![llvm_module_ty()], Type::Str, true));
+    AdtDef { name: Path::root("llvm-module"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
+}
+
+/// A declared LLVM function (a `Module::add-function` result).
+fn llvm_function_def() -> AdtDef {
+    let mut assoc = HashMap::new();
+    assoc.insert("append-block".to_string(), assoc_fn(vec![llvm_function_ty(), Type::Str], llvm_basic_block_ty(), true));
+    AdtDef { name: Path::root("llvm-function"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
+}
+
+/// An LLVM basic block. No methods of its own yet (Phase 0) — produced by
+/// `llvm-function::append-block`, consumed by `llvm-builder::position-at-end`.
+fn llvm_basic_block_def() -> AdtDef {
+    AdtDef { name: Path::root("llvm-basic-block"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
+}
+
+/// An IR builder. Phase 0 only needs enough to position it at a block,
+/// build an `i64` constant, and emit a `ret`.
+fn llvm_builder_def() -> AdtDef {
+    let mut assoc = HashMap::new();
+    assoc.insert("create".to_string(), assoc_fn(vec![], llvm_builder_ty(), false));
+    assoc.insert("position-at-end".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit, true));
+    assoc.insert("const-i64".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::I64], llvm_value_ty(), true));
+    assoc.insert("build-ret".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], Type::Unit, true));
+    AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
+}
+
+/// An LLVM SSA value (e.g. a constant). No methods of its own yet — produced
+/// by `llvm-builder::const-i64`, consumed by `llvm-builder::build-ret`.
+fn llvm_value_def() -> AdtDef {
+    AdtDef { name: Path::root("llvm-value"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
+}
 
 /// Built-in `String` instance methods ([cl-equivalence-catalog.md](../../../docs/cl-equivalence-catalog.md)
 /// §2.2 d). All char/index arguments and `length` count Unicode scalar values

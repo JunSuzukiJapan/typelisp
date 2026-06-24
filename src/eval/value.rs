@@ -5,6 +5,11 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::{error, fmt};
 
+use inkwell::basic_block::BasicBlock;
+use inkwell::builder::Builder;
+use inkwell::module::Module;
+use inkwell::values::{BasicValueEnum, FunctionValue};
+
 use crate::{Path, Typed, Value};
 
 /// A `HashTable<K,V>` key. Restricted to the scalar `RtValue` variants with a
@@ -64,7 +69,11 @@ pub struct StructData {
 /// user structs) are represented uniformly by [`RtValue::Data`]; `Sexpr` is
 /// the one exception — it is the cons/nil-bearing builtin the GC-managed cons
 /// heap exists for, so its values live there instead, in [`RtValue::Sexpr`].
-#[derive(Clone, Debug, PartialEq)]
+///
+/// `PartialEq` is hand-written, not derived: the `Llvm*` variants wrap
+/// inkwell types that don't implement it (and structural equality wouldn't
+/// be meaningful for them anyway — see [`RtValue::eq`]).
+#[derive(Clone, Debug)]
 pub enum RtValue {
     Int(i64),
     Float(f64),
@@ -108,6 +117,49 @@ pub enum RtValue {
     /// ordinary Rust-managed memory, the same `Rc<RefCell<..>>` pattern as
     /// `HashTable` above (and the same accepted cycle-leak trade-off).
     Struct(Rc<RefCell<StructData>>),
+    /// An in-progress LLVM module being built by the (typelisp-hosted)
+    /// compiler. `Rc<RefCell<..>>` because `inkwell::module::Module` owns
+    /// the underlying LLVM module and isn't `Clone` (dropping it disposes
+    /// the LLVM-side object).
+    LlvmModule(Rc<RefCell<Module<'static>>>),
+    /// An LLVM IR builder positioned at some point in a function. Same
+    /// `Rc<RefCell<..>>` reasoning as `LlvmModule`.
+    LlvmBuilder(Rc<RefCell<Builder<'static>>>),
+    /// A declared/defined LLVM function. Inkwell's value/block handles
+    /// (unlike `Module`/`Builder`) are cheap `Copy` references into the
+    /// owning module, not separately-owned resources.
+    LlvmFunction(FunctionValue<'static>),
+    LlvmBasicBlock(BasicBlock<'static>),
+    LlvmValue(BasicValueEnum<'static>),
+}
+
+impl PartialEq for RtValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (RtValue::Int(a), RtValue::Int(b)) => a == b,
+            (RtValue::Float(a), RtValue::Float(b)) => a == b,
+            (RtValue::Bool(a), RtValue::Bool(b)) => a == b,
+            (RtValue::Char(a), RtValue::Char(b)) => a == b,
+            (RtValue::Str(a), RtValue::Str(b)) => a == b,
+            (RtValue::Unit, RtValue::Unit) => true,
+            (
+                RtValue::Data { type_name: tn1, variant: v1, fields: f1 },
+                RtValue::Data { type_name: tn2, variant: v2, fields: f2 },
+            ) => tn1 == tn2 && v1 == v2 && f1 == f2,
+            (RtValue::Sexpr(a), RtValue::Sexpr(b)) => a == b,
+            (RtValue::Closure(a), RtValue::Closure(b)) => a == b,
+            (RtValue::Builtin(a), RtValue::Builtin(b)) => a == b,
+            (RtValue::BuiltinMethod(p1, m1), RtValue::BuiltinMethod(p2, m2)) => {
+                p1 == p2 && m1 == m2
+            }
+            (RtValue::HashTable(a), RtValue::HashTable(b)) => *a.borrow() == *b.borrow(),
+            (RtValue::Struct(a), RtValue::Struct(b)) => *a.borrow() == *b.borrow(),
+            // Compiler-internal LLVM handles have no meaningful structural
+            // equality, and inkwell's types don't implement `PartialEq`
+            // anyway — they (and any other non-matching pair) fall through.
+            _ => false,
+        }
+    }
 }
 
 /// A runtime error. `Panic` is a deliberate `panic`; `Break`/`Return` are not

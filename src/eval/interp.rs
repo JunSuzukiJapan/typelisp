@@ -17,6 +17,11 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
+use inkwell::basic_block::BasicBlock;
+use inkwell::builder::Builder;
+use inkwell::module::Module;
+use inkwell::values::{BasicValueEnum, FunctionValue};
+
 use crate::{Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Typed, Value};
 
 use super::value::{Closure, EvalError, HashKey, RtValue, StructData};
@@ -957,7 +962,145 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             _ => None,
         };
     }
+    eval_llvm_builtin_method(type_name, method, args)
+}
+
+/// The (typelisp-hosted) compiler's view of LLVM — `llvm-module`/
+/// `llvm-function`/`llvm-builder`/`llvm-value` instance and static methods.
+/// Same metadata-only pattern as the rest of `eval_builtin_method` (the
+/// `AdtDef`s in `registry::llvm_module_def` etc. carry no `defmethod` body).
+/// Every arm holds [`crate::compile::COMPILE_LOCK`] for its duration — see
+/// that constant's doc comment for why concurrent access to the one
+/// process-wide LLVM `Context` must never happen.
+fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+    if *type_name == Path::root("llvm-module") {
+        return match method {
+            "create" => Some(llvm_module_create(args)),
+            "add-function" => Some(llvm_module_add_function(args)),
+            "verify" => Some(llvm_module_verify(args)),
+            "to-string" => Some(llvm_module_to_string(args)),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("llvm-function") {
+        return match method {
+            "append-block" => Some(llvm_function_append_block(args)),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("llvm-builder") {
+        return match method {
+            "create" => Some(llvm_builder_create()),
+            "position-at-end" => Some(llvm_builder_position_at_end(args)),
+            "const-i64" => Some(llvm_builder_const_i64(args)),
+            "build-ret" => Some(llvm_builder_build_ret(args)),
+            _ => None,
+        };
+    }
     None
+}
+
+fn expect_llvm_module(v: &RtValue) -> Result<&Rc<RefCell<Module<'static>>>, EvalError> {
+    match v {
+        RtValue::LlvmModule(m) => Ok(m),
+        other => Err(EvalError::Internal(format!("expected an LlvmModule, got {:?}", other))),
+    }
+}
+
+fn expect_llvm_function(v: &RtValue) -> Result<FunctionValue<'static>, EvalError> {
+    match v {
+        RtValue::LlvmFunction(f) => Ok(*f),
+        other => Err(EvalError::Internal(format!("expected an LlvmFunction, got {:?}", other))),
+    }
+}
+
+fn expect_llvm_builder(v: &RtValue) -> Result<&Rc<RefCell<Builder<'static>>>, EvalError> {
+    match v {
+        RtValue::LlvmBuilder(b) => Ok(b),
+        other => Err(EvalError::Internal(format!("expected an LlvmBuilder, got {:?}", other))),
+    }
+}
+
+fn expect_llvm_basic_block(v: &RtValue) -> Result<BasicBlock<'static>, EvalError> {
+    match v {
+        RtValue::LlvmBasicBlock(b) => Ok(*b),
+        other => Err(EvalError::Internal(format!("expected an LlvmBasicBlock, got {:?}", other))),
+    }
+}
+
+fn expect_llvm_value(v: &RtValue) -> Result<BasicValueEnum<'static>, EvalError> {
+    match v {
+        RtValue::LlvmValue(v) => Ok(*v),
+        other => Err(EvalError::Internal(format!("expected an LlvmValue, got {:?}", other))),
+    }
+}
+
+fn llvm_module_create(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let name = expect_str(&args[0])?;
+    let module = crate::compile::llvm_context().create_module(name);
+    Ok(RtValue::LlvmModule(Rc::new(RefCell::new(module))))
+}
+
+/// Phase 0's only function shape: zero parameters, returning `i64`. Parameter
+/// lists and other return types are a later phase's concern (see
+/// `registry::llvm_module_def`'s doc comment).
+fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let module = expect_llvm_module(&args[0])?;
+    let name = expect_str(&args[1])?;
+    let ctx = crate::compile::llvm_context();
+    let fn_type = ctx.i64_type().fn_type(&[], false);
+    let function = module.borrow_mut().add_function(name, fn_type, None);
+    Ok(RtValue::LlvmFunction(function))
+}
+
+fn llvm_module_verify(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let module = expect_llvm_module(&args[0])?;
+    Ok(RtValue::Bool(module.borrow().verify().is_ok()))
+}
+
+fn llvm_module_to_string(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let module = expect_llvm_module(&args[0])?;
+    Ok(RtValue::Str(module.borrow().print_to_string().to_string()))
+}
+
+fn llvm_function_append_block(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let function = expect_llvm_function(&args[0])?;
+    let name = expect_str(&args[1])?;
+    let block = crate::compile::llvm_context().append_basic_block(function, name);
+    Ok(RtValue::LlvmBasicBlock(block))
+}
+
+fn llvm_builder_create() -> Result<RtValue, EvalError> {
+    let builder = crate::compile::llvm_context().create_builder();
+    Ok(RtValue::LlvmBuilder(Rc::new(RefCell::new(builder))))
+}
+
+fn llvm_builder_position_at_end(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let block = expect_llvm_basic_block(&args[1])?;
+    builder.borrow().position_at_end(block);
+    Ok(RtValue::Unit)
+}
+
+fn llvm_builder_const_i64(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let _builder = expect_llvm_builder(&args[0])?;
+    let n = match &args[1] {
+        RtValue::Int(n) => *n,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let value = crate::compile::llvm_context().i64_type().const_int(n as u64, false);
+    Ok(RtValue::LlvmValue(value.into()))
+}
+
+fn llvm_builder_build_ret(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let value = expect_llvm_value(&args[1])?;
+    builder
+        .borrow()
+        .build_return(Some(&value))
+        .map_err(|e| EvalError::Internal(format!("build-ret: {}", e)))?;
+    Ok(RtValue::Unit)
 }
 
 fn expect_hashtable(v: &RtValue) -> Result<&Rc<RefCell<HashMap<HashKey, RtValue>>>, EvalError> {
