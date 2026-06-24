@@ -9,6 +9,9 @@ pub mod ast_bridge;
 use std::sync::{Mutex, OnceLock};
 
 use inkwell::context::Context;
+use inkwell::execution_engine::JitFunction;
+use inkwell::module::Module;
+use inkwell::OptimizationLevel;
 
 /// Serializes every LLVM-Context-touching operation. LLVM's C API is not
 /// safe to call concurrently against one `Context` from multiple threads
@@ -33,4 +36,33 @@ static LLVM_CONTEXT: OnceLock<ContextCell> = OnceLock::new();
 /// `'static` inkwell types instead of threading a lifetime through `RtValue`.
 pub fn llvm_context() -> &'static Context {
     &LLVM_CONTEXT.get_or_init(|| ContextCell(Context::create())).0
+}
+
+/// The fixed C ABI every JIT-compiled function uses, regardless of its
+/// typelisp-level arity: an `i64` argument array (and its length) in, one
+/// `i64` out — see `registry::llvm_module_def`'s doc comment for why
+/// `compiler.rs`'s `compile-function` always builds LLVM functions under
+/// this exact signature.
+pub type CompiledSignature = unsafe extern "C" fn(*const i64, u32) -> i64;
+
+/// A JIT-compiled function. Holding the `JitFunction` is enough to keep the
+/// code (and its owning `ExecutionEngine`) alive — see
+/// [`inkwell::execution_engine::JitFunction`]'s doc comment, it carries its
+/// engine along internally.
+pub struct CompiledFn {
+    f: JitFunction<'static, CompiledSignature>,
+}
+
+impl CompiledFn {
+    /// JIT-compiles `fn_name` out of `module`. Must be called with
+    /// [`COMPILE_LOCK`] held — see that constant's doc comment.
+    pub fn new(module: &Module<'static>, fn_name: &str) -> Result<CompiledFn, String> {
+        let engine = module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?;
+        let f = unsafe { engine.get_function::<CompiledSignature>(fn_name).map_err(|e| e.to_string())? };
+        Ok(CompiledFn { f })
+    }
+
+    pub fn call(&self, args: &[i64]) -> i64 {
+        unsafe { self.f.call(args.as_ptr(), args.len() as u32) }
+    }
 }

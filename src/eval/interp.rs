@@ -21,8 +21,9 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::module::Module;
 use inkwell::values::{BasicValueEnum, FunctionValue};
+use inkwell::AddressSpace;
 
-use crate::{Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Typed, Value};
+use crate::{Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
 
 use super::value::{Closure, EvalError, HashKey, RtValue, StructData};
 
@@ -35,6 +36,16 @@ struct FnDef {
     /// [`Interp::expand_macro`]); always `false` for `defun`/`defmethod`,
     /// which `apply` calls 1:1 regardless.
     rest: bool,
+    /// `(parameter types, return type)`, parallel to `params` — `None` for a
+    /// `defmacro` (every parameter and the implicit return are always
+    /// `Sexpr`, see `check::registry::MacroDef`'s doc comment) since a macro
+    /// is never a `compile` target. The tree-walking evaluator itself never
+    /// needs this (it's already erased everywhere else, see
+    /// `Checker::check_call`'s doc comment) — it exists solely so
+    /// `Interp::compile_function` can build an LLVM function signature
+    /// without the checker's `Registry` (which `Interp` otherwise has no
+    /// access to).
+    sig: Option<(Vec<Type>, Type)>,
 }
 
 /// A mutable variable slot (shared so `setf` mutations are visible to every
@@ -73,6 +84,13 @@ pub struct Interp {
     /// can only offer collision-*resistant* fresh names, not CL's
     /// unforgeable ones — see [`Self::eval_builtin`]'s `"gensym"` arm.
     gensym_counter: Cell<u64>,
+    /// Functions JIT-compiled by `(compile "name")` (see
+    /// [`Self::compile_function`]), by their fully-qualified `Path`.
+    /// `RefCell` because `compile` is itself an ordinary builtin reached
+    /// through `eval`'s `&self` — the same internal-mutability pattern
+    /// `slots` above already uses. `Expr::Call`'s eval arm checks here
+    /// first, before falling back to the tree-walking `fns` entry.
+    compiled: RefCell<HashMap<Path, crate::compile::CompiledFn>>,
 }
 
 impl Interp {
@@ -84,6 +102,7 @@ impl Interp {
             slots: RefCell::new(Vec::new()),
             rooted: Cell::new(0),
             gensym_counter: Cell::new(0),
+            compiled: RefCell::new(HashMap::new()),
         }
     }
 
@@ -123,25 +142,30 @@ impl Interp {
     /// a bare expression returns `Some(value)`.
     pub fn exec(&mut self, heap: &mut Heap, tl: TopLevel) -> Result<Option<RtValue>, EvalError> {
         match tl {
-            TopLevel::Defun { name, params, body, .. } => {
-                let params = params.into_iter().map(|(n, _)| n).collect();
-                self.fns.insert(name, FnDef { params, body, rest: false });
+            TopLevel::Defun { name, params, ret, body, .. } => {
+                let (names, types): (Vec<String>, Vec<Type>) = params.into_iter().unzip();
+                self.fns.insert(name, FnDef { params: names, body, rest: false, sig: Some((types, ret)) });
                 Ok(None)
             }
-            TopLevel::Defmethod { type_name, method, self_name, params, body, .. } => {
+            TopLevel::Defmethod { type_name, method, self_name, params, ret, body, .. } => {
                 let mut names: Vec<String> = Vec::new();
+                let mut types: Vec<Type> = Vec::new();
                 if let Some(s) = self_name {
                     names.push(s);
+                    types.push(Type::Named(type_name.clone(), vec![]));
                 }
-                names.extend(params.into_iter().map(|(n, _)| n));
-                self.methods.insert((type_name, method), FnDef { params: names, body, rest: false });
+                for (n, t) in params {
+                    names.push(n);
+                    types.push(t);
+                }
+                self.methods.insert((type_name, method), FnDef { params: names, body, rest: false, sig: Some((types, ret)) });
                 Ok(None)
             }
             TopLevel::Defmacro { name, params, body, rest } => {
                 // A macro's body is callable exactly like a `defun`'s — see
                 // `MacroExpander`/`Self::expand_macro` — so it's stored in
                 // the very same `fns` table; no separate macro table exists.
-                self.fns.insert(name, FnDef { params, body, rest });
+                self.fns.insert(name, FnDef { params, body, rest, sig: None });
                 Ok(None)
             }
             TopLevel::Use { .. } => Ok(None),
@@ -240,6 +264,23 @@ impl Interp {
             }
             Expr::Call(name, args) => {
                 let (argv, _slots) = self.eval_args(heap, args, env)?;
+                // A `(compile "name")`d function dispatches to native code
+                // first — checked ahead of `fns` so a later recompile (not
+                // possible yet, but the ordering is the cheap-to-get-right
+                // choice) would naturally take precedence over the
+                // tree-walked body.
+                if let Some(compiled) = self.compiled.borrow().get(name) {
+                    let int_args = argv
+                        .iter()
+                        .map(|v| match v {
+                            RtValue::Int(n) => Ok(*n),
+                            other => {
+                                Err(EvalError::Internal(format!("compiled call: expected an Int argument, got {:?}", other)))
+                            }
+                        })
+                        .collect::<Result<Vec<i64>, EvalError>>()?;
+                    return Ok(RtValue::Int(compiled.call(&int_args)));
+                }
                 if let Some(f) = self.fns.get(name) {
                     self.apply(heap, &f.params, &f.body, argv)
                 } else if name.is_simple() {
@@ -449,6 +490,82 @@ impl Interp {
         self.eval_seq(heap, body, &env)
     }
 
+    /// `(compile "fn-name")`: JIT-compiles a previously-defined `defun` and
+    /// registers the result in [`Self::compiled`] so `Expr::Call` dispatches
+    /// to native code instead of tree-walking it from then on. Phase 1
+    /// scope: a non-generic `defun` whose single-expression body only uses
+    /// node shapes `compile::ast_bridge::ast_to_sexpr` has a real
+    /// translation for (`i64` literals/vars/`+`/`-`/`*`) — anything else
+    /// surfaces as a `Panic` from the compiler body's own `"unsupported"`
+    /// handling (`compiler.rs`'s `compile-value`), not a separate check
+    /// here; there's exactly one place that needs to know the supported
+    /// shape.
+    fn compile_function(&self, heap: &mut Heap, name: &str) -> Result<RtValue, EvalError> {
+        let path = Path::root(name);
+        let (params, body) = {
+            let f = self.fns.get(&path).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))?;
+            if f.sig.is_none() {
+                return Err(EvalError::Panic(format!("compile: \"{}\" has no type signature (is it a defmacro?)", name)));
+            }
+            if f.body.len() != 1 {
+                return Err(EvalError::Panic(format!(
+                    "compile: \"{}\" has a multi-expression body, not yet supported",
+                    name
+                )));
+            }
+            (f.params.clone(), f.body[0].clone())
+        };
+
+        // Builds `(a b ...)`, the `Sexpr` symbol list `compiler.rs`'s
+        // `bind-params` walks to know which logical argument-array slot
+        // binds to which name.
+        let mut param_list = Value::Empty;
+        for n in params.iter().rev() {
+            let sym = heap.intern_symbol(n);
+            heap.push_root(sym);
+            heap.push_root(param_list);
+            let next = heap.cons(sym, param_list);
+            heap.pop_root();
+            heap.pop_root();
+            param_list = next.map_err(|e| EvalError::Panic(e.to_string()))?;
+        }
+        heap.push_root(param_list);
+        let body_sexpr = match crate::compile::ast_bridge::ast_to_sexpr(heap, &body) {
+            Ok(v) => v,
+            Err(e) => {
+                heap.pop_root(); // param_list
+                return Err(EvalError::Panic(e.to_string()));
+            }
+        };
+        heap.pop_root(); // param_list
+
+        let compiler_path = Path::root("compile-function");
+        let (compiler_params, compiler_body) = {
+            let f = self.fns.get(&compiler_path).ok_or_else(|| {
+                EvalError::Internal("compile: compiler body not loaded — call load_compiler first".into())
+            })?;
+            (f.params.clone(), f.body.clone())
+        };
+        let module_value = self.apply(
+            heap,
+            &compiler_params,
+            &compiler_body,
+            vec![RtValue::Str(name.to_string()), RtValue::Sexpr(param_list), RtValue::Sexpr(body_sexpr)],
+        )?;
+        let module_rc = match module_value {
+            RtValue::LlvmModule(m) => m,
+            other => {
+                return Err(EvalError::Internal(format!("compile: compiler body returned {:?}, not an llvm-module", other)))
+            }
+        };
+
+        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+        let compiled = crate::compile::CompiledFn::new(&module_rc.borrow(), name)
+            .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
+        self.compiled.borrow_mut().insert(path, compiled);
+        Ok(RtValue::Bool(true))
+    }
+
     /// Build the argument vector for a macro call: the first `fixed` raw
     /// forms map 1:1 to `RtValue::Sexpr`; if `f.rest`, every remaining raw
     /// form is collected into a single heap-allocated `Sexpr` list (built
@@ -512,8 +629,15 @@ impl Interp {
     /// on, so it stays a free function too.)
     fn eval_builtin(&self, heap: &mut Heap, name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
         match name {
+            "compile" => {
+                let fn_name = match expect_str(&args[0]) {
+                    Ok(s) => s.to_string(),
+                    Err(e) => return Some(Err(e)),
+                };
+                Some(self.compile_function(heap, &fn_name))
+            }
             "random" => Some(eval_random(args)),
-            "not" => { eprintln!("DEBUG not arg = {:?}", args[0]); Some(expect_bool(&args[0]).map(|b| RtValue::Bool(!b))) },
+            "not" => Some(expect_bool(&args[0]).map(|b| RtValue::Bool(!b))),
             "gensym" => {
                 // A leading space mirrors the hidden-binding idiom already
                 // used for `dotimes`/`dolist`'s internal variables in the
@@ -995,6 +1119,10 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "position-at-end" => Some(llvm_builder_position_at_end(args)),
             "const-i64" => Some(llvm_builder_const_i64(args)),
             "build-ret" => Some(llvm_builder_build_ret(args)),
+            "load-arg" => Some(llvm_builder_load_arg(args)),
+            "build-add" => Some(llvm_builder_build_int_op(args, "add", Builder::build_int_add)),
+            "build-sub" => Some(llvm_builder_build_int_op(args, "sub", Builder::build_int_sub)),
+            "build-mul" => Some(llvm_builder_build_int_op(args, "mul", Builder::build_int_mul)),
             _ => None,
         };
     }
@@ -1042,14 +1170,19 @@ fn llvm_module_create(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::LlvmModule(Rc::new(RefCell::new(module))))
 }
 
-/// Phase 0's only function shape: zero parameters, returning `i64`. Parameter
-/// lists and other return types are a later phase's concern (see
-/// `registry::llvm_module_def`'s doc comment).
+/// Every compiled function gets the same fixed C ABI — `i64 name(i64* args,
+/// i32 argc)` — regardless of its typelisp-level arity (see
+/// `registry::llvm_module_def`'s doc comment for why); `llvm-builder::load-arg`
+/// reads a logical parameter back out of `args`. LLVM 17 defaults to opaque
+/// pointers (inkwell's `llvm17-0` feature doesn't pull in its
+/// `typed-pointers` feature — confirmed against inkwell's own `Cargo.toml`),
+/// so the parameter type is `Context::ptr_type`, not `IntType::ptr_type`.
 fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(&args[1])?;
     let ctx = crate::compile::llvm_context();
-    let fn_type = ctx.i64_type().fn_type(&[], false);
+    let ptr_ty = ctx.ptr_type(AddressSpace::default());
+    let fn_type = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
     let function = module.borrow_mut().add_function(name, fn_type, None);
     Ok(RtValue::LlvmFunction(function))
 }
@@ -1101,6 +1234,48 @@ fn llvm_builder_build_ret(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .build_return(Some(&value))
         .map_err(|e| EvalError::Internal(format!("build-ret: {}", e)))?;
     Ok(RtValue::Unit)
+}
+
+/// Reads logical parameter `index` out of `function`'s fixed-ABI argument
+/// array (its sole real LLVM parameter — see `llvm_module_add_function`'s
+/// doc comment) via a GEP + load. `i64` only for now, matching every other
+/// `llvm-builder` arithmetic builtin.
+fn llvm_builder_load_arg(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let function = expect_llvm_function(&args[1])?;
+    let index = match &args[2] {
+        RtValue::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let args_ptr = function
+        .get_nth_param(0)
+        .ok_or_else(|| EvalError::Internal("load-arg: function has no args parameter".into()))?
+        .into_pointer_value();
+    let ctx = crate::compile::llvm_context();
+    let idx_val = ctx.i64_type().const_int(index, false);
+    let b = builder.borrow();
+    let elem_ptr = unsafe {
+        b.build_gep(ctx.i64_type(), args_ptr, &[idx_val], "arg_ptr")
+            .map_err(|e| EvalError::Internal(format!("load-arg: {}", e)))?
+    };
+    let loaded =
+        b.build_load(ctx.i64_type(), elem_ptr, "arg_val").map_err(|e| EvalError::Internal(format!("load-arg: {}", e)))?;
+    Ok(RtValue::LlvmValue(loaded))
+}
+
+/// Shared by `build-add`/`build-sub`/`build-mul`: unwrap both `llvm-value`
+/// operands to `IntValue`s, apply `op` (one of `Builder::build_int_add`/
+/// `_sub`/`_mul`), and re-wrap the result.
+fn llvm_builder_build_int_op(
+    args: &[RtValue],
+    name: &str,
+    op: impl FnOnce(&Builder<'static>, inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>, &str) -> Result<inkwell::values::IntValue<'static>, inkwell::builder::BuilderError>,
+) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let a = expect_llvm_value(&args[1])?.into_int_value();
+    let b = expect_llvm_value(&args[2])?.into_int_value();
+    let result = op(&builder.borrow(), a, b, name).map_err(|e| EvalError::Internal(format!("build-{}: {}", name, e)))?;
+    Ok(RtValue::LlvmValue(result.into()))
 }
 
 fn expect_hashtable(v: &RtValue) -> Result<&Rc<RefCell<HashMap<HashKey, RtValue>>>, EvalError> {

@@ -41,6 +41,32 @@ fn unsupported(heap: &mut Heap, variant: &str) -> Result<Value, Error> {
     tagged(heap, "unsupported", &[name])
 }
 
+/// Translates each of `items` in order, rooting every translated `Value` as
+/// it goes (so an earlier sibling survives a later sibling's own `heap.cons`
+/// calls — the same concern `tagged` has for its own `items`, just one level
+/// up). On success every value in the returned `Vec` is left rooted; the
+/// caller must pop exactly that many roots once it's done embedding them in
+/// whatever it builds next (see `Expr::Assoc`'s arm below). On error, pops
+/// everything pushed so far before propagating.
+fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed]) -> Result<Vec<Value>, Error> {
+    let mut values = Vec::with_capacity(items.len());
+    for item in items {
+        match ast_to_sexpr(heap, item) {
+            Ok(v) => {
+                heap.push_root(v);
+                values.push(v);
+            }
+            Err(e) => {
+                for _ in 0..values.len() {
+                    heap.pop_root();
+                }
+                return Err(e);
+            }
+        }
+    }
+    Ok(values)
+}
+
 /// Translates one typed AST node. See the module doc comment for the tagged
 /// shape and which variants are real vs. `unsupported` placeholders today.
 pub fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
@@ -57,6 +83,36 @@ pub fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
         Expr::Var(name) => {
             let v = heap.alloc_string(name.clone());
             tagged(heap, "var", &[v])
+        }
+        // `(assoc type-name method instance arg...)` — a fixed 3-field
+        // header (both strings, then the receiver flag) followed by the
+        // translated argument list. `compile_value` only matters about
+        // `Expr::Var`'s `name`/`Expr::Assoc`'s `type_name`/`method` as
+        // plain text, so they're translated as `Str`s like `Expr::Str`
+        // (rather than e.g. interned symbols) — there's no reason for the
+        // compiler body to treat them differently from any other string.
+        Expr::Assoc { type_name, method, instance, args } => {
+            let type_name_v = heap.alloc_string(type_name.to_string());
+            heap.push_root(type_name_v);
+            let method_v = heap.alloc_string(method.clone());
+            heap.push_root(method_v);
+            let arg_values = match ast_list_to_sexpr(heap, args) {
+                Ok(v) => v,
+                Err(e) => {
+                    heap.pop_root(); // method_v
+                    heap.pop_root(); // type_name_v
+                    return Err(e);
+                }
+            };
+            let mut items = vec![type_name_v, method_v, Value::Bool(*instance)];
+            items.extend(arg_values.iter().copied());
+            let result = tagged(heap, "assoc", &items);
+            for _ in 0..arg_values.len() {
+                heap.pop_root();
+            }
+            heap.pop_root(); // method_v
+            heap.pop_root(); // type_name_v
+            result
         }
         // Everything below needs either multi-child rooting (a child's
         // translated `Value` must stay rooted while its siblings are
@@ -75,7 +131,6 @@ pub fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
         Expr::Lambda { .. } => unsupported(heap, "Lambda"),
         Expr::Labels { .. } => unsupported(heap, "Labels"),
         Expr::Apply(..) => unsupported(heap, "Apply"),
-        Expr::Assoc { .. } => unsupported(heap, "Assoc"),
         Expr::Construct { .. } => unsupported(heap, "Construct"),
         Expr::FieldGet(..) => unsupported(heap, "FieldGet"),
         Expr::FieldSet(..) => unsupported(heap, "FieldSet"),
@@ -145,6 +200,51 @@ mod tests {
             Value::Str(id) => assert_eq!(heap.string(id), "hi"),
             other => panic!("expected a Str, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn translates_a_var_reference() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Var("a".to_string()), Type::I64)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "var");
+        match fields[0] {
+            Value::Str(id) => assert_eq!(heap.string(id), "a"),
+            other => panic!("expected a Str, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn translates_an_instance_method_call() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let a = typed(Expr::Var("a".to_string()), Type::I64);
+        let b = typed(Expr::Var("b".to_string()), Type::I64);
+        let assoc = Expr::Assoc {
+            type_name: crate::Path::root("i64"),
+            method: "+".to_string(),
+            instance: true,
+            args: vec![a, b],
+        };
+        let v = ast_to_sexpr(&mut heap, &typed(assoc, Type::I64)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "assoc");
+        match fields[0] {
+            Value::Str(id) => assert_eq!(heap.string(id), "i64"),
+            other => panic!("expected a Str, got {:?}", other),
+        }
+        match fields[1] {
+            Value::Str(id) => assert_eq!(heap.string(id), "+"),
+            other => panic!("expected a Str, got {:?}", other),
+        }
+        assert_eq!(fields[2], Value::Bool(true));
+        let (arg0_tag, arg0_fields) = untag(&heap, fields[3]);
+        assert_eq!(arg0_tag, "var");
+        match arg0_fields[0] {
+            Value::Str(id) => assert_eq!(heap.string(id), "a"),
+            other => panic!("expected a Str, got {:?}", other),
+        }
+        let (arg1_tag, _) = untag(&heap, fields[4]);
+        assert_eq!(arg1_tag, "var");
     }
 
     #[test]

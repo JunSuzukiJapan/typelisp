@@ -299,6 +299,12 @@ impl Registry {
         // symbols are always interned/permanent, there is no uninterned-symbol
         // concept to give a CL-style absolute guarantee).
         root.fns.insert("gensym".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: sexpr(), public: true, builtin: true });
+        // `compile`: JIT-compiles a previously-defined `defun` (see
+        // `Interp::compile_function`) so later calls dispatch to native
+        // code. No natural receiver (it operates on something named by a
+        // string, not a typed value), so a free function like `gensym`/
+        // `random` above.
+        root.fns.insert("compile".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: Type::Bool, public: true, builtin: true });
         Registry { root }
     }
 
@@ -517,10 +523,13 @@ fn assoc_fn(params: Vec<Type>, ret: Type, instance: bool) -> AssocFn {
     AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true }, instance, builtin: true }
 }
 
-/// An in-progress LLVM module (Phase 0: just enough to build a single
-/// constant-returning function and inspect the result — `add-function`
-/// always declares a zero-parameter function returning `i64`; parameter
-/// lists and other return types are a later phase's concern).
+/// An in-progress LLVM module. `add-function` always declares a function
+/// under one fixed C ABI — `i64 name(i64* args, i32 argc)` — regardless of
+/// the typelisp-level function's actual arity; `llvm-builder::load-arg`
+/// reads a logical parameter back out of that array. Fixing the ABI this
+/// way (rather than generating a distinct LLVM signature per arity) is what
+/// lets `compile::CompiledFn` call *any* compiled function through one Rust
+/// function-pointer type — other return types are a later phase's concern.
 fn llvm_module_def() -> AdtDef {
     let mut assoc = HashMap::new();
     assoc.insert("create".to_string(), assoc_fn(vec![Type::Str], llvm_module_ty(), false));
@@ -543,14 +552,22 @@ fn llvm_basic_block_def() -> AdtDef {
     AdtDef { name: Path::root("llvm-basic-block"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
 }
 
-/// An IR builder. Phase 0 only needs enough to position it at a block,
-/// build an `i64` constant, and emit a `ret`.
+/// An IR builder. `load-arg` reads logical parameter `index` out of a
+/// function's fixed-ABI argument array (see `llvm_module_def`'s doc
+/// comment); `build-add`/`build-sub`/`build-mul` cover Phase 1's scalar
+/// arithmetic (comparisons, which return `bool` rather than `i64`, are a
+/// later phase's concern — keeping every builtin here `i64`-in-`i64`-out
+/// for now).
 fn llvm_builder_def() -> AdtDef {
     let mut assoc = HashMap::new();
     assoc.insert("create".to_string(), assoc_fn(vec![], llvm_builder_ty(), false));
     assoc.insert("position-at-end".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit, true));
     assoc.insert("const-i64".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::I64], llvm_value_ty(), true));
     assoc.insert("build-ret".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], Type::Unit, true));
+    assoc.insert("load-arg".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty(), true));
+    assoc.insert("build-add".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    assoc.insert("build-sub".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    assoc.insert("build-mul".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
 }
 
