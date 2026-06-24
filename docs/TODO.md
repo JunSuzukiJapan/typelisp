@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-06-23 / ブランチ: `feature/typed-lisp-impl`
+最終更新: 2026-06-24 / ブランチ: `feature/compiler`
 
 このドキュメントは、再実装（read 関数から作り直し）の進捗と次回の作業を記録する。
 **言語仕様の確定事項は [language-design.md](language-design.md) を参照。**
@@ -466,6 +466,56 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
   **次にcompileへ再着手する場合の前提**: `Vector<T>`/`defstruct`の再設計が完了していること
   （特に`compiler_source.rs`を何で書き直すか——`Vector<T>`が無くなった以上、`Sexpr`ベースか、
   再設計後の何らかの型を使う必要がある）。
+
+### compile機能 再構築（2026-06-24開始、`feature/compiler`ブランチ、進行中）
+
+`defstruct`再設計完了（[[typelisp-defstruct-redesign]]）を受けてゼロから再構築開始。
+**過去の実装（git history）は一切参照しない**——設計は現在のコードベースのみを前提に行う方針
+（ユーザー明示指示）。詳細な進捗・設計判断は[[typelisp-compile-rebuild-2026]]（memory）、
+全体計画は`~/.claude/plans/distributed-baking-owl.md`参照。
+
+**確定方針**:
+- フルスコープ（JIT基盤・ABI・スカラ型対応・制御構造の再構築からdefstruct/defmethod対応まで）。
+- self-hosting（コンパイラ本体はtypelisp自身のdefunで書く、Rustはinkwellバインディング・AST
+  ブリッジ・ランタイムシムのみ）。
+- JIT（`compile`）とAOT（`compile-file`）の両方を最初から見据える（共通コアを最大化、出口だけ分岐）。
+
+**Phase 0完了（commit `551fc9c`）**: typelisp言語から直接LLVM IRを組み立てられる基盤。
+`RtValue`に`Llvm*`系5バリアント追加、`registry.rs`/`eval_llvm_builtin_method`に
+`llvm-module`/`llvm-function`/`llvm-builder`/`llvm-basic-block`/`llvm-value`の5型と
+`create`/`add-function`/`append-block`/`build-*`等を実装、`compile::ast_bridge::ast_to_sexpr`
+（typed AST→タグ付きSexpr、今回はリテラル系のみ実翻訳）、`src/compiler.rs`（self-hosting
+コンパイラ本体の最小スライス）。ビルドに`inkwell 0.9`（`llvm17-0`）が必要、
+`LLVM_SYS_170_PREFIX`は`scripts/with-llvm-env.sh`が`brew --prefix llvm@17`で動的解決
+（絶対パスは一切ハードコードしない——[[feedback-no-hardcoded-absolute-paths]]）。
+
+**Phase 1完了（commit `aeaacf3`、`590709d`）**: JIT実行をInterpに統合。`(compile "fn-name")`
+がtypelisp言語内から呼べ、以降の`Expr::Call`はJIT済みネイティブコードへ優先ディスパッチする。
+全コンパイル済み関数は固定ABI`i64 fn(i64* args, i32 argc)`に統一。`i64`の`+`/`-`/`*`のみ対応
+（比較演算はABI拡張が要るため後続Phaseへ先送り）。コンパイラ本体は CL `labels`
+（既存の`Expr::Labels`、トップレベル`defun`は相互再帰不可なため）で
+`compile-value`/`compile-int`/`compile-var`/`compile-assoc`を相互再帰させる構造。
+
+**発見した制約・注意点（今後も踏まえる）**:
+- トップレベル`defun`同士は相互再帰不可能（前方参照不可、自己再帰のみ）。コンパイラ本体を
+  拡張する際は、Rustから呼ばれる唯一のエントリポイント（`compile-function`）内の`labels`
+  ブロックにサブ関数を追加していく。
+- LLVM Contextに触るコードは`compile::COMPILE_LOCK`を必ず取得する——**テストコードも例外
+  ではない**。Rust側で直接`create_jit_execution_engine`等を呼ぶテストでロックを取らずマルチ
+  スレッド実行で間欠的SIGSEGVが発生した実例あり。
+- LLVM 17はopaque pointerがデフォルト（inkwellの`llvm17-0` featureは`typed-pointers`を含まない）
+  なので、ポインタ型は`Context::ptr_type`、`build_gep`/`build_load`は`pointee_ty`引数を渡す版を使う。
+
+**次回やること（Phase 2: AOT出口）**:
+1. `compile-file`コマンド: ファイル全体を1モジュールにまとめ、`TargetMachine`でオブジェクト
+   ファイル生成→システムリンカ(`cc`)で実行ファイル化。
+2. 最小ランタイムライブラリ`libtlrt`の雛形（最初は空でよい）。
+3. エントリポイント規約: ファイル中の`main`という名前の`defun`をCの`main`にマップ。
+4. JIT(Phase1)で書いたIR生成コードがそのまま再利用できることの確認が核心的な検証ポイント——
+   同一typelispソースをJIT/AOT両方でコンパイルし結果が一致するペアテストを以降の基本パターンにする。
+5. その後のPhase: Phase 3(let/if/loop/再帰、比較演算・f64/bool/char対応含む) →
+   Phase 4(Struct読み書き) → Phase 5(defmethod)。Struct構築・戻り値化はPhase 6として
+   設計のみ記録し実装範囲には含めない方針（AOTの方が単純という非対称性があるため）。
 
 ---
 
