@@ -305,6 +305,15 @@ impl Registry {
         // string, not a typed value), so a free function like `gensym`/
         // `random` above.
         root.fns.insert("compile".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: Type::Bool, public: true, builtin: true });
+        // `compile-file`: AOT-compiles an independent source file to a
+        // native executable (see `Interp::eval_builtin`'s `"compile-file"`
+        // arm / `compile::aot::compile_file`). Same free-function shape as
+        // `compile` above, just two string arguments (source path, output
+        // path) instead of one.
+        root.fns.insert(
+            "compile-file".to_string(),
+            FnSig { type_params: vec![], rest: None, params: vec![Type::Str, Type::Str], ret: Type::Bool, public: true, builtin: true },
+        );
         Registry { root }
     }
 

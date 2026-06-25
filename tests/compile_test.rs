@@ -120,7 +120,7 @@ fn a_freshly_built_module_verifies_successfully() {
 #[test]
 fn the_compiler_body_compiles_an_int_literal_node() {
     let ir = expect_str(eval_ok_with_compiler(
-        r#"(to-string (compile-function "answer" '() '(int 42)))"#,
+        r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(int 42)))"#,
     ));
     assert!(ir.contains("define i64 @answer"), "IR was:\n{}", ir);
     assert!(ir.contains("ret i64 42"), "IR was:\n{}", ir);
@@ -128,7 +128,7 @@ fn the_compiler_body_compiles_an_int_literal_node() {
 
 #[test]
 fn the_compiler_body_panics_on_an_unsupported_tag() {
-    let err = run_with_compiler(r#"(compile-function "answer" '() '(if true))"#)
+    let err = run_with_compiler(r#"(compile-function (llvm-module::create "mod") "answer" '() '(if true))"#)
         .expect_err("expected an unsupported-tag panic");
     match err {
         EvalError::Panic(msg) => assert!(msg.contains("unsupported tag"), "message was: {}", msg),
@@ -144,7 +144,7 @@ fn the_compiler_body_panics_on_an_unsupported_tag() {
 #[test]
 fn the_compiler_body_compiles_a_two_parameter_addition() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function "add2" '(a b) '(assoc "i64" "+" true (var "a") (var "b")))"#,
+        r#"(compile-function (llvm-module::create "mod") "add2" '(a b) '(assoc "i64" "+" true (var "a") (var "b")))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),

@@ -490,17 +490,36 @@ impl Interp {
         self.eval_seq(heap, body, &env)
     }
 
-    /// `(compile "fn-name")`: JIT-compiles a previously-defined `defun` and
-    /// registers the result in [`Self::compiled`] so `Expr::Call` dispatches
-    /// to native code instead of tree-walking it from then on. Phase 1
-    /// scope: a non-generic `defun` whose single-expression body only uses
-    /// node shapes `compile::ast_bridge::ast_to_sexpr` has a real
+    /// Compiles the `defun` named `name` (looked up in `self.fns`) into one
+    /// LLVM function — named `internal_name` — added to `module`. Shared by
+    /// [`Self::compile_function`] (JIT, Phase 1) — which always passes a
+    /// throwaway, single-use module and the same name twice — and
+    /// `compile::aot::compile_file` (AOT, Phase 2) — which passes the same
+    /// shared, file-wide module across every `defun` in the source file,
+    /// asking for a different `internal_name` only for `main` (so it
+    /// doesn't collide with the real C `main` the AOT path synthesizes
+    /// separately — see that module's doc comment).
+    ///
+    /// Takes `module` instead of creating/returning one, on purpose: see
+    /// `compiler.rs`'s doc comment for why `compile-function` (the
+    /// typelisp-hosted half of this) can never hand back sole ownership of
+    /// an `llvm-module` value once `labels`' mutual-recursion closures have
+    /// captured it.
+    ///
+    /// Phase 1/2 scope: a non-generic `defun` whose single-expression body
+    /// only uses node shapes `compile::ast_bridge::ast_to_sexpr` has a real
     /// translation for (`i64` literals/vars/`+`/`-`/`*`) — anything else
     /// surfaces as a `Panic` from the compiler body's own `"unsupported"`
     /// handling (`compiler.rs`'s `compile-value`), not a separate check
     /// here; there's exactly one place that needs to know the supported
     /// shape.
-    fn compile_function(&self, heap: &mut Heap, name: &str) -> Result<RtValue, EvalError> {
+    pub(crate) fn add_compiled_function(
+        &self,
+        heap: &mut Heap,
+        module: Rc<RefCell<Module<'static>>>,
+        name: &str,
+        internal_name: &str,
+    ) -> Result<(), EvalError> {
         let path = Path::root(name);
         let (params, body) = {
             let f = self.fns.get(&path).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))?;
@@ -546,23 +565,34 @@ impl Interp {
             })?;
             (f.params.clone(), f.body.clone())
         };
-        let module_value = self.apply(
+        self.apply(
             heap,
             &compiler_params,
             &compiler_body,
-            vec![RtValue::Str(name.to_string()), RtValue::Sexpr(param_list), RtValue::Sexpr(body_sexpr)],
+            vec![
+                RtValue::LlvmModule(module),
+                RtValue::Str(internal_name.to_string()),
+                RtValue::Sexpr(param_list),
+                RtValue::Sexpr(body_sexpr),
+            ],
         )?;
-        let module_rc = match module_value {
-            RtValue::LlvmModule(m) => m,
-            other => {
-                return Err(EvalError::Internal(format!("compile: compiler body returned {:?}, not an llvm-module", other)))
-            }
-        };
+        Ok(())
+    }
 
+    /// `(compile "fn-name")`: JIT-compiles a previously-defined `defun` and
+    /// registers the result in [`Self::compiled`] so `Expr::Call` dispatches
+    /// to native code instead of tree-walking it from then on. See
+    /// [`Self::add_compiled_function`] for the supported-shape scope.
+    fn compile_function(&self, heap: &mut Heap, name: &str) -> Result<RtValue, EvalError> {
+        let module = {
+            let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+            Rc::new(RefCell::new(crate::compile::llvm_context().create_module("compiled")))
+        };
+        self.add_compiled_function(heap, module.clone(), name, name)?;
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-        let compiled = crate::compile::CompiledFn::new(&module_rc.borrow(), name)
+        let compiled = crate::compile::CompiledFn::new(&module.borrow(), name)
             .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
-        self.compiled.borrow_mut().insert(path, compiled);
+        self.compiled.borrow_mut().insert(Path::root(name), compiled);
         Ok(RtValue::Bool(true))
     }
 
@@ -635,6 +665,26 @@ impl Interp {
                     Err(e) => return Some(Err(e)),
                 };
                 Some(self.compile_function(heap, &fn_name))
+            }
+            // `(compile-file "source.typl" "output")`: AOT-compiles an
+            // independent source file straight to a native executable —
+            // see `compile::aot::compile_file`'s doc comment for why this
+            // runs against a *fresh* `Heap`/`Checker`/`Interp` rather than
+            // the caller's (`self`'s), unlike `compile` above.
+            "compile-file" => {
+                let source_path = match expect_str(&args[0]) {
+                    Ok(s) => s.to_string(),
+                    Err(e) => return Some(Err(e)),
+                };
+                let output_path = match expect_str(&args[1]) {
+                    Ok(s) => s.to_string(),
+                    Err(e) => return Some(Err(e)),
+                };
+                Some(
+                    crate::compile::aot::compile_file(&source_path, &output_path)
+                        .map(|()| RtValue::Bool(true))
+                        .map_err(|e| EvalError::Panic(format!("compile-file: {}", e))),
+                )
             }
             "random" => Some(eval_random(args)),
             "not" => Some(expect_bool(&args[0]).map(|b| RtValue::Bool(!b))),

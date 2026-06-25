@@ -14,6 +14,24 @@
 //! as later phases teach `ast_bridge` to translate more `Expr` variants for
 //! real. No `if`/`let`/`loop` yet.
 //!
+//! `compile-function` takes the destination `llvm-module` as a parameter
+//! rather than creating its own — added in Phase 2 (the AOT exit,
+//! `compile::aot`) so multiple `defun`s can be compiled into *one* shared
+//! module (one `add-function` call each) without ever needing to take
+//! exclusive Rust-side ownership of an `llvm-module` value back out of a
+//! typelisp slot. That turns out to be impossible in general: `labels`
+//! (just below) deliberately builds a reference cycle between its mutually
+//! recursive closures (each one's captured environment includes every
+//! sibling, itself included, to support the mutual recursion at all — see
+//! `Expr::Labels`'s eval doc comment) — `compile-value` & co. close over
+//! `m` along with `builder`/`env`, so that cycle keeps `m`'s slot, and
+//! hence the `Rc<RefCell<Module>>` inside it, alive forever. `Rc::try_unwrap`
+//! on a value `compile-function` itself returned would therefore always
+//! fail. Letting the Rust caller own the one `Rc<RefCell<Module>>` from the
+//! start (creating it itself, passing it in by reference, never trying to
+//! reclaim sole ownership) sidesteps the cycle entirely — see
+//! `Interp::add_compiled_function`.
+//!
 //! `compile-value`/`compile-int`/`compile-var`/`compile-assoc` are CL
 //! `labels` (mutually recursive *local* functions — see
 //! `check::ast::Expr::Labels`), not top-level `defun`s: a `defun` may only
@@ -56,8 +74,7 @@ pub const SOURCE: &str = r#"
 ;; exists purely to give `HashTable::new` a return type to infer from.
 (defun new-env () HashTable<string,llvm-value> (HashTable::new))
 
-(defun compile-function ((name string) (param-names Sexpr) (body Sexpr)) llvm-module
-  (let ((m (llvm-module::create "compiled")))
+(defun compile-function ((m llvm-module) (name string) (param-names Sexpr) (body Sexpr)) llvm-module
     (let ((f (add-function m name)))
       (let ((b (append-block f "entry")))
         (let ((builder (llvm-builder::create)))
@@ -98,7 +115,7 @@ pub const SOURCE: &str = r#"
                                            (panic (append "compile-assoc: unsupported method " method)))))))))))
               (let ((v (compile-value body)))
                 (build-ret builder v)
-                m))))))))
+                m)))))))
 "#;
 
 /// Loads the compiler body. Like [`crate::load_prelude`], `SOURCE` is fixed

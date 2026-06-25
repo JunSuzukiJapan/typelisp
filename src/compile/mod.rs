@@ -4,6 +4,7 @@
 //! provides the pieces that have to live in Rust: the LLVM context/locking,
 //! and (in later phases) the AST bridge and runtime shims.
 
+pub mod aot;
 pub mod ast_bridge;
 
 use std::sync::{Mutex, OnceLock};

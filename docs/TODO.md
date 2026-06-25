@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-06-24 / ブランチ: `feature/compiler`
+最終更新: 2026-06-25 / ブランチ: `feature/compiler`
 
 このドキュメントは、再実装（read 関数から作り直し）の進捗と次回の作業を記録する。
 **言語仕様の確定事項は [language-design.md](language-design.md) を参照。**
@@ -506,16 +506,72 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
 - LLVM 17はopaque pointerがデフォルト（inkwellの`llvm17-0` featureは`typed-pointers`を含まない）
   なので、ポインタ型は`Context::ptr_type`、`build_gep`/`build_load`は`pointee_ty`引数を渡す版を使う。
 
-**次回やること（Phase 2: AOT出口）**:
-1. `compile-file`コマンド: ファイル全体を1モジュールにまとめ、`TargetMachine`でオブジェクト
-   ファイル生成→システムリンカ(`cc`)で実行ファイル化。
-2. 最小ランタイムライブラリ`libtlrt`の雛形（最初は空でよい）。
-3. エントリポイント規約: ファイル中の`main`という名前の`defun`をCの`main`にマップ。
-4. JIT(Phase1)で書いたIR生成コードがそのまま再利用できることの確認が核心的な検証ポイント——
-   同一typelispソースをJIT/AOT両方でコンパイルし結果が一致するペアテストを以降の基本パターンにする。
-5. その後のPhase: Phase 3(let/if/loop/再帰、比較演算・f64/bool/char対応含む) →
-   Phase 4(Struct読み書き) → Phase 5(defmethod)。Struct構築・戻り値化はPhase 6として
-   設計のみ記録し実装範囲には含めない方針（AOTの方が単純という非対称性があるため）。
+**Phase 2完了（未コミット）**: AOT出口。`(compile-file "src.typl" "out")`が独立した
+typelispソースファイルを読み、ファイル中の全`defun`を1つのLLVM moduleへコンパイルし、
+`TargetMachine`でオブジェクトファイル化→システムリンカ(`cc`)で実行ファイルにリンクする。
+新規`src/compile/aot.rs`（`compile::aot::compile_file`）、`registry.rs`に
+`compile-file: (string,string)->bool`を自由関数登録、`Interp::eval_builtin`に
+`"compile-file"`ディスパッチを追加。
+
+- **設計が計画から変わった点（実装中に判明した制約による）**: 当初案は「関数ごとに
+  別moduleを作りLLVMの`Module::link_in_module`で1つに結合する」だったが、実装すると
+  必ず`Rc::try_unwrap`に失敗した。原因は`compile-function`(typelisp側)内の`labels`が
+  相互再帰のために**意図的に**参照循環を作る構造（[[typelisp-compile-rebuild-2026]]
+  のPhase1の節参照）——`compile-value`等の4つのclosureが自分自身を含む全labels名を
+  captureするため、外側の`m`(module)のslotがプログラム終了まで解放されない。
+  この設計は変更せず（mutual recursionに必要な既存の仕組み）、代わりに
+  **`compile-function`がmoduleを生成せず、Rust側から引数として受け取る**ように変更した
+  （`(defun compile-function ((m llvm-module) (name string) (param-names Sexpr)
+  (body Sexpr)) llvm-module ...)`）。これにより「1個の関数をコンパイルして既存のmodule
+  に追加する」が本当に共有可能なJIT/AOT共通の最小単位になった——JIT(`Interp::compile_function`)
+  は使い捨ての1関数用moduleを都度生成して渡し、AOT(`compile_file`)は1つのmoduleを
+  ファイル全体で共有して`defun`の数だけ渡す。Rust側は`Interp::build_module`を
+  `Interp::add_compiled_function(heap, module: Rc<RefCell<Module>>, name, internal_name)
+  -> Result<(), EvalError>`に置き換え（戻り値でmoduleを返す必要がなくなった）。
+  `link_in_module`は使われていない。
+- **`libtlrt`雛形は今回作らなかった**（計画書には「最初は空でよい」とあったが見送った）:
+  Phase 2時点では生成コードがランタイムシムを一切呼ばない（`ast_bridge`の翻訳対象が
+  リテラル/var/算術のみのため）。空のstaticlibを追加するだけの新規cargoクレートは
+  Phase 4でシムの最初のシンボルが要るようになった時点で作る方が、使われないコードを
+  先取りしないという既存方針（YAGNI）に合う。リンクは`cc`にオブジェクトファイル
+  単体を渡すだけで成立している。
+- **エントリポイント規約**: ファイル中の`main`という名前・**0引数**の`defun`が必須
+  （他の名前の関数は呼び出されないが、コンパイル自体は通る——複数`defun`が同じ
+  moduleに共存できることの確認に使っている、`tests/compile_file_test.rs`の
+  `compiles_a_file_with_a_non_main_helper_function_too`参照）。コンパイル後の
+  LLVM関数名は`main`ではなく`tl_main`にし（固定ABI`i64 fn(i64*,i32)`とCの
+  `int main(void)`がリンク非互換なため）、Rust側(`build_main_wrapper`)が別途
+  本物の`main`（`tl_main`を呼んで`i64`結果を`i32`終了コードへtruncateするだけ）を
+  直接inkwellで組み立てて追加する——これはJIT/AOT共通コアの外側（出口側）の処理。
+- **`expected`が算術の最初の引数まで伝播しない既存挙動への対応**: `(+ 4 2)`のような
+  裸の整数リテラルの算術は、`main`の宣言戻り値型が`i64`でも常に`i32`になる
+  （`Checker::try_instance_method`が受け手の型を**最初の引数を`expected: None`で
+  検査して**決めるため——メソッド解決にはまず型が要り、型を知るには`expected`を
+  使えない、という設計上の理由がある。`main`はAOTの制約でパラメータも`let`も
+  使えないため、外側の`expected`を伝える手段がない）。これはcompile-file固有の
+  バグではなく既存の型検査の仕様通りの挙動なので、テスト側（`main`の宣言型を`i32`に
+  する）で対応した。`i32`/`i64`はランタイム表現・生成されるLLVM IRの両方で完全に
+  同一（`RtValue::Int(i64)`/`const-i64`固定）なため、動作に違いは無い。
+- TDD: 新規`tests/compile_file_test.rs`（7件。定数`main`、算術、`main`以外の`defun`
+  共存、終了コードの32bit truncate、`main`欠落エラー、`defun`以外のトップレベル形式
+  エラー、JIT/AOTペアテスト）。並列実行を含め複数回連続green（`COMPILE_LOCK`の
+  保持区間がRust→typelisp→Rustの再入を避けるよう注意——`add_compiled_function`の
+  呼び出し中は外側でロックを取ってはいけない、デッドロックする）。
+
+**次回やること（Phase 3: 制御構造）**:
+1. `compiler.rs`のコンパイラ本体に`Expr::Let`/`Expr::If`(値位置・phi)/`Expr::Loop`/
+   `Expr::Break`/`Expr::Return`のコード生成を追加（`ast_bridge`側の対応する翻訳も
+   `(unsupported ...)`から実装に変える）。比較演算・`f64`/`bool`/`char`対応も
+   このPhaseに含む。
+2. 自己再帰はそのまま自分のLLVM関数を呼ぶだけ、特別扱い不要。
+3. 相互再帰: AOTはファイル全体が1moduleなので「全関数を先にdeclare→本体生成」の
+   2パスで自然に解決できる。JITは依存関数グループを1moduleに集約する仕組みが
+   別途必要（Phase 2で作った「moduleを共有して複数回`add_compiled_function`を呼ぶ」
+   仕組みがそのまま使えるはず——呼び出し先の関数も同じmoduleに先に登録しておけば
+   `build-call`で参照できる）。
+4. その後: Phase 4(Struct読み書き) → Phase 5(defmethod)。Struct構築・戻り値化は
+   Phase 6として設計のみ記録し実装範囲には含めない方針（AOTの方が単純という
+   非対称性があるため）。
 
 ---
 
