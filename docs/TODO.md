@@ -890,7 +890,32 @@ escapeする値があってもIR上1回だけ定義されることを確認、ba
 参照をcall引数として渡した場合にコール後release呼び出しがIRに現れる
 ことを確認）+ 既存の生Sexprテスト9件を新フォーマットに書き換え。
 全件green（compile_test.rs 38件、compile_file_test.rs 14件含む全テスト
-スイート）、clippy警告0、5回連続実行で安定確認済み。
+スイート）、clippy警告0、5回連続実行で安定確認済み（commit 4176868）。
+
+### 次にやること候補（2026-06-25時点、未着手）
+
+labels/クロージャのコンパイル対応（Stage 1-4＋labels兄弟値参照＋自動
+retain/release挿入）はこれで一区切り。残る選択肢、優先順位はユーザー未確認:
+
+- **`if`/`let`/比較演算の実装**: これまでのStage 1-4・各follow-upのどの
+  テストでも結局不要だったが、本物の再帰関数（ベースケース付き）を書くには
+  必須。実装され次第、ClosureBoxのR1-R4所有権規約（中間スコープが無い前提で
+  設計済み）をスコープ途中の解放にも拡張できるか再検討が必要になる
+  （`retain-bindings`/`release-bindings`は今のところ「関数の入口で1回retain
+  →出口で1回release」の2点だけを前提にしている）。
+- **mark-and-sweepによるサイクル収集本体**: ユーザー提案の元々の到達点
+  （「GCを参照カウントに追加で、適当なタイミングでmark-and-sweepする」）だが、
+  既存の`ClosureBox`設計では真の参照循環がそもそも構築不可能と判明済み
+  （`compiler.rs`の`resolve-value`doc comment参照）——サイクルが無い以上、
+  今のところ収集すべき対象が無く緊急性は低い。
+- **ネストした`labels`が外側labelsの兄弟を参照するケース**（既存の
+  「known limitation」、`compiler.rs`冒頭のdocコメントに既述）: 今回も
+  未解決のまま——`compile-labels`は常に`inner-fn-env`を空から始める設計。
+- **retain/release対の重複除去**（Swift ARC Optimizer的な最適化パス）:
+  正しさは確認済みだが、自分の束縛名をコールの引数として渡すだけのような
+  ケースでも呼ばれる側のR1/R2が律儀にretain/releaseを行うため、冗長な対が
+  残っている。最適化より正しさを優先したのでパフォーマンスチューニングは
+  後回し。
 
 ---
 
