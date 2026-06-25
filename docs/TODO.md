@@ -506,7 +506,7 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
 - LLVM 17はopaque pointerがデフォルト（inkwellの`llvm17-0` featureは`typed-pointers`を含まない）
   なので、ポインタ型は`Context::ptr_type`、`build_gep`/`build_load`は`pointee_ty`引数を渡す版を使う。
 
-**Phase 2完了（未コミット）**: AOT出口。`(compile-file "src.typl" "out")`が独立した
+**Phase 2完了（commit `ca30fc5`）**: AOT出口。`(compile-file "src.typl" "out")`が独立した
 typelispソースファイルを読み、ファイル中の全`defun`を1つのLLVM moduleへコンパイルし、
 `TargetMachine`でオブジェクトファイル化→システムリンカ(`cc`)で実行ファイルにリンクする。
 新規`src/compile/aot.rs`（`compile::aot::compile_file`）、`registry.rs`に
