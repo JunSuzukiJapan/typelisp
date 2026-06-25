@@ -19,6 +19,27 @@ use std::collections::HashSet;
 
 use crate::{Expr, LabelDef, Pattern, Typed};
 
+/// The free variables of a single `lambda`'s body (labels/closures Stage
+/// 4) — [`labels_free_vars`]'s one-function counterpart, for a `lambda`
+/// that has no siblings of its own at all (unlike a `labels` def). Walked
+/// with an *empty* siblings set — matching [`walk`]'s own existing
+/// nested-`Lambda` arm exactly (a `lambda` never gets direct-call access to
+/// whatever `labels` block encloses it, so any name from there that its body
+/// references becomes an ordinary free variable/capture attempt here too,
+/// not a resolved direct call). When that name turns out to be a sibling
+/// *function* rather than an ordinary value, `compiler.rs`'s `compile-lambda`
+/// still resolves it correctly (a follow-up to Stage 4): it builds *this*
+/// lambda's `ClosureBox` env array in the outer scope, where the real
+/// `fn-env` this sibling lives in is still available, so `resolve-value`
+/// boxes it there before this lambda's own `bind-captures` ever runs.
+pub fn lambda_free_vars(params: &[(String, crate::Type)], body: &[Typed]) -> Vec<String> {
+    let bound: HashSet<String> = params.iter().map(|(n, _)| n.clone()).collect();
+    let mut seen = HashSet::new();
+    let mut order = Vec::new();
+    walk_body(body, &bound, &HashSet::new(), &mut seen, &mut order);
+    order
+}
+
 /// The free variables of a whole `labels` block, deduplicated, in
 /// first-occurrence order (defs in the given order, then within each def's
 /// body) — that order becomes the shared captured environment's slot order.
@@ -30,24 +51,6 @@ use crate::{Expr, LabelDef, Pattern, Typed};
 /// block's own sibling names, or this analysis would manufacture a bogus
 /// captured slot for a name `compile-apply` resolves through `fn-env`
 /// instead of `env`.
-/// The free variables of a single `lambda`'s body (labels/closures Stage
-/// 4) — [`labels_free_vars`]'s one-function counterpart, for a `lambda`
-/// that has no siblings of its own at all (unlike a `labels` def). Walked
-/// with an *empty* siblings set — matching [`walk`]'s own existing
-/// nested-`Lambda` arm exactly (a `lambda` never gets direct-call access to
-/// whatever `labels` block encloses it, so any name from there that its body
-/// references becomes an ordinary free variable/capture attempt here too,
-/// not a resolved direct call — see `ast_bridge::translate_lambda`'s doc
-/// comment for the documented gap that follows when that name turns out to
-/// be a sibling *function*, not an ordinary value).
-pub fn lambda_free_vars(params: &[(String, crate::Type)], body: &[Typed]) -> Vec<String> {
-    let bound: HashSet<String> = params.iter().map(|(n, _)| n.clone()).collect();
-    let mut seen = HashSet::new();
-    let mut order = Vec::new();
-    walk_body(body, &bound, &HashSet::new(), &mut seen, &mut order);
-    order
-}
-
 pub fn labels_free_vars(defs: &[LabelDef], outer_direct: &HashSet<String>) -> Vec<String> {
     let mut siblings: HashSet<String> = outer_direct.clone();
     for (name, _, _) in defs {

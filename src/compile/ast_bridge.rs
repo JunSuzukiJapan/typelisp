@@ -140,17 +140,16 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
         // matters to [`translate_apply`], which intercepts the *callee*
         // position of an `Expr::Apply` before a bare `Expr::Var` node for
         // that name would ever reach here. A sibling *referenced as a
-        // value* rather than called (e.g. a nested `lambda` capturing it,
-        // or a `labels` block's trailing body returning it bare) still
-        // becomes a plain `(var name)` — a documented gap, not a silent
-        // miscompilation: `compiler.rs`'s `compile-var`/`lookup-var` only
-        // ever search the ordinary value `env` (never `fn-env`, where a
-        // sibling's `llvm-function` actually lives), so this fails clearly
-        // at compile time ("unbound variable") rather than doing the wrong
-        // thing. Boxing a sibling into a `ClosureBox` on demand (the same
-        // way [`translate_fnref`] boxes a top-level function reference) is
-        // future work — labels/closures Stage 4 only wires that up for
-        // top-level `defun`s and real `lambda` literals.
+        // value* rather than called (e.g. a nested `lambda` capturing it, or
+        // a `labels` block's trailing body returning it bare) still becomes
+        // this same plain `(var name)` — deliberately: the "is this an
+        // ordinary value or a sibling that needs boxing into a `ClosureBox`"
+        // judgment is made entirely at compile time instead, by
+        // `compiler.rs`'s `resolve-value` (a follow-up to labels/closures
+        // Stage 4) — see that function's doc comment for why doing it there
+        // (where the relevant `fn-env` is still in scope) rather than here
+        // avoids colliding with `compile-lambda`'s own, separate decision to
+        // always give an escaping `lambda`'s body a *fresh* `fn-env`.
         Expr::Var(name) => {
             let v = heap.alloc_string(name.clone());
             tagged(heap, "var", &[v])
@@ -229,9 +228,11 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
 /// work without a second, transitive analysis pass.
 ///
 /// A def's body may otherwise reference its own parameters, any sibling/self
-/// name (resolved as a direct call, see [`translate_apply`]), or any of
-/// `captured`'s names — anything else is a name the compiler body itself
-/// will reject at compile time (`compile-var`'s "unbound variable" panic).
+/// name (resolved as a direct call when it's the callee of an `Apply`, see
+/// [`translate_apply`], or boxed into a `ClosureBox` on demand when
+/// referenced bare as a value, see `compiler.rs`'s `resolve-value`), or any
+/// of `captured`'s names — only a genuinely nonexistent name is rejected at
+/// compile time (`resolve-value`'s "unbound variable" panic).
 /// Every def's body and the trailing body must be a single expression — the
 /// same restriction `Interp::add_compiled_function` already applies to a
 /// `defun`'s own body, just extended uniformly to `labels` rather than
@@ -494,11 +495,13 @@ fn build_lambda_tag(heap: &mut Heap, name: &str, captured: &[String], params: &[
 /// matching [`lambda_free_vars`]'s own treatment of enclosing `labels`
 /// siblings: a nested `lambda` never gets direct-call access to them (only
 /// a `labels` def's own siblings do), so a sibling name referenced here
-/// becomes an ordinary capture attempt instead, which fails clearly at
-/// `compiler.rs`'s `compile-env-args`/`lookup-var` ("unbound variable")
-/// rather than silently doing the wrong thing — a documented gap (capturing
-/// an outer `labels` sibling's *function value*, as opposed to calling it
-/// directly, isn't supported yet), not a silent miscompilation.
+/// becomes an ordinary capture attempt instead — which now resolves
+/// correctly (a follow-up to labels/closures Stage 4): `compiler.rs`'s
+/// `compile-lambda` builds *this* lambda's own `ClosureBox` env array in the
+/// *outer* scope (where the real `fn-env` is still available), so
+/// `compile-env-args`/`resolve-value` box the sibling there, and the boxed
+/// value flows into this lambda's own `env` via the ordinary `bind-captures`
+/// path — no special-casing needed inside the lambda's own body at all.
 fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed]) -> Result<Value, Error> {
     if body.len() != 1 {
         return Err(Error::TypeError("compile: lambda has a multi-expression body, not yet supported".into()));

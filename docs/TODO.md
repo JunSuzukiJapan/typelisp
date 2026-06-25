@@ -744,19 +744,9 @@ AOT用に別途staticlibをビルドして`cc`にリンクする方式を想定�
   で評価→`build-closure-apply`）。
 - **`freevars.rs`**: `lambda_free_vars`新設（`labels_free_vars`の単一関数版、
   siblings概念が無いため`outer_direct`引数も無い）。
-- **既知の未対応（意図的にスコープ外、ドキュメント化のみ)**: `labels`兄弟を
-  **値として**（呼ぶのではなく）参照するケース（例: `(labels ((f ...)) f)`）は
-  ClosureBox化されない——`Expr::Var`は`direct`集合を見ないため常に
-  `(var name)`になり、`compile-var`の`lookup-var`は`env`しか見ない（兄弟の
-  `llvm-function`は`fn-env`にしか無い）ので「unbound variable」で明確に
-  失敗する。計画のsub-step5（escapeしてキャプチャしあうlabels兄弟の循環
-  リーク確認）はこの機構が無いと書けないと判明したため**実装しなかった**
-  ——`translate_fnref`と同じ要領で兄弟をforwarding lambdaに包む拡張は
-  可能だが、その場合のラッパー本体`(apply name ...)`は兄弟のマングル済み
-  LLVM名を`fn-env`経由でしか解決できず、`compile-lambda`が新規関数の本体に
-  渡す`fn-env`を常に空にする設計（escapeするlambdaは外側labelsスコープに
-  アクセスできない、という別の意図的な制約）と衝突する——根本的な再設計が
-  要るため見送り、将来課題として明記。
+- **当初の既知の未対応は後日解決済み（下記参照）**: `labels`兄弟を**値として**
+  （呼ぶのではなく）参照するケース（例: `(labels ((f ...)) f)`）は実装当初
+  ClosureBox化されず「unbound variable」で失敗していたが、後続の修正で解決した。
 - TDD: 生builtinテスト2件（make-closure+apply、retain/release後も
   呼び出し可能なことのクラッシュフリー回帰テスト——この2件目でmallocが
   JITで追加配線無しに解決することを実証）、ast_bridge単体テスト8件
@@ -766,6 +756,60 @@ AOT用に別途staticlibをビルドして`cc`にリンクする方式を想定�
   escapeする捕捉lambdaを別関数からindirect呼び出し、FnRefを値として
   渡す）、`tests/compile_file_test.rs`にAOT1件+JIT/AOTペア1件。全件green、
   clippy警告0、5回連続実行で安定確認済み。
+
+### labels兄弟を値として参照するケースの解決（Stage 4の続き、2026-06-25）
+
+Stage 4完了時に見送った「`labels`兄弟を値として参照する」ケース
+（`(labels ((f ...)) f)`が「unbound variable」で失敗する問題）を、
+plan modeでの設計検討（他言語のクロージャコンパイル手法の調査込み）の後に解決した。
+
+**調査結果**: Scheme/SML/OCamlの`letrec`、V8のJS Context、C#のdisplay classは
+いずれも「相互再帰するクロージャ群が1つの共有environmentフレームを持つ」
+という同型のパターンを採用している。本プロジェクトの既存設計（labelsブロック
+全体で1つの共有`captured`リストを使う、Stage 2で確定済み）はすでにこの
+パターンを踏襲済みで、欠けていたのは「共有している情報（`fn-env`と
+`captured`リスト）を値参照の場面でも使い切る」という最後の1段だけだった
+——新しいビルトインや実行時表現は不要だった。Rust（`Rc<RefCell<>>`）・
+Swift/Objective-C（ARC）の「循環参照はリークするが許容する」という前例は、
+本プロジェクトが`build-closure-retain`/`-release`のみでweak参照を持たず
+循環リークを受容する既存方針の妥当性を裏付けた。
+
+**設計**: `ast_bridge.rs`/`freevars.rs`は無変更（`Expr::Var`は常に
+`(var name)`のまま——`freevars.rs`の自由変数解析はStage 2の時点で
+すでに正しくこのケースを想定済みだったと判明した）。`compiler.rs`内の
+`lookup-var`/`compile-env-args`（従来`compile-function`の`labels`リング
+**外側**の独立トップレベル`defun`）を、`resolve-value`（リネーム）として
+**リング内に移動**——`env`に名前が無ければ`fn-env`を見て、見つかれば
+今のスコープの共有`captured`リストから環境配列を構築し`build-make-closure`で
+ClosureBoxにラップする。`compile-env-args`も`fn-env`引数を追加して同じ
+リング内に移動（トップレベル`defun`同士は相互再帰できないため、両者が
+相互再帰する今回の拡張にはリング内への移動が必須だった）。
+
+**判明した重要な事実**: この方式では「2つのClosureBoxが互いを指し合う
+真の参照循環」はそもそも構築不可能——`resolve-value`のフォールバックも
+`compile-lambda`も毎回新規にヒープ確保するだけで、構築済みのBoxを後から
+書き換えて相互参照させる手段が無いため（Scheme/OCamlの「プレースホルダーを
+先に確保→後で相互参照を埋める」というletrecクロージャの定石とは異なる、
+本プロジェクトの方がより簡素な設計）。当初Stage 4が想定していた「循環
+リーク確認テスト」は意味を持たないと判明し、代わりに「2兄弟が互いを正しく
+区別して値参照できること」を確認するテストに置き換えた。
+
+**自動的に解決した範囲**: ネストした`lambda`が兄弟を間接キャプチャするケース
+（`compile-lambda`自体は一切変更不要——`compile-lambda`がこのlambdaの
+ClosureBox env配列を構築する呼び出しは**外側**スコープ（`fn-env`がまだ
+有効）で行われるため、`resolve-value`の拡張だけで自動的に動作した。
+plan mode時点ではこの点を慎重にトレースして検証が必要と判断していたが、
+実装後のテスト（`compile_dispatches_an_escaping_lambda_that_indirectly_captures_a_labels_sibling`）
+で実際に確認できた。
+
+**変わらない既知の制約**: ネストした`labels`が外側labelsの兄弟を参照する
+ケース（既存の「known limitation」）は今回も解決しない——ネストした
+`compile-labels`は常に`inner-fn-env`を空から始める設計のまま。
+
+TDD: `tests/compile_test.rs`に6件追加（裸参照+indirect呼び出し、捕捉あり版、
+自己参照のIR検証のみ、end-to-endのlabels-as-escaping-value、2兄弟の取り違え
+検出、ネストlambdaが兄弟を間接キャプチャ）。全件green、clippy警告0、
+5回連続実行で安定確認済み。
 
 ---
 

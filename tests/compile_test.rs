@@ -804,3 +804,166 @@ fn compile_dispatches_a_top_level_function_passed_by_name_through_apply_fn() {
         other => panic!("expected an Int, got {:?}", other),
     }
 }
+
+/// Follow-up to Stage 4: a `labels` sibling referenced *as a value* (not
+/// called) — here, the block's own trailing body bare-returns `f` instead of
+/// calling it. `ast_bridge::ast_to_sexpr_scoped`'s `Expr::Var` arm doesn't
+/// distinguish this from any other variable reference (it always emits
+/// `(var name)`); `compiler.rs`'s `resolve-value` is what now resolves it —
+/// not found in the ordinary `env`, found instead in `fn-env`, so it gets
+/// boxed into a fresh `ClosureBox` on the spot (`build-make-closure`, the
+/// same builtin `compile-lambda` already uses). `(apply-indirect (var "f")
+/// (int 5))` then calls through that box, proving the boxing produced a
+/// genuinely callable closure, not just a value that type-checks.
+#[test]
+fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
+    let module = match eval_ok_with_compiler(
+        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" (n) (var "n"))) (apply-indirect (var "f") (int 5))))"#,
+    ) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let outer = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("outer")
+            .expect("failed to look up the compiled `outer` function")
+    };
+    assert_eq!(unsafe { outer.call(std::ptr::null(), 0) }, 5);
+}
+
+/// Same as above, but the sibling being boxed itself captures an outer-scope
+/// value (`offset`) — exercises `compile-env-args`'s extended signature: the
+/// `names` it's walking (`captured`, building the *block's* own env array
+/// from the caller's `outer` scope) and the `captured` it holds constant for
+/// `resolve-value`'s own fallback happen to be the *same* list here (the
+/// common case — see `resolve-value`'s doc comment for the one place,
+/// `compile-lambda`, where they legitimately differ).
+#[test]
+fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_outer_value() {
+    let module = match eval_ok_with_compiler(
+        r#"(compile-function (llvm-module::create "mod") "outer" '(offset n) '(labels (offset) (("go" (k) (assoc "i64" "+" true (var "k") (var "offset")))) (apply-indirect (var "go") (int 5))))"#,
+    ) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let outer = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("outer")
+            .expect("failed to look up the compiled `outer` function")
+    };
+    let argv: [i64; 2] = [10, 5];
+    assert_eq!(unsafe { outer.call(argv.as_ptr(), argv.len() as u32) }, 15);
+}
+
+/// A `labels` sibling whose own body bare-references *itself* — `declare-labels-siblings`
+/// already registers `f` into `inner-fn-env` before any sibling's body is
+/// compiled (including `f`'s own), so `resolve-value`'s fallback finds it
+/// immediately. Only checks the IR (never run!), the same way
+/// `the_compiler_body_compiles_a_self_referencing_call` deliberately never
+/// JIT-runs a self-referencing top-level `Expr::Call`: a closure that boxes
+/// itself and is then called would just box itself again, forever, with no
+/// base case — out of scope here (no `if`/comparison yet), but the boxing
+/// itself (a `build-array_malloc` call showing up in the IR) is exactly what
+/// this test confirms.
+#[test]
+fn the_compiler_body_boxes_a_labels_sibling_that_bare_references_itself() {
+    let ir = expect_str(eval_ok_with_compiler(
+        r#"(to-string (compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" () (var "f"))) (apply "f"))))"#,
+    ));
+    assert!(ir.contains("malloc"), "IR was:\n{}", ir);
+}
+
+/// The end-to-end follow-up to Stage 4: `make-adder` returns one of its own
+/// `labels` siblings bare (no `lambda` literal involved at all this time —
+/// the originally-skipped Stage 4 sub-step 5 scenario, restricted to the
+/// non-cyclic single-sibling case this fix actually supports — see
+/// `resolve-value`'s doc comment for why a true reference cycle between two
+/// boxed siblings isn't constructible under this design). `apply-fn` is the
+/// same helper already used by the `lambda`-literal version of this test
+/// (`compile_dispatches_an_escaping_capturing_lambda_called_through_another_compiled_function`).
+#[test]
+fn compile_dispatches_an_escaping_labels_sibling_returned_bare() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun make-adder ((n i64)) (fn (i64) i64)
+          (labels ((adder ((x i64)) i64 (+ x n)))
+            adder))
+        (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
+        (compile "make-adder")
+        (compile "apply-fn")
+        (apply-fn (make-adder 5) 10)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 15),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// A `labels` block with *two* siblings, where the trailing body bare-returns
+/// only one of them (`f`, not `g`) — `g` exists purely to catch a plausible
+/// implementation bug: if `resolve-value`'s `fn-env` lookup or
+/// `declare-labels-siblings`' mangled-name bookkeeping ever got the wrong
+/// sibling, this would box/call `g` instead of `f` and produce a different
+/// (or panicking) result. `g` calling `f` directly (an ordinary `apply`,
+/// unaffected by this fix) also confirms the fix doesn't disturb sibling-to-
+/// sibling direct calls.
+#[test]
+fn compile_dispatches_an_escaping_labels_sibling_chosen_correctly_among_several() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun make-pair ((n i64)) (fn (i64) i64)
+          (labels ((f ((x i64)) i64 (+ x n))
+                   (g ((x i64)) i64 (+ x (f x))))
+            f))
+        (defun apply-fn ((h (fn (i64) i64)) (n i64)) i64 (h n))
+        (compile "make-pair")
+        (compile "apply-fn")
+        (apply-fn (make-pair 5) 10)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 15),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// A nested, escaping `lambda` whose body indirectly calls a `labels`
+/// sibling — `freevars::lambda_free_vars` already treated a sibling
+/// referenced from inside a nested `lambda` as an ordinary free variable
+/// (this predates this fix, written back in Stage 2 before `lambda`s even
+/// existed), so the sibling ends up in the `lambda`'s own captured list;
+/// when `compile-lambda` builds that `lambda`'s `ClosureBox` env array (in
+/// the *outer*, still-`fn-env`-having scope, via `compile-env-args`), it now
+/// resolves the sibling through `resolve-value`'s fallback exactly like the
+/// bare-reference tests above, and the boxed sibling flows into the nested
+/// `lambda`'s own `env` via the ordinary `bind-captures` path — no change to
+/// `compile-lambda` itself was needed for this case to start working.
+#[test]
+fn compile_dispatches_an_escaping_lambda_that_indirectly_captures_a_labels_sibling() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun make-caller ((n i64)) (fn () i64)
+          (labels ((double ((x i64)) i64 (* x 2)))
+            (lambda () i64 (double n))))
+        (defun apply-fn0 ((f (fn () i64))) i64 (f))
+        (compile "make-caller")
+        (compile "apply-fn0")
+        (apply-fn0 (make-caller 21))
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 42),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
