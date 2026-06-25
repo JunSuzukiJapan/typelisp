@@ -655,14 +655,23 @@ fn llvm_builder_def() -> AdtDef {
     // `i64` value, so it loads `fn_ptr`/`env_len`/the env pointer out of the
     // box at runtime and calls through `build_indirect_call` instead.
     // `build-closure-retain` increments the refcount and returns the closure
-    // itself (chainable); `build-closure-release` decrements it and frees
-    // the box once it reaches zero — cyclic captures (e.g. mutually
-    // recursive escaping `labels` siblings) still leak, by design, the same
-    // accepted limitation the tree-walking interpreter's own `RtValue::Closure`/
-    // `labels` `Rc` cycles already have.
+    // itself (chainable); `build-closure-release` decrements it and, once it
+    // reaches zero, recursively releases any captured slot `fn_mask` marks
+    // as itself `Fn`-typed before freeing the box (automatic retain/release
+    // insertion, a follow-up to labels/closures Stage 4 — see
+    // `compiler.rs`'s `resolve-value`/`compile-lambda` for where retains are
+    // inserted on the way in). `build-make-closure`'s `fn_mask` (a bitmask,
+    // one bit per captured slot, computed entirely at compile time by
+    // `compiler.rs`'s `compute-fn-mask`) is what makes that cascade
+    // possible — without it, `build-closure-release` would have no way to
+    // tell a captured closure pointer apart from an ordinary `i64` at
+    // runtime. A true reference cycle between two `ClosureBox`es still isn't
+    // constructible under this design (see `resolve-value`'s doc comment),
+    // so the cascade's recursion is always finite in practice even though
+    // nothing here guards against one.
     assoc.insert(
         "build-make-closure".to_string(),
-        assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
+        assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty(), Type::I32, Type::I64], llvm_value_ty(), true),
     );
     assoc.insert(
         "build-closure-env-get".to_string(),
@@ -673,7 +682,22 @@ fn llvm_builder_def() -> AdtDef {
         assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
     );
     assoc.insert("build-closure-retain".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
-    assoc.insert("build-closure-release".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], Type::Unit, true));
+    assoc.insert(
+        "build-closure-release".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty()], Type::Unit, true),
+    );
+    // Test-only: reads a `ClosureBox`'s refcount slot directly, as an
+    // ordinary `llvm-value` — never called from `compiler.rs` itself, only
+    // from `tests/compile_test.rs` to verify the automatic retain/release
+    // insertion work, see `interp::llvm_builder_debug_closure_refcount`'s
+    // doc comment.
+    assoc.insert("debug-closure-refcount".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    // The generic-pointer read counterpart of `store-arg` — see
+    // `interp::llvm_builder_load_raw`'s doc comment.
+    assoc.insert(
+        "load-raw".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
+    );
     AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
 }
 

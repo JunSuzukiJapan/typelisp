@@ -9,21 +9,43 @@
 //!
 //! Compiles the node shapes `ast_bridge::ast_to_sexpr` actually produces a
 //! real translation for today — integer literals (`(int n)`), `i64`
-//! arithmetic (`(var name)`/`(assoc type method instance arg...)`, for
+//! arithmetic (`(var name is-fn)`/`(assoc type method instance arg...)`, for
 //! `+`/`-`/`*` only), `labels`-sibling/self direct calls
-//! (`(apply name arg...)`/`(labels (captured...) ((name (params)
-//! body))... trailing-body)`, the labels-compilation work — see
-//! `compile-labels`'s doc comment below for scope), top-level `defun`-to-
-//! `defun` calls including self-recursion (`(call name arg...)`,
-//! `Expr::Call`, labels/closures Stage 3 — see `compile-call`'s doc comment),
-//! and general closures (labels/closures Stage 4 — escaping `lambda`
-//! values/`Expr::FnRef` forwarding wrappers compiled to a heap-allocated
-//! `ClosureBox`, `(lambda name (captured...) (params...) body)`, see
+//! (`(apply name (is-fn . arg-form)...)`/`(labels ((captured . is-fn)...)
+//! ((name ((param . is-fn)...) body))... trailing-body)`, the labels-
+//! compilation work — see `compile-labels`'s doc comment below for scope),
+//! top-level `defun`-to-`defun` calls including self-recursion (`(call name
+//! (is-fn . arg-form)...)`, `Expr::Call`, labels/closures Stage 3 — see
+//! `compile-call`'s doc comment), and general closures (labels/closures
+//! Stage 4 — escaping `lambda` values/`Expr::FnRef` forwarding wrappers
+//! compiled to a heap-allocated `ClosureBox`, `(lambda name
+//! ((captured . is-fn)...) ((param . is-fn)...) body)`, see
 //! `compile-lambda`'s doc comment; indirect dispatch through one,
-//! `(apply-indirect callee-form arg...)`, see `compile-apply-indirect`'s
-//! doc comment). `compile-value` grows a new tag-/method-matching arm as
-//! later phases teach `ast_bridge` to translate more `Expr` variants for
-//! real. No `if`/`let`/`loop` yet.
+//! `(apply-indirect callee-form (is-fn . arg-form)...)`, see
+//! `compile-apply-indirect`'s doc comment). `compile-value` grows a new
+//! tag-/method-matching arm as later phases teach `ast_bridge` to translate
+//! more `Expr` variants for real. No `if`/`let`/`loop` yet.
+//!
+//! Every captured/parameter name and call argument carries an `is-fn` `Bool`
+//! tag alongside it (`ast_bridge`'s `tagged_sym_list`/`tagged_ast_list_to_sexpr`)
+//! — whether that name/argument's static type is `Fn`. This is what makes
+//! the automatic `ClosureBox` retain/release insertion work (a follow-up to
+//! labels/closures Stage 4) possible at all: without it, nothing here could
+//! tell an ordinary `i64` apart from a closure pointer at the points that
+//! matter (`build-closure-retain`/`build-closure-release` would corrupt
+//! memory if called on the former). See `retain-bindings`/`release-bindings`/
+//! `compile-env-args`/`compile-escaping-env-args`'s doc comments for the
+//! actual insertion points and the ownership rules behind them (R1-R4 in the
+//! design notes this followed — `docs/TODO.md` has the full writeup); the
+//! short version: every function activation retains its own `Fn`-typed
+//! params/captures on entry and releases them (unconditionally, minus
+//! whichever one is being returned bare) on exit, a *borrowed* value being
+//! folded into an escaping `ClosureBox`'s own captured array gets an extra
+//! retain right there (the box can outlive the activation that built it),
+//! and a *fresh* value (a `labels` sibling boxed on demand by
+//! `resolve-value`, or any other tag's result) consumed by a call/env-array
+//! that doesn't itself escape gets released right after that call is done
+//! with it.
 //!
 //! `compile-function` takes the destination `llvm-module` as a parameter
 //! rather than creating its own — added in Phase 2 (the AOT exit,
@@ -55,7 +77,17 @@
 //! mutual recursion); `labels` is the right tool, and nesting them all
 //! inside the one `compile-function` entry point that's actually called
 //! from Rust (`Interp::add_compiled_function`) sidesteps the top-level
-//! restriction entirely.
+//! restriction entirely. `resolve-value`/`compile-env-args`/
+//! `compile-escaping-env-args` live in this same ring for the same reason —
+//! they mutually recurse with each other (resolving a captured name's value
+//! may need to box a sibling on demand, which needs to resolve *that* box's
+//! own captured names' values, ...) and with the rest of the ring (`resolve-value`
+//! is `compile-var`'s callee). Helpers that only ever call *out* of the ring
+//! (`retain-bindings`/`release-bindings`/`release-pending-args`/
+//! `bare-returned-own-name`/`name-is-borrowed?`/`form-is-borrowed?`/
+//! `compute-fn-mask`/...) stay ordinary top-level `defun`s, defined before
+//! `compile-function`, exactly like `sexpr-str`/`sexpr-list-length` always
+//! have.
 //!
 //! Unlike Phase 0/1, `builder`/`env`/`fn-env`/`captured` are now **explicit**
 //! parameters threaded through every one of these functions, not values
@@ -83,8 +115,9 @@
 //!
 //! Doesn't depend on `prelude.rs` (no `cond`/`when`/...) — only the
 //! checker's native special forms (`if`/`let`/`match`/`labels`) and
-//! builtins (`eq`/`append`/`car`/`cdr`/`HashTable`'s methods), so loading
-//! order relative to the prelude doesn't matter.
+//! builtins (`eq`/`append`/`car`/`cdr`/`HashTable`'s methods, `Option`'s
+//! `some`/`none`/pattern-matching), so loading order relative to the
+//! prelude doesn't matter.
 
 use crate::{Checker, Heap, Interp, Reader};
 
@@ -94,11 +127,34 @@ pub const SOURCE: &str = r#"
     ((Str v) v)
     (_ (panic "expected a Str Sexpr node"))))
 
+;; Extracts a host `bool` out of a `(Bool b)` Sexpr node — the `is-fn` tag
+;; counterpart of `sexpr-str`, used everywhere a captured/parameter-name
+;; pair or call-argument pair's tag needs reading (automatic `ClosureBox`
+;; retain/release insertion).
+(defun sexpr-bool ((s Sexpr)) bool
+  (match s
+    ((Bool b) b)
+    (_ (panic "expected a Bool Sexpr node"))))
+
+;; Extracts a host `string` out of a `(Sym v)` Sexpr node — the symbol
+;; counterpart of `sexpr-str` (a *param/captured-name* pair's name half is a
+;; `Sym`, via `ast_bridge::tagged_sym_list`/`intern_symbol`, unlike a `var`
+;; tag's or a `labels` def's name, both plain `Str`s).
+(defun sexpr-sym-name ((s Sexpr)) string
+  (match s
+    ((Sym v) v)
+    (_ (panic "expected a Sym Sexpr node"))))
+
+;; `names` is now a list of `(name . is-fn)` pairs (`ast_bridge::tagged_sym_list`),
+;; not bare symbols — `is-fn` itself isn't needed here (binding a value
+;; doesn't yet decide anything about its ownership; `retain-bindings`, called
+;; right after, is what reads it).
 (defun bind-params ((env HashTable<string,llvm-value>) (builder llvm-builder) (f llvm-function) (names Sexpr) (idx i32)) ()
   (match names
-    ((Cons (Sym name) rest)
-     (set env name (load-arg builder f idx))
-     (bind-params env builder f rest (+ idx 1)))
+    ((Cons name-pair rest)
+     (let ((nm (sexpr-sym-name (car name-pair))))
+       (set env nm (load-arg builder f idx))
+       (bind-params env builder f rest (+ idx 1))))
     (_ ())))
 
 ;; The captures counterpart of `bind-params` (labels/closures Stage 2):
@@ -109,10 +165,155 @@ pub const SOURCE: &str = r#"
 ;; this leaves untouched.
 (defun bind-captures ((env HashTable<string,llvm-value>) (builder llvm-builder) (f llvm-function) (names Sexpr) (idx i32)) ()
   (match names
-    ((Cons (Sym name) rest)
-     (set env name (load-env builder f idx))
-     (bind-captures env builder f rest (+ idx 1)))
+    ((Cons name-pair rest)
+     (let ((nm (sexpr-sym-name (car name-pair))))
+       (set env nm (load-env builder f idx))
+       (bind-captures env builder f rest (+ idx 1))))
     (_ ())))
+
+;; 2^n by repeated doubling — `compute-fn-mask`'s one helper, not a generic
+;; utility; `n` (a captured-slot index) is always small in practice so the
+;; O(n) recursion is in no way a bottleneck.
+(defun pow2 ((n i32)) i64
+  (if (eq n 0) 1 (* (pow2 (- n 1)) 2)))
+
+;; Computes `build-make-closure`'s `fn_mask` argument: a bitmask, one bit per
+;; captured slot, set wherever that slot's `is-fn` tag is true — entirely a
+;; *host*-level computation (no LLVM IR involved, unlike everything `compile-*`
+;; builds): the mask is fully determined by `names`' own tags, known already
+;; at the point this runs, so there's nothing to generate code for. See
+;; `interp::get_or_define_closure_release_fn`'s doc comment for what this
+;; mask is used for (the cascading release that walks it back out at
+;; runtime).
+(defun compute-fn-mask ((names Sexpr) (idx i32)) i64
+  (match names
+    ((Cons name-pair rest)
+     (let ((is-fn (sexpr-bool (cdr name-pair))))
+       (if is-fn
+           (+ (pow2 idx) (compute-fn-mask rest (+ idx 1)))
+           (compute-fn-mask rest (+ idx 1)))))
+    (_ 0)))
+
+;; Whether `nm` appears as the name half of any `(name . is-fn)` pair in
+;; `names` — `bare-returned-own-name`'s one helper.
+(defun sexpr-name-list-contains? ((names Sexpr) (nm string)) bool
+  (match names
+    ((Cons name-pair rest)
+     (if (eq (sexpr-sym-name (car name-pair)) nm)
+         true
+         (sexpr-name-list-contains? rest nm)))
+    (_ false)))
+
+;; If `body` is literally `(var name is-fn)` and `name` is one of *this*
+;; function activation's own bound names (`params`/`captured`, its own
+;; `bind-params`/`bind-captures` lists) — the one case where the value about
+;; to be returned is also one of the names the matching `release-bindings`
+;; call is about to bulk-release — returns `Some name` so that call can
+;; exclude it (R2 of the design notes this followed: excluding it from the
+;; release is *all* that's needed, since this activation's own `retain-bindings`
+;; call already gave it the extra +1 a returned value needs to leave with;
+;; no separate "protect" retain). Any other body shape (`apply`/`call`/
+;; `labels`/`lambda`/`assoc`/...) computes an inherently fresh result with
+;; no alias among this activation's own bound names, so `None` — the bulk
+;; release was never going to touch it anyway.
+(defun bare-returned-own-name ((body Sexpr) (params Sexpr) (captured Sexpr)) Option<string>
+  (match (car body)
+    ((Sym s)
+     (if (eq s "var")
+         (let ((nm (sexpr-str (car (cdr body)))))
+           (if (sexpr-name-list-contains? params nm)
+               (Option::some nm)
+               (if (sexpr-name-list-contains? captured nm)
+                   (Option::some nm)
+                   (Option::none))))
+         (Option::none)))
+    (_ (Option::none))))
+
+;; Whether `nm` currently resolves through `env` (an ordinary bound
+;; parameter/capture, *borrowed* from that binding's own, longer-lived
+;; ownership) rather than `fn-env`'s fallback (a `labels` sibling boxed
+;; *fresh*, on demand, by `resolve-value` — see that function's doc
+;; comment). The borrowed/fresh distinction `compile-env-args`/
+;; `compile-escaping-env-args`/`compile-call-args` all key their retain/
+;; release decisions on.
+(defun name-is-borrowed? ((env HashTable<string,llvm-value>) (nm string)) bool
+  (match (get env nm)
+    ((Some _) true)
+    (None false)))
+
+;; The general-expression-form counterpart of `name-is-borrowed?`: a `var`
+;; node is borrowed exactly when its name is (`compile-call-args`'s own
+;; argument forms can be arbitrary expressions, not just bare names — every
+;; other tag's result is fresh by construction, see this module's doc
+;; comment).
+(defun form-is-borrowed? ((env HashTable<string,llvm-value>) (form Sexpr)) bool
+  (match (car form)
+    ((Sym s)
+     (if (eq s "var")
+         (name-is-borrowed? env (sexpr-str (car (cdr form))))
+         false))
+    (_ false)))
+
+(defun protects? ((protected Option<string>) (nm string)) bool
+  (match protected
+    ((Some pname) (eq pname nm))
+    (None false)))
+
+;; R1 (function entry, design notes): retains every `Fn`-typed name in
+;; `names` (a tagged params or captured list, as just bound by `bind-params`/
+;; `bind-captures`) once, so this activation owns an independent reference
+;; for its own lifetime regardless of what the caller does with its own
+;; copy afterward. `release-bindings`, at this same activation's exit,
+;; undoes it.
+(defun retain-bindings ((builder llvm-builder) (env HashTable<string,llvm-value>) (names Sexpr)) ()
+  (match names
+    ((Cons name-pair rest)
+     (let ((nm (sexpr-sym-name (car name-pair))))
+       (let ((is-fn (sexpr-bool (cdr name-pair))))
+         (if is-fn
+             (match (get env nm)
+               ((Some v) (let ((ignored (build-closure-retain builder v))) ()))
+               (None ()))
+             ())
+         (retain-bindings builder env rest))))
+    (_ ())))
+
+;; R2 (function exit, design notes): unconditionally releases every
+;; `Fn`-typed name in `names`, except `protected` (see `bare-returned-own-name`)
+;; — the `retain-bindings` call this activation made on entry, undone now
+;; that its lifetime is ending, with the one exception being whichever name
+;; (if any) is leaving as the bare return value instead of being dropped.
+(defun release-bindings ((builder llvm-builder) (m llvm-module) (env HashTable<string,llvm-value>) (names Sexpr) (protected Option<string>)) ()
+  (match names
+    ((Cons name-pair rest)
+     (let ((nm (sexpr-sym-name (car name-pair))))
+       (let ((is-fn (sexpr-bool (cdr name-pair))))
+         (if is-fn
+             (if (protects? protected nm)
+                 ()
+                 (match (get env nm)
+                   ((Some v) (build-closure-release builder m v))
+                   (None ())))
+             ())
+         (release-bindings builder m env rest protected))))
+    (_ ())))
+
+;; Releases every slot of a `pending-ptr` array `compile-call-args`/
+;; `compile-env-args` built (`0..argc`) — called once, right after the call/
+;; env-array those slots belong to is done using them, never before (the
+;; value has to stay valid for that call's full duration). Every slot gets
+;; an unconditional `build-closure-release` call, including the ones marked
+;; `0` for "nothing to release here" — `build-closure-release`'s underlying
+;; `__typelisp_closure_release` tolerates a null closure as a no-op (see
+;; that function's doc comment), which is what lets this walk be
+;; unconditional: `compiler.rs` has no general `if` to skip a slot with
+;; otherwise.
+(defun release-pending-args ((builder llvm-builder) (m llvm-module) (pending-ptr llvm-value) (argc i32) (idx i32)) ()
+  (if (eq idx argc)
+      ()
+      (let ((v (load-raw builder pending-ptr idx)))
+        (build-closure-release builder m v)
+        (release-pending-args builder m pending-ptr argc (+ idx 1)))))
 
 ;; `HashTable::new` is a static call whose generic `V`/`K` can only be
 ;; inferred from an *expected* type (e.g. a `defun`'s declared return type),
@@ -141,6 +342,7 @@ pub const SOURCE: &str = r#"
           (position-at-end builder b)
           (let ((env (new-env)))
             (bind-params env builder f param-names 0)
+            (retain-bindings builder env param-names)
             (let ((fn-env (new-fn-env)))
               (labels ((compile-value ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
                          (match (car e)
@@ -167,48 +369,66 @@ pub const SOURCE: &str = r#"
                          (match (car (cdr e))
                            ((Int n) (const-i64 builder n))
                            (_ (panic "compile-int: malformed int node"))))
-                       ;; `(var name)` — a plain variable reference,
-                       ;; ordinary or (labels/closures follow-up to Stage 4)
-                       ;; a `labels` sibling/self referenced *as a value*
-                       ;; rather than called (e.g. a `labels` block's own
-                       ;; trailing body bare-returning one of its siblings —
-                       ;; `ast_bridge::ast_to_sexpr_scoped`'s `Expr::Var` arm
-                       ;; never distinguishes the two: it always emits
-                       ;; `(var name)` regardless of whether `name` happens
-                       ;; to be a sibling, deliberately deferring that
-                       ;; judgment to here). See `resolve-value`'s doc
-                       ;; comment for how the second case resolves.
+                       ;; `(var name is-fn)` — a plain variable reference,
+                       ;; ordinary or a `labels` sibling/self referenced *as
+                       ;; a value* rather than called (e.g. a `labels`
+                       ;; block's own trailing body bare-returning one of
+                       ;; its siblings — `ast_bridge::ast_to_sexpr_scoped`'s
+                       ;; `Expr::Var` arm never distinguishes the two: it
+                       ;; always emits `(var name is-fn)` regardless of
+                       ;; whether `name` happens to be a sibling,
+                       ;; deliberately deferring that judgment to here).
+                       ;; `is-fn` isn't read here — `compile-var` only needs
+                       ;; the *value*; it's `compile-call-args`/
+                       ;; `compile-env-args`/`compile-escaping-env-args`,
+                       ;; reading this same tag straight off the Sexpr
+                       ;; *before* calling this, that decide what (if
+                       ;; anything) needs retaining/releasing around it. See
+                       ;; `resolve-value`'s doc comment for how the
+                       ;; sibling-as-value case resolves.
                        (compile-var ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
                          (resolve-value builder env fn-env captured (sexpr-str (car (cdr e)))))
                        ;; Resolves `name` to a value two ways, in order:
                        ;; (1) an ordinary binding in `env` (a parameter, or a
                        ;; captured name already loaded by `bind-captures`) —
-                       ;; the only thing this function did before this
-                       ;; follow-up to Stage 4; (2) a currently in-scope
+                       ;; *borrowed* from that binding's own ownership,
+                       ;; unchanged by this lookup; (2) a currently in-scope
                        ;; `labels` sibling/self, found in `fn-env` instead —
-                       ;; boxed into a fresh `ClosureBox` on the spot
+                       ;; boxed into a *fresh* `ClosureBox` on the spot
                        ;; (`build-make-closure`, exactly the way
                        ;; `compile-lambda` already boxes a `lambda` literal),
                        ;; using *this* scope's own shared `captured` list to
-                       ;; build the box's env array (`compile-env-args`,
-                       ;; mutually recursive with this function — that's why
-                       ;; both live in this `labels` ring now rather than as
-                       ;; separate top-level `defun`s, which can never be
-                       ;; mutually recursive with each other — see
-                       ;; `compile-call`'s doc comment for that constraint).
-                       ;; Anything in neither table is a genuine unbound
-                       ;; name, the only case that still panics.
+                       ;; build the box's env array. That array is built via
+                       ;; `compile-escaping-env-args`, not the lighter
+                       ;; `compile-env-args` a direct call uses: this fresh
+                       ;; box may itself escape (e.g. it's what a `labels`
+                       ;; block's trailing body bare-returns), so any
+                       ;; *borrowed* value folded into its own captured
+                       ;; array needs its own independent retain right here
+                       ;; — waiting for some later invocation's own entry
+                       ;; retain (R1) would be too late, if it ever happens
+                       ;; at all. `compile-escaping-env-args` is mutually
+                       ;; recursive with this function (case (2) needs it;
+                       ;; it needs `resolve-value` to read each captured
+                       ;; name's current value) — that's why both live in
+                       ;; this `labels` ring now rather than as separate
+                       ;; top-level `defun`s, which can never be mutually
+                       ;; recursive with each other (see `compile-call`'s
+                       ;; doc comment for that constraint). Anything in
+                       ;; neither table is a genuine unbound name, the only
+                       ;; case that still panics.
                        ;;
                        ;; This can never recurse unboundedly: `captured`
                        ;; never itself contains a sibling/self name
                        ;; (`compile::freevars`'s `note` always excludes
                        ;; `siblings`, regardless of nesting — see that
-                       ;; module's doc comment), so the `compile-env-args`
-                       ;; call inside case (2) only ever resolves *ordinary*
-                       ;; values through `env`, never re-enters case (2)
-                       ;; itself. Nor can two boxes built this way ever
-                       ;; reference *each other* (a true cycle): every call
-                       ;; here allocates a fresh `ClosureBox` via
+                       ;; module's doc comment), so the
+                       ;; `compile-escaping-env-args` call inside case (2)
+                       ;; only ever resolves *ordinary* values through
+                       ;; `env`, never re-enters case (2) itself by way of a
+                       ;; sibling name. Nor can two boxes built this way
+                       ;; ever reference *each other* (a true cycle): every
+                       ;; call here allocates a fresh `ClosureBox` via
                        ;; `build-array_malloc`, and nothing in this compiler
                        ;; ever mutates an already-built box's env slots
                        ;; afterward to patch in a forward reference (the
@@ -219,16 +439,16 @@ pub const SOURCE: &str = r#"
                        ;; capture the *other's* boxed value as data (not
                        ;; just call it) is therefore two ordinary,
                        ;; independently-releasable allocations, never a
-                       ;; reference cycle.
+                       ;; reference cycle — which is also why
+                       ;; `get_or_define_closure_release_fn`'s recursive
+                       ;; release cascade is guaranteed to terminate.
                        ;;
                        ;; Known boundary, unchanged from before this
                        ;; follow-up: a *nested* `labels` block can't reach
                        ;; an *enclosing* one's siblings this way either (its
                        ;; own `inner-fn-env` is always built fresh — see
                        ;; this module's doc comment's "known limitation"
-                       ;; paragraph) — that failure mode is the existing
-                       ;; one, not something this change introduces or
-                       ;; fixes.
+                       ;; paragraph).
                        (resolve-value ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (name string)) llvm-value
                          (match (get env name)
                            ((Some v) v)
@@ -236,35 +456,75 @@ pub const SOURCE: &str = r#"
                                    ((Some target)
                                     (let ((env-len (sexpr-list-length captured)))
                                       (let ((env-ptr (alloca-args builder env-len)))
-                                        (compile-env-args builder env fn-env captured env-ptr captured 0)
-                                        (build-make-closure builder target env-ptr env-len))))
+                                        (compile-escaping-env-args builder env fn-env captured env-ptr captured 0)
+                                        (build-make-closure builder target env-ptr env-len (compute-fn-mask captured 0)))))
                                    (None (panic (append "compile-var: unbound variable " name)))))))
-                       ;; Fills a fresh `alloca-args` array with each name's
-                       ;; *current* value via `resolve-value` — the env-array
-                       ;; analogue of `compile-call-args`, just reading
-                       ;; already-computed values by name instead of
-                       ;; compiling fresh argument expressions. `names`/`idx`
-                       ;; are what this call is actually walking to fill
-                       ;; `env-ptr`; `captured` is held constant across every
-                       ;; recursive step — the *enclosing* scope's own shared
-                       ;; captured-name list, passed through unchanged purely
-                       ;; so `resolve-value`'s fallback (case (2) above) has
-                       ;; it on hand if any name along the way turns out to
-                       ;; be a sibling rather than an ordinary value — the
-                       ;; same separation `compile-call-args` already makes
-                       ;; between its own `captured` (constant) and
-                       ;; `forms`/`idx` (walked). At every existing call site
-                       ;; before this follow-up, `names` and `captured`
-                       ;; happened to be the *same* list (the call was always
-                       ;; "build this block's own shared env array"); `compile-lambda`'s
-                       ;; call is the one place they legitimately differ
-                       ;; (`names` is the `lambda`'s own captured list,
-                       ;; `captured` is the *outer* scope constructing it).
-                       (compile-env-args ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (env-ptr llvm-value) (names Sexpr) (idx i32)) ()
+                       ;; Fills `env-ptr` for a *direct* (non-escaping)
+                       ;; call's env array — `compile-apply`'s sibling-to-
+                       ;; sibling calls. A *borrowed* value needs no extra
+                       ;; action here at all: the callee's own R1 entry-
+                       ;; retain (on this exact array's contents, once
+                       ;; `bind-captures` loads them back out on the other
+                       ;; side) already gives it an independent reference
+                       ;; for the callee's lifetime, leaving this scope's
+                       ;; own copy untouched. A *fresh* value (a sibling
+                       ;; boxed on demand by `resolve-value`, with no other
+                       ;; owner) does need releasing once this call is done
+                       ;; with it — `pending-ptr` (same length as `env-ptr`,
+                       ;; caller-allocated) records which slots need that
+                       ;; post-call release, the same way `compile-call-args`
+                       ;; marks its own argument array; see
+                       ;; `release-pending-args`. `names`/`idx` are what
+                       ;; this call is actually walking to fill `env-ptr`;
+                       ;; `captured` is held constant across every recursive
+                       ;; step — the *enclosing* scope's own shared
+                       ;; captured-name list, passed through unchanged
+                       ;; purely so `resolve-value`'s fallback has it on
+                       ;; hand if any name along the way turns out to be a
+                       ;; sibling rather than an ordinary value. At every
+                       ;; existing call site, `names` and `captured` happen
+                       ;; to be the *same* list (building a block's own
+                       ;; shared env array).
+                       (compile-env-args ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (env-ptr llvm-value) (pending-ptr llvm-value) (names Sexpr) (idx i32)) ()
                          (match names
-                           ((Cons (Sym name) rest)
-                            (store-arg builder env-ptr idx (resolve-value builder env fn-env captured name))
-                            (compile-env-args builder env fn-env captured env-ptr rest (+ idx 1)))
+                           ((Cons name-pair rest)
+                            (let ((nm (sexpr-sym-name (car name-pair))))
+                              (let ((is-fn (sexpr-bool (cdr name-pair))))
+                                (let ((v (resolve-value builder env fn-env captured nm)))
+                                  (store-arg builder env-ptr idx v)
+                                  (if is-fn
+                                      (if (name-is-borrowed? env nm)
+                                          (store-arg builder pending-ptr idx (const-i64 builder 0))
+                                          (store-arg builder pending-ptr idx v))
+                                      (store-arg builder pending-ptr idx (const-i64 builder 0)))
+                                  (compile-env-args builder env fn-env captured env-ptr pending-ptr rest (+ idx 1))))))
+                           (_ ())))
+                       ;; Fills `env-ptr` for an *escaping* `ClosureBox`'s
+                       ;; own captured-value array — `compile-lambda`'s and
+                       ;; `resolve-value`'s fallback's use. A *borrowed*
+                       ;; value (one of the *constructing* scope's own bound
+                       ;; names) gets an explicit retain right here: this
+                       ;; box can outlive the current activation, so it must
+                       ;; hold an independent reference from the moment it's
+                       ;; built — relying on some later invocation's own R1
+                       ;; entry-retain would be too late (the box might
+                       ;; never be invoked at all, or be invoked only after
+                       ;; the original binding's own R2 exit-release has
+                       ;; already dropped it). A *fresh* value needs nothing
+                       ;; extra: it's already a singly-owned reference with
+                       ;; no other claimant, so it just moves into the box.
+                       (compile-escaping-env-args ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (env-ptr llvm-value) (names Sexpr) (idx i32)) ()
+                         (match names
+                           ((Cons name-pair rest)
+                            (let ((nm (sexpr-sym-name (car name-pair))))
+                              (let ((is-fn (sexpr-bool (cdr name-pair))))
+                                (let ((v (resolve-value builder env fn-env captured nm)))
+                                  (if is-fn
+                                      (if (name-is-borrowed? env nm)
+                                          (store-arg builder env-ptr idx (build-closure-retain builder v))
+                                          (store-arg builder env-ptr idx v))
+                                      (store-arg builder env-ptr idx v))
+                                  (compile-escaping-env-args builder env fn-env captured env-ptr rest (+ idx 1))))))
                            (_ ())))
                        (compile-assoc ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
                          (let ((method (sexpr-str (car (cdr (cdr e))))))
@@ -279,60 +539,89 @@ pub const SOURCE: &str = r#"
                                              (build-mul builder a b2)
                                              (panic (append "compile-assoc: unsupported method " method))))))))))
                        ;; Fills a previously-`alloca-args`'d array, one
-                       ;; compiled argument per slot — the loop shape
-                       ;; `bind-params` already uses, just writing instead
-                       ;; of reading, and walking a Sexpr list of *unevaluated
-                       ;; forms* (each one fed back through `compile-value`)
-                       ;; rather than a Sexpr list of parameter names.
-                       (compile-call-args ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (args-ptr llvm-value) (forms Sexpr) (idx i32)) ()
+                       ;; compiled argument per slot, exactly as before —
+                       ;; plus, since each `forms` element is now an
+                       ;; `(is-fn . arg-form)` pair (`ast_bridge::tagged_ast_list_to_sexpr`),
+                       ;; marking `pending-ptr` (same length, caller-
+                       ;; allocated) wherever that argument is `Fn`-typed
+                       ;; *and* fresh (see `form-is-borrowed?`) — the same
+                       ;; post-call release bookkeeping `compile-env-args`
+                       ;; does for env arrays, here for ordinary call
+                       ;; arguments instead.
+                       (compile-call-args ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (args-ptr llvm-value) (pending-ptr llvm-value) (forms Sexpr) (idx i32)) ()
                          (match forms
-                           ((Cons form rest)
-                            (let ((v (compile-value builder env fn-env captured form)))
-                              (store-arg builder args-ptr idx v)
-                              (compile-call-args builder env fn-env captured args-ptr rest (+ idx 1))))
+                           ((Cons arg-pair rest)
+                            (let ((is-fn (sexpr-bool (car arg-pair))))
+                              (let ((form (cdr arg-pair)))
+                                (let ((v (compile-value builder env fn-env captured form)))
+                                  (store-arg builder args-ptr idx v)
+                                  (if is-fn
+                                      (if (form-is-borrowed? env form)
+                                          (store-arg builder pending-ptr idx (const-i64 builder 0))
+                                          (store-arg builder pending-ptr idx v))
+                                      (store-arg builder pending-ptr idx (const-i64 builder 0)))
+                                  (compile-call-args builder env fn-env captured args-ptr pending-ptr rest (+ idx 1))))))
                            (_ ())))
-                       ;; `(apply name arg...)` — a direct call to a name
-                       ;; `ast_bridge::translate_apply` already proved (at
-                       ;; bridge-translation time) resolves to a currently
-                       ;; in-scope `labels` sibling or self; this only has
-                       ;; to look it up in `fn-env`, never re-derive that
-                       ;; judgment. labels/closures Stage 2: every direct
-                       ;; callee reachable from here shares this same
-                       ;; `captured` list (see `compile-labels`'s doc
-                       ;; comment), so a non-empty `captured` means *every*
-                       ;; direct call here needs an env array built and
-                       ;; passed via `build-call-with-env`, regardless of
-                       ;; which sibling `nm` actually names.
+                       ;; `(apply name (is-fn . arg-form)...)` — a direct
+                       ;; call to a name `ast_bridge::translate_apply`
+                       ;; already proved (at bridge-translation time)
+                       ;; resolves to a currently in-scope `labels` sibling
+                       ;; or self; this only has to look it up in `fn-env`,
+                       ;; never re-derive that judgment. labels/closures
+                       ;; Stage 2: every direct callee reachable from here
+                       ;; shares this same `captured` list (see
+                       ;; `compile-labels`'s doc comment), so a non-empty
+                       ;; `captured` means *every* direct call here needs an
+                       ;; env array built and passed via
+                       ;; `build-call-with-env`, regardless of which sibling
+                       ;; `nm` actually names. Every pending-release array
+                       ;; built along the way (`pending-ptr` for the call
+                       ;; arguments, `env-pending-ptr` for the env array, if
+                       ;; any) is released right after the call returns —
+                       ;; never before, since the value has to stay valid
+                       ;; for the call's full duration.
                        (compile-apply ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
                          (let ((nm (sexpr-str (car (cdr e)))))
                            (let ((arg-forms (cdr (cdr e))))
                              (let ((argc (sexpr-list-length arg-forms)))
                                (let ((args-ptr (alloca-args builder argc)))
-                                 (compile-call-args builder env fn-env captured args-ptr arg-forms 0)
-                                 (match (get fn-env nm)
-                                   ((Some target)
-                                    (let ((env-len (sexpr-list-length captured)))
-                                      (if (eq env-len 0)
-                                          (build-call builder target args-ptr argc)
-                                          (let ((env-ptr (alloca-args builder env-len)))
-                                            (compile-env-args builder env fn-env captured env-ptr captured 0)
-                                            (build-call-with-env builder target args-ptr argc env-ptr env-len)))))
-                                   (None (panic (append "compile-apply: no direct-callable function named " nm)))))))))
-                       ;; `(call name arg...)` — `Expr::Call`, labels/closures
-                       ;; Stage 3: a call to a *top-level* `defun` (itself
-                       ;; included, for self-recursion), never a `labels`
-                       ;; sibling (those go through `compile-apply`/`fn-env`
-                       ;; above instead). Looks `nm` up directly in `m` (the
-                       ;; destination module `compile-function` itself
-                       ;; received — closed over here exactly the way
-                       ;; `declare-labels-siblings` below already closes over
-                       ;; it) via `get-function`, not `fn-env`, since a
-                       ;; top-level `defun` is never registered there. A
-                       ;; top-level `defun` can never capture an outer scope
-                       ;; (`Checker::check_defun` always starts from an empty
-                       ;; `Env` — see `ast_bridge::translate_call`'s doc
-                       ;; comment), so unlike `compile-apply` this never needs
-                       ;; an env array: always a plain `build-call`.
+                                 (let ((pending-ptr (alloca-args builder argc)))
+                                   (compile-call-args builder env fn-env captured args-ptr pending-ptr arg-forms 0)
+                                   (match (get fn-env nm)
+                                     ((Some target)
+                                      (let ((env-len (sexpr-list-length captured)))
+                                        (if (eq env-len 0)
+                                            (let ((result (build-call builder target args-ptr argc)))
+                                              (release-pending-args builder m pending-ptr argc 0)
+                                              result)
+                                            (let ((env-ptr (alloca-args builder env-len)))
+                                              (let ((env-pending-ptr (alloca-args builder env-len)))
+                                                (compile-env-args builder env fn-env captured env-ptr env-pending-ptr captured 0)
+                                                (let ((result (build-call-with-env builder target args-ptr argc env-ptr env-len)))
+                                                  (release-pending-args builder m pending-ptr argc 0)
+                                                  (release-pending-args builder m env-pending-ptr env-len 0)
+                                                  result))))))
+                                     (None (panic (append "compile-apply: no direct-callable function named " nm))))))))))
+                       ;; `(call name (is-fn . arg-form)...)` — `Expr::Call`,
+                       ;; labels/closures Stage 3: a call to a *top-level*
+                       ;; `defun` (itself included, for self-recursion),
+                       ;; never a `labels` sibling (those go through
+                       ;; `compile-apply`/`fn-env` above instead). Looks
+                       ;; `nm` up directly in `m` (the destination module
+                       ;; `compile-function` itself received — closed over
+                       ;; here exactly the way `declare-labels-siblings`
+                       ;; below already closes over it) via `get-function`,
+                       ;; not `fn-env`, since a top-level `defun` is never
+                       ;; registered there. A top-level `defun` can never
+                       ;; capture an outer scope (`Checker::check_defun`
+                       ;; always starts from an empty `Env` — see
+                       ;; `ast_bridge::translate_call`'s doc comment), so
+                       ;; unlike `compile-apply` this never needs an env
+                       ;; array: always a plain `build-call`. Its arguments
+                       ;; can still be `Fn`-typed though (a closure passed
+                       ;; to another compiled top-level function), hence the
+                       ;; same `pending-ptr` release as `compile-apply`'s
+                       ;; own call arguments.
                        ;;
                        ;; For an *other* already-`compile`d function, `m`
                        ;; either already has `nm`'s real body in it (AOT's one
@@ -352,32 +641,53 @@ pub const SOURCE: &str = r#"
                            (let ((arg-forms (cdr (cdr e))))
                              (let ((argc (sexpr-list-length arg-forms)))
                                (let ((args-ptr (alloca-args builder argc)))
-                                 (compile-call-args builder env fn-env captured args-ptr arg-forms 0)
-                                 (build-call builder (get-function m nm) args-ptr argc))))))
-                       ;; `(apply-indirect callee-form arg...)` — `Expr::Apply`,
-                       ;; labels/closures Stage 4, the general indirect-
-                       ;; dispatch case (`ast_bridge::translate_indirect_apply`'s
-                       ;; doc comment explains why this is a *separate* tag
-                       ;; from `(apply name arg...)` rather than the plan's
+                                 (let ((pending-ptr (alloca-args builder argc)))
+                                   (compile-call-args builder env fn-env captured args-ptr pending-ptr arg-forms 0)
+                                   (let ((result (build-call builder (get-function m nm) args-ptr argc)))
+                                     (release-pending-args builder m pending-ptr argc 0)
+                                     result)))))))
+                       ;; `(apply-indirect callee-form (is-fn . arg-form)...)`
+                       ;; — `Expr::Apply`, labels/closures Stage 4, the
+                       ;; general indirect-dispatch case
+                       ;; (`ast_bridge::translate_indirect_apply`'s doc
+                       ;; comment explains why this is a *separate* tag from
+                       ;; `(apply name arg...)` rather than the plan's
                        ;; originally sketched `(apply (direct|indirect ...)
                        ;; ...)` unification — keeps Stage 1-3's already-
                        ;; shipped shape untouched). `callee-form` is compiled
-                       ;; like any other value (it might be a `(var name)`,
+                       ;; like any other value (it might be a `(var name is-fn)`,
                        ;; another `(apply-indirect ...)`, a `(lambda ...)`,
                        ;; ... — whatever produced the function value here) to
                        ;; get a `ClosureBox` `i64`, then called through
                        ;; `build-closure-apply` rather than `build-call`:
                        ;; nothing here can know ahead of time which compiled
-                       ;; function it'll actually be.
+                       ;; function it'll actually be. The callee position is
+                       ;; always `Fn`-typed by construction (that's what
+                       ;; makes it callable at all), so unlike call
+                       ;; arguments there's no `is-fn` tag to read for it —
+                       ;; only whether it's *borrowed* (`form-is-borrowed?`)
+                       ;; matters, to decide whether this transient read
+                       ;; needs releasing once the indirect call is done
+                       ;; with it (a *fresh* callee, e.g. a bare-referenced
+                       ;; `labels` sibling boxed on the spot by
+                       ;; `resolve-value`, would otherwise leak one box per
+                       ;; call).
                        (compile-apply-indirect ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
-                         (let ((closure (compile-value builder env fn-env captured (car (cdr e)))))
-                           (let ((arg-forms (cdr (cdr e))))
-                             (let ((argc (sexpr-list-length arg-forms)))
-                               (let ((args-ptr (alloca-args builder argc)))
-                                 (compile-call-args builder env fn-env captured args-ptr arg-forms 0)
-                                 (build-closure-apply builder closure args-ptr argc))))))
-                       ;; `(lambda name (captured...) (params...) body)` —
-                       ;; `Expr::Lambda` (a standalone escaping value) or a
+                         (let ((callee-form (car (cdr e))))
+                           (let ((closure (compile-value builder env fn-env captured callee-form)))
+                             (let ((arg-forms (cdr (cdr e))))
+                               (let ((argc (sexpr-list-length arg-forms)))
+                                 (let ((args-ptr (alloca-args builder argc)))
+                                   (let ((pending-ptr (alloca-args builder argc)))
+                                     (compile-call-args builder env fn-env captured args-ptr pending-ptr arg-forms 0)
+                                     (let ((result (build-closure-apply builder closure args-ptr argc)))
+                                       (release-pending-args builder m pending-ptr argc 0)
+                                       (if (form-is-borrowed? env callee-form)
+                                           ()
+                                           (build-closure-release builder m closure))
+                                       result))))))))
+                       ;; `(lambda name ((captured . is-fn)...) ((param . is-fn)...) body)`
+                       ;; — `Expr::Lambda` (a standalone escaping value) or a
                        ;; synthesized `Expr::FnRef` forwarding wrapper
                        ;; (`ast_bridge::translate_fnref`) — labels/closures
                        ;; Stage 4. Unlike every other tag `compile-value`
@@ -393,13 +703,20 @@ pub const SOURCE: &str = r#"
                        ;; body with a *fresh* env/fn-env (a `lambda` never
                        ;; gets direct-call access to whatever `labels` scope
                        ;; encloses it — see `ast_bridge::translate_lambda`'s
-                       ;; doc comment for the documented gap that follows),
-                       ;; then builds an env array from `lcaptured`'s
-                       ;; *current* values in the *outer* `env`
-                       ;; (`compile-env-args`, exactly as a capturing direct
-                       ;; call already does) and wraps the whole thing into a
-                       ;; `ClosureBox` (`build-make-closure`) — the value
-                       ;; this whole node evaluates to.
+                       ;; doc comment), R1-retaining its own params/captures
+                       ;; on entry and R2-releasing them (minus whichever is
+                       ;; bare-returned) on exit exactly like
+                       ;; `compile-function`'s own top-level body and each
+                       ;; `labels` sibling's body do, then builds an env
+                       ;; array from `lcaptured`'s *current* values in the
+                       ;; *outer* `env` (`compile-escaping-env-args`,
+                       ;; retaining any borrowed one — this box can escape)
+                       ;; and wraps the whole thing into a `ClosureBox`
+                       ;; (`build-make-closure`, with `compute-fn-mask`'s
+                       ;; bitmask so a later release of this box can
+                       ;; recursively release whichever of its own captures
+                       ;; are themselves closures) — the value this whole
+                       ;; node evaluates to.
                        (compile-lambda ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
                          (let ((lname (sexpr-str (car (cdr e)))))
                            (let ((lcaptured (car (cdr (cdr e)))))
@@ -411,9 +728,14 @@ pub const SOURCE: &str = r#"
                                        (position-at-end nested-builder nested-block)
                                        (let ((nested-env (new-env)))
                                          (bind-params nested-env nested-builder nested-fn lparams 0)
+                                         (retain-bindings nested-builder nested-env lparams)
                                          (bind-captures nested-env nested-builder nested-fn lcaptured 0)
+                                         (retain-bindings nested-builder nested-env lcaptured)
                                          (let ((v (compile-value nested-builder nested-env (new-fn-env) lcaptured lbody)))
-                                           (build-ret nested-builder v)))))
+                                           (let ((protected (bare-returned-own-name lbody lparams lcaptured)))
+                                             (release-bindings nested-builder m nested-env lparams protected)
+                                             (release-bindings nested-builder m nested-env lcaptured protected)
+                                             (build-ret nested-builder v))))))
                                    (let ((env-len (sexpr-list-length lcaptured)))
                                      (let ((env-ptr (alloca-args builder env-len)))
                                        ;; `lcaptured` is what's walked (the
@@ -428,8 +750,8 @@ pub const SOURCE: &str = r#"
                                        ;; body, with its own fresh `fn-env`,
                                        ;; was already compiled above — this
                                        ;; call is unrelated to that one).
-                                       (compile-env-args builder env fn-env captured env-ptr lcaptured 0)
-                                       (build-make-closure builder nested-fn env-ptr env-len)))))))))
+                                       (compile-escaping-env-args builder env fn-env captured env-ptr lcaptured 0)
+                                       (build-make-closure builder nested-fn env-ptr env-len (compute-fn-mask lcaptured 0))))))))))
                        ;; Declares every `labels` def's `llvm-function`
                        ;; *before* compiling any of their bodies — the
                        ;; compiled-world counterpart of `Expr::Labels`'s own
@@ -466,10 +788,13 @@ pub const SOURCE: &str = r#"
                        ;; `env`, and — labels/closures Stage 2 — load every
                        ;; one of the block's shared captured names into that
                        ;; same `env` too (`bind-captures`, a no-op when
-                       ;; `captured` is empty), before compiling its single
-                       ;; body expression with `captured` carried forward so
-                       ;; any call it makes to a sibling (or itself) can
-                       ;; build that same env array right back.
+                       ;; `captured` is empty), R1-retaining both (this
+                       ;; sibling's own activation, like any other), before
+                       ;; compiling its single body expression with
+                       ;; `captured` carried forward so any call it makes to
+                       ;; a sibling (or itself) can build that same env
+                       ;; array right back, then R2-releasing both (minus
+                       ;; whichever is bare-returned) before returning.
                        (compile-labels-bodies ((inner-fn-env HashTable<string,llvm-function>) (captured Sexpr) (defs Sexpr)) ()
                          (match defs
                            ((Cons def rest)
@@ -483,19 +808,25 @@ pub const SOURCE: &str = r#"
                                          (position-at-end sib-builder sib-block)
                                          (let ((sib-env (new-env)))
                                            (bind-params sib-env sib-builder sib-fn param-syms 0)
+                                           (retain-bindings sib-builder sib-env param-syms)
                                            (bind-captures sib-env sib-builder sib-fn captured 0)
+                                           (retain-bindings sib-builder sib-env captured)
                                            (let ((v (compile-value sib-builder sib-env inner-fn-env captured def-body)))
-                                             (build-ret sib-builder v)
-                                             (compile-labels-bodies inner-fn-env captured rest))))))
+                                             (let ((protected (bare-returned-own-name def-body param-syms captured)))
+                                               (release-bindings sib-builder m sib-env param-syms protected)
+                                               (release-bindings sib-builder m sib-env captured protected)
+                                               (build-ret sib-builder v)
+                                               (compile-labels-bodies inner-fn-env captured rest)))))))
                                     (None (panic (append "compile-labels-bodies: missing declaration for " nm))))))))
                            (_ ())))
-                       ;; `(labels (captured...) ((name (params) body))...
-                       ;; trailing-body)`: declare every sibling, compile
-                       ;; every body, then compile the trailing body *with
-                       ;; the enclosing function's own `builder`/`env`* (it's
-                       ;; ordinary code in the function currently being
-                       ;; compiled, not a new function of its own) extended
-                       ;; with `inner-fn-env` and this block's own
+                       ;; `(labels ((captured . is-fn)...) ((name
+                       ;; ((param . is-fn)...) body))... trailing-body)`:
+                       ;; declare every sibling, compile every body, then
+                       ;; compile the trailing body *with the enclosing
+                       ;; function's own `builder`/`env`* (it's ordinary
+                       ;; code in the function currently being compiled, not
+                       ;; a new function of its own) extended with
+                       ;; `inner-fn-env` and this block's own
                        ;; `inner-captured` so it can call the siblings
                        ;; (including any that capture) too. The `captured`
                        ;; parameter `compile-labels` itself receives — the
@@ -506,6 +837,13 @@ pub const SOURCE: &str = r#"
                        ;; needs, not whatever scope `labels` itself was
                        ;; compiled in. See this module's doc comment for the
                        ;; nested-`labels` limitation that follows from that.
+                       ;; The trailing body's own retain/release treatment
+                       ;; (if any) is handled by whichever of
+                       ;; `compile-function`/`compile-lambda`/
+                       ;; `compile-labels-bodies` this `labels` form's
+                       ;; result ultimately flows back up into — this
+                       ;; function introduces no function activation of its
+                       ;; own, so no R1/R2 here.
                        (compile-labels ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
                          (let ((inner-captured (car (cdr e))))
                            (let ((defs (car (cdr (cdr e)))))
@@ -515,8 +853,10 @@ pub const SOURCE: &str = r#"
                                  (compile-labels-bodies inner-fn-env inner-captured defs)
                                  (compile-value builder env inner-fn-env inner-captured trailing)))))))
                 (let ((v (compile-value builder env fn-env '() body)))
-                  (build-ret builder v)
-                  m))))))))
+                  (let ((protected (bare-returned-own-name body param-names '())))
+                    (release-bindings builder m env param-names protected)
+                    (build-ret builder v)
+                    m)))))))))
 "#;
 
 /// Loads the compiler body. Like [`crate::load_prelude`], `SOURCE` is fixed

@@ -61,17 +61,24 @@ fn tagged(heap: &mut Heap, tag: &str, items: &[Value]) -> Result<Value, Error> {
     result
 }
 
-/// Builds a `Sexpr` symbol list from plain parameter names — the same
-/// shape `Interp::add_compiled_function` builds for a `defun`'s own
-/// parameter list (consumed by `compiler.rs`'s `bind-params`), just
-/// reusable here for a `labels` def's parameters too.
-fn sym_list(heap: &mut Heap, names: &[String]) -> Result<Value, Error> {
+/// Builds a `Sexpr` list of `(name . is-fn)` pairs from typed
+/// parameter/captured names — every such list needs this (the automatic
+/// `ClosureBox` retain/release insertion work, a follow-up to
+/// labels/closures Stage 4, needs to know per bound name whether it's safe
+/// to call `build-closure-retain`/`build-closure-release` on it; see
+/// `compiler.rs`'s `bind-params`/`bind-captures`).
+fn tagged_sym_list(heap: &mut Heap, names: &[(String, Type)]) -> Result<Value, Error> {
     let mut acc = Value::Empty;
-    for n in names.iter().rev() {
+    for (n, ty) in names.iter().rev() {
         let sym = heap.intern_symbol(n);
+        let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
         heap.push_root(sym);
+        let pair = heap.cons(sym, is_fn);
+        heap.pop_root();
+        let pair = pair?;
+        heap.push_root(pair);
         heap.push_root(acc);
-        let next = heap.cons(sym, acc);
+        let next = heap.cons(pair, acc);
         heap.pop_root();
         heap.pop_root();
         acc = next?;
@@ -108,6 +115,44 @@ fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>)
                 return Err(e);
             }
         }
+    }
+    Ok(values)
+}
+
+/// The call-argument counterpart of [`ast_list_to_sexpr`]: each translated
+/// form is wrapped as `(is-fn . form)` rather than left bare — `apply`/
+/// `apply-indirect`/`call`'s argument lists need this (unlike `Expr::Assoc`'s,
+/// which stays untagged via [`ast_list_to_sexpr`]: arithmetic operands are
+/// always `i64`, never `Fn`-typed, so `compile-assoc` never needs the tag).
+/// `compile-call-args` reads `is-fn` to decide whether a given argument's
+/// value needs the automatic `ClosureBox` retain/release treatment at all.
+fn tagged_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>) -> Result<Vec<Value>, Error> {
+    let mut values = Vec::with_capacity(items.len());
+    for item in items {
+        let form = match ast_to_sexpr_scoped(heap, item, direct) {
+            Ok(v) => v,
+            Err(e) => {
+                for _ in 0..values.len() {
+                    heap.pop_root();
+                }
+                return Err(e);
+            }
+        };
+        let is_fn = Value::Bool(matches!(item.ty, Type::Fn(..)));
+        heap.push_root(form);
+        let pair = heap.cons(is_fn, form);
+        heap.pop_root();
+        let pair = match pair {
+            Ok(p) => p,
+            Err(e) => {
+                for _ in 0..values.len() {
+                    heap.pop_root();
+                }
+                return Err(e);
+            }
+        };
+        heap.push_root(pair);
+        values.push(pair);
     }
     Ok(values)
 }
@@ -152,7 +197,8 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
         // always give an escaping `lambda`'s body a *fresh* `fn-env`.
         Expr::Var(name) => {
             let v = heap.alloc_string(name.clone());
-            tagged(heap, "var", &[v])
+            let is_fn = Value::Bool(matches!(typed.ty, Type::Fn(..)));
+            tagged(heap, "var", &[v, is_fn])
         }
         // `(assoc type-name method instance arg...)` — a fixed 3-field
         // header (both strings, then the receiver flag) followed by the
@@ -244,7 +290,7 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: 
     }
 
     let captured_names = labels_free_vars(defs, direct);
-    let captured_list = sym_list(heap, &captured_names)?;
+    let captured_list = tagged_sym_list(heap, &captured_names)?;
     heap.push_root(captured_list);
 
     let mut def_values = Vec::with_capacity(defs.len());
@@ -315,8 +361,7 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: 
 fn translate_labels_def(heap: &mut Heap, name: &str, params: &[(String, crate::Type)], body: &Typed, siblings: &HashSet<String>) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
-    let param_names: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
-    let param_list = match sym_list(heap, &param_names) {
+    let param_list = match tagged_sym_list(heap, params) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -363,7 +408,7 @@ fn translate_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &Has
 fn translate_direct_apply(heap: &mut Heap, name: &str, args: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
-    let arg_values = match ast_list_to_sexpr(heap, args, direct) {
+    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -428,7 +473,7 @@ fn translate_immediate_lambda_call(
 fn translate_indirect_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
     let callee_v = ast_to_sexpr_scoped(heap, callee, direct)?;
     heap.push_root(callee_v);
-    let arg_values = match ast_list_to_sexpr(heap, args, direct) {
+    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -454,10 +499,10 @@ fn translate_indirect_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], dir
 /// by the caller (the same convention [`tagged`]'s own `items` slice
 /// elements rely on) and remains the caller's to pop afterward; this
 /// function only roots/pops what it itself allocates.
-fn build_lambda_tag(heap: &mut Heap, name: &str, captured: &[String], params: &[String], body: Value) -> Result<Value, Error> {
+fn build_lambda_tag(heap: &mut Heap, name: &str, captured: &[(String, Type)], params: &[(String, Type)], body: Value) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
-    let captured_list = match sym_list(heap, captured) {
+    let captured_list = match tagged_sym_list(heap, captured) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // name_v
@@ -465,7 +510,7 @@ fn build_lambda_tag(heap: &mut Heap, name: &str, captured: &[String], params: &[
         }
     };
     heap.push_root(captured_list);
-    let param_list = match sym_list(heap, params) {
+    let param_list = match tagged_sym_list(heap, params) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // captured_list
@@ -507,10 +552,9 @@ fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed]) 
         return Err(Error::TypeError("compile: lambda has a multi-expression body, not yet supported".into()));
     }
     let captured_names = lambda_free_vars(params, body);
-    let param_names: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
     let body_v = ast_to_sexpr_scoped(heap, &body[0], &HashSet::new())?;
     heap.push_root(body_v);
-    let result = build_lambda_tag(heap, &fresh_lambda_name("lambda"), &captured_names, &param_names, body_v);
+    let result = build_lambda_tag(heap, &fresh_lambda_name("lambda"), &captured_names, params, body_v);
     heap.pop_root(); // body_v
     result
 }
@@ -530,19 +574,19 @@ fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed]) 
 /// own, just a `Path`) — a variadic target's `&rest` parameter isn't
 /// forwarded (out of scope; this only synthesizes `ty`'s fixed parameters).
 fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Error> {
-    let arity = match ty {
-        Type::Fn(params, ..) => params.len(),
+    let params: Vec<(String, Type)> = match ty {
+        Type::Fn(params, ..) => params.iter().enumerate().map(|(i, t)| (format!("arg{}", i), t.clone())).collect(),
         _ => return unsupported(heap, "FnRef"),
     };
-    let param_names: Vec<String> = (0..arity).map(|i| format!("arg{}", i)).collect();
 
     let target_v = heap.alloc_string(path.local().to_string());
     heap.push_root(target_v);
-    let mut var_values = Vec::with_capacity(param_names.len());
-    for n in &param_names {
+    let mut var_values = Vec::with_capacity(params.len());
+    for (n, t) in &params {
+        let is_fn = matches!(t, Type::Fn(..));
         let s = heap.alloc_string(n.clone());
         heap.push_root(s);
-        let v = match tagged(heap, "var", &[s]) {
+        let v = match tagged(heap, "var", &[s, Value::Bool(is_fn)]) {
             Ok(v) => v,
             Err(e) => {
                 heap.pop_root(); // s
@@ -554,8 +598,26 @@ fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Err
             }
         };
         heap.pop_root(); // s
+        // wrap as `(is-fn . form)` — the same tagged shape every other
+        // `apply`/`apply-indirect`/`call` argument list uses (see
+        // `tagged_ast_list_to_sexpr`), built by hand here since these `var`
+        // forms are synthesized from `ty`'s arity rather than translated
+        // from real `Typed` argument nodes.
         heap.push_root(v);
-        var_values.push(v);
+        let pair = heap.cons(Value::Bool(is_fn), v);
+        heap.pop_root(); // v
+        let pair = match pair {
+            Ok(p) => p,
+            Err(e) => {
+                for _ in 0..var_values.len() {
+                    heap.pop_root();
+                }
+                heap.pop_root(); // target_v
+                return Err(e);
+            }
+        };
+        heap.push_root(pair);
+        var_values.push(pair);
     }
     let mut call_items = vec![target_v];
     call_items.extend(var_values.iter().copied());
@@ -574,7 +636,7 @@ fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Err
     }
     heap.pop_root(); // target_v
     heap.push_root(call_body);
-    let result = build_lambda_tag(heap, &fresh_lambda_name("fnref"), &[], &param_names, call_body);
+    let result = build_lambda_tag(heap, &fresh_lambda_name("fnref"), &[], &params, call_body);
     heap.pop_root(); // call_body
     result
 }
@@ -593,7 +655,7 @@ fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Err
 fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
     let name_v = heap.alloc_string(path.local().to_string());
     heap.push_root(name_v);
-    let arg_values = match ast_list_to_sexpr(heap, args, direct) {
+    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -711,6 +773,30 @@ mod tests {
         (tag, fields)
     }
 
+    /// Unwraps a tagged call-argument pair `(is-fn . form)` — see
+    /// `tagged_ast_list_to_sexpr`.
+    fn untag_arg(heap: &Heap, pair: Value) -> (bool, Value) {
+        let is_fn = match heap.car(pair).expect("arg pair has a car") {
+            Value::Bool(b) => b,
+            other => panic!("expected a Bool is-fn tag, got {:?}", other),
+        };
+        let form = heap.cdr(pair).expect("arg pair has a cdr");
+        (is_fn, form)
+    }
+
+    /// Unwraps a tagged name pair `(name . is-fn)` — see `tagged_sym_list`.
+    fn untag_name(heap: &Heap, pair: Value) -> (String, bool) {
+        let name = match heap.car(pair).expect("name pair has a car") {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            other => panic!("expected a Sym, got {:?}", other),
+        };
+        let is_fn = match heap.cdr(pair).expect("name pair has a cdr") {
+            Value::Bool(b) => b,
+            other => panic!("expected a Bool is-fn tag, got {:?}", other),
+        };
+        (name, is_fn)
+    }
+
     #[test]
     fn translates_an_int_literal() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -751,6 +837,7 @@ mod tests {
             Value::Str(id) => assert_eq!(heap.string(id), "a"),
             other => panic!("expected a Str, got {:?}", other),
         }
+        assert_eq!(fields[1], Value::Bool(false), "an I64-typed var is never Fn-typed");
     }
 
     #[test]
@@ -862,10 +949,8 @@ mod tests {
         assert_eq!(expect_str(&heap, heap.car(f_def).unwrap()), "f");
         let f_rest = heap.cdr(f_def).unwrap();
         let f_params = heap.car(f_rest).unwrap();
-        match heap.car(f_params).unwrap() {
-            Value::Symbol(id) => assert_eq!(heap.symbol_name(id), "x"),
-            other => panic!("expected a Sym, got {:?}", other),
-        }
+        let (param0_name, _) = untag_name(&heap, heap.car(f_params).unwrap());
+        assert_eq!(param0_name, "x");
         let f_body_v = heap.car(heap.cdr(f_rest).unwrap()).unwrap();
         let (f_body_tag, f_body_fields) = untag(&heap, f_body_v);
         assert_eq!(f_body_tag, "apply");
@@ -903,10 +988,9 @@ mod tests {
 
         let captured = list_elems(&heap, fields[0]);
         assert_eq!(captured.len(), 1);
-        match captured[0] {
-            Value::Symbol(id) => assert_eq!(heap.symbol_name(id), "offset"),
-            other => panic!("expected a Sym, got {:?}", other),
-        }
+        let (name, is_fn) = untag_name(&heap, captured[0]);
+        assert_eq!(name, "offset");
+        assert!(!is_fn);
     }
 
     /// A call to a function value that *isn't* a currently in-scope `labels`
@@ -924,7 +1008,9 @@ mod tests {
         let (callee_tag, callee_fields) = untag(&heap, fields[0]);
         assert_eq!(callee_tag, "var");
         assert_eq!(expect_str(&heap, callee_fields[0]), "not-a-sibling");
-        let (arg_tag, _) = untag(&heap, fields[1]);
+        let (is_fn, arg_form) = untag_arg(&heap, fields[1]);
+        assert!(!is_fn);
+        let (arg_tag, _) = untag(&heap, arg_form);
         assert_eq!(arg_tag, "int");
     }
 
@@ -940,7 +1026,9 @@ mod tests {
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "call");
         assert_eq!(expect_str(&heap, fields[0]), "square");
-        let (arg_tag, arg_fields) = untag(&heap, fields[1]);
+        let (is_fn, arg_form) = untag_arg(&heap, fields[1]);
+        assert!(!is_fn);
+        let (arg_tag, arg_fields) = untag(&heap, arg_form);
         assert_eq!(arg_tag, "var");
         assert_eq!(expect_str(&heap, arg_fields[0]), "a");
     }
@@ -1023,10 +1111,9 @@ mod tests {
         assert!(fields[1].is_empty(), "expected an empty captured list, got {:?}", fields[1]);
         let params = list_elems(&heap, fields[2]);
         assert_eq!(params.len(), 1);
-        match params[0] {
-            Value::Symbol(id) => assert_eq!(heap.symbol_name(id), "y"),
-            other => panic!("expected a Sym, got {:?}", other),
-        }
+        let (param0_name, is_fn) = untag_name(&heap, params[0]);
+        assert_eq!(param0_name, "y");
+        assert!(!is_fn);
         let (body_tag, body_fields) = untag(&heap, fields[3]);
         assert_eq!(body_tag, "var");
         assert_eq!(expect_str(&heap, body_fields[0]), "y");
@@ -1068,10 +1155,9 @@ mod tests {
         assert_eq!(tag, "lambda");
         let captured = list_elems(&heap, fields[1]);
         assert_eq!(captured.len(), 1);
-        match captured[0] {
-            Value::Symbol(id) => assert_eq!(heap.symbol_name(id), "x"),
-            other => panic!("expected a Sym, got {:?}", other),
-        }
+        let (name, is_fn) = untag_name(&heap, captured[0]);
+        assert_eq!(name, "x");
+        assert!(!is_fn);
     }
 
     /// labels/closures Stage 4: `((lambda (params) body) args...)` becomes a
@@ -1115,12 +1201,11 @@ mod tests {
         assert_eq!(expect_str(&heap, body_fields[0]), "add2");
         assert_eq!(body_fields.len() - 1, 2, "expected one forwarded arg per parameter");
         for (i, param) in params.iter().enumerate() {
-            let (arg_tag, arg_fields) = untag(&heap, body_fields[1 + i]);
+            let (param_name, _) = untag_name(&heap, *param);
+            let (_, arg_form) = untag_arg(&heap, body_fields[1 + i]);
+            let (arg_tag, arg_fields) = untag(&heap, arg_form);
             assert_eq!(arg_tag, "var");
-            match param {
-                Value::Symbol(id) => assert_eq!(expect_str(&heap, arg_fields[0]), heap.symbol_name(*id)),
-                other => panic!("expected a Sym, got {:?}", other),
-            }
+            assert_eq!(expect_str(&heap, arg_fields[0]), param_name);
         }
     }
 }

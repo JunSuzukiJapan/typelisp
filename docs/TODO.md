@@ -811,6 +811,87 @@ TDD: `tests/compile_test.rs`に6件追加（裸参照+indirect呼び出し、捕
 検出、ネストlambdaが兄弟を間接キャプチャ）。全件green、clippy警告0、
 5回連続実行で安定確認済み。
 
+### ClosureBoxの自動retain/release挿入（2026-06-25、commit 96fa72eの続き）
+
+`build-closure-retain`/`build-closure-release`はStage 4からビルトインとして
+存在していたが、`compiler.rs`は一度も呼んでいなかった——全ClosureBoxがリーク
+しっぱなしの状態だった。これを解消し、非循環構造でのrefcountを正しく保つ
+自動retain/release挿入を実装した（ユーザー提案の「参照カウント＋周期的な
+mark-and-sweep」というサイクル収集方針の前提となる、より基礎的な土台）。
+
+**所有権規約（R1-R4）**:
+- **R1（関数入口）**: 関数（トップレベル`defun`/`compile-lambda`生成関数/
+  `labels`兄弟いずれも）はparams・capturedをbind後、Fn型の各名前を
+  `build-closure-retain`で1回retain（`retain-bindings`）。
+- **R2（関数出口）**: Fn型のbind済み名前を無条件に一括release
+  （`release-bindings`）——ただし本体が文字通り`(var name is-fn)`で
+  `name`がこの関数自身の束縛名と一致する場合のみその名前を除外
+  （`bare-returned-own-name`）。除外するだけで十分（R1のretainがそのまま
+  戻り値の+1として機能する）で、別途の保護retainは不要と判明した
+  （当初の設計案では保護retainが必要と考えていたが、callee-retains-on-entry
+  規約のもとでは不要であることが手計算のトレースで確定した）。
+- **R3（"var"の二分類）**: `resolve-value`が`env`でヒット（borrowed）か
+  `fn-env`のfallback（fresh、新規box構築）かを`name-is-borrowed?`/
+  `form-is-borrowed?`で判定。
+- **R4（消費コンテキスト別）**: call-arg/直接呼び出しのenv-slotでは
+  fresh値のみコール後にrelease（`release-pending-args`、`malloc`が
+  nullを返さないことを利用した0センチネル方式、`build-closure-release`の
+  共有関数自体がnull許容になるよう改修）。escapeするClosureBoxのenv-slot
+  （`compile-lambda`/`resolve-value`のfallback両方が使う）ではborrowed値の
+  みstore時にretain。
+
+**型タグをSexprに追加**: captured/param名リストを`(name . is-fn)`ペアの
+リストに、call-arg（apply/apply-indirect/call共通）を`(is-fn . form)`
+ペアのリストに、`Expr::Var`を`(var name is-fn)`の3要素タグに変更
+（`ast_bridge.rs`の`tagged_sym_list`/`tagged_ast_list_to_sexpr`、
+`freevars.rs`の戻り値も`Vec<(String, Type)>`化）。
+
+**escapeするBoxの再帰的解放**: R4でescapeするBoxの捕捉スロットを
+retainして独立所有権を持たせたため、Box自体が最終的にfree される時、
+捕捉スロット中のFn型のものも再帰的にreleaseする必要がある
+（Rustの`Drop`/Swiftの`deinit`カスケードと同型）。新ヘッダースロット
+`CLOSURE_FN_MASK_SLOT`（捕捉スロットごとに1bit、`compiler.rs`の
+`compute-fn-mask`がコンパイル時に純粋なホスト側計算で求める）を追加し、
+`build-closure-release`を**実行時に自己再帰するLLVM関数**
+`__typelisp_closure_release`（モジュールごとに1つだけ、
+`Module::get_function`でメモ化）として再実装した。当初「Rust側コード生成を
+再帰呼び出しする」設計を考えたが、捕捉先Boxの構造（env_len/fn_mask）は
+そのBox自身の中にあり実行時にしか分からないため、コンパイル時のIR静的展開
+では原理的に不可能と判明し、実行時自己再帰のLLVM関数に設計変更した。
+
+**ハマったポイント（実装中に判明）**:
+- 算術演算子（`+`/`-`/`*`）は**最初の引数から**ジェネリックな数値型を推論し、
+  裸の整数リテラルは`i32`にデフォルトする——`(* 2 (pow2 ...))`のように
+  リテラルを先頭に置くと、2番目の引数が`i64`を返してもチェッカーが
+  「`i32`を期待したのに`i64`が来た」と拒否する。`i64`を返す算術には
+  i64型がすでに確定している式（関数呼び出しや型付き変数）を**先頭**に
+  置く必要がある（`(* (pow2 ...) 2)`のように）。
+- captured/param名ペアの名前部分は`Sym`（`sexpr-sym-name`で取り出す）、
+  `(var name is-fn)`タグの名前部分や`labels`defの名前は`Str`
+  （既存の`sexpr-str`のまま）——両方`sexpr-str`で取り出そうとすると
+  `car: not a cons`にはならず黙って違う型を返す、もしくは
+  パターンマッチで`panic`する（実際には全end-to-endテストが
+  `car: not a cons`で落ち、原因はこの取り違えだった）。
+
+**新規ビルトイン**: `load-raw`（`store-arg`の読み取り版、任意の配列
+ポインタ+indexから読む、`load-arg`はfunction引数専用で使えないため）、
+`debug-closure-refcount`（テスト専用、ClosureBoxのrefcountスロットを
+直接読む——本番コードからは呼ばれない）。
+
+**スコープ外**: `if`/`let`/`loop`実装後の規約再検討、mark-and-sweepによる
+サイクル収集本体（既存設計ではサイクル構築自体が不可能なため不要）、
+retain/release対の重複除去（Swift ARC Optimizer的な最適化パス）。
+
+TDD: `tests/compile_test.rs`に新規4件追加（捕捉クロージャを介した
+1000回繰り返し呼び出しでrefcountが1のまま安定することを確認、
+escapeするlambdaをreleaseすると捕捉していたクロージャも再帰的にrelease
+されることを確認、`__typelisp_closure_release`がモジュール内に複数
+escapeする値があってもIR上1回だけ定義されることを確認、bareなsibling
+参照をcall引数として渡した場合にコール後release呼び出しがIRに現れる
+ことを確認）+ 既存の生Sexprテスト9件を新フォーマットに書き換え。
+全件green（compile_test.rs 38件、compile_file_test.rs 14件含む全テスト
+スイート）、clippy警告0、5回連続実行で安定確認済み。
+
 ---
 
 ## 開発コマンド

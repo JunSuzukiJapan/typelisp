@@ -19,6 +19,7 @@ use std::rc::{Rc, Weak};
 
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
+use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::AddressSpace;
@@ -499,19 +500,21 @@ impl Interp {
     /// [`Self::compile_function`] (which needs the body slightly earlier —
     /// to collect `Expr::Call` targets, see that method's doc comment —
     /// before `add_compiled_function` ever runs).
-    fn compiled_fn_body(&self, name: &str) -> Result<(Vec<String>, Typed), EvalError> {
+    fn compiled_fn_body(&self, name: &str) -> Result<(Vec<(String, Type)>, Typed), EvalError> {
         let path = Path::root(name);
         let f = self.fns.get(&path).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))?;
-        if f.sig.is_none() {
-            return Err(EvalError::Panic(format!("compile: \"{}\" has no type signature (is it a defmacro?)", name)));
-        }
+        let sig = f
+            .sig
+            .as_ref()
+            .ok_or_else(|| EvalError::Panic(format!("compile: \"{}\" has no type signature (is it a defmacro?)", name)))?;
         if f.body.len() != 1 {
             return Err(EvalError::Panic(format!(
                 "compile: \"{}\" has a multi-expression body, not yet supported",
                 name
             )));
         }
-        Ok((f.params.clone(), f.body[0].clone()))
+        let params = f.params.iter().cloned().zip(sig.0.iter().cloned()).collect();
+        Ok((params, f.body[0].clone()))
     }
 
     /// Compiles the `defun` named `name` (looked up in `self.fns`) into one
@@ -546,15 +549,23 @@ impl Interp {
     ) -> Result<(), EvalError> {
         let (params, body) = self.compiled_fn_body(name)?;
 
-        // Builds `(a b ...)`, the `Sexpr` symbol list `compiler.rs`'s
-        // `bind-params` walks to know which logical argument-array slot
-        // binds to which name.
+        // Builds `((a . is-fn) (b . is-fn) ...)`, the `Sexpr` list of typed
+        // name pairs `compiler.rs`'s `bind-params` walks to know which
+        // logical argument-array slot binds to which name — and, for the
+        // automatic `ClosureBox` retain/release insertion work, whether that
+        // slot's value is ever safe to call `build-closure-retain`/
+        // `build-closure-release` on at all.
         let mut param_list = Value::Empty;
-        for n in params.iter().rev() {
+        for (n, ty) in params.iter().rev() {
             let sym = heap.intern_symbol(n);
+            let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
             heap.push_root(sym);
+            let pair = heap.cons(sym, is_fn);
+            heap.pop_root();
+            let pair = pair.map_err(|e| EvalError::Panic(e.to_string()))?;
+            heap.push_root(pair);
             heap.push_root(param_list);
-            let next = heap.cons(sym, param_list);
+            let next = heap.cons(pair, param_list);
             heap.pop_root();
             heap.pop_root();
             param_list = next.map_err(|e| EvalError::Panic(e.to_string()))?;
@@ -1245,6 +1256,8 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-closure-apply" => Some(llvm_builder_build_closure_apply(args)),
             "build-closure-retain" => Some(llvm_builder_build_closure_retain(args)),
             "build-closure-release" => Some(llvm_builder_build_closure_release(args)),
+            "debug-closure-refcount" => Some(llvm_builder_debug_closure_refcount(args)),
+            "load-raw" => Some(llvm_builder_load_raw(args)),
             _ => None,
         };
     }
@@ -1529,6 +1542,29 @@ fn llvm_builder_store_arg(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Unit)
 }
 
+/// The generic-pointer read counterpart of [`llvm_builder_store_arg`] — same
+/// GEP pattern as [`llvm_builder_load_arg`], but against an arbitrary
+/// `array_ptr` rather than a function's own args parameter (automatic
+/// retain/release insertion's `release-pending-args` uses this to read back
+/// the parallel "which call/env-array slots need releasing" array
+/// `compile-call-args`/`compile-env-args` built via `store-arg`).
+fn llvm_builder_load_raw(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let array_ptr = expect_llvm_value(&args[1])?.into_pointer_value();
+    let index = match &args[2] {
+        RtValue::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let ctx = crate::compile::llvm_context();
+    let idx_val = ctx.i64_type().const_int(index, false);
+    let b = builder.borrow();
+    let elem_ptr = unsafe {
+        b.build_gep(ctx.i64_type(), array_ptr, &[idx_val], "load_raw_ptr").map_err(|e| EvalError::Internal(format!("load-raw: {}", e)))?
+    };
+    let loaded = b.build_load(ctx.i64_type(), elem_ptr, "load_raw_val").map_err(|e| EvalError::Internal(format!("load-raw: {}", e)))?;
+    Ok(RtValue::LlvmValue(loaded))
+}
+
 /// A direct call to an already-declared `target` (typically `get-function`'s
 /// result), passing `args_ptr`/`argc` straight through to its fixed ABI —
 /// see `registry::llvm_module_def`'s doc comment for why every compiled
@@ -1589,16 +1625,27 @@ fn llvm_builder_build_call_with_env(args: &[RtValue]) -> Result<RtValue, EvalErr
     }
 }
 
-/// A `ClosureBox`'s fixed heap layout (labels/closures Stage 4): 3 header
+/// A `ClosureBox`'s fixed heap layout (labels/closures Stage 4): 4 header
 /// slots, then `env_len` captured `i64` values inline right after — see
 /// `registry::llvm_builder_def`'s doc comment on `build-make-closure` for
 /// why this exists at all (a `lambda` value that *escapes* its defining
 /// function, rather than being called directly while still statically
 /// resolvable — `compile-apply`/`compile-call`'s direct-call scope).
-const CLOSURE_HEADER_SLOTS: u64 = 3;
+const CLOSURE_HEADER_SLOTS: u64 = 4;
 const CLOSURE_FN_PTR_SLOT: u64 = 0;
 const CLOSURE_ENV_LEN_SLOT: u64 = 1;
 const CLOSURE_REFCOUNT_SLOT: u64 = 2;
+/// A bitmask, one bit per captured slot (so up to 64 captures), marking
+/// which of a `ClosureBox`'s captured values are themselves `Fn`-typed —
+/// the automatic retain/release insertion work's piece of per-box metadata,
+/// computed entirely at compile time (`compiler.rs`'s `compute-fn-mask`)
+/// from the static types already known for every captured name. Needed so
+/// [`get_or_define_closure_release_fn`]'s cascading release (a box being
+/// freed must also release any closure-typed values it captured — the
+/// `Drop`/`deinit`-cascade counterpart of `compile-lambda`'s/`resolve-value`'s
+/// retain at capture time) knows, at *runtime*, which slots to recurse into
+/// without corrupting an ordinary `i64` by treating it as a pointer.
+const CLOSURE_FN_MASK_SLOT: u64 = 3;
 
 /// GEPs to slot `slot` of a `ClosureBox` whose base address is `base` — the
 /// same flat-`i64`-array GEP pattern [`llvm_builder_load_arg`]/
@@ -1609,6 +1656,23 @@ fn closure_slot_ptr(b: &Builder<'static>, base: PointerValue<'static>, slot: u64
     let idx_val = ctx.i64_type().const_int(slot, false);
     unsafe {
         b.build_gep(ctx.i64_type(), base, &[idx_val], "closure_slot_ptr")
+            .map_err(|e| EvalError::Internal(format!("closure: {}", e)))
+    }
+}
+
+/// The dynamic-index counterpart of [`closure_slot_ptr`] — `idx` is a
+/// runtime `i64` value rather than a compile-time constant, for
+/// [`get_or_define_closure_release_fn`]'s captured-slot scan (the number of
+/// captures, and which slot index is being visited, are only known once the
+/// loop is actually running).
+fn closure_slot_ptr_dyn(
+    b: &Builder<'static>,
+    base: PointerValue<'static>,
+    idx: inkwell::values::IntValue<'static>,
+) -> Result<PointerValue<'static>, EvalError> {
+    let ctx = crate::compile::llvm_context();
+    unsafe {
+        b.build_gep(ctx.i64_type(), base, &[idx], "closure_slot_ptr_dyn")
             .map_err(|e| EvalError::Internal(format!("closure: {}", e)))
     }
 }
@@ -1655,12 +1719,21 @@ fn closure_box_ptr(b: &Builder<'static>, closure: BasicValueEnum<'static>, who: 
 /// unmapped externals against the host process's own symbol table by
 /// default, and this process is itself linked against libc) — unlike
 /// Stage 3's cross-`compile`-call case, no `add_global_mapping` wiring is
-/// needed here at all.
+/// needed here at all. `fn_mask` (automatic retain/release insertion
+/// follow-up) is stored verbatim into `CLOSURE_FN_MASK_SLOT` — a bitmask,
+/// computed entirely at compile time by `compiler.rs`'s `compute-fn-mask`,
+/// of which captured slots are themselves `Fn`-typed, so
+/// [`get_or_define_closure_release_fn`]'s cascading release knows which
+/// slots to recurse into when this box is finally freed.
 fn llvm_builder_build_make_closure(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let target = expect_llvm_function(&args[1])?;
     let env_ptr = expect_llvm_value(&args[2])?.into_pointer_value();
     let env_len = match &args[3] {
+        RtValue::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let fn_mask = match &args[4] {
         RtValue::Int(n) => *n as u64,
         other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
     };
@@ -1677,6 +1750,7 @@ fn llvm_builder_build_make_closure(args: &[RtValue]) -> Result<RtValue, EvalErro
     store_closure_slot(&b, box_ptr, CLOSURE_FN_PTR_SLOT, fn_ptr_int.into(), "build-make-closure")?;
     store_closure_slot(&b, box_ptr, CLOSURE_ENV_LEN_SLOT, ctx.i64_type().const_int(env_len, false).into(), "build-make-closure")?;
     store_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, ctx.i64_type().const_int(1, false).into(), "build-make-closure")?;
+    store_closure_slot(&b, box_ptr, CLOSURE_FN_MASK_SLOT, ctx.i64_type().const_int(fn_mask, false).into(), "build-make-closure")?;
 
     for i in 0..env_len {
         let idx_val = ctx.i64_type().const_int(i, false);
@@ -1773,49 +1847,156 @@ fn llvm_builder_build_closure_retain(args: &[RtValue]) -> Result<RtValue, EvalEr
     Ok(RtValue::LlvmValue(closure))
 }
 
-/// Decrements a `ClosureBox`'s refcount, freeing it once that reaches zero.
-/// The only existing builtin that ever needs real control flow (a
-/// conditional `free`) — contained entirely within this one Rust function's
-/// fixed-shape IR emission (new basic blocks of its own, merged back before
-/// returning), the same way `compile::aot::build_main_wrapper` already
-/// builds fixed-shape IR with its own blocks without exposing "make a new
-/// block" as a general compiler-body capability; `compiler.rs` doesn't gain
-/// `if`/branching from this. Cyclic captures (e.g. two escaping `labels`
-/// siblings that capture each other) never reach a zero refcount and so
-/// leak, by design — see `registry::llvm_builder_def`'s doc comment.
-fn llvm_builder_build_closure_release(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let closure = expect_llvm_value(&args[1])?;
-    let ctx = crate::compile::llvm_context();
-    let b = builder.borrow();
-    let box_ptr = closure_box_ptr(&b, closure, "build-closure-release")?;
-    let rc = load_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, "build-closure-release")?;
-    let one = ctx.i64_type().const_int(1, false);
-    let rc2 =
-        b.build_int_sub(rc, one, "closure_rc_dec").map_err(|e| EvalError::Internal(format!("build-closure-release: {}", e)))?;
-    store_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, rc2.into(), "build-closure-release")?;
+/// Builds (once per `module`) the shared LLVM function backing
+/// `build-closure-release`: `void __typelisp_closure_release(i64 closure)`.
+/// Decrements `closure`'s refcount; once that reaches zero, walks its
+/// captured slots (`CLOSURE_FN_MASK_SLOT` says which ones are themselves
+/// `Fn`-typed) recursively releasing each one *before* freeing the box
+/// itself — the `Drop`/`deinit`-cascade counterpart of `compile-lambda`'s/
+/// `resolve-value`'s retain at capture time (automatic retain/release
+/// insertion, a follow-up to labels/closures Stage 4).
+///
+/// This has to be a real, runtime-self-recursive *LLVM function* — not a
+/// Rust-side recursive call that statically unrolls the IR — because a
+/// captured slot's own `env_len`/`fn_mask` live *inside* the box it points
+/// to, which this code generator has no way to know at the point it's
+/// generating IR for the *outer* box: "release whatever this slot turns out
+/// to point to, recursively" can only be resolved once that pointer's value
+/// actually exists, at runtime. `Module::get_function` makes building this
+/// idempotent: every `build-closure-release` call (and the function's own
+/// body, for its self-call) shares the one definition already in `module`,
+/// built lazily the first time any `ClosureBox` work happens in it.
+///
+/// Recursion only ever terminates because a true reference cycle between
+/// two `ClosureBox`es isn't constructible under this design (see
+/// `compiler.rs`'s `resolve-value` doc comment) — nothing here detects or
+/// guards against one; a cyclic structure, were one ever constructed some
+/// other way, would recurse until the native stack overflows.
+fn get_or_define_closure_release_fn(
+    module: &Rc<RefCell<Module<'static>>>,
+    ctx: &'static Context,
+) -> Result<FunctionValue<'static>, EvalError> {
+    const RELEASE_FN_NAME: &str = "__typelisp_closure_release";
+    if let Some(f) = module.borrow().get_function(RELEASE_FN_NAME) {
+        return Ok(f);
+    }
 
-    let current_block = b
-        .get_insert_block()
-        .ok_or_else(|| EvalError::Internal("build-closure-release: builder has no current block".into()))?;
-    let function = current_block
-        .get_parent()
-        .ok_or_else(|| EvalError::Internal("build-closure-release: current block has no parent function".into()))?;
-    let free_block = ctx.append_basic_block(function, "closure_release_free");
-    let cont_block = ctx.append_basic_block(function, "closure_release_cont");
-    let zero = ctx.i64_type().const_int(0, false);
-    let is_zero = b
-        .build_int_compare(inkwell::IntPredicate::EQ, rc2, zero, "closure_rc_is_zero")
-        .map_err(|e| EvalError::Internal(format!("build-closure-release: {}", e)))?;
-    b.build_conditional_branch(is_zero, free_block, cont_block)
-        .map_err(|e| EvalError::Internal(format!("build-closure-release: {}", e)))?;
+    let i64_ty = ctx.i64_type();
+    let fn_ty = ctx.void_type().fn_type(&[i64_ty.into()], false);
+    let function = module.borrow_mut().add_function(RELEASE_FN_NAME, fn_ty, None);
 
+    let entry = ctx.append_basic_block(function, "entry");
+    let not_null = ctx.append_basic_block(function, "not_null");
+    let free_block = ctx.append_basic_block(function, "free");
+    let loop_header = ctx.append_basic_block(function, "loop_header");
+    let loop_check_fn = ctx.append_basic_block(function, "loop_check_fn");
+    let loop_release = ctx.append_basic_block(function, "loop_release");
+    let loop_inc = ctx.append_basic_block(function, "loop_inc");
+    let loop_exit = ctx.append_basic_block(function, "loop_exit");
+    let cont_block = ctx.append_basic_block(function, "cont");
+
+    let b = ctx.create_builder();
+    let err = |e: inkwell::builder::BuilderError| EvalError::Internal(format!("closure_release: {}", e));
+    let one = i64_ty.const_int(1, false);
+    let zero = i64_ty.const_int(0, false);
+
+    b.position_at_end(entry);
+    let closure = function
+        .get_nth_param(0)
+        .ok_or_else(|| EvalError::Internal("closure_release: missing param".into()))?
+        .into_int_value();
+    // `release-pending-args` (automatic retain/release insertion) calls
+    // this unconditionally on every slot of a "pending release" array, even
+    // ones it marked with the `0` sentinel for "nothing to release here" —
+    // `malloc` never returns a null pointer for a real allocation, so `0`
+    // can never collide with an actual `ClosureBox`. Tolerating it here
+    // keeps that caller from needing a runtime branch of its own (`compiler.rs`
+    // has no general `if` to build one with).
+    let is_null = b.build_int_compare(inkwell::IntPredicate::EQ, closure, zero, "closure_release_is_null").map_err(err)?;
+    b.build_conditional_branch(is_null, cont_block, not_null).map_err(err)?;
+
+    b.position_at_end(not_null);
+    let box_ptr = closure_box_ptr(&b, closure.into(), "closure_release")?;
+    let rc = load_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, "closure_release")?;
+    let rc2 = b.build_int_sub(rc, one, "closure_rc_dec").map_err(err)?;
+    store_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, rc2.into(), "closure_release")?;
+    let is_zero = b.build_int_compare(inkwell::IntPredicate::EQ, rc2, zero, "closure_rc_is_zero").map_err(err)?;
+    b.build_conditional_branch(is_zero, free_block, cont_block).map_err(err)?;
+
+    // free: scan the captured slots, recursively releasing the `Fn`-typed
+    // ones, before freeing the box itself.
     b.position_at_end(free_block);
-    b.build_free(box_ptr).map_err(|e| EvalError::Internal(format!("build-closure-release: {}", e)))?;
-    b.build_unconditional_branch(cont_block).map_err(|e| EvalError::Internal(format!("build-closure-release: {}", e)))?;
+    let env_len = load_closure_slot(&b, box_ptr, CLOSURE_ENV_LEN_SLOT, "closure_release")?;
+    let fn_mask = load_closure_slot(&b, box_ptr, CLOSURE_FN_MASK_SLOT, "closure_release")?;
+    let idx_alloca = b.build_alloca(i64_ty, "release_idx").map_err(err)?;
+    b.build_store(idx_alloca, zero).map_err(err)?;
+    b.build_unconditional_branch(loop_header).map_err(err)?;
+
+    b.position_at_end(loop_header);
+    let i_val = b.build_load(i64_ty, idx_alloca, "release_i").map_err(err)?.into_int_value();
+    let in_range = b.build_int_compare(inkwell::IntPredicate::ULT, i_val, env_len, "release_i_lt_len").map_err(err)?;
+    b.build_conditional_branch(in_range, loop_check_fn, loop_exit).map_err(err)?;
+
+    b.position_at_end(loop_check_fn);
+    let shifted = b.build_right_shift(fn_mask, i_val, false, "release_mask_shifted").map_err(err)?;
+    let bit = b.build_and(shifted, one, "release_mask_bit").map_err(err)?;
+    let is_fn = b.build_int_compare(inkwell::IntPredicate::EQ, bit, one, "release_is_fn").map_err(err)?;
+    b.build_conditional_branch(is_fn, loop_release, loop_inc).map_err(err)?;
+
+    b.position_at_end(loop_release);
+    let slot_idx = b.build_int_add(i64_ty.const_int(CLOSURE_HEADER_SLOTS, false), i_val, "release_slot_idx").map_err(err)?;
+    let slot_ptr = closure_slot_ptr_dyn(&b, box_ptr, slot_idx)?;
+    let captured_val = b.build_load(i64_ty, slot_ptr, "release_captured_val").map_err(err)?;
+    b.build_call(function, &[captured_val.into()], "").map_err(err)?;
+    b.build_unconditional_branch(loop_inc).map_err(err)?;
+
+    b.position_at_end(loop_inc);
+    let i_next = b.build_int_add(i_val, one, "release_i_next").map_err(err)?;
+    b.build_store(idx_alloca, i_next).map_err(err)?;
+    b.build_unconditional_branch(loop_header).map_err(err)?;
+
+    b.position_at_end(loop_exit);
+    b.build_free(box_ptr).map_err(err)?;
+    b.build_unconditional_branch(cont_block).map_err(err)?;
 
     b.position_at_end(cont_block);
+    b.build_return(None).map_err(err)?;
+
+    Ok(function)
+}
+
+/// `build-closure-release`: a thin wrapper emitting one
+/// `call void @__typelisp_closure_release(i64 closure)` against the shared,
+/// self-recursive function [`get_or_define_closure_release_fn`] builds (and
+/// memoizes) in `module` — see that function's doc comment for why the
+/// actual decrement/cascade logic has to live there rather than here.
+fn llvm_builder_build_closure_release(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let closure = expect_llvm_value(&args[2])?;
+    let ctx = crate::compile::llvm_context();
+    let release_fn = get_or_define_closure_release_fn(module, ctx)?;
+    let b = builder.borrow();
+    b.build_call(release_fn, &[closure.into()], "")
+        .map_err(|e| EvalError::Internal(format!("build-closure-release: {}", e)))?;
     Ok(RtValue::Unit)
+}
+
+/// Test-only observation hook: reads a `ClosureBox`'s refcount slot
+/// straight out, as an ordinary `llvm-value` the caller can `build-ret`/
+/// inspect — never called from `compiler.rs` itself, only from
+/// `tests/compile_test.rs` to verify the automatic retain/release insertion
+/// work actually keeps a box's refcount at the expected value at a given
+/// point, rather than only checking "didn't crash" (this builtin's whole
+/// reason for existing — there's no other way to observe a refcount that
+/// isn't itself a behavior change to the compiled code under test).
+fn llvm_builder_debug_closure_refcount(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let closure = expect_llvm_value(&args[1])?;
+    let b = builder.borrow();
+    let box_ptr = closure_box_ptr(&b, closure, "debug-closure-refcount")?;
+    let rc = load_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, "debug-closure-refcount")?;
+    Ok(RtValue::LlvmValue(rc.into()))
 }
 
 fn expect_hashtable(v: &RtValue) -> Result<&Rc<RefCell<HashMap<HashKey, RtValue>>>, EvalError> {

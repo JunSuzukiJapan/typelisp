@@ -144,7 +144,7 @@ fn the_compiler_body_panics_on_an_unsupported_tag() {
 #[test]
 fn the_compiler_body_compiles_a_two_parameter_addition() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "add2" '(a b) '(assoc "i64" "+" true (var "a") (var "b")))"#,
+        r#"(compile-function (llvm-module::create "mod") "add2" '((a . false) (b . false)) '(assoc "i64" "+" true (var "a" false) (var "b" false)))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -177,7 +177,7 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
 #[test]
 fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" (x) (apply "g" (var "x"))) ("g" (n) (var "n"))) (apply "f" (int 5))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . false)) (apply "g" (false var "x" false))) ("g" ((n . false)) (var "n" false))) (apply "f" (false int 5))))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -205,7 +205,7 @@ fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
 #[test]
 fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '(offset n) '(labels (offset) (("go" (k) (assoc "i64" "+" true (var "k") (var "offset")))) (apply "go" (var "n"))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '((offset . false) (n . false)) '(labels ((offset . false)) (("go" ((k . false)) (assoc "i64" "+" true (var "k" false) (var "offset" false)))) (apply "go" (false var "n" false))))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -383,7 +383,7 @@ fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
                     (position-at-end builder2 b2)
                     (let ((env-arr (alloca-args builder2 1)))
                       (store-arg builder2 env-arr 0 (const-i64 builder2 100))
-                      (let ((closure (build-make-closure builder2 add-offset-fn env-arr 1)))
+                      (let ((closure (build-make-closure builder2 add-offset-fn env-arr 1 0)))
                         (let ((args-arr (alloca-args builder2 1)))
                           (store-arg builder2 args-arr 0 (const-i64 builder2 5))
                           (build-ret builder2 (build-closure-apply builder2 closure args-arr 1)))))))
@@ -433,9 +433,9 @@ fn closure_retain_then_release_leaves_it_still_callable() {
                     (position-at-end builder2 b2)
                     (let ((env-arr (alloca-args builder2 1)))
                       (store-arg builder2 env-arr 0 (const-i64 builder2 100))
-                      (let ((closure (build-make-closure builder2 add-offset-fn env-arr 1)))
+                      (let ((closure (build-make-closure builder2 add-offset-fn env-arr 1 0)))
                         (let ((retained (build-closure-retain builder2 closure)))
-                          (build-closure-release builder2 retained)
+                          (build-closure-release builder2 m retained)
                           (let ((args-arr (alloca-args builder2 1)))
                             (store-arg builder2 args-arr 0 (const-i64 builder2 5))
                             (build-ret builder2 (build-closure-apply builder2 closure args-arr 1))))))))
@@ -598,8 +598,8 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
     let module = match eval_ok_with_compiler(
         r#"
         (let ((m (llvm-module::create "mod")))
-          (compile-function m "double" '(x) '(assoc "i64" "+" true (var "x") (var "x")))
-          (compile-function m "quadruple" '(n) '(call "double" (call "double" (var "n")))))
+          (compile-function m "double" '((x . false)) '(assoc "i64" "+" true (var "x" false) (var "x" false)))
+          (compile-function m "quadruple" '((n . false)) '(call "double" (false call "double" (false var "n" false)))))
         "#,
     ) {
         RtValue::LlvmModule(m) => m,
@@ -630,7 +630,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
 #[test]
 fn the_compiler_body_compiles_a_self_referencing_call() {
     let ir = expect_str(eval_ok_with_compiler(
-        r#"(to-string (compile-function (llvm-module::create "mod") "f" '(n) '(call "f" (var "n"))))"#,
+        r#"(to-string (compile-function (llvm-module::create "mod") "f" '((n . false)) '(call "f" (false var "n" false))))"#,
     ));
     assert!(ir.contains("define i64 @f("), "IR was:\n{}", ir);
     assert!(ir.contains("call i64 @f("), "IR was:\n{}", ir);
@@ -818,7 +818,7 @@ fn compile_dispatches_a_top_level_function_passed_by_name_through_apply_fn() {
 #[test]
 fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" (n) (var "n"))) (apply-indirect (var "f") (int 5))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((n . false)) (var "n" false))) (apply-indirect (var "f" true) (false int 5))))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -846,7 +846,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
 #[test]
 fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_outer_value() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '(offset n) '(labels (offset) (("go" (k) (assoc "i64" "+" true (var "k") (var "offset")))) (apply-indirect (var "go") (int 5))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '((offset . false) (n . false)) '(labels ((offset . false)) (("go" ((k . false)) (assoc "i64" "+" true (var "k" false) (var "offset" false)))) (apply-indirect (var "go" true) (false int 5))))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -878,7 +878,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
 #[test]
 fn the_compiler_body_boxes_a_labels_sibling_that_bare_references_itself() {
     let ir = expect_str(eval_ok_with_compiler(
-        r#"(to-string (compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" () (var "f"))) (apply "f"))))"#,
+        r#"(to-string (compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" () (var "f" true))) (apply "f"))))"#,
     ));
     assert!(ir.contains("malloc"), "IR was:\n{}", ir);
 }
@@ -966,4 +966,214 @@ fn compile_dispatches_an_escaping_lambda_that_indirectly_captures_a_labels_sibli
         RtValue::Int(n) => assert_eq!(n, 42),
         other => panic!("expected an Int, got {:?}", other),
     }
+}
+
+/// Automatic `ClosureBox` retain/release insertion (a follow-up to
+/// labels/closures Stage 4): `outer(cb, x)` is a `labels` block with one
+/// sibling, `go`, that captures `cb` (a borrowed, `Fn`-typed parameter of
+/// `outer` itself) and calls it indirectly. Every call to `outer` exercises
+/// the *direct*, non-escaping `compile-env-args` path (`compile-apply`
+/// building `go`'s env array each time) plus both `go`'s and `outer`'s own
+/// R1 entry-retain/R2 exit-release — if either leaked or double-released,
+/// `cb`'s refcount (read back via the test-only `debug-closure-refcount`
+/// builtin, through a hand-built `read_rc` function sharing the same
+/// module) would drift after repeated calls instead of returning to
+/// exactly `1` every time.
+#[test]
+fn repeated_calls_through_a_captured_closure_do_not_leak_its_refcount() {
+    let module = match eval_ok_with_compiler(
+        r#"
+        (defun build-test-module () llvm-module
+          (let ((m (llvm-module::create "mod")))
+            (let ((identity-fn (add-function-with-env m "identity")))
+              (let ((b (append-block identity-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-ret builder (load-arg builder identity-fn 0)))))
+            (let ((rc-fn (add-function m "read_rc")))
+              (let ((b (append-block rc-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-ret builder (debug-closure-refcount builder (load-arg builder rc-fn 0))))))
+            (let ((mkbox-fn (add-function m "make_box")))
+              (let ((b (append-block mkbox-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-ret builder (build-make-closure builder (get-function m "identity") (alloca-args builder 0) 0 0)))))
+            (compile-function m "outer" '((cb . true) (x . false))
+              '(labels ((cb . true)) (("go" ((x . false)) (apply-indirect (var "cb" true) (false var "x" false)))) (apply "go" (false var "x" false))))
+            m))
+        (build-test-module)
+        "#,
+    ) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let make_box = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("make_box")
+            .expect("failed to look up `make_box`")
+    };
+    let read_rc = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("read_rc")
+            .expect("failed to look up `read_rc`")
+    };
+    let outer = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("outer")
+            .expect("failed to look up the compiled `outer` function")
+    };
+
+    let cb = unsafe { make_box.call(std::ptr::null(), 0) };
+    let rc_argv = [cb];
+    assert_eq!(unsafe { read_rc.call(rc_argv.as_ptr(), 1) }, 1, "a freshly made closure starts at refcount 1");
+
+    for _ in 0..1000 {
+        let outer_argv = [cb, 5];
+        assert_eq!(unsafe { outer.call(outer_argv.as_ptr(), 2) }, 5);
+        assert_eq!(unsafe { read_rc.call(rc_argv.as_ptr(), 1) }, 1, "refcount must return to 1 after every call, never drift");
+    }
+}
+
+/// The escaping-`ClosureBox` counterpart of the test above: `make-wrapper`
+/// (real typelisp source, going through `ast_bridge`/`(compile ...)`, not a
+/// hand-fed `Sexpr`) returns a `lambda` that captures a borrowed `Fn`-typed
+/// parameter of its own — `compile-lambda`'s `compile-escaping-env-args`
+/// call must retain that borrowed value at construction time (R4), and the
+/// resulting outer box's `fn_mask` must mark that captured slot so
+/// releasing the outer box (without ever calling it) recursively releases
+/// the inner one too — read back via `debug-closure-refcount` afterward.
+#[test]
+fn releasing_an_escaping_lambda_recursively_releases_a_captured_closure() {
+    let module = match eval_ok_with_compiler(
+        r#"
+        (defun build-test-module () llvm-module
+          (let ((m (llvm-module::create "mod")))
+            (let ((identity-fn (add-function-with-env m "identity")))
+              (let ((b (append-block identity-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-ret builder (load-arg builder identity-fn 0)))))
+            (let ((rc-fn (add-function m "read_rc")))
+              (let ((b (append-block rc-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-ret builder (debug-closure-refcount builder (load-arg builder rc-fn 0))))))
+            (let ((mkbox-fn (add-function m "make_box")))
+              (let ((b (append-block mkbox-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-ret builder (build-make-closure builder (get-function m "identity") (alloca-args builder 0) 0 0)))))
+            (let ((release-fn (add-function m "release_box")))
+              (let ((b (append-block release-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-closure-release builder m (load-arg builder release-fn 0))
+                  (build-ret builder (const-i64 builder 0)))))
+            (compile-function m "make-wrapper" '((inner . true))
+              '(lambda "wrapper$0" ((inner . true)) () (var "inner" true)))
+            m))
+        (build-test-module)
+        "#,
+    ) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let make_box = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("make_box")
+            .expect("failed to look up `make_box`")
+    };
+    let read_rc = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("read_rc")
+            .expect("failed to look up `read_rc`")
+    };
+    let release_box = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("release_box")
+            .expect("failed to look up `release_box`")
+    };
+    let make_wrapper = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("make-wrapper")
+            .expect("failed to look up the compiled `make-wrapper` function")
+    };
+
+    let inner = unsafe { make_box.call(std::ptr::null(), 0) };
+    let inner_argv = [inner];
+    assert_eq!(unsafe { read_rc.call(inner_argv.as_ptr(), 1) }, 1);
+
+    let wrapper_argv = [inner];
+    let outer = unsafe { make_wrapper.call(wrapper_argv.as_ptr(), 1) };
+    // The escaping wrapper's own construction retained `inner` (it's
+    // *borrowed* from `make-wrapper`'s own parameter) — `inner`'s refcount
+    // should now be 2: `make-wrapper`'s own activation's R1 copy is already
+    // gone (released at `make-wrapper`'s R2 exit, since `inner` isn't what
+    // it bare-returns — the *wrapper* is) plus the wrapper's own captured
+    // copy.
+    assert_eq!(unsafe { read_rc.call(inner_argv.as_ptr(), 1) }, 2, "the escaping wrapper's own retain of its borrowed capture");
+
+    let release_argv = [outer];
+    unsafe { release_box.call(release_argv.as_ptr(), 1) };
+    assert_eq!(
+        unsafe { read_rc.call(inner_argv.as_ptr(), 1) },
+        1,
+        "releasing the outer box must cascade-release its captured inner closure"
+    );
+}
+
+/// `get_or_define_closure_release_fn` builds the shared
+/// `__typelisp_closure_release` LLVM function lazily, the first time any
+/// `ClosureBox` work happens in a module, and memoizes it via
+/// `Module::get_function` — confirms that memoization actually holds even
+/// with *two* separately-escaping closures in the same module (IR-only,
+/// never executed).
+#[test]
+fn the_shared_closure_release_function_is_defined_once_per_module() {
+    let ir = expect_str(eval_ok_with_compiler(
+        r#"
+        (to-string
+          (let ((m (llvm-module::create "mod")))
+            (compile-function m "f" '((cb . true))
+              '(lambda "f$0" ((cb . true)) () (var "cb" true)))
+            (compile-function m "g" '((cb . true))
+              '(lambda "g$0" ((cb . true)) () (var "cb" true)))
+            m))
+        "#,
+    ));
+    let occurrences = ir.matches("define void @__typelisp_closure_release").count();
+    assert_eq!(occurrences, 1, "expected exactly one shared definition, IR was:\n{}", ir);
+}
+
+/// `compile-call-args`' fresh-value pending-release path (R4: a call
+/// argument that's `Fn`-typed *and* fresh — here, `helper` referenced bare
+/// and passed straight to `go` as a call argument, resolved via
+/// `resolve-value`'s fallback — needs releasing once `go`'s call returns,
+/// since nothing else owns that one-off box). IR-only: the ephemeral box
+/// never escapes anywhere this test could read its refcount back out of,
+/// so this checks the *generated IR* has a release call after the call
+/// instead (`compile_apply`'s `release-pending-args` call site).
+#[test]
+fn compile_apply_releases_a_fresh_sibling_passed_as_a_call_argument_after_the_call() {
+    let ir = expect_str(eval_ok_with_compiler(
+        r#"(to-string (compile-function (llvm-module::create "mod") "outer" '((x . false))
+              '(labels () (("helper" () (int 7))
+                           ("go" ((f . true) (y . false)) (apply-indirect (var "f" true) (false var "y" false))))
+                 (apply "go" (false var "helper" true) (false var "x" false)))))"#,
+    ));
+    let call_pos = ir.find("call i64").expect("expected a direct call to go in the IR");
+    let release_pos = ir.find("call void @__typelisp_closure_release").expect("expected a release call in the IR");
+    assert!(release_pos > call_pos, "release must come after the call, IR was:\n{}", ir);
 }
