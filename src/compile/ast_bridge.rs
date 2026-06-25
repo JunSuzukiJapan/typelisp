@@ -11,9 +11,25 @@
 //! once a phase needs to compile that node.
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::freevars::labels_free_vars;
-use crate::{Error, Expr, Heap, LabelDef, Path, Typed, Value};
+use super::freevars::{labels_free_vars, lambda_free_vars};
+use crate::{Error, Expr, Heap, LabelDef, Path, Type, Typed, Value};
+
+/// A process-wide counter for synthesizing unique LLVM symbol names for
+/// anonymous functions — every `lambda`/`Expr::FnRef`-forwarding-wrapper/
+/// immediately-invoked-lambda gets one (labels/closures Stage 4), since none
+/// of those have a name from user source the way a `labels` def or `defun`
+/// does. Process-wide (not per-translation-pass or per-outer-function) so
+/// two lambdas compiled into the same shared AOT module — even from two
+/// *different* `defun`s — can never collide, with no mangling scheme to get
+/// right.
+static LAMBDA_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn fresh_lambda_name(prefix: &str) -> String {
+    let n = LAMBDA_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{}${}", prefix, n)
+}
 
 /// Conses a proper list from `items` (in order), rooting as it goes — the
 /// same push/pop discipline `crate::eval::interp::alloc_quoted` uses for
@@ -119,6 +135,22 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
             tagged(heap, "str", &[v])
         }
         Expr::Unit => tagged(heap, "unit", &[]),
+        // Always `(var name)`, even when `name` is a currently in-scope
+        // `labels` sibling/self (`direct.contains(name)`) — that only
+        // matters to [`translate_apply`], which intercepts the *callee*
+        // position of an `Expr::Apply` before a bare `Expr::Var` node for
+        // that name would ever reach here. A sibling *referenced as a
+        // value* rather than called (e.g. a nested `lambda` capturing it,
+        // or a `labels` block's trailing body returning it bare) still
+        // becomes a plain `(var name)` — a documented gap, not a silent
+        // miscompilation: `compiler.rs`'s `compile-var`/`lookup-var` only
+        // ever search the ordinary value `env` (never `fn-env`, where a
+        // sibling's `llvm-function` actually lives), so this fails clearly
+        // at compile time ("unbound variable") rather than doing the wrong
+        // thing. Boxing a sibling into a `ClosureBox` on demand (the same
+        // way [`translate_fnref`] boxes a top-level function reference) is
+        // future work — labels/closures Stage 4 only wires that up for
+        // top-level `defun`s and real `lambda` literals.
         Expr::Var(name) => {
             let v = heap.alloc_string(name.clone());
             tagged(heap, "var", &[v])
@@ -162,12 +194,12 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
         // than building out unrooted multi-child plumbing nothing exercises
         // yet — see the module doc comment.
         Expr::Global(_) => unsupported(heap, "Global"),
-        Expr::FnRef(_) => unsupported(heap, "FnRef"),
+        Expr::FnRef(path) => translate_fnref(heap, path, &typed.ty),
         Expr::MethodRef { .. } => unsupported(heap, "MethodRef"),
         Expr::If(..) => unsupported(heap, "If"),
         Expr::Let(..) => unsupported(heap, "Let"),
         Expr::Call(path, args) => translate_call(heap, path, args, direct),
-        Expr::Lambda { .. } => unsupported(heap, "Lambda"),
+        Expr::Lambda { params, body } => translate_lambda(heap, params, body),
         Expr::Labels { defs, body } => translate_labels(heap, defs, body, direct),
         Expr::Apply(callee, args) => translate_apply(heap, callee, args, direct),
         Expr::Construct { .. } => unsupported(heap, "Construct"),
@@ -307,18 +339,28 @@ fn translate_labels_def(heap: &mut Heap, name: &str, params: &[(String, crate::T
     result
 }
 
-/// `Expr::Apply(callee, args)` -> `(apply name arg...)` when `callee` is a
-/// `Var` naming a currently in-scope `labels` sibling/self (a direct call).
-/// Anything else is a callee that would need indirect/boxed dispatch — a
-/// `ClosureBox`/runtime-shim mechanism a later phase builds — so it falls
-/// back to `unsupported("Apply")` rather than guessing at a shape nothing
-/// consumes yet.
+/// `Expr::Apply(callee, args)` dispatches on `callee`'s shape (labels/closures
+/// Stage 4 extends this from the Stage 1 direct-only version):
+/// - a `Var` naming a currently in-scope `labels` sibling/self ->
+///   [`translate_direct_apply`] (unchanged since Stage 1).
+/// - a `lambda` literal being called immediately (an IIFE) ->
+///   [`translate_immediate_lambda_call`] — never escapes, so no `ClosureBox`.
+/// - anything else (a captured closure variable, a higher-order function's
+///   own parameter, ...) -> [`translate_indirect_apply`] — `callee`'s value
+///   is evaluated and called through at runtime, since nothing here can
+///   know ahead of time which `ClosureBox` it'll be.
 fn translate_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
-    let name = match &callee.expr {
-        Expr::Var(n) if direct.contains(n) => n.clone(),
-        _ => return unsupported(heap, "Apply"),
-    };
-    let name_v = heap.alloc_string(name);
+    match &callee.expr {
+        Expr::Var(n) if direct.contains(n) => translate_direct_apply(heap, n, args, direct),
+        Expr::Lambda { params, body } => translate_immediate_lambda_call(heap, params, body, args, direct),
+        _ => translate_indirect_apply(heap, callee, args, direct),
+    }
+}
+
+/// `(apply name arg...)` — a direct call to a `labels` sibling/self
+/// (Stage 1 scope, unchanged).
+fn translate_direct_apply(heap: &mut Heap, name: &str, args: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
+    let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
     let arg_values = match ast_list_to_sexpr(heap, args, direct) {
         Ok(v) => v,
@@ -334,6 +376,203 @@ fn translate_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &Has
         heap.pop_root();
     }
     heap.pop_root(); // name_v
+    result
+}
+
+/// `((lambda (params) body) args...)` — an immediately-invoked `lambda`
+/// literal as the callee of its own `Apply` (labels/closures Stage 4): never
+/// escapes, so it needs no `ClosureBox` at all. Translated as if it were a
+/// single-def, non-recursive `labels` block instead (`(labels ()
+/// ((name (params) body)) (name args...))`), reusing [`translate_labels`]'s
+/// entire mechanism — declare-then-compile, captured-list sharing, direct-
+/// call dispatch into the *outer* scope's own siblings, all for free —
+/// rather than teaching `compiler.rs` a second way to build essentially the
+/// same kind of LLVM function. Passing the *outer* `direct` set through
+/// (rather than an empty one, unlike [`translate_lambda`]'s escaping case)
+/// is deliberate and safe specifically because this lambda never escapes:
+/// it's compiled within the very same `compile-labels`-style scope its call
+/// site already has, so it can call outer `labels` siblings directly just
+/// like another sibling could (the synthesized `labels` block is, after
+/// all, nested at exactly the point the source `Apply` was). `name` is a
+/// fresh, process-wide-unique local name ([`fresh_lambda_name`]) —
+/// `translate_labels_def`/`compile-labels`'s own `outer_fn_name$inner_name`
+/// mangling still guarantees no collision with anything else in the same
+/// module even though this name never came from user source.
+fn translate_immediate_lambda_call(
+    heap: &mut Heap,
+    params: &[(String, Type)],
+    lambda_body: &[Typed],
+    args: &[Typed],
+    direct: &HashSet<String>,
+) -> Result<Value, Error> {
+    let name = fresh_lambda_name("__lambda");
+    let dummy_ty = Type::Unit;
+    let def: LabelDef = (name.clone(), params.to_vec(), lambda_body.to_vec());
+    let call = Typed {
+        expr: Expr::Apply(Box::new(Typed { expr: Expr::Var(name), ty: dummy_ty.clone() }), args.to_vec()),
+        ty: dummy_ty,
+    };
+    translate_labels(heap, &[def], std::slice::from_ref(&call), direct)
+}
+
+/// `(apply-indirect callee-form arg...)` — the general indirect-dispatch
+/// case (labels/closures Stage 4): `callee` is translated and (at
+/// `compiler.rs`'s `compile-apply-indirect`) evaluated like any other value,
+/// then called through `build-closure-apply` at runtime. A deliberately
+/// distinct tag from `(apply name arg...)` — *not* the plan's originally
+/// sketched `(apply (direct name) arg...)`/`(apply (indirect callee) arg...)`
+/// unification — so Stage 1-3's already-shipped `(apply name arg...)` shape
+/// (and `compiler.rs`'s/tests' existing assumptions about it) needs no
+/// change at all.
+fn translate_indirect_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
+    let callee_v = ast_to_sexpr_scoped(heap, callee, direct)?;
+    heap.push_root(callee_v);
+    let arg_values = match ast_list_to_sexpr(heap, args, direct) {
+        Ok(v) => v,
+        Err(e) => {
+            heap.pop_root();
+            return Err(e);
+        }
+    };
+    let mut items = vec![callee_v];
+    items.extend(arg_values.iter().copied());
+    let result = tagged(heap, "apply-indirect", &items);
+    for _ in 0..arg_values.len() {
+        heap.pop_root();
+    }
+    heap.pop_root(); // callee_v
+    result
+}
+
+/// Builds `(lambda name-str (captured-sym...) (param-sym...)
+/// single-body-form)` — the tagged shape both a real escaping `Expr::Lambda`
+/// ([`translate_lambda`]) and a synthesized `Expr::FnRef` forwarding wrapper
+/// ([`translate_fnref`]) produce. `name` is the caller's responsibility to
+/// make unique ([`fresh_lambda_name`]) — both source forms are anonymous at
+/// the typelisp level, unlike a `labels` def. `body` must already be rooted
+/// by the caller (the same convention [`tagged`]'s own `items` slice
+/// elements rely on) and remains the caller's to pop afterward; this
+/// function only roots/pops what it itself allocates.
+fn build_lambda_tag(heap: &mut Heap, name: &str, captured: &[String], params: &[String], body: Value) -> Result<Value, Error> {
+    let name_v = heap.alloc_string(name.to_string());
+    heap.push_root(name_v);
+    let captured_list = match sym_list(heap, captured) {
+        Ok(v) => v,
+        Err(e) => {
+            heap.pop_root(); // name_v
+            return Err(e);
+        }
+    };
+    heap.push_root(captured_list);
+    let param_list = match sym_list(heap, params) {
+        Ok(v) => v,
+        Err(e) => {
+            heap.pop_root(); // captured_list
+            heap.pop_root(); // name_v
+            return Err(e);
+        }
+    };
+    heap.push_root(param_list);
+    let result = tagged(heap, "lambda", &[name_v, captured_list, param_list, body]);
+    heap.pop_root(); // param_list
+    heap.pop_root(); // captured_list
+    heap.pop_root(); // name_v
+    result
+}
+
+/// `Expr::Lambda { params, body }` -> `(lambda name (captured...)
+/// (param-sym...) single-body-form)` (labels/closures Stage 4) — a `lambda`
+/// value that *escapes*: reached anywhere a `Expr::Lambda` is its own typed
+/// node rather than the literal callee of its own enclosing `Apply`
+/// ([`translate_immediate_lambda_call`] handles that case instead, via a
+/// completely different, boxing-free translation). `compiler.rs`'s
+/// `compile-lambda` (the consumer of this tag) therefore never has to decide
+/// whether to box the result — every `lambda` tag it ever sees is, by
+/// construction, the escaping case.
+///
+/// The lambda's own body is translated with an *empty* `direct` set,
+/// matching [`lambda_free_vars`]'s own treatment of enclosing `labels`
+/// siblings: a nested `lambda` never gets direct-call access to them (only
+/// a `labels` def's own siblings do), so a sibling name referenced here
+/// becomes an ordinary capture attempt instead, which fails clearly at
+/// `compiler.rs`'s `compile-env-args`/`lookup-var` ("unbound variable")
+/// rather than silently doing the wrong thing — a documented gap (capturing
+/// an outer `labels` sibling's *function value*, as opposed to calling it
+/// directly, isn't supported yet), not a silent miscompilation.
+fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed]) -> Result<Value, Error> {
+    if body.len() != 1 {
+        return Err(Error::TypeError("compile: lambda has a multi-expression body, not yet supported".into()));
+    }
+    let captured_names = lambda_free_vars(params, body);
+    let param_names: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
+    let body_v = ast_to_sexpr_scoped(heap, &body[0], &HashSet::new())?;
+    heap.push_root(body_v);
+    let result = build_lambda_tag(heap, &fresh_lambda_name("lambda"), &captured_names, &param_names, body_v);
+    heap.pop_root(); // body_v
+    result
+}
+
+/// `Expr::FnRef(path)` -> a non-capturing `lambda` tag that just forwards
+/// every argument straight through to the named top-level `defun`
+/// (labels/closures Stage 4): `(lambda fnref$N () (arg0 arg1 ...) (call
+/// path-local-name (var arg0) (var arg1) ...))`. Lets a top-level function
+/// used as a first-class value (e.g. passed where a `(fn (i64) i64)` is
+/// expected) reach the exact same `ClosureBox` machinery a real `lambda`
+/// value does, rather than inventing a second runtime representation for
+/// "function reference" values — `compile-lambda` builds this wrapper's
+/// `ClosureBox` exactly like any other, `compile-call` (already built for
+/// labels/closures Stage 3) handles the forwarding call inside it. Param
+/// names are synthesized positionally from `ty`'s arity (the only place that
+/// arity is available — an `Expr::FnRef` carries no parameter names of its
+/// own, just a `Path`) — a variadic target's `&rest` parameter isn't
+/// forwarded (out of scope; this only synthesizes `ty`'s fixed parameters).
+fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Error> {
+    let arity = match ty {
+        Type::Fn(params, ..) => params.len(),
+        _ => return unsupported(heap, "FnRef"),
+    };
+    let param_names: Vec<String> = (0..arity).map(|i| format!("arg{}", i)).collect();
+
+    let target_v = heap.alloc_string(path.local().to_string());
+    heap.push_root(target_v);
+    let mut var_values = Vec::with_capacity(param_names.len());
+    for n in &param_names {
+        let s = heap.alloc_string(n.clone());
+        heap.push_root(s);
+        let v = match tagged(heap, "var", &[s]) {
+            Ok(v) => v,
+            Err(e) => {
+                heap.pop_root(); // s
+                for _ in 0..var_values.len() {
+                    heap.pop_root();
+                }
+                heap.pop_root(); // target_v
+                return Err(e);
+            }
+        };
+        heap.pop_root(); // s
+        heap.push_root(v);
+        var_values.push(v);
+    }
+    let mut call_items = vec![target_v];
+    call_items.extend(var_values.iter().copied());
+    let call_body = match tagged(heap, "call", &call_items) {
+        Ok(v) => v,
+        Err(e) => {
+            for _ in 0..var_values.len() {
+                heap.pop_root();
+            }
+            heap.pop_root(); // target_v
+            return Err(e);
+        }
+    };
+    for _ in 0..var_values.len() {
+        heap.pop_root();
+    }
+    heap.pop_root(); // target_v
+    heap.push_root(call_body);
+    let result = build_lambda_tag(heap, &fresh_lambda_name("fnref"), &[], &param_names, call_body);
+    heap.pop_root(); // call_body
     result
 }
 
@@ -399,6 +638,14 @@ fn collect_calls(typed: &Typed, out: &mut Vec<Path>) {
                 collect_calls(a, out);
             }
         }
+        // `translate_fnref` turns this into a forwarding `(call
+        // path-local-name ...)` wrapper, so `path` needs the same
+        // pre-declaration treatment as a real `Expr::Call` would.
+        Expr::FnRef(path) => {
+            if !out.contains(path) {
+                out.push(path.clone());
+            }
+        }
         Expr::Assoc { args, .. } => {
             for a in args {
                 collect_calls(a, out);
@@ -408,6 +655,16 @@ fn collect_calls(typed: &Typed, out: &mut Vec<Path>) {
             collect_calls(callee, out);
             for a in args {
                 collect_calls(a, out);
+            }
+        }
+        // Covers both an escaping `lambda` value's own body and an
+        // immediately-invoked lambda literal's body (the latter reached via
+        // the `Apply` arm above recursing into its `callee`, which is this
+        // same `Expr::Lambda` node) — either way, a `Call` inside it still
+        // needs the same JIT-only pre-declaration treatment.
+        Expr::Lambda { body, .. } => {
+            for e in body {
+                collect_calls(e, out);
             }
         }
         Expr::Labels { defs, body } => {
@@ -649,19 +906,23 @@ mod tests {
         }
     }
 
-    /// A call to a function value that *isn't* a currently in-scope
-    /// `labels` sibling/self (here: no enclosing `labels` at all) has no
-    /// direct-call target to resolve to — indirect/boxed dispatch is a
-    /// later phase's work, so this stays an explicit `unsupported`, not a
-    /// best-effort guess.
+    /// A call to a function value that *isn't* a currently in-scope `labels`
+    /// sibling/self (here: no enclosing `labels` at all) has no direct-call
+    /// target to resolve to — labels/closures Stage 4 makes this a real
+    /// `apply-indirect` translation (`callee`'s value, evaluated and called
+    /// through `build-closure-apply` at runtime) rather than `unsupported`.
     #[test]
-    fn an_apply_to_a_name_outside_the_current_labels_scope_is_unsupported() {
+    fn an_apply_to_a_name_outside_the_current_labels_scope_is_indirect() {
         let mut heap = Heap::with_capacity(1 << 10);
         let callee = typed(Expr::Var("not-a-sibling".to_string()), fn_ty());
         let v = ast_to_sexpr(&mut heap, &typed(Expr::Apply(Box::new(callee), vec![typed(Expr::Int(1), Type::I64)]), Type::I64)).unwrap();
         let (tag, fields) = untag(&heap, v);
-        assert_eq!(tag, "unsupported");
-        assert_eq!(expect_str(&heap, fields[0]), "Apply");
+        assert_eq!(tag, "apply-indirect");
+        let (callee_tag, callee_fields) = untag(&heap, fields[0]);
+        assert_eq!(callee_tag, "var");
+        assert_eq!(expect_str(&heap, callee_fields[0]), "not-a-sibling");
+        let (arg_tag, _) = untag(&heap, fields[1]);
+        assert_eq!(arg_tag, "int");
     }
 
     /// labels/closures Stage 3: a top-level `Expr::Call` becomes `(call name
@@ -739,5 +1000,124 @@ mod tests {
             Type::I64,
         );
         assert_eq!(collect_call_targets(&v), vec![crate::Path::root("g")]);
+    }
+
+    /// labels/closures Stage 4: a standalone (escaping) `Expr::Lambda` ->
+    /// `(lambda name (captured...) (param-sym...) single-body-form)`, with
+    /// an empty captured list when the body only references its own
+    /// parameter.
+    #[test]
+    fn translates_an_escaping_lambda() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let lambda = Expr::Lambda {
+            params: vec![("y".to_string(), Type::I64)],
+            body: vec![typed(Expr::Var("y".to_string()), Type::I64)],
+        };
+        let v = ast_to_sexpr(&mut heap, &typed(lambda, fn_ty())).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "lambda");
+        assert!(!expect_str(&heap, fields[0]).is_empty(), "expected a non-empty synthesized name");
+        assert!(fields[1].is_empty(), "expected an empty captured list, got {:?}", fields[1]);
+        let params = list_elems(&heap, fields[2]);
+        assert_eq!(params.len(), 1);
+        match params[0] {
+            Value::Symbol(id) => assert_eq!(heap.symbol_name(id), "y"),
+            other => panic!("expected a Sym, got {:?}", other),
+        }
+        let (body_tag, body_fields) = untag(&heap, fields[3]);
+        assert_eq!(body_tag, "var");
+        assert_eq!(expect_str(&heap, body_fields[0]), "y");
+    }
+
+    /// Two separately-translated lambdas get distinct synthesized names —
+    /// `fresh_lambda_name`'s whole reason for existing (no two anonymous
+    /// functions can collide once compiled into the same shared module).
+    #[test]
+    fn two_escaping_lambdas_get_distinct_synthesized_names() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let make = || Expr::Lambda { params: vec![], body: vec![typed(Expr::Int(1), Type::I64)] };
+        let v1 = ast_to_sexpr(&mut heap, &typed(make(), fn_ty())).unwrap();
+        let v2 = ast_to_sexpr(&mut heap, &typed(make(), fn_ty())).unwrap();
+        let (_, f1) = untag(&heap, v1);
+        let (_, f2) = untag(&heap, v2);
+        assert_ne!(expect_str(&heap, f1[0]), expect_str(&heap, f2[0]));
+    }
+
+    /// labels/closures Stage 4: a `lambda` value that captures an outer name
+    /// has it in the captured list, the same as a `labels` block would.
+    #[test]
+    fn translates_a_lambda_capturing_an_outer_name() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let lambda = Expr::Lambda {
+            params: vec![("y".to_string(), Type::I64)],
+            body: vec![typed(
+                Expr::Assoc {
+                    type_name: crate::Path::root("i64"),
+                    method: "+".to_string(),
+                    instance: true,
+                    args: vec![typed(Expr::Var("y".to_string()), Type::I64), typed(Expr::Var("x".to_string()), Type::I64)],
+                },
+                Type::I64,
+            )],
+        };
+        let v = ast_to_sexpr(&mut heap, &typed(lambda, fn_ty())).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "lambda");
+        let captured = list_elems(&heap, fields[1]);
+        assert_eq!(captured.len(), 1);
+        match captured[0] {
+            Value::Symbol(id) => assert_eq!(heap.symbol_name(id), "x"),
+            other => panic!("expected a Sym, got {:?}", other),
+        }
+    }
+
+    /// labels/closures Stage 4: `((lambda (params) body) args...)` becomes a
+    /// single-def, non-recursive `labels` block — not a `lambda` tag at
+    /// all — proving the immediate-call path never boxes the function.
+    #[test]
+    fn translates_an_immediately_invoked_lambda_as_a_single_def_labels_block() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let lambda = typed(
+            Expr::Lambda { params: vec![("y".to_string(), Type::I64)], body: vec![typed(Expr::Var("y".to_string()), Type::I64)] },
+            fn_ty(),
+        );
+        let apply = Expr::Apply(Box::new(lambda), vec![typed(Expr::Int(5), Type::I64)]);
+        let v = ast_to_sexpr(&mut heap, &typed(apply, Type::I64)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "labels");
+        assert!(fields[0].is_empty(), "expected an empty captured list, got {:?}", fields[0]);
+        let defs_seen = list_elems(&heap, fields[1]);
+        assert_eq!(defs_seen.len(), 1);
+        let (body_tag, body_fields) = untag(&heap, fields[2]);
+        assert_eq!(body_tag, "apply");
+        let def_name = expect_str(&heap, heap.car(defs_seen[0]).unwrap());
+        assert_eq!(expect_str(&heap, body_fields[0]), def_name);
+    }
+
+    /// labels/closures Stage 4: `Expr::FnRef(path)` becomes a non-capturing
+    /// `lambda` that forwards positionally-synthesized arguments straight
+    /// through to a `(call path-local-name ...)`.
+    #[test]
+    fn translates_an_fnref_as_a_forwarding_lambda() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let ty = Type::Fn(vec![Type::I64, Type::I64], None, Box::new(Type::I64));
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::FnRef(crate::Path::root("add2")), ty)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "lambda");
+        assert!(fields[1].is_empty(), "expected an empty captured list, got {:?}", fields[1]);
+        let params = list_elems(&heap, fields[2]);
+        assert_eq!(params.len(), 2);
+        let (body_tag, body_fields) = untag(&heap, fields[3]);
+        assert_eq!(body_tag, "call");
+        assert_eq!(expect_str(&heap, body_fields[0]), "add2");
+        assert_eq!(body_fields.len() - 1, 2, "expected one forwarded arg per parameter");
+        for (i, param) in params.iter().enumerate() {
+            let (arg_tag, arg_fields) = untag(&heap, body_fields[1 + i]);
+            assert_eq!(arg_tag, "var");
+            match param {
+                Value::Symbol(id) => assert_eq!(expect_str(&heap, arg_fields[0]), heap.symbol_name(*id)),
+                other => panic!("expected a Sym, got {:?}", other),
+            }
+        }
     }
 }

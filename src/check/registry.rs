@@ -625,6 +625,55 @@ fn llvm_builder_def() -> AdtDef {
             true,
         ),
     );
+    // `build-make-closure`/`build-closure-env-get`/`build-closure-apply`/
+    // `build-closure-retain`/`build-closure-release`: a `ClosureBox` — the
+    // runtime representation of a `lambda` value that *escapes* its defining
+    // function (rather than being called directly while statically known,
+    // like every `apply`/`call` site above) — labels/closures Stage 4.
+    // Heap-allocated (`malloc`/`free`, not a Rust-side runtime shim — see
+    // `compile::CompiledFn`'s module doc comment for the staticlib
+    // alternative this replaces) with a fixed `i64` layout: `fn_ptr`,
+    // `env_len`, `refcount`, then `env_len` captured values inline. The
+    // resulting `i64` *is* the closure value, exactly like every other
+    // compiled value — see `registry::llvm_module_def`'s doc comment for why
+    // every compiled value is a plain, untagged `i64`.
+    //
+    // `build-make-closure` takes the already-compiled `target` (declared
+    // under `add-function-with-env`'s ABI — *every* closure-boxed function
+    // uses that ABI, capturing or not, so `build-closure-apply` never has to
+    // decide which ABI to call through) and an env array built the same way
+    // a direct capturing call already builds one (`alloca-args`/`store-arg`/
+    // `compile-env-args`), copying it into the new heap box rather than
+    // passing it straight through (the stack array doesn't outlive this
+    // call). `build-closure-env-get` is `load-env`'s closure-value
+    // counterpart (reads a captured slot back out of the box itself, for the
+    // *nested* function's own body — the closure-boxed function still reads
+    // its captures via `load-env`/its own env parameter, never this one;
+    // this one is for code holding the closure *value* from the outside).
+    // `build-closure-apply` is `build-call-with-env`'s indirect counterpart:
+    // the callee isn't a statically-known `llvm-function` here, just an
+    // `i64` value, so it loads `fn_ptr`/`env_len`/the env pointer out of the
+    // box at runtime and calls through `build_indirect_call` instead.
+    // `build-closure-retain` increments the refcount and returns the closure
+    // itself (chainable); `build-closure-release` decrements it and frees
+    // the box once it reaches zero — cyclic captures (e.g. mutually
+    // recursive escaping `labels` siblings) still leak, by design, the same
+    // accepted limitation the tree-walking interpreter's own `RtValue::Closure`/
+    // `labels` `Rc` cycles already have.
+    assoc.insert(
+        "build-make-closure".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
+    );
+    assoc.insert(
+        "build-closure-env-get".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
+    );
+    assoc.insert(
+        "build-closure-apply".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
+    );
+    assoc.insert("build-closure-retain".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    assoc.insert("build-closure-release".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], Type::Unit, true));
     AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
 }
 

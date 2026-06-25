@@ -20,7 +20,7 @@ use std::rc::{Rc, Weak};
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::module::Module;
-use inkwell::values::{BasicValueEnum, FunctionValue};
+use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::AddressSpace;
 
 use crate::{Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
@@ -1240,6 +1240,11 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-call" => Some(llvm_builder_build_call(args)),
             "load-env" => Some(llvm_builder_load_env(args)),
             "build-call-with-env" => Some(llvm_builder_build_call_with_env(args)),
+            "build-make-closure" => Some(llvm_builder_build_make_closure(args)),
+            "build-closure-env-get" => Some(llvm_builder_build_closure_env_get(args)),
+            "build-closure-apply" => Some(llvm_builder_build_closure_apply(args)),
+            "build-closure-retain" => Some(llvm_builder_build_closure_retain(args)),
+            "build-closure-release" => Some(llvm_builder_build_closure_release(args)),
             _ => None,
         };
     }
@@ -1325,20 +1330,28 @@ fn declare_external_function(module: &Rc<RefCell<Module<'static>>>, name: &str) 
     module.borrow_mut().add_function(name, compiled_fn_type(), None);
 }
 
-/// The captures counterpart of [`llvm_module_add_function`]: `i64
-/// name(i64* args, i32 argc, i64* env, i32 env_len)` — used for a `labels`
-/// sibling whenever its block's shared captured-name list
-/// (`compile::freevars::labels_free_vars`) is non-empty. `llvm-builder::load-env`
-/// reads a logical captured slot back out of `env`, the same way `load-arg`
-/// reads a logical parameter out of `args`.
+/// The captures counterpart of [`compiled_fn_type`]: `i64 name(i64* args,
+/// i32 argc, i64* env, i32 env_len)` — used for a `labels` sibling whenever
+/// its block's shared captured-name list
+/// (`compile::freevars::labels_free_vars`) is non-empty, and (labels/closures
+/// Stage 4) for *every* function ever wrapped into a `ClosureBox` via
+/// `build-make-closure`, capturing or not — see that builtin's doc comment
+/// (`registry::llvm_builder_def`) for why unifying on one ABI regardless of
+/// whether a given closure actually captures anything is what lets
+/// `build-closure-apply` call through it without first checking which case
+/// it's in.
+fn compiled_fn_type_with_env() -> inkwell::types::FunctionType<'static> {
+    let ctx = crate::compile::llvm_context();
+    let ptr_ty = ctx.ptr_type(AddressSpace::default());
+    ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into(), ptr_ty.into(), ctx.i32_type().into()], false)
+}
+
+/// `llvm-builder::load-env` reads a logical captured slot back out of `env`,
+/// the same way `load-arg` reads a logical parameter out of `args`.
 fn llvm_module_add_function_with_env(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(&args[1])?;
-    let ctx = crate::compile::llvm_context();
-    let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let fn_type =
-        ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into(), ptr_ty.into(), ctx.i32_type().into()], false);
-    let function = module.borrow_mut().add_function(name, fn_type, None);
+    let function = module.borrow_mut().add_function(name, compiled_fn_type_with_env(), None);
     Ok(RtValue::LlvmFunction(function))
 }
 
@@ -1574,6 +1587,235 @@ fn llvm_builder_build_call_with_env(args: &[RtValue]) -> Result<RtValue, EvalErr
             Err(EvalError::Internal("build-call-with-env: callee produced no value".into()))
         }
     }
+}
+
+/// A `ClosureBox`'s fixed heap layout (labels/closures Stage 4): 3 header
+/// slots, then `env_len` captured `i64` values inline right after — see
+/// `registry::llvm_builder_def`'s doc comment on `build-make-closure` for
+/// why this exists at all (a `lambda` value that *escapes* its defining
+/// function, rather than being called directly while still statically
+/// resolvable — `compile-apply`/`compile-call`'s direct-call scope).
+const CLOSURE_HEADER_SLOTS: u64 = 3;
+const CLOSURE_FN_PTR_SLOT: u64 = 0;
+const CLOSURE_ENV_LEN_SLOT: u64 = 1;
+const CLOSURE_REFCOUNT_SLOT: u64 = 2;
+
+/// GEPs to slot `slot` of a `ClosureBox` whose base address is `base` — the
+/// same flat-`i64`-array GEP pattern [`llvm_builder_load_arg`]/
+/// [`llvm_builder_store_arg`] already use for the args/env arrays, just
+/// against heap-allocated closure storage instead of a stack one.
+fn closure_slot_ptr(b: &Builder<'static>, base: PointerValue<'static>, slot: u64) -> Result<PointerValue<'static>, EvalError> {
+    let ctx = crate::compile::llvm_context();
+    let idx_val = ctx.i64_type().const_int(slot, false);
+    unsafe {
+        b.build_gep(ctx.i64_type(), base, &[idx_val], "closure_slot_ptr")
+            .map_err(|e| EvalError::Internal(format!("closure: {}", e)))
+    }
+}
+
+fn store_closure_slot(
+    b: &Builder<'static>,
+    base: PointerValue<'static>,
+    slot: u64,
+    value: BasicValueEnum<'static>,
+    who: &str,
+) -> Result<(), EvalError> {
+    let ptr = closure_slot_ptr(b, base, slot)?;
+    b.build_store(ptr, value).map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))?;
+    Ok(())
+}
+
+fn load_closure_slot(b: &Builder<'static>, base: PointerValue<'static>, slot: u64, who: &str) -> Result<inkwell::values::IntValue<'static>, EvalError> {
+    let ptr = closure_slot_ptr(b, base, slot)?;
+    let ctx = crate::compile::llvm_context();
+    b.build_load(ctx.i64_type(), ptr, "closure_slot_val")
+        .map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))
+        .map(|v| v.into_int_value())
+}
+
+/// Reinterprets a closure `i64` value back into the `ClosureBox` pointer it
+/// actually is — the inverse of `build-make-closure`'s final `ptrtoint`.
+fn closure_box_ptr(b: &Builder<'static>, closure: BasicValueEnum<'static>, who: &str) -> Result<PointerValue<'static>, EvalError> {
+    let ctx = crate::compile::llvm_context();
+    let ptr_ty = ctx.ptr_type(AddressSpace::default());
+    b.build_int_to_ptr(closure.into_int_value(), ptr_ty, "closure_box_ptr")
+        .map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))
+}
+
+/// Heap-allocates a `ClosureBox` wrapping `target` (a function declared via
+/// `add-function-with-env` — see `compiled_fn_type_with_env`'s doc comment
+/// for why *every* closure-boxed function uses that ABI) and a copy of
+/// `env`'s `env_len` values (an already-built `alloca-args`/`store-arg`
+/// array — the same shape a direct capturing call already builds, see
+/// `compiler.rs`'s `compile-env-args`). Uses `Builder::build_array_malloc`
+/// (LLVM's legacy `malloc`-declaring IR helper, not a Rust-side runtime
+/// shim — see `registry::llvm_builder_def`'s doc comment for that decision):
+/// `malloc`/`free` are ordinary, already-linked C library symbols on both
+/// backends (AOT's `cc` step links libc by default; MCJIT resolves
+/// unmapped externals against the host process's own symbol table by
+/// default, and this process is itself linked against libc) — unlike
+/// Stage 3's cross-`compile`-call case, no `add_global_mapping` wiring is
+/// needed here at all.
+fn llvm_builder_build_make_closure(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let target = expect_llvm_function(&args[1])?;
+    let env_ptr = expect_llvm_value(&args[2])?.into_pointer_value();
+    let env_len = match &args[3] {
+        RtValue::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let ctx = crate::compile::llvm_context();
+    let b = builder.borrow();
+    let total_slots = ctx.i64_type().const_int(CLOSURE_HEADER_SLOTS + env_len, false);
+    let box_ptr = b
+        .build_array_malloc(ctx.i64_type(), total_slots, "closure_box")
+        .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
+
+    let fn_ptr_int = b
+        .build_ptr_to_int(target.as_global_value().as_pointer_value(), ctx.i64_type(), "closure_fn_ptr")
+        .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
+    store_closure_slot(&b, box_ptr, CLOSURE_FN_PTR_SLOT, fn_ptr_int.into(), "build-make-closure")?;
+    store_closure_slot(&b, box_ptr, CLOSURE_ENV_LEN_SLOT, ctx.i64_type().const_int(env_len, false).into(), "build-make-closure")?;
+    store_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, ctx.i64_type().const_int(1, false).into(), "build-make-closure")?;
+
+    for i in 0..env_len {
+        let idx_val = ctx.i64_type().const_int(i, false);
+        let src_ptr = unsafe {
+            b.build_gep(ctx.i64_type(), env_ptr, &[idx_val], "closure_env_src")
+                .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?
+        };
+        let v = b
+            .build_load(ctx.i64_type(), src_ptr, "closure_env_val")
+            .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
+        store_closure_slot(&b, box_ptr, CLOSURE_HEADER_SLOTS + i, v, "build-make-closure")?;
+    }
+
+    let closure_val = b
+        .build_ptr_to_int(box_ptr, ctx.i64_type(), "closure_value")
+        .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
+    Ok(RtValue::LlvmValue(closure_val.into()))
+}
+
+/// `load-env`'s closure-value counterpart: reads captured slot `index` back
+/// out of a `ClosureBox` value directly, for code *holding the closure
+/// value* (e.g. about to forward its captures elsewhere) — the closure-boxed
+/// function's own body still reads its captures via `load-env` against its
+/// own env parameter, never this one.
+fn llvm_builder_build_closure_env_get(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let closure = expect_llvm_value(&args[1])?;
+    let index = match &args[2] {
+        RtValue::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let b = builder.borrow();
+    let box_ptr = closure_box_ptr(&b, closure, "build-closure-env-get")?;
+    let v = load_closure_slot(&b, box_ptr, CLOSURE_HEADER_SLOTS + index, "build-closure-env-get")?;
+    Ok(RtValue::LlvmValue(v.into()))
+}
+
+/// `build-call-with-env`'s indirect counterpart: the callee isn't a
+/// statically-known `llvm-function` here, only an `i64` closure value, so
+/// this loads `fn_ptr`/`env_len`/the env array straight out of the box at
+/// runtime and calls through `Builder::build_indirect_call` against the one
+/// fixed `compiled_fn_type_with_env` signature every closure-boxed function
+/// shares (see that function's doc comment for why no ABI branch is needed
+/// here).
+fn llvm_builder_build_closure_apply(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let closure = expect_llvm_value(&args[1])?;
+    let args_ptr = expect_llvm_value(&args[2])?;
+    let argc = match &args[3] {
+        RtValue::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let ctx = crate::compile::llvm_context();
+    let b = builder.borrow();
+    let box_ptr = closure_box_ptr(&b, closure, "build-closure-apply")?;
+    let fn_ptr_int = load_closure_slot(&b, box_ptr, CLOSURE_FN_PTR_SLOT, "build-closure-apply")?;
+    let env_len_int = load_closure_slot(&b, box_ptr, CLOSURE_ENV_LEN_SLOT, "build-closure-apply")?;
+    let env_len_i32 = b
+        .build_int_truncate(env_len_int, ctx.i32_type(), "closure_env_len_i32")
+        .map_err(|e| EvalError::Internal(format!("build-closure-apply: {}", e)))?;
+    let env_ptr = closure_slot_ptr(&b, box_ptr, CLOSURE_HEADER_SLOTS)?;
+    let ptr_ty = ctx.ptr_type(AddressSpace::default());
+    let fn_ptr = b
+        .build_int_to_ptr(fn_ptr_int, ptr_ty, "closure_fn_ptr_val")
+        .map_err(|e| EvalError::Internal(format!("build-closure-apply: {}", e)))?;
+    let argc_val = ctx.i32_type().const_int(argc, false);
+    let call = b
+        .build_indirect_call(
+            compiled_fn_type_with_env(),
+            fn_ptr,
+            &[args_ptr.into(), argc_val.into(), env_ptr.into(), env_len_i32.into()],
+            "closure_apply_result",
+        )
+        .map_err(|e| EvalError::Internal(format!("build-closure-apply: {}", e)))?;
+    match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => Ok(RtValue::LlvmValue(v)),
+        inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-closure-apply: callee produced no value".into())),
+    }
+}
+
+/// Increments a `ClosureBox`'s refcount and returns the closure value
+/// itself unchanged, so calls can chain (`(build-closure-retain b (compile-value ...))`)
+/// without a separate `let` to hold onto the original value.
+fn llvm_builder_build_closure_retain(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let closure = expect_llvm_value(&args[1])?;
+    let ctx = crate::compile::llvm_context();
+    let b = builder.borrow();
+    let box_ptr = closure_box_ptr(&b, closure, "build-closure-retain")?;
+    let rc = load_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, "build-closure-retain")?;
+    let one = ctx.i64_type().const_int(1, false);
+    let rc2 = b.build_int_add(rc, one, "closure_rc_inc").map_err(|e| EvalError::Internal(format!("build-closure-retain: {}", e)))?;
+    store_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, rc2.into(), "build-closure-retain")?;
+    Ok(RtValue::LlvmValue(closure))
+}
+
+/// Decrements a `ClosureBox`'s refcount, freeing it once that reaches zero.
+/// The only existing builtin that ever needs real control flow (a
+/// conditional `free`) — contained entirely within this one Rust function's
+/// fixed-shape IR emission (new basic blocks of its own, merged back before
+/// returning), the same way `compile::aot::build_main_wrapper` already
+/// builds fixed-shape IR with its own blocks without exposing "make a new
+/// block" as a general compiler-body capability; `compiler.rs` doesn't gain
+/// `if`/branching from this. Cyclic captures (e.g. two escaping `labels`
+/// siblings that capture each other) never reach a zero refcount and so
+/// leak, by design — see `registry::llvm_builder_def`'s doc comment.
+fn llvm_builder_build_closure_release(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let closure = expect_llvm_value(&args[1])?;
+    let ctx = crate::compile::llvm_context();
+    let b = builder.borrow();
+    let box_ptr = closure_box_ptr(&b, closure, "build-closure-release")?;
+    let rc = load_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, "build-closure-release")?;
+    let one = ctx.i64_type().const_int(1, false);
+    let rc2 =
+        b.build_int_sub(rc, one, "closure_rc_dec").map_err(|e| EvalError::Internal(format!("build-closure-release: {}", e)))?;
+    store_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, rc2.into(), "build-closure-release")?;
+
+    let current_block = b
+        .get_insert_block()
+        .ok_or_else(|| EvalError::Internal("build-closure-release: builder has no current block".into()))?;
+    let function = current_block
+        .get_parent()
+        .ok_or_else(|| EvalError::Internal("build-closure-release: current block has no parent function".into()))?;
+    let free_block = ctx.append_basic_block(function, "closure_release_free");
+    let cont_block = ctx.append_basic_block(function, "closure_release_cont");
+    let zero = ctx.i64_type().const_int(0, false);
+    let is_zero = b
+        .build_int_compare(inkwell::IntPredicate::EQ, rc2, zero, "closure_rc_is_zero")
+        .map_err(|e| EvalError::Internal(format!("build-closure-release: {}", e)))?;
+    b.build_conditional_branch(is_zero, free_block, cont_block)
+        .map_err(|e| EvalError::Internal(format!("build-closure-release: {}", e)))?;
+
+    b.position_at_end(free_block);
+    b.build_free(box_ptr).map_err(|e| EvalError::Internal(format!("build-closure-release: {}", e)))?;
+    b.build_unconditional_branch(cont_block).map_err(|e| EvalError::Internal(format!("build-closure-release: {}", e)))?;
+
+    b.position_at_end(cont_block);
+    Ok(RtValue::Unit)
 }
 
 fn expect_hashtable(v: &RtValue) -> Result<&Rc<RefCell<HashMap<HashKey, RtValue>>>, EvalError> {

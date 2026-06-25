@@ -351,6 +351,114 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
     assert_eq!(unsafe { quadruple.call(argv.as_ptr(), argv.len() as u32) }, 20);
 }
 
+/// `build-make-closure`/`build-closure-apply`: a `ClosureBox` wrapping a
+/// capturing function (`add_offset`, declared via `add-function-with-env`,
+/// adding its one logical argument to a captured value), called *indirectly*
+/// through the closure value rather than `build-call-with-env`'s direct,
+/// statically-known-target path (labels/closures Stage 4) — no
+/// `ast_bridge`/`compiler.rs` involvement yet, raw builtins only, the same
+/// way Phase 0/1's and Stage 1's own raw-builtin tests preceded their
+/// self-hosted-compiler-body counterparts. Also the first thing in this
+/// codebase to exercise `Builder::build_array_malloc`'s legacy
+/// `malloc`-declaring IR helper end to end: this test JIT-executing
+/// successfully is the empirical proof that `malloc` resolves under MCJIT
+/// with no extra `add_global_mapping` wiring (see
+/// `registry::llvm_builder_def`'s doc comment on `build-make-closure` for
+/// why that's expected, not a leap of faith).
+#[test]
+fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
+    let src = r#"
+        (defun build-and-run-closure-module () llvm-module
+          (let ((m (llvm-module::create "mod")))
+            (let ((add-offset-fn (add-function-with-env m "add_offset")))
+              (let ((caller-fn (add-function m "caller")))
+                (let ((b1 (append-block add-offset-fn "entry")))
+                  (let ((builder1 (llvm-builder::create)))
+                    (position-at-end builder1 b1)
+                    (let ((x (load-arg builder1 add-offset-fn 0)))
+                      (let ((offset (load-env builder1 add-offset-fn 0)))
+                        (build-ret builder1 (build-add builder1 x offset))))))
+                (let ((b2 (append-block caller-fn "entry")))
+                  (let ((builder2 (llvm-builder::create)))
+                    (position-at-end builder2 b2)
+                    (let ((env-arr (alloca-args builder2 1)))
+                      (store-arg builder2 env-arr 0 (const-i64 builder2 100))
+                      (let ((closure (build-make-closure builder2 add-offset-fn env-arr 1)))
+                        (let ((args-arr (alloca-args builder2 1)))
+                          (store-arg builder2 args-arr 0 (const-i64 builder2 5))
+                          (build-ret builder2 (build-closure-apply builder2 closure args-arr 1)))))))
+                m))))
+        (build-and-run-closure-module)
+    "#;
+    let module = match eval_ok(src) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let caller = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("caller")
+            .expect("failed to look up the compiled `caller` function")
+    };
+    assert_eq!(unsafe { caller.call(std::ptr::null(), 0) }, 105);
+}
+
+/// `build-closure-retain`/`build-closure-release`: a crash-free regression
+/// test, not an exact-refcount one — the refcount slot itself isn't exposed
+/// by any builtin, so the only thing worth asserting is what the plan calls
+/// for (labels/closures Stage 4 plan, §6 Stage 4 step 5): retaining once
+/// then releasing once leaves the closure still safely callable (refcount
+/// back to its original 1, not 0), and `build-closure-retain` really does
+/// return the closure value unchanged (so call sites can chain it without a
+/// separate `let`).
+#[test]
+fn closure_retain_then_release_leaves_it_still_callable() {
+    let src = r#"
+        (defun build-and-run-closure-module () llvm-module
+          (let ((m (llvm-module::create "mod")))
+            (let ((add-offset-fn (add-function-with-env m "add_offset")))
+              (let ((caller-fn (add-function m "caller")))
+                (let ((b1 (append-block add-offset-fn "entry")))
+                  (let ((builder1 (llvm-builder::create)))
+                    (position-at-end builder1 b1)
+                    (let ((x (load-arg builder1 add-offset-fn 0)))
+                      (let ((offset (load-env builder1 add-offset-fn 0)))
+                        (build-ret builder1 (build-add builder1 x offset))))))
+                (let ((b2 (append-block caller-fn "entry")))
+                  (let ((builder2 (llvm-builder::create)))
+                    (position-at-end builder2 b2)
+                    (let ((env-arr (alloca-args builder2 1)))
+                      (store-arg builder2 env-arr 0 (const-i64 builder2 100))
+                      (let ((closure (build-make-closure builder2 add-offset-fn env-arr 1)))
+                        (let ((retained (build-closure-retain builder2 closure)))
+                          (build-closure-release builder2 retained)
+                          (let ((args-arr (alloca-args builder2 1)))
+                            (store-arg builder2 args-arr 0 (const-i64 builder2 5))
+                            (build-ret builder2 (build-closure-apply builder2 closure args-arr 1))))))))
+                m))))
+        (build-and-run-closure-module)
+    "#;
+    let module = match eval_ok(src) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let caller = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("caller")
+            .expect("failed to look up the compiled `caller` function")
+    };
+    assert_eq!(unsafe { caller.call(std::ptr::null(), 0) }, 105);
+}
+
 /// The end-to-end Phase 1 slice: `(compile "name")` from typelisp source
 /// itself (not by hand-feeding `compile-function` a pre-built `Sexpr`, like
 /// the compiler-body tests above), then a later `Expr::Call` of that same
@@ -592,4 +700,107 @@ fn compile_succeeds_for_a_self_recursive_defun_without_being_run() {
         "#,
     );
     assert!(expect_bool(v));
+}
+
+/// The end-to-end Stage 4 slice (immediate-call, non-capturing): an IIFE
+/// (`((lambda (params) body) args...)`) translates to a single-def `labels`
+/// block (`ast_bridge::translate_immediate_lambda_call`), not a boxed
+/// `ClosureBox` at all — proves that delegation actually produces working,
+/// callable code end to end, from real source through `(compile "name")`.
+#[test]
+fn compile_dispatches_a_defun_with_an_immediately_invoked_lambda_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun calls-immediately ((n i64)) i64 ((lambda ((x i64)) i64 (+ x 1)) n))
+        (compile "calls-immediately")
+        (calls-immediately 9)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 10),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// Same IIFE shape, but the lambda's body captures its enclosing `defun`'s
+/// own parameter — exercising `translate_immediate_lambda_call`'s reuse of
+/// `labels_free_vars`/the captures ABI through the synthetic single-def
+/// block, not just the no-capture case above.
+#[test]
+fn compile_dispatches_a_defun_with_a_capturing_immediately_invoked_lambda_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun adds-offset ((offset i64) (n i64)) i64 ((lambda ((y i64)) i64 (+ y offset)) n))
+        (compile "adds-offset")
+        (adds-offset 100 5)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 105),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// The end-to-end Stage 4 slice (escaping + capturing `lambda`): `adder`
+/// returns a closure that captures its own parameter `n`, and `apply-fn`
+/// (a separately-compiled function taking a `(fn (i64) i64)` *parameter*)
+/// calls it through `apply-indirect`/`build-closure-apply` — the closure
+/// value never gets inspected by tree-walking code along the way (it flows
+/// from one `compile`d function's `i64` return straight into another's
+/// `i64` argument via the ordinary `Expr::Call`-dispatches-to-`Interp::compiled`
+/// path — see `Interp::compile_function`'s doc comment), which is exactly
+/// what keeps this in scope (a compiled closure observed *by tree-walking
+/// code* — e.g. printed, `eq`-compared, stored in a `HashTable` — is the
+/// one documented exclusion, not this).
+#[test]
+fn compile_dispatches_an_escaping_capturing_lambda_called_through_another_compiled_function() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun adder ((n i64)) (fn (i64) i64) (lambda ((x i64)) i64 (+ x n)))
+        (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
+        (compile "adder")
+        (compile "apply-fn")
+        (apply-fn (adder 5) 10)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 15),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// The end-to-end Stage 4 slice (`Expr::FnRef` as a closure value): `square`
+/// is used bare (no call syntax) where a `(fn (i64) i64)` is expected — the
+/// checker reifies that into `Expr::FnRef`, which `ast_bridge::translate_fnref`
+/// turns into a non-capturing forwarding `lambda` (`(lambda ... (call
+/// "square" (var arg0)))`), reaching the exact same `ClosureBox`/
+/// `build-closure-apply` machinery the closure-value test above does.
+///
+/// `run-it`'s body (not the top-level call site) is where `square` appears
+/// bare — deliberately, since the *tree-walking* interpreter's own
+/// `Expr::FnRef` evaluation produces an `RtValue::Closure`, not a plain
+/// `i64` (see `Interp::eval`'s `Expr::FnRef` arm) — feeding that straight
+/// into a *compiled* function's fixed `i64` ABI from the top level would be
+/// exactly the "compiled closure observed by tree-walking code" case
+/// `compile-lambda`'s doc comment explicitly excludes. Routing the `FnRef`
+/// through another `compile`d function instead (`run-it`, itself dispatched
+/// via `Expr::Call` -> `Interp.compiled` like any Stage 3 call) keeps the
+/// `ClosureBox` entirely on the compiled side throughout.
+#[test]
+fn compile_dispatches_a_top_level_function_passed_by_name_through_apply_fn() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun square ((x i64)) i64 (* x x))
+        (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
+        (defun run-it () i64 (apply-fn square 5))
+        (compile "square")
+        (compile "apply-fn")
+        (compile "run-it")
+        (run-it)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 25),
+        other => panic!("expected an Int, got {:?}", other),
+    }
 }

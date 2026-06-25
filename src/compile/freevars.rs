@@ -30,6 +30,24 @@ use crate::{Expr, LabelDef, Pattern, Typed};
 /// block's own sibling names, or this analysis would manufacture a bogus
 /// captured slot for a name `compile-apply` resolves through `fn-env`
 /// instead of `env`.
+/// The free variables of a single `lambda`'s body (labels/closures Stage
+/// 4) — [`labels_free_vars`]'s one-function counterpart, for a `lambda`
+/// that has no siblings of its own at all (unlike a `labels` def). Walked
+/// with an *empty* siblings set — matching [`walk`]'s own existing
+/// nested-`Lambda` arm exactly (a `lambda` never gets direct-call access to
+/// whatever `labels` block encloses it, so any name from there that its body
+/// references becomes an ordinary free variable/capture attempt here too,
+/// not a resolved direct call — see `ast_bridge::translate_lambda`'s doc
+/// comment for the documented gap that follows when that name turns out to
+/// be a sibling *function*, not an ordinary value).
+pub fn lambda_free_vars(params: &[(String, crate::Type)], body: &[Typed]) -> Vec<String> {
+    let bound: HashSet<String> = params.iter().map(|(n, _)| n.clone()).collect();
+    let mut seen = HashSet::new();
+    let mut order = Vec::new();
+    walk_body(body, &bound, &HashSet::new(), &mut seen, &mut order);
+    order
+}
+
 pub fn labels_free_vars(defs: &[LabelDef], outer_direct: &HashSet<String>) -> Vec<String> {
     let mut siblings: HashSet<String> = outer_direct.clone();
     for (name, _, _) in defs {
@@ -243,5 +261,29 @@ mod tests {
             ("g".to_string(), vec![("n".to_string(), Type::I64)], g_body),
         ];
         assert_eq!(labels_free_vars(&defs, &HashSet::new()), Vec::<String>::new());
+    }
+
+    /// `lambda_free_vars`: a single lambda's body referencing a name that's
+    /// neither its own parameter is a free variable, same as `labels_free_vars`
+    /// for a non-recursive, sibling-less def.
+    #[test]
+    fn a_lambda_referencing_an_outer_name_has_one_free_variable() {
+        let body = vec![typed(
+            Expr::Assoc {
+                type_name: crate::Path::root("i64"),
+                method: "+".to_string(),
+                instance: true,
+                args: vec![typed(Expr::Var("y".to_string()), Type::I64), typed(Expr::Var("x".to_string()), Type::I64)],
+            },
+            Type::I64,
+        )];
+        assert_eq!(lambda_free_vars(&[("y".to_string(), Type::I64)], &body), vec!["x".to_string()]);
+    }
+
+    /// A lambda's own parameter is never a free variable.
+    #[test]
+    fn a_lambda_referencing_only_its_own_parameter_has_no_free_variables() {
+        let body = vec![typed(Expr::Var("y".to_string()), Type::I64)];
+        assert_eq!(lambda_free_vars(&[("y".to_string(), Type::I64)], &body), Vec::<String>::new());
     }
 }

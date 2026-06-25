@@ -694,14 +694,78 @@ TDD: `tests/compile_test.rs`に6件追加（生Sexprの相互呼び出し・自�
 （捕捉ありlabelsヘルパーを`main`が実際に呼ぶように強化、コメントの
 古い「未対応」記述を修正）。全件green、clippy警告0、5回連続実行で安定確認済み。
 
-**次回やること（Stage 4: 一般クロージャ・`ClosureBox`・ランタイムシム）**:
-1. `tl_closure_*`シム（`make`/`env_get`/`apply`/`retain`/`release`）をRust単体
-   テストで検証（LLVM抜き）。AOTの静的リンク方式を確定（計画ファイル1.2節）。
-2. `build-make-closure`等のLLVM builtinを生typelispソースから直接検証。
-3. 即時呼び出し・非キャプチャの`lambda`でASTブリッジ〜コンパイラ本体まで通す。
-4. キャプチャしてescapeする`lambda`（`tl_closure_retain`/`_release`が初めて
-   意味を持つ）、キャプチャしてescapeする`labels`（循環キャプチャのリーク確認）。
-5. 実行時に決まるcalleeへのindirect apply、`Expr::FnRef`の実翻訳。
+**Stage 4完了（2026-06-25、未コミット）**: 一般クロージャ（`ClosureBox`、escapeする
+`lambda`値・`Expr::FnRef`・indirect apply）。
+
+**着手前の設計変更（計画ファイル1.2節の「AOT静的リンク方式」を確定）**:
+計画では`tl_closure_*`をRust側`#[no_mangle] extern "C"`シム関数として実装し、
+AOT用に別途staticlibをビルドして`cc`にリンクする方式を想定していたが、
+実装時に**ClosureBoxの全操作を直接LLVM IRとして生成する方式**（`malloc`/`free`
+はRust shimではなく`Builder::build_malloc`/`build_array_malloc`/`build_free`
+というLLVMの「レガシーmalloc宣言ヘルパー」を使う）に変更した。これにより
+新規ビルド成果物（staticlib）が一切不要になった——`malloc`/`free`はAOTの
+`cc`リンクが標準で解決し、JITのMCJITも未解決外部シンボルをプロセス自身の
+シンボルテーブル（libcを含む）にデフォルトでフォールバック検索するため、
+`add_global_mapping`の追加配線も不要だった（`tests/compile_test.rs`の
+`a_closure_made_from_a_capturing_function_can_be_called_indirectly`が
+実際にJIT実行できたことでこの前提を実証——malloc呼び出しを含むコードが
+追加配線無しで動いた）。typelisp向けbuiltin名・シグネチャ・意味論は計画通り
+（`build-make-closure`/`build-closure-env-get`/`build-closure-apply`/
+`build-closure-retain`/`build-closure-release`）だが内部実装が変わった、
+という整理——`registry.rs`の各doc commentに記載済み。
+
+- **ClosureBoxのレイアウト**: heap上のフラットな`i64`配列。slot 0=fn_ptr、
+  slot 1=env_len、slot 2=refcount、slot 3以降=捕捉値。`build-make-closure`
+  が`build_array_malloc`で確保し各slotを埋める（捕捉値は呼び出し元のスタック
+  alloca-args配列からコピー——スタック配列は寿命が尽きるため）。
+  `build-closure-apply`はslot 0/1/3..を読んでboxの**外から**間接呼び出しする
+  （`Builder::build_indirect_call`、LLVM15+のAPI）。**全てのclosure化対象関数は
+  捕捉が無くても4引数ABI(`add-function-with-env`)で統一**——これにより
+  build-closure-applyがABI分岐を持つ必要が無くなった（計画の暗黙の前提を
+  明文化）。`build-closure-retain`/`-release`はこのコードベースで唯一、
+  実際の条件分岐（`build_conditional_branch`+新規basic block）を生成する
+  builtin——`compile-closure-release`内部に閉じており、compiler.rs自体に
+  `if`を教えるものではない。循環キャプチャは既存方針通りリークを受容
+  （トレーシングGCは追加しない）。
+- **ast_bridge.rs**: `Expr::Apply`を3分岐に拡張（直接呼び出し=Stage1不変／
+  即時呼び出しlambda＝**`translate_labels`への委譲**（単一defの非再帰labels
+  ブロックとして翻訳、ClosureBox不要）／その他=indirect、新規タグ
+  `(apply-indirect callee-form arg...)`——計画原案の`(apply (direct|indirect
+  ...) ...)`統一は採用せず、Stage1-3が既に出荷済みの`(apply name arg...)`
+  形を変えずに済む独立タグにした、これも設計変更点）。`Expr::Lambda`単体
+  （escapeする値）は新規`(lambda name (captured...) (params...) body)`、
+  `name`はプロセス全体で一意な合成名（`fresh_lambda_name`、ユーザーソースに
+  無名前のため）。`Expr::FnRef`はトップレベル関数を非捕捉のforwarding
+  `lambda`（`(call name ...)`を転送するだけの本体）として同じタグに翻訳——
+  「関数参照値」を別の実行時表現にせず同じClosureBox機構に載せる設計。
+- **compiler.rs**: `compile-lambda`（新規関数を`add-function-with-env`で宣言
+  →本体を**常に新規・空の`fn-env`**でコンパイル→outer envから捕捉値を集めて
+  `build-make-closure`）、`compile-apply-indirect`（callee式をcompile-value
+  で評価→`build-closure-apply`）。
+- **`freevars.rs`**: `lambda_free_vars`新設（`labels_free_vars`の単一関数版、
+  siblings概念が無いため`outer_direct`引数も無い）。
+- **既知の未対応（意図的にスコープ外、ドキュメント化のみ)**: `labels`兄弟を
+  **値として**（呼ぶのではなく）参照するケース（例: `(labels ((f ...)) f)`）は
+  ClosureBox化されない——`Expr::Var`は`direct`集合を見ないため常に
+  `(var name)`になり、`compile-var`の`lookup-var`は`env`しか見ない（兄弟の
+  `llvm-function`は`fn-env`にしか無い）ので「unbound variable」で明確に
+  失敗する。計画のsub-step5（escapeしてキャプチャしあうlabels兄弟の循環
+  リーク確認）はこの機構が無いと書けないと判明したため**実装しなかった**
+  ——`translate_fnref`と同じ要領で兄弟をforwarding lambdaに包む拡張は
+  可能だが、その場合のラッパー本体`(apply name ...)`は兄弟のマングル済み
+  LLVM名を`fn-env`経由でしか解決できず、`compile-lambda`が新規関数の本体に
+  渡す`fn-env`を常に空にする設計（escapeするlambdaは外側labelsスコープに
+  アクセスできない、という別の意図的な制約）と衝突する——根本的な再設計が
+  要るため見送り、将来課題として明記。
+- TDD: 生builtinテスト2件（make-closure+apply、retain/release後も
+  呼び出し可能なことのクラッシュフリー回帰テスト——この2件目でmallocが
+  JITで追加配線無しに解決することを実証）、ast_bridge単体テスト8件
+  （escapeするlambda・捕捉あり・名前一意性・即時呼び出しのlabels化・
+  indirect化・FnRefのforwarding化）、freevars単体テスト2件、
+  `tests/compile_test.rs`にend-to-end4件（即時呼び出し無捕捉/捕捉、
+  escapeする捕捉lambdaを別関数からindirect呼び出し、FnRefを値として
+  渡す）、`tests/compile_file_test.rs`にAOT1件+JIT/AOTペア1件。全件green、
+  clippy警告0、5回連続実行で安定確認済み。
 
 ---
 

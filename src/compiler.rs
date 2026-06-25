@@ -13,12 +13,17 @@
 //! `+`/`-`/`*` only), `labels`-sibling/self direct calls
 //! (`(apply name arg...)`/`(labels (captured...) ((name (params)
 //! body))... trailing-body)`, the labels-compilation work — see
-//! `compile-labels`'s doc comment below for scope), and top-level `defun`-to-
+//! `compile-labels`'s doc comment below for scope), top-level `defun`-to-
 //! `defun` calls including self-recursion (`(call name arg...)`,
-//! `Expr::Call`, labels/closures Stage 3 — see `compile-call`'s doc comment).
-//! `compile-value` grows a new tag-/method-matching arm as later phases
-//! teach `ast_bridge` to translate more `Expr` variants for real. No
-//! `if`/`let`/`loop` yet.
+//! `Expr::Call`, labels/closures Stage 3 — see `compile-call`'s doc comment),
+//! and general closures (labels/closures Stage 4 — escaping `lambda`
+//! values/`Expr::FnRef` forwarding wrappers compiled to a heap-allocated
+//! `ClosureBox`, `(lambda name (captured...) (params...) body)`, see
+//! `compile-lambda`'s doc comment; indirect dispatch through one,
+//! `(apply-indirect callee-form arg...)`, see `compile-apply-indirect`'s
+//! doc comment). `compile-value` grows a new tag-/method-matching arm as
+//! later phases teach `ast_bridge` to translate more `Expr` variants for
+//! real. No `if`/`let`/`loop` yet.
 //!
 //! `compile-function` takes the destination `llvm-module` as a parameter
 //! rather than creating its own — added in Phase 2 (the AOT exit,
@@ -178,7 +183,11 @@ pub const SOURCE: &str = r#"
                                                 (compile-labels builder env fn-env captured e)
                                                 (if (eq s "call")
                                                     (compile-call builder env fn-env captured e)
-                                                    (panic (append "compile-value: unsupported tag " s)))))))))
+                                                    (if (eq s "lambda")
+                                                        (compile-lambda builder env fn-env captured e)
+                                                        (if (eq s "apply-indirect")
+                                                            (compile-apply-indirect builder env fn-env captured e)
+                                                            (panic (append "compile-value: unsupported tag " s)))))))))))
                            (_ (panic "compile-value: malformed node, expected a tagged list"))))
                        (compile-int ((builder llvm-builder) (e Sexpr)) llvm-value
                          (match (car (cdr e))
@@ -274,6 +283,70 @@ pub const SOURCE: &str = r#"
                                (let ((args-ptr (alloca-args builder argc)))
                                  (compile-call-args builder env fn-env captured args-ptr arg-forms 0)
                                  (build-call builder (get-function m nm) args-ptr argc))))))
+                       ;; `(apply-indirect callee-form arg...)` — `Expr::Apply`,
+                       ;; labels/closures Stage 4, the general indirect-
+                       ;; dispatch case (`ast_bridge::translate_indirect_apply`'s
+                       ;; doc comment explains why this is a *separate* tag
+                       ;; from `(apply name arg...)` rather than the plan's
+                       ;; originally sketched `(apply (direct|indirect ...)
+                       ;; ...)` unification — keeps Stage 1-3's already-
+                       ;; shipped shape untouched). `callee-form` is compiled
+                       ;; like any other value (it might be a `(var name)`,
+                       ;; another `(apply-indirect ...)`, a `(lambda ...)`,
+                       ;; ... — whatever produced the function value here) to
+                       ;; get a `ClosureBox` `i64`, then called through
+                       ;; `build-closure-apply` rather than `build-call`:
+                       ;; nothing here can know ahead of time which compiled
+                       ;; function it'll actually be.
+                       (compile-apply-indirect ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
+                         (let ((closure (compile-value builder env fn-env captured (car (cdr e)))))
+                           (let ((arg-forms (cdr (cdr e))))
+                             (let ((argc (sexpr-list-length arg-forms)))
+                               (let ((args-ptr (alloca-args builder argc)))
+                                 (compile-call-args builder env fn-env captured args-ptr arg-forms 0)
+                                 (build-closure-apply builder closure args-ptr argc))))))
+                       ;; `(lambda name (captured...) (params...) body)` —
+                       ;; `Expr::Lambda` (a standalone escaping value) or a
+                       ;; synthesized `Expr::FnRef` forwarding wrapper
+                       ;; (`ast_bridge::translate_fnref`) — labels/closures
+                       ;; Stage 4. Unlike every other tag `compile-value`
+                       ;; dispatches on, this one's result is *itself* a
+                       ;; fresh function, not a value computed from existing
+                       ;; ones: declares `lname` under the captures ABI
+                       ;; (`add-function-with-env` — *every* closure-boxed
+                       ;; function uses that ABI regardless of whether
+                       ;; `lcaptured` here is empty, so
+                       ;; `compile-apply-indirect`'s `build-closure-apply`
+                       ;; never has to branch on which kind of function it's
+                       ;; calling through), compiles its single-expression
+                       ;; body with a *fresh* env/fn-env (a `lambda` never
+                       ;; gets direct-call access to whatever `labels` scope
+                       ;; encloses it — see `ast_bridge::translate_lambda`'s
+                       ;; doc comment for the documented gap that follows),
+                       ;; then builds an env array from `lcaptured`'s
+                       ;; *current* values in the *outer* `env`
+                       ;; (`compile-env-args`, exactly as a capturing direct
+                       ;; call already does) and wraps the whole thing into a
+                       ;; `ClosureBox` (`build-make-closure`) — the value
+                       ;; this whole node evaluates to.
+                       (compile-lambda ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
+                         (let ((lname (sexpr-str (car (cdr e)))))
+                           (let ((lcaptured (car (cdr (cdr e)))))
+                             (let ((lparams (car (cdr (cdr (cdr e))))))
+                               (let ((lbody (car (cdr (cdr (cdr (cdr e)))))))
+                                 (let ((nested-fn (add-function-with-env m lname)))
+                                   (let ((nested-block (append-block nested-fn "entry")))
+                                     (let ((nested-builder (llvm-builder::create)))
+                                       (position-at-end nested-builder nested-block)
+                                       (let ((nested-env (new-env)))
+                                         (bind-params nested-env nested-builder nested-fn lparams 0)
+                                         (bind-captures nested-env nested-builder nested-fn lcaptured 0)
+                                         (let ((v (compile-value nested-builder nested-env (new-fn-env) lcaptured lbody)))
+                                           (build-ret nested-builder v)))))
+                                   (let ((env-len (sexpr-list-length lcaptured)))
+                                     (let ((env-ptr (alloca-args builder env-len)))
+                                       (compile-env-args builder env env-ptr lcaptured 0)
+                                       (build-make-closure builder nested-fn env-ptr env-len)))))))))
                        ;; Declares every `labels` def's `llvm-function`
                        ;; *before* compiling any of their bodies — the
                        ;; compiled-world counterpart of `Expr::Labels`'s own

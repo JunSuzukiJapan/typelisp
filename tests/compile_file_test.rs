@@ -87,6 +87,25 @@ fn compiles_and_runs_main_calling_a_helper_function() {
     assert_eq!(compile_and_run("calls_helper", src), 25);
 }
 
+/// The end-to-end Stage 4 slice (escaping + capturing `lambda`, indirect
+/// dispatch through a parameter), AOT side: `main` calls `apply-fn` with
+/// `(adder 5)` directly — `main` still can't have parameters/`let`s of its
+/// own, but every value here comes from ordinary calls with literal
+/// arguments, which `main`'s body can already express (see this module's
+/// doc comment). Proves the `ClosureBox` (`build-make-closure`/
+/// `build-closure-apply`, `malloc`/`free`-based — see
+/// `registry::llvm_builder_def`'s doc comment) links and runs correctly
+/// from a real `cc`-built executable, not just under JIT.
+#[test]
+fn compiles_and_runs_an_escaping_capturing_lambda_through_a_helper() {
+    let src = r#"
+        (defun adder ((n i64)) (fn (i64) i64) (lambda ((x i64)) i64 (+ x n)))
+        (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
+        (defun main () i64 (apply-fn (adder 5) 10))
+    "#;
+    assert_eq!(compile_and_run("escaping_lambda", src), 15);
+}
+
 /// labels/closures Stage 2 (outer-scope capture) + Stage 3 (top-level
 /// `Expr::Call`) together: a non-`main` helper `defun` whose body is a
 /// *capturing* `labels` form (`go` references `add-offset`'s own parameter
@@ -268,6 +287,47 @@ fn jit_and_aot_agree_on_a_cross_function_call() {
     };
 
     let aot_exit_code = compile_and_run("jit_aot_call_pair", src) as i64;
+
+    assert_eq!(jit_value, aot_exit_code);
+}
+
+/// Same claim as `jit_and_aot_agree_on_the_same_source`, but for `main`'s
+/// escaping-capturing-`lambda`-through-a-helper body (labels/closures
+/// Stage 4 — see `compiles_and_runs_an_escaping_capturing_lambda_through_a_helper`
+/// for the AOT-only version of this exact source). Both `adder` and
+/// `apply-fn` need a `(compile ...)` of their own before `main`'s, same
+/// reason as `jit_and_aot_agree_on_a_cross_function_call`.
+#[test]
+fn jit_and_aot_agree_on_an_escaping_capturing_lambda() {
+    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+
+    let src = r#"
+        (defun adder ((n i64)) (fn (i64) i64) (lambda ((x i64)) i64 (+ x n)))
+        (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
+        (defun main () i64 (apply-fn (adder 5) 10))
+    "#;
+
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    typelisp::load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r
+        .read_all(&mut h, &format!("{}\n(compile \"adder\")\n(compile \"apply-fn\")\n(compile \"main\")\n(main)", src))
+        .expect("read failed");
+    let mut jit_result = None;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("exec failed") {
+            jit_result = Some(val);
+        }
+    }
+    let jit_value = match jit_result {
+        Some(RtValue::Int(n)) => n,
+        other => panic!("expected an Int from the JIT path, got {:?}", other),
+    };
+
+    let aot_exit_code = compile_and_run("jit_aot_closure_pair", src) as i64;
 
     assert_eq!(jit_value, aot_exit_code);
 }
