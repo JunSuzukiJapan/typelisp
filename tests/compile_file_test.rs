@@ -72,6 +72,22 @@ fn compiles_a_file_with_a_non_main_helper_function_too() {
     assert_eq!(compile_and_run("with_helper", src), 7);
 }
 
+/// labels compilation work (Stage 1): `main`'s body is a `labels` form with
+/// two non-recursive siblings, one calling the other directly — proving
+/// the AOT path compiles `labels`-sibling calls the same way JIT does (see
+/// `tests/compile_test.rs`'s `compile_dispatches_a_defun_with_a_labels_body_to_native_code`
+/// for the JIT-side version of this exact source).
+#[test]
+fn compiles_and_runs_a_labels_body_in_main() {
+    let src = r#"
+        (defun main () i64
+          (labels ((square ((x i64)) i64 (* x x))
+                   (sum-helper ((x i64) (y i64)) i64 (+ (square x) (square y))))
+            (sum-helper 3 4)))
+    "#;
+    assert_eq!(compile_and_run("labels_in_main", src), 25);
+}
+
 #[test]
 fn exit_code_is_truncated_to_32_bits() {
     // Process exit codes are a byte on POSIX (`status.code()` already
@@ -137,6 +153,43 @@ fn jit_and_aot_agree_on_the_same_source() {
     };
 
     let aot_exit_code = compile_and_run("jit_aot_pair", src) as i64;
+
+    assert_eq!(jit_value, aot_exit_code);
+}
+
+/// Same claim as `jit_and_aot_agree_on_the_same_source`, but for a `main`
+/// whose body is a `labels` form with a non-recursive sibling call (Stage 1
+/// scope) rather than bare arithmetic.
+#[test]
+fn jit_and_aot_agree_on_a_labels_body() {
+    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+
+    let src = r#"
+        (defun main () i64
+          (labels ((square ((x i64)) i64 (* x x))
+                   (sum-helper ((x i64) (y i64)) i64 (+ (square x) (square y))))
+            (sum-helper 3 4)))
+    "#;
+
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    typelisp::load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, &format!("{}\n(compile \"main\")\n(main)", src)).expect("read failed");
+    let mut jit_result = None;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("exec failed") {
+            jit_result = Some(val);
+        }
+    }
+    let jit_value = match jit_result {
+        Some(RtValue::Int(n)) => n,
+        other => panic!("expected an Int from the JIT path, got {:?}", other),
+    };
+
+    let aot_exit_code = compile_and_run("jit_aot_labels_pair", src) as i64;
 
     assert_eq!(jit_value, aot_exit_code);
 }

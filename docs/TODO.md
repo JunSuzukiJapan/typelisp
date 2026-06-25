@@ -558,20 +558,49 @@ typelispソースファイルを読み、ファイル中の全`defun`を1つのL
   保持区間がRust→typelisp→Rustの再入を避けるよう注意——`add_compiled_function`の
   呼び出し中は外側でロックを取ってはいけない、デッドロックする）。
 
-**次回やること（Phase 3: 制御構造）**:
-1. `compiler.rs`のコンパイラ本体に`Expr::Let`/`Expr::If`(値位置・phi)/`Expr::Loop`/
-   `Expr::Break`/`Expr::Return`のコード生成を追加（`ast_bridge`側の対応する翻訳も
-   `(unsupported ...)`から実装に変える）。比較演算・`f64`/`bool`/`char`対応も
-   このPhaseに含む。
-2. 自己再帰はそのまま自分のLLVM関数を呼ぶだけ、特別扱い不要。
-3. 相互再帰: AOTはファイル全体が1moduleなので「全関数を先にdeclare→本体生成」の
-   2パスで自然に解決できる。JITは依存関数グループを1moduleに集約する仕組みが
-   別途必要（Phase 2で作った「moduleを共有して複数回`add_compiled_function`を呼ぶ」
-   仕組みがそのまま使えるはず——呼び出し先の関数も同じmoduleに先に登録しておけば
-   `build-call`で参照できる）。
-4. その後: Phase 4(Struct読み書き) → Phase 5(defmethod)。Struct構築・戻り値化は
-   Phase 6として設計のみ記録し実装範囲には含めない方針（AOTの方が単純という
-   非対称性があるため）。
+### labels/クロージャのコンパイル対応（2026-06-25開始）
+
+上の「Phase 3: 制御構造」メモ（相互再帰にAOTの2パス・JITの依存グループ集約が
+必要、という記述）は**実装コードを直接確認した結果誤りだったと判明**し、
+`labels`（CL流の局所相互再帰関数定義）と一般クロージャ（escapeするlambda値・
+高階関数）のコンパイル対応という、計画当時より大きいスコープに置き換わった。
+ユーザーの出発点の指摘——「`labels`は関数の循環参照を可能にする構文なので
+必ず循環参照がある」「LLVMレベルでは関数の循環参照は可能」「よって`labels`内の
+各関数はLLVMレベルでそれぞれ別関数としてコンパイルすべき」——から、
+**クロージャの自由変数キャプチャに対応**・**一般のlambda/高階関数も対象に含める**
+という2点をユーザーが追加スコープとして確定した。詳細な設計判断（クロージャの
+実行時表現、自由変数解析、新規LLVM builtin一覧、段階分割Stage 1-4）は計画ファイル
+`~/.claude/plans/labels-labels-resilient-shannon.md`参照。
+
+**Stage 1完了**: `labels`の兄弟/自分自身への直接呼び出し（キャプチャ無し）。
+新規`llvm-module::get-function`（同モジュール内の既存関数を名前で取得）、
+`llvm-builder::alloca-args`/`store-arg`/`build-call`（既知の関数への直接call、
+固定ABI`(args-ptr, argc)`を既存`load-arg`と対称な形で構築）。`ast_bridge.rs`に
+`Expr::Labels`/`Expr::Apply`の実翻訳を追加（`Expr::Apply`は呼び出し先が現在の
+`labels`兄弟/自分自身を指す`Var`のときだけ`(apply name arg...)`に、それ以外は
+まだ`unsupported`——indirect/boxedディスパッチは後続Stageの仕事）。`compiler.rs`は
+`builder`/`env`に加え`fn-env: HashTable<string,llvm-function>`を全ヘルパー間で
+明示的に引数として渡す設計に変更（兄弟ごとに別のbuilder/blockでボディをコンパイル
+する必要があり、Phase 1のようにクロージャで閉じ込める方式では対応できないため）。
+LLVM関数名は`外側の関数名$内側の名前`でマングルし、同一moduleを共有する別の
+`defun`の同名labels関数と衝突しないようにした。TDD: `tests/compile_test.rs`に
+3件（直接呼び出しの生builtinテスト、compile-function直接呼び出しテスト、
+`(compile "name")`経由の実ソーステスト）、`tests/compile_file_test.rs`に
+AOT版+JIT/AOTペアテスト2件追加。全件green、clippy警告0、複数回連続実行で安定。
+
+**次回やること（Stage 2: labelsの外側スコープキャプチャ対応）**:
+1. 新規`src/compile/freevars.rs`——`labels`defのbody中のVar参照のうち、自分の
+   パラメータでも兄弟名でもない名前を自由変数として収集（計画ファイル2.1/2.2節）。
+2. ABI拡張: キャプチャを持つ関数だけ`(args, argc, env, env_len)`の4引数に
+   （キャプチャ無しの既存関数・トップレベルdefunは2引数のまま不変）。
+   新規`llvm-builder::load-env`（`load-arg`のenv版）。
+3. **未決定（着手時に判断）**: Stage 1のTDDは非再帰のlabels相互呼び出しで
+   済ませたが、本来`labels`の主目的である自己再帰のテストには`if`+比較演算が要る。
+   これを軽量に先行実装するか、既存の「Phase 3: 制御構造」を先にやるかは
+   計画ファイルの保留事項3を参照し、Stage 2着手時に決める。
+4. その後: Stage 3(トップレベル`Expr::Call`、自己再帰含む——AOTはコード変更
+   不要なはず、JITのみ「未コンパイルの呼び出し先はエラー+`add_global_mapping`」
+   の配線が必要) → Stage 4(一般クロージャ・`ClosureBox`・ランタイムシム)。
 
 ---
 

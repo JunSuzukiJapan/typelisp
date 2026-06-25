@@ -8,6 +8,6 @@ pub mod ast;
 pub mod registry;
 pub mod checker;
 
-pub use ast::{Arm, Expr, Pattern, QuotedSexpr, Typed};
+pub use ast::{Arm, Expr, LabelDef, Pattern, QuotedSexpr, Typed};
 pub use registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};
 pub use checker::{Checker, MacroExpander, RedefPolicy, TopLevel};

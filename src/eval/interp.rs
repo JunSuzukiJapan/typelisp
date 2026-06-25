@@ -1154,6 +1154,7 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "add-function" => Some(llvm_module_add_function(args)),
             "verify" => Some(llvm_module_verify(args)),
             "to-string" => Some(llvm_module_to_string(args)),
+            "get-function" => Some(llvm_module_get_function(args)),
             _ => None,
         };
     }
@@ -1173,6 +1174,9 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-add" => Some(llvm_builder_build_int_op(args, "add", Builder::build_int_add)),
             "build-sub" => Some(llvm_builder_build_int_op(args, "sub", Builder::build_int_sub)),
             "build-mul" => Some(llvm_builder_build_int_op(args, "mul", Builder::build_int_mul)),
+            "alloca-args" => Some(llvm_builder_alloca_args(args)),
+            "store-arg" => Some(llvm_builder_store_arg(args)),
+            "build-call" => Some(llvm_builder_build_call(args)),
             _ => None,
         };
     }
@@ -1245,6 +1249,20 @@ fn llvm_module_verify(args: &[RtValue]) -> Result<RtValue, EvalError> {
 fn llvm_module_to_string(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let module = expect_llvm_module(&args[0])?;
     Ok(RtValue::Str(module.borrow().print_to_string().to_string()))
+}
+
+/// Looks up an already-`add-function`-declared `llvm-function` by name —
+/// see `registry::llvm_module_def`'s doc comment on `get-function` for why
+/// this is the core lookup every direct call (self-recursion, `labels`
+/// siblings, top-level `defun`-to-`defun` calls) is built on.
+fn llvm_module_get_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let module = expect_llvm_module(&args[0])?;
+    let name = expect_str(&args[1])?;
+    module
+        .borrow()
+        .get_function(name)
+        .map(RtValue::LlvmFunction)
+        .ok_or_else(|| EvalError::Panic(format!("get-function: no function named \"{}\" in this module", name)))
 }
 
 fn llvm_function_append_block(args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -1326,6 +1344,75 @@ fn llvm_builder_build_int_op(
     let b = expect_llvm_value(&args[2])?.into_int_value();
     let result = op(&builder.borrow(), a, b, name).map_err(|e| EvalError::Internal(format!("build-{}: {}", name, e)))?;
     Ok(RtValue::LlvmValue(result.into()))
+}
+
+/// Stack-allocates a `[count x i64]` array and returns its base pointer, to
+/// be filled in by `store-arg` and passed to `build-call` — the compiled-IR
+/// equivalent of building the `i64* args` array every compiled function's
+/// fixed ABI expects (see `llvm_module_add_function`'s doc comment). Opaque
+/// pointers (LLVM 17's default) carry no element-type info of their own, so
+/// this pointer is usable as a flat `i64*` exactly the way `load_arg`'s own
+/// `args_ptr` parameter already is — every GEP against it supplies
+/// `ctx.i64_type()` itself, regardless of the alloca's nominal array type.
+fn llvm_builder_alloca_args(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let count = match &args[1] {
+        RtValue::Int(n) => *n as u32,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let ctx = crate::compile::llvm_context();
+    let array_ty = ctx.i64_type().array_type(count);
+    let ptr = builder.borrow().build_alloca(array_ty, "call_args").map_err(|e| EvalError::Internal(format!("alloca-args: {}", e)))?;
+    Ok(RtValue::LlvmValue(ptr.into()))
+}
+
+/// Writes `value` into slot `index` of an `alloca-args` array — the same
+/// GEP pattern `load_arg` uses to *read* a logical argument, just paired
+/// with a store instead of a load.
+fn llvm_builder_store_arg(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let array_ptr = expect_llvm_value(&args[1])?.into_pointer_value();
+    let index = match &args[2] {
+        RtValue::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let value = expect_llvm_value(&args[3])?.into_int_value();
+    let ctx = crate::compile::llvm_context();
+    let idx_val = ctx.i64_type().const_int(index, false);
+    let b = builder.borrow();
+    let elem_ptr = unsafe {
+        b.build_gep(ctx.i64_type(), array_ptr, &[idx_val], "store_arg_ptr").map_err(|e| EvalError::Internal(format!("store-arg: {}", e)))?
+    };
+    b.build_store(elem_ptr, value).map_err(|e| EvalError::Internal(format!("store-arg: {}", e)))?;
+    Ok(RtValue::Unit)
+}
+
+/// A direct call to an already-declared `target` (typically `get-function`'s
+/// result), passing `args_ptr`/`argc` straight through to its fixed ABI —
+/// see `registry::llvm_module_def`'s doc comment for why every compiled
+/// function shares that one signature regardless of arity. This is the one
+/// new primitive that unlocks every statically-resolvable direct call:
+/// self-recursion, `labels`-sibling calls, and top-level `defun`-to-`defun`
+/// calls alike, since all three reduce to "the callee's `llvm-function`
+/// already exists in this module, look it up and call it."
+fn llvm_builder_build_call(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let target = expect_llvm_function(&args[1])?;
+    let args_ptr = expect_llvm_value(&args[2])?;
+    let argc = match &args[3] {
+        RtValue::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let ctx = crate::compile::llvm_context();
+    let argc_val = ctx.i32_type().const_int(argc, false);
+    let call = builder
+        .borrow()
+        .build_call(target, &[args_ptr.into(), argc_val.into()], "call_result")
+        .map_err(|e| EvalError::Internal(format!("build-call: {}", e)))?;
+    match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => Ok(RtValue::LlvmValue(v)),
+        inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-call: callee produced no value".into())),
+    }
 }
 
 fn expect_hashtable(v: &RtValue) -> Result<&Rc<RefCell<HashMap<HashKey, RtValue>>>, EvalError> {

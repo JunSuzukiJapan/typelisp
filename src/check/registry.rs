@@ -545,6 +545,12 @@ fn llvm_module_def() -> AdtDef {
     assoc.insert("add-function".to_string(), assoc_fn(vec![llvm_module_ty(), Type::Str], llvm_function_ty(), true));
     assoc.insert("verify".to_string(), assoc_fn(vec![llvm_module_ty()], Type::Bool, true));
     assoc.insert("to-string".to_string(), assoc_fn(vec![llvm_module_ty()], Type::Str, true));
+    // `get-function`: look up an already-declared `llvm-function` by name in
+    // this module — the core primitive direct calls (self-recursion,
+    // `labels`-sibling calls, top-level `defun`-to-`defun` calls) are built
+    // on, since every callee in those cases is something this same module
+    // already added via `add-function` before the caller's body is compiled.
+    assoc.insert("get-function".to_string(), assoc_fn(vec![llvm_module_ty(), Type::Str], llvm_function_ty(), true));
     AdtDef { name: Path::root("llvm-module"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
 }
 
@@ -577,6 +583,20 @@ fn llvm_builder_def() -> AdtDef {
     assoc.insert("build-add".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     assoc.insert("build-sub".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     assoc.insert("build-mul".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    // `alloca-args`/`store-arg`/`build-call`: building a direct call to an
+    // already-declared function (`get-function`'s result). `alloca-args`
+    // stack-allocates a fresh `[count x i64]` array (mirroring the fixed-ABI
+    // argument array every compiled function already expects) and returns
+    // its decayed element pointer; `store-arg` fills in one slot at a time
+    // (the same loop shape `compiler.rs`'s `bind-params` already uses for
+    // reading arguments, just writing instead); `build-call` then calls the
+    // target with that pointer plus a literal arg count, exactly matching
+    // `CompiledSignature`'s `i64 fn(i64* args, i32 argc)` shape — so calling
+    // a compiled function looks the same whether the call originates from
+    // Rust (`compile::CompiledFn::call`) or from another compiled function.
+    assoc.insert("alloca-args".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::I32], llvm_value_ty(), true));
+    assoc.insert("store-arg".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::I32, llvm_value_ty()], Type::Unit, true));
+    assoc.insert("build-call".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true));
     AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
 }
 
