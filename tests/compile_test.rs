@@ -177,7 +177,7 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
 #[test]
 fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels (("f" (x) (apply "g" (var "x"))) ("g" (n) (var "n"))) (apply "f" (int 5))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" (x) (apply "g" (var "x"))) ("g" (n) (var "n"))) (apply "f" (int 5))))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -193,6 +193,35 @@ fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
             .expect("failed to look up the compiled `outer` function")
     };
     assert_eq!(unsafe { outer.call(std::ptr::null(), 0) }, 5);
+}
+
+/// labels/closures Stage 2 (outer-scope capture): the compiler body
+/// compiling `ast_bridge::translate_labels`'s extended shape — a non-empty
+/// captured list (`"offset"`, `outer`'s own first parameter) — through
+/// `declare-labels-siblings`'s `add-function-with-env` branch,
+/// `compile-labels-bodies`'s `bind-captures`, and `compile-apply`'s
+/// `build-call-with-env` branch, none of which the Stage 1 sibling-call
+/// test above exercises (its captured list is always empty).
+#[test]
+fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value() {
+    let module = match eval_ok_with_compiler(
+        r#"(compile-function (llvm-module::create "mod") "outer" '(offset n) '(labels (offset) (("go" (k) (assoc "i64" "+" true (var "k") (var "offset")))) (apply "go" (var "n"))))"#,
+    ) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let outer = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("outer")
+            .expect("failed to look up the compiled `outer` function")
+    };
+    let argv: [i64; 2] = [3, 4];
+    assert_eq!(unsafe { outer.call(argv.as_ptr(), argv.len() as u32) }, 7);
 }
 
 /// Hands a real, JIT-executable `llvm-module` back to Rust (rather than its
@@ -393,6 +422,56 @@ fn compile_dispatches_a_defun_with_a_labels_body_to_native_code() {
     );
     match v {
         RtValue::Int(n) => assert_eq!(n, 25),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// The end-to-end Stage 2 slice (outer-scope capture), from real typelisp
+/// source: `go`'s body references `offset`, the enclosing `defun`'s own
+/// parameter — neither its own parameter `k` nor a sibling name — so
+/// `ast_bridge`'s `labels_free_vars` must collect it as a real capture, and
+/// `(compile "add-offset")` must build `go` under the extended ABI and wire
+/// the trailing body's call to pass `offset` through.
+#[test]
+fn compile_dispatches_a_defun_with_a_capturing_labels_body_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun add-offset ((offset i64) (n i64)) i64
+          (labels ((go ((k i64)) i64 (+ k offset)))
+            (go n)))
+        (compile "add-offset")
+        (add-offset 10 5)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 15),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// The multi-sibling case `compile_dispatches_a_defun_with_a_capturing_labels_body_to_native_code`
+/// doesn't exercise: `helper` itself never references `offset`, only its
+/// sibling `go` does — so the *block's* free-variable list (not `helper`'s
+/// own) must still include `offset`, and `helper` must still receive it (via
+/// `bind-captures`, even though its own body never reads it) purely so it
+/// can forward it on to `go`. This is the shared-environment design's load-
+/// bearing claim (`compile::freevars::labels_free_vars`'s doc comment): if
+/// each sibling computed its own narrower captured list instead, `helper`
+/// would have no value to forward and this call would fail to compile.
+#[test]
+fn a_sibling_that_never_references_a_capture_still_forwards_it_to_another_sibling() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun choose ((offset i64) (n i64)) i64
+          (labels ((helper ((k i64)) i64 (go k))
+                   (go ((k i64)) i64 (+ k offset)))
+            (helper n)))
+        (compile "choose")
+        (choose 10 5)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 15),
         other => panic!("expected an Int, got {:?}", other),
     }
 }

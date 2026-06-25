@@ -588,19 +588,78 @@ LLVM関数名は`外側の関数名$内側の名前`でマングルし、同一m
 `(compile "name")`経由の実ソーステスト）、`tests/compile_file_test.rs`に
 AOT版+JIT/AOTペアテスト2件追加。全件green、clippy警告0、複数回連続実行で安定。
 
-**次回やること（Stage 2: labelsの外側スコープキャプチャ対応）**:
-1. 新規`src/compile/freevars.rs`——`labels`defのbody中のVar参照のうち、自分の
-   パラメータでも兄弟名でもない名前を自由変数として収集（計画ファイル2.1/2.2節）。
-2. ABI拡張: キャプチャを持つ関数だけ`(args, argc, env, env_len)`の4引数に
-   （キャプチャ無しの既存関数・トップレベルdefunは2引数のまま不変）。
-   新規`llvm-builder::load-env`（`load-arg`のenv版）。
-3. **未決定（着手時に判断）**: Stage 1のTDDは非再帰のlabels相互呼び出しで
-   済ませたが、本来`labels`の主目的である自己再帰のテストには`if`+比較演算が要る。
-   これを軽量に先行実装するか、既存の「Phase 3: 制御構造」を先にやるかは
-   計画ファイルの保留事項3を参照し、Stage 2着手時に決める。
-4. その後: Stage 3(トップレベル`Expr::Call`、自己再帰含む——AOTはコード変更
-   不要なはず、JITのみ「未コンパイルの呼び出し先はエラー+`add_global_mapping`」
-   の配線が必要) → Stage 4(一般クロージャ・`ClosureBox`・ランタイムシム)。
+**Stage 2完了**: `labels`の外側スコープキャプチャ対応。新規`src/compile/freevars.rs`
+の`labels_free_vars(defs, outer_direct)`——`labels`ブロック**全体**の自由変数を
+1つのリストとして集約（defごとに別々のリストを持たせるのではなく、全兄弟が
+**同じ1つの**捕捉リストを共有する設計。理由: 兄弟Aが兄弟Bを呼ぶとき、Bが必要とする
+捕捉変数をAが転送できる必要があるが、Aの「自分の自由変数」だけではBの分が
+欠落する——全員に同じリストを持たせれば、各兄弟が自分のprologueで全捕捉変数を
+受け取っておくだけで、誰が誰を呼んでも転送できる。詳細は
+`labels_free_vars`/`compile-labels`のdocコメント参照）。`outer_direct`引数は
+外側の`labels`がすでに直接呼び出し解決済みの名前（ネストした`labels`が外側の
+兄弟を参照する場合に誤って捕捉と判定しないための除外——現状ネストした`labels`
+自体は未対応・未テストだが、Stage 1から継承していた“外側兄弟への直接呼び出しは
+可能”という前提を自由変数解析でも壊さないための安全策）。
+
+ABI拡張: 捕捉ありの`labels`ブロックは**ブロック内の全兄弟**が`(args, argc, env,
+env_len)`の4引数ABIになる（捕捉無しの既存関数・トップレベル`defun`は2引数の
+まま不変——既存テスト・Stage 1のABIに一切影響なし）。新規
+`llvm-module::add-function-with-env`（4引数ABIで宣言）、
+`llvm-builder::load-env`（`load-arg`のenv版、`get_nth_param(2)`）、
+`llvm-builder::build-call-with-env`（`build-call`のenv版、4引数を渡す呼び出し）。
+`compiler.rs`は`compile-value`/`compile-apply`/`compile-assoc`/`compile-call-args`
+全てに`captured: Sexpr`（現在の直接呼び出しスコープが共有する捕捉名リスト、
+キャプチャ無しなら空リスト）を明示的に追加で引き渡す設計に拡張。新規
+`bind-captures`（`bind-params`のenv版）、`compile-env-args`（呼び出し側で
+捕捉変数の現在値を集めてenv配列を組み立てる、`compile-call-args`の対）、
+`lookup-var`（`compile-var`の実体を切り出し`compile-env-args`と共有）。
+
+**未決定だった保留事項3（if/比較演算の先行実装)は不要だった**: Stage 1と同じく
+非再帰（自己呼び出し無し）の検証で十分だった——`labels`ブロック内の1兄弟が
+別の兄弟を呼ぶだけで捕捉の転送ロジックを検証できるため、再帰の終了条件
+（`if`+比較）は要らなかった。よって`if`/比較演算の実装は依然未着手のまま
+（Stage 3着手時に改めて検討）。
+
+**実装中に見つかった既存の根本問題（Stage 1から、今回修正）**: `ast_bridge.rs`の
+`translate_labels`が、複数式bodyエラー（`fbody.len() != 1`）を返す際に、すでに
+push済みの`def_values`のGC rootをpopせずreturnしていた——root stackの不変条件を
+破る既存バグ（[[feedback-dont-excuse-by-age]]の通りStage 1からの既存問題かどうかは
+重大度判断に使わない）。今回`captured_list`の追加と合わせて修正済み。
+
+**既知の制約（今回判明、未解決）**: `compile-labels`は`inner-fn-env`を常に
+`new-fn-env`で空から始めるため、ネストした`labels`の内側兄弟が外側の兄弟を
+直接呼ぶケースは、`ast_bridge`側は`direct`集合で正しく直接呼び出しと判定する
+ものの、`compiler.rs`側で`fn-env`の検索が失敗しコンパイル時panicになる
+（Stage 1から存在、Stage 1/2どちらのテストでも露見しない——両方とも単一階層の
+`labels`のみが対象のため）。ネストした`labels`のコンパイル対応に着手する際は
+要修正（`compiler.rs`のモジュールdocコメントに記載済み）。
+
+TDD: `tests/compile_test.rs`に3件追加（捕捉ありlabelsの生Sexprテスト、単一兄弟が
+外側パラメータを捕捉する`(compile "name")`経由のend-to-endテスト、兄弟Aが自分では
+参照しない捕捉変数を兄弟Bのために転送するend-to-endテスト——共有リスト設計の
+価値を直接立証）。`tests/compile_file_test.rs`に1件追加（捕捉ありlabelsを持つ
+non-main helper defunがAOTで他の関数と同じmoduleに問題なくコンパイル・リンク
+できることの確認——`main`自身はパラメータも`let`も使えないため捕捉元になる
+変数が無く、捕捉ありlabelsを直接実行するJIT/AOTペアテストは書けない、既存の
+`compiles_a_file_with_a_non_main_helper_function_too`と同じ制約）。全件green、
+clippy警告0、5回連続実行で安定確認済み。
+
+**次回やること（Stage 3: トップレベル`Expr::Call`、自己再帰含む）**:
+1. `ast_bridge.rs`の`Expr::Call`実翻訳（`(call name arg...)`、`Expr::Assoc`と同型）。
+2. `compiler.rs`の`compile-call`を新設（`compile-apply`の直接呼び出し経路と
+   ほぼ同じ、ただし`fn-env`ではなく`(get-function m name)`で直接モジュールから
+   検索——トップレベル`defun`は`fn-env`に登録されないため）。
+3. AOTはコード変更不要なはず（`compile::aot::compile_file`の既存の単純な
+   前方ループで十分——`resolve_fn`の制約上、呼び出し先は呼び出し元より必ず
+   先に定義済み、計画ファイル2.5節参照）。
+4. JITのみ追加が必要: `(compile "f")`が未コンパイルの呼び出し先`g`を検出した
+   場合に明確なエラーを返す経路、および`g`がコンパイル済みなら使い捨てモジュールに
+   外部宣言+`engine.add_global_mapping`で配線。
+5. 自己再帰のテスト（`if`/比較演算が無くてもベースケース無しの末尾呼び出し型で
+   検証できないか要検討——あるいはここでようやく`if`/比較演算の先行実装が必要に
+   なる可能性が高い）。
+6. その後: Stage 4(一般クロージャ・`ClosureBox`・ランタイムシム`tl_closure_*`・
+   AOT用staticlibビルド方式の確定)。
 
 ---
 

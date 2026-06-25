@@ -551,6 +551,16 @@ fn llvm_module_def() -> AdtDef {
     // on, since every callee in those cases is something this same module
     // already added via `add-function` before the caller's body is compiled.
     assoc.insert("get-function".to_string(), assoc_fn(vec![llvm_module_ty(), Type::Str], llvm_function_ty(), true));
+    // `add-function-with-env`: declares a function under the *extended*
+    // ABI a `labels` block with outer-scope captures needs — `i64 name(i64*
+    // args, i32 argc, i64* env, i32 env_len)` — used instead of
+    // `add-function` exactly when that block's shared captured-name list
+    // (`compile::freevars::labels_free_vars`) is non-empty. Every sibling in
+    // such a block shares this one extended signature, even ones whose own
+    // body doesn't reference every captured name (see `compiler.rs`'s
+    // `compile-labels` doc comment for why captures aren't computed
+    // per-sibling).
+    assoc.insert("add-function-with-env".to_string(), assoc_fn(vec![llvm_module_ty(), Type::Str], llvm_function_ty(), true));
     AdtDef { name: Path::root("llvm-module"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
 }
 
@@ -597,6 +607,24 @@ fn llvm_builder_def() -> AdtDef {
     assoc.insert("alloca-args".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::I32], llvm_value_ty(), true));
     assoc.insert("store-arg".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::I32, llvm_value_ty()], Type::Unit, true));
     assoc.insert("build-call".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true));
+    // `load-env`/`build-call-with-env`: the captures counterpart of
+    // `load-arg`/`build-call`, for functions declared via
+    // `add-function-with-env`. `load-env` reads logical captured slot
+    // `index` out of the function's env array (`load-arg`'s GEP pattern,
+    // against the env parameter instead of the args one); `build-call-with-env`
+    // calls a target under the extended ABI, passing both the args array
+    // (as `build-call` already does) and an env array built the same way
+    // (`alloca-args`/`store-arg`, just filled with captured values instead
+    // of call arguments).
+    assoc.insert("load-env".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), Type::I32], llvm_value_ty(), true));
+    assoc.insert(
+        "build-call-with-env".to_string(),
+        assoc_fn(
+            vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty(), Type::I32, llvm_value_ty(), Type::I32],
+            llvm_value_ty(),
+            true,
+        ),
+    );
     AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
 }
 

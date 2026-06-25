@@ -11,10 +11,10 @@
 //! real translation for today — integer literals (`(int n)`), `i64`
 //! arithmetic (`(var name)`/`(assoc type method instance arg...)`, for
 //! `+`/`-`/`*` only), and direct calls (`(apply name arg...)`/
-//! `(labels ((name (params) body))... trailing-body)`, the labels-
-//! compilation work — see `compile-labels`'s doc comment below for scope).
-//! `compile-value` grows a new tag-/method-matching arm as later phases
-//! teach `ast_bridge` to translate more `Expr` variants for real. No
+//! `(labels (captured...) ((name (params) body))... trailing-body)`, the
+//! labels-compilation work — see `compile-labels`'s doc comment below for
+//! scope). `compile-value` grows a new tag-/method-matching arm as later
+//! phases teach `ast_bridge` to translate more `Expr` variants for real. No
 //! `if`/`let`/`loop`/top-level `Expr::Call` yet.
 //!
 //! `compile-function` takes the destination `llvm-module` as a parameter
@@ -49,7 +49,7 @@
 //! from Rust (`Interp::add_compiled_function`) sidesteps the top-level
 //! restriction entirely.
 //!
-//! Unlike Phase 0/1, `builder`/`env`/`fn-env` are now **explicit**
+//! Unlike Phase 0/1, `builder`/`env`/`fn-env`/`captured` are now **explicit**
 //! parameters threaded through every one of these functions, not values
 //! they close over: `compile-labels` (below) needs to compile each
 //! `labels`-sibling's body with *its own* fresh `builder`/`env` (a
@@ -57,9 +57,21 @@
 //! bindings) while still reusing the very same `compile-value` dispatcher
 //! — something closing over one fixed `builder`/`env` at the `labels`
 //! block's own definition site (Phase 1's design) can't do. `fn-env:
-//! HashTable<string,llvm-function>` is the new table parallel to `env`
-//! that makes a name resolve to a *callable function* rather than a value
-//! — see `compile-apply`'s doc comment.
+//! HashTable<string,llvm-function>` is the table parallel to `env` that
+//! makes a name resolve to a *callable function* rather than a value (see
+//! `compile-apply`'s doc comment); `captured: Sexpr` (labels/closures
+//! Stage 2) is the *current* direct-call scope's shared captured-name list
+//! (empty outside any capturing `labels` block), threaded the same way so
+//! every direct call site knows whether — and how — to build an env array
+//! for its callee. **Known limitation**: a `labels` block nested inside
+//! another doesn't share `fn-env` with its enclosing one (`compile-labels`
+//! always starts `inner-fn-env` from `new-fn-env`, not from the `fn-env` it
+//! itself received), so an inner sibling calling an *outer* one would panic
+//! at compile time ("no direct-callable function named ...") despite
+//! `ast_bridge` correctly treating that name as direct-callable — out of
+//! scope for Stage 1/2 (both are single-level `labels` only) and not
+//! exercised by any test here, but a real gap for whenever nested `labels`
+//! compilation is attempted.
 //!
 //! Doesn't depend on `prelude.rs` (no `cond`/`when`/...) — only the
 //! checker's native special forms (`if`/`let`/`match`/`labels`) and
@@ -81,6 +93,19 @@ pub const SOURCE: &str = r#"
      (bind-params env builder f rest (+ idx 1)))
     (_ ())))
 
+;; The captures counterpart of `bind-params` (labels/closures Stage 2):
+;; reads each captured name back out of a function's env array (`load-env`,
+;; the env-array analogue of `load-arg`) into `env` under its own name, so
+;; `compile-var`'s ordinary by-name lookup finds it exactly like a regular
+;; parameter. A no-op when `names` is empty — the Stage 1 (no-capture) path
+;; this leaves untouched.
+(defun bind-captures ((env HashTable<string,llvm-value>) (builder llvm-builder) (f llvm-function) (names Sexpr) (idx i32)) ()
+  (match names
+    ((Cons (Sym name) rest)
+     (set env name (load-env builder f idx))
+     (bind-captures env builder f rest (+ idx 1)))
+    (_ ())))
+
 ;; `HashTable::new` is a static call whose generic `V`/`K` can only be
 ;; inferred from an *expected* type (e.g. a `defun`'s declared return type),
 ;; never from a `let` binding's initializer (`check_let` always checks that
@@ -94,11 +119,38 @@ pub const SOURCE: &str = r#"
 (defun new-fn-env () HashTable<string,llvm-function> (HashTable::new))
 
 ;; Counts a plain `Sexpr` list's elements — used to size the `i64*` args
-;; array a direct call needs (`compile-apply`'s `alloca-args`/`build-call`).
+;; array a direct call needs (`compile-apply`'s `alloca-args`/`build-call`),
+;; and (labels/closures Stage 2) the `i64*` env array a captured call needs.
 (defun sexpr-list-length ((s Sexpr)) i32
   (match s
     ((Cons _ rest) (+ 1 (sexpr-list-length rest)))
     (_ 0)))
+
+;; Looks up `name` in `env`, panicking if unbound — the lookup
+;; `compile-var` does for an ordinary variable reference, factored out so
+;; `compile-env-args` (labels/closures Stage 2: building the env array a
+;; captured call passes) can reuse the exact same by-name lookup without
+;; re-deriving it from a `(var name)`-tagged `Sexpr` node it doesn't have.
+(defun lookup-var ((env HashTable<string,llvm-value>) (name string)) llvm-value
+  (match (get env name)
+    ((Some v) v)
+    (None (panic (append "compile-var: unbound variable " name)))))
+
+;; Fills a fresh `alloca-args` array with each captured name's *current*
+;; value, looked up in the caller's own `env` — the env-array analogue of
+;; `compile-call-args`, just reading already-computed values by name
+;; instead of compiling fresh argument expressions. Every direct callee
+;; reachable from a given call site shares the same captured-name list (see
+;; `compile-labels`'s doc comment), so the caller's own `env` already holds
+;; a value for each one: either bound directly (an enclosing `defun`'s own
+;; parameter), or itself loaded via `bind-captures` if the caller is a
+;; sibling that captures the very same names.
+(defun compile-env-args ((builder llvm-builder) (env HashTable<string,llvm-value>) (env-ptr llvm-value) (names Sexpr) (idx i32)) ()
+  (match names
+    ((Cons (Sym name) rest)
+     (store-arg builder env-ptr idx (lookup-var env name))
+     (compile-env-args builder env env-ptr rest (+ idx 1)))
+    (_ ())))
 
 (defun compile-function ((m llvm-module) (name string) (param-names Sexpr) (body Sexpr)) llvm-module
     (let ((f (add-function m name)))
@@ -108,7 +160,7 @@ pub const SOURCE: &str = r#"
           (let ((env (new-env)))
             (bind-params env builder f param-names 0)
             (let ((fn-env (new-fn-env)))
-              (labels ((compile-value ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (e Sexpr)) llvm-value
+              (labels ((compile-value ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
                          (match (car e)
                            ((Sym s)
                             (if (eq s "int")
@@ -116,11 +168,11 @@ pub const SOURCE: &str = r#"
                                 (if (eq s "var")
                                     (compile-var env e)
                                     (if (eq s "assoc")
-                                        (compile-assoc builder env fn-env e)
+                                        (compile-assoc builder env fn-env captured e)
                                         (if (eq s "apply")
-                                            (compile-apply builder env fn-env e)
+                                            (compile-apply builder env fn-env captured e)
                                             (if (eq s "labels")
-                                                (compile-labels builder env fn-env e)
+                                                (compile-labels builder env fn-env captured e)
                                                 (panic (append "compile-value: unsupported tag " s))))))))
                            (_ (panic "compile-value: malformed node, expected a tagged list"))))
                        (compile-int ((builder llvm-builder) (e Sexpr)) llvm-value
@@ -128,15 +180,12 @@ pub const SOURCE: &str = r#"
                            ((Int n) (const-i64 builder n))
                            (_ (panic "compile-int: malformed int node"))))
                        (compile-var ((env HashTable<string,llvm-value>) (e Sexpr)) llvm-value
-                         (let ((var-name (sexpr-str (car (cdr e)))))
-                           (match (get env var-name)
-                             ((Some v) v)
-                             (None (panic (append "compile-var: unbound variable " var-name))))))
-                       (compile-assoc ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (e Sexpr)) llvm-value
+                         (lookup-var env (sexpr-str (car (cdr e)))))
+                       (compile-assoc ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
                          (let ((method (sexpr-str (car (cdr (cdr e))))))
                            (let ((rest (cdr (cdr (cdr (cdr e))))))
-                             (let ((a (compile-value builder env fn-env (car rest))))
-                               (let ((b2 (compile-value builder env fn-env (car (cdr rest)))))
+                             (let ((a (compile-value builder env fn-env captured (car rest))))
+                               (let ((b2 (compile-value builder env fn-env captured (car (cdr rest)))))
                                  (if (eq method "+")
                                      (build-add builder a b2)
                                      (if (eq method "-")
@@ -150,27 +199,39 @@ pub const SOURCE: &str = r#"
                        ;; of reading, and walking a Sexpr list of *unevaluated
                        ;; forms* (each one fed back through `compile-value`)
                        ;; rather than a Sexpr list of parameter names.
-                       (compile-call-args ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (args-ptr llvm-value) (forms Sexpr) (idx i32)) ()
+                       (compile-call-args ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (args-ptr llvm-value) (forms Sexpr) (idx i32)) ()
                          (match forms
                            ((Cons form rest)
-                            (let ((v (compile-value builder env fn-env form)))
+                            (let ((v (compile-value builder env fn-env captured form)))
                               (store-arg builder args-ptr idx v)
-                              (compile-call-args builder env fn-env args-ptr rest (+ idx 1))))
+                              (compile-call-args builder env fn-env captured args-ptr rest (+ idx 1))))
                            (_ ())))
                        ;; `(apply name arg...)` — a direct call to a name
                        ;; `ast_bridge::translate_apply` already proved (at
                        ;; bridge-translation time) resolves to a currently
                        ;; in-scope `labels` sibling or self; this only has
                        ;; to look it up in `fn-env`, never re-derive that
-                       ;; judgment.
-                       (compile-apply ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (e Sexpr)) llvm-value
+                       ;; judgment. labels/closures Stage 2: every direct
+                       ;; callee reachable from here shares this same
+                       ;; `captured` list (see `compile-labels`'s doc
+                       ;; comment), so a non-empty `captured` means *every*
+                       ;; direct call here needs an env array built and
+                       ;; passed via `build-call-with-env`, regardless of
+                       ;; which sibling `nm` actually names.
+                       (compile-apply ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
                          (let ((nm (sexpr-str (car (cdr e)))))
                            (let ((arg-forms (cdr (cdr e))))
                              (let ((argc (sexpr-list-length arg-forms)))
                                (let ((args-ptr (alloca-args builder argc)))
-                                 (compile-call-args builder env fn-env args-ptr arg-forms 0)
+                                 (compile-call-args builder env fn-env captured args-ptr arg-forms 0)
                                  (match (get fn-env nm)
-                                   ((Some target) (build-call builder target args-ptr argc))
+                                   ((Some target)
+                                    (let ((env-len (sexpr-list-length captured)))
+                                      (if (eq env-len 0)
+                                          (build-call builder target args-ptr argc)
+                                          (let ((env-ptr (alloca-args builder env-len)))
+                                            (compile-env-args builder env env-ptr captured 0)
+                                            (build-call-with-env builder target args-ptr argc env-ptr env-len)))))
                                    (None (panic (append "compile-apply: no direct-callable function named " nm)))))))))
                        ;; Declares every `labels` def's `llvm-function`
                        ;; *before* compiling any of their bodies — the
@@ -187,23 +248,32 @@ pub const SOURCE: &str = r#"
                        ;; function with the same local name without
                        ;; colliding; `inner-fn-env` is keyed by the
                        ;; *unmangled* local name, since that's the only name
-                       ;; `compile-apply`'s lookups ever see.
-                       (declare-labels-siblings ((inner-fn-env HashTable<string,llvm-function>) (defs Sexpr)) ()
+                       ;; `compile-apply`'s lookups ever see. labels/closures
+                       ;; Stage 2: every sibling in one block shares the same
+                       ;; ABI, so the choice between `add-function` (no
+                       ;; captures) and `add-function-with-env` (captures) is
+                       ;; made once from `captured`'s length, not per-def.
+                       (declare-labels-siblings ((inner-fn-env HashTable<string,llvm-function>) (captured Sexpr) (defs Sexpr)) ()
                          (match defs
                            ((Cons def rest)
                             (let ((nm (sexpr-str (car def))))
-                              (set inner-fn-env nm (add-function m (append name (append "$" nm))))
-                              (declare-labels-siblings inner-fn-env rest)))
+                              (let ((mangled (append name (append "$" nm))))
+                                (if (eq (sexpr-list-length captured) 0)
+                                    (set inner-fn-env nm (add-function m mangled))
+                                    (set inner-fn-env nm (add-function-with-env m mangled)))
+                                (declare-labels-siblings inner-fn-env captured rest))))
                            (_ ())))
                        ;; Second pass: now that every sibling is declared
                        ;; (and in `inner-fn-env`), give each its own block
                        ;; and builder, bind its own parameters into a fresh
-                       ;; `env` (Stage 1 scope: no outer-scope capture, so
-                       ;; nothing besides `inner-fn-env` carries over from
-                       ;; the enclosing function — see `ast_bridge`'s
-                       ;; `translate_labels` doc comment), and compile its
-                       ;; single body expression.
-                       (compile-labels-bodies ((inner-fn-env HashTable<string,llvm-function>) (defs Sexpr)) ()
+                       ;; `env`, and — labels/closures Stage 2 — load every
+                       ;; one of the block's shared captured names into that
+                       ;; same `env` too (`bind-captures`, a no-op when
+                       ;; `captured` is empty), before compiling its single
+                       ;; body expression with `captured` carried forward so
+                       ;; any call it makes to a sibling (or itself) can
+                       ;; build that same env array right back.
+                       (compile-labels-bodies ((inner-fn-env HashTable<string,llvm-function>) (captured Sexpr) (defs Sexpr)) ()
                          (match defs
                            ((Cons def rest)
                             (let ((nm (sexpr-str (car def))))
@@ -216,26 +286,38 @@ pub const SOURCE: &str = r#"
                                          (position-at-end sib-builder sib-block)
                                          (let ((sib-env (new-env)))
                                            (bind-params sib-env sib-builder sib-fn param-syms 0)
-                                           (let ((v (compile-value sib-builder sib-env inner-fn-env def-body)))
+                                           (bind-captures sib-env sib-builder sib-fn captured 0)
+                                           (let ((v (compile-value sib-builder sib-env inner-fn-env captured def-body)))
                                              (build-ret sib-builder v)
-                                             (compile-labels-bodies inner-fn-env rest))))))
+                                             (compile-labels-bodies inner-fn-env captured rest))))))
                                     (None (panic (append "compile-labels-bodies: missing declaration for " nm))))))))
                            (_ ())))
-                       ;; `(labels ((name (params) body))... trailing-body)`:
-                       ;; declare every sibling, compile every body, then
-                       ;; compile the trailing body *with the enclosing
-                       ;; function's own `builder`/`env`* (it's ordinary
-                       ;; code in the function currently being compiled,
-                       ;; not a new function of its own) extended with
-                       ;; `inner-fn-env` so it can call the siblings too.
-                       (compile-labels ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (e Sexpr)) llvm-value
-                         (let ((defs (car (cdr e))))
-                           (let ((trailing (car (cdr (cdr e)))))
-                             (let ((inner-fn-env (new-fn-env)))
-                               (declare-labels-siblings inner-fn-env defs)
-                               (compile-labels-bodies inner-fn-env defs)
-                               (compile-value builder env inner-fn-env trailing))))))
-                (let ((v (compile-value builder env fn-env body)))
+                       ;; `(labels (captured...) ((name (params) body))...
+                       ;; trailing-body)`: declare every sibling, compile
+                       ;; every body, then compile the trailing body *with
+                       ;; the enclosing function's own `builder`/`env`* (it's
+                       ;; ordinary code in the function currently being
+                       ;; compiled, not a new function of its own) extended
+                       ;; with `inner-fn-env` and this block's own
+                       ;; `inner-captured` so it can call the siblings
+                       ;; (including any that capture) too. The `captured`
+                       ;; parameter `compile-labels` itself receives — the
+                       ;; *enclosing* scope's captured-name list — goes
+                       ;; unused here: this block's own `inner-captured`,
+                       ;; read straight out of `e`, is what every call made
+                       ;; from within it (siblings or trailing body alike)
+                       ;; needs, not whatever scope `labels` itself was
+                       ;; compiled in. See this module's doc comment for the
+                       ;; nested-`labels` limitation that follows from that.
+                       (compile-labels ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
+                         (let ((inner-captured (car (cdr e))))
+                           (let ((defs (car (cdr (cdr e)))))
+                             (let ((trailing (car (cdr (cdr (cdr e))))))
+                               (let ((inner-fn-env (new-fn-env)))
+                                 (declare-labels-siblings inner-fn-env inner-captured defs)
+                                 (compile-labels-bodies inner-fn-env inner-captured defs)
+                                 (compile-value builder env inner-fn-env inner-captured trailing)))))))
+                (let ((v (compile-value builder env fn-env '() body)))
                   (build-ret builder v)
                   m))))))))
 "#;

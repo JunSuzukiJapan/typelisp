@@ -1155,6 +1155,7 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "verify" => Some(llvm_module_verify(args)),
             "to-string" => Some(llvm_module_to_string(args)),
             "get-function" => Some(llvm_module_get_function(args)),
+            "add-function-with-env" => Some(llvm_module_add_function_with_env(args)),
             _ => None,
         };
     }
@@ -1177,6 +1178,8 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "alloca-args" => Some(llvm_builder_alloca_args(args)),
             "store-arg" => Some(llvm_builder_store_arg(args)),
             "build-call" => Some(llvm_builder_build_call(args)),
+            "load-env" => Some(llvm_builder_load_env(args)),
+            "build-call-with-env" => Some(llvm_builder_build_call_with_env(args)),
             _ => None,
         };
     }
@@ -1237,6 +1240,23 @@ fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let ctx = crate::compile::llvm_context();
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
     let fn_type = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+    let function = module.borrow_mut().add_function(name, fn_type, None);
+    Ok(RtValue::LlvmFunction(function))
+}
+
+/// The captures counterpart of [`llvm_module_add_function`]: `i64
+/// name(i64* args, i32 argc, i64* env, i32 env_len)` — used for a `labels`
+/// sibling whenever its block's shared captured-name list
+/// (`compile::freevars::labels_free_vars`) is non-empty. `llvm-builder::load-env`
+/// reads a logical captured slot back out of `env`, the same way `load-arg`
+/// reads a logical parameter out of `args`.
+fn llvm_module_add_function_with_env(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let module = expect_llvm_module(&args[0])?;
+    let name = expect_str(&args[1])?;
+    let ctx = crate::compile::llvm_context();
+    let ptr_ty = ctx.ptr_type(AddressSpace::default());
+    let fn_type =
+        ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into(), ptr_ty.into(), ctx.i32_type().into()], false);
     let function = module.borrow_mut().add_function(name, fn_type, None);
     Ok(RtValue::LlvmFunction(function))
 }
@@ -1331,6 +1351,34 @@ fn llvm_builder_load_arg(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::LlvmValue(loaded))
 }
 
+/// Reads logical captured slot `index` out of `function`'s env array
+/// (its 3rd real LLVM parameter, `get_nth_param(2)` — see
+/// `llvm_module_add_function_with_env`'s doc comment) — the same GEP+load
+/// pattern `load_arg` uses against the args array (parameter 0), just
+/// against the env one instead.
+fn llvm_builder_load_env(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let function = expect_llvm_function(&args[1])?;
+    let index = match &args[2] {
+        RtValue::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let env_ptr = function
+        .get_nth_param(2)
+        .ok_or_else(|| EvalError::Internal("load-env: function has no env parameter".into()))?
+        .into_pointer_value();
+    let ctx = crate::compile::llvm_context();
+    let idx_val = ctx.i64_type().const_int(index, false);
+    let b = builder.borrow();
+    let elem_ptr = unsafe {
+        b.build_gep(ctx.i64_type(), env_ptr, &[idx_val], "env_ptr")
+            .map_err(|e| EvalError::Internal(format!("load-env: {}", e)))?
+    };
+    let loaded =
+        b.build_load(ctx.i64_type(), elem_ptr, "env_val").map_err(|e| EvalError::Internal(format!("load-env: {}", e)))?;
+    Ok(RtValue::LlvmValue(loaded))
+}
+
 /// Shared by `build-add`/`build-sub`/`build-mul`: unwrap both `llvm-value`
 /// operands to `IntValue`s, apply `op` (one of `Builder::build_int_add`/
 /// `_sub`/`_mul`), and re-wrap the result.
@@ -1412,6 +1460,38 @@ fn llvm_builder_build_call(args: &[RtValue]) -> Result<RtValue, EvalError> {
     match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => Ok(RtValue::LlvmValue(v)),
         inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-call: callee produced no value".into())),
+    }
+}
+
+/// The captures counterpart of [`llvm_builder_build_call`]: calls `target`
+/// (declared via `add-function-with-env`) passing both the args array
+/// (`args_ptr`/`argc`, exactly as `build-call` does) and an env array
+/// (`env_ptr`/`env_len`) under its extended ABI.
+fn llvm_builder_build_call_with_env(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let target = expect_llvm_function(&args[1])?;
+    let args_ptr = expect_llvm_value(&args[2])?;
+    let argc = match &args[3] {
+        RtValue::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let env_ptr = expect_llvm_value(&args[4])?;
+    let env_len = match &args[5] {
+        RtValue::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let ctx = crate::compile::llvm_context();
+    let argc_val = ctx.i32_type().const_int(argc, false);
+    let env_len_val = ctx.i32_type().const_int(env_len, false);
+    let call = builder
+        .borrow()
+        .build_call(target, &[args_ptr.into(), argc_val.into(), env_ptr.into(), env_len_val.into()], "call_result")
+        .map_err(|e| EvalError::Internal(format!("build-call-with-env: {}", e)))?;
+    match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => Ok(RtValue::LlvmValue(v)),
+        inkwell::values::ValueKind::Instruction(_) => {
+            Err(EvalError::Internal("build-call-with-env: callee produced no value".into()))
+        }
     }
 }
 

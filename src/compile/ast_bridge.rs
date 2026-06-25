@@ -12,6 +12,7 @@
 
 use std::collections::HashSet;
 
+use super::freevars::labels_free_vars;
 use crate::{Error, Expr, Heap, LabelDef, Typed, Value};
 
 /// Conses a proper list from `items` (in order), rooting as it goes — the
@@ -183,28 +184,43 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
     }
 }
 
-/// `Expr::Labels { defs, body }` -> `(labels ((name (param-sym...)
-/// single-body-form)...) single-trailing-body-form)`.
+/// `Expr::Labels { defs, body }` -> `(labels (captured-sym...) ((name
+/// (param-sym...) single-body-form)...) single-trailing-body-form)`.
 ///
-/// Stage 1 scope (labels compilation work — see `compiler.rs`'s doc
-/// comment): no outer-scope capture. A def's body may reference its own
-/// parameters and any sibling/self name (resolved as a direct call, see
-/// [`translate_apply`]) — anything else is a name the compiler body itself
-/// will reject at compile time (`compile-var`'s "unbound variable" panic),
-/// not checked here; real free-variable analysis (`src/compile/freevars.rs`)
-/// is a later phase. Every def's body and the trailing body must be a
-/// single expression — the same restriction `Interp::add_compiled_function`
-/// already applies to a `defun`'s own body, just extended uniformly to
-/// `labels` rather than lifted here.
+/// `captured` (labels/closures Stage 2: outer-scope capture) is the whole
+/// block's free-variable list (`freevars::labels_free_vars`) — empty when
+/// no def references anything outside its own parameters/siblings, exactly
+/// reproducing Stage 1's no-capture shape (just with an extra empty list
+/// field). Every sibling shares this *one* list rather than each getting its
+/// own narrower one — see `labels_free_vars`'s doc comment for why a shared
+/// environment, not a per-sibling one, is what lets sibling-to-sibling calls
+/// work without a second, transitive analysis pass.
+///
+/// A def's body may otherwise reference its own parameters, any sibling/self
+/// name (resolved as a direct call, see [`translate_apply`]), or any of
+/// `captured`'s names — anything else is a name the compiler body itself
+/// will reject at compile time (`compile-var`'s "unbound variable" panic).
+/// Every def's body and the trailing body must be a single expression — the
+/// same restriction `Interp::add_compiled_function` already applies to a
+/// `defun`'s own body, just extended uniformly to `labels` rather than
+/// lifted here.
 fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
     let mut siblings = direct.clone();
     for (name, _, _) in defs {
         siblings.insert(name.clone());
     }
 
+    let captured_names = labels_free_vars(defs, direct);
+    let captured_list = sym_list(heap, &captured_names)?;
+    heap.push_root(captured_list);
+
     let mut def_values = Vec::with_capacity(defs.len());
     for (name, params, fbody) in defs {
         if fbody.len() != 1 {
+            for _ in 0..def_values.len() {
+                heap.pop_root();
+            }
+            heap.pop_root(); // captured_list
             return Err(Error::TypeError(format!(
                 "compile: labels function \"{}\" has a multi-expression body, not yet supported",
                 name
@@ -219,6 +235,7 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: 
                 for _ in 0..def_values.len() {
                     heap.pop_root();
                 }
+                heap.pop_root(); // captured_list
                 return Err(e);
             }
         }
@@ -229,6 +246,7 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: 
             for _ in 0..def_values.len() {
                 heap.pop_root();
             }
+            heap.pop_root(); // captured_list
             return Err(e);
         }
     };
@@ -238,20 +256,23 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: 
     heap.push_root(defs_list);
 
     if body.len() != 1 {
-        heap.pop_root();
+        heap.pop_root(); // defs_list
+        heap.pop_root(); // captured_list
         return Err(Error::TypeError("compile: labels body has a multi-expression body, not yet supported".into()));
     }
     let body_v = match ast_to_sexpr_scoped(heap, &body[0], &siblings) {
         Ok(v) => v,
         Err(e) => {
-            heap.pop_root();
+            heap.pop_root(); // defs_list
+            heap.pop_root(); // captured_list
             return Err(e);
         }
     };
     heap.push_root(body_v);
-    let result = tagged(heap, "labels", &[defs_list, body_v]);
+    let result = tagged(heap, "labels", &[captured_list, defs_list, body_v]);
     heap.pop_root(); // body_v
     heap.pop_root(); // defs_list
+    heap.pop_root(); // captured_list
     result
 }
 
@@ -444,11 +465,25 @@ mod tests {
         }
     }
 
+    /// Walks a proper `Sexpr` list into a `Vec` of its elements (`car`/`cdr`
+    /// until `Empty`), the same loop shape several tests below repeat.
+    fn list_elems(heap: &Heap, mut list: Value) -> Vec<Value> {
+        let mut elems = Vec::new();
+        while !list.is_empty() {
+            elems.push(heap.car(list).unwrap());
+            list = heap.cdr(list).unwrap();
+        }
+        elems
+    }
+
     /// `Expr::Labels { defs: [(f, .. (g x)), (g, .. x)], body: (f 5) }` —
     /// `f` calls its sibling `g` directly, and the trailing body calls `f`
-    /// directly too. Confirms both the `(labels ((name (params) body)...)
-    /// trailing-body)` shape and that sibling/self calls become `(apply
-    /// name arg...)`, not `(unsupported "Apply")`.
+    /// directly too. Confirms both the `(labels (captured...) ((name
+    /// (params) body)...) trailing-body)` shape (an empty captured list,
+    /// since neither def references anything outside its own
+    /// parameters/siblings — labels/closures Stage 1 scope) and that
+    /// sibling/self calls become `(apply name arg...)`, not `(unsupported
+    /// "Apply")`.
     #[test]
     fn translates_a_labels_form_with_a_sibling_call() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -471,13 +506,9 @@ mod tests {
         let v = ast_to_sexpr(&mut heap, &typed(Expr::Labels { defs, body }, Type::I64)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "labels");
+        assert!(fields[0].is_empty(), "expected an empty captured list, got {:?}", fields[0]);
 
-        let mut def_list = fields[0];
-        let mut defs_seen = Vec::new();
-        while !def_list.is_empty() {
-            defs_seen.push(heap.car(def_list).unwrap());
-            def_list = heap.cdr(def_list).unwrap();
-        }
+        let defs_seen = list_elems(&heap, fields[1]);
         assert_eq!(defs_seen.len(), 2);
 
         let f_def = defs_seen[0];
@@ -493,9 +524,42 @@ mod tests {
         assert_eq!(f_body_tag, "apply");
         assert_eq!(expect_str(&heap, f_body_fields[0]), "g");
 
-        let (body_tag, body_fields) = untag(&heap, fields[1]);
+        let (body_tag, body_fields) = untag(&heap, fields[2]);
         assert_eq!(body_tag, "apply");
         assert_eq!(expect_str(&heap, body_fields[0]), "f");
+    }
+
+    /// labels/closures Stage 2: `go`'s body references `offset`, an outer
+    /// (enclosing-`defun`) name that's neither its own parameter nor a
+    /// sibling — confirms the captured list is non-empty and carries that
+    /// name, as a `Sym` (matching the parameter list's own convention).
+    #[test]
+    fn translates_a_labels_form_that_captures_an_outer_scope_name() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let go_body = vec![typed(
+            Expr::Assoc {
+                type_name: crate::Path::root("i64"),
+                method: "+".to_string(),
+                instance: true,
+                args: vec![typed(Expr::Var("k".to_string()), Type::I64), typed(Expr::Var("offset".to_string()), Type::I64)],
+            },
+            Type::I64,
+        )];
+        let defs = vec![("go".to_string(), vec![("k".to_string(), Type::I64)], go_body)];
+        let body = vec![typed(
+            Expr::Apply(Box::new(typed(Expr::Var("go".to_string()), fn_ty())), vec![typed(Expr::Int(1), Type::I64)]),
+            Type::I64,
+        )];
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Labels { defs, body }, Type::I64)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "labels");
+
+        let captured = list_elems(&heap, fields[0]);
+        assert_eq!(captured.len(), 1);
+        match captured[0] {
+            Value::Symbol(id) => assert_eq!(heap.symbol_name(id), "offset"),
+            other => panic!("expected a Sym, got {:?}", other),
+        }
     }
 
     /// A call to a function value that *isn't* a currently in-scope

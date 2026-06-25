@@ -72,6 +72,27 @@ fn compiles_a_file_with_a_non_main_helper_function_too() {
     assert_eq!(compile_and_run("with_helper", src), 7);
 }
 
+/// labels/closures Stage 2 (outer-scope capture): a non-`main` helper
+/// `defun` whose body is a *capturing* `labels` form (`go` references
+/// `add-offset`'s own parameter `offset`) compiles and links into the same
+/// shared module as `main` without error — proving the AOT path handles the
+/// `add-function-with-env` ABI variant correctly alongside `main`'s own
+/// (always non-capturing) function in one module. `main` can't actually
+/// call `add-offset` here (no top-level `Expr::Call` support yet, and
+/// `main` itself can't have parameters to capture from — see this module's
+/// doc comment), the same limitation `compiles_a_file_with_a_non_main_helper_function_too`
+/// already works around for an ordinary (non-capturing) helper.
+#[test]
+fn compiles_a_file_with_a_capturing_labels_helper_function_too() {
+    let src = r#"
+        (defun add-offset ((offset i64) (n i64)) i64
+          (labels ((go ((k i64)) i64 (+ k offset)))
+            (go n)))
+        (defun main () i64 7)
+    "#;
+    assert_eq!(compile_and_run("with_capturing_helper", src), 7);
+}
+
 /// labels compilation work (Stage 1): `main`'s body is a `labels` form with
 /// two non-recursive siblings, one calling the other directly — proving
 /// the AOT path compiles `labels`-sibling calls the same way JIT does (see

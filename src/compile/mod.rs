@@ -6,6 +6,7 @@
 
 pub mod aot;
 pub mod ast_bridge;
+pub mod freevars;
 
 use std::sync::{Mutex, OnceLock};
 
