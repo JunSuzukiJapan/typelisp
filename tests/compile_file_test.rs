@@ -61,9 +61,10 @@ fn compiles_and_runs_arithmetic_in_main() {
 
 #[test]
 fn compiles_a_file_with_a_non_main_helper_function_too() {
-    // `add2` isn't called from `main` (cross-function calls aren't
-    // supported until a later phase — see `compile::aot`'s doc comment),
-    // but it still has to compile and link into the same executable
+    // `add2` specifically isn't called from `main` here (see
+    // `compiles_and_runs_main_calling_a_helper_function` for a helper `main`
+    // actually calls, labels/closures Stage 3) — this just confirms an
+    // uncalled helper still compiles and links into the same executable
     // without colliding with anything.
     let src = r#"
         (defun add2 ((a i64) (b i64)) i64 (+ a b))
@@ -72,25 +73,39 @@ fn compiles_a_file_with_a_non_main_helper_function_too() {
     assert_eq!(compile_and_run("with_helper", src), 7);
 }
 
-/// labels/closures Stage 2 (outer-scope capture): a non-`main` helper
-/// `defun` whose body is a *capturing* `labels` form (`go` references
-/// `add-offset`'s own parameter `offset`) compiles and links into the same
-/// shared module as `main` without error — proving the AOT path handles the
-/// `add-function-with-env` ABI variant correctly alongside `main`'s own
-/// (always non-capturing) function in one module. `main` can't actually
-/// call `add-offset` here (no top-level `Expr::Call` support yet, and
-/// `main` itself can't have parameters to capture from — see this module's
-/// doc comment), the same limitation `compiles_a_file_with_a_non_main_helper_function_too`
-/// already works around for an ordinary (non-capturing) helper.
+/// The end-to-end Stage 3 slice (top-level `Expr::Call`, non-recursive),
+/// AOT side: `main` calls the earlier-defined `square` twice — proving
+/// `compile::aot::compile_file`'s simple one-pass loop needs no special
+/// handling for cross-function calls (see that module's doc comment for
+/// why), unlike `Interp::compile_function`'s JIT path.
+#[test]
+fn compiles_and_runs_main_calling_a_helper_function() {
+    let src = r#"
+        (defun square ((x i64)) i64 (* x x))
+        (defun main () i64 (+ (square 3) (square 4)))
+    "#;
+    assert_eq!(compile_and_run("calls_helper", src), 25);
+}
+
+/// labels/closures Stage 2 (outer-scope capture) + Stage 3 (top-level
+/// `Expr::Call`) together: a non-`main` helper `defun` whose body is a
+/// *capturing* `labels` form (`go` references `add-offset`'s own parameter
+/// `offset`) compiles and links into the same shared module as `main`, and
+/// `main` now calls it directly with literal arguments — proving the AOT
+/// path handles the `add-function-with-env` ABI variant correctly alongside
+/// an ordinary top-level call into it (`main` itself still can't have
+/// parameters of its own to forward — see this module's doc comment — but
+/// `add-offset`'s capture of `offset` happens entirely inside `add-offset`,
+/// not via `main`).
 #[test]
 fn compiles_a_file_with_a_capturing_labels_helper_function_too() {
     let src = r#"
         (defun add-offset ((offset i64) (n i64)) i64
           (labels ((go ((k i64)) i64 (+ k offset)))
             (go n)))
-        (defun main () i64 7)
+        (defun main () i64 (add-offset 10 5))
     "#;
-    assert_eq!(compile_and_run("with_capturing_helper", src), 7);
+    assert_eq!(compile_and_run("with_capturing_helper", src), 15);
 }
 
 /// labels compilation work (Stage 1): `main`'s body is a `labels` form with
@@ -211,6 +226,48 @@ fn jit_and_aot_agree_on_a_labels_body() {
     };
 
     let aot_exit_code = compile_and_run("jit_aot_labels_pair", src) as i64;
+
+    assert_eq!(jit_value, aot_exit_code);
+}
+
+/// Same claim as `jit_and_aot_agree_on_the_same_source`, but for a `main`
+/// that calls a separately-defined helper function directly (labels/
+/// closures Stage 3, top-level `Expr::Call`) rather than bare arithmetic or
+/// a `labels` form. The JIT path needs an extra `(compile "square")` before
+/// `(compile "main")` — `Interp::compile_function`'s own forward-declare +
+/// `add_global_mapping` requirement (see that method's doc comment) — that
+/// `compile::aot::compile_file`'s single shared module never needs (see
+/// that module's doc comment).
+#[test]
+fn jit_and_aot_agree_on_a_cross_function_call() {
+    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+
+    let src = r#"
+        (defun square ((x i64)) i64 (* x x))
+        (defun main () i64 (+ (square 3) (square 4)))
+    "#;
+
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    typelisp::load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r
+        .read_all(&mut h, &format!("{}\n(compile \"square\")\n(compile \"main\")\n(main)", src))
+        .expect("read failed");
+    let mut jit_result = None;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("exec failed") {
+            jit_result = Some(val);
+        }
+    }
+    let jit_value = match jit_result {
+        Some(RtValue::Int(n)) => n,
+        other => panic!("expected an Int from the JIT path, got {:?}", other),
+    };
+
+    let aot_exit_code = compile_and_run("jit_aot_call_pair", src) as i64;
 
     assert_eq!(jit_value, aot_exit_code);
 }

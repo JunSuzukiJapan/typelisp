@@ -475,3 +475,121 @@ fn a_sibling_that_never_references_a_capture_still_forwards_it_to_another_siblin
         other => panic!("expected an Int, got {:?}", other),
     }
 }
+
+/// `get-function`/`compile-call`: the compiler body (not the raw builtins
+/// directly, unlike `a_function_can_directly_call_another_function_in_the_same_module`)
+/// compiling `(call name arg...)` nodes — `ast_bridge::translate_call`'s
+/// exact tagged shape (labels/closures Stage 3) — into direct calls to a
+/// *different*, already-`compile-function`-compiled function sharing the
+/// same module: the same shared-module setup `compile::aot::compile_file`
+/// uses in practice. `quadruple`'s body even nests one `call` inside
+/// another's argument, exercising `compile-call-args`' own recursion back
+/// into `compile-value`.
+#[test]
+fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
+    let module = match eval_ok_with_compiler(
+        r#"
+        (let ((m (llvm-module::create "mod")))
+          (compile-function m "double" '(x) '(assoc "i64" "+" true (var "x") (var "x")))
+          (compile-function m "quadruple" '(n) '(call "double" (call "double" (var "n")))))
+        "#,
+    ) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let quadruple = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("quadruple")
+            .expect("failed to look up the compiled `quadruple` function")
+    };
+    let argv: [i64; 1] = [5];
+    assert_eq!(unsafe { quadruple.call(argv.as_ptr(), argv.len() as u32) }, 20);
+}
+
+/// labels/closures Stage 3, self-recursion: `compile-function`'s own first
+/// step (`add-function`) already declares `f` in its module *before*
+/// compiling its body, so a `(call "f" ...)` referring to the very function
+/// being compiled resolves through the same `get-function` `compile-call`
+/// uses for any other target — no special-casing needed. Only checks the
+/// resulting IR (deliberately never run!): the body trivially infinite-loops
+/// if executed (no `if`/comparison support yet to give it a base case — out
+/// of this stage's scope, see `compiler.rs`'s `compile-call` doc comment).
+#[test]
+fn the_compiler_body_compiles_a_self_referencing_call() {
+    let ir = expect_str(eval_ok_with_compiler(
+        r#"(to-string (compile-function (llvm-module::create "mod") "f" '(n) '(call "f" (var "n"))))"#,
+    ));
+    assert!(ir.contains("define i64 @f("), "IR was:\n{}", ir);
+    assert!(ir.contains("call i64 @f("), "IR was:\n{}", ir);
+}
+
+/// The end-to-end Stage 3 slice (top-level `Expr::Call`, non-recursive),
+/// from real typelisp source (not a hand-fed `Sexpr`, unlike the
+/// compiler-body tests above): `sum-of-squares` calls the *separately*
+/// `compile`d `square` twice. `Interp::compile_function`'s own module for
+/// `sum-of-squares` never contains `square`'s body, only a no-body forward
+/// declaration of it — proving the `add_global_mapping` wiring really does
+/// reach the other, already-running JIT code, not just a coincidentally
+/// correct IR shape.
+#[test]
+fn compile_dispatches_a_defun_that_calls_another_compiled_function() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun square ((x i64)) i64 (* x x))
+        (defun sum-of-squares ((a i64) (b i64)) i64 (+ (square a) (square b)))
+        (compile "square")
+        (compile "sum-of-squares")
+        (sum-of-squares 3 4)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 25),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// `Interp::compile_function`'s up-front check (labels/closures Stage 3):
+/// `(compile "sum-of-squares")` calls `square`, but nothing has `compile`d
+/// `square` yet — a clear `Panic` naming both functions, not a confusing one
+/// from deep inside the compiler body's `get-function`.
+#[test]
+fn compile_errors_clearly_when_a_called_function_is_not_yet_compiled() {
+    let err = run_with_compiler(
+        r#"
+        (defun square ((x i64)) i64 (* x x))
+        (defun sum-of-squares ((a i64) (b i64)) i64 (+ (square a) (square b)))
+        (compile "sum-of-squares")
+        "#,
+    )
+    .expect_err("expected a clear must-compile-first error");
+    match err {
+        EvalError::Panic(msg) => {
+            assert!(msg.contains("square"), "message was: {}", msg);
+            assert!(msg.contains("sum-of-squares"), "message was: {}", msg);
+        }
+        other => panic!("expected a Panic, got {:?}", other),
+    }
+}
+
+/// The end-to-end self-recursion counterpart of
+/// `the_compiler_body_compiles_a_self_referencing_call`, through the real
+/// `(compile "name")` JIT path rather than a hand-fed `Sexpr`: proves
+/// `Interp::compile_function`'s call-target collection correctly excludes
+/// self (no "must be compiled first" error, no forward declaration/
+/// `add_global_mapping` wiring attempted for its own name). Deliberately
+/// never *called* — see that test's doc comment for why.
+#[test]
+fn compile_succeeds_for_a_self_recursive_defun_without_being_run() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun loop-forever ((n i64)) i64 (loop-forever n))
+        (compile "loop-forever")
+        "#,
+    );
+    assert!(expect_bool(v));
+}

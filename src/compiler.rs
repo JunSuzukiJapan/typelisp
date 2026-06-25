@@ -10,12 +10,15 @@
 //! Compiles the node shapes `ast_bridge::ast_to_sexpr` actually produces a
 //! real translation for today — integer literals (`(int n)`), `i64`
 //! arithmetic (`(var name)`/`(assoc type method instance arg...)`, for
-//! `+`/`-`/`*` only), and direct calls (`(apply name arg...)`/
-//! `(labels (captured...) ((name (params) body))... trailing-body)`, the
-//! labels-compilation work — see `compile-labels`'s doc comment below for
-//! scope). `compile-value` grows a new tag-/method-matching arm as later
-//! phases teach `ast_bridge` to translate more `Expr` variants for real. No
-//! `if`/`let`/`loop`/top-level `Expr::Call` yet.
+//! `+`/`-`/`*` only), `labels`-sibling/self direct calls
+//! (`(apply name arg...)`/`(labels (captured...) ((name (params)
+//! body))... trailing-body)`, the labels-compilation work — see
+//! `compile-labels`'s doc comment below for scope), and top-level `defun`-to-
+//! `defun` calls including self-recursion (`(call name arg...)`,
+//! `Expr::Call`, labels/closures Stage 3 — see `compile-call`'s doc comment).
+//! `compile-value` grows a new tag-/method-matching arm as later phases
+//! teach `ast_bridge` to translate more `Expr` variants for real. No
+//! `if`/`let`/`loop` yet.
 //!
 //! `compile-function` takes the destination `llvm-module` as a parameter
 //! rather than creating its own — added in Phase 2 (the AOT exit,
@@ -173,7 +176,9 @@ pub const SOURCE: &str = r#"
                                             (compile-apply builder env fn-env captured e)
                                             (if (eq s "labels")
                                                 (compile-labels builder env fn-env captured e)
-                                                (panic (append "compile-value: unsupported tag " s))))))))
+                                                (if (eq s "call")
+                                                    (compile-call builder env fn-env captured e)
+                                                    (panic (append "compile-value: unsupported tag " s)))))))))
                            (_ (panic "compile-value: malformed node, expected a tagged list"))))
                        (compile-int ((builder llvm-builder) (e Sexpr)) llvm-value
                          (match (car (cdr e))
@@ -233,6 +238,42 @@ pub const SOURCE: &str = r#"
                                             (compile-env-args builder env env-ptr captured 0)
                                             (build-call-with-env builder target args-ptr argc env-ptr env-len)))))
                                    (None (panic (append "compile-apply: no direct-callable function named " nm)))))))))
+                       ;; `(call name arg...)` — `Expr::Call`, labels/closures
+                       ;; Stage 3: a call to a *top-level* `defun` (itself
+                       ;; included, for self-recursion), never a `labels`
+                       ;; sibling (those go through `compile-apply`/`fn-env`
+                       ;; above instead). Looks `nm` up directly in `m` (the
+                       ;; destination module `compile-function` itself
+                       ;; received — closed over here exactly the way
+                       ;; `declare-labels-siblings` below already closes over
+                       ;; it) via `get-function`, not `fn-env`, since a
+                       ;; top-level `defun` is never registered there. A
+                       ;; top-level `defun` can never capture an outer scope
+                       ;; (`Checker::check_defun` always starts from an empty
+                       ;; `Env` — see `ast_bridge::translate_call`'s doc
+                       ;; comment), so unlike `compile-apply` this never needs
+                       ;; an env array: always a plain `build-call`.
+                       ;;
+                       ;; For an *other* already-`compile`d function, `m`
+                       ;; either already has `nm`'s real body in it (AOT's one
+                       ;; shared, file-ordered module — see `compile::aot`'s
+                       ;; doc comment) or a JIT-only forward declaration with
+                       ;; no body that `Interp::compile_function` wires to
+                       ;; the real address via `add_global_mapping` after
+                       ;; this whole function is compiled (see that method's
+                       ;; doc comment) — `get-function` doesn't need to know
+                       ;; which case it's in, since both already exist in `m`
+                       ;; by the time this runs. For a self-recursive call,
+                       ;; `nm` is `name` itself, already declared by
+                       ;; `compile-function`'s own first step (`add-function`,
+                       ;; above) before this body was ever reached.
+                       (compile-call ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
+                         (let ((nm (sexpr-str (car (cdr e)))))
+                           (let ((arg-forms (cdr (cdr e))))
+                             (let ((argc (sexpr-list-length arg-forms)))
+                               (let ((args-ptr (alloca-args builder argc)))
+                                 (compile-call-args builder env fn-env captured args-ptr arg-forms 0)
+                                 (build-call builder (get-function m nm) args-ptr argc))))))
                        ;; Declares every `labels` def's `llvm-function`
                        ;; *before* compiling any of their bodies — the
                        ;; compiled-world counterpart of `Expr::Labels`'s own

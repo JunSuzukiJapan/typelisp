@@ -53,18 +53,47 @@ pub type CompiledSignature = unsafe extern "C" fn(*const i64, u32) -> i64;
 /// engine along internally.
 pub struct CompiledFn {
     f: JitFunction<'static, CompiledSignature>,
+    /// This function's own JIT-resolved address — see [`Self::address`].
+    addr: usize,
 }
 
 impl CompiledFn {
-    /// JIT-compiles `fn_name` out of `module`. Must be called with
-    /// [`COMPILE_LOCK`] held — see that constant's doc comment.
-    pub fn new(module: &Module<'static>, fn_name: &str) -> Result<CompiledFn, String> {
+    /// JIT-compiles `fn_name` out of `module`. `externals` (labels/closures
+    /// Stage 3) is `(name, address)` for every *other* already-`compile`d
+    /// top-level function `fn_name`'s body calls (`Expr::Call`): each must
+    /// already be forward-declared, with no body, in `module` under that
+    /// same name — see [`crate::eval::interp::Interp::compile_function`]'s
+    /// doc comment for why that declaration has to exist *before* the
+    /// typelisp compiler body ever runs (`compile-call`'s `get-function`
+    /// needs to find *something* by that name). Wiring each one's real
+    /// address via `add_global_mapping` here, before resolving `fn_name`
+    /// itself, makes a call through that declaration jump straight to the
+    /// real, already-running JIT code instead of an unresolved symbol. Empty
+    /// for self-recursion only or no calls at all — the common case, and
+    /// every call before Stage 3. Must be called with [`COMPILE_LOCK`]
+    /// held.
+    pub fn new(module: &Module<'static>, fn_name: &str, externals: &[(String, usize)]) -> Result<CompiledFn, String> {
         let engine = module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?;
+        for (name, addr) in externals {
+            let decl = module
+                .get_function(name)
+                .ok_or_else(|| format!("internal error: no forward declaration for \"{}\" in this module", name))?;
+            engine.add_global_mapping(&decl, *addr);
+        }
         let f = unsafe { engine.get_function::<CompiledSignature>(fn_name).map_err(|e| e.to_string())? };
-        Ok(CompiledFn { f })
+        let addr = engine.get_function_address(fn_name).map_err(|e| e.to_string())?;
+        Ok(CompiledFn { f, addr })
     }
 
     pub fn call(&self, args: &[i64]) -> i64 {
         unsafe { self.f.call(args.as_ptr(), args.len() as u32) }
+    }
+
+    /// This function's own JIT-resolved address — used to wire
+    /// `add_global_mapping` when a *later* `compile`d function's body calls
+    /// this one (labels/closures Stage 3, see [`Self::new`]'s `externals`
+    /// parameter).
+    pub fn address(&self) -> usize {
+        self.addr
     }
 }

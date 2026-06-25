@@ -13,7 +13,7 @@
 use std::collections::HashSet;
 
 use super::freevars::labels_free_vars;
-use crate::{Error, Expr, Heap, LabelDef, Typed, Value};
+use crate::{Error, Expr, Heap, LabelDef, Path, Typed, Value};
 
 /// Conses a proper list from `items` (in order), rooting as it goes — the
 /// same push/pop discipline `crate::eval::interp::alloc_quoted` uses for
@@ -166,7 +166,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
         Expr::MethodRef { .. } => unsupported(heap, "MethodRef"),
         Expr::If(..) => unsupported(heap, "If"),
         Expr::Let(..) => unsupported(heap, "Let"),
-        Expr::Call(..) => unsupported(heap, "Call"),
+        Expr::Call(path, args) => translate_call(heap, path, args, direct),
         Expr::Lambda { .. } => unsupported(heap, "Lambda"),
         Expr::Labels { defs, body } => translate_labels(heap, defs, body, direct),
         Expr::Apply(callee, args) => translate_apply(heap, callee, args, direct),
@@ -335,6 +335,93 @@ fn translate_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &Has
     }
     heap.pop_root(); // name_v
     result
+}
+
+/// `Expr::Call(path, args)` -> `(call name arg...)` (labels/closures Stage
+/// 3) — same shape as [`translate_apply`]'s output, but for a call to a
+/// *top-level* `defun` rather than a `labels` sibling/self. Always
+/// resolvable: `Checker::resolve_fn` only ever lets a `defun` call a name
+/// that's already fully registered (itself included, for self-recursion —
+/// see `Checker::check_defun`'s doc comment), so unlike [`translate_apply`]
+/// there's no indirect/boxed case to fall back to `unsupported` for. Only
+/// `path`'s local (final) segment is kept — `compiler.rs`'s `compile-call`
+/// looks the callee up by that same plain name via `get-function` against
+/// the destination module, matching how every compiled top-level function
+/// is itself declared under its local name (`Interp::add_compiled_function`).
+fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
+    let name_v = heap.alloc_string(path.local().to_string());
+    heap.push_root(name_v);
+    let arg_values = match ast_list_to_sexpr(heap, args, direct) {
+        Ok(v) => v,
+        Err(e) => {
+            heap.pop_root();
+            return Err(e);
+        }
+    };
+    let mut items = vec![name_v];
+    items.extend(arg_values.iter().copied());
+    let result = tagged(heap, "call", &items);
+    for _ in 0..arg_values.len() {
+        heap.pop_root();
+    }
+    heap.pop_root(); // name_v
+    result
+}
+
+/// Collects every distinct top-level [`Path`] an `Expr::Call` reachable from
+/// `typed` refers to, in first-encounter order. Mirrors exactly the node
+/// shapes [`ast_to_sexpr_scoped`] actually recurses into — anything that
+/// becomes `unsupported` there has no calls worth collecting, since
+/// translating that node would fail before ever reaching them anyway.
+///
+/// JIT-only (labels/closures Stage 3): `Interp::compile_function` calls this
+/// *before* running the typelisp compiler body, to learn which other
+/// already-`compile`d top-level functions this body's `(call ...)`s need
+/// forward-declared (no body) in its own throwaway module and wired to their
+/// real address via `add_global_mapping` — `compile-call`'s `get-function`
+/// would otherwise panic, not knowing about anything outside the module it
+/// was handed. `compile::aot::compile_file` needs none of this: its one
+/// shared module already has every earlier `defun`'s real body in it by the
+/// time a later one's call needs to find it.
+pub fn collect_call_targets(typed: &Typed) -> Vec<Path> {
+    let mut out = Vec::new();
+    collect_calls(typed, &mut out);
+    out
+}
+
+fn collect_calls(typed: &Typed, out: &mut Vec<Path>) {
+    match &typed.expr {
+        Expr::Call(path, args) => {
+            if !out.contains(path) {
+                out.push(path.clone());
+            }
+            for a in args {
+                collect_calls(a, out);
+            }
+        }
+        Expr::Assoc { args, .. } => {
+            for a in args {
+                collect_calls(a, out);
+            }
+        }
+        Expr::Apply(callee, args) => {
+            collect_calls(callee, out);
+            for a in args {
+                collect_calls(a, out);
+            }
+        }
+        Expr::Labels { defs, body } => {
+            for (_, _, def_body) in defs {
+                for e in def_body {
+                    collect_calls(e, out);
+                }
+            }
+            for e in body {
+                collect_calls(e, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -575,5 +662,82 @@ mod tests {
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "unsupported");
         assert_eq!(expect_str(&heap, fields[0]), "Apply");
+    }
+
+    /// labels/closures Stage 3: a top-level `Expr::Call` becomes `(call name
+    /// arg...)` — always a real translation, never `unsupported`, since
+    /// `Checker::resolve_fn` guarantees the callee is already a registered
+    /// `defun` (see `translate_call`'s doc comment).
+    #[test]
+    fn translates_a_call_to_another_top_level_function() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let call = Expr::Call(crate::Path::root("square"), vec![typed(Expr::Var("a".to_string()), Type::I64)]);
+        let v = ast_to_sexpr(&mut heap, &typed(call, Type::I64)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "call");
+        assert_eq!(expect_str(&heap, fields[0]), "square");
+        let (arg_tag, arg_fields) = untag(&heap, fields[1]);
+        assert_eq!(arg_tag, "var");
+        assert_eq!(expect_str(&heap, arg_fields[0]), "a");
+    }
+
+    /// Only the local segment of a qualified `Path` survives translation —
+    /// `compiler.rs`'s `compile-call` looks callees up by plain name, the
+    /// same way every compiled top-level function is itself declared (see
+    /// `translate_call`'s doc comment).
+    #[test]
+    fn translates_a_call_keeping_only_the_paths_local_segment() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let call = Expr::Call(crate::Path::of(&["geo", "distance"]), vec![]);
+        let v = ast_to_sexpr(&mut heap, &typed(call, Type::I64)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "call");
+        assert_eq!(expect_str(&heap, fields[0]), "distance");
+    }
+
+    #[test]
+    fn collect_call_targets_is_empty_for_a_body_with_no_calls() {
+        let v = typed(Expr::Int(1), Type::I64);
+        assert!(collect_call_targets(&v).is_empty());
+    }
+
+    #[test]
+    fn collect_call_targets_finds_a_direct_top_level_call() {
+        let v = typed(Expr::Call(crate::Path::root("g"), vec![typed(Expr::Int(1), Type::I64)]), Type::I64);
+        assert_eq!(collect_call_targets(&v), vec![crate::Path::root("g")]);
+    }
+
+    /// `collect_call_targets` recurses into a `labels` block's def bodies and
+    /// trailing body too — a top-level `Expr::Call` can appear nested inside
+    /// either (e.g. a `labels` sibling itself calling out to another
+    /// top-level `defun`), and `Interp::compile_function` needs every one of
+    /// them pre-declared, not just calls sitting directly in the outer body.
+    #[test]
+    fn collect_call_targets_finds_a_call_nested_inside_a_labels_def_body() {
+        let inner = typed(Expr::Call(crate::Path::root("helper"), vec![typed(Expr::Int(1), Type::I64)]), Type::I64);
+        let defs = vec![("f".to_string(), vec![], vec![inner])];
+        let body = vec![typed(
+            Expr::Apply(Box::new(typed(Expr::Var("f".to_string()), fn_ty())), vec![]),
+            Type::I64,
+        )];
+        let v = typed(Expr::Labels { defs, body }, Type::I64);
+        assert_eq!(collect_call_targets(&v), vec![crate::Path::root("helper")]);
+    }
+
+    #[test]
+    fn collect_call_targets_deduplicates_repeated_calls_to_the_same_target() {
+        let v = typed(
+            Expr::Assoc {
+                type_name: crate::Path::root("i64"),
+                method: "+".to_string(),
+                instance: true,
+                args: vec![
+                    typed(Expr::Call(crate::Path::root("g"), vec![]), Type::I64),
+                    typed(Expr::Call(crate::Path::root("g"), vec![]), Type::I64),
+                ],
+            },
+            Type::I64,
+        );
+        assert_eq!(collect_call_targets(&v), vec![crate::Path::root("g")]);
     }
 }

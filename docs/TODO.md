@@ -644,22 +644,64 @@ non-main helper defunがAOTで他の関数と同じmoduleに問題なくコン�
 `compiles_a_file_with_a_non_main_helper_function_too`と同じ制約）。全件green、
 clippy警告0、5回連続実行で安定確認済み。
 
-**次回やること（Stage 3: トップレベル`Expr::Call`、自己再帰含む）**:
-1. `ast_bridge.rs`の`Expr::Call`実翻訳（`(call name arg...)`、`Expr::Assoc`と同型）。
-2. `compiler.rs`の`compile-call`を新設（`compile-apply`の直接呼び出し経路と
-   ほぼ同じ、ただし`fn-env`ではなく`(get-function m name)`で直接モジュールから
-   検索——トップレベル`defun`は`fn-env`に登録されないため）。
-3. AOTはコード変更不要なはず（`compile::aot::compile_file`の既存の単純な
-   前方ループで十分——`resolve_fn`の制約上、呼び出し先は呼び出し元より必ず
-   先に定義済み、計画ファイル2.5節参照）。
-4. JITのみ追加が必要: `(compile "f")`が未コンパイルの呼び出し先`g`を検出した
-   場合に明確なエラーを返す経路、および`g`がコンパイル済みなら使い捨てモジュールに
-   外部宣言+`engine.add_global_mapping`で配線。
-5. 自己再帰のテスト（`if`/比較演算が無くてもベースケース無しの末尾呼び出し型で
-   検証できないか要検討——あるいはここでようやく`if`/比較演算の先行実装が必要に
-   なる可能性が高い）。
-6. その後: Stage 4(一般クロージャ・`ClosureBox`・ランタイムシム`tl_closure_*`・
-   AOT用staticlibビルド方式の確定)。
+**Stage 3完了**: トップレベル`Expr::Call`（自己再帰含む）。
+
+`ast_bridge.rs`に`Expr::Call`実翻訳（`translate_call`、`(call name arg...)`、
+`Expr::Assoc`/`translate_apply`と同型、`Path`の`local()`のみ保持——名前空間越し
+の解決は今回スコープ外）。同モジュールに`collect_call_targets`（JIT専用、
+`Interp::compile_function`がコンパイラ本体を呼ぶ**前**に`Expr::Call`の呼び出し先
+`Path`を収集する小さな専用ウォーカー——`ast_to_sexpr_scoped`が実際に再帰する
+ノード形（`Assoc`/`Apply`/`Labels`/`Call`）だけを辿る設計、`unsupported`になる
+ノードの中の呼び出しは収集する意味が無いため）。
+
+`compiler.rs`に`compile-call`を新設——`compile-apply`の直接呼び出し経路と似て
+いるが、`fn-env`ではなく`(get-function m name)`で`compile-function`が直接受け取った
+`m`から検索（トップレベル`defun`は`fn-env`に登録されないため）。トップレベル
+`defun`は外側スコープを捕捉できない（`check_defun`は常に空の`Env`から始まる）ため
+`compile-apply`と違って常にプレーンな`build-call`（env配列が要らない）。
+
+計画ファイル2.5節の訂正が的中: **AOTはコード変更不要**だった
+（`compile::aot::compile_file`の既存の単純な前方ループのままで動く——`resolve_fn`の
+制約上、呼び出し先は呼び出し元より必ずファイル内で先に定義済みなので、後の
+`defun`をコンパイルする時点で呼び出し先は同じ共有moduleに本体まで含めて
+すでに存在する）。
+
+**JIT側のみ追加実装**（`Interp::compile_function`、使い捨てmodule方式が
+Stage 1から変わらないため、AOTの「1つの共有module」とは事情が異なる）:
+コンパイラ本体を呼ぶ**前**に`collect_call_targets`で呼び出し先`Path`を集め、
+(1) 自分自身は除外（自己再帰は`compile-function`自身の`add-function`が
+事前に解決するため何もしなくてよい）、(2) 残りが全て`Interp.compiled`に
+既にあるか確認——無ければ「`g`を先に`compile`してください」という明確な
+`Panic`、(3) あれば使い捨てmoduleに本体無しの外部宣言（新規
+`declare_external_function`、`llvm-module::add-function`と同じABI構築を
+共有する新規`compiled_fn_type()`ヘルパーに統合）をコンパイラ本体実行**前**に
+追加、(4) コンパイラ本体実行後、JITエンジン生成時に`engine.add_global_mapping`
+で各外部宣言の実アドレスを配線（`compile::CompiledFn::new`に
+`externals: &[(String, usize)]`引数を追加、`CompiledFn`自身も
+`engine.get_function_address`で取得した自分のアドレスを`address()`として
+保持——後で自分を呼ぶ別の`compile`にこの仕組みで使われる）。
+
+**自己再帰のテストは`if`/比較演算無しでも書けた**: 実行はしない
+（ベースケースが無いので実行すれば無限ループになる——`if`/比較演算は依然未着手）
+が、`(compile "f")`がエラーにならないこと・IRに自己呼び出し命令が出ることは
+検証可能——`(compile "fn-name")`自体はボディを実行しないため。`if`/比較演算の
+実装は依然先送り（Stage 4着手時に改めて検討）。
+
+TDD: `tests/compile_test.rs`に6件追加（生Sexprの相互呼び出し・自己再帰IR検証、
+`(compile "name")`経由の相互呼び出しend-to-end、未コンパイル呼び出し先への
+明確なエラー、自己再帰の`(compile "name")`成功確認）。`tests/compile_file_test.rs`
+に2件追加（`main`が別関数を呼ぶAOT、JIT/AOTペア）+既存2件を更新
+（捕捉ありlabelsヘルパーを`main`が実際に呼ぶように強化、コメントの
+古い「未対応」記述を修正）。全件green、clippy警告0、5回連続実行で安定確認済み。
+
+**次回やること（Stage 4: 一般クロージャ・`ClosureBox`・ランタイムシム）**:
+1. `tl_closure_*`シム（`make`/`env_get`/`apply`/`retain`/`release`）をRust単体
+   テストで検証（LLVM抜き）。AOTの静的リンク方式を確定（計画ファイル1.2節）。
+2. `build-make-closure`等のLLVM builtinを生typelispソースから直接検証。
+3. 即時呼び出し・非キャプチャの`lambda`でASTブリッジ〜コンパイラ本体まで通す。
+4. キャプチャしてescapeする`lambda`（`tl_closure_retain`/`_release`が初めて
+   意味を持つ）、キャプチャしてescapeする`labels`（循環キャプチャのリーク確認）。
+5. 実行時に決まるcalleeへのindirect apply、`Expr::FnRef`の実翻訳。
 
 ---
 

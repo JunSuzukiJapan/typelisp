@@ -10,14 +10,23 @@
 //! up front, in this file rather than per function), and links the result
 //! into a native executable via the system `cc`.
 //!
-//! Phase 2 scope, matching [`crate::compile::ast_bridge`]'s current
-//! translation coverage: every `defun` in the file must be non-generic with
-//! a single-expression body using only literals/vars/`+`/`-`/`*` (no calls
-//! between functions yet — that needs `Expr::Call` translation, left to a
-//! later phase). The file must contain a zero-parameter `main` defun — the
-//! entry point — under whatever integer return type its body's arithmetic
-//! happens to check as (see `compiles_and_runs_arithmetic_in_main` in
-//! `tests/compile_file_test.rs` for why that's `i32` more often than not).
+//! Scope matches [`crate::compile::ast_bridge`]'s current translation
+//! coverage: every `defun` in the file must be non-generic with a
+//! single-expression body using only literals/vars/`+`/`-`/`*`,
+//! `labels`-sibling/self calls, and top-level `defun`-to-`defun` calls
+//! including self-recursion (`Expr::Call`, labels/closures Stage 3) — a
+//! callee must already be defined earlier in the file, the same forward-
+//! reference restriction `Checker::resolve_fn` enforces at type-checking
+//! time regardless of AOT/JIT (see `compile::CompiledFn::new`'s doc comment
+//! for the JIT-side counterpart of this same restriction). The loop below
+//! needs no special handling for that: by the time a later `defun` in the
+//! file is compiled, every earlier one already has its real body — not just
+//! a declaration — in this same shared module, so `compile-call`'s
+//! `get-function` always finds it. The file must contain a zero-parameter
+//! `main` defun — the entry point — under whatever integer return type its
+//! body's arithmetic happens to check as (see
+//! `compiles_and_runs_arithmetic_in_main` in `tests/compile_file_test.rs`
+//! for why that's `i32` more often than not).
 //!
 //! ## The `main` name problem
 //!

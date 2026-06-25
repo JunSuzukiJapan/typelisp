@@ -490,6 +490,30 @@ impl Interp {
         self.eval_seq(heap, body, &env)
     }
 
+    /// Looks up `name`'s registered `defun`/`defmethod` body, enforcing the
+    /// two constraints every entry point into the compiler shares: a real
+    /// type signature (so an LLVM function type can be built — never set for
+    /// a `defmacro`) and a single-expression body (`compile`'s long-standing
+    /// scope, unchanged by labels/closures Stage 3). Shared by
+    /// [`Self::add_compiled_function`] (the actual AST-bridge step) and
+    /// [`Self::compile_function`] (which needs the body slightly earlier —
+    /// to collect `Expr::Call` targets, see that method's doc comment —
+    /// before `add_compiled_function` ever runs).
+    fn compiled_fn_body(&self, name: &str) -> Result<(Vec<String>, Typed), EvalError> {
+        let path = Path::root(name);
+        let f = self.fns.get(&path).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))?;
+        if f.sig.is_none() {
+            return Err(EvalError::Panic(format!("compile: \"{}\" has no type signature (is it a defmacro?)", name)));
+        }
+        if f.body.len() != 1 {
+            return Err(EvalError::Panic(format!(
+                "compile: \"{}\" has a multi-expression body, not yet supported",
+                name
+            )));
+        }
+        Ok((f.params.clone(), f.body[0].clone()))
+    }
+
     /// Compiles the `defun` named `name` (looked up in `self.fns`) into one
     /// LLVM function — named `internal_name` — added to `module`. Shared by
     /// [`Self::compile_function`] (JIT, Phase 1) — which always passes a
@@ -520,20 +544,7 @@ impl Interp {
         name: &str,
         internal_name: &str,
     ) -> Result<(), EvalError> {
-        let path = Path::root(name);
-        let (params, body) = {
-            let f = self.fns.get(&path).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))?;
-            if f.sig.is_none() {
-                return Err(EvalError::Panic(format!("compile: \"{}\" has no type signature (is it a defmacro?)", name)));
-            }
-            if f.body.len() != 1 {
-                return Err(EvalError::Panic(format!(
-                    "compile: \"{}\" has a multi-expression body, not yet supported",
-                    name
-                )));
-            }
-            (f.params.clone(), f.body[0].clone())
-        };
+        let (params, body) = self.compiled_fn_body(name)?;
 
         // Builds `(a b ...)`, the `Sexpr` symbol list `compiler.rs`'s
         // `bind-params` walks to know which logical argument-array slot
@@ -583,16 +594,65 @@ impl Interp {
     /// registers the result in [`Self::compiled`] so `Expr::Call` dispatches
     /// to native code instead of tree-walking it from then on. See
     /// [`Self::add_compiled_function`] for the supported-shape scope.
+    ///
+    /// labels/closures Stage 3: unlike `compile::aot::compile_file` (one
+    /// shared module built up over every `defun` in file order, so a callee
+    /// is always already fully defined in that same module by the time its
+    /// caller is compiled — see that module's doc comment), every `compile`
+    /// call gets its own throwaway module/engine (this method's
+    /// long-standing design, unchanged). So a *different* top-level function
+    /// this body's `Expr::Call`s reach
+    /// (`crate::compile::ast_bridge::collect_call_targets`) has to be
+    /// handled by hand, in three steps: (1) it must already be `compile`d
+    /// (checked against [`Self::compiled`] up front, so a missing one
+    /// surfaces as a clear `Panic` here rather than a confusing one from
+    /// deep inside the compiler body's `get-function`); (2) forward-declared
+    /// — no body — in this throwaway module *before* the compiler body runs
+    /// (`compile-call`'s `get-function` needs to find *something* by that
+    /// name); (3) wired to the real, already-running JIT code's address via
+    /// `add_global_mapping` *after* (`crate::compile::CompiledFn::new`'s
+    /// `externals` parameter) — can't happen any earlier, since the engine
+    /// that will actually run this function's code doesn't exist until then.
+    /// Self-recursion needs none of this: `compile-function`'s own first
+    /// step (`add-function`) already declares this very function in its own
+    /// module before compiling its body, so it's excluded from every step
+    /// above.
     fn compile_function(&self, heap: &mut Heap, name: &str) -> Result<RtValue, EvalError> {
+        let path = Path::root(name);
+        let (_, body) = self.compiled_fn_body(name)?;
+        let call_targets: Vec<Path> =
+            crate::compile::ast_bridge::collect_call_targets(&body).into_iter().filter(|p| *p != path).collect();
+        for target in &call_targets {
+            if !self.compiled.borrow().contains_key(target) {
+                return Err(EvalError::Panic(format!(
+                    "compile: \"{}\" calls \"{}\", which must be `compile`d first",
+                    name,
+                    target.local()
+                )));
+            }
+        }
+
         let module = {
             let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-            Rc::new(RefCell::new(crate::compile::llvm_context().create_module("compiled")))
+            let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("compiled")));
+            for target in &call_targets {
+                declare_external_function(&module, target.local());
+            }
+            module
         };
         self.add_compiled_function(heap, module.clone(), name, name)?;
+
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-        let compiled = crate::compile::CompiledFn::new(&module.borrow(), name)
+        let externals: Vec<(String, usize)> = {
+            let compiled = self.compiled.borrow();
+            call_targets
+                .iter()
+                .map(|p| (p.local().to_string(), compiled.get(p).expect("checked compiled above").address()))
+                .collect()
+        };
+        let compiled = crate::compile::CompiledFn::new(&module.borrow(), name, &externals)
             .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
-        self.compiled.borrow_mut().insert(Path::root(name), compiled);
+        self.compiled.borrow_mut().insert(path, compiled);
         Ok(RtValue::Bool(true))
     }
 
@@ -1234,14 +1294,35 @@ fn llvm_module_create(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// pointers (inkwell's `llvm17-0` feature doesn't pull in its
 /// `typed-pointers` feature — confirmed against inkwell's own `Cargo.toml`),
 /// so the parameter type is `Context::ptr_type`, not `IntType::ptr_type`.
+/// Shared by [`llvm_module_add_function`] and [`declare_external_function`]
+/// (labels/closures Stage 3's JIT-only forward declarations) — both declare
+/// a function under this exact same signature, just with or without a body.
+fn compiled_fn_type() -> inkwell::types::FunctionType<'static> {
+    let ctx = crate::compile::llvm_context();
+    let ptr_ty = ctx.ptr_type(AddressSpace::default());
+    ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
+}
+
 fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(&args[1])?;
-    let ctx = crate::compile::llvm_context();
-    let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let fn_type = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-    let function = module.borrow_mut().add_function(name, fn_type, None);
+    let function = module.borrow_mut().add_function(name, compiled_fn_type(), None);
     Ok(RtValue::LlvmFunction(function))
+}
+
+/// Forward-declares `name` in `module` with the standard compiled-function
+/// ABI but **no body** — [`Interp::compile_function`]'s JIT-only step
+/// (labels/closures Stage 3, `Expr::Call` to a different top-level function)
+/// that lets `compiler.rs`'s `compile-call` find an already-`compile`d
+/// function via `get-function` before the real call target is wired in via
+/// `add_global_mapping` once the engine running this declaration's own
+/// module exists (see that method's doc comment). Not exposed as an
+/// `llvm-*` builtin — unlike [`llvm_module_add_function`], the typelisp
+/// compiler body itself never needs to call this; only the Rust-side JIT
+/// orchestration above does. Must be called with
+/// [`crate::compile::COMPILE_LOCK`] held.
+fn declare_external_function(module: &Rc<RefCell<Module<'static>>>, name: &str) {
+    module.borrow_mut().add_function(name, compiled_fn_type(), None);
 }
 
 /// The captures counterpart of [`llvm_module_add_function`]: `i64
