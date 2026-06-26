@@ -7,6 +7,7 @@
 pub mod aot;
 pub mod ast_bridge;
 pub mod freevars;
+pub mod runtime;
 
 use std::sync::{Mutex, OnceLock};
 
@@ -95,5 +96,51 @@ impl CompiledFn {
     /// parameter).
     pub fn address(&self) -> usize {
         self.addr
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use inkwell::AddressSpace;
+
+    use super::{llvm_context, CompiledFn, COMPILE_LOCK};
+    use crate::compile::runtime::rt_ping;
+
+    /// Stage 0's JIT-side half of the proof that a `#[no_mangle]` Rust
+    /// function from [`crate::compile::runtime`] is callable through the
+    /// exact same `externals`/`add_global_mapping` wiring labels/closures
+    /// Stage 3 already built for calling another JIT-compiled typelisp
+    /// function by name — `rt_ping`'s real address is just another `usize`
+    /// to map, indistinguishable to this machinery from a previously-JIT'd
+    /// function's address. See `aot_output_can_call_an_rt_extern_function`
+    /// (`aot.rs`) for the AOT-side counterpart.
+    #[test]
+    fn jit_can_call_an_rt_extern_function() {
+        let ctx = llvm_context();
+        let _guard = COMPILE_LOCK.lock().unwrap();
+        let module = ctx.create_module("jit_ping_test");
+
+        let ptr_ty = ctx.ptr_type(AddressSpace::default());
+        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        let rt_ping_decl = module.add_function("rt_ping", fn_ty, None);
+        let caller = module.add_function("jit_ping_test", fn_ty, None);
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(caller, "entry");
+        builder.position_at_end(entry);
+        let one_slot = builder.build_alloca(ctx.i64_type(), "one_slot").unwrap();
+        builder.build_store(one_slot, ctx.i64_type().const_int(41, false)).unwrap();
+        let argc_one = ctx.i32_type().const_int(1, false);
+        let call = builder.build_call(rt_ping_decl, &[one_slot.into(), argc_one.into()], "rt_ping_result").unwrap();
+        let result = match call.try_as_basic_value() {
+            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
+            inkwell::values::ValueKind::Instruction(_) => panic!("rt_ping call produced no value"),
+        };
+        builder.build_return(Some(&result)).unwrap();
+        module.verify().expect("module failed verification");
+
+        let externals = vec![("rt_ping".to_string(), rt_ping as usize)];
+        let compiled = CompiledFn::new(&module, "jit_ping_test", &externals).expect("CompiledFn::new failed");
+        assert_eq!(compiled.call(&[]), 42);
     }
 }

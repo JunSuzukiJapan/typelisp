@@ -154,6 +154,24 @@ fn build_main_wrapper(ctx: &'static Context, module: &Module<'static>) -> Result
     Ok(())
 }
 
+/// The path to this crate's own `staticlib` artifact (see `Cargo.toml`'s
+/// `[lib] crate-type`), which exports the `#[no_mangle]` runtime shims in
+/// [`crate::compile::runtime`] (`rt_ping`, and from Stage 3 onward
+/// `rt_cons`/`rt_car`/...) as plain C symbols. Linked into every AOT
+/// executable below so calls to those shims resolve the same way a call to
+/// another `defun` in the file does — see `runtime`'s module doc comment.
+///
+/// Computed from `CARGO_MANIFEST_DIR` + the build profile this very test/
+/// binary was compiled under (`debug_assertions` tracks `dev`/`test` vs
+/// `release` closely enough: the staticlib is always built in the same
+/// profile as whatever is currently calling this function, since both come
+/// from the same `cargo` invocation) rather than hardcoded — see the
+/// project's policy on machine-specific absolute paths.
+fn staticlib_path() -> String {
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    format!("{}/target/{}/libtypelisp.a", env!("CARGO_MANIFEST_DIR"), profile)
+}
+
 /// Emits `module` to an object file and links it into a native executable
 /// at `output_path` via the system `cc`. Must be called with
 /// [`crate::compile::COMPILE_LOCK`] held.
@@ -185,6 +203,7 @@ fn write_executable(module: &Module<'static>, output_path: &str) -> Result<(), S
 
     let status = Command::new("cc")
         .arg(&object_path)
+        .arg(staticlib_path())
         .arg("-o")
         .arg(output_path)
         .status()
@@ -196,4 +215,64 @@ fn write_executable(module: &Module<'static>, output_path: &str) -> Result<(), S
         return Err(format!("linker failed with status {}", status));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    use inkwell::AddressSpace;
+
+    use super::{build_main_wrapper, write_executable, ENTRY_POINT_INTERNAL_NAME};
+    use crate::compile::{llvm_context, COMPILE_LOCK};
+
+    fn tmp_path(name: &str) -> PathBuf {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("aot-test-tmp");
+        std::fs::create_dir_all(&dir).expect("failed to create the AOT test scratch dir");
+        dir.join(name)
+    }
+
+    /// Stage 0's proof that AOT-linked native code can call a `#[no_mangle]`
+    /// Rust function from this crate's own `staticlib` artifact (see
+    /// `super::staticlib_path`'s doc comment) through nothing more than an
+    /// ordinary `declare` + `call` against the shared compiled-function ABI
+    /// — no per-shim linking mechanism needed, the same way Stage 3 of
+    /// labels/closures already lets one JIT-compiled function call another
+    /// by name. Bypasses the typelisp compiler entirely (hand-builds the
+    /// module via inkwell) since this only needs to test the link step, not
+    /// anything `ast_bridge`/`compiler.rs` does.
+    #[test]
+    fn aot_output_can_call_an_rt_extern_function() {
+        let ctx = llvm_context();
+        let _guard = COMPILE_LOCK.lock().unwrap();
+        let module = ctx.create_module("rt_ping_test");
+
+        let ptr_ty = ctx.ptr_type(AddressSpace::default());
+        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        let rt_ping = module.add_function("rt_ping", fn_ty, None);
+        let tl_main = module.add_function(ENTRY_POINT_INTERNAL_NAME, fn_ty, None);
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(tl_main, "entry");
+        builder.position_at_end(entry);
+        let one_slot = builder.build_alloca(ctx.i64_type(), "one_slot").unwrap();
+        builder.build_store(one_slot, ctx.i64_type().const_int(41, false)).unwrap();
+        let argc_one = ctx.i32_type().const_int(1, false);
+        let call = builder.build_call(rt_ping, &[one_slot.into(), argc_one.into()], "rt_ping_result").unwrap();
+        let result = match call.try_as_basic_value() {
+            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
+            inkwell::values::ValueKind::Instruction(_) => panic!("rt_ping call produced no value"),
+        };
+        builder.build_return(Some(&result)).unwrap();
+
+        build_main_wrapper(ctx, &module).expect("build_main_wrapper failed");
+        module.verify().expect("module failed verification");
+
+        let out_path = tmp_path("rt_ping_test");
+        write_executable(&module, out_path.to_str().unwrap()).expect("write_executable failed");
+
+        let status = Command::new(&out_path).status().expect("failed to run the compiled executable");
+        assert_eq!(status.code(), Some(42));
+    }
 }

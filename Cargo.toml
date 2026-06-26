@@ -14,3 +14,12 @@ inkwell = { version = "0.9", features = ["llvm17-0"] }
 [[bin]]
 name = "typl"
 path = "src/main.rs"
+
+# `staticlib` lets `compile-file`'s AOT output (linked via the system `cc`,
+# see `src/compile/aot.rs`'s `write_executable`) resolve the `#[no_mangle]`
+# runtime shims in `src/compile/runtime.rs` as ordinary linker symbols —
+# `rlib` alone isn't something a plain `cc` link step can consume. `rlib`
+# stays too, since `tests/*.rs` and `src/main.rs` link against this crate
+# the normal Rust way.
+[lib]
+crate-type = ["rlib", "staticlib"]
