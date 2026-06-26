@@ -1,10 +1,5 @@
-//! Managed memory: a fixed cons-cell arena with mark-sweep garbage collection.
-//!
-//! See [`heap::Heap`] for the design. The public surface is safe; raw pointers
-//! are encapsulated inside [`value::ConsRef`] and never escape this module.
-
-pub mod value;
-pub mod heap;
-
-pub use value::{ConsRef, PathId, StrId, SymId, Value};
-pub use heap::Heap;
+//! The GC-managed cons heap now lives in the `typelisp-mem` crate (see its
+//! doc comment for why) — re-exported here unchanged so every existing
+//! `crate::mem::*`/`crate::Heap`/`crate::Value`/... reference elsewhere in
+//! this crate keeps working.
+pub use typelisp_mem::*;

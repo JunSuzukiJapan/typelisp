@@ -280,6 +280,15 @@ impl Interp {
                             }
                         })
                         .collect::<Result<Vec<i64>, EvalError>>()?;
+                    // Registers `heap` as this thread's active `Heap` (see
+                    // `compile::runtime::set_active_heap`'s doc comment) so any
+                    // `rt-cons`/`rt-car`/... call the compiled code makes —
+                    // directly or transitively through another compiled
+                    // function — resolves against the right heap. Done on every
+                    // call rather than once, since it's one pointer store and
+                    // there's no cheaper place to detect "this callee might
+                    // transitively touch the heap" ahead of time.
+                    crate::compile::runtime::set_active_heap(heap as *mut Heap);
                     return Ok(RtValue::Int(compiled.call(&int_args)));
                 }
                 if let Some(f) = self.fns.get(name) {

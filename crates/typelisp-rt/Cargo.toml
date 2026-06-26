@@ -1,0 +1,15 @@
+[package]
+name = "typelisp-rt"
+version = "0.1.0"
+edition = "2018"
+
+# `staticlib` lets `compile-file`'s AOT output (linked via the system `cc`,
+# see `typelisp::compile::aot::write_executable`) resolve these `#[no_mangle]`
+# functions as ordinary linker symbols. `rlib` stays too, since the main
+# `typelisp` crate links against this the normal Rust way for its JIT path.
+[lib]
+name = "typelisp_rt"
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+typelisp-mem = { path = "../typelisp-mem" }

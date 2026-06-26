@@ -1161,15 +1161,38 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
 
 **ステージ分割**（Stage 1-6=クロージャ/loopと同等以上の規模を見込む）:
 
-- **Stage 0（最優先・最大の不確定要素）**: AOTがRust側`extern "C"`関数
-  （ダミーの`rt_ping`）をリンクできるかのスパイク。JIT側は
-  `add_global_mapping`で動くはず（リスク低い）が、AOTは`cc`で別プロセスに
-  リンクするため「`typelisp`バイナリ自身の関数を生成済み実行可能ファイルが
-  シンボル解決できるか」が未検証。結果次第で以降のAOT側設計
-  （別の静的ライブラリ新設が要るか等）が変わるため最初に潰す。
-- **Stage 1**: 共有ライブラリの土台——`rt_set_active_heap`等の内部限定
-  Heap登録機構。JIT側は[`Interp::eval`のコンパイル済み呼び出し箇所](src/eval/interp.rs#L273)、
-  AOT側は生成`main`/`tl_main`ラッパーの起動時初期化を追加。
+- **Stage 0（完了、2026-06-26）**: AOTがRust側`extern "C"`関数（ダミーの
+  `rt_ping`）をリンクできるかのスパイク。JITは`add_global_mapping`の
+  `externals`配線（labels/closures Stage 3と同じ機構）で問題なく動作。
+  AOTは`cc <obj>.o <staticlib> -o <out>`で実際にリンク・実行できることを
+  確認——ただし**`typelisp`クレート自身を`staticlib`化する素朴な方法は
+  実用に耺えなかった**：`inkwell`経由でLLVM全体を静的に内包しているため、
+  `cc`（C++ランタイムやzlib/libffi/terminfo等を自動リンクしない）が
+  `operator new`/`__cxa_*`/`compress2`/`ffi_call`/`setupterm`等、未定義
+  シンボルの山で失敗する（`llvm-config --system-libs`相当の知識が必要に
+  なり、しかも巨大な実行可能ファイルになる）。対策として**ワークスペース
+  分割**を実施：`crates/typelisp-mem`（`mem::Heap`/`Value`+`Error`、LLVM
+  依存ゼロ）と`crates/typelisp-rt`（`rt_*`関数群、`typelisp-mem`にのみ
+  依存、`crate-type=["rlib","staticlib"]`）を新設。メインの`typelisp`
+  クレートは両方にパス依存し、`src/mem.rs`/`src/errors.rs`/
+  `src/compile/mod.rs`の`runtime`は全部`pub use`の薄い再エクスポートに
+  変更——既存コードの`crate::Heap`/`crate::Error`/
+  `crate::compile::runtime::*`という参照は一切変更不要だった。AOTは
+  小さい（LLVM不在の）`libtypelisp_rt.a`だけをリンクすればよくなった。
+  `[workspace] default-members`に全メンバーを明記しないと、素の
+  `cargo build`/`cargo test`が`typelisp-rt`の`staticlib`を生成しない
+  （依存先としては`rlib`しか要求されないため）ことも判明、対応済み。
+- **Stage 1（完了、2026-06-26）**: 共有ライブラリの土台——
+  `typelisp-rt`に`set_active_heap`/`active_heap()`（`thread_local!`、
+  `cargo test`の並行実行で複数テストが別々の`Heap`を持つため**プレーンな
+  `static`だと競合する**——各OSスレッドは常に1つの`Interp`/`Heap`しか
+  同時に扱わないのでスレッドローカルで十分）と、診断用`rt_heap_live_count`
+  /AOT起動時専用`rt_heap_init`（`Heap`を確保してそのまま登録、プロセス
+  終了まで解放しない意図的なリーク）を実装。JIT側は
+  [`Interp::eval`のコンパイル済み呼び出し箇所](src/eval/interp.rs#L273)で
+  呼び出し直前に`set_active_heap`、AOT側は`build_main_wrapper`が生成する
+  `main`が`tl_main`を呼ぶ前に必ず`rt_heap_init`を呼ぶよう変更。JIT/AOT
+  双方の単体テストで実証、全テストgreen・clippy警告0・3回連続実行で安定。
 - **Stage 2**: タグ付きi64表現＋ビット演算プリミティブ（`build-and`/
   `build-or`/`build-shl`/`build-lshr`）。Cons無しでInt往復のみ先に確認。
 - **Stage 3**: `rt-cons`/`rt-car`/`rt-cdr`/`rt-set-car`/`rt-set-cdr`。

@@ -7,7 +7,12 @@
 pub mod aot;
 pub mod ast_bridge;
 pub mod freevars;
-pub mod runtime;
+
+/// The shared Rust-only runtime library (`typelisp-rt`, a separate crate —
+/// see its doc comment for why) re-exported under its old in-crate path so
+/// every existing `crate::compile::runtime::...` reference elsewhere in this
+/// crate keeps working unchanged.
+pub use typelisp_rt as runtime;
 
 use std::sync::{Mutex, OnceLock};
 
@@ -142,5 +147,50 @@ mod tests {
         let externals = vec![("rt_ping".to_string(), rt_ping as usize)];
         let compiled = CompiledFn::new(&module, "jit_ping_test", &externals).expect("CompiledFn::new failed");
         assert_eq!(compiled.call(&[]), 42);
+    }
+
+    /// Stage 1's JIT-side proof: registering a `Heap` via
+    /// `runtime::set_active_heap` (exactly what `Interp::eval`'s
+    /// compiled-call dispatch now does before every call) makes it visible,
+    /// through nothing but `rt_heap_live_count`'s real address, to code that
+    /// was JIT-compiled with no awareness of which `Heap` it'd end up
+    /// running against.
+    #[test]
+    fn jit_compiled_code_sees_the_heap_registered_by_set_active_heap() {
+        use crate::compile::runtime::{rt_heap_live_count, set_active_heap};
+        use crate::{Heap, Value};
+
+        let ctx = llvm_context();
+        let _guard = COMPILE_LOCK.lock().unwrap();
+        let module = ctx.create_module("jit_heap_test");
+
+        let ptr_ty = ctx.ptr_type(AddressSpace::default());
+        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        let rt_heap_live_count_decl = module.add_function("rt_heap_live_count", fn_ty, None);
+        let caller = module.add_function("jit_heap_test", fn_ty, None);
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(caller, "entry");
+        builder.position_at_end(entry);
+        let null_args = ptr_ty.const_null();
+        let argc_zero = ctx.i32_type().const_int(0, false);
+        let call = builder
+            .build_call(rt_heap_live_count_decl, &[null_args.into(), argc_zero.into()], "live_count")
+            .unwrap();
+        let result = match call.try_as_basic_value() {
+            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
+            inkwell::values::ValueKind::Instruction(_) => panic!("rt_heap_live_count call produced no value"),
+        };
+        builder.build_return(Some(&result)).unwrap();
+        module.verify().expect("module failed verification");
+
+        let mut heap = Heap::with_capacity(8);
+        heap.cons(Value::Int(1), Value::Empty).expect("cons failed");
+        heap.cons(Value::Int(2), Value::Empty).expect("cons failed");
+        set_active_heap(&mut heap as *mut Heap);
+
+        let externals = vec![("rt_heap_live_count".to_string(), rt_heap_live_count as usize)];
+        let compiled = CompiledFn::new(&module, "jit_heap_test", &externals).expect("CompiledFn::new failed");
+        assert_eq!(compiled.call(&[]), 2);
     }
 }

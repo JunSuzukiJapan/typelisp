@@ -131,6 +131,9 @@ fn build_main_wrapper(ctx: &'static Context, module: &Module<'static>) -> Result
         .ok_or_else(|| "internal error: compiled entry point not found in module".to_string())?;
 
     let i32_type = ctx.i32_type();
+    let ptr_ty = ctx.ptr_type(AddressSpace::default());
+    let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+    let rt_heap_init = module.add_function("rt_heap_init", fn_ty, None);
     let main_fn = module.add_function(ENTRY_POINT_NAME, i32_type.fn_type(&[], false), None);
     let entry_block = ctx.append_basic_block(main_fn, "entry");
     let builder = ctx.create_builder();
@@ -138,6 +141,16 @@ fn build_main_wrapper(ctx: &'static Context, module: &Module<'static>) -> Result
 
     let null_args = ctx.ptr_type(AddressSpace::default()).const_null();
     let argc_zero = ctx.i32_type().const_int(0, false);
+    // AOT's counterpart to the JIT path's `Interp::eval` calling
+    // `runtime::set_active_heap` before every compiled call — see
+    // `runtime::rt_heap_init`'s doc comment for why a standalone executable
+    // has to create and register its own `Heap` here instead. Must run
+    // before `tl_main` (or anything it calls) touches the heap at all; no
+    // logical arguments, so `rt_heap_init` falls back to its default
+    // capacity.
+    builder
+        .build_call(rt_heap_init, &[null_args.into(), argc_zero.into()], "heap_init_result")
+        .map_err(|e| format!("failed to build rt_heap_init call: {}", e))?;
     let call: CallSiteValue = builder
         .build_call(tl_main, &[null_args.into(), argc_zero.into()], "tl_main_result")
         .map_err(|e| format!("failed to build entry-point call: {}", e))?;
@@ -154,22 +167,30 @@ fn build_main_wrapper(ctx: &'static Context, module: &Module<'static>) -> Result
     Ok(())
 }
 
-/// The path to this crate's own `staticlib` artifact (see `Cargo.toml`'s
-/// `[lib] crate-type`), which exports the `#[no_mangle]` runtime shims in
-/// [`crate::compile::runtime`] (`rt_ping`, and from Stage 3 onward
+/// The path to the `typelisp-rt` crate's `staticlib` artifact, which
+/// exports the `#[no_mangle]` runtime shims in [`crate::compile::runtime`]
+/// (`rt_ping`/`rt_heap_init`/`rt_heap_live_count`, and from Stage 3 onward
 /// `rt_cons`/`rt_car`/...) as plain C symbols. Linked into every AOT
 /// executable below so calls to those shims resolve the same way a call to
 /// another `defun` in the file does — see `runtime`'s module doc comment.
+///
+/// Deliberately the small, dependency-free `typelisp-rt` crate's own
+/// artifact, not this (`typelisp`) crate's — `typelisp` embeds all of LLVM
+/// via `inkwell`, and linking *that* into a tiny AOT executable drags in
+/// LLVM's entire system-library footprint (`libc++`, zlib, libffi,
+/// terminfo, ...) for no benefit; `typelisp-rt` has none of that.
 ///
 /// Computed from `CARGO_MANIFEST_DIR` + the build profile this very test/
 /// binary was compiled under (`debug_assertions` tracks `dev`/`test` vs
 /// `release` closely enough: the staticlib is always built in the same
 /// profile as whatever is currently calling this function, since both come
 /// from the same `cargo` invocation) rather than hardcoded — see the
-/// project's policy on machine-specific absolute paths.
+/// project's policy on machine-specific absolute paths. The workspace
+/// shares one `target/` dir at the repo root, so `CARGO_MANIFEST_DIR` (this
+/// crate's own root) is the right base for every member's artifacts.
 fn staticlib_path() -> String {
     let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
-    format!("{}/target/{}/libtypelisp.a", env!("CARGO_MANIFEST_DIR"), profile)
+    format!("{}/target/{}/libtypelisp_rt.a", env!("CARGO_MANIFEST_DIR"), profile)
 }
 
 /// Emits `module` to an object file and links it into a native executable
@@ -274,5 +295,44 @@ mod tests {
 
         let status = Command::new(&out_path).status().expect("failed to run the compiled executable");
         assert_eq!(status.code(), Some(42));
+    }
+
+    /// Stage 1's AOT-side proof: `build_main_wrapper` now inserts a call to
+    /// `rt_heap_init` before `tl_main` ever runs (see its doc comment), so a
+    /// freshly-started AOT executable can call `rt_heap_live_count` (or any
+    /// future `rt-cons`/`rt-car`/...) with no Rust embedder around to have
+    /// registered a `Heap` for it — this `tl_main` never calls `rt_heap_init`
+    /// itself, only `build_main_wrapper`'s generated `main` does.
+    #[test]
+    fn aot_main_wrapper_initializes_a_heap_before_tl_main_runs() {
+        let ctx = llvm_context();
+        let _guard = COMPILE_LOCK.lock().unwrap();
+        let module = ctx.create_module("rt_heap_init_test");
+
+        let ptr_ty = ctx.ptr_type(AddressSpace::default());
+        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        let rt_heap_live_count = module.add_function("rt_heap_live_count", fn_ty, None);
+        let tl_main = module.add_function(ENTRY_POINT_INTERNAL_NAME, fn_ty, None);
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(tl_main, "entry");
+        builder.position_at_end(entry);
+        let null_args = ptr_ty.const_null();
+        let argc_zero = ctx.i32_type().const_int(0, false);
+        let call = builder.build_call(rt_heap_live_count, &[null_args.into(), argc_zero.into()], "live_count").unwrap();
+        let result = match call.try_as_basic_value() {
+            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
+            inkwell::values::ValueKind::Instruction(_) => panic!("rt_heap_live_count call produced no value"),
+        };
+        builder.build_return(Some(&result)).unwrap();
+
+        build_main_wrapper(ctx, &module).expect("build_main_wrapper failed");
+        module.verify().expect("module failed verification");
+
+        let out_path = tmp_path("rt_heap_init_test");
+        write_executable(&module, out_path.to_str().unwrap()).expect("write_executable failed");
+
+        let status = Command::new(&out_path).status().expect("failed to run the compiled executable");
+        assert_eq!(status.code(), Some(0));
     }
 }

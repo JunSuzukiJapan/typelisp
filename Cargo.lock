@@ -309,6 +309,19 @@ dependencies = [
  "num-bigint",
  "once_cell",
  "rustyline",
+ "typelisp-mem",
+ "typelisp-rt",
+]
+
+[[package]]
+name = "typelisp-mem"
+version = "0.1.0"
+
+[[package]]
+name = "typelisp-rt"
+version = "0.1.0"
+dependencies = [
+ "typelisp-mem",
 ]
 
 [[package]]
