@@ -1118,19 +1118,77 @@ setf+if+returnによるカウントループ、bare breakのみ（Unit型、ハ�
 既存のまま（移行後も green）。全件green（既存テスト含む全スイート）、
 clippy警告0（`-D warnings`含む）、5回連続実行で安定確認済み。
 
+### Sexpr表現 + Match/Construct/共有Rustライブラリ 実装計画（2026-06-26起案、未着手）
+
+`not`移行後も`dolist`はcompile不能なまま（前節参照）。原因は`car`/`cdr`が
+Rust専用なこと自体ではなく、**コンパイル済みコードに`Sexpr`値の表現も
+GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針「全
+コンパイル値は素の`i64`」のまま）。ユーザーと設計を詰めた結果、以下の
+方針で固まった。
+
+**設計の要点**:
+- typelispは静的型付けなので動的タグが必要なのは`Sexpr`型だけ（他の型は
+  コンパイル時に表現が確定する）。`mem::Value`（`src/mem/value.rs`）の
+  9バリアントを下位3bitタグの8通りに収める（`Nil`/`Bool`を1タグに畳む）：
+  000=Fixnum(Int、61bit化)/001=Cons(生ポインタ、`Cell`は8byte以上アライン
+  済みで安全)/010=Symbol/011=Str/100=Char/101=Path（いずれも対応する
+  `SymId`/`StrId`/`PathId`をそのまま即値化）/110=immediate定数{Nil,False,
+  True}/111=Float(ボックス化、ClosureBoxと同型のmalloc+refcount。循環
+  不可能なので安全)。SBCL/CCL/Chez Scheme等の下位タグ付きポインタ方式を
+  参考にした（CPythonの全ボックス化は今回不採用——ClosureBoxの実績を
+  活かしたタグ付き即値の方が小整数/文字等を確保なしで扱える）。
+- `Heap`はCL/Scheme実装一般と同じく「プロセスにつき1つの暗黙の大域状態」
+  として扱う。コンパイル済みコードからは`Heap`ポインタを明示的に取得・
+  引渡しせず、共有Rustライブラリの各プリミティブ（`rt-cons`等）が内部で
+  グローバルから解決する。ABI拡張（全呼び出し箇所への引数追加）は不要——
+  JIT側は`Interp`がコンパイル済み関数を呼ぶ直前に登録するだけ、AOT側は
+  生成された実行可能ファイルが起動時に自前でヒープを確保・登録する
+  （AOTは独立プロセスなのでそもそも「呼び出し元から渡す」相手がいない）。
+- 共有ライブラリの各関数は**既存の`compiled_fn_type`と全く同じABI**
+  （`i64 fn(i64* args, i32 argc)`）で実装する。これにより
+  labels/closures Stage 3で作った「外部関数アドレスを`add_global_mapping`
+  で配線する」既存機構をそのまま再利用でき、新しい呼び出し機構を作らずに
+  済む。
+- `Match`/`Construct`/`FieldGet`/`FieldSet`自体のロジック（`compile-match`
+  等）は既存の`compile-if`/`compile-loop`と同じく全部typelisp
+  （`compiler.rs`）に書く。Rust側に追加するのはビット演算
+  （`build-and`/`build-or`/`build-shl`/`build-lshr`）と汎用malloc/free+
+  offset load/store（`ClosureBox`の汎用化）だけ——`Match`の多分岐自体は
+  既存の`build-icmp-eq`/`build-cond-br`の連鎖で足り新規Rost不要。
+  `Construct`/`FieldGet`/`FieldSet`（`Option`/`Result`/`defstruct`)は
+  `Sexpr`とは別経路（`mem::Heap`と無関係、ClosureBoxと同型のmalloc+
+  refcountに乗せられるので`Sexpr`より作業が軽い）。
+
+**ステージ分割**（Stage 1-6=クロージャ/loopと同等以上の規模を見込む）:
+
+- **Stage 0（最優先・最大の不確定要素）**: AOTがRust側`extern "C"`関数
+  （ダミーの`rt_ping`）をリンクできるかのスパイク。JIT側は
+  `add_global_mapping`で動くはず（リスク低い）が、AOTは`cc`で別プロセスに
+  リンクするため「`typelisp`バイナリ自身の関数を生成済み実行可能ファイルが
+  シンボル解決できるか」が未検証。結果次第で以降のAOT側設計
+  （別の静的ライブラリ新設が要るか等）が変わるため最初に潰す。
+- **Stage 1**: 共有ライブラリの土台——`rt_set_active_heap`等の内部限定
+  Heap登録機構。JIT側は[`Interp::eval`のコンパイル済み呼び出し箇所](src/eval/interp.rs#L273)、
+  AOT側は生成`main`/`tl_main`ラッパーの起動時初期化を追加。
+- **Stage 2**: タグ付きi64表現＋ビット演算プリミティブ（`build-and`/
+  `build-or`/`build-shl`/`build-lshr`）。Cons無しでInt往復のみ先に確認。
+- **Stage 3**: `rt-cons`/`rt-car`/`rt-cdr`/`rt-set-car`/`rt-set-cdr`。
+  `HeapExhausted`時の挙動（abort方針）を決定。`(cons 1 2)`→`car`/`cdr`の
+  ラウンドトリップをコンパイル済みコードで確認。
+- **Stage 4**: GCルート安全性——`rt-push-sexpr-root`/`rt-pop-sexpr-root`。
+  既存retain/release挿入パスと並行する「Sexprルート挿入」パスを追加。
+  小容量Heapで頻繁にGCを起こしながらループ内でconsを作り続けるテストで
+  実証。
+- **Stage 5**: `Match`対応（Sexprスクルーティニー）。`consp`/`null`/`atom`
+  が実際にコンパイル可能になることを確認。
+- **Stage 6**: `Construct`/`FieldGet`/`FieldSet`対応（一般ADT）。
+  `Option`/`Result`/`defstruct`がコンパイル可能になることを確認。
+- **Stage 7**（優先度低）: 文字列対応。
+- **Stage 8**: `dolist`含む`prelude.rs`のリスト関数群が実際にコンパイル
+  可能になることの実証＋全体回帰確認。
+
 ### 残る選択肢（優先順位はユーザー未確認）
 
-- **`Sexpr`をコンパイル値として表現し`Match`/`Construct`/`FieldGet`/
-  `FieldSet`をコンパイル対応させる**（今回新たに判明、上記参照）: `dolist`
-  はじめ`prelude.rs`のリスト操作関数群（`length`/`append`/`map`/`filter`/...
-  29関数）はどれも`car`/`cdr`/`match`に依存しており、これが無いと
-  compile不能なまま——影響範囲が非常に大きいため次点の最有力候補。
-  ユーザー方針（Rust専用組み込みを共有ライブラリ化しインタープリタ/
-  コンパイラ両方から使う）の本体はここで効いてくる——`car`/`cdr`自体は
-  コンスセル直接操作のためRust専用のままだが、コンパイル済みコードから
-  それを呼ぶには`Sexpr`値の表現（タグ付きヒープポインタ等）と、
-  コンパイル済み関数のABI拡張（GCヒープへのコンテキストポインタを渡す
-  必要が生じる）が前提になる、本ステージより大きいスコープ。
 - **mark-and-sweepによるサイクル収集本体**: ユーザー提案の元々の到達点
   （「GCを参照カウントに追加で、適当なタイミングでmark-and-sweepする」）だが、
   既存の`ClosureBox`設計では真の参照循環がそもそも構築不可能と判明済み
