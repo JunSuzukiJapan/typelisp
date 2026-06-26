@@ -232,8 +232,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
         }
         // Everything below needs either multi-child rooting (a child's
         // translated `Value` must stay rooted while its siblings are
-        // translated — `Expr::If`'s three children, `Expr::Let`'s bindings
-        // plus body, ...) or a node shape this phase doesn't compile yet
+        // translated) or a node shape this phase doesn't compile yet
         // (`Construct`/`FieldGet`/`FieldSet`/`Match`/`Loop`/...). Both are
         // deliberately deferred to the phase that first needs them, rather
         // than building out unrooted multi-child plumbing nothing exercises
@@ -241,8 +240,8 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
         Expr::Global(_) => unsupported(heap, "Global"),
         Expr::FnRef(path) => translate_fnref(heap, path, &typed.ty),
         Expr::MethodRef { .. } => unsupported(heap, "MethodRef"),
-        Expr::If(..) => unsupported(heap, "If"),
-        Expr::Let(..) => unsupported(heap, "Let"),
+        Expr::If(cond, then, els) => translate_if(heap, cond, then, els, &typed.ty, direct),
+        Expr::Let(binds, body) => translate_let(heap, binds, body, direct),
         Expr::Call(path, args) => translate_call(heap, path, args, direct),
         Expr::Lambda { params, body } => translate_lambda(heap, params, body),
         Expr::Labels { defs, body } => translate_labels(heap, defs, body, direct),
@@ -259,6 +258,122 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
         Expr::Panic(_) => unsupported(heap, "Panic"),
         Expr::Quote(_) => unsupported(heap, "Quote"),
     }
+}
+
+/// `Expr::If(cond, then, els)` -> `(if is-fn cond-form then-form else-form)`
+/// (if/let/comparisons, labels/closures Stage 5). `is-fn` is `typed.ty`'s own
+/// `Fn`-ness — the same per-node tag `Expr::Var`'s own `(var name is-fn)`
+/// carries — because `if` doesn't introduce a function boundary the way a
+/// `call`/`apply`/`labels`/`lambda` result does: nothing here automatically
+/// "freshens" a branch's value the way `bare-returned-own-name`/R1-R4 do at an
+/// actual function exit. `compiler.rs`'s `compile-if` reads this tag to know
+/// whether it must retain a *borrowed* branch value before it can safely flow
+/// out as the `if`'s own (necessarily fresh, by the time any caller sees it)
+/// result — see that function's doc comment for the full reasoning. Every
+/// other compiled node shape here is already either inherently fresh
+/// (`int`/`bool`/arithmetic/a fresh `lambda`/`labels` box) or a function
+/// boundary that already freshens its result, so `if` is the one place this
+/// module needs to carry that information explicitly rather than letting
+/// `compiler.rs` assume it.
+fn translate_if(heap: &mut Heap, cond: &Typed, then: &Typed, els: &Typed, ty: &Type, direct: &HashSet<String>) -> Result<Value, Error> {
+    let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
+    let cond_v = ast_to_sexpr_scoped(heap, cond, direct)?;
+    heap.push_root(cond_v);
+    let then_v = match ast_to_sexpr_scoped(heap, then, direct) {
+        Ok(v) => v,
+        Err(e) => {
+            heap.pop_root(); // cond_v
+            return Err(e);
+        }
+    };
+    heap.push_root(then_v);
+    let els_v = match ast_to_sexpr_scoped(heap, els, direct) {
+        Ok(v) => v,
+        Err(e) => {
+            heap.pop_root(); // then_v
+            heap.pop_root(); // cond_v
+            return Err(e);
+        }
+    };
+    heap.push_root(els_v);
+    let result = tagged(heap, "if", &[is_fn, cond_v, then_v, els_v]);
+    heap.pop_root(); // els_v
+    heap.pop_root(); // then_v
+    heap.pop_root(); // cond_v
+    result
+}
+
+/// `Expr::Let(binds, body)` -> `(let ((name-sym . value-form)...)
+/// single-body-form)` (if/let/comparisons, labels/closures Stage 5). Unlike
+/// a `labels`/`lambda` parameter or captured-name list, binding pairs here
+/// carry no `is-fn` tag: `compiler.rs`'s `compile-let` only ever moves
+/// already-computed values into/out of `env` by name, and the existing
+/// `name-is-borrowed?`/`form-is-borrowed?` checks (keyed purely on "is this
+/// name present in `env`") already do the right thing for a `let`-bound
+/// `Fn`-typed value with no further bookkeeping — see `compile-let`'s doc
+/// comment. `body` is restricted to a single expression, the same limit
+/// every other multi-expression body shape here has (`translate_labels`'s
+/// def bodies, [`translate_lambda`]) — lifting it later is one allocation
+/// scheme away (compiling every body form but the last for effect only).
+fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
+    if body.len() != 1 {
+        return Err(Error::TypeError("compile: let has a multi-expression body, not yet supported".into()));
+    }
+    let mut pair_values = Vec::with_capacity(binds.len());
+    for (name, val) in binds {
+        let name_sym = heap.intern_symbol(name);
+        heap.push_root(name_sym);
+        let val_v = match ast_to_sexpr_scoped(heap, val, direct) {
+            Ok(v) => v,
+            Err(e) => {
+                heap.pop_root(); // name_sym
+                for _ in 0..pair_values.len() {
+                    heap.pop_root();
+                }
+                return Err(e);
+            }
+        };
+        heap.push_root(val_v);
+        let pair = heap.cons(name_sym, val_v);
+        heap.pop_root(); // val_v
+        heap.pop_root(); // name_sym
+        let pair = match pair {
+            Ok(p) => p,
+            Err(e) => {
+                for _ in 0..pair_values.len() {
+                    heap.pop_root();
+                }
+                return Err(e);
+            }
+        };
+        heap.push_root(pair);
+        pair_values.push(pair);
+    }
+    let bindings_list = match list_of(heap, &pair_values) {
+        Ok(v) => v,
+        Err(e) => {
+            for _ in 0..pair_values.len() {
+                heap.pop_root();
+            }
+            return Err(e);
+        }
+    };
+    for _ in 0..pair_values.len() {
+        heap.pop_root();
+    }
+    heap.push_root(bindings_list);
+    let body_v = match ast_to_sexpr_scoped(heap, &body[0], direct) {
+        Ok(v) => v,
+        Err(e) => {
+            heap.pop_root(); // bindings_list
+            return Err(e);
+        }
+    };
+    heap.push_root(body_v);
+    let result = tagged(heap, "let", &[bindings_list, body_v]);
+    heap.pop_root(); // body_v
+    heap.pop_root(); // bindings_list
+    result
 }
 
 /// `Expr::Labels { defs, body }` -> `(labels (captured-sym...) ((name
@@ -742,6 +857,24 @@ fn collect_calls(typed: &Typed, out: &mut Vec<Path>) {
                 collect_calls(e, out);
             }
         }
+        // if/let/comparisons, labels/closures Stage 5: a `Call` can sit
+        // inside either branch of an `If` or a `Let`'s binding values/body —
+        // both are now real translations (see `translate_if`/`translate_let`),
+        // so this walker must follow them too, the same way it already
+        // follows `Labels`'/`Lambda`'s bodies.
+        Expr::If(cond, then, els) => {
+            collect_calls(cond, out);
+            collect_calls(then, out);
+            collect_calls(els, out);
+        }
+        Expr::Let(binds, body) => {
+            for (_, value) in binds {
+                collect_calls(value, out);
+            }
+            for e in body {
+                collect_calls(e, out);
+            }
+        }
         _ => {}
     }
 }
@@ -876,14 +1009,12 @@ mod tests {
     #[test]
     fn an_unimplemented_node_becomes_an_explicit_unsupported_tag() {
         let mut heap = Heap::with_capacity(1 << 10);
-        let cond = Box::new(typed(Expr::Bool(true), Type::Bool));
-        let then = Box::new(typed(Expr::Int(1), Type::I64));
-        let els = Box::new(typed(Expr::Int(2), Type::I64));
-        let v = ast_to_sexpr(&mut heap, &typed(Expr::If(cond, then, els), Type::I64)).unwrap();
+        let scrutinee = Box::new(typed(Expr::Int(1), Type::I64));
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Match(scrutinee, Vec::new()), Type::I64)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "unsupported");
         match fields[0] {
-            Value::Str(id) => assert_eq!(heap.string(id), "If"),
+            Value::Str(id) => assert_eq!(heap.string(id), "Match"),
             other => panic!("expected a Str, got {:?}", other),
         }
     }
@@ -1207,5 +1338,107 @@ mod tests {
             assert_eq!(arg_tag, "var");
             assert_eq!(expect_str(&heap, arg_fields[0]), param_name);
         }
+    }
+
+    /// if/let/comparisons, labels/closures Stage 5: `Expr::If` -> `(if is-fn
+    /// cond-form then-form else-form)`. An `I64`-typed `if` carries `is-fn =
+    /// false` — see `translate_if`'s doc comment for why this tag exists at
+    /// all (an `if` doesn't freshen a borrowed branch value the way a
+    /// function-boundary node does, so `compiler.rs`'s `compile-if` needs to
+    /// know when it must).
+    #[test]
+    fn translates_an_if_expression() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let cond = typed(Expr::Bool(true), Type::Bool);
+        let then = typed(Expr::Int(1), Type::I64);
+        let els = typed(Expr::Int(2), Type::I64);
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::If(Box::new(cond), Box::new(then), Box::new(els)), Type::I64)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "if");
+        assert_eq!(fields[0], Value::Bool(false), "an I64-typed if is never Fn-typed");
+        let (cond_tag, _) = untag(&heap, fields[1]);
+        assert_eq!(cond_tag, "bool");
+        let (then_tag, then_fields) = untag(&heap, fields[2]);
+        assert_eq!(then_tag, "int");
+        assert_eq!(then_fields, vec![Value::Int(1)]);
+        let (else_tag, else_fields) = untag(&heap, fields[3]);
+        assert_eq!(else_tag, "int");
+        assert_eq!(else_fields, vec![Value::Int(2)]);
+    }
+
+    /// An `if` whose unified type is `Fn` (both branches return a closure)
+    /// carries `is-fn = true` — `compile-if` uses this to know it must
+    /// consider retaining a borrowed branch before the merge.
+    #[test]
+    fn an_fn_typed_if_carries_an_is_fn_tag() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let cond = typed(Expr::Bool(true), Type::Bool);
+        let then = typed(Expr::Var("f".to_string()), fn_ty());
+        let els = typed(Expr::Var("g".to_string()), fn_ty());
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::If(Box::new(cond), Box::new(then), Box::new(els)), fn_ty())).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "if");
+        assert_eq!(fields[0], Value::Bool(true));
+    }
+
+    /// if/let/comparisons, labels/closures Stage 5: `Expr::Let` -> `(let
+    /// ((name-sym . value-form)...) single-body-form)`. Binding pairs carry
+    /// no `is-fn` tag (unlike a `labels`/`lambda` parameter list) — see
+    /// `translate_let`'s doc comment for why none is needed.
+    #[test]
+    fn translates_a_let_expression() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let binds = vec![("x".to_string(), typed(Expr::Int(5), Type::I64))];
+        let body = vec![typed(Expr::Var("x".to_string()), Type::I64)];
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Let(binds, body), Type::I64)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "let");
+        let pairs = list_elems(&heap, fields[0]);
+        assert_eq!(pairs.len(), 1);
+        match heap.car(pairs[0]).unwrap() {
+            Value::Symbol(id) => assert_eq!(heap.symbol_name(id), "x"),
+            other => panic!("expected a Sym, got {:?}", other),
+        }
+        let (value_tag, value_fields) = untag(&heap, heap.cdr(pairs[0]).unwrap());
+        assert_eq!(value_tag, "int");
+        assert_eq!(value_fields, vec![Value::Int(5)]);
+        let (body_tag, body_fields) = untag(&heap, fields[1]);
+        assert_eq!(body_tag, "var");
+        assert_eq!(expect_str(&heap, body_fields[0]), "x");
+    }
+
+    /// Mirrors `translate_labels`/`translate_lambda`'s own restriction: a
+    /// `let` body with more than one expression isn't supported yet.
+    #[test]
+    fn let_rejects_a_multi_expression_body() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let binds = vec![("x".to_string(), typed(Expr::Int(1), Type::I64))];
+        let body = vec![typed(Expr::Var("x".to_string()), Type::I64), typed(Expr::Var("x".to_string()), Type::I64)];
+        let err = ast_to_sexpr(&mut heap, &typed(Expr::Let(binds, body), Type::I64)).unwrap_err();
+        match err {
+            Error::TypeError(msg) => assert!(msg.contains("multi-expression body"), "message was: {}", msg),
+            other => panic!("expected a TypeError, got {:?}", other),
+        }
+    }
+
+    /// `collect_call_targets` recurses into both arms of an `If` — a `Call`
+    /// inside either branch still needs JIT pre-declaration.
+    #[test]
+    fn collect_call_targets_finds_a_call_nested_inside_an_if_branch() {
+        let cond = typed(Expr::Bool(true), Type::Bool);
+        let then = typed(Expr::Call(crate::Path::root("g"), vec![]), Type::I64);
+        let els = typed(Expr::Int(0), Type::I64);
+        let v = typed(Expr::If(Box::new(cond), Box::new(then), Box::new(els)), Type::I64);
+        assert_eq!(collect_call_targets(&v), vec![crate::Path::root("g")]);
+    }
+
+    /// `collect_call_targets` recurses into both a `Let`'s binding values and
+    /// its body.
+    #[test]
+    fn collect_call_targets_finds_a_call_nested_inside_a_let_binding() {
+        let binds = vec![("x".to_string(), typed(Expr::Call(crate::Path::root("g"), vec![]), Type::I64))];
+        let body = vec![typed(Expr::Var("x".to_string()), Type::I64)];
+        let v = typed(Expr::Let(binds, body), Type::I64);
+        assert_eq!(collect_call_targets(&v), vec![crate::Path::root("g")]);
     }
 }

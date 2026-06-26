@@ -698,6 +698,28 @@ fn llvm_builder_def() -> AdtDef {
         "load-raw".to_string(),
         assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
     );
+    // `build-icmp-lt`/`-le`/`-gt`/`-ge`/`-eq`/`-ne`: `i64` comparisons —
+    // `compiler.rs`'s `compile-assoc` dispatches `<`/`<=`/`>`/`>=`/(`=`,`eq`)/`/=`
+    // to these (`if`/comparisons work, labels/closures Stage 5). Each widens
+    // the underlying `icmp` instruction's `i1` result back to `i64` (0/1) via
+    // `build_int_z_extend`, matching every other builtin's "every compiled
+    // value is a plain i64" convention (see `llvm_module_def`'s doc comment)
+    // — keeping a `bool` result indistinguishable in representation from any
+    // other `i64` is what lets `compile-if`'s `build-cond-br` (just below)
+    // accept either one uniformly.
+    for name in ["build-icmp-lt", "build-icmp-le", "build-icmp-gt", "build-icmp-ge", "build-icmp-eq", "build-icmp-ne"] {
+        assoc.insert(name.to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    }
+    // `build-cond-br`: branches to `then`/`else` depending on whether `cond`
+    // (an ordinary `i64`-valued `llvm-value`, typically a `build-icmp-*`
+    // result or a `bool` literal) is zero — `compile-if`'s primitive.
+    assoc.insert(
+        "build-cond-br".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_basic_block_ty(), llvm_basic_block_ty()], Type::Unit, true),
+    );
+    // `build-br`: an unconditional branch — `compile-if`'s then/else arms use
+    // this to join back at the merge block.
+    assoc.insert("build-br".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit, true));
     AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
 }
 

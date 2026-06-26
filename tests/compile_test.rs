@@ -128,7 +128,11 @@ fn the_compiler_body_compiles_an_int_literal_node() {
 
 #[test]
 fn the_compiler_body_panics_on_an_unsupported_tag() {
-    let err = run_with_compiler(r#"(compile-function (llvm-module::create "mod") "answer" '() '(if true))"#)
+    // `match` has no real translation yet (see `ast_bridge`'s module doc
+    // comment) — `if`/`let`/`bool` used to stand in for "not yet supported"
+    // here too, until if/let/comparisons (labels/closures Stage 5) gave them
+    // real translations.
+    let err = run_with_compiler(r#"(compile-function (llvm-module::create "mod") "answer" '() '(match))"#)
         .expect_err("expected an unsupported-tag panic");
     match err {
         EvalError::Panic(msg) => assert!(msg.contains("unsupported tag"), "message was: {}", msg),
@@ -1176,4 +1180,203 @@ fn compile_apply_releases_a_fresh_sibling_passed_as_a_call_argument_after_the_ca
     let call_pos = ir.find("call i64").expect("expected a direct call to go in the IR");
     let release_pos = ir.find("call void @__typelisp_closure_release").expect("expected a release call in the IR");
     assert!(release_pos > call_pos, "release must come after the call, IR was:\n{}", ir);
+}
+
+// --- if/let/comparisons (labels/closures Stage 5) ---
+
+/// `(bool b)` (`ast_bridge` already produced this tag; `compile-value` had no
+/// receiving arm for it until now) — every compiled value is a plain `i64`,
+/// so `true`/`false` compile straight to `1`/`0`.
+#[test]
+fn the_compiler_body_compiles_a_bool_literal_node() {
+    let ir = expect_str(eval_ok_with_compiler(
+        r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(bool true)))"#,
+    ));
+    assert!(ir.contains("ret i64 1"), "IR was:\n{}", ir);
+}
+
+/// `compile-assoc`'s new comparison arms (`<`/`<=`/`>`/`>=`/`=`/`eq`/`/=`) —
+/// `build-icmp-lt` end to end, JIT-executed both ways.
+#[test]
+fn the_compiler_body_compiles_an_i64_comparison() {
+    let module = match eval_ok_with_compiler(
+        r#"(compile-function (llvm-module::create "mod") "lt" '((a . false) (b . false))
+              '(assoc "i64" "<" true (var "a" false) (var "b" false)))"#,
+    ) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
+    let lt = unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("lt").expect("failed to look up `lt`") };
+    assert_eq!(unsafe { lt.call([3, 5].as_ptr(), 2) }, 1);
+    assert_eq!(unsafe { lt.call([5, 3].as_ptr(), 2) }, 0);
+}
+
+/// `compile-assoc`'s new receiver-type guard: an `f64` receiver (which
+/// defines the very same method names under `registry::float_assoc`) must
+/// panic clearly rather than silently misinterpreting its bit pattern as an
+/// `i64` — see `compile-assoc`'s doc comment.
+#[test]
+fn compile_assoc_panics_on_an_unsupported_receiver_type() {
+    let err = run_with_compiler(
+        r#"(compile-function (llvm-module::create "mod") "addf" '((a . false) (b . false))
+              '(assoc "f64" "+" true (var "a" false) (var "b" false)))"#,
+    )
+    .expect_err("expected a panic for a non-i64/i32 receiver");
+    match err {
+        EvalError::Panic(msg) => assert!(msg.contains("unsupported receiver type"), "message was: {}", msg),
+        other => panic!("expected a Panic, got {:?}", other),
+    }
+}
+
+/// `compile-if`: `(if is-fn cond-form then-form else-form)` end to end —
+/// `max(a, b)` via a comparison feeding the branch, JIT-executed both ways
+/// to prove both the `then` and `else` arm are reachable and correct.
+#[test]
+fn the_compiler_body_compiles_an_if_expression() {
+    let module = match eval_ok_with_compiler(
+        r#"(compile-function (llvm-module::create "mod") "maxab" '((a . false) (b . false))
+              '(if false
+                   (assoc "i64" ">" true (var "a" false) (var "b" false))
+                   (var "a" false)
+                   (var "b" false)))"#,
+    ) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
+    let maxab =
+        unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("maxab").expect("failed to look up `maxab`") };
+    assert_eq!(unsafe { maxab.call([10, 32].as_ptr(), 2) }, 32);
+    assert_eq!(unsafe { maxab.call([50, 3].as_ptr(), 2) }, 50);
+}
+
+/// `compile-let`'s shadow/restore discipline (`bind-let-values`/
+/// `restore-let-values`): a `let` that shadows the enclosing function's own
+/// parameter must not leak its shadowed value into a sibling expression that
+/// references the same name *after* the `let` ends — `(+ (let ((x 99)) x)
+/// x)`'s second `x` must read the real parameter, not 99.
+#[test]
+fn let_shadowing_is_correctly_restored_after_the_let_ends() {
+    let module = match eval_ok_with_compiler(
+        r#"(compile-function (llvm-module::create "mod") "shadow_test" '((x . false))
+              '(assoc "i64" "+" true
+                 (let ((x . (int 99))) (var "x" false))
+                 (var "x" false)))"#,
+    ) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
+    let f = unsafe {
+        engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("shadow_test").expect("failed to look up `shadow_test`")
+    };
+    assert_eq!(
+        unsafe { f.call([5].as_ptr(), 1) },
+        104,
+        "the let must shadow x only within its own body, restoring the outer parameter afterward"
+    );
+}
+
+/// `compile-if`'s retain-before-merge fix (this module's doc comment,
+/// `compile-if-branch`): an `if` whose branches are `Fn`-typed must retain
+/// whichever branch is *borrowed* before it escapes, since `if` introduces
+/// no function boundary to freshen it the way a call/apply/labels/lambda
+/// result already does. `pick` bare-passes through one of two borrowed
+/// `Fn`-typed parameters depending on a (constant-`false`) condition,
+/// picking `g`. Without the fix, the untouched branch's refcount would
+/// still be correct (it's never touched), but the *picked* branch would
+/// escape with no extra retain — releasing it once (simulating the caller
+/// treating `pick`'s non-`var`-shaped result as fresh, per `form-is-borrowed?`'s
+/// existing convention for every other tag) would then under-count `g`'s
+/// refcount by one relative to before the call, instead of exactly
+/// restoring it.
+#[test]
+fn compile_if_retains_a_borrowed_branch_value_before_it_escapes() {
+    let module = match eval_ok_with_compiler(
+        r#"
+        (defun build-test-module () llvm-module
+          (let ((m (llvm-module::create "mod")))
+            (let ((identity-fn (add-function-with-env m "identity")))
+              (let ((b (append-block identity-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-ret builder (load-arg builder identity-fn 0)))))
+            (let ((rc-fn (add-function m "read_rc")))
+              (let ((b (append-block rc-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-ret builder (debug-closure-refcount builder (load-arg builder rc-fn 0))))))
+            (let ((mkbox-fn (add-function m "make_box")))
+              (let ((b (append-block mkbox-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-ret builder (build-make-closure builder (get-function m "identity") (alloca-args builder 0) 0 0)))))
+            (let ((release-fn (add-function m "release_box")))
+              (let ((b (append-block release-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-closure-release builder m (load-arg builder release-fn 0))
+                  (build-ret builder (const-i64 builder 0)))))
+            (compile-function m "pick" '((f . true) (g . true))
+              '(if true (bool false) (var "f" true) (var "g" true)))
+            m))
+        (build-test-module)
+        "#,
+    ) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
+    let make_box = unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("make_box").expect("failed to look up `make_box`") };
+    let read_rc = unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("read_rc").expect("failed to look up `read_rc`") };
+    let release_box =
+        unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("release_box").expect("failed to look up `release_box`") };
+    let pick = unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("pick").expect("failed to look up `pick`") };
+
+    let f_box = unsafe { make_box.call(std::ptr::null(), 0) };
+    let g_box = unsafe { make_box.call(std::ptr::null(), 0) };
+    let f_rc_before = unsafe { read_rc.call([f_box].as_ptr(), 1) };
+    let g_rc_before = unsafe { read_rc.call([g_box].as_ptr(), 1) };
+
+    let picked = unsafe { pick.call([f_box, g_box].as_ptr(), 2) };
+    assert_eq!(picked, g_box, "expected the else branch (g) to be chosen");
+    assert_eq!(
+        unsafe { read_rc.call([f_box].as_ptr(), 1) },
+        f_rc_before,
+        "the untouched branch's refcount must be unchanged"
+    );
+
+    unsafe { release_box.call([picked].as_ptr(), 1) };
+    assert_eq!(
+        unsafe { read_rc.call([g_box].as_ptr(), 1) },
+        g_rc_before,
+        "releasing the if's returned value should exactly undo compile-if's retain of the borrowed branch"
+    );
+}
+
+/// The capstone of if/let/comparisons (labels/closures Stage 5): a *real*,
+/// terminating self-recursive function with a base case, compiled through
+/// the full `ast_bridge`/`compiler.rs` pipeline from ordinary typelisp
+/// source (not a hand-fed `Sexpr`) and JIT-dispatched via `(compile ...)`.
+/// Every earlier Stage 1-4 self-recursion test had to leave the base case
+/// out (no `if` existed to write one) — this is the first one that actually
+/// runs.
+#[test]
+fn compile_dispatches_a_self_recursive_function_with_a_base_case_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun fact ((n i64)) i64 (if (<= n 1) 1 (* n (fact (- n 1)))))
+        (compile "fact")
+        (fact 10)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 3628800),
+        other => panic!("expected an Int, got {:?}", other),
+    }
 }

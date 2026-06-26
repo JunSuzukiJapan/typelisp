@@ -1258,6 +1258,14 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-closure-release" => Some(llvm_builder_build_closure_release(args)),
             "debug-closure-refcount" => Some(llvm_builder_debug_closure_refcount(args)),
             "load-raw" => Some(llvm_builder_load_raw(args)),
+            "build-icmp-lt" => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
+            "build-icmp-le" => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
+            "build-icmp-gt" => Some(llvm_builder_build_icmp(args, "icmp_gt", inkwell::IntPredicate::SGT)),
+            "build-icmp-ge" => Some(llvm_builder_build_icmp(args, "icmp_ge", inkwell::IntPredicate::SGE)),
+            "build-icmp-eq" => Some(llvm_builder_build_icmp(args, "icmp_eq", inkwell::IntPredicate::EQ)),
+            "build-icmp-ne" => Some(llvm_builder_build_icmp(args, "icmp_ne", inkwell::IntPredicate::NE)),
+            "build-cond-br" => Some(llvm_builder_build_cond_br(args)),
+            "build-br" => Some(llvm_builder_build_br(args)),
             _ => None,
         };
     }
@@ -1563,6 +1571,53 @@ fn llvm_builder_load_raw(args: &[RtValue]) -> Result<RtValue, EvalError> {
     };
     let loaded = b.build_load(ctx.i64_type(), elem_ptr, "load_raw_val").map_err(|e| EvalError::Internal(format!("load-raw: {}", e)))?;
     Ok(RtValue::LlvmValue(loaded))
+}
+
+/// Shared by every `build-icmp-*` builtin (if/let/comparisons, labels/closures
+/// Stage 5): runs `icmp <predicate>` on two `i64` operands, then widens the
+/// resulting `i1` back to `i64` (0/1) via `build_int_z_extend` — every other
+/// builtin here treats a compiled value as a plain `i64` (see
+/// `registry::llvm_module_def`'s doc comment), and a comparison result is no
+/// exception, which is exactly what lets `compile-if`'s `build-cond-br` (and
+/// ordinary arithmetic/storage) accept it without caring it came from a
+/// comparison rather than `+`/a literal.
+fn llvm_builder_build_icmp(args: &[RtValue], name: &str, predicate: inkwell::IntPredicate) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let a = expect_llvm_value(&args[1])?.into_int_value();
+    let b = expect_llvm_value(&args[2])?.into_int_value();
+    let bld = builder.borrow();
+    let cmp = bld.build_int_compare(predicate, a, b, name).map_err(|e| EvalError::Internal(format!("{}: {}", name, e)))?;
+    let ctx = crate::compile::llvm_context();
+    let widened = bld.build_int_z_extend(cmp, ctx.i64_type(), name).map_err(|e| EvalError::Internal(format!("{}: {}", name, e)))?;
+    Ok(RtValue::LlvmValue(widened.into()))
+}
+
+/// `compile-if`'s branch primitive: branches to `then_block` when `cond`
+/// (an ordinary `i64`-valued `llvm-value`) is nonzero, `else_block`
+/// otherwise — built from an `icmp ne cond, 0` plus a conditional branch, the
+/// same shape [`get_or_define_closure_release_fn`] already uses internally
+/// for its own null/refcount checks.
+fn llvm_builder_build_cond_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let cond = expect_llvm_value(&args[1])?.into_int_value();
+    let then_block = expect_llvm_basic_block(&args[2])?;
+    let else_block = expect_llvm_basic_block(&args[3])?;
+    let b = builder.borrow();
+    let ctx = crate::compile::llvm_context();
+    let zero = ctx.i64_type().const_zero();
+    let is_nonzero =
+        b.build_int_compare(inkwell::IntPredicate::NE, cond, zero, "if_cond_nz").map_err(|e| EvalError::Internal(format!("build-cond-br: {}", e)))?;
+    b.build_conditional_branch(is_nonzero, then_block, else_block).map_err(|e| EvalError::Internal(format!("build-cond-br: {}", e)))?;
+    Ok(RtValue::Unit)
+}
+
+/// An unconditional branch — `compile-if`'s then/else arms use this to join
+/// back at the merge block after storing their value into the shared slot.
+fn llvm_builder_build_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let target = expect_llvm_basic_block(&args[1])?;
+    builder.borrow().build_unconditional_branch(target).map_err(|e| EvalError::Internal(format!("build-br: {}", e)))?;
+    Ok(RtValue::Unit)
 }
 
 /// A direct call to an already-declared `target` (typically `get-function`'s

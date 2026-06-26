@@ -22,9 +22,14 @@
 //! ((captured . is-fn)...) ((param . is-fn)...) body)`, see
 //! `compile-lambda`'s doc comment; indirect dispatch through one,
 //! `(apply-indirect callee-form (is-fn . arg-form)...)`, see
-//! `compile-apply-indirect`'s doc comment). `compile-value` grows a new
-//! tag-/method-matching arm as later phases teach `ast_bridge` to translate
-//! more `Expr` variants for real. No `if`/`let`/`loop` yet.
+//! `compile-apply-indirect`'s doc comment), `bool` literals (`(bool b)`),
+//! `i64` comparisons (`<`/`<=`/`>`/`>=`/`=`/`eq`/`/=`, alongside the existing
+//! `+`/`-`/`*`), `if` (`(if is-fn cond-form then-form else-form)`, see
+//! `compile-if`'s doc comment), and `let` (`(let ((name-sym . value-form)...)
+//! single-body-form)`, see `compile-let`'s doc comment) — if/let/comparisons,
+//! labels/closures Stage 5. `compile-value` grows a new tag-/method-matching
+//! arm as later phases teach `ast_bridge` to translate more `Expr` variants
+//! for real. No `loop` yet.
 //!
 //! Every captured/parameter name and call argument carries an `is-fn` `Bool`
 //! tag alongside it (`ast_bridge`'s `tagged_sym_list`/`tagged_ast_list_to_sexpr`)
@@ -112,6 +117,38 @@
 //! scope for Stage 1/2 (both are single-level `labels` only) and not
 //! exercised by any test here, but a real gap for whenever nested `labels`
 //! compilation is attempted.
+//!
+//! `cur-fn: llvm-function` (if/let/comparisons, labels/closures Stage 5) is
+//! the same kind of explicit parameter, threaded for the same reason:
+//! `compile-if` needs `append-block` to add its `then`/`else`/`merge` blocks
+//! to whichever LLVM function's body is actually being compiled right now —
+//! a `labels` sibling's own (`sib-fn`), a `lambda`'s own (`nested-fn`), or the
+//! outermost one (`f`) — and none of those are otherwise reachable from deep
+//! inside the dispatcher without closing over one fixed function the way
+//! Phase 1 closed over one fixed `builder`/`env`. Every function that calls
+//! `compile-value` (directly or by calling something that does) forwards its
+//! own incoming `cur-fn` *except* `compile-lambda`/`compile-labels-bodies`,
+//! which pass their own freshly-declared `nested-fn`/`sib-fn` instead — that
+//! new function, not whatever was being compiled when the `lambda`/`labels`
+//! form was reached, is what its own body's `if`s must add blocks to.
+//!
+//! `if`'s Fn-typed branches need one more piece of care that's specific to
+//! `if` alone: the existing retain/release convention (R1-R4 below) holds
+//! because every *other* boundary a value can cross — a `call`/`apply`/
+//! `apply-indirect`'s return, a `labels`/`lambda` body's own result — is a
+//! function activation that already retains what it owns on entry (R1) and
+//! releases it on exit (R2, `bare-returned-own-name`'s exception folding R1's
+//! retain into the returned value's own ownership), so whatever crosses that
+//! boundary always arrives already-fresh. `if` introduces no such boundary:
+//! without help, a *borrowed* branch value (e.g. a bare parameter) could flow
+//! straight out as the `if`'s own result, and any consumer — which always
+//! treats a non-`(var ...)`-shaped form as fresh, per `form-is-borrowed?` —
+//! would then release something it was never entitled to. `compile-if`
+//! closes this the same way `compile-escaping-env-args` already closes the
+//! analogous gap for a `ClosureBox`'s own captured array: retain a borrowed
+//! branch value right before it's stored into the shared merge slot, so by
+//! the time the `if` returns, the value crossing out is unconditionally as
+//! fresh as a call result — see `compile-if-branch`'s doc comment.
 //!
 //! Doesn't depend on `prelude.rs` (no `cond`/`when`/...) — only the
 //! checker's native special forms (`if`/`let`/`match`/`labels`) and
@@ -335,6 +372,54 @@ pub const SOURCE: &str = r#"
     ((Cons _ rest) (+ 1 (sexpr-list-length rest)))
     (_ 0)))
 
+;; The `let` analogue of `retain-bindings`'s save-then-overwrite step
+;; (if/let/comparisons, labels/closures Stage 5): for each `(name . _)`
+;; binding pair, if `env` already has a value under that name, stash it in
+;; `saved` before overwriting it with `acc`'s already-computed value for that
+;; same name (`compile-let-values` built `acc` first, against `env`
+;; *unmodified* — see that function's doc comment for why this can't be one
+;; combined pass). No `is-fn` bookkeeping happens here at all: a `let`-bound
+;; name resolves through `env` exactly like a parameter/capture does, so the
+;; existing `name-is-borrowed?`/`form-is-borrowed?` (which only ask "is this
+;; name present in `env`") already treat it correctly with no further
+;; tagging — see `compile-let`'s doc comment.
+(defun bind-let-values ((env HashTable<string,llvm-value>) (bindings Sexpr) (acc HashTable<string,llvm-value>) (saved HashTable<string,llvm-value>)) ()
+  (match bindings
+    ((Cons pair rest)
+     (let ((nm (sexpr-sym-name (car pair))))
+       (match (get env nm)
+         ((Some old) (set saved nm old))
+         (None ()))
+       (match (get acc nm)
+         ((Some v) (set env nm v))
+         (None (panic "bind-let-values: missing computed value")))
+       (bind-let-values env rest acc saved)))
+    (_ ())))
+
+;; Undoes `bind-let-values` once the `let`'s body has been compiled: restores
+;; whatever `env` held under each binding's name before this `let` shadowed
+;; it (or removes the binding entirely if there was nothing there before).
+;; Skipping this would leak a stale shadowed value into any later expression
+;; that happens to reuse the same name after this `let` ends — e.g. `(+ (let
+;; ((a 99)) a) a)`'s second `a` would otherwise wrongly read back 99.
+;;
+;; Known limitation: if `bindings` names the *same* symbol more than once
+;; (`(let ((a 1) (a 2)) ...)`), `saved` can only remember one prior value per
+;; name, so restoration after such a `let` may leave `env` slightly wrong —
+;; though never in a way that double-frees or corrupts anything, only in
+;; what value a *later, unrelated* expression sees under that name. Checked
+;; typelisp source rarely if ever writes a `let` with a repeated binding
+;; name; not worth a multi-value-per-name structure for this alone.
+(defun restore-let-values ((env HashTable<string,llvm-value>) (bindings Sexpr) (saved HashTable<string,llvm-value>)) ()
+  (match bindings
+    ((Cons pair rest)
+     (let ((nm (sexpr-sym-name (car pair))))
+       (match (get saved nm)
+         ((Some old) (set env nm old))
+         (None (let ((ignored (remove env nm))) ())))
+       (restore-let-values env rest saved)))
+    (_ ())))
+
 (defun compile-function ((m llvm-module) (name string) (param-names Sexpr) (body Sexpr)) llvm-module
     (let ((f (add-function m name)))
       (let ((b (append-block f "entry")))
@@ -344,31 +429,47 @@ pub const SOURCE: &str = r#"
             (bind-params env builder f param-names 0)
             (retain-bindings builder env param-names)
             (let ((fn-env (new-fn-env)))
-              (labels ((compile-value ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
+              (labels ((compile-value ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (e Sexpr)) llvm-value
                          (match (car e)
                            ((Sym s)
                             (if (eq s "int")
                                 (compile-int builder e)
-                                (if (eq s "var")
-                                    (compile-var builder env fn-env captured e)
-                                    (if (eq s "assoc")
-                                        (compile-assoc builder env fn-env captured e)
-                                        (if (eq s "apply")
-                                            (compile-apply builder env fn-env captured e)
-                                            (if (eq s "labels")
-                                                (compile-labels builder env fn-env captured e)
-                                                (if (eq s "call")
-                                                    (compile-call builder env fn-env captured e)
-                                                    (if (eq s "lambda")
-                                                        (compile-lambda builder env fn-env captured e)
-                                                        (if (eq s "apply-indirect")
-                                                            (compile-apply-indirect builder env fn-env captured e)
-                                                            (panic (append "compile-value: unsupported tag " s)))))))))))
+                                (if (eq s "bool")
+                                    (compile-bool builder e)
+                                    (if (eq s "var")
+                                        (compile-var builder env fn-env captured e)
+                                        (if (eq s "assoc")
+                                            (compile-assoc builder env fn-env captured cur-fn e)
+                                            (if (eq s "apply")
+                                                (compile-apply builder env fn-env captured cur-fn e)
+                                                (if (eq s "labels")
+                                                    (compile-labels builder env fn-env captured cur-fn e)
+                                                    (if (eq s "call")
+                                                        (compile-call builder env fn-env captured cur-fn e)
+                                                        (if (eq s "lambda")
+                                                            (compile-lambda builder env fn-env captured e)
+                                                            (if (eq s "apply-indirect")
+                                                                (compile-apply-indirect builder env fn-env captured cur-fn e)
+                                                                (if (eq s "if")
+                                                                    (compile-if builder env fn-env captured cur-fn e)
+                                                                    (if (eq s "let")
+                                                                        (compile-let builder env fn-env captured cur-fn e)
+                                                                        (panic (append "compile-value: unsupported tag " s))))))))))))))
                            (_ (panic "compile-value: malformed node, expected a tagged list"))))
                        (compile-int ((builder llvm-builder) (e Sexpr)) llvm-value
                          (match (car (cdr e))
                            ((Int n) (const-i64 builder n))
                            (_ (panic "compile-int: malformed int node"))))
+                       ;; `(bool b)` (if/let/comparisons, labels/closures
+                       ;; Stage 5) — every compiled value is a plain `i64`
+                       ;; (see `registry::llvm_module_def`'s doc comment), so
+                       ;; a `bool` literal is just `0`/`1`, the same
+                       ;; representation `build-icmp-*` already produces and
+                       ;; `compile-if`'s `build-cond-br` already expects.
+                       (compile-bool ((builder llvm-builder) (e Sexpr)) llvm-value
+                         (match (car (cdr e))
+                           ((Bool b) (if b (const-i64 builder 1) (const-i64 builder 0)))
+                           (_ (panic "compile-bool: malformed bool node"))))
                        ;; `(var name is-fn)` — a plain variable reference,
                        ;; ordinary or a `labels` sibling/self referenced *as
                        ;; a value* rather than called (e.g. a `labels`
@@ -526,18 +627,45 @@ pub const SOURCE: &str = r#"
                                       (store-arg builder env-ptr idx v))
                                   (compile-escaping-env-args builder env fn-env captured env-ptr rest (+ idx 1))))))
                            (_ ())))
-                       (compile-assoc ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
-                         (let ((method (sexpr-str (car (cdr (cdr e))))))
-                           (let ((rest (cdr (cdr (cdr (cdr e))))))
-                             (let ((a (compile-value builder env fn-env captured (car rest))))
-                               (let ((b2 (compile-value builder env fn-env captured (car (cdr rest)))))
-                                 (if (eq method "+")
-                                     (build-add builder a b2)
-                                     (if (eq method "-")
-                                         (build-sub builder a b2)
-                                         (if (eq method "*")
-                                             (build-mul builder a b2)
-                                             (panic (append "compile-assoc: unsupported method " method))))))))))
+                       ;; `(assoc type-name method instance arg...)` — only
+                       ;; `i64`/`i32` receivers (the same runtime
+                       ;; representation, `RtValue::Int(i64)`, so one code
+                       ;; path covers both) are compiled; anything else
+                       ;; (`f64`, ...) panics clearly rather than silently
+                       ;; misinterpreting its bit pattern as an `i64` — this
+                       ;; guard didn't exist before if/let/comparisons (Stage
+                       ;; 5) added methods (`<`/`<=`/.../`eq`/`/=`) that
+                       ;; `f64` *also* defines under the same names
+                       ;; (`registry::float_assoc`), so without it
+                       ;; `(< 1.0 2.0)` would have quietly compiled as an
+                       ;; integer comparison.
+                       (compile-assoc ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (e Sexpr)) llvm-value
+                         (let ((type-name (sexpr-str (car (cdr e)))))
+                           (if (if (eq type-name "i64") true (eq type-name "i32"))
+                               (let ((method (sexpr-str (car (cdr (cdr e))))))
+                                 (let ((rest (cdr (cdr (cdr (cdr e))))))
+                                   (let ((a (compile-value builder env fn-env captured cur-fn (car rest))))
+                                     (let ((b2 (compile-value builder env fn-env captured cur-fn (car (cdr rest)))))
+                                       (if (eq method "+")
+                                           (build-add builder a b2)
+                                           (if (eq method "-")
+                                               (build-sub builder a b2)
+                                               (if (eq method "*")
+                                                   (build-mul builder a b2)
+                                                   (if (eq method "<")
+                                                       (build-icmp-lt builder a b2)
+                                                       (if (eq method "<=")
+                                                           (build-icmp-le builder a b2)
+                                                           (if (eq method ">")
+                                                               (build-icmp-gt builder a b2)
+                                                               (if (eq method ">=")
+                                                                   (build-icmp-ge builder a b2)
+                                                                   (if (if (eq method "=") true (eq method "eq"))
+                                                                       (build-icmp-eq builder a b2)
+                                                                       (if (eq method "/=")
+                                                                           (build-icmp-ne builder a b2)
+                                                                           (panic (append "compile-assoc: unsupported method " method)))))))))))))))
+                               (panic (append "compile-assoc: unsupported receiver type " type-name)))))
                        ;; Fills a previously-`alloca-args`'d array, one
                        ;; compiled argument per slot, exactly as before —
                        ;; plus, since each `forms` element is now an
@@ -548,19 +676,19 @@ pub const SOURCE: &str = r#"
                        ;; post-call release bookkeeping `compile-env-args`
                        ;; does for env arrays, here for ordinary call
                        ;; arguments instead.
-                       (compile-call-args ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (args-ptr llvm-value) (pending-ptr llvm-value) (forms Sexpr) (idx i32)) ()
+                       (compile-call-args ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (args-ptr llvm-value) (pending-ptr llvm-value) (forms Sexpr) (idx i32)) ()
                          (match forms
                            ((Cons arg-pair rest)
                             (let ((is-fn (sexpr-bool (car arg-pair))))
                               (let ((form (cdr arg-pair)))
-                                (let ((v (compile-value builder env fn-env captured form)))
+                                (let ((v (compile-value builder env fn-env captured cur-fn form)))
                                   (store-arg builder args-ptr idx v)
                                   (if is-fn
                                       (if (form-is-borrowed? env form)
                                           (store-arg builder pending-ptr idx (const-i64 builder 0))
                                           (store-arg builder pending-ptr idx v))
                                       (store-arg builder pending-ptr idx (const-i64 builder 0)))
-                                  (compile-call-args builder env fn-env captured args-ptr pending-ptr rest (+ idx 1))))))
+                                  (compile-call-args builder env fn-env captured cur-fn args-ptr pending-ptr rest (+ idx 1))))))
                            (_ ())))
                        ;; `(apply name (is-fn . arg-form)...)` — a direct
                        ;; call to a name `ast_bridge::translate_apply`
@@ -580,13 +708,13 @@ pub const SOURCE: &str = r#"
                        ;; any) is released right after the call returns —
                        ;; never before, since the value has to stay valid
                        ;; for the call's full duration.
-                       (compile-apply ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
+                       (compile-apply ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (e Sexpr)) llvm-value
                          (let ((nm (sexpr-str (car (cdr e)))))
                            (let ((arg-forms (cdr (cdr e))))
                              (let ((argc (sexpr-list-length arg-forms)))
                                (let ((args-ptr (alloca-args builder argc)))
                                  (let ((pending-ptr (alloca-args builder argc)))
-                                   (compile-call-args builder env fn-env captured args-ptr pending-ptr arg-forms 0)
+                                   (compile-call-args builder env fn-env captured cur-fn args-ptr pending-ptr arg-forms 0)
                                    (match (get fn-env nm)
                                      ((Some target)
                                       (let ((env-len (sexpr-list-length captured)))
@@ -636,13 +764,13 @@ pub const SOURCE: &str = r#"
                        ;; `nm` is `name` itself, already declared by
                        ;; `compile-function`'s own first step (`add-function`,
                        ;; above) before this body was ever reached.
-                       (compile-call ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
+                       (compile-call ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (e Sexpr)) llvm-value
                          (let ((nm (sexpr-str (car (cdr e)))))
                            (let ((arg-forms (cdr (cdr e))))
                              (let ((argc (sexpr-list-length arg-forms)))
                                (let ((args-ptr (alloca-args builder argc)))
                                  (let ((pending-ptr (alloca-args builder argc)))
-                                   (compile-call-args builder env fn-env captured args-ptr pending-ptr arg-forms 0)
+                                   (compile-call-args builder env fn-env captured cur-fn args-ptr pending-ptr arg-forms 0)
                                    (let ((result (build-call builder (get-function m nm) args-ptr argc)))
                                      (release-pending-args builder m pending-ptr argc 0)
                                      result)))))))
@@ -672,20 +800,129 @@ pub const SOURCE: &str = r#"
                        ;; `labels` sibling boxed on the spot by
                        ;; `resolve-value`, would otherwise leak one box per
                        ;; call).
-                       (compile-apply-indirect ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
+                       (compile-apply-indirect ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (e Sexpr)) llvm-value
                          (let ((callee-form (car (cdr e))))
-                           (let ((closure (compile-value builder env fn-env captured callee-form)))
+                           (let ((closure (compile-value builder env fn-env captured cur-fn callee-form)))
                              (let ((arg-forms (cdr (cdr e))))
                                (let ((argc (sexpr-list-length arg-forms)))
                                  (let ((args-ptr (alloca-args builder argc)))
                                    (let ((pending-ptr (alloca-args builder argc)))
-                                     (compile-call-args builder env fn-env captured args-ptr pending-ptr arg-forms 0)
+                                     (compile-call-args builder env fn-env captured cur-fn args-ptr pending-ptr arg-forms 0)
                                      (let ((result (build-closure-apply builder closure args-ptr argc)))
                                        (release-pending-args builder m pending-ptr argc 0)
                                        (if (form-is-borrowed? env callee-form)
                                            ()
                                            (build-closure-release builder m closure))
                                        result))))))))
+                       ;; `compile-if`'s one helper (if/let/comparisons,
+                       ;; labels/closures Stage 5): compiles `form` (one of
+                       ;; an `if`'s `then`/`else` branches) and, when this
+                       ;; `if` is itself `Fn`-typed (`is-fn`) *and* `form` is
+                       ;; a *borrowed* value (`form-is-borrowed?` — a bare
+                       ;; reference to something this scope doesn't own an
+                       ;; independent copy of), retains it right here before
+                       ;; handing it back. See `compile-if`'s doc comment and
+                       ;; this module's doc comment for the full reasoning —
+                       ;; short version: unlike every other tag, `if`
+                       ;; introduces no function boundary to freshen a
+                       ;; borrowed value at, so it has to do that itself, and
+                       ;; this is the one place both branches share that
+                       ;; decision (kept out of `compile-if` itself purely to
+                       ;; avoid writing the same `if`-on-`is-fn`-and-`form-is-borrowed?`
+                       ;; logic out twice).
+                       (compile-if-branch ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (is-fn bool) (form Sexpr)) llvm-value
+                         (let ((v (compile-value builder env fn-env captured cur-fn form)))
+                           (if (if is-fn (form-is-borrowed? env form) false)
+                               (build-closure-retain builder v)
+                               v)))
+                       ;; `(if is-fn cond-form then-form else-form)`
+                       ;; (if/let/comparisons, labels/closures Stage 5): adds
+                       ;; `then`/`else`/`merge` blocks to `cur-fn`, branches
+                       ;; on `cond` via `build-cond-br`, compiles each branch
+                       ;; (through `compile-if-branch`, which also handles
+                       ;; the borrowed-value retain) into a single shared
+                       ;; 1-slot `alloca-args` rather than an LLVM `phi` node
+                       ;; — every compiled value is already a plain `i64`
+                       ;; (see `registry::llvm_module_def`'s doc comment), so
+                       ;; the existing `alloca-args`/`store-arg`/`load-raw`
+                       ;; triple (already built for call-argument arrays)
+                       ;; covers a 2-way merge with no new builtin needed for
+                       ;; the merge itself. `cur-fn` is forwarded unchanged
+                       ;; to every recursive `compile-value` call — `if`
+                       ;; never starts a new LLVM function the way
+                       ;; `compile-lambda`/a `labels` sibling does.
+                       (compile-if ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (e Sexpr)) llvm-value
+                         (let ((is-fn (sexpr-bool (car (cdr e)))))
+                           (let ((cond-form (car (cdr (cdr e)))))
+                             (let ((then-form (car (cdr (cdr (cdr e))))))
+                               (let ((else-form (car (cdr (cdr (cdr (cdr e)))))))
+                                 (let ((cond-v (compile-value builder env fn-env captured cur-fn cond-form)))
+                                   (let ((then-block (append-block cur-fn "if-then")))
+                                     (let ((else-block (append-block cur-fn "if-else")))
+                                       (let ((merge-block (append-block cur-fn "if-merge")))
+                                         (let ((slot (alloca-args builder 1)))
+                                           (build-cond-br builder cond-v then-block else-block)
+                                           (position-at-end builder then-block)
+                                           (let ((then-v (compile-if-branch builder env fn-env captured cur-fn is-fn then-form)))
+                                             (store-arg builder slot 0 then-v))
+                                           (build-br builder merge-block)
+                                           (position-at-end builder else-block)
+                                           (let ((else-v (compile-if-branch builder env fn-env captured cur-fn is-fn else-form)))
+                                             (store-arg builder slot 0 else-v))
+                                           (build-br builder merge-block)
+                                           (position-at-end builder merge-block)
+                                           (load-raw builder slot 0)))))))))))
+                       ;; `compile-let`'s one helper (if/let/comparisons,
+                       ;; labels/closures Stage 5): computes every binding's
+                       ;; value against `env` *unmodified* into a fresh
+                       ;; accumulator `acc`, in order — CL `let` semantics
+                       ;; ("Binding values are checked in the *outer*
+                       ;; environment" — `Checker::check_let`'s own comment),
+                       ;; so an earlier binding shadowing a name a *later*
+                       ;; binding's value-form also references must not leak
+                       ;; into that later computation. Lives in this `labels`
+                       ;; ring (unlike `bind-let-values`/`restore-let-values`)
+                       ;; purely because it calls `compile-value`.
+                       (compile-let-values ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (bindings Sexpr) (acc HashTable<string,llvm-value>)) ()
+                         (match bindings
+                           ((Cons pair rest)
+                            (let ((nm (sexpr-sym-name (car pair))))
+                              (let ((form (cdr pair)))
+                                (let ((v (compile-value builder env fn-env captured cur-fn form)))
+                                  (set acc nm v)
+                                  (compile-let-values builder env fn-env captured cur-fn rest acc)))))
+                           (_ ())))
+                       ;; `(let ((name-sym . value-form)...) single-body-form)`
+                       ;; (if/let/comparisons, labels/closures Stage 5): all
+                       ;; binding values first (`compile-let-values`, against
+                       ;; the untouched `env`), then shadow `env` with them
+                       ;; (`bind-let-values`, saving whatever was already
+                       ;; there per name into `saved`), compile the body, and
+                       ;; finally undo the shadowing (`restore-let-values`) —
+                       ;; see those two functions' doc comments for why the
+                       ;; restore step matters and its one known limitation.
+                       ;; Unlike `compile-if`, no retain/release decision is
+                       ;; made for `Fn`-typed bindings here at all: folding a
+                       ;; value into `env` under a new name is exactly what a
+                       ;; parameter/capture binding already does, and the
+                       ;; existing borrowed/fresh machinery (keyed on `env`
+                       ;; membership, not on *how* a name got there) already
+                       ;; accounts for it correctly — a `let`-bound *fresh*
+                       ;; `Fn`-typed value that's never otherwise consumed
+                       ;; simply leaks (never double-frees or corrupts), the
+                       ;; same accepted tradeoff as an unreferenced boxed
+                       ;; `labels` sibling or a captured reference cycle (see
+                       ;; this module's doc comment).
+                       (compile-let ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (e Sexpr)) llvm-value
+                         (let ((bindings (car (cdr e))))
+                           (let ((body-form (car (cdr (cdr e)))))
+                             (let ((acc (new-env)))
+                               (compile-let-values builder env fn-env captured cur-fn bindings acc)
+                               (let ((saved (new-env)))
+                                 (bind-let-values env bindings acc saved)
+                                 (let ((result (compile-value builder env fn-env captured cur-fn body-form)))
+                                   (restore-let-values env bindings saved)
+                                   result))))))
                        ;; `(lambda name ((captured . is-fn)...) ((param . is-fn)...) body)`
                        ;; — `Expr::Lambda` (a standalone escaping value) or a
                        ;; synthesized `Expr::FnRef` forwarding wrapper
@@ -731,7 +968,7 @@ pub const SOURCE: &str = r#"
                                          (retain-bindings nested-builder nested-env lparams)
                                          (bind-captures nested-env nested-builder nested-fn lcaptured 0)
                                          (retain-bindings nested-builder nested-env lcaptured)
-                                         (let ((v (compile-value nested-builder nested-env (new-fn-env) lcaptured lbody)))
+                                         (let ((v (compile-value nested-builder nested-env (new-fn-env) lcaptured nested-fn lbody)))
                                            (let ((protected (bare-returned-own-name lbody lparams lcaptured)))
                                              (release-bindings nested-builder m nested-env lparams protected)
                                              (release-bindings nested-builder m nested-env lcaptured protected)
@@ -811,7 +1048,7 @@ pub const SOURCE: &str = r#"
                                            (retain-bindings sib-builder sib-env param-syms)
                                            (bind-captures sib-env sib-builder sib-fn captured 0)
                                            (retain-bindings sib-builder sib-env captured)
-                                           (let ((v (compile-value sib-builder sib-env inner-fn-env captured def-body)))
+                                           (let ((v (compile-value sib-builder sib-env inner-fn-env captured sib-fn def-body)))
                                              (let ((protected (bare-returned-own-name def-body param-syms captured)))
                                                (release-bindings sib-builder m sib-env param-syms protected)
                                                (release-bindings sib-builder m sib-env captured protected)
@@ -844,15 +1081,15 @@ pub const SOURCE: &str = r#"
                        ;; result ultimately flows back up into — this
                        ;; function introduces no function activation of its
                        ;; own, so no R1/R2 here.
-                       (compile-labels ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
+                       (compile-labels ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (e Sexpr)) llvm-value
                          (let ((inner-captured (car (cdr e))))
                            (let ((defs (car (cdr (cdr e)))))
                              (let ((trailing (car (cdr (cdr (cdr e))))))
                                (let ((inner-fn-env (new-fn-env)))
                                  (declare-labels-siblings inner-fn-env inner-captured defs)
                                  (compile-labels-bodies inner-fn-env inner-captured defs)
-                                 (compile-value builder env inner-fn-env inner-captured trailing)))))))
-                (let ((v (compile-value builder env fn-env '() body)))
+                                 (compile-value builder env inner-fn-env inner-captured cur-fn trailing)))))))
+                (let ((v (compile-value builder env fn-env '() f body)))
                   (let ((protected (bare-returned-own-name body param-names '())))
                     (release-bindings builder m env param-names protected)
                     (build-ret builder v)

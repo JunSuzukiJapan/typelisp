@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-06-25 / ブランチ: `feature/compiler`
+最終更新: 2026-06-26 / ブランチ: `feature/compiler`
 
 このドキュメントは、再実装（read 関数から作り直し）の進捗と次回の作業を記録する。
 **言語仕様の確定事項は [language-design.md](language-design.md) を参照。**
@@ -892,17 +892,79 @@ escapeする値があってもIR上1回だけ定義されることを確認、ba
 全件green（compile_test.rs 38件、compile_file_test.rs 14件含む全テスト
 スイート）、clippy警告0、5回連続実行で安定確認済み（commit 4176868）。
 
-### 次にやること候補（2026-06-25時点、未着手）
+### if/let/比較演算の実装（2026-06-26完了）
 
-labels/クロージャのコンパイル対応（Stage 1-4＋labels兄弟値参照＋自動
-retain/release挿入）はこれで一区切り。残る選択肢、優先順位はユーザー未確認:
+上の「次にやること候補」のうち、影響範囲（＝ブロッキング度）で最優先と判断し
+実装した: ベースケース付きの本物の再帰関数（factorial等）はif/比較が無いと
+compile機能では一切書けない、唯一「無いと本質的に何も書けない」候補だった
+ため（他の3候補——mark-and-sweep/ネストlabels/retain-release重複除去——は
+いずれも「無くても動く」）。
 
-- **`if`/`let`/比較演算の実装**: これまでのStage 1-4・各follow-upのどの
-  テストでも結局不要だったが、本物の再帰関数（ベースケース付き）を書くには
-  必須。実装され次第、ClosureBoxのR1-R4所有権規約（中間スコープが無い前提で
-  設計済み）をスコープ途中の解放にも拡張できるか再検討が必要になる
-  （`retain-bindings`/`release-bindings`は今のところ「関数の入口で1回retain
-  →出口で1回release」の2点だけを前提にしている）。
+**新規LLVM builtin**（`registry.rs`/`interp.rs`）: `build-icmp-lt`/`-le`/`-gt`/
+`-ge`/`-eq`/`-ne`（`i64`比較、`icmp`命令の`i1`結果を`build_int_z_extend`で
+`i64`化——「全ての値はi64」という既存方針に合わせる）、`build-cond-br`
+（`icmp ne cond, 0`+条件分岐）、`build-br`（無条件分岐）。
+
+**`ast_bridge.rs`**: `Expr::If`→`(if is-fn cond-form then-form else-form)`、
+`Expr::Let`→`(let ((name-sym . value-form)...) single-body-form)`を実翻訳
+（`let`はlabels/lambdaと同じ単一式bodyの制約）。`collect_calls`（JIT用の
+事前宣言コレクタ）にif/letの再帰アームを追加——if/letの中の`Expr::Call`が
+JIT事前宣言から漏れる既存の抜け穴で、if/letが実翻訳されることで初めて
+表面化した。`freevars.rs`は変更不要だった（Stage 2の時点でif/letアームが
+先回りして実装済みと判明）。
+
+**`compiler.rs`**: `cur-fn: llvm-function`を新規にringへスレッディング
+（`compile-if`が`append-block`で新しいbasic blockを追加する対象——`labels`
+兄弟の`sib-fn`/`lambda`の`nested-fn`/最外殻の`f`のいずれか——を、深い再帰
+呼び出しの中でも知る必要があるため、builder/env/fn-env/capturedと同じ理由で
+明示パラメータ化）。`compile-bool`（`(bool b)`→`const-i64` 0/1）、
+`compile-assoc`に型ガード（`i64`/`i32`以外の受け手は明確にpanic——比較演算が
+`f64`にも同名で存在するため、ガードを追加せずに済ませると`(< 1.0 2.0)`が
+ビット列をi64として誤解釈する新規バグになっていた）+比較演算6種を追加。
+
+**`compile-if`のFn型分岐対応（retain-before-merge）**: 当初「関数境界が無いため
+R1-R4の前提が破れる、今回はunsupportedにして将来に先送り」という案を立てたが、
+「影響範囲が大きいものから実装する」方針に反するという指摘を受け実際に解決した。
+既存のR1-R4規約は「call/apply/labels/lambdaの戻り値は関数境界を通るので
+必ずfresh化される」という前提に立つが、`if`は関数境界を作らないため、何の
+対策もしないとborrowedな値（例: 関数の引用パラメータそのもの）が分岐の結果
+としてそのまま外に出て、呼び出し側が「`(if ...)`という非var形だから常に
+fresh」と誤分類し誤ってreleaseしてしまう（二重解放のリスク）。解決策は
+`compile-escaping-env-args`の「borrowedな値をescapeするClosureBoxへ折り込む際に
+retainする」と全く同じパターンをifのmerge地点に適用するだけ——`compile-if-branch`
+が分岐の値を確定させた直後、`is-fn`かつ`form-is-borrowed?`なら
+`build-closure-retain`を1回挿入する。これにより`if`はFn型分岐を含めて
+完全にサポートし、`ast_bridge`での型ガードは不要になった。`tests/compile_test.rs`の
+`compile_if_retains_a_borrowed_branch_value_before_it_escapes`がrefcountを
+直接読んでこの修正を実証している。
+
+**`compile-let`**: CL `let`のセマンティクス（バインディング値は全て外側の
+envに対して計算、`Checker::check_let`のコメントで確認済み）を守るため
+`compile-let-values`（全値を新規accumulatorへ計算、env未変更）→
+`bind-let-values`（env既存値を`saved`へ退避してから上書き）→body実行→
+`restore-let-values`（`saved`から復元、無ければ`remove`）の3段に分離。
+`let`はFn型バインディングを禁止しない——`env`への出し入れだけで完結し
+既存の`name-is-borrowed?`/`form-is-borrowed?`（envに存在するかだけを見る）が
+そのまま正しく機能するため、`if`と違って関数境界の問題が生じない
+（fresh値を束縛してreleaseしないまま終わる場合は既存の循環参照リークと
+同種の「リークするが壊れない」挙動になるだけ、と手計算で確認済み）。
+既知の制約: 同一`let`内に同名バインディングが複数あると復元がやや不正確に
+なる（実用上ほぼ起こらないため対応見送り、`bind-let-values`/`restore-let-values`
+のdocコメントに明記）。
+
+**テスト**: `src/compile/ast_bridge.rs`に8件追加（if/letの実翻訳、
+`collect_call_targets`のif/let内Call検出など）。`tests/compile_test.rs`に
+8件追加（bool literal、i64比較、型ガードpanic、if実行、letシャドーイング
+復元、ifのFn型分岐retain回帰、そして本タスクの核心——`(compile "fact")`で
+`(defun fact ((n i64)) i64 (if (<= n 1) 1 (* n (fact (- n 1)))))`をJIT
+コンパイルし`fact(10) = 3628800`を実際に検証するend-to-endテスト）。
+`tests/compile_file_test.rs`に2件追加（AOT版+JIT/AOTペア）。全件green、
+clippy警告0（`-D warnings`含む）、既存テスト（`'(if true)`を「未対応タグ」の
+プレースホルダーに使っていた1件のみ、`'(match)`に差し替え）を含め
+リグレッション無し。
+
+### 残る選択肢（優先順位はユーザー未確認）
+
 - **mark-and-sweepによるサイクル収集本体**: ユーザー提案の元々の到達点
   （「GCを参照カウントに追加で、適当なタイミングでmark-and-sweepする」）だが、
   既存の`ClosureBox`設計では真の参照循環がそもそも構築不可能と判明済み
@@ -916,6 +978,9 @@ retain/release挿入）はこれで一区切り。残る選択肢、優先順位
   ケースでも呼ばれる側のR1/R2が律儀にretain/releaseを行うため、冗長な対が
   残っている。最適化より正しさを優先したのでパフォーマンスチューニングは
   後回し。
+- **`loop`の実装**: if/letで唯一未対応のまま残った制御構造（`compiler.rs`
+  冒頭のdocコメント参照）。再帰では書けないループ依存の処理（末尾再帰
+  最適化が無い前提でのスタック消費回避等）に必要になった時点で検討。
 
 ---
 

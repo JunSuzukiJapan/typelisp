@@ -143,6 +143,23 @@ fn compiles_and_runs_a_labels_body_in_main() {
     assert_eq!(compile_and_run("labels_in_main", src), 25);
 }
 
+/// if/let/comparisons (labels/closures Stage 5), AOT side: a *real*,
+/// terminating self-recursive helper function with a base case (`fact`),
+/// called from `main` with a literal argument (`main` itself still can't
+/// have parameters/`let`s of its own — see this module's doc comment).
+/// Every earlier self-recursion AOT test had no `if` to write a base case
+/// with at all (see `tests/compile_test.rs`'s
+/// `compile_succeeds_for_a_self_recursive_defun_without_being_run`, which
+/// could only prove compilation succeeded, never actually run it).
+#[test]
+fn compiles_and_runs_a_self_recursive_function_with_a_base_case() {
+    let src = r#"
+        (defun fact ((n i64)) i64 (if (<= n 1) 1 (* n (fact (- n 1)))))
+        (defun main () i64 (fact 5))
+    "#;
+    assert_eq!(compile_and_run("self_recursive_base_case", src), 120);
+}
+
 #[test]
 fn exit_code_is_truncated_to_32_bits() {
     // Process exit codes are a byte on POSIX (`status.code()` already
@@ -328,6 +345,45 @@ fn jit_and_aot_agree_on_an_escaping_capturing_lambda() {
     };
 
     let aot_exit_code = compile_and_run("jit_aot_closure_pair", src) as i64;
+
+    assert_eq!(jit_value, aot_exit_code);
+}
+
+/// Same claim as `jit_and_aot_agree_on_the_same_source`, but for a `main`
+/// that calls a self-recursive helper with a base case (if/let/comparisons,
+/// labels/closures Stage 5) rather than bare arithmetic — `fact` needs its
+/// own `(compile ...)` before `main`'s, same reason as
+/// `jit_and_aot_agree_on_a_cross_function_call`.
+#[test]
+fn jit_and_aot_agree_on_a_self_recursive_function_with_a_base_case() {
+    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+
+    let src = r#"
+        (defun fact ((n i64)) i64 (if (<= n 1) 1 (* n (fact (- n 1)))))
+        (defun main () i64 (fact 5))
+    "#;
+
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    typelisp::load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r
+        .read_all(&mut h, &format!("{}\n(compile \"fact\")\n(compile \"main\")\n(main)", src))
+        .expect("read failed");
+    let mut jit_result = None;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("exec failed") {
+            jit_result = Some(val);
+        }
+    }
+    let jit_value = match jit_result {
+        Some(RtValue::Int(n)) => n,
+        other => panic!("expected an Int from the JIT path, got {:?}", other),
+    };
+
+    let aot_exit_code = compile_and_run("jit_aot_self_recursive_pair", src) as i64;
 
     assert_eq!(jit_value, aot_exit_code);
 }
