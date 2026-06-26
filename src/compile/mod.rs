@@ -193,4 +193,89 @@ mod tests {
         let compiled = CompiledFn::new(&module, "jit_heap_test", &externals).expect("CompiledFn::new failed");
         assert_eq!(compiled.call(&[]), 2);
     }
+
+    /// Stage 3's JIT-side proof: `rt_cons`/`rt_car`/`rt_cdr` are callable
+    /// from JIT-compiled code through nothing but their real addresses
+    /// (the same `externals` mechanism as every test above), and a cons
+    /// cell built through `rt_cons` survives a round trip back out through
+    /// `rt_car`/`rt_cdr` correctly. `1`/`2`'s tagged form (`n << 3`, tag
+    /// `000` = fixnum) is hardcoded here rather than calling into
+    /// `runtime`'s own (private, by design) `encode`/`decode` — this is
+    /// exactly the bit-twiddling `compiler.rs`'s own future
+    /// `compile-construct`/tagging helpers will do via `build-shl`/...,
+    /// just written directly against inkwell for this lower-level test.
+    #[test]
+    fn jit_compiled_code_round_trips_a_cons_through_rt_cons_rt_car_rt_cdr() {
+        use crate::compile::runtime::{rt_car, rt_cdr, rt_cons};
+        use crate::Heap;
+
+        let ctx = llvm_context();
+        let _guard = COMPILE_LOCK.lock().unwrap();
+        let module = ctx.create_module("jit_cons_test");
+
+        let ptr_ty = ctx.ptr_type(AddressSpace::default());
+        let i64_ty = ctx.i64_type();
+        let fn_ty = i64_ty.fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        let rt_cons_decl = module.add_function("rt_cons", fn_ty, None);
+        let rt_car_decl = module.add_function("rt_car", fn_ty, None);
+        let rt_cdr_decl = module.add_function("rt_cdr", fn_ty, None);
+        let caller = module.add_function("jit_cons_test", fn_ty, None);
+
+        let builder = ctx.create_builder();
+        let entry = ctx.append_basic_block(caller, "entry");
+        builder.position_at_end(entry);
+
+        let tagged_one = i64_ty.const_int(1, false).const_shl(i64_ty.const_int(3, false));
+        let tagged_two = i64_ty.const_int(2, false).const_shl(i64_ty.const_int(3, false));
+        let cons_args = builder.build_alloca(i64_ty.array_type(2), "cons_args").unwrap();
+        let argc_zero32 = ctx.i32_type().const_int(0, false);
+        let slot0 = unsafe { builder.build_gep(i64_ty, cons_args, &[argc_zero32], "slot0").unwrap() };
+        builder.build_store(slot0, tagged_one).unwrap();
+        let slot1 = unsafe { builder.build_gep(i64_ty, cons_args, &[ctx.i32_type().const_int(1, false)], "slot1").unwrap() };
+        builder.build_store(slot1, tagged_two).unwrap();
+        let argc_two = ctx.i32_type().const_int(2, false);
+        let pair = builder.build_call(rt_cons_decl, &[cons_args.into(), argc_two.into()], "pair").unwrap();
+        let pair = match pair.try_as_basic_value() {
+            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
+            inkwell::values::ValueKind::Instruction(_) => panic!("rt_cons call produced no value"),
+        };
+
+        let one_slot = builder.build_alloca(i64_ty, "one_slot").unwrap();
+        builder.build_store(one_slot, pair).unwrap();
+        let argc_one = ctx.i32_type().const_int(1, false);
+        let car_call = builder.build_call(rt_car_decl, &[one_slot.into(), argc_one.into()], "car_result").unwrap();
+        let car_result = match car_call.try_as_basic_value() {
+            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
+            inkwell::values::ValueKind::Instruction(_) => panic!("rt_car call produced no value"),
+        };
+        let cdr_call = builder.build_call(rt_cdr_decl, &[one_slot.into(), argc_one.into()], "cdr_result").unwrap();
+        let cdr_result = match cdr_call.try_as_basic_value() {
+            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
+            inkwell::values::ValueKind::Instruction(_) => panic!("rt_cdr call produced no value"),
+        };
+
+        let three = i64_ty.const_int(3, false);
+        let car_untagged = builder.build_right_shift(car_result, three, true, "car_untagged").unwrap();
+        let cdr_untagged = builder.build_right_shift(cdr_result, three, true, "cdr_untagged").unwrap();
+        let thousand = i64_ty.const_int(1000, false);
+        let combined =
+            builder.build_int_add(builder.build_int_mul(car_untagged, thousand, "car_scaled").unwrap(), cdr_untagged, "combined").unwrap();
+        builder.build_return(Some(&combined)).unwrap();
+        module.verify().expect("module failed verification");
+
+        let mut heap = Heap::with_capacity(8);
+        crate::compile::runtime::set_active_heap(&mut heap as *mut Heap);
+
+        let externals = vec![
+            ("rt_cons".to_string(), rt_cons as usize),
+            ("rt_car".to_string(), rt_car as usize),
+            ("rt_cdr".to_string(), rt_cdr as usize),
+        ];
+        let compiled = CompiledFn::new(&module, "jit_cons_test", &externals).expect("CompiledFn::new failed");
+        assert_eq!(compiled.call(&[]), 1002);
+        // The real `Heap` (not just the tagged `i64`s) actually grew by one
+        // cons cell — proof `rt_cons` went through `Heap::cons`, not some
+        // shortcut that happened to produce the right bit pattern.
+        assert_eq!(heap.live_count(), 1);
+    }
 }

@@ -150,11 +150,196 @@ pub unsafe extern "C" fn rt_heap_live_count(_args: *const i64, _argc: u32) -> i6
     active_heap().live_count() as i64
 }
 
+// ---- Stage 2/3: the tagged `Sexpr` representation ----------------------
+
+use typelisp_mem::{ConsRef, PathId, StrId, SymId, Value};
+
+const TAG_BITS: i64 = 3;
+const TAG_MASK: i64 = 0b111;
+
+// Stage 2's tag table (`docs/TODO.md`): 8 tags in the low 3 bits. `Nil`/
+// `Bool` share one "immediate constant" tag (`TAG_IMMEDIATE`) since `Value`
+// has 9 variants but only 8 tag slots — see that doc for the full rationale
+// (why this needs no more than 3 bits, the alignment argument for `Cons`
+// pointers, etc.).
+const TAG_FIXNUM: i64 = 0b000;
+const TAG_CONS: i64 = 0b001;
+const TAG_SYMBOL: i64 = 0b010;
+const TAG_STR: i64 = 0b011;
+const TAG_CHAR: i64 = 0b100;
+const TAG_PATH: i64 = 0b101;
+const TAG_IMMEDIATE: i64 = 0b110;
+const TAG_FLOAT: i64 = 0b111;
+
+const IMMEDIATE_NIL: i64 = 0;
+const IMMEDIATE_FALSE: i64 = 1;
+const IMMEDIATE_TRUE: i64 = 2;
+
+/// Prints `msg` to stderr and aborts the process — the only safe way to
+/// fail out of an `rt_*` function. A bare Rust `panic!` would try to unwind
+/// back through whatever JIT-compiled or AOT-linked native code called in
+/// (no Rust landing pads there), which is undefined behavior across an
+/// `extern "C"` boundary; aborting is the documented-safe alternative.
+/// Every error case below is a contract violation by `compiler.rs` itself
+/// (an internal compiler bug), never a normal/recoverable runtime
+/// condition — there is no `Result`-like channel back to compiled code to
+/// report it through instead.
+fn fatal(msg: &str) -> ! {
+    eprintln!("typelisp runtime error: {}", msg);
+    std::process::abort();
+}
+
+/// Encodes a `Value` into the tagged `i64` representation compiled code
+/// uses for a `Sexpr`. `Value::Float` isn't representable yet — it needs
+/// heap-boxing (a `ClosureBox`-style malloc+refcount allocation), out of
+/// scope for Stage 3 (see `docs/TODO.md`); callers that might encounter a
+/// `Sexpr` float should not reach this function yet.
+fn encode(v: Value) -> i64 {
+    match v {
+        Value::Int(n) => (n << TAG_BITS) | TAG_FIXNUM,
+        Value::Cons(c) => (c.addr() as i64) | TAG_CONS,
+        Value::Symbol(id) => ((id.as_u32() as i64) << TAG_BITS) | TAG_SYMBOL,
+        Value::Str(id) => ((id.as_u32() as i64) << TAG_BITS) | TAG_STR,
+        Value::Char(c) => ((c as i64) << TAG_BITS) | TAG_CHAR,
+        Value::Path(id) => ((id.as_u32() as i64) << TAG_BITS) | TAG_PATH,
+        Value::Empty => (IMMEDIATE_NIL << TAG_BITS) | TAG_IMMEDIATE,
+        Value::Bool(false) => (IMMEDIATE_FALSE << TAG_BITS) | TAG_IMMEDIATE,
+        Value::Bool(true) => (IMMEDIATE_TRUE << TAG_BITS) | TAG_IMMEDIATE,
+        Value::Float(_) => fatal("encode: Sexpr Float is not yet representable in compiled code (boxing not implemented)"),
+    }
+}
+
+/// The inverse of [`encode`].
+fn decode(tagged: i64) -> Value {
+    match tagged & TAG_MASK {
+        TAG_FIXNUM => Value::Int(tagged >> TAG_BITS),
+        TAG_CONS => Value::Cons(unsafe { ConsRef::from_addr((tagged & !TAG_MASK) as usize) }),
+        TAG_SYMBOL => Value::Symbol(SymId::from_u32((tagged >> TAG_BITS) as u32)),
+        TAG_STR => Value::Str(StrId::from_u32((tagged >> TAG_BITS) as u32)),
+        TAG_CHAR => {
+            let scalar = (tagged >> TAG_BITS) as u32;
+            Value::Char(char::from_u32(scalar).unwrap_or_else(|| fatal("decode: invalid char scalar value")))
+        }
+        TAG_PATH => Value::Path(PathId::from_u32((tagged >> TAG_BITS) as u32)),
+        TAG_IMMEDIATE => match tagged >> TAG_BITS {
+            IMMEDIATE_NIL => Value::Empty,
+            IMMEDIATE_FALSE => Value::Bool(false),
+            IMMEDIATE_TRUE => Value::Bool(true),
+            other => fatal(&format!("decode: unknown immediate tag payload {}", other)),
+        },
+        TAG_FLOAT => fatal("decode: Sexpr Float is not yet representable in compiled code (boxing not implemented)"),
+        _ => unreachable!("a 3-bit mask is always one of the 8 arms above"),
+    }
+}
+
+/// `(cons car cdr)` for compiled code.
+///
+/// Like the interpreter's own `cons` builtin, this may run a GC
+/// (`Heap::cons` does so internally when its free list is empty) — but
+/// unlike the interpreter, nothing here pushes any *other* live `Sexpr`
+/// value the calling compiled frame still holds onto [`active_heap`]'s
+/// root set first. That's Stage 4's job (`docs/TODO.md`); until it lands, a
+/// GC triggered by this call could reclaim a cons cell a caller still
+/// needs.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s;
+/// a `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_cons(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_cons: expected 2 arguments");
+    }
+    let car = decode(*args);
+    let cdr = decode(*args.add(1));
+    match active_heap().cons(car, cdr) {
+        Ok(v) => encode(v),
+        Err(_) => fatal("rt_cons: heap exhausted, no cons cell could be reclaimed"),
+    }
+}
+
+/// `(car c)` for compiled code. Fatal (not a recoverable error) if `c`
+/// isn't a cons — the checker is responsible for guaranteeing that never
+/// happens, same as the interpreter's own `car` builtin treats it as an
+/// internal-error-class `Panic`.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`; a
+/// `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_car(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_car: expected 1 argument");
+    }
+    match active_heap().car(decode(*args)) {
+        Ok(v) => encode(v),
+        Err(_) => fatal("rt_car: argument is not a cons"),
+    }
+}
+
+/// `(cdr c)` for compiled code — see [`rt_car`]'s doc comment.
+///
+/// # Safety
+///
+/// Same as [`rt_car`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_cdr(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_cdr: expected 1 argument");
+    }
+    match active_heap().cdr(decode(*args)) {
+        Ok(v) => encode(v),
+        Err(_) => fatal("rt_cdr: argument is not a cons"),
+    }
+}
+
+/// `(rplaca c val)` for compiled code. Returns the compiled representation
+/// of `Unit` (the literal `0` `compile-unit` already uses — see
+/// `compiler.rs`), not a re-encoded `Sexpr` value: `set-car`'s return type
+/// is the language-level `Unit`, unrelated to `Sexpr`'s own tag space.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s;
+/// a `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_set_car(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_set_car: expected 2 arguments");
+    }
+    let c = decode(*args);
+    let val = decode(*args.add(1));
+    match active_heap().set_car(c, val) {
+        Ok(()) => 0,
+        Err(_) => fatal("rt_set_car: first argument is not a cons"),
+    }
+}
+
+/// `(rplacd c val)` for compiled code — see [`rt_set_car`]'s doc comment.
+///
+/// # Safety
+///
+/// Same as [`rt_set_car`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_set_cdr(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_set_cdr: expected 2 arguments");
+    }
+    let c = decode(*args);
+    let val = decode(*args.add(1));
+    match active_heap().set_cdr(c, val) {
+        Ok(()) => 0,
+        Err(_) => fatal("rt_set_cdr: first argument is not a cons"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use typelisp_mem::{Heap, Value};
+    use typelisp_mem::{Heap, PathId, StrId, SymId, Value};
 
-    use super::{rt_heap_init, rt_heap_live_count, rt_ping, set_active_heap};
+    use super::{decode, encode, rt_car, rt_cdr, rt_cons, rt_heap_init, rt_heap_live_count, rt_ping, rt_set_car, rt_set_cdr, set_active_heap};
 
     #[test]
     fn rt_ping_adds_one_to_its_first_argument() {
@@ -182,5 +367,61 @@ mod tests {
         let args = [4i64];
         assert_eq!(unsafe { rt_heap_init(args.as_ptr(), 1) }, 0);
         assert_eq!(unsafe { rt_heap_live_count(std::ptr::null(), 0) }, 0);
+    }
+
+    #[test]
+    fn encode_decode_round_trips_every_immediate_variant() {
+        for n in [0i64, 1, -1, 42, -42, i64::MIN >> 3, i64::MAX >> 3] {
+            assert_eq!(decode(encode(Value::Int(n))), Value::Int(n), "Int({})", n);
+        }
+        for c in ['a', 'Z', '0', '\u{10FFFF}', '\0'] {
+            assert_eq!(decode(encode(Value::Char(c))), Value::Char(c), "Char({:?})", c);
+        }
+        assert_eq!(decode(encode(Value::Bool(true))), Value::Bool(true));
+        assert_eq!(decode(encode(Value::Bool(false))), Value::Bool(false));
+        assert_eq!(decode(encode(Value::Empty)), Value::Empty);
+        assert_eq!(decode(encode(Value::Symbol(SymId::from_u32(7)))), Value::Symbol(SymId::from_u32(7)));
+        assert_eq!(decode(encode(Value::Str(StrId::from_u32(9)))), Value::Str(StrId::from_u32(9)));
+        assert_eq!(decode(encode(Value::Path(PathId::from_u32(3)))), Value::Path(PathId::from_u32(3)));
+    }
+
+    #[test]
+    fn encode_decode_round_trips_a_cons() {
+        let mut heap = Heap::with_capacity(8);
+        let pair = heap.cons(Value::Int(1), Value::Int(2)).expect("cons failed");
+        assert_eq!(decode(encode(pair)), pair);
+    }
+
+    #[test]
+    fn rt_cons_rt_car_rt_cdr_round_trip_through_a_real_heap() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let car_in = encode(Value::Int(1));
+        let cdr_in = encode(Value::Int(2));
+        let cons_args = [car_in, cdr_in];
+        let pair = unsafe { rt_cons(cons_args.as_ptr(), 2) };
+
+        let one_arg = [pair];
+        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(1));
+        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Int(2));
+    }
+
+    #[test]
+    fn rt_set_car_and_rt_set_cdr_mutate_in_place() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let cons_args = [encode(Value::Int(1)), encode(Value::Int(2))];
+        let pair = unsafe { rt_cons(cons_args.as_ptr(), 2) };
+
+        let set_car_args = [pair, encode(Value::Int(99))];
+        assert_eq!(unsafe { rt_set_car(set_car_args.as_ptr(), 2) }, 0, "set-car returns Unit (0)");
+        let set_cdr_args = [pair, encode(Value::Empty)];
+        assert_eq!(unsafe { rt_set_cdr(set_cdr_args.as_ptr(), 2) }, 0, "set-cdr returns Unit (0)");
+
+        let one_arg = [pair];
+        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(99));
+        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Empty);
     }
 }

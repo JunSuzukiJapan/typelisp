@@ -52,6 +52,26 @@ impl fmt::Debug for ConsRef {
     }
 }
 
+impl ConsRef {
+    /// The raw address backing this cons cell, as an opaque integer rather
+    /// than the (crate-private) `*mut Cell` itself — for embedding in
+    /// `typelisp-rt`'s tagged compiled-code representation of a `Sexpr`
+    /// value. Never meaningful to do arithmetic on; only ever round-tripped
+    /// back through [`ConsRef::from_addr`] and the ordinary `Heap` API
+    /// (`car`/`cdr`/`set_car`/`set_cdr`).
+    pub fn addr(&self) -> usize {
+        self.0 as usize
+    }
+
+    /// # Safety
+    ///
+    /// `addr` must have come from [`ConsRef::addr`] on a cons cell that is
+    /// still live — not freed by a [`super::heap::Heap::gc`] call since.
+    pub unsafe fn from_addr(addr: usize) -> ConsRef {
+        ConsRef(addr as *mut Cell)
+    }
+}
+
 /// Reference to an interned symbol in the heap's symbol table.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SymId(pub(crate) u32);
@@ -63,6 +83,39 @@ pub struct StrId(pub(crate) u32);
 /// Reference to an interned `::` path (a sequence of symbols) in the heap.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PathId(pub(crate) u32);
+
+// `as_u32`/`from_u32`: for `typelisp-rt`'s tagged compiled-code
+// representation, which embeds these as plain integer payloads (see
+// `typelisp-rt`'s `encode`/`decode`).
+impl SymId {
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+
+    pub fn from_u32(v: u32) -> SymId {
+        SymId(v)
+    }
+}
+
+impl StrId {
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+
+    pub fn from_u32(v: u32) -> StrId {
+        StrId(v)
+    }
+}
+
+impl PathId {
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+
+    pub fn from_u32(v: u32) -> PathId {
+        PathId(v)
+    }
+}
 
 /// A Lisp value — the runtime encoding of `Sexpr`.
 #[derive(Clone, Copy, PartialEq, Debug)]

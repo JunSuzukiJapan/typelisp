@@ -1208,9 +1208,28 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   symbol的な値の`shl`+`or`→`and`+`lshr`往復（タグとpayload両方が正しく
   復元されることを1回の呼び出しで検証）。全テストgreen、clippy警告0
   （`--workspace`）、3回連続実行で安定。
-- **Stage 3**: `rt-cons`/`rt-car`/`rt-cdr`/`rt-set-car`/`rt-set-cdr`。
-  `HeapExhausted`時の挙動（abort方針）を決定。`(cons 1 2)`→`car`/`cdr`の
-  ラウンドトリップをコンパイル済みコードで確認。
+- **Stage 3（完了、2026-06-26）**: `rt_cons`/`rt_car`/`rt_cdr`/
+  `rt_set_car`/`rt_set_cdr`を`crates/typelisp-rt/src/lib.rs`に実装。
+  `encode`/`decode`関数でStage 2のタグ表（8タグ）の残り全部（Cons/Symbol/
+  Str/Char/Path/immediate Nil・Bool）を実装——`Value::Cons`は
+  `ConsRef::addr`/`from_addr`（新設、`*mut Cell`自体は`typelisp-mem`内部
+  限定なので生アドレス`usize`として越境させる）、`SymId`/`StrId`/`PathId`
+  も`as_u32`/`from_u32`を新設して同様に即値化。`Value::Float`のみ未対応
+  （malloc+refcountのボクシングが要るため、`Construct`/ADT側の作業と
+  合わせてStage 6以降に先送りし、明示的にabortする旨をdoc commentに
+  記録）。**エラー時の挙動はabort方針で確定**：`extern "C" fn`の中で
+  Rustの`panic!`を素で使うと、呼び出し元がJIT/AOT生成のネイティブコード
+  （Rustのunwindテーブルを持たない）の場合に未定義動作になるため、
+  `eprintln!`+`std::process::abort()`の`fatal`ヘルパーに統一
+  （`HeapExhausted`/`NotACons`/不明な即値タグ等、全てのエラー経路で使用）。
+  `rt_set_car`/`rt_set_cdr`の返り値は`Sexpr`としての再エンコードではなく
+  `compile-unit`と同じ`0`（Unit型はSexprのタグ空間と無関係）。GCルート
+  安全性（Stage 4で対応予定の「呼び出し元フレームが握っている他のSexpr
+  値がGCで誤って回収される」問題）は明示的に未対応のままdoc commentに
+  記録。TDD: `typelisp-rt`に8件（encode/decode往復×2、cons/car/cdr往復、
+  set-car/set-cdr）、メインクレートにJIT経由でのcons round-trip検証
+  （実際のHeapが1セル増えたことまで確認）を1件追加。全テストgreen、
+  clippy警告0（`--workspace`）、3回連続実行で安定。
 - **Stage 4**: GCルート安全性——`rt-push-sexpr-root`/`rt-pop-sexpr-root`。
   既存retain/release挿入パスと並行する「Sexprルート挿入」パスを追加。
   小容量Heapで頻繁にGCを起こしながらループ内でconsを作り続けるテストで
