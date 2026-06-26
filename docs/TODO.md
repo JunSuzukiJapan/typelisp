@@ -1193,8 +1193,21 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   呼び出し直前に`set_active_heap`、AOT側は`build_main_wrapper`が生成する
   `main`が`tl_main`を呼ぶ前に必ず`rt_heap_init`を呼ぶよう変更。JIT/AOT
   双方の単体テストで実証、全テストgreen・clippy警告0・3回連続実行で安定。
-- **Stage 2**: タグ付きi64表現＋ビット演算プリミティブ（`build-and`/
-  `build-or`/`build-shl`/`build-lshr`）。Cons無しでInt往復のみ先に確認。
+- **Stage 2（完了、2026-06-26）**: タグ付きi64表現＋ビット演算プリミティブ
+  ——`build-and`/`build-or`/`build-shl`/`build-lshr`に加え、実装中に
+  **`build-ashr`（算術右シフト）の必要性が判明**して追加：`build-lshr`
+  （論理右シフト）だけでは符号付き`Sexpr::Int`の負数payloadが復元できない
+  （上位ビットが符号拡張されず0埋めになり値が壊れる）ため、fixnumの
+  タグ外しには`build-ashr`が必須、Cons/Symbol/Str/Pathのような符号無し
+  添字/ポインタには`build-lshr`を使う、という使い分けを確定。いずれも
+  既存の`llvm_builder_build_int_op`ヘルパ（`build-add`/`build-sub`/`build-mul`
+  と同型）を再利用するだけで実装でき、新規Rustコードは各1行。
+  `tests/compile_test.rs`に生のLLVMビルダー呼び出し（`ast_bridge`/
+  `compiler.rs`を経由しない、Phase 0/1と同じパターン）で2件追加：fixnum
+  (タグ0)の`shl`→`ashr`往復（0/正/負/61bit境界値で検証）、tag=2の
+  symbol的な値の`shl`+`or`→`and`+`lshr`往復（タグとpayload両方が正しく
+  復元されることを1回の呼び出しで検証）。全テストgreen、clippy警告0
+  （`--workspace`）、3回連続実行で安定。
 - **Stage 3**: `rt-cons`/`rt-car`/`rt-cdr`/`rt-set-car`/`rt-set-cdr`。
   `HeapExhausted`時の挙動（abort方針）を決定。`(cons 1 2)`→`car`/`cdr`の
   ラウンドトリップをコンパイル済みコードで確認。

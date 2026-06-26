@@ -589,6 +589,25 @@ fn llvm_builder_def() -> AdtDef {
     assoc.insert("build-add".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     assoc.insert("build-sub".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     assoc.insert("build-mul".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    // Stage 2 of the Sexpr-representation plan (`docs/TODO.md`): bitwise
+    // primitives for packing/unpacking the tagged `i64` representation of a
+    // compiled `Sexpr` value (3 low tag bits + payload — see that doc's
+    // tag table). Deliberately generic, type-agnostic `i64`-in-`i64`-out
+    // ops, the same as `build-add`/`build-sub`/`build-mul` — the actual
+    // tagging/untagging logic is plain typelisp in `compiler.rs`, built out
+    // of these, the same way `compile-if`/`compile-loop` are built out of
+    // `build-icmp-*`/`build-cond-br`.
+    assoc.insert("build-and".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    assoc.insert("build-or".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    assoc.insert("build-shl".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    // Logical (unsigned) vs. arithmetic (sign-extending) right shift: the
+    // tagged representation's payload bits must never be sign-extended back
+    // in when shifting a Cons/Symbol/Str/Path pointer or index out from
+    // under its tag (`build-lshr`), but a genuine signed `Sexpr::Int`
+    // fixnum's sign bit must survive untagging (`build-ashr`) or negative
+    // integers would come back corrupted.
+    assoc.insert("build-lshr".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    assoc.insert("build-ashr".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     // `alloca-args`/`store-arg`/`build-call`: building a direct call to an
     // already-declared function (`get-function`'s result). `alloca-args`
     // stack-allocates a fresh `[count x i64]` array (mirroring the fixed-ABI

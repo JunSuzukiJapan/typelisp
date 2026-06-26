@@ -1700,3 +1700,94 @@ fn compile_of_a_dolist_based_function_fails_clearly_on_the_uncompiled_match_spec
         other => panic!("expected a Panic, got {:?}", other),
     }
 }
+
+// ---- Stage 2 of the Sexpr-representation plan: tagged-i64 bit primitives --
+
+/// `build-shl`/`build-ashr` round-trip a `Sexpr::Int` fixnum through the
+/// planned tagged representation (`docs/TODO.md`'s tag table: tag `000`,
+/// payload in the upper 61 bits) — *arithmetic*, not logical, right shift,
+/// so a negative payload's sign survives untagging. No `ast_bridge`/
+/// `compiler.rs` involvement — these are the raw builtins Stage 5/6's real
+/// `compile-match`/tagging helpers will be built out of, the same way
+/// `a_function_using_load_arg_and_build_add_computes_correctly` preceded the
+/// self-hosted compiler's own use of `build-add`.
+#[test]
+fn build_shl_and_build_ashr_round_trip_a_signed_fixnum_payload() {
+    let src = r#"
+        (defun build-fixnum-round-trip-module () llvm-module
+          (let ((m (llvm-module::create "mod")))
+            (let ((f (add-function m "round_trip")))
+              (let ((b (append-block f "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (let ((x (load-arg builder f 0)))
+                    (let ((three (const-i64 builder 3)))
+                      (let ((tagged (build-shl builder x three)))
+                        (let ((untagged (build-ashr builder tagged three)))
+                          (build-ret builder untagged)
+                          m)))))))))
+        (build-fixnum-round-trip-module)
+    "#;
+    let module = match eval_ok(src) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let round_trip = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("round_trip")
+            .expect("failed to look up the compiled `round_trip` function")
+    };
+    for x in [0i64, 1, 42, -1, -5, i64::MIN >> 3, i64::MAX >> 3] {
+        let argv: [i64; 1] = [x];
+        assert_eq!(unsafe { round_trip.call(argv.as_ptr(), argv.len() as u32) }, x, "round trip failed for {}", x);
+    }
+}
+
+/// `build-shl`/`build-or`/`build-and`/`build-lshr` round-trip a non-fixnum
+/// tag (here `010`, the planned `Symbol` tag) and its unsigned index
+/// payload — `build-or` to attach the tag, `build-and` to read it back out,
+/// `build-lshr` (not `build-ashr`: an index payload is never sign-extended)
+/// to recover the payload.
+#[test]
+fn build_or_and_build_and_pack_and_read_back_a_tag() {
+    let src = r#"
+        (defun build-tag-round-trip-module () llvm-module
+          (let ((m (llvm-module::create "mod")))
+            (let ((f (add-function m "round_trip")))
+              (let ((b (append-block f "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (let ((idx (load-arg builder f 0)))
+                    (let ((three (const-i64 builder 3)))
+                      (let ((tagged (build-or builder (build-shl builder idx three) (const-i64 builder 2))))
+                        (let ((tag-back (build-and builder tagged (const-i64 builder 7))))
+                          (let ((idx-back (build-lshr builder tagged three)))
+                            (build-ret builder (build-add builder (build-mul builder tag-back (const-i64 builder 1000)) idx-back))
+                            m))))))))))
+        (build-tag-round-trip-module)
+    "#;
+    let module = match eval_ok(src) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let round_trip = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("round_trip")
+            .expect("failed to look up the compiled `round_trip` function")
+    };
+    // `combined` packs `tag-back * 1000 + idx-back` into one return value so
+    // a single call proves both the tag (must read back as `2`) and the
+    // payload (must read back as the original index) survived.
+    let argv: [i64; 1] = [123];
+    assert_eq!(unsafe { round_trip.call(argv.as_ptr(), argv.len() as u32) }, 2123);
+}
