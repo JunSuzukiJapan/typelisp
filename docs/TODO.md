@@ -963,8 +963,174 @@ clippy警告0（`-D warnings`含む）、既存テスト（`'(if true)`を「未
 プレースホルダーに使っていた1件のみ、`'(match)`に差し替え）を含め
 リグレッション無し。
 
+### loop/break/return/setfの実装（2026-06-26完了、未コミット）
+
+「影響範囲の大きいものから実装する」方針——前段の3候補
+（mark-and-sweep/ネストlabels/retain-release重複除去）は本節執筆時点で
+いずれも「無くても動く」のに対し、`loop`は唯一未対応のまま残った制御構造で、
+`prelude.rs`の`while`/`dotimes`/`dolist`（ひいてはそれらに依存する大半の
+リスト操作関数）が`loop`+`if`+`break`/`return`へ脱糖する以上、`loop`が無い
+ことは「compile機能でリスト操作系がまるごとコンパイル不能」を意味していた
+ため最優先で着手した。
+
+**スコープが`loop`/`break`/`return`だけでは閉じなかった**: `while`等の
+脱糖先`(loop (if (not ,test) (break) ()) ,@body (setf ,var ...))`は
+ループ変数の更新に必ず`setf`（`Expr::Set`、これも`ast_bridge`未対応のまま
+だった）を使う。`setf`をLLVMレベルで動かすには、ループの2回目以降の
+反復が1回目の`setf`の結果を読める必要があり、これは（real LLVM `phi`
+ノードを組まない本コンパイラの設計では）**全ローカル変数（param/capture/
+let束縛）の表現をSSA値からalloca済みスタックスロットに変更する**ことを
+要求した——`setf`単体の対応ではなく、`bind-params`/`bind-captures`/
+`bind-let-values`/`resolve-value`/`retain-bindings`/`release-bindings`
+全てに及ぶ表現変更になった（詳細下記）。
+
+**新規LLVM builtin**: `block-terminated?`（`llvm-builder`、host-levelな
+真偽値クエリ、`llvm_module_def::verify`と同系統）——`break`/`return`は
+直近のループ脱出ブロックへ`build-br`で直接ジャンプするため、その後に
+`compile-if`の通常経路（store-then-branch-to-merge）や`compile-loop-body`
+の次フォーム処理を続けると「1ブロックに2つ目のterminator」という不正IRに
+なる。両者とも、この新builtinで「直前のフォームが既にブロックを終端した
+か」を確認し、終端済みならその後の処理をスキップする。
+
+**`ast_bridge.rs`**: `Expr::Loop`→`(loop body-form...)`（各文を裸のまま
+翻訳、`apply`/`call`の引数のような`is-fn`タグ付けは不要——ループ本体の
+各文の値は`break`/`return`以外では決して消費されないため）、`Expr::Break`
+→`(break)`（フィールド無し）、`Expr::Return`→`(return is-fn value-form)`
+（値無し`(return)`は`Expr::Unit`相当の`(unit)`を明示的な値として代入——
+新規タグを増やさず既存の`compile-value`の"unit"分岐に載せるだけにした）、
+`Expr::Set`→`(set name-str is-fn value-form)`（`is-fn`は`typed.ty`——
+`Set`ノード自身の型は*代入先変数*の型、`Checker::check_setf`参照）。
+`collect_call_targets`（JIT用）もLoop/Set/Returnの再帰を追加。
+
+**`compiler.rs`のローカル変数表現変更**（`loop`/`break`/`return`/`setf`の
+本質的な前提）: `env: HashTable<string,llvm-value>`が指す先を「値そのもの」
+から「1要素`alloca-args`スロットへのポインタ」に変更。`bind-params`/
+`bind-captures`は読み込んだ値をスロットへ`store-arg`してからそのスロットを
+`env`に登録、`resolve-value`は`(get env name)`で得たスロットを
+`load-raw`してから返す、`retain-bindings`/`release-bindings`も同様に
+loadを挟む。`bind-let-values`は計算済みの値ごとに新規スロットを確保し直す
+（同じ`let`の再実行——ループ内に`let`がある場合の各反復——ごとに新しい
+スロットができる設計、`compile-if`の自分のmergeスロットが既に持っていた
+「ループ内で毎回alloca、スタック消費は許容」という前例をそのまま踏襲）。
+`name-is-borrowed?`/`form-is-borrowed?`（`env`に名前が存在するかだけを見る）
+や`compile-env-args`/`compile-escaping-env-args`（`resolve-value`越しに
+既にload済みの値を受け取るだけ）は無変更で正しく動作した。
+**既知の制約（意図的な設計判断）**: キャプチャされた名前への`setf`は
+*このアクティビエーションが受け取った自分のスロットだけ*を書き換える
+——元の変数や同じ論理キャプチャを共有する他のクロージャへは伝播しない
+（tree-walkインタプリタの`RtValue::Closure`が`Rc<RefCell<Slot>>`で実現する
+真の共有可変クロージャとは異なる）。`while`/`dotimes`/`dolist`はいずれも
+同一アクティビエーション内の`let`束縛だけを`setf`するため実害は無く、
+ドキュメント化のみで対応は見送った。
+
+**`loop`/`break`/`return`のスコープ境界**: `loop-exit: Option<llvm-basic-block>`
+/`loop-slot: Option<llvm-value>`を`cur-fn`と同様にring全体へ明示的に
+スレッディング。`compile-loop`が自分の本体をコンパイルする際だけ
+`Option::some`の新規ペアを設定（ネスト時の「直近のループ」解決は通常の
+コールスタックのスコープだけで自動的に達成される、`cur-fn`/`captured`の
+labels/lambdaネスト対応と全く同じ理屈）。`compile-lambda`/
+`compile-labels-bodies`は自分の新規関数本体をコンパイルする際`None`に
+リセット（`Checker::check_lambda`/`check_labels`がloop_stackを空にリセット
+するのと対応——`break`/`return`は決して関数境界を越えない、CLの
+`return`/`return-from nil`がそうであるように常に*直近のループ*だけを
+脱出するため、本コンパイラはunwind/continuation相当の機構を一切持たずに
+済んでいる）。`compile-labels`の*末尾*bodyは新規関数境界ではない
+（`check_labels`が`args[1..]`を loop_stack変更無しでcheckする）ため、
+外側から受け取ったペアをそのまま転送する。
+
+**`break`/`return`の対応範囲は文の位置のみ**: ループ本体の直接の1文として、
+または`if`の枝の*全体*としてのみ対応（`while`/`dotimes`/`dolist`が実際に
+必要とする形はこれで全てカバーされる）。算術オペランドや呼び出し引数の中に
+埋め込まれた`break`/`return`（例: `(+ 1 (break))`、型レベルでは合法——
+`Never`は何にでも単一化されるため）は対象外——対応するには`compile-assoc`
+の`build-add`前や`compile-call-args`/`compile-let-values`の「次のフォームへ」
+ステップ全てに同じ`block-terminated?`チェックを追加する必要があり、
+今回実際に必要だった範囲を超えるため見送った（2個のterminatorを持つ不正IR
+が生成されるが、`llvm-module::verify`以外には検出されない）。
+
+**実装中に判明した別の壁（本ステージ内で解消）**: `while`の脱糖
+`(if (not ,test) (break) ())`が呼ぶ`not`はRust組み込みの自由関数で、
+typelispの関数本体（AST）を一切持たないため、`Interp::compile_function`の
+呼び出し先事前チェックが「先にcompileしてください」と拒否し続け、
+`while`/`dotimes`を使う関数がどれもcompile不能だった。
+
+### Rust組み込み関数の方針確定 + `not`をtypelispへ移行（同日完了）
+
+ユーザーから方針指示: 「Rustで書かれた組み込み関数は、ライブラリとして
+１つにまとめて、typelispインタープリターでもコンパイラでも、その
+ライブラリを使う方針とします」「コンパイラの負担を減らすため、Rustでしか
+書けない物以外はtypelispで書くように」。すなわち (1) 本当にRust必須な
+組み込み（GCヒープへの直接アクセス等）だけ共有ライブラリにまとめ
+インタープリタ/コンパイラ両方から使う、(2) それ以外（typelispで表現可能な
+もの）はtypelispへ移し、コンパイラが特別扱いする対象を減らす、という
+二段方針。
+
+**`not`を即座にtypelispへ移行**: `not`はGCヒープ等のRust専用機能に一切
+依存しない単純な`bool->bool`（`if`一発で書ける）と判明したため、
+`registry.rs`の自由関数登録と`interp.rs`の`eval_builtin`分岐を削除し、
+`src/prelude.rs`に`(defun not ((b bool)) bool (if b false true))`を追加
+（`atom`等より前に定義——`defun`は前方参照不可のため）。これにより`not`は
+他のユーザー定義`defun`と全く同じ経路でコンパイル可能になり、
+**`while`/`dotimes`が実際にend-to-endでcompile可能になった**
+（`(compile "not")`を呼び出し元より先に呼ぶ必要がある——他の関数間
+呼び出しと同じ既存の「先にcompileしてください」要件のままで十分、
+`not`専用の特別扱いは一切不要）。
+
+**実装中に見つけた既存テストの回帰3件**: `not`がRust builtinから
+typelisp `defun`になったことで、「check用の`Interp`にだけprelude を
+ロードし、実行用には別の素の`Interp::new()`を使う」という既存テスト
+ヘルパー（`tests/eval_test.rs`/`tests/hashtable_test.rs`/`tests/macro_test.rs`
+の`run_with_capacity_and_prelude`系）が`NoSuchFunction("not")`で落ちた——
+`while`の展開が呼ぶ`not`は以前はRust builtin（`Interp`の状態と無関係に
+常に呼べた）だったが、今は`defun`本体が実行用`Interp.fns`に登録されている
+必要がある。修正は3箇所とも同じ: 実行フェーズも（素の`Interp::new()`では
+なく）prelude済みの`check_interp`自身を再利用する（`Interp`はheap状態を
+持たず`exec`呼び出しごとに引数で受け取るだけなので、GC圧テスト用の小さい
+heapを渡すこと自体には支障がない）。`tests/redefine_test.rs`の
+「builtin関数の再定義は常にエラー」テストも例として`not`を使っていたため
+（preludeをロードしないこのテストでは`not`はもはや何も登録されていない
+名前になってしまう）、同種のRust専用自由関数`car`に差し替えた。
+
+**`dolist`はまだcompile不能——ただし理由がより根本的なものに変わった**:
+`not`解消後も`dolist`は`consp`/`car`/`cdr`を要し、`car`/`cdr`は
+（コンスセルへの直接アクセスのため）原理的にRust専用のまま残る。だが
+実際に手前で先にぶつかる壁は`consp`自身の本体`(match s ((Cons _ _) true)
+(_ false))`——`Expr::Match`（`Construct`/`FieldGet`/`FieldSet`も同様）が
+`ast_bridge`に翻訳が無く、そもそもコンパイル済みコードに`Sexpr`値の表現が
+無い（`registry::llvm_module_def`の方針「全コンパイル値は素の`i64`」を
+拡張しないまま）。つまり「組み込み自由関数を呼ぶ機構」を作っても
+**それだけでは`dolist`は動かない**——`Sexpr`をコンパイル値として表現し
+`Match`/`Construct`をコンパイル対応させる、本ステージとは別の・より大きい
+作業が前提になる。`tests/compile_test.rs`の
+`compile_of_a_dolist_based_function_fails_clearly_on_the_uncompiled_match_special_form`
+で現状の挙動（`Match`未対応によるエラー）を記録した。
+
+TDD: `src/compile/ast_bridge.rs`に8件追加（loop/break/return（値あり/値無し/
+is-fn）/setfの翻訳、collect_call_targetsのLoop/Set/Return内Call検出）。
+`tests/compile_test.rs`に10件追加（setf単体、ループ内return、値無しreturn、
+setf+if+returnによるカウントループ、bare breakのみ（Unit型、ハング/クラッシュ
+が唯一の失敗シグナルである旨をdoc commentに明記）、ネストループ（内側breakが
+外側を脱出しないことの検証）、compile-returnのborrowed値retain回帰
+（compile-ifの同種テストの構成を再利用）、while/dotimesが実際にcompile・
+実行できることの実証、dolistがMatch未対応で明確に失敗することの記録）。
+`tests/compile_file_test.rs`に3件追加（loopベースのhelper関数のAOT版、
+ネストループのAOT版、JIT/AOTペア）。`tests/prelude_test.rs`にnotのテストは
+既存のまま（移行後も green）。全件green（既存テスト含む全スイート）、
+clippy警告0（`-D warnings`含む）、5回連続実行で安定確認済み。
+
 ### 残る選択肢（優先順位はユーザー未確認）
 
+- **`Sexpr`をコンパイル値として表現し`Match`/`Construct`/`FieldGet`/
+  `FieldSet`をコンパイル対応させる**（今回新たに判明、上記参照）: `dolist`
+  はじめ`prelude.rs`のリスト操作関数群（`length`/`append`/`map`/`filter`/...
+  29関数）はどれも`car`/`cdr`/`match`に依存しており、これが無いと
+  compile不能なまま——影響範囲が非常に大きいため次点の最有力候補。
+  ユーザー方針（Rust専用組み込みを共有ライブラリ化しインタープリタ/
+  コンパイラ両方から使う）の本体はここで効いてくる——`car`/`cdr`自体は
+  コンスセル直接操作のためRust専用のままだが、コンパイル済みコードから
+  それを呼ぶには`Sexpr`値の表現（タグ付きヒープポインタ等）と、
+  コンパイル済み関数のABI拡張（GCヒープへのコンテキストポインタを渡す
+  必要が生じる）が前提になる、本ステージより大きいスコープ。
 - **mark-and-sweepによるサイクル収集本体**: ユーザー提案の元々の到達点
   （「GCを参照カウントに追加で、適当なタイミングでmark-and-sweepする」）だが、
   既存の`ClosureBox`設計では真の参照循環がそもそも構築不可能と判明済み
@@ -978,9 +1144,9 @@ clippy警告0（`-D warnings`含む）、既存テスト（`'(if true)`を「未
   ケースでも呼ばれる側のR1/R2が律儀にretain/releaseを行うため、冗長な対が
   残っている。最適化より正しさを優先したのでパフォーマンスチューニングは
   後回し。
-- **`loop`の実装**: if/letで唯一未対応のまま残った制御構造（`compiler.rs`
-  冒頭のdocコメント参照）。再帰では書けないループ依存の処理（末尾再帰
-  最適化が無い前提でのスタック消費回避等）に必要になった時点で検討。
+- **`break`/`return`を文の位置以外（算術オペランド/呼び出し引数の中）でも
+  許容する**: 型レベルでは合法だが、今回は文の位置（ループ本体直下/ifの枝
+  全体）のみ対応——上記「対応範囲」の節参照。
 
 ---
 

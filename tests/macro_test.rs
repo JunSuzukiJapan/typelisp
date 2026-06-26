@@ -58,10 +58,16 @@ fn eval_ok_with_prelude(src: &str) -> (RtValue, Heap) {
 /// `defmacro`s in `src/prelude.rs`, expanded during checking, not
 /// checker-native special forms) — while still *executing* against a heap
 /// of exactly `capacity` cells, so a small `capacity` still stresses the GC
-/// the way `run_with_capacity` alone would. Safe because the expansion only
-/// ever bottoms out in builtins (`loop`/`if`/`break`/`setf`/...), never a
-/// prelude-*defined* function the runtime `Interp` would also need
-/// registered.
+/// the way `run_with_capacity` alone would. The execution phase reuses
+/// `check_interp` itself (its `Interp.fns` already has the prelude's
+/// `defun`s registered, `not` included — `not` moved from a Rust builtin to
+/// a plain prelude `defun` in the `loop`/`break`/`return`/`setf` stage, so
+/// unlike `loop`/`if`/`break`/`setf`/... a fresh, prelude-less `Interp` can
+/// no longer evaluate `while`'s expansion) rather than a second, fresh
+/// `Interp::new()` — `Interp` carries no heap state of its own (every `exec`
+/// call takes one as an explicit argument), so this doesn't tie the
+/// GC-pressure heap to `check_heap`'s large one (see `eval_test.rs`'s
+/// `runtime_cons_cells_survive_gc_when_rooted` for the same fix).
 ///
 /// All but the *last* form are also `exec`'d (cloned first) against
 /// `check_interp`/`check_heap` as they're checked, not just collected —
@@ -90,10 +96,9 @@ fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(RtValue,
     }
 
     let mut h = Heap::with_capacity(capacity);
-    let mut interp = Interp::new();
     let mut last = RtValue::Unit;
     for tl in tls {
-        if let Some(val) = interp.exec(&mut h, tl)? {
+        if let Some(val) = check_interp.exec(&mut h, tl)? {
             last = val;
         }
     }

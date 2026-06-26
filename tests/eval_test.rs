@@ -500,8 +500,17 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
     // `dotimes` is a `defmacro` (see `src/prelude.rs`), expanded during
     // checking — `check_interp` needs the prelude actually `exec`'d (not
     // just checked) for `MacroExpander::expand_macro` to find it. The
-    // expansion bottoms out in builtins only (`loop`/`if`/`break`/`setf`/
-    // `cons`/`<`/`+`/`not`), so the *runtime* `interp` below doesn't need it.
+    // expansion bottoms out in `loop`/`if`/`break`/`setf`/`cons`/`<`/`+`
+    // (true Rust builtins/native `Expr` variants) plus a call to `not` —
+    // `not` is a plain prelude `defun` now (`loop`/`break`/`return`/`setf`
+    // stage), not a builtin, so unlike the others its *body* must actually
+    // be registered in whichever `Interp` runs the expanded `Expr::Call`,
+    // not just present at check time — this is why the loop below reuses
+    // `check_interp` itself (already holding the loaded prelude's `Interp.fns`)
+    // rather than a second, fresh `Interp::new()`. `Interp` carries no heap
+    // state of its own (every `exec`/`add_compiled_function` call takes one
+    // as an explicit argument), so reusing it here doesn't tie this test's
+    // GC-pressure heap to the large one `load_prelude` ran against above.
     load_prelude(&mut src_heap, &mut chk, &mut check_interp);
     let tls: Vec<_> = vs
         .into_iter()
@@ -509,10 +518,9 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
         .collect();
 
     let mut rt_heap = Heap::with_capacity(2);
-    let mut interp = Interp::new();
     let mut last = RtValue::Unit;
     for tl in tls {
-        if let Some(val) = interp.exec(&mut rt_heap, tl).expect("eval failed") {
+        if let Some(val) = check_interp.exec(&mut rt_heap, tl).expect("eval failed") {
             last = val;
         }
     }

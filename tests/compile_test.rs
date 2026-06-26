@@ -9,7 +9,7 @@
 extern crate typelisp;
 use inkwell::OptimizationLevel;
 use typelisp::compile::COMPILE_LOCK;
-use typelisp::{load_compiler, Checker, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
 
 fn run(src: &str) -> Result<RtValue, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -53,6 +53,28 @@ fn run_with_compiler(src: &str) -> Result<RtValue, EvalError> {
 
 fn eval_ok_with_compiler(src: &str) -> RtValue {
     run_with_compiler(src).expect("eval failed")
+}
+
+/// Like [`run_with_compiler`], but with the prelude (`prelude::SOURCE` —
+/// `while`/`dotimes`/`dolist`/...) loaded too, for tests that exercise a
+/// macro built on `loop`/`break`/`return`/`setf` rather than those
+/// primitives directly.
+fn run_with_compiler_and_prelude(src: &str) -> Result<RtValue, EvalError> {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl)? {
+            last = val;
+        }
+    }
+    Ok(last)
 }
 
 fn expect_str(v: RtValue) -> String {
@@ -1378,5 +1400,303 @@ fn compile_dispatches_a_self_recursive_function_with_a_base_case_to_native_code(
     match v {
         RtValue::Int(n) => assert_eq!(n, 3628800),
         other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// `loop`/`break`/`return`/`setf`: a `setf` on a `let`-bound local, compiled
+/// through the full pipeline. Exercises the new alloca-backed `env`
+/// representation (`bind-params`/`bind-captures`/`bind-let-values`).
+/// `i32`, not `i64`: a bare integer literal defaults to `i32`
+/// (`Checker::check_let` always checks a binding's value with `expected:
+/// None`), and nothing here forces otherwise. The `setf`/read-back happen
+/// inside a `loop` (whose body, unlike `let`'s, may have any number of
+/// statements — see `ast_bridge::translate_let`'s single-expression-body
+/// restriction) rather than directly in the `let`'s own body, purely to fit
+/// that restriction; `compile_dispatches_a_counting_loop_with_setf_and_conditional_return_to_native_code`
+/// below is the test that actually exercises `setf` for something a `loop`
+/// needs it for.
+#[test]
+fn compile_dispatches_a_setf_on_a_let_bound_local_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun setf-test () i32 (let ((x 1)) (loop (setf x 5) (return x))))
+        (compile "setf-test")
+        (setf-test)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 5),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// A bare `(return value)` inside a `loop` exits immediately with that
+/// value — the simplest possible `loop`/`return` round trip, no `break`/
+/// `setf` involved. `i32`: `(loop ...)` is seeded `Never` and refined purely
+/// from the `return`s found inside it (`Checker::check_loop`/`check_return`)
+/// — a `defun`'s own declared return type never propagates down into that
+/// seed, so the bare literal `42` still defaults to `i32` regardless of
+/// what `loop-return-test` itself declares.
+#[test]
+fn compile_dispatches_a_bare_return_inside_a_loop_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun loop-return-test () i32 (loop (return 42)))
+        (compile "loop-return-test")
+        (loop-return-test)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 42),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// `(return)` with no value — `ast_bridge::translate_return`'s implicit-
+/// `Unit` case, which also exercises `compile-value`'s new `"unit"` arm
+/// (`compile-unit`). The tree-walking call dispatch
+/// (`Expr::Call`'s `compiled.borrow().get(name)` branch in `interp.rs`)
+/// always wraps a compiled call's raw `i64` result as `RtValue::Int`
+/// regardless of the callee's declared return type — a pre-existing gap,
+/// not something this stage introduces or fixes — so a `unit`-returning
+/// compiled function surfaces here as `RtValue::Int(0)` (`compile-unit`'s
+/// `0` encoding), not `RtValue::Unit`; what matters for this test is that
+/// it compiles and runs at all.
+#[test]
+fn compile_dispatches_a_value_less_return_from_a_loop_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun void-return-test () () (loop (return)))
+        (compile "void-return-test")
+        (void-return-test)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 0),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// The realistic shape `while`/`dotimes`/`dolist` all reduce to: a `loop`
+/// whose body conditionally exits via `return` (delivering the
+/// accumulator) and otherwise mutates loop-carried locals via `setf` —
+/// computes `0+1+...+n` without recursion. `i`/`acc` default to `i32`
+/// (bare integer literals with no `expected` type — `Checker::check_let`
+/// always checks a binding's value with `expected: None`), so `n` is `i32`
+/// too, to keep every arithmetic operand the same type.
+#[test]
+fn compile_dispatches_a_counting_loop_with_setf_and_conditional_return_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun sum-to ((n i32)) i32
+          (let ((i 0) (acc 0))
+            (loop
+              (if (> i n) (return acc) ())
+              (setf acc (+ acc i))
+              (setf i (+ i 1)))))
+        (compile "sum-to")
+        (sum-to 5)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 15, "0+1+2+3+4+5"),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// A `loop` exited via a bare `(break)` (no `return` anywhere) is
+/// necessarily `Unit`-typed (`Checker::check_break` always contributes
+/// `Unit` to the enclosing loop's type) — this is the `compile-break`
+/// counterpart of the `return`-based tests above, and the only way to
+/// observe it actually terminating (rather than looping forever, or
+/// crashing on malformed IR from a missed `block-terminated?` guard) is to
+/// run it: a hung or crashed test is the failure signature here, not a
+/// wrong return value (see `compile_dispatches_a_value_less_return_from_a_loop_to_native_code`'s
+/// doc comment for why the result is `RtValue::Int(0)` regardless).
+#[test]
+fn compile_dispatches_a_loop_exited_via_a_bare_break_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun count-to-five () ()
+          (let ((i 0))
+            (loop
+              (if (>= i 5) (break) ())
+              (setf i (+ i 1)))))
+        (compile "count-to-five")
+        (count-to-five)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 0),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// Nested `loop`s: an inner `loop`'s bare `(break)` must exit only the
+/// *inner* loop, never the outer one — the property `loop-exit`/`loop-slot`
+/// being threaded (and re-installed fresh by each `compile-loop`, the same
+/// way `cur-fn`/`captured` already are for `labels`/`lambda` nesting) exists
+/// to guarantee. The inner loop (nested inside a fresh `let` each outer
+/// iteration, so `inner` resets to `0` every time) runs exactly twice before
+/// breaking, incrementing the *outer*-scoped `total` each time; after 3
+/// outer iterations `total` must be exactly `3 * 2 = 6` — if the inner
+/// `break` wrongly resolved to the outer loop's exit instead, this would
+/// return `2` (one outer iteration's worth) or hang.
+#[test]
+fn compile_dispatches_nested_loops_where_an_inner_break_only_exits_the_inner_loop() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun nested-loop-test () i32
+          (let ((outer 0) (total 0))
+            (loop
+              (if (eq outer 3) (return total) ())
+              (let ((inner 0))
+                (loop
+                  (if (eq inner 2) (break) ())
+                  (setf total (+ total 1))
+                  (setf inner (+ inner 1))))
+              (setf outer (+ outer 1)))))
+        (compile "nested-loop-test")
+        (nested-loop-test)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 6),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// `compile-return`'s reuse of `compile-if-branch`'s retain-before-escape
+/// fix (this module's doc comment): a `loop` whose only exit is `(return
+/// (var "f" true))` — a *borrowed* `Fn`-typed parameter — must retain it
+/// before the value crosses out of the loop's merge slot, the same boundary
+/// `compile_if_retains_a_borrowed_branch_value_before_it_escapes` already
+/// verifies for `if`. Reuses that test's helper functions
+/// (`identity`/`read_rc`/`make_box`/`release_box`) against a new
+/// loop-returning function instead of an `if`-branching one.
+#[test]
+fn compile_loop_retains_a_borrowed_return_value_before_it_escapes() {
+    let module = match eval_ok_with_compiler(
+        r#"
+        (defun build-test-module () llvm-module
+          (let ((m (llvm-module::create "mod")))
+            (let ((identity-fn (add-function-with-env m "identity")))
+              (let ((b (append-block identity-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-ret builder (load-arg builder identity-fn 0)))))
+            (let ((rc-fn (add-function m "read_rc")))
+              (let ((b (append-block rc-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-ret builder (debug-closure-refcount builder (load-arg builder rc-fn 0))))))
+            (let ((mkbox-fn (add-function m "make_box")))
+              (let ((b (append-block mkbox-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-ret builder (build-make-closure builder (get-function m "identity") (alloca-args builder 0) 0 0)))))
+            (let ((release-fn (add-function m "release_box")))
+              (let ((b (append-block release-fn "entry")))
+                (let ((builder (llvm-builder::create)))
+                  (position-at-end builder b)
+                  (build-closure-release builder m (load-arg builder release-fn 0))
+                  (build-ret builder (const-i64 builder 0)))))
+            (compile-function m "pick_via_loop" '((f . true))
+              '(loop (return true (var "f" true))))
+            m))
+        (build-test-module)
+        "#,
+    ) {
+        RtValue::LlvmModule(m) => m,
+        other => panic!("expected an LlvmModule, got {:?}", other),
+    };
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
+    let make_box = unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("make_box").expect("failed to look up `make_box`") };
+    let read_rc = unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("read_rc").expect("failed to look up `read_rc`") };
+    let release_box =
+        unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("release_box").expect("failed to look up `release_box`") };
+    let pick_via_loop =
+        unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("pick_via_loop").expect("failed to look up `pick_via_loop`") };
+
+    let f_box = unsafe { make_box.call(std::ptr::null(), 0) };
+    let rc_before = unsafe { read_rc.call([f_box].as_ptr(), 1) };
+
+    let picked = unsafe { pick_via_loop.call([f_box].as_ptr(), 1) };
+    assert_eq!(picked, f_box);
+
+    unsafe { release_box.call([picked].as_ptr(), 1) };
+    assert_eq!(
+        unsafe { read_rc.call([f_box].as_ptr(), 1) },
+        rc_before,
+        "releasing the loop's returned value should exactly undo compile-return's retain of the borrowed parameter"
+    );
+}
+
+/// `while`/`dotimes` (`prelude.rs`) desugar to `loop`/`break`/`setf` (this
+/// stage) plus a call to `not` (`(loop (if (not ,test) (break) ()) ,@body)`)
+/// — `not` used to be a Rust-native free function with no typelisp AST body
+/// at all, which would have made this permanently uncompilable (`compile`'s
+/// call-target pre-check has no way to compile a body that doesn't exist).
+/// It's a plain `defun` in `src/prelude.rs` now (`(defun not ((b bool))
+/// bool (if b false true))` — no GC-heap/Rust-only dependency, so there was
+/// no reason for it to stay a Rust builtin once `loop`/`if` existed to
+/// write it with), so it only needs the same `(compile "not")` *first* every
+/// other cross-function dependency already requires (see
+/// `compile_errors_clearly_when_a_called_function_is_not_yet_compiled`) —
+/// proving `while`/`dotimes` themselves are now fully compilable, the
+/// original motivation for this whole `loop`/`break`/`return`/`setf` stage.
+#[test]
+fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun count-via-dotimes ((n i32)) ()
+          (dotimes (i n) ()))
+        (compile "not")
+        (compile "count-via-dotimes")
+        (count-via-dotimes 5)
+        "#,
+    )
+    .expect("eval failed");
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 0),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// `dolist` (`prelude.rs`) still doesn't compile, but no longer for the
+/// reason `while`/`dotimes` used to (a Rust-only free function with no AST
+/// body) — `not` is typelisp now, and `car`/`cdr`/`consp` *do* have a
+/// compilable shape, in principle. What actually blocks `dolist` is one
+/// level deeper: `consp`'s own body is `(match s ((Cons _ _) true) (_
+/// false)))` — `Expr::Match` (and `Expr::Construct`/`FieldGet`/`FieldSet`)
+/// has no `ast_bridge` translation at all yet (still `unsupported`, see
+/// that module's doc comment), and there's no representation for a `Sexpr`
+/// value in compiled code to begin with (every compiled value is a plain
+/// `i64` — see `registry::llvm_module_def`'s doc comment — a cons cell
+/// would need to be some kind of tagged heap pointer, undecided). That's a
+/// substantially bigger piece of work than this stage's scope (`car`/`cdr`
+/// themselves are Rust-only too, on top of needing that representation) —
+/// recorded as the next follow-up candidate in `docs/TODO.md`, not
+/// attempted here.
+#[test]
+fn compile_of_a_dolist_based_function_fails_clearly_on_the_uncompiled_match_special_form() {
+    let err = run_with_compiler_and_prelude(
+        r#"
+        (defun walk-via-dolist () ()
+          (dolist (x (list (Int 1) (Int 2) (Int 3))) ()))
+        (compile "not")
+        (compile "consp")
+        "#,
+    )
+    .expect_err("expected compiling `consp` to fail because `match` has no compiler translation");
+    match err {
+        // `ast_bridge::unsupported` tags an untranslatable node as `(unsupported
+        // "Match")` — the field naming the real `Expr` variant, but
+        // `compile-value`'s dispatch only ever reads the *tag* symbol itself
+        // (literally the string `"unsupported"`) before panicking, so that's
+        // what actually surfaces here, not the word "Match".
+        EvalError::Panic(msg) => assert!(msg.contains("unsupported"), "message was: {}", msg),
+        other => panic!("expected a Panic, got {:?}", other),
     }
 }

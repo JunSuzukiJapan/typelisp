@@ -57,6 +57,16 @@ use crate::{Checker, Heap, Interp, Reader};
 /// completes the roadmap's step-8 macro set, parallel-stepping multiple
 /// bindings via `gensym`-fresh temporaries (see its own comment).
 pub const SOURCE: &str = r#"
+;; `not`: moved here from a Rust builtin (it has no dependency on the GC
+;; heap or anything else Rust-only — a plain `if`/`bool` round trip) so it
+;; compiles through the ordinary `ast_bridge`/`compiler.rs` pipeline like any
+;; other `defun`, instead of needing a "compiled code calling a Rust
+;; builtin" mechanism — see `compiler.rs`'s module doc comment's `loop`/
+;; `break`/`return`/`setf` stage note (`while`'s own expansion calls `not`
+;; unconditionally, so this is what makes `while`/`dotimes` compilable at
+;; all). `and`/`or` (below) still need special-form treatment for short-
+;; circuiting; `not` never did.
+(defun not ((b bool)) bool (if b false true))
 (defun consp ((s Sexpr)) bool (match s ((Cons _ _) true) (_ false)))
 (defun null ((s Sexpr)) bool (match s ((Nil) true) (_ false)))
 (defun atom ((s Sexpr)) bool (not (consp s)))

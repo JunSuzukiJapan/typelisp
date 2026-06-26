@@ -250,11 +250,11 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
         Expr::FieldGet(..) => unsupported(heap, "FieldGet"),
         Expr::FieldSet(..) => unsupported(heap, "FieldSet"),
         Expr::Match(..) => unsupported(heap, "Match"),
-        Expr::Set(..) => unsupported(heap, "Set"),
+        Expr::Set(name, value) => translate_set(heap, name, value, &typed.ty, direct),
         Expr::SetGlobal(..) => unsupported(heap, "SetGlobal"),
-        Expr::Loop(_) => unsupported(heap, "Loop"),
-        Expr::Break => unsupported(heap, "Break"),
-        Expr::Return(_) => unsupported(heap, "Return"),
+        Expr::Loop(body) => translate_loop(heap, body, direct),
+        Expr::Break => tagged(heap, "break", &[]),
+        Expr::Return(value) => translate_return(heap, value, direct),
         Expr::Panic(_) => unsupported(heap, "Panic"),
         Expr::Quote(_) => unsupported(heap, "Quote"),
     }
@@ -374,6 +374,82 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], dir
     heap.pop_root(); // body_v
     heap.pop_root(); // bindings_list
     result
+}
+
+/// `Expr::Set(name, value)` -> `(set name-str is-fn value-form)` (`loop`/
+/// `break`/`return`/`setf`). `is-fn` is `typed.ty`'s own `Fn`-ness — for a
+/// `Set` node that's the *target variable's* type (`Checker::check_setf`
+/// builds `Typed { expr: Expr::Set(name, value), ty }` with `ty` taken from
+/// `env.get(&name)`, not from `value`'s own type — though the two always
+/// agree, since `value` is checked against that same type), the same role
+/// `translate_if`'s `is_fn` plays for a branch value: `compiler.rs`'s
+/// `compile-set` reuses `compile-if-branch`'s retain-a-borrowed-value-before-
+/// it-escapes-into-longer-lived-storage logic for the new value before
+/// storing it into the target's slot, since that slot can outlive whatever
+/// activation computed a borrowed value (exactly the same boundary an `if`
+/// merge crosses).
+fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, direct: &HashSet<String>) -> Result<Value, Error> {
+    let name_v = heap.alloc_string(name.to_string());
+    heap.push_root(name_v);
+    let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
+    let form = match ast_to_sexpr_scoped(heap, value, direct) {
+        Ok(v) => v,
+        Err(e) => {
+            heap.pop_root(); // name_v
+            return Err(e);
+        }
+    };
+    heap.push_root(form);
+    let result = tagged(heap, "set", &[name_v, is_fn, form]);
+    heap.pop_root(); // form
+    heap.pop_root(); // name_v
+    result
+}
+
+/// `Expr::Loop(body)` -> `(loop body-form...)` (`loop`/`break`/`return`):
+/// each body statement translated in order, untagged (unlike a call
+/// argument list — these are executed for effect/control, not consumed as
+/// values, so no `is-fn` retain bookkeeping applies to them directly; only
+/// whichever `break`/`return` eventually exits the loop carries that tag,
+/// see [`translate_return`]). `compiler.rs`'s `compile-loop` builds the
+/// actual loop/exit blocks and merge slot; `compile-loop-body` walks this
+/// list.
+fn translate_loop(heap: &mut Heap, body: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
+    let body_values = ast_list_to_sexpr(heap, body, direct)?;
+    let result = tagged(heap, "loop", &body_values);
+    for _ in 0..body_values.len() {
+        heap.pop_root();
+    }
+    result
+}
+
+/// `Expr::Return(value)` -> `(return is-fn value-form)` (`loop`/`break`/
+/// `return`). A value-less `(return)` is translated as if its value were an
+/// explicit `Expr::Unit` literal (`is-fn` always `false`, `value-form` the
+/// real `(unit)` tag `Expr::Unit` itself already produces) rather than a
+/// second, special-cased tag — `compiler.rs`'s `compile-return` (and
+/// `compile-value`'s "unit" arm it relies on) handles both shapes through
+/// the exact same path this way. `(break)`, by contrast, never carries a
+/// value at all (not even an implicit `Unit` one) — see its own tag, built
+/// directly in [`ast_to_sexpr_scoped`].
+fn translate_return(heap: &mut Heap, value: &Option<Box<Typed>>, direct: &HashSet<String>) -> Result<Value, Error> {
+    match value {
+        Some(v) => {
+            let is_fn = Value::Bool(matches!(v.ty, Type::Fn(..)));
+            let form = ast_to_sexpr_scoped(heap, v, direct)?;
+            heap.push_root(form);
+            let result = tagged(heap, "return", &[is_fn, form]);
+            heap.pop_root();
+            result
+        }
+        None => {
+            let form = tagged(heap, "unit", &[])?;
+            heap.push_root(form);
+            let result = tagged(heap, "return", &[Value::Bool(false), form]);
+            heap.pop_root();
+            result
+        }
+    }
 }
 
 /// `Expr::Labels { defs, body }` -> `(labels (captured-sym...) ((name
@@ -875,6 +951,19 @@ fn collect_calls(typed: &Typed, out: &mut Vec<Path>) {
                 collect_calls(e, out);
             }
         }
+        // `loop`/`break`/`return`/`setf`: a `Call` can sit inside a loop's
+        // body sequence, a `setf`'s new value, or a `return`'s value — all
+        // now real translations (see `translate_loop`/`translate_set`/
+        // `translate_return`), so this walker must follow them too. `Break`
+        // carries no sub-expression at all.
+        Expr::Loop(body) => {
+            for e in body {
+                collect_calls(e, out);
+            }
+        }
+        Expr::Set(_, value) => collect_calls(value, out),
+        Expr::Return(Some(v)) => collect_calls(v, out),
+        Expr::Return(None) => {}
         _ => {}
     }
 }
@@ -1440,5 +1529,105 @@ mod tests {
         let body = vec![typed(Expr::Var("x".to_string()), Type::I64)];
         let v = typed(Expr::Let(binds, body), Type::I64);
         assert_eq!(collect_call_targets(&v), vec![crate::Path::root("g")]);
+    }
+
+    /// `loop`/`break`/`return`/`setf`: `Expr::Loop` -> `(loop form...)`, each
+    /// body statement translated in order, untagged.
+    #[test]
+    fn translates_a_loop_with_a_multi_statement_body() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let body = vec![typed(Expr::Break, Type::Never), typed(Expr::Int(1), Type::I64)];
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Loop(body), Type::Unit)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "loop");
+        assert_eq!(fields.len(), 2);
+        let (f0_tag, _) = untag(&heap, fields[0]);
+        assert_eq!(f0_tag, "break");
+        let (f1_tag, f1_fields) = untag(&heap, fields[1]);
+        assert_eq!(f1_tag, "int");
+        assert_eq!(f1_fields, vec![Value::Int(1)]);
+    }
+
+    /// `Expr::Break` -> a bare `(break)` tag, no fields.
+    #[test]
+    fn translates_a_break() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Break, Type::Never)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "break");
+        assert!(fields.is_empty());
+    }
+
+    /// `Expr::Return(Some(value))` -> `(return is-fn value-form)`.
+    #[test]
+    fn translates_a_return_with_a_value() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let value = Box::new(typed(Expr::Int(5), Type::I64));
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Return(Some(value)), Type::Never)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "return");
+        assert_eq!(fields[0], Value::Bool(false));
+        let (value_tag, value_fields) = untag(&heap, fields[1]);
+        assert_eq!(value_tag, "int");
+        assert_eq!(value_fields, vec![Value::Int(5)]);
+    }
+
+    /// `Expr::Return(None)` -> `(return false (unit))` — the implicit `Unit`
+    /// value, not a second special-cased tag.
+    #[test]
+    fn translates_a_value_less_return_as_an_implicit_unit() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Return(None), Type::Never)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "return");
+        assert_eq!(fields[0], Value::Bool(false));
+        let (value_tag, value_fields) = untag(&heap, fields[1]);
+        assert_eq!(value_tag, "unit");
+        assert!(value_fields.is_empty());
+    }
+
+    /// A `Fn`-typed `return` value carries `is-fn = true` — the same tag
+    /// `compile-return` forwards into `compile-if-branch`'s retain logic.
+    #[test]
+    fn an_fn_typed_return_value_carries_an_is_fn_tag() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let value = Box::new(typed(Expr::Var("f".to_string()), fn_ty()));
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Return(Some(value)), Type::Never)).unwrap();
+        let (_, fields) = untag(&heap, v);
+        assert_eq!(fields[0], Value::Bool(true));
+    }
+
+    /// `Expr::Set(name, value)` -> `(set name-str is-fn value-form)` — `ty`
+    /// is the *target variable's* type (here `I64`, never `Fn`), not
+    /// `value`'s own (also `I64` here, but the two needn't be the same node).
+    #[test]
+    fn translates_a_setf() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let set = Expr::Set("x".to_string(), Box::new(typed(Expr::Int(9), Type::I64)));
+        let v = ast_to_sexpr(&mut heap, &typed(set, Type::I64)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "set");
+        assert_eq!(expect_str(&heap, fields[0]), "x");
+        assert_eq!(fields[1], Value::Bool(false));
+        let (value_tag, value_fields) = untag(&heap, fields[2]);
+        assert_eq!(value_tag, "int");
+        assert_eq!(value_fields, vec![Value::Int(9)]);
+    }
+
+    /// `collect_call_targets` recurses into a `Loop`'s body, a `Set`'s
+    /// value, and a `Return`'s value.
+    #[test]
+    fn collect_call_targets_finds_calls_nested_inside_loop_set_and_return() {
+        let loop_body = vec![typed(Expr::Call(crate::Path::root("a"), vec![]), Type::I64)];
+        let v = typed(Expr::Loop(loop_body), Type::Unit);
+        assert_eq!(collect_call_targets(&v), vec![crate::Path::root("a")]);
+
+        let set = Expr::Set("x".to_string(), Box::new(typed(Expr::Call(crate::Path::root("b"), vec![]), Type::I64)));
+        let v = typed(set, Type::I64);
+        assert_eq!(collect_call_targets(&v), vec![crate::Path::root("b")]);
+
+        let ret = Expr::Return(Some(Box::new(typed(Expr::Call(crate::Path::root("c"), vec![]), Type::I64))));
+        let v = typed(ret, Type::Never);
+        assert_eq!(collect_call_targets(&v), vec![crate::Path::root("c")]);
     }
 }

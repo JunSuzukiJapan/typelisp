@@ -1,8 +1,10 @@
 //! Tests for the typelisp-defined prelude
 //! ([cl-equivalence-catalog.md](../docs/cl-equivalence-catalog.md) §2.1,
-//! roadmap step 7a): `consp`/`null`/`atom`/`equal` (`src/prelude.rs`), plus
-//! their Rust-side foundations added alongside them — `not`, and the `eq`
-//! coverage gaps it closes (`sexpr`/`bool`/`i32`/`i64`/`f64`).
+//! roadmap step 7a): `not`/`consp`/`null`/`atom`/`equal` (`src/prelude.rs`),
+//! plus a Rust-side foundation added alongside them — the `eq` coverage
+//! gaps it closes (`sexpr`/`bool`/`i32`/`i64`/`f64`). `not` itself moved
+//! from a Rust builtin to a plain `defun` here later (`loop`/`break`/
+//! `return`/`setf` stage — see `src/prelude.rs`'s own comment on it).
 
 extern crate typelisp;
 use std::cell::RefCell;

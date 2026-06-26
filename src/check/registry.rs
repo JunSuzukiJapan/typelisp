@@ -274,10 +274,6 @@ impl Registry {
         // `random`: the only numeric builtin with no natural receiver to
         // dispatch on (like `gensym`), so it stays a free function.
         root.fns.insert("random".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::I32, public: true, builtin: true });
-        // `not`: a plain unary function (no short-circuiting needed, unlike
-        // `and`/`or`), so — unlike those two — it doesn't need special-form
-        // treatment.
-        root.fns.insert("not".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Bool], ret: Type::Bool, public: true, builtin: true });
         // `cons`/`car`/`cdr` operate on `Sexpr` (the cons/nil duality at the
         // type level). `cons` is also reachable as the `Cons` constructor;
         // registering it as a function too lets it be used as a value
@@ -720,6 +716,20 @@ fn llvm_builder_def() -> AdtDef {
     // `build-br`: an unconditional branch — `compile-if`'s then/else arms use
     // this to join back at the merge block.
     assoc.insert("build-br".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit, true));
+    // `block-terminated?` (`loop`/`break`/`return`): whether the builder's
+    // *current* insertion block already ends in a terminator instruction —
+    // a host-level query (returns a real `Bool`, not a compiled `i64` the
+    // way every `build-*` primitive above does), the same flavor as
+    // `llvm-module::verify`. `compile-if`'s branches and `compile-loop-body`'s
+    // statement sequencing both need this: a `break`/`return` reached
+    // directly (or via a taken `if` branch) already ends the current block
+    // with its own unconditional branch to the loop's exit block, and LLVM
+    // allows only one terminator per block — anything that would otherwise
+    // unconditionally append more instructions after compiling a sub-form
+    // (`compile-if`'s store-then-branch-to-merge, `compile-loop-body`'s next
+    // statement) must check this first and skip emitting if it's already
+    // true, or the resulting IR is malformed.
+    assoc.insert("block-terminated?".to_string(), assoc_fn(vec![llvm_builder_ty()], Type::Bool, true));
     AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
 }
 

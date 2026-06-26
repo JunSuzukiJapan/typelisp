@@ -160,6 +160,51 @@ fn compiles_and_runs_a_self_recursive_function_with_a_base_case() {
     assert_eq!(compile_and_run("self_recursive_base_case", src), 120);
 }
 
+/// `loop`/`break`/`return`/`setf`, AOT side: a helper function computing
+/// `0+1+...+n` via a `loop` that mutates loop-carried locals with `setf`
+/// and delivers the result with `return` (no recursion at all) — `main`
+/// itself still can't have parameters/`let`s of its own (see this module's
+/// doc comment), so the actual `loop`/`setf` logic lives in `sum-to`, the
+/// same shape every other AOT helper test here already uses. Mirrors
+/// `tests/compile_test.rs`'s
+/// `compile_dispatches_a_counting_loop_with_setf_and_conditional_return_to_native_code`.
+#[test]
+fn compiles_and_runs_a_loop_based_sum_through_a_helper() {
+    let src = r#"
+        (defun sum-to ((n i32)) i32
+          (let ((i 0) (acc 0))
+            (loop
+              (if (> i n) (return acc) ())
+              (setf acc (+ acc i))
+              (setf i (+ i 1)))))
+        (defun main () i32 (sum-to 5))
+    "#;
+    assert_eq!(compile_and_run("loop_sum_helper", src), 15);
+}
+
+/// Nested `loop`s, AOT side: an inner `loop`'s bare `(break)` must exit only
+/// the inner loop — see `tests/compile_test.rs`'s
+/// `compile_dispatches_nested_loops_where_an_inner_break_only_exits_the_inner_loop`
+/// for the JIT-side version of this exact source (same expected result, `6`,
+/// for the same reason: 3 outer iterations &times; 2 inner increments each).
+#[test]
+fn compiles_and_runs_nested_loops_through_a_helper() {
+    let src = r#"
+        (defun nested-loop-test () i32
+          (let ((outer 0) (total 0))
+            (loop
+              (if (eq outer 3) (return total) ())
+              (let ((inner 0))
+                (loop
+                  (if (eq inner 2) (break) ())
+                  (setf total (+ total 1))
+                  (setf inner (+ inner 1))))
+              (setf outer (+ outer 1)))))
+        (defun main () i32 (nested-loop-test))
+    "#;
+    assert_eq!(compile_and_run("nested_loop_helper", src), 6);
+}
+
 #[test]
 fn exit_code_is_truncated_to_32_bits() {
     // Process exit codes are a byte on POSIX (`status.code()` already
@@ -384,6 +429,49 @@ fn jit_and_aot_agree_on_a_self_recursive_function_with_a_base_case() {
     };
 
     let aot_exit_code = compile_and_run("jit_aot_self_recursive_pair", src) as i64;
+
+    assert_eq!(jit_value, aot_exit_code);
+}
+
+/// Same claim as `jit_and_aot_agree_on_the_same_source`, but for a `main`
+/// that calls a `loop`/`break`/`return`/`setf`-based helper (this stage)
+/// rather than bare arithmetic — `sum-to` needs its own `(compile ...)`
+/// before `main`'s, same reason as `jit_and_aot_agree_on_a_cross_function_call`.
+#[test]
+fn jit_and_aot_agree_on_a_loop_based_function() {
+    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+
+    let src = r#"
+        (defun sum-to ((n i32)) i32
+          (let ((i 0) (acc 0))
+            (loop
+              (if (> i n) (return acc) ())
+              (setf acc (+ acc i))
+              (setf i (+ i 1)))))
+        (defun main () i32 (sum-to 5))
+    "#;
+
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    typelisp::load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r
+        .read_all(&mut h, &format!("{}\n(compile \"sum-to\")\n(compile \"main\")\n(main)", src))
+        .expect("read failed");
+    let mut jit_result = None;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("exec failed") {
+            jit_result = Some(val);
+        }
+    }
+    let jit_value = match jit_result {
+        Some(RtValue::Int(n)) => n,
+        other => panic!("expected an Int from the JIT path, got {:?}", other),
+    };
+
+    let aot_exit_code = compile_and_run("jit_aot_loop_pair", src) as i64;
 
     assert_eq!(jit_value, aot_exit_code);
 }

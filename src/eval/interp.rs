@@ -758,7 +758,6 @@ impl Interp {
                 )
             }
             "random" => Some(eval_random(args)),
-            "not" => Some(expect_bool(&args[0]).map(|b| RtValue::Bool(!b))),
             "gensym" => {
                 // A leading space mirrors the hidden-binding idiom already
                 // used for `dotimes`/`dolist`'s internal variables in the
@@ -1266,6 +1265,7 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-icmp-ne" => Some(llvm_builder_build_icmp(args, "icmp_ne", inkwell::IntPredicate::NE)),
             "build-cond-br" => Some(llvm_builder_build_cond_br(args)),
             "build-br" => Some(llvm_builder_build_br(args)),
+            "block-terminated?" => Some(llvm_builder_block_terminated(args)),
             _ => None,
         };
     }
@@ -1618,6 +1618,13 @@ fn llvm_builder_build_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let target = expect_llvm_basic_block(&args[1])?;
     builder.borrow().build_unconditional_branch(target).map_err(|e| EvalError::Internal(format!("build-br: {}", e)))?;
     Ok(RtValue::Unit)
+}
+
+/// See `registry::llvm_builder_def`'s doc comment for `block-terminated?`.
+fn llvm_builder_block_terminated(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let terminated = builder.borrow().get_insert_block().and_then(|bb| bb.get_terminator()).is_some();
+    Ok(RtValue::Bool(terminated))
 }
 
 /// A direct call to an already-declared `target` (typically `get-function`'s
