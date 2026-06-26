@@ -640,8 +640,10 @@ impl Interp {
     fn compile_function(&self, heap: &mut Heap, name: &str) -> Result<RtValue, EvalError> {
         let path = Path::root(name);
         let (_, body) = self.compiled_fn_body(name)?;
-        let call_targets: Vec<Path> =
-            crate::compile::ast_bridge::collect_call_targets(&body).into_iter().filter(|p| *p != path).collect();
+        let call_targets: Vec<Path> = crate::compile::ast_bridge::collect_call_targets(&body)
+            .into_iter()
+            .filter(|p| *p != path && !is_rt_builtin_name(p.local()))
+            .collect();
         for target in &call_targets {
             if !self.compiled.borrow().contains_key(target) {
                 return Err(EvalError::Panic(format!(
@@ -658,18 +660,22 @@ impl Interp {
             for target in &call_targets {
                 declare_external_function(&module, target.local());
             }
+            for (rt_name, _) in rt_extern_functions() {
+                declare_external_function(&module, rt_name);
+            }
             module
         };
         self.add_compiled_function(heap, module.clone(), name, name)?;
 
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-        let externals: Vec<(String, usize)> = {
+        let mut externals: Vec<(String, usize)> = {
             let compiled = self.compiled.borrow();
             call_targets
                 .iter()
                 .map(|p| (p.local().to_string(), compiled.get(p).expect("checked compiled above").address()))
                 .collect()
         };
+        externals.extend(rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)));
         let compiled = crate::compile::CompiledFn::new(&module.borrow(), name, &externals)
             .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
         self.compiled.borrow_mut().insert(path, compiled);
@@ -1363,6 +1369,39 @@ fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// [`crate::compile::COMPILE_LOCK`] held.
 fn declare_external_function(module: &Rc<RefCell<Module<'static>>>, name: &str) {
     module.borrow_mut().add_function(name, compiled_fn_type(), None);
+}
+
+/// True for the handful of free functions `compiler.rs`'s `compile-call`
+/// rewrites to a `crate::compile::runtime` shim by name (`car` -> `rt_car`,
+/// etc. — see that function's `raw-nm`/`nm` rename) rather than requiring
+/// `(compile "car")` first: these can never be `compile`d themselves (no
+/// typelisp AST body — direct cons-heap access, Rust-only), so
+/// [`Interp::compile_function`] excludes them from its normal "every call
+/// target must already be compiled" check and instead always wires them via
+/// [`rt_extern_functions`].
+fn is_rt_builtin_name(name: &str) -> bool {
+    matches!(name, "car" | "cdr" | "cons" | "set-car" | "set-cdr")
+}
+
+/// The fixed set of `crate::compile::runtime` shims every compiled function
+/// gets forward-declared and (JIT only — AOT resolves them as ordinary
+/// linker symbols against `typelisp-rt`'s `staticlib`, see
+/// `compile::aot::compile_file`) `add_global_mapping`-wired to, regardless
+/// of whether its own body actually calls any of them. Cheap enough (5
+/// extra declarations/mappings) to always include rather than checking
+/// which ones a given body's call targets actually need. `pub(crate)`:
+/// `compile::aot::compile_file` declares the same names (no JIT mapping
+/// needed there — ordinary linker symbol resolution against `typelisp-rt`'s
+/// `staticlib` instead) from this one source of truth.
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 5] {
+    use crate::compile::runtime::{rt_car, rt_cdr, rt_cons, rt_set_car, rt_set_cdr};
+    [
+        ("rt_car", rt_car as usize),
+        ("rt_cdr", rt_cdr as usize),
+        ("rt_cons", rt_cons as usize),
+        ("rt_set_car", rt_set_car as usize),
+        ("rt_set_cdr", rt_set_cdr as usize),
+    ]
 }
 
 /// The captures counterpart of [`compiled_fn_type`]: `i64 name(i64* args,

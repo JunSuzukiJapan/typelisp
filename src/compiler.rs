@@ -870,15 +870,21 @@ pub const SOURCE: &str = r#"
                        ;; `compile-function`'s own first step (`add-function`,
                        ;; above) before this body was ever reached.
                        (compile-call ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
-                         (let ((nm (sexpr-str (car (cdr e)))))
-                           (let ((arg-forms (cdr (cdr e))))
-                             (let ((argc (sexpr-list-length arg-forms)))
-                               (let ((args-ptr (alloca-args builder argc)))
-                                 (let ((pending-ptr (alloca-args builder argc)))
-                                   (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr arg-forms 0)
-                                   (let ((result (build-call builder (get-function m nm) args-ptr argc)))
-                                     (release-pending-args builder m pending-ptr argc 0)
-                                     result)))))))
+                         (let ((raw-nm (sexpr-str (car (cdr e)))))
+                           (let ((nm (if (eq raw-nm "car") "rt_car"
+                                         (if (eq raw-nm "cdr") "rt_cdr"
+                                             (if (eq raw-nm "cons") "rt_cons"
+                                                 (if (eq raw-nm "set-car") "rt_set_car"
+                                                     (if (eq raw-nm "set-cdr") "rt_set_cdr"
+                                                         raw-nm)))))))
+                             (let ((arg-forms (cdr (cdr e))))
+                               (let ((argc (sexpr-list-length arg-forms)))
+                                 (let ((args-ptr (alloca-args builder argc)))
+                                   (let ((pending-ptr (alloca-args builder argc)))
+                                     (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr arg-forms 0)
+                                     (let ((result (build-call builder (get-function m nm) args-ptr argc)))
+                                       (release-pending-args builder m pending-ptr argc 0)
+                                       result))))))))
                        ;; `(apply-indirect callee-form (is-fn . arg-form)...)`
                        ;; — `Expr::Apply`, labels/closures Stage 4, the
                        ;; general indirect-dispatch case

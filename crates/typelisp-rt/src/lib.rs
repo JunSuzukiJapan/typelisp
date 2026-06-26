@@ -335,11 +335,63 @@ pub unsafe extern "C" fn rt_set_cdr(args: *const i64, argc: u32) -> i64 {
     }
 }
 
+// ---- Stage 4: GC root safety -------------------------------------------
+
+/// Registers a `Sexpr`-typed value as a GC root for as long as it's live in
+/// a compiled frame — closing the gap [`rt_cons`]'s doc comment calls out:
+/// without this, a GC that `rt_cons` (or any other allocating `rt_*` call)
+/// triggers internally could reclaim a cons cell some *other* live value in
+/// the calling frame still points to, since nothing makes that value
+/// visible to `Heap::gc`'s root walk otherwise. `compiler.rs`'s future
+/// rooting pass (paralleling its existing `ClosureBox` retain/release
+/// insertion) is expected to wrap every `Sexpr`-typed local's lexical scope
+/// in a push here / [`rt_pop_sexpr_root`] there, the same way retain/release
+/// already wrap a `Fn`-typed one's.
+///
+/// Returns its argument unchanged (like `build-closure-retain`), so a
+/// caller can chain it directly around the value it's rooting rather than
+/// needing a separate statement.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`; a
+/// `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_push_sexpr_root(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_push_sexpr_root: expected 1 argument");
+    }
+    let tagged = *args;
+    active_heap().push_root(decode(tagged));
+    tagged
+}
+
+/// The inverse of [`rt_push_sexpr_root`] — pops the most recently pushed
+/// root and returns it (decoded back to its tagged form), for the matching
+/// end of whatever lexical scope pushed it. Fatal if nothing is on the root
+/// stack to pop: every call site is expected to be paired 1:1 with an
+/// earlier [`rt_push_sexpr_root`], so an empty stack here is a
+/// `compiler.rs`-side bug, not a recoverable condition.
+///
+/// # Safety
+///
+/// A `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_pop_sexpr_root(_args: *const i64, _argc: u32) -> i64 {
+    match active_heap().pop_root() {
+        Some(v) => encode(v),
+        None => fatal("rt_pop_sexpr_root: root stack was empty"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use typelisp_mem::{Heap, PathId, StrId, SymId, Value};
 
-    use super::{decode, encode, rt_car, rt_cdr, rt_cons, rt_heap_init, rt_heap_live_count, rt_ping, rt_set_car, rt_set_cdr, set_active_heap};
+    use super::{
+        decode, encode, rt_car, rt_cdr, rt_cons, rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_sexpr_root, rt_set_car,
+        rt_set_cdr, set_active_heap,
+    };
 
     #[test]
     fn rt_ping_adds_one_to_its_first_argument() {
@@ -423,5 +475,65 @@ mod tests {
         let one_arg = [pair];
         assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(99));
         assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Empty);
+    }
+
+    /// Forces a real `Heap::gc()` (capacity 4, more than 4 conses follow)
+    /// while a `precious` cons cell is rooted via [`rt_push_sexpr_root`] —
+    /// proving the root genuinely keeps it (and what it points to) alive
+    /// across a collection triggered by *other*, unrelated allocations, not
+    /// just that the API doesn't crash.
+    #[test]
+    fn rt_push_sexpr_root_protects_a_value_across_a_gc_triggered_by_other_allocations() {
+        let mut heap = Heap::with_capacity(4);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let precious_args = [encode(Value::Int(111)), encode(Value::Int(222))];
+        let precious = unsafe { rt_cons(precious_args.as_ptr(), 2) };
+        let pushed = unsafe { rt_push_sexpr_root(&precious as *const i64, 1) };
+        assert_eq!(pushed, precious, "rt_push_sexpr_root returns its argument unchanged");
+
+        // Exhausts the remaining 3 free cells and forces at least one GC;
+        // none of these throwaway conses are rooted, so each is garbage by
+        // the time the next one runs.
+        for i in 0..20 {
+            let args = [encode(Value::Int(i)), encode(Value::Int(i))];
+            unsafe { rt_cons(args.as_ptr(), 2) };
+        }
+
+        let popped = unsafe { rt_pop_sexpr_root(std::ptr::null(), 0) };
+        assert_eq!(popped, precious, "the popped root is the same value that was pushed");
+
+        let one_arg = [precious];
+        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(111));
+        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Int(222));
+    }
+
+    /// The negative case `rt_push_sexpr_root`'s test above guards against:
+    /// without rooting it, the *same* cons cell gets reclaimed by the GC the
+    /// later allocations trigger and reused for one of them — so reading
+    /// through the original (now-dangling, from the language's perspective)
+    /// tagged value no longer shows what it was consed with. Confirms the
+    /// problem [`rt_cons`]'s doc comment describes is real, not
+    /// hypothetical, and that the fixed-arena sweep
+    /// (`Heap::gc`, lowest-index-first free-list rebuild) makes this
+    /// deterministic rather than a flaky one-in-a-while corruption.
+    #[test]
+    fn an_unrooted_value_is_corrupted_by_a_gc_triggered_by_other_allocations() {
+        let mut heap = Heap::with_capacity(4);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let unrooted_args = [encode(Value::Int(111)), encode(Value::Int(222))];
+        let unrooted = unsafe { rt_cons(unrooted_args.as_ptr(), 2) };
+        // Deliberately not pushed as a root.
+
+        for i in 0..20 {
+            let args = [encode(Value::Int(i)), encode(Value::Int(i))];
+            unsafe { rt_cons(args.as_ptr(), 2) };
+        }
+
+        let one_arg = [unrooted];
+        let car_after = decode(unsafe { rt_car(one_arg.as_ptr(), 1) });
+        let cdr_after = decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) });
+        assert_ne!((car_after, cdr_after), (Value::Int(111), Value::Int(222)));
     }
 }

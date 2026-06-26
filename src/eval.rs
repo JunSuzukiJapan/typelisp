@@ -3,7 +3,7 @@
 //! for the runtime value representation.
 
 mod value;
-mod interp;
+pub(crate) mod interp;
 
 pub use value::{Closure, EvalError, RtValue, StructData};
 pub use interp::Interp;

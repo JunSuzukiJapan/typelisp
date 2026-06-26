@@ -97,7 +97,23 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     let ctx = crate::compile::llvm_context();
     let module = {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-        Rc::new(RefCell::new(ctx.create_module("compiled_file")))
+        let module = ctx.create_module("compiled_file");
+        // Forward-declares `rt_car`/`rt_cdr`/`rt_cons`/`rt_set_car`/
+        // `rt_set_cdr` (no body) so `compile-call`'s `get-function` finds
+        // them the same way it finds any other already-defined function in
+        // this shared module — `compiler.rs`'s `compile-call` rewrites a
+        // call to `car`/`cdr`/`cons`/`set-car`/`set-cdr` to one of these
+        // names before ever reaching `get-function` (see that function's
+        // `raw-nm`/`nm` rename). Unlike the JIT path
+        // (`Interp::compile_function`), no `add_global_mapping` is needed
+        // here: these resolve as ordinary linker symbols against
+        // `typelisp-rt`'s `staticlib` once `write_executable` links it in.
+        let ptr_ty = ctx.ptr_type(AddressSpace::default());
+        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        for (name, _) in crate::eval::interp::rt_extern_functions() {
+            module.add_function(name, fn_ty, None);
+        }
+        Rc::new(RefCell::new(module))
     };
 
     // One shared module, one `add_compiled_function` call per `defun` —

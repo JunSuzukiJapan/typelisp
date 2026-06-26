@@ -1230,14 +1230,62 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   set-car/set-cdr）、メインクレートにJIT経由でのcons round-trip検証
   （実際のHeapが1セル増えたことまで確認）を1件追加。全テストgreen、
   clippy警告0（`--workspace`）、3回連続実行で安定。
-- **Stage 4**: GCルート安全性——`rt-push-sexpr-root`/`rt-pop-sexpr-root`。
-  既存retain/release挿入パスと並行する「Sexprルート挿入」パスを追加。
-  小容量Heapで頻繁にGCを起こしながらループ内でconsを作り続けるテストで
-  実証。
+- **Stage 4（完了、2026-06-26）**: GCルート安全性——
+  `rt_push_sexpr_root`/`rt_pop_sexpr_root`を実装（`rt_push_sexpr_root`は
+  `build-closure-retain`同様、引数を無変更で返しチェーン可能）。容量4の
+  小さいHeapで「rootedな値を1つcons→push-root→無関係なconsを20回連続
+  （free list 4セルを使い切り複数回gcを誘発）→pop-root→car/cdrで内容が
+  保持されていることを確認」というテストと、**対照として「rootしないと
+  同じシナリオで実際に値が壊れる」ことまで実証するテスト**を追加（固定
+  サイズアリーナの決定的なsweep——`(0..cap).rev()`で未マーク順に新free
+  listを再構築するため、再利用順序が常に同じ——を利用、フレーキーでない
+  ことを確認済み）。
+
+  **scope変更の経緯（重要）**: 当初「コンパイル済みのループでconsし続ける
+  テスト」を想定していたが、実装を進める中で2つの未解決ギャップが先に
+  判明したため、それらは本ステージの範囲外として明示的に先送りした：
+  (1) `Expr::Call`がコンパイル済み関数を呼ぶ際の引数/戻り値は今も
+  `RtValue::Int`決め打ち（[interp.rs](src/eval/interp.rs#L266)）——
+  `Sexpr`型の引数/戻り値を実際にtypelisp呼び出し構文`(f sexpr式)`から
+  渡すには、ここにエンコード/デコードの橋渡しを追加する必要がある。
+  (2) `cons`の引数を作るには`(Int 5)`のような`Sexpr`コンストラクタ
+  （`Expr::Construct`）が要るが、`ast_bridge`はまだ未対応（Stage 6で
+  対応予定）——つまりtypelispソースから新しい`Sexpr::Int`値を作る手段が
+  Stage 6まで存在しない。この2点が揃うまでは「実際のtypelispソースで
+  コンパイル済み関数にSexprを渡す」エンドツーエンドテストは原理的に
+  書けないため、Stage 4のテストはStage 0/3と同じ高さ（Rust直呼び/生IR）
+  に留め、上記2点はStage 5/6で実際に必要になった時点で対応する。
+
+  **Stage 3の「接続」を本ステージで完了**: Stage 3時点では`rt_cons`等の
+  Rust関数を実装しただけで、`compiler.rs`の`compile-call`から実際に
+  呼べるようにする「接続」は未完了だった（Stage 3の文言「実装と接続」の
+  後半）。本ステージで`compile-call`に`car`/`cdr`/`cons`/`set-car`/
+  `set-cdr`→`rt_car`/`rt_cdr`/`rt_cons`/`rt_set_car`/`rt_set_cdr`への
+  名前書き換えを追加（`compiler.rs`本体への変更はこの1箇所のみ、既存の
+  `get-function`+`build-call`の仕組みは無変更で再利用）。Rust側
+  （`Interp::compile_function`/`compile::aot::compile_file`）は、この5つを
+  「`(compile ...)`済みでなければ呼べない」という既存チェックから除外し、
+  常に（呼ばれるかどうかに関わらず）モジュールへ前方宣言——JITは
+  `add_global_mapping`で実アドレスを配線、AOTは`typelisp-rt`の
+  staticlibに対する通常のリンカ記号解決に委ねる（追加の配線不要）。
 - **Stage 5**: `Match`対応（Sexprスクルーティニー）。`consp`/`null`/`atom`
-  が実際にコンパイル可能になることを確認。
+  が実際にコンパイル可能になることを確認。**前提として持ち越されている
+  ギャップ**（Stage 4で判明）：`Expr::Call`がコンパイル済み関数を呼ぶ際の
+  引数/戻り値の`RtValue::Int`決め打ち（[interp.rs](src/eval/interp.rs#L266)）に
+  `Sexpr`型のエンコード/デコード橋渡しを追加しないと、typelisp呼び出し
+  構文`(f sexpr式)`で`Sexpr`を渡せない。Stage 5で実際にSexpr引数を持つ
+  関数をcompileするテストを書く時点で対応必須。
 - **Stage 6**: `Construct`/`FieldGet`/`FieldSet`対応（一般ADT）。
   `Option`/`Result`/`defstruct`がコンパイル可能になることを確認。
+  **前提として持ち越されているギャップ**（Stage 4で判明）：typelisp
+  ソースから新しい`Sexpr::Int`等を作るには`(Int 5)`のような`Sexpr`
+  コンストラクタ（`Expr::Construct`）が要るが、これ自体が本ステージの
+  対象——つまり「`cons`に渡す値をtypelispソースで作る」エンドツーエンド
+  テストはStage 6で`Construct`対応が完了してから初めて書ける。また
+  Stage 4で実装した`rt_push_sexpr_root`/`rt_pop_sexpr_root`を
+  `compiler.rs`の実バインディング処理（`bind-params`/`bind-captures`/
+  `bind-let-values`/ループスロット）に実際に組み込む「Sexprルート挿入
+  パス」も、Sexpr型の実バインディングが初めて存在するこの段階で行う。
 - **Stage 7**（優先度低）: 文字列対応。
 - **Stage 8**: `dolist`含む`prelude.rs`のリスト関数群が実際にコンパイル
   可能になることの実証＋全体回帰確認。
