@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::freevars::{labels_free_vars, lambda_free_vars};
-use crate::{Error, Expr, Heap, LabelDef, Path, Type, Typed, Value};
+use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, Type, Typed, Value};
 
 /// A process-wide counter for synthesizing unique LLVM symbol names for
 /// anonymous functions — every `lambda`/`Expr::FnRef`-forwarding-wrapper/
@@ -249,7 +249,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
         Expr::Construct { .. } => unsupported(heap, "Construct"),
         Expr::FieldGet(..) => unsupported(heap, "FieldGet"),
         Expr::FieldSet(..) => unsupported(heap, "FieldSet"),
-        Expr::Match(..) => unsupported(heap, "Match"),
+        Expr::Match(scrut, arms) => translate_match(heap, scrut, arms, &typed.ty, direct),
         Expr::Set(name, value) => translate_set(heap, name, value, &typed.ty, direct),
         Expr::SetGlobal(..) => unsupported(heap, "SetGlobal"),
         Expr::Loop(body) => translate_loop(heap, body, direct),
@@ -863,6 +863,191 @@ fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], direct: &HashSet
     result
 }
 
+/// Whether `ty` is the built-in `Sexpr` type — [`translate_match`] only
+/// translates a `match` whose scrutinee has this type for real; any other
+/// scrutinee type stays `unsupported` (deferred to the `Construct`/
+/// `FieldGet`/`FieldSet` stage, since matching `Option`/`Result`/a
+/// `defstruct` needs those translated too before it's exercisable
+/// end-to-end).
+fn is_sexpr_scrutinee(ty: &Type) -> bool {
+    matches!(ty, Type::Named(p, _) if *p == Path::root("sexpr"))
+}
+
+/// Translates one [`Pattern`] into a tagged `Sexpr` `compiler.rs`'s
+/// `compile-pattern-test` walks: `(pat-wild)` / `(pat-bind name-str)` /
+/// `(pat-lit n)` (an `Int`/`Bool`/`Char` literal sub-pattern, collapsed to
+/// one shared tag — see the note on `n` below) / `(pat-ctor variant-i64
+/// (sub-pattern...))`. Only ever called once [`translate_match`] has
+/// already confirmed the *scrutinee*'s type is `Sexpr` — every `Ctor`
+/// pattern reachable from there (including a nested one inside a `cons`
+/// pattern's own fields, e.g. `(Cons _ (Nil))` — `prelude.rs`'s `last`/
+/// `butlast`) is therefore necessarily matching against the `sexpr` ADT
+/// too, so this never needs to check (or even know) `Pattern::Ctor`'s own
+/// `type_name` field.
+///
+/// `n` for `(pat-lit n)`: precomputed here, in Rust, to whatever raw
+/// `i64` the *compiled* representation of that literal would be —
+/// `Bool`'s `0`/`1` (matching `compile-bool`'s own convention) and
+/// `Char`'s Unicode scalar value, not just `Int`'s payload — so
+/// `compiler.rs`'s `compile-pattern-test` only ever needs one plain
+/// `build-icmp-eq` against a `const-i64`, regardless of which of the
+/// three literal kinds it came from (no `char`/`bool` -> `i64` conversion
+/// primitive exists in the compiled language yet, so doing this
+/// conversion on the Rust side avoids needing one).
+fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern) -> Result<Value, Error> {
+    match pat {
+        Pattern::Wildcard => tagged(heap, "pat-wild", &[]),
+        Pattern::Bind(name) => {
+            let v = heap.alloc_string(name.clone());
+            tagged(heap, "pat-bind", &[v])
+        }
+        Pattern::Int(n) => tagged(heap, "pat-lit", &[Value::Int(*n)]),
+        Pattern::Bool(b) => tagged(heap, "pat-lit", &[Value::Int(if *b { 1 } else { 0 })]),
+        Pattern::Char(c) => tagged(heap, "pat-lit", &[Value::Int(*c as i64)]),
+        Pattern::Ctor { variant, args, .. } => {
+            let sub_values = pattern_list_to_sexpr(heap, args)?;
+            let list = match list_of(heap, &sub_values) {
+                Ok(v) => v,
+                Err(e) => {
+                    for _ in 0..sub_values.len() {
+                        heap.pop_root();
+                    }
+                    return Err(e);
+                }
+            };
+            for _ in 0..sub_values.len() {
+                heap.pop_root();
+            }
+            heap.push_root(list);
+            let result = tagged(heap, "pat-ctor", &[Value::Int(*variant as i64), list]);
+            heap.pop_root(); // list
+            result
+        }
+    }
+}
+
+/// Translates each of `pats` in order, rooting every translated `Value` as
+/// it goes — the pattern-tree counterpart of [`ast_list_to_sexpr`].
+fn pattern_list_to_sexpr(heap: &mut Heap, pats: &[Pattern]) -> Result<Vec<Value>, Error> {
+    let mut values = Vec::with_capacity(pats.len());
+    for p in pats {
+        match pattern_to_sexpr(heap, p) {
+            Ok(v) => {
+                heap.push_root(v);
+                values.push(v);
+            }
+            Err(e) => {
+                for _ in 0..values.len() {
+                    heap.pop_root();
+                }
+                return Err(e);
+            }
+        }
+    }
+    Ok(values)
+}
+
+/// `Expr::Match(scrut, arms)` -> `(match is-fn scrutinee-form
+/// ((pattern-form . body-form)...))` (Stage 5, `docs/TODO.md`) — only
+/// when the scrutinee's own type is `Sexpr` ([`is_sexpr_scrutinee`]);
+/// matching `Option`/`Result`/a `defstruct` stays `unsupported`, deferred
+/// to the `Construct`/`FieldGet`/`FieldSet` stage (Stage 6) since those
+/// types can't yet be *constructed* in compiled code either, so compiling
+/// a `match` over one wouldn't be exercisable end-to-end yet. `is_fn`
+/// mirrors [`translate_if`]'s own tag of the same name — `match`, like
+/// `if`, introduces no function-activation boundary of its own, so a
+/// borrowed `Fn`-typed arm result needs the same explicit retain
+/// `compiler.rs`'s `compile-if-branch` already provides (reused as-is for
+/// each arm's body — see `compile-match-arms`'s doc comment). Each arm's
+/// body is restricted to a single expression, the same limit every other
+/// multi-expression body shape in this module has ([`translate_let`]'s
+/// body, a `labels` def's body, ...).
+fn translate_match(heap: &mut Heap, scrut: &Typed, arms: &[Arm], ty: &Type, direct: &HashSet<String>) -> Result<Value, Error> {
+    if !is_sexpr_scrutinee(&scrut.ty) {
+        return unsupported(heap, "Match");
+    }
+    let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
+    let scrut_v = ast_to_sexpr_scoped(heap, scrut, direct)?;
+    heap.push_root(scrut_v);
+    let arm_values = match translate_arms(heap, arms, direct) {
+        Ok(v) => v,
+        Err(e) => {
+            heap.pop_root(); // scrut_v
+            return Err(e);
+        }
+    };
+    let arms_list = match list_of(heap, &arm_values) {
+        Ok(v) => v,
+        Err(e) => {
+            for _ in 0..arm_values.len() {
+                heap.pop_root();
+            }
+            heap.pop_root(); // scrut_v
+            return Err(e);
+        }
+    };
+    for _ in 0..arm_values.len() {
+        heap.pop_root();
+    }
+    heap.push_root(arms_list);
+    let result = tagged(heap, "match", &[is_fn, scrut_v, arms_list]);
+    heap.pop_root(); // arms_list
+    heap.pop_root(); // scrut_v
+    result
+}
+
+/// Translates each [`Arm`] into a `(pattern-form . body-form)` pair,
+/// rooting every pair as it goes — [`translate_match`]'s own helper, kept
+/// separate purely to give the per-arm rooting its own clean error-
+/// cleanup scope (mirrors [`ast_list_to_sexpr`]'s shape, one level up).
+fn translate_arms(heap: &mut Heap, arms: &[Arm], direct: &HashSet<String>) -> Result<Vec<Value>, Error> {
+    let mut values = Vec::with_capacity(arms.len());
+    for arm in arms {
+        if arm.body.len() != 1 {
+            for _ in 0..values.len() {
+                heap.pop_root();
+            }
+            return Err(Error::TypeError("compile: match arm has a multi-expression body, not yet supported".into()));
+        }
+        let pat_v = match pattern_to_sexpr(heap, &arm.pat) {
+            Ok(v) => v,
+            Err(e) => {
+                for _ in 0..values.len() {
+                    heap.pop_root();
+                }
+                return Err(e);
+            }
+        };
+        heap.push_root(pat_v);
+        let body_v = match ast_to_sexpr_scoped(heap, &arm.body[0], direct) {
+            Ok(v) => v,
+            Err(e) => {
+                heap.pop_root(); // pat_v
+                for _ in 0..values.len() {
+                    heap.pop_root();
+                }
+                return Err(e);
+            }
+        };
+        heap.push_root(body_v);
+        let pair = heap.cons(pat_v, body_v);
+        heap.pop_root(); // body_v
+        heap.pop_root(); // pat_v
+        let pair = match pair {
+            Ok(p) => p,
+            Err(e) => {
+                for _ in 0..values.len() {
+                    heap.pop_root();
+                }
+                return Err(e);
+            }
+        };
+        heap.push_root(pair);
+        values.push(pair);
+    }
+    Ok(values)
+}
+
 /// Collects every distinct top-level [`Path`] an `Expr::Call` reachable from
 /// `typed` refers to, in first-encounter order. Mirrors exactly the node
 /// shapes [`ast_to_sexpr_scoped`] actually recurses into — anything that
@@ -964,6 +1149,19 @@ fn collect_calls(typed: &Typed, out: &mut Vec<Path>) {
         Expr::Set(_, value) => collect_calls(value, out),
         Expr::Return(Some(v)) => collect_calls(v, out),
         Expr::Return(None) => {}
+        // Stage 5: a `Call` can sit in a `match`'s scrutinee or any arm's
+        // body (`translate_match`'s own translation is now real) — pattern
+        // trees themselves never contain a `Call` (a [`Pattern`] has no
+        // sub-expression slot at all), so only the scrutinee/bodies need
+        // walking here.
+        Expr::Match(scrut, arms) => {
+            collect_calls(scrut, out);
+            for arm in arms {
+                for e in &arm.body {
+                    collect_calls(e, out);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -1629,5 +1827,167 @@ mod tests {
         let ret = Expr::Return(Some(Box::new(typed(Expr::Call(crate::Path::root("c"), vec![]), Type::I64))));
         let v = typed(ret, Type::Never);
         assert_eq!(collect_call_targets(&v), vec![crate::Path::root("c")]);
+    }
+
+    // ---- Stage 5 of the Sexpr-representation plan: `Match` --------------
+
+    fn sexpr_ty() -> Type {
+        Type::Named(Path::root("sexpr"), vec![])
+    }
+
+    /// `consp`'s own shape (`prelude.rs`): `(match s ((Cons _ _) true) (_
+    /// false)))` -> `(match is-fn scrutinee-form ((pattern-form .
+    /// body-form)...))`, with every sub-pattern here a `Wildcard` (no
+    /// `Bind` extraction needed at all).
+    #[test]
+    fn translates_a_match_over_a_sexpr_scrutinee_with_wildcard_ctor_patterns() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
+        let arms = vec![
+            Arm {
+                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, Pattern::Wildcard] },
+                body: vec![typed(Expr::Bool(true), Type::Bool)],
+            },
+            Arm { pat: Pattern::Wildcard, body: vec![typed(Expr::Bool(false), Type::Bool)] },
+        ];
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Match(Box::new(scrut), arms), Type::Bool)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "match");
+        assert_eq!(fields[0], Value::Bool(false), "a Bool-typed match is never Fn-typed");
+        let (scrut_tag, scrut_fields) = untag(&heap, fields[1]);
+        assert_eq!(scrut_tag, "var");
+        assert_eq!(expect_str(&heap, scrut_fields[0]), "s");
+
+        let arm_pairs = list_elems(&heap, fields[2]);
+        assert_eq!(arm_pairs.len(), 2);
+
+        let pat0 = heap.car(arm_pairs[0]).unwrap();
+        let (pat0_tag, pat0_fields) = untag(&heap, pat0);
+        assert_eq!(pat0_tag, "pat-ctor");
+        assert_eq!(pat0_fields[0], Value::Int(7));
+        let subpats = list_elems(&heap, pat0_fields[1]);
+        assert_eq!(subpats.len(), 2);
+        for sp in subpats {
+            assert_eq!(untag(&heap, sp).0, "pat-wild");
+        }
+        let body0 = heap.cdr(arm_pairs[0]).unwrap();
+        assert_eq!(untag(&heap, body0).0, "bool");
+
+        let pat1 = heap.car(arm_pairs[1]).unwrap();
+        assert_eq!(untag(&heap, pat1).0, "pat-wild");
+    }
+
+    /// `translate_match` only translates a `Sexpr` scrutinee — matching
+    /// `Option`/`Result`/a `defstruct` stays `unsupported`, deferred to
+    /// the `Construct`/`FieldGet`/`FieldSet` stage (Stage 6).
+    #[test]
+    fn match_over_a_non_sexpr_scrutinee_is_unsupported() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let scrut = typed(Expr::Int(0), Type::I64);
+        let arms = vec![Arm { pat: Pattern::Wildcard, body: vec![typed(Expr::Bool(true), Type::Bool)] }];
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Match(Box::new(scrut), arms), Type::Bool)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "unsupported");
+        assert_eq!(expect_str(&heap, fields[0]), "Match");
+    }
+
+    /// A `Bind` sub-pattern (e.g. `(Cons h _)`) -> `(pat-bind name-str)`.
+    #[test]
+    fn translates_a_bind_subpattern_inside_a_ctor_pattern() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
+        let arms = vec![Arm {
+            pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Bind("h".to_string()), Pattern::Wildcard] },
+            body: vec![typed(Expr::Var("h".to_string()), sexpr_ty())],
+        }];
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Match(Box::new(scrut), arms), sexpr_ty())).unwrap();
+        let (_, fields) = untag(&heap, v);
+        let arm_pairs = list_elems(&heap, fields[2]);
+        let pat0 = heap.car(arm_pairs[0]).unwrap();
+        let (_, pat0_fields) = untag(&heap, pat0);
+        let subpats = list_elems(&heap, pat0_fields[1]);
+        let (bind_tag, bind_fields) = untag(&heap, subpats[0]);
+        assert_eq!(bind_tag, "pat-bind");
+        assert_eq!(expect_str(&heap, bind_fields[0]), "h");
+        assert_eq!(untag(&heap, subpats[1]).0, "pat-wild");
+    }
+
+    /// A nested `Ctor` sub-pattern (`(Cons _ (Nil))` — `prelude.rs`'s
+    /// `last`/`butlast`) translates recursively, not just one level deep.
+    #[test]
+    fn translates_a_nested_ctor_subpattern() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
+        let inner_nil = Pattern::Ctor { type_name: Path::root("sexpr"), variant: 0, args: vec![] };
+        let arms = vec![
+            Arm {
+                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, inner_nil] },
+                body: vec![typed(Expr::Bool(true), Type::Bool)],
+            },
+            Arm { pat: Pattern::Wildcard, body: vec![typed(Expr::Bool(false), Type::Bool)] },
+        ];
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Match(Box::new(scrut), arms), Type::Bool)).unwrap();
+        let (_, fields) = untag(&heap, v);
+        let arm_pairs = list_elems(&heap, fields[2]);
+        let pat0 = heap.car(arm_pairs[0]).unwrap();
+        let (_, pat0_fields) = untag(&heap, pat0);
+        let subpats = list_elems(&heap, pat0_fields[1]);
+        assert_eq!(untag(&heap, subpats[0]).0, "pat-wild");
+        let (nested_tag, nested_fields) = untag(&heap, subpats[1]);
+        assert_eq!(nested_tag, "pat-ctor");
+        assert_eq!(nested_fields[0], Value::Int(0));
+        assert!(list_elems(&heap, nested_fields[1]).is_empty());
+    }
+
+    /// `Pattern::Int`/`Bool`/`Char` all collapse to one shared `(pat-lit
+    /// n)` tag, `n` precomputed to whatever raw `i64` the *compiled*
+    /// representation of that literal would be — see `pattern_to_sexpr`'s
+    /// doc comment for why (no `char`/`bool` -> `i64` conversion exists
+    /// in the compiled language itself yet).
+    #[test]
+    fn int_bool_and_char_subpatterns_collapse_to_a_shared_pat_lit_tag() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let pat_lit_payload = |heap: &mut Heap, pat: &Pattern| -> i64 {
+            let v = pattern_to_sexpr(heap, pat).unwrap();
+            let (tag, fields) = untag(heap, v);
+            assert_eq!(tag, "pat-lit");
+            match fields[0] {
+                Value::Int(n) => n,
+                other => panic!("expected an Int payload, got {:?}", other),
+            }
+        };
+        assert_eq!(pat_lit_payload(&mut heap, &Pattern::Int(5)), 5);
+        assert_eq!(pat_lit_payload(&mut heap, &Pattern::Bool(true)), 1);
+        assert_eq!(pat_lit_payload(&mut heap, &Pattern::Bool(false)), 0);
+        assert_eq!(pat_lit_payload(&mut heap, &Pattern::Char('A')), 'A' as i64);
+    }
+
+    /// A `match` arm whose body is more than one expression isn't
+    /// supported yet — mirrors `translate_let`/`translate_labels_def`'s
+    /// own single-expression-body restriction.
+    #[test]
+    fn match_rejects_a_multi_expression_arm_body() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
+        let arms = vec![Arm {
+            pat: Pattern::Wildcard,
+            body: vec![typed(Expr::Bool(true), Type::Bool), typed(Expr::Bool(false), Type::Bool)],
+        }];
+        let err = ast_to_sexpr(&mut heap, &typed(Expr::Match(Box::new(scrut), arms), Type::Bool)).unwrap_err();
+        match err {
+            Error::TypeError(msg) => assert!(msg.contains("multi-expression body"), "message was: {}", msg),
+            other => panic!("expected a TypeError, got {:?}", other),
+        }
+    }
+
+    /// `collect_call_targets` recurses into a `Match`'s scrutinee and
+    /// every arm's body — a pattern tree itself never contains a `Call`
+    /// (no sub-expression slot at all), so only those two need walking.
+    #[test]
+    fn collect_call_targets_finds_calls_nested_inside_a_match_scrutinee_and_arm_body() {
+        let scrut = typed(Expr::Call(crate::Path::root("a"), vec![]), sexpr_ty());
+        let arms = vec![Arm { pat: Pattern::Wildcard, body: vec![typed(Expr::Call(crate::Path::root("b"), vec![]), Type::I64)] }];
+        let v = typed(Expr::Match(Box::new(scrut), arms), Type::I64);
+        assert_eq!(collect_call_targets(&v), vec![crate::Path::root("a"), crate::Path::root("b")]);
     }
 }

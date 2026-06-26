@@ -505,6 +505,133 @@ pub const SOURCE: &str = r#"
        (restore-let-values env rest saved)))
     (_ ())))
 
+(defun sexpr-int ((s Sexpr)) i64
+  (match s
+    ((Int n) n)
+    (_ (panic "expected an Int Sexpr node"))))
+
+;; Tests whether tagged Sexpr value `v` is Sexpr variant `variant`
+;; (`registry::sexpr_def`'s variant order: 0=nil 1=int 2=float 3=char
+;; 4=bool 5=sym 6=str 7=cons) -- `nil`/`bool` both compile to the same
+;; 3-bit tag (`typelisp-rt`'s `TAG_IMMEDIATE`, 6) and are told apart by
+;; `v`'s payload bits instead (`0` vs non-zero, see that crate's
+;; `encode`/`decode`); every other variant has its own dedicated tag.
+(defun compile-sexpr-tag-test ((builder llvm-builder) (v llvm-value) (variant i64)) llvm-value
+  (let ((tag (build-and builder v (const-i64 builder 7))))
+    (if (eq variant 0)
+        (build-and builder
+                    (build-icmp-eq builder tag (const-i64 builder 6))
+                    (build-icmp-eq builder (build-lshr builder v (const-i64 builder 3)) (const-i64 builder 0)))
+        (if (eq variant 4)
+            (build-and builder
+                        (build-icmp-eq builder tag (const-i64 builder 6))
+                        (build-icmp-ne builder (build-lshr builder v (const-i64 builder 3)) (const-i64 builder 0)))
+            (build-icmp-eq builder tag
+                            (const-i64 builder
+                                       (if (eq variant 1) 0
+                                           (if (eq variant 2) 7
+                                               (if (eq variant 3) 4
+                                                   (if (eq variant 5) 2
+                                                       (if (eq variant 6) 3
+                                                           (if (eq variant 7) 1
+                                                               (panic "compile-sexpr-tag-test: unknown Sexpr variant")))))))))))))
+
+;; Extracts Sexpr variant `variant`'s field `idx` (0-based) from tagged
+;; value `v` -- the inverse of `typelisp-rt`'s `encode` for each field
+;; kind representable in compiled code today: `int`'s `i64` payload
+;; (signed, `build-ashr`), `char`'s scalar (`build-lshr`), `bool`'s
+;; payload (`1`/`2` -> `0`/`1`, matching `compile-bool`'s own convention),
+;; and `cons`'s two `Sexpr` fields (via `rt_car`/`rt_cdr` -- the only
+;; field kind that needs a real heap read rather than pure bit
+;; manipulation). `sym`/`str`'s `Str` field and `float`'s `f64` field
+;; aren't representable in compiled code yet (Stage 6/7, `docs/TODO.md`),
+;; so a `Bind` pattern trying to extract either panics clearly here
+;; rather than producing garbage -- never reached for a `Wildcard`
+;; sub-pattern (`compile-ctor-subpatterns` skips the call entirely then).
+(defun compile-sexpr-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant i64) (idx i32)) llvm-value
+  (if (eq variant 1)
+      (build-ashr builder v (const-i64 builder 3))
+      (if (eq variant 3)
+          (build-lshr builder v (const-i64 builder 3))
+          (if (eq variant 4)
+              (build-sub builder (build-lshr builder v (const-i64 builder 3)) (const-i64 builder 1))
+              (if (eq variant 7)
+                  (let ((args-ptr (alloca-args builder 1)))
+                    (store-arg builder args-ptr 0 v)
+                    (if (eq idx 0)
+                        (build-call builder (get-function m "rt_car") args-ptr 1)
+                        (build-call builder (get-function m "rt_cdr") args-ptr 1)))
+                  (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))))
+
+;; Shared by every atomic pattern test (`pat-lit`'s literal-equality
+;; check, a Ctor pattern's tag test): appends a fresh "this test passed"
+;; block, branches on `test`, and leaves `builder` positioned at that new
+;; block -- the caller's subsequent code (more guards, then the arm's
+;; body) falls through naturally on success; on failure control jumps
+;; straight to `fail-block` instead, never returning here.
+(defun compile-pattern-guard ((builder llvm-builder) (cur-fn llvm-function) (test llvm-value) (fail-block llvm-basic-block)) ()
+  (let ((ok-block (append-block cur-fn "pat-ok")))
+    (build-cond-br builder test ok-block fail-block)
+    (position-at-end builder ok-block)))
+
+;; Every name a pattern's `Bind` sub-patterns introduce, at any nesting
+;; depth (`compile-match-arms`'s save/restore around each arm -- `let`'s
+;; `bind-let-values`/`restore-let-values` do the analogous thing for a
+;; `let`'s own bindings). Accumulator-style (no `append`/`reverse` needed
+;; -- `compiler.rs` doesn't load `prelude.rs`, only the language's own
+;; `cons`/`car`/`cdr`/`match`); the resulting order doesn't matter, only
+;; the *set* of names does. Walking one pattern and walking a *list* of
+;; sub-patterns are mutually recursive (a `pat-ctor`'s sub-patterns can
+;; themselves be `pat-ctor`s), so — like `compile-value`/`compile-apply` &
+;; co. above — they're `labels` siblings nested inside this one top-level
+;; `defun` rather than two separate ones (top-level `defun`s can only be
+;; self-recursive, never mutually recursive — see this module's doc
+;; comment).
+(defun pattern-bound-names ((pat Sexpr) (acc Sexpr)) Sexpr
+  (labels ((names ((p Sexpr) (a Sexpr)) Sexpr
+             (match (car p)
+               ((Sym s)
+                (if (eq s "pat-bind")
+                    (cons (car (cdr p)) a)
+                    (if (eq s "pat-ctor")
+                        (names-list (car (cdr (cdr p))) a)
+                        a)))
+               (_ a)))
+           (names-list ((ps Sexpr) (a Sexpr)) Sexpr
+             (match ps
+               ((Cons p rest) (names-list rest (names p a)))
+               (_ a))))
+    (names pat acc)))
+
+;; The pattern-match counterpart of `bind-let-values`'s "stash whatever
+;; was already there" half -- `names` is a flat list of plain `Str` nodes
+;; (`pattern-bound-names`'s result), not `(name . is-fn)` pairs: a
+;; pattern-bound name is never itself a `Fn`-typed value (every Sexpr
+;; field kind this compiler can extract -- `sexpr`/`i64`/`char`/`bool` --
+;; is never `Fn`), so no `is-fn` bookkeeping applies here at all.
+(defun save-env-names ((env HashTable<string,llvm-value>) (names Sexpr) (saved HashTable<string,llvm-value>)) ()
+  (match names
+    ((Cons n rest)
+     (let ((nm (sexpr-str n)))
+       (match (get env nm)
+         ((Some old) (set saved nm old))
+         (None ()))
+       (save-env-names env rest saved)))
+    (_ ())))
+
+;; Undoes `save-env-names` once an arm's pattern test (success *or*
+;; failure) is done with its own bound names -- see `compile-match-arms`'s
+;; doc comment for why this runs at *both* exits.
+(defun restore-env-names ((env HashTable<string,llvm-value>) (names Sexpr) (saved HashTable<string,llvm-value>)) ()
+  (match names
+    ((Cons n rest)
+     (let ((nm (sexpr-str n)))
+       (match (get saved nm)
+         ((Some old) (set env nm old))
+         (None (let ((ignored (remove env nm))) ())))
+       (restore-env-names env rest saved)))
+    (_ ())))
+
 (defun compile-function ((m llvm-module) (name string) (param-names Sexpr) (body Sexpr)) llvm-module
     (let ((f (add-function m name)))
       (let ((b (append-block f "entry")))
@@ -549,7 +676,9 @@ pub const SOURCE: &str = r#"
                                                                                         (compile-return builder env fn-env captured cur-fn loop-exit loop-slot e)
                                                                                         (if (eq s "set")
                                                                                             (compile-set builder env fn-env captured cur-fn loop-exit loop-slot e)
-                                                                                            (panic (append "compile-value: unsupported tag " s)))))))))))))))))))
+                                                                                            (if (eq s "match")
+                                                                                                (compile-match builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                                                (panic (append "compile-value: unsupported tag " s))))))))))))))))))))
                            (_ (panic "compile-value: malformed node, expected a tagged list"))))
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -1394,7 +1523,135 @@ pub const SOURCE: &str = r#"
                                (let ((v (compile-if-branch builder env fn-env captured cur-fn loop-exit loop-slot is-fn value-form)))
                                  (match (get env nm)
                                    ((Some slot) (store-arg builder slot 0 v) v)
-                                   (None (panic (append "compile-set: unbound variable " nm))))))))))
+                                   (None (panic (append "compile-set: unbound variable " nm)))))))))
+                       ;; Tests `v` against pattern `pat`; on failure
+                       ;; branches to `fail-block` (jumping straight to
+                       ;; whatever should run next -- never returning to
+                       ;; this call), on success falls through with
+                       ;; `builder` positioned right after the last
+                       ;; guard, having already bound any `pat-bind` name
+                       ;; into a fresh `env` slot. Mutually recursive with
+                       ;; `compile-ctor-subpatterns` (a `pat-ctor`'s
+                       ;; sub-patterns can themselves be `pat-ctor`s, e.g.
+                       ;; `(Cons _ (Nil))` -- `prelude.rs`'s `last`/
+                       ;; `butlast`), which is why both live in this
+                       ;; `labels` ring rather than as top-level `defun`s
+                       ;; (the same "can't forward/mutually reference
+                       ;; each other" constraint this module's doc
+                       ;; comment already explains for `compile-value`
+                       ;; & co.).
+                       (compile-pattern-test ((builder llvm-builder) (env HashTable<string,llvm-value>) (cur-fn llvm-function) (v llvm-value) (pat Sexpr) (fail-block llvm-basic-block)) ()
+                         (match (car pat)
+                           ((Sym s)
+                            (if (eq s "pat-wild")
+                                ()
+                                (if (eq s "pat-bind")
+                                    (let ((nm (sexpr-str (car (cdr pat)))))
+                                      (let ((bslot (alloca-args builder 1)))
+                                        (store-arg builder bslot 0 v)
+                                        (set env nm bslot)))
+                                    (if (eq s "pat-lit")
+                                        (compile-pattern-guard builder cur-fn (build-icmp-eq builder v (const-i64 builder (sexpr-int (car (cdr pat))))) fail-block)
+                                        (if (eq s "pat-ctor")
+                                            (let ((variant (sexpr-int (car (cdr pat)))))
+                                              (let ((subpats (car (cdr (cdr pat)))))
+                                                (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder v variant) fail-block)
+                                                (compile-ctor-subpatterns builder env cur-fn v variant subpats 0 fail-block)))
+                                            (panic (append "compile-pattern-test: unsupported pattern tag " s)))))))
+                           (_ (panic "compile-pattern-test: malformed pattern node"))))
+                       ;; Tests/extracts each of a `pat-ctor`'s
+                       ;; sub-patterns in turn against variant `variant`'s
+                       ;; fields, skipping the extraction call entirely
+                       ;; for a `pat-wild` sub-pattern (no value to test
+                       ;; or bind, so no reason to call
+                       ;; `compile-sexpr-field` -- and for `cons`, no
+                       ;; reason to emit an `rt_car`/`rt_cdr` call
+                       ;; either).
+                       (compile-ctor-subpatterns ((builder llvm-builder) (env HashTable<string,llvm-value>) (cur-fn llvm-function) (v llvm-value) (variant i64) (subpats Sexpr) (idx i32) (fail-block llvm-basic-block)) ()
+                         (match subpats
+                           ((Cons p rest)
+                            (if (eq (sexpr-sym-name (car p)) "pat-wild")
+                                (compile-ctor-subpatterns builder env cur-fn v variant rest (+ idx 1) fail-block)
+                                (let ((field-v (compile-sexpr-field builder m v variant idx)))
+                                  (compile-pattern-test builder env cur-fn field-v p fail-block)
+                                  (compile-ctor-subpatterns builder env cur-fn v variant rest (+ idx 1) fail-block))))
+                           (_ ())))
+                       ;; `(match is-fn scrutinee-form ((pattern-form .
+                       ;; body-form)...))` -- `Expr::Match` over a
+                       ;; `Sexpr` scrutinee (`ast_bridge::translate_match`
+                       ;; -- any other scrutinee type stays
+                       ;; `unsupported`, deferred to Construct/FieldGet/
+                       ;; FieldSet's own stage). Compiles the scrutinee
+                       ;; once, then tries each arm in textual order
+                       ;; (`compile-match-arms`) into a single shared
+                       ;; 1-slot merge -- the same `alloca-args`/
+                       ;; `store-arg`/`load-raw` triple `compile-if`'s
+                       ;; 2-way merge already uses, just for an n-way set
+                       ;; of arms instead. `is-fn` is `compile-if-branch`'s
+                       ;; usual borrowed-value-retain tag, reused
+                       ;; unchanged for each arm's body (the same boundary
+                       ;; an `if` merge crosses).
+                       (compile-match ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((is-fn (sexpr-bool (car (cdr e)))))
+                           (let ((scrut-form (car (cdr (cdr e)))))
+                             (let ((arms (car (cdr (cdr (cdr e))))))
+                               (let ((scrut-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot scrut-form)))
+                                 (let ((merge-block (append-block cur-fn "match-merge")))
+                                   (let ((slot (alloca-args builder 1)))
+                                     (compile-match-arms builder env fn-env captured cur-fn loop-exit loop-slot is-fn scrut-v slot merge-block arms)
+                                     (position-at-end builder merge-block)
+                                     (load-raw builder slot 0))))))))
+                       ;; Tries each `(pattern-form . body-form)` arm in
+                       ;; order: save whatever `env` already holds for any
+                       ;; name this arm's pattern might bind
+                       ;; (`pattern-bound-names`/`save-env-names` -- the
+                       ;; pattern-match analogue of `let`'s
+                       ;; `bind-let-values`), test the pattern
+                       ;; (`compile-pattern-test`, binding into fresh
+                       ;; slots as it succeeds), compile the body through
+                       ;; `compile-if-branch` (the usual borrowed-value-
+                       ;; retain treatment), store into the shared merge
+                       ;; slot, restore `env` (`restore-env-names` -- this
+                       ;; arm's bindings must not leak into anything after
+                       ;; the `match`, success *or* failure), and branch
+                       ;; to `merge-block`. `next-block` is this arm's
+                       ;; single shared failure target -- every guard
+                       ;; `compile-pattern-test` emits for this arm's
+                       ;; pattern (however deeply nested) branches there
+                       ;; on failure, so the restore only has to run once,
+                       ;; at the top of `next-block`, rather than at every
+                       ;; individual failure point. Once every arm's
+                       ;; pattern has failed, the checker's own
+                       ;; exhaustiveness check guarantees this is
+                       ;; unreachable for a well-typed program --
+                       ;; `rt_match_fail` (an `abort`, see `typelisp-rt`'s
+                       ;; `fatal`) is the trap for the case that guarantee
+                       ;; was somehow wrong, the same role
+                       ;; `resolve-value`'s "unbound variable" panic plays
+                       ;; elsewhere in this file.
+                       (compile-match-arms ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (is-fn bool) (scrut-v llvm-value) (slot llvm-value) (merge-block llvm-basic-block) (arms Sexpr)) ()
+                         (match arms
+                           ((Cons arm rest)
+                            (let ((pat (car arm)))
+                              (let ((body-form (cdr arm)))
+                                (let ((bound (pattern-bound-names pat '())))
+                                  (let ((saved (new-env)))
+                                    (save-env-names env bound saved)
+                                    (let ((next-block (append-block cur-fn "match-next")))
+                                      (compile-pattern-test builder env cur-fn scrut-v pat next-block)
+                                      (let ((body-v (compile-if-branch builder env fn-env captured cur-fn loop-exit loop-slot is-fn body-form)))
+                                        (if (block-terminated? builder)
+                                            ()
+                                            (let ((ignored (store-arg builder slot 0 body-v)))
+                                              (restore-env-names env bound saved)
+                                              (build-br builder merge-block))))
+                                      (position-at-end builder next-block)
+                                      (restore-env-names env bound saved)
+                                      (compile-match-arms builder env fn-env captured cur-fn loop-exit loop-slot is-fn scrut-v slot merge-block rest)))))))
+                           (_ (let ((args-ptr (alloca-args builder 0)))
+                                (let ((fallback (build-call builder (get-function m "rt_match_fail") args-ptr 0)))
+                                  (store-arg builder slot 0 fallback)
+                                  (build-br builder merge-block)))))))
                 (let ((v (compile-value builder env fn-env '() f (Option::none) (Option::none) body)))
                   (let ((protected (bare-returned-own-name body param-names '())))
                     (release-bindings builder m env param-names protected)

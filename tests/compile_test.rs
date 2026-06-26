@@ -9,7 +9,7 @@
 extern crate typelisp;
 use inkwell::OptimizationLevel;
 use typelisp::compile::COMPILE_LOCK;
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
 
 fn run(src: &str) -> Result<RtValue, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -150,11 +150,11 @@ fn the_compiler_body_compiles_an_int_literal_node() {
 
 #[test]
 fn the_compiler_body_panics_on_an_unsupported_tag() {
-    // `match` has no real translation yet (see `ast_bridge`'s module doc
-    // comment) — `if`/`let`/`bool` used to stand in for "not yet supported"
-    // here too, until if/let/comparisons (labels/closures Stage 5) gave them
-    // real translations.
-    let err = run_with_compiler(r#"(compile-function (llvm-module::create "mod") "answer" '() '(match))"#)
+    // `construct` has no real translation yet (`Construct`/`FieldGet`/
+    // `FieldSet` — Stage 6, `docs/TODO.md`) — `if`/`let`/`bool`/`match`
+    // used to stand in for "not yet supported" here too, until each in
+    // turn got a real translation.
+    let err = run_with_compiler(r#"(compile-function (llvm-module::create "mod") "answer" '() '(construct))"#)
         .expect_err("expected an unsupported-tag panic");
     match err {
         EvalError::Panic(msg) => assert!(msg.contains("unsupported tag"), "message was: {}", msg),
@@ -1664,39 +1664,157 @@ fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
     }
 }
 
-/// `dolist` (`prelude.rs`) still doesn't compile, but no longer for the
-/// reason `while`/`dotimes` used to (a Rust-only free function with no AST
-/// body) — `not` is typelisp now, and `car`/`cdr`/`consp` *do* have a
-/// compilable shape, in principle. What actually blocks `dolist` is one
-/// level deeper: `consp`'s own body is `(match s ((Cons _ _) true) (_
-/// false)))` — `Expr::Match` (and `Expr::Construct`/`FieldGet`/`FieldSet`)
-/// has no `ast_bridge` translation at all yet (still `unsupported`, see
-/// that module's doc comment), and there's no representation for a `Sexpr`
-/// value in compiled code to begin with (every compiled value is a plain
-/// `i64` — see `registry::llvm_module_def`'s doc comment — a cons cell
-/// would need to be some kind of tagged heap pointer, undecided). That's a
-/// substantially bigger piece of work than this stage's scope (`car`/`cdr`
-/// themselves are Rust-only too, on top of needing that representation) —
-/// recorded as the next follow-up candidate in `docs/TODO.md`, not
-/// attempted here.
+/// Stage 5 (`docs/TODO.md`): `consp`/`null`/`atom` (`prelude.rs`) now
+/// compile clean through to native code — `Expr::Match` over a `Sexpr`
+/// scrutinee has a real translation (`ast_bridge::translate_match`) and
+/// `compiler.rs` has `compile-match`/`compile-pattern-test`/
+/// `compile-ctor-subpatterns`. Each is exercised (via ordinary
+/// `Expr::Call` dispatch — Stage 5's other half, `Sexpr`-typed arguments
+/// now marshal across that boundary too, see `Interp::eval`'s
+/// compiled-call arm) on both a `Cons` and a `Nil` value, proving the
+/// compiled tag test gets both arms right, not just one.
+///
+/// `consp`/`null`/`atom` all return `bool` — this stage's scope is the
+/// `Sexpr` side of the `Expr::Call` marshaling gap only (`docs/TODO.md`),
+/// not `bool`'s, so a compiled call's return value still surfaces as the
+/// raw `i64` `compile-bool`'s convention uses (`1`/`0`), not a faithful
+/// `RtValue::Bool` — asserted on directly here rather than glossed over.
 #[test]
-fn compile_of_a_dolist_based_function_fails_clearly_on_the_uncompiled_match_special_form() {
+fn compile_dispatches_consp_null_and_atom_to_native_code_for_both_a_cons_and_a_nil_value() {
+    let truthy = run_with_compiler_and_prelude(
+        r#"
+        (compile "not")
+        (compile "consp")
+        (consp (cons (Int 1) (Int 2)))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(truthy, RtValue::Int(1), "consp on a Cons should report true (1)");
+
+    let falsy = run_with_compiler_and_prelude(
+        r#"
+        (compile "not")
+        (compile "consp")
+        (consp ())
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(falsy, RtValue::Int(0), "consp on Nil should report false (0)");
+
+    let truthy = run_with_compiler_and_prelude(
+        r#"
+        (compile "not")
+        (compile "null")
+        (null ())
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(truthy, RtValue::Int(1), "null on Nil should report true (1)");
+
+    let falsy = run_with_compiler_and_prelude(
+        r#"
+        (compile "not")
+        (compile "null")
+        (null (cons (Int 1) (Int 2)))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(falsy, RtValue::Int(0), "null on a Cons should report false (0)");
+
+    let truthy = run_with_compiler_and_prelude(
+        r#"
+        (compile "not")
+        (compile "consp")
+        (compile "atom")
+        (atom ())
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(truthy, RtValue::Int(1), "atom (= not . consp) on Nil should report true (1) — exercises a compiled call to another compiled function (Stage 3) alongside the new Match support");
+}
+
+/// Stage 5: a `Bind` sub-pattern over a `cons` field (`Sexpr`-typed) is
+/// extracted via `rt_car`/`rt_cdr` (`compile-sexpr-field`) and the whole
+/// function's `Sexpr`-typed *return* value round-trips back out through
+/// `Expr::Call`'s new `decode` step — together, the full argument-in/
+/// return-out `Sexpr` marshaling this stage adds, not just the `bool`-
+/// returning predicates above.
+#[test]
+fn compile_dispatches_a_function_that_binds_and_returns_a_cons_field_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun my-car ((s Sexpr)) Sexpr (match s ((Cons h _) h) (_ s)))
+        (compile "my-car")
+        (my-car (cons (Int 42) (Int 99)))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Sexpr(Value::Int(42)));
+}
+
+/// Stage 5: a nested `Ctor` sub-pattern (`(Cons _ (Nil))` —
+/// `prelude.rs`'s `last`/`butlast` use exactly this shape) dispatches
+/// correctly: `compile-ctor-subpatterns` extracts the `cdr` field and
+/// recurses `compile-pattern-test` on it against the inner `(Nil)`
+/// pattern, sharing this arm's one `fail-block` with the outer tag test.
+#[test]
+fn compile_dispatches_a_nested_ctor_pattern_to_native_code() {
+    let src = r#"
+        (defun second-is-nil ((s Sexpr)) bool (match s ((Cons _ (Nil)) true) (_ false)))
+        (compile "second-is-nil")
+        "#;
+    let single = run_with_compiler_and_prelude(&format!("{}\n(second-is-nil (cons (Int 1) ()))", src)).expect("eval failed");
+    assert_eq!(single, RtValue::Int(1), "(1 . Nil) should match (Cons _ (Nil))");
+
+    let two = run_with_compiler_and_prelude(&format!("{}\n(second-is-nil (cons (Int 1) (cons (Int 2) ())))", src)).expect("eval failed");
+    assert_eq!(two, RtValue::Int(0), "(1 . (2 . Nil)) should not match — its cdr is a Cons, not Nil");
+
+    let nil = run_with_compiler_and_prelude(&format!("{}\n(second-is-nil ())", src)).expect("eval failed");
+    assert_eq!(nil, RtValue::Int(0), "Nil itself doesn't match (Cons _ (Nil)) at all — falls to the wildcard arm");
+}
+
+/// Stage 5: a literal `Int` sub-pattern (`pat-lit`) inside a `Cons`/`Int`
+/// `Ctor` test — `compile-sexpr-field`'s `int` extraction (`build-ashr`)
+/// feeding straight into `compile-pattern-guard`'s `build-icmp-eq`.
+#[test]
+fn compile_dispatches_a_literal_int_subpattern_to_native_code() {
+    let src = r#"
+        (defun is-zero ((s Sexpr)) bool (match s ((Int 0) true) (_ false)))
+        (compile "is-zero")
+        "#;
+    let zero = run_with_compiler_and_prelude(&format!("{}\n(is-zero (Int 0))", src)).expect("eval failed");
+    assert_eq!(zero, RtValue::Int(1));
+    let nonzero = run_with_compiler_and_prelude(&format!("{}\n(is-zero (Int 7))", src)).expect("eval failed");
+    assert_eq!(nonzero, RtValue::Int(0));
+    let other_variant = run_with_compiler_and_prelude(&format!("{}\n(is-zero ())", src)).expect("eval failed");
+    assert_eq!(other_variant, RtValue::Int(0), "a different Sexpr variant (Nil) falls through to the wildcard arm, not a tag-test crash");
+}
+
+/// `dolist` (`prelude.rs`) still doesn't compile — `Match` over `Sexpr`
+/// now works (the tests above), so the compiler gets much further into
+/// `dolist`'s own macro expansion than before, but bottoms out on a
+/// *different*, already-known limitation: `dolist`'s expansion is `(let
+/// ((,lst ,lst-expr)) (while (consp ,lst) (let ((,var (car ,lst)))
+/// ,@body (setf ,lst (cdr ,lst)))))` — the inner `let`'s body is always
+/// at least two statements (`body...` followed by the hidden `setf`
+/// that steps the list), and `ast_bridge::translate_let` only translates
+/// a single-expression body (see that function's doc comment). Not a
+/// `Match`/`Sexpr` gap at all; recorded as a still-open prerequisite for
+/// Stage 8, not attempted here.
+#[test]
+fn compile_of_a_dolist_based_function_fails_clearly_on_the_uncompiled_multi_statement_let_body() {
     let err = run_with_compiler_and_prelude(
         r#"
         (defun walk-via-dolist () ()
           (dolist (x (list (Int 1) (Int 2) (Int 3))) ()))
         (compile "not")
         (compile "consp")
+        (compile "walk-via-dolist")
         "#,
     )
-    .expect_err("expected compiling `consp` to fail because `match` has no compiler translation");
+    .expect_err("expected compiling `walk-via-dolist` to fail because of dolist's multi-statement `let` body");
     match err {
-        // `ast_bridge::unsupported` tags an untranslatable node as `(unsupported
-        // "Match")` — the field naming the real `Expr` variant, but
-        // `compile-value`'s dispatch only ever reads the *tag* symbol itself
-        // (literally the string `"unsupported"`) before panicking, so that's
-        // what actually surfaces here, not the word "Match".
-        EvalError::Panic(msg) => assert!(msg.contains("unsupported"), "message was: {}", msg),
+        EvalError::Panic(msg) => assert!(msg.contains("multi-expression body"), "message was: {}", msg),
         other => panic!("expected a Panic, got {:?}", other),
     }
 }

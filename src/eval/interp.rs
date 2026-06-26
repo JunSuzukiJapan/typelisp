@@ -271,11 +271,30 @@ impl Interp {
                 // choice) would naturally take precedence over the
                 // tree-walked body.
                 if let Some(compiled) = self.compiled.borrow().get(name) {
+                    // Every parameter/return type is either `Sexpr` (needs
+                    // `compile::runtime::encode`/`decode` — Stage 5,
+                    // `docs/TODO.md`) or already a plain `i64` at the
+                    // compiled ABI level (everything else this compiler can
+                    // produce today). `compile_function` never registers a
+                    // `compiled` entry without first going through
+                    // `compiled_fn_body`, which requires `fns[name].sig` to
+                    // be `Some` — so this is an internal invariant, not a
+                    // user-reachable error.
+                    let (param_tys, ret_ty) = self
+                        .fns
+                        .get(name)
+                        .and_then(|f| f.sig.as_ref())
+                        .expect("a compiled function always has a type signature");
                     let int_args = argv
                         .iter()
-                        .map(|v| match v {
-                            RtValue::Int(n) => Ok(*n),
-                            other => {
+                        .zip(param_tys.iter())
+                        .map(|(v, ty)| match (v, type_is_sexpr(ty)) {
+                            (RtValue::Sexpr(sv), true) => Ok(crate::compile::runtime::encode(*sv)),
+                            (RtValue::Int(n), false) => Ok(*n),
+                            (other, true) => {
+                                Err(EvalError::Internal(format!("compiled call: expected a Sexpr argument, got {:?}", other)))
+                            }
+                            (other, false) => {
                                 Err(EvalError::Internal(format!("compiled call: expected an Int argument, got {:?}", other)))
                             }
                         })
@@ -289,7 +308,12 @@ impl Interp {
                     // there's no cheaper place to detect "this callee might
                     // transitively touch the heap" ahead of time.
                     crate::compile::runtime::set_active_heap(heap as *mut Heap);
-                    return Ok(RtValue::Int(compiled.call(&int_args)));
+                    let raw = compiled.call(&int_args);
+                    return Ok(if type_is_sexpr(ret_ty) {
+                        RtValue::Sexpr(crate::compile::runtime::decode(raw))
+                    } else {
+                        RtValue::Int(raw)
+                    });
                 }
                 if let Some(f) = self.fns.get(name) {
                     self.apply(heap, &f.params, &f.body, argv)
@@ -948,6 +972,17 @@ fn is_sexpr_type(type_name: &Path) -> bool {
     *type_name == Path::root("sexpr")
 }
 
+/// The [`Type`]-level counterpart of [`is_sexpr_type`] — whether `ty` is
+/// `Sexpr` itself (as opposed to some other `Type::Named` ADT). Used by
+/// the compiled-call dispatch (`Expr::Call`'s `eval` arm) to decide, per
+/// parameter/return type, whether a value crossing the typelisp-call-
+/// syntax/compiled-code boundary needs `compile::runtime::encode`/`decode`
+/// (a `Sexpr`) or is already a plain `i64` (everything else this compiler
+/// can produce today — see `docs/TODO.md`'s Stage 5 entry).
+fn type_is_sexpr(ty: &Type) -> bool {
+    matches!(ty, Type::Named(p, _) if is_sexpr_type(p))
+}
+
 /// Recursively gather every `Sexpr` value reachable from `v` through nested
 /// `Data` fields or `HashTable` values (a `Closure`'s captured environment is
 /// covered separately, since each of its slots is already registered in
@@ -1387,20 +1422,21 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// gets forward-declared and (JIT only — AOT resolves them as ordinary
 /// linker symbols against `typelisp-rt`'s `staticlib`, see
 /// `compile::aot::compile_file`) `add_global_mapping`-wired to, regardless
-/// of whether its own body actually calls any of them. Cheap enough (5
+/// of whether its own body actually calls any of them. Cheap enough (6
 /// extra declarations/mappings) to always include rather than checking
 /// which ones a given body's call targets actually need. `pub(crate)`:
 /// `compile::aot::compile_file` declares the same names (no JIT mapping
 /// needed there — ordinary linker symbol resolution against `typelisp-rt`'s
 /// `staticlib` instead) from this one source of truth.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 5] {
-    use crate::compile::runtime::{rt_car, rt_cdr, rt_cons, rt_set_car, rt_set_cdr};
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 6] {
+    use crate::compile::runtime::{rt_car, rt_cdr, rt_cons, rt_match_fail, rt_set_car, rt_set_cdr};
     [
         ("rt_car", rt_car as usize),
         ("rt_cdr", rt_cdr as usize),
         ("rt_cons", rt_cons as usize),
         ("rt_set_car", rt_set_car as usize),
         ("rt_set_cdr", rt_set_cdr as usize),
+        ("rt_match_fail", rt_match_fail as usize),
     ]
 }
 

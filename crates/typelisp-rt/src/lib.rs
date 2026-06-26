@@ -194,7 +194,15 @@ fn fatal(msg: &str) -> ! {
 /// heap-boxing (a `ClosureBox`-style malloc+refcount allocation), out of
 /// scope for Stage 3 (see `docs/TODO.md`); callers that might encounter a
 /// `Sexpr` float should not reach this function yet.
-fn encode(v: Value) -> i64 {
+///
+/// `pub`, not `pub(crate)`: Stage 5's `Expr::Call` dispatch
+/// (`typelisp::eval::Interp::eval`) needs this same encoding from the
+/// `typelisp` crate, to marshal a `Sexpr`-typed argument/return value
+/// across the typelisp-call-syntax boundary into a compiled function — the
+/// same tagging scheme every `rt_*` function below already uses, so
+/// re-deriving it on the other side of the crate boundary would just be
+/// duplicated, easy-to-desync logic.
+pub fn encode(v: Value) -> i64 {
     match v {
         Value::Int(n) => (n << TAG_BITS) | TAG_FIXNUM,
         Value::Cons(c) => (c.addr() as i64) | TAG_CONS,
@@ -209,8 +217,9 @@ fn encode(v: Value) -> i64 {
     }
 }
 
-/// The inverse of [`encode`].
-fn decode(tagged: i64) -> Value {
+/// The inverse of [`encode`]. `pub` for the same cross-crate reason — see
+/// [`encode`]'s doc comment.
+pub fn decode(tagged: i64) -> Value {
     match tagged & TAG_MASK {
         TAG_FIXNUM => Value::Int(tagged >> TAG_BITS),
         TAG_CONS => Value::Cons(unsafe { ConsRef::from_addr((tagged & !TAG_MASK) as usize) }),
@@ -382,6 +391,25 @@ pub unsafe extern "C" fn rt_pop_sexpr_root(_args: *const i64, _argc: u32) -> i64
         Some(v) => encode(v),
         None => fatal("rt_pop_sexpr_root: root stack was empty"),
     }
+}
+
+// ---- Stage 5: Match -----------------------------------------------------
+
+/// `compiler.rs`'s `compile-match-arms` calls this once every arm's
+/// pattern has failed to match — provably unreachable for a well-typed
+/// program (the checker's own exhaustiveness check already guarantees one
+/// of `nil`/`int`/`float`/`char`/`bool`/`sym`/`str`/`cons` always matches a
+/// `Sexpr` scrutinee), so this is a trap for a `compiler.rs`/checker bug,
+/// not a normal/recoverable runtime condition — there is nothing
+/// meaningful to return.
+///
+/// # Safety
+///
+/// None beyond the ordinary compiled-function-ABI contract — unlike every
+/// other `rt_*` function here, this one never touches the active `Heap`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_match_fail(_args: *const i64, _argc: u32) -> i64 {
+    fatal("match: no pattern arm matched (the checker should have guaranteed exhaustiveness)")
 }
 
 #[cfg(test)]

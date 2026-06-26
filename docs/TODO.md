@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-06-26 / ブランチ: `feature/compiler`
+最終更新: 2026-06-26 / ブランチ: `feature/compile-sexpr`
 
 このドキュメントは、再実装（read 関数から作り直し）の進捗と次回の作業を記録する。
 **言語仕様の確定事項は [language-design.md](language-design.md) を参照。**
@@ -1268,13 +1268,105 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   常に（呼ばれるかどうかに関わらず）モジュールへ前方宣言——JITは
   `add_global_mapping`で実アドレスを配線、AOTは`typelisp-rt`の
   staticlibに対する通常のリンカ記号解決に委ねる（追加の配線不要）。
-- **Stage 5**: `Match`対応（Sexprスクルーティニー）。`consp`/`null`/`atom`
-  が実際にコンパイル可能になることを確認。**前提として持ち越されている
-  ギャップ**（Stage 4で判明）：`Expr::Call`がコンパイル済み関数を呼ぶ際の
-  引数/戻り値の`RtValue::Int`決め打ち（[interp.rs](src/eval/interp.rs#L266)）に
-  `Sexpr`型のエンコード/デコード橋渡しを追加しないと、typelisp呼び出し
-  構文`(f sexpr式)`で`Sexpr`を渡せない。Stage 5で実際にSexpr引数を持つ
-  関数をcompileするテストを書く時点で対応必須。
+- **Stage 5（完了、2026-06-26）**: `Match`対応（Sexprスクルーティニー）+
+  `Expr::Call`のSexpr引き渡し対応。`consp`/`null`/`atom`が実際にコンパイル
+  可能になることを確認した。
+
+  **`Expr::Call`のSexpr引き渡し**（Stage 4で判明していた前提ギャップを解消）:
+  [interp.rs](src/eval/interp.rs#L266)のコンパイル済み呼び出し分岐が、呼び出し先の
+  `FnDef.sig`（パラメータ型・戻り値型）を見て、各引数/戻り値が`Sexpr`型なら
+  `typelisp-rt`の`encode`/`decode`（Stage 3で実装、本ステージで`pub`化——別
+  クレートをまたぐため）でタグ付きi64に変換、それ以外は従来通り素の`i64`
+  として渡すようになった（`type_is_sexpr(ty: &Type)`が判定）。`bool`戻り値
+  （`consp`等の宣言型）は対象外と明示的に決めた——`Sexpr`専用の橋渡しが
+  本ステージの宣言された範囲であり、`bool`/`char`/`f64`の戻り値忠実性
+  （`RtValue::Int`のまま返ってくる）は別の・まだ手を付けていないギャップ
+  として残し、`compile_test.rs`のテストでもこの制約を明示してアサートして
+  いる（`if`/`and`等の条件位置でコンパイル済み述語をそのまま使うには
+  この別ギャップの解消が必要）。
+
+  **`ast_bridge.rs`**: `Expr::Match(scrut, arms)`は、scrutineeの型が
+  `Sexpr`のときだけ実翻訳し（`is_sexpr_scrutinee`）、それ以外（`Option`/
+  `Result`/`defstruct`）は引き続き`unsupported`——`Construct`が無いと
+  そもそも構築できない型を`match`できるようにしても検証不能なため、
+  Stage 6に先送り。`(match is-fn scrutinee-form ((pattern-form .
+  body-form)...))`という形に翻訳する`translate_match`/`translate_arms`を
+  新設。パターン自体も`pattern_to_sexpr`で独立したタグ空間に翻訳:
+  `(pat-wild)`/`(pat-bind name-str)`/`(pat-ctor variant-i64
+  (sub-pattern...))`/`(pat-lit n)`——`Pattern::Int`/`Bool`/`Char`の3種の
+  リテラルサブパターンを1つの共通タグに畳み込み、`n`はその場でRust側が
+  「コンパイル済み表現としての生i64」（`Bool`は0/1、`Char`はUnicodeスカラー
+  値）に変換済みにした。理由: コンパイル言語自体に`char`/`bool`→`i64`の
+  変換プリミティブが無く、`compiler.rs`側で変換しようとすると新規ビルトインが
+  要るが、Rust側で前計算すれば不要になる。`Ctor`パターンの`type_name`は
+  チェック済み（scrutinee型が`sexpr`である以上、再帰するサブパターンも
+  必ず`sexpr`自身——`cons`の2フィールドが共に`sexpr`型のため）なので、
+  各パターンの`type_name`フィールドを個別に検証する必要は無いと判断した。
+  `collect_calls`（JIT用）にも`Expr::Match`の再帰（scrutinee+各armの
+  body、パターン木自体は式を持たないので不要）を追加。
+
+  **`compiler.rs`**: 新規トップレベル`defun`群（`sexpr-int`、
+  `compile-sexpr-tag-test`、`compile-sexpr-field`、
+  `compile-pattern-guard`、`pattern-bound-names`、`save-env-names`/
+  `restore-env-names`）+ 既存`labels`リング内への新規シブリング4つ
+  （`compile-match`、`compile-match-arms`、`compile-pattern-test`、
+  `compile-ctor-subpatterns`）。`compile-match`は`compile-if`と同型の
+  「1スロットの共有merge + 各armをbranch-on-failureの連鎖で試す」構造——
+  各armは自分専用の`next-block`（失敗時の合流先）を持ち、ネストした
+  サブパターンの全guardがこの同じ`next-block`を共有することで、
+  「このarmの失敗経路は何箇所あっても復元(restore)は1回で済む」という
+  設計にした。`compile-sexpr-tag-test`（タグ判定、`nil`/`bool`は
+  `TAG_IMMEDIATE`を共有するためpayloadも見る）と`compile-sexpr-field`
+  （フィールド抽出、`int`は`build-ashr`、`char`は`build-lshr`、`bool`は
+  payload-1、`cons`は`rt_car`/`rt_cdr`呼び出し）は`typelisp-rt`の
+  `encode`/`decode`テーブルの逆操作をLLVM IRとして地で書いたもの——
+  `sym`/`str`の`Str`フィールドと`float`フィールドは未対応のまま明確に
+  panicする（文字列・float boxingは別ステージ）。`Bind`サブパターンが
+  無い`Wildcard`位置では`compile-sexpr-field`呼び出し自体をスキップする
+  最適化も入れた（`rt_car`/`rt_cdr`の不要呼び出しを避ける）。
+
+  **新規Rust builtin1個**: `rt_match_fail`（`typelisp-rt`）——全armの
+  パターンが失敗した場合のトラップ。型検査器の網羅性検査により
+  型付きプログラムでは到達不能だが、コンパイラ自身のバグに備えて
+  `fatal`（abort）する。既存の`rt_extern_functions()`（JIT配線・AOT前方
+  宣言の単一の情報源）に追加するだけで両経路に自動的に伝播した。
+
+  **実装中に見つけた3件のバグ（いずれも修正済み）**:
+  1. `let`の束縛値は`expected: None`で検査されるため、`(let ((expected
+     (if ... 0 ... 7 ...))) (const-i64 builder expected))`のような
+     コードは`expected`がデフォルトで`i32`になり、`const-i64`の`i64`引数
+     要求と衝突して型エラーになった——`compile-sexpr-tag-test`で発覚。
+     修正: `let`で受けずに`if`連鎖を`const-i64`の引数位置に直接埋め込み、
+     関数呼び出しの引数として`expected: i64`の文脈で検査させた。
+  2. `compile-ctor-subpatterns`がサブパターンのタグ判定に`sexpr-str`を
+     使っていたが、タグシンボル自体（`(car p)`）は`Sym`であり`Str`では
+     ない——`sexpr-sym-name`に修正（既存の`compile-value`自身のディスパッチが
+     `(match (car e) ((Sym s) ...))`と直接パターンマッチしているのに対し、
+     ここだけ誤って`sexpr-str`を使っていた）。
+  3. `pattern-bound-names`（1パターンを処理）と
+     `pattern-bound-names-list`（パターン列を処理）が真に相互再帰する
+     設計だったが、トップレベル`defun`同士は相互再帰不可——`compile-value`
+     & co.と同じ理由で、1つの`defun`の中に`labels`で両者を閉じ込める形に
+     直した（ユーザーから見える振る舞いは変わらない、内部構造のみの修正）。
+
+  **テスト**: `ast_bridge.rs`に9件追加（wildcard-onlyの`Ctor`翻訳、
+  非Sexprスクルーティニーの`unsupported`、`Bind`サブパターン、ネストした
+  `Ctor`サブパターン（`(Cons _ (Nil))`）、`Int`/`Bool`/`Char`リテラルの
+  `pat-lit`畳み込み、armの複数式bodyのエラー、`collect_call_targets`の
+  scrutinee/arm-body再帰）。`compile_test.rs`に5件追加——`consp`/`null`/
+  `atom`をCons/Nil両方の値で実行（`atom`は`not`+`consp`という既にcompile
+  済みの別関数呼び出しも経由）、`Bind`抽出+Sexpr戻り値往復（`my-car`、
+  `(cons (Int 42) (Int 99))`→`42`）、ネストした`Ctor`パターン
+  （`second-is-nil`）、リテラル`Int`サブパターン（`is-zero`）。既存の
+  「`match`は未対応」を前提にしていた2件のテストを更新——
+  `the_compiler_body_panics_on_an_unsupported_tag`は未対応タグの代表を
+  `match`から`construct`に差し替え、`dolist`がcompileできないことを示す
+  テストは「`match`未対応」ではなく「`dolist`の脱糖が生む`let`の複数式body
+  （`,@body`の後に隠れた`setf`が続く）が`translate_let`の単一式body制約に
+  当たる」という**新しく判明した、より正確な**理由に更新した——`Match`が
+  動くようになったことで`dolist`のコンパイルがどこまで進むかが変わった
+  ため、テストの前提も合わせて修正する必要があった。全件green、clippy
+  警告0（`--workspace`）、5回連続実行で安定確認済み。
 - **Stage 6**: `Construct`/`FieldGet`/`FieldSet`対応（一般ADT）。
   `Option`/`Result`/`defstruct`がコンパイル可能になることを確認。
   **前提として持ち越されているギャップ**（Stage 4で判明）：typelisp
