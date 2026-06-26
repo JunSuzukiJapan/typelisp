@@ -244,9 +244,22 @@ pub const SOURCE: &str = r#"
     ((Sym v) v)
     (_ (panic "expected a Sym Sexpr node"))))
 
-;; `names` is now a list of `(name . is-fn)` pairs (`ast_bridge::tagged_sym_list`),
-;; not bare symbols — `is-fn` itself isn't needed here (binding a value
-;; doesn't yet decide anything about its ownership; `retain-bindings`, called
+;; Extracts a host `i64` out of an `(Int n)` Sexpr node — moved up here
+;; (ahead of `compute-fn-mask`/`retain-bindings`/`release-bindings`, which
+;; all need it for the `kind` tag `ast_bridge::tagged_sym_list` carries,
+;; Stage 6 of the Sexpr-representation plan) from its original spot
+;; alongside `compile-sexpr-tag-test`/`compile-sexpr-field`, since a
+;; top-level `defun` can only call one already defined *earlier* in this
+;; same source (no forward references — see this module's doc comment).
+(defun sexpr-int ((s Sexpr)) i64
+  (match s
+    ((Int n) n)
+    (_ (panic "expected an Int Sexpr node"))))
+
+;; `names` is now a list of `(name . kind)` pairs (`ast_bridge::tagged_sym_list`
+;; — `kind` generalized from a plain `is-fn` `Bool` to a 3-way `Int` tag in
+;; Stage 6), not bare symbols — `kind` itself isn't needed here (binding a
+;; value doesn't yet decide anything about its ownership; `retain-bindings`, called
 ;; right after, is what reads it).
 ;;
 ;; `env` maps every name to a *slot* (a 1-element `alloca-args` pointer), not
@@ -293,23 +306,27 @@ pub const SOURCE: &str = r#"
   (if (eq n 0) 1 (* (pow2 (- n 1)) 2)))
 
 ;; Computes `build-make-closure`'s `fn_mask` argument: a bitmask, one bit per
-;; captured slot, set wherever that slot's `is-fn` tag is true — entirely a
-;; *host*-level computation (no LLVM IR involved, unlike everything `compile-*`
-;; builds): the mask is fully determined by `names`' own tags, known already
-;; at the point this runs, so there's nothing to generate code for. See
-;; `interp::get_or_define_closure_release_fn`'s doc comment for what this
-;; mask is used for (the cascading release that walks it back out at
-;; runtime).
+;; captured slot, set wherever that slot's `kind` tag (`ast_bridge::binding_kind`
+;; — `0`=plain, `1`=fn, `2`=sexpr; Stage 6 of the Sexpr-representation plan
+;; generalized this from a plain `is-fn` `Bool`, see `tagged_sym_list`'s doc
+;; comment) is exactly `1` (fn) — entirely a *host*-level computation (no LLVM
+;; IR involved, unlike everything `compile-*` builds): the mask is fully
+;; determined by `names`' own tags, known already at the point this runs, so
+;; there's nothing to generate code for. A `2` (sexpr) slot must *not* set its
+;; bit here: it's a tagged `i64`, not a `ClosureBox` pointer, and
+;; `interp::get_or_define_closure_release_fn`'s cascading release would
+;; corrupt memory if it tried to treat one as a closure to recursively
+;; release.
 (defun compute-fn-mask ((names Sexpr) (idx i32)) i64
   (match names
     ((Cons name-pair rest)
-     (let ((is-fn (sexpr-bool (cdr name-pair))))
-       (if is-fn
+     (let ((kind (sexpr-int (cdr name-pair))))
+       (if (eq kind 1)
            (+ (pow2 idx) (compute-fn-mask rest (+ idx 1)))
            (compute-fn-mask rest (+ idx 1)))))
     (_ 0)))
 
-;; Whether `nm` appears as the name half of any `(name . is-fn)` pair in
+;; Whether `nm` appears as the name half of any `(name . kind)` pair in
 ;; `names` — `bare-returned-own-name`'s one helper.
 (defun sexpr-name-list-contains? ((names Sexpr) (nm string)) bool
   (match names
@@ -380,17 +397,41 @@ pub const SOURCE: &str = r#"
 ;; for its own lifetime regardless of what the caller does with its own
 ;; copy afterward. `release-bindings`, at this same activation's exit,
 ;; undoes it.
-(defun retain-bindings ((builder llvm-builder) (env HashTable<string,llvm-value>) (names Sexpr)) ()
+;;
+;; Stage 6 of the Sexpr-representation plan (`docs/TODO.md` — the
+;; "Sexprルート挿入パス"): a `kind = 2` (sexpr) name gets the analogous
+;; treatment, but via `rt_push_sexpr_root` (a GC-root-stack push, not a
+;; refcount increment) instead of `build-closure-retain` — a `Sexpr`-typed
+;; parameter/capture is a tagged `i64` that may point into the GC-managed
+;; cons heap, so without this, any allocation anywhere later in this
+;; activation's body (a `cons`, another `rt_*` call) could trigger a GC that
+;; reclaims it out from under a still-live binding (`typelisp-rt`'s
+;; `rt_push_sexpr_root` doc comment/tests demonstrate exactly this failure
+;; mode). `m` (needed to `get-function`/`build-call` `rt_push_sexpr_root`)
+;; is a new explicit parameter here — unlike a ring member (`compile-apply`
+;; and friends), this is an ordinary top-level `defun`, so it can't close
+;; over `compile-function`'s own `m` the way `release-bindings` already
+;; takes it explicitly for the matching reason (`build-closure-release`'s
+;; own `m` argument).
+(defun retain-bindings ((builder llvm-builder) (m llvm-module) (env HashTable<string,llvm-value>) (names Sexpr)) ()
   (match names
     ((Cons name-pair rest)
      (let ((nm (sexpr-sym-name (car name-pair))))
-       (let ((is-fn (sexpr-bool (cdr name-pair))))
-         (if is-fn
+       (let ((kind (sexpr-int (cdr name-pair))))
+         (if (eq kind 1)
              (match (get env nm)
                ((Some slot) (let ((v (load-raw builder slot 0))) (let ((ignored (build-closure-retain builder v))) ())))
                (None ()))
-             ())
-         (retain-bindings builder env rest))))
+             (if (eq kind 2)
+                 (match (get env nm)
+                   ((Some slot)
+                    (let ((v (load-raw builder slot 0)))
+                      (let ((args-ptr (alloca-args builder 1)))
+                        (store-arg builder args-ptr 0 v)
+                        (let ((ignored (build-call builder (get-function m "rt_push_sexpr_root") args-ptr 1))) ()))))
+                   (None ()))
+                 ()))
+         (retain-bindings builder m env rest))))
     (_ ())))
 
 ;; R2 (function exit, design notes): unconditionally releases every
@@ -398,18 +439,35 @@ pub const SOURCE: &str = r#"
 ;; — the `retain-bindings` call this activation made on entry, undone now
 ;; that its lifetime is ending, with the one exception being whichever name
 ;; (if any) is leaving as the bare return value instead of being dropped.
+;;
+;; Stage 6: the GC-root-stack counterpart for a `kind = 2` (sexpr) name —
+;; `rt_pop_sexpr_root`, undoing `retain-bindings`' push. Unlike the `fn` case,
+;; this runs *unconditionally*, `protected` or not: popping a root never
+;; frees anything (it only stops a GC root walk from visiting that slot), so
+;; even the bare-returned name's root must come off here — the tagged `i64`
+;; itself still flows out via this activation's own `build-ret` regardless,
+;; and if its *caller* needs to keep it alive across further allocations,
+;; that's the caller's own binding (a `let`, another function's params) that
+;; pushes a fresh root for it, exactly as it would for any other fresh
+;; `Sexpr` value. Leaving this activation's own push on the stack past its
+;; own lifetime would otherwise grow `Heap`'s root stack without bound across
+;; repeated calls, eventually desyncing every later `rt_pop_sexpr_root`'s
+;; LIFO assumption.
 (defun release-bindings ((builder llvm-builder) (m llvm-module) (env HashTable<string,llvm-value>) (names Sexpr) (protected Option<string>)) ()
   (match names
     ((Cons name-pair rest)
      (let ((nm (sexpr-sym-name (car name-pair))))
-       (let ((is-fn (sexpr-bool (cdr name-pair))))
-         (if is-fn
+       (let ((kind (sexpr-int (cdr name-pair))))
+         (if (eq kind 1)
              (if (protects? protected nm)
                  ()
                  (match (get env nm)
                    ((Some slot) (let ((v (load-raw builder slot 0))) (build-closure-release builder m v)))
                    (None ())))
-             ())
+             (if (eq kind 2)
+                 (let ((args-ptr (alloca-args builder 0)))
+                   (let ((ignored (build-call builder (get-function m "rt_pop_sexpr_root") args-ptr 0))) ()))
+                 ()))
          (release-bindings builder m env rest protected))))
     (_ ())))
 
@@ -451,42 +509,66 @@ pub const SOURCE: &str = r#"
     (_ 0)))
 
 ;; The `let` analogue of `retain-bindings`'s save-then-overwrite step
-;; (if/let/comparisons, labels/closures Stage 5): for each `(name . _)`
-;; binding pair, if `env` already has a *slot* under that name, stash it in
-;; `saved` before overwriting it with a *fresh* slot holding `acc`'s
-;; already-computed value for that same name (`compile-let-values` built
-;; `acc` first, against `env` *unmodified* — see that function's doc comment
-;; for why this can't be one combined pass). A fresh slot per binding (rather
-;; than reusing whatever slot `saved` is about to displace) is what makes a
-;; `let`-bound name `setf`-able inside its own body (`loop`/`break`/`return`/
-;; `setf`) without that mutation leaking into the shadowed outer binding once
-;; `restore-let-values` puts the old slot back. No `is-fn` bookkeeping
-;; happens here at all: a `let`-bound name resolves through `env` exactly
-;; like a parameter/capture does, so the existing `name-is-borrowed?`/
+;; (if/let/comparisons, labels/closures Stage 5): for each `((name . kind)
+;; . value-form)` binding pair, if `env` already has a *slot* under that
+;; name, stash it in `saved` before overwriting it with a *fresh* slot
+;; holding `acc`'s already-computed value for that same name
+;; (`compile-let-values` built `acc` first, against `env` *unmodified* — see
+;; that function's doc comment for why this can't be one combined pass). A
+;; fresh slot per binding (rather than reusing whatever slot `saved` is
+;; about to displace) is what makes a `let`-bound name `setf`-able inside its
+;; own body (`loop`/`break`/`return`/`setf`) without that mutation leaking
+;; into the shadowed outer binding once `restore-let-values` puts the old
+;; slot back. No `is-fn`-style retain/release bookkeeping happens here at
+;; all: a `let`-bound name resolves through `env` exactly like a
+;; parameter/capture does, so the existing `name-is-borrowed?`/
 ;; `form-is-borrowed?` (which only ask "is this name present in `env`")
 ;; already treat it correctly with no further tagging — see `compile-let`'s
 ;; doc comment.
-(defun bind-let-values ((builder llvm-builder) (env HashTable<string,llvm-value>) (bindings Sexpr) (acc HashTable<string,llvm-value>) (saved HashTable<string,llvm-value>)) ()
+;;
+;; Stage 6 of the Sexpr-representation plan (`docs/TODO.md`): unlike the
+;; `fn` case, a `kind = 2` (sexpr) binding *does* need action here —
+;; `rt_push_sexpr_root`, the same GC-root push `retain-bindings` gives a
+;; `Sexpr`-typed parameter/capture, since a `let`-bound `Sexpr` value is just
+;; as exposed to a later allocation reclaiming it (the "leak it" tolerance
+;; the `fn` case accepts isn't available here — an unrooted `Sexpr` doesn't
+;; merely leak, it gets *corrupted*). `m` is a new explicit parameter for the
+;; same reason `retain-bindings` gained one.
+(defun bind-let-values ((builder llvm-builder) (m llvm-module) (env HashTable<string,llvm-value>) (bindings Sexpr) (acc HashTable<string,llvm-value>) (saved HashTable<string,llvm-value>)) ()
   (match bindings
     ((Cons pair rest)
-     (let ((nm (sexpr-sym-name (car pair))))
-       (match (get env nm)
-         ((Some old) (set saved nm old))
-         (None ()))
-       (match (get acc nm)
-         ((Some v) (let ((slot (alloca-args builder 1)))
-                     (store-arg builder slot 0 v)
-                     (set env nm slot)))
-         (None (panic "bind-let-values: missing computed value")))
-       (bind-let-values builder env rest acc saved)))
+     (let ((name-pair (car pair)))
+       (let ((nm (sexpr-sym-name (car name-pair))))
+         (let ((kind (sexpr-int (cdr name-pair))))
+           (match (get env nm)
+             ((Some old) (set saved nm old))
+             (None ()))
+           (match (get acc nm)
+             ((Some v) (let ((slot (alloca-args builder 1)))
+                         (store-arg builder slot 0 v)
+                         (set env nm slot)
+                         (if (eq kind 2)
+                             (let ((args-ptr (alloca-args builder 1)))
+                               (store-arg builder args-ptr 0 v)
+                               (let ((ignored (build-call builder (get-function m "rt_push_sexpr_root") args-ptr 1))) ()))
+                             ())))
+             (None (panic "bind-let-values: missing computed value")))
+           (bind-let-values builder m env rest acc saved)))))
     (_ ())))
 
 ;; Undoes `bind-let-values` once the `let`'s body has been compiled: restores
 ;; whatever `env` held under each binding's name before this `let` shadowed
-;; it (or removes the binding entirely if there was nothing there before).
-;; Skipping this would leak a stale shadowed value into any later expression
-;; that happens to reuse the same name after this `let` ends — e.g. `(+ (let
-;; ((a 99)) a) a)`'s second `a` would otherwise wrongly read back 99.
+;; it (or removes the binding entirely if there was nothing there before),
+;; and (Stage 6) pops the GC root `bind-let-values` pushed for a `kind = 2`
+;; binding — see `release-bindings`'s doc comment for why this runs
+;; unconditionally, with no `protected`-style exception (this `let` has
+;; nothing resembling a bare-returned-own-name carve-out at all: its result
+;; already flows out through whatever tag (`if`/`call`/...) is consuming
+;; `compile-let`'s own return value, entirely independent of this cleanup).
+;; Skipping the `env` restoration would leak a stale shadowed value into any
+;; later expression that happens to reuse the same name after this `let`
+;; ends — e.g. `(+ (let ((a 99)) a) a)`'s second `a` would otherwise wrongly
+;; read back 99.
 ;;
 ;; Known limitation: if `bindings` names the *same* symbol more than once
 ;; (`(let ((a 1) (a 2)) ...)`), `saved` can only remember one prior value per
@@ -495,20 +577,21 @@ pub const SOURCE: &str = r#"
 ;; what value a *later, unrelated* expression sees under that name. Checked
 ;; typelisp source rarely if ever writes a `let` with a repeated binding
 ;; name; not worth a multi-value-per-name structure for this alone.
-(defun restore-let-values ((env HashTable<string,llvm-value>) (bindings Sexpr) (saved HashTable<string,llvm-value>)) ()
+(defun restore-let-values ((builder llvm-builder) (m llvm-module) (env HashTable<string,llvm-value>) (bindings Sexpr) (saved HashTable<string,llvm-value>)) ()
   (match bindings
     ((Cons pair rest)
-     (let ((nm (sexpr-sym-name (car pair))))
-       (match (get saved nm)
-         ((Some old) (set env nm old))
-         (None (let ((ignored (remove env nm))) ())))
-       (restore-let-values env rest saved)))
+     (let ((name-pair (car pair)))
+       (let ((nm (sexpr-sym-name (car name-pair))))
+         (let ((kind (sexpr-int (cdr name-pair))))
+           (if (eq kind 2)
+               (let ((args-ptr (alloca-args builder 0)))
+                 (let ((ignored (build-call builder (get-function m "rt_pop_sexpr_root") args-ptr 0))) ()))
+               ())
+           (match (get saved nm)
+             ((Some old) (set env nm old))
+             (None (let ((ignored (remove env nm))) ())))
+           (restore-let-values builder m env rest saved)))))
     (_ ())))
-
-(defun sexpr-int ((s Sexpr)) i64
-  (match s
-    ((Int n) n)
-    (_ (panic "expected an Int Sexpr node"))))
 
 ;; Tests whether tagged Sexpr value `v` is Sexpr variant `variant`
 ;; (`registry::sexpr_def`'s variant order: 0=nil 1=int 2=float 3=char
@@ -605,7 +688,7 @@ pub const SOURCE: &str = r#"
 
 ;; The pattern-match counterpart of `bind-let-values`'s "stash whatever
 ;; was already there" half -- `names` is a flat list of plain `Str` nodes
-;; (`pattern-bound-names`'s result), not `(name . is-fn)` pairs: a
+;; (`pattern-bound-names`'s result), not `(name . kind)` pairs: a
 ;; pattern-bound name is never itself a `Fn`-typed value (every Sexpr
 ;; field kind this compiler can extract -- `sexpr`/`i64`/`char`/`bool` --
 ;; is never `Fn`), so no `is-fn` bookkeeping applies here at all.
@@ -639,7 +722,7 @@ pub const SOURCE: &str = r#"
           (position-at-end builder b)
           (let ((env (new-env)))
             (bind-params env builder f param-names 0)
-            (retain-bindings builder env param-names)
+            (retain-bindings builder m env param-names)
             (let ((fn-env (new-fn-env)))
               (labels ((compile-value ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
                          (match (car e)
@@ -678,7 +761,13 @@ pub const SOURCE: &str = r#"
                                                                                             (compile-set builder env fn-env captured cur-fn loop-exit loop-slot e)
                                                                                             (if (eq s "match")
                                                                                                 (compile-match builder env fn-env captured cur-fn loop-exit loop-slot e)
-                                                                                                (panic (append "compile-value: unsupported tag " s))))))))))))))))))))
+                                                                                                (if (eq s "construct")
+                                                                                                    (compile-construct builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                                                    (if (eq s "field-get")
+                                                                                                        (compile-field-get builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                                                        (if (eq s "field-set")
+                                                                                                            (compile-field-set builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                                                            (panic (append "compile-value: unsupported tag " s)))))))))))))))))))))))
                            (_ (panic "compile-value: malformed node, expected a tagged list"))))
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -824,7 +913,7 @@ pub const SOURCE: &str = r#"
                          (match names
                            ((Cons name-pair rest)
                             (let ((nm (sexpr-sym-name (car name-pair))))
-                              (let ((is-fn (sexpr-bool (cdr name-pair))))
+                              (let ((is-fn (eq (sexpr-int (cdr name-pair)) 1)))
                                 (let ((v (resolve-value builder env fn-env captured nm)))
                                   (store-arg builder env-ptr idx v)
                                   (if is-fn
@@ -852,7 +941,7 @@ pub const SOURCE: &str = r#"
                          (match names
                            ((Cons name-pair rest)
                             (let ((nm (sexpr-sym-name (car name-pair))))
-                              (let ((is-fn (sexpr-bool (cdr name-pair))))
+                              (let ((is-fn (eq (sexpr-int (cdr name-pair)) 1)))
                                 (let ((v (resolve-value builder env fn-env captured nm)))
                                   (if is-fn
                                       (if (name-is-borrowed? env nm)
@@ -1158,7 +1247,7 @@ pub const SOURCE: &str = r#"
                        (compile-let-values ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (bindings Sexpr) (acc HashTable<string,llvm-value>)) ()
                          (match bindings
                            ((Cons pair rest)
-                            (let ((nm (sexpr-sym-name (car pair))))
+                            (let ((nm (sexpr-sym-name (car (car pair)))))
                               (let ((form (cdr pair)))
                                 (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot form)))
                                   (set acc nm v)
@@ -1191,11 +1280,11 @@ pub const SOURCE: &str = r#"
                              (let ((acc (new-env)))
                                (compile-let-values builder env fn-env captured cur-fn loop-exit loop-slot bindings acc)
                                (let ((saved (new-env)))
-                                 (bind-let-values builder env bindings acc saved)
+                                 (bind-let-values builder m env bindings acc saved)
                                  (let ((result (compile-value builder env fn-env captured cur-fn loop-exit loop-slot body-form)))
-                                   (restore-let-values env bindings saved)
+                                   (restore-let-values builder m env bindings saved)
                                    result))))))
-                       ;; `(lambda name ((captured . is-fn)...) ((param . is-fn)...) body)`
+                       ;; `(lambda name ((captured . kind)...) ((param . kind)...) body)`
                        ;; — `Expr::Lambda` (a standalone escaping value) or a
                        ;; synthesized `Expr::FnRef` forwarding wrapper
                        ;; (`ast_bridge::translate_fnref`) — labels/closures
@@ -1237,9 +1326,9 @@ pub const SOURCE: &str = r#"
                                        (position-at-end nested-builder nested-block)
                                        (let ((nested-env (new-env)))
                                          (bind-params nested-env nested-builder nested-fn lparams 0)
-                                         (retain-bindings nested-builder nested-env lparams)
+                                         (retain-bindings nested-builder m nested-env lparams)
                                          (bind-captures nested-env nested-builder nested-fn lcaptured 0)
-                                         (retain-bindings nested-builder nested-env lcaptured)
+                                         (retain-bindings nested-builder m nested-env lcaptured)
                                          ;; `loop`/`break`/`return`/`setf`: a
                                          ;; `lambda` is a new function
                                          ;; boundary — `break`/`return` can't
@@ -1327,9 +1416,9 @@ pub const SOURCE: &str = r#"
                                          (position-at-end sib-builder sib-block)
                                          (let ((sib-env (new-env)))
                                            (bind-params sib-env sib-builder sib-fn param-syms 0)
-                                           (retain-bindings sib-builder sib-env param-syms)
+                                           (retain-bindings sib-builder m sib-env param-syms)
                                            (bind-captures sib-env sib-builder sib-fn captured 0)
-                                           (retain-bindings sib-builder sib-env captured)
+                                           (retain-bindings sib-builder m sib-env captured)
                                            ;; `loop`/`break`/`return`/`setf`:
                                            ;; a `labels` sibling's own body is
                                            ;; a new function boundary too
@@ -1347,8 +1436,8 @@ pub const SOURCE: &str = r#"
                                                (compile-labels-bodies inner-fn-env captured rest)))))))
                                     (None (panic (append "compile-labels-bodies: missing declaration for " nm))))))))
                            (_ ())))
-                       ;; `(labels ((captured . is-fn)...) ((name
-                       ;; ((param . is-fn)...) body))... trailing-body)`:
+                       ;; `(labels ((captured . kind)...) ((name
+                       ;; ((param . kind)...) body))... trailing-body)`:
                        ;; declare every sibling, compile every body, then
                        ;; compile the trailing body *with the enclosing
                        ;; function's own `builder`/`env`* (it's ordinary
@@ -1651,7 +1740,123 @@ pub const SOURCE: &str = r#"
                            (_ (let ((args-ptr (alloca-args builder 0)))
                                 (let ((fallback (build-call builder (get-function m "rt_match_fail") args-ptr 0)))
                                   (store-arg builder slot 0 fallback)
-                                  (build-br builder merge-block)))))))
+                                  (build-br builder merge-block))))))
+                       ;; `(construct is-sexpr variant-i64 arg-form...)`
+                       ;; (Stage 6 of the Sexpr-representation plan,
+                       ;; `docs/TODO.md`) — `is-sexpr` (`ast_bridge::is_sexpr_type`,
+                       ;; read off the node's own checked type) dispatches
+                       ;; between `Sexpr`'s own 8 variants
+                       ;; (`compile-construct-sexpr`) and every other ADT's
+                       ;; general `malloc`'d-box representation
+                       ;; (`compile-construct-box`) — see those two
+                       ;; functions' doc comments.
+                       (compile-construct ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((is-sexpr (sexpr-bool (car (cdr e)))))
+                           (let ((variant (sexpr-int (car (cdr (cdr e))))))
+                             (let ((arg-forms (cdr (cdr (cdr e)))))
+                               (if is-sexpr
+                                   (compile-construct-sexpr builder env fn-env captured cur-fn loop-exit loop-slot variant arg-forms)
+                                   (compile-construct-box builder env fn-env captured cur-fn loop-exit loop-slot variant arg-forms))))))
+                       ;; Builds a general-ADT box (`Option`/`Result`/a
+                       ;; `defstruct`, sum or struct kind alike): a fresh
+                       ;; `build-malloc`'d `[1 + argc]`-slot array, slot `0`
+                       ;; the variant tag, slot `1 + i` the `i`-th field's
+                       ;; already-compiled value — `compile-field-get`/
+                       ;; `compile-field-set` read/write the same `1 + idx`
+                       ;; offset, so the layout only has to agree with
+                       ;; itself. The final `build-ptr-to-int` turns the
+                       ;; fresh pointer into the plain `i64` value every
+                       ;; other compiled value already is (mirroring
+                       ;; `build-make-closure`'s own final `ptrtoint`).
+                       ;; Deliberately never freed/refcounted in this stage
+                       ;; — see this file's own module doc comment for the
+                       ;; same accepted leak this codebase already takes for
+                       ;; an unreferenced boxed `labels` sibling.
+                       (compile-construct-box ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (variant i64) (arg-forms Sexpr)) llvm-value
+                         (let ((argc (sexpr-list-length arg-forms)))
+                           (let ((ptr (build-malloc builder (+ argc 1))))
+                             (store-arg builder ptr 0 (const-i64 builder variant))
+                             (compile-construct-box-fields builder env fn-env captured cur-fn loop-exit loop-slot ptr arg-forms 1)
+                             (build-ptr-to-int builder ptr))))
+                       ;; Fills a `compile-construct-box`-allocated array,
+                       ;; one compiled field per slot starting at `idx`
+                       ;; (`1`, skipping the variant-tag slot) — the
+                       ;; `compile-construct` analogue of
+                       ;; `compile-call-args`'s argument-array fill, minus
+                       ;; the `is-fn`/pending-release bookkeeping (no
+                       ;; retain/release happens for a box's own fields in
+                       ;; this stage at all, fresh or borrowed alike).
+                       (compile-construct-box-fields ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (ptr llvm-value) (forms Sexpr) (idx i32)) ()
+                         (match forms
+                           ((Cons form rest)
+                            (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot form)))
+                              (store-arg builder ptr idx v)
+                              (compile-construct-box-fields builder env fn-env captured cur-fn loop-exit loop-slot ptr rest (+ idx 1))))
+                           (_ ())))
+                       ;; `Sexpr`'s own 8 variants, encoded directly as the
+                       ;; tagged `i64` `typelisp-rt`'s `encode` (and this
+                       ;; file's own `compile-sexpr-field`) already use —
+                       ;; see `registry::sexpr_def`'s variant order (`0`=nil
+                       ;; `1`=int `2`=float `3`=char `4`=bool `5`=sym `6`=str
+                       ;; `7`=cons), the exact inverse of
+                       ;; `compile-sexpr-tag-test`/`compile-sexpr-field`'s
+                       ;; own extraction. `sym`/`str`'s `Str` field and
+                       ;; `float`'s `f64` field aren't representable in
+                       ;; compiled code yet (string/float boxing is a later
+                       ;; stage), so constructing either panics clearly —
+                       ;; symmetric with `compile-sexpr-field`'s own
+                       ;; extraction panicking on the same three.
+                       (compile-construct-sexpr ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (variant i64) (arg-forms Sexpr)) llvm-value
+                         (if (eq variant 0)
+                             (const-i64 builder 6)
+                             (if (eq variant 1)
+                                 (build-shl builder (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car arg-forms)) (const-i64 builder 3))
+                                 (if (eq variant 3)
+                                     (build-or builder
+                                                (build-shl builder (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car arg-forms)) (const-i64 builder 3))
+                                                (const-i64 builder 4))
+                                     (if (eq variant 4)
+                                         (let ((b (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car arg-forms))))
+                                           (build-or builder (build-shl builder (build-add builder b (const-i64 builder 1)) (const-i64 builder 3)) (const-i64 builder 6)))
+                                         (if (eq variant 7)
+                                             (let ((args-ptr (alloca-args builder 2)))
+                                               (store-arg builder args-ptr 0 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car arg-forms)))
+                                               (store-arg builder args-ptr 1 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car (cdr arg-forms))))
+                                               (build-call builder (get-function m "rt_cons") args-ptr 2))
+                                             (panic "compile-construct-sexpr: field type is not representable in compiled code yet")))))))
+                       ;; `(field-get idx-unary-list obj-form)` (Stage 6) —
+                       ;; always a general-ADT box `compile-construct-box`
+                       ;; built (this tag is only ever synthesized by
+                       ;; `Checker::check_defstruct` as a field accessor's
+                       ;; own body, never for a `Sexpr` — see
+                       ;; `ast_bridge::translate_field_get`'s doc comment):
+                       ;; the object's own value is reinterpreted as a
+                       ;; pointer (`build-int-to-ptr`, the inverse of
+                       ;; `compile-construct-box`'s final `build-ptr-to-int`)
+                       ;; and read at slot `1 + idx` (skipping the
+                       ;; variant-tag slot). `idx` is recovered from
+                       ;; `idx-unary-list`'s own length
+                       ;; (`ast_bridge::idx_unary_list`'s doc comment
+                       ;; explains why it isn't simply a `Sexpr` `Int`).
+                       (compile-field-get ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((idx (+ (sexpr-list-length (car (cdr e))) 1)))
+                           (let ((obj-form (car (cdr (cdr e)))))
+                             (let ((obj-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot obj-form)))
+                               (let ((ptr (build-int-to-ptr builder obj-v)))
+                                 (load-raw builder ptr idx))))))
+                       ;; `(field-set idx-unary-list obj-form value-form)`
+                       ;; (Stage 6) — see `compile-field-get`; evaluates to
+                       ;; `Unit` (`0`, `compile-unit`'s own convention),
+                       ;; matching `Expr::FieldSet`'s own checked type.
+                       (compile-field-set ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((idx (+ (sexpr-list-length (car (cdr e))) 1)))
+                           (let ((obj-form (car (cdr (cdr e)))))
+                             (let ((value-form (car (cdr (cdr (cdr e))))))
+                               (let ((obj-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot obj-form)))
+                                 (let ((ptr (build-int-to-ptr builder obj-v)))
+                                   (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot value-form)))
+                                     (store-arg builder ptr idx v)
+                                     (const-i64 builder 0)))))))))
                 (let ((v (compile-value builder env fn-env '() f (Option::none) (Option::none) body)))
                   (let ((protected (bare-returned-own-name body param-names '())))
                     (release-bindings builder m env param-names protected)

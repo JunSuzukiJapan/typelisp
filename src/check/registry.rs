@@ -749,6 +749,21 @@ fn llvm_builder_def() -> AdtDef {
     // statement) must check this first and skip emitting if it's already
     // true, or the resulting IR is malformed.
     assoc.insert("block-terminated?".to_string(), assoc_fn(vec![llvm_builder_ty()], Type::Bool, true));
+    // Stage 6 of the Sexpr-representation plan (`docs/TODO.md`): generic
+    // malloc/free + pointer conversion — the `ClosureBox` generalization a
+    // general ADT box (`Option`/`Result`/`defstruct`) needs, without baking
+    // in `ClosureBox`'s own fixed header layout. `build-malloc`/`build-free`
+    // mirror `alloca-args`'s stack-allocation shape but on the heap;
+    // `build-int-to-ptr`/`build-ptr-to-int` let `compiler.rs` cross between
+    // "every compiled value is a plain i64" (`build-ret`/`store-arg`'s value
+    // operand/`build-icmp-*`/...) and the pointer `load-raw`/`store-arg`'s
+    // *array* operand already expects, exactly the conversion
+    // `build-make-closure`/`build-closure-apply` already do internally for
+    // `ClosureBox`, just exposed generically here.
+    assoc.insert("build-malloc".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::I32], llvm_value_ty(), true));
+    assoc.insert("build-free".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], Type::Unit, true));
+    assoc.insert("build-int-to-ptr".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    assoc.insert("build-ptr-to-int".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
     AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
 }
 

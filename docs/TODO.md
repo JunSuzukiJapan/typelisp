@@ -1367,17 +1367,115 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   動くようになったことで`dolist`のコンパイルがどこまで進むかが変わった
   ため、テストの前提も合わせて修正する必要があった。全件green、clippy
   警告0（`--workspace`）、5回連続実行で安定確認済み。
-- **Stage 6**: `Construct`/`FieldGet`/`FieldSet`対応（一般ADT）。
-  `Option`/`Result`/`defstruct`がコンパイル可能になることを確認。
-  **前提として持ち越されているギャップ**（Stage 4で判明）：typelisp
-  ソースから新しい`Sexpr::Int`等を作るには`(Int 5)`のような`Sexpr`
-  コンストラクタ（`Expr::Construct`）が要るが、これ自体が本ステージの
-  対象——つまり「`cons`に渡す値をtypelispソースで作る」エンドツーエンド
-  テストはStage 6で`Construct`対応が完了してから初めて書ける。また
-  Stage 4で実装した`rt_push_sexpr_root`/`rt_pop_sexpr_root`を
-  `compiler.rs`の実バインディング処理（`bind-params`/`bind-captures`/
-  `bind-let-values`/ループスロット）に実際に組み込む「Sexprルート挿入
-  パス」も、Sexpr型の実バインディングが初めて存在するこの段階で行う。
+- **Stage 6（完了、2026-06-26）**: `Construct`/`FieldGet`/`FieldSet`対応
+  （一般ADT）。`check_construct`は`Sexpr`自身の8バリアントと
+  `Option`/`Result`/`defstruct`を同じ`Expr::Construct`ノードで表現する
+  ——つまりStage 4で持ち越されていたギャップ「`cons`に渡す値を
+  typelispソースで作るには`(Int 5)`のような`Sexpr`コンストラクタが要る」
+  は、一般ADTのConstruct対応と全く同じ実装で同時に解決した。
+
+  **設計の要点（malloc+タグ箱の汎用化）**: `Sexpr`自身は既存のタグ付き
+  `i64`/`rt_cons`表現（Stage 2-5）にそのまま乗せ、`compile-construct`は
+  ノードの**checked型**（`ast_bridge::is_sexpr_type`、レジストリ非依存で
+  判定可能）で`compile-construct-sexpr`（ビット演算/`rt_cons`の逆操作）
+  と`compile-construct-box`（一般ADT用、新規）に振り分ける。後者は
+  `ClosureBox`の汎用化——`[variant-tag, field0, field1, ...]`という
+  固定レイアウトの`malloc`箱（`AdtKind::Sum`/`Struct`どちらも同じ箱、
+  `mutable`フラグはレイアウトに影響しない）。Rust側新規ビルトインは
+  ちょうど4つ（`build-malloc`/`build-free`/`build-int-to-ptr`/
+  `build-ptr-to-int`、`registry::llvm_builder_def`+`interp.rs`）——
+  オフセットload/store自体は既存の`load-raw`/`store-arg`がポインタ型
+  `llvm-value`に対して既に汎用的だったため再利用するだけで済み、
+  TODOの見立て「Rust側に追加するのは...だけ」通りの最小追加で済んだ。
+  **リファインカウント/解放はこの段階では一切行わない**（`build-free`は
+  公開するが`compiler.rs`からは未使用）——`labels`サブリングの未参照
+  `ClosureBox`が許容リークになっているのと同じ判断。`compile-field-get`/
+  `compile-field-set`は箱を`build-int-to-ptr`で戻し`1 + idx`オフセットで
+  読み書きするだけ（`idx`は`Sexpr`の`Int`では運べない——`load-raw`/
+  `store-arg`のインデックス引数は`i32`だが`Sexpr::Int`は常に`i64`に
+  decodeされ、コンパイル済みコードに narrowing 変換プリミティブが無い
+  ——ので`ast_bridge::idx_unary_list`が「中身は無意味、長さだけが`idx`」
+  という単項リストにエンコードし、`compiler.rs`側は既存の
+  `sexpr-list-length`（元々`i32`を返す）で長さを取り出す回避策にした）。
+
+  **「is-fn」タグの「kind」への一般化**: Stage 6で新たに必要になった
+  Sexprルート挿入パス（後述）は、`ClosureBox`retain/releaseと**同じ
+  「束縛点ごとの種別判定」が必要**だが判定軸が違う（refcount増減 vs
+  GCルートのpush/pop）。そこで`ast_bridge::tagged_sym_list`/
+  `translate_let`が生成する各束縛ペアの第2要素を、`is-fn: Bool`から
+  `kind: Int`（`0`=plain `1`=fn `2`=sexpr、`ast_bridge::binding_kind`）
+  に一般化——`compiler.rs`の`retain-bindings`/`release-bindings`/
+  `compute-fn-mask`/`compile-env-args`/`compile-escaping-env-args`/
+  `bind-let-values`/`restore-let-values`/`compile-let-values`を機械的に
+  追従させた（`Interp::add_compiled_function`が独自に持っていた
+  `param_list`構築の重複コードも`ast_bridge::tagged_sym_list`呼び出しに
+  統一——2箇所が同じ形を別々に作っていたことがバグの実際の原因になった
+  ので、`pub(crate)`化して一本化）。call-argument側の`is-fn`タグ
+  （`tagged_ast_list_to_sexpr`、`(is-fn . form)`）と`if`/`return`/`set`/
+  `match`の`is-fn`タグ（`compile-if-branch`が読む方）は**意図的に未変更**
+  ——後述のスコープ縮小（残課題）参照。
+
+  **Sexprルート挿入パス**（Stage 4で実装済みの`rt_push_sexpr_root`/
+  `rt_pop_sexpr_root`を実際に配線）: `kind = 2`（sexpr）の束縛に対して
+  `retain-bindings`/`release-bindings`（関数引数・キャプチャ、関数の
+  入口/出口）と`bind-let-values`/`restore-let-values`（`let`束縛、
+  let開始/終了）がpush/pop呼び出しを追加。is-fnのretain/releaseとの
+  決定的な違いは2点:
+  (1) `let`束縛は（is-fnでは何もしない、リーク許容の箇所だが）sexprでは
+  **必ず**push/popする——GCルート漏れは「リークするだけ」ではなく
+  「後で読むと壊れている」という事故になるため。
+  (2) `release-bindings`の`kind=2`分岐は`protected`（bare-returned-own-
+  name）を**無視して常にpop**する——popは何も解放しない（ヒープ上の値
+  自体は影響を受けない、GCの訪問対象から外れるだけ）ので、戻り値として
+  出ていく名前であっても自分の役目（このスコープが持っていたルートの
+  後始末）は完了させる必要があるという、is-fnのrefcount意味論とは
+  別物の理屈になる。push/popの**順序や分割**は無関係（複数のpush/popが
+  常にLIFOで正しくネストしてさえいれば、どの呼び出しがどの値を
+  popしたかは関係ない——popした値自体は使わず捨てるだけなので）。
+  **スコープを意図的に絞った範囲**: TODOで名指しされた
+  `bind-params`/`bind-captures`/`bind-let-values`の3箇所のみ実装——
+  call引数配列・env配列（`compile-call-args`/`compile-env-args`/
+  `compile-escaping-env-args`）の一時的なSexpr値や、`if`/`match`の
+  マージスロット・ループの`break`/`return`マージスロットを通過する
+  **fresh**（束縛されていない）なSexpr値のGCルート保護は、依然未対応
+  ——「束縛されていない一時値が次の割り当てで壊れうる」という同種の
+  ギャップとして次段以降に持ち越し（Stage 5がbool戻り値の忠実性を
+  明示的にスコープ外にした前例と同じ扱い）。
+
+  **`Expr::FieldGet`/`FieldSet`のコンパイルロジックはJIT経由で
+  end-to-endに実行できない（既知のギャップ）**: この2ノードは
+  `Checker::check_defstruct`が自動生成するフィールドアクセサ/セッタ
+  **メソッド自身の本体**としてしか出現しない（`p::x`/`(setf p::y v)`
+  という呼び出し側の構文は常に`Expr::Assoc`に脱糖される）。一方
+  `(compile "name")`は`self.fns`（トップレベル`defun`）しか見ない
+  （`Interp::compiled_fn_body`）——`self.methods`は対象外。つまり
+  `compile-field-get`/`compile-field-set`自体は実装・`ast_bridge`単体
+  テストで実証済みだが、実際のソースをコンパイルして実行する
+  end-to-endテストは「`compile`がインスタンスメソッドも対象にする」
+  という別の拡張（本ステージ未着手）が無いと書けない——Stage 5が
+  bool戻り値の忠実性を未対応のまま残したのと同じ種類の、意図的に
+  先送りした境界。
+
+  **テスト**: `ast_bridge.rs`に8件追加（`Sexpr`自身のConstruct、一般ADT
+  のConstruct、フィールド無しConstruct、`FieldGet`、`idx=0`の単項リスト
+  境界値、`FieldSet`、`collect_call_targets`がConstruct引数/FieldGet/
+  FieldSetへ再帰することの確認2件）+ 既存6件をkindタグ形状変更に追従
+  （`untag_name`ヘルパをBoolからInt返却に変更、`translates_a_let_
+  expression`を新しいネスト束縛ペア形状に追従）。`compile_test.rs`に
+  5件追加：(1) `Sexpr`即値（`Int`/`Bool`/`Nil`、`Char`は別の既存ギャップ
+  ——`compile-value`に`"char"`タグのハンドラが無い——のため対象外と
+  明示）の構築→`Expr::Call`の既存decodeで往復、(2) `(Cons (Int a)
+  (Int b))`構築→同じ関数内で`match`により分解→合計を返す
+  end-to-end往復（`rt_cons`呼び出しを経由）、(3) `Option::some`の箱を
+  構築し、戻り値の生アドレス（一般ADT箱は`Expr::Call`境界で未対応の
+  ため`RtValue::Int`のまま——同種の既知ギャップ）を`unsafe`で直接読んで
+  タグ/フィールドを検証（`debug-closure-refcount`と同じ流儀）、
+  (4) `defstruct`の`point::new`で同じ箱表現を確認、(5)
+  「`let`束縛のSexprローカルが、無関係な多数の割り当て後も内容を
+  保持する」回帰テスト——`bind-let-values`のpush呼び出しを一時的に
+  無効化すると実際に値が壊れて失敗することを確認した上で実装に戻した
+  （Stage 4の「rootしないと壊れる」対照テストと同じ実証スタイル）。
+  全体テスト3回連続実行で安定、clippy警告0（`--workspace`）。
 - **Stage 7**（優先度低）: 文字列対応。
 - **Stage 8**: `dolist`含む`prelude.rs`のリスト関数群が実際にコンパイル
   可能になることの実証＋全体回帰確認。
@@ -1400,6 +1498,18 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
 - **`break`/`return`を文の位置以外（算術オペランド/呼び出し引数の中）でも
   許容する**: 型レベルでは合法だが、今回は文の位置（ループ本体直下/ifの枝
   全体）のみ対応——上記「対応範囲」の節参照。
+- **`compile`をインスタンスメソッド（`self.methods`）にも対応させる**
+  （Stage 6で判明）: `Expr::FieldGet`/`FieldSet`は`defstruct`の自動生成
+  アクセサ/セッタの本体としてしか存在せず、`(compile "name")`は
+  `self.fns`しか見ないため、フィールドアクセスを含む関数のend-to-end
+  コンパイルが書けない。`Interp::compiled_fn_body`/`compile_function`/
+  `add_compiled_function`に「型名+メソッド名」で`self.methods`を引く
+  経路を追加する必要がある。
+- **一般ADT箱（`Construct`/`FieldGet`/`FieldSet`）のrefcount/解放と
+  GCルート保護**（Stage 6で判明）: 現状`malloc`のみでリーク許容、
+  call引数配列・env配列・if/matchのマージスロット・ループの
+  break/returnマージスロットを通過する一時的なSexpr値のGCルート保護も
+  未対応（束縛点のみ対応——上記Stage 6本文参照）。
 
 ---
 

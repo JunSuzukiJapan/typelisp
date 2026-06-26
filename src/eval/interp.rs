@@ -582,27 +582,20 @@ impl Interp {
     ) -> Result<(), EvalError> {
         let (params, body) = self.compiled_fn_body(name)?;
 
-        // Builds `((a . is-fn) (b . is-fn) ...)`, the `Sexpr` list of typed
+        // Builds `((a . kind) (b . kind) ...)`, the `Sexpr` list of typed
         // name pairs `compiler.rs`'s `bind-params` walks to know which
         // logical argument-array slot binds to which name — and, for the
-        // automatic `ClosureBox` retain/release insertion work, whether that
-        // slot's value is ever safe to call `build-closure-retain`/
-        // `build-closure-release` on at all.
-        let mut param_list = Value::Empty;
-        for (n, ty) in params.iter().rev() {
-            let sym = heap.intern_symbol(n);
-            let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
-            heap.push_root(sym);
-            let pair = heap.cons(sym, is_fn);
-            heap.pop_root();
-            let pair = pair.map_err(|e| EvalError::Panic(e.to_string()))?;
-            heap.push_root(pair);
-            heap.push_root(param_list);
-            let next = heap.cons(pair, param_list);
-            heap.pop_root();
-            heap.pop_root();
-            param_list = next.map_err(|e| EvalError::Panic(e.to_string()))?;
-        }
+        // automatic `ClosureBox` retain/release insertion work (`kind = 1`)
+        // and the Sexpr GC-root insertion work (`kind = 2`, Stage 6 of the
+        // Sexpr-representation plan, `docs/TODO.md`), what kind of binding
+        // it is at all. Shares `ast_bridge::tagged_sym_list`'s exact
+        // construction (a `labels`/`lambda` parameter or captured-name list
+        // needs the identical shape) rather than re-deriving it here, so
+        // the two can never desync.
+        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, &params) {
+            Ok(v) => v,
+            Err(e) => return Err(EvalError::Panic(e.to_string())),
+        };
         heap.push_root(param_list);
         let body_sexpr = match crate::compile::ast_bridge::ast_to_sexpr(heap, &body) {
             Ok(v) => v,
@@ -1321,6 +1314,10 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-cond-br" => Some(llvm_builder_build_cond_br(args)),
             "build-br" => Some(llvm_builder_build_br(args)),
             "block-terminated?" => Some(llvm_builder_block_terminated(args)),
+            "build-malloc" => Some(llvm_builder_build_malloc(args)),
+            "build-free" => Some(llvm_builder_build_free(args)),
+            "build-int-to-ptr" => Some(llvm_builder_build_int_to_ptr(args)),
+            "build-ptr-to-int" => Some(llvm_builder_build_ptr_to_int(args)),
             _ => None,
         };
     }
@@ -1422,14 +1419,25 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// gets forward-declared and (JIT only — AOT resolves them as ordinary
 /// linker symbols against `typelisp-rt`'s `staticlib`, see
 /// `compile::aot::compile_file`) `add_global_mapping`-wired to, regardless
-/// of whether its own body actually calls any of them. Cheap enough (6
+/// of whether its own body actually calls any of them. Cheap enough (8
 /// extra declarations/mappings) to always include rather than checking
 /// which ones a given body's call targets actually need. `pub(crate)`:
 /// `compile::aot::compile_file` declares the same names (no JIT mapping
 /// needed there — ordinary linker symbol resolution against `typelisp-rt`'s
 /// `staticlib` instead) from this one source of truth.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 6] {
-    use crate::compile::runtime::{rt_car, rt_cdr, rt_cons, rt_match_fail, rt_set_car, rt_set_cdr};
+///
+/// `rt_push_sexpr_root`/`rt_pop_sexpr_root` (Stage 6 of the
+/// Sexpr-representation plan, `docs/TODO.md` — the "Sexprルート挿入パス"):
+/// unlike `rt_car`/.../`rt_match_fail`, nothing here rewrites a *user-visible*
+/// call name to reach these (`is_rt_builtin_name`'s list is unchanged) —
+/// `compiler.rs`'s `retain-bindings`/`release-bindings`/`bind-let-values`/
+/// `restore-let-values` call them directly via `get-function`/`build-call`,
+/// the same way `release-pending-args` calls `build-closure-release`
+/// directly rather than through the `(call name args)` tag. They still need
+/// the same forward-declaration/global-mapping treatment as every other
+/// `rt_*` shim, so they belong in this one shared list regardless.
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 8] {
+    use crate::compile::runtime::{rt_car, rt_cdr, rt_cons, rt_match_fail, rt_pop_sexpr_root, rt_push_sexpr_root, rt_set_car, rt_set_cdr};
     [
         ("rt_car", rt_car as usize),
         ("rt_cdr", rt_cdr as usize),
@@ -1437,6 +1445,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 6] {
         ("rt_set_car", rt_set_car as usize),
         ("rt_set_cdr", rt_set_cdr as usize),
         ("rt_match_fail", rt_match_fail as usize),
+        ("rt_push_sexpr_root", rt_push_sexpr_root as usize),
+        ("rt_pop_sexpr_root", rt_pop_sexpr_root as usize),
     ]
 }
 
@@ -2148,6 +2158,85 @@ fn llvm_builder_debug_closure_refcount(args: &[RtValue]) -> Result<RtValue, Eval
     let box_ptr = closure_box_ptr(&b, closure, "debug-closure-refcount")?;
     let rc = load_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, "debug-closure-refcount")?;
     Ok(RtValue::LlvmValue(rc.into()))
+}
+
+// ---- Stage 6 of the Sexpr-representation plan: generic malloc/free ------
+// (`docs/TODO.md`) — the `ClosureBox` generalization: a general ADT box
+// (`Option`/`Result`/`defstruct`) needs heap storage and offset load/store
+// exactly like a `ClosureBox` does, but with no fixed header shape to bake
+// in (a variant tag slot, then one slot per field — `compiler.rs`'s
+// `compile-construct` lays this out itself using the four primitives below
+// plus the already-generic `store-arg`/`load-raw`). Unlike `ClosureBox`,
+// no refcounting/cascading-release machinery exists yet for these boxes —
+// `compile-construct` simply leaks them, the same accepted trade-off this
+// codebase already takes for an unreferenced boxed `labels` sibling or a
+// captured reference cycle (see `compiler.rs`'s module doc comment) —
+// `build-free` is exposed regardless, ready for a later stage to wire up
+// automatic freeing without needing a new Rust primitive then.
+
+/// Heap-allocates `count` `i64` slots and returns the raw pointer — see this
+/// section's own doc comment. The generalization of
+/// [`llvm_builder_build_make_closure`]'s own `build_array_malloc` call,
+/// without baking in `ClosureBox`'s fixed header layout.
+fn llvm_builder_build_malloc(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let count = match &args[1] {
+        RtValue::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let ctx = crate::compile::llvm_context();
+    let count_val = ctx.i64_type().const_int(count, false);
+    let ptr = builder
+        .borrow()
+        .build_array_malloc(ctx.i64_type(), count_val, "box")
+        .map_err(|e| EvalError::Internal(format!("build-malloc: {}", e)))?;
+    Ok(RtValue::LlvmValue(ptr.into()))
+}
+
+/// Frees a pointer `build-malloc` returned (or any other `llvm-value`
+/// already holding a real pointer, e.g. after `build-int-to-ptr`) — the
+/// inverse of `build-malloc`. See this section's own doc comment for why
+/// nothing in `compiler.rs` calls this yet.
+fn llvm_builder_build_free(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let ptr = expect_llvm_value(&args[1])?.into_pointer_value();
+    builder.borrow().build_free(ptr).map_err(|e| EvalError::Internal(format!("build-free: {}", e)))?;
+    Ok(RtValue::Unit)
+}
+
+/// Reinterprets an `i64`-valued `llvm-value` as a pointer — every compiled
+/// value is a plain `i64` (`registry::llvm_module_def`'s doc comment), so a
+/// general ADT box value read back out of a slot/argument/field needs this
+/// before `load-raw`/`store-arg` (which both expect an already-pointer-typed
+/// `llvm-value`) can dereference it. The generic, builtin-exposed
+/// counterpart of [`closure_box_ptr`] — `compiler.rs`'s `compile-field-get`/
+/// `compile-field-set` need it directly, unlike `ClosureBox`'s own
+/// fixed-shape accessors.
+fn llvm_builder_build_int_to_ptr(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let v = expect_llvm_value(&args[1])?.into_int_value();
+    let ctx = crate::compile::llvm_context();
+    let ptr_ty = ctx.ptr_type(AddressSpace::default());
+    let ptr = builder
+        .borrow()
+        .build_int_to_ptr(v, ptr_ty, "int_to_ptr")
+        .map_err(|e| EvalError::Internal(format!("build-int-to-ptr: {}", e)))?;
+    Ok(RtValue::LlvmValue(ptr.into()))
+}
+
+/// The inverse of `build-int-to-ptr` — `compile-construct`'s final step,
+/// turning a freshly `build-malloc`'d pointer into the plain `i64` value
+/// every other compiled value already is, matching how `build-make-closure`
+/// does the same `ptrtoint` for a `ClosureBox`.
+fn llvm_builder_build_ptr_to_int(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let ptr = expect_llvm_value(&args[1])?.into_pointer_value();
+    let ctx = crate::compile::llvm_context();
+    let v = builder
+        .borrow()
+        .build_ptr_to_int(ptr, ctx.i64_type(), "ptr_to_int")
+        .map_err(|e| EvalError::Internal(format!("build-ptr-to-int: {}", e)))?;
+    Ok(RtValue::LlvmValue(v.into()))
 }
 
 fn expect_hashtable(v: &RtValue) -> Result<&Rc<RefCell<HashMap<HashKey, RtValue>>>, EvalError> {
