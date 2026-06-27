@@ -295,6 +295,13 @@ impl Registry {
         // symbols are always interned/permanent, there is no uninterned-symbol
         // concept to give a CL-style absolute guarantee).
         root.fns.insert("gensym".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: sexpr(), public: true, builtin: true });
+        // `exit`: process termination (cl-equivalence-catalog.md §1.2). Unlike
+        // `panic`/`unreachable`/`todo` (which unwind through `EvalError::Panic`,
+        // a typelisp-level signal), this needs an actual OS call
+        // (`std::process::exit`, in `Interp::eval_builtin`'s `"exit"` arm), so
+        // it stays an ordinary `Rust` builtin rather than a `defmacro`. `Never`
+        // return type, same as `panic`, so it satisfies any expected type.
+        root.fns.insert("exit".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::Never, public: true, builtin: true });
         // `compile`: JIT-compiles a previously-defined `defun` (see
         // `Interp::compile_function`) so later calls dispatch to native
         // code. This `Type::Str` signature is the internal shape only —
@@ -592,7 +599,7 @@ fn llvm_builder_def() -> AdtDef {
     assoc.insert("build-add".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     assoc.insert("build-sub".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     assoc.insert("build-mul".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
-    // Stage 2 of the Sexpr-representation plan (`docs/TODO.md`): bitwise
+    // Stage 2 of the Sexpr-representation plan (`docs/implementation-log.md`): bitwise
     // primitives for packing/unpacking the tagged `i64` representation of a
     // compiled `Sexpr` value (3 low tag bits + payload — see that doc's
     // tag table). Deliberately generic, type-agnostic `i64`-in-`i64`-out
@@ -752,7 +759,7 @@ fn llvm_builder_def() -> AdtDef {
     // statement) must check this first and skip emitting if it's already
     // true, or the resulting IR is malformed.
     assoc.insert("block-terminated?".to_string(), assoc_fn(vec![llvm_builder_ty()], Type::Bool, true));
-    // Stage 6 of the Sexpr-representation plan (`docs/TODO.md`): generic
+    // Stage 6 of the Sexpr-representation plan (`docs/implementation-log.md`): generic
     // malloc/free + pointer conversion — the `ClosureBox` generalization a
     // general ADT box (`Option`/`Result`/`defstruct`) needs, without baking
     // in `ClosureBox`'s own fixed header layout. `build-malloc`/`build-free`

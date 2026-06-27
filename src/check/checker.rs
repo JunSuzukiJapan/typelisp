@@ -1357,6 +1357,7 @@ impl Checker {
             "apply" => return self.check_apply_form(heap, interp, env, args),
             "match" => return self.check_match(heap, interp, env, args, expected),
             "panic" => return self.check_panic(heap, interp, env, args),
+            "the" => return self.check_the(heap, interp, env, args),
             "compile" => return self.check_compile(heap, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
@@ -1887,6 +1888,28 @@ impl Checker {
         }
         let msg = self.check(heap, interp, env, args[0], Some(&Type::Str))?;
         Ok(Typed { expr: Expr::Panic(Box::new(msg)), ty: Type::Never })
+    }
+
+    /// `(the Type expr)`: a type annotation, e.g. `(the i64 5)` to make an
+    /// integer literal default to `i64` instead of `i32`, or to pin down a
+    /// generic call's type argument the way an `expected` type elsewhere
+    /// would. Purely a checking-time hint with no runtime behavior of its
+    /// own — `Type` simply becomes `expr`'s `expected` (the same role it
+    /// plays for a `defun` parameter or `let` binding annotation), and the
+    /// returned `Typed` is exactly `expr`'s own (no new `Expr` variant; `the`
+    /// vanishes after checking).
+    fn check_the(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
+        if args.len() != 2 {
+            return Err(Error::TypeError("the: (the Type expr)".into()));
+        }
+        let ty = self.canon(&parse_type(heap, args[0])?);
+        self.check(heap, interp, env, args[1], Some(&ty))
     }
 
     /// `(compile name)` / `(compile type::method)`: the name being compiled

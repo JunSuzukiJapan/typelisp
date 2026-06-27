@@ -579,3 +579,73 @@ fn typed_ast_records_expr_and_type() {
         other => panic!("unexpected: {:?}", other),
     }
 }
+
+// ---- the (type annotation) ---------------------------------------------------
+
+#[test]
+fn the_overrides_an_integer_literals_default_type() {
+    assert_eq!(ty("(the i64 5)"), Type::I64);
+    assert_eq!(ty("(the f32 1.5)"), Type::F32);
+}
+
+#[test]
+fn the_produces_the_same_expr_as_its_inner_form() {
+    // `the` contributes no AST node of its own — checking `(the i32 5)`
+    // yields exactly the same `Expr::Int` the bare literal would.
+    match form("(the i32 5)").unwrap() {
+        TopLevel::Expr(Typed { expr: Expr::Int(5), ty: Type::I32 }) => {}
+        other => panic!("unexpected: {:?}", other),
+    }
+}
+
+#[test]
+fn the_mismatch_is_a_type_error() {
+    assert_type_error("(the bool 5)");
+}
+
+#[test]
+fn the_rejects_wrong_arity() {
+    assert_type_error("(the i32)");
+    assert_type_error("(the i32 5 6)");
+}
+
+#[test]
+fn the_pins_a_generic_calls_type_argument() {
+    // `identity` is a generic `defun` (T -> T); annotating its argument's
+    // type with `the` is enough to resolve `T`, the same as an outer
+    // `expected` type would.
+    assert_eq!(ty_with_prelude("(identity (the i64 5))"), Type::I64);
+}
+
+// ---- exit ---------------------------------------------------------------------
+
+#[test]
+fn exit_type_checks_as_never() {
+    // `exit`'s actual process termination can only be observed
+    // out-of-process — see `tests/exit_test.rs`. This only checks the type
+    // level: `Never` satisfies any expected type, like `panic`.
+    match program("(defun f () i32 (if true 1 (exit 1)))").unwrap() {
+        TopLevel::Defun { ret, .. } => assert_eq!(ret, Type::I32),
+        other => panic!("unexpected: {:?}", other),
+    }
+}
+
+#[test]
+fn exit_rejects_wrong_arity() {
+    assert_type_error("(exit)");
+    assert_type_error("(exit 1 2)");
+}
+
+// ---- unreachable / todo (prelude macros) ---------------------------------------
+
+#[test]
+fn unreachable_and_todo_type_check_as_never() {
+    match program_with_prelude("(defun f () i32 (if true 1 (unreachable)))").unwrap() {
+        TopLevel::Defun { ret, .. } => assert_eq!(ret, Type::I32),
+        other => panic!("unexpected: {:?}", other),
+    }
+    match program_with_prelude("(defun g () i32 (if true 1 (todo)))").unwrap() {
+        TopLevel::Defun { ret, .. } => assert_eq!(ret, Type::I32),
+        other => panic!("unexpected: {:?}", other),
+    }
+}

@@ -246,7 +246,7 @@ impl Interp {
                 // chain (~20 tags) nested a few `Construct`/`Match` levels
                 // deep was enough to blow even a worker thread's default
                 // stack (discovered compiling a `dolist`-based function,
-                // Stage 8 of the Sexpr-representation plan, `docs/TODO.md`).
+                // Stage 8 of the Sexpr-representation plan, `docs/implementation-log.md`).
                 // Only the condition's own (shallow) evaluation and whichever
                 // single leaf branch is ultimately taken still recurse.
                 let mut cur = t;
@@ -692,7 +692,7 @@ impl Interp {
         // logical argument-array slot binds to which name — and, for the
         // automatic `ClosureBox` retain/release insertion work (`kind = 1`)
         // and the Sexpr GC-root insertion work (`kind = 2`, Stage 6 of the
-        // Sexpr-representation plan, `docs/TODO.md`), what kind of binding
+        // Sexpr-representation plan, `docs/implementation-log.md`), what kind of binding
         // it is at all. Shares `ast_bridge::tagged_sym_list`'s exact
         // construction (a `labels`/`lambda` parameter or captured-name list
         // needs the identical shape) rather than re-deriving it here, so
@@ -905,6 +905,13 @@ impl Interp {
                 )
             }
             "random" => Some(eval_random(args)),
+            // `exit`: terminates the process immediately via the OS, never
+            // returning — `rt_i64` truncates to `i32` the same way every
+            // other `i32`-typed builtin extracts its argument.
+            "exit" => match rt_i64(&args[0]) {
+                Ok(code) => std::process::exit(code as i32),
+                Err(e) => Some(Err(e)),
+            },
             "gensym" => {
                 // A leading space mirrors the hidden-binding idiom already
                 // used for `dotimes`/`dolist`'s internal variables in the
@@ -1086,7 +1093,7 @@ fn is_sexpr_type(type_name: &Path) -> bool {
 /// parameter/return type, whether a value crossing the typelisp-call-
 /// syntax/compiled-code boundary needs `compile::runtime::encode`/`decode`
 /// (a `Sexpr`) or is already a plain `i64` (everything else this compiler
-/// can produce today — see `docs/TODO.md`'s Stage 5 entry).
+/// can produce today — see `docs/implementation-log.md`'s Stage 5 entry).
 fn type_is_sexpr(ty: &Type) -> bool {
     matches!(ty, Type::Named(p, _) if is_sexpr_type(p))
 }
@@ -1542,7 +1549,7 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// `staticlib` instead) from this one source of truth.
 ///
 /// `rt_push_sexpr_root`/`rt_pop_sexpr_root` (Stage 6 of the
-/// Sexpr-representation plan, `docs/TODO.md` — the "Sexprルート挿入パス"):
+/// Sexpr-representation plan, `docs/implementation-log.md` — the "Sexprルート挿入パス"):
 /// unlike `rt_car`/.../`rt_match_fail`, nothing here rewrites a *user-visible*
 /// call name to reach these (`is_rt_builtin_name`'s list is unchanged) —
 /// `compiler.rs`'s `retain-bindings`/`release-bindings`/`bind-let-values`/
@@ -2276,7 +2283,7 @@ fn llvm_builder_debug_closure_refcount(args: &[RtValue]) -> Result<RtValue, Eval
 }
 
 // ---- Stage 6 of the Sexpr-representation plan: generic malloc/free ------
-// (`docs/TODO.md`) — the `ClosureBox` generalization: a general ADT box
+// (`docs/implementation-log.md`) — the `ClosureBox` generalization: a general ADT box
 // (`Option`/`Result`/`defstruct`) needs heap storage and offset load/store
 // exactly like a `ClosureBox` does, but with no fixed header shape to bake
 // in (a variant tag slot, then one slot per field — `compiler.rs`'s

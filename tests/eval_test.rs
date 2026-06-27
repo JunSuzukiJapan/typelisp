@@ -716,3 +716,24 @@ fn apply_with_no_fixed_arguments_passes_the_whole_list_as_rest() {
     );
     assert_eq!(eval_ok(&src), RtValue::Int(3));
 }
+
+// ---- the (type annotation) ---------------------------------------------------
+
+#[test]
+fn the_is_transparent_at_runtime() {
+    assert_eq!(eval_ok("(the i64 5)"), RtValue::Int(5));
+}
+
+// ---- unreachable / todo -------------------------------------------------------
+
+#[test]
+fn unreachable_panics() {
+    let src = "(defun boom () i32 (unreachable)) (boom)";
+    assert_eq!(run_with_prelude(src), Err(EvalError::Panic("unreachable".into())));
+}
+
+#[test]
+fn todo_panics() {
+    let src = "(defun boom () i32 (todo)) (boom)";
+    assert_eq!(run_with_prelude(src), Err(EvalError::Panic("todo".into())));
+}

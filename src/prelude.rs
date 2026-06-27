@@ -71,6 +71,14 @@ pub const SOURCE: &str = r#"
 (defun null ((s Sexpr)) bool (match s ((Nil) true) (_ false)))
 (defun atom ((s Sexpr)) bool (not (consp s)))
 
+;; `unreachable`/`todo` (cl-equivalence-catalog.md §1.2): placeholders for
+;; "this branch can't be reached" / "not implemented yet", each a
+;; zero-argument macro expanding to a fixed `panic` call — no new special
+;; form needed in Rust, unlike `the` (a real checker extension, since
+;; annotating a type can't be done by macro expansion alone).
+(defmacro unreachable () `(panic "unreachable"))
+(defmacro todo () `(panic "todo"))
+
 ;; Loop/branch primitive reduction (LLVMコンパイラ作業に先立つ整理): `loop`/
 ;; `break`/`return` (looping) and `if`/`match` (branching) are the only forms
 ;; the checker/interpreter/compiler need to understand natively going
