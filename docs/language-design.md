@@ -3,7 +3,7 @@
 最終更新: 2026-06-23 / ブランチ: `feature/compiler`
 
 このドキュメントは、設計で**確定した言語仕様**を後から見返せるよう記録するもの。
-実装の進捗・段取りは [TODO.md](TODO.md) を参照。
+現在の残作業は [TODO.md](TODO.md)、完了した実装の経緯は [implementation-log.md](implementation-log.md) を参照。
 
 ---
 
@@ -106,10 +106,14 @@
 脱糖の例: `when`→`if`+`progn`、`unless`→`if`、`if-let (pat val) then else`→2 腕 `match`（包括アームで網羅）、
 `quasiquote`→`Expr::Quote`+`Expr::Construct{Cons,..}` の組合せ（`list` の脱糖と同様、ランタイムマクロ機構は使わない）。
 
-実装状況: `if` `let` `let*` `progn` `when` `unless` `and` `or` `cond` `setf` `while` `loop` `break` `return` `lambda`
-`match` `if-let` `panic` `defvar` `defconstant` `module` `use` `defmethod` `quote` `quasiquote` `defmacro`
-は実装済（[src/check/checker.rs](../src/check/checker.rs)）。`defmacro` は CL 流（非衛生的）— 詳細は
-[TODO.md](TODO.md) のステップ 4k を参照。`defstruct` は実装後2026-06-23に削除・再設計待ち。
+実装状況: `if` `let` `let*` `progn` `when` `unless` `and` `or` `cond` `case` `setf` `while` `until` `loop` `break`
+`return` `lambda` `match` `if-let` `while-let` `do` `the` `panic` `defvar` `defconstant` `module` `use`
+`defmethod` `quote` `quasiquote` `defmacro`
+は実装済（[src/check/checker.rs](../src/check/checker.rs)。`the`のみchecker特殊形、
+`case`/`until`/`while-let`/`do`は`prelude.rs`の`defmacro`）。`unreachable`/`todo`/`exit`（§4.1/§7）も実装済
+（前2つは`panic`を呼ぶ`defmacro`、`exit`は`std::process::exit`を呼ぶRust組み込み自由関数）。
+残るは`doiter`のみ（仕様未確定、§3末尾参照）。`defmacro` は CL 流（非衛生的）— 詳細は
+[implementation-log.md](implementation-log.md) のステップ 4k を参照。`defstruct` は実装後2026-06-23に削除・再設計待ち。
 `when`/`unless`/`and`/`or`/`cond`/`let*` は `if`/`let` への脱糖。`setf`（可変ローカル/グローバル変数）/`while` は専用 AST
 ノード（eval 環境は `Rc<RefCell>` の可変スロット）。`defvar`（可変）/`defconstant`（不変）はグローバル変数を現在の
 名前空間に登録し、型注釈 `(name Type)` は任意（省略時は値から推論）。
@@ -125,7 +129,7 @@
 `dolist`/`loop` いずれの内側でも使え、`loop` の型は内側で見つかった `break`/`return` の値型の join（`match`/`cond` の
 腕と同様に一致が必要）。一度も脱出しない `loop` は型 `!`（Rust の `loop {}` と同じ）。`while` 系はもともと型が `Unit`
 固定なので、その内側の `return` の値も `Unit` でなければ型エラー。
-残り（`case` `do` `doiter` `while-let` `the`）は今後。
+残るのは `doiter`（「何に対する反復か」の仕様未確定、要設計）のみ——`case`/`do`/`while-let`/`the`は実装済。
 
 ---
 

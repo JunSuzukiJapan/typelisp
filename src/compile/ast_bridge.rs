@@ -74,7 +74,7 @@ const KIND_SEXPR: i64 = 2;
 /// `unsupported`), [`translate_construct`] (`Sexpr`'s own variants compile to
 /// the tagged-`i64`/`rt_cons` representation Stage 2/3/4/5 already built,
 /// every *other* ADT compiles to a freshly `malloc`'d box instead — Stage 6
-/// of the Sexpr-representation plan, `docs/TODO.md`), and [`binding_kind`].
+/// of the Sexpr-representation plan, `docs/implementation-log.md`), and [`binding_kind`].
 fn is_sexpr_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(p, _) if *p == Path::root("sexpr"))
 }
@@ -84,7 +84,7 @@ fn is_sexpr_type(ty: &Type) -> bool {
 /// crosses a binding boundary (a function's own parameters/captures, a
 /// `let` binding): a `Fn`-typed one needs `ClosureBox` retain/release
 /// (labels/closures Stage 4); a `Sexpr`-typed one needs GC-root push/pop
-/// instead (Stage 6 of the Sexpr-representation plan, `docs/TODO.md` — the
+/// instead (Stage 6 of the Sexpr-representation plan, `docs/implementation-log.md` — the
 /// "Sexprルート挿入パス") — a tagged `i64` that may point into the
 /// GC-managed cons heap, never something `build-closure-retain`/
 /// `build-closure-release` could safely touch; anything else needs neither.
@@ -171,7 +171,7 @@ fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>)
 /// `compile-call-args` reads `kind` to decide whether a given argument's
 /// value needs the automatic `ClosureBox` retain/release treatment (`kind =
 /// 1`) or a `push-sexpr-root` (`kind = 2`, Stage 8 of the
-/// Sexpr-representation plan, `docs/TODO.md` — a call argument is exactly
+/// Sexpr-representation plan, `docs/implementation-log.md` — a call argument is exactly
 /// the kind of fresh, unnamed temporary the "Sexprルート挿入パス" left
 /// unprotected: computing a *later* argument could allocate and reclaim an
 /// *earlier* one's still-unrooted cons cell before the call ever happens).
@@ -376,7 +376,7 @@ fn translate_if(heap: &mut Heap, cond: &Typed, then: &Typed, els: &Typed, ty: &T
 /// its own body statements; `compiler.rs`'s `compile-let-body` is what
 /// gives the trailing forms CL `let`'s actual "sequence, last form's value
 /// wins" semantics (lifted for Stage 8 of the Sexpr-representation plan,
-/// `docs/TODO.md` — `dolist`'s own macro expansion always produces a
+/// `docs/implementation-log.md` — `dolist`'s own macro expansion always produces a
 /// multi-statement inner `let` body: `,@body` followed by a hidden `setf`).
 fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
     let mut pair_values = Vec::with_capacity(binds.len());
@@ -1015,7 +1015,7 @@ fn pattern_list_to_sexpr(heap: &mut Heap, pats: &[Pattern]) -> Result<Vec<Value>
 }
 
 /// `Expr::Match(scrut, arms)` -> `(match is-fn scrutinee-form
-/// ((pattern-form . body-form)...))` (Stage 5, `docs/TODO.md`) — only
+/// ((pattern-form . body-form)...))` (Stage 5, `docs/implementation-log.md`) — only
 /// when the scrutinee's own type is `Sexpr` ([`is_sexpr_type`]); matching
 /// `Option`/`Result`/a `defstruct` stays `unsupported`. Stage 6 makes those
 /// types constructible (`Expr::Construct`) but doesn't lift this
@@ -1120,7 +1120,7 @@ fn translate_arms(heap: &mut Heap, arms: &[Arm], direct: &HashSet<String>) -> Re
 
 /// `Expr::Construct { variant, args, .. }` -> `(construct is-sexpr-bool
 /// variant-i64 arg-form...)` (Stage 6 of the Sexpr-representation plan,
-/// `docs/TODO.md`). `is-sexpr` ([`is_sexpr_type`], read off `ty` — the
+/// `docs/implementation-log.md`). `is-sexpr` ([`is_sexpr_type`], read off `ty` — the
 /// node's own checked type, `Type::Named(type_name, _)`, the same `Path`
 /// `Checker::check_construct` built `type_name` from — so this needs no
 /// separate `type_name` field of its own) is the dispatch `compiler.rs`'s
@@ -1894,7 +1894,7 @@ mod tests {
         assert_eq!(expect_str(&heap, body_fields[0]), "x");
     }
 
-    /// Stage 8 of the Sexpr-representation plan (`docs/TODO.md`): a `let`
+    /// Stage 8 of the Sexpr-representation plan (`docs/implementation-log.md`): a `let`
     /// body may now hold more than one statement — translated the same
     /// variadic way `translate_loop` already translates its own body
     /// (`translates_a_loop_with_a_multi_statement_body`, above) — needed

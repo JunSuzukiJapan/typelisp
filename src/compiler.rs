@@ -2,7 +2,7 @@
 //! [`crate::compile::ast_bridge`]) -> LLVM IR, built by calling the
 //! `llvm-*` builtins (`crate::eval::interp`'s `eval_llvm_builtin_method`)
 //! directly — the same "Rust provides the bindings, typelisp drives them"
-//! split [docs/TODO.md](../docs/TODO.md) calls for. Loaded the same way
+//! split [docs/implementation-log.md](../docs/implementation-log.md) calls for. Loaded the same way
 //! `prelude.rs` loads the standard library: read -> check -> exec each
 //! top-level form once, against the same `Heap`/`Checker`/`Interp` the rest
 //! of the program uses.
@@ -103,7 +103,7 @@
 //! memory if called on the former). See `retain-bindings`/`release-bindings`/
 //! `compile-env-args`/`compile-escaping-env-args`'s doc comments for the
 //! actual insertion points and the ownership rules behind them (R1-R4 in the
-//! design notes this followed — `docs/TODO.md` has the full writeup); the
+//! design notes this followed — `docs/implementation-log.md` has the full writeup); the
 //! short version: every function activation retains its own `Fn`-typed
 //! params/captures on entry and releases them (unconditionally, minus
 //! whichever one is being returned bare) on exit, a *borrowed* value being
@@ -398,7 +398,7 @@ pub const SOURCE: &str = r#"
 ;; copy afterward. `release-bindings`, at this same activation's exit,
 ;; undoes it.
 ;;
-;; Stage 6 of the Sexpr-representation plan (`docs/TODO.md` — the
+;; Stage 6 of the Sexpr-representation plan (`docs/implementation-log.md` — the
 ;; "Sexprルート挿入パス"): a `kind = 2` (sexpr) name gets the analogous
 ;; treatment, but via `rt_push_sexpr_root` (a GC-root-stack push, not a
 ;; refcount increment) instead of `build-closure-retain` — a `Sexpr`-typed
@@ -491,7 +491,7 @@ pub const SOURCE: &str = r#"
 ;; The bare `rt_push_sexpr_root`/`rt_pop_sexpr_root` call `retain-bindings`/
 ;; `release-bindings`/`bind-let-values`/`restore-let-values` each inline for
 ;; a *named* `kind = 2` binding (Stage 6 of the Sexpr-representation plan,
-;; `docs/TODO.md`), factored out for a *fresh*, unnamed `Sexpr` value instead
+;; `docs/implementation-log.md`), factored out for a *fresh*, unnamed `Sexpr` value instead
 ;; (a `Cons`'s own car/cdr sub-expression, a call argument) — Stage 8's own
 ;; residual gap, the "残る選択肢" entry that gap left for a later pass:
 ;; a temporary `Sexpr` value sitting only in a raw stack slot (never bound
@@ -563,7 +563,7 @@ pub const SOURCE: &str = r#"
 ;; already treat it correctly with no further tagging — see `compile-let`'s
 ;; doc comment.
 ;;
-;; Stage 6 of the Sexpr-representation plan (`docs/TODO.md`): unlike the
+;; Stage 6 of the Sexpr-representation plan (`docs/implementation-log.md`): unlike the
 ;; `fn` case, a `kind = 2` (sexpr) binding *does* need action here —
 ;; `rt_push_sexpr_root`, the same GC-root push `retain-bindings` gives a
 ;; `Sexpr`-typed parameter/capture, since a `let`-bound `Sexpr` value is just
@@ -664,7 +664,7 @@ pub const SOURCE: &str = r#"
 ;; and `cons`'s two `Sexpr` fields (via `rt_car`/`rt_cdr` -- the only
 ;; field kind that needs a real heap read rather than pure bit
 ;; manipulation). `sym`/`str`'s `Str` field and `float`'s `f64` field
-;; aren't representable in compiled code yet (Stage 6/7, `docs/TODO.md`),
+;; aren't representable in compiled code yet (Stage 6/7, `docs/implementation-log.md`),
 ;; so a `Bind` pattern trying to extract either panics clearly here
 ;; rather than producing garbage -- never reached for a `Wildcard`
 ;; sub-pattern (`compile-ctor-subpatterns` skips the call entirely then).
@@ -1031,7 +1031,7 @@ pub const SOURCE: &str = r#"
                        ;; plus, since each `forms` element is now a
                        ;; `(kind . arg-form)` pair (`ast_bridge::tagged_ast_list_to_sexpr`,
                        ;; generalized from a plain `is-fn` `Bool` in Stage 8
-                       ;; of the Sexpr-representation plan, `docs/TODO.md`),
+                       ;; of the Sexpr-representation plan, `docs/implementation-log.md`),
                        ;; marking `pending-ptr` (same length, caller-
                        ;; allocated) wherever that argument is `Fn`-typed
                        ;; (`kind = 1`) *and* fresh (see `form-is-borrowed?`)
@@ -1317,7 +1317,7 @@ pub const SOURCE: &str = r#"
                                   (compile-let-values builder env fn-env captured cur-fn loop-exit loop-slot rest acc)))))
                            (_ ())))
                        ;; Stage 8 of the Sexpr-representation plan
-                       ;; (`docs/TODO.md`): compiles a `let` body's statement
+                       ;; (`docs/implementation-log.md`): compiles a `let` body's statement
                        ;; sequence one form at a time, the same
                        ;; `block-terminated?` short-circuit
                        ;; `compile-loop-body` already makes (every form after
@@ -1838,7 +1838,7 @@ pub const SOURCE: &str = r#"
                                   (build-br builder merge-block))))))
                        ;; `(construct is-sexpr variant-i64 arg-form...)`
                        ;; (Stage 6 of the Sexpr-representation plan,
-                       ;; `docs/TODO.md`) — `is-sexpr` (`ast_bridge::is_sexpr_type`,
+                       ;; `docs/implementation-log.md`) — `is-sexpr` (`ast_bridge::is_sexpr_type`,
                        ;; read off the node's own checked type) dispatches
                        ;; between `Sexpr`'s own 8 variants
                        ;; (`compile-construct-sexpr`) and every other ADT's
