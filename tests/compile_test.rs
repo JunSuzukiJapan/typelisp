@@ -2054,20 +2054,25 @@ fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_cod
 /// variant tag.
 ///
 /// `compile-field-get`/`compile-field-set` themselves aren't exercised
-/// end-to-end here, deliberately: `p::x`/`(setf p::y v)` surface syntax
-/// always desugars to an *instance-method call* (`Expr::Assoc`, evaluating
-/// the auto-generated accessor's body — `Expr::FieldGet`/`FieldSet` — only
-/// *inside that method*, never at the call site itself), and `(compile
-/// "name")` only ever compiles a top-level `defun` (`self.fns`), never an
-/// instance method (`self.methods`) — see `Interp::compiled_fn_body`. So a
-/// `defun` that reads/writes a constructed struct's fields can't be
-/// `compile`d in this stage at all (it would panic in `compile-assoc`,
-/// which only recognizes an `i64`/`i32` receiver). `compile-field-get`/
-/// `compile-field-set`'s own compiled logic is exercised at the
-/// `ast_bridge` translation level only (`translates_a_field_get`/
-/// `translates_a_field_set`) — extending `compile` to reach instance
-/// methods is a separate, not-yet-addressed gap, left for a follow-up
-/// stage.
+/// end-to-end *here* — `p::x`/`(setf p::y v)` surface syntax always
+/// desugars to an *instance-method call* (`Expr::Assoc`, evaluating the
+/// auto-generated accessor's body — `Expr::FieldGet`/`FieldSet` — only
+/// *inside that method*, never at the call site itself), and at this stage
+/// `(compile "name")` only ever compiled a top-level `defun` (`self.fns`),
+/// never an instance method (`self.methods`). See the
+/// `compile_dispatches_a_defstruct_field_accessor_method_to_native_code`/
+/// `..._setter_method_to_native_code` tests below (`Interp::resolve_fn_def`/
+/// `method_key` — `(compile "type::method")`) for the follow-up that closes
+/// this specific gap: compiling the accessor/setter *method itself* (whose
+/// body is the bare `Expr::FieldGet`/`FieldSet`, no `Expr::Assoc` involved)
+/// and wiring `Expr::Assoc`'s own dispatch to use it once compiled, the same
+/// way `Expr::Call` already did for top-level functions. A *different* gap
+/// remains open, deliberately not attempted here: a top-level `defun` whose
+/// *body itself* contains a `p::x`-style call still can't be `compile`d at
+/// all (it would panic in `compile-assoc`, which only recognizes an
+/// `i64`/`i32` receiver — calling a `compile`d method *from inside other
+/// compiled code* needs `compile-assoc` to grow a third case, not attempted
+/// here).
 #[test]
 fn compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_code() {
     let v = run_with_compiler_and_prelude(
@@ -2091,6 +2096,91 @@ fn compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_
     assert_eq!(variant, 0, "a defstruct's lone variant is always index 0 (\"new\")");
     assert_eq!(x, 3);
     assert_eq!(y, 4);
+}
+
+/// `(compile "point::x")`: `Interp::method_key`/`resolve_fn_def` resolve a
+/// `"type::method"` name against `self.methods` instead of `self.fns`,
+/// compiling `point`'s auto-generated `x` accessor (body: bare
+/// `Expr::FieldGet`, no `Expr::Assoc`) on its own — closing the gap the
+/// `..._constructs_a_defstruct_instance..._` test above's doc comment
+/// describes. `make-point`'s own *construction* stays exactly as before
+/// (a `compile`d top-level `defun`, `Expr::Call`-dispatched); only the
+/// *read* (`p::x`, an `Expr::Assoc`) is new — `Interp::call_compiled`
+/// receives the receiver as `RtValue::Int` (the box's raw address, already
+/// in that representation since it came straight out of a `compile`d
+/// `Expr::Call` — see that method's doc comment for why a *purely
+/// interpreted* `RtValue::Struct` receiver would instead hit a clear
+/// internal error, a separate, pre-existing gap), encodes nothing further
+/// (the receiver's static type isn't `Sexpr`), and the field itself is a
+/// plain `i64`.
+#[test]
+fn compile_dispatches_a_defstruct_field_accessor_method_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defstruct point (x i64) (y i64))
+        (defun make-point ((a i64) (b i64)) point (point::new a b))
+        (compile "make-point")
+        (compile "point::x")
+        (let ((p (make-point 3 4))) p::x)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(3));
+}
+
+/// The `FieldSet` counterpart, through `(setf p::x v)`'s own desugaring to
+/// `(set-x p v)` (`Checker::check_setf`) — `compile-field-set` mutates the
+/// box `make-point` returned *in place* (the same raw address, never
+/// copied), so reading it back afterward (interpreted `p::x`, still
+/// dispatching to the now-`compile`d `point::x` from the test above) sees
+/// the write.
+#[test]
+fn compile_dispatches_a_defstruct_field_setter_method_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defstruct point (x i64) (y i64))
+        (defun make-point ((a i64) (b i64)) point (point::new a b))
+        (compile "make-point")
+        (compile "point::x")
+        (compile "point::set-x")
+        (let ((p (make-point 3 4)))
+          (setf p::x 99)
+          p::x)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(99));
+}
+
+/// `(compile "point::bogus")`/`(compile "bogus::x")`: `Interp::method_key`
+/// finds no match either way (a real method name on the wrong type, or any
+/// method name on a type that was never `defstruct`/`defmethod`-registered)
+/// — `resolve_fn_def` reports the same `NoSuchFunction` a plain unknown
+/// `defun` name would, not an internal panic.
+#[test]
+fn compile_of_an_unknown_method_name_is_a_clean_error() {
+    let err = run_with_compiler_and_prelude(
+        r#"
+        (defstruct point (x i64) (y i64))
+        (compile "point::bogus")
+        "#,
+    )
+    .expect_err("expected compiling an unknown method to fail");
+    match err {
+        EvalError::NoSuchFunction(name) => assert_eq!(name, "point::bogus"),
+        other => panic!("expected a NoSuchFunction, got {:?}", other),
+    }
+
+    let err2 = run_with_compiler_and_prelude(
+        r#"
+        (compile "bogus::x")
+        "#,
+    )
+    .expect_err("expected compiling a method on an unknown type to fail");
+    match err2 {
+        EvalError::NoSuchFunction(name) => assert_eq!(name, "bogus::x"),
+        other => panic!("expected a NoSuchFunction, got {:?}", other),
+    }
 }
 
 /// The "Sexprルート挿入パス" (`docs/TODO.md`): a `let`-bound `Sexpr` local

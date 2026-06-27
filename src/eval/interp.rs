@@ -92,6 +92,11 @@ pub struct Interp {
     /// `slots` above already uses. `Expr::Call`'s eval arm checks here
     /// first, before falling back to the tree-walking `fns` entry.
     compiled: RefCell<HashMap<Path, crate::compile::CompiledFn>>,
+    /// `compiled`'s counterpart for an instance/static method JIT-compiled by
+    /// `(compile "type::method")` — keyed the same way [`Self::methods`]
+    /// already is, so the two can never drift. `Expr::Assoc`'s eval arm
+    /// checks here first, mirroring `Expr::Call`'s own `compiled` check.
+    compiled_methods: RefCell<HashMap<(Path, String), crate::compile::CompiledFn>>,
 }
 
 impl Interp {
@@ -104,6 +109,7 @@ impl Interp {
             rooted: Cell::new(0),
             gensym_counter: Cell::new(0),
             compiled: RefCell::new(HashMap::new()),
+            compiled_methods: RefCell::new(HashMap::new()),
         }
     }
 
@@ -301,49 +307,16 @@ impl Interp {
                 // choice) would naturally take precedence over the
                 // tree-walked body.
                 if let Some(compiled) = self.compiled.borrow().get(name) {
-                    // Every parameter/return type is either `Sexpr` (needs
-                    // `compile::runtime::encode`/`decode` — Stage 5,
-                    // `docs/TODO.md`) or already a plain `i64` at the
-                    // compiled ABI level (everything else this compiler can
-                    // produce today). `compile_function` never registers a
-                    // `compiled` entry without first going through
-                    // `compiled_fn_body`, which requires `fns[name].sig` to
-                    // be `Some` — so this is an internal invariant, not a
-                    // user-reachable error.
+                    // `compile_function` never registers a `compiled` entry
+                    // without first going through `compiled_fn_body`, which
+                    // requires `fns[name].sig` to be `Some` — so this is an
+                    // internal invariant, not a user-reachable error.
                     let (param_tys, ret_ty) = self
                         .fns
                         .get(name)
                         .and_then(|f| f.sig.as_ref())
                         .expect("a compiled function always has a type signature");
-                    let int_args = argv
-                        .iter()
-                        .zip(param_tys.iter())
-                        .map(|(v, ty)| match (v, type_is_sexpr(ty)) {
-                            (RtValue::Sexpr(sv), true) => Ok(crate::compile::runtime::encode(*sv)),
-                            (RtValue::Int(n), false) => Ok(*n),
-                            (other, true) => {
-                                Err(EvalError::Internal(format!("compiled call: expected a Sexpr argument, got {:?}", other)))
-                            }
-                            (other, false) => {
-                                Err(EvalError::Internal(format!("compiled call: expected an Int argument, got {:?}", other)))
-                            }
-                        })
-                        .collect::<Result<Vec<i64>, EvalError>>()?;
-                    // Registers `heap` as this thread's active `Heap` (see
-                    // `compile::runtime::set_active_heap`'s doc comment) so any
-                    // `rt-cons`/`rt-car`/... call the compiled code makes —
-                    // directly or transitively through another compiled
-                    // function — resolves against the right heap. Done on every
-                    // call rather than once, since it's one pointer store and
-                    // there's no cheaper place to detect "this callee might
-                    // transitively touch the heap" ahead of time.
-                    crate::compile::runtime::set_active_heap(heap as *mut Heap);
-                    let raw = compiled.call(&int_args);
-                    return Ok(if type_is_sexpr(ret_ty) {
-                        RtValue::Sexpr(crate::compile::runtime::decode(raw))
-                    } else {
-                        RtValue::Int(raw)
-                    });
+                    return self.call_compiled(heap, compiled, &argv, param_tys, ret_ty);
                 }
                 if let Some(f) = self.fns.get(name) {
                     self.apply(heap, &f.params, &f.body, argv)
@@ -358,7 +331,20 @@ impl Interp {
             }
             Expr::Assoc { type_name, method, args, .. } => {
                 let (argv, _slots) = self.eval_args(heap, args, env)?;
-                if let Some(m) = self.methods.get(&(type_name.clone(), method.clone())) {
+                let key = (type_name.clone(), method.clone());
+                // `compiled_methods`'s counterpart of `Expr::Call`'s own
+                // `compiled` check above — see [`Self::call_compiled`]'s doc
+                // comment for the one extra risk a method's receiver carries
+                // that a plain function's parameters never do.
+                if let Some(compiled) = self.compiled_methods.borrow().get(&key) {
+                    let (param_tys, ret_ty) = self
+                        .methods
+                        .get(&key)
+                        .and_then(|f| f.sig.as_ref())
+                        .expect("a compiled method always has a type signature");
+                    return self.call_compiled(heap, compiled, &argv, param_tys, ret_ty);
+                }
+                if let Some(m) = self.methods.get(&key) {
                     self.apply(heap, &m.params, &m.body, argv)
                 } else {
                     match eval_builtin_method(type_name, method, &argv) {
@@ -554,18 +540,107 @@ impl Interp {
         self.eval_seq(heap, body, &env)
     }
 
-    /// Looks up `name`'s registered `defun`/`defmethod` body, enforcing the
-    /// two constraints every entry point into the compiler shares: a real
-    /// type signature (so an LLVM function type can be built — never set for
-    /// a `defmacro`) and a single-expression body (`compile`'s long-standing
-    /// scope, unchanged by labels/closures Stage 3). Shared by
+    /// Runs already-evaluated `argv` (`param_tys`-typed, `ret_ty`-returning)
+    /// through `compiled` instead of tree-walking — shared by `Expr::Call`
+    /// and `Expr::Assoc`, the two places eval can reach a `(compile
+    /// "name")`d body from. Every parameter/return type is either `Sexpr`
+    /// (`compile::runtime::encode`/`decode`, Stage 5 of the
+    /// Sexpr-representation plan) or assumed already representable as a
+    /// plain `i64` at the compiled ABI level — true for an `i64`/`i32`
+    /// itself, and for a general-ADT pointer (`Option`/`defstruct`, Stage 6)
+    /// that *already* crossed this same boundary once (so it's sitting in
+    /// `argv` as `RtValue::Int`, not decoded into `RtValue::Struct`/etc. —
+    /// general-ADT bridging at this boundary isn't implemented, a
+    /// pre-existing, separate gap). Calling a compiled method on a receiver
+    /// built by *pure* interpretation (a real `RtValue::Struct`, never
+    /// touched by compiled code) hits the same wall an analogous top-level
+    /// `Expr::Call` already would for a general-ADT parameter — a clear
+    /// internal error here, not a silent misread of unrelated bits.
+    fn call_compiled(
+        &self,
+        heap: &mut Heap,
+        compiled: &crate::compile::CompiledFn,
+        argv: &[RtValue],
+        param_tys: &[Type],
+        ret_ty: &Type,
+    ) -> Result<RtValue, EvalError> {
+        let int_args = argv
+            .iter()
+            .zip(param_tys.iter())
+            .map(|(v, ty)| match (v, type_is_sexpr(ty)) {
+                (RtValue::Sexpr(sv), true) => Ok(crate::compile::runtime::encode(*sv)),
+                (RtValue::Int(n), false) => Ok(*n),
+                (other, true) => Err(EvalError::Internal(format!("compiled call: expected a Sexpr argument, got {:?}", other))),
+                (other, false) => Err(EvalError::Internal(format!("compiled call: expected an Int argument, got {:?}", other))),
+            })
+            .collect::<Result<Vec<i64>, EvalError>>()?;
+        // Registers `heap` as this thread's active `Heap` (see
+        // `compile::runtime::set_active_heap`'s doc comment) so any
+        // `rt-cons`/`rt-car`/... call the compiled code makes — directly or
+        // transitively through another compiled function — resolves against
+        // the right heap. Done on every call rather than once, since it's
+        // one pointer store and there's no cheaper place to detect "this
+        // callee might transitively touch the heap" ahead of time.
+        crate::compile::runtime::set_active_heap(heap as *mut Heap);
+        let raw = compiled.call(&int_args);
+        Ok(if type_is_sexpr(ret_ty) {
+            RtValue::Sexpr(crate::compile::runtime::decode(raw))
+        } else {
+            RtValue::Int(raw)
+        })
+    }
+
+    /// Finds the registered `(Path, String)` key for a `"type::method"`
+    /// name — `None` for a plain name (no `"::"`) or a method that isn't
+    /// registered. The match is purely textual on `name`'s `"::"` split,
+    /// then by `Path::local()` alone (discarding any module qualification) —
+    /// matching `compile-call`'s own "discard qualification, look up by
+    /// local name" treatment of a *caller's* method/function references. A
+    /// real receiver type is never module-qualified in this language
+    /// (`defmethod` always registers under the type's own resolved `Path`,
+    /// and `Checker::check_defmethod` requires that type to already be
+    /// registered), so matching by local name alone can't collide across
+    /// two different types sharing a method name. Shared by
+    /// [`Self::resolve_fn_def`] (the lookup) and [`Self::compile_function`]
+    /// (which `(compile "name")` for a method) — both need the exact same
+    /// `(Path, String)` key.
+    fn method_key(&self, name: &str) -> Option<(Path, String)> {
+        let (type_name, method) = name.split_once("::")?;
+        self.methods.keys().find(|(p, m)| p.local() == type_name && m == method).cloned()
+    }
+
+    /// Resolves a `(compile "name")` argument against either `self.fns` (a
+    /// plain name, a top-level `defun`) or `self.methods` (a `"type::method"`
+    /// name, an instance/static `defmethod` — including a `defstruct`'s
+    /// auto-generated field accessor/setter, whose body is the `Expr::FieldGet`/
+    /// `FieldSet` `compile-field-get`/`compile-field-set` exist to compile in
+    /// the first place). See [`Self::method_key`] for how `name` decides
+    /// which of the two this is.
+    fn resolve_fn_def(&self, name: &str) -> Result<&FnDef, EvalError> {
+        if name.contains("::") {
+            let key = self.method_key(name).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))?;
+            self.methods.get(&key).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))
+        } else {
+            self.fns.get(&Path::root(name)).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))
+        }
+    }
+
+    /// Looks up `name`'s registered `defun`/`defmethod` body (see
+    /// [`Self::resolve_fn_def`]), enforcing the two constraints every entry
+    /// point into the compiler shares: a real type signature (so an LLVM
+    /// function type can be built — never set for a `defmacro`) and a
+    /// single-expression body (`compile`'s long-standing scope, unchanged by
+    /// labels/closures Stage 3). For an instance method, `params`/`sig.0`
+    /// already carry the receiver as element `0` (`Checker::check_defmethod`
+    /// pushes the receiver's own type onto `sig_params` before the method's
+    /// declared parameters) — so it flows through exactly like any other
+    /// parameter here, no special-casing needed. Shared by
     /// [`Self::add_compiled_function`] (the actual AST-bridge step) and
     /// [`Self::compile_function`] (which needs the body slightly earlier —
     /// to collect `Expr::Call` targets, see that method's doc comment —
     /// before `add_compiled_function` ever runs).
     fn compiled_fn_body(&self, name: &str) -> Result<(Vec<(String, Type)>, Typed), EvalError> {
-        let path = Path::root(name);
-        let f = self.fns.get(&path).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))?;
+        let f = self.resolve_fn_def(name)?;
         let sig = f
             .sig
             .as_ref()
@@ -657,10 +732,12 @@ impl Interp {
         Ok(())
     }
 
-    /// `(compile "fn-name")`: JIT-compiles a previously-defined `defun` and
-    /// registers the result in [`Self::compiled`] so `Expr::Call` dispatches
-    /// to native code instead of tree-walking it from then on. See
-    /// [`Self::add_compiled_function`] for the supported-shape scope.
+    /// `(compile "fn-name")` (or `(compile "type::method")`): JIT-compiles a
+    /// previously-defined `defun`/`defmethod` and registers the result in
+    /// [`Self::compiled`]/[`Self::compiled_methods`] (see [`Self::method_key`])
+    /// so `Expr::Call`/`Expr::Assoc` dispatches to native code instead of
+    /// tree-walking it from then on. See [`Self::add_compiled_function`] for
+    /// the supported-shape scope.
     ///
     /// labels/closures Stage 3: unlike `compile::aot::compile_file` (one
     /// shared module built up over every `defun` in file order, so a callee
@@ -686,6 +763,7 @@ impl Interp {
     /// above.
     fn compile_function(&self, heap: &mut Heap, name: &str) -> Result<RtValue, EvalError> {
         let path = Path::root(name);
+        let method_key = self.method_key(name);
         let (_, body) = self.compiled_fn_body(name)?;
         let call_targets: Vec<Path> = crate::compile::ast_bridge::collect_call_targets(&body)
             .into_iter()
@@ -725,7 +803,14 @@ impl Interp {
         externals.extend(rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)));
         let compiled = crate::compile::CompiledFn::new(&module.borrow(), name, &externals)
             .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
-        self.compiled.borrow_mut().insert(path, compiled);
+        match method_key {
+            Some(key) => {
+                self.compiled_methods.borrow_mut().insert(key, compiled);
+            }
+            None => {
+                self.compiled.borrow_mut().insert(path, compiled);
+            }
+        }
         Ok(RtValue::Bool(true))
     }
 

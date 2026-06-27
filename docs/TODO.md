@@ -1548,12 +1548,41 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   許容する**: 型レベルでは合法だが、今回は文の位置（ループ本体直下/ifの枝
   全体）のみ対応——上記「対応範囲」の節参照。
 - **`compile`をインスタンスメソッド（`self.methods`）にも対応させる**
-  （Stage 6で判明）: `Expr::FieldGet`/`FieldSet`は`defstruct`の自動生成
-  アクセサ/セッタの本体としてしか存在せず、`(compile "name")`は
-  `self.fns`しか見ないため、フィールドアクセスを含む関数のend-to-end
-  コンパイルが書けない。`Interp::compiled_fn_body`/`compile_function`/
-  `add_compiled_function`に「型名+メソッド名」で`self.methods`を引く
-  経路を追加する必要がある。
+  （Stage 6で判明、2026-06-27対応済み）: `(compile "type::method")`という
+  名前を`Interp::method_key`/`resolve_fn_def`が`self.methods`に対して解決
+  （`"::"`で分割し`Path::local()`で照合——`compile-call`の「修飾を捨てて
+  ローカル名だけで見る」既存方針と同じ）するようにし、`compiled_fn_body`/
+  `add_compiled_function`/`compile_function`は無変更で動いた（どちらも
+  既に`name: &str`一本で抽象化されていたため）。
+
+  これだけでは「コンパイルできるが呼べない」半端な機能になるため、
+  `Expr::Assoc`の評価も`Expr::Call`と同じ「`compile`済みなら先にネイティブ
+  実行」方式に揃えた——新規`compiled_methods: HashMap<(Path,String),
+  CompiledFn>`フィールド+共通化した`call_compiled`ヘルパー（`Expr::Call`/
+  `Expr::Assoc`両方が呼ぶ）。レシーバの表現問題（インタプリタ上の
+  `RtValue::Struct`とコンパイル済みコードのmalloc箱は別表現）は、
+  「コンパイル済みコードを一度でも経由した値は既に`RtValue::Int`（生
+  アドレス）として流れている」という既存のStage6の挙動を利用して回避——
+  レシーバが`RtValue::Int`であればそのまま渡す、純粋にインタプリタだけで
+  作られた`RtValue::Struct`が来た場合は`Expr::Call`の一般ADT引数と同じ
+  既存の（新規ではない）internal errorになる、という`Expr::Call`と完全に
+  対称な挙動にした（新しい表現変換コードは一切書いていない——書けば
+  mutableなdefstructの書き込みがコピー先にしか反映されない、という
+  別の正しさ問題を生んでいたはず）。
+
+  **まだ未対応（別の独立したgap、意図的に今回は対象外）**: `compile-assoc`
+  は依然`i64`/`i32`の算術/比較演算子しか認識しない——`p::x`呼び出しを
+  ボディに含む`defun`自体をcompileすることはできない（`compile-assoc`が
+  panicする）。コンパイル済みコードの中から別のcompile済みメソッドを
+  呼ぶには`compile-assoc`に3つ目の分岐（ユーザー定義メソッド呼び出し）を
+  追加する必要がある——今回はメソッド単体のcompile+`Expr::Assoc`からの
+  ネイティブ呼び出しのみが対象。
+
+  テスト: `tests/compile_test.rs`に4件追加（`point::x`アクセサの
+  end-to-end実行、`point::set-x`セッタの破壊的書き込みが後続の読み出しに
+  反映されることの確認、未知のメソッド名/未知の型名どちらも明確な
+  `NoSuchFunction`になることの確認2件）。全体テスト3回連続green、
+  clippy警告0。
 - **一般ADT箱（`Construct`/`FieldGet`/`FieldSet`）のrefcount/解放と
   GCルート保護**（Stage 6で判明、2026-06-27に一部対応）: 現状`malloc`の
   みでリーク許容（変更なし、`ClosureBox`の未参照リークと同じ前例）。
