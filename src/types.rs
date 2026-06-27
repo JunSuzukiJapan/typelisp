@@ -9,7 +9,9 @@
 //! Symbols are case-folded by the reader, so all type names are lowercase here.
 
 use std::fmt;
+use std::iter::Peekable;
 
+use crate::name_lexer::{NameLexer, NameTok};
 use crate::{Error, Heap, Value};
 
 /// A structured, fully-qualified path identifying a type, free function, or
@@ -217,8 +219,52 @@ fn parse_fn_params(heap: &Heap, ps: &[Value]) -> Result<(Vec<Type>, Option<Box<T
 /// `::` path segments into a structured [`Type`]/[`Path`]. This — and the
 /// reader — are the only places `::` strings are decoded.
 fn parse_type_name(name: &str) -> Type {
-    let (head, args) = split_generics(name);
-    let segs: Vec<String> = head.split("::").map(|s| s.to_string()).collect();
+    let mut toks = NameLexer::new(name).peekable();
+    let (segs, args) = parse_qualified_generic(&mut toks);
+    named_or_primitive(segs, args)
+}
+
+/// Recursive-descent parse of `ident (:: ident)* (< args >)?` — the grammar
+/// behind a generic type token like `geometry::Pair<K,V>` — into path
+/// segments and (if a `<...>` suffix was present) the generic arguments of
+/// the final segment. `Vec<a::b>`'s inner `::` is never mistaken for a path
+/// separator because it is consumed while parsing the `<...>` argument, one
+/// recursive level down from the `::` chain that builds `segs` here.
+fn parse_qualified_generic<'a>(toks: &mut Peekable<NameLexer<'a>>) -> (Vec<String>, Vec<Type>) {
+    let mut segs = Vec::new();
+    loop {
+        if let Some(NameTok::Ident(s)) = toks.next() {
+            segs.push(s.to_string());
+        }
+        if matches!(toks.peek(), Some(NameTok::ColonColon)) {
+            toks.next();
+        } else {
+            break;
+        }
+    }
+
+    let mut args = Vec::new();
+    if matches!(toks.peek(), Some(NameTok::Lt)) {
+        toks.next(); // '<'
+        if matches!(toks.peek(), Some(NameTok::Gt)) {
+            toks.next(); // empty argument list, e.g. `Foo<>`
+        } else {
+            loop {
+                let (a_segs, a_args) = parse_qualified_generic(toks);
+                args.push(named_or_primitive(a_segs, a_args));
+                match toks.next() {
+                    Some(NameTok::Comma) => continue,
+                    _ => break, // '>' (or a malformed, premature end) closes the list
+                }
+            }
+        }
+    }
+    (segs, args)
+}
+
+/// A non-generic, single-segment name names a primitive; anything else is a
+/// nominal [`Type::Named`].
+fn named_or_primitive(segs: Vec<String>, args: Vec<Type>) -> Type {
     if args.is_empty() && segs.len() == 1 {
         match segs[0].as_str() {
             "i8" => return Type::I8,
@@ -240,43 +286,5 @@ fn parse_type_name(name: &str) -> Type {
             _ => {}
         }
     }
-    Type::Named(
-        Path::from_segments(segs),
-        args.iter().map(|a| parse_type_name(a)).collect(),
-    )
-}
-
-/// Split `"option<i32>"` into `("option", ["i32"])`. Non-generic names yield
-/// no args. Commas separate arguments at the top `<>` nesting level.
-fn split_generics(name: &str) -> (&str, Vec<String>) {
-    if let Some(lt) = name.find('<') {
-        if name.ends_with('>') {
-            let head = &name[..lt];
-            let inner = &name[lt + 1..name.len() - 1];
-            return (head, split_top_level_commas(inner));
-        }
-    }
-    (name, Vec::new())
-}
-
-fn split_top_level_commas(s: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut depth: i32 = 0;
-    let mut start = 0;
-    for (i, c) in s.char_indices() {
-        match c {
-            '<' => depth += 1,
-            '>' => depth -= 1,
-            ',' if depth == 0 => {
-                out.push(s[start..i].trim().to_string());
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    let last = s[start..].trim();
-    if !last.is_empty() {
-        out.push(last.to_string());
-    }
-    out
+    Type::Named(Path::from_segments(segs), args)
 }

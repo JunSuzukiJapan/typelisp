@@ -15,6 +15,7 @@
 //! quote `'`, quasiquote `` ` ``, unquote `,`, unquote-splicing `,@`, and
 //! comments (`;` line, `#| ... |#` nested block).
 
+use crate::name_lexer::{NameLexer, NameTok};
 use crate::{Error, Heap, SymId, Value};
 
 pub struct Reader;
@@ -424,26 +425,23 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
 /// `geometry::Point` and `geometry::Vec<T>` split but `Vec<a::b>` does not.
 /// Returns `None` when there is no top-level `::`.
 fn split_path_top_level(tok: &str) -> Option<Vec<&str>> {
-    let bytes = tok.as_bytes();
     let mut depth: i32 = 0;
     let mut parts: Vec<&str> = Vec::new();
     let mut start = 0;
-    let mut i = 0;
     let mut found = false;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'<' => depth += 1,
-            b'>' => depth -= 1,
-            b':' if depth == 0 && i + 1 < bytes.len() && bytes[i + 1] == b':' => {
-                parts.push(&tok[start..i]);
-                i += 2;
-                start = i;
+    let mut lex = NameLexer::new(tok);
+    while let Some(t) = lex.next() {
+        match t {
+            NameTok::Lt => depth += 1,
+            NameTok::Gt => depth -= 1,
+            NameTok::ColonColon if depth == 0 => {
+                let sep_end = lex.pos(); // just past this "::"
+                parts.push(&tok[start..sep_end - 2]);
+                start = sep_end;
                 found = true;
-                continue;
             }
             _ => {}
         }
-        i += 1;
     }
     if !found {
         return None;
