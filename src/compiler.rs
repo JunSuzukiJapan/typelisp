@@ -488,6 +488,43 @@ pub const SOURCE: &str = r#"
         (build-closure-release builder m v)
         (release-pending-args builder m pending-ptr argc (+ idx 1)))))
 
+;; The bare `rt_push_sexpr_root`/`rt_pop_sexpr_root` call `retain-bindings`/
+;; `release-bindings`/`bind-let-values`/`restore-let-values` each inline for
+;; a *named* `kind = 2` binding (Stage 6 of the Sexpr-representation plan,
+;; `docs/TODO.md`), factored out for a *fresh*, unnamed `Sexpr` value instead
+;; (a `Cons`'s own car/cdr sub-expression, a call argument) — Stage 8's own
+;; residual gap, the "残る選択肢" entry that gap left for a later pass:
+;; a temporary `Sexpr` value sitting only in a raw stack slot (never bound
+;; to a name) has no GC root at all, so any allocation made while computing
+;; a *sibling* operand (another field, another argument) before the value is
+;; finally consumed (a `cons`, a call) could have it reclaimed out from
+;; under that slot. `push-sexpr-root` returns nothing (unlike
+;; `build-closure-retain`, there's no chained value to hand back — a GC
+;; root-stack push has no return value of its own worth threading through).
+(defun push-sexpr-root ((builder llvm-builder) (m llvm-module) (v llvm-value)) ()
+  (let ((args-ptr (alloca-args builder 1)))
+    (store-arg builder args-ptr 0 v)
+    (let ((ignored (build-call builder (get-function m "rt_push_sexpr_root") args-ptr 1))) ())))
+
+;; `push-sexpr-root`'s pop, undoing exactly one push — see that function's
+;; doc comment. Callers always know at LLVM-build time how many pushes they
+;; made (a fixed field count, or `compile-call-args`'s own returned count —
+;; see [`pop-sexpr-roots`] for the latter), so no runtime bookkeeping (a
+;; counter slot, ...) is needed to pair pushes with pops.
+(defun pop-sexpr-root ((builder llvm-builder) (m llvm-module)) ()
+  (let ((args-ptr (alloca-args builder 0)))
+    (let ((ignored (build-call builder (get-function m "rt_pop_sexpr_root") args-ptr 0))) ())))
+
+;; Calls `pop-sexpr-root` `n` times — `compile-call-args`'s own return value
+;; (how many of its arguments were `kind = 2` and so got a `push-sexpr-root`)
+;; tells each call site exactly how many to undo here, once the call those
+;; pushes were protecting is done.
+(defun pop-sexpr-roots ((builder llvm-builder) (m llvm-module) (n i32)) ()
+  (if (eq n 0)
+      ()
+      (let ((ignored (pop-sexpr-root builder m)))
+        (pop-sexpr-roots builder m (- n 1)))))
+
 ;; `HashTable::new` is a static call whose generic `V`/`K` can only be
 ;; inferred from an *expected* type (e.g. a `defun`'s declared return type),
 ;; never from a `let` binding's initializer (`check_let` always checks that
@@ -991,28 +1028,50 @@ pub const SOURCE: &str = r#"
                                (panic (append "compile-assoc: unsupported receiver type " type-name)))))
                        ;; Fills a previously-`alloca-args`'d array, one
                        ;; compiled argument per slot, exactly as before —
-                       ;; plus, since each `forms` element is now an
-                       ;; `(is-fn . arg-form)` pair (`ast_bridge::tagged_ast_list_to_sexpr`),
+                       ;; plus, since each `forms` element is now a
+                       ;; `(kind . arg-form)` pair (`ast_bridge::tagged_ast_list_to_sexpr`,
+                       ;; generalized from a plain `is-fn` `Bool` in Stage 8
+                       ;; of the Sexpr-representation plan, `docs/TODO.md`),
                        ;; marking `pending-ptr` (same length, caller-
                        ;; allocated) wherever that argument is `Fn`-typed
-                       ;; *and* fresh (see `form-is-borrowed?`) — the same
-                       ;; post-call release bookkeeping `compile-env-args`
-                       ;; does for env arrays, here for ordinary call
-                       ;; arguments instead.
-                       (compile-call-args ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (args-ptr llvm-value) (pending-ptr llvm-value) (forms Sexpr) (idx i32)) ()
+                       ;; (`kind = 1`) *and* fresh (see `form-is-borrowed?`)
+                       ;; — the same post-call release bookkeeping
+                       ;; `compile-env-args` does for env arrays, here for
+                       ;; ordinary call arguments instead. A `kind = 2`
+                       ;; (`Sexpr`) argument gets `push-sexpr-root`ed right
+                       ;; here instead, *unconditionally* (no
+                       ;; borrowed/fresh distinction — unlike a `ClosureBox`
+                       ;; retain, a root-stack push is always correct to
+                       ;; make and just as correct to immediately undo,
+                       ;; never a double-free risk): this slot's value would
+                       ;; otherwise sit unrooted in the raw `args-ptr` array
+                       ;; while every *later* argument is computed (each one
+                       ;; a fresh opportunity to allocate and trigger a `gc()`
+                       ;; that reclaims it before the call ever happens) —
+                       ;; the call-argument counterpart of
+                       ;; `compile-construct-sexpr`'s own `Cons`-field fix.
+                       ;; Returns how many such pushes it made, so the
+                       ;; caller (`compile-apply`/`compile-call`/
+                       ;; `compile-apply-indirect`) knows how many
+                       ;; `pop-sexpr-root` calls to make once the call these
+                       ;; roots were protecting is done.
+                       (compile-call-args ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (args-ptr llvm-value) (pending-ptr llvm-value) (forms Sexpr) (idx i32)) i32
                          (match forms
                            ((Cons arg-pair rest)
-                            (let ((is-fn (sexpr-bool (car arg-pair))))
+                            (let ((kind (sexpr-int (car arg-pair))))
                               (let ((form (cdr arg-pair)))
                                 (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot form)))
                                   (store-arg builder args-ptr idx v)
-                                  (if is-fn
+                                  (if (eq kind 1)
                                       (if (form-is-borrowed? env form)
                                           (store-arg builder pending-ptr idx (const-i64 builder 0))
                                           (store-arg builder pending-ptr idx v))
                                       (store-arg builder pending-ptr idx (const-i64 builder 0)))
-                                  (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr rest (+ idx 1))))))
-                           (_ ())))
+                                  (if (eq kind 2)
+                                      (let ((ignored (push-sexpr-root builder m v)))
+                                        (+ 1 (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr rest (+ idx 1))))
+                                      (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr rest (+ idx 1)))))))
+                           (_ 0)))
                        ;; `(apply name (is-fn . arg-form)...)` — a direct
                        ;; call to a name `ast_bridge::translate_apply`
                        ;; already proved (at bridge-translation time)
@@ -1037,22 +1096,24 @@ pub const SOURCE: &str = r#"
                              (let ((argc (sexpr-list-length arg-forms)))
                                (let ((args-ptr (alloca-args builder argc)))
                                  (let ((pending-ptr (alloca-args builder argc)))
-                                   (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr arg-forms 0)
-                                   (match (get fn-env nm)
-                                     ((Some target)
-                                      (let ((env-len (sexpr-list-length captured)))
-                                        (if (eq env-len 0)
-                                            (let ((result (build-call builder target args-ptr argc)))
-                                              (release-pending-args builder m pending-ptr argc 0)
-                                              result)
-                                            (let ((env-ptr (alloca-args builder env-len)))
-                                              (let ((env-pending-ptr (alloca-args builder env-len)))
-                                                (compile-env-args builder env fn-env captured env-ptr env-pending-ptr captured 0)
-                                                (let ((result (build-call-with-env builder target args-ptr argc env-ptr env-len)))
-                                                  (release-pending-args builder m pending-ptr argc 0)
-                                                  (release-pending-args builder m env-pending-ptr env-len 0)
-                                                  result))))))
-                                     (None (panic (append "compile-apply: no direct-callable function named " nm))))))))))
+                                   (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr arg-forms 0)))
+                                     (match (get fn-env nm)
+                                       ((Some target)
+                                        (let ((env-len (sexpr-list-length captured)))
+                                          (if (eq env-len 0)
+                                              (let ((result (build-call builder target args-ptr argc)))
+                                                (release-pending-args builder m pending-ptr argc 0)
+                                                (pop-sexpr-roots builder m sexpr-roots)
+                                                result)
+                                              (let ((env-ptr (alloca-args builder env-len)))
+                                                (let ((env-pending-ptr (alloca-args builder env-len)))
+                                                  (compile-env-args builder env fn-env captured env-ptr env-pending-ptr captured 0)
+                                                  (let ((result (build-call-with-env builder target args-ptr argc env-ptr env-len)))
+                                                    (release-pending-args builder m pending-ptr argc 0)
+                                                    (release-pending-args builder m env-pending-ptr env-len 0)
+                                                    (pop-sexpr-roots builder m sexpr-roots)
+                                                    result))))))
+                                       (None (panic (append "compile-apply: no direct-callable function named " nm)))))))))))
                        ;; `(call name (is-fn . arg-form)...)` — `Expr::Call`,
                        ;; labels/closures Stage 3: a call to a *top-level*
                        ;; `defun` (itself included, for self-recursion),
@@ -1099,10 +1160,11 @@ pub const SOURCE: &str = r#"
                                (let ((argc (sexpr-list-length arg-forms)))
                                  (let ((args-ptr (alloca-args builder argc)))
                                    (let ((pending-ptr (alloca-args builder argc)))
-                                     (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr arg-forms 0)
-                                     (let ((result (build-call builder (get-function m nm) args-ptr argc)))
-                                       (release-pending-args builder m pending-ptr argc 0)
-                                       result))))))))
+                                     (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr arg-forms 0)))
+                                       (let ((result (build-call builder (get-function m nm) args-ptr argc)))
+                                         (release-pending-args builder m pending-ptr argc 0)
+                                         (pop-sexpr-roots builder m sexpr-roots)
+                                         result)))))))))
                        ;; `(apply-indirect callee-form (is-fn . arg-form)...)`
                        ;; — `Expr::Apply`, labels/closures Stage 4, the
                        ;; general indirect-dispatch case
@@ -1136,13 +1198,14 @@ pub const SOURCE: &str = r#"
                                (let ((argc (sexpr-list-length arg-forms)))
                                  (let ((args-ptr (alloca-args builder argc)))
                                    (let ((pending-ptr (alloca-args builder argc)))
-                                     (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr arg-forms 0)
-                                     (let ((result (build-closure-apply builder closure args-ptr argc)))
-                                       (release-pending-args builder m pending-ptr argc 0)
-                                       (if (form-is-borrowed? env callee-form)
-                                           ()
-                                           (build-closure-release builder m closure))
-                                       result))))))))
+                                     (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr arg-forms 0)))
+                                       (let ((result (build-closure-apply builder closure args-ptr argc)))
+                                         (release-pending-args builder m pending-ptr argc 0)
+                                         (pop-sexpr-roots builder m sexpr-roots)
+                                         (if (form-is-borrowed? env callee-form)
+                                             ()
+                                             (build-closure-release builder m closure))
+                                         result)))))))))
                        ;; `compile-if`'s one helper (if/let/comparisons,
                        ;; labels/closures Stage 5): compiles `form` (one of
                        ;; an `if`'s `then`/`else` branches) and, when this
@@ -1852,9 +1915,16 @@ pub const SOURCE: &str = r#"
                                            (build-or builder (build-shl builder (build-add builder b (const-i64 builder 1)) (const-i64 builder 3)) (const-i64 builder 6)))
                                          (if (eq variant 7)
                                              (let ((args-ptr (alloca-args builder 2)))
-                                               (store-arg builder args-ptr 0 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car arg-forms)))
-                                               (store-arg builder args-ptr 1 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car (cdr arg-forms))))
-                                               (build-call builder (get-function m "rt_cons") args-ptr 2))
+                                               (let ((car-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car arg-forms))))
+                                                 (store-arg builder args-ptr 0 car-v)
+                                                 (push-sexpr-root builder m car-v)
+                                                 (let ((cdr-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car (cdr arg-forms)))))
+                                                   (store-arg builder args-ptr 1 cdr-v)
+                                                   (push-sexpr-root builder m cdr-v)
+                                                   (let ((result (build-call builder (get-function m "rt_cons") args-ptr 2)))
+                                                     (pop-sexpr-root builder m)
+                                                     (pop-sexpr-root builder m)
+                                                     result))))
                                              (panic "compile-construct-sexpr: field type is not representable in compiled code yet")))))))
                        ;; `(field-get idx-unary-list obj-form)` (Stage 6) —
                        ;; always a general-ADT box `compile-construct-box`

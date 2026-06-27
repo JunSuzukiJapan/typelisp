@@ -222,7 +222,7 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
 #[test]
 fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" (false var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" (false int 5))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" (0 var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" (0 int 5))))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -250,7 +250,7 @@ fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
 #[test]
 fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (var "k" false) (var "offset" false)))) (apply "go" (false var "n" false))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (var "k" false) (var "offset" false)))) (apply "go" (0 var "n" false))))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -644,7 +644,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
         r#"
         (let ((m (llvm-module::create "mod")))
           (compile-function m "double" '((x . 0)) '(assoc "i64" "+" true (var "x" false) (var "x" false)))
-          (compile-function m "quadruple" '((n . 0)) '(call "double" (false call "double" (false var "n" false)))))
+          (compile-function m "quadruple" '((n . 0)) '(call "double" (0 call "double" (0 var "n" false)))))
         "#,
     ) {
         RtValue::LlvmModule(m) => m,
@@ -675,7 +675,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
 #[test]
 fn the_compiler_body_compiles_a_self_referencing_call() {
     let ir = expect_str(eval_ok_with_compiler(
-        r#"(to-string (compile-function (llvm-module::create "mod") "f" '((n . 0)) '(call "f" (false var "n" false))))"#,
+        r#"(to-string (compile-function (llvm-module::create "mod") "f" '((n . 0)) '(call "f" (0 var "n" false))))"#,
     ));
     assert!(ir.contains("define i64 @f("), "IR was:\n{}", ir);
     assert!(ir.contains("call i64 @f("), "IR was:\n{}", ir);
@@ -863,7 +863,7 @@ fn compile_dispatches_a_top_level_function_passed_by_name_through_apply_fn() {
 #[test]
 fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (false int 5))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int 5))))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -891,7 +891,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
 #[test]
 fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_outer_value() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (var "k" false) (var "offset" false)))) (apply-indirect (var "go" true) (false int 5))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (var "k" false) (var "offset" false)))) (apply-indirect (var "go" true) (0 int 5))))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -1046,7 +1046,7 @@ fn repeated_calls_through_a_captured_closure_do_not_leak_its_refcount() {
                   (position-at-end builder b)
                   (build-ret builder (build-make-closure builder (get-function m "identity") (alloca-args builder 0) 0 0)))))
             (compile-function m "outer" '((cb . 1) (x . 0))
-              '(labels ((cb . 1)) (("go" ((x . 0)) (apply-indirect (var "cb" true) (false var "x" false)))) (apply "go" (false var "x" false))))
+              '(labels ((cb . 1)) (("go" ((x . 0)) (apply-indirect (var "cb" true) (0 var "x" false)))) (apply "go" (0 var "x" false))))
             m))
         (build-test-module)
         "#,
@@ -1215,8 +1215,8 @@ fn compile_apply_releases_a_fresh_sibling_passed_as_a_call_argument_after_the_ca
     let ir = expect_str(eval_ok_with_compiler(
         r#"(to-string (compile-function (llvm-module::create "mod") "outer" '((x . 0))
               '(labels () (("helper" () (int 7))
-                           ("go" ((f . 1) (y . 0)) (apply-indirect (var "f" true) (false var "y" false))))
-                 (apply "go" (false var "helper" true) (false var "x" false)))))"#,
+                           ("go" ((f . 1) (y . 0)) (apply-indirect (var "f" true) (0 var "y" false))))
+                 (apply "go" (1 var "helper" true) (0 var "x" false)))))"#,
     ));
     let call_pos = ir.find("call i64").expect("expected a direct call to go in the IR");
     let release_pos = ir.find("call void @__typelisp_closure_release").expect("expected a release call in the IR");
@@ -2129,5 +2129,75 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_sexpr_local_rooted_acros
     )
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(1), "s's contents must survive every intervening allocation");
+}
+
+/// A gap the "Sexprルート挿入パス" left for a later stage (`docs/TODO.md`'s
+/// "残る選択肢" — temporaries passing through a call-argument array are
+/// unrooted): `compile-construct-sexpr`'s `Cons` variant computes its `car`
+/// sub-form *first* (storing the freshly-built cons cell's tagged pointer
+/// into `args-ptr[0]`), then its `cdr` sub-form — if that second step
+/// allocates (here, by calling a separately-compiled `churn`, which loops
+/// consing the way `churn-and-check` above does directly), `args-ptr[0]`'s
+/// pointer sits in a raw stack slot with no GC root at all until `rt_cons`
+/// is finally called with both slots. Same tiny-heap-forces-real-`gc()`
+/// technique as the `let`-bound case above, just aimed at a fresh, never-let-
+/// bound `car` sub-expression instead.
+#[test]
+fn compile_dispatches_a_function_that_keeps_a_fresh_cons_car_rooted_while_its_cdr_sub_expression_allocates() {
+    let v = run_with_compiler_and_capacity(
+        r#"
+        (defun churn ((n i64)) i64
+          (let ((s (Cons (Int 9) (Int 9))))
+            (loop
+              (if (eq n 0) (return n) ())
+              (Cons s s)
+              (setf n (- n 1)))))
+        (defun make-and-check ((n i64)) i64
+          (match (Cons (Cons (Int 111) (Int 222)) (Int (churn n)))
+            ((Cons (Cons (Int a) (Int b)) (Int c)) (+ a b))
+            (_ -1)))
+        (compile "churn")
+        (compile "make-and-check")
+        (make-and-check 5000)
+        "#,
+        1 << 13,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(333), "the car cons cell's contents must survive the cdr sub-expression's own allocations");
+}
+
+/// The call-argument-array counterpart of the `Cons`-field test above:
+/// `compile-call-args` (`ast_bridge::tagged_ast_list_to_sexpr`'s `kind`
+/// tag, Stage 8 of the Sexpr-representation plan) now `push-sexpr-root`s
+/// every `kind = 2` argument right after computing it — without that, the
+/// first of `combine`'s two `Sexpr` arguments would sit unrooted in
+/// `args-ptr[0]` while the second argument's own sub-expression (a call to
+/// `churn`, allocating heavily) runs, exactly the same exposure window as
+/// `compile-construct-sexpr`'s `Cons` case, just reached through an ordinary
+/// function call instead of a `Construct` literal.
+#[test]
+fn compile_dispatches_a_call_that_keeps_an_earlier_fresh_sexpr_argument_rooted_while_a_later_argument_allocates() {
+    let v = run_with_compiler_and_capacity(
+        r#"
+        (defun churn ((n i64)) i64
+          (let ((s (Cons (Int 9) (Int 9))))
+            (loop
+              (if (eq n 0) (return n) ())
+              (Cons s s)
+              (setf n (- n 1)))))
+        (defun combine ((a Sexpr) (b Sexpr)) Sexpr (Cons a b))
+        (defun make-and-check ((n i64)) i64
+          (match (combine (Cons (Int 111) (Int 222)) (Int (churn n)))
+            ((Cons (Cons (Int a) (Int b)) (Int c)) (+ a b))
+            (_ -1)))
+        (compile "churn")
+        (compile "combine")
+        (compile "make-and-check")
+        (make-and-check 5000)
+        "#,
+        1 << 13,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(333), "combine's first argument must survive its second argument's own allocations");
 }
 

@@ -164,12 +164,21 @@ fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>)
 }
 
 /// The call-argument counterpart of [`ast_list_to_sexpr`]: each translated
-/// form is wrapped as `(is-fn . form)` rather than left bare — `apply`/
+/// form is wrapped as `(kind . form)` rather than left bare — `apply`/
 /// `apply-indirect`/`call`'s argument lists need this (unlike `Expr::Assoc`'s,
 /// which stays untagged via [`ast_list_to_sexpr`]: arithmetic operands are
 /// always `i64`, never `Fn`-typed, so `compile-assoc` never needs the tag).
-/// `compile-call-args` reads `is-fn` to decide whether a given argument's
-/// value needs the automatic `ClosureBox` retain/release treatment at all.
+/// `compile-call-args` reads `kind` to decide whether a given argument's
+/// value needs the automatic `ClosureBox` retain/release treatment (`kind =
+/// 1`) or a `push-sexpr-root` (`kind = 2`, Stage 8 of the
+/// Sexpr-representation plan, `docs/TODO.md` — a call argument is exactly
+/// the kind of fresh, unnamed temporary the "Sexprルート挿入パス" left
+/// unprotected: computing a *later* argument could allocate and reclaim an
+/// *earlier* one's still-unrooted cons cell before the call ever happens).
+/// A plain `Bool` tag (`is-fn`) before this stage — generalized the same way
+/// [`tagged_sym_list`]'s own pair shape was in Stage 6, reusing
+/// [`binding_kind`] rather than re-deriving the same 3-way classification a
+/// third time.
 fn tagged_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>) -> Result<Vec<Value>, Error> {
     let mut values = Vec::with_capacity(items.len());
     for item in items {
@@ -182,9 +191,9 @@ fn tagged_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<S
                 return Err(e);
             }
         };
-        let is_fn = Value::Bool(matches!(item.ty, Type::Fn(..)));
+        let kind = Value::Int(binding_kind(&item.ty));
         heap.push_root(form);
-        let pair = heap.cons(is_fn, form);
+        let pair = heap.cons(kind, form);
         heap.pop_root();
         let pair = match pair {
             Ok(p) => p,
@@ -857,13 +866,13 @@ fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Err
             }
         };
         heap.pop_root(); // s
-        // wrap as `(is-fn . form)` — the same tagged shape every other
+        // wrap as `(kind . form)` — the same tagged shape every other
         // `apply`/`apply-indirect`/`call` argument list uses (see
         // `tagged_ast_list_to_sexpr`), built by hand here since these `var`
         // forms are synthesized from `ty`'s arity rather than translated
         // from real `Typed` argument nodes.
         heap.push_root(v);
-        let pair = heap.cons(Value::Bool(is_fn), v);
+        let pair = heap.cons(Value::Int(binding_kind(t)), v);
         heap.pop_root(); // v
         let pair = match pair {
             Ok(p) => p,
@@ -1381,15 +1390,15 @@ mod tests {
         (tag, fields)
     }
 
-    /// Unwraps a tagged call-argument pair `(is-fn . form)` — see
+    /// Unwraps a tagged call-argument pair `(kind . form)` — see
     /// `tagged_ast_list_to_sexpr`.
-    fn untag_arg(heap: &Heap, pair: Value) -> (bool, Value) {
-        let is_fn = match heap.car(pair).expect("arg pair has a car") {
-            Value::Bool(b) => b,
-            other => panic!("expected a Bool is-fn tag, got {:?}", other),
+    fn untag_arg(heap: &Heap, pair: Value) -> (i64, Value) {
+        let kind = match heap.car(pair).expect("arg pair has a car") {
+            Value::Int(n) => n,
+            other => panic!("expected an Int kind tag, got {:?}", other),
         };
         let form = heap.cdr(pair).expect("arg pair has a cdr");
-        (is_fn, form)
+        (kind, form)
     }
 
     /// Unwraps a tagged name pair `(name . kind)` — see `tagged_sym_list`.
@@ -1614,8 +1623,8 @@ mod tests {
         let (callee_tag, callee_fields) = untag(&heap, fields[0]);
         assert_eq!(callee_tag, "var");
         assert_eq!(expect_str(&heap, callee_fields[0]), "not-a-sibling");
-        let (is_fn, arg_form) = untag_arg(&heap, fields[1]);
-        assert!(!is_fn);
+        let (kind, arg_form) = untag_arg(&heap, fields[1]);
+        assert_eq!(kind, KIND_PLAIN);
         let (arg_tag, _) = untag(&heap, arg_form);
         assert_eq!(arg_tag, "int");
     }
@@ -1632,8 +1641,8 @@ mod tests {
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "call");
         assert_eq!(expect_str(&heap, fields[0]), "square");
-        let (is_fn, arg_form) = untag_arg(&heap, fields[1]);
-        assert!(!is_fn);
+        let (kind, arg_form) = untag_arg(&heap, fields[1]);
+        assert_eq!(kind, KIND_PLAIN);
         let (arg_tag, arg_fields) = untag(&heap, arg_form);
         assert_eq!(arg_tag, "var");
         assert_eq!(expect_str(&heap, arg_fields[0]), "a");

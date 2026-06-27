@@ -1555,10 +1555,50 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   `add_compiled_function`に「型名+メソッド名」で`self.methods`を引く
   経路を追加する必要がある。
 - **一般ADT箱（`Construct`/`FieldGet`/`FieldSet`）のrefcount/解放と
-  GCルート保護**（Stage 6で判明）: 現状`malloc`のみでリーク許容、
-  call引数配列・env配列・if/matchのマージスロット・ループの
-  break/returnマージスロットを通過する一時的なSexpr値のGCルート保護も
-  未対応（束縛点のみ対応——上記Stage 6本文参照）。
+  GCルート保護**（Stage 6で判明、2026-06-27に一部対応）: 現状`malloc`の
+  みでリーク許容（変更なし、`ClosureBox`の未参照リークと同じ前例）。
+
+  GCルート保護のうち**`Cons`構築のcar/cdrフィールドと通常の呼び出し引数
+  配列の2箇所は対応済み**（`docs/TODO.md`このすぐ上、Stage8の節とは別の
+  2026-06-27の追加対応）: `compile-construct-sexpr`の`Cons`分岐
+  （両フィールドが常にSexpr型と静的に分かるため型タグ不要、無条件に
+  `push-sexpr-root`）と、`compile-call-args`（`ast_bridge::tagged_ast_list_to_sexpr`
+  を`is-fn: Bool`から`kind: Int`へ一般化、Stage6の`tagged_sym_list`と
+  同じ`binding_kind`を再利用——`(cons a b)`関数呼び出し経由のCons構築も
+  `compile-call`経由でこの修正の対象に自動的に入った）。新規`push-sexpr-root`/
+  `pop-sexpr-root`/`pop-sexpr-roots`ヘルパーを追加し、`compile-apply`/
+  `compile-call`/`compile-apply-indirect`の3呼び出し元全てに配線。
+  「rootしないと壊れる対照テスト」（小ヒープ+多数の無関係な`cons`で
+  実際に破壊されることを先に実証、その後修正して直ることを確認、
+  Stage4/6と同じ実証スタイル）2件追加。
+
+  **まだ未対応（次に着手する場合の候補、優先順位はユーザー未確認）**:
+  - **一般ADT箱のフィールド**（`compile-construct-box-fields`）:
+    Cons/呼び出し引数と違い、各フィールドの型はSexprとは限らない
+    （`Option<i64>`の`Some`フィールドはi64、等）——`ast_bridge::translate_construct`
+    の現在のwire形式はフィールドの型情報を運んでいない（`tagged_sym_list`/
+    `tagged_ast_list_to_sexpr`と違い`(kind . form)`ペア化されていない）ため、
+    まず`Expr::Construct`のwire形式自体を拡張する必要がある——
+    Cons/呼び出し引数より一段大きい変更。
+  - **`compile-if-branch`経由の値**（`if`/`return`/`setf`/`match`アーム）:
+    これらは依然`is-fn: Bool`のまま（`translate_if`/`translate_return`/
+    `translate_set`/`translate_match`、Stage6の時点で意図的に未変更と
+    明記済み）。`if`/`match`自身のmerge slotは store→load が隣接命令
+    （間に割り込むallocationが無い）なので実は単体では安全——本当に
+    危険なのはload後の値が「名前に束縛されない一時値」のまま次の
+    consumer（呼び出し引数・別のConstructフィールド等）に渡る経路で、
+    そこは今回の呼び出し引数・Cons修正で実質的にカバーされる。残る
+    ギャップは主に「if/matchの結果をそのまま関数の戻り値として
+    `build-ret`する直前」（現状は問題なし、間に割り込む大きい構造的
+    allocationが無いケースのみ）と「将来compile-if-branch自身がkind対応
+    した場合の一貫性」程度——現時点で具体的な破壊を実証するテストは
+    まだ書けていない（書けたら優先度を上げる）。
+  - **`compile-env-args`/`compile-escaping-env-args`**: 既存の`kind`判定
+    （`tagged_sym_list`由来）はkind=1のみ分岐、kind=2は素通し——ただし
+    これらは既存の（別の場所で既にrootされている）束縛値を**コピー**
+    するだけで新規allocationを生まないため、追加対応は不要と判断
+    （対応不要の理由を明記、今後のセッションが同じ箇所を再検討しなくて
+    済むように）。
 
 ---
 
