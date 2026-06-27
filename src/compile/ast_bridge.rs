@@ -348,9 +348,9 @@ fn translate_if(heap: &mut Heap, cond: &Typed, then: &Typed, els: &Typed, ty: &T
 }
 
 /// `Expr::Let(binds, body)` -> `(let (((name-sym . kind) . value-form)...)
-/// single-body-form)` (if/let/comparisons, labels/closures Stage 5; the
-/// nested `(name-sym . kind)` pair was a bare `name-sym` before Stage 6 of
-/// the Sexpr-representation plan — see below). Unlike a `labels`/`lambda`
+/// body-form...)` (if/let/comparisons, labels/closures Stage 5; the nested
+/// `(name-sym . kind)` pair was a bare `name-sym` before Stage 6 of the
+/// Sexpr-representation plan — see below). Unlike a `labels`/`lambda`
 /// parameter or captured-name list, a binding pair's own retain/release
 /// bookkeeping is lighter: `compiler.rs`'s `compile-let` only ever moves
 /// already-computed values into/out of `env` by name, and the existing
@@ -361,15 +361,15 @@ fn translate_if(heap: &mut Heap, cond: &Typed, then: &Typed, els: &Typed, ty: &T
 /// its slot is live (`bind-let-values`/`restore-let-values`'s
 /// `rt_push_sexpr_root`/`rt_pop_sexpr_root` — see [`binding_kind`]), so
 /// Stage 6 added `kind` here too, mirroring [`tagged_sym_list`]'s own pair
-/// shape exactly (reused, not reinvented). `body` is restricted to a single
-/// expression, the same limit every other multi-expression body shape here
-/// has (`translate_labels`'s def bodies, [`translate_lambda`]) — lifting it
-/// later is one allocation scheme away (compiling every body form but the
-/// last for effect only).
+/// shape exactly (reused, not reinvented). `body` may hold any number of
+/// forms (including zero, CL `let`'s own `Unit`-typed empty-body case) —
+/// translated the same variadic way [`translate_loop`] already translates
+/// its own body statements; `compiler.rs`'s `compile-let-body` is what
+/// gives the trailing forms CL `let`'s actual "sequence, last form's value
+/// wins" semantics (lifted for Stage 8 of the Sexpr-representation plan,
+/// `docs/TODO.md` — `dolist`'s own macro expansion always produces a
+/// multi-statement inner `let` body: `,@body` followed by a hidden `setf`).
 fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
-    if body.len() != 1 {
-        return Err(Error::TypeError("compile: let has a multi-expression body, not yet supported".into()));
-    }
     let mut pair_values = Vec::with_capacity(binds.len());
     for (name, val) in binds {
         let name_sym = heap.intern_symbol(name);
@@ -426,16 +426,20 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], dir
         heap.pop_root();
     }
     heap.push_root(bindings_list);
-    let body_v = match ast_to_sexpr_scoped(heap, &body[0], direct) {
+    let body_values = match ast_list_to_sexpr(heap, body, direct) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // bindings_list
             return Err(e);
         }
     };
-    heap.push_root(body_v);
-    let result = tagged(heap, "let", &[bindings_list, body_v]);
-    heap.pop_root(); // body_v
+    let mut items = Vec::with_capacity(1 + body_values.len());
+    items.push(bindings_list);
+    items.extend(body_values.iter().copied());
+    let result = tagged(heap, "let", &items);
+    for _ in 0..body_values.len() {
+        heap.pop_root();
+    }
     heap.pop_root(); // bindings_list
     result
 }
@@ -1853,12 +1857,12 @@ mod tests {
     }
 
     /// if/let/comparisons, labels/closures Stage 5: `Expr::Let` -> `(let
-    /// (((name-sym . kind) . value-form)...) single-body-form)` — the
-    /// nested `(name-sym . kind)` pair (reusing `tagged_sym_list`'s own
-    /// shape) replaced a bare `name-sym` in Stage 6 of the
-    /// Sexpr-representation plan, once a `let`-bound `Sexpr`-typed value
-    /// needed the same GC-root push/pop bookkeeping a parameter/capture
-    /// already gets (see `binding_kind`'s doc comment).
+    /// (((name-sym . kind) . value-form)...) body-form...)` — the nested
+    /// `(name-sym . kind)` pair (reusing `tagged_sym_list`'s own shape)
+    /// replaced a bare `name-sym` in Stage 6 of the Sexpr-representation
+    /// plan, once a `let`-bound `Sexpr`-typed value needed the same
+    /// GC-root push/pop bookkeeping a parameter/capture already gets (see
+    /// `binding_kind`'s doc comment).
     #[test]
     fn translates_a_let_expression() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -1875,23 +1879,43 @@ mod tests {
         let (value_tag, value_fields) = untag(&heap, heap.cdr(pairs[0]).unwrap());
         assert_eq!(value_tag, "int");
         assert_eq!(value_fields, vec![Value::Int(5)]);
+        assert_eq!(fields.len(), 2, "single-statement body: exactly one trailing field");
         let (body_tag, body_fields) = untag(&heap, fields[1]);
         assert_eq!(body_tag, "var");
         assert_eq!(expect_str(&heap, body_fields[0]), "x");
     }
 
-    /// Mirrors `translate_labels`/`translate_lambda`'s own restriction: a
-    /// `let` body with more than one expression isn't supported yet.
+    /// Stage 8 of the Sexpr-representation plan (`docs/TODO.md`): a `let`
+    /// body may now hold more than one statement — translated the same
+    /// variadic way `translate_loop` already translates its own body
+    /// (`translates_a_loop_with_a_multi_statement_body`, above) — needed
+    /// for `dolist`'s own macro expansion, whose inner `let` body is always
+    /// `,@body` followed by a hidden `setf`.
     #[test]
-    fn let_rejects_a_multi_expression_body() {
+    fn translates_a_let_expression_with_a_multi_statement_body() {
         let mut heap = Heap::with_capacity(1 << 10);
         let binds = vec![("x".to_string(), typed(Expr::Int(1), Type::I64))];
-        let body = vec![typed(Expr::Var("x".to_string()), Type::I64), typed(Expr::Var("x".to_string()), Type::I64)];
-        let err = ast_to_sexpr(&mut heap, &typed(Expr::Let(binds, body), Type::I64)).unwrap_err();
-        match err {
-            Error::TypeError(msg) => assert!(msg.contains("multi-expression body"), "message was: {}", msg),
-            other => panic!("expected a TypeError, got {:?}", other),
-        }
+        let body = vec![typed(Expr::Break, Type::Never), typed(Expr::Var("x".to_string()), Type::I64)];
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Let(binds, body), Type::I64)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "let");
+        assert_eq!(fields.len(), 3, "bindings + 2 body statements");
+        let (f1_tag, _) = untag(&heap, fields[1]);
+        assert_eq!(f1_tag, "break");
+        let (f2_tag, _) = untag(&heap, fields[2]);
+        assert_eq!(f2_tag, "var");
+    }
+
+    /// The empty-body edge case (CL `let`'s own `Unit`-typed `(let
+    /// ((x 1)))`) — no trailing fields at all besides the bindings list.
+    #[test]
+    fn translates_a_let_expression_with_an_empty_body() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let binds = vec![("x".to_string(), typed(Expr::Int(1), Type::I64))];
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Let(binds, Vec::new()), Type::Unit)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "let");
+        assert_eq!(fields.len(), 1, "bindings only, no body statements");
     }
 
     /// `collect_call_targets` recurses into both arms of an `If` — a `Call`

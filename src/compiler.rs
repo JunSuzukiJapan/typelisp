@@ -26,7 +26,7 @@
 //! `i64` comparisons (`<`/`<=`/`>`/`>=`/`=`/`eq`/`/=`, alongside the existing
 //! `+`/`-`/`*`), `if` (`(if is-fn cond-form then-form else-form)`, see
 //! `compile-if`'s doc comment), and `let` (`(let ((name-sym . value-form)...)
-//! single-body-form)`, see `compile-let`'s doc comment) — if/let/comparisons,
+//! body-form...)`, see `compile-let`'s doc comment) — if/let/comparisons,
 //! labels/closures Stage 5. `loop`/`break`/`return`/`setf` (`(loop
 //! body-form...)`/`(break)`/`(return is-fn value-form)`/`(set name-str is-fn
 //! value-form)`, see `compile-loop`/`compile-break`/`compile-return`/
@@ -1253,12 +1253,44 @@ pub const SOURCE: &str = r#"
                                   (set acc nm v)
                                   (compile-let-values builder env fn-env captured cur-fn loop-exit loop-slot rest acc)))))
                            (_ ())))
-                       ;; `(let ((name-sym . value-form)...) single-body-form)`
-                       ;; (if/let/comparisons, labels/closures Stage 5): all
-                       ;; binding values first (`compile-let-values`, against
-                       ;; the untouched `env`), then shadow `env` with them
-                       ;; (`bind-let-values`, saving whatever was already
-                       ;; there per name into `saved`), compile the body, and
+                       ;; Stage 8 of the Sexpr-representation plan
+                       ;; (`docs/TODO.md`): compiles a `let` body's statement
+                       ;; sequence one form at a time, the same
+                       ;; `block-terminated?` short-circuit
+                       ;; `compile-loop-body` already makes (every form after
+                       ;; one that left the block terminated — a `break`/
+                       ;; `return`, possibly nested inside an `if`/`match` arm
+                       ;; that took it — would be unreachable, and emitting
+                       ;; IR into an already-terminated block is malformed).
+                       ;; Unlike `compile-loop-body`, which only ever produces
+                       ;; a value via `break`/`return` and so discards every
+                       ;; form's own value, this *is* CL `let`'s actual
+                       ;; "body is a sequence, result is the last form's
+                       ;; value" semantics — needed once a `let` body can hold
+                       ;; more than one statement (`dolist`'s own macro
+                       ;; expansion always produces one: `,@body` followed by
+                       ;; a hidden `setf`). An empty body (`(let ((x 1)))`,
+                       ;; CL `let`'s own `Unit`-typed case) compiles to
+                       ;; `compile-unit`, the same `Unit` encoding every other
+                       ;; empty-body shape in this module already uses.
+                       (compile-let-body ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (forms Sexpr)) llvm-value
+                         (match forms
+                           ((Cons form rest)
+                            (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot form)))
+                              (if (block-terminated? builder)
+                                  v
+                                  (match rest
+                                    ((Cons _ _) (compile-let-body builder env fn-env captured cur-fn loop-exit loop-slot rest))
+                                    (_ v)))))
+                           (_ (compile-unit builder))))
+                       ;; `(let ((name-sym . value-form)...) body-form...)`
+                       ;; (if/let/comparisons, labels/closures Stage 5; the
+                       ;; trailing variadic body, Stage 8 of the
+                       ;; Sexpr-representation plan): all binding values first
+                       ;; (`compile-let-values`, against the untouched `env`),
+                       ;; then shadow `env` with them (`bind-let-values`,
+                       ;; saving whatever was already there per name into
+                       ;; `saved`), compile the body (`compile-let-body`), and
                        ;; finally undo the shadowing (`restore-let-values`) —
                        ;; see those two functions' doc comments for why the
                        ;; restore step matters and its one known limitation.
@@ -1276,12 +1308,12 @@ pub const SOURCE: &str = r#"
                        ;; this module's doc comment).
                        (compile-let ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((bindings (car (cdr e))))
-                           (let ((body-form (car (cdr (cdr e)))))
+                           (let ((body-forms (cdr (cdr e))))
                              (let ((acc (new-env)))
                                (compile-let-values builder env fn-env captured cur-fn loop-exit loop-slot bindings acc)
                                (let ((saved (new-env)))
                                  (bind-let-values builder m env bindings acc saved)
-                                 (let ((result (compile-value builder env fn-env captured cur-fn loop-exit loop-slot body-form)))
+                                 (let ((result (compile-let-body builder env fn-env captured cur-fn loop-exit loop-slot body-forms)))
                                    (restore-let-values builder m env bindings saved)
                                    result))))))
                        ;; `(lambda name ((captured . kind)...) ((param . kind)...) body)`

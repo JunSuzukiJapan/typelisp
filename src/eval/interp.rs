@@ -227,11 +227,41 @@ impl Interp {
                     None => RtValue::BuiltinMethod(type_name.clone(), method.clone()),
                 })
             }
-            Expr::If(c, then, els) => match self.eval(heap, c, env)? {
-                RtValue::Bool(true) => self.eval(heap, then, env),
-                RtValue::Bool(false) => self.eval(heap, els, env),
-                _ => Err(EvalError::Internal("if condition is not a bool".into())),
-            },
+            Expr::If(..) => {
+                // Walks a right-leaning `if`/`else-if` chain (`(if c1 b1 (if
+                // c2 b2 (if c3 b3 ...)))`, exactly what `cond`'s expansion —
+                // and `compiler.rs`'s own tag-dispatch `compile-value`,
+                // `compile-construct-sexpr`'s variant-`eq` chain, etc. —
+                // produce) iteratively instead of recursing once per link.
+                // Recursing (`self.eval(heap, els, env)` on an `els` that's
+                // itself another `If`) would re-enter this whole match via a
+                // *new* Rust call frame per chain link — with debug builds'
+                // large, uninlined `eval` frames, a `compile-value`-sized
+                // chain (~20 tags) nested a few `Construct`/`Match` levels
+                // deep was enough to blow even a worker thread's default
+                // stack (discovered compiling a `dolist`-based function,
+                // Stage 8 of the Sexpr-representation plan, `docs/TODO.md`).
+                // Only the condition's own (shallow) evaluation and whichever
+                // single leaf branch is ultimately taken still recurse.
+                let mut cur = t;
+                loop {
+                    let (c, then, els) = match &cur.expr {
+                        Expr::If(c, then, els) => (c, then, els),
+                        _ => unreachable!("loop only ever advances `cur` to another Expr::If"),
+                    };
+                    match self.eval(heap, c, env)? {
+                        RtValue::Bool(true) => break self.eval(heap, then, env),
+                        RtValue::Bool(false) => {
+                            if matches!(els.expr, Expr::If(..)) {
+                                cur = els;
+                            } else {
+                                break self.eval(heap, els, env);
+                            }
+                        }
+                        _ => break Err(EvalError::Internal("if condition is not a bool".into())),
+                    }
+                }
+            }
             Expr::Let(binds, body) => {
                 // CL `let`: binding values are evaluated in the outer environment.
                 let mut child = env.clone();

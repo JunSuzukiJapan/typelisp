@@ -1809,33 +1809,40 @@ fn compile_dispatches_a_literal_int_subpattern_to_native_code() {
     assert_eq!(other_variant, RtValue::Int(0), "a different Sexpr variant (Nil) falls through to the wildcard arm, not a tag-test crash");
 }
 
-/// `dolist` (`prelude.rs`) still doesn't compile — `Match` over `Sexpr`
-/// now works (the tests above), so the compiler gets much further into
-/// `dolist`'s own macro expansion than before, but bottoms out on a
-/// *different*, already-known limitation: `dolist`'s expansion is `(let
+/// Stage 8 of the Sexpr-representation plan (`docs/TODO.md`) — the
+/// motivating end goal of the whole 8-stage effort: `dolist` (`prelude.rs`)
+/// actually compiles and runs correctly now. `dolist`'s expansion is `(let
 /// ((,lst ,lst-expr)) (while (consp ,lst) (let ((,var (car ,lst)))
-/// ,@body (setf ,lst (cdr ,lst)))))` — the inner `let`'s body is always
-/// at least two statements (`body...` followed by the hidden `setf`
-/// that steps the list), and `ast_bridge::translate_let` only translates
-/// a single-expression body (see that function's doc comment). Not a
-/// `Match`/`Sexpr` gap at all; recorded as a still-open prerequisite for
-/// Stage 8, not attempted here.
+/// ,@body (setf ,lst (cdr ,lst)))))` — the inner `let`'s body is always at
+/// least two statements (`body...` followed by the hidden `setf` that steps
+/// the list); `ast_bridge::translate_let`/`compiler.rs`'s `compile-let` used
+/// to reject any `let` body but a single expression (see
+/// `translate_let`'s doc comment) — lifted for this stage, the same
+/// variadic-body treatment `translate_loop`/`compile-loop-body` already had.
+/// `not` (`while`'s expansion) and `consp` (`dolist`'s own expansion) are
+/// ordinary `defun`s, not one of the 5 `rt_*`-backed primitives exempted
+/// from the "callee must already be `compile`d" check (`Expr::Call`'s
+/// pre-declaration rule, Stage 3) — both must be explicitly `compile`d
+/// before `sum-via-dolist` itself.
 #[test]
-fn compile_of_a_dolist_based_function_fails_clearly_on_the_uncompiled_multi_statement_let_body() {
-    let err = run_with_compiler_and_prelude(
+fn compile_dispatches_a_dolist_based_function_that_sums_a_sexpr_list_to_native_code() {
+    let v = run_with_compiler_and_prelude(
         r#"
-        (defun walk-via-dolist () ()
-          (dolist (x (list (Int 1) (Int 2) (Int 3))) ()))
+        (defun sum-via-dolist ((seed i64)) i64
+          (let ((acc seed))
+            (dolist (x (list (Int 1) (Int 2) (Int 3)))
+              (match x
+                ((Int n) (setf acc (+ acc n)))
+                (_ acc)))
+            acc))
         (compile "not")
         (compile "consp")
-        (compile "walk-via-dolist")
+        (compile "sum-via-dolist")
+        (sum-via-dolist 0)
         "#,
     )
-    .expect_err("expected compiling `walk-via-dolist` to fail because of dolist's multi-statement `let` body");
-    match err {
-        EvalError::Panic(msg) => assert!(msg.contains("multi-expression body"), "message was: {}", msg),
-        other => panic!("expected a Panic, got {:?}", other),
-    }
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(6), "1+2+3");
 }
 
 // ---- Stage 2 of the Sexpr-representation plan: tagged-i64 bit primitives --

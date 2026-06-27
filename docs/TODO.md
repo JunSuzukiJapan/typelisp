@@ -1118,7 +1118,7 @@ setf+if+returnによるカウントループ、bare breakのみ（Unit型、ハ�
 既存のまま（移行後も green）。全件green（既存テスト含む全スイート）、
 clippy警告0（`-D warnings`含む）、5回連続実行で安定確認済み。
 
-### Sexpr表現 + Match/Construct/共有Rustライブラリ 実装計画（2026-06-26起案、未着手）
+### Sexpr表現 + Match/Construct/共有Rustライブラリ 実装計画（2026-06-26起案、Stage 0-6/8完了・Stage 7未着手）
 
 `not`移行後も`dolist`はcompile不能なまま（前節参照）。原因は`car`/`cdr`が
 Rust専用なこと自体ではなく、**コンパイル済みコードに`Sexpr`値の表現も
@@ -1477,8 +1477,57 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   （Stage 4の「rootしないと壊れる」対照テストと同じ実証スタイル）。
   全体テスト3回連続実行で安定、clippy警告0（`--workspace`）。
 - **Stage 7**（優先度低）: 文字列対応。
-- **Stage 8**: `dolist`含む`prelude.rs`のリスト関数群が実際にコンパイル
-  可能になることの実証＋全体回帰確認。
+- **Stage 8（完了、2026-06-27）**: `dolist`含む`prelude.rs`のリスト関数群が
+  実際にコンパイル可能になることの実証＋全体回帰確認——8ステージ計画の
+  本来の動機（[[typelisp-compile-labels-closures]]）そのものの達成点。
+
+  **`let`の複数式body対応（本来の想定ブロッカー）**: `dolist`の展開
+  `(let ((,lst ,lst-expr)) (while (consp ,lst) (let ((,var (car ,lst)))
+  ,@body (setf ,lst (cdr ,lst)))))`の内側`let`は常に2文以上のbody
+  （`,@body`に続く隠れた`setf`）——Stage5時点で「`match`ではなく`let`の
+  単一式body制約が次の障害」と判明していた通りの想定内のギャップだった。
+  `ast_bridge::translate_let`を`translate_loop`と同じ可変長body方式に
+  変更（`(let bindings body-form...)`、0個も含む）、`compiler.rs`に新規
+  `compile-let-body`（`compile-loop-body`と同じ`block-terminated?`連鎖
+  だが、CLの`let`本来の「最後の式の値を返す」意味論を持つ点が違う）を
+  追加して`compile-let`から呼ぶよう変更——想定通り`compiler.rs`本体への
+  変更はこの1か所のみで済んだ。
+
+  **未想定の発見: インタプリタ自身の`if`連鎖評価がワーカースレッドの
+  デフォルトスタックを溢れさせるバグ**（`let`修正そのものとは無関係、
+  本ステージで初めて十分な深さのASTがコンパイルされたために露見した
+  既存の問題）: `dolist`展開全体をコンパイルしようとすると
+  （`let`修正後も）スタックオーバーフローで落ちた。`Interp::eval`に
+  一時的な深さ計測を入れて追跡した結果、`(list (Int 1) (Int 2) (Int 3))`
+  のような3要素リストでは再現し1要素では再現しないことが分かり、
+  `RUST_MIN_STACK=64MiB`で同じコードが成功することで「無限再帰ではなく
+  スタック使用量の問題」と確定、`compile-value`/`compile-construct-sexpr`
+  自身が`(if (eq s "int") ... (if (eq s "bool") ...))`という右に伸びる
+  `if`連鎖（最大20分岐ほど）であることが原因と判明した——
+  `Interp::eval`の`Expr::If`評価が`els`位置の入れ子`If`を
+  `self.eval(heap, els, env)`で**再帰**していたため（Rustはdebugビルドで
+  末尾呼び出し最適化をしない）、分岐1つ進むごとに新しいRust呼び出し
+  フレームが積み上がっていた——`compile-value`の20分岐 ×
+  `Construct`/`Match`の入れ子（3要素リストの構築で発生）が、テスト
+  スレッドのデフォルトスタックを溢れさせるところまで積算されていた
+  （1要素リストでは入れ子が浅く踏み切らなかった）。
+  修正は`Interp::eval`の`Expr::If`評価をループ化——`els`が`Expr::If`である
+  限り再帰せず`cur`を書き換えて回り続け、条件式自身の評価と最終的に
+  選ばれた1つの葉だけが再帰する形にした（[interp.rs](src/eval/interp.rs)）。
+  `compile-value`のような分岐数の多いタグディスパッチだけでなく、`cond`
+  マクロの展開等、典型的なtypelisp全体のif連鎖に効くため
+  影響範囲は本ステージの範囲を超える——根本原因のインタプリタ側を直した
+  ので、`compiler.rs`側の分岐の書き方自体は変更不要だった。
+
+  **テスト**: `ast_bridge.rs`の既存`let_rejects_a_multi_expression_body`
+  を、複数式body/空bodyを翻訳できることを示す2件
+  （`translates_a_let_expression_with_a_multi_statement_body`/
+  `translates_a_let_expression_with_an_empty_body`）に置き換え。
+  `compile_test.rs`の既存「`dolist`はまだコンパイルできない」テストを、
+  `dolist`でSexprリストを合計する関数が実際にJIT実行されて正しい値
+  （`6`）を返すことを示す
+  `compile_dispatches_a_dolist_based_function_that_sums_a_sexpr_list_to_native_code`
+  に置き換え。全体テスト3回連続実行で安定、clippy警告0（`--workspace`）。
 
 ### 残る選択肢（優先順位はユーザー未確認）
 
