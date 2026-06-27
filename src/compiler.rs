@@ -525,6 +525,27 @@ pub const SOURCE: &str = r#"
       (let ((ignored (pop-sexpr-root builder m)))
         (pop-sexpr-roots builder m (- n 1)))))
 
+;; `push-sexpr-root`'s permanent counterpart (general-ADT box field GC root
+;; protection): `compile-construct-box-fields` calls this for a `kind = 2`
+;; field right after storing it, instead of `push-sexpr-root`. The
+;; difference is *why* no pop ever follows: `push-sexpr-root`'s caller
+;; always knows, at LLVM-build time, the matching `pop-sexpr-root`(s) to
+;; emit later in the *same* activation (a `let`'s own end, a call's return) —
+;; but a box field's value must stay reachable for as long as the box
+;; itself does, which can outlive this activation entirely (the box can be
+;; returned, stored elsewhere, ...). `rt_push_permanent_sexpr_root` (see its
+;; own doc comment) registers the root on a separate, append-only list
+;; `Heap::gc`'s mark phase also walks, so it never has to be popped and
+;; never desyncs `push-sexpr-root`/`pop-sexpr-root`'s own LIFO pairing
+;; elsewhere. This is the same accepted trade-off as the box itself
+;; (deliberately never `build-free`'d, see `compile-construct-box`'s doc
+;; comment) — both leak for the process's lifetime rather than tracking a
+;; box's real lifetime.
+(defun push-permanent-sexpr-root ((builder llvm-builder) (m llvm-module) (v llvm-value)) ()
+  (let ((args-ptr (alloca-args builder 1)))
+    (store-arg builder args-ptr 0 v)
+    (let ((ignored (build-call builder (get-function m "rt_push_permanent_sexpr_root") args-ptr 1))) ())))
+
 ;; `HashTable::new` is a static call whose generic `V`/`K` can only be
 ;; inferred from an *expected* type (e.g. a `defun`'s declared return type),
 ;; never from a `let` binding's initializer (`check_let` always checks that
@@ -1877,16 +1898,38 @@ pub const SOURCE: &str = r#"
                        ;; one compiled field per slot starting at `idx`
                        ;; (`1`, skipping the variant-tag slot) — the
                        ;; `compile-construct` analogue of
-                       ;; `compile-call-args`'s argument-array fill, minus
-                       ;; the `is-fn`/pending-release bookkeeping (no
-                       ;; retain/release happens for a box's own fields in
-                       ;; this stage at all, fresh or borrowed alike).
+                       ;; `compile-call-args`'s argument-array fill. Each
+                       ;; `forms` element is a `(kind . field-form)` pair
+                       ;; (`ast_bridge::tagged_ast_list_to_sexpr`, the same
+                       ;; tagging `compile-call-args` itself reads) rather
+                       ;; than a bare form: still no `ClosureBox`
+                       ;; retain/release for a `kind = 1` (`Fn`-typed) field
+                       ;; (deliberately leaked, same as before), but a
+                       ;; `kind = 2` (`Sexpr`-typed) field now gets
+                       ;; `push-permanent-sexpr-root`ed right after being
+                       ;; stored — closing the GC-root gap a general-ADT
+                       ;; box's own fields otherwise have: once `compile-
+                       ;; construct-box-fields` returns and whatever local
+                       ;; bound the field's value goes out of scope
+                       ;; (`release-bindings`'s unconditional `kind = 2`
+                       ;; pop), nothing else roots a value sitting only
+                       ;; inside this `malloc`'d, never-GC-scanned box —
+                       ;; the next collection a *later*, unrelated
+                       ;; allocation triggers would otherwise reclaim it out
+                       ;; from under the box. See `push-permanent-sexpr-root`'s
+                       ;; doc comment for why this needs its own root list
+                       ;; rather than the ordinary `push-sexpr-root`.
                        (compile-construct-box-fields ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (ptr llvm-value) (forms Sexpr) (idx i32)) ()
                          (match forms
-                           ((Cons form rest)
-                            (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot form)))
-                              (store-arg builder ptr idx v)
-                              (compile-construct-box-fields builder env fn-env captured cur-fn loop-exit loop-slot ptr rest (+ idx 1))))
+                           ((Cons field-pair rest)
+                            (let ((kind (sexpr-int (car field-pair))))
+                              (let ((form (cdr field-pair)))
+                                (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot form)))
+                                  (store-arg builder ptr idx v)
+                                  (if (eq kind 2)
+                                      (push-permanent-sexpr-root builder m v)
+                                      ())
+                                  (compile-construct-box-fields builder env fn-env captured cur-fn loop-exit loop-slot ptr rest (+ idx 1))))))
                            (_ ())))
                        ;; `Sexpr`'s own 8 variants, encoded directly as the
                        ;; tagged `i64` `typelisp-rt`'s `encode` (and this

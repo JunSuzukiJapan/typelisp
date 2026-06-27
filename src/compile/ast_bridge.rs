@@ -1133,17 +1133,29 @@ fn translate_arms(heap: &mut Heap, arms: &[Arm], direct: &HashSet<String>) -> Re
 /// field) — deciding this here, from `ty`, is what lets `compiler.rs` stay
 /// registry-free, the same reason [`translate_match`] reads `is_sexpr_type`
 /// off the scrutinee rather than `compile-match` re-deriving it from a type
-/// name string. `args` are translated plain/untagged
-/// ([`ast_list_to_sexpr`], the same as `Expr::Assoc`'s own arithmetic
-/// operands) — a general-ADT box's fields carry no `is-fn`-style retain tag
-/// at all in this stage (deliberately leaked, never retained/released —
-/// see `compiler.rs`'s `compile-construct` doc comment), and `Sexpr`'s own
-/// fields (an `Int`'s payload, a `Cons`'s two `Sexpr` fields, ...) are never
-/// `Fn`-typed either way.
+/// name string.
+///
+/// `args`' own translation differs between the two branches: the `is-sexpr`
+/// case stays plain/untagged ([`ast_list_to_sexpr`], the same as
+/// `Expr::Assoc`'s own arithmetic operands) — `Sexpr`'s own fields (an
+/// `Int`'s payload, a `Cons`'s two `Sexpr` fields, ...) are never `Fn`- or
+/// (recursively) `Sexpr`-typed in a way `compile-construct-sexpr` doesn't
+/// already special-case (its `Cons` arm roots both fields itself). The
+/// general-ADT case instead reuses [`tagged_ast_list_to_sexpr`] — the exact
+/// same `(kind . form)` wrapping `Expr::Call`'s own call-argument list gets
+/// — so `compile-construct-box-fields` can tell which fields are
+/// `Sexpr`-typed (`kind = 2`) and need [`crate::compile::runtime::rt_push_permanent_sexpr_root`]'s
+/// protection once stored into the box: unlike a call argument's root (popped
+/// right after the call returns), a box field's value must stay reachable
+/// for the box's own lifetime, which can outlive this activation — see that
+/// function's doc comment. A `Fn`-typed field (`kind = 1`) still gets no
+/// `ClosureBox` retain at all (deliberately leaked, same as before — see
+/// `compiler.rs`'s `compile-construct-box` doc comment); only the
+/// GC-root gap this tag closes is in scope here.
 fn translate_construct(heap: &mut Heap, ty: &Type, variant: usize, args: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
-    let is_sexpr = Value::Bool(is_sexpr_type(ty));
-    let arg_values = ast_list_to_sexpr(heap, args, direct)?;
-    let mut items = vec![is_sexpr, Value::Int(variant as i64)];
+    let is_sexpr = is_sexpr_type(ty);
+    let arg_values = if is_sexpr { ast_list_to_sexpr(heap, args, direct)? } else { tagged_ast_list_to_sexpr(heap, args, direct)? };
+    let mut items = vec![Value::Bool(is_sexpr), Value::Int(variant as i64)];
     items.extend(arg_values.iter().copied());
     let result = tagged(heap, "construct", &items);
     for _ in 0..arg_values.len() {
@@ -2237,11 +2249,14 @@ mod tests {
     }
 
     /// `Expr::Construct` over a general ADT (`Option<i64>`'s `Some`, an
-    /// `AdtKind::Sum`) -> `(construct false variant-i64 arg-form...)` —
-    /// `is-sexpr` is `false`, dispatching to `compile-construct-box`'s
-    /// `malloc`'d-box path. Multiple args are each translated in order,
-    /// untagged (no `is-fn`-style retain tag — see `translate_construct`'s
-    /// doc comment).
+    /// `AdtKind::Sum`) -> `(construct false variant-i64 (kind . arg-form)...)`
+    /// — `is-sexpr` is `false`, dispatching to `compile-construct-box`'s
+    /// `malloc`'d-box path. Multiple args are each translated in order, each
+    /// wrapped in the same `(kind . form)` shape `Expr::Call`'s own argument
+    /// list gets (`tagged_ast_list_to_sexpr`/`binding_kind`) — an `i64` field
+    /// is `KIND_PLAIN`, a `bool` field likewise (see `translate_construct`'s
+    /// doc comment for why this is needed: `compile-construct-box-fields`
+    /// reads `kind` to decide which fields need `rt_push_permanent_sexpr_root`).
     #[test]
     fn translates_a_general_adt_construct() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -2257,11 +2272,34 @@ mod tests {
         assert_eq!(tag, "construct");
         assert_eq!(fields[0], Value::Bool(false), "a non-Sexpr ADT dispatches to the malloc'd-box path");
         assert_eq!(fields[1], Value::Int(0));
-        let (arg0_tag, arg0_fields) = untag(&heap, fields[2]);
+        let (kind0, arg0_form) = untag_arg(&heap, fields[2]);
+        assert_eq!(kind0, 0, "an i64 field is KIND_PLAIN");
+        let (arg0_tag, arg0_fields) = untag(&heap, arg0_form);
         assert_eq!(arg0_tag, "int");
         assert_eq!(arg0_fields, vec![Value::Int(7)]);
-        let (arg1_tag, _) = untag(&heap, fields[3]);
+        let (kind1, arg1_form) = untag_arg(&heap, fields[3]);
+        assert_eq!(kind1, 0, "a bool field is KIND_PLAIN");
+        let (arg1_tag, _) = untag(&heap, arg1_form);
         assert_eq!(arg1_tag, "bool");
+    }
+
+    /// A `Sexpr`-typed field of a general ADT (e.g. a `defstruct` field
+    /// declared `Sexpr`) is tagged `KIND_SEXPR` — the case
+    /// `compile-construct-box-fields` actually roots.
+    #[test]
+    fn a_sexpr_typed_field_of_a_general_adt_construct_is_tagged_kind_sexpr() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let ctor = Expr::Construct {
+            type_name: Path::root("holder"),
+            variant: 0,
+            args: vec![typed(Expr::Var("s".to_string()), sexpr_ty())],
+            mutable: false,
+        };
+        let ty = Type::Named(Path::root("holder"), vec![]);
+        let v = ast_to_sexpr(&mut heap, &typed(ctor, ty)).unwrap();
+        let (_, fields) = untag(&heap, v);
+        let (kind, _) = untag_arg(&heap, fields[2]);
+        assert_eq!(kind, 2, "a Sexpr-typed field is KIND_SEXPR");
     }
 
     /// A field-less `Construct` (e.g. `None`) still produces a well-formed

@@ -1541,7 +1541,7 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// gets forward-declared and (JIT only — AOT resolves them as ordinary
 /// linker symbols against `typelisp-rt`'s `staticlib`, see
 /// `compile::aot::compile_file`) `add_global_mapping`-wired to, regardless
-/// of whether its own body actually calls any of them. Cheap enough (8
+/// of whether its own body actually calls any of them. Cheap enough (9
 /// extra declarations/mappings) to always include rather than checking
 /// which ones a given body's call targets actually need. `pub(crate)`:
 /// `compile::aot::compile_file` declares the same names (no JIT mapping
@@ -1558,8 +1558,17 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// directly rather than through the `(call name args)` tag. They still need
 /// the same forward-declaration/global-mapping treatment as every other
 /// `rt_*` shim, so they belong in this one shared list regardless.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 8] {
-    use crate::compile::runtime::{rt_car, rt_cdr, rt_cons, rt_match_fail, rt_pop_sexpr_root, rt_push_sexpr_root, rt_set_car, rt_set_cdr};
+///
+/// `rt_push_permanent_sexpr_root` (general-ADT box field GC root
+/// protection): `compiler.rs`'s `compile-construct-box-fields` calls this
+/// directly for the same reason, one level down from a box's own
+/// never-`build-free`'d field storage rather than a call-stack scope — see
+/// `typelisp_rt::rt_push_permanent_sexpr_root`'s doc comment for why it has
+/// no `rt_pop_permanent_sexpr_root` counterpart.
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 9] {
+    use crate::compile::runtime::{
+        rt_car, rt_cdr, rt_cons, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_set_car, rt_set_cdr,
+    };
     [
         ("rt_car", rt_car as usize),
         ("rt_cdr", rt_cdr as usize),
@@ -1569,6 +1578,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 8] {
         ("rt_match_fail", rt_match_fail as usize),
         ("rt_push_sexpr_root", rt_push_sexpr_root as usize),
         ("rt_pop_sexpr_root", rt_pop_sexpr_root as usize),
+        ("rt_push_permanent_sexpr_root", rt_push_permanent_sexpr_root as usize),
     ]
 }
 

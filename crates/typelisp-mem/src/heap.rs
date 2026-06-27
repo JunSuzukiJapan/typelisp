@@ -18,6 +18,10 @@
 //! * **Mark-sweep.** `gc()` marks everything reachable from the root set
 //!   (iteratively — no native recursion), then rebuilds the cons free list and
 //!   sweeps strings. Cycles are reclaimed (unlike reference counting).
+//! * **Two root sets.** `roots` is a strict LIFO stack (push on scope entry,
+//!   pop on scope exit). `permanent_roots` holds values whose owner outlives
+//!   any single activation (e.g. a field inside a heap-external, never-freed
+//!   box) — appended to, never popped. `gc()` marks from both.
 //!
 //! All `unsafe` is confined here; the public API is safe.
 
@@ -33,6 +37,7 @@ pub struct Heap {
     free: *mut Cell, // head of the free list (null when empty)
     free_count: usize,
     roots: Vec<Value>,
+    permanent_roots: Vec<Value>,
 
     // interned symbols (permanent)
     sym_names: Vec<String>,
@@ -71,6 +76,7 @@ impl Heap {
             free: if capacity > 0 { base } else { ptr::null_mut() },
             free_count: capacity,
             roots: Vec::new(),
+            permanent_roots: Vec::new(),
             sym_names: Vec::new(),
             sym_ids: HashMap::new(),
             paths: Vec::new(),
@@ -137,6 +143,31 @@ impl Heap {
     /// itself returned earlier in the same dynamic scope, never user input.
     pub fn set_root(&mut self, idx: usize, v: Value) {
         self.roots[idx] = v;
+    }
+
+    /// Registers `v` as a root with no matching pop, ever — for a value
+    /// whose owner isn't a call-stack activation but a heap-external,
+    /// never-freed allocation (e.g. compiled code's general-ADT box fields:
+    /// a `defstruct`/`Option`/`Result` value stored in a `malloc`'d box
+    /// outlives the activation that built it, so it can't use
+    /// [`push_root`](Self::push_root)'s push-on-entry/pop-on-exit discipline
+    /// without desyncing every *other* caller's strict LIFO pairing on the
+    /// same `roots` stack). Kept in a wholly separate `Vec` rather than
+    /// appended to `roots` for exactly that reason — `gc()` walks both, but
+    /// only `roots` has to nest correctly.
+    ///
+    /// This leaks one root slot per call, forever (no removal API): the
+    /// matching trade-off compiled code already makes for the box itself
+    /// (never `build-free`'d) — see `compiler.rs`'s `compile-construct-box`
+    /// doc comment.
+    pub fn push_permanent_root(&mut self, v: Value) {
+        self.permanent_roots.push(v);
+    }
+
+    /// Number of registered permanent roots — see
+    /// [`push_permanent_root`](Self::push_permanent_root).
+    pub fn permanent_root_count(&self) -> usize {
+        self.permanent_roots.len()
     }
 
     // ---- symbols ----------------------------------------------------------
@@ -293,10 +324,20 @@ impl Heap {
             *m = false;
         }
 
-        // MARK: iterative DFS from the roots (no native recursion).
+        // MARK: iterative DFS from the roots (no native recursion). Two
+        // independent root sets feed the same walk — `roots` (the strict
+        // LIFO call-stack discipline) and `permanent_roots` (never popped,
+        // see `push_permanent_root`) — a value is live if either reaches it.
         let mut stack: Vec<*mut Cell> = Vec::new();
         for i in 0..self.roots.len() {
             match self.roots[i] {
+                Value::Cons(c) => stack.push(c.0),
+                Value::Str(s) => self.str_marks[s.0 as usize] = true,
+                _ => {}
+            }
+        }
+        for i in 0..self.permanent_roots.len() {
+            match self.permanent_roots[i] {
                 Value::Cons(c) => stack.push(c.0),
                 Value::Str(s) => self.str_marks[s.0 as usize] = true,
                 _ => {}

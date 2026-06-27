@@ -17,21 +17,21 @@
    将来 compile 機能の共有ライブラリ化が `pub` を export 基準に使う計画があるが、現状は何も
    ブロックしていないため優先度は低いまま。
 3. **compile 機能の残課題**（LLVM JIT/AOT コンパイラという実験的サブシステム内の技術的負債。
-   優先順位はユーザー未確認——コア言語機能ではないため上記2項目より下位）:
-   - Stage 7: 文字列対応（優先度低、計画上も最後に残されたステージ）。
-   - 一般ADT箱（`Construct`/`FieldGet`/`FieldSet`）の**フィールド自体**のGCルート保護
-     （`Cons`構築/呼び出し引数は対応済み——フィールドは`Expr::Construct`のwire形式が型情報を
-     運んでいないため、まず拡張が必要な一段大きい変更）。
-   - `compile-if-branch`経由の値（`if`/`return`/`setf`/`match`アーム）のkind対応——現時点では
-     具体的な破壊を実証するテストが書けていない（書けたら優先度を上げる）。
+   優先順位はユーザー未確認——コア言語機能ではないため上記2項目より下位。影響範囲基準で並べ替え済み
+   ——[[feedback-impl-priority]]、詳細は[implementation-log.md](implementation-log.md)の
+   「compile機能の残課題の一部対応」節参照）:
    - `compile-assoc`がユーザー定義メソッド呼び出しを認識しない——コンパイル済みコードの中から
      別のcompile済みメソッドを呼べない（`p::x`等をボディに含む`defun`自体をcompileできない）。
-   - retain/release対の重複除去（Swift ARC Optimizer的な最適化パス）。正しさは確認済みで
-     パフォーマンスチューニングのみ、後回し。
+     構成可能性の根本的な欠落で、残課題の中では最も影響範囲が大きい。
+   - `compile-if-branch`経由の値（`if`/`return`/`setf`/`match`アーム）のkind対応——現時点では
+     具体的な破壊を実証するテストが書けていない（書けたら優先度を上げる）。
    - ネストした`labels`が外側labelsの兄弟を参照するケース（既存の "known limitation"、
      `compile-labels`は常に`inner-fn-env`を空から始める設計）。
    - `break`/`return`を文の位置以外（算術オペランド/呼び出し引数の中）でも許容する——型レベル
      では合法だが未対応。
+   - Stage 7: 文字列対応（優先度低、計画上も最後に残されたステージ）。
+   - retain/release対の重複除去（Swift ARC Optimizer的な最適化パス）。正しさは確認済みで
+     パフォーマンスチューニングのみ、後回し。
    - mark-and-sweepによるサイクル収集本体——既存の`ClosureBox`設計では真の参照循環がそもそも
      構築不可能と判明済みのため、収集すべき対象が無く緊急性は低い。
 

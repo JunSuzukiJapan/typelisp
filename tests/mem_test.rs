@@ -413,6 +413,41 @@ fn root_count_tracks_push_and_pop() {
     assert_eq!(h.root_count(), 1);
 }
 
+/// A permanent root keeps its value alive across a `gc()` exactly like an
+/// ordinary root does, with no matching pop — proving `gc()`'s mark phase
+/// genuinely walks `permanent_roots`, not just `roots`.
+#[test]
+fn permanent_root_survives_gc_with_no_matching_pop() {
+    let mut h = Heap::with_capacity(64);
+    let list = list_of(&mut h, &[10, 20, 30]);
+    h.push_permanent_root(list);
+    assert_eq!(h.permanent_root_count(), 1);
+    for i in 0..20 {
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap();
+    }
+    h.gc();
+    assert_eq!(h.live_count(), 3);
+    assert_eq!(to_vec(&h, list), vec![10, 20, 30]);
+    assert_eq!(h.permanent_root_count(), 1, "never popped");
+    assert_accounting(&h);
+}
+
+/// A permanent root pushed *between* an ordinary root's push and pop must
+/// not disturb that ordinary root's own LIFO pairing — the entire reason
+/// `permanent_roots` is a separate `Vec` rather than appended to `roots`
+/// (see `Heap::push_permanent_root`'s doc comment).
+#[test]
+fn permanent_root_does_not_desync_the_ordinary_root_stack() {
+    let mut h = Heap::with_capacity(16);
+    let a = h.cons(Value::Int(1), Value::Empty).unwrap();
+    h.push_root(a);
+    let b = h.cons(Value::Int(2), Value::Empty).unwrap();
+    h.push_permanent_root(b);
+    assert_eq!(h.root_count(), 1, "the permanent push left the ordinary stack untouched");
+    assert_eq!(h.pop_root(), Some(a), "still pops exactly what was pushed");
+    assert_eq!(h.root_count(), 0);
+}
+
 #[test]
 fn gc_is_idempotent() {
     let mut h = Heap::with_capacity(16);

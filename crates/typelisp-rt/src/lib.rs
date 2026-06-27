@@ -393,6 +393,39 @@ pub unsafe extern "C" fn rt_pop_sexpr_root(_args: *const i64, _argc: u32) -> i64
     }
 }
 
+/// Registers a `Sexpr`-typed value as a *permanent* GC root — for a value
+/// stored into a general-ADT box's field (`compiler.rs`'s
+/// `compile-construct-box-fields`), not a call-stack-scoped local.
+/// [`rt_push_sexpr_root`]'s root lives on `Heap`'s ordinary `roots` stack,
+/// which every caller above and below relies on strict LIFO pairing for
+/// (push on scope entry, pop on scope exit) — a box field has no such scope:
+/// it must stay reachable for as long as the box itself does, which can
+/// outlive the activation that built it. Pushing it there with no matching
+/// pop would desync every *other* `rt_pop_sexpr_root` call still to come in
+/// the same thread (the next one would pop this field's root instead of
+/// whatever it actually owns). [`typelisp_mem::Heap::push_permanent_root`]
+/// exists precisely to take such a value off to one side, in a `Vec`
+/// `Heap::gc`'s mark phase walks but no `rt_*` function ever pops from — see
+/// that method's doc comment. No `rt_pop_permanent_sexpr_root` exists, by
+/// design: this leaks one root slot per call, forever, the same trade-off
+/// the box itself already makes (never `build-free`'d — `compiler.rs`'s
+/// `compile-construct-box` doc comment).
+///
+/// Returns its argument unchanged, like [`rt_push_sexpr_root`].
+///
+/// # Safety
+///
+/// Same as [`rt_push_sexpr_root`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_push_permanent_sexpr_root(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_push_permanent_sexpr_root: expected 1 argument");
+    }
+    let tagged = *args;
+    active_heap().push_permanent_root(decode(tagged));
+    tagged
+}
+
 // ---- Stage 5: Match -----------------------------------------------------
 
 /// `compiler.rs`'s `compile-match-arms` calls this once every arm's
@@ -417,8 +450,8 @@ mod tests {
     use typelisp_mem::{Heap, PathId, StrId, SymId, Value};
 
     use super::{
-        decode, encode, rt_car, rt_cdr, rt_cons, rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_sexpr_root, rt_set_car,
-        rt_set_cdr, set_active_heap,
+        decode, encode, rt_car, rt_cdr, rt_cons, rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
+        rt_push_sexpr_root, rt_set_car, rt_set_cdr, set_active_heap,
     };
 
     #[test]
@@ -563,5 +596,52 @@ mod tests {
         let car_after = decode(unsafe { rt_car(one_arg.as_ptr(), 1) });
         let cdr_after = decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) });
         assert_ne!((car_after, cdr_after), (Value::Int(111), Value::Int(222)));
+    }
+
+    /// [`rt_push_permanent_sexpr_root`]'s own version of
+    /// [`rt_push_sexpr_root_protects_a_value_across_a_gc_triggered_by_other_allocations`]
+    /// — protects a value across a forced `gc()` with *no* matching pop at
+    /// all (unlike the ordinary root, which the other test still pops at
+    /// the end).
+    #[test]
+    fn rt_push_permanent_sexpr_root_protects_a_value_across_a_gc_with_no_matching_pop() {
+        let mut heap = Heap::with_capacity(4);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let precious_args = [encode(Value::Int(111)), encode(Value::Int(222))];
+        let precious = unsafe { rt_cons(precious_args.as_ptr(), 2) };
+        let pushed = unsafe { rt_push_permanent_sexpr_root(&precious as *const i64, 1) };
+        assert_eq!(pushed, precious, "rt_push_permanent_sexpr_root returns its argument unchanged");
+
+        for i in 0..20 {
+            let args = [encode(Value::Int(i)), encode(Value::Int(i))];
+            unsafe { rt_cons(args.as_ptr(), 2) };
+        }
+
+        let one_arg = [precious];
+        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(111));
+        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Int(222));
+    }
+
+    /// A permanent root pushed in between an ordinary push/pop pair must
+    /// not desync that pair's LIFO accounting — the reason
+    /// [`rt_push_permanent_sexpr_root`] feeds a separate `Vec`
+    /// (`Heap::push_permanent_root`) rather than the same stack
+    /// [`rt_push_sexpr_root`]/[`rt_pop_sexpr_root`] share.
+    #[test]
+    fn rt_push_permanent_sexpr_root_does_not_desync_an_interleaved_ordinary_root_pop() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let ordinary_args = [encode(Value::Int(1)), encode(Value::Int(1))];
+        let ordinary = unsafe { rt_cons(ordinary_args.as_ptr(), 2) };
+        unsafe { rt_push_sexpr_root(&ordinary as *const i64, 1) };
+
+        let permanent_args = [encode(Value::Int(2)), encode(Value::Int(2))];
+        let permanent = unsafe { rt_cons(permanent_args.as_ptr(), 2) };
+        unsafe { rt_push_permanent_sexpr_root(&permanent as *const i64, 1) };
+
+        let popped = unsafe { rt_pop_sexpr_root(std::ptr::null(), 0) };
+        assert_eq!(popped, ordinary, "the ordinary root pops, unaffected by the permanent push");
     }
 }

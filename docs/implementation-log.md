@@ -1513,10 +1513,11 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
 
 ### compile機能の残課題の一部対応（2026-06-27）
 
-下記2件は完了。**完了していない残課題（mark-and-sweepサイクル収集・ネストしたlabelsの
-known limitation・retain/release重複除去・break/returnの対応範囲拡大・一般ADT箱の
-フィールドGCルート保護・compile-if-branchのkind対応・compile-assocのユーザー定義メソッド
-呼び出し対応、いずれも優先順位はユーザー未確認）は [TODO.md](TODO.md) を参照**。
+下記3件は完了（一般ADT箱のフィールドGCルート保護は同日後刻、[[feedback-impl-priority]]の
+影響範囲基準で残課題群の最優先として追加対応）。**完了していない残課題（mark-and-sweep
+サイクル収集・ネストしたlabelsのknown limitation・retain/release重複除去・break/returnの
+対応範囲拡大・compile-if-branchのkind対応・compile-assocのユーザー定義メソッド呼び出し
+対応、いずれも優先順位はユーザー未確認）は [TODO.md](TODO.md) を参照**。
 
 - **`compile`をインスタンスメソッド（`self.methods`）にも対応させる**
   （Stage 6で判明、2026-06-27対応済み）: `(compile type::method)`という
@@ -1568,9 +1569,40 @@ known limitation・retain/release重複除去・break/returnの対応範囲拡�
   実際に破壊されることを先に実証、その後修正して直ることを確認、
   Stage4/6と同じ実証スタイル）2件追加。
 
-  一般ADT箱のフィールド自体のGCルート保護、`compile-if-branch`経由の値のkind対応は
-  まだ未対応（詳細・理由はTODO.md参照）。なお`compile-env-args`/
-  `compile-escaping-env-args`は既存の（別の場所で既にrootされている）束縛値を
-  **コピー**するだけで新規allocationを生まないため、追加対応は不要と判断済み
+  なお`compile-env-args`/`compile-escaping-env-args`は既存の（別の場所で既にrootされている）
+  束縛値を**コピー**するだけで新規allocationを生まないため、追加対応は不要と判断済み
   （対応不要の理由をここに明記し、今後のセッションが同じ箇所を再検討しなくて済むように
   している）。
+
+  **フィールド自体のGCルート保護も2026-06-27に対応完了**——[[feedback-impl-priority]]の
+  影響範囲基準で残課題群の最優先と判断（一般ADTを使う全てのcompile済みコードに関わる
+  正しさの欠落で、`compile-assoc`のメソッド呼び出し未対応より上位）。`Cons`構築/呼び出し
+  引数の対応時には型タグが不要だったか既存の`is-fn`系タグを再利用できたが、今回は
+  `Expr::Construct`のwire形式（`ast_bridge::translate_construct`）が一般ADTの各フィールドの
+  型情報を運んでいなかったため、まず`tagged_ast_list_to_sexpr`（Stage8で`compile-call-args`用
+  に作った`(kind . form)`タグ付けそのもの）を流用する形に拡張——`is-sexpr`が`true`
+  （`Sexpr`自身のConstruct）の枝は無変更、`false`（一般ADT）の枝だけ`ast_list_to_sexpr`から
+  `tagged_ast_list_to_sexpr`に切り替えた。
+
+  **本質的な設計上の発見**: 単純に「フィールド保存直後に`push-sexpr-root`して該当する
+  `pop-sexpr-root`を呼ばない」では直らない——`Heap.roots`は関数の出入りで必ずpush/popが
+  対になる**単一のLIFOスタック**なので、ポップしないpushを混ぜると後続の無関係な
+  `pop-sexpr-root`呼び出し全ての対応がズレて全体が壊れる。一般ADT箱の寿命はそれを構築した
+  関数activationを超えうる（戻り値として返る、別の構造体に格納される等）ため、box自体が
+  "deliberately leaked"（`build-free`されない）なのと対称的に、フィールドのルートも
+  「**永久にリークする別系統のルート集合**」として扱うのが筋——`typelisp-mem::Heap`に
+  LIFO規律と無関係な`permanent_roots: Vec<Value>`を新設し、`gc()`のmark phaseが`roots`と
+  両方を辿るようにした（`push_permanent_root`、popは存在しない、by design）。`typelisp-rt`に
+  対応する`rt_push_permanent_sexpr_root`を追加（`rt_pop_permanent_sexpr_root`は無し）、
+  `compiler.rs`に`push-permanent-sexpr-root`ヘルパーを追加し、`compile-construct-box-fields`
+  が`kind = 2`（Sexpr型）フィールドを格納した直後に呼ぶよう変更。
+
+  「rootしないと壊れる対照テスト」（小ヒープ+`defstruct`のSexpr型フィールド+多数の無関係な
+  `cons`で実際に破壊されることを先に実証——`a + b`が`333`ではなく`-1`になることを確認、
+  その後修正して直ることを確認、既存ステージと同じ実証スタイル）を追加。
+  `typelisp-mem`/`typelisp-rt`それぞれに、permanent rootがGCを跨いで値を保護することと
+  通常の`roots`スタックのLIFO対応を乱さないこと（permanent pushを通常のpush/popの間に
+  挟んでも、popされる値が変わらないこと）を確認する単体テストも追加。全体テスト3回連続
+  green、clippy警告0（`--workspace`）。
+
+  `compile-if-branch`経由の値のkind対応はまだ未対応（詳細・理由はTODO.md参照）。

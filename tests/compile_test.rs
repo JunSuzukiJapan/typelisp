@@ -2315,3 +2315,45 @@ fn compile_dispatches_a_call_that_keeps_an_earlier_fresh_sexpr_argument_rooted_w
     assert_eq!(v, RtValue::Int(333), "combine's first argument must survive its second argument's own allocations");
 }
 
+/// The general-ADT-box counterpart of the `Cons`-field/call-argument GC-root
+/// tests above, for a `defstruct` field instead: `compile-construct-box-fields`
+/// now `push-permanent-sexpr-root`s a `kind = 2` (`Sexpr`-typed) field right
+/// after storing it (`ast_bridge::translate_construct`'s new `kind` tagging
+/// for a general-ADT `Construct`'s args). Without this, `holder::s`'s
+/// `Cons` cell has no GC root at all the moment `make-holder` returns
+/// (`release-bindings` unconditionally pops the local that built it, the
+/// only thing that *did* root it) — sitting only inside the `malloc`'d box,
+/// invisible to `Heap::gc`'s root walk — so `churn`'s own heavy, unrelated
+/// consing under a tiny heap reclaims it before `holder::s` is ever read
+/// back. Confirmed by temporarily removing the `push-permanent-sexpr-root`
+/// call from `compile-construct-box-fields`: this test then fails (`a + b`
+/// comes back as something other than `333`, the exact corruption pattern
+/// `typelisp-rt`'s own permanent-root tests demonstrate at the raw-builtin
+/// level) before restoring the fix.
+#[test]
+fn compile_dispatches_a_function_that_keeps_a_general_adt_box_field_rooted_across_many_unrelated_allocations() {
+    let v = run_with_compiler_and_capacity(
+        r#"
+        (defstruct holder (s Sexpr))
+        (defun make-holder () holder (holder::new (Cons (Int 111) (Int 222))))
+        (defun churn ((n i64)) i64
+          (let ((s (Cons (Int 9) (Int 9))))
+            (loop
+              (if (eq n 0) (return n) ())
+              (Cons s s)
+              (setf n (- n 1)))))
+        (compile make-holder)
+        (compile churn)
+        (compile holder::s)
+        (let ((h (make-holder)))
+          (let ((ignored (churn 5000)))
+            (match h::s
+              ((Cons (Int a) (Int b)) (+ a b))
+              (_ -1))))
+        "#,
+        1 << 13,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(333), "holder::s's contents must survive churn's own unrelated allocations after make-holder returns");
+}
+
