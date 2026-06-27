@@ -489,7 +489,7 @@ only_used_in_recursion）は解消済み: 前者2件は `(type_fq, method)`/`(ad
 `LLVM_SYS_170_PREFIX`は`scripts/with-llvm-env.sh`が`brew --prefix llvm@17`で動的解決
 （絶対パスは一切ハードコードしない——[[feedback-no-hardcoded-absolute-paths]]）。
 
-**Phase 1完了（commit `aeaacf3`、`590709d`）**: JIT実行をInterpに統合。`(compile "fn-name")`
+**Phase 1完了（commit `aeaacf3`、`590709d`）**: JIT実行をInterpに統合。`(compile fn-name)`
 がtypelisp言語内から呼べ、以降の`Expr::Call`はJIT済みネイティブコードへ優先ディスパッチする。
 全コンパイル済み関数は固定ABI`i64 fn(i64* args, i32 argc)`に統一。`i64`の`+`/`-`/`*`のみ対応
 （比較演算はABI拡張が要るため後続Phaseへ先送り）。コンパイラ本体は CL `labels`
@@ -585,7 +585,7 @@ typelispソースファイルを読み、ファイル中の全`defun`を1つのL
 LLVM関数名は`外側の関数名$内側の名前`でマングルし、同一moduleを共有する別の
 `defun`の同名labels関数と衝突しないようにした。TDD: `tests/compile_test.rs`に
 3件（直接呼び出しの生builtinテスト、compile-function直接呼び出しテスト、
-`(compile "name")`経由の実ソーステスト）、`tests/compile_file_test.rs`に
+`(compile name)`経由の実ソーステスト）、`tests/compile_file_test.rs`に
 AOT版+JIT/AOTペアテスト2件追加。全件green、clippy警告0、複数回連続実行で安定。
 
 **Stage 2完了**: `labels`の外側スコープキャプチャ対応。新規`src/compile/freevars.rs`
@@ -635,7 +635,7 @@ push済みの`def_values`のGC rootをpopせずreturnしていた——root stac
 要修正（`compiler.rs`のモジュールdocコメントに記載済み）。
 
 TDD: `tests/compile_test.rs`に3件追加（捕捉ありlabelsの生Sexprテスト、単一兄弟が
-外側パラメータを捕捉する`(compile "name")`経由のend-to-endテスト、兄弟Aが自分では
+外側パラメータを捕捉する`(compile name)`経由のend-to-endテスト、兄弟Aが自分では
 参照しない捕捉変数を兄弟Bのために転送するend-to-endテスト——共有リスト設計の
 価値を直接立証）。`tests/compile_file_test.rs`に1件追加（捕捉ありlabelsを持つ
 non-main helper defunがAOTで他の関数と同じmoduleに問題なくコンパイル・リンク
@@ -683,13 +683,13 @@ Stage 1から変わらないため、AOTの「1つの共有module」とは事情
 
 **自己再帰のテストは`if`/比較演算無しでも書けた**: 実行はしない
 （ベースケースが無いので実行すれば無限ループになる——`if`/比較演算は依然未着手）
-が、`(compile "f")`がエラーにならないこと・IRに自己呼び出し命令が出ることは
-検証可能——`(compile "fn-name")`自体はボディを実行しないため。`if`/比較演算の
+が、`(compile f)`がエラーにならないこと・IRに自己呼び出し命令が出ることは
+検証可能——`(compile fn-name)`自体はボディを実行しないため。`if`/比較演算の
 実装は依然先送り（Stage 4着手時に改めて検討）。
 
 TDD: `tests/compile_test.rs`に6件追加（生Sexprの相互呼び出し・自己再帰IR検証、
-`(compile "name")`経由の相互呼び出しend-to-end、未コンパイル呼び出し先への
-明確なエラー、自己再帰の`(compile "name")`成功確認）。`tests/compile_file_test.rs`
+`(compile name)`経由の相互呼び出しend-to-end、未コンパイル呼び出し先への
+明確なエラー、自己再帰の`(compile name)`成功確認）。`tests/compile_file_test.rs`
 に2件追加（`main`が別関数を呼ぶAOT、JIT/AOTペア）+既存2件を更新
 （捕捉ありlabelsヘルパーを`main`が実際に呼ぶように強化、コメントの
 古い「未対応」記述を修正）。全件green、clippy警告0、5回連続実行で安定確認済み。
@@ -955,7 +955,7 @@ envに対して計算、`Checker::check_let`のコメントで確認済み）を
 **テスト**: `src/compile/ast_bridge.rs`に8件追加（if/letの実翻訳、
 `collect_call_targets`のif/let内Call検出など）。`tests/compile_test.rs`に
 8件追加（bool literal、i64比較、型ガードpanic、if実行、letシャドーイング
-復元、ifのFn型分岐retain回帰、そして本タスクの核心——`(compile "fact")`で
+復元、ifのFn型分岐retain回帰、そして本タスクの核心——`(compile fact)`で
 `(defun fact ((n i64)) i64 (if (<= n 1) 1 (* n (fact (- n 1)))))`をJIT
 コンパイルし`fact(10) = 3628800`を実際に検証するend-to-endテスト）。
 `tests/compile_file_test.rs`に2件追加（AOT版+JIT/AOTペア）。全件green、
@@ -1072,7 +1072,7 @@ typelispの関数本体（AST）を一切持たないため、`Interp::compile_f
 （`atom`等より前に定義——`defun`は前方参照不可のため）。これにより`not`は
 他のユーザー定義`defun`と全く同じ経路でコンパイル可能になり、
 **`while`/`dotimes`が実際にend-to-endでcompile可能になった**
-（`(compile "not")`を呼び出し元より先に呼ぶ必要がある——他の関数間
+（`(compile not)`を呼び出し元より先に呼ぶ必要がある——他の関数間
 呼び出しと同じ既存の「先にcompileしてください」要件のままで十分、
 `not`専用の特別扱いは一切不要）。
 
@@ -1447,7 +1447,7 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   `Checker::check_defstruct`が自動生成するフィールドアクセサ/セッタ
   **メソッド自身の本体**としてしか出現しない（`p::x`/`(setf p::y v)`
   という呼び出し側の構文は常に`Expr::Assoc`に脱糖される）。一方
-  `(compile "name")`は`self.fns`（トップレベル`defun`）しか見ない
+  `(compile name)`は`self.fns`（トップレベル`defun`）しか見ない
   （`Interp::compiled_fn_body`）——`self.methods`は対象外。つまり
   `compile-field-get`/`compile-field-set`自体は実装・`ast_bridge`単体
   テストで実証済みだが、実際のソースをコンパイルして実行する
@@ -1548,7 +1548,7 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   許容する**: 型レベルでは合法だが、今回は文の位置（ループ本体直下/ifの枝
   全体）のみ対応——上記「対応範囲」の節参照。
 - **`compile`をインスタンスメソッド（`self.methods`）にも対応させる**
-  （Stage 6で判明、2026-06-27対応済み）: `(compile "type::method")`という
+  （Stage 6で判明、2026-06-27対応済み）: `(compile type::method)`という
   名前を`Interp::method_key`/`resolve_fn_def`が`self.methods`に対して解決
   （`"::"`で分割し`Path::local()`で照合——`compile-call`の「修飾を捨てて
   ローカル名だけで見る」既存方針と同じ）するようにし、`compiled_fn_body`/

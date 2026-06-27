@@ -297,9 +297,12 @@ impl Registry {
         root.fns.insert("gensym".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: sexpr(), public: true, builtin: true });
         // `compile`: JIT-compiles a previously-defined `defun` (see
         // `Interp::compile_function`) so later calls dispatch to native
-        // code. No natural receiver (it operates on something named by a
-        // string, not a typed value), so a free function like `gensym`/
-        // `random` above.
+        // code. This `Type::Str` signature is the internal shape only —
+        // surface syntax takes an unevaluated symbol or `::`-path
+        // (`(compile foo)`, `(compile point::x)`), special-cased in
+        // `Checker::check_compile` to convert that name to the string this
+        // entry expects before an ordinary call is built; a string literal
+        // there (`(compile "foo")`) is a type error.
         root.fns.insert("compile".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: Type::Bool, public: true, builtin: true });
         // `compile-file`: AOT-compiles an independent source file to a
         // native executable (see `Interp::eval_builtin`'s `"compile-file"`

@@ -85,7 +85,7 @@ pub struct Interp {
     /// can only offer collision-*resistant* fresh names, not CL's
     /// unforgeable ones — see [`Self::eval_builtin`]'s `"gensym"` arm.
     gensym_counter: Cell<u64>,
-    /// Functions JIT-compiled by `(compile "name")` (see
+    /// Functions JIT-compiled by `(compile name)` (see
     /// [`Self::compile_function`]), by their fully-qualified `Path`.
     /// `RefCell` because `compile` is itself an ordinary builtin reached
     /// through `eval`'s `&self` — the same internal-mutability pattern
@@ -93,7 +93,7 @@ pub struct Interp {
     /// first, before falling back to the tree-walking `fns` entry.
     compiled: RefCell<HashMap<Path, crate::compile::CompiledFn>>,
     /// `compiled`'s counterpart for an instance/static method JIT-compiled by
-    /// `(compile "type::method")` — keyed the same way [`Self::methods`]
+    /// `(compile type::method)` — keyed the same way [`Self::methods`]
     /// already is, so the two can never drift. `Expr::Assoc`'s eval arm
     /// checks here first, mirroring `Expr::Call`'s own `compiled` check.
     compiled_methods: RefCell<HashMap<(Path, String), crate::compile::CompiledFn>>,
@@ -301,7 +301,7 @@ impl Interp {
             }
             Expr::Call(name, args) => {
                 let (argv, _slots) = self.eval_args(heap, args, env)?;
-                // A `(compile "name")`d function dispatches to native code
+                // A `(compile name)`d function dispatches to native code
                 // first — checked ahead of `fns` so a later recompile (not
                 // possible yet, but the ordering is the cheap-to-get-right
                 // choice) would naturally take precedence over the
@@ -602,14 +602,14 @@ impl Interp {
     /// registered), so matching by local name alone can't collide across
     /// two different types sharing a method name. Shared by
     /// [`Self::resolve_fn_def`] (the lookup) and [`Self::compile_function`]
-    /// (which `(compile "name")` for a method) — both need the exact same
+    /// (which `(compile name)` for a method) — both need the exact same
     /// `(Path, String)` key.
     fn method_key(&self, name: &str) -> Option<(Path, String)> {
         let (type_name, method) = name.split_once("::")?;
         self.methods.keys().find(|(p, m)| p.local() == type_name && m == method).cloned()
     }
 
-    /// Resolves a `(compile "name")` argument against either `self.fns` (a
+    /// Resolves a `(compile name)` argument against either `self.fns` (a
     /// plain name, a top-level `defun`) or `self.methods` (a `"type::method"`
     /// name, an instance/static `defmethod` — including a `defstruct`'s
     /// auto-generated field accessor/setter, whose body is the `Expr::FieldGet`/
@@ -732,7 +732,7 @@ impl Interp {
         Ok(())
     }
 
-    /// `(compile "fn-name")` (or `(compile "type::method")`): JIT-compiles a
+    /// `(compile fn-name)` (or `(compile type::method)`): JIT-compiles a
     /// previously-defined `defun`/`defmethod` and registers the result in
     /// [`Self::compiled`]/[`Self::compiled_methods`] (see [`Self::method_key`])
     /// so `Expr::Call`/`Expr::Assoc` dispatches to native code instead of
@@ -1521,7 +1521,7 @@ fn declare_external_function(module: &Rc<RefCell<Module<'static>>>, name: &str) 
 /// True for the handful of free functions `compiler.rs`'s `compile-call`
 /// rewrites to a `crate::compile::runtime` shim by name (`car` -> `rt_car`,
 /// etc. — see that function's `raw-nm`/`nm` rename) rather than requiring
-/// `(compile "car")` first: these can never be `compile`d themselves (no
+/// `(compile car)` first: these can never be `compile`d themselves (no
 /// typelisp AST body — direct cons-heap access, Rust-only), so
 /// [`Interp::compile_function`] excludes them from its normal "every call
 /// target must already be compiled" check and instead always wires them via

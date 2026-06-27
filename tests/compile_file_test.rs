@@ -256,7 +256,7 @@ fn jit_and_aot_agree_on_the_same_source() {
     let r = Reader::new();
     // The JIT path has no notion of an entry point (that's AOT-only), so
     // explicitly `compile` then call `main` after defining it.
-    let vs = r.read_all(&mut h, &format!("{}\n(compile \"main\")\n(main)", src)).expect("read failed");
+    let vs = r.read_all(&mut h, &format!("{}\n(compile main)\n(main)", src)).expect("read failed");
     let mut jit_result = None;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
@@ -293,7 +293,7 @@ fn jit_and_aot_agree_on_a_labels_body() {
     let mut interp = Interp::new();
     typelisp::load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, &format!("{}\n(compile \"main\")\n(main)", src)).expect("read failed");
+    let vs = r.read_all(&mut h, &format!("{}\n(compile main)\n(main)", src)).expect("read failed");
     let mut jit_result = None;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
@@ -314,8 +314,8 @@ fn jit_and_aot_agree_on_a_labels_body() {
 /// Same claim as `jit_and_aot_agree_on_the_same_source`, but for a `main`
 /// that calls a separately-defined helper function directly (labels/
 /// closures Stage 3, top-level `Expr::Call`) rather than bare arithmetic or
-/// a `labels` form. The JIT path needs an extra `(compile "square")` before
-/// `(compile "main")` — `Interp::compile_function`'s own forward-declare +
+/// a `labels` form. The JIT path needs an extra `(compile square)` before
+/// `(compile main)` — `Interp::compile_function`'s own forward-declare +
 /// `add_global_mapping` requirement (see that method's doc comment) — that
 /// `compile::aot::compile_file`'s single shared module never needs (see
 /// that module's doc comment).
@@ -334,7 +334,7 @@ fn jit_and_aot_agree_on_a_cross_function_call() {
     typelisp::load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r
-        .read_all(&mut h, &format!("{}\n(compile \"square\")\n(compile \"main\")\n(main)", src))
+        .read_all(&mut h, &format!("{}\n(compile square)\n(compile main)\n(main)", src))
         .expect("read failed");
     let mut jit_result = None;
     for v in vs {
@@ -375,7 +375,7 @@ fn jit_and_aot_agree_on_an_escaping_capturing_lambda() {
     typelisp::load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r
-        .read_all(&mut h, &format!("{}\n(compile \"adder\")\n(compile \"apply-fn\")\n(compile \"main\")\n(main)", src))
+        .read_all(&mut h, &format!("{}\n(compile adder)\n(compile apply-fn)\n(compile main)\n(main)", src))
         .expect("read failed");
     let mut jit_result = None;
     for v in vs {
@@ -414,7 +414,7 @@ fn jit_and_aot_agree_on_a_self_recursive_function_with_a_base_case() {
     typelisp::load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r
-        .read_all(&mut h, &format!("{}\n(compile \"fact\")\n(compile \"main\")\n(main)", src))
+        .read_all(&mut h, &format!("{}\n(compile fact)\n(compile main)\n(main)", src))
         .expect("read failed");
     let mut jit_result = None;
     for v in vs {
@@ -457,7 +457,7 @@ fn jit_and_aot_agree_on_a_loop_based_function() {
     typelisp::load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r
-        .read_all(&mut h, &format!("{}\n(compile \"sum-to\")\n(compile \"main\")\n(main)", src))
+        .read_all(&mut h, &format!("{}\n(compile sum-to)\n(compile main)\n(main)", src))
         .expect("read failed");
     let mut jit_result = None;
     for v in vs {

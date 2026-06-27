@@ -1357,6 +1357,7 @@ impl Checker {
             "apply" => return self.check_apply_form(heap, interp, env, args),
             "match" => return self.check_match(heap, interp, env, args, expected),
             "panic" => return self.check_panic(heap, interp, env, args),
+            "compile" => return self.check_compile(heap, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
             _ => {}
@@ -1886,6 +1887,42 @@ impl Checker {
         }
         let msg = self.check(heap, interp, env, args[0], Some(&Type::Str))?;
         Ok(Typed { expr: Expr::Panic(Box::new(msg)), ty: Type::Never })
+    }
+
+    /// `(compile name)` / `(compile type::method)`: the name being compiled
+    /// is program structure, not runtime data, so — unlike an ordinary call —
+    /// its argument is special-cased here to read as an unevaluated symbol or
+    /// `::`-path rather than a checked expression. A string (`(compile
+    /// "name")`) is a type error: it would let the same name be spelled two
+    /// incompatible ways for no benefit. Converts the symbol/path straight to
+    /// the plain `&str` `Interp::eval_builtin`'s `"compile"` arm and
+    /// `Interp::method_key` already expect (`"name"` or `"type::method"`),
+    /// then re-wraps it as an ordinary call to the registered `compile`
+    /// builtin (`Registry::with_builtins`, still `Type::Str` -> `Type::Bool`)
+    /// so every other part of the pipeline is untouched.
+    fn check_compile(&self, heap: &Heap, args: &[Value]) -> Result<Typed, Error> {
+        if args.len() != 1 {
+            return Err(Error::TypeError("compile: (compile name) — expected exactly 1 argument".into()));
+        }
+        let name = match args[0] {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            Value::Path(pid) => heap
+                .path_segments(pid)
+                .iter()
+                .map(|s| heap.symbol_name(*s).to_string())
+                .collect::<Vec<_>>()
+                .join("::"),
+            _ => {
+                return Err(Error::TypeError(
+                    "compile: expected a symbol or path naming a function, e.g. (compile foo) or (compile point::x) — not a string".into(),
+                ))
+            }
+        };
+        let sig = self.reg.fn_sig(&Path::root("compile")).expect("compile is always registered");
+        Ok(Typed {
+            expr: Expr::Call(Path::root("compile"), vec![Typed { expr: Expr::Str(name), ty: Type::Str }]),
+            ty: sig.ret.clone(),
+        })
     }
 
     /// `(quote datum)`: `datum` as a literal `Sexpr` value, unevaluated. See

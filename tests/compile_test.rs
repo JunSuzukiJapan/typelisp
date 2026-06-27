@@ -9,7 +9,7 @@
 extern crate typelisp;
 use inkwell::OptimizationLevel;
 use typelisp::compile::COMPILE_LOCK;
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
+use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue, Value};
 
 fn run(src: &str) -> Result<RtValue, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -504,7 +504,7 @@ fn closure_retain_then_release_leaves_it_still_callable() {
     assert_eq!(unsafe { caller.call(std::ptr::null(), 0) }, 105);
 }
 
-/// The end-to-end Phase 1 slice: `(compile "name")` from typelisp source
+/// The end-to-end Phase 1 slice: `(compile name)` from typelisp source
 /// itself (not by hand-feeding `compile-function` a pre-built `Sexpr`, like
 /// the compiler-body tests above), then a later `Expr::Call` of that same
 /// function transparently dispatching to the JIT-compiled native code
@@ -514,7 +514,7 @@ fn compile_dispatches_a_defun_call_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
         (defun add2 ((a i64) (b i64)) i64 (+ a b))
-        (compile "add2")
+        (compile add2)
         (add2 10 32)
         "#,
     );
@@ -526,7 +526,7 @@ fn compile_dispatches_a_defun_call_to_native_code() {
 
 #[test]
 fn compile_returns_true_on_success() {
-    let v = eval_ok_with_compiler(r#"(defun answer () i64 42) (compile "answer")"#);
+    let v = eval_ok_with_compiler(r#"(defun answer () i64 42) (compile answer)"#);
     assert!(expect_bool(v));
 }
 
@@ -557,7 +557,7 @@ fn two_modules_built_back_to_back_do_not_interfere() {
 
 /// The end-to-end Stage 1 slice, from real typelisp source (not a hand-fed
 /// Sexpr like `the_compiler_body_compiles_a_labels_form_with_a_sibling_call`):
-/// `(compile "sum-of-squares")` runs the *whole* pipeline (`ast_bridge`'s
+/// `(compile sum-of-squares)` runs the *whole* pipeline (`ast_bridge`'s
 /// `translate_labels`/`translate_apply` included) on a `defun` whose body
 /// is a `labels` form with two non-recursive siblings, one calling the
 /// other (`sum-of-squares` calls `square` twice; nothing calls itself).
@@ -569,7 +569,7 @@ fn compile_dispatches_a_defun_with_a_labels_body_to_native_code() {
           (labels ((square ((x i64)) i64 (* x x))
                    (sum-helper ((x i64) (y i64)) i64 (+ (square x) (square y))))
             (sum-helper a b)))
-        (compile "sum-of-squares")
+        (compile sum-of-squares)
         (sum-of-squares 3 4)
         "#,
     );
@@ -583,7 +583,7 @@ fn compile_dispatches_a_defun_with_a_labels_body_to_native_code() {
 /// source: `go`'s body references `offset`, the enclosing `defun`'s own
 /// parameter — neither its own parameter `k` nor a sibling name — so
 /// `ast_bridge`'s `labels_free_vars` must collect it as a real capture, and
-/// `(compile "add-offset")` must build `go` under the extended ABI and wire
+/// `(compile add-offset)` must build `go` under the extended ABI and wire
 /// the trailing body's call to pass `offset` through.
 #[test]
 fn compile_dispatches_a_defun_with_a_capturing_labels_body_to_native_code() {
@@ -592,7 +592,7 @@ fn compile_dispatches_a_defun_with_a_capturing_labels_body_to_native_code() {
         (defun add-offset ((offset i64) (n i64)) i64
           (labels ((go ((k i64)) i64 (+ k offset)))
             (go n)))
-        (compile "add-offset")
+        (compile add-offset)
         (add-offset 10 5)
         "#,
     );
@@ -619,7 +619,7 @@ fn a_sibling_that_never_references_a_capture_still_forwards_it_to_another_siblin
           (labels ((helper ((k i64)) i64 (go k))
                    (go ((k i64)) i64 (+ k offset)))
             (helper n)))
-        (compile "choose")
+        (compile choose)
         (choose 10 5)
         "#,
     );
@@ -695,8 +695,8 @@ fn compile_dispatches_a_defun_that_calls_another_compiled_function() {
         r#"
         (defun square ((x i64)) i64 (* x x))
         (defun sum-of-squares ((a i64) (b i64)) i64 (+ (square a) (square b)))
-        (compile "square")
-        (compile "sum-of-squares")
+        (compile square)
+        (compile sum-of-squares)
         (sum-of-squares 3 4)
         "#,
     );
@@ -707,7 +707,7 @@ fn compile_dispatches_a_defun_that_calls_another_compiled_function() {
 }
 
 /// `Interp::compile_function`'s up-front check (labels/closures Stage 3):
-/// `(compile "sum-of-squares")` calls `square`, but nothing has `compile`d
+/// `(compile sum-of-squares)` calls `square`, but nothing has `compile`d
 /// `square` yet — a clear `Panic` naming both functions, not a confusing one
 /// from deep inside the compiler body's `get-function`.
 #[test]
@@ -716,7 +716,7 @@ fn compile_errors_clearly_when_a_called_function_is_not_yet_compiled() {
         r#"
         (defun square ((x i64)) i64 (* x x))
         (defun sum-of-squares ((a i64) (b i64)) i64 (+ (square a) (square b)))
-        (compile "sum-of-squares")
+        (compile sum-of-squares)
         "#,
     )
     .expect_err("expected a clear must-compile-first error");
@@ -731,7 +731,7 @@ fn compile_errors_clearly_when_a_called_function_is_not_yet_compiled() {
 
 /// The end-to-end self-recursion counterpart of
 /// `the_compiler_body_compiles_a_self_referencing_call`, through the real
-/// `(compile "name")` JIT path rather than a hand-fed `Sexpr`: proves
+/// `(compile name)` JIT path rather than a hand-fed `Sexpr`: proves
 /// `Interp::compile_function`'s call-target collection correctly excludes
 /// self (no "must be compiled first" error, no forward declaration/
 /// `add_global_mapping` wiring attempted for its own name). Deliberately
@@ -741,7 +741,7 @@ fn compile_succeeds_for_a_self_recursive_defun_without_being_run() {
     let v = eval_ok_with_compiler(
         r#"
         (defun loop-forever ((n i64)) i64 (loop-forever n))
-        (compile "loop-forever")
+        (compile loop-forever)
         "#,
     );
     assert!(expect_bool(v));
@@ -751,13 +751,13 @@ fn compile_succeeds_for_a_self_recursive_defun_without_being_run() {
 /// (`((lambda (params) body) args...)`) translates to a single-def `labels`
 /// block (`ast_bridge::translate_immediate_lambda_call`), not a boxed
 /// `ClosureBox` at all — proves that delegation actually produces working,
-/// callable code end to end, from real source through `(compile "name")`.
+/// callable code end to end, from real source through `(compile name)`.
 #[test]
 fn compile_dispatches_a_defun_with_an_immediately_invoked_lambda_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
         (defun calls-immediately ((n i64)) i64 ((lambda ((x i64)) i64 (+ x 1)) n))
-        (compile "calls-immediately")
+        (compile calls-immediately)
         (calls-immediately 9)
         "#,
     );
@@ -776,7 +776,7 @@ fn compile_dispatches_a_defun_with_a_capturing_immediately_invoked_lambda_to_nat
     let v = eval_ok_with_compiler(
         r#"
         (defun adds-offset ((offset i64) (n i64)) i64 ((lambda ((y i64)) i64 (+ y offset)) n))
-        (compile "adds-offset")
+        (compile adds-offset)
         (adds-offset 100 5)
         "#,
     );
@@ -803,8 +803,8 @@ fn compile_dispatches_an_escaping_capturing_lambda_called_through_another_compil
         r#"
         (defun adder ((n i64)) (fn (i64) i64) (lambda ((x i64)) i64 (+ x n)))
         (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
-        (compile "adder")
-        (compile "apply-fn")
+        (compile adder)
+        (compile apply-fn)
         (apply-fn (adder 5) 10)
         "#,
     );
@@ -838,9 +838,9 @@ fn compile_dispatches_a_top_level_function_passed_by_name_through_apply_fn() {
         (defun square ((x i64)) i64 (* x x))
         (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
         (defun run-it () i64 (apply-fn square 5))
-        (compile "square")
-        (compile "apply-fn")
-        (compile "run-it")
+        (compile square)
+        (compile apply-fn)
+        (compile run-it)
         (run-it)
         "#,
     );
@@ -944,8 +944,8 @@ fn compile_dispatches_an_escaping_labels_sibling_returned_bare() {
           (labels ((adder ((x i64)) i64 (+ x n)))
             adder))
         (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
-        (compile "make-adder")
-        (compile "apply-fn")
+        (compile make-adder)
+        (compile apply-fn)
         (apply-fn (make-adder 5) 10)
         "#,
     );
@@ -972,8 +972,8 @@ fn compile_dispatches_an_escaping_labels_sibling_chosen_correctly_among_several(
                    (g ((x i64)) i64 (+ x (f x))))
             f))
         (defun apply-fn ((h (fn (i64) i64)) (n i64)) i64 (h n))
-        (compile "make-pair")
-        (compile "apply-fn")
+        (compile make-pair)
+        (compile apply-fn)
         (apply-fn (make-pair 5) 10)
         "#,
     );
@@ -1002,8 +1002,8 @@ fn compile_dispatches_an_escaping_lambda_that_indirectly_captures_a_labels_sibli
           (labels ((double ((x i64)) i64 (* x 2)))
             (lambda () i64 (double n))))
         (defun apply-fn0 ((f (fn () i64))) i64 (f))
-        (compile "make-caller")
-        (compile "apply-fn0")
+        (compile make-caller)
+        (compile apply-fn0)
         (apply-fn0 (make-caller 21))
         "#,
     );
@@ -1412,7 +1412,7 @@ fn compile_dispatches_a_self_recursive_function_with_a_base_case_to_native_code(
     let v = eval_ok_with_compiler(
         r#"
         (defun fact ((n i64)) i64 (if (<= n 1) 1 (* n (fact (- n 1)))))
-        (compile "fact")
+        (compile fact)
         (fact 10)
         "#,
     );
@@ -1439,7 +1439,7 @@ fn compile_dispatches_a_setf_on_a_let_bound_local_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
         (defun setf-test () i32 (let ((x 1)) (loop (setf x 5) (return x))))
-        (compile "setf-test")
+        (compile setf-test)
         (setf-test)
         "#,
     );
@@ -1461,7 +1461,7 @@ fn compile_dispatches_a_bare_return_inside_a_loop_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
         (defun loop-return-test () i32 (loop (return 42)))
-        (compile "loop-return-test")
+        (compile loop-return-test)
         (loop-return-test)
         "#,
     );
@@ -1486,7 +1486,7 @@ fn compile_dispatches_a_value_less_return_from_a_loop_to_native_code() {
     let v = eval_ok_with_compiler(
         r#"
         (defun void-return-test () () (loop (return)))
-        (compile "void-return-test")
+        (compile void-return-test)
         (void-return-test)
         "#,
     );
@@ -1513,7 +1513,7 @@ fn compile_dispatches_a_counting_loop_with_setf_and_conditional_return_to_native
               (if (> i n) (return acc) ())
               (setf acc (+ acc i))
               (setf i (+ i 1)))))
-        (compile "sum-to")
+        (compile sum-to)
         (sum-to 5)
         "#,
     );
@@ -1541,7 +1541,7 @@ fn compile_dispatches_a_loop_exited_via_a_bare_break_to_native_code() {
             (loop
               (if (>= i 5) (break) ())
               (setf i (+ i 1)))))
-        (compile "count-to-five")
+        (compile count-to-five)
         (count-to-five)
         "#,
     );
@@ -1575,7 +1575,7 @@ fn compile_dispatches_nested_loops_where_an_inner_break_only_exits_the_inner_loo
                   (setf total (+ total 1))
                   (setf inner (+ inner 1))))
               (setf outer (+ outer 1)))))
-        (compile "nested-loop-test")
+        (compile nested-loop-test)
         (nested-loop-test)
         "#,
     );
@@ -1660,7 +1660,7 @@ fn compile_loop_retains_a_borrowed_return_value_before_it_escapes() {
 /// It's a plain `defun` in `src/prelude.rs` now (`(defun not ((b bool))
 /// bool (if b false true))` — no GC-heap/Rust-only dependency, so there was
 /// no reason for it to stay a Rust builtin once `loop`/`if` existed to
-/// write it with), so it only needs the same `(compile "not")` *first* every
+/// write it with), so it only needs the same `(compile not)` *first* every
 /// other cross-function dependency already requires (see
 /// `compile_errors_clearly_when_a_called_function_is_not_yet_compiled`) —
 /// proving `while`/`dotimes` themselves are now fully compilable, the
@@ -1671,8 +1671,8 @@ fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
         r#"
         (defun count-via-dotimes ((n i32)) ()
           (dotimes (i n) ()))
-        (compile "not")
-        (compile "count-via-dotimes")
+        (compile not)
+        (compile count-via-dotimes)
         (count-via-dotimes 5)
         "#,
     )
@@ -1702,8 +1702,8 @@ fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
 fn compile_dispatches_consp_null_and_atom_to_native_code_for_both_a_cons_and_a_nil_value() {
     let truthy = run_with_compiler_and_prelude(
         r#"
-        (compile "not")
-        (compile "consp")
+        (compile not)
+        (compile consp)
         (consp (cons (Int 1) (Int 2)))
         "#,
     )
@@ -1712,8 +1712,8 @@ fn compile_dispatches_consp_null_and_atom_to_native_code_for_both_a_cons_and_a_n
 
     let falsy = run_with_compiler_and_prelude(
         r#"
-        (compile "not")
-        (compile "consp")
+        (compile not)
+        (compile consp)
         (consp ())
         "#,
     )
@@ -1722,8 +1722,8 @@ fn compile_dispatches_consp_null_and_atom_to_native_code_for_both_a_cons_and_a_n
 
     let truthy = run_with_compiler_and_prelude(
         r#"
-        (compile "not")
-        (compile "null")
+        (compile not)
+        (compile null)
         (null ())
         "#,
     )
@@ -1732,8 +1732,8 @@ fn compile_dispatches_consp_null_and_atom_to_native_code_for_both_a_cons_and_a_n
 
     let falsy = run_with_compiler_and_prelude(
         r#"
-        (compile "not")
-        (compile "null")
+        (compile not)
+        (compile null)
         (null (cons (Int 1) (Int 2)))
         "#,
     )
@@ -1742,9 +1742,9 @@ fn compile_dispatches_consp_null_and_atom_to_native_code_for_both_a_cons_and_a_n
 
     let truthy = run_with_compiler_and_prelude(
         r#"
-        (compile "not")
-        (compile "consp")
-        (compile "atom")
+        (compile not)
+        (compile consp)
+        (compile atom)
         (atom ())
         "#,
     )
@@ -1763,7 +1763,7 @@ fn compile_dispatches_a_function_that_binds_and_returns_a_cons_field_to_native_c
     let v = run_with_compiler_and_prelude(
         r#"
         (defun my-car ((s Sexpr)) Sexpr (match s ((Cons h _) h) (_ s)))
-        (compile "my-car")
+        (compile my-car)
         (my-car (cons (Int 42) (Int 99)))
         "#,
     )
@@ -1780,7 +1780,7 @@ fn compile_dispatches_a_function_that_binds_and_returns_a_cons_field_to_native_c
 fn compile_dispatches_a_nested_ctor_pattern_to_native_code() {
     let src = r#"
         (defun second-is-nil ((s Sexpr)) bool (match s ((Cons _ (Nil)) true) (_ false)))
-        (compile "second-is-nil")
+        (compile second-is-nil)
         "#;
     let single = run_with_compiler_and_prelude(&format!("{}\n(second-is-nil (cons (Int 1) ()))", src)).expect("eval failed");
     assert_eq!(single, RtValue::Int(1), "(1 . Nil) should match (Cons _ (Nil))");
@@ -1799,7 +1799,7 @@ fn compile_dispatches_a_nested_ctor_pattern_to_native_code() {
 fn compile_dispatches_a_literal_int_subpattern_to_native_code() {
     let src = r#"
         (defun is-zero ((s Sexpr)) bool (match s ((Int 0) true) (_ false)))
-        (compile "is-zero")
+        (compile is-zero)
         "#;
     let zero = run_with_compiler_and_prelude(&format!("{}\n(is-zero (Int 0))", src)).expect("eval failed");
     assert_eq!(zero, RtValue::Int(1));
@@ -1835,9 +1835,9 @@ fn compile_dispatches_a_dolist_based_function_that_sums_a_sexpr_list_to_native_c
                 ((Int n) (setf acc (+ acc n)))
                 (_ acc)))
             acc))
-        (compile "not")
-        (compile "consp")
-        (compile "sum-via-dolist")
+        (compile not)
+        (compile consp)
+        (compile sum-via-dolist)
         (sum-via-dolist 0)
         "#,
     )
@@ -1958,7 +1958,7 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
     let v = run_with_compiler_and_prelude(
         r#"
         (defun make-int ((n i64)) Sexpr (Int n))
-        (compile "make-int")
+        (compile make-int)
         (make-int 42)
         "#,
     )
@@ -1968,7 +1968,7 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
     let v = run_with_compiler_and_prelude(
         r#"
         (defun make-true () Sexpr (Bool true))
-        (compile "make-true")
+        (compile make-true)
         (make-true)
         "#,
     )
@@ -1978,7 +1978,7 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
     let v = run_with_compiler_and_prelude(
         r#"
         (defun make-nil () Sexpr (Nil))
-        (compile "make-nil")
+        (compile make-nil)
         (make-nil)
         "#,
     )
@@ -2002,7 +2002,7 @@ fn compile_dispatches_a_function_that_constructs_a_cons_via_construct_to_native_
           (match (Cons (Int a) (Int b))
             ((Cons (Int x) (Int y)) (+ x y))
             (_ -1)))
-        (compile "make-pair-sum")
+        (compile make-pair-sum)
         (make-pair-sum 3 4)
         "#,
     )
@@ -2026,7 +2026,7 @@ fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_cod
     let v = run_with_compiler_and_prelude(
         r#"
         (defun make-some ((n i64)) Option<i64> (Option::some n))
-        (compile "make-some")
+        (compile make-some)
         (make-some 42)
         "#,
     )
@@ -2058,11 +2058,11 @@ fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_cod
 /// desugars to an *instance-method call* (`Expr::Assoc`, evaluating the
 /// auto-generated accessor's body — `Expr::FieldGet`/`FieldSet` — only
 /// *inside that method*, never at the call site itself), and at this stage
-/// `(compile "name")` only ever compiled a top-level `defun` (`self.fns`),
+/// `(compile name)` only ever compiled a top-level `defun` (`self.fns`),
 /// never an instance method (`self.methods`). See the
 /// `compile_dispatches_a_defstruct_field_accessor_method_to_native_code`/
 /// `..._setter_method_to_native_code` tests below (`Interp::resolve_fn_def`/
-/// `method_key` — `(compile "type::method")`) for the follow-up that closes
+/// `method_key` — `(compile type::method)`) for the follow-up that closes
 /// this specific gap: compiling the accessor/setter *method itself* (whose
 /// body is the bare `Expr::FieldGet`/`FieldSet`, no `Expr::Assoc` involved)
 /// and wiring `Expr::Assoc`'s own dispatch to use it once compiled, the same
@@ -2079,7 +2079,7 @@ fn compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_
         r#"
         (defstruct point (x i64) (y i64))
         (defun make-point ((a i64) (b i64)) point (point::new a b))
-        (compile "make-point")
+        (compile make-point)
         (make-point 3 4)
         "#,
     )
@@ -2098,7 +2098,7 @@ fn compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_
     assert_eq!(y, 4);
 }
 
-/// `(compile "point::x")`: `Interp::method_key`/`resolve_fn_def` resolve a
+/// `(compile point::x)`: `Interp::method_key`/`resolve_fn_def` resolve a
 /// `"type::method"` name against `self.methods` instead of `self.fns`,
 /// compiling `point`'s auto-generated `x` accessor (body: bare
 /// `Expr::FieldGet`, no `Expr::Assoc`) on its own — closing the gap the
@@ -2119,8 +2119,8 @@ fn compile_dispatches_a_defstruct_field_accessor_method_to_native_code() {
         r#"
         (defstruct point (x i64) (y i64))
         (defun make-point ((a i64) (b i64)) point (point::new a b))
-        (compile "make-point")
-        (compile "point::x")
+        (compile make-point)
+        (compile point::x)
         (let ((p (make-point 3 4))) p::x)
         "#,
     )
@@ -2140,9 +2140,9 @@ fn compile_dispatches_a_defstruct_field_setter_method_to_native_code() {
         r#"
         (defstruct point (x i64) (y i64))
         (defun make-point ((a i64) (b i64)) point (point::new a b))
-        (compile "make-point")
-        (compile "point::x")
-        (compile "point::set-x")
+        (compile make-point)
+        (compile point::x)
+        (compile point::set-x)
         (let ((p (make-point 3 4)))
           (setf p::x 99)
           p::x)
@@ -2152,7 +2152,7 @@ fn compile_dispatches_a_defstruct_field_setter_method_to_native_code() {
     assert_eq!(v, RtValue::Int(99));
 }
 
-/// `(compile "point::bogus")`/`(compile "bogus::x")`: `Interp::method_key`
+/// `(compile point::bogus)`/`(compile bogus::x)`: `Interp::method_key`
 /// finds no match either way (a real method name on the wrong type, or any
 /// method name on a type that was never `defstruct`/`defmethod`-registered)
 /// — `resolve_fn_def` reports the same `NoSuchFunction` a plain unknown
@@ -2162,7 +2162,7 @@ fn compile_of_an_unknown_method_name_is_a_clean_error() {
     let err = run_with_compiler_and_prelude(
         r#"
         (defstruct point (x i64) (y i64))
-        (compile "point::bogus")
+        (compile point::bogus)
         "#,
     )
     .expect_err("expected compiling an unknown method to fail");
@@ -2173,13 +2173,37 @@ fn compile_of_an_unknown_method_name_is_a_clean_error() {
 
     let err2 = run_with_compiler_and_prelude(
         r#"
-        (compile "bogus::x")
+        (compile bogus::x)
         "#,
     )
     .expect_err("expected compiling a method on an unknown type to fail");
     match err2 {
         EvalError::NoSuchFunction(name) => assert_eq!(name, "bogus::x"),
         other => panic!("expected a NoSuchFunction, got {:?}", other),
+    }
+}
+
+/// `(compile "name")`/`(compile "type::method")` — a string literal, not an
+/// unevaluated symbol or `::`-path — is a type error caught at check time,
+/// before the compiler ever runs (see `Checker::check_compile`'s doc
+/// comment for why the name being compiled is program structure, not
+/// runtime data).
+#[test]
+fn compile_of_a_string_literal_is_a_type_error() {
+    for src in [
+        r#"(defun add2 ((a i64) (b i64)) i64 (+ a b)) (compile "add2")"#,
+        r#"(defstruct point (x i64) (y i64)) (compile "point::x")"#,
+    ] {
+        let mut h = Heap::with_capacity(1 << 16);
+        let r = Reader::new();
+        let vs = r.read_all(&mut h, src).expect("read failed");
+        let mut chk = Checker::new();
+        let interp = Interp::new();
+        let result = vs.into_iter().try_for_each(|v| chk.check_form(&mut h, &interp, v).map(|_| ()));
+        match result {
+            Err(Error::TypeError(_)) => {}
+            other => panic!("expected a TypeError for {:?}, got {:?}", src, other),
+        }
     }
 }
 
@@ -2212,7 +2236,7 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_sexpr_local_rooted_acros
               (match s
                 ((Cons (Int a) (Int b)) (eq (+ a b) 333))
                 (_ false)))))
-        (compile "churn-and-check")
+        (compile churn-and-check)
         (churn-and-check 5000)
         "#,
         1 << 13,
@@ -2246,8 +2270,8 @@ fn compile_dispatches_a_function_that_keeps_a_fresh_cons_car_rooted_while_its_cd
           (match (Cons (Cons (Int 111) (Int 222)) (Int (churn n)))
             ((Cons (Cons (Int a) (Int b)) (Int c)) (+ a b))
             (_ -1)))
-        (compile "churn")
-        (compile "make-and-check")
+        (compile churn)
+        (compile make-and-check)
         (make-and-check 5000)
         "#,
         1 << 13,
@@ -2280,9 +2304,9 @@ fn compile_dispatches_a_call_that_keeps_an_earlier_fresh_sexpr_argument_rooted_w
           (match (combine (Cons (Int 111) (Int 222)) (Int (churn n)))
             ((Cons (Cons (Int a) (Int b)) (Int c)) (+ a b))
             (_ -1)))
-        (compile "churn")
-        (compile "combine")
-        (compile "make-and-check")
+        (compile churn)
+        (compile combine)
+        (compile make-and-check)
         (make-and-check 5000)
         "#,
         1 << 13,
