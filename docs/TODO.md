@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-06-28 / ブランチ: `feature/compile-sexpr`
+最終更新: 2026-06-29 / ブランチ: `feature/compile-sexpr`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離した）。
@@ -22,8 +22,6 @@
    「compile機能の残課題の一部対応」節参照）:
    - `compile-if-branch`経由の値（`if`/`return`/`setf`/`match`アーム）のkind対応——現時点では
      具体的な破壊を実証するテストが書けていない（書けたら優先度を上げる）。
-   - ネストした`labels`が外側labelsの兄弟を参照するケース（既存の "known limitation"、
-     `compile-labels`は常に`inner-fn-env`を空から始める設計）。
    - `break`/`return`を文の位置以外（算術オペランド/呼び出し引数の中）でも許容する——型レベル
      では合法だが未対応。
    - Stage 7: 文字列対応（優先度低、計画上も最後に残されたステージ）。

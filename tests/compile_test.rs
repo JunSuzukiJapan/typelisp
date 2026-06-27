@@ -2478,3 +2478,161 @@ fn compile_dispatches_a_function_that_keeps_a_general_adt_box_field_rooted_acros
     assert_eq!(v, RtValue::Int(333), "holder::s's contents must survive churn's own unrelated allocations after make-holder returns");
 }
 
+/// Follow-up to the labels/closures work: the long-standing "known
+/// limitation" this module's own doc comment used to describe (a nested
+/// `labels`'s inner sibling couldn't direct-call an *outer* `labels`'s own
+/// sibling) is now fixed — `compiler.rs`'s `fn-env` is a real `Scope` shared
+/// down through `labels` nesting (`push-frame`/`clone-frames`, see that
+/// module's doc comment), not a fresh empty table per block. Here `inner-fn`
+/// (the sole sibling of the *inner* `labels` block) calls `outer-fn` (the
+/// sole sibling of the block enclosing it) directly — neither captures
+/// anything, the simplest case this fix covers.
+#[test]
+fn compile_dispatches_a_nested_labels_inner_sibling_calling_an_outer_sibling_directly() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun f () i64
+          (labels ((outer-fn ((a i64)) i64 (+ a 1)))
+            (labels ((inner-fn ((b i64)) i64 (outer-fn b)))
+              (inner-fn 10))))
+        (compile f)
+        (f)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 11),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// Same shape as the no-capture case above, but `outer-fn` itself captures
+/// `z` from the enclosing `defun` — `outer-fn` is declared with
+/// `add-function-with-env` and expects a 1-element env array.
+/// `freevars::labels_free_vars`'s unconditional prefix-copy of
+/// `outer_captured` makes the inner block's own captured-list `[z]` too (the
+/// same list, even though `inner-fn`'s body never mentions `z` directly), so
+/// `compile-apply`'s existing "build the callee's env array from the
+/// caller's own shared captured list" logic hands `outer-fn` exactly the
+/// `z` value it needs with no further change.
+#[test]
+fn compile_dispatches_a_nested_labels_inner_sibling_calling_a_capturing_outer_sibling() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun f ((z i64)) i64
+          (labels ((outer-fn ((a i64)) i64 (+ a z)))
+            (labels ((inner-fn ((b i64)) i64 (outer-fn b)))
+              (inner-fn 10))))
+        (compile f)
+        (f 100)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 110),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// The inner `labels`'s *trailing* body (not one of its own def bodies)
+/// calls the outer `labels`'s sibling directly — `compile-labels` compiles
+/// the trailing body with `fn-env` still holding this block's own
+/// just-`push-frame`d frame on top of the outer one, so the lookup
+/// succeeds the same way a def body's own would.
+#[test]
+fn compile_dispatches_a_nested_labels_trailing_body_calling_an_outer_sibling() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun f ((z i64)) i64
+          (labels ((outer-fn ((a i64)) i64 (+ a z)))
+            (labels ((dummy ((x i64)) i64 x))
+              (outer-fn 10))))
+        (compile f)
+        (f 100)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 110),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// `inner-fn` captures `z` (transitively, via calling `outer-fn`, which
+/// itself captures `z`) *and* references its own additional `w` directly —
+/// so the inner block's own captured-list `[z, w]` is strictly longer than
+/// the outer block's `[z]`. `compile-apply`'s callee env-array build still
+/// only reads as many slots as `outer-fn` itself declared captures for
+/// (`bind-captures`/`load-env` index purely off `outer-fn`'s own captured
+/// list, never off the caller's longer one or any runtime length), so the
+/// caller handing over a strictly *longer* array than the callee reads is
+/// safe — proving a separate "callee's own captured-list length" table
+/// isn't needed, only the unconditional prefix-inheritance in
+/// `labels_free_vars`.
+#[test]
+fn compile_dispatches_a_nested_labels_inner_sibling_with_a_capture_of_its_own_beyond_the_outer_blocks() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun f ((z i64) (w i64)) i64
+          (labels ((outer-fn ((a i64)) i64 (+ a z)))
+            (labels ((inner-fn ((b i64)) i64 (+ (outer-fn b) w)))
+              (inner-fn 10))))
+        (compile f)
+        (f 100 1000)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 1110),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// The innermost `labels` sibling, `f3`, calls `f1` — the *outermost*
+/// block's sibling, two levels up — skipping `f2`'s own level entirely.
+/// `f2` itself never references `f1` or `z`, so this also exercises that
+/// `labels_free_vars`'s unconditional prefix-copy still carries `z` through
+/// `f2`'s own (otherwise-empty) captured-list down to `f3`'s — proving the
+/// fix isn't limited to one level of nesting.
+#[test]
+fn compile_dispatches_a_triple_nested_labels_call_skipping_the_middle_level() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun f ((z i64)) i64
+          (labels ((f1 ((a i64)) i64 (+ a z)))
+            (labels ((f2 ((a i64)) i64 (* a 2)))
+              (labels ((f3 ((a i64)) i64 (f1 a)))
+                (f3 10)))))
+        (compile f)
+        (f 100)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 110),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// The inner `labels`'s sibling bare-returns the *outer* `labels`'s own
+/// sibling as a value — `resolve-value`'s fallback boxes `outer-fn` into a
+/// `ClosureBox` (it's found via `fn-env`, not `env`), exactly like the
+/// existing single-level "boxes a bare labels sibling reference" tests,
+/// just with the box built one nesting level further out. The box is then
+/// called *indirectly*, through another already-compiled function, well
+/// outside either `labels` block.
+#[test]
+fn compile_dispatches_a_nested_labels_inner_sibling_that_boxes_an_outer_sibling_bare() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun make-it ((z i64)) (fn (i64) i64)
+          (labels ((outer-fn ((a i64)) i64 (+ a z)))
+            (labels ((grab () (fn (i64) i64) outer-fn))
+              (grab))))
+        (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
+        (compile make-it)
+        (compile apply-fn)
+        (apply-fn (make-it 100) 10)
+        "#,
+    );
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 110),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+

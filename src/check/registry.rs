@@ -223,6 +223,7 @@ impl Registry {
         root.register_ctors(&def.name, &def.variants);
         root.add_type(def);
         root.add_type(hashtable_def());
+        root.add_type(scope_def());
         // The (typelisp-hosted) `compile`/`compile-file` compiler's view of
         // LLVM: four more builtin types, metadata-only like `hashtable_def`
         // (the runtime implementation lives in `eval_llvm_builtin_method` in
@@ -504,6 +505,69 @@ fn hashtable_def() -> AdtDef {
     AdtDef {
         name: Path::root("hashtable"),
         params: vec!["k".to_string(), "v".to_string()],
+        variants: vec![],
+        assoc,
+        public: true,
+        builtin: true,
+        kind: AdtKind::Sum,
+        field_names: Vec::new(),
+    }
+}
+
+fn scope_ty() -> Type {
+    Type::Named(Path::root("scope"), vec![tvar("v")])
+}
+
+/// `Scope<V>`: a builtin (Rust-implemented) stack of `String`-keyed frames —
+/// the (typelisp-hosted) compiler body's (`src/compiler.rs`) replacement for
+/// a bare `HashTable` as `env`/`fn-env`, modeling the "list of scopes" name
+/// resolution `labels`/`let` need (see that module's doc comment). No
+/// constructors of its own (built via the static `new`); all methods here
+/// are metadata only — the runtime implementation lives in
+/// `eval_builtin_method` in `crate::eval::interp`.
+fn scope_def() -> AdtDef {
+    let mut assoc = HashMap::new();
+    assoc.insert(
+        "new".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: scope_ty(), public: true, builtin: true }, instance: false, builtin: true },
+    );
+    assoc.insert(
+        // Shares every existing frame (by reference, not by copying their
+        // contents) plus pushes one fresh empty frame on top — the single
+        // operation a `labels` def's own new lexical scope needs to start
+        // from every enclosing scope's frames (see `compile-labels`'s doc
+        // comment for why a *fresh* top frame, not the shared ones
+        // themselves, must receive that def's own parameter bindings).
+        "clone-frames".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty()], ret: scope_ty(), public: true, builtin: true }, instance: true, builtin: true },
+    );
+    assoc.insert(
+        "push-frame".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty()], ret: Type::Unit, public: true, builtin: true }, instance: true, builtin: true },
+    );
+    assoc.insert(
+        "pop-frame".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty()], ret: Type::Unit, public: true, builtin: true }, instance: true, builtin: true },
+    );
+    assoc.insert(
+        "get".to_string(),
+        AssocFn {
+            sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty(), Type::Str], ret: option_of(tvar("v")), public: true, builtin: true },
+            instance: true,
+            builtin: true,
+        },
+    );
+    assoc.insert(
+        "set".to_string(),
+        AssocFn {
+            sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty(), Type::Str, tvar("v")], ret: Type::Unit, public: true, builtin: true },
+            instance: true,
+            builtin: true,
+        },
+    );
+    AdtDef {
+        name: Path::root("scope"),
+        params: vec!["v".to_string()],
         variants: vec![],
         assoc,
         public: true,

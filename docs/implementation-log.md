@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-06-27 / ブランチ: `feature/compile-sexpr`
+最終更新: 2026-06-29 / ブランチ: `feature/compile-sexpr`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -1657,3 +1657,102 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
 clippy警告0（`--workspace --all-targets`）。
 
 残課題はTODO.mdの「compile機能の残課題」節を参照（本対応で1項目解消）。
+
+## ネストした`labels`が外側`labels`の兄弟を参照できるよう修正（2026-06-29）
+
+[[feedback-impl-priority]]の残課題群にあった既存の"known limitation"
+（ネストした`labels`内のdef本体/trailing bodyが外側`labels`の兄弟をdirect call
+しようとすると`compile-apply: no direct-callable function named ...`で
+panicする）を解消した。
+
+**根本原因の再診断**: 当初は「`compile-labels`が`inner-fn-env`を外側から
+継承していない」という単純な話に見えたが、調査の結果、`compiler.rs`の
+`env`/`fn-env`管理自体に設計原則の誤りがあると判明した。既存の3パターンを
+比較すると——`loop`の`loop-exit`/`loop-slot`は再帰呼び出しの引数として
+新しい値を渡す安全な値渡し、`let`の`env`は外側を直接mutateして`saved`に
+退避し後で個別restoreする「mutate+restore」（同名重複bindingで復元が
+狂うという既存の"Known limitation"付き）、`labels`の`fn-env`は常に空の
+新規テーブル（今回の本題のバグ）——という3つの異なる（うち2つは問題のある）
+パターンが混在していた。
+
+ユーザー指摘によりCLHSの`labels`仕様（"the scope the created function
+bindings encompasses the function definitions themselves as well as the
+body"）を確認し、正しいモデルは「スコープのリストのリスト」だと整理した：
+関数呼び出しの境界で新しいフレームのスタックを作り、`let`/`labels`はその
+スタックに新しいフレームをpush/popする。`labels`が`let`と違うのは、各
+def本体をコンパイルする新しいフレームスタックが、空からではなく
+**このlabelsブロック自身が作ったフレーム（兄弟シグネチャ）を最初の要素として
+共有してスタートする**点のみ——これがCLHSの記述の直接的な実装になる。
+
+**設計**: 新しいRust組み込み型`Scope<V>`（`crate::check::registry::scope_def`/
+`crate::eval::interp`の`scope_*`系builtin、`RtValue::Scope`）を追加した。
+内部表現は「フレーム（`Rc<RefCell<HashMap<String,V>>>`、`HashTable`と
+同じ表現）への参照のリスト」——`push-frame`/`pop-frame`はリストの
+末尾操作、`clone-frames`は新しいリストを作って各フレームの`Rc`をclone
+するだけ（フレームの内容は複製しない、ポインタコピーのみでO(深さ)）。
+これは「新しいスコープに入るたびに名前空間を複製する」という効率の悪い
+実装ではなく、Scheme/Lisp実装の「フレームのリスト」、JSのScope Chainと
+同種の軽量なチェーン構造である。
+
+`compiler.rs`の`env`/`fn-env`の型を`HashTable<string,V>`から`Scope<V>`に
+変更（パラメータの個数は不変、型名のみ）。`compile-let`/`compile-match-arms`
+は`push-frame`→bind→body→`pop-frame`に書き換え、`bind-let-values`/
+`restore-let-values`/`pattern-bound-names`/`save-env-names`/
+`restore-env-names`という個別キーのsave/restore関数群は全廃した
+（`pop-frame`がフレーム単位で一括して戻すため、同名重複時の復元ミスという
+"Known limitation"も同時に解消）。`compile-match-arms`は1点注意が必要
+だった——LLVM基本ブロックの分岐とは無関係に、コンパイラ自身の実行は
+1本のシーケンシャルな処理なので、成功パス・失敗パスそれぞれで`pop-frame`を
+呼ぶと（旧`restore-env-names`の2回呼び出しは個別キーの復元なのでidempotent
+だったのに対し）2回popしてフレームを1つ余分に消費してしまう。
+`compile-if-branch`呼び出し直後の1箇所だけで`pop-frame`を呼ぶよう修正——
+それ以降に生成されるどの基本ブロックのコードも、もう「popされた後の`env`」を
+見るので問題ない。
+
+`compile-labels`は外側から受け取った`fn-env`に対して`push-frame`し、
+`declare-labels-siblings`/`compile-labels-bodies`にそのまま渡す（別の
+`new-fn-env`は作らない）。各兄弟の本体をコンパイルする際の`fn-env`は
+`(clone-frames inner-fn-env)`——外側の全フレーム（ネストしていれば祖先の
+labelsのフレームも含めて）を共有しつつ、これにより何段ネストしていても、
+どのレベルのlabels兄弟も`get`で見つかる（祖先を飛び越える参照も自動的に
+動く）。
+
+**captured-list（クロージャenv配列）の伝播**: `Scope`による名前解決の
+修正だけでは、内側labelsの兄弟が外側labelsの（capture有りの）兄弟を呼ぶ
+ケースで、その外側兄弟が必要とする捕獲値を呼び出し元が運べない問題が
+残る。`freevars::labels_free_vars`に`outer_captured`パラメータ（直接の親
+labelsブロックの共有captured-list）を追加し、結果の先頭に無条件コピー
+してから既存の自由変数解析を行うよう変更——ネストのたびに外側を無条件
+prefixとして継承するので、祖先を飛び越える参照でも必要な値は自動的に
+伝播済みになる。`ast_bridge.rs`の`direct: &HashSet<String>`を引き回す
+全関数（約20箇所）に同様に`outer_captured: &[(String, Type)]`を追加。
+`translate_labels`はこのブロック自身が計算した`captured_names`を、各def
+本体とtrailing bodyへの新しい`outer_captured`として渡す（直接の親は常に
+このブロック自身）。`translate_lambda`は空の`outer_captured`を渡す——
+`labels`と違い`lambda`は`compile-lambda`側で常に新規`fn-env`から始まる
+ため、内側にネストした`labels`が継承すべき外側captured-listは存在しない。
+
+**当初計画していた`fn-captured-len`は不要と判明**: 計画段階では
+「呼び出し先ごとに期待するcaptured配列の長さを記録する並行Scope」が
+別途必要と想定していたが、実装・検証の結果不要と判明した。`load-env`
+（`llvm_builder_load_env`）はターゲット関数自身の`get_nth_param(2)`
+（env配列）から、`bind-captures`が辿る「ターゲット自身のcaptured名リスト」
+の長さ分だけGEP+loadするだけで、呼び出し元が渡した`env_len`という実引数
+自体は本体側で一切参照されない。つまり呼び出し元が（無条件prefix継承の
+おかげで）十分に長い配列を渡せば、ターゲットは自分が必要な先頭部分だけを
+正しく読み取り、余分な要素は単に無視される——ABIミスマッチは実害なし。
+これにより設計を1段シンプル化できた。
+
+**テスト**: `tests/compile_test.rs`に6件追加——内側labelsの兄弟が外側
+labels兄弟を（capture無し/capture有りそれぞれで）直接呼ぶケース、
+trailing bodyが外側兄弟を呼ぶケース、内側兄弟が外側のcaptureに加えて
+自分自身の追加captureも持つケース（`captured_inner`が`captured_outer`より
+長い、`fn-captured-len`の必要性検証も兼ねる）、3段ネストで中間レベルを
+スキップして祖父を直接呼ぶケース、内側兄弟が外側兄弟をbareで返して
+ClosureBox化されるケース。新規`tests/scope_test.rs`に`Scope<V>`自体の
+単体テスト9件（push/pop/get/set/clone-framesの基本動作、クローン後の
+共有・独立性の確認）。既存の全テスト（labels/lambda/let/matchの兄弟参照系・
+shadowing系を含む）は無修正でgreenのまま。`cargo +nightly miri test
+--test mem_test`/`--test scope_test`もUB・リーク無し、clippy警告0
+（`Scope`の内部表現が`clippy::type_complexity`を出したため`ScopeFrame`
+型エイリアスを追加して解消）。

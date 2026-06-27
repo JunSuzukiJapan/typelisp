@@ -57,13 +57,35 @@ pub fn lambda_free_vars(params: &[(String, Type)], body: &[Typed]) -> Vec<(Strin
 /// block's own sibling names, or this analysis would manufacture a bogus
 /// captured slot for a name `compile-apply` resolves through `fn-env`
 /// instead of `env`.
-pub fn labels_free_vars(defs: &[LabelDef], outer_direct: &HashSet<String>) -> Vec<(String, Type)> {
+///
+/// `outer_captured` is the *closest enclosing* `labels` block's own shared
+/// captured-list (empty at the top level, or when this block isn't nested
+/// inside another) — unconditionally copied into the front of this block's
+/// own result, regardless of whether any def here actually references one
+/// of those names directly. This is what makes a nested `labels` block's
+/// captured-list a strict prefix-superset of every block enclosing it,
+/// however deep the nesting: calling an enclosing block's own sibling (which
+/// `compiler.rs`'s `compile-apply` resolves via `fn-env`, now correctly
+/// shared down through nesting — see that module's doc comment) still needs
+/// that sibling's *own* captured values forwarded along, and the only way
+/// this def's compiled body can have them on hand to forward is if they're
+/// already in its own captured list too. Padding the list with names this
+/// block's own defs never reference is the trade-off that buys this — same
+/// idea as `compile-apply`'s own "every sibling in one block shares the same
+/// captured list" sharing, just extended across nesting levels instead of
+/// across siblings within one level.
+pub fn labels_free_vars(defs: &[LabelDef], outer_direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Vec<(String, Type)> {
     let mut siblings: HashSet<String> = outer_direct.clone();
     for (name, _, _) in defs {
         siblings.insert(name.clone());
     }
     let mut seen = HashSet::new();
     let mut order = Vec::new();
+    for (name, ty) in outer_captured {
+        if seen.insert(name.clone()) {
+            order.push((name.clone(), ty.clone()));
+        }
+    }
     for (_, params, body) in defs {
         let bound: HashSet<String> = params.iter().map(|(n, _)| n.clone()).collect();
         walk_body(body, &bound, &siblings, &mut seen, &mut order);
@@ -225,7 +247,7 @@ mod tests {
             Type::I64,
         )];
         let defs = vec![("go".to_string(), vec![("k".to_string(), Type::I64)], go_body)];
-        assert_eq!(labels_free_vars(&defs, &HashSet::new()), vec![("offset".to_string(), Type::I64)]);
+        assert_eq!(labels_free_vars(&defs, &HashSet::new(), &[]), vec![("offset".to_string(), Type::I64)]);
     }
 
     /// `f`'s own parameter `x` and its sibling `g` are both in scope, so
@@ -254,7 +276,7 @@ mod tests {
             ("f".to_string(), vec![("x".to_string(), Type::I64)], f_body),
             ("g".to_string(), vec![("x".to_string(), Type::I64)], g_body),
         ];
-        assert_eq!(labels_free_vars(&defs, &HashSet::new()), vec![("shared".to_string(), Type::I64)]);
+        assert_eq!(labels_free_vars(&defs, &HashSet::new(), &[]), vec![("shared".to_string(), Type::I64)]);
     }
 
     /// No def references anything outside its own parameters/siblings ->
@@ -273,7 +295,7 @@ mod tests {
             ("f".to_string(), vec![("x".to_string(), Type::I64)], f_body),
             ("g".to_string(), vec![("n".to_string(), Type::I64)], g_body),
         ];
-        assert_eq!(labels_free_vars(&defs, &HashSet::new()), Vec::new());
+        assert_eq!(labels_free_vars(&defs, &HashSet::new(), &[]), Vec::new());
     }
 
     /// `lambda_free_vars`: a single lambda's body referencing a name that's

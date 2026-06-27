@@ -12,6 +12,9 @@ use inkwell::values::{BasicValueEnum, FunctionValue};
 
 use crate::{Path, Typed, Value};
 
+/// One `Scope<V>` frame — see [`RtValue::Scope`]'s doc comment.
+pub type ScopeFrame = Rc<RefCell<HashMap<String, RtValue>>>;
+
 /// A `HashTable<K,V>` key. Restricted to the scalar `RtValue` variants with a
 /// natural, total `Eq`/`Hash` (notably excluding `Float` — `f64` has no `Eq`
 /// because of `NaN` — and any reference-counted variant, where a structural
@@ -111,6 +114,17 @@ pub enum RtValue {
     /// have; mark-sweep cycle collection is deliberately only for the cons
     /// heap (`Sexpr`/`cons`/strings).
     HashTable(Rc<RefCell<HashMap<HashKey, RtValue>>>),
+    /// A `Scope<V>`: a stack of frames (each an ordinary `String`-keyed map),
+    /// used by the (typelisp-hosted) compiler body (`src/compiler.rs`) to
+    /// track lexically-nested name resolution (`env`/`fn-env`) the way a
+    /// real interpreter's environment chain would — see that module's doc
+    /// comment for the "list of scopes" model this implements. A frame is
+    /// `Rc<RefCell<HashMap<..>>>` (the same representation `HashTable`
+    /// already uses) specifically so a "clone the frame list" operation
+    /// is just a `Vec` of cloned `Rc`s — cheap (pointer copies, no per-entry
+    /// work) and exactly what lets a `labels` def's own new scope start from
+    /// every enclosing scope's frames without copying their contents.
+    Scope(Rc<RefCell<Vec<ScopeFrame>>>),
     /// A `defstruct` instance — mutable, reference-identity-bearing, unlike
     /// `Data`'s value semantics (see [`StructData`]'s doc comment for why
     /// this needed its own variant rather than reusing `Data`). Lives in
@@ -153,6 +167,7 @@ impl PartialEq for RtValue {
                 p1 == p2 && m1 == m2
             }
             (RtValue::HashTable(a), RtValue::HashTable(b)) => *a.borrow() == *b.borrow(),
+            (RtValue::Scope(a), RtValue::Scope(b)) => *a.borrow() == *b.borrow(),
             (RtValue::Struct(a), RtValue::Struct(b)) => *a.borrow() == *b.borrow(),
             // Compiler-internal LLVM handles have no meaningful structural
             // equality, and inkwell's types don't implement `PartialEq`

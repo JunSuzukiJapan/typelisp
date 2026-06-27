@@ -202,6 +202,7 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
         RtValue::Builtin(name) => format!("#<builtin {}>", name),
         RtValue::BuiltinMethod(type_name, method) => format!("#<builtin {}::{}>", type_name, method),
         RtValue::HashTable(map) => format!("#<hashtable count={}>", map.borrow().len()),
+        RtValue::Scope(frames) => format!("#<scope depth={}>", frames.borrow().len()),
         RtValue::Struct(s) => {
             // Positional, not named — `StructData` deliberately doesn't
             // carry field names at runtime (see its doc comment), and this

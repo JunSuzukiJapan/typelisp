@@ -145,10 +145,10 @@ fn unsupported(heap: &mut Heap, variant: &str) -> Result<Value, Error> {
 /// arm below). On error, pops everything pushed so far before propagating.
 /// `direct` is threaded through unchanged — see [`ast_to_sexpr_scoped`]'s
 /// doc comment.
-fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>) -> Result<Vec<Value>, Error> {
+fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Vec<Value>, Error> {
     let mut values = Vec::with_capacity(items.len());
     for item in items {
-        match ast_to_sexpr_scoped(heap, item, direct) {
+        match ast_to_sexpr_scoped(heap, item, direct, outer_captured) {
             Ok(v) => {
                 heap.push_root(v);
                 values.push(v);
@@ -182,10 +182,10 @@ fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>)
 /// [`tagged_sym_list`]'s own pair shape was in Stage 6, reusing
 /// [`binding_kind`] rather than re-deriving the same 3-way classification a
 /// third time.
-fn tagged_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>) -> Result<Vec<Value>, Error> {
+fn tagged_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Vec<Value>, Error> {
     let mut values = Vec::with_capacity(items.len());
     for item in items {
-        let form = match ast_to_sexpr_scoped(heap, item, direct) {
+        let form = match ast_to_sexpr_scoped(heap, item, direct, outer_captured) {
             Ok(v) => v,
             Err(e) => {
                 for _ in 0..values.len() {
@@ -216,7 +216,7 @@ fn tagged_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<S
 /// Translates one typed AST node. See the module doc comment for the tagged
 /// shape and which variants are real vs. `unsupported` placeholders today.
 pub fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
-    ast_to_sexpr_scoped(heap, typed, &HashSet::new())
+    ast_to_sexpr_scoped(heap, typed, &HashSet::new(), &[])
 }
 
 /// `direct` is the set of names that resolve to a direct call rather than
@@ -225,7 +225,7 @@ pub fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
 /// see [`translate_apply`]. Empty at the top level (a `defun`'s own body
 /// has no such names; they only come into existence inside a `labels`
 /// form, see [`translate_labels`]).
-fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>) -> Result<Value, Error> {
+fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     match &typed.expr {
         Expr::Int(n) => tagged(heap, "int", &[Value::Int(*n)]),
         Expr::Float(f) => tagged(heap, "float", &[Value::Float(*f)]),
@@ -281,7 +281,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
             heap.push_root(type_name_v);
             let method_v = heap.alloc_string(method.clone());
             heap.push_root(method_v);
-            let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct) {
+            let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured) {
                 Ok(v) => v,
                 Err(e) => {
                     heap.pop_root(); // method_v
@@ -309,21 +309,21 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
         Expr::Global(_) => unsupported(heap, "Global"),
         Expr::FnRef(path) => translate_fnref(heap, path, &typed.ty),
         Expr::MethodRef { .. } => unsupported(heap, "MethodRef"),
-        Expr::If(cond, then, els) => translate_if(heap, cond, then, els, &typed.ty, direct),
-        Expr::Let(binds, body) => translate_let(heap, binds, body, direct),
-        Expr::Call(path, args) => translate_call(heap, path, args, direct),
+        Expr::If(cond, then, els) => translate_if(heap, cond, then, els, &typed.ty, direct, outer_captured),
+        Expr::Let(binds, body) => translate_let(heap, binds, body, direct, outer_captured),
+        Expr::Call(path, args) => translate_call(heap, path, args, direct, outer_captured),
         Expr::Lambda { params, body } => translate_lambda(heap, params, body),
-        Expr::Labels { defs, body } => translate_labels(heap, defs, body, direct),
-        Expr::Apply(callee, args) => translate_apply(heap, callee, args, direct),
-        Expr::Construct { variant, args, .. } => translate_construct(heap, &typed.ty, *variant, args, direct),
-        Expr::FieldGet(obj, idx) => translate_field_get(heap, obj, *idx, direct),
-        Expr::FieldSet(obj, idx, value) => translate_field_set(heap, obj, *idx, value, direct),
-        Expr::Match(scrut, arms) => translate_match(heap, scrut, arms, &typed.ty, direct),
-        Expr::Set(name, value) => translate_set(heap, name, value, &typed.ty, direct),
+        Expr::Labels { defs, body } => translate_labels(heap, defs, body, direct, outer_captured),
+        Expr::Apply(callee, args) => translate_apply(heap, callee, args, direct, outer_captured),
+        Expr::Construct { variant, args, .. } => translate_construct(heap, &typed.ty, *variant, args, direct, outer_captured),
+        Expr::FieldGet(obj, idx) => translate_field_get(heap, obj, *idx, direct, outer_captured),
+        Expr::FieldSet(obj, idx, value) => translate_field_set(heap, obj, *idx, value, direct, outer_captured),
+        Expr::Match(scrut, arms) => translate_match(heap, scrut, arms, &typed.ty, direct, outer_captured),
+        Expr::Set(name, value) => translate_set(heap, name, value, &typed.ty, direct, outer_captured),
         Expr::SetGlobal(..) => unsupported(heap, "SetGlobal"),
-        Expr::Loop(body) => translate_loop(heap, body, direct),
+        Expr::Loop(body) => translate_loop(heap, body, direct, outer_captured),
         Expr::Break => tagged(heap, "break", &[]),
-        Expr::Return(value) => translate_return(heap, value, direct),
+        Expr::Return(value) => translate_return(heap, value, direct, outer_captured),
         Expr::Panic(_) => unsupported(heap, "Panic"),
         Expr::Quote(_) => unsupported(heap, "Quote"),
     }
@@ -344,11 +344,11 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
 /// boundary that already freshens its result, so `if` is the one place this
 /// module needs to carry that information explicitly rather than letting
 /// `compiler.rs` assume it.
-fn translate_if(heap: &mut Heap, cond: &Typed, then: &Typed, els: &Typed, ty: &Type, direct: &HashSet<String>) -> Result<Value, Error> {
+fn translate_if(heap: &mut Heap, cond: &Typed, then: &Typed, els: &Typed, ty: &Type, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
-    let cond_v = ast_to_sexpr_scoped(heap, cond, direct)?;
+    let cond_v = ast_to_sexpr_scoped(heap, cond, direct, outer_captured)?;
     heap.push_root(cond_v);
-    let then_v = match ast_to_sexpr_scoped(heap, then, direct) {
+    let then_v = match ast_to_sexpr_scoped(heap, then, direct, outer_captured) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // cond_v
@@ -356,7 +356,7 @@ fn translate_if(heap: &mut Heap, cond: &Typed, then: &Typed, els: &Typed, ty: &T
         }
     };
     heap.push_root(then_v);
-    let els_v = match ast_to_sexpr_scoped(heap, els, direct) {
+    let els_v = match ast_to_sexpr_scoped(heap, els, direct, outer_captured) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // then_v
@@ -394,7 +394,7 @@ fn translate_if(heap: &mut Heap, cond: &Typed, then: &Typed, els: &Typed, ty: &T
 /// wins" semantics (lifted for Stage 8 of the Sexpr-representation plan,
 /// `docs/implementation-log.md` — `dolist`'s own macro expansion always produces a
 /// multi-statement inner `let` body: `,@body` followed by a hidden `setf`).
-fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
+fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     let mut pair_values = Vec::with_capacity(binds.len());
     for (name, val) in binds {
         let name_sym = heap.intern_symbol(name);
@@ -412,7 +412,7 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], dir
             }
         };
         heap.push_root(name_pair);
-        let val_v = match ast_to_sexpr_scoped(heap, val, direct) {
+        let val_v = match ast_to_sexpr_scoped(heap, val, direct, outer_captured) {
             Ok(v) => v,
             Err(e) => {
                 heap.pop_root(); // name_pair
@@ -451,7 +451,7 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], dir
         heap.pop_root();
     }
     heap.push_root(bindings_list);
-    let body_values = match ast_list_to_sexpr(heap, body, direct) {
+    let body_values = match ast_list_to_sexpr(heap, body, direct, outer_captured) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // bindings_list
@@ -481,11 +481,11 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], dir
 /// storing it into the target's slot, since that slot can outlive whatever
 /// activation computed a borrowed value (exactly the same boundary an `if`
 /// merge crosses).
-fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, direct: &HashSet<String>) -> Result<Value, Error> {
+fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
     let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
-    let form = match ast_to_sexpr_scoped(heap, value, direct) {
+    let form = match ast_to_sexpr_scoped(heap, value, direct, outer_captured) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // name_v
@@ -507,8 +507,8 @@ fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, direct: 
 /// see [`translate_return`]). `compiler.rs`'s `compile-loop` builds the
 /// actual loop/exit blocks and merge slot; `compile-loop-body` walks this
 /// list.
-fn translate_loop(heap: &mut Heap, body: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
-    let body_values = ast_list_to_sexpr(heap, body, direct)?;
+fn translate_loop(heap: &mut Heap, body: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+    let body_values = ast_list_to_sexpr(heap, body, direct, outer_captured)?;
     let result = tagged(heap, "loop", &body_values);
     for _ in 0..body_values.len() {
         heap.pop_root();
@@ -525,11 +525,11 @@ fn translate_loop(heap: &mut Heap, body: &[Typed], direct: &HashSet<String>) -> 
 /// the exact same path this way. `(break)`, by contrast, never carries a
 /// value at all (not even an implicit `Unit` one) — see its own tag, built
 /// directly in [`ast_to_sexpr_scoped`].
-fn translate_return(heap: &mut Heap, value: &Option<Box<Typed>>, direct: &HashSet<String>) -> Result<Value, Error> {
+fn translate_return(heap: &mut Heap, value: &Option<Box<Typed>>, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     match value {
         Some(v) => {
             let is_fn = Value::Bool(matches!(v.ty, Type::Fn(..)));
-            let form = ast_to_sexpr_scoped(heap, v, direct)?;
+            let form = ast_to_sexpr_scoped(heap, v, direct, outer_captured)?;
             heap.push_root(form);
             let result = tagged(heap, "return", &[is_fn, form]);
             heap.pop_root();
@@ -555,7 +555,15 @@ fn translate_return(heap: &mut Heap, value: &Option<Box<Typed>>, direct: &HashSe
 /// field). Every sibling shares this *one* list rather than each getting its
 /// own narrower one — see `labels_free_vars`'s doc comment for why a shared
 /// environment, not a per-sibling one, is what lets sibling-to-sibling calls
-/// work without a second, transitive analysis pass.
+/// work without a second, transitive analysis pass. When this `labels` block
+/// itself nests inside another, `captured_names` (computed here, from
+/// `outer_captured`) becomes the *new* `outer_captured` passed down to each
+/// def's own body translation and to the trailing body — both can reach an
+/// enclosing block's own sibling (`compiler.rs`'s `fn-env` is now a real
+/// scope stack shared down through nesting — see that module's doc comment),
+/// and forwarding that sibling's own captured values along requires having
+/// them on hand, which `labels_free_vars`'s unconditional prefix-copy of
+/// `outer_captured` guarantees.
 ///
 /// A def's body may otherwise reference its own parameters, any sibling/self
 /// name (resolved as a direct call when it's the callee of an `Apply`, see
@@ -567,13 +575,13 @@ fn translate_return(heap: &mut Heap, value: &Option<Box<Typed>>, direct: &HashSe
 /// same restriction `Interp::add_compiled_function` already applies to a
 /// `defun`'s own body, just extended uniformly to `labels` rather than
 /// lifted here.
-fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
+fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     let mut siblings = direct.clone();
     for (name, _, _) in defs {
         siblings.insert(name.clone());
     }
 
-    let captured_names = labels_free_vars(defs, direct);
+    let captured_names = labels_free_vars(defs, direct, outer_captured);
     let captured_list = tagged_sym_list(heap, &captured_names)?;
     heap.push_root(captured_list);
 
@@ -589,7 +597,7 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: 
                 name
             )));
         }
-        match translate_labels_def(heap, name, params, &fbody[0], &siblings) {
+        match translate_labels_def(heap, name, params, &fbody[0], &siblings, &captured_names) {
             Ok(v) => {
                 heap.push_root(v);
                 def_values.push(v);
@@ -623,7 +631,7 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: 
         heap.pop_root(); // captured_list
         return Err(Error::TypeError("compile: labels body has a multi-expression body, not yet supported".into()));
     }
-    let body_v = match ast_to_sexpr_scoped(heap, &body[0], &siblings) {
+    let body_v = match ast_to_sexpr_scoped(heap, &body[0], &siblings, &captured_names) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // defs_list
@@ -642,7 +650,14 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: 
 /// One `labels` def: `(name-str (param-sym...) single-body-form)` — an
 /// untagged 3-element list (its fixed position within `labels`'s own
 /// already-tagged shape makes a separate tag unnecessary).
-fn translate_labels_def(heap: &mut Heap, name: &str, params: &[(String, crate::Type)], body: &Typed, siblings: &HashSet<String>) -> Result<Value, Error> {
+fn translate_labels_def(
+    heap: &mut Heap,
+    name: &str,
+    params: &[(String, crate::Type)],
+    body: &Typed,
+    siblings: &HashSet<String>,
+    outer_captured: &[(String, Type)],
+) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
     let param_list = match tagged_sym_list(heap, params) {
@@ -653,7 +668,7 @@ fn translate_labels_def(heap: &mut Heap, name: &str, params: &[(String, crate::T
         }
     };
     heap.push_root(param_list);
-    let body_v = match ast_to_sexpr_scoped(heap, body, siblings) {
+    let body_v = match ast_to_sexpr_scoped(heap, body, siblings, outer_captured) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -679,20 +694,20 @@ fn translate_labels_def(heap: &mut Heap, name: &str, params: &[(String, crate::T
 ///   own parameter, ...) -> [`translate_indirect_apply`] — `callee`'s value
 ///   is evaluated and called through at runtime, since nothing here can
 ///   know ahead of time which `ClosureBox` it'll be.
-fn translate_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
+fn translate_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     match &callee.expr {
-        Expr::Var(n) if direct.contains(n) => translate_direct_apply(heap, n, args, direct),
-        Expr::Lambda { params, body } => translate_immediate_lambda_call(heap, params, body, args, direct),
-        _ => translate_indirect_apply(heap, callee, args, direct),
+        Expr::Var(n) if direct.contains(n) => translate_direct_apply(heap, n, args, direct, outer_captured),
+        Expr::Lambda { params, body } => translate_immediate_lambda_call(heap, params, body, args, direct, outer_captured),
+        _ => translate_indirect_apply(heap, callee, args, direct, outer_captured),
     }
 }
 
 /// `(apply name arg...)` — a direct call to a `labels` sibling/self
 /// (Stage 1 scope, unchanged).
-fn translate_direct_apply(heap: &mut Heap, name: &str, args: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
+fn translate_direct_apply(heap: &mut Heap, name: &str, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
-    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct) {
+    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -734,6 +749,7 @@ fn translate_immediate_lambda_call(
     lambda_body: &[Typed],
     args: &[Typed],
     direct: &HashSet<String>,
+    outer_captured: &[(String, Type)],
 ) -> Result<Value, Error> {
     let name = fresh_lambda_name("__lambda");
     let dummy_ty = Type::Unit;
@@ -742,7 +758,7 @@ fn translate_immediate_lambda_call(
         expr: Expr::Apply(Box::new(Typed { expr: Expr::Var(name), ty: dummy_ty.clone() }), args.to_vec()),
         ty: dummy_ty,
     };
-    translate_labels(heap, &[def], std::slice::from_ref(&call), direct)
+    translate_labels(heap, &[def], std::slice::from_ref(&call), direct, outer_captured)
 }
 
 /// `(apply-indirect callee-form arg...)` — the general indirect-dispatch
@@ -754,10 +770,10 @@ fn translate_immediate_lambda_call(
 /// unification — so Stage 1-3's already-shipped `(apply name arg...)` shape
 /// (and `compiler.rs`'s/tests' existing assumptions about it) needs no
 /// change at all.
-fn translate_indirect_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
-    let callee_v = ast_to_sexpr_scoped(heap, callee, direct)?;
+fn translate_indirect_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+    let callee_v = ast_to_sexpr_scoped(heap, callee, direct, outer_captured)?;
     heap.push_root(callee_v);
-    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct) {
+    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -836,7 +852,13 @@ fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed]) 
         return Err(Error::TypeError("compile: lambda has a multi-expression body, not yet supported".into()));
     }
     let captured_names = lambda_free_vars(params, body);
-    let body_v = ast_to_sexpr_scoped(heap, &body[0], &HashSet::new())?;
+    // An empty `outer_captured`, not whatever the enclosing scope's own was:
+    // unlike `labels` (which shares `compiler.rs`'s `fn-env` scope stack
+    // down through nesting), a `lambda` is compiled with a *fresh* `fn-env`
+    // (`compile-lambda`'s own `(new-fn-env)`) — so a `labels` block nested
+    // inside *this* body has no enclosing block's captured-list to prefix
+    // its own with, regardless of what scope the `lambda` itself sits in.
+    let body_v = ast_to_sexpr_scoped(heap, &body[0], &HashSet::new(), &[])?;
     heap.push_root(body_v);
     let result = build_lambda_tag(heap, &fresh_lambda_name("lambda"), &captured_names, params, body_v);
     heap.pop_root(); // body_v
@@ -936,10 +958,10 @@ fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Err
 /// looks the callee up by that same plain name via `get-function` against
 /// the destination module, matching how every compiled top-level function
 /// is itself declared under its local name (`Interp::add_compiled_function`).
-fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
+fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     let name_v = heap.alloc_string(path.local().to_string());
     heap.push_root(name_v);
-    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct) {
+    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -1048,14 +1070,14 @@ fn pattern_list_to_sexpr(heap: &mut Heap, pats: &[Pattern]) -> Result<Vec<Value>
 /// body is restricted to a single expression, the same limit every other
 /// multi-expression body shape in this module has ([`translate_let`]'s
 /// body, a `labels` def's body, ...).
-fn translate_match(heap: &mut Heap, scrut: &Typed, arms: &[Arm], ty: &Type, direct: &HashSet<String>) -> Result<Value, Error> {
+fn translate_match(heap: &mut Heap, scrut: &Typed, arms: &[Arm], ty: &Type, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     if !is_sexpr_type(&scrut.ty) {
         return unsupported(heap, "Match");
     }
     let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
-    let scrut_v = ast_to_sexpr_scoped(heap, scrut, direct)?;
+    let scrut_v = ast_to_sexpr_scoped(heap, scrut, direct, outer_captured)?;
     heap.push_root(scrut_v);
-    let arm_values = match translate_arms(heap, arms, direct) {
+    let arm_values = match translate_arms(heap, arms, direct, outer_captured) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // scrut_v
@@ -1086,7 +1108,7 @@ fn translate_match(heap: &mut Heap, scrut: &Typed, arms: &[Arm], ty: &Type, dire
 /// rooting every pair as it goes — [`translate_match`]'s own helper, kept
 /// separate purely to give the per-arm rooting its own clean error-
 /// cleanup scope (mirrors [`ast_list_to_sexpr`]'s shape, one level up).
-fn translate_arms(heap: &mut Heap, arms: &[Arm], direct: &HashSet<String>) -> Result<Vec<Value>, Error> {
+fn translate_arms(heap: &mut Heap, arms: &[Arm], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Vec<Value>, Error> {
     let mut values = Vec::with_capacity(arms.len());
     for arm in arms {
         if arm.body.len() != 1 {
@@ -1105,7 +1127,7 @@ fn translate_arms(heap: &mut Heap, arms: &[Arm], direct: &HashSet<String>) -> Re
             }
         };
         heap.push_root(pat_v);
-        let body_v = match ast_to_sexpr_scoped(heap, &arm.body[0], direct) {
+        let body_v = match ast_to_sexpr_scoped(heap, &arm.body[0], direct, outer_captured) {
             Ok(v) => v,
             Err(e) => {
                 heap.pop_root(); // pat_v
@@ -1168,9 +1190,9 @@ fn translate_arms(heap: &mut Heap, arms: &[Arm], direct: &HashSet<String>) -> Re
 /// `ClosureBox` retain at all (deliberately leaked, same as before — see
 /// `compiler.rs`'s `compile-construct-box` doc comment); only the
 /// GC-root gap this tag closes is in scope here.
-fn translate_construct(heap: &mut Heap, ty: &Type, variant: usize, args: &[Typed], direct: &HashSet<String>) -> Result<Value, Error> {
+fn translate_construct(heap: &mut Heap, ty: &Type, variant: usize, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     let is_sexpr = is_sexpr_type(ty);
-    let arg_values = if is_sexpr { ast_list_to_sexpr(heap, args, direct)? } else { tagged_ast_list_to_sexpr(heap, args, direct)? };
+    let arg_values = if is_sexpr { ast_list_to_sexpr(heap, args, direct, outer_captured)? } else { tagged_ast_list_to_sexpr(heap, args, direct, outer_captured)? };
     let mut items = vec![Value::Bool(is_sexpr), Value::Int(variant as i64)];
     items.extend(arg_values.iter().copied());
     let result = tagged(heap, "construct", &items);
@@ -1210,10 +1232,10 @@ fn idx_unary_list(heap: &mut Heap, idx: usize) -> Result<Value, Error> {
 /// `Expr::FieldGet`'s doc comment), so `obj`'s static type is always some
 /// `defstruct`, never `Sexpr` — no `is_sexpr_type` dispatch is needed here
 /// the way [`translate_construct`] needs one.
-fn translate_field_get(heap: &mut Heap, obj: &Typed, idx: usize, direct: &HashSet<String>) -> Result<Value, Error> {
+fn translate_field_get(heap: &mut Heap, obj: &Typed, idx: usize, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     let idx_list = idx_unary_list(heap, idx)?;
     heap.push_root(idx_list);
-    let obj_v = match ast_to_sexpr_scoped(heap, obj, direct) {
+    let obj_v = match ast_to_sexpr_scoped(heap, obj, direct, outer_captured) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // idx_list
@@ -1231,10 +1253,10 @@ fn translate_field_get(heap: &mut Heap, obj: &Typed, idx: usize, direct: &HashSe
 /// value-form)` (Stage 6) — see [`translate_field_get`]; `value` carries no
 /// `is-fn`-style retain tag for the same reason a `construct` field
 /// doesn't.
-fn translate_field_set(heap: &mut Heap, obj: &Typed, idx: usize, value: &Typed, direct: &HashSet<String>) -> Result<Value, Error> {
+fn translate_field_set(heap: &mut Heap, obj: &Typed, idx: usize, value: &Typed, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     let idx_list = idx_unary_list(heap, idx)?;
     heap.push_root(idx_list);
-    let obj_v = match ast_to_sexpr_scoped(heap, obj, direct) {
+    let obj_v = match ast_to_sexpr_scoped(heap, obj, direct, outer_captured) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // idx_list
@@ -1242,7 +1264,7 @@ fn translate_field_set(heap: &mut Heap, obj: &Typed, idx: usize, value: &Typed, 
         }
     };
     heap.push_root(obj_v);
-    let value_v = match ast_to_sexpr_scoped(heap, value, direct) {
+    let value_v = match ast_to_sexpr_scoped(heap, value, direct, outer_captured) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // obj_v
