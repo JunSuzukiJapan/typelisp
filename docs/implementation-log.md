@@ -1606,3 +1606,54 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   green、clippy警告0（`--workspace`）。
 
   `compile-if-branch`経由の値のkind対応はまだ未対応（詳細・理由はTODO.md参照）。
+
+## `compile-assoc`のユーザー定義メソッド呼び出し対応（2026-06-28）
+
+[[feedback-impl-priority]]の影響範囲基準で残課題群の最優先だった「`compile-assoc`が
+ユーザー定義メソッド呼び出しを認識しない」を解消——`p::x`等のメソッド呼び出しを
+ボディに含む`defun`/`defmethod`自体が`compile`できない、構成可能性の根本的な欠落だった。
+
+**核心の変更**: `compile-assoc`の`i64`/`i32`以外の受信型は従来即座に
+`panic`していたが、その分岐を「`type-name::method`という名前へマングルし
+`get-function`で検索して`build-call`する」という`compile-call`と同型の処理に
+置き換えた。マングル名は`Interp::add_compiled_function`が単体の`(compile
+"type::method")`実行時に`internal_name`として使う文字列と完全に一致させる
+（新規`method_link_name`ヘルパーを両箇所で共有）ため、別のcompile済みメソッドを
+呼ぶ側はそれが既にcompile済みかどうかを一切気にせず`get-function`に委ねられる。
+自己再帰も無料で動く——`compile-function`自身の最初の一手（`add-function`）が
+このマングル名を呼び出し前にすでにモジュールへ宣言しているため、
+`compile-call`の自己再帰が成立する理屈とまったく同じ。
+
+**前提として`Expr::Assoc`のwire形式を変更**: 従来`ast_bridge`は`Expr::Assoc`の
+引数を`ast_list_to_sexpr`（タグ無し）で翻訳していた（「算術オペランドは常に`i64`、
+`Fn`型になることはない」という前提）。ユーザー定義メソッドの受信者/引数は
+`Fn`型/`Sexpr`型になり得るため、`Expr::Call`と同じ`tagged_ast_list_to_sexpr`
+（`(kind . form)`タグ付け、Stage8で導入）に切り替え、`compile-call-args`の
+既存のretain/GCルート処理をそのまま再利用できるようにした。型名自体も
+`type_name.to_string()`（完全修飾）から`type_name.local()`に変更——
+`Interp::method_key`の「修飾を捨ててローカル名だけで照合する」既存方針と
+マングル名を一致させるための変更（現状ルートレベルの型しかテストされておらず
+実害は無いが、将来ネストした型でも食い違わないようにする一貫性の修正）。
+
+**Rust側の対応**: `ast_bridge::collect_call_targets`の内部実装を
+`(Vec<Path>, Vec<(Path,String)>)`を一度の走査で集める`CallTargets`構造体に
+一般化し、新規`collect_assoc_targets`で`Expr::Assoc`ターゲットも取得できる
+ようにした。`Interp::compile_function`はこれを使い、各`(type_name, method)`を
+(1) `i64`/`i32`ならスキップ（ネイティブ算術、外部呼び出し不要）、(2) `self.methods`に
+無ければ即座に明確な`Panic`（`f64`/`str`/`char`等のビルトインメソッドは
+そもそも`compile`対象のASTボディが無いため、対象外のまま）、(3) `self.compiled_methods`に
+無ければ「先に`compile`してください」という明確な`Panic`（`Expr::Call`の既存方針と
+対称）、(4) それ以外は`call_targets`と同じ要領でモジュールへ前方宣言し
+`externals`に実アドレスを配線——という4分岐で処理する。
+
+**テスト**: `tests/compile_test.rs`に5件追加——`defun`の本体から既にcompile済みの
+`defstruct`フィールドアクセサ2つを呼んで合計を返す関数のend-to-end実行（本来の
+依頼内容そのもの）、`defmethod`の自己再帰（`setf`によるフィールド更新+ゼロ引数の
+インスタンスメソッド自己呼び出し）、未compileのユーザー定義メソッドを呼ぶ場合の
+明確なエラー、未対応のビルトイン（`f64`）メソッドを呼ぶ場合の明確なエラー。
+既存の生Sexprハンドフィードテスト（`compile-assoc`を直接呼ぶもの）はすべて
+新しい`(kind . form)`タグ付き引数形式に書き換えた。`src/compile/ast_bridge.rs`にも
+`collect_assoc_targets`の単体テスト3件追加。全体テスト3回連続green、
+clippy警告0（`--workspace --all-targets`）。
+
+残課題はTODO.mdの「compile機能の残課題」節を参照（本対応で1項目解消）。

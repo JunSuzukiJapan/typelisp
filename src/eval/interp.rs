@@ -761,6 +761,25 @@ impl Interp {
     /// step (`add-function`) already declares this very function in its own
     /// module before compiling its body, so it's excluded from every step
     /// above.
+    ///
+    /// A user-defined method this body calls (`Expr::Assoc`,
+    /// `crate::compile::ast_bridge::collect_assoc_targets`) goes through the
+    /// exact same three steps, *keyed and named differently*: looked up in
+    /// [`Self::methods`]/[`Self::compiled_methods`] instead of
+    /// [`Self::fns`]/[`Self::compiled`], and forward-declared/wired under the
+    /// mangled name [`method_link_name`] builds — the same literal string
+    /// this very method itself uses as `internal_name` when `name` is a
+    /// method (see [`Self::add_compiled_function`]'s call below), which is
+    /// also exactly what `compiler.rs`'s `compile-assoc` mangles a callee's
+    /// `(type-name, method)` back into before its own `get-function` lookup
+    /// — so the three names (this method's own `internal_name`, this
+    /// method's entry in `externals`, and a *caller's* `compile-assoc`
+    /// lookup) can never drift apart. A target whose `type_name` isn't
+    /// registered in `self.methods` at all (`i64`/`i32`'s own built-in
+    /// arithmetic, or — still out of scope — `f64`/`str`/`char`'s) needs
+    /// none of this: `i64`/`i32` compile natively with no external call,
+    /// and anything else panics clearly right here rather than deep inside
+    /// `compile-assoc`'s own `get-function`.
     fn compile_function(&self, heap: &mut Heap, name: &str) -> Result<RtValue, EvalError> {
         let path = Path::root(name);
         let method_key = self.method_key(name);
@@ -779,11 +798,37 @@ impl Interp {
             }
         }
 
+        let method_targets: Vec<(Path, String)> = crate::compile::ast_bridge::collect_assoc_targets(&body)
+            .into_iter()
+            .filter(|key| method_key.as_ref() != Some(key))
+            .filter(|(type_name, _)| !matches!(type_name.local(), "i64" | "i32"))
+            .collect();
+        for (type_name, method) in &method_targets {
+            let key = (type_name.clone(), method.clone());
+            if !self.methods.contains_key(&key) {
+                return Err(EvalError::Panic(format!(
+                    "compile: \"{}\" calls \"{}\", a builtin method with no compiled implementation",
+                    name,
+                    method_link_name(type_name, method)
+                )));
+            }
+            if !self.compiled_methods.borrow().contains_key(&key) {
+                return Err(EvalError::Panic(format!(
+                    "compile: \"{}\" calls \"{}\", which must be `compile`d first",
+                    name,
+                    method_link_name(type_name, method)
+                )));
+            }
+        }
+
         let module = {
             let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
             let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("compiled")));
             for target in &call_targets {
                 declare_external_function(&module, target.local());
+            }
+            for (type_name, method) in &method_targets {
+                declare_external_function(&module, &method_link_name(type_name, method));
             }
             for (rt_name, _) in rt_extern_functions() {
                 declare_external_function(&module, rt_name);
@@ -800,6 +845,13 @@ impl Interp {
                 .map(|p| (p.local().to_string(), compiled.get(p).expect("checked compiled above").address()))
                 .collect()
         };
+        {
+            let compiled_methods = self.compiled_methods.borrow();
+            externals.extend(method_targets.iter().map(|(type_name, method)| {
+                let key = (type_name.clone(), method.clone());
+                (method_link_name(type_name, method), compiled_methods.get(&key).expect("checked compiled_methods above").address())
+            }));
+        }
         externals.extend(rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)));
         let compiled = crate::compile::CompiledFn::new(&module.borrow(), name, &externals)
             .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
@@ -1523,6 +1575,20 @@ fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// [`crate::compile::COMPILE_LOCK`] held.
 fn declare_external_function(module: &Rc<RefCell<Module<'static>>>, name: &str) {
     module.borrow_mut().add_function(name, compiled_fn_type(), None);
+}
+
+/// The LLVM-visible name a method's own compiled function is declared/
+/// looked-up under: `type_name`'s *local* segment, `"::"`, `method` —
+/// exactly the literal string a standalone `(compile "type-name::method")`
+/// call uses as its `internal_name` ([`Interp::compile_function`]'s own
+/// `self.add_compiled_function(heap, module.clone(), name, name)` call,
+/// where `name` is that literal user-typed string), so every caller of this
+/// helper agrees with that name without re-deriving it. Shared by
+/// [`Interp::compile_function`] (forward-declaring/wiring a callee method)
+/// and `compiler.rs`'s `compile-assoc` (looking the same name back up via
+/// `get-function` — see that function's doc comment).
+fn method_link_name(type_name: &Path, method: &str) -> String {
+    format!("{}::{}", type_name.local(), method)
 }
 
 /// True for the handful of free functions `compiler.rs`'s `compile-call`

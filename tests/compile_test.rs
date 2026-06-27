@@ -189,7 +189,7 @@ fn the_compiler_body_panics_on_an_unsupported_tag() {
 #[test]
 fn the_compiler_body_compiles_a_two_parameter_addition() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '(assoc "i64" "+" true (var "a" false) (var "b" false)))"#,
+        r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '(assoc "i64" "+" true (0 var "a" false) (0 var "b" false)))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -250,7 +250,7 @@ fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
 #[test]
 fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (var "k" false) (var "offset" false)))) (apply "go" (0 var "n" false))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (0 var "k" false) (0 var "offset" false)))) (apply "go" (0 var "n" false))))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -643,7 +643,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
     let module = match eval_ok_with_compiler(
         r#"
         (let ((m (llvm-module::create "mod")))
-          (compile-function m "double" '((x . 0)) '(assoc "i64" "+" true (var "x" false) (var "x" false)))
+          (compile-function m "double" '((x . 0)) '(assoc "i64" "+" true (0 var "x" false) (0 var "x" false)))
           (compile-function m "quadruple" '((n . 0)) '(call "double" (0 call "double" (0 var "n" false)))))
         "#,
     ) {
@@ -891,7 +891,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
 #[test]
 fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_outer_value() {
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (var "k" false) (var "offset" false)))) (apply-indirect (var "go" true) (0 int 5))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "go" true) (0 int 5))))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -1242,7 +1242,7 @@ fn the_compiler_body_compiles_a_bool_literal_node() {
 fn the_compiler_body_compiles_an_i64_comparison() {
     let module = match eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "lt" '((a . 0) (b . 0))
-              '(assoc "i64" "<" true (var "a" false) (var "b" false)))"#,
+              '(assoc "i64" "<" true (0 var "a" false) (0 var "b" false)))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -1254,19 +1254,25 @@ fn the_compiler_body_compiles_an_i64_comparison() {
     assert_eq!(unsafe { lt.call([5, 3].as_ptr(), 2) }, 0);
 }
 
-/// `compile-assoc`'s new receiver-type guard: an `f64` receiver (which
-/// defines the very same method names under `registry::float_assoc`) must
-/// panic clearly rather than silently misinterpreting its bit pattern as an
-/// `i64` — see `compile-assoc`'s doc comment.
+/// `compile-assoc`'s receiver-type guard: an `f64` receiver (which defines
+/// the very same method names under `registry::float_assoc`, still out of
+/// scope — see `compile-assoc`'s doc comment) must panic clearly rather than
+/// silently misinterpreting its bit pattern as an `i64`. Now reached via the
+/// generic method-call branch instead of a dedicated `i64`/`i32`-only guard:
+/// this hand-fed Sexpr bypasses `Interp::compile_function`'s own up-front
+/// check (the normal way such a call is rejected, with a clearer message —
+/// see `compile_of_a_function_calling_an_uncompiled_builtin_method_is_a_clean_error`
+/// below), so the only thing left to catch it is `get-function` itself
+/// failing to find `"f64::+"` in this throwaway module.
 #[test]
 fn compile_assoc_panics_on_an_unsupported_receiver_type() {
     let err = run_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "addf" '((a . 0) (b . 0))
-              '(assoc "f64" "+" true (var "a" false) (var "b" false)))"#,
+              '(assoc "f64" "+" true (0 var "a" false) (0 var "b" false)))"#,
     )
     .expect_err("expected a panic for a non-i64/i32 receiver");
     match err {
-        EvalError::Panic(msg) => assert!(msg.contains("unsupported receiver type"), "message was: {}", msg),
+        EvalError::Panic(msg) => assert!(msg.contains("no function named") && msg.contains("f64::+"), "message was: {}", msg),
         other => panic!("expected a Panic, got {:?}", other),
     }
 }
@@ -1279,7 +1285,7 @@ fn the_compiler_body_compiles_an_if_expression() {
     let module = match eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "maxab" '((a . 0) (b . 0))
               '(if false
-                   (assoc "i64" ">" true (var "a" false) (var "b" false))
+                   (assoc "i64" ">" true (0 var "a" false) (0 var "b" false))
                    (var "a" false)
                    (var "b" false)))"#,
     ) {
@@ -1304,8 +1310,8 @@ fn let_shadowing_is_correctly_restored_after_the_let_ends() {
     let module = match eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "shadow_test" '((x . 0))
               '(assoc "i64" "+" true
-                 (let (((x . 0) . (int 99))) (var "x" false))
-                 (var "x" false)))"#,
+                 (0 let (((x . 0) . (int 99))) (var "x" false))
+                 (0 var "x" false)))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -2067,12 +2073,12 @@ fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_cod
 /// body is the bare `Expr::FieldGet`/`FieldSet`, no `Expr::Assoc` involved)
 /// and wiring `Expr::Assoc`'s own dispatch to use it once compiled, the same
 /// way `Expr::Call` already did for top-level functions. A *different* gap
-/// remains open, deliberately not attempted here: a top-level `defun` whose
-/// *body itself* contains a `p::x`-style call still can't be `compile`d at
-/// all (it would panic in `compile-assoc`, which only recognizes an
-/// `i64`/`i32` receiver — calling a `compile`d method *from inside other
-/// compiled code* needs `compile-assoc` to grow a third case, not attempted
-/// here).
+/// stayed open after that, deliberately not attempted there: a top-level
+/// `defun` whose *body itself* contains a `p::x`-style call still couldn't be
+/// `compile`d at all (`compile-assoc` only recognized an `i64`/`i32`
+/// receiver) — see
+/// `compile_dispatches_a_function_that_calls_a_compiled_method_in_its_own_body`
+/// below for the follow-up that closes *that* gap.
 #[test]
 fn compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_code() {
     let v = run_with_compiler_and_prelude(
@@ -2150,6 +2156,121 @@ fn compile_dispatches_a_defstruct_field_setter_method_to_native_code() {
     )
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(99));
+}
+
+/// The composability gap described in the
+/// `compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_code`
+/// test's doc comment, now closed: `sum-coords`'s body itself contains a
+/// `p::x`/`p::y`-style call (`Expr::Assoc`), and it's an ordinary `defun`
+/// (`self.fns`), not a method — `compile-assoc`'s new generic branch resolves
+/// each to the already-`compile`d `point::x`/`point::y` accessor via the
+/// mangled `get-function` lookup, and `Interp::compile_function` forward-
+/// declares/wires both *before* `sum-coords`'s own body is compiled (see
+/// `compile-assoc`'s and `Interp::compile_function`'s doc comments).
+#[test]
+fn compile_dispatches_a_function_that_calls_a_compiled_method_in_its_own_body() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defstruct point (x i64) (y i64))
+        (defun make-point ((a i64) (b i64)) point (point::new a b))
+        (compile make-point)
+        (compile point::x)
+        (compile point::y)
+        (defun sum-coords ((p point)) i64 (+ p::x p::y))
+        (compile sum-coords)
+        (sum-coords (make-point 3 4))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(7));
+}
+
+/// A self-recursive `defmethod` (CLOS-style call syntax, `(countdown self)`
+/// — see `Checker::check_defmethod`'s "register the signature before
+/// checking the body" comment for why self-recursion is allowed at all)
+/// through `compile-assoc`'s same generic branch: the mangled lookup name
+/// `counter::countdown` is exactly what `compile-function`'s own first step
+/// (`add-function`) already declared in this module before this body was
+/// compiled — the same self-recursion precedent `compile-call` already
+/// established for a top-level `defun`, just reached through `Expr::Assoc`
+/// instead of `Expr::Call`. Also exercises the generic branch's handling of
+/// a zero-argument instance method (`argc` 1, the receiver alone) and a
+/// `setf` through an already-`compile`d setter method (`counter::set-n`)
+/// inside the same recursive call. `make-counter` must be `compile`d too
+/// (not just interpreted) so the receiver `countdown` itself first sees is
+/// already the raw-address `RtValue::Int` form `Interp::call_compiled`
+/// expects — a purely-interpreted `RtValue::Struct` receiver hits a
+/// different, pre-existing, documented gap (see `Interp::call_compiled`'s
+/// doc comment), not the one this test is for.
+#[test]
+fn compile_dispatches_a_self_recursive_method_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defstruct counter (n i64))
+        (defun make-counter ((a i64)) counter (counter::new a))
+        (compile make-counter)
+        (compile counter::n)
+        (compile counter::set-n)
+        (defmethod countdown ((self counter)) i64
+          (if (<= self::n 0)
+              0
+              (let ((ignored (setf self::n (- self::n 1))))
+                (countdown self))))
+        (compile counter::countdown)
+        (countdown (make-counter 5))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(0));
+}
+
+/// `Interp::compile_function`'s up-front check for an `Expr::Assoc` target
+/// (the method-call counterpart of `compile_errors_clearly_when_a_called_function_is_not_yet_compiled`):
+/// `sum-coords` calls `point::x`, but only `point::y` has been `compile`d —
+/// a clear `Panic` naming the exact missing method, not a confusing failure
+/// from deep inside `compile-assoc`'s own `get-function`.
+#[test]
+fn compile_of_a_function_calling_an_uncompiled_user_method_is_a_clean_error() {
+    let err = run_with_compiler_and_prelude(
+        r#"
+        (defstruct point (x i64) (y i64))
+        (compile point::y)
+        (defun sum-coords ((p point)) i64 (+ p::x p::y))
+        (compile sum-coords)
+        "#,
+    )
+    .expect_err("expected compiling a caller of an uncompiled method to fail");
+    match err {
+        EvalError::Panic(msg) => {
+            assert!(msg.contains("point::x"), "message was: {}", msg);
+            assert!(msg.contains("must be"), "message was: {}", msg);
+        }
+        other => panic!("expected a Panic, got {:?}", other),
+    }
+}
+
+/// The other half of `Interp::compile_function`'s `Expr::Assoc`-target check:
+/// a receiver type with no `self.methods` entry at all and not `i64`/`i32`
+/// (here `f64`, a registry-builtin receiver with no typelisp AST body to
+/// `compile` in the first place — still out of scope, see `compile-assoc`'s
+/// doc comment) is rejected with its own clear message up front, rather than
+/// a deep `get-function` failure from inside the generic branch.
+#[test]
+fn compile_of_a_function_calling_an_uncompiled_builtin_method_is_a_clean_error() {
+    let err = run_with_compiler_and_prelude(
+        r#"
+        (defun add-floats ((a f64) (b f64)) f64 (+ a b))
+        (compile add-floats)
+        "#,
+    )
+    .expect_err("expected compiling a caller of a builtin f64 method to fail");
+    match err {
+        EvalError::Panic(msg) => {
+            assert!(msg.contains("f64::+"), "message was: {}", msg);
+            assert!(msg.contains("builtin method"), "message was: {}", msg);
+        }
+        other => panic!("expected a Panic, got {:?}", other),
+    }
 }
 
 /// `(compile point::bogus)`/`(compile bogus::x)`: `Interp::method_key`

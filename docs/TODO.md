@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-06-27 / ブランチ: `feature/compile-sexpr`
+最終更新: 2026-06-28 / ブランチ: `feature/compile-sexpr`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離した）。
@@ -20,9 +20,6 @@
    優先順位はユーザー未確認——コア言語機能ではないため上記2項目より下位。影響範囲基準で並べ替え済み
    ——[[feedback-impl-priority]]、詳細は[implementation-log.md](implementation-log.md)の
    「compile機能の残課題の一部対応」節参照）:
-   - `compile-assoc`がユーザー定義メソッド呼び出しを認識しない——コンパイル済みコードの中から
-     別のcompile済みメソッドを呼べない（`p::x`等をボディに含む`defun`自体をcompileできない）。
-     構成可能性の根本的な欠落で、残課題の中では最も影響範囲が大きい。
    - `compile-if-branch`経由の値（`if`/`return`/`setf`/`match`アーム）のkind対応——現時点では
      具体的な破壊を実証するテストが書けていない（書けたら優先度を上げる）。
    - ネストした`labels`が外側labelsの兄弟を参照するケース（既存の "known limitation"、

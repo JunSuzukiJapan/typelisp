@@ -141,9 +141,10 @@ fn unsupported(heap: &mut Heap, variant: &str) -> Result<Value, Error> {
 /// calls — the same concern `tagged` has for its own `items`, just one level
 /// up). On success every value in the returned `Vec` is left rooted; the
 /// caller must pop exactly that many roots once it's done embedding them in
-/// whatever it builds next (see `Expr::Assoc`'s arm below). On error, pops
-/// everything pushed so far before propagating. `direct` is threaded through
-/// unchanged — see [`ast_to_sexpr_scoped`]'s doc comment.
+/// whatever it builds next (e.g. a body sequence — see `translate_lambda`'s
+/// arm below). On error, pops everything pushed so far before propagating.
+/// `direct` is threaded through unchanged — see [`ast_to_sexpr_scoped`]'s
+/// doc comment.
 fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>) -> Result<Vec<Value>, Error> {
     let mut values = Vec::with_capacity(items.len());
     for item in items {
@@ -165,9 +166,11 @@ fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>)
 
 /// The call-argument counterpart of [`ast_list_to_sexpr`]: each translated
 /// form is wrapped as `(kind . form)` rather than left bare — `apply`/
-/// `apply-indirect`/`call`'s argument lists need this (unlike `Expr::Assoc`'s,
-/// which stays untagged via [`ast_list_to_sexpr`]: arithmetic operands are
-/// always `i64`, never `Fn`-typed, so `compile-assoc` never needs the tag).
+/// `apply-indirect`/`call`/`assoc`'s argument lists need this (a method's
+/// receiver/arguments, like an ordinary call's, can be `Fn`- or
+/// `Sexpr`-typed, unlike `i64`/`i32`'s own built-in arithmetic operands,
+/// always plain `i64`s, which is why `compile-assoc`'s arithmetic branch
+/// alone still only needs to unwrap the tag, never act on it).
 /// `compile-call-args` reads `kind` to decide whether a given argument's
 /// value needs the automatic `ClosureBox` retain/release treatment (`kind =
 /// 1`) or a `push-sexpr-root` (`kind = 2`, Stage 8 of the
@@ -260,12 +263,25 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>)
         // plain text, so they're translated as `Str`s like `Expr::Str`
         // (rather than e.g. interned symbols) — there's no reason for the
         // compiler body to treat them differently from any other string.
+        // `type_name` is encoded by its *local* (unqualified) segment —
+        // matching `Interp::method_key`'s own "drop qualification, match
+        // local name only" convention — since `compiler.rs`'s
+        // `compile-assoc` mangles it back into a `type-name::method`
+        // lookup name that must agree with the literal string a standalone
+        // `(compile "type-name::method")` call used as that method's own
+        // LLVM function name (see `compile-assoc`'s doc comment). Arguments
+        // are tagged via [`tagged_ast_list_to_sexpr`] rather than the
+        // untagged [`ast_list_to_sexpr`]: unlike the built-in `i64`/`i32`
+        // arithmetic operands (always plain `i64`s), a user-defined
+        // method's receiver/arguments can be `Fn`- or `Sexpr`-typed and need
+        // the same `compile-call-args` retain/GC-root treatment an ordinary
+        // call's arguments already get.
         Expr::Assoc { type_name, method, instance, args } => {
-            let type_name_v = heap.alloc_string(type_name.to_string());
+            let type_name_v = heap.alloc_string(type_name.local().to_string());
             heap.push_root(type_name_v);
             let method_v = heap.alloc_string(method.clone());
             heap.push_root(method_v);
-            let arg_values = match ast_list_to_sexpr(heap, args, direct) {
+            let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct) {
                 Ok(v) => v,
                 Err(e) => {
                     heap.pop_root(); // method_v
@@ -1242,11 +1258,25 @@ fn translate_field_set(heap: &mut Heap, obj: &Typed, idx: usize, value: &Typed, 
     result
 }
 
-/// Collects every distinct top-level [`Path`] an `Expr::Call` reachable from
-/// `typed` refers to, in first-encounter order. Mirrors exactly the node
-/// shapes [`ast_to_sexpr_scoped`] actually recurses into — anything that
-/// becomes `unsupported` there has no calls worth collecting, since
-/// translating that node would fail before ever reaching them anyway.
+/// Accumulates both kinds of pre-declaration target [`Interp::compile_function`]
+/// needs before compiling a body: free-function `Expr::Call`/`Expr::FnRef`
+/// targets (`calls`) and instance/static-method `Expr::Assoc` targets
+/// (`methods`, `(type_name, method)` pairs) — gathered by one walk
+/// ([`collect_calls`]) since both are collected from the exact same set of
+/// node shapes; see [`collect_call_targets`]/[`collect_assoc_targets`].
+///
+/// [`Interp::compile_function`]: crate::eval::Interp::compile_function
+#[derive(Default)]
+struct CallTargets {
+    calls: Vec<Path>,
+    methods: Vec<(Path, String)>,
+}
+
+/// Collects every distinct top-level [`Path`] an `Expr::Call`/`Expr::FnRef`
+/// reachable from `typed` refers to, in first-encounter order. Mirrors
+/// exactly the node shapes [`ast_to_sexpr_scoped`] actually recurses into —
+/// anything that becomes `unsupported` there has no calls worth collecting,
+/// since translating that node would fail before ever reaching them anyway.
 ///
 /// JIT-only (labels/closures Stage 3): `Interp::compile_function` calls this
 /// *before* running the typelisp compiler body, to learn which other
@@ -1258,38 +1288,60 @@ fn translate_field_set(heap: &mut Heap, obj: &Typed, idx: usize, value: &Typed, 
 /// shared module already has every earlier `defun`'s real body in it by the
 /// time a later one's call needs to find it.
 pub fn collect_call_targets(typed: &Typed) -> Vec<Path> {
-    let mut out = Vec::new();
-    collect_calls(typed, &mut out);
-    out
+    let mut targets = CallTargets::default();
+    collect_calls(typed, &mut targets);
+    targets.calls
 }
 
-fn collect_calls(typed: &Typed, out: &mut Vec<Path>) {
+/// The `Expr::Assoc` counterpart of [`collect_call_targets`]: every
+/// `(type_name, method)` pair this body calls as an instance/static method,
+/// in first-encounter order — the composability gap `compile-assoc` used to
+/// dead-end into an "unsupported receiver type" panic for (see that
+/// function's doc comment in `compiler.rs`). `Interp::compile_function` uses
+/// this to require — and forward-declare, under the same mangled
+/// `type-name::method` name `compile-assoc` itself looks up — every
+/// *user-defined* method target (a `defmethod`/`defstruct` accessor/setter),
+/// exactly the way it already does for a plain `Expr::Call` target; a
+/// built-in receiver (`i64`/`i32`, compiled natively with no external call at
+/// all) needs no such treatment, so the caller filters those out itself
+/// rather than this walker trying to guess which `type_name`s are built in.
+pub fn collect_assoc_targets(typed: &Typed) -> Vec<(Path, String)> {
+    let mut targets = CallTargets::default();
+    collect_calls(typed, &mut targets);
+    targets.methods
+}
+
+fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
     match &typed.expr {
         Expr::Call(path, args) => {
-            if !out.contains(path) {
-                out.push(path.clone());
+            if !targets.calls.contains(path) {
+                targets.calls.push(path.clone());
             }
             for a in args {
-                collect_calls(a, out);
+                collect_calls(a, targets);
             }
         }
         // `translate_fnref` turns this into a forwarding `(call
         // path-local-name ...)` wrapper, so `path` needs the same
         // pre-declaration treatment as a real `Expr::Call` would.
         Expr::FnRef(path) => {
-            if !out.contains(path) {
-                out.push(path.clone());
+            if !targets.calls.contains(path) {
+                targets.calls.push(path.clone());
             }
         }
-        Expr::Assoc { args, .. } => {
+        Expr::Assoc { type_name, method, args, .. } => {
+            let key = (type_name.clone(), method.clone());
+            if !targets.methods.contains(&key) {
+                targets.methods.push(key);
+            }
             for a in args {
-                collect_calls(a, out);
+                collect_calls(a, targets);
             }
         }
         Expr::Apply(callee, args) => {
-            collect_calls(callee, out);
+            collect_calls(callee, targets);
             for a in args {
-                collect_calls(a, out);
+                collect_calls(a, targets);
             }
         }
         // Covers both an escaping `lambda` value's own body and an
@@ -1299,17 +1351,17 @@ fn collect_calls(typed: &Typed, out: &mut Vec<Path>) {
         // needs the same JIT-only pre-declaration treatment.
         Expr::Lambda { body, .. } => {
             for e in body {
-                collect_calls(e, out);
+                collect_calls(e, targets);
             }
         }
         Expr::Labels { defs, body } => {
             for (_, _, def_body) in defs {
                 for e in def_body {
-                    collect_calls(e, out);
+                    collect_calls(e, targets);
                 }
             }
             for e in body {
-                collect_calls(e, out);
+                collect_calls(e, targets);
             }
         }
         // if/let/comparisons, labels/closures Stage 5: a `Call` can sit
@@ -1318,16 +1370,16 @@ fn collect_calls(typed: &Typed, out: &mut Vec<Path>) {
         // so this walker must follow them too, the same way it already
         // follows `Labels`'/`Lambda`'s bodies.
         Expr::If(cond, then, els) => {
-            collect_calls(cond, out);
-            collect_calls(then, out);
-            collect_calls(els, out);
+            collect_calls(cond, targets);
+            collect_calls(then, targets);
+            collect_calls(els, targets);
         }
         Expr::Let(binds, body) => {
             for (_, value) in binds {
-                collect_calls(value, out);
+                collect_calls(value, targets);
             }
             for e in body {
-                collect_calls(e, out);
+                collect_calls(e, targets);
             }
         }
         // `loop`/`break`/`return`/`setf`: a `Call` can sit inside a loop's
@@ -1337,11 +1389,11 @@ fn collect_calls(typed: &Typed, out: &mut Vec<Path>) {
         // carries no sub-expression at all.
         Expr::Loop(body) => {
             for e in body {
-                collect_calls(e, out);
+                collect_calls(e, targets);
             }
         }
-        Expr::Set(_, value) => collect_calls(value, out),
-        Expr::Return(Some(v)) => collect_calls(v, out),
+        Expr::Set(_, value) => collect_calls(value, targets),
+        Expr::Return(Some(v)) => collect_calls(v, targets),
         Expr::Return(None) => {}
         // Stage 5: a `Call` can sit in a `match`'s scrutinee or any arm's
         // body (`translate_match`'s own translation is now real) — pattern
@@ -1349,10 +1401,10 @@ fn collect_calls(typed: &Typed, out: &mut Vec<Path>) {
         // sub-expression slot at all), so only the scrutinee/bodies need
         // walking here.
         Expr::Match(scrut, arms) => {
-            collect_calls(scrut, out);
+            collect_calls(scrut, targets);
             for arm in arms {
                 for e in &arm.body {
-                    collect_calls(e, out);
+                    collect_calls(e, targets);
                 }
             }
         }
@@ -1363,13 +1415,13 @@ fn collect_calls(typed: &Typed, out: &mut Vec<Path>) {
         // follow them too.
         Expr::Construct { args, .. } => {
             for a in args {
-                collect_calls(a, out);
+                collect_calls(a, targets);
             }
         }
-        Expr::FieldGet(obj, _) => collect_calls(obj, out),
+        Expr::FieldGet(obj, _) => collect_calls(obj, targets),
         Expr::FieldSet(obj, _, value) => {
-            collect_calls(obj, out);
-            collect_calls(value, out);
+            collect_calls(obj, targets);
+            collect_calls(value, targets);
         }
         _ => {}
     }
@@ -1492,13 +1544,16 @@ mod tests {
             other => panic!("expected a Str, got {:?}", other),
         }
         assert_eq!(fields[2], Value::Bool(true));
-        let (arg0_tag, arg0_fields) = untag(&heap, fields[3]);
+        let (arg0_kind, arg0_form) = untag_arg(&heap, fields[3]);
+        assert_eq!(arg0_kind, 0, "an I64 argument is KIND_PLAIN");
+        let (arg0_tag, arg0_fields) = untag(&heap, arg0_form);
         assert_eq!(arg0_tag, "var");
         match arg0_fields[0] {
             Value::Str(id) => assert_eq!(heap.string(id), "a"),
             other => panic!("expected a Str, got {:?}", other),
         }
-        let (arg1_tag, _) = untag(&heap, fields[4]);
+        let (_, arg1_form) = untag_arg(&heap, fields[4]);
+        let (arg1_tag, _) = untag(&heap, arg1_form);
         assert_eq!(arg1_tag, "var");
     }
 
@@ -2397,5 +2452,67 @@ mod tests {
             collect_call_targets(&v),
             vec![crate::Path::root("get-point"), crate::Path::root("new-value")]
         );
+    }
+
+    #[test]
+    fn collect_assoc_targets_is_empty_for_a_body_with_no_method_calls() {
+        let v = typed(Expr::Int(1), Type::I64);
+        assert!(collect_assoc_targets(&v).is_empty());
+    }
+
+    /// The composability gap this whole module exists to close: a
+    /// user-defined method call (`p::x`, desugared to `Expr::Assoc`) is a
+    /// real pre-declaration target, unlike a built-in `i64`/`i32` one —
+    /// `Interp::compile_function` itself is what filters those back out
+    /// (see [`collect_assoc_targets`]'s doc comment), so this walker reports
+    /// every `Expr::Assoc` it sees without trying to guess which receivers
+    /// are built in.
+    #[test]
+    fn collect_assoc_targets_finds_an_instance_method_call() {
+        let a = typed(Expr::Var("p".to_string()), Type::Named(Path::root("point"), vec![]));
+        let assoc = Expr::Assoc { type_name: Path::root("point"), method: "x".to_string(), instance: true, args: vec![a] };
+        let v = typed(assoc, Type::I64);
+        assert_eq!(collect_assoc_targets(&v), vec![(Path::root("point"), "x".to_string())]);
+        assert!(collect_call_targets(&v).is_empty(), "an Expr::Assoc target is never a call target");
+    }
+
+    #[test]
+    fn collect_assoc_targets_deduplicates_repeated_calls_to_the_same_method() {
+        let a = typed(Expr::Var("p".to_string()), Type::Named(Path::root("point"), vec![]));
+        let inner = typed(
+            Expr::Assoc { type_name: Path::root("point"), method: "x".to_string(), instance: true, args: vec![a] },
+            Type::I64,
+        );
+        // The outer `Expr::Assoc` is itself a target too (`collect_assoc_targets`
+        // reports every receiver, including a built-in `i64`/`i32` one — see its
+        // doc comment for why filtering those out is `Interp::compile_function`'s
+        // job, not this walker's), so both ends up in the result; only the
+        // *repeated* `point::x` target is deduplicated.
+        let outer = typed(
+            Expr::Assoc { type_name: Path::root("i64"), method: "+".to_string(), instance: true, args: vec![inner.clone(), inner] },
+            Type::I64,
+        );
+        assert_eq!(
+            collect_assoc_targets(&outer),
+            vec![(Path::root("i64"), "+".to_string()), (Path::root("point"), "x".to_string())]
+        );
+    }
+
+    /// `collect_assoc_targets` recurses into a `labels`/`lambda` body and an
+    /// `if`/`let`'s branches/bindings — the same node shapes
+    /// `collect_call_targets` already follows, since both walk the same
+    /// `collect_calls`.
+    #[test]
+    fn collect_assoc_targets_recurses_into_an_if_branch() {
+        let receiver = typed(Expr::Var("p".to_string()), Type::Named(Path::root("point"), vec![]));
+        let then_branch = typed(
+            Expr::Assoc { type_name: Path::root("point"), method: "x".to_string(), instance: true, args: vec![receiver] },
+            Type::I64,
+        );
+        let v = typed(
+            Expr::If(Box::new(typed(Expr::Bool(true), Type::Bool)), Box::new(then_branch), Box::new(typed(Expr::Int(0), Type::I64))),
+            Type::I64,
+        );
+        assert_eq!(collect_assoc_targets(&v), vec![(Path::root("point"), "x".to_string())]);
     }
 }

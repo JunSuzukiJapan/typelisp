@@ -212,6 +212,26 @@
 //! the time the `if` returns, the value crossing out is unconditionally as
 //! fresh as a call result — see `compile-if-branch`'s doc comment.
 //!
+//! **`compile-assoc` can call another already-`compile`d user-defined method**
+//! (a `defmethod` or a `defstruct` accessor/setter, `(assoc type-name method
+//! instance arg...)` for any `type-name` other than `i64`/`i32`) — the
+//! composability gap that, until now, meant a `defun` whose body called
+//! `p::x` could never itself be `compile`d at all. Resolved the same way a
+//! top-level `defun`-to-`defun` call already is (`compile-call`): the callee
+//! is found via `get-function` under the mangled name `type-name::method`
+//! (exactly the literal string a standalone `(compile "type-name::method")`
+//! names its own LLVM function, `Interp::add_compiled_function`'s
+//! `internal_name`), and `Interp::compile_function` requires — and forward-
+//! declares — every such target the same way it already does for an
+//! `Expr::Call` target, so self-recursive method calls and ordinary
+//! method-to-method calls both Just Work without `compile-assoc` itself
+//! having to know whether `get-function` will succeed. Needed `Expr::Assoc`'s
+//! own argument list to switch from the untagged `ast_list_to_sexpr` to the
+//! `(kind . form)`-tagged `tagged_ast_list_to_sexpr` (`compile-call`'s own
+//! argument shape) — the receiver/arguments of a general method call, unlike
+//! an arithmetic operand, can be `Fn`- or `Sexpr`-typed and need the same
+//! retain/GC-root treatment `compile-call-args` already gives those.
+//!
 //! Doesn't depend on `prelude.rs` (no `cond`/`when`/...) — only the
 //! checker's native special forms (`if`/`let`/`match`/`labels`/`loop`/
 //! `break`/`return`/`setf`) and builtins (`eq`/`append`/`car`/`cdr`/
@@ -1008,25 +1028,56 @@ pub const SOURCE: &str = r#"
                                       (store-arg builder env-ptr idx v))
                                   (compile-escaping-env-args builder env fn-env captured env-ptr rest (+ idx 1))))))
                            (_ ())))
-                       ;; `(assoc type-name method instance arg...)` — only
-                       ;; `i64`/`i32` receivers (the same runtime
+                       ;; `(assoc type-name method instance arg...)` — two
+                       ;; cases. `i64`/`i32` receivers (the same runtime
                        ;; representation, `RtValue::Int(i64)`, so one code
-                       ;; path covers both) are compiled; anything else
-                       ;; (`f64`, ...) panics clearly rather than silently
-                       ;; misinterpreting its bit pattern as an `i64` — this
-                       ;; guard didn't exist before if/let/comparisons (Stage
-                       ;; 5) added methods (`<`/`<=`/.../`eq`/`/=`) that
-                       ;; `f64` *also* defines under the same names
-                       ;; (`registry::float_assoc`), so without it
-                       ;; `(< 1.0 2.0)` would have quietly compiled as an
-                       ;; integer comparison.
+                       ;; path covers both) compile straight to the matching
+                       ;; LLVM instruction, exactly as before; this guard
+                       ;; still matters because `f64` defines methods under
+                       ;; the same names (`registry::float_assoc`), so
+                       ;; without it `(< 1.0 2.0)` would quietly compile as
+                       ;; an integer comparison. Every other `type-name` is
+                       ;; now treated as a call to a *user-defined* method
+                       ;; (a `defmethod`/`defstruct` accessor or setter) —
+                       ;; the composability gap this arm used to dead-end
+                       ;; into a clear "unsupported receiver type" panic for.
+                       ;; `args` is tagged the same `(kind . form)` way
+                       ;; `compile-call`'s own argument list is
+                       ;; (`ast_bridge`'s `Expr::Assoc` translation switched
+                       ;; from `ast_list_to_sexpr` to `tagged_ast_list_to_sexpr`
+                       ;; for this), so a receiver/argument that's itself
+                       ;; `Fn`- or `Sexpr`-typed gets the same retain/GC-root
+                       ;; treatment `compile-call-args` already gives an
+                       ;; ordinary call's arguments — `args[0]` is the
+                       ;; receiver for an instance method, with no special
+                       ;; casing needed here (it flows through
+                       ;; `compile-call-args` like any other argument).
+                       ;; The callee is found by `get-function` under the
+                       ;; mangled name `type-name::method` — exactly the
+                       ;; literal string a standalone `(compile
+                       ;; "type-name::method")` call names its own LLVM
+                       ;; function (`Interp::add_compiled_function`'s
+                       ;; `internal_name`), so a self-recursive method call
+                       ;; resolves to the `add-function` `compile-function`'s
+                       ;; own first step already declared, the same way a
+                       ;; self-recursive `Expr::Call` does in `compile-call`.
+                       ;; Every *other* method this body calls must already
+                       ;; be `compile`d — `Interp::compile_function` checks
+                       ;; that and forward-declares each one under this same
+                       ;; mangled name before this function's own body is
+                       ;; compiled, mirroring `Expr::Call`'s targets — so
+                       ;; `get-function` never has to fail here in practice;
+                       ;; if it still can't find `mangled` (a builtin method
+                       ;; with no compiled implementation, e.g. `f64`/`str`/
+                       ;; `char`, still out of scope), it panics clearly on
+                       ;; its own.
                        (compile-assoc ((builder llvm-builder) (env HashTable<string,llvm-value>) (fn-env HashTable<string,llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((type-name (sexpr-str (car (cdr e)))))
-                           (if (if (eq type-name "i64") true (eq type-name "i32"))
-                               (let ((method (sexpr-str (car (cdr (cdr e))))))
-                                 (let ((rest (cdr (cdr (cdr (cdr e))))))
-                                   (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car rest))))
-                                     (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car (cdr rest)))))
+                           (let ((method (sexpr-str (car (cdr (cdr e))))))
+                             (let ((rest (cdr (cdr (cdr (cdr e))))))
+                               (if (if (eq type-name "i64") true (eq type-name "i32"))
+                                   (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (cdr (car rest)))))
+                                     (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (cdr (car (cdr rest))))))
                                        (if (eq method "+")
                                            (build-add builder a b2)
                                            (if (eq method "-")
@@ -1045,8 +1096,16 @@ pub const SOURCE: &str = r#"
                                                                        (build-icmp-eq builder a b2)
                                                                        (if (eq method "/=")
                                                                            (build-icmp-ne builder a b2)
-                                                                           (panic (append "compile-assoc: unsupported method " method)))))))))))))))
-                               (panic (append "compile-assoc: unsupported receiver type " type-name)))))
+                                                                           (panic (append "compile-assoc: unsupported method " method)))))))))))))
+                                   (let ((mangled (append type-name (append "::" method))))
+                                     (let ((argc (sexpr-list-length rest)))
+                                       (let ((args-ptr (alloca-args builder argc)))
+                                         (let ((pending-ptr (alloca-args builder argc)))
+                                           (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr rest 0)))
+                                             (let ((result (build-call builder (get-function m mangled) args-ptr argc)))
+                                               (release-pending-args builder m pending-ptr argc 0)
+                                               (pop-sexpr-roots builder m sexpr-roots)
+                                               result)))))))))))
                        ;; Fills a previously-`alloca-args`'d array, one
                        ;; compiled argument per slot, exactly as before —
                        ;; plus, since each `forms` element is now a
