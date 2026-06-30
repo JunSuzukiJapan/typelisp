@@ -1649,9 +1649,19 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// never-`build-free`'d field storage rather than a call-stack scope — see
 /// `typelisp_rt::rt_push_permanent_sexpr_root`'s doc comment for why it has
 /// no `rt_pop_permanent_sexpr_root` counterpart.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 9] {
+///
+/// `rt_root_count`/`rt_set_sexpr_root` (the `setf`-reassignment GC-root fix):
+/// `compiler.rs`'s `retain-bindings`/`bind-let-values` call `rt_root_count`
+/// right before their own `rt_push_sexpr_root` call for a `kind = 2` binding,
+/// to record the exact root-stack index that push lands at; `compile-set`
+/// later hands that same index to `rt_set_sexpr_root` so a `setf` updates the
+/// binding's *existing* root in place instead of leaving a freshly assigned
+/// value with no root at all — see `typelisp_rt::rt_set_sexpr_root`'s doc
+/// comment for the corruption this closes.
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 11] {
     use crate::compile::runtime::{
-        rt_car, rt_cdr, rt_cons, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_set_car, rt_set_cdr,
+        rt_car, rt_cdr, rt_cons, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car,
+        rt_set_cdr, rt_set_sexpr_root,
     };
     [
         ("rt_car", rt_car as usize),
@@ -1663,6 +1673,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 9] {
         ("rt_push_sexpr_root", rt_push_sexpr_root as usize),
         ("rt_pop_sexpr_root", rt_pop_sexpr_root as usize),
         ("rt_push_permanent_sexpr_root", rt_push_permanent_sexpr_root as usize),
+        ("rt_root_count", rt_root_count as usize),
+        ("rt_set_sexpr_root", rt_set_sexpr_root as usize),
     ]
 }
 

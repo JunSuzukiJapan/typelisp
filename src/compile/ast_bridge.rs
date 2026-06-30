@@ -469,9 +469,9 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], dir
     result
 }
 
-/// `Expr::Set(name, value)` -> `(set name-str is-fn value-form)` (`loop`/
-/// `break`/`return`/`setf`). `is-fn` is `typed.ty`'s own `Fn`-ness — for a
-/// `Set` node that's the *target variable's* type (`Checker::check_setf`
+/// `Expr::Set(name, value)` -> `(set name-str kind value-form)` (`loop`/
+/// `break`/`return`/`setf`). `kind` is `typed.ty`'s own [`binding_kind`] —
+/// for a `Set` node that's the *target variable's* type (`Checker::check_setf`
 /// builds `Typed { expr: Expr::Set(name, value), ty }` with `ty` taken from
 /// `env.get(&name)`, not from `value`'s own type — though the two always
 /// agree, since `value` is checked against that same type), the same role
@@ -480,11 +480,23 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], dir
 /// it-escapes-into-longer-lived-storage logic for the new value before
 /// storing it into the target's slot, since that slot can outlive whatever
 /// activation computed a borrowed value (exactly the same boundary an `if`
-/// merge crosses).
+/// merge crosses) — derived from `kind = 1` (fn) rather than carried as a
+/// separate `Bool`, now that `compile-set` also needs `kind = 2` (sexpr) to
+/// know whether the target's slot has a second word holding its GC-root
+/// stack index (`bind-params`/`bind-captures`/`bind-let-values`, the only
+/// three binding sites a `setf` target's name can resolve to): a `setf`
+/// overwrites the slot in place but the GC root pushed for it at bind time
+/// is a value snapshot, not a live view of the slot — left unupdated, the
+/// *new* value would sit completely unrooted for the rest of the binding's
+/// scope (`crates/typelisp-rt/src/lib.rs`'s
+/// `a_setf_reassigned_sexpr_value_is_corrupted_by_a_gc_triggered_by_other_allocations_without_rt_set_sexpr_root`
+/// demonstrates exactly this at the raw-builtin level). `compile-set` calls
+/// `rt_set_sexpr_root` with that recorded index to fix the *same* root entry
+/// in place instead.
 fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
-    let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
+    let kind = Value::Int(binding_kind(ty));
     let form = match ast_to_sexpr_scoped(heap, value, direct, outer_captured) {
         Ok(v) => v,
         Err(e) => {
@@ -493,7 +505,7 @@ fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, direct: 
         }
     };
     heap.push_root(form);
-    let result = tagged(heap, "set", &[name_v, is_fn, form]);
+    let result = tagged(heap, "set", &[name_v, kind, form]);
     heap.pop_root(); // form
     heap.pop_root(); // name_v
     result
@@ -2103,8 +2115,8 @@ mod tests {
         assert_eq!(fields[0], Value::Bool(true));
     }
 
-    /// `Expr::Set(name, value)` -> `(set name-str is-fn value-form)` — `ty`
-    /// is the *target variable's* type (here `I64`, never `Fn`), not
+    /// `Expr::Set(name, value)` -> `(set name-str kind value-form)` — `ty`
+    /// is the *target variable's* type (here `I64`, `KIND_PLAIN`), not
     /// `value`'s own (also `I64` here, but the two needn't be the same node).
     #[test]
     fn translates_a_setf() {
@@ -2114,10 +2126,23 @@ mod tests {
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "set");
         assert_eq!(expect_str(&heap, fields[0]), "x");
-        assert_eq!(fields[1], Value::Bool(false));
+        assert_eq!(fields[1], Value::Int(0), "I64 is KIND_PLAIN");
         let (value_tag, value_fields) = untag(&heap, fields[2]);
         assert_eq!(value_tag, "int");
         assert_eq!(value_fields, vec![Value::Int(9)]);
+    }
+
+    /// A `setf` whose target is `Sexpr`-typed carries `KIND_SEXPR` (`2`) —
+    /// `compile-set`'s signal to update the target's GC-root entry in place
+    /// via `rt_set_sexpr_root`, not just overwrite the value slot.
+    #[test]
+    fn translates_a_setf_targeting_a_sexpr_local_with_kind_sexpr() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let set = Expr::Set("s".to_string(), Box::new(typed(Expr::Var("s".to_string()), sexpr_ty())));
+        let v = ast_to_sexpr(&mut heap, &typed(set, sexpr_ty())).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "set");
+        assert_eq!(fields[1], Value::Int(2), "Sexpr is KIND_SEXPR");
     }
 
     /// `collect_call_targets` recurses into a `Loop`'s body, a `Set`'s

@@ -2366,6 +2366,38 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_sexpr_local_rooted_acros
     assert_eq!(v, RtValue::Int(1), "s's contents must survive every intervening allocation");
 }
 
+/// The `setf`-reassignment counterpart of the test above: a `let`-bound
+/// `Sexpr` local's GC root is pushed once, at bind time — `compile-set`
+/// (`rt_set_sexpr_root`, see `compiler.rs`'s doc comment) must update that
+/// *same* root in place when `setf` later reassigns the binding to a freshly
+/// built value, or that new value would have no root at all for the rest of
+/// the binding's scope (`typelisp-rt`'s own
+/// `a_setf_reassigned_sexpr_value_is_corrupted_by_a_gc_triggered_by_other_allocations_without_rt_set_sexpr_root`
+/// test demonstrates that corruption directly, at the raw-builtin level,
+/// without needing to land it through this exact JIT/arena-layout timing).
+#[test]
+fn compile_dispatches_a_function_that_keeps_a_setf_reassigned_sexpr_local_rooted_across_many_allocations() {
+    let v = run_with_compiler_and_capacity(
+        r#"
+        (defun churn-and-check ((n i64)) bool
+          (let ((s (Cons (Int 1) (Int 1))))
+            (setf s (Cons (Int 111) (Int 222)))
+            (let ((ignored (loop
+                             (if (eq n 0) (break) ())
+                             (Cons s s)
+                             (setf n (- n 1)))))
+              (match s
+                ((Cons (Int a) (Int b)) (eq (+ a b) 333))
+                (_ false)))))
+        (compile churn-and-check)
+        (churn-and-check 5000)
+        "#,
+        1 << 13,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(1), "s's reassigned contents must survive every intervening allocation");
+}
+
 /// A gap the "Sexprルート挿入パス" left for a later stage (`docs/TODO.md`'s
 /// "残る選択肢" — temporaries passing through a call-argument array are
 /// unrooted): `compile-construct-sexpr`'s `Cons` variant computes its `car`

@@ -426,6 +426,76 @@ pub unsafe extern "C" fn rt_push_permanent_sexpr_root(args: *const i64, argc: u3
     tagged
 }
 
+/// Returns the active `Heap`'s current root count (`Heap::root_count`), as a
+/// raw host index — never a tagged `Sexpr`, unlike every other `rt_*`
+/// function's `i64` payload. `compiler.rs`'s `retain-bindings`/
+/// `bind-let-values` call this *immediately before* their own
+/// [`rt_push_sexpr_root`] call for a `kind = 2` (`Sexpr`-typed) binding, to
+/// capture the exact stack position that root is about to occupy (`push_root`
+/// appends at the end, so "current count" *is* "the new root's index"). That
+/// index is then stashed in a second word of the binding's own slot
+/// (`compiler.rs`'s `bind-params`/`bind-captures`/`bind-let-values` all now
+/// allocate two words per binding rather than one) so a later `setf` to the
+/// same binding (`compile-set`) can hand it straight to
+/// [`rt_set_sexpr_root`] — see that function's doc comment for why an
+/// update-in-place, not a second push, is what a reassignment actually
+/// needs.
+///
+/// # Safety
+///
+/// A `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_root_count(_args: *const i64, _argc: u32) -> i64 {
+    active_heap().root_count() as i64
+}
+
+/// `setf`'s GC-root counterpart to [`rt_push_sexpr_root`]: overwrites the
+/// root at stack position `args[0]` (a raw host index, *not* a tagged
+/// `Sexpr` — see [`rt_root_count`]) with `args[1]` (`Heap::set_root`).
+///
+/// A `let`/parameter/captured binding's GC root is pushed exactly once, at
+/// bind time, holding whatever value the binding started with
+/// (`rt_push_sexpr_root`, called from `compiler.rs`'s `retain-bindings`/
+/// `bind-let-values`). `compile-set` only ever overwrites the binding's own
+/// value *slot* in place — it never touches `Heap.roots` — so without this,
+/// a `setf` that reassigns a `kind = 2` binding to a freshly built value
+/// leaves that new value completely unrooted for the rest of the binding's
+/// scope: the existing root stays pinned to the *original* value (itself
+/// now harmlessly over-retained, not a correctness problem), while the new
+/// one is exposed to the very next GC any unrelated allocation triggers.
+/// `crates/typelisp-rt/src/lib.rs`'s own
+/// `a_setf_reassigned_sexpr_value_is_corrupted_by_a_gc_triggered_by_other_allocations_without_rt_set_sexpr_root`
+/// test demonstrates that corruption directly, the same way
+/// [`rt_push_sexpr_root`]'s doc comment points at
+/// `an_unrooted_value_is_corrupted_by_a_gc_triggered_by_other_allocations`
+/// for the never-rooted-at-all case this complements. A binding keeps the
+/// same root-stack slot for its whole lifetime (`rt_root_count`, called
+/// once when the root is first pushed, hands back that fixed index), so
+/// every subsequent `setf` to the same binding just updates that one slot
+/// again — `O(1)` regardless of how many times it's reassigned (e.g. inside
+/// a loop), unlike pushing a fresh root per `setf` would be (which has no
+/// matching pop count known until runtime).
+///
+/// Returns `args[1]` unchanged, like [`rt_push_sexpr_root`].
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s; a
+/// `Heap` must already be registered on this thread; `args[0]` must be a
+/// valid index into that `Heap`'s current root stack (always true in
+/// practice — it's always a value `rt_root_count` itself returned earlier in
+/// the same dynamic scope, never user input).
+#[no_mangle]
+pub unsafe extern "C" fn rt_set_sexpr_root(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_set_sexpr_root: expected 2 arguments");
+    }
+    let idx = *args as usize;
+    let tagged = *args.add(1);
+    active_heap().set_root(idx, decode(tagged));
+    tagged
+}
+
 // ---- Stage 5: Match -----------------------------------------------------
 
 /// `compiler.rs`'s `compile-match-arms` calls this once every arm's
@@ -451,7 +521,7 @@ mod tests {
 
     use super::{
         decode, encode, rt_car, rt_cdr, rt_cons, rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
-        rt_push_sexpr_root, rt_set_car, rt_set_cdr, set_active_heap,
+        rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, set_active_heap,
     };
 
     #[test]
@@ -643,5 +713,86 @@ mod tests {
 
         let popped = unsafe { rt_pop_sexpr_root(std::ptr::null(), 0) };
         assert_eq!(popped, ordinary, "the ordinary root pops, unaffected by the permanent push");
+    }
+
+    /// The problem [`rt_set_sexpr_root`] exists to fix, reproduced directly:
+    /// a `kind = 2` binding's GC root is pushed once, at bind time, holding
+    /// its *original* value (`bind-let-values`'s `rt_push_sexpr_root` call).
+    /// `compile-set` (pre-fix) only overwrote the binding's own value slot —
+    /// it never touched that root — so a `setf` reassigning the binding to a
+    /// freshly built value left the new value with no root at all, exposed
+    /// to the very next GC any unrelated allocation triggers. This is
+    /// exactly [`an_unrooted_value_is_corrupted_by_a_gc_triggered_by_other_allocations`]'s
+    /// scenario, just reached via a stale *existing* root rather than no
+    /// root ever having been pushed.
+    #[test]
+    fn a_setf_reassigned_sexpr_value_is_corrupted_by_a_gc_triggered_by_other_allocations_without_rt_set_sexpr_root() {
+        let mut heap = Heap::with_capacity(4);
+        set_active_heap(&mut heap as *mut Heap);
+
+        // `(let ((s (Cons (Int 1) (Int 1)))) ...)` — bind-let-values pushes
+        // a root for the *original* value.
+        let original_args = [encode(Value::Int(1)), encode(Value::Int(1))];
+        let original = unsafe { rt_cons(original_args.as_ptr(), 2) };
+        unsafe { rt_push_sexpr_root(&original as *const i64, 1) };
+
+        // `(setf s (Cons (Int 111) (Int 222)))` — overwrites s's own slot
+        // with this new value, but (without rt_set_sexpr_root) no root is
+        // ever pushed or updated for it.
+        let reassigned_args = [encode(Value::Int(111)), encode(Value::Int(222))];
+        let reassigned = unsafe { rt_cons(reassigned_args.as_ptr(), 2) };
+
+        // Many unrelated allocations, forcing real gc() calls under a tiny
+        // heap — same technique as the un-rooted-value test above.
+        for i in 0..20 {
+            let args = [encode(Value::Int(i)), encode(Value::Int(i))];
+            unsafe { rt_cons(args.as_ptr(), 2) };
+        }
+
+        let one_arg = [reassigned];
+        let car_after = decode(unsafe { rt_car(one_arg.as_ptr(), 1) });
+        let cdr_after = decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) });
+        assert_ne!(
+            (car_after, cdr_after),
+            (Value::Int(111), Value::Int(222)),
+            "a setf-reassigned value with no updated root is expected to be corrupted -- \
+             this test documents the bug rt_set_sexpr_root fixes, see the test below"
+        );
+    }
+
+    /// [`rt_set_sexpr_root`]'s own fix for the test above: capture the
+    /// binding's root-stack index via [`rt_root_count`] right before the
+    /// initial [`rt_push_sexpr_root`] (mirroring `compiler.rs`'s
+    /// `retain-bindings`/`bind-let-values`), then hand that same index to
+    /// `rt_set_sexpr_root` on every `setf` instead of pushing a second root
+    /// — the reassigned value now survives the identical GC pressure the
+    /// test above shows corrupts it without this fix.
+    #[test]
+    fn rt_set_sexpr_root_protects_a_setf_reassigned_value_across_a_gc_triggered_by_other_allocations() {
+        let mut heap = Heap::with_capacity(4);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let idx = unsafe { rt_root_count(std::ptr::null(), 0) };
+        let original_args = [encode(Value::Int(1)), encode(Value::Int(1))];
+        let original = unsafe { rt_cons(original_args.as_ptr(), 2) };
+        unsafe { rt_push_sexpr_root(&original as *const i64, 1) };
+
+        let reassigned_args = [encode(Value::Int(111)), encode(Value::Int(222))];
+        let reassigned = unsafe { rt_cons(reassigned_args.as_ptr(), 2) };
+        let set_args = [idx, reassigned];
+        let returned = unsafe { rt_set_sexpr_root(set_args.as_ptr(), 2) };
+        assert_eq!(returned, reassigned, "rt_set_sexpr_root returns its new-value argument unchanged");
+
+        for i in 0..20 {
+            let args = [encode(Value::Int(i)), encode(Value::Int(i))];
+            unsafe { rt_cons(args.as_ptr(), 2) };
+        }
+
+        let one_arg = [reassigned];
+        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(111));
+        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Int(222));
+
+        let popped = unsafe { rt_pop_sexpr_root(std::ptr::null(), 0) };
+        assert_eq!(popped, reassigned, "popping the binding's root now yields the reassigned value, not the original");
     }
 }

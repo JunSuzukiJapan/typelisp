@@ -1801,3 +1801,83 @@ defmethod/defvar/defstruct自身）が一律「コンテナから継承せず明
 全てルート名前空間（`self.ns.is_empty()`によりvisibilityチェックが
 自動的にバイパスされる）でのテストのため無修正でgreenのまま。全体
 `cargo test`/`cargo clippy --all-targets`ともgreen・警告0。
+
+## `setf`によるkind=2束縛再代入のGCルート未更新バグを修正（2026-06-30）
+
+TODO.mdの「`compile-if-branch`経由の値のkind対応」のうち、`setf`部分だけを
+具体的に実証・修正した。残り（`if`/`match`自身のmerge slot・`return`の
+loop-slotを素通りする束縛されない一時値）は引き続き「store直後にload する
+隣接命令なので単体では安全、消費先も呼び出し引数・Cons構築・一般ADT
+フィールド経由で既に対応済み」という従来の分析のまま、未着手（具体的な
+破壊を実証するテストはまだ書けていない）。
+
+**根本原因**: `bind-params`/`bind-captures`/`bind-let-values`は`kind = 2`
+（`Sexpr`型）の束縛に対して`rt_push_sexpr_root`でGCルートを1回だけ積むが、
+これは値の**スナップショット**であり束縛の*スロット*を生きたまま参照する
+ものではない（`typelisp-mem::Heap::push_root(&mut self, v: Value)`の
+シグネチャ自体がそれを示している）。一方`compile-set`（`setf`）は束縛の
+スロットを直接上書きするだけで、対応するGCルートには一切触れていなかった
+——つまり`setf`で束縛を新しい値に再代入した瞬間、その新しい値は束縛の
+スコープが終わるまでの間まったく無保護になり、無関係な別の割り当てが
+起こす次のGCで破壊されうる（古いルートは再代入前の値を指したまま生き
+続けるだけで、これ自体は実害のないリーク）。
+
+`crates/typelisp-rt/src/lib.rs`に生のHeap API（JITを介さない）でこの
+シナリオを直接再現するテスト
+`a_setf_reassigned_sexpr_value_is_corrupted_by_a_gc_triggered_by_other_allocations_without_rt_set_sexpr_root`
+を追加し、実際に`(111 . 222)`が無関係なGCで別の値に化けることを確認した
+——既存の`an_unrooted_value_is_corrupted_by_a_gc_triggered_by_other_allocations`
+（一度もrootされない値）の「再代入によって既存rootが無効化される」版。
+
+なお、この具体的な破壊は**JITコンパイル経由のend-to-endテストでは
+再現できなかった**（`tests/compile_test.rs`の既存`let`束縛テストと同じ
+手法で5通り以上のcapacity/反復回数を試した）——`load_compiler`だけで
+6300セル前後がpermanent rootとして常時生存しており、その上で「`setf`で
+再代入したばかりの未root値」と「ループの使い捨てallocation」が同じ
+自由領域（昇順index優先のfree-list）のどのタイミングで衝突するかを
+ピンポイントで作り込む必要があるため。生のHeap APIレベルでの実証は、
+バグそのものが実在することの証明としては十分と判断した。
+
+**修正**: `Heap::set_root(idx, v)`（既存だが未配線だった、ちょうどこの
+用途のために用意されていたAPI）を呼べるよう、以下を配線した。
+
+1. `typelisp-rt`に`rt_root_count`（現在のroot数を生のホストindexとして
+   返す——他の`rt_*`と違いSexprタグを一切経由しない）と`rt_set_sexpr_root`
+   （`(idx, new_value)`を受け取り`Heap::set_root`を呼ぶ、`rt_push_sexpr_root`
+   と同じく新しい値をそのまま返す）を追加。`rt_extern_functions()`
+   （JIT/AOT共通のフォワード宣言一覧、`src/eval/interp.rs`）に追加して
+   両経路から`get-function`で見つかるようにした。
+2. `compiler.rs`の`bind-params`/`bind-captures`/`bind-let-values`は
+   束縛スロットを1語から2語の`alloca-args`に拡張——offset 0は従来通り
+   値、offset 1は`kind = 2`の束縛だけが使う、その束縛のGCルートが
+   積まれたスタック位置（`rt_root_count`を`rt_push_sexpr_root`の**直前**に
+   呼んで取得——`push_root`は常に末尾に追加するため「現在のroot数」が
+   そのまま「これから積まれるrootの位置」になる）。`kind`が0/1の束縛では
+   offset 1は単に読まれない。
+3. `ast_bridge::translate_set`の`(set name-str is-fn value-form)`タグを
+   `(set name-str kind value-form)`へ一般化（Stage 6が呼び出し引数・
+   `let`/パラメータ束縛に対して行った`is-fn: Bool`→`kind: Int`一般化の
+   `setf`版——当時は意図的に未対応のまま残されていた）。`compile-set`は
+   `kind`を読み、`(eq kind 1)`を`compile-if-branch`への既存の`is-fn`引数
+   としてそのまま使い（Fn型のretainロジックは無変更）、`kind = 2`なら
+   値スロットへのstore-argに加えてoffset 1のidxを読み出し
+   `rt_set_sexpr_root`を呼ぶ。
+
+**テスト**: `crates/typelisp-rt/src/lib.rs`に上記の破壊実証テストと、修正後に
+同じシナリオが正しく保護されることを示す
+`rt_set_sexpr_root_protects_a_setf_reassigned_value_across_a_gc_triggered_by_other_allocations`
+の計2件追加。`src/compile/ast_bridge.rs`の`translates_a_setf`を新しい
+`kind: Int`タグ形状に追従させ、`Sexpr`型ターゲットが`KIND_SEXPR`を運ぶこと
+を示す`translates_a_setf_targeting_a_sexpr_local_with_kind_sexpr`を追加。
+`tests/compile_test.rs`に、既存の「`let`束縛のSexprローカルが無関係な
+大量割り当てを生き延びる」回帰テストの`setf`版
+`compile_dispatches_a_function_that_keeps_a_setf_reassigned_sexpr_local_rooted_across_many_allocations`
+を追加（JIT経由では上記の理由により破壊そのものは再現できないが、修正の
+配線が実コンパイル済み関数を通しても壊れていないことを示す正の回帰
+テストとして追加）。全体`cargo test --workspace`3回連続green、
+`cargo clippy --workspace --all-targets -- -D warnings`警告0、
+`cargo +nightly miri test --test mem_test`green（既存の
+`typelisp-rt`単体クレートのMiriには本修正と無関係な既存の失敗2件が
+あることを確認済み——`rt_heap_live_count_reflects_the_registered_heaps_real_state`
+のstacked borrows違反と`rt_heap_init_registers_a_freshly_created_heap`の
+意図的leak、いずれも変更前のコードでも再現する）。
