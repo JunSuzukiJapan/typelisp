@@ -520,8 +520,8 @@ mod tests {
     use typelisp_mem::{Heap, PathId, StrId, SymId, Value};
 
     use super::{
-        decode, encode, rt_car, rt_cdr, rt_cons, rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
-        rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, set_active_heap,
+        active_heap, decode, encode, rt_car, rt_cdr, rt_cons, rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root,
+        rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, set_active_heap,
     };
 
     #[test]
@@ -541,7 +541,16 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
         assert_eq!(unsafe { rt_heap_live_count(std::ptr::null(), 0) }, 0);
 
-        heap.cons(Value::Int(1), Value::Empty).expect("cons failed");
+        // Goes through `rt_cons`, not `heap.cons(...)` directly: once `heap`
+        // has been registered as the active `Heap` via a raw pointer, every
+        // further mutation must go through that same raw-pointer-derived
+        // access path (the `rt_*` functions, via `active_heap()`) rather
+        // than the original `&mut heap` binding — under Stacked Borrows,
+        // reborrowing `heap` directly (as `heap.cons(...)` implicitly does)
+        // invalidates the raw pointer `set_active_heap` was given, which
+        // `rt_heap_live_count`'s own `active_heap()` call below then trips.
+        let cons_args = [encode(Value::Int(1)), encode(Value::Empty)];
+        unsafe { rt_cons(cons_args.as_ptr(), 2) };
         assert_eq!(unsafe { rt_heap_live_count(std::ptr::null(), 0) }, 1);
     }
 
@@ -550,6 +559,20 @@ mod tests {
         let args = [4i64];
         assert_eq!(unsafe { rt_heap_init(args.as_ptr(), 1) }, 0);
         assert_eq!(unsafe { rt_heap_live_count(std::ptr::null(), 0) }, 0);
+
+        // `rt_heap_init` deliberately never frees the `Heap` it allocates
+        // (see its own doc comment — it must outlive every compiled function
+        // in an AOT-linked process, i.e. until the OS reclaims it at exit).
+        // That's the right trade-off in production, but this test's process
+        // doesn't exit here, so reclaim it explicitly to keep the test
+        // itself leak-free under Miri's leak checker rather than suppressing
+        // that checker (which would also hide a *real* leak introduced
+        // elsewhere in this same test in the future).
+        unsafe {
+            let heap_ptr = active_heap() as *mut Heap;
+            drop(Box::from_raw(heap_ptr));
+        }
+        set_active_heap(std::ptr::null_mut());
     }
 
     #[test]
