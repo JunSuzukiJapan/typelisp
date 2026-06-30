@@ -339,6 +339,20 @@ impl Checker {
         item_ns == self.ns.as_slice()
     }
 
+    /// Whether an associated function/method `af` of `type_fq` is reachable
+    /// from the current namespace: public, or declared in the same module —
+    /// mirrors `resolve_fn_path`'s cross-module `public` check. Used at every
+    /// call site that looks up `def.assoc` directly (`try_field_access`,
+    /// `check_field_set`, `check_path_call`'s static-member branch,
+    /// `try_instance_method`, `check_instance_method`) so a private member —
+    /// including a `defstruct` field whose accessor wasn't declared
+    /// `pub` — is treated as absent rather than merely forbidden, matching
+    /// how a private free function or constructor "doesn't resolve" instead
+    /// of erroring with a privacy-specific message.
+    fn assoc_visible(&self, type_fq: &Path, af: &AssocFn) -> bool {
+        af.sig.public || self.same_module(type_fq.parent())
+    }
+
     /// Locate a child-module `path`, resolving it relative to the current
     /// namespace first, then the root, then via `mod_aliases`. Handles absolute
     /// paths (leading empty segment) by going straight to root.
@@ -675,7 +689,7 @@ impl Checker {
         };
         let Type::Named(type_fq, _) = &recv.ty else { return None };
         let af = self.reg.type_def(type_fq)?.assoc.get(method)?;
-        if !af.instance {
+        if !af.instance || !self.assoc_visible(type_fq, af) {
             return None;
         }
         let type_fq = type_fq.clone();
@@ -919,6 +933,35 @@ impl Checker {
         Ok(out)
     }
 
+    /// Parse `defstruct` field bindings: `(name type)` or `(pub name type)`.
+    /// Field visibility is independent of the struct's own `pub` — like every
+    /// other `pub` in this language it's opt-in per item, never inherited
+    /// from a container — so a field defaults to private (its getter/setter
+    /// only reachable from the struct's own module) even on a `pub`
+    /// `defstruct`, and `pub` on a field of a non-`pub` struct is legal (the
+    /// field is reachable cross-module on any value of that type the current
+    /// module's own `pub` API happens to hand out, even though outside code
+    /// can't name or construct the type itself).
+    fn parse_struct_fields(&self, heap: &Heap, pairs: &[Value]) -> Result<Vec<(String, Type, bool)>, Error> {
+        let mut out = Vec::new();
+        for binding in pairs {
+            let elems = heap.list_to_vec(*binding)?;
+            let (public, rest) = match elems.first() {
+                Some(Value::Symbol(id)) if heap.symbol_name(*id) == "pub" => (true, &elems[1..]),
+                _ => (false, &elems[..]),
+            };
+            if rest.len() != 2 {
+                return Err(Error::TypeError("defstruct: field must be (name type) or (pub name type)".into()));
+            }
+            let name = match rest[0] {
+                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                _ => return Err(Error::TypeError("defstruct: field name must be a symbol".into())),
+            };
+            out.push((name, self.canon(&parse_type(heap, rest[1])?), public));
+        }
+        Ok(out)
+    }
+
     // ---- module / defmethod / use -----------------------------------------
 
     fn check_module(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value]) -> Result<TopLevel, Error> {
@@ -1056,12 +1099,12 @@ impl Checker {
             return Err(Error::TypeError("defstruct: (defstruct name (field type)...)".into()));
         }
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
-        let fields = self.parse_param_pairs(heap, &parts[1..])?;
+        let fields = self.parse_struct_fields(heap, &parts[1..])?;
         if fields.is_empty() {
             return Err(Error::TypeError("defstruct: needs at least one field".into()));
         }
-        let field_names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
-        let field_types: Vec<Type> = fields.iter().map(|(_, t)| t.clone()).collect();
+        let field_names: Vec<String> = fields.iter().map(|(n, _, _)| n.clone()).collect();
+        let field_types: Vec<Type> = fields.iter().map(|(_, t, _)| t.clone()).collect();
         for (i, n) in field_names.iter().enumerate() {
             if field_names[..i].contains(n) {
                 return Err(Error::TypeError(format!("defstruct: duplicate field `{}`", n)));
@@ -1075,12 +1118,13 @@ impl Checker {
 
         let mut assoc = HashMap::new();
         let mut accessors = Vec::with_capacity(fields.len() * 2);
-        for (i, (field_name, field_ty)) in fields.iter().enumerate() {
+        for (i, (field_name, field_ty, field_public)) in fields.iter().enumerate() {
+            let field_public = *field_public;
             let getter_sig = FnSig {
                 type_params: vec![],
                 params: vec![recv_ty.clone()],
                 ret: field_ty.clone(),
-                public,
+                public: field_public,
                 rest: None,
                 builtin: false,
             };
@@ -1103,7 +1147,7 @@ impl Checker {
                 type_params: vec![],
                 params: vec![recv_ty.clone(), field_ty.clone()],
                 ret: Type::Unit,
-                public,
+                public: field_public,
                 rest: None,
                 builtin: false,
             };
@@ -1667,19 +1711,21 @@ impl Checker {
                     return self.check_construct(heap, interp, env, (&type_fq, variant), args, expected);
                 }
                 if let Some(af) = def.assoc.get(member) {
-                    if af.instance {
-                        return Err(Error::TypeError(format!(
-                            "`{}::{}` is an instance method; call it as ({} obj ...)",
-                            type_fq, member, member
-                        )));
+                    if self.assoc_visible(&type_fq, af) {
+                        if af.instance {
+                            return Err(Error::TypeError(format!(
+                                "`{}::{}` is an instance method; call it as ({} obj ...)",
+                                type_fq, member, member
+                            )));
+                        }
+                        return self.check_assoc_call(
+                            heap,
+                            interp,
+                            env,
+                            AssocCall { type_fq: &type_fq, method: member.as_str(), receiver: None, expected },
+                            args,
+                        );
                     }
-                    return self.check_assoc_call(
-                        heap,
-                        interp,
-                        env,
-                        AssocCall { type_fq: &type_fq, method: member.as_str(), receiver: None, expected },
-                        args,
-                    );
                 }
             }
         }
@@ -1722,8 +1768,9 @@ impl Checker {
             other => prim_type_path(other),
         }?;
         let def = self.reg.type_def(&type_fq)?;
-        if def.assoc.get(method).map(|a| a.instance) != Some(true) {
-            return None;
+        match def.assoc.get(method) {
+            Some(af) if af.instance && self.assoc_visible(&type_fq, af) => {}
+            _ => return None,
         }
         Some(self.check_assoc_call(
             heap,
@@ -1756,7 +1803,11 @@ impl Checker {
             };
             if let Some(type_fq) = type_fq {
                 if let Some(def) = self.reg.type_def(&type_fq) {
-                    if def.assoc.get(method).map(|a| a.instance) == Some(true) {
+                    let visible = def
+                        .assoc
+                        .get(method)
+                        .is_some_and(|af| af.instance && self.assoc_visible(&type_fq, af));
+                    if visible {
                         return self.check_assoc_call(
                             heap,
                             interp,
@@ -2208,7 +2259,7 @@ impl Checker {
             .reg
             .type_def(type_fq)
             .and_then(|d| d.assoc.get(&setter))
-            .is_some_and(|af| af.instance);
+            .is_some_and(|af| af.instance && self.assoc_visible(type_fq, af));
         if !is_field_setter {
             return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", type_fq, field)));
         }

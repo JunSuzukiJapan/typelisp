@@ -211,6 +211,68 @@ fn private_fn_accessible_within_same_module() {
     assert!(program(src).is_ok());
 }
 
+// ---- visibility: defstruct field accessors are private by default,
+// independent of the struct's own `pub` -----------------------------------
+
+#[test]
+fn struct_field_without_pub_is_inaccessible_cross_module_even_on_a_pub_struct() {
+    // `geo::point` itself is `pub` (constructible from outside), but its `x`
+    // field wasn't declared `pub` — the accessor stays module-private. `(x p)`
+    // is the bare instance-method call form (dispatch is by `p`'s type, not
+    // by namespace lookup, so it works the same from any module).
+    let src = "(module geo (pub defstruct point (x i32) (y i32))) \
+               (let ((p (geo::point::new 1 2))) (x p))";
+    assert!(program(src).is_err());
+}
+
+#[test]
+fn struct_field_path_sugar_without_pub_is_inaccessible_cross_module() {
+    let src = "(module geo (pub defstruct point (x i32) (y i32))) \
+               (let ((p (geo::point::new 1 2))) p::x)";
+    assert!(program(src).is_err());
+}
+
+#[test]
+fn struct_field_marked_pub_is_accessible_cross_module() {
+    let src = "(module geo (pub defstruct point (pub x i32) (y i32))) \
+               (let ((p (geo::point::new 1 2))) p::x)";
+    assert_eq!(ty_program(src), Type::I32);
+}
+
+#[test]
+fn struct_field_marked_pub_setter_is_accessible_cross_module() {
+    let src = "(module geo (pub defstruct point (pub x i32) (y i32))) \
+               (let ((p (geo::point::new 1 2))) (setf p::x 9))";
+    assert_eq!(ty_program(src), Type::Unit);
+}
+
+#[test]
+fn struct_field_not_marked_pub_setter_is_inaccessible_cross_module() {
+    let src = "(module geo (pub defstruct point (x i32) (pub y i32))) \
+               (let ((p (geo::point::new 1 2))) (setf p::x 9))";
+    assert!(program(src).is_err());
+}
+
+#[test]
+fn struct_field_without_pub_is_accessible_within_its_own_module() {
+    let src = "(module geo \
+                 (pub defstruct point (x i32) (y i32)) \
+                 (pub defun get-x ((p point)) i32 p::x))";
+    assert!(program(src).is_ok());
+}
+
+#[test]
+fn struct_pub_field_on_a_non_pub_struct_is_still_accessible_cross_module() {
+    // The type itself is private (unnameable/unconstructible outside `geo`),
+    // but a value the module hands out through its own public API can still
+    // expose individual `pub` fields to outside code.
+    let src = "(module geo \
+                 (defstruct point (pub x i32) (y i32)) \
+                 (pub defun origin () point (point::new 0 0))) \
+               (x (geo::origin))";
+    assert_eq!(ty_program(src), Type::I32);
+}
+
 // ---- use: module alias (`use std::math` makes `math` resolve to `std::math`) ---
 
 #[test]

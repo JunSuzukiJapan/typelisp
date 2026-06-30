@@ -1756,3 +1756,48 @@ shadowing系を含む）は無修正でgreenのまま。`cargo +nightly miri tes
 --test mem_test`/`--test scope_test`もUB・リーク無し、clippy警告0
 （`Scope`の内部表現が`clippy::type_complexity`を出したため`ScopeFrame`
 型エイリアスを追加して解消）。
+
+### `defstruct`フィールド単位の可視性 + assocメソッド呼び出し経路全体への可視性チェック導入（2026-06-30）
+
+TODO.mdの「可視性（`FnSig::public`が常に`true`で実効性なし）」という記述は
+古い情報と判明——2026-06-16のコミット`1a5d9f3`で関数/型/マクロ/変数の
+クロスモジュール`pub`チェックは既に実装・テスト済みだった（`tests/
+namespace_test.rs`の`private_fn_inaccessible_cross_module`等）。ただし
+調査の過程で**真の欠落**を発見: `defstruct`が合成するフィールドgetter/
+setterを含む`AssocFn`（型に紐づくstatic/instanceメソッド）は、`(use
+Type)`によるstatic methodのbare化（`check_use`内）でしか`public`が
+チェックされておらず、実際の呼び出し経路——`try_field_access`（`p::x`
+糖衣構文）・`check_field_set`（`(setf p::x v)`）・`check_path_call`の
+static member分岐（`Type::method`）・`try_instance_method`/
+`check_instance_method`（`(method recv args...)`形式）——はいずれも
+`af.sig.public`を一切見ていなかった。
+
+**実装**: `Checker::assoc_visible(type_fq, af)`（`af.sig.public ||
+self.same_module(type_fq.parent())`、`resolve_fn_path`の既存パターンと
+同形）を新設し、上記5箇所すべてに適用。private扱いの場合は「forbidden」
+ではなく「unresolved」として振る舞う（`resolve_fn_path`等の既存方針に
+合わせ、存在自体を漏らさない）——`try_field_access`/`try_instance_method`
+は`None`を返し、`check_field_set`/`check_instance_method`/
+`check_path_call`は既存の「フィールド/パスが見つからない」エラーに
+自然に落ちる。
+
+**`defstruct`のフィールド構文拡張**: `(name type)`に加え`(pub name
+type)`を許可（`Checker::parse_struct_fields`、`parse_param_pairs`とは
+別関数——`defun`の引数リストには`pub`の概念がないため共有しない）。
+**フィールドのデフォルト可視性はprivate**——構造体自身が`pub defstruct`
+でも、フィールドごとに明示`pub`しない限りgetter/setterはモジュール外から
+見えない（Rustの`pub struct { x: T }`と同じ規約）。これは他の`pub`（defun/
+defmethod/defvar/defstruct自身）が一律「コンテナから継承せず明示
+オプトイン」である設計と一貫させた判断。逆に非`pub`な構造体のフィールドを
+`pub`にすることも許可——型自体は外から名指しできなくても、その型の値を
+渡す`pub`な関数経由で個々のフィールドだけ覗ける、というopaqueハンドル的
+パターンが成立する。
+
+**テスト**: `tests/namespace_test.rs`に8件追加（`pub`構造体の非`pub`
+フィールドが`p::x`/`(x p)`いずれの形式でもクロスモジュールから読めない
+こと、setterも同様、`pub`フィールドはクロスモジュールで読み書き可能、
+同一モジュール内では`pub`無しでも読める、非`pub`構造体の`pub`フィールド
+がクロスモジュールでなお読めること）。既存`tests/struct_test.rs`の33件は
+全てルート名前空間（`self.ns.is_empty()`によりvisibilityチェックが
+自動的にバイパスされる）でのテストのため無修正でgreenのまま。全体
+`cargo test`/`cargo clippy --all-targets`ともgreen・警告0。
