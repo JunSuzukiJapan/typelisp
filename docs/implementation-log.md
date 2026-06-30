@@ -1881,3 +1881,105 @@ loop-slotを素通りする束縛されない一時値）は引き続き「store
 あることを確認済み——`rt_heap_live_count_reflects_the_registered_heaps_real_state`
 のstacked borrows違反と`rt_heap_init_registers_a_freshly_created_heap`の
 意図的leak、いずれも変更前のコードでも再現する）。
+
+## trait機構（deftrait/impl/where） + Vector\<T\> + doiter（2026-06-30）
+
+TODO.mdの最優先課題`doiter`（「何に対する反復か」仕様未確定）の解決。ユーザーと協議し
+「Iterトレイトを実装した型すべてで使える、汎用trait機構の上に作る」方針が確定、4フェーズで実装。
+
+**フェーズ1: `Vector<T>`の再設計**。2026-06-23に専用`RtValue::Vector`バリアントもろとも
+全面削除された経緯（[[typelisp-vector-defstruct-revert]]）を踏まえ、「専用RtValueバリアントを
+作らず、ユーザー定義型（`defstruct`/`RtValue::Struct`）と対称に扱う」という当時の教訓を踏襲。
+`StructData{ type_name, fields: Vec<RtValue> }`の`fields`を、`defstruct`の固定フィールド数とは
+異なり**可変長コレクションとして扱う**ことで、`StructData`自体への変更なしに実現
+（`src/check/registry.rs`の`vector_def`、`src/eval/interp.rs`の`eval_builtin_method`の
+`"vector"`アーム——`new`/`push`/`get`/`set`/`len`、`HashTable`と同じ「Rust組み込みassocメソッド」
+方式）。`tests/vector_test.rs`新設。
+
+**フェーズ2: trait機構の基盤**。既存の単一静的ディスパッチ（`AdtDef.assoc`+`Expr::Assoc`+
+`Interp::methods`）を可能な限り再利用する設計:
+- `registry.rs`に`TraitDef{ name, assoc_types, methods: HashMap<String,FnSig>, ... }`新設、
+  `Namespace.traits`、`AdtDef.impls: Vec<Path>`（実装済みtrait一覧）追加。
+- `impl`登録時、各メソッド本体は**通常の`defmethod`と全く同じ実体**として対象型の`assoc`に
+  挿入する（`Checker::check_impl`が`Self`/関連型名を対象型の具体型へ構文木レベルで置換してから
+  `check_defmethod`を呼ぶ——置換は`Checker::subst_value`、受け手リストの**型位置のみ**を置換する
+  必要があった点が落とし穴: `(self Self)`の変数名`self`と型キーワード`Self`は読み取り後どちらも
+  同じ`"self"`という大文字小文字無視の文字列になるため、フォーム全体を素朴に一括置換すると
+  レシーバの変数名まで型に化けてしまう——`((self Self))`のような受け手ペアの「型」要素だけを
+  選んで置換し、変数名・本体は触らない実装に修正して解決）。
+- 具体型に対する呼び出しはこれで既存コードパスのまま動く。ジェネリック関数本体の型変数レシーバ
+  （`(where (Iter T))`宣言下の`(next it)`、`it: T`）は新規`Expr::TraitCall`ノードで表現——
+  チェック時には実装型のPathを持たず、実行時にレシーバの値自身が持つ型タグ
+  （`RtValue::Struct`の`type_name`等、`rtvalue_type_path`ヘルパー）を読んで、`Expr::Assoc`と
+  **同じ`methods`テーブル**を引く。vtable等の専用間接構造ではなく、型消去インタプリタが要求する
+  最小限の動的型タグ参照という整理。
+- `Env`に`bounds: Rc<HashMap<String,Vec<Path>>>`追加（`where`節の宣言を関数本体チェック時のみ
+  伝播、呼び出し側シグネチャには影響しない——呼び出し側での境界検証は未実装のまま、TODO.md参照）。
+- `tests/trait_test.rs`新設（具体型ディスパッチ、`where`境界経由のジェネリック呼び出し、型ごとの
+  独立ディスパッチ、未実装trait呼び出しの型エラーを検証）。
+
+**フェーズ3: `Iter`トレイト + `vector-iter<T>`**。`next: Self -> Option<Item>`という可変状態
+モデル（呼び出しごとに`Self`の内部フィールドを`setf`で書き換える、Rust Iteratorに近い）。
+`Vector<T>`自体ではなく別の`vector-iter<T>`（`vec`/`pos`の2フィールド`defstruct`）が`Iter`を
+実装——`Vector<T>`自身に`next`を持たせると、複数の独立した反復状態を同時に持てなくなるため。
+すべて`prelude.rs`に追加（`deftrait`/`impl`はtypelispソースとして書ける）。落とし穴2件:
+(1) `(Option Item)`という型注釈は`(fn ...)`形式と誤認されパースエラーになる——このシステムでは
+ジェネリック型は`Option<Item>`という単一トークン構文が必須（`(関数名 引数...)`形のリストは
+`parse_type`が無条件に`parse_fn_type`へ回す）。(2) `impl Iter VectorIter<T>`のようにキャメル
+ケースで書いた型名は、シンボルの大文字小文字無視正規化を経ても`defstruct`側の`vector-iter`
+（ハイフン区切り）とは一致しない——`impl`の対象型名は実際の型のシンボル表記（ハイフン）と
+揃える必要がある。`tests/iter_test.rs`新設。
+
+**フェーズ4: `doiter`特殊形**。`while`/`dolist`/`case`/`do`はすべて`defmacro`（構文展開のみ）
+だが、`doiter`は`var`の型が`coll`の`Iter::Item`（型チェッカーでしか分からない）に依存するため
+唯一`defmacro`で書けず、`Checker::check_doiter`がcheckerレベルで`Expr`を直接構築する
+（`while-let`が展開する`(loop (match val (pat body...) (_ (break))))`と同型のExpr木を、構文展開
+ではなく直接組み立てる）。落とし穴: `def.assoc["next"].sig.ret`は`HashTable`の`get`等と同じく
+`def.params`（例: `vector-iter<T>`の`t`）を型変数として含む**テンプレート**のまま登録されている
+——`check_assoc_call`が行う`subst`/`subst_apply`による具体化を素通りしてしまい、`Item`型が型変数
+`t`のまま漏れ出ていた。`coll`の具体型引数から`subst`を構築し`subst_apply`で具体化して解決。
+`tests/doiter_test.rs`新設（合計計算、空Vector、`break`/`return`、`where`境界内、ネスト、
+未実装trait呼び出しの型エラーを検証）。
+
+**既知の制限**（TODO.md参照）: 関連型の具体指定（`where`節で「Tの`Item`はi32」のような制約）は
+未実装——ジェネリック関数本体内で`Item`型の値に対する算術演算等はできない（`doiter`/`Iter`自体の
+動作は問題ない）。呼び出し側での境界検証も未実装。`Sexpr`へのtrait実装は意図的に対象外
+（要素型が固定されないリストにジェネリックな`Iter<Item>`を被せるのは型システム上不適切、という
+ユーザー判断）。`Expr::TraitCall`はcompile機能（LLVM）では`unsupported`のプレースホルダのまま
+——`Iter`/`doiter`を使うコードは現状compileできない。
+
+**テスト**: 全フェーズ完了後`cargo test`（`scripts/with-llvm-env.sh`経由）で既存含め全件green、
+`cargo +nightly miri test --test mem_test`green。
+
+### 追記: `doiter`をchecker特殊形から`defmacro`へ作り直し（同日）
+
+上記フェーズ4で`doiter`をRust製checker特殊形（`Checker::check_doiter`、`var`の型を手動で導出し
+`Expr`木を直接構築）として実装したが、ユーザーから「`var`の型がcheckerでしか分からないというのは
+誤り。`dolist`同様ジェネリックなスペシャルフォームと考えれば`var`の型は型変数が指す型になるはずで、
+`defmacro`で書けない理由にならない」という指摘を受け、検証の上で全面的に書き直した。
+
+検証結果: `Checker::check_ctor_pattern`（`(some var)`のようなコンストラクタパターンのチェック）
+は、scrutineeの型から`def.params`→`subst`→`subst_apply`で**`Pattern::Bind`の型を自動的に正しく
+推論する**仕組みを既に持っており、`var`の型をマクロ展開時に知る必要は最初からなかった。
+`while-let`マクロ（`prelude.rs`）のドキュメントコメント自体に「`val`は毎回再評価される
+（`(next i)`のような状態変化を観察する呼び出しのため）」と明記されている——これは`doiter`が
+`next`を繰り返し呼んで`Iter`の可変状態を観察する動作と完全に一致する。
+
+`doiter`を`dotimes`/`dolist`と同じ「`gensym`で`coll`を一度だけ評価する隠しbinding」+
+`while-let`呼び出しだけの`defmacro`に置き換え:
+```lisp
+(defmacro doiter (spec &rest body)
+  (let ((var (car spec)) (coll-expr (car (cdr spec))) (tmp (gensym)))
+    `(let ((,tmp ,coll-expr))
+       (while-let ((some ,var) (next ,tmp)) ,@body))))
+```
+`(next ,tmp)`という呼び出しは、マクロ展開後に通常の`check_list`のhead解決
+（`try_instance_method`→`check_instance_method`）を経由し、これはフェーズ2で実装した型変数分岐
+（`Expr::TraitCall`生成）も含めてそのまま機能する——trait機構基盤（`TraitDef`/`AdtDef.impls`/
+`Expr::TraitCall`/`check_instance_method`の拡張）は無変更。`Checker::check_doiter`関数と
+`check_list`の`"doiter"`特殊形ディスパッチのみ削除。
+
+**テスト**: `tests/doiter_test.rs`の既存7ケースを**一切変更せず**全green（実装方式が変わっても
+挙動は完全に同一であることの実証）。`scripts/with-llvm-env.sh cargo test`で既存含め全件green、
+`cargo +nightly miri test --test mem_test`green。`grep -n '"doiter"' src/check/checker.rs`が
+ノーヒットであることを確認（checker側の特殊形ハードコードが完全に消えたことの確認）。

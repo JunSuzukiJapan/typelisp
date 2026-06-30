@@ -326,6 +326,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>,
         Expr::Return(value) => translate_return(heap, value, direct, outer_captured),
         Expr::Panic(_) => unsupported(heap, "Panic"),
         Expr::Quote(_) => unsupported(heap, "Quote"),
+        Expr::TraitCall { .. } => unsupported(heap, "TraitCall"),
     }
 }
 

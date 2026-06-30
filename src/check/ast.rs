@@ -69,6 +69,26 @@ pub enum Expr {
         instance: bool,
         args: Vec<Typed>,
     },
+    /// A call to a trait method on a still-generic type-variable receiver
+    /// inside a `where`-bounded function body (`Checker::check_instance_method`'s
+    /// type-variable branch) — e.g. `(next it)` where `it: T` and the
+    /// enclosing function declared `(where (Iter T))`. Unlike `Expr::Assoc`,
+    /// whose `type_name` is a concrete `Path` fixed at check time, here the
+    /// implementing type is only known once `args[0]` is *evaluated* — the
+    /// interpreter reads it off the runtime value's own type tag (see
+    /// `Interp::eval`'s `TraitCall` arm) and looks it up in the very same
+    /// `Interp::methods` table an `Expr::Assoc` call uses, since
+    /// `Checker::check_impl` inserts each `impl`ed method there as an
+    /// ordinary `defmethod`. This keeps dispatch static in spirit (one fixed
+    /// table, no indirection through a vtable) while still being the one
+    /// point where *which* entry to read isn't known until runtime — the
+    /// minimum a type-erasing tree-walker needs for a generic function body
+    /// to call a trait method on its own type parameter.
+    TraitCall {
+        trait_name: Path,
+        method: String,
+        args: Vec<Typed>,
+    },
     /// A data-type constructor application, e.g. `(Some x)` / `(Cons a d)`.
     Construct {
         /// The nominal type's fully-qualified [`Path`], e.g. `option`, `sexpr`.

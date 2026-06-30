@@ -165,7 +165,7 @@ fn walk(typed: &Typed, bound: &HashSet<String>, siblings: &HashSet<String>, seen
                 walk(a, bound, siblings, seen, order);
             }
         }
-        Expr::Assoc { args, .. } => {
+        Expr::Assoc { args, .. } | Expr::TraitCall { args, .. } => {
             for a in args {
                 walk(a, bound, siblings, seen, order);
             }

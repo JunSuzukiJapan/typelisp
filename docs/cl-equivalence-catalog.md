@@ -80,7 +80,7 @@ Path::root("char")`、`Type::Str → Path::root("str")`、`Type::I32 → Path::r
 | `until` | Rust | **TypeLisp**（`defmacro`） | `(while (not cond) body...)` への展開のみ |
 | `while-let` | Rust | **TypeLisp**（`defmacro`） | `if-let` と同様、`(loop (match expr (pat body...) (_ (break))))` 相当に展開可能 |
 | `do` | Rust | **TypeLisp**（`defmacro`） | `dotimes`/`dolist` と同型の `let`+`while`+`setf` 展開で複数変数・ステップ式も表現可能 |
-| `doiter` | 仕様未確定 | **要設計** | 「何に対する反復か」（イテレータ抽象 or リスト限定）が未確定。実装方針より先に仕様確定が必要 |
+| `doiter` | 仕様未確定 | **TypeLisp**（`defmacro`、実装済み2026-06-30） | イテレータ抽象（`Iter`トレイト、`next: Self -> Option<Item>`）として実装。`dotimes`/`dolist`と同じ「`gensym`で`coll`を一度だけ評価する隠しbinding」+`while-let`呼び出しだけの薄いマクロ——`var`の型はマクロ展開時には分からないが、展開後の`(some var)`という構成子パターンの型を`Checker::check_ctor_pattern`がscrutinee（`next`の戻り値`Option<Item>`）から自動推論するため、checker特殊形は不要（`case`/`do`/`while-let`と同列）。`Sexpr`は要素型固定なし（ジェネリックな`Iter<Item>`を実装すべきでない、というユーザー判断）のため対象外、`Vector<T>`（新規導入）の`vector-iter<T>`が動作確認の実装例 |
 | `the` | Rust | **Rust**（変更なし） | 型注釈の検査自体が目的のため、構文展開だけのマクロでは実現不能（checker拡張が必須） |
 
 ### 1.2 新規追加候補
@@ -214,6 +214,7 @@ IO系（`print`/`println`/`princ`/`format`/`read`/`read-line`）・型変換・i
 4. 文字・文字列操作の基本プリミティブ（1.の拡張を利用）
 5. 数値拡張（i64/f64、四則・比較）
 6. TypeLisp側ライブラリ関数一式（リスト操作拡張、Option/Result補助、ソート、文字列補助）を `defun`/`defmacro` で実装
-7. `case`/`until`/`while-let`/`do` を `defmacro` で実装（`doiter` は仕様確定後、`case` は型ごとの `eq` が前提）
+7. `case`/`until`/`while-let`/`do` を `defmacro` で実装（`case` は型ごとの `eq` が前提）。`doiter` は
+   trait機構（`deftrait`/`impl`）の導入後、2026-06-30に別途実装（§1.1参照）
 8. `labels`（ローカル再帰関数）の特殊形追加
 9. `apply`（`&rest` 設計と合わせて）

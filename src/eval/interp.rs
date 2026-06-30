@@ -353,6 +353,28 @@ impl Interp {
                     }
                 }
             }
+            Expr::TraitCall { method, args, .. } => {
+                // The checker resolved this call only as far as "some type
+                // bound to `Iter`/etc. has a `next`" (`Checker::check_instance_method`'s
+                // type-variable branch) — *which* type is only known once
+                // `args[0]` (the receiver) is evaluated. `rtvalue_type_path`
+                // reads that off the value's own runtime type tag, then this
+                // is an ordinary `methods` lookup — the exact same table
+                // `Expr::Assoc` (below) reads, since `Checker::check_impl`
+                // inserted this method there as a plain `defmethod`.
+                let (argv, _slots) = self.eval_args(heap, args, env)?;
+                let type_path = rtvalue_type_path(&argv[0])
+                    .ok_or_else(|| EvalError::Panic(format!("{}: no implementation for this value", method)))?;
+                let key = (type_path, method.clone());
+                if let Some(m) = self.methods.get(&key) {
+                    self.apply(heap, &m.params, &m.body, argv)
+                } else {
+                    match eval_builtin_method(&key.0, method, &argv) {
+                        Some(result) => result,
+                        None => Err(EvalError::NoSuchFunction(format!("{}::{}", key.0, method))),
+                    }
+                }
+            }
             Expr::Construct { type_name, variant, args, mutable } => {
                 if is_sexpr_type(type_name) {
                     self.construct_sexpr(heap, *variant, args, env)
@@ -1366,6 +1388,16 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             "remove" => Some(hashtable_remove(args)),
             "count" => Some(hashtable_count(args)),
             "clear" => Some(hashtable_clear(args)),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("vector") {
+        return match method {
+            "new" => Some(Ok(RtValue::Struct(Rc::new(RefCell::new(StructData { type_name: "vector".to_string(), fields: Vec::new() }))))),
+            "push" => Some(vector_push(args)),
+            "get" => Some(vector_get(args)),
+            "set" => Some(vector_set(args)),
+            "len" => Some(vector_len(args)),
             _ => None,
         };
     }
@@ -2511,6 +2543,72 @@ fn hashtable_clear(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let map = expect_hashtable(&args[0])?;
     map.borrow_mut().clear();
     Ok(RtValue::Unit)
+}
+
+/// The type tag a runtime value carries — what `Expr::TraitCall`'s eval arm
+/// reads off the receiver to learn which `impl`'s methods apply, since the
+/// checker erased that information down to "some type bound to the trait"
+/// (see `Checker::check_instance_method`'s type-variable branch and
+/// `Expr::TraitCall`'s doc comment). Only the variants an `impl` target can
+/// plausibly be are covered — a closure/`HashTable`/LLVM-builder receiver
+/// can't have gone through `Checker::check_impl` today, so `None` for those
+/// is unreachable in practice, not a missing case.
+fn rtvalue_type_path(v: &RtValue) -> Option<Path> {
+    match v {
+        RtValue::Struct(s) => Some(Path::root(&s.borrow().type_name)),
+        RtValue::Data { type_name, .. } => Some(type_name.clone()),
+        RtValue::Bool(_) => Some(Path::root("bool")),
+        RtValue::Char(_) => Some(Path::root("char")),
+        RtValue::Str(_) => Some(Path::root("string")),
+        RtValue::Sexpr(_) => Some(Path::root("sexpr")),
+        _ => None,
+    }
+}
+
+fn expect_struct(v: &RtValue) -> Result<&Rc<RefCell<StructData>>, EvalError> {
+    match v {
+        RtValue::Struct(s) => Ok(s),
+        other => Err(EvalError::Internal(format!("expected a Vector, got {:?}", other))),
+    }
+}
+
+fn expect_int_index(v: &RtValue) -> Result<usize, EvalError> {
+    match v {
+        RtValue::Int(n) if *n >= 0 => Ok(*n as usize),
+        other => Err(EvalError::Panic(format!("Vector: invalid index {:?}", other))),
+    }
+}
+
+fn vector_push(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let v = expect_struct(&args[0])?;
+    v.borrow_mut().fields.push(args[1].clone());
+    Ok(RtValue::Unit)
+}
+
+fn vector_get(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let v = expect_struct(&args[0])?;
+    let i = expect_int_index(&args[1])?;
+    v.borrow()
+        .fields
+        .get(i)
+        .cloned()
+        .ok_or_else(|| EvalError::Panic(format!("Vector: index {} out of bounds", i)))
+}
+
+fn vector_set(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let v = expect_struct(&args[0])?;
+    let i = expect_int_index(&args[1])?;
+    let mut s = v.borrow_mut();
+    if i >= s.fields.len() {
+        return Err(EvalError::Panic(format!("Vector: index {} out of bounds", i)));
+    }
+    s.fields[i] = args[2].clone();
+    Ok(RtValue::Unit)
+}
+
+fn vector_len(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let v = expect_struct(&args[0])?;
+    Ok(RtValue::Int(v.borrow().fields.len() as i64))
 }
 
 fn expect_scope(v: &RtValue) -> Result<&Rc<RefCell<Vec<ScopeFrame>>>, EvalError> {

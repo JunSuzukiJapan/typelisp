@@ -1,6 +1,6 @@
 # typelisp 言語設計（確定仕様）
 
-最終更新: 2026-06-23 / ブランチ: `feature/compiler`
+最終更新: 2026-06-30 / ブランチ: `feature/compile-sexpr`
 
 このドキュメントは、設計で**確定した言語仕様**を後から見返せるよう記録するもの。
 現在の残作業は [TODO.md](TODO.md)、完了した実装の経緯は [implementation-log.md](implementation-log.md) を参照。
@@ -96,7 +96,7 @@
 
 | 分類 | 特殊形 | 備考 |
 |---|---|---|
-| 定義 | `defun` `defvar` `defconstant` `defmethod` `defmacro` `module` `use` `lambda` | 引数・戻り型は明示（局所束縛は推論可。`defmacro` は全パラメータ・戻りが `Sexpr` 固定なので型注釈なし、末尾 `&rest name` で可変長対応）。`defstruct`（ユーザ定義型）は2026-06-23に削除・再設計待ち |
+| 定義 | `defun` `defvar` `defconstant` `defmethod` `defmacro` `module` `use` `lambda` `deftrait` `impl` | 引数・戻り型は明示（局所束縛は推論可。`defmacro` は全パラメータ・戻りが `Sexpr` 固定なので型注釈なし、末尾 `&rest name` で可変長対応）。`defstruct`（ユーザ定義型）は2026-06-23に削除・再設計待ち。`deftrait`/`impl`（trait機構、§5.1）は2026-06-30実装 |
 | 束縛 | `let` `let*` | |
 | 制御 | `if` `when` `unless` `cond` `case` `match` `if-let` `while-let` `and` `or` `progn` `the` | `and`/`or` は短絡のため特殊形。`the` は型注釈 |
 | 反復 | `loop` `while` `until` `dotimes` `dolist` `do` `doiter` | |
@@ -107,12 +107,15 @@
 `quasiquote`→`Expr::Quote`+`Expr::Construct{Cons,..}` の組合せ（`list` の脱糖と同様、ランタイムマクロ機構は使わない）。
 
 実装状況: `if` `let` `let*` `progn` `when` `unless` `and` `or` `cond` `case` `setf` `while` `until` `loop` `break`
-`return` `lambda` `match` `if-let` `while-let` `do` `the` `panic` `defvar` `defconstant` `module` `use`
-`defmethod` `quote` `quasiquote` `defmacro`
+`return` `lambda` `match` `if-let` `while-let` `do` `doiter` `the` `panic` `defvar` `defconstant` `module` `use`
+`defmethod` `deftrait` `impl` `quote` `quasiquote` `defmacro`
 は実装済（[src/check/checker.rs](../src/check/checker.rs)。`the`のみchecker特殊形、
-`case`/`until`/`while-let`/`do`は`prelude.rs`の`defmacro`）。`unreachable`/`todo`/`exit`（§4.1/§7）も実装済
+`case`/`until`/`while-let`/`do`/`doiter`は`prelude.rs`の`defmacro`）。`unreachable`/`todo`/`exit`（§4.1/§7）も実装済
 （前2つは`panic`を呼ぶ`defmacro`、`exit`は`std::process::exit`を呼ぶRust組み込み自由関数）。
-残るは`doiter`のみ（仕様未確定、§3末尾参照）。`defmacro` は CL 流（非衛生的）— 詳細は
+`doiter`も実装済（2026-06-30、`prelude.rs`の`defmacro`——`var`の型はマクロ展開時には分からないが、
+展開先の`(some var)`のような構成子パターンの型を`Checker::check_ctor_pattern`がscrutinee（`next`の
+戻り値`Option<Item>`）から自動推論するため、checker特殊形にする必要はない。`while-let`を呼ぶだけの
+薄い`defmacro`、§5.1のtrait機構参照）。`defmacro` は CL 流（非衛生的）— 詳細は
 [implementation-log.md](implementation-log.md) のステップ 4k を参照。`defstruct` は実装後2026-06-23に削除・再設計待ち。
 `when`/`unless`/`and`/`or`/`cond`/`let*` は `if`/`let` への脱糖。`setf`（可変ローカル/グローバル変数）/`while` は専用 AST
 ノード（eval 環境は `Rc<RefCell>` の可変スロット）。`defvar`（可変）/`defconstant`（不変）はグローバル変数を現在の
@@ -129,7 +132,15 @@
 `dolist`/`loop` いずれの内側でも使え、`loop` の型は内側で見つかった `break`/`return` の値型の join（`match`/`cond` の
 腕と同様に一致が必要）。一度も脱出しない `loop` は型 `!`（Rust の `loop {}` と同じ）。`while` 系はもともと型が `Unit`
 固定なので、その内側の `return` の値も `Unit` でなければ型エラー。
-残るのは `doiter`（「何に対する反復か」の仕様未確定、要設計）のみ——`case`/`do`/`while-let`/`the`は実装済。
+**`doiter`** `(doiter (var coll) body...)` は `Iter` トレイト（§5.1）を実装した値を反復する——
+`coll` の `next` を `Item` が尽きるまで呼び、`var` に束縛して `body` を実行する。`dotimes`/`dolist`
+と同じ「`gensym` で `coll` を一度だけ評価する隠しbinding」パターンで `while-let` を呼ぶだけの
+`defmacro`（`prelude.rs`）: `` `(let ((,tmp ,coll)) (while-let ((some ,var) (next ,tmp)) ,@body)) ``。
+`var` の型はマクロ展開時には分からないが、展開後の `(some var)` という構成子パターンの型を
+`Checker::check_ctor_pattern` がscrutinee（`next` の戻り値 `Option<Item>`）から自動推論するので、
+`case`/`do`/`while-let` 同様マクロのみで書け、checker特殊形は不要（`while-let` のドキュメント
+コメントが明記する「`val` は毎回再評価される（`(next i)` のような状態変化観察のため）」という
+性質をそのまま利用している）。
 
 ---
 
@@ -184,7 +195,10 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   (defmethod m (T (a A) ...) Ret body...)
   ```
   型 `T` の関連関数として登録。呼び出しは `(T::m a ...)`（head は `Path([t, m])`）。
-- ディスパッチは **まず静的**（self の静的型で一意に解決）。将来 trait / 動的ディスパッチを追加する余地を残す。
+- ディスパッチは **まず静的**（self の静的型で一意に解決）。**動的ディスパッチ（vtable/`dyn Trait`相当）は
+  実装しない**——trait機構（§5.1、2026-06-30実装）はこの単一静的ディスパッチを拡張する形で構築されており、
+  ジェネリック関数本体の型変数レシーバ呼び出しのみ実行時に値自身の型タグを読む（§5.1参照、vtable的な
+  間接呼び出しテーブルではない）。
 
 例（`i32` という既存の組み込み型に対する static / instance メソッド。ユーザ定義型
 `defstruct` は2026-06-23に削除・再設計待ちのため、組み込み型を例に挙げる）:
@@ -192,6 +206,46 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 (defmethod zero (i32) i32 0)                  ; static → (i32::zero)
 (defmethod double ((self i32)) i32 (+ self self))  ; instance → (double 3)
 ```
+
+### 5.1 trait機構（deftrait / impl / where）
+
+`doiter`（§3末尾）が「Iterトレイトを実装した型すべてで使える」ことを要求したため2026-06-30に導入。
+`defmethod`の単一静的ディスパッチをそのまま再利用する設計（trait専用の新しいディスパッチ機構は作らない）。
+
+- **trait定義**: `(deftrait Name (type AssocName)... (method-name ((self Self) params...) Ret)...)`。
+  `Self`・宣言した関連型名は本体を持たないメソッドシグネチャの中で型変数として使える。
+  ```lisp
+  (deftrait Iter
+    (type Item)
+    (next ((self Self)) Option<Item>))
+  ```
+- **trait実装**: `(impl TraitName TargetType (type AssocName ConcreteType)... (method-name (recv params...) Ret body...)...)`。
+  `Self`/関連型名は`TargetType`/`(type ...)`の具体型へ構文木レベルで置換されてから`defmethod`相当の
+  処理に通る——実装後、各メソッドは`TargetType`の通常の`assoc`テーブルに**普通の`defmethod`として**
+  挿入される（trait用の別テーブルは持たない）。`TargetType`の`AdtDef.impls`に`TraitName`が記録され、
+  以後「型T が trait X を実装しているか」はこの一覧を見るだけで判定できる。
+  ```lisp
+  (impl Iter vector-iter<T>
+    (type Item T)
+    (next ((self Self)) Option<T> ...))
+  ```
+  具体型に対する呼び出し（`(next concrete-vec-iter)`）は、register済みの`assoc`テーブルを引く
+  既存の`Expr::Assoc`機構がそのまま動く——trait導入前と挙動・コードパスとも変わらない。
+- **ジェネリック関数のtrait境界**: `(defun (name T) (params...) Ret (where (Trait T)...) body...)`。
+  `where`節は関数の**呼び出し側シグネチャには影響せず**（呼び出し側での境界検証は未実装、TODO.md参照）、
+  本体チェック時にのみ「型変数Tはこのtraitのメソッドを呼べる」という情報を与える。本体内で型変数Tの
+  値に対するtraitメソッド呼び出しは、新設の`Expr::TraitCall`ノードになる——`Expr::Assoc`と違い
+  実装型のPathをチェック時には持たず、実行時にレシーバの値自身が持つ型タグ（`RtValue::Struct`の
+  `type_name`等）を読んで`Expr::Assoc`と同じ`methods`テーブルを引く。これが本機構で唯一「型消去後の
+  実行時情報」を必要とする箇所だが、参照するテーブル自体はvtable等の専用間接構造ではなく、既存の
+  固定`methods`テーブルそのもの。
+  ```lisp
+  (defun (count-iter T) ((it T)) i32 (where (Iter T))
+    (let ((n 0)) (doiter (x it) (setf n (+ n 1))) n))
+  ```
+- **既知の制限**（TODO.md参照）: 関連型の具体指定（「Tの`Item`はi32」のような制約）は`where`節で
+  表現できない。呼び出し側での境界検証も未実装。`Sexpr`へのtrait実装は意図的に対象外（要素型が
+  固定されないリストにジェネリックな`Iter<Item>`を被せるのは型システム上不適切、というユーザー判断）。
 
 ---
 
@@ -260,7 +314,8 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 
 - `use a::b`（モジュール名を現NSに alias として導入。個別 `use a::b::name` は対応）、ジェネリック構造体/受け手、ネスト総称の修飾型。
 - 可視性（pub/private）、絶対パス `::foo`。
-- trait / 動的ディスパッチ、ユーザ定義エラー型。
+- 動的ディスパッチ（vtable/`dyn Trait`相当）、ユーザ定義エラー型。**静的trait機構
+  （`deftrait`/`impl`/`where`境界）は2026-06-30実装済み**——§5.1参照。
 - 関数カタログ（§4）の実装本体は eval（step4）以降。
 - `,@`（unquote-splicing、`append` 実装後）、`defmacro` の構造化ラムダリスト（`&rest` のみ実装済み、`&optional`/`&key` は対象外）、マクロの `use`-alias 解決。
 - `defun`/`lambda` の**型付き** `&rest`／`apply` は実装済み（roadmap step10）。
@@ -271,10 +326,13 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 - **`Vector<T>`/`defstruct`の再設計**（2026-06-23に全面削除、[[typelisp-vector-defstruct-revert]]
   参照）: `Vector<T>`は`RtValue::Vector`という専用enumバリアントを持っていたが「ユーザー定義型と
   同様に扱うべき」という原則に反すると判明し、`defstruct`自体もフィールド読み書き手段の欠如という
-  不完全な設計と判明したため、両方を削除して1から設計し直す。再設計が完了するまで、Lispの本質的
-  特徴である「consセルで構築された異種混在可能なリスト」（`Sexpr`）以外の同種コレクション型は
-  言語に存在しない。
-- **`compile`/`compile-file`の再実装**（同上の理由で2026-06-23に全面削除）: Vector/defstructの
-  再設計完了後、コンパイラ本体（typelisp自身で書く、`compiler_source.rs`）が内部データ構造に
-  何を使うか（`Vector<T>`が無くなった以上`Sexpr`ベース、または再設計後の型）を再検討してから
-  再着手する。
+  不完全な設計と判明したため、両方を削除して1から設計し直すことになった。**`defstruct`は
+  2026-06-24に再設計・再実装完了**（フィールドアクセサ`変数::フィールド名`/`(setf 変数::フィールド名 v)`、
+  ジェネリック対応、`RtValue::Struct`ベース）。**`Vector<T>`も2026-06-30に再設計完了**——専用
+  `RtValue`バリアントを作らず`RtValue::Struct`をそのまま使い（`StructData.fields`を可変長
+  コレクションとして扱う）、push/get/set/lenをRust組み込みの`assoc`メソッドとして実装
+  （`src/check/registry.rs`の`vector_def`、`src/eval/interp.rs`の`eval_builtin_method`の
+  `"vector"`アーム）。
+- **`compile`/`compile-file`の再実装**（同上の理由で2026-06-23に全面削除）: コンパイラ本体
+  （typelisp自身で書く、`compiler_source.rs`）が内部データ構造に何を使うかは再検討の余地が
+  あるが、Vector/defstructとも再設計完了済みなので前提は満たされている。

@@ -479,6 +479,28 @@ pub const SOURCE: &str = r#"
         (val (car (cdr binding))))
     `(loop (match ,val (,pattern ,@body) (_ (break))))))
 
+;; `doiter` (TODO.md, [[typelisp-trait-mechanism-and-doiter]]): iterate a
+;; value of any type implementing the `Iter` trait (`Item`/`next`, declared
+;; further down once `deftrait`/`impl` exist) by repeatedly calling `next`,
+;; binding `var` to each yielded `Item` until `(none)`. Same hidden-binding
+;; trick `dotimes`/`dolist` use (`gensym` evaluates `coll-expr` exactly
+;; once into `tmp`, so the value being iterated isn't re-built every
+;; iteration) layered on top of `while-let` — `(next ,tmp)` is `while-let`'s
+;; re-evaluated-every-iteration `val`, which is exactly the "observe `next`'s
+;; mutated state each time" behavior `Iter` needs. `var`'s type is never
+;; named here: `Checker::check_ctor_pattern` infers a `(some var)` pattern's
+;; binding type from the scrutinee's own type (`next`'s return, `Option<Item>`)
+;; the same way it already does for every other `match`, so this needs no
+;; checker-level special form — `(next tmp)` resolves through the ordinary
+;; instance-method/trait-bound call machinery (`Checker::check_instance_method`),
+;; concrete or `where`-bounded type variable alike.
+(defmacro doiter (spec &rest body)
+  (let ((var (car spec))
+        (coll-expr (car (cdr spec)))
+        (tmp (gensym)))
+    `(let ((,tmp ,coll-expr))
+       (while-let ((some ,var) (next ,tmp)) ,@body))))
+
 ;; `case` (roadmap step 8c, catalog §1.1): `(case expr (key1 body1...)
 ;; (key2 body2...) ... (else default...))` expands to `(cond ((eq tmp key1)
 ;; body1...) ((eq tmp key2) body2...) ... (else default...))`, where `tmp` is
@@ -539,6 +561,37 @@ pub const SOURCE: &str = r#"
          (let ,(map (lambda ((tr Sexpr)) Sexpr (list (car tr) (car (cdr (cdr tr))))) temps)
            ,@(map (lambda ((tr Sexpr)) Sexpr (list (quote setf) (car (cdr tr)) (car tr))) temps)))
        ,@result)))
+
+;; `Iter`/`doiter` (TODO.md's `doiter` entry, [[typelisp-todo-md-staleness]]):
+;; the trait `doiter` requires every iterable type to implement — a single
+;; `next` method returning the next element, or `(none)` once exhausted.
+;; `Self` mutates in place across calls (no immutable "next state" returned
+;; alongside the element — see the trait machinery's design notes): a
+;; `next` implementation is expected to update its own fields via `setf`,
+;; the same mutation `RtValue::Struct`'s `Rc<RefCell<..>>` representation
+;; already gives every `defstruct` instance.
+(deftrait Iter
+  (type Item)
+  (next ((self Self)) Option<Item>))
+
+;; `vector-iter<T>` is `Vector<T>`'s own iterator: a shared reference to the
+;; vector being walked (`vec`, sharing the same underlying `RtValue::Struct`
+;; — pushing to the original after creating an iterator is visible through
+;; it, matching Rust's own growable-vec iterators) plus a cursor position
+;; (`pos`). `Vector<T>` is deliberately *not* `Iter` itself (its `next` would
+;; have to choose between starting over and corrupting external iteration
+;; state — `vector-iter<T>` is the conventional fix: a separate, independent
+;; cursor per `(v::iter)` call).
+(defstruct (vector-iter T) (vec Vector<T>) (pos i32))
+(impl Iter vector-iter<T>
+  (type Item T)
+  (next ((self Self)) Option<T>
+    (if (< self::pos (len self::vec))
+        (let ((v (get self::vec self::pos)))
+          (setf self::pos (+ self::pos 1))
+          (Option::some v))
+        (Option::none))))
+(defmethod iter ((self Vector<T>)) vector-iter<T> (vector-iter::new self 0))
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,

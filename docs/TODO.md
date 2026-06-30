@@ -10,13 +10,25 @@
 
 ## 残っている作業（影響範囲の大きさで優先順位付け——[[feedback-impl-priority]]）
 
-1. **`doiter`**（特殊形・checker拡張）—「何に対する反復か」（イテレータ抽象 or リスト限定）の
-   仕様が未確定（[cl-equivalence-catalog.md](cl-equivalence-catalog.md) §1.1）。実装方針より
-   先に**ユーザとの仕様確認**が必要なため、このドキュメント単独では着手できない。
-2. **compile 機能の残課題**（LLVM JIT/AOT コンパイラという実験的サブシステム内の技術的負債。
-   優先順位はユーザー未確認——コア言語機能ではないため上記1項目より下位。影響範囲基準で並べ替え済み
+1. **trait機構の関連型の具体指定**（`where`節の拡張）— 現状の`(where (Iter T))`は「型変数Tが
+   traitを実装している」ことのみ表現でき、「Tの関連型Itemが特定の具体型である」ことは表現できない
+   （`tests/doiter_test.rs`の`doiter_works_inside_a_where_bounded_generic_function`参照——
+   ジェネリック関数本体内で`Item`型の値に対する演算ができないのはこの制約のため）。`doiter`/`Iter`
+   自体の動作には影響しないため優先度は低い。
+2. **trait機構の呼び出し側（call site）での境界検証** — `where`節は関数本体内でのメソッド呼び出し
+   解決にのみ使われ、呼び出し側で実引数の具体型が実際にtraitを実装しているかは検証していない
+   （境界を満たさない型を渡した場合、`Expr::TraitCall`評価時の実行時エラーにフォールバックする）。
+   静的型システムとしては不完全だが、影響は限定的（`doiter`/`Iter`の現状の利用範囲では顕在化しない）。
+3. **`Sexpr`/`HashTable<K,V>`への`Iter`実装** — `doiter`は意図的に`Vector<T>`のみで動作確認した
+   （`Sexpr`は要素型が固定されないため`Iter<Item>`を実装すべきでない、というユーザー判断
+   ——詳細は[implementation-log.md](implementation-log.md)の「trait機構+doiter」節参照）。
+   `HashTable<K,V>`への走査API（keys/values/entries相当）自体が未実装。
+4. **compile 機能の残課題**（LLVM JIT/AOT コンパイラという実験的サブシステム内の技術的負債。
+   優先順位はユーザー未確認——コア言語機能ではないため上記項目より下位。影響範囲基準で並べ替え済み
    ——[[feedback-impl-priority]]、詳細は[implementation-log.md](implementation-log.md)の
-   「compile機能の残課題の一部対応」節参照）:
+   「compile機能の残課題の一部対応」節参照）。`Expr::TraitCall`はcompile機能では`unsupported`の
+   プレースホルダのまま（`src/compile/ast_bridge.rs`）——`Iter`/`doiter`を使うコードは現状compile
+   できない:
    - `compile-if-branch`経由の値のうち、`if`/`match`自身のmerge slot・`return`の
      loop-slotを素通りする**束縛されない一時値**のkind対応——store直後にloadする
      隣接命令なので単体では安全、かつ呼び出し引数・Cons構築・一般ADTフィールド

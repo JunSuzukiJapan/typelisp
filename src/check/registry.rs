@@ -120,6 +120,42 @@ pub struct AdtDef {
     /// accessor/setter generation (`Checker::check_defstruct`) — the
     /// `Variant`'s own `fields: Vec<Type>` still holds the parallel types.
     pub field_names: Vec<String>,
+    /// Traits this type has an `impl` for (`Checker::check_impl`), by the
+    /// trait's [`Path`]. Each `impl`ed method is inserted into `assoc` like
+    /// an ordinary `defmethod` — so an instance call on a *concrete* receiver
+    /// type resolves through the same `assoc` lookup `check_instance_method`
+    /// already does, untouched. `impls` is consulted only by the *other*
+    /// path: a call on a still-generic type-variable receiver inside a
+    /// `where`-bounded function body, where there's no concrete `AdtDef` to
+    /// look `assoc` up on yet (see `Checker::check_instance_method`'s
+    /// type-variable branch).
+    pub impls: Vec<Path>,
+}
+
+/// A `deftrait` definition (`Checker::check_deftrait`): a trait name, its
+/// associated type names, and method signature *templates* — mentioning
+/// `Self` and the trait's own associated types (e.g. `Item`) as type
+/// variables, the same way an [`AdtDef`]'s `variants` field types mention
+/// `AdtDef::params`. Carries no method bodies: those live on the
+/// *implementing* type's own [`AdtDef::assoc`], inserted by `Checker::check_impl`
+/// as ordinary `defmethod`s with `Self`/the associated types already
+/// substituted for the `impl`'s concrete target type — see that function's
+/// doc comment. A `TraitDef` itself is consulted only when a method is
+/// called on a still-generic type-variable receiver (no concrete `AdtDef` to
+/// look the method up on yet) — `Checker::check_instance_method`'s
+/// type-variable branch.
+#[derive(Clone, Debug)]
+pub struct TraitDef {
+    pub name: Path,
+    /// Associated type names (lowercase), e.g. `["item"]` for `Iter`.
+    pub assoc_types: Vec<String>,
+    /// Method signature templates, keyed by (unqualified) method name. Each
+    /// signature's `params`/`ret` may mention `Self` and `assoc_types` as
+    /// type variables (`Type::Named(Path::root("self"), [])` etc.).
+    pub methods: HashMap<String, FnSig>,
+    /// Visible outside its defining module.
+    pub public: bool,
+    pub builtin: bool,
 }
 
 /// A namespace (module): a container of free functions, types, constructors,
@@ -132,6 +168,8 @@ pub struct Namespace {
     pub modules: HashMap<String, Namespace>,
     /// Free functions defined directly here, keyed by unqualified name.
     pub fns: HashMap<String, FnSig>,
+    /// `deftrait`s defined directly here, keyed by unqualified name.
+    pub traits: HashMap<String, TraitDef>,
     /// `defmacro`s defined directly here, keyed by unqualified name. Kept
     /// separate from `fns` so the checker's head-symbol dispatch can tell a
     /// macro call (expand, then re-check) from an ordinary function call.
@@ -223,6 +261,7 @@ impl Registry {
         root.register_ctors(&def.name, &def.variants);
         root.add_type(def);
         root.add_type(hashtable_def());
+        root.add_type(vector_def());
         root.add_type(scope_def());
         // The (typelisp-hosted) `compile`/`compile-file` compiler's view of
         // LLVM: four more builtin types, metadata-only like `hashtable_def`
@@ -269,7 +308,7 @@ impl Registry {
                 public: true,
                 builtin: true,
                 kind: AdtKind::Sum,
-                field_names: Vec::new(),
+                field_names: Vec::new(), impls: Vec::new(),
             });
         }
         // `random`: the only numeric builtin with no natural receiver to
@@ -338,6 +377,16 @@ impl Registry {
     pub fn fn_sig(&self, path: &Path) -> Option<&FnSig> {
         self.root.module(path.parent())?.fns.get(path.local())
     }
+
+    /// Look up a `deftrait` by its fully-qualified [`Path`].
+    pub fn trait_def(&self, path: &Path) -> Option<&TraitDef> {
+        self.root.module(path.parent())?.traits.get(path.local())
+    }
+
+    /// Mutable lookup of a `deftrait` by its fully-qualified [`Path`].
+    pub fn trait_def_mut(&mut self, path: &Path) -> Option<&mut TraitDef> {
+        self.root.module_mut(path.parent()).traits.get_mut(path.local())
+    }
 }
 
 /// `Option<T> = Some(T) | None`.
@@ -353,7 +402,7 @@ fn option_def() -> AdtDef {
         public: true,
         builtin: true,
         kind: AdtKind::Sum,
-        field_names: Vec::new(),
+        field_names: Vec::new(), impls: Vec::new(),
     }
 }
 
@@ -370,7 +419,7 @@ fn result_def() -> AdtDef {
         public: true,
         builtin: true,
         kind: AdtKind::Sum,
-        field_names: Vec::new(),
+        field_names: Vec::new(), impls: Vec::new(),
     }
 }
 
@@ -385,7 +434,7 @@ fn error_def() -> AdtDef {
         public: true,
         builtin: true,
         kind: AdtKind::Sum,
-        field_names: Vec::new(),
+        field_names: Vec::new(), impls: Vec::new(),
     }
 }
 
@@ -414,7 +463,7 @@ fn sexpr_def() -> AdtDef {
         public: true,
         builtin: true,
         kind: AdtKind::Sum,
-        field_names: Vec::new(),
+        field_names: Vec::new(), impls: Vec::new(),
     }
 }
 
@@ -510,7 +559,65 @@ fn hashtable_def() -> AdtDef {
         public: true,
         builtin: true,
         kind: AdtKind::Sum,
-        field_names: Vec::new(),
+        field_names: Vec::new(), impls: Vec::new(),
+    }
+}
+
+fn vector_ty() -> Type {
+    Type::Named(Path::root("vector"), vec![tvar("t")])
+}
+
+/// `Vector<T>`: a builtin growable sequence. Reuses [`crate::eval::RtValue::Struct`]
+/// (the same representation `defstruct` instances get) rather than a dedicated
+/// `RtValue` variant — a `Vector<T>` instance's `StructData::fields` is simply
+/// treated as variable-length instead of the fixed, name-indexed layout a
+/// `defstruct`'s fields have (see `eval_builtin_method`'s `"vector"` arm).
+/// All methods here are metadata only — there is no `defmethod` body to
+/// check; the runtime implementation lives in `eval_builtin_method` in
+/// `crate::eval::interp`.
+fn vector_def() -> AdtDef {
+    let mut assoc = HashMap::new();
+    assoc.insert(
+        "new".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: vector_ty(), public: true, builtin: true }, instance: false, builtin: true },
+    );
+    assoc.insert(
+        "push".to_string(),
+        AssocFn {
+            sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty(), tvar("t")], ret: Type::Unit, public: true, builtin: true },
+            instance: true,
+            builtin: true,
+        },
+    );
+    assoc.insert(
+        "get".to_string(),
+        AssocFn {
+            sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty(), Type::I32], ret: tvar("t"), public: true, builtin: true },
+            instance: true,
+            builtin: true,
+        },
+    );
+    assoc.insert(
+        "set".to_string(),
+        AssocFn {
+            sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty(), Type::I32, tvar("t")], ret: Type::Unit, public: true, builtin: true },
+            instance: true,
+            builtin: true,
+        },
+    );
+    assoc.insert(
+        "len".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty()], ret: Type::I32, public: true, builtin: true }, instance: true, builtin: true },
+    );
+    AdtDef {
+        name: Path::root("vector"),
+        params: vec!["t".to_string()],
+        variants: vec![],
+        assoc,
+        public: true,
+        builtin: true,
+        kind: AdtKind::Struct,
+        field_names: Vec::new(), impls: Vec::new(),
     }
 }
 
@@ -573,7 +680,7 @@ fn scope_def() -> AdtDef {
         public: true,
         builtin: true,
         kind: AdtKind::Sum,
-        field_names: Vec::new(),
+        field_names: Vec::new(), impls: Vec::new(),
     }
 }
 
@@ -631,20 +738,20 @@ fn llvm_module_def() -> AdtDef {
     // `compile-labels` doc comment for why captures aren't computed
     // per-sibling).
     assoc.insert("add-function-with-env".to_string(), assoc_fn(vec![llvm_module_ty(), Type::Str], llvm_function_ty(), true));
-    AdtDef { name: Path::root("llvm-module"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
+    AdtDef { name: Path::root("llvm-module"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new() }
 }
 
 /// A declared LLVM function (a `Module::add-function` result).
 fn llvm_function_def() -> AdtDef {
     let mut assoc = HashMap::new();
     assoc.insert("append-block".to_string(), assoc_fn(vec![llvm_function_ty(), Type::Str], llvm_basic_block_ty(), true));
-    AdtDef { name: Path::root("llvm-function"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
+    AdtDef { name: Path::root("llvm-function"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new() }
 }
 
 /// An LLVM basic block. No methods of its own yet (Phase 0) — produced by
 /// `llvm-function::append-block`, consumed by `llvm-builder::position-at-end`.
 fn llvm_basic_block_def() -> AdtDef {
-    AdtDef { name: Path::root("llvm-basic-block"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
+    AdtDef { name: Path::root("llvm-basic-block"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new() }
 }
 
 /// An IR builder. `load-arg` reads logical parameter `index` out of a
@@ -838,13 +945,13 @@ fn llvm_builder_def() -> AdtDef {
     assoc.insert("build-free".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], Type::Unit, true));
     assoc.insert("build-int-to-ptr".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
     assoc.insert("build-ptr-to-int".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
-    AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
+    AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new() }
 }
 
 /// An LLVM SSA value (e.g. a constant). No methods of its own yet — produced
 /// by `llvm-builder::const-i64`, consumed by `llvm-builder::build-ret`.
 fn llvm_value_def() -> AdtDef {
-    AdtDef { name: Path::root("llvm-value"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new() }
+    AdtDef { name: Path::root("llvm-value"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new() }
 }
 
 /// Built-in `String` instance methods ([cl-equivalence-catalog.md](../../../docs/cl-equivalence-catalog.md)

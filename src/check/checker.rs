@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{parse_type, prim_type_path, Error, Heap, Path, Type, Value};
 
 use super::ast::{Arm, Expr, Pattern, QuotedSexpr, Typed};
-use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};
+use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Registry, TraitDef, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
 /// `raw_args` are the call's unevaluated argument forms (exactly as written —
@@ -92,11 +92,20 @@ type ParamsAndRest = (Vec<(String, Type)>, Option<(String, Type)>);
 #[derive(Clone)]
 struct Env {
     vars: Vec<(String, Type)>,
+    /// Trait bounds on this function's own generic type parameters, declared
+    /// by a `(where (Trait T)...)` clause (`Checker::check_defun`) — e.g.
+    /// `{"t": [Path::root("iter")]}`. Fixed for the lifetime of one function
+    /// body (a nested `let`/`lambda` never introduces new type parameters),
+    /// so `extended` just carries the same `Rc` forward instead of letting it
+    /// vary per-binding the way `vars` does. Consulted only by
+    /// `Checker::check_instance_method`'s type-variable-receiver branch — see
+    /// its doc comment.
+    bounds: std::rc::Rc<HashMap<String, Vec<Path>>>,
 }
 
 impl Env {
     fn new() -> Env {
-        Env { vars: Vec::new() }
+        Env { vars: Vec::new(), bounds: std::rc::Rc::new(HashMap::new()) }
     }
 
     fn get(&self, name: &str) -> Option<&Type> {
@@ -107,7 +116,13 @@ impl Env {
     fn extended(&self, binds: Vec<(String, Type)>) -> Env {
         let mut vars = self.vars.clone();
         vars.extend(binds);
-        Env { vars }
+        Env { vars, bounds: self.bounds.clone() }
+    }
+
+    /// A child environment that additionally declares `bounds` (a function's
+    /// own `where`-clause trait bounds) — see the field's doc comment.
+    fn with_bounds(&self, bounds: HashMap<String, Vec<Path>>) -> Env {
+        Env { vars: self.vars.clone(), bounds: std::rc::Rc::new(bounds) }
     }
 }
 
@@ -168,6 +183,11 @@ impl Definable for AdtDef {
     }
 }
 impl Definable for AssocFn {
+    fn builtin(&self) -> bool {
+        self.builtin
+    }
+}
+impl Definable for TraitDef {
     fn builtin(&self) -> bool {
         self.builtin
     }
@@ -269,6 +289,8 @@ impl Checker {
                     "module" => return self.check_module(heap, interp, &elems[1..]),
                     "defmethod" => return self.check_defmethod(heap, interp, &elems[1..], false),
                     "defstruct" => return self.check_defstruct(heap, &elems[1..], false),
+                    "deftrait" => return self.check_deftrait(heap, &elems[1..], false),
+                    "impl" => return self.check_impl(heap, interp, &elems[1..], false),
                     "use" => return self.check_use(heap, &elems[1..]),
                     _ => {}
                 }
@@ -774,9 +796,54 @@ impl Checker {
         if let Some((rname, _)) = &rest {
             params.push((rname.clone(), sexpr_ty()));
         }
-        let env = Env::new().extended(params.clone());
-        let (body, _) = self.check_seq(heap, interp, &env, &parts[3..], Some(&ret))?;
+        // An optional `(where (Trait T)...)` clause right after the return
+        // type declares trait bounds on this `defun`'s own type parameters —
+        // consulted only while checking the body (`Env::bounds`); it isn't
+        // part of the function's call-site signature (`TopLevel::Defun`
+        // carries no bounds of its own), so a generic function with no
+        // `where` clause behaves exactly as before.
+        let mut body_start = 3;
+        let mut bounds: HashMap<String, Vec<Path>> = HashMap::new();
+        if let Some(form) = parts.get(3) {
+            if self.is_where_clause(heap, *form)? {
+                bounds = self.parse_where_clause(heap, *form)?;
+                body_start = 4;
+            }
+        }
+        let env = Env::new().with_bounds(bounds).extended(params.clone());
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], Some(&ret))?;
         Ok(TopLevel::Defun { name: fq_name, type_params, params, ret, body })
+    }
+
+    /// Whether `v` is a `(where ...)` clause (vs. an ordinary body form) —
+    /// `Checker::check_defun` peeks at this to decide whether to consume it.
+    fn is_where_clause(&self, heap: &Heap, v: Value) -> Result<bool, Error> {
+        Ok(matches!(v, Value::Cons(_))
+            && matches!(heap.list_to_vec(v)?.first(), Some(Value::Symbol(id)) if heap.symbol_name(*id) == "where"))
+    }
+
+    /// `(where (Trait1 T1) (Trait2 T2)...)`: trait bounds on a generic
+    /// `defun`'s type parameters, keyed by parameter name — see
+    /// `Env::bounds`'s doc comment for how this is used.
+    fn parse_where_clause(&self, heap: &Heap, v: Value) -> Result<HashMap<String, Vec<Path>>, Error> {
+        let elems = heap.list_to_vec(v)?;
+        let mut bounds: HashMap<String, Vec<Path>> = HashMap::new();
+        for clause in &elems[1..] {
+            let parts = heap.list_to_vec(*clause)?;
+            if parts.len() != 2 {
+                return Err(Error::TypeError("where: each bound must be (Trait type-param)".into()));
+            }
+            let trait_name = match parts[0] {
+                Value::Symbol(id) => Path::root(heap.symbol_name(id)),
+                _ => return Err(Error::TypeError("where: trait name must be a symbol".into())),
+            };
+            let tparam = match parts[1] {
+                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                _ => return Err(Error::TypeError("where: type parameter must be a symbol".into())),
+            };
+            bounds.entry(tparam).or_default().push(trait_name);
+        }
+        Ok(bounds)
     }
 
     /// `parts[0]` of a `defun` form: a bare symbol names an ordinary
@@ -960,6 +1027,230 @@ impl Checker {
             out.push((name, self.canon(&parse_type(heap, rest[1])?), public));
         }
         Ok(out)
+    }
+
+    // ---- deftrait / impl ---------------------------------------------------
+
+    /// `(deftrait Name (type AssocName)... (method-name ((self Self) params...) Ret)...)`:
+    /// declares a trait as a set of method signature *templates* (no
+    /// bodies) — `Self` and any declared associated type name are usable as
+    /// ordinary type variables in a signature, exactly like a generic
+    /// `defstruct`'s own type parameters (`Checker::parse_struct_fields`).
+    /// Registers a [`TraitDef`]; `Checker::check_impl` later supplies bodies
+    /// for some concrete implementing type. No type-checking happens here
+    /// beyond parsing — a signature template's `Self`/associated-type
+    /// variables aren't real types, so there's nothing to check yet.
+    fn check_deftrait(&mut self, heap: &Heap, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
+        if parts.is_empty() {
+            return Err(Error::TypeError(
+                "deftrait: (deftrait Name (type AssocName)... (method (params...) ret)...)".into(),
+            ));
+        }
+        let name = match parts[0] {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            _ => return Err(Error::TypeError("deftrait: name must be a symbol".into())),
+        };
+        let mut assoc_types = Vec::new();
+        let mut methods = HashMap::new();
+        for item in &parts[1..] {
+            let elems = heap.list_to_vec(*item)?;
+            let head = match elems.first() {
+                Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+                _ => return Err(Error::TypeError("deftrait: item must start with a symbol".into())),
+            };
+            if head == "type" {
+                if elems.len() != 2 {
+                    return Err(Error::TypeError("deftrait: (type AssocName)".into()));
+                }
+                let aname = match elems[1] {
+                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    _ => return Err(Error::TypeError("deftrait: associated type name must be a symbol".into())),
+                };
+                assoc_types.push(aname);
+                continue;
+            }
+            if elems.len() != 3 {
+                return Err(Error::TypeError("deftrait: method signature must be (name (params...) ret)".into()));
+            }
+            let params = self.parse_param_pairs(heap, &heap.list_to_vec(elems[1])?)?;
+            let ret = self.canon(&parse_type(heap, elems[2])?);
+            let sig = FnSig {
+                type_params: vec![],
+                params: params.iter().map(|(_, t)| t.clone()).collect(),
+                ret,
+                public: true,
+                rest: None,
+                builtin: false,
+            };
+            methods.insert(head, sig);
+        }
+        let fq_name = self.fq(&name);
+        self.check_redef("trait", &name, self.cur_ns().traits.get(&name))?;
+        self.reg
+            .root
+            .module_mut(&self.ns)
+            .traits
+            .insert(name, TraitDef { name: fq_name.clone(), assoc_types, methods, public, builtin: false });
+        Ok(TopLevel::Module { path: fq_name, body: vec![] })
+    }
+
+    /// `(impl TraitName TargetType (type AssocName ConcreteType)... (method-name (recv params...) Ret body...)...)`:
+    /// implements `TraitName` for `TargetType`. Each method is checked and
+    /// registered exactly like an ordinary `(defmethod method-name ((self
+    /// TargetType) params...) Ret body...)` — `Self` (and any of the
+    /// trait's associated type names) occurring in a method's *written*
+    /// parameter/return type syntax is textually substituted with
+    /// `TargetType`/the `(type ...)` binding's concrete type *before*
+    /// parsing, by rewriting the read `Value` tree (`Checker::subst_value`),
+    /// so the rest of `check_defmethod` never has to know `Self`/associated
+    /// types exist — by the time it parses the receiver/parameter/return
+    /// types, they're already concrete. This is also why a method needs no
+    /// separate "does this satisfy the trait's signature template" check:
+    /// it's checked as a perfectly ordinary `defmethod`, just like any other.
+    ///
+    /// `TargetType`'s own `AdtDef.impls` gets `TraitName`'s path appended —
+    /// the one piece of metadata `Checker::check_instance_method`'s
+    /// type-variable branch needs later, since by then the method itself is
+    /// just one more entry in `TargetType`'s ordinary `assoc` table.
+    fn check_impl(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
+        if parts.len() < 2 {
+            return Err(Error::TypeError("impl: (impl TraitName TargetType (type AssocName Type)... (method ...)...)".into()));
+        }
+        let trait_name = match parts[0] {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            _ => return Err(Error::TypeError("impl: trait name must be a symbol".into())),
+        };
+        let trait_fq = self.resolve_trait_name(&trait_name)?;
+        let target_ty = self.canon(&parse_type(heap, parts[1])?);
+        let target_fq = match &target_ty {
+            Type::Named(n, _) => n.clone(),
+            other => match prim_type_path(other) {
+                Some(p) => p,
+                None => return Err(Error::TypeError("impl: target must be a data type".into())),
+            },
+        };
+        if self.reg.type_def(&target_fq).is_none() {
+            return Err(Error::TypeError(format!("impl: unknown type `{}`", target_fq)));
+        }
+
+        // `Self` -> the target type's *written* form (`parts[1]`, unparsed —
+        // substitution happens before `parse_type` runs on each method, so
+        // a generic target like `(VectorIter T)` carries its own type
+        // variable `T` through untouched). Each `(type AssocName Type)`
+        // binding adds one more substitution, keyed by the trait's
+        // associated type name.
+        let mut subst: HashMap<String, Value> = HashMap::new();
+        subst.insert("self".to_string(), parts[1]);
+
+        let mut method_forms: Vec<Value> = Vec::new();
+        for item in &parts[2..] {
+            let elems = heap.list_to_vec(*item)?;
+            let head = match elems.first() {
+                Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+                _ => return Err(Error::TypeError("impl: item must start with a symbol".into())),
+            };
+            if head == "type" {
+                if elems.len() != 3 {
+                    return Err(Error::TypeError("impl: (type AssocName Type)".into()));
+                }
+                let aname = match elems[1] {
+                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    _ => return Err(Error::TypeError("impl: associated type name must be a symbol".into())),
+                };
+                subst.insert(aname, elems[2]);
+                continue;
+            }
+            method_forms.push(*item);
+        }
+
+        let mut body = Vec::new();
+        for m in &method_forms {
+            // `(method-name (recv-list) ret body...)`. Substitution applies
+            // only to *type* positions — each receiver/parameter's type
+            // (never its bound *name*, which would collide with `subst`'s
+            // `"self"` key: the receiver is conventionally also named
+            // `self`, a plain variable, completely unrelated to the `Self`
+            // *type* keyword even though both case-fold to the same
+            // string) — and the return type. The body is left untouched:
+            // it's executable code, not type syntax, so any `Self`/`Item`
+            // appearing there is an ordinary (if confusingly named)
+            // variable/function reference, not something to substitute.
+            let elems = heap.list_to_vec(*m)?;
+            if elems.len() < 3 {
+                return Err(Error::TypeError("impl: method must be (name (recv params...) ret body...)".into()));
+            }
+            let recv_pairs = heap.list_to_vec(elems[1])?;
+            let mut new_recv_pairs = Vec::new();
+            for pair in &recv_pairs {
+                let p = heap.list_to_vec(*pair)?;
+                if p.len() != 2 {
+                    return Err(Error::TypeError("impl: receiver/parameter must be (name type)".into()));
+                }
+                let new_ty = self.subst_value(heap, p[1], &subst)?;
+                new_recv_pairs.push(self.list_from_vec(heap, &[p[0], new_ty])?);
+            }
+            let new_recv_list = self.list_from_vec(heap, &new_recv_pairs)?;
+            let new_ret = self.subst_value(heap, elems[2], &subst)?;
+            let mut new_elems = vec![elems[0], new_recv_list, new_ret];
+            new_elems.extend_from_slice(&elems[3..]);
+            let tl = self.check_defmethod(heap, interp, &new_elems, public)?;
+            body.push(tl);
+        }
+        if let Some(def) = self.reg.type_def_mut(&target_fq) {
+            def.impls.push(trait_fq);
+        }
+        Ok(TopLevel::Module { path: target_fq, body })
+    }
+
+    /// Resolve a `deftrait`-defined trait's bare name to its fully-qualified
+    /// [`Path`] — mirrors `Checker::resolve_type_name`, but for the separate
+    /// `traits` table (traits aren't types and don't share its namespace).
+    fn resolve_trait_name(&self, name: &str) -> Result<Path, Error> {
+        let mut ns = self.ns.clone();
+        loop {
+            if let Some(td) = self.reg.root.module(&ns).and_then(|m| m.traits.get(name)) {
+                return Ok(td.name.clone());
+            }
+            if ns.is_empty() {
+                break;
+            }
+            ns.pop();
+        }
+        Err(Error::TypeError(format!("impl: unknown trait `{}`", name)))
+    }
+
+    /// Build a proper list `Value` from `items`, in order — the inverse of
+    /// `heap.list_to_vec`, used by `Checker::check_impl` to reassemble a
+    /// receiver/parameter form after substituting just its type position.
+    fn list_from_vec(&self, heap: &mut Heap, items: &[Value]) -> Result<Value, Error> {
+        let mut out = Value::Empty;
+        for item in items.iter().rev() {
+            out = heap.cons(*item, out)?;
+        }
+        Ok(out)
+    }
+
+    /// Rewrite a read `Value` tree, replacing every bare symbol whose
+    /// (case-folded) name is a key of `subst` with the corresponding
+    /// replacement `Value` — `Checker::check_impl`'s `Self`/associated-type
+    /// substitution. Leaves every other node (including non-symbol atoms and
+    /// the list spine itself) alone; only used on already-read syntax, never
+    /// on data, so there's no quoting concern.
+    fn subst_value(&self, heap: &mut Heap, v: Value, subst: &HashMap<String, Value>) -> Result<Value, Error> {
+        match v {
+            Value::Symbol(id) => {
+                let name = heap.symbol_name(id).to_string();
+                Ok(subst.get(&name).copied().unwrap_or(v))
+            }
+            Value::Cons(_) => {
+                let car = heap.car(v)?;
+                let cdr = heap.cdr(v)?;
+                let new_car = self.subst_value(heap, car, subst)?;
+                let new_cdr = self.subst_value(heap, cdr, subst)?;
+                heap.cons(new_car, new_cdr)
+            }
+            other => Ok(other),
+        }
     }
 
     // ---- module / defmethod / use -----------------------------------------
@@ -1177,6 +1468,7 @@ impl Checker {
             builtin: false,
             kind: AdtKind::Struct,
             field_names,
+            impls: Vec::new(),
         };
         self.reg.root.module_mut(&self.ns).add_type(def);
 
@@ -1801,20 +2093,51 @@ impl Checker {
                 Type::Named(n, _) => Some(n.clone()),
                 other => prim_type_path(other),
             };
-            if let Some(type_fq) = type_fq {
-                if let Some(def) = self.reg.type_def(&type_fq) {
+            if let Some(type_fq) = &type_fq {
+                if let Some(def) = self.reg.type_def(type_fq) {
                     let visible = def
                         .assoc
                         .get(method)
-                        .is_some_and(|af| af.instance && self.assoc_visible(&type_fq, af));
+                        .is_some_and(|af| af.instance && self.assoc_visible(type_fq, af));
                     if visible {
                         return self.check_assoc_call(
                             heap,
                             interp,
                             env,
-                            AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None },
+                            AssocCall { type_fq, method, receiver: Some(recv), expected: None },
                             &args[1..],
                         );
+                    }
+                }
+                // No concrete `AdtDef` named `type_fq` — it may be one of
+                // this function's own `where`-bounded type parameters
+                // (`Env::bounds`, keyed by the lowercase type-variable name,
+                // exactly what `type_fq.local()` is for a bare `Type::Named`
+                // type variable like `t`). Search every trait it's bound to
+                // for a matching method; see `Expr::TraitCall`'s doc comment
+                // for why the implementing type is resolved at runtime
+                // instead of here.
+                if let Some(bound_traits) = env.bounds.get(type_fq.local()) {
+                    for trait_path in bound_traits {
+                        let Some(tdef) = self.reg.trait_def(trait_path) else { continue };
+                        let Some(sig) = tdef.methods.get(method) else { continue };
+                        let want = sig.params.len() - 1;
+                        if args.len() - 1 != want {
+                            return Err(Error::TypeError(format!(
+                                "{}: expected {} argument(s), got {}",
+                                method,
+                                want,
+                                args.len() - 1
+                            )));
+                        }
+                        let mut typed_args = vec![recv];
+                        for a in &args[1..] {
+                            typed_args.push(self.check(heap, interp, env, *a, None)?);
+                        }
+                        return Ok(Typed {
+                            expr: Expr::TraitCall { trait_name: trait_path.clone(), method: method.to_string(), args: typed_args },
+                            ty: sig.ret.clone(),
+                        });
                     }
                 }
             }
