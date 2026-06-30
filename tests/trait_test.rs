@@ -111,3 +111,19 @@ fn two_types_implementing_the_same_trait_dispatch_independently() {
         (+ (describe (box-a::new 3)) (describe (box-b::new 3)))";
     assert_eq!(eval_ok(src), RtValue::Int(3 + 6));
 }
+
+#[test]
+fn call_site_rejects_a_type_that_does_not_implement_the_required_trait() {
+    // `box2` never gets a `Counted` impl, so `(describe (box2::new 5))` must
+    // fail to *check* now — previously this type-checked fine (the `where`
+    // clause was never consulted at the call site) and only panicked if
+    // actually evaluated, via `Expr::TraitCall`'s "no implementation"
+    // runtime fallback.
+    let src = format!(
+        "{} (defstruct box2 (n i32))
+            (defun (describe T) ((it T)) i32 (where (Counted T)) (count it))
+            (describe (box2::new 5))",
+        COUNTER_PRELUDE
+    );
+    assert!(check(&src).is_err());
+}

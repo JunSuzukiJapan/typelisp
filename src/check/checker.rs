@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{parse_type, prim_type_path, Error, Heap, Path, Type, Value};
 
 use super::ast::{Arm, Expr, Pattern, QuotedSexpr, Typed};
-use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Registry, TraitDef, VarInfo, Variant};
+use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Registry, TraitBound, TraitDef, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
 /// `raw_args` are the call's unevaluated argument forms (exactly as written —
@@ -93,14 +93,19 @@ type ParamsAndRest = (Vec<(String, Type)>, Option<(String, Type)>);
 struct Env {
     vars: Vec<(String, Type)>,
     /// Trait bounds on this function's own generic type parameters, declared
-    /// by a `(where (Trait T)...)` clause (`Checker::check_defun`) — e.g.
-    /// `{"t": [Path::root("iter")]}`. Fixed for the lifetime of one function
-    /// body (a nested `let`/`lambda` never introduces new type parameters),
-    /// so `extended` just carries the same `Rc` forward instead of letting it
-    /// vary per-binding the way `vars` does. Consulted only by
+    /// by a `(where (Trait T (Assoc Concrete)...)...)` clause
+    /// (`Checker::check_defun`) — e.g. `{"t": [TraitBound { trait_path:
+    /// Path::root("iter"), assoc: {} }]}`. Fixed for the lifetime of one
+    /// function body (a nested `let`/`lambda` never introduces new type
+    /// parameters), so `extended` just carries the same `Rc` forward instead
+    /// of letting it vary per-binding the way `vars` does. Consulted only by
     /// `Checker::check_instance_method`'s type-variable-receiver branch — see
-    /// its doc comment.
-    bounds: std::rc::Rc<HashMap<String, Vec<Path>>>,
+    /// its doc comment. The same bounds are also stored on the registered
+    /// `FnSig` (`Checker::check_defun`), for `Checker::check_call`'s
+    /// call-site validation — this copy exists only because body-checking
+    /// needs it readily available in `Env`, not threaded through `Registry`
+    /// lookups on every method call.
+    bounds: std::rc::Rc<HashMap<String, Vec<TraitBound>>>,
 }
 
 impl Env {
@@ -121,7 +126,7 @@ impl Env {
 
     /// A child environment that additionally declares `bounds` (a function's
     /// own `where`-clause trait bounds) — see the field's doc comment.
-    fn with_bounds(&self, bounds: HashMap<String, Vec<Path>>) -> Env {
+    fn with_bounds(&self, bounds: HashMap<String, Vec<TraitBound>>) -> Env {
         Env { vars: self.vars.clone(), bounds: std::rc::Rc::new(bounds) }
     }
 }
@@ -771,6 +776,22 @@ impl Checker {
         let ret = self.canon(&parse_type(heap, parts[2])?);
         let fq_name = self.fq(&name);
 
+        // An optional `(where (Trait T (Assoc Concrete)...)...)` clause right
+        // after the return type declares trait bounds on this `defun`'s own
+        // type parameters. Parsed *before* the `FnSig` below is registered
+        // (only `parts`/`heap` are needed, nothing computed later) so the
+        // bounds can be stored on the signature itself — `Checker::check_call`
+        // consults them for call-site validation, not just body-checking's
+        // `Env` as before bounds existed.
+        let mut body_start = 3;
+        let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
+        if let Some(form) = parts.get(3) {
+            if self.is_where_clause(heap, *form)? {
+                bounds = self.parse_where_clause(heap, *form)?;
+                body_start = 4;
+            }
+        }
+
         // Register the signature in the current namespace before checking the
         // body so self-recursion works.
         self.check_redef("function", &name, self.cur_ns().fns.get(&name))?;
@@ -781,6 +802,7 @@ impl Checker {
             public,
             rest: rest.as_ref().map(|(_, t)| t.clone()),
             builtin: false,
+            bounds: bounds.clone(),
         };
         self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
 
@@ -796,20 +818,6 @@ impl Checker {
         if let Some((rname, _)) = &rest {
             params.push((rname.clone(), sexpr_ty()));
         }
-        // An optional `(where (Trait T)...)` clause right after the return
-        // type declares trait bounds on this `defun`'s own type parameters —
-        // consulted only while checking the body (`Env::bounds`); it isn't
-        // part of the function's call-site signature (`TopLevel::Defun`
-        // carries no bounds of its own), so a generic function with no
-        // `where` clause behaves exactly as before.
-        let mut body_start = 3;
-        let mut bounds: HashMap<String, Vec<Path>> = HashMap::new();
-        if let Some(form) = parts.get(3) {
-            if self.is_where_clause(heap, *form)? {
-                bounds = self.parse_where_clause(heap, *form)?;
-                body_start = 4;
-            }
-        }
         let env = Env::new().with_bounds(bounds).extended(params.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], Some(&ret))?;
         Ok(TopLevel::Defun { name: fq_name, type_params, params, ret, body })
@@ -822,16 +830,24 @@ impl Checker {
             && matches!(heap.list_to_vec(v)?.first(), Some(Value::Symbol(id)) if heap.symbol_name(*id) == "where"))
     }
 
-    /// `(where (Trait1 T1) (Trait2 T2)...)`: trait bounds on a generic
-    /// `defun`'s type parameters, keyed by parameter name — see
-    /// `Env::bounds`'s doc comment for how this is used.
-    fn parse_where_clause(&self, heap: &Heap, v: Value) -> Result<HashMap<String, Vec<Path>>, Error> {
+    /// `(where (Trait1 T1 (Assoc1 Concrete1)...) (Trait2 T2)...)`: trait
+    /// bounds on a generic `defun`'s type parameters, keyed by parameter
+    /// name, each optionally pinning one or more of that trait's associated
+    /// types to a concrete type — see `TraitBound`'s doc comment for how
+    /// pins are used. Trait names are resolved as bare root-module paths
+    /// (`Path::root`, not `Checker::resolve_trait_name`), mirroring
+    /// `Checker::check_instance_method`'s existing assumption that every
+    /// trait lives at the root module — a pre-existing limitation, not new
+    /// here.
+    fn parse_where_clause(&self, heap: &Heap, v: Value) -> Result<HashMap<String, Vec<TraitBound>>, Error> {
         let elems = heap.list_to_vec(v)?;
-        let mut bounds: HashMap<String, Vec<Path>> = HashMap::new();
+        let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
         for clause in &elems[1..] {
             let parts = heap.list_to_vec(*clause)?;
-            if parts.len() != 2 {
-                return Err(Error::TypeError("where: each bound must be (Trait type-param)".into()));
+            if parts.len() < 2 {
+                return Err(Error::TypeError(
+                    "where: each bound must be (Trait type-param (AssocName Type)...)".into(),
+                ));
             }
             let trait_name = match parts[0] {
                 Value::Symbol(id) => Path::root(heap.symbol_name(id)),
@@ -841,7 +857,20 @@ impl Checker {
                 Value::Symbol(id) => heap.symbol_name(id).to_string(),
                 _ => return Err(Error::TypeError("where: type parameter must be a symbol".into())),
             };
-            bounds.entry(tparam).or_default().push(trait_name);
+            let mut assoc: HashMap<String, Type> = HashMap::new();
+            for pin in &parts[2..] {
+                let pin_parts = heap.list_to_vec(*pin)?;
+                if pin_parts.len() != 2 {
+                    return Err(Error::TypeError("where: associated-type pin must be (AssocName Type)".into()));
+                }
+                let aname = match pin_parts[0] {
+                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    _ => return Err(Error::TypeError("where: associated type name must be a symbol".into())),
+                };
+                let aty = self.canon(&parse_type(heap, pin_parts[1])?);
+                assoc.insert(aname, aty);
+            }
+            bounds.entry(tparam).or_default().push(TraitBound { trait_path: trait_name, assoc });
         }
         Ok(bounds)
     }
@@ -1081,6 +1110,7 @@ impl Checker {
                 public: true,
                 rest: None,
                 builtin: false,
+                bounds: HashMap::new(),
             };
             methods.insert(head, sig);
         }
@@ -1141,6 +1171,12 @@ impl Checker {
         // associated type name.
         let mut subst: HashMap<String, Value> = HashMap::new();
         subst.insert("self".to_string(), parts[1]);
+        // Parsed (not just textual) parallel of `subst`'s `(type AssocName
+        // Type)` bindings, for `AdtDef::trait_assoc` — lets
+        // `Checker::check_call`/`resolve_trait_assoc_type` later recover
+        // what this `impl` concretely binds each associated type to, without
+        // re-parsing `subst`'s raw `Value`s.
+        let mut assoc_concrete: HashMap<String, Type> = HashMap::new();
 
         let mut method_forms: Vec<Value> = Vec::new();
         for item in &parts[2..] {
@@ -1157,6 +1193,7 @@ impl Checker {
                     Value::Symbol(id) => heap.symbol_name(id).to_string(),
                     _ => return Err(Error::TypeError("impl: associated type name must be a symbol".into())),
                 };
+                assoc_concrete.insert(aname.clone(), self.canon(&parse_type(heap, elems[2])?));
                 subst.insert(aname, elems[2]);
                 continue;
             }
@@ -1197,7 +1234,8 @@ impl Checker {
             body.push(tl);
         }
         if let Some(def) = self.reg.type_def_mut(&target_fq) {
-            def.impls.push(trait_fq);
+            def.impls.push(trait_fq.clone());
+            def.trait_assoc.insert(trait_fq, assoc_concrete);
         }
         Ok(TopLevel::Module { path: target_fq, body })
     }
@@ -1342,7 +1380,7 @@ impl Checker {
             sig_params.push(recv_ty.clone());
         }
         sig_params.extend(params.iter().map(|(_, t)| t.clone()));
-        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public, rest: None, builtin: false };
+        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public, rest: None, builtin: false, bounds: HashMap::new() };
         self.check_redef("method", &method, self.reg.type_def(&type_fq).and_then(|d| d.assoc.get(&method)))?;
         if let Some(def) = self.reg.type_def_mut(&type_fq) {
             def.assoc.insert(method.clone(), AssocFn { sig, instance, builtin: false });
@@ -1418,6 +1456,7 @@ impl Checker {
                 public: field_public,
                 rest: None,
                 builtin: false,
+                bounds: HashMap::new(),
             };
             assoc.insert(field_name.clone(), AssocFn { sig: getter_sig, instance: true, builtin: false });
             let self_var = Typed { expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
@@ -1441,6 +1480,7 @@ impl Checker {
                 public: field_public,
                 rest: None,
                 builtin: false,
+                bounds: HashMap::new(),
             };
             assoc.insert(setter_name.clone(), AssocFn { sig: setter_sig, instance: true, builtin: false });
             let self_var = Typed { expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
@@ -1469,6 +1509,7 @@ impl Checker {
             kind: AdtKind::Struct,
             field_names,
             impls: Vec::new(),
+            trait_assoc: HashMap::new(),
         };
         self.reg.root.module_mut(&self.ns).add_type(def);
 
@@ -2118,8 +2159,8 @@ impl Checker {
                 // for why the implementing type is resolved at runtime
                 // instead of here.
                 if let Some(bound_traits) = env.bounds.get(type_fq.local()) {
-                    for trait_path in bound_traits {
-                        let Some(tdef) = self.reg.trait_def(trait_path) else { continue };
+                    for tb in bound_traits {
+                        let Some(tdef) = self.reg.trait_def(&tb.trait_path) else { continue };
                         let Some(sig) = tdef.methods.get(method) else { continue };
                         let want = sig.params.len() - 1;
                         if args.len() - 1 != want {
@@ -2134,9 +2175,17 @@ impl Checker {
                         for a in &args[1..] {
                             typed_args.push(self.check(heap, interp, env, *a, None)?);
                         }
+                        // This bound's `where`-clause associated-type pins
+                        // (e.g. `(Item i32)`) resolve the trait method
+                        // template's otherwise-opaque associated-type
+                        // variables (e.g. `Option<Item>`) wherever pinned —
+                        // a no-op (returns `sig.ret` unchanged) when
+                        // `tb.assoc` is empty, exactly matching pre-pin
+                        // behavior.
+                        let ret_ty = subst_apply(&sig.ret, &tb.assoc);
                         return Ok(Typed {
-                            expr: Expr::TraitCall { trait_name: trait_path.clone(), method: method.to_string(), args: typed_args },
-                            ty: sig.ret.clone(),
+                            expr: Expr::TraitCall { trait_name: tb.trait_path.clone(), method: method.to_string(), args: typed_args },
+                            ty: ret_ty,
                         });
                     }
                 }
@@ -2818,6 +2867,67 @@ impl Checker {
                 )));
             }
         }
+        // Call-site `where`-bound validation: for each of `name`'s own type
+        // parameters that carries trait bounds, check the concrete type
+        // `subst` resolved it to actually implements every required trait
+        // (and, if the bound pins an associated type, that the concrete
+        // type's *own* binding for that associated type matches what the
+        // `where` clause declared). Skipped when the resolved type is
+        // itself still a *bare* unresolved type variable (this call is
+        // nested inside another generic function and the type only becomes
+        // concrete further up the call chain) — propagating the *caller's
+        // own* bounds through to verify an equivalent bound is already
+        // declared on the outer function is real but currently unexercised
+        // by any code in this repo (no `where`-bounded function forwards its
+        // own type parameter into another `where`-bounded call), so it's
+        // left to the existing runtime `Expr::TraitCall` fallback, same as
+        // before this validation existed. Note the skip only catches a bare
+        // type variable (`T` itself) — a type variable *wrapped* in a
+        // concrete type (e.g. `Vector<U>` for an outer `U`) is still
+        // validated strictly below, which is correct for plain
+        // trait-membership checks (`Vector<U>` never implements `Iter`
+        // regardless of `U`) but could in principle reject an associated-type
+        // pin that would actually hold once `U` resolves further up the call
+        // chain — also unexercised today.
+        for (tparam, trait_bounds) in &sig.bounds {
+            let Some(concrete) = subst.get(tparam) else { continue };
+            let type_fq = match concrete {
+                Type::Named(n, _) if n.is_simple() && self.reg.type_def(n).is_none() => None,
+                Type::Named(n, _) => Some(n.clone()),
+                other => prim_type_path(other),
+            };
+            let Some(type_fq) = type_fq else { continue };
+            let def = self.reg.type_def(&type_fq).ok_or_else(|| {
+                Error::TypeError(format!(
+                    "{}: type {:?} does not implement a trait required by `where` clause on type parameter `{}`",
+                    name, concrete, tparam
+                ))
+            })?;
+            for tb in trait_bounds {
+                if !def.impls.contains(&tb.trait_path) {
+                    return Err(Error::TypeError(format!(
+                        "{}: type {:?} does not implement trait {:?} required by `where` clause on type parameter `{}`",
+                        name, concrete, tb.trait_path, tparam
+                    )));
+                }
+                let concrete_args: &[Type] = match concrete {
+                    Type::Named(_, args) => args.as_slice(),
+                    _ => &[],
+                };
+                for (assoc_name, declared_ty) in &tb.assoc {
+                    let actual = resolve_trait_assoc_type(def, &tb.trait_path, assoc_name, concrete_args);
+                    match actual {
+                        Some(actual) if actual == *declared_ty => {}
+                        actual => {
+                            return Err(Error::TypeError(format!(
+                                "{}: type {:?}'s associated type `{}` is {:?}, but `where` clause requires {:?}",
+                                name, concrete, assoc_name, actual, declared_ty
+                            )));
+                        }
+                    }
+                }
+            }
+        }
         Ok(Typed { expr: Expr::Call(name.clone(), typed), ty: subst_apply(&sig.ret, &subst) })
     }
 
@@ -3231,6 +3341,23 @@ fn subst_apply(t: &Type, subst: &HashMap<String, Type>) -> Type {
             Box::new(subst_apply(r, subst)),
         ),
         other => other.clone(),
+    }
+}
+
+/// Resolve what a concrete instantiation of `def` (e.g. `vector-iter<i32>`,
+/// `concrete_args = [i32]`) actually binds trait `trait_path`'s associated
+/// type `assoc_name` to — reading `AdtDef::trait_assoc`'s raw (possibly
+/// still `def.params`-generic) binding and substituting `concrete_args` in,
+/// the same `params`-zip `Checker::check_assoc_call` already does for method
+/// signatures. `None` if `def` has no recorded binding for that trait/name
+/// pair.
+fn resolve_trait_assoc_type(def: &AdtDef, trait_path: &Path, assoc_name: &str, concrete_args: &[Type]) -> Option<Type> {
+    let raw = def.trait_assoc.get(trait_path)?.get(assoc_name)?;
+    if concrete_args.len() == def.params.len() {
+        let subst: HashMap<String, Type> = def.params.iter().cloned().zip(concrete_args.iter().cloned()).collect();
+        Some(subst_apply(raw, &subst))
+    } else {
+        Some(raw.clone())
     }
 }
 

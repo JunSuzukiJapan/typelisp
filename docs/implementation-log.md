@@ -1941,12 +1941,14 @@ TODO.mdの最優先課題`doiter`（「何に対する反復か」仕様未確�
 `tests/doiter_test.rs`新設（合計計算、空Vector、`break`/`return`、`where`境界内、ネスト、
 未実装trait呼び出しの型エラーを検証）。
 
-**既知の制限**（TODO.md参照）: 関連型の具体指定（`where`節で「Tの`Item`はi32」のような制約）は
-未実装——ジェネリック関数本体内で`Item`型の値に対する算術演算等はできない（`doiter`/`Iter`自体の
-動作は問題ない）。呼び出し側での境界検証も未実装。`Sexpr`へのtrait実装は意図的に対象外
-（要素型が固定されないリストにジェネリックな`Iter<Item>`を被せるのは型システム上不適切、という
-ユーザー判断）。`Expr::TraitCall`はcompile機能（LLVM）では`unsupported`のプレースホルダのまま
-——`Iter`/`doiter`を使うコードは現状compileできない。
+**既知の制限（当時。2026-06-30の後続作業で関連型pin・呼び出し側境界検証は解消——下記
+「trait機構: where節の関連型pin + 呼び出し側境界検証」参照）**: 関連型の具体指定（`where`節で
+「Tの`Item`はi32」のような制約）は未実装——ジェネリック関数本体内で`Item`型の値に対する算術演算等
+はできない（`doiter`/`Iter`自体の動作は問題ない）。呼び出し側での境界検証も未実装。`Sexpr`への
+trait実装は意図的に対象外（要素型が固定されないリストにジェネリックな`Iter<Item>`を被せるのは
+型システム上不適切、というユーザー判断——これは現在も変わらず対象外）。`Expr::TraitCall`は
+compile機能（LLVM）では`unsupported`のプレースホルダのまま——`Iter`/`doiter`を使うコードは現状
+compileできない（これも現在も変わらず）。
 
 **テスト**: 全フェーズ完了後`cargo test`（`scripts/with-llvm-env.sh`経由）で既存含め全件green、
 `cargo +nightly miri test --test mem_test`green。
@@ -1983,3 +1985,58 @@ TODO.mdの最優先課題`doiter`（「何に対する反復か」仕様未確�
 挙動は完全に同一であることの実証）。`scripts/with-llvm-env.sh cargo test`で既存含め全件green、
 `cargo +nightly miri test --test mem_test`green。`grep -n '"doiter"' src/check/checker.rs`が
 ノーヒットであることを確認（checker側の特殊形ハードコードが完全に消えたことの確認）。
+
+## trait機構: where節の関連型pin + 呼び出し側境界検証（2026-06-30）
+
+TODO.mdの残作業冒頭2項目（[[typelisp-trait-mechanism-and-doiter]]の「既知の制限」だった2点）
+をまとめて解消。両者は表裏一体——「呼び出し側で実際にItemが宣言通りか検証する」処理は関連型pin
+機能なしには書けないため、1つの設計でまとめて実装した。
+
+**設計の核**: `AdtDef.impls: Vec<Path>`（`check_impl`が書き込むだけで、それまでどこからも
+読まれていなかった）を、実際に読む経路を新設するだけで両項目が解消できることが分かった
+——`docs/language-design.md` §5.1の既存コメントも「この一覧を見るだけで判定できる」と
+将来を見越して書かれていた。
+
+**`where`節の文法拡張（関連型pin）**: 既存`(where (Trait T))`（厳密に2要素）を、
+`(where (Iter T (Item i32)))`のように末尾に0個以上の`(AssocName ConcreteType)`を許す形へ拡張
+（後方互換、pin無しは今まで通り）。内部表現として`TraitBound{ trait_path: Path, assoc:
+HashMap<String,Type> }`（`src/check/registry.rs`）を新設し、`Env::bounds`/新設の`FnSig::bounds`
+の値型を`Vec<Path>`から`Vec<TraitBound>`に変更。
+
+**where節を関数シグネチャ自体に保存**: 旧実装は`check_defun`がwhere節をパースする**前**に
+`FnSig`を登録していた（自己再帰のため）ため、パース結果が本体チェック用`Env`にしか残らず
+レジストリ上の`FnSig`には一切記録されていなかった——これが呼び出し側検証が原理的に不可能
+だった理由。where節のパースを`FnSig`構築より前に並べ替え、`FnSig.bounds`に保存することで
+`Checker::check_call`がレジストリ越しに呼び出し対象関数自身のboundsを参照できるようにした。
+
+**本体チェック側（pin代入）**: `check_instance_method`の型変数レシーバ分岐で`Expr::TraitCall`の
+戻り型を`sig.ret.clone()`（trait定義上の`Option<Item>`、`Item`未解決のまま）としていたのを、
+マッチした`TraitBound.assoc`で`subst_apply`してから使うよう変更。pin無し（`assoc`が空）なら
+`subst_apply`は恒等関数で完全に後方互換、pin有りなら`Option<Item>`が`Option<i32>`に解決され、
+ループ変数に対する算術演算が型チェックを通るようになる。
+
+**呼び出し側検証**: `AdtDef`に`trait_assoc: HashMap<Path, HashMap<String,Type>>`（trait path →
+{関連型名 → implが束縛した具体Type、ジェネリックimplなら自身のparamsを含んだまま}）を新設し、
+`check_impl`の`(type AssocName Type)`処理で構造化して蓄積。具体型からこれを解決する
+`resolve_trait_assoc_type`ヘルパー（`check_assoc_call`の`def.params`zipパターンを再利用）を新設。
+`check_call`で型パラメータが全て解決済みになった後、`Ok(...)`を返す前に、各bound type paramの
+具体型が`def.impls`にtrait pathを含むか・pinした関連型が`resolve_trait_assoc_type`の実際の
+結果と一致するかを検証し、満たさなければハードエラーにする変更を追加。
+
+**既知の限界（意図的にスコープ外）**: ネストしたジェネリック呼び出し——ある`where`境界付き
+ジェネリック関数の中から、外側自身の型パラメータをそのまま渡して別の`where`境界付き関数を
+呼ぶケース（Rustで言う境界の伝播）。呼び出し側検証は「裸の未解決型変数（`T`そのもの）」なら
+スキップして既存のランタイムフォールバックに委ねるが、型変数を**含む**具体型（例:外側の`U`に
+対する`vector-iter<U>`）の場合、トレイト実装の有無チェックは正しく動く一方、pinの一致チェック
+は`U`という未解決のままの型と宣言値との構造的不一致で誤ってハードエラーになり得る。現状この
+パターン（ジェネリック関数がジェネリック関数をpin付きで型変数のまま呼ぶ）を使う既存コードも
+テストも無く、解決には同程度の追加コード（呼び出し元自身の`env.bounds`を`check_call`に伝播・
+突き合わせ）が要るため、`doiter`のcount/sum制限と同種のYAGNI判断として今は広げないことにした
+（[[feedback-impl-priority]]）。
+
+**テスト**: `tests/trait_test.rs`に呼び出し側でtrait未実装の型を拒否するケースを追加。
+`tests/doiter_test.rs`に`(where (Iter T (Item i32)))`で実際に`+`演算を行う`sum`版、および
+pinと実際の関連型が食い違う場合に呼び出し側で拒否されるケースを追加（既存の`count`版は
+pin無し経路の回帰確認としてそのまま維持、コメントのみ`Checker::check_doiter`という現存しない
+関数名への古い参照を`check_instance_method`に修正）。全件green
+（`scripts/with-llvm-env.sh cargo test`、compile機能含む）。

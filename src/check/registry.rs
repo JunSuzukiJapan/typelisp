@@ -15,6 +15,21 @@ pub struct Variant {
     pub fields: Vec<Type>,
 }
 
+/// One `where`-clause bound: a trait a type parameter must implement, plus
+/// (optionally) concrete pins for that trait's associated types — e.g.
+/// `(Iter T (Item i32))` pins `T`'s `Item` to `i32`. `assoc` is empty for a
+/// bound with no pins (`(Iter T)`), which behaves exactly as before pins
+/// existed — see `Checker::parse_where_clause`.
+#[derive(Clone, Debug)]
+pub struct TraitBound {
+    pub trait_path: Path,
+    /// Associated-type name (lowercase) -> the concrete `Type` this bound
+    /// pins it to. Only entries explicitly written in the `where` clause are
+    /// present; an un-pinned associated type stays absent (looked up, not
+    /// substituted) wherever it's consulted.
+    pub assoc: HashMap<String, Type>,
+}
+
 /// A function's parameter and return types.
 #[derive(Clone, Debug)]
 pub struct FnSig {
@@ -39,6 +54,13 @@ pub struct FnSig {
     /// Redefining a builtin is always an error; redefining anything else
     /// follows the configurable [`crate::check::checker::RedefPolicy`].
     pub builtin: bool,
+    /// Trait bounds declared by this function's own `(where (Trait T
+    /// (Assoc Concrete)...)...)` clause (`Checker::check_defun`), keyed by
+    /// type-parameter name — empty for a non-generic function or a generic
+    /// one with no `where` clause. Stored on the registered signature (not
+    /// just the body-checking `Env`) so `Checker::check_call` can validate a
+    /// call site's actual argument types against it.
+    pub bounds: HashMap<String, Vec<TraitBound>>,
 }
 
 /// A type-associated function or method (Rust-style; types are *not*
@@ -124,12 +146,19 @@ pub struct AdtDef {
     /// trait's [`Path`]. Each `impl`ed method is inserted into `assoc` like
     /// an ordinary `defmethod` — so an instance call on a *concrete* receiver
     /// type resolves through the same `assoc` lookup `check_instance_method`
-    /// already does, untouched. `impls` is consulted only by the *other*
-    /// path: a call on a still-generic type-variable receiver inside a
-    /// `where`-bounded function body, where there's no concrete `AdtDef` to
-    /// look `assoc` up on yet (see `Checker::check_instance_method`'s
-    /// type-variable branch).
+    /// already does, untouched. Also consulted by `Checker::check_call` to
+    /// validate a where-bounded call site's actual argument types against
+    /// the callee's declared bounds.
     pub impls: Vec<Path>,
+    /// Per-implemented-trait associated-type bindings, parsed
+    /// (`Checker::check_impl`): trait `Path` -> {associated-type name -> the
+    /// `Type` this `impl` binds it to}. For a generic `impl` (e.g. `(impl
+    /// Iter (vector-iter T) (type Item T) ...)`), the stored `Type` may
+    /// itself still mention this ADT's own `params` (here, `T`) rather than
+    /// being fully concrete — see `resolve_trait_assoc_type`, which
+    /// substitutes a *specific* instantiation's `params` (e.g.
+    /// `vector-iter<i32>`) in before use.
+    pub trait_assoc: HashMap<Path, HashMap<String, Type>>,
 }
 
 /// A `deftrait` definition (`Checker::check_deftrait`): a trait name, its
@@ -308,40 +337,40 @@ impl Registry {
                 public: true,
                 builtin: true,
                 kind: AdtKind::Sum,
-                field_names: Vec::new(), impls: Vec::new(),
+                field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new(),
             });
         }
         // `random`: the only numeric builtin with no natural receiver to
         // dispatch on (like `gensym`), so it stays a free function.
-        root.fns.insert("random".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::I32, public: true, builtin: true });
+        root.fns.insert("random".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::I32, public: true, builtin: true, bounds: HashMap::new() });
         // `cons`/`car`/`cdr` operate on `Sexpr` (the cons/nil duality at the
         // type level). `cons` is also reachable as the `Cons` constructor;
         // registering it as a function too lets it be used as a value
         // (e.g. passed to a higher-order function).
-        root.fns.insert("cons".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: sexpr(), public: true, builtin: true });
-        root.fns.insert("car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true, builtin: true });
-        root.fns.insert("cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true, builtin: true });
+        root.fns.insert("cons".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: sexpr(), public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true, builtin: true, bounds: HashMap::new() });
         // `set-car`/`set-cdr` (CL `rplaca`/`rplacd`): in-place mutation of an
         // existing cons cell, backed by `mem::Heap::set_car`/`set_cdr` (already
         // implemented at the heap layer, just not wired up to a language-level
         // name until now). Panics on a non-`Cons` `Sexpr`, matching `car`/`cdr`.
         // This is the prerequisite `nconc`/`nreverse` (the prelude's destructive
         // list operations) build on.
-        root.fns.insert("set-car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true, builtin: true });
-        root.fns.insert("set-cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true, builtin: true });
+        root.fns.insert("set-car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("set-cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() });
         // `gensym`: a fresh `Sexpr::Sym` on every call, for macro hygiene
         // workarounds (see `Interp`'s `gensym_counter` for the caveat that
         // these are collision-*resistant*, not truly unforgeable — typelisp
         // symbols are always interned/permanent, there is no uninterned-symbol
         // concept to give a CL-style absolute guarantee).
-        root.fns.insert("gensym".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: sexpr(), public: true, builtin: true });
+        root.fns.insert("gensym".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: sexpr(), public: true, builtin: true, bounds: HashMap::new() });
         // `exit`: process termination (cl-equivalence-catalog.md §1.2). Unlike
         // `panic`/`unreachable`/`todo` (which unwind through `EvalError::Panic`,
         // a typelisp-level signal), this needs an actual OS call
         // (`std::process::exit`, in `Interp::eval_builtin`'s `"exit"` arm), so
         // it stays an ordinary `Rust` builtin rather than a `defmacro`. `Never`
         // return type, same as `panic`, so it satisfies any expected type.
-        root.fns.insert("exit".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::Never, public: true, builtin: true });
+        root.fns.insert("exit".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::Never, public: true, builtin: true, bounds: HashMap::new() });
         // `compile`: JIT-compiles a previously-defined `defun` (see
         // `Interp::compile_function`) so later calls dispatch to native
         // code. This `Type::Str` signature is the internal shape only —
@@ -350,7 +379,7 @@ impl Registry {
         // `Checker::check_compile` to convert that name to the string this
         // entry expects before an ordinary call is built; a string literal
         // there (`(compile "foo")`) is a type error.
-        root.fns.insert("compile".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: Type::Bool, public: true, builtin: true });
+        root.fns.insert("compile".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
         // `compile-file`: AOT-compiles an independent source file to a
         // native executable (see `Interp::eval_builtin`'s `"compile-file"`
         // arm / `compile::aot::compile_file`). Same free-function shape as
@@ -358,7 +387,7 @@ impl Registry {
         // path) instead of one.
         root.fns.insert(
             "compile-file".to_string(),
-            FnSig { type_params: vec![], rest: None, params: vec![Type::Str, Type::Str], ret: Type::Bool, public: true, builtin: true },
+            FnSig { type_params: vec![], rest: None, params: vec![Type::Str, Type::Str], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() },
         );
         Registry { root }
     }
@@ -402,7 +431,7 @@ fn option_def() -> AdtDef {
         public: true,
         builtin: true,
         kind: AdtKind::Sum,
-        field_names: Vec::new(), impls: Vec::new(),
+        field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new(),
     }
 }
 
@@ -419,7 +448,7 @@ fn result_def() -> AdtDef {
         public: true,
         builtin: true,
         kind: AdtKind::Sum,
-        field_names: Vec::new(), impls: Vec::new(),
+        field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new(),
     }
 }
 
@@ -434,7 +463,7 @@ fn error_def() -> AdtDef {
         public: true,
         builtin: true,
         kind: AdtKind::Sum,
-        field_names: Vec::new(), impls: Vec::new(),
+        field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new(),
     }
 }
 
@@ -463,7 +492,7 @@ fn sexpr_def() -> AdtDef {
         public: true,
         builtin: true,
         kind: AdtKind::Sum,
-        field_names: Vec::new(), impls: Vec::new(),
+        field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new(),
     }
 }
 
@@ -482,7 +511,7 @@ fn sexpr_assoc() -> HashMap<String, AssocFn> {
     let mut m = HashMap::new();
     m.insert(
         "eq".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true, builtin: true }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
     );
     m
 }
@@ -491,7 +520,7 @@ fn bool_assoc() -> HashMap<String, AssocFn> {
     let mut m = HashMap::new();
     m.insert(
         "eq".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bool, Type::Bool], ret: Type::Bool, public: true, builtin: true }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bool, Type::Bool], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
     );
     m
 }
@@ -517,12 +546,12 @@ fn hashtable_def() -> AdtDef {
     let mut assoc = HashMap::new();
     assoc.insert(
         "new".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: hashtable_ty(), public: true, builtin: true }, instance: false, builtin: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: hashtable_ty(), public: true, builtin: true, bounds: HashMap::new() }, instance: false, builtin: true },
     );
     assoc.insert(
         "get".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true, builtin: true },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true, builtin: true, bounds: HashMap::new() },
             instance: true,
             builtin: true,
         },
@@ -530,7 +559,7 @@ fn hashtable_def() -> AdtDef {
     assoc.insert(
         "set".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k"), tvar("v")], ret: Type::Unit, public: true, builtin: true },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k"), tvar("v")], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() },
             instance: true,
             builtin: true,
         },
@@ -538,18 +567,18 @@ fn hashtable_def() -> AdtDef {
     assoc.insert(
         "remove".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true, builtin: true },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty(), tvar("k")], ret: option_of(tvar("v")), public: true, builtin: true, bounds: HashMap::new() },
             instance: true,
             builtin: true,
         },
     );
     assoc.insert(
         "count".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::I32, public: true, builtin: true }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::I32, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
     );
     assoc.insert(
         "clear".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Unit, public: true, builtin: true }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
     );
     AdtDef {
         name: Path::root("hashtable"),
@@ -559,7 +588,7 @@ fn hashtable_def() -> AdtDef {
         public: true,
         builtin: true,
         kind: AdtKind::Sum,
-        field_names: Vec::new(), impls: Vec::new(),
+        field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new(),
     }
 }
 
@@ -579,12 +608,12 @@ fn vector_def() -> AdtDef {
     let mut assoc = HashMap::new();
     assoc.insert(
         "new".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: vector_ty(), public: true, builtin: true }, instance: false, builtin: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: vector_ty(), public: true, builtin: true, bounds: HashMap::new() }, instance: false, builtin: true },
     );
     assoc.insert(
         "push".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty(), tvar("t")], ret: Type::Unit, public: true, builtin: true },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty(), tvar("t")], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() },
             instance: true,
             builtin: true,
         },
@@ -592,7 +621,7 @@ fn vector_def() -> AdtDef {
     assoc.insert(
         "get".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty(), Type::I32], ret: tvar("t"), public: true, builtin: true },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty(), Type::I32], ret: tvar("t"), public: true, builtin: true, bounds: HashMap::new() },
             instance: true,
             builtin: true,
         },
@@ -600,14 +629,14 @@ fn vector_def() -> AdtDef {
     assoc.insert(
         "set".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty(), Type::I32, tvar("t")], ret: Type::Unit, public: true, builtin: true },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty(), Type::I32, tvar("t")], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() },
             instance: true,
             builtin: true,
         },
     );
     assoc.insert(
         "len".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty()], ret: Type::I32, public: true, builtin: true }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty()], ret: Type::I32, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
     );
     AdtDef {
         name: Path::root("vector"),
@@ -617,7 +646,7 @@ fn vector_def() -> AdtDef {
         public: true,
         builtin: true,
         kind: AdtKind::Struct,
-        field_names: Vec::new(), impls: Vec::new(),
+        field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new(),
     }
 }
 
@@ -636,7 +665,7 @@ fn scope_def() -> AdtDef {
     let mut assoc = HashMap::new();
     assoc.insert(
         "new".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: scope_ty(), public: true, builtin: true }, instance: false, builtin: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![], ret: scope_ty(), public: true, builtin: true, bounds: HashMap::new() }, instance: false, builtin: true },
     );
     assoc.insert(
         // Shares every existing frame (by reference, not by copying their
@@ -646,20 +675,20 @@ fn scope_def() -> AdtDef {
         // comment for why a *fresh* top frame, not the shared ones
         // themselves, must receive that def's own parameter bindings).
         "clone-frames".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty()], ret: scope_ty(), public: true, builtin: true }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty()], ret: scope_ty(), public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
     );
     assoc.insert(
         "push-frame".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty()], ret: Type::Unit, public: true, builtin: true }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty()], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
     );
     assoc.insert(
         "pop-frame".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty()], ret: Type::Unit, public: true, builtin: true }, instance: true, builtin: true },
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty()], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
     );
     assoc.insert(
         "get".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty(), Type::Str], ret: option_of(tvar("v")), public: true, builtin: true },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty(), Type::Str], ret: option_of(tvar("v")), public: true, builtin: true, bounds: HashMap::new() },
             instance: true,
             builtin: true,
         },
@@ -667,7 +696,7 @@ fn scope_def() -> AdtDef {
     assoc.insert(
         "set".to_string(),
         AssocFn {
-            sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty(), Type::Str, tvar("v")], ret: Type::Unit, public: true, builtin: true },
+            sig: FnSig { type_params: vec![], rest: None, params: vec![scope_ty(), Type::Str, tvar("v")], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() },
             instance: true,
             builtin: true,
         },
@@ -680,7 +709,7 @@ fn scope_def() -> AdtDef {
         public: true,
         builtin: true,
         kind: AdtKind::Sum,
-        field_names: Vec::new(), impls: Vec::new(),
+        field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new(),
     }
 }
 
@@ -706,7 +735,7 @@ fn llvm_value_ty() -> Type {
 }
 
 fn assoc_fn(params: Vec<Type>, ret: Type, instance: bool) -> AssocFn {
-    AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true }, instance, builtin: true }
+    AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true, bounds: HashMap::new() }, instance, builtin: true }
 }
 
 /// An in-progress LLVM module. `add-function` always declares a function
@@ -738,20 +767,20 @@ fn llvm_module_def() -> AdtDef {
     // `compile-labels` doc comment for why captures aren't computed
     // per-sibling).
     assoc.insert("add-function-with-env".to_string(), assoc_fn(vec![llvm_module_ty(), Type::Str], llvm_function_ty(), true));
-    AdtDef { name: Path::root("llvm-module"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new() }
+    AdtDef { name: Path::root("llvm-module"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new() }
 }
 
 /// A declared LLVM function (a `Module::add-function` result).
 fn llvm_function_def() -> AdtDef {
     let mut assoc = HashMap::new();
     assoc.insert("append-block".to_string(), assoc_fn(vec![llvm_function_ty(), Type::Str], llvm_basic_block_ty(), true));
-    AdtDef { name: Path::root("llvm-function"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new() }
+    AdtDef { name: Path::root("llvm-function"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new() }
 }
 
 /// An LLVM basic block. No methods of its own yet (Phase 0) — produced by
 /// `llvm-function::append-block`, consumed by `llvm-builder::position-at-end`.
 fn llvm_basic_block_def() -> AdtDef {
-    AdtDef { name: Path::root("llvm-basic-block"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new() }
+    AdtDef { name: Path::root("llvm-basic-block"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new() }
 }
 
 /// An IR builder. `load-arg` reads logical parameter `index` out of a
@@ -945,13 +974,13 @@ fn llvm_builder_def() -> AdtDef {
     assoc.insert("build-free".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], Type::Unit, true));
     assoc.insert("build-int-to-ptr".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
     assoc.insert("build-ptr-to-int".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
-    AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new() }
+    AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new() }
 }
 
 /// An LLVM SSA value (e.g. a constant). No methods of its own yet — produced
 /// by `llvm-builder::const-i64`, consumed by `llvm-builder::build-ret`.
 fn llvm_value_def() -> AdtDef {
-    AdtDef { name: Path::root("llvm-value"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new() }
+    AdtDef { name: Path::root("llvm-value"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new() }
 }
 
 /// Built-in `String` instance methods ([cl-equivalence-catalog.md](../../../docs/cl-equivalence-catalog.md)
@@ -962,7 +991,7 @@ fn llvm_value_def() -> AdtDef {
 /// (`str::to_ascii_uppercase`/`lowercase`), avoiding Unicode case mappings
 /// that can change a string's length (e.g. German `ß` -> `SS`).
 fn string_assoc() -> HashMap<String, AssocFn> {
-    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true }, instance: true, builtin: true };
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
     m.insert("upcase".to_string(), method(vec![Type::Str], Type::Str));
     m.insert("downcase".to_string(), method(vec![Type::Str], Type::Str));
@@ -981,7 +1010,7 @@ fn string_assoc() -> HashMap<String, AssocFn> {
 /// necessarily a single char). `alphap`/`digitp` classify ASCII letters/
 /// digits only (CL's `alpha-char-p`/`digit-char-p` without a radix).
 fn char_assoc() -> HashMap<String, AssocFn> {
-    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true }, instance: true, builtin: true };
+    let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
     m.insert("upcase".to_string(), method(vec![Type::Char], Type::Char));
     m.insert("downcase".to_string(), method(vec![Type::Char], Type::Char));
@@ -1000,8 +1029,8 @@ fn char_assoc() -> HashMap<String, AssocFn> {
 /// Shared by both integer widths since the operation set and panic policy
 /// are identical; only the receiver/param `Type` differs.
 fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true, builtin: true }, instance: true, builtin: true };
-    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true, builtin: true }, instance: true, builtin: true };
+    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
+    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
     for op in ["+", "-", "*", "/", "mod"] {
         m.insert(op.to_string(), binop());
@@ -1022,9 +1051,9 @@ fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
 /// plus `expt`(binary, `f64::powf`) and the unary rounding/root family
 /// `sqrt`/`floor`/`ceiling`/`round`/`truncate`.
 fn float_assoc() -> HashMap<String, AssocFn> {
-    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64, Type::F64], ret: Type::F64, public: true, builtin: true }, instance: true, builtin: true };
-    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64, Type::F64], ret: Type::Bool, public: true, builtin: true }, instance: true, builtin: true };
-    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::F64, public: true, builtin: true }, instance: true, builtin: true };
+    let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64, Type::F64], ret: Type::F64, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
+    let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64, Type::F64], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
+    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::F64, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
     for op in ["+", "-", "*", "/", "mod"] {
         m.insert(op.to_string(), binop());

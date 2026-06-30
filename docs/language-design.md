@@ -231,21 +231,36 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   ```
   具体型に対する呼び出し（`(next concrete-vec-iter)`）は、register済みの`assoc`テーブルを引く
   既存の`Expr::Assoc`機構がそのまま動く——trait導入前と挙動・コードパスとも変わらない。
-- **ジェネリック関数のtrait境界**: `(defun (name T) (params...) Ret (where (Trait T)...) body...)`。
-  `where`節は関数の**呼び出し側シグネチャには影響せず**（呼び出し側での境界検証は未実装、TODO.md参照）、
-  本体チェック時にのみ「型変数Tはこのtraitのメソッドを呼べる」という情報を与える。本体内で型変数Tの
-  値に対するtraitメソッド呼び出しは、新設の`Expr::TraitCall`ノードになる——`Expr::Assoc`と違い
-  実装型のPathをチェック時には持たず、実行時にレシーバの値自身が持つ型タグ（`RtValue::Struct`の
+- **ジェネリック関数のtrait境界**: `(defun (name T) (params...) Ret (where (Trait T (Assoc
+  Concrete)...)...) body...)`。`(Assoc Concrete)...`は省略可能で、trait の関連型を具体型に
+  pinする（2026-06-30追加）——例えば`Iter`の関連型`Item`を`i32`に固定したい場合
+  `(where (Iter T (Item i32)))`と書く。本体チェック時にのみ「型変数Tはこのtraitのメソッドを
+  呼べ、pinした関連型は具体型として扱える」という情報を与える。本体内で型変数Tの値に対する
+  traitメソッド呼び出しは、新設の`Expr::TraitCall`ノードになる——`Expr::Assoc`と違い実装型の
+  Pathをチェック時には持たず、実行時にレシーバの値自身が持つ型タグ（`RtValue::Struct`の
   `type_name`等）を読んで`Expr::Assoc`と同じ`methods`テーブルを引く。これが本機構で唯一「型消去後の
   実行時情報」を必要とする箇所だが、参照するテーブル自体はvtable等の専用間接構造ではなく、既存の
-  固定`methods`テーブルそのもの。
+  固定`methods`テーブルそのもの。`Expr::TraitCall`の静的な戻り型は、マッチしたboundのpinで
+  `subst_apply`してから使う——pin無しなら`Option<Item>`のまま（`Item`未解決）、pin有りなら
+  `Option<Item>`が`Option<i32>`に解決され、ループ変数への算術演算等が型チェックを通る。
   ```lisp
   (defun (count-iter T) ((it T)) i32 (where (Iter T))
     (let ((n 0)) (doiter (x it) (setf n (+ n 1))) n))
+  (defun (sum-iter T) ((it T)) i32 (where (Iter T (Item i32)))
+    (let ((n 0)) (doiter (x it) (setf n (+ n x))) n))  ; x: i32（pin済み）
   ```
-- **既知の制限**（TODO.md参照）: 関連型の具体指定（「Tの`Item`はi32」のような制約）は`where`節で
-  表現できない。呼び出し側での境界検証も未実装。`Sexpr`へのtrait実装は意図的に対象外（要素型が
-  固定されないリストにジェネリックな`Iter<Item>`を被せるのは型システム上不適切、というユーザー判断）。
+  `where`節は**呼び出し側シグネチャにも反映される**（2026-06-30追加、`FnSig.bounds`）——
+  `Checker::check_call`が、各boundの型パラメータが実引数からどの具体型に解決されたかを確認し、
+  その具体型が実際に`AdtDef.impls`へ要求traitを含むか、pinした関連型が
+  （`AdtDef.trait_assoc`経由で解決した）実際の関連型と一致するかを検証する。満たさなければ
+  型チェック時点でエラーになる——以前は境界を満たさない型を渡しても型チェックは通り、
+  `Expr::TraitCall`評価時の実行時エラーに初めて落ちていた。
+- **既知の制限**: ネストしたジェネリック呼び出し——ある`where`境界付きジェネリック関数の中から、
+  外側自身の型パラメータをそのまま渡して別の`where`境界付き関数を呼ぶケース——は呼び出し側検証の
+  対象外（型変数が裸の場合はスキップして既存の実行時フォールバックに委ね、型変数を*含む*具体型
+  に包まれている場合はpin一致チェックが誤って失敗し得る）。`Sexpr`へのtrait実装は意図的に対象外
+  （要素型が固定されないリストにジェネリックな`Iter<Item>`を被せるのは型システム上不適切、という
+  ユーザー判断）。
 
 ---
 

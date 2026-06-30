@@ -103,20 +103,46 @@ fn doiter_on_a_type_with_no_iter_impl_is_a_type_error() {
 #[test]
 fn doiter_works_inside_a_where_bounded_generic_function() {
     // `it: T` inside `count-iter`'s own body — no concrete `AdtDef` for `t`,
-    // so `next` resolves through `Expr::TraitCall` (`Checker::check_doiter`'s
-    // type-variable branch), not `Expr::Assoc`. `x`'s own type is `T`'s
-    // *associated* type `Item` — itself an unresolved type variable inside a
-    // generic body with no concrete `AdtDef` (`Checker::check_doiter` leaves
-    // it as `Iter`'s own `item` template, see its doc comment) — so `x` is
-    // only usable here as an opaque value (bound, never operated on); this
-    // is intentionally a `count`, not a `sum`, since arithmetic on `Item`
-    // would need a `where` clause expressive enough to pin `Item` to a
-    // concrete type, which is out of scope for this `where`-bounds MVP.
+    // so `next` resolves through `Expr::TraitCall` (`Checker::check_instance_method`'s
+    // type-variable branch, reached transitively through `doiter`'s `defmacro`
+    // expansion), not `Expr::Assoc`. `x`'s own type is `T`'s *associated*
+    // type `Item` — left as `Iter`'s own unresolved `item` template here
+    // because this `where` clause has no associated-type pin, so `x` is only
+    // usable as an opaque value (bound, never operated on); this is
+    // intentionally a `count`, not a `sum`, to keep this test exercising the
+    // *un-pinned* `(where (Iter T))` form as a regression check — see
+    // `doiter_sums_inside_a_where_bounded_generic_function_with_a_pinned_item`
+    // for the pinned/`sum` sibling.
     let src = "(defun (count-iter T) ((it T)) i32 (where (Iter T))
                  (let ((n 0)) (doiter (x it) (setf n (+ n 1))) n))
                (defun make-v () Vector<i32> (Vector::new))
                (let ((v (make-v))) (push v 10) (push v 20) (count-iter (iter v)))";
     assert_eq!(eval_ok(src), RtValue::Int(2));
+}
+
+#[test]
+fn doiter_sums_inside_a_where_bounded_generic_function_with_a_pinned_item() {
+    // Sibling of `doiter_works_inside_a_where_bounded_generic_function`, now
+    // pinning `Item` to `i32` via `(where (Iter T (Item i32)))` — `x`'s type
+    // resolves to a concrete `i32` (not an opaque type variable), so
+    // arithmetic (`+`) on it type-checks and runs.
+    let src = "(defun (sum-iter T) ((it T)) i32 (where (Iter T (Item i32)))
+                 (let ((n 0)) (doiter (x it) (setf n (+ n x))) n))
+               (defun make-v () Vector<i32> (Vector::new))
+               (let ((v (make-v))) (push v 10) (push v 20) (sum-iter (iter v)))";
+    assert_eq!(eval_ok(src), RtValue::Int(30));
+}
+
+#[test]
+fn call_site_rejects_a_pinned_item_that_does_not_match_the_real_associated_type() {
+    // `vector-iter<bool>`'s real `Item` is `bool`, but `sum-iter`'s `where`
+    // clause pins `Item` to `i32` — the call site must reject this, not
+    // type-check the body's `(+ n x)` against a wrong assumption.
+    let src = "(defun (sum-iter T) ((it T)) i32 (where (Iter T (Item i32)))
+                 (let ((n 0)) (doiter (x it) (setf n (+ n x))) n))
+               (defun make-bv () Vector<bool> (Vector::new))
+               (let ((v (make-bv))) (push v true) (sum-iter (iter v)))";
+    assert!(check(src).is_err());
 }
 
 #[test]
