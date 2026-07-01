@@ -2288,3 +2288,69 @@ FFI境界を越えたRust panicはunwindできないため、これは"catchable
 `rt_truncate_sexpr_roots`の中身を一時的に無効化して確認したところ、
 `leaky-inner`の増分だけが`trivial`のちょうど2倍（500回呼んで500余分にリーク）になり、
 実際に1呼び出しにつき1ルートずつ着実に漏れていたことを確認してから元に戻した。
+
+## `eq`/`eql`/`equal`/`equalp`をCommon Lisp準拠に再設計（2026-07-01）
+
+Stage 7（文字列対応、compile機能）の作業中、テストコメントで`str::eq`を
+「内容比較であってポインタ一致でないことを確認する」とCLの`eq`本来の仕様
+であるかのように説明したところ、ユーザーから指摘を受けた。CLの
+`eq`/`eql`/`equal`/`equalp`の正確な違いを調査した結果、`docs/cl-equivalence-catalog.md`
+の当初設計（`case`が型を問わず`(eq a b)`で書けるよう、`eq`を型ごとに
+「値の等価性」として再定義——`Str`は実質内容比較）がCL仕様と食い違って
+いたことが判明——内容比較はCLでは`equal`/`equalp`の役割であり、
+`eq`/`eql`は文字列に対して常に同一性判定のまま。ユーザーの指示で
+4つとも正しく実装し直した。詳細な対応表・訂正内容は
+`docs/cl-equivalence-catalog.md`の「5. 訂正（2026-07-01）」節を参照。
+
+**最大の技術的分岐点**: `Type::Str`（プレーンな`string`型）の値は
+インタプリタ内で`RtValue::Str(String)`という値型で、変数を読むたびに
+`clone`（深いコピー）されており、「同じオブジェクト」という概念自体が
+存在しなかった——`(let ((s "hi")) (eq s s))`ですら真の同一性判定が
+成立しない。これを解決するため`RtValue::Str`を`Rc<str>`に変更
+（`src/eval/value.rs`）——`Rc::clone`はポインタ複製（refcountインクリメント）
+なので、同じ束縛を2回読んでも同一オブジェクトのままになり、`Rc::ptr_eq`
+で正しい同一性判定ができるようになった。呼び出し箇所は10箇所程度で、
+Rustの`Deref`/`AsRef`のおかげでほぼ機械的な追従で済んだ（`.into()`/
+`.to_string()`/`.as_ref()`の使い分けのみ）。
+
+**想定外の大きな副作用**: `compiler.rs`（自己ホスト型LLVMコンパイラ本体）
+が、タグ・メソッド名・型名のディスパッチ全体で`(eq s "int")`のような
+**文字列内容比較としての`eq`**に依存していた（48箇所）。`eq`の意味を
+真の同一性に変えた瞬間、これらが全て「別々に確保された文字列は常に
+不一致」になり、`compile-value: unsupported tag int`のような形で
+自己ホスト型コンパイラ全体が機能しなくなった——`tests/compile_test.rs`
+（interpreted経由でcompiler.rsを動かすテスト群）は偶然通っていたが、
+`tests/compile_file_test.rs`（AOT経由、19件）で発覚。該当48箇所は
+Pythonの正規表現一括置換（`\(eq (\S+) "` → `\(equal \1 "`）で`equal`に
+置換して修正——このパターンに一致する箇所は全て文字列タグの比較のみで、
+`(eq idx 0)`のような整数/Sexpr比較は無関係のため触れていない。
+
+**設計の要点**:
+- `eq`/`eql`: `Sexpr`は既存のまま（`Value`を直接比較、`Cons`/`Str`は
+  同一性、他は値——immediateなので同一性と値比較が一致）。`Str`の`eq`は
+  新規に`Rc::ptr_eq`で同一性判定に修正。`eql`は全型で`eq`のエイリアス
+  として登録——このタグ付き即値表現では数値/文字がboxingされていないため
+  `eq`と`eql`が理論上も一致する（CLでの両者の相違はboxed数値/文字での
+  み生じる）。
+- `equal`/`equalp`: `Str`/`char`に内容比較（`equalp`は大小無視）を新設。
+  `i32`/`i64`/`f64`/`bool`は`eq`のエイリアス（静的型システム上、型跨ぎ
+  比較は到達不能なため）。`Sexpr`は`prelude.rs`の既存`equal`（再帰構造
+  比較）を修正（`Str`分岐が`eq`ではなく新設の`Str::equal`を呼ぶよう変更）
+  し、`equalp`を新規追加（`Cons`再帰・`Str`/`Char`は大小無視・数値の
+  型跨ぎ比較`Int`⇔`Float`は変換プリミティブが無いため意図的に未対応の
+  まま`eql`にフォールバック——スコープを明示的に絞った）。
+- `case`マクロ（`prelude.rs`）: `eq`ではなく`equal`を使うよう変更。
+  ANSI CLの`case`は`eql`基準（文字列キーはほぼ一致しない）だが、本処理系
+  はもともと文字列キーが内容一致してほしいという設計意図があったため、
+  意図的に`equal`基準を採用——CL本来の`case`とは異なる、明示的な拡張と
+  して文書化した。
+
+**テスト**: `tests/prelude_test.rs`に`eql`セクション新設（bool/i32/char/
+`Sexpr`atomの`eql`、`Str`の`eq`/`eql`が同一性のままであることの確認）、
+`equal`セクション拡張（`i32`の`equal`、型不一致の`equal`は依然型エラー）、
+`equalp`セクション新設（`Str`/`char`の大小無視、`Sexpr`再帰）、`case`が
+文字列キーで実際に動くことを確認する新規テスト。`tests/string_test.rs`の
+既存`eq`テストを同一性ベースに修正し`equal`/`equalp`テストを追加。
+`tests/vector_test.rs`/`tests/compile_test.rs`の`RtValue::Str`関連ヘルパも
+`Rc<str>`に追従。全体テスト（`cargo test`、workspace全体）green、
+clippy警告0。

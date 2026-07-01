@@ -111,8 +111,57 @@ fn eq_on_char() {
 }
 
 #[test]
-fn eq_on_string() {
-    assert_eq!(eval_ok(r#"(eq "a" "a")"#), RtValue::Bool(true));
+fn eq_on_string_is_identity_not_content() {
+    // Two separately-evaluated string literals with equal content are *not*
+    // `eq` — real CL never does structural string comparison under `eq`
+    // (or `eql` — see the `eql`/`equal` sections below). `RtValue::Str`'s
+    // `Rc<str>` is what makes this distinction meaningful at all (a plain
+    // owned `String`, re-cloned on every read, would have no stable
+    // identity to test).
+    assert_eq!(eval_ok(r#"(eq "a" "a")"#), RtValue::Bool(false));
+}
+
+#[test]
+fn eq_on_string_self_is_true() {
+    // The same binding read twice stays the same object — reading a
+    // variable clones the `Rc` pointer, not the string buffer.
+    assert_eq!(eval_ok(r#"(let ((s "a")) (eq s s))"#), RtValue::Bool(true));
+}
+
+// ---- eql: identity, plus same-type/value numbers and characters ---------------
+// (see `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section) — every
+// type here is an immediate scalar except `Str`/`Sexpr`, so `eql` coincides
+// with `eq` throughout; it's still tested explicitly per type so a future
+// divergence (e.g. a boxed numeric representation) has a clear regression
+// signal.
+
+#[test]
+fn eql_on_bool() {
+    assert_eq!(eval_ok("(eql true true)"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(eql true false)"), RtValue::Bool(false));
+}
+
+#[test]
+fn eql_on_i32() {
+    assert_eq!(eval_ok("(eql 1 1)"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(eql 1 2)"), RtValue::Bool(false));
+}
+
+#[test]
+fn eql_on_char() {
+    assert_eq!(eval_ok(r"(eql #\a #\a)"), RtValue::Bool(true));
+}
+
+#[test]
+fn eql_on_string_is_identity_not_content() {
+    // `eql` does *not* add structural string comparison beyond `eq` in CL —
+    // only `equal`/`equalp` do.
+    assert_eq!(eval_ok(r#"(eql "a" "a")"#), RtValue::Bool(false));
+}
+
+#[test]
+fn eql_on_sexpr_atoms_compares_by_value() {
+    assert_eq!(eval_ok("(eql (quote a) (quote a))"), RtValue::Bool(true));
 }
 
 #[test]
@@ -202,8 +251,53 @@ fn equal_on_atoms_matches_eq() {
 }
 
 #[test]
-fn equal_requires_matching_sexpr_type() {
-    type_error("(equal 1 2)");
+fn equal_on_i32_compares_by_value() {
+    // `equal` is no longer `Sexpr`-only: it's registered as an instance
+    // method on every scalar type too (`registry::int_assoc` etc.),
+    // specifically so `case` can dispatch uniformly across types including
+    // `string` — see `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp
+    // section.
+    assert_eq!(eval_ok("(equal 1 1)"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(equal 1 2)"), RtValue::Bool(false));
+}
+
+#[test]
+fn equal_rejects_mismatched_types() {
+    // Each type's `equal` still requires both operands to be that same
+    // type — there is no cross-type overload (that's `equalp`'s job, and
+    // even `equalp` only crosses `Sexpr`'s own dynamic tags, not bare
+    // statically-typed `i32`/`Str`).
+    type_error(r#"(equal 1 "a")"#);
+}
+
+// ---- equalp: like equal, but case-insensitive strings/chars -------------------
+
+#[test]
+fn equalp_on_string_ignores_ascii_case() {
+    assert_eq!(eval_ok(r#"(equalp "ABC" "abc")"#), RtValue::Bool(true));
+    assert_eq!(eval_ok(r#"(equalp "abc" "abd")"#), RtValue::Bool(false));
+}
+
+#[test]
+fn equalp_on_char_ignores_ascii_case() {
+    assert_eq!(eval_ok(r"(equalp #\A #\a)"), RtValue::Bool(true));
+}
+
+#[test]
+fn equalp_on_i32_compares_by_value() {
+    assert_eq!(eval_ok("(equalp 1 1)"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(equalp 1 2)"), RtValue::Bool(false));
+}
+
+#[test]
+fn equalp_on_sexpr_recurses_with_case_insensitive_strings() {
+    let src = r#"(equalp (quote ("HI")) (quote ("hi")))"#;
+    assert_eq!(eval_ok(src), RtValue::Bool(true));
+}
+
+#[test]
+fn equalp_is_false_for_different_sexpr_lists() {
+    assert_eq!(eval_ok("(equalp (quote (a b c)) (quote (a b d)))"), RtValue::Bool(false));
 }
 
 // ---- step 7b: Sexpr-list library ------------------------------------------------
@@ -721,6 +815,18 @@ fn case_falls_through_to_else_when_nothing_matches() {
 #[test]
 fn case_matches_explicitly_quoted_symbol_keys() {
     assert_eq!(eval_ok("(case (quote b) ('a 1) ('b 2) (else 0))"), RtValue::Int(2));
+}
+
+#[test]
+fn case_matches_string_keys_by_content() {
+    // A real capability, not just documented intent (`docs/cl-equivalence-catalog.md`'s
+    // `case` design goal predates this test) — `case`'s expansion uses
+    // `equal`, not `eq`/`eql` (neither does string content comparison in
+    // real CL either — see the eq/eql/equal/equalp section), so a string
+    // key matches by content even though the scrutinee and the key literal
+    // are always separately allocated `Str`s.
+    let src = r#"(case "b" ("a" 1) ("b" 2) (else 0))"#;
+    assert_eq!(eval_ok(src), RtValue::Int(2));
 }
 
 #[test]

@@ -38,7 +38,7 @@ impl HashKey {
             RtValue::Int(n) => Ok(HashKey::Int(*n)),
             RtValue::Bool(b) => Ok(HashKey::Bool(*b)),
             RtValue::Char(c) => Ok(HashKey::Char(*c)),
-            RtValue::Str(s) => Ok(HashKey::Str(s.clone())),
+            RtValue::Str(s) => Ok(HashKey::Str(s.to_string())),
             other => Err(EvalError::Panic(format!("HashTable: unsupported key type {:?}", other))),
         }
     }
@@ -82,7 +82,21 @@ pub enum RtValue {
     Float(f64),
     Bool(bool),
     Char(char),
-    Str(String),
+    /// `Rc<str>`, not a plain owned `String` — this language's `string`
+    /// values are immutable, and cloning a `String` on every variable read
+    /// (the interpreter's ordinary evaluation pattern) would otherwise
+    /// silently deep-copy the buffer each time, leaving no way to observe
+    /// "the same string object" ever again — not even `(let ((s "hi"))
+    /// (eq s s))`, since each read of `s` would hand back an independently
+    /// allocated copy. `Rc::clone` is a pointer/refcount bump instead, so
+    /// two reads of the same binding stay the *same* object, and `eq`'s
+    /// `Rc::ptr_eq` (`eval_builtin_method`'s `"eq"` case for `Str`) can
+    /// give this type genuine CL identity semantics rather than falling
+    /// back to (incorrect) content comparison or a meaningless "always
+    /// false". Content comparison itself now lives under `eql`/`equal`/
+    /// `equalp` instead — see `docs/cl-equivalence-catalog.md`'s eq/eql/
+    /// equal/equalp section.
+    Str(Rc<str>),
     Unit,
     /// A constructor instance: the type's [`Path`], the variant index, and the
     /// evaluated field values.

@@ -129,11 +129,28 @@ pub const SOURCE: &str = r#"
           (car args)
           (list (quote if) (car args) (quote true) (cons (quote or) (cdr args))))))
 
+;; CL's `equal`: `eql` (here, `eq` — the two coincide in this representation,
+;; see `registry::sexpr_assoc`'s doc comment) plus structural recursion into
+;; `Cons` and case-sensitive content comparison for `Str` (`Str::equal`, not
+;; `Str::eq` — two separately-built `Str`s with equal content are never `eq`,
+;; see `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section).
 (defun equal ((a Sexpr) (b Sexpr)) bool
   (match a
     ((Cons a1 a2) (match b ((Cons b1 b2) (and (equal a1 b1) (equal a2 b2))) (_ false)))
-    ((Str s1) (match b ((Str s2) (eq s1 s2)) (_ false)))
+    ((Str s1) (match b ((Str s2) (equal s1 s2)) (_ false)))
     (_ (eq a b))))
+
+;; CL's `equalp`: like `equal`, but `Str`/`Char` fields compare
+;; case-insensitively (`Str::equalp`/`Char::equalp`) — cross-*type* numeric
+;; comparison (e.g. `(Int 1)` vs `(Float 1.0)`), the other real difference
+;; `equalp` has from `equal` in CL, is out of scope here (no `Sexpr`-level
+;; `Int`<->`Float` coercion primitive exists yet).
+(defun equalp ((a Sexpr) (b Sexpr)) bool
+  (match a
+    ((Cons a1 a2) (match b ((Cons b1 b2) (and (equalp a1 b1) (equalp a2 b2))) (_ false)))
+    ((Str s1) (match b ((Str s2) (equalp s1 s2)) (_ false)))
+    ((Char c1) (match b ((Char c2) (equalp c1 c2)) (_ false)))
+    (_ (eql a b))))
 
 (defun length ((lst Sexpr)) i32
   (match lst
@@ -519,13 +536,22 @@ pub const SOURCE: &str = r#"
 ;; (where a symbol key needs an explicit `'sym` — written by the caller,
 ;; same as any other quoted symbol). This means `(case x (1 ...))` works
 ;; directly, but a symbol-keyed clause must be written `(case x ('a ...))`.
+;; Each key is matched via `equal`, not CL's own `eql` — a deliberate,
+;; documented departure (`docs/cl-equivalence-catalog.md`'s eq/eql/equal/
+;; equalp section): ANSI CL's `case` uses `eql`, which never does structural
+;; string comparison, so a string-literal key would (almost) never actually
+;; match in real CL either. This language's `case` is built on `equal`
+;; instead specifically so a `string` key still works by content — the same
+;; design goal that originally motivated giving every scalar type its own
+;; `eq` method (now corrected to real identity; `equal` is the one that
+;; keeps `case` working uniformly across types, `string` included).
 (defmacro case (expr &rest clauses)
   (let ((tmp (gensym)))
     `(let ((,tmp ,expr))
        (cond ,@(map (lambda ((c Sexpr)) Sexpr
                        (if (eq (car c) (quote else))
                            c
-                           (cons (list (quote eq) tmp (car c)) (cdr c))))
+                           (cons (list (quote equal) tmp (car c)) (cdr c))))
                      clauses)))))
 
 ;; `do` (roadmap step 8d, catalog §1.1): `(do ((var1 init1 step1)

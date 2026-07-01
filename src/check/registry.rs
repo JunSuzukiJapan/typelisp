@@ -496,32 +496,42 @@ fn sexpr_def() -> AdtDef {
     }
 }
 
-/// `eq`: identity/structural-scalar equality on `Sexpr`, matching CL's `eq`
-/// for the cases this representation can express cheaply — comparing the
-/// underlying `mem::Value` directly (`crate::eval::interp`'s
-/// `eval_builtin_method`) means two `Cons` cells are equal only if they're
-/// the *same* heap cell (true `eq` identity), while two scalar `Sexpr`s
-/// (`Int`/`Char`/`Sym`/...) compare by value — `Sym` is still correct under
-/// `eq` since symbols are always interned (same name -> same id). The one
-/// case this can't get right structurally is two separately-built `Str`
-/// `Sexpr`s with equal content (different heap allocations, not `eq` in
-/// CL either) — `equal` (the prelude's recursive structural comparison)
-/// special-cases `Str` to compare content instead.
+/// `eq`/`eql`: true CL identity on `Sexpr` — comparing the underlying
+/// `mem::Value` directly (`crate::eval::interp`'s `eval_builtin_method`)
+/// means two `Cons` cells or two `Str`s are equal only if they're the *same*
+/// heap cell/slot (real identity), while immediate scalars (`Int`/`Char`/
+/// `Bool`/`Sym`/...) compare by value — correct under `eq` for these since
+/// there is no separate boxed representation to diverge from (`Sym` in
+/// particular is correct since symbols are always interned: same name ->
+/// same id). `eql` is registered as a plain alias of `eq` here: CL's `eql`
+/// only adds same-type/value number and character comparisons beyond `eq`'s
+/// identity, and every immediate scalar in this representation already
+/// satisfies that trivially — the two predicates only diverge once a boxed
+/// numeric representation exists (not yet the case here). Two separately
+/// built `Str` `Sexpr`s with equal content are correctly *not* `eq`/`eql` —
+/// see [`string_assoc`]'s own doc comment and `docs/cl-equivalence-catalog.md`'s
+/// eq/eql/equal/equalp section — `equal`/`equalp` (the prelude's recursive
+/// structural comparisons) special-case `Str` to compare content instead.
 fn sexpr_assoc() -> HashMap<String, AssocFn> {
     let mut m = HashMap::new();
-    m.insert(
-        "eq".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
-    );
+    let eq_fn = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
+    m.insert("eq".to_string(), eq_fn());
+    m.insert("eql".to_string(), eq_fn());
     m
 }
 
 fn bool_assoc() -> HashMap<String, AssocFn> {
     let mut m = HashMap::new();
-    m.insert(
-        "eq".to_string(),
-        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bool, Type::Bool], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
-    );
+    // `bool` has exactly two values, both immediate — `eq`/`eql`/`equal`/
+    // `equalp` can never diverge for it (no case-folding, no cross-type
+    // comparison, no structure to recurse into), so all four alias the same
+    // value comparison. See `docs/cl-equivalence-catalog.md`'s eq/eql/equal/
+    // equalp section for why every one of these four is still registered
+    // explicitly rather than leaving `eql`/`equal`/`equalp` undefined.
+    let eq_fn = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bool, Type::Bool], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
+    for name in ["eq", "eql", "equal", "equalp"] {
+        m.insert(name.to_string(), eq_fn());
+    }
     m
 }
 
@@ -990,6 +1000,18 @@ fn llvm_value_def() -> AdtDef {
 /// `car`/`cdr` on a non-`Cons` `Sexpr`. `upcase`/`downcase` are ASCII-only
 /// (`str::to_ascii_uppercase`/`lowercase`), avoiding Unicode case mappings
 /// that can change a string's length (e.g. German `ß` -> `SS`).
+///
+/// `eq`/`eql`/`equal`/`equalp` (see `docs/cl-equivalence-catalog.md`'s
+/// eq/eql/equal/equalp section for the full rationale): `eq`/`eql` are true
+/// CL identity (`Rc::ptr_eq` on `RtValue::Str`'s underlying `Rc<str>` —
+/// see that variant's own doc comment for why `Rc`, not a plain `String`, is
+/// what makes identity meaningful here at all); `eql` doesn't add anything
+/// beyond `eq` for strings in real CL either (it only extends numbers/
+/// characters), so it's a plain alias. Content comparison — what a naive
+/// reading of "string equality" usually means — is `equal` (case-sensitive)
+/// and `equalp` (case-insensitive, ASCII-only for the same reason
+/// `upcase`/`downcase` are) instead; two separately-built equal-content
+/// `Str`s are correctly *not* `eq`/`eql`.
 fn string_assoc() -> HashMap<String, AssocFn> {
     let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
@@ -999,8 +1021,10 @@ fn string_assoc() -> HashMap<String, AssocFn> {
     m.insert("ref".to_string(), method(vec![Type::Str, Type::I32], Type::Char));
     m.insert("substring".to_string(), method(vec![Type::Str, Type::I32, Type::I32], Type::Str));
     m.insert("append".to_string(), method(vec![Type::Str, Type::Str], Type::Str));
-    m.insert("eq".to_string(), method(vec![Type::Str, Type::Str], Type::Bool));
     m.insert("lt".to_string(), method(vec![Type::Str, Type::Str], Type::Bool));
+    for name in ["eq", "eql", "equal", "equalp"] {
+        m.insert(name.to_string(), method(vec![Type::Str, Type::Str], Type::Bool));
+    }
     m
 }
 
@@ -1009,15 +1033,23 @@ fn string_assoc() -> HashMap<String, AssocFn> {
 /// reason as `string_assoc`'s (a non-ASCII char's case mapping isn't
 /// necessarily a single char). `alphap`/`digitp` classify ASCII letters/
 /// digits only (CL's `alpha-char-p`/`digit-char-p` without a radix).
+///
+/// `eq`/`eql`/`equal` all coincide (plain value comparison) — a `char` is an
+/// immediate scalar here, so there's no separate identity to diverge from,
+/// and CL's `equal` on characters is defined to be the same as `eql` anyway.
+/// `equalp` is the one that differs for real: CL requires case-insensitive
+/// comparison there (`(equalp #\A #\a)` is true).
 fn char_assoc() -> HashMap<String, AssocFn> {
     let method = |params: Vec<Type>, ret: Type| AssocFn { sig: FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
     m.insert("upcase".to_string(), method(vec![Type::Char], Type::Char));
     m.insert("downcase".to_string(), method(vec![Type::Char], Type::Char));
-    m.insert("eq".to_string(), method(vec![Type::Char, Type::Char], Type::Bool));
     m.insert("lt".to_string(), method(vec![Type::Char, Type::Char], Type::Bool));
     m.insert("alphap".to_string(), method(vec![Type::Char], Type::Bool));
     m.insert("digitp".to_string(), method(vec![Type::Char], Type::Bool));
+    for name in ["eq", "eql", "equal", "equalp"] {
+        m.insert(name.to_string(), method(vec![Type::Char, Type::Char], Type::Bool));
+    }
     m
 }
 
@@ -1038,10 +1070,19 @@ fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
     }
-    // `eq` is an alias for `=` here (no identity/value distinction for a
-    // scalar) — registered separately so `case`/`equal` can call `eq`
-    // uniformly across every type (see `cl-equivalence-catalog.md` §2.1).
-    m.insert("eq".to_string(), cmp());
+    // `eq`/`eql`/`equal`/`equalp` are all aliases for `=` here — a fixnum has
+    // no separate identity to diverge from value, `eql` doesn't add anything
+    // for same-type numbers beyond `eq` in real CL either, `equal` on
+    // numbers is defined to be the same as `eql`, and `equalp`'s one real
+    // difference (cross-*type* numeric comparison, e.g. `i32` vs `f64`) can
+    // never be reached here — the checker requires both operands to share
+    // this exact `ty`, so there is no other type for it to differ from.
+    // Registered under all four names anyway so `case`/`equal`/`equalp`
+    // can call any of them uniformly across every type (see
+    // `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section).
+    for name in ["eq", "eql", "equal", "equalp"] {
+        m.insert(name.to_string(), cmp());
+    }
     m
 }
 
@@ -1065,8 +1106,12 @@ fn float_assoc() -> HashMap<String, AssocFn> {
     for op in ["sqrt", "floor", "ceiling", "round", "truncate"] {
         m.insert(op.to_string(), unary());
     }
-    // See `int_assoc`'s `eq` comment — same alias-for-`=` rationale.
-    m.insert("eq".to_string(), cmp());
+    // See `int_assoc`'s eq/eql/equal/equalp comment — same alias-for-`=`
+    // rationale (cross-type numeric `equalp`, e.g. `f64` vs `i32`, is
+    // likewise unreachable: the checker requires both operands to be `f64`).
+    for name in ["eq", "eql", "equal", "equalp"] {
+        m.insert(name.to_string(), cmp());
+    }
     m
 }
 

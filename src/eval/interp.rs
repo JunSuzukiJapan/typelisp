@@ -203,7 +203,7 @@ impl Interp {
             Expr::Float(f) => Ok(RtValue::Float(*f)),
             Expr::Bool(b) => Ok(RtValue::Bool(*b)),
             Expr::Char(c) => Ok(RtValue::Char(*c)),
-            Expr::Str(s) => Ok(RtValue::Str(s.clone())),
+            Expr::Str(s) => Ok(RtValue::Str(s.as_str().into())),
             Expr::Unit => Ok(RtValue::Unit),
             Expr::Var(n) => env_get(env, n)
                 .map(|s| s.borrow().clone())
@@ -477,7 +477,7 @@ impl Interp {
                 Err(EvalError::Return(Box::new(v)))
             }
             Expr::Panic(msg) => match self.eval(heap, msg, env)? {
-                RtValue::Str(s) => Err(EvalError::Panic(s)),
+                RtValue::Str(s) => Err(EvalError::Panic(s.to_string())),
                 _ => Err(EvalError::Panic(String::new())),
             },
             Expr::Quote(qs) => {
@@ -746,7 +746,7 @@ impl Interp {
             &compiler_body,
             vec![
                 RtValue::LlvmModule(module),
-                RtValue::Str(internal_name.to_string()),
+                RtValue::Str(internal_name.into()),
                 RtValue::Sexpr(param_list),
                 RtValue::Sexpr(body_sexpr),
             ],
@@ -1256,7 +1256,7 @@ fn rt_bool(v: &RtValue) -> Result<bool, EvalError> {
 
 fn rt_str(v: RtValue) -> Result<String, EvalError> {
     match v {
-        RtValue::Str(s) => Ok(s),
+        RtValue::Str(s) => Ok(s.to_string()),
         _ => Err(EvalError::Internal("sexpr: expected a str field".into())),
     }
 }
@@ -1434,14 +1434,22 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
     }
     if *type_name == Path::root("string") {
         return match method {
-            "upcase" => Some(expect_str(&args[0]).map(|s| RtValue::Str(s.to_ascii_uppercase()))),
-            "downcase" => Some(expect_str(&args[0]).map(|s| RtValue::Str(s.to_ascii_lowercase()))),
+            "upcase" => Some(expect_str(&args[0]).map(|s| RtValue::Str(s.to_ascii_uppercase().into()))),
+            "downcase" => Some(expect_str(&args[0]).map(|s| RtValue::Str(s.to_ascii_lowercase().into()))),
             "length" => Some(string_length(args)),
             "ref" => Some(string_ref(args)),
             "substring" => Some(string_substring(args)),
             "append" => Some(string_append(args)),
-            "eq" => Some(string_eq(args)),
             "lt" => Some(string_lt(args)),
+            // `eq`/`eql`: true identity (`Rc::ptr_eq` — see `RtValue::Str`'s
+            // doc comment). `equal`/`equalp`: content comparison, the
+            // (case-sensitive/-insensitive) CL predicates a naive "string
+            // equality" actually means — see `registry::string_assoc`'s doc
+            // comment and `docs/cl-equivalence-catalog.md`'s eq/eql/equal/
+            // equalp section.
+            "eq" | "eql" => Some(string_identity_eq(args)),
+            "equal" => Some(string_content_eq(args)),
+            "equalp" => Some(string_content_eqp(args)),
             _ => None,
         };
     }
@@ -1449,10 +1457,14 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
         return match method {
             "upcase" => Some(expect_char(&args[0]).map(|c| RtValue::Char(c.to_ascii_uppercase()))),
             "downcase" => Some(expect_char(&args[0]).map(|c| RtValue::Char(c.to_ascii_lowercase()))),
-            "eq" => Some(char_eq(args)),
             "lt" => Some(char_lt(args)),
             "alphap" => Some(expect_char(&args[0]).map(|c| RtValue::Bool(c.is_ascii_alphabetic()))),
             "digitp" => Some(expect_char(&args[0]).map(|c| RtValue::Bool(c.is_ascii_digit()))),
+            // `eq`/`eql`/`equal` all coincide (immediate scalar, and CL's
+            // own `equal` on characters is defined to be `eql`); `equalp`
+            // is case-insensitive (see `registry::char_assoc`'s doc comment).
+            "eq" | "eql" | "equal" => Some(char_eq(args)),
+            "equalp" => Some(char_eqp(args)),
             _ => None,
         };
     }
@@ -1461,8 +1473,11 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
                 eval_int_builtin(method, args)
             }
-            // `eq` is registered as an alias for `=` (see `registry::int_assoc`).
-            "eq" => eval_int_builtin("=", args),
+            // `eq`/`eql`/`equal`/`equalp` are all registered as aliases for
+            // `=` (see `registry::int_assoc`'s doc comment for why every one
+            // of these four is meaningful to register even though none can
+            // diverge from `=` here).
+            "eq" | "eql" | "equal" | "equalp" => eval_int_builtin("=", args),
             _ => None,
         };
     }
@@ -1471,7 +1486,7 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
                 eval_float_builtin(method, args)
             }
-            "eq" => eval_float_builtin("=", args),
+            "eq" | "eql" | "equal" | "equalp" => eval_float_builtin("=", args),
             "expt" => Some(float_expt(args)),
             "sqrt" => Some(float_unary(args, f64::sqrt)),
             "floor" => Some(float_unary(args, f64::floor)),
@@ -1483,13 +1498,19 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
     }
     if *type_name == Path::root("bool") {
         return match method {
-            "eq" => Some(bool_eq(args)),
+            "eq" | "eql" | "equal" | "equalp" => Some(bool_eq(args)),
             _ => None,
         };
     }
     if *type_name == Path::root("sexpr") {
         return match method {
-            "eq" => Some(sexpr_eq(args)),
+            // `eql` is a plain alias of `eq` here — see `registry::sexpr_assoc`'s
+            // doc comment (they only diverge once a boxed numeric
+            // representation exists, which this implementation doesn't have
+            // yet). `equal`/`equalp` are `prelude.rs` free functions
+            // (structural recursion via `match`), not registered here, the
+            // same as `length`/`append` for `Sexpr` lists.
+            "eq" | "eql" => Some(sexpr_eq(args)),
             _ => None,
         };
     }
@@ -1769,7 +1790,7 @@ fn llvm_module_verify(args: &[RtValue]) -> Result<RtValue, EvalError> {
 
 fn llvm_module_to_string(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let module = expect_llvm_module(&args[0])?;
-    Ok(RtValue::Str(module.borrow().print_to_string().to_string()))
+    Ok(RtValue::Str(module.borrow().print_to_string().to_string().into()))
 }
 
 /// Looks up an already-`add-function`-declared `llvm-function` by name —
@@ -2716,7 +2737,7 @@ fn checked_index(i: i64, len: usize) -> Option<usize> {
 
 fn expect_str(v: &RtValue) -> Result<&str, EvalError> {
     match v {
-        RtValue::Str(s) => Ok(s.as_str()),
+        RtValue::Str(s) => Ok(s.as_ref()),
         other => Err(EvalError::Internal(format!("expected a Str, got {:?}", other))),
     }
 }
@@ -2749,15 +2770,38 @@ fn string_substring(args: &[RtValue]) -> Result<RtValue, EvalError> {
     if start < 0 || end > len || start > end {
         return Err(EvalError::Panic(format!("substring: invalid range {}..{} (length {})", start, end, len)));
     }
-    Ok(RtValue::Str(chars[start as usize..end as usize].iter().collect()))
+    let s: String = chars[start as usize..end as usize].iter().collect();
+    Ok(RtValue::Str(s.into()))
 }
 
 fn string_append(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    Ok(RtValue::Str(format!("{}{}", expect_str(&args[0])?, expect_str(&args[1])?)))
+    Ok(RtValue::Str(format!("{}{}", expect_str(&args[0])?, expect_str(&args[1])?).into()))
 }
 
-fn string_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
+/// True CL identity for `string` — same underlying `Rc<str>` allocation, not
+/// merely equal content (that's [`string_content_eq`]/[`string_content_eqp`]
+/// instead — CL's `eq`/`eql` never do structural string comparison, only
+/// `equal`/`equalp` do). See `RtValue::Str`'s doc comment for why `Rc` is
+/// what makes this meaningful at all (a plain owned `String`, re-cloned on
+/// every variable read, would have no stable identity to compare).
+fn string_identity_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    match (&args[0], &args[1]) {
+        (RtValue::Str(a), RtValue::Str(b)) => Ok(RtValue::Bool(Rc::ptr_eq(a, b))),
+        (other0, other1) => Err(EvalError::Internal(format!("string::eq: expected two Str arguments, got {:?}/{:?}", other0, other1))),
+    }
+}
+
+/// Content equality (case-sensitive) — CL's `equal`/`string=`, *not* `eq`
+/// (identity — see `RtValue::Str`'s doc comment and `docs/cl-equivalence-catalog.md`'s
+/// eq/eql/equal/equalp section). Named for what it computes, not for which
+/// builtin method currently calls it.
+fn string_content_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Bool(expect_str(&args[0])? == expect_str(&args[1])?))
+}
+
+/// Content equality ignoring ASCII case — CL's `equalp` for strings.
+fn string_content_eqp(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bool(expect_str(&args[0])?.eq_ignore_ascii_case(expect_str(&args[1])?)))
 }
 
 fn string_lt(args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -2770,6 +2814,11 @@ fn char_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
 
 fn char_lt(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Bool(expect_char(&args[0])? < expect_char(&args[1])?))
+}
+
+/// CL's `equalp` for `char` — case-insensitive (`(equalp #\A #\a)` is true).
+fn char_eqp(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bool(expect_char(&args[0])?.eq_ignore_ascii_case(&expect_char(&args[1])?)))
 }
 
 fn expect_bool(v: &RtValue) -> Result<bool, EvalError> {
@@ -2845,10 +2894,10 @@ fn match_sexpr_ctor(heap: &Heap, variant: usize, args: &[Pattern], v: Value) -> 
         (SEXPR_CHAR, Value::Char(c)) => match_pattern(heap, &args[0], &RtValue::Char(c)),
         (SEXPR_BOOL, Value::Bool(b)) => match_pattern(heap, &args[0], &RtValue::Bool(b)),
         (SEXPR_SYM, Value::Symbol(id)) => {
-            match_pattern(heap, &args[0], &RtValue::Str(heap.symbol_name(id).to_string()))
+            match_pattern(heap, &args[0], &RtValue::Str(heap.symbol_name(id).into()))
         }
         (SEXPR_STR, Value::Str(id)) => {
-            match_pattern(heap, &args[0], &RtValue::Str(heap.string(id).to_string()))
+            match_pattern(heap, &args[0], &RtValue::Str(heap.string(id).into()))
         }
         (SEXPR_CONS, Value::Cons(_)) => {
             let car = heap.car(v).ok()?;

@@ -95,7 +95,7 @@ fn run_with_compiler_and_prelude_and_capacity(src: &str, capacity: usize) -> Res
 
 fn expect_str(v: RtValue) -> String {
     match v {
-        RtValue::Str(s) => s,
+        RtValue::Str(s) => s.to_string(),
         other => panic!("expected a Str, got {:?}", other),
     }
 }
@@ -2064,8 +2064,15 @@ fn compile_dispatches_a_function_that_constructs_and_matches_a_sexpr_str_to_nati
 /// *separately* constructed strings — `content` comes from matching a fresh
 /// `(Str "hi")`, the right-hand side of `eq` is its own independent literal,
 /// so this only passes if `rt_str_eq` compares content (`Heap::string`)
-/// rather than the two `StrId`s' identity. `append` similarly builds a
-/// brand-new string at run time (not something `compile-str`'s
+/// rather than the two `StrId`s' identity. Note this is *not* CL's own
+/// `eq` (identity-only — real CL content comparison for strings is `equal`)
+/// — `docs/cl-equivalence-catalog.md` §2.1 deliberately repurposes the name
+/// `eq` as a per-type value-equality hook so `case` can dispatch uniformly
+/// regardless of receiver type, predating this stage; `registry::sexpr_assoc`'s
+/// own `eq` (for an actual `Sexpr::Str`, as opposed to this extracted
+/// `Type::Str` field) keeps true CL identity semantics instead, so the two
+/// `eq`s intentionally disagree on this exact case. `append` similarly
+/// builds a brand-new string at run time (not something `compile-str`'s
 /// compile-time character embedding could produce) and `length`s the
 /// result, exercising `rt_str_append`'s own fresh allocation.
 #[test]

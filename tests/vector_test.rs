@@ -106,7 +106,7 @@ fn vector_holds_strings_too() {
                  (push v \"a\")
                  (push v \"b\")
                  (get v 1))";
-    assert_eq!(eval_ok(src), RtValue::Str("b".to_string()));
+    assert_eq!(eval_ok(src), RtValue::Str("b".into()));
 }
 
 #[test]

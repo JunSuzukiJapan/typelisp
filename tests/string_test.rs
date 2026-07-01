@@ -126,9 +126,24 @@ fn string_append_concatenates() {
 }
 
 #[test]
-fn string_eq_compares_value_equality() {
-    assert_eq!(eval_ok(r#"(eq "abc" "abc")"#), RtValue::Bool(true));
-    assert_eq!(eval_ok(r#"(eq "abc" "abd")"#), RtValue::Bool(false));
+fn string_eq_is_identity_not_value_equality() {
+    // `eq` is real CL identity (see `RtValue::Str`'s doc comment and
+    // `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section) — two
+    // separately-evaluated literals with equal content are not `eq`.
+    // Content comparison is `equal`/`equalp` instead (below).
+    assert_eq!(eval_ok(r#"(eq "abc" "abc")"#), RtValue::Bool(false));
+}
+
+#[test]
+fn string_equal_compares_value_equality() {
+    assert_eq!(eval_ok(r#"(equal "abc" "abc")"#), RtValue::Bool(true));
+    assert_eq!(eval_ok(r#"(equal "abc" "abd")"#), RtValue::Bool(false));
+}
+
+#[test]
+fn string_equalp_ignores_ascii_case() {
+    assert_eq!(eval_ok(r#"(equalp "ABC" "abc")"#), RtValue::Bool(true));
+    assert_eq!(eval_ok(r#"(equalp "abc" "abd")"#), RtValue::Bool(false));
 }
 
 #[test]
@@ -198,10 +213,12 @@ fn char_only_method_on_a_string_is_a_type_error() {
 
 #[test]
 fn eq_dispatches_separately_per_receiver_type() {
-    // `string`'s and `char`'s `eq` live in separate per-type `assoc` tables
-    // (see `check_instance_method`'s dispatch on the receiver's static
-    // type) — calling both in the same program is a regression check that
-    // they don't collide.
-    let src = r#"(defun f () bool (and (eq "x" "x") (eq #\x #\x))) (f)"#;
+    // `string`'s and `char`'s comparison methods live in separate per-type
+    // `assoc` tables (see `check_instance_method`'s dispatch on the
+    // receiver's static type) — calling both in the same program is a
+    // regression check that they don't collide. Uses `equal` for the
+    // string half (`eq` on `Str` is identity, not content — see
+    // `string_eq_is_identity_not_value_equality`).
+    let src = r#"(defun f () bool (and (equal "x" "x") (eq #\x #\x))) (f)"#;
     assert_eq!(eval_ok_with_prelude(src), RtValue::Bool(true));
 }
