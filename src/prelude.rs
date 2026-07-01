@@ -141,15 +141,16 @@ pub const SOURCE: &str = r#"
     (_ (eq a b))))
 
 ;; CL's `equalp`: like `equal`, but `Str`/`Char` fields compare
-;; case-insensitively (`Str::equalp`/`Char::equalp`) — cross-*type* numeric
-;; comparison (e.g. `(Int 1)` vs `(Float 1.0)`), the other real difference
-;; `equalp` has from `equal` in CL, is out of scope here (no `Sexpr`-level
-;; `Int`<->`Float` coercion primitive exists yet).
+;; case-insensitively (`Str::equalp`/`Char::equalp`), and numbers compare by
+;; value across the `Int`/`Float` type boundary (e.g. `(Int 1)` vs `(Float
+;; 1.0)` is true) via `int->float` (`registry::int_assoc`).
 (defun equalp ((a Sexpr) (b Sexpr)) bool
   (match a
     ((Cons a1 a2) (match b ((Cons b1 b2) (and (equalp a1 b1) (equalp a2 b2))) (_ false)))
     ((Str s1) (match b ((Str s2) (equalp s1 s2)) (_ false)))
     ((Char c1) (match b ((Char c2) (equalp c1 c2)) (_ false)))
+    ((Int a1) (match b ((Float b1) (= (int->float a1) b1)) (_ (eql a b))))
+    ((Float a1) (match b ((Int b1) (= a1 (int->float b1))) (_ (eql a b))))
     (_ (eql a b))))
 
 (defun length ((lst Sexpr)) i32

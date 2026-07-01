@@ -1083,6 +1083,13 @@ fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), cmp());
     }
+    // `int->float`: widening numeric conversion (`docs/language-design.md`
+    // §4.1's planned conversion catalog) — registered for both `i32`/`i64`
+    // widths since each gets its own `int_assoc` call. This is also what
+    // `equalp`'s `Sexpr` `Int`<->`Float` cross-type comparison
+    // (`prelude.rs`) needed and previously lacked (see
+    // `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section).
+    m.insert("int->float".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::F64, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m
 }
 
@@ -1112,6 +1119,13 @@ fn float_assoc() -> HashMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), cmp());
     }
+    // `float->int`: narrowing numeric conversion, truncating toward zero
+    // (Rust's `as i64`, same as CL's `truncate`) — the other half of
+    // `int_assoc`'s `int->float`. Returns `i32` (this language's default
+    // integer type, `Checker::int_lit_ty`'s fallback) even though the
+    // runtime value is a uniform `RtValue::Int(i64)` either way (see
+    // `eval_int_builtin`'s doc comment).
+    m.insert("float->int".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::I32, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m
 }
 

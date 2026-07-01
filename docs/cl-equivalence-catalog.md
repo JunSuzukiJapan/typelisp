@@ -239,7 +239,7 @@ CL仕様上は`equal`の役割だった。CLの`eq`/`eql`/`equal`/`equalp`の正
 | `Str` | 真の同一性（`Rc::ptr_eq`） | 内容比較（大小区別あり） | 内容比較（大小区別なし） |
 | `char` | 値比較（immediate） | `eq`と同じ | 大小区別なし |
 | `i32`/`i64`/`f64`/`bool` | 値比較 | `eq`と同じ | `eq`と同じ（型跨ぎ数値比較は静的型の時点で到達不能） |
-| `Sexpr` | 同一性（既存のまま） | `prelude.rs`の再帰構造比較（`Str`は内容比較を呼ぶ） | 同上+大小無視+`Cons`/`Char`再帰（`Int`⇔`Float`型跨ぎ比較は変換プリミティブが無く未対応） |
+| `Sexpr` | 同一性（既存のまま） | `prelude.rs`の再帰構造比較（`Str`は内容比較を呼ぶ） | 同上+大小無視+`Cons`/`Char`再帰+`Int`⇔`Float`型跨ぎ比較（`int->float`変換プリミティブ経由、2026-07-01実装） |
 
 **`RtValue::Str`を`String`から`Rc<str>`に変更**（`src/eval/value.rs`）: プレーンな`string`型の値は
 変数を読むたびに`clone`されるため、`String`のままでは「同じオブジェクト」という概念自体が存在せず

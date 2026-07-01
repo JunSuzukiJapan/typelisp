@@ -300,6 +300,40 @@ fn equalp_is_false_for_different_sexpr_lists() {
     assert_eq!(eval_ok("(equalp (quote (a b c)) (quote (a b d)))"), RtValue::Bool(false));
 }
 
+// ---- equalp: Int<->Float cross-type numeric comparison, via `int->float` --------
+// (`docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section: this used to
+// fall back to `eql`, which is false across types even at matching value.)
+
+#[test]
+fn equalp_on_sexpr_crosses_int_and_float() {
+    assert_eq!(eval_ok("(equalp (quote 1) (quote 1.0))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(equalp (quote 1.0) (quote 1))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(equalp (quote 1) (quote 2.0))"), RtValue::Bool(false));
+}
+
+#[test]
+fn equalp_on_sexpr_still_rejects_other_mismatched_types() {
+    assert_eq!(eval_ok(r#"(equalp (quote 1) (quote "1"))"#), RtValue::Bool(false));
+}
+
+// ---- int->float / float->int: numeric conversion primitives --------------------
+
+#[test]
+fn int_to_float_converts_i32() {
+    assert_eq!(eval_ok("(int->float 3)"), RtValue::Float(3.0));
+}
+
+#[test]
+fn int_to_float_converts_i64() {
+    assert_eq!(eval_ok("(int->float (the i64 3))"), RtValue::Float(3.0));
+}
+
+#[test]
+fn float_to_int_truncates_toward_zero() {
+    assert_eq!(eval_ok("(float->int 3.9)"), RtValue::Int(3));
+    assert_eq!(eval_ok("(float->int -3.9)"), RtValue::Int(-3));
+}
+
 // ---- step 7b: Sexpr-list library ------------------------------------------------
 
 fn eval_true(src: &str) {

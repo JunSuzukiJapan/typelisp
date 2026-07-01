@@ -2354,3 +2354,33 @@ Pythonの正規表現一括置換（`\(eq (\S+) "` → `\(equal \1 "`）で`equa
 `tests/vector_test.rs`/`tests/compile_test.rs`の`RtValue::Str`関連ヘルパも
 `Rc<str>`に追従。全体テスト（`cargo test`、workspace全体）green、
 clippy警告0。
+
+## `int->float`/`float->int`変換プリミティブを追加（2026-07-01）
+
+前節の`equalp`再設計で「`Int`⇔`Float`型跨ぎ比較は変換プリミティブが無いため
+未対応」として明示的にスコープ外にした残課題を解消。`docs/language-design.md`
+§4.1の関数カタログに元々`int->float float->int`として名前だけ予約されていた
+（実装は無し）ので、その名前をそのまま採用した。
+
+**実装**: `registry::int_assoc`（`i32`/`i64`共通、幅ごとに別々に呼ばれるため
+両方に`int->float: (fn (iN) f64)`が乗る）と`registry::float_assoc`に
+`float->int: (fn (f64) i32)`をそれぞれ追加。どちらも他の算術/比較演算子と
+同じ「レシーバ型のinstanceメソッド」として登録——`(int->float x)`という
+ふつうの関数呼び出し構文のまま、`Checker::try_instance_method`が第一引数の
+静的型で自動的にディスパッチする（`+`/`floor`等と同じ仕組み、新規の呼び出し
+構文は不要）。実行時本体は`eval::interp`に`int_to_float`/`float_to_int`を
+新設（`RtValue::Int(i64) as f64` / `RtValue::Float(f64) as i64`——`i32`/`i64`
+は実行時には常に`RtValue::Int(i64)`に統一されているため片方の実装で両幅を
+カバーする、`eval_int_builtin`と同じ前提）。`float->int`は0方向丸め
+（Rustの`as i64`、CLの`truncate`と同じ向き）。
+
+**`equalp`側の追従**（`prelude.rs`）: `Sexpr`の`Int`/`Float`分岐をそれぞれ
+明示的に追加し、相手が逆の数値タグならその内側だけ`int->float`で揃えて`=`、
+それ以外（同タグ含む）は既存の`eql`にフォールバックする形に変更——`Cons`/
+`Str`/`Char`の既存分岐と同じ「自分の分岐で相手をmatchし直す」形にそろえた。
+
+**テスト**: `tests/prelude_test.rs`に`equalp`のInt⇔Float相互変換テスト
+（`(quote 1)`⇔`(quote 1.0)`双方向、値が違えばfalse）、他型とのequalpが
+依然falseのままであることの確認、`int->float`/`float->int`単体テスト
+（i32/i64双方からの変換、負数の0方向丸め）を追加。全体テスト
+（`./scripts/with-llvm-env.sh cargo test`、workspace全体）green。

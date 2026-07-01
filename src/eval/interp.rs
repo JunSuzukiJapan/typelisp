@@ -1320,6 +1320,26 @@ fn expect_float(v: &RtValue) -> Result<f64, EvalError> {
     }
 }
 
+/// `int->float` (`registry::int_assoc`): widen an `i32`/`i64` to `f64`. Both
+/// widths share `RtValue::Int(i64)` at runtime (see `eval_int_builtin`'s doc
+/// comment), so one implementation covers both.
+fn int_to_float(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    match args.first() {
+        Some(RtValue::Int(n)) => Ok(RtValue::Float(*n as f64)),
+        other => Err(EvalError::Internal(format!("int->float: expected an integer, got {:?}", other))),
+    }
+}
+
+/// `float->int` (`registry::float_assoc`): narrow an `f64` to an integer,
+/// truncating toward zero (Rust's `as i64`, same rounding direction as CL's
+/// `truncate`).
+fn float_to_int(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    match args.first() {
+        Some(RtValue::Float(f)) => Ok(RtValue::Int(*f as i64)),
+        other => Err(EvalError::Internal(format!("float->int: expected a float, got {:?}", other))),
+    }
+}
+
 /// Evaluate a built-in `f64` arithmetic/comparison instance method
 /// (`registry::float_assoc`). Unlike [`eval_int_builtin`], `/`/`mod` never
 /// panic on a zero divisor — IEEE-754 division yields `inf`/`NaN` instead,
@@ -1478,6 +1498,7 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             // of these four is meaningful to register even though none can
             // diverge from `=` here).
             "eq" | "eql" | "equal" | "equalp" => eval_int_builtin("=", args),
+            "int->float" => Some(int_to_float(args)),
             _ => None,
         };
     }
@@ -1493,6 +1514,7 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             "ceiling" => Some(float_unary(args, f64::ceil)),
             "round" => Some(float_unary(args, f64::round)),
             "truncate" => Some(float_unary(args, f64::trunc)),
+            "float->int" => Some(float_to_int(args)),
             _ => None,
         };
     }
