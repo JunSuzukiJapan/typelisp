@@ -1100,7 +1100,7 @@ setf+if+returnによるカウントループ、bare breakのみ（Unit型、ハ�
 既存のまま（移行後も green）。全件green（既存テスト含む全スイート）、
 clippy警告0（`-D warnings`含む）、5回連続実行で安定確認済み。
 
-### Sexpr表現 + Match/Construct/共有Rustライブラリ 実装計画（2026-06-26起案、Stage 0-6/8完了・Stage 7未着手）
+### Sexpr表現 + Match/Construct/共有Rustライブラリ 実装計画（2026-06-26起案、Stage 0-8全完了・2026-07-01）
 
 `not`移行後も`dolist`はcompile不能なまま（前節参照）。原因は`car`/`cdr`が
 Rust専用なこと自体ではなく、**コンパイル済みコードに`Sexpr`値の表現も
@@ -1458,7 +1458,75 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   無効化すると実際に値が壊れて失敗することを確認した上で実装に戻した
   （Stage 4の「rootしないと壊れる」対照テストと同じ実証スタイル）。
   全体テスト3回連続実行で安定、clippy警告0（`--workspace`）。
-- **Stage 7**（優先度低）: 文字列対応。
+- **Stage 7（完了、2026-07-01）**: 文字列対応——`Sexpr::Str`のConstruct/Match/
+  FieldGetと、それを実用にする最小限の`String`組み込みメソッド
+  （`length`/`ref`/`eq`/`append`）のコンパイルに対応。スコープは意図的に
+  `str`（`Sexpr`の`str`バリアント兼`Type::Str`本体）のみに絞り、`sym`
+  バリアント（タグ付き即値が`StrId`ではなく別テーブルの`SymId`であり、
+  名前を文字列化するには別のインターン処理が要る）は既存のまま未対応で
+  残した——両者とも表面上は`Type::Str`型の1フィールドという同じ形をして
+  いるため、既存コードの`sym`/`str`をひとまとめに扱うコメントは誤解を招く
+  として本ステージで書き分けた。
+
+  **設計の要点（タグを剥がさない、という唯一の例外）**: `int`/`char`/`bool`の
+  フィールド抽出（`compile-sexpr-field`）はタグを剥がして裸の`i64`/scalar/
+  0-1にするが、`str`は逆に**タグを残したまま**にする——`typelisp-rt`の
+  `rt_push_sexpr_root`/`rt_pop_sexpr_root`が`decode`（タグ判定）を経由する
+  既存の汎用実装のままで保護できるようにするためで、剥がしてしまうと
+  「ただの整数」と区別がつかなくなり、GC安全性の穴が再発する。この帰結として
+  「裸の`Type::Str`値の表現は`Sexpr::Str`の表現と完全に同一」という単純な
+  等式が成立し、`compile-sexpr-field`のstr抽出は`v`をそのまま返すだけ、
+  `compile-construct-sexpr`のstr構築は`compile-value`の結果をそのまま
+  返すだけで済んだ（追加のビット演算が一切不要）。
+
+  **文字列リテラルの経路**: リテラルの内容はコンパイル時に確定しているが、
+  それをターゲットプログラム（JITなら同一プロセスの生きた`Heap`、AOTなら
+  起動時に`rt_heap_init`で新規に確保される別の`Heap`）に載せる手段が
+  必要——`ast_bridge`の`Expr::Str`翻訳を、事前に`Heap::alloc_string`した
+  `StrId`を埋め込む形から、**1文字ごとの`(int c)`ノードのリスト**
+  `(str (int c0) (int c1) ...)`に変更した。これにより`compiler.rs`の新設
+  `compile-str`は各文字を`compile-value`の既存`int`ハンドラでそのまま
+  `const-i64`化し、`alloca-args`/`store-arg`で配列化して新設の
+  `rt_str_new`（`typelisp-rt`、生の符号なし4バイトコードポイント列から
+  `Heap::alloc_string`し、既にタグ付きの結果を返す）を呼ぶだけで済み、
+  新しいリテラル埋め込み機構（LLVMグローバル文字列定数など）は一切不要
+  だった。空文字列リテラルも`argc=0`の呼び出しとして自然に扱える。
+
+  **`let`/パラメータ束縛の巻き込み**: `ast_bridge::binding_kind`を
+  `Type::Str`も`KIND_SEXPR`（既存の`Sexpr`と同じタグ）に分類するよう拡張
+  ——上記の「裸の`Type::Str`と`Sexpr::Str`は表現が同一」という設計の直接の
+  帰結で、これをしないと`(let ((s (Str "hi"))) (Cons (Int 1) s))`のような
+  コードで`s`のGCルートが一切保護されず、後続の`cons`が誘発する`gc()`で
+  黙って壊れるという実在する穴になる（`Cons`フィールドの一時値は
+  `compile-construct-sexpr`が個別に保護済みだが、`let`束縛はこの拡張なしでは
+  無防備だった）。`compiler.rs`側の`retain-bindings`/`bind-let-values`等は
+  `kind`の値だけを見る既存の汎用実装のままで、変更は`binding_kind`の
+  1箇所のみで済んだ。
+
+  **`String`組み込みメソッド4つ**: `compile-assoc`に`type-name`が
+  `"string"`（`prim_type_path`が`Type::Str`に割り当てる名前——`Sexpr`の
+  `"str"`バリアントタグとは別物なので注意）の分岐を新設し、`length`/`ref`/
+  `eq`/`append`を対応する`rt_str_length`/`rt_str_ref`/`rt_str_eq`/
+  `rt_str_append`（`typelisp-rt`新設4関数）への`alloca-args`/`store-arg`/
+  `build-call`ラップに変換——`i64`/`i32`の算術・比較分岐と全く同じ形。
+  `upcase`/`downcase`/`substring`/`lt`は未対応のまま「unsupported str
+  method」にpanicする（スコープ外、YAGNI）。`Interp::compile_function`の
+  事前ゲート（`self.methods`に無いbuiltinメソッド呼び出しを「未コンパイル」
+  として弾く既存チェック）にも`"string"`を`"i64"`/`"i32"`と同じ除外リストに
+  追加——ここを直さないと`compile-assoc`まで到達する前に「a builtin method
+  with no compiled implementation」で弾かれてしまう。
+
+  **テスト**: `typelisp-rt`に6件（`rt_str_new`往復×2、`rt_str_length`の
+  Unicodeスカラー数カウント、`rt_str_ref`、`rt_str_eq`の内容比較、
+  `rt_str_append`）、`ast_bridge.rs`は`translates_a_str_literal`を新しい
+  `(str (int c)...)`形状に追従させ`translates_an_empty_str_literal`を追加、
+  `compile_test.rs`に4件——`Construct`→`Match`→`length`のラウンドトリップ
+  （空文字列含む）、別々に確保した同内容文字列の`eq`、`append`の`length`、
+  そして`Cons`版の直接の前例
+  （`compile_dispatches_a_function_that_keeps_a_let_bound_sexpr_local_rooted_across_many_allocations`）
+  を模した「`let`束縛の`Type::Str`ローカルが多数の無関係な`cons`後も
+  内容を保持する」回帰テスト。全体テスト（`cargo test`、workspace全体）
+  green、clippy警告0。
 - **Stage 8（完了、2026-06-27）**: `dolist`含む`prelude.rs`のリスト関数群が
   実際にコンパイル可能になることの実証＋全体回帰確認——8ステージ計画の
   本来の動機（[[typelisp-compile-labels-closures]]）そのものの達成点。

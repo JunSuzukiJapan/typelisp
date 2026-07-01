@@ -567,13 +567,166 @@ pub unsafe extern "C" fn rt_trait_call_fail(_args: *const i64, _argc: u32) -> i6
     fatal("trait-call: no implementation matched the receiver's type (the checker should have guaranteed one does)")
 }
 
+// ---- Stage 7: Str --------------------------------------------------------
+
+/// `(str c0 c1 ... cN-1)` for compiled code — builds a fresh, heap-allocated
+/// string from `argc` *raw* (untagged) Unicode scalar values, one per
+/// character, and returns it already tagged the same way `encode`/`decode`
+/// represent a `Value::Str` — this tagged form doubles as the compiled
+/// representation of a bare `Type::Str` value too (`compiler.rs`'s
+/// `compile-sexpr-field`/`compile-construct-sexpr` doc comments explain why:
+/// keeping the tag, rather than stripping it the way `int`/`char`/`bool`
+/// extraction does, is what lets a `Type::Str` local reuse
+/// [`rt_push_sexpr_root`]'s already-generic `decode`-based protection with
+/// no new rooting mechanism).
+///
+/// `compiler.rs`'s `compile-str` is the only caller: a string literal's
+/// content is entirely known at compile time, so each character becomes an
+/// ordinary `const-i64` operand (`ast_bridge` translates `Expr::Str` into a
+/// `(str (int c0) (int c1) ...)` node, reusing `compile-value`'s existing
+/// `int` handling for every character rather than needing a new
+/// literal-embedding mechanism) — unlike every other allocating `rt_*`
+/// function, none of `args` here is itself a tagged `Sexpr` value to
+/// `decode`.
+///
+/// Unlike [`rt_cons`], `Heap::alloc_string` never runs a GC itself (the
+/// string arena grows without a fixed capacity) — but the string this
+/// returns is exactly as unrooted as a fresh cons cell until some caller
+/// roots it or immediately consumes it, for the same reason [`rt_cons`]'s
+/// doc comment gives.
+///
+/// # Safety
+///
+/// `args` must point to at least `argc` valid, readable `i64`s, each a valid
+/// Unicode scalar value; a `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_str_new(args: *const i64, argc: u32) -> i64 {
+    let mut s = String::with_capacity(argc as usize);
+    for i in 0..argc as isize {
+        let scalar = *args.offset(i) as u32;
+        match char::from_u32(scalar) {
+            Some(c) => s.push(c),
+            None => fatal("rt_str_new: invalid char scalar value"),
+        }
+    }
+    encode(active_heap().alloc_string(s))
+}
+
+/// `str::length` for compiled code — the character count (not byte length)
+/// of `args[0]`, matching the interpreter's own `string_length`. Returns a
+/// bare `i64` (a `Type::I64` result is never itself Sexpr-tagged).
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// encoding a `Value::Str`; a `Heap` must already be registered on this
+/// thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_str_length(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_str_length: expected 1 argument");
+    }
+    let id = match decode(*args) {
+        Value::Str(id) => id,
+        _ => fatal("rt_str_length: argument is not a Str"),
+    };
+    active_heap().string(id).chars().count() as i64
+}
+
+/// `str::ref` for compiled code — the `i`-th Unicode scalar value of
+/// `args[0]`'s content (`args[1]`, a bare `i64` index), matching the
+/// interpreter's own `string_ref`. Returns a bare (untagged) scalar, the
+/// same `Type::Char` representation `compile-sexpr-field`'s own `char`
+/// extraction produces. Fatal on an out-of-range index — the type system
+/// can't express the bound, the same `car`/`cdr`-on-non-`Cons` precedent
+/// every other `rt_*` bounds violation here follows (the interpreter's own
+/// `string_ref` instead raises a catchable `Panic`, but there is no such
+/// channel across the compiled-code ABI boundary — see [`fatal`]).
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s,
+/// the first encoding a `Value::Str`; a `Heap` must already be registered on
+/// this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_str_ref(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_str_ref: expected 2 arguments");
+    }
+    let id = match decode(*args) {
+        Value::Str(id) => id,
+        _ => fatal("rt_str_ref: first argument is not a Str"),
+    };
+    let idx = *args.add(1);
+    let found = if idx >= 0 { active_heap().string(id).chars().nth(idx as usize) } else { None };
+    match found {
+        Some(c) => c as i64,
+        None => fatal("rt_str_ref: index out of range"),
+    }
+}
+
+/// `str::eq` for compiled code — content equality, not `Sexpr`'s own `eq`
+/// (two separately-heap-allocated `Str`s never satisfy that even with equal
+/// content — see `registry::sexpr_assoc`'s doc comment). Returns a bare
+/// `0`/`1`, the same `Type::Bool` convention every comparison builtin here
+/// already uses (`build-icmp-*`'s zero-extended result).
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s,
+/// both encoding a `Value::Str`; a `Heap` must already be registered on this
+/// thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_str_eq(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_str_eq: expected 2 arguments");
+    }
+    let a = match decode(*args) {
+        Value::Str(id) => id,
+        _ => fatal("rt_str_eq: first argument is not a Str"),
+    };
+    let b = match decode(*args.add(1)) {
+        Value::Str(id) => id,
+        _ => fatal("rt_str_eq: second argument is not a Str"),
+    };
+    let heap = active_heap();
+    i64::from(heap.string(a) == heap.string(b))
+}
+
+/// `str::append` for compiled code — concatenates the content of
+/// `args[0]`/`args[1]` into a freshly allocated string, matching the
+/// interpreter's own `string_append`. Returns the tagged form, exactly like
+/// [`rt_str_new`] (and just as unrooted until a caller protects it).
+///
+/// # Safety
+///
+/// Same as [`rt_str_eq`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_str_append(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_str_append: expected 2 arguments");
+    }
+    let a = match decode(*args) {
+        Value::Str(id) => id,
+        _ => fatal("rt_str_append: first argument is not a Str"),
+    };
+    let b = match decode(*args.add(1)) {
+        Value::Str(id) => id,
+        _ => fatal("rt_str_append: second argument is not a Str"),
+    };
+    let heap = active_heap();
+    let s = format!("{}{}", heap.string(a), heap.string(b));
+    encode(heap.alloc_string(s))
+}
+
 #[cfg(test)]
 mod tests {
     use typelisp_mem::{Heap, PathId, StrId, SymId, Value};
 
     use super::{
         active_heap, decode, encode, rt_car, rt_cdr, rt_cons, rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root,
-        rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, set_active_heap,
+        rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append,
+        rt_str_eq, rt_str_length, rt_str_new, rt_str_ref, set_active_heap,
     };
 
     #[test]
@@ -869,5 +1022,89 @@ mod tests {
 
         let popped = unsafe { rt_pop_sexpr_root(std::ptr::null(), 0) };
         assert_eq!(popped, reassigned, "popping the binding's root now yields the reassigned value, not the original");
+    }
+
+    /// Builds a tagged `Value::Str` via [`rt_str_new`] itself, rather than a
+    /// direct `heap.alloc_string(...)` call — every test below needs
+    /// pre-existing string content to exercise `rt_str_length`/`rt_str_ref`/
+    /// `rt_str_eq`/`rt_str_append` against, and (per the existing
+    /// `rt_heap_live_count_reflects_the_registered_heaps_real_state` test's
+    /// own comment) once a `Heap` is registered via [`set_active_heap`], every
+    /// further mutation must go through that same raw-pointer-derived access
+    /// path (here, another `rt_*` call) rather than reborrowing the original
+    /// `&mut heap` binding directly, which Stacked Borrows treats as
+    /// invalidating the raw pointer.
+    fn make_str(s: &str) -> i64 {
+        let args: Vec<i64> = s.chars().map(|c| c as i64).collect();
+        unsafe { rt_str_new(args.as_ptr(), args.len() as u32) }
+    }
+
+    #[test]
+    fn rt_str_new_builds_a_string_from_raw_char_scalars() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let tagged = make_str("hi");
+        match decode(tagged) {
+            Value::Str(id) => assert_eq!(unsafe { active_heap() }.string(id), "hi"),
+            other => panic!("expected a Str, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rt_str_new_with_no_characters_builds_an_empty_string() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let tagged = unsafe { rt_str_new(std::ptr::null(), 0) };
+        match decode(tagged) {
+            Value::Str(id) => assert_eq!(unsafe { active_heap() }.string(id), ""),
+            other => panic!("expected a Str, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rt_str_length_counts_unicode_scalar_values_not_bytes() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let tagged = make_str("héllo");
+        assert_eq!(unsafe { rt_str_length([tagged].as_ptr(), 1) }, 5);
+    }
+
+    #[test]
+    fn rt_str_ref_returns_the_nth_char_as_a_bare_scalar() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let tagged = make_str("hi");
+        let args = [tagged, 1];
+        assert_eq!(unsafe { rt_str_ref(args.as_ptr(), 2) }, 'i' as i64);
+    }
+
+    #[test]
+    fn rt_str_eq_compares_content_not_identity() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let a = make_str("hi");
+        let b = make_str("hi");
+        let c = make_str("bye");
+        assert_eq!(unsafe { rt_str_eq([a, b].as_ptr(), 2) }, 1, "separately allocated, equal content");
+        assert_eq!(unsafe { rt_str_eq([a, c].as_ptr(), 2) }, 0);
+    }
+
+    #[test]
+    fn rt_str_append_concatenates_into_a_fresh_string() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let a = make_str("foo");
+        let b = make_str("bar");
+        let tagged = unsafe { rt_str_append([a, b].as_ptr(), 2) };
+        match decode(tagged) {
+            Value::Str(id) => assert_eq!(unsafe { active_heap() }.string(id), "foobar"),
+            other => panic!("expected a Str, got {:?}", other),
+        }
     }
 }

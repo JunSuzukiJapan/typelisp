@@ -798,9 +798,13 @@ impl Interp {
     /// method's entry in `externals`, and a *caller's* `compile-assoc`
     /// lookup) can never drift apart. A target whose `type_name` isn't
     /// registered in `self.methods` at all (`i64`/`i32`'s own built-in
-    /// arithmetic, or — still out of scope — `f64`/`str`/`char`'s) needs
-    /// none of this: `i64`/`i32` compile natively with no external call,
-    /// and anything else panics clearly right here rather than deep inside
+    /// arithmetic; `string`'s, since Stage 7 of the Sexpr-representation
+    /// plan — `docs/implementation-log.md`; or — still out of scope —
+    /// `f64`/`char`'s) needs none of this: each of `i64`/`i32`/`string`
+    /// compiles natively with no external call (`compile-assoc`'s own
+    /// dispatch, which panics clearly on its own for any one of *their*
+    /// methods it doesn't actually implement, e.g. `string::upcase`), and
+    /// anything else panics clearly right here rather than deep inside
     /// `compile-assoc`'s own `get-function`.
     fn compile_function(&self, heap: &mut Heap, name: &str) -> Result<RtValue, EvalError> {
         let path = Path::root(name);
@@ -823,7 +827,7 @@ impl Interp {
         let method_targets: Vec<(Path, String)> = crate::compile::ast_bridge::collect_assoc_targets(&body)
             .into_iter()
             .filter(|key| method_key.as_ref() != Some(key))
-            .filter(|(type_name, _)| !matches!(type_name.local(), "i64" | "i32"))
+            .filter(|(type_name, _)| !matches!(type_name.local(), "i64" | "i32" | "string"))
             .collect();
         for (type_name, method) in &method_targets {
             let key = (type_name.clone(), method.clone());
@@ -1706,10 +1710,10 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// binding's *existing* root in place instead of leaving a freshly assigned
 /// value with no root at all — see `typelisp_rt::rt_set_sexpr_root`'s doc
 /// comment for the corruption this closes.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 13] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 18] {
     use crate::compile::runtime::{
         rt_car, rt_cdr, rt_cons, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car,
-        rt_set_cdr, rt_set_sexpr_root, rt_trait_call_fail, rt_truncate_sexpr_roots,
+        rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_new, rt_str_ref, rt_trait_call_fail, rt_truncate_sexpr_roots,
     };
     [
         ("rt_car", rt_car as usize),
@@ -1725,6 +1729,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 13] {
         ("rt_set_sexpr_root", rt_set_sexpr_root as usize),
         ("rt_trait_call_fail", rt_trait_call_fail as usize),
         ("rt_truncate_sexpr_roots", rt_truncate_sexpr_roots as usize),
+        ("rt_str_new", rt_str_new as usize),
+        ("rt_str_length", rt_str_length as usize),
+        ("rt_str_ref", rt_str_ref as usize),
+        ("rt_str_eq", rt_str_eq as usize),
+        ("rt_str_append", rt_str_append as usize),
     ]
 }
 

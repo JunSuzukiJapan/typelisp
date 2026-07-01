@@ -764,13 +764,26 @@ pub const SOURCE: &str = r#"
 ;; kind representable in compiled code today: `int`'s `i64` payload
 ;; (signed, `build-ashr`), `char`'s scalar (`build-lshr`), `bool`'s
 ;; payload (`1`/`2` -> `0`/`1`, matching `compile-bool`'s own convention),
-;; and `cons`'s two `Sexpr` fields (via `rt_car`/`rt_cdr` -- the only
-;; field kind that needs a real heap read rather than pure bit
-;; manipulation). `sym`/`str`'s `Str` field and `float`'s `f64` field
-;; aren't representable in compiled code yet (Stage 6/7, `docs/implementation-log.md`),
-;; so a `Bind` pattern trying to extract either panics clearly here
-;; rather than producing garbage -- never reached for a `Wildcard`
-;; sub-pattern (`compile-ctor-subpatterns` skips the call entirely then).
+;; `cons`'s two `Sexpr` fields (via `rt_car`/`rt_cdr` -- the only field kind
+;; that needs a real heap read rather than pure bit manipulation), and (Stage
+;; 7) `str`'s `Str` field. `str` is deliberately the *odd one out* among
+;; these: unlike `int`/`char`/`bool`, extraction here does *not* strip the
+;; 3-bit tag -- it returns `v` unchanged. That's not an oversight: a bare
+;; `Type::Str` value's compiled representation is *defined* to be the exact
+;; same tagged immediate a `Sexpr::Str` already is (`typelisp-rt`'s
+;; `rt_str_new` returns it pre-tagged for the same reason), specifically so
+;; it stays heap-referencing-and-therefore-GC-root-eligible under
+;; `rt_push_sexpr_root`/`rt_pop_sexpr_root`'s existing generic `decode` --
+;; stripping the tag the way `char` does would make a `Str` field
+;; indistinguishable from a plain integer to that machinery, silently
+;; reopening the exact GC-safety gap Stage 4/6 closed for `Sexpr`. `sym`'s
+;; `Str` field and `float`'s `f64` field still aren't representable in
+;; compiled code (a `Sym`'s tagged payload is a `SymId`, not a `StrId` --
+;; extracting its *name* as a string needs its own interning primitive, a
+;; separate gap from this stage's `str`), so a `Bind` pattern trying to
+;; extract either still panics clearly here rather than producing garbage --
+;; never reached for a `Wildcard` sub-pattern (`compile-ctor-subpatterns`
+;; skips the call entirely then).
 (defun compile-sexpr-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant i64) (idx i32)) llvm-value
   (if (eq variant 1)
       (build-ashr builder v (const-i64 builder 3))
@@ -784,7 +797,9 @@ pub const SOURCE: &str = r#"
                     (if (eq idx 0)
                         (build-call builder (get-function m "rt_car") args-ptr 1)
                         (build-call builder (get-function m "rt_cdr") args-ptr 1)))
-                  (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))))
+                  (if (eq variant 6)
+                      v
+                      (panic "compile-sexpr-field: field type is not representable in compiled code yet")))))))
 
 ;; Shared by every atomic pattern test (`pat-lit`'s literal-equality
 ;; check, a Ctor pattern's tag test): appends a fresh "this test passed"
@@ -813,6 +828,8 @@ pub const SOURCE: &str = r#"
                                 (compile-int builder e)
                                 (if (eq s "bool")
                                     (compile-bool builder e)
+                                    (if (eq s "str")
+                                        (compile-str builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                     (if (eq s "unit")
                                         (compile-unit builder)
                                         (if (eq s "var")
@@ -851,7 +868,7 @@ pub const SOURCE: &str = r#"
                                                                                                             (compile-field-set builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                             (if (eq s "trait-call")
                                                                                                                 (compile-trait-call builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))
+                                                                                                                (panic (append "compile-value: unsupported tag " s)))))))))))))))))))))))))
                            (_ (panic "compile-value: malformed node, expected a tagged list"))))
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -877,6 +894,42 @@ pub const SOURCE: &str = r#"
                          (match (car (cdr e))
                            ((Bool b) (if b (const-i64 builder 1) (const-i64 builder 0)))
                            (_ (panic "compile-bool: malformed bool node"))))
+                       ;; `(str (int c0) (int c1) ...)` (Stage 7 of the
+                       ;; Sexpr-representation plan, `docs/implementation-log.md`)
+                       ;; — a string literal's content, one `(int c)` node per
+                       ;; character (`ast_bridge`'s `Expr::Str` doc comment
+                       ;; explains why not a pre-allocated `Value::Str`: the
+                       ;; target program's `Heap` doesn't exist yet when this
+                       ;; IR is built). Builds a fresh `args-ptr` array of one
+                       ;; slot per character, fills it via `store-str-chars`
+                       ;; (each slot compiled through the ordinary `int`
+                       ;; dispatch above — no new literal-embedding mechanism
+                       ;; needed), then calls `rt_str_new`, which returns the
+                       ;; result already tagged (unlike `int`/`char`/`bool`
+                       ;; literals, a `str` literal's compiled form *is* the
+                       ;; full `Sexpr::Str` representation — see
+                       ;; `compile-sexpr-field`'s own `str` doc comment for
+                       ;; why). `rt_str_new` never runs a GC itself, but its
+                       ;; result is exactly as unrooted as a fresh `rt_cons`
+                       ;; cell until some caller protects it — the same
+                       ;; obligation every other allocating call here already
+                       ;; has (e.g. `compile-construct-sexpr`'s `Cons` field
+                       ;; handling, or a `kind = 2` `let`/parameter binding).
+                       (compile-str ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((chars (cdr e)))
+                           (let ((n (sexpr-list-length chars)))
+                             (let ((args-ptr (alloca-args builder n)))
+                               (store-str-chars builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr chars 0)
+                               (build-call builder (get-function m "rt_str_new") args-ptr n)))))
+                       ;; Fills a `compile-str`-allocated array, one compiled
+                       ;; `(int c)` character per slot — the `str`-literal
+                       ;; analogue of `compile-construct-box-fields`.
+                       (store-str-chars ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (args-ptr llvm-value) (forms Sexpr) (idx i32)) ()
+                         (match forms
+                           ((Cons form rest)
+                            (store-arg builder args-ptr idx (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base form))
+                            (store-str-chars builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr rest (+ idx 1)))
+                           (_ ())))
                        ;; `(var name is-fn)` — a plain variable reference,
                        ;; ordinary or a `labels` sibling/self referenced *as
                        ;; a value* rather than called (e.g. a `labels`
@@ -1084,41 +1137,80 @@ pub const SOURCE: &str = r#"
                        ;; with no compiled implementation, e.g. `f64`/`str`/
                        ;; `char`, still out of scope), it panics clearly on
                        ;; its own.
+                       ;; The `string` branch (Stage 7 — `prim_type_path`
+                       ;; names `Type::Str`'s receiver type "string", distinct
+                       ;; from `Sexpr`'s own "str" variant tag) covers only
+                       ;; the built-in `String` instance methods
+                       ;; `compiler.rs` itself needs to make a
+                       ;; `Sexpr::Str`/`Type::Str` value actually useful once
+                       ;; extracted/constructed —
+                       ;; `length`/`ref`/`eq`/`append` — each a thin
+                       ;; `alloca-args`/`store-arg`/`build-call` wrapper
+                       ;; around the matching `typelisp-rt` primitive, the
+                       ;; same shape the `i64`/`i32` branch below already
+                       ;; uses for arithmetic. `upcase`/`downcase`/
+                       ;; `substring`/`lt` stay out of scope for this stage
+                       ;; (no compiled-code primitive backs them yet) and
+                       ;; fall through to the same "unsupported method" panic
+                       ;; as any other not-yet-compilable builtin method.
                        (compile-assoc ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((type-name (sexpr-str (car (cdr e)))))
                            (let ((method (sexpr-str (car (cdr (cdr e))))))
                              (let ((rest (cdr (cdr (cdr (cdr e))))))
-                               (if (if (eq type-name "i64") true (eq type-name "i32"))
+                               (if (eq type-name "string")
                                    (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (cdr (car rest)))))
-                                     (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (cdr (car (cdr rest))))))
-                                       (if (eq method "+")
-                                           (build-add builder a b2)
-                                           (if (eq method "-")
-                                               (build-sub builder a b2)
-                                               (if (eq method "*")
-                                                   (build-mul builder a b2)
-                                                   (if (eq method "<")
-                                                       (build-icmp-lt builder a b2)
-                                                       (if (eq method "<=")
-                                                           (build-icmp-le builder a b2)
-                                                           (if (eq method ">")
-                                                               (build-icmp-gt builder a b2)
-                                                               (if (eq method ">=")
-                                                                   (build-icmp-ge builder a b2)
-                                                                   (if (if (eq method "=") true (eq method "eq"))
-                                                                       (build-icmp-eq builder a b2)
-                                                                       (if (eq method "/=")
-                                                                           (build-icmp-ne builder a b2)
-                                                                           (panic (append "compile-assoc: unsupported method " method)))))))))))))
-                                   (let ((mangled (append type-name (append "::" method))))
-                                     (let ((argc (sexpr-list-length rest)))
-                                       (let ((args-ptr (alloca-args builder argc)))
-                                         (let ((pending-ptr (alloca-args builder argc)))
-                                           (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr pending-ptr rest 0)))
-                                             (let ((result (build-call builder (get-function m mangled) args-ptr argc)))
-                                               (release-pending-args builder m pending-ptr argc 0)
-                                               (pop-sexpr-roots builder m sexpr-roots)
-                                               result)))))))))))
+                                     (if (eq method "length")
+                                         (let ((args-ptr (alloca-args builder 1)))
+                                           (store-arg builder args-ptr 0 a)
+                                           (build-call builder (get-function m "rt_str_length") args-ptr 1))
+                                         (let ((b (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (cdr (car (cdr rest))))))
+                                           (if (eq method "ref")
+                                               (let ((args-ptr (alloca-args builder 2)))
+                                                 (store-arg builder args-ptr 0 a)
+                                                 (store-arg builder args-ptr 1 b)
+                                                 (build-call builder (get-function m "rt_str_ref") args-ptr 2))
+                                               (if (eq method "eq")
+                                                   (let ((args-ptr (alloca-args builder 2)))
+                                                     (store-arg builder args-ptr 0 a)
+                                                     (store-arg builder args-ptr 1 b)
+                                                     (build-call builder (get-function m "rt_str_eq") args-ptr 2))
+                                                   (if (eq method "append")
+                                                       (let ((args-ptr (alloca-args builder 2)))
+                                                         (store-arg builder args-ptr 0 a)
+                                                         (store-arg builder args-ptr 1 b)
+                                                         (build-call builder (get-function m "rt_str_append") args-ptr 2))
+                                                       (panic (append "compile-assoc: unsupported str method " method))))))))
+                                   (if (if (eq type-name "i64") true (eq type-name "i32"))
+                                       (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (cdr (car rest)))))
+                                         (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (cdr (car (cdr rest))))))
+                                           (if (eq method "+")
+                                               (build-add builder a b2)
+                                               (if (eq method "-")
+                                                   (build-sub builder a b2)
+                                                   (if (eq method "*")
+                                                       (build-mul builder a b2)
+                                                       (if (eq method "<")
+                                                           (build-icmp-lt builder a b2)
+                                                           (if (eq method "<=")
+                                                               (build-icmp-le builder a b2)
+                                                               (if (eq method ">")
+                                                                   (build-icmp-gt builder a b2)
+                                                                   (if (eq method ">=")
+                                                                       (build-icmp-ge builder a b2)
+                                                                       (if (if (eq method "=") true (eq method "eq"))
+                                                                           (build-icmp-eq builder a b2)
+                                                                           (if (eq method "/=")
+                                                                               (build-icmp-ne builder a b2)
+                                                                               (panic (append "compile-assoc: unsupported method " method)))))))))))))
+                                       (let ((mangled (append type-name (append "::" method))))
+                                         (let ((argc (sexpr-list-length rest)))
+                                           (let ((args-ptr (alloca-args builder argc)))
+                                             (let ((pending-ptr (alloca-args builder argc)))
+                                               (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr pending-ptr rest 0)))
+                                                 (let ((result (build-call builder (get-function m mangled) args-ptr argc)))
+                                                   (release-pending-args builder m pending-ptr argc 0)
+                                                   (pop-sexpr-roots builder m sexpr-roots)
+                                                   result))))))))))))
                        ;; Fills a previously-`alloca-args`'d array, one
                        ;; compiled argument per slot, exactly as before —
                        ;; plus, since each `forms` element is now a
@@ -2181,12 +2273,21 @@ pub const SOURCE: &str = r#"
                        ;; `1`=int `2`=float `3`=char `4`=bool `5`=sym `6`=str
                        ;; `7`=cons), the exact inverse of
                        ;; `compile-sexpr-tag-test`/`compile-sexpr-field`'s
-                       ;; own extraction. `sym`/`str`'s `Str` field and
-                       ;; `float`'s `f64` field aren't representable in
-                       ;; compiled code yet (string/float boxing is a later
-                       ;; stage), so constructing either panics clearly —
-                       ;; symmetric with `compile-sexpr-field`'s own
-                       ;; extraction panicking on the same three.
+                       ;; own extraction. `str`'s single field is itself a
+                       ;; `Type::Str`-typed sub-expression, which
+                       ;; `compile-value`'s own `str` tag (Stage 7) already
+                       ;; compiles down to the *fully tagged* `Sexpr::Str`
+                       ;; representation directly (`compile-sexpr-field`'s own
+                       ;; doc comment explains why a bare `Type::Str` value
+                       ;; and a `Sexpr::Str` are the same bits) — so unlike
+                       ;; every other variant here, `str` needs no further bit
+                       ;; manipulation at all, just the field's own compiled
+                       ;; value passed straight through. `sym`'s `Str` field
+                       ;; and `float`'s `f64` field still aren't representable
+                       ;; in compiled code yet (a `Sym`'s tag payload is a
+                       ;; `SymId`, a separate gap from `str`'s own — see
+                       ;; `compile-sexpr-field`'s doc comment), so constructing
+                       ;; either still panics clearly.
                        (compile-construct-sexpr ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (variant i64) (arg-forms Sexpr)) llvm-value
                          (if (eq variant 0)
                              (const-i64 builder 6)
@@ -2211,7 +2312,9 @@ pub const SOURCE: &str = r#"
                                                      (pop-sexpr-root builder m)
                                                      (pop-sexpr-root builder m)
                                                      result))))
-                                             (panic "compile-construct-sexpr: field type is not representable in compiled code yet")))))))
+                                             (if (eq variant 6)
+                                                 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (car arg-forms))
+                                                 (panic "compile-construct-sexpr: field type is not representable in compiled code yet"))))))))
                        ;; `(field-get idx-unary-list obj-form)` (Stage 6) —
                        ;; always a general-ADT box `compile-construct-box`
                        ;; built (this tag is only ever synthesized by

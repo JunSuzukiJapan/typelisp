@@ -14,17 +14,10 @@
    （`Sexpr`は要素型が固定されないため`Iter<Item>`を実装すべきでない、というユーザー判断
    ——詳細は[implementation-log.md](implementation-log.md)の「trait機構+doiter」節参照）。
    `HashTable<K,V>`への走査API（keys/values/entries相当）自体が未実装。
-2. **compile 機能の残課題**（LLVM JIT/AOT コンパイラはコア機能。影響範囲基準で並べ替え済み
-   ——[[feedback-impl-priority]]、詳細は[implementation-log.md](implementation-log.md)の
-   「compile機能の残課題の一部対応」節参照）。`Expr::TraitCall`の実runtime dispatch対応・
-   `compile-match`のGCルート漏れ修正・retain/release対の重複除去パス・`compile-let`の
-   `unroot-let-sexpr-values`不正IRリスク修正は2026-07-01に対応済み。同日、
-   `compile-loop`/`compile-break`/`compile-return`に一般的なGCルート巻き戻し機構
-   （`loop-root-base` + `rt_truncate_sexpr_roots`）を追加し、`compile-match`の
-   scrutinee・`compile-let`の`Sexpr`束縛のいずれも`break`/`return`早期脱出時に
-   GCルートが漏れる問題を解消済み（詳細はimplementation-log.mdの該当節参照）。
-   残っているのは:
-   - Stage 7: 文字列対応（優先度低、計画上も最後に残されたステージ）。
+
+compile 機能（LLVM JIT/AOT コンパイラ）の残課題は2026-07-01時点で全て解消済み——
+Stage 7（文字列対応、計画上最後に残されていたステージ）を含め、詳細は
+[implementation-log.md](implementation-log.md)の該当節を参照。
 
 ---
 

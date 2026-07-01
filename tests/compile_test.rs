@@ -2023,6 +2023,117 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
     assert_eq!(v, RtValue::Sexpr(Value::Empty));
 }
 
+// ---- Stage 7 of the Sexpr-representation plan: `str` -----------------
+
+/// `(Str "hi")` — `compile-str`'s literal-embedding path (each character
+/// becomes a `const-i64` operand fed to `rt_str_new`) feeding straight into
+/// `compile-construct-sexpr`'s new `str` variant (a pure pass-through, no
+/// bit manipulation — see that function's doc comment), then back out
+/// through `Match`/`compile-sexpr-field`'s own `str` extraction (also a
+/// pass-through) and `compile-assoc`'s new `str` branch (`length`), proving
+/// construct/match/method-call all agree on the representation without any
+/// raw pointer peeking, the same round-trip style
+/// `compile_dispatches_a_function_that_constructs_a_cons_via_construct_to_native_code`
+/// already uses for `Cons`.
+#[test]
+fn compile_dispatches_a_function_that_constructs_and_matches_a_sexpr_str_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun str-len-of-hi () i32
+          (match (Str "hi") ((Str content) (length content)) (_ -1)))
+        (compile str-len-of-hi)
+        (str-len-of-hi)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(2));
+
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun str-len-of-empty () i32
+          (match (Str "") ((Str content) (length content)) (_ -1)))
+        (compile str-len-of-empty)
+        (str-len-of-empty)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(0), "an empty string literal (zero characters) round-trips too");
+}
+
+/// `str::eq`/`str::append` (`compile-assoc`'s new `str` branch) on two
+/// *separately* constructed strings — `content` comes from matching a fresh
+/// `(Str "hi")`, the right-hand side of `eq` is its own independent literal,
+/// so this only passes if `rt_str_eq` compares content (`Heap::string`)
+/// rather than the two `StrId`s' identity. `append` similarly builds a
+/// brand-new string at run time (not something `compile-str`'s
+/// compile-time character embedding could produce) and `length`s the
+/// result, exercising `rt_str_append`'s own fresh allocation.
+#[test]
+fn compile_dispatches_a_function_that_compares_and_appends_strings_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun str-content-eq () i64
+          (match (Str "hi") ((Str content) (if (eq content "hi") 1 0)) (_ -1)))
+        (compile str-content-eq)
+        (str-content-eq)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(1), "two separately allocated Strs with equal content are str::eq");
+
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun str-content-not-eq () i64
+          (match (Str "hi") ((Str content) (if (eq content "bye") 1 0)) (_ -1)))
+        (compile str-content-not-eq)
+        (str-content-not-eq)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(0));
+
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun str-append-len () i32
+          (length (append "foo" "bar")))
+        (compile str-append-len)
+        (str-append-len)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(6), "\"foo\" ++ \"bar\" has 6 characters");
+}
+
+/// A `let`-bound `Type::Str` local survives many unrelated allocations —
+/// `ast_bridge::binding_kind`'s Stage 7 extension (`Type::Str` now shares
+/// `KIND_SEXPR` with `Sexpr`) is what gives it the same `rt_push_sexpr_root`/
+/// `rt_pop_sexpr_root` protection a `let`-bound `Sexpr` local already gets
+/// (see `compile_dispatches_a_function_that_keeps_a_let_bound_sexpr_local_rooted_across_many_allocations`,
+/// the direct precedent this test mirrors) — without it, `s`'s underlying
+/// `StrId` slot could be reclaimed by the `gc()` a later, unrelated `cons`
+/// triggers before `length` ever reads it back. Forces that with a tiny
+/// heap capacity, the same technique that test and `typelisp-rt`'s own
+/// GC-root tests already use.
+#[test]
+fn compile_dispatches_a_function_that_keeps_a_let_bound_str_local_rooted_across_many_allocations() {
+    let v = run_with_compiler_and_capacity(
+        r#"
+        (defun str-survives-gc ((n i64)) i32
+          (let ((s (append "hello" " world")))
+            (let ((ignored (loop
+                             (if (eq n 0) (break) ())
+                             (Cons (Int 0) (Int 0))
+                             (setf n (- n 1)))))
+              (length s))))
+        (compile str-survives-gc)
+        (str-survives-gc 5000)
+        "#,
+        1 << 13,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(11), "\"hello world\" has 11 characters, even after many unrelated conses force a gc()");
+}
+
 /// `(Cons a-form b-form)` — `compile-construct-sexpr`'s one variant that
 /// isn't pure bit math: it calls `rt_cons` (already implemented/connected
 /// since Stage 3/4), exactly the inverse of `compile-sexpr-field`'s `cons`

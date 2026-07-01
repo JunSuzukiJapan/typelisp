@@ -83,19 +83,25 @@ fn is_sexpr_type(ty: &Type) -> bool {
 /// per-binding bookkeeping `compiler.rs` must do at the point such a value
 /// crosses a binding boundary (a function's own parameters/captures, a
 /// `let` binding): a `Fn`-typed one needs `ClosureBox` retain/release
-/// (labels/closures Stage 4); a `Sexpr`-typed one needs GC-root push/pop
-/// instead (Stage 6 of the Sexpr-representation plan, `docs/implementation-log.md` — the
-/// "Sexprルート挿入パス") — a tagged `i64` that may point into the
-/// GC-managed cons heap, never something `build-closure-retain`/
-/// `build-closure-release` could safely touch; anything else needs neither.
-/// A single `kind` tag (rather than two independent booleans) keeps the two
-/// cases mutually exclusive by construction, the same way a `Typed` node
-/// has exactly one static type — see `compiler.rs`'s `retain-bindings`/
-/// `release-bindings`/`bind-let-values`/`restore-let-values`.
+/// (labels/closures Stage 4); a `Sexpr`-typed *or* `Str`-typed one needs
+/// GC-root push/pop instead (Stage 6 of the Sexpr-representation plan,
+/// `docs/implementation-log.md` — the "Sexprルート挿入パス"; `Str` joins it
+/// in Stage 7) — a tagged `i64` that may point into the GC-managed cons/
+/// string heap, never something `build-closure-retain`/`build-closure-release`
+/// could safely touch; anything else needs neither. `Str` reuses `KIND_SEXPR`
+/// rather than a fourth tag of its own because a bare `Type::Str` value's
+/// compiled representation *is* the exact same tagged immediate a
+/// `Sexpr::Str` is (`compiler.rs`'s `compile-sexpr-field`/
+/// `compile-construct-sexpr` doc comments) — the same `rt_push_sexpr_root`/
+/// `rt_pop_sexpr_root` calls this drives already protect it correctly with
+/// no changes of their own. A single `kind` tag (rather than independent
+/// booleans) keeps the cases mutually exclusive by construction, the same
+/// way a `Typed` node has exactly one static type — see `compiler.rs`'s
+/// `retain-bindings`/`release-bindings`/`bind-let-values`/`restore-let-values`.
 fn binding_kind(ty: &Type) -> i64 {
     if matches!(ty, Type::Fn(..)) {
         KIND_FN
-    } else if is_sexpr_type(ty) {
+    } else if is_sexpr_type(ty) || matches!(ty, Type::Str) {
         KIND_SEXPR
     } else {
         KIND_PLAIN
@@ -231,9 +237,32 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>,
         Expr::Float(f) => tagged(heap, "float", &[Value::Float(*f)]),
         Expr::Bool(b) => tagged(heap, "bool", &[Value::Bool(*b)]),
         Expr::Char(c) => tagged(heap, "char", &[Value::Char(*c)]),
+        // `(str (int c0) (int c1) ...)`, not a pre-allocated `Value::Str` —
+        // Stage 7 of the Sexpr-representation plan (`docs/implementation-log.md`):
+        // a literal's content is entirely known at compile time, but the
+        // `StrId` a compile-time `Heap::alloc_string` would produce here is
+        // meaningless to the *target* program (the JIT's own running `Heap`
+        // outlives this call, but AOT's compiled executable allocates its
+        // own `Heap` from scratch at startup, via `rt_heap_init` — see that
+        // function's doc comment — with no `StrId` table shared with this
+        // one at all). So each character becomes an ordinary `(int c)` node
+        // instead, letting `compiler.rs`'s `compile-str` re-embed the
+        // content as `const-i64` operands and rebuild the string at *run*
+        // time via `rt_str_new` — reusing `compile-value`'s already-working
+        // `int` handling for every character rather than needing a new
+        // literal-embedding mechanism of its own.
         Expr::Str(s) => {
-            let v = heap.alloc_string(s.clone());
-            tagged(heap, "str", &[v])
+            let mut char_nodes = Vec::with_capacity(s.chars().count());
+            for c in s.chars() {
+                let node = tagged(heap, "int", &[Value::Int(c as i64)])?;
+                heap.push_root(node);
+                char_nodes.push(node);
+            }
+            let result = tagged(heap, "str", &char_nodes);
+            for _ in 0..char_nodes.len() {
+                heap.pop_root();
+            }
+            result
         }
         Expr::Unit => tagged(heap, "unit", &[]),
         // Always `(var name)`, even when `name` is a currently in-scope
@@ -1694,10 +1723,30 @@ mod tests {
         let v = ast_to_sexpr(&mut heap, &typed(Expr::Str("hi".to_string()), Type::Str)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "str");
-        match fields[0] {
-            Value::Str(id) => assert_eq!(heap.string(id), "hi"),
-            other => panic!("expected a Str, got {:?}", other),
-        }
+        // Each character is its own `(int c)` node (not a pre-allocated
+        // `Value::Str`) — see `ast_to_sexpr_scoped`'s `Expr::Str` doc
+        // comment for why.
+        let codepoints: Vec<i64> = fields
+            .iter()
+            .map(|f| {
+                let (tag, fields) = untag(&heap, *f);
+                assert_eq!(tag, "int");
+                match fields[0] {
+                    Value::Int(n) => n,
+                    other => panic!("expected an Int, got {:?}", other),
+                }
+            })
+            .collect();
+        assert_eq!(codepoints, vec!['h' as i64, 'i' as i64]);
+    }
+
+    #[test]
+    fn translates_an_empty_str_literal() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Str(String::new()), Type::Str)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "str");
+        assert!(fields.is_empty());
     }
 
     #[test]
