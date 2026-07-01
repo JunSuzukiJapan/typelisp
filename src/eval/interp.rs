@@ -875,6 +875,22 @@ impl Interp {
             }));
         }
         externals.extend(rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)));
+        // A no-op on everything this typelisp-hosted compiler body emits
+        // today (see that pass's own doc comment) — run unconditionally
+        // anyway, the same "cheap, provably-safe cleanup pass" spirit as
+        // running an optimizer at `OptimizationLevel::None` costs nothing
+        // when it finds nothing to do.
+        crate::compile::arc_opt::eliminate_redundant_retain_release_pairs(&module.borrow());
+        // Mirrors `compile::aot::compile_file`'s own `verify()` call in the
+        // same position (after `arc_opt`, before handing the module to LLVM
+        // for real): a typelisp-hosted `compiler.rs` bug that emits
+        // instructions after a block's terminator (the `compile-let`
+        // GC-root-leak fix's own doc comment names this exact risk) would
+        // otherwise reach `CompiledFn::new`'s `create_jit_execution_engine`
+        // as malformed IR — undefined behavior in LLVM itself, not a
+        // catchable Rust error. Verifying first turns that into a clean
+        // `Panic` instead.
+        module.borrow().verify().map_err(|e| EvalError::Panic(format!("compile: module failed verification: {}", e)))?;
         let compiled = crate::compile::CompiledFn::new(&module.borrow(), name, &externals)
             .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
         match method_key {
@@ -1690,10 +1706,10 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// binding's *existing* root in place instead of leaving a freshly assigned
 /// value with no root at all — see `typelisp_rt::rt_set_sexpr_root`'s doc
 /// comment for the corruption this closes.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 11] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 12] {
     use crate::compile::runtime::{
         rt_car, rt_cdr, rt_cons, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car,
-        rt_set_cdr, rt_set_sexpr_root,
+        rt_set_cdr, rt_set_sexpr_root, rt_trait_call_fail,
     };
     [
         ("rt_car", rt_car as usize),
@@ -1707,6 +1723,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 11] {
         ("rt_push_permanent_sexpr_root", rt_push_permanent_sexpr_root as usize),
         ("rt_root_count", rt_root_count as usize),
         ("rt_set_sexpr_root", rt_set_sexpr_root as usize),
+        ("rt_trait_call_fail", rt_trait_call_fail as usize),
     ]
 }
 

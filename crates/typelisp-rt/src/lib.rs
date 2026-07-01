@@ -515,6 +515,25 @@ pub unsafe extern "C" fn rt_match_fail(_args: *const i64, _argc: u32) -> i64 {
     fatal("match: no pattern arm matched (the checker should have guaranteed exhaustiveness)")
 }
 
+// ---- Trait-call dispatch -------------------------------------------------
+
+/// `compiler.rs`'s `compile-trait-dispatch` calls this once every candidate
+/// implementation's type-id test has failed to match the receiver's own —
+/// provably unreachable for a well-typed program (`Checker::check_instance_method`'s
+/// call-site check already guarantees every argument's concrete type
+/// implements the bound trait), so this is a trap for a `compiler.rs`/checker
+/// bug, not a normal/recoverable runtime condition, exactly mirroring
+/// [`rt_match_fail`]'s role for an exhausted `match`.
+///
+/// # Safety
+///
+/// None beyond the ordinary compiled-function-ABI contract — like
+/// [`rt_match_fail`], never touches the active `Heap`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_trait_call_fail(_args: *const i64, _argc: u32) -> i64 {
+    fatal("trait-call: no implementation matched the receiver's type (the checker should have guaranteed one does)")
+}
+
 #[cfg(test)]
 mod tests {
     use typelisp_mem::{Heap, PathId, StrId, SymId, Value};

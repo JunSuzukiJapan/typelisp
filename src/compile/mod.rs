@@ -5,6 +5,7 @@
 //! and (in later phases) the AST bridge and runtime shims.
 
 pub mod aot;
+pub mod arc_opt;
 pub mod ast_bridge;
 pub mod freevars;
 

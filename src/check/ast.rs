@@ -87,6 +87,23 @@ pub enum Expr {
     TraitCall {
         trait_name: Path,
         method: String,
+        /// Every concrete type registered (in `Registry`) as `impl`ing
+        /// `trait_name` as of this call site's own check time — resolved
+        /// once, here, purely so `compile`'s `ast_bridge`/`compiler.rs` can
+        /// build a closed dispatch chain (embed each candidate's own
+        /// type-id/mangled method name as LLVM constants) without needing
+        /// registry access of their own, the same "resolve fully at check
+        /// time" convention `Expr::Assoc`'s own `type_name` already follows.
+        /// **Not** consulted by the interpreter's own `TraitCall` eval arm at
+        /// all (`Interp::eval` reads the receiver's live runtime type tag
+        /// instead, via `rtvalue_type_path`) — so an `impl` registered
+        /// *after* this call site checks still dispatches correctly when
+        /// tree-walked, just not when `compile`d (a `compile`d call only
+        /// ever resolves to whichever impls existed at this point in the
+        /// source; a later impl needs the generic function re-checked to be
+        /// reachable there). See `Checker::check_instance_method`'s doc
+        /// comment for how this list is built.
+        impls: Vec<Path>,
         args: Vec<Typed>,
     },
     /// A data-type constructor application, e.g. `(Some x)` / `(Cons a d)`.

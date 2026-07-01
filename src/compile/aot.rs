@@ -131,6 +131,13 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
 
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let module = module.borrow();
+    // See `arc_opt`'s own doc comment for why this is currently a no-op on
+    // every AOT-compiled program too (a capturing `lambda`/`labels` block
+    // here can still reach `build-closure-retain`/`-release`, same as JIT —
+    // just never in the literally-adjacent shape the pass matches) — run
+    // unconditionally regardless, before `verify`, the same way the JIT
+    // path (`Interp::compile_function`) does.
+    crate::compile::arc_opt::eliminate_redundant_retain_release_pairs(&module);
     build_main_wrapper(ctx, &module)?;
     module.verify().map_err(|e| format!("module failed verification: {}", e))?;
     write_executable(&module, output_path)

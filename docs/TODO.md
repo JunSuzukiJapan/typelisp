@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-06-30 / ブランチ: `feature/compile-sexpr`
+最終更新: 2026-07-01 / ブランチ: `feature/compile-sexpr`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離した）。
@@ -14,25 +14,21 @@
    （`Sexpr`は要素型が固定されないため`Iter<Item>`を実装すべきでない、というユーザー判断
    ——詳細は[implementation-log.md](implementation-log.md)の「trait機構+doiter」節参照）。
    `HashTable<K,V>`への走査API（keys/values/entries相当）自体が未実装。
-2. **compile 機能の残課題**（LLVM JIT/AOT コンパイラという実験的サブシステム内の技術的負債。
-   優先順位はユーザー未確認——コア言語機能ではないため上記項目より下位。影響範囲基準で並べ替え済み
+2. **compile 機能の残課題**（LLVM JIT/AOT コンパイラはコア機能。影響範囲基準で並べ替え済み
    ——[[feedback-impl-priority]]、詳細は[implementation-log.md](implementation-log.md)の
-   「compile機能の残課題の一部対応」節参照）。`Expr::TraitCall`はcompile機能では`unsupported`の
-   プレースホルダのまま（`src/compile/ast_bridge.rs`）——`Iter`/`doiter`を使うコードは現状compile
-   できない:
-   - `compile-if-branch`経由の値のうち、`if`/`match`自身のmerge slot・`return`の
-     loop-slotを素通りする**束縛されない一時値**のkind対応——store直後にloadする
-     隣接命令なので単体では安全、かつ呼び出し引数・Cons構築・一般ADTフィールド
-     経由の消費先は既に対応済みのため、具体的な破壊を実証するテストはまだ書けて
-     いない（書けたら優先度を上げる）。`setf`によるkind=2束縛の**再代入**自体は
-     2026-06-30に対応済み——`compile-set`が`rt_set_sexpr_root`で再代入後の値の
-     GCルートを更新する（再代入前は値のスナップショットを積んだまま動かない
-     既存rootが新しい値を一切保護しておらず、`typelisp-rt`の
-     `a_setf_reassigned_sexpr_value_is_corrupted_by_a_gc_triggered_by_other_allocations_without_rt_set_sexpr_root`
-     で実証済み）。
+   「compile機能の残課題の一部対応」節参照）。`Expr::TraitCall`の実runtime dispatch対応・
+   `compile-match`のGCルート漏れ修正・retain/release対の重複除去パス・`compile-let`の
+   `unroot-let-sexpr-values`不正IRリスク修正は2026-07-01に対応済み
+   （詳細はimplementation-log.mdの該当節参照）。残っているのは:
    - Stage 7: 文字列対応（優先度低、計画上も最後に残されたステージ）。
-   - retain/release対の重複除去（Swift ARC Optimizer的な最適化パス）。正しさは確認済みで
-     パフォーマンスチューニングのみ、後回し。
+   - `compile-match`のscrutinee GCルート・`compile-let`の`Sexpr`束縛GCルートは、
+     いずれもarm/let本体が`break`/`return`で早期脱出する経路では
+     `pop-sexpr-root`されない（既知の許容リーク——`break`/`return`をまたぐルート
+     巻き戻し機構自体がこのコンパイラにまだ無いため。`labels`兄弟の未呼び出しbox
+     リークと同種、`compiler.rs`の`compile-match`/`unroot-let-sexpr-values`の
+     doc comment参照）。`compile-let`側は不正IR化（`module.verify()`失敗）は
+     `block-terminated?`ガードで解消済み——残るのはリークのみ。一般的な巻き戻し
+     機構の設計は未着手。
 
 ---
 

@@ -698,6 +698,22 @@ pub const SOURCE: &str = r#"
 ;; frame (every binding's slot at once, exact and order-independent), so
 ;; there is nothing left to "undo" name by name here. Skipping this would
 ;; leak a `Sexpr`-typed binding's GC root past the `let`'s own end.
+;;
+;; `compile-let` only reaches this call when the body did *not* already
+;; terminate the current block (see its own doc comment) — a `let` body that
+;; exits early via `break`/`return` has already built a `build-br` to the
+;; loop's exit block, and this function's own `build-call`s would otherwise
+;; land *after* that terminator: not a mere leak but invalid LLVM IR (a
+;; second instruction following a basic block's one-and-only terminator),
+;; caught by `module.verify()` (`Interp::compile_function`, added specifically
+;; because this bug could otherwise reach the JIT as undefined behavior)
+;; with "Terminator found in the middle of a basic block!". So on that path
+;; the `kind = 2` binding's GC root is *not* popped here — an accepted leak
+;; identical in kind to `compile-match`'s own documented one for a `match`
+;; arm that exits the same way (see that function's doc comment): both are
+;; instances of this compiler having no general unwind/cleanup mechanism for
+;; `break`/`return` crossing an open scope, the same tolerated class as an
+;; unreferenced `labels` sibling's box leak.
 (defun unroot-let-sexpr-values ((builder llvm-builder) (m llvm-module) (bindings Sexpr)) ()
   (match bindings
     ((Cons pair rest)
@@ -825,7 +841,9 @@ pub const SOURCE: &str = r#"
                                                                                                         (compile-field-get builder env fn-env captured cur-fn loop-exit loop-slot e)
                                                                                                         (if (eq s "field-set")
                                                                                                             (compile-field-set builder env fn-env captured cur-fn loop-exit loop-slot e)
-                                                                                                            (panic (append "compile-value: unsupported tag " s)))))))))))))))))))))))
+                                                                                                            (if (eq s "trait-call")
+                                                                                                                (compile-trait-call builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                                                                (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))
                            (_ (panic "compile-value: malformed node, expected a tagged list"))))
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -1421,7 +1439,14 @@ pub const SOURCE: &str = r#"
                        ;; then `push-frame` a brand new frame and write every
                        ;; binding into it (`bind-let-values`), compile the
                        ;; body (`compile-let-body`), pop any `Sexpr` GC roots
-                       ;; bindings pushed (`unroot-let-sexpr-values`), and
+                       ;; bindings pushed (`unroot-let-sexpr-values`) — guarded
+                       ;; by `block-terminated?`, since a body that exited
+                       ;; early via `break`/`return` has already closed the
+                       ;; current block with its own `build-br`, and calling
+                       ;; `unroot-let-sexpr-values` unconditionally there would
+                       ;; build instructions after that terminator (invalid
+                       ;; IR — see that function's own doc comment for the
+                       ;; accepted-leak tradeoff this guard implies) — and
                        ;; finally `pop-frame` to discard the whole frame at
                        ;; once — see this module's doc comment for why a
                        ;; pushed/popped *frame*, not the old per-key
@@ -1447,7 +1472,9 @@ pub const SOURCE: &str = r#"
                                (push-frame env)
                                (bind-let-values builder m env bindings acc)
                                (let ((result (compile-let-body builder env fn-env captured cur-fn loop-exit loop-slot body-forms)))
-                                 (unroot-let-sexpr-values builder m bindings)
+                                 (if (block-terminated? builder)
+                                     ()
+                                     (unroot-let-sexpr-values builder m bindings))
                                  (pop-frame env)
                                  result)))))
                        ;; `(lambda name ((captured . kind)...) ((param . kind)...) body)`
@@ -1891,16 +1918,56 @@ pub const SOURCE: &str = r#"
                        ;; usual borrowed-value-retain tag, reused
                        ;; unchanged for each arm's body (the same boundary
                        ;; an `if` merge crosses).
+                       ;;
+                       ;; `scrut-v` itself gets a `push-sexpr-root` right
+                       ;; after being computed, popped again once
+                       ;; `merge-block` is reached — a gap
+                       ;; `tests/compile_test.rs`'s
+                       ;; `compile_match_keeps_a_fresh_scrutinee_and_its_pattern_extracted_fields_rooted_across_an_arms_own_allocations`
+                       ;; demonstrates directly: `scrut-v` is always
+                       ;; `Sexpr`-typed here (`translate_match` only ever
+                       ;; translates a `Sexpr` scrutinee for real), but
+                       ;; unlike a `let` binding or call argument, nothing
+                       ;; else ever rooted it — a *fresh* scrutinee (e.g. the
+                       ;; direct result of a call, never bound to a name)
+                       ;; had no owner at all, so a `pat-bind` field
+                       ;; extracted from it (`compile-pattern-test`'s own
+                       ;; `bslot`, itself never rooted either) was only ever
+                       ;; safe by the GC transitively marking it *through*
+                       ;; `scrut-v` — which nothing protected an allocation
+                       ;; during a later arm statement (e.g. a sibling `let`
+                       ;; binding's own value) from reclaiming outright.
+                       ;; Rooting `scrut-v` for the match's own duration
+                       ;; keeps that transitive reachability valid the whole
+                       ;; time, which is enough: nothing here needs to root
+                       ;; each individual `pat-bind` separately. Popped only
+                       ;; on the normal `merge-block` path (that block is
+                       ;; always freshly appended, never `block-terminated?`
+                       ;; itself, so this is safe to emit unconditionally
+                       ;; without `compile-if`/`compile-let-body`'s usual
+                       ;; termination guard) — an arm that exits via a bare
+                       ;; `break`/`return` instead never reaches
+                       ;; `merge-block` at all, so that one path leaks this
+                       ;; root, the same accepted class of gap this file's
+                       ;; own module doc comment already documents for a
+                       ;; `labels` sibling boxed but never invoked (out of
+                       ;; scope for the same reason: closing it needs a
+                       ;; general unwind-through-`break`/`return` mechanism
+                       ;; this compiler doesn't have yet, not something
+                       ;; specific to `match`).
                        (compile-match ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((is-fn (sexpr-bool (car (cdr e)))))
                            (let ((scrut-form (car (cdr (cdr e)))))
                              (let ((arms (car (cdr (cdr (cdr e))))))
                                (let ((scrut-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot scrut-form)))
-                                 (let ((merge-block (append-block cur-fn "match-merge")))
-                                   (let ((slot (alloca-args builder 1)))
-                                     (compile-match-arms builder env fn-env captured cur-fn loop-exit loop-slot is-fn scrut-v slot merge-block arms)
-                                     (position-at-end builder merge-block)
-                                     (load-raw builder slot 0))))))))
+                                 (let ((ignored (push-sexpr-root builder m scrut-v)))
+                                   (let ((merge-block (append-block cur-fn "match-merge")))
+                                     (let ((slot (alloca-args builder 1)))
+                                       (compile-match-arms builder env fn-env captured cur-fn loop-exit loop-slot is-fn scrut-v slot merge-block arms)
+                                       (position-at-end builder merge-block)
+                                       (let ((result (load-raw builder slot 0)))
+                                         (let ((ignored2 (pop-sexpr-root builder m)))
+                                           result))))))))))
                        ;; Tries each `(pattern-form . body-form)` arm in
                        ;; order: `push-frame env` a fresh frame for any name
                        ;; this arm's pattern might bind, test the pattern
@@ -1968,17 +2035,23 @@ pub const SOURCE: &str = r#"
                        ;; functions' doc comments.
                        (compile-construct ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((is-sexpr (sexpr-bool (car (cdr e)))))
-                           (let ((variant (sexpr-int (car (cdr (cdr e))))))
-                             (let ((arg-forms (cdr (cdr (cdr e)))))
-                               (if is-sexpr
-                                   (compile-construct-sexpr builder env fn-env captured cur-fn loop-exit loop-slot variant arg-forms)
-                                   (compile-construct-box builder env fn-env captured cur-fn loop-exit loop-slot variant arg-forms))))))
+                           (let ((type-id (sexpr-int (car (cdr (cdr e))))))
+                             (let ((variant (sexpr-int (car (cdr (cdr (cdr e)))))))
+                               (let ((arg-forms (cdr (cdr (cdr (cdr e))))))
+                                 (if is-sexpr
+                                     (compile-construct-sexpr builder env fn-env captured cur-fn loop-exit loop-slot variant arg-forms)
+                                     (compile-construct-box builder env fn-env captured cur-fn loop-exit loop-slot type-id variant arg-forms)))))))
                        ;; Builds a general-ADT box (`Option`/`Result`/a
                        ;; `defstruct`, sum or struct kind alike): a fresh
-                       ;; `build-malloc`'d `[1 + argc]`-slot array, slot `0`
-                       ;; the variant tag, slot `1 + i` the `i`-th field's
-                       ;; already-compiled value — `compile-field-get`/
-                       ;; `compile-field-set` read/write the same `1 + idx`
+                       ;; `build-malloc`'d `[2 + argc]`-slot array, slot `0`
+                       ;; the box's own type-id (`ast_bridge::type_id_hash` of
+                       ;; its type's local name — added for `compile-trait-call`'s
+                       ;; runtime dispatch, see that function's doc comment;
+                       ;; `0` for a box built before that stage would have
+                       ;; been meaningless anyway, since nothing read it),
+                       ;; slot `1` the variant tag, slot `2 + i` the `i`-th
+                       ;; field's already-compiled value — `compile-field-get`/
+                       ;; `compile-field-set` read/write the same `2 + idx`
                        ;; offset, so the layout only has to agree with
                        ;; itself. The final `build-ptr-to-int` turns the
                        ;; fresh pointer into the plain `i64` value every
@@ -1988,11 +2061,12 @@ pub const SOURCE: &str = r#"
                        ;; — see this file's own module doc comment for the
                        ;; same accepted leak this codebase already takes for
                        ;; an unreferenced boxed `labels` sibling.
-                       (compile-construct-box ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (variant i64) (arg-forms Sexpr)) llvm-value
+                       (compile-construct-box ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (type-id i64) (variant i64) (arg-forms Sexpr)) llvm-value
                          (let ((argc (sexpr-list-length arg-forms)))
-                           (let ((ptr (build-malloc builder (+ argc 1))))
-                             (store-arg builder ptr 0 (const-i64 builder variant))
-                             (compile-construct-box-fields builder env fn-env captured cur-fn loop-exit loop-slot ptr arg-forms 1)
+                           (let ((ptr (build-malloc builder (+ argc 2))))
+                             (store-arg builder ptr 0 (const-i64 builder type-id))
+                             (store-arg builder ptr 1 (const-i64 builder variant))
+                             (compile-construct-box-fields builder env fn-env captured cur-fn loop-exit loop-slot ptr arg-forms 2)
                              (build-ptr-to-int builder ptr))))
                        ;; Fills a `compile-construct-box`-allocated array,
                        ;; one compiled field per slot starting at `idx`
@@ -2078,13 +2152,13 @@ pub const SOURCE: &str = r#"
                        ;; the object's own value is reinterpreted as a
                        ;; pointer (`build-int-to-ptr`, the inverse of
                        ;; `compile-construct-box`'s final `build-ptr-to-int`)
-                       ;; and read at slot `1 + idx` (skipping the
-                       ;; variant-tag slot). `idx` is recovered from
+                       ;; and read at slot `2 + idx` (skipping the type-id
+                       ;; and variant-tag slots). `idx` is recovered from
                        ;; `idx-unary-list`'s own length
                        ;; (`ast_bridge::idx_unary_list`'s doc comment
                        ;; explains why it isn't simply a `Sexpr` `Int`).
                        (compile-field-get ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
-                         (let ((idx (+ (sexpr-list-length (car (cdr e))) 1)))
+                         (let ((idx (+ (sexpr-list-length (car (cdr e))) 2)))
                            (let ((obj-form (car (cdr (cdr e)))))
                              (let ((obj-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot obj-form)))
                                (let ((ptr (build-int-to-ptr builder obj-v)))
@@ -2094,14 +2168,99 @@ pub const SOURCE: &str = r#"
                        ;; `Unit` (`0`, `compile-unit`'s own convention),
                        ;; matching `Expr::FieldSet`'s own checked type.
                        (compile-field-set ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
-                         (let ((idx (+ (sexpr-list-length (car (cdr e))) 1)))
+                         (let ((idx (+ (sexpr-list-length (car (cdr e))) 2)))
                            (let ((obj-form (car (cdr (cdr e)))))
                              (let ((value-form (car (cdr (cdr (cdr e))))))
                                (let ((obj-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot obj-form)))
                                  (let ((ptr (build-int-to-ptr builder obj-v)))
                                    (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot value-form)))
                                      (store-arg builder ptr idx v)
-                                     (const-i64 builder 0)))))))))
+                                     (const-i64 builder 0))))))))
+                       ;; `(trait-call method-str candidates-list arg-form...)`
+                       ;; — `Expr::TraitCall`'s compile counterpart:
+                       ;; `candidates-list` is a plain list of
+                       ;; `(type-id-i64 . type-name-str)` pairs
+                       ;; (`ast_bridge::translate_trait_call`, one per
+                       ;; `impl` of the trait known at check time), `args`
+                       ;; tagged exactly like `compile-assoc`'s own
+                       ;; instance-call arguments — `args[0]` is always the
+                       ;; receiver. Computes the argument array once
+                       ;; (`compile-call-args`, same as `compile-assoc`),
+                       ;; then re-reads the receiver straight back out of
+                       ;; slot `0` of that same array (`load-raw`) rather
+                       ;; than compiling it a second time — the call
+                       ;; argument list already holds it, exactly the trick
+                       ;; `compile-field-get` uses to read a box field, just
+                       ;; applied to the local argument array instead of a
+                       ;; heap box. Reinterprets that receiver as a pointer
+                       ;; and reads its own type-id (`compile-construct-box`'s
+                       ;; slot `0`) to drive `compile-trait-dispatch`'s
+                       ;; runtime chain, merged into one shared 1-slot
+                       ;; result the same `alloca-args`/`store-arg`/
+                       ;; `load-raw` way `compile-if`'s 2-way merge already
+                       ;; works, just for an n-way (one per candidate) set of
+                       ;; blocks instead. `release-pending-args`/
+                       ;; `pop-sexpr-roots` run once, at the merge point —
+                       ;; safe (and simpler than duplicating them into every
+                       ;; candidate block) since only one candidate's call
+                       ;; block ever actually runs, and the merge block
+                       ;; post-dominates every one of them.
+                       (compile-trait-call ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((method (sexpr-str (car (cdr e)))))
+                           (let ((candidates (car (cdr (cdr e)))))
+                             (let ((arg-forms (cdr (cdr (cdr e)))))
+                               (let ((argc (sexpr-list-length arg-forms)))
+                                 (let ((args-ptr (alloca-args builder argc)))
+                                   (let ((pending-ptr (alloca-args builder argc)))
+                                     (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr arg-forms 0)))
+                                       (let ((recv (load-raw builder args-ptr 0)))
+                                         (let ((recv-ptr (build-int-to-ptr builder recv)))
+                                           (let ((type-id (load-raw builder recv-ptr 0)))
+                                             (let ((merge-block (append-block cur-fn "trait-call-merge")))
+                                               (let ((slot (alloca-args builder 1)))
+                                                 (compile-trait-dispatch builder cur-fn args-ptr argc method type-id merge-block slot candidates)
+                                                 (position-at-end builder merge-block)
+                                                 (let ((result (load-raw builder slot 0)))
+                                                   (release-pending-args builder m pending-ptr argc 0)
+                                                   (pop-sexpr-roots builder m sexpr-roots)
+                                                   result))))))))))))))
+                       ;; Walks `candidates` (`(type-id-i64 . type-name-str)`
+                       ;; pairs), building one two-way test per entry: if the
+                       ;; runtime `type-id` matches this candidate's, call
+                       ;; its own mangled `type-name::method` (the same
+                       ;; forward-declared/wired name `compile-assoc` already
+                       ;; relies on — `ast_bridge::collect_trait_call_targets`
+                       ;; requires and wires every candidate exactly like a
+                       ;; static `Expr::Assoc` target), store the result into
+                       ;; `slot`, and branch to `merge-block`; otherwise fall
+                       ;; through to the next candidate's own test. Once every
+                       ;; candidate has failed, `Checker::check_instance_method`'s
+                       ;; own call-site check (every argument's concrete type
+                       ;; must actually implement the bound trait) guarantees
+                       ;; this is unreachable for a well-typed program —
+                       ;; `rt_trait_call_fail` (an `abort`, mirroring
+                       ;; `rt_match_fail`'s role for `compile-match-arms`) is
+                       ;; the trap for the case that guarantee was somehow
+                       ;; wrong.
+                       (compile-trait-dispatch ((builder llvm-builder) (cur-fn llvm-function) (args-ptr llvm-value) (argc i32) (method string) (type-id llvm-value) (merge-block llvm-basic-block) (slot llvm-value) (candidates Sexpr)) ()
+                         (match candidates
+                           ((Cons pair rest)
+                            (let ((cand-id (sexpr-int (car pair))))
+                              (let ((cand-name (sexpr-str (cdr pair))))
+                                (let ((call-block (append-block cur-fn "trait-call-call")))
+                                  (let ((next-block (append-block cur-fn "trait-call-next")))
+                                    (build-cond-br builder (build-icmp-eq builder type-id (const-i64 builder cand-id)) call-block next-block)
+                                    (position-at-end builder call-block)
+                                    (let ((mangled (append cand-name (append "::" method))))
+                                      (let ((result (build-call builder (get-function m mangled) args-ptr argc)))
+                                        (store-arg builder slot 0 result)
+                                        (build-br builder merge-block)))
+                                    (position-at-end builder next-block)
+                                    (compile-trait-dispatch builder cur-fn args-ptr argc method type-id merge-block slot rest))))))
+                           (_ (let ((fail-args (alloca-args builder 0)))
+                                (let ((fallback (build-call builder (get-function m "rt_trait_call_fail") fail-args 0)))
+                                  (store-arg builder slot 0 fallback)
+                                  (build-br builder merge-block)))))))
                 (let ((v (compile-value builder env fn-env '() f (Option::none) (Option::none) body)))
                   (let ((protected (bare-returned-own-name body param-names '())))
                     (release-bindings builder m env param-names protected)

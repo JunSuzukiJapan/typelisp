@@ -2040,3 +2040,117 @@ pinと実際の関連型が食い違う場合に呼び出し側で拒否され�
 pin無し経路の回帰確認としてそのまま維持、コメントのみ`Checker::check_doiter`という現存しない
 関数名への古い参照を`check_instance_method`に修正）。全件green
 （`scripts/with-llvm-env.sh cargo test`、compile機能含む）。
+
+## compile機能: TraitCallランタイムdispatch・compile-matchのGCルート漏れ修正・retain/release重複除去パス（2026-07-01）
+
+TODO.mdに残っていたcompile機能の3項目をまとめて対応。
+
+**`Expr::TraitCall`の実装（型IDタグ付きボックス + 実行時ディスパッチチェーン）**:
+ユーザーに「限定対応」（実装が1つしかなければ静的呼び出し扱い）か「汎用ランタイムディスパッチ」
+（複数実装を実行時に型IDで分岐）かを確認し、後者を選択。設計:
+- `Checker::check_instance_method`のTraitCall分岐で、その時点で登録済みの全impl実装型を
+  `Registry`のnamespaceツリーを再帰的に走査して収集し、新設の`Expr::TraitCall::impls: Vec<Path>`
+  に埋め込む（チェック時に確定——インタプリタの`Interp::eval`側TraitCall分岐は従来通り
+  実行時型タグで動的解決するため`impls`を一切参照しない、この一覧は**compileのみ**が使う）。
+- 一般ADTボックス（`compile-construct-box`）の先頭にtype-idスロットを新設
+  （`ast_bridge::type_id_hash`——型のlocal名のFNV-1aハッシュ、プロセス横断でグローバルな
+  型ID採番テーブルを持たずに済む）。スロット0=type-id、スロット1=variant tag、
+  スロット2+i=フィールド、と1つずつシフト（`compile-field-get`/`-field-set`のoffsetも
+  `+1`→`+2`に追随）。
+- `ast_bridge::translate_trait_call`が`impls`（`i64`/`i32`/`sexpr`を除外——ボックス表現を
+  持たないため）を候補リストとして`(trait-call method-str candidates-list arg-form...)`に
+  翻訳、`compiler.rs`の`compile-trait-call`/`compile-trait-dispatch`が受信側の型IDを
+  実行時に読み、候補を順に`build-icmp-eq`で比較する二分岐チェーン（`compile-if`と同じ
+  `alloca-args`1スロットmergeパターンのn-way版）を生成。マッチしなければ`rt_trait_call_fail`
+  （`rt_match_fail`と同型の`fatal`トラップ）。各候補の`type::method`は`Expr::Assoc`と
+  全く同じ`method_link_name`前方宣言/wiring機構に相乗り
+  （`ast_bridge::collect_trait_call_targets`が`collect_assoc_targets`と同じ
+  `(Path, String)`ペア形式で追加するだけで`Interp::compile_function`側の変更は不要）。
+- 制約: `impls`はチェック時点のスナップショットなので、ジェネリック関数を`check`した**後**に
+  追加された`impl`はそのcompile済み呼び出しからは見えない（インタプリタ実行では問題なし、
+  compileした場合のみの既知の制約——`Expr::TraitCall::impls`のdoc comment参照）。
+- テスト: `tests/compile_test.rs`に単一impl版・複数impl版（`box-a`/`box-b`が同じtraitを
+  実装し、実行時に正しい方へ分岐することを実証）を追加。既存の生ボックスレイアウトを
+  直接読むテスト2件（`Option`/`defstruct`）をtype-idスロット追加後のoffsetに追随。
+
+**retain/release対の重複除去（Swift ARC Optimizer的な最適化パス）**: `src/compile/arc_opt.rs`
+新設。`build-closure-retain`が実際にはcallではなくインライン展開
+（`inttoptr; getelementptr; load; add; getelementptr; store`の6命令、リファレンスカウント
+スロットへの単純な+1）である点を利用し、`call void @__typelisp_closure_release`直前に
+この6命令が同一クロージャ値に対して隣接している場合のみ両方をまとめて消去する、狭くだが
+検証可能に安全なペフォールピープホール。全オペランドの依存関係をLLVM生値参照
+（`AsValueRef`）で厳密照合するため、異なる2つのクロージャの隣接retain/releaseは誤って
+消されない（否定テストで確認）。現行の`compiler.rs`のどのretain呼び出し元
+（`retain-bindings`/`compile-escaping-env-args`/`compile-if-branch`）も実際には
+隣接パターンを生成しないため、既存の全compileテストに対しては恒常的にno-op
+（=0件除去）——`Interp::compile_function`（JIT）・`compile::aot::compile_file`（AOT）の
+両方に無条件で組み込み済みで、将来のcodegen変更が隣接パターンを生成するようになった時点で
+自動的に効き始める、前方互換の建て付け。テストは`tests/compile_test.rs`の既存
+`closure_retain_then_release_leaves_it_still_callable`と全く同じ生IRを対象に、
+除去件数が1件であること・除去後も正しく実行できることを確認する肯定テストと、
+異なる2つの閉包値に対しては何も消さないことを確認する否定テストの2本。
+
+**compile-matchのGCルート漏れ修正（実証テスト付き）**: 当初のTODOの表現は
+「compile-if-branch経由の値のうち`if`/`match`のmerge slot・`return`のloop-slotを
+素通りする一時値のkind対応」だったが、調査の結果`if`/`return`自身の分岐値は
+（分岐ごとに毎回`compile-value`で作った直後に即座にstore→load、間に割り込みうる
+アロケーションが存在しない）常に安全であることが判明——実際に脆弱だったのは
+`compile-match`の**scrutinee**（マッチ対象）だった。scrutinee値自体がどこにも
+ルート保護されておらず、パターンで取り出したサブフィールド（`pat-bind`）の安全性は
+scrutinee自身がGCから到達可能であることに全面的に依存していたため、
+`(match (fresh-heap-value) ((Cons a d) (アーム本体内で大量にアロケーションしてから a を返す)))`
+という形——scrutinueがどの変数にも束縛されない**フレッシュな値**（関数呼び出し結果を
+直接matchする等）かつアーム本体自身が他のアロケーションを行う——で、scrutineeのヒープ
+セルがアーム本体中の無関係なアロケーションに巻き込まれて回収・再利用され、最終的に
+壊れたデータが返ることを`tests/compile_test.rs`の
+`compile_match_keeps_a_fresh_scrutinee_and_its_pattern_extracted_fields_rooted_across_an_arms_own_allocations`
+で実証（小さいヒープ容量+大量アロケーションループで確実にGCを誘発、修正前は失敗することを
+確認してから修正）。修正: `compile-match`がscrutinee計算直後に`push-sexpr-root`、
+`merge-block`到達時（＝正常終了パスのみ）に`pop-sexpr-root`する形にブラケット化——
+scrutinee自身さえ生きていればGCのmarkフェーズがそこから辿れるフィールドも全て
+自動的にマークするため、`pat-bind`個々に別途ルートを積む必要はない。
+`merge-block`は毎回新規に追加されるブロックで既存の`block-terminated?`ガードなしに
+無条件でpopを積んでも不正なIR（terminator後の命令）にはならないため安全。
+既知の残課題: アームが`break`/`return`で早期脱出し`merge-block`に到達しない経路では
+このpopが実行されずルートが1つリークする——`break`/`return`をまたいで巻き戻す一般機構が
+このコンパイラにまだ無いため（`labels`兄弟の未呼び出しboxリークと同種の、意図的に
+スコープ外とした既知の限界。`compile-let`の`unroot-let-sexpr-values`も同型の
+未対応ギャップを抱えていることを調査中に発見したが、今回のスコープ外として温存）。
+
+## compile-letのunroot-let-sexpr-values不正IRリスクを修正（2026-07-01）
+
+上の節で発見・温存した`compile-let`側のギャップを対応。`compile-match`のscrutineeと違い、
+こちらは「リークするだけ」では済まない一段深刻な問題だった: `unroot-let-sexpr-values`は
+`compile-let-body`が返った直後、**その時点のbuilder位置に無条件で**`call rt_pop_sexpr_root`
+命令を積む。body内で`break`/`return`が実行された場合、`compile-break`/`compile-return`は
+既にそのブロックへ`build-br`（terminator）を積んでいる——builderの挿入位置はterminator
+命令を積んだ後もそのブロックのままなので（`build-br`のラッパー`llvm_builder_build_br`は
+位置を移動しない）、直後の`unroot-let-sexpr-values`呼び出しはterminatorの**後**に
+命令を追加してしまう。これはLLVMの基本ブロック不変条件違反（terminatorはブロック内で
+唯一・かつ最後の命令でなければならない）で、単なるGCルートリークとは異なり不正なIRそのもの
+——`compile-match`のscrutinee修正のように「新規ブロックに無条件で積むので安全」という
+逃げ道が使えない箇所だった。
+
+再現手順（`tests/compile_test.rs`の
+`compile_let_does_not_emit_instructions_after_an_early_return_from_its_body`）:
+`Sexpr`型（kind=2）の値を束縛する`let`の本体が`loop`の中で即座に`(return 42)`する、
+という最小コードを`compile`させる。修正前にこのテストを実行すると、`(compile make-thing)`
+自体が失敗し、`module.verify()`が`"Terminator found in the middle of a basic block!"`
+を返すことを確認した——実際にJITエンジンへ渡してクラッシュさせるのはプロセスを巻き込む
+危険な検証手段になる（LLVMの`report_fatal_error`は捕捉可能なRust panicではなく
+プロセスabortになりうる）ため、安全に再現・確認するために合わせて
+`Interp::compile_function`（JIT経路）に`module.verify()`呼び出しを追加した
+（`compile::aot::compile_file`が既に同じ位置——`arc_opt`の後、実際のコード生成の前——で
+行っているのと同じガード。これによりJIT経路でも不正なIRは「未定義動作としてクラッシュ」
+ではなく「捕捉可能な`EvalError::Panic`」に変わる、という副次的な堅牢化でもある）。
+
+修正本体: `compile-let`が`compile-let-body`の戻り値を受け取った直後、
+`unroot-let-sexpr-values`呼び出しを`(if (block-terminated? builder) () (unroot-let-sexpr-values ...))`
+でガード——`compile-if-branch`が自分の分岐値をstoreする前に同じ`block-terminated?`で
+ガードしているのと全く同じパターン。ブロックが既にterminateされている（＝bodyが
+`break`/`return`で早期脱出した）場合はpop自体をスキップする。これにより不正なIRの
+生成は解消されるが、その経路では`kind = 2`束縛のGCルートは結局popされないまま残る——
+これは`compile-match`のscrutinee用に既に文書化・許容している同種のリーク
+（`break`/`return`をまたぐ巻き戻し機構がこのコンパイラにまだ無いための、`labels`兄弟の
+未呼び出しboxリークと同種の意図的スコープ外）に完全に一致する形へ帰着した。
+一般的な巻き戻し機構の設計自体は今回も引き続き未着手。

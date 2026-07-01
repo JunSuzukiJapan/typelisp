@@ -2018,7 +2018,9 @@ fn compile_dispatches_a_function_that_constructs_a_cons_via_construct_to_native_
 
 /// A general ADT (`Option<i64>`'s `Some`, `AdtKind::Sum`) constructs via
 /// `compile-construct-box`'s `malloc`'d-box path instead —
-/// `[1, field0]`: slot `0` the variant tag, slot `1` the lone field.
+/// `[type-id, 0, field0]`: slot `0` the box's own type-id (added for
+/// `compile-trait-call`'s runtime dispatch, `ast_bridge::type_id_hash`),
+/// slot `1` the variant tag, slot `2` the lone field.
 /// `Expr::Call`'s existing `Sexpr`-only decode step (Stage 5) doesn't know
 /// about this representation, so the box's raw address surfaces as a
 /// (representationally faithful, just not yet correctly *typed*)
@@ -2042,11 +2044,12 @@ fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_cod
         other => panic!("expected the box's raw address as an Int (see this test's doc comment), got {:?}", other),
     };
     // SAFETY: `raw` is `build-ptr-to-int`'s result over a `build-malloc`'d,
-    // never-freed `[2 x i64]` array (`compile-construct-box`'s layout: slot
-    // 0 = variant tag, slot 1 = the lone field) — still valid to read.
+    // never-freed `[3 x i64]` array (`compile-construct-box`'s layout: slot
+    // 0 = type-id, slot 1 = variant tag, slot 2 = the lone field) — still
+    // valid to read.
     let (variant, field0) = unsafe {
         let p = raw as *const i64;
-        (*p, *p.add(1))
+        (*p.add(1), *p.add(2))
     };
     assert_eq!(variant, 0, "Some is option_def's variant 0");
     assert_eq!(field0, 42);
@@ -2097,7 +2100,7 @@ fn compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_
     // SAFETY: same reasoning as the `Option` box test above, just 2 fields.
     let (variant, x, y) = unsafe {
         let p = raw as *const i64;
-        (*p, *p.add(1), *p.add(2))
+        (*p.add(1), *p.add(2), *p.add(3))
     };
     assert_eq!(variant, 0, "a defstruct's lone variant is always index 0 (\"new\")");
     assert_eq!(x, 3);
@@ -2668,3 +2671,155 @@ fn compile_dispatches_a_nested_labels_inner_sibling_that_boxes_an_outer_sibling_
     }
 }
 
+// ---- Expr::TraitCall: runtime dispatch through a where-bounded generic ----
+
+/// `describe`'s body — `(count it)` where `it: T`, `(where (Counted T))` —
+/// checks as `Expr::TraitCall`, not `Expr::Assoc` (see that node's own doc
+/// comment): the implementing type is only known once a concrete `T` is
+/// substituted at a call site, unlike a call through a concrete receiver
+/// type. With exactly one type (`box-a`) registered as `impl Counted` by the
+/// time `describe` is checked, `ast_bridge::translate_trait_call`'s
+/// candidate list has one entry — still a real runtime dispatch chain
+/// (`compile-trait-dispatch`), just one comparison deep. `make-box-a`'s own
+/// `Expr::Construct` must itself be `compile`d for the receiver `describe`
+/// sees to actually be a type-id-tagged `compile-construct-box` box (an
+/// *interpreted* `box-a::new` would instead produce an `RtValue::Struct`,
+/// never reaching compiled code at all) — see
+/// `compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_code`
+/// for the same requirement.
+#[test]
+fn compile_dispatches_a_trait_call_with_a_single_impl_to_native_code() {
+    let v = run_with_compiler(
+        r#"
+        (deftrait Counted (count ((self Self)) i32))
+        (defstruct box-a (n i32))
+        (impl Counted box-a (count ((self Self)) i32 self::n))
+        (defun (describe T) ((it T)) i32 (where (Counted T)) (count it))
+        (defun make-box-a ((n i32)) box-a (box-a::new n))
+        (compile box-a::n)
+        (compile box-a::count)
+        (compile make-box-a)
+        (compile describe)
+        (describe (make-box-a 7))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(7));
+}
+
+/// The multi-impl counterpart of the test above — mirrors
+/// `two_types_implementing_the_same_trait_dispatch_independently`
+/// (`tests/trait_test.rs`), but with `describe` itself `compile`d: both
+/// `box-a::count`/`box-b::count` must already be `compile`d before
+/// `describe` is (`Interp::compile_function`'s `method_targets` check —
+/// the same requirement an ordinary `Expr::Assoc` target already has), and
+/// `compile-trait-dispatch`'s chain must pick the *right* one of the two at
+/// runtime purely from each receiver's own type-id header
+/// (`compile-construct-box`'s slot `0`), proving this isn't just the
+/// single-candidate fast path the test above alone could pass by
+/// coincidence (e.g. an always-branch-to-the-first-candidate bug would
+/// still pass a single-impl test but fail this one on `box-b`).
+#[test]
+fn compile_dispatches_a_trait_call_with_multiple_impls_to_native_code() {
+    let v = run_with_compiler(
+        r#"
+        (deftrait Counted (count ((self Self)) i32))
+        (defstruct box-a (n i32))
+        (defstruct box-b (n i32))
+        (impl Counted box-a (count ((self Self)) i32 self::n))
+        (impl Counted box-b (count ((self Self)) i32 (* 2 self::n)))
+        (defun (describe T) ((it T)) i32 (where (Counted T)) (count it))
+        (defun make-box-a ((n i32)) box-a (box-a::new n))
+        (defun make-box-b ((n i32)) box-b (box-b::new n))
+        (compile box-a::n)
+        (compile box-b::n)
+        (compile box-a::count)
+        (compile box-b::count)
+        (compile make-box-a)
+        (compile make-box-b)
+        (compile describe)
+        (+ (describe (make-box-a 3)) (describe (make-box-b 3)))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(3 + 6));
+}
+
+
+/// Demonstrates the corruption `compile-match`'s doc comment describes
+/// (docs/TODO.md's "compile-if-branch経由の値の...kind対応" entry, narrowed
+/// down from "somewhere among if/match/return's merge-slot handoffs" to
+/// this specific one): `make-fresh`'s result — a freshly-`Cons`ed value
+/// never bound to a name, so nothing roots it — is `match`ed directly, and
+/// `a` (the outer cons's own `car`, itself a *second* heap-allocated cons)
+/// is extracted via a `pat-bind` and bare-returned from the arm, flowing
+/// through `compile-if-branch` into the match's own merge slot with no GC
+/// protection anywhere along the way. `churn`'s own unrelated allocations
+/// — running *inside* the same arm, after `a` was extracted but before it's
+/// read back out of the merge slot — are exactly the kind of intervening
+/// allocation nothing here was expected to survive without the scrutinee
+/// itself staying rooted: reverting `compile-match`'s `push-sexpr-root`/
+/// `pop-sexpr-root` bracket reliably reproduces the failure this test
+/// guards against — `a`'s own heap cell gets reclaimed and reused by one of
+/// `churn`'s own `(Cons s s)`, so the final match against
+/// `(Cons (Int x) (Int y))` no longer matches and the whole thing reads
+/// back `-1` instead of `187`.
+#[test]
+fn compile_match_keeps_a_fresh_scrutinee_and_its_pattern_extracted_fields_rooted_across_an_arms_own_allocations() {
+    let v = run_with_compiler_and_capacity(
+        r#"
+        (defun make-fresh () Sexpr (Cons (Cons (Int 99) (Int 88)) (Int 0)))
+        (defun churn ((n i64)) i64
+          (let ((s (Cons (Int 9) (Int 9))))
+            (loop
+              (if (eq n 0) (return n) ())
+              (Cons s s)
+              (setf n (- n 1)))))
+        (defun extract-from-fresh-match () Sexpr
+          (match (make-fresh)
+            ((Cons a d) (let ((ignored (churn 30000))) a))
+            (_ (Int -1))))
+        (compile make-fresh)
+        (compile churn)
+        (compile extract-from-fresh-match)
+        (match (extract-from-fresh-match)
+          ((Cons (Int x) (Int y)) (+ x y))
+          (_ -1))
+        "#,
+        9000,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(187), "the match scrutinee's extracted nested-cons field must survive churn's unrelated allocations");
+}
+
+/// Demonstrates the invalid-IR risk `compile-let`'s `unroot-let-sexpr-values`
+/// doc comment describes: a `let` binding a `Sexpr`-typed value (`s`, kind
+/// `2`) whose body exits early via a bare `(return 42)` inside a `loop` has
+/// already closed the current block with `compile-return`'s own `build-br`
+/// to the loop's exit block by the time `compile-let` would otherwise
+/// unconditionally call `unroot-let-sexpr-values` — which itself builds a
+/// `call rt_pop_sexpr_root` instruction. Without the `block-terminated?`
+/// guard around that call, this lands *after* the block's terminator: not
+/// merely a leak but a malformed basic block (LLVM requires exactly one
+/// terminator, as the very last instruction). Reverting that guard reliably
+/// reproduces the failure this test guards against — `Interp::compile_function`'s
+/// own `module.verify()` call (added alongside this fix specifically because
+/// this bug could otherwise reach the JIT engine as undefined behavior
+/// instead of a catchable error) rejects the module with "Terminator found
+/// in the middle of a basic block!", so `(compile make-thing)` itself fails
+/// rather than `(make-thing)` returning a corrupted value.
+#[test]
+fn compile_let_does_not_emit_instructions_after_an_early_return_from_its_body() {
+    let v = run_with_compiler(
+        r#"
+        (defun make-thing () i32
+          (loop
+            (let ((s (Cons (Int 1) (Int 2))))
+              (return 42))))
+        (compile make-thing)
+        (make-thing)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(42));
+}
