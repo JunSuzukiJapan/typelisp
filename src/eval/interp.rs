@@ -1706,10 +1706,10 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// binding's *existing* root in place instead of leaving a freshly assigned
 /// value with no root at all — see `typelisp_rt::rt_set_sexpr_root`'s doc
 /// comment for the corruption this closes.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 12] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 13] {
     use crate::compile::runtime::{
         rt_car, rt_cdr, rt_cons, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car,
-        rt_set_cdr, rt_set_sexpr_root, rt_trait_call_fail,
+        rt_set_cdr, rt_set_sexpr_root, rt_trait_call_fail, rt_truncate_sexpr_roots,
     };
     [
         ("rt_car", rt_car as usize),
@@ -1724,6 +1724,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 12] {
         ("rt_root_count", rt_root_count as usize),
         ("rt_set_sexpr_root", rt_set_sexpr_root as usize),
         ("rt_trait_call_fail", rt_trait_call_fail as usize),
+        ("rt_truncate_sexpr_roots", rt_truncate_sexpr_roots as usize),
     ]
 }
 

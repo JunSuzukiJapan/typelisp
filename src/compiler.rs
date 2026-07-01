@@ -67,16 +67,21 @@
 //! activation boundary this compiler doesn't already track explicitly: it's
 //! always a plain, local LLVM branch to a basic block already known at
 //! compile time, never anything resembling a non-local exit/continuation.
-//! `loop-exit`/`loop-slot` (threaded through the whole ring exactly like
-//! `cur-fn`) are the *nearest* enclosing loop's exit block and 1-slot result
-//! merge; `compile-loop` installs a fresh `Option::some` pair when compiling
-//! its own body (nesting falls out of ordinary call-stack scoping, no
-//! explicit push/pop needed — see `compile-loop`'s doc comment), and
-//! `compile-lambda`/`compile-labels-bodies` reset to `Option::none` when
-//! compiling a *new* function's own body, mirroring the checker's reset
-//! exactly. `compile-labels`'s *trailing* body is not a new function
-//! boundary (`check_labels` checks it against the *unmodified* loop stack),
-//! so it forwards the pair unchanged instead.
+//! `loop-exit`/`loop-slot`/`loop-root-base` (threaded through the whole ring
+//! exactly like `cur-fn`) are the *nearest* enclosing loop's exit block,
+//! 1-slot result merge, and the GC root stack's depth as of that loop's own
+//! entry (`rt_root_count`, read once in `compile-loop`'s pre-header — see
+//! `compile-break`/`compile-return`'s doc comments for why a `break`/
+//! `return` needs that depth, not just the block/slot pair, to unwind
+//! correctly through however many `let`/`match` scopes happen to be open
+//! above it); `compile-loop` installs a fresh `Option::some` trio when
+//! compiling its own body (nesting falls out of ordinary call-stack
+//! scoping, no explicit push/pop needed — see `compile-loop`'s doc
+//! comment), and `compile-lambda`/`compile-labels-bodies` reset to
+//! `Option::none` when compiling a *new* function's own body, mirroring the
+//! checker's reset exactly. `compile-labels`'s *trailing* body is not a new
+//! function boundary (`check_labels` checks it against the *unmodified*
+//! loop stack), so it forwards the trio unchanged instead.
 //!
 //! **Only statement position is supported for `break`/`return`** — directly
 //! in a `loop` body's sequence (`compile-loop-body`), or as the *entire* form
@@ -708,12 +713,15 @@ pub const SOURCE: &str = r#"
 ;; caught by `module.verify()` (`Interp::compile_function`, added specifically
 ;; because this bug could otherwise reach the JIT as undefined behavior)
 ;; with "Terminator found in the middle of a basic block!". So on that path
-;; the `kind = 2` binding's GC root is *not* popped here — an accepted leak
-;; identical in kind to `compile-match`'s own documented one for a `match`
-;; arm that exits the same way (see that function's doc comment): both are
-;; instances of this compiler having no general unwind/cleanup mechanism for
-;; `break`/`return` crossing an open scope, the same tolerated class as an
-;; unreferenced `labels` sibling's box leak.
+;; the `kind = 2` binding's GC root is *not* popped here — no longer a
+;; problem, though: `compile-break`/`compile-return` themselves now
+;; unconditionally truncate the GC root stack back to the depth it was at
+;; the nearest enclosing loop's own entry (`rt_truncate_sexpr_roots`, keyed
+;; off `loop-root-base` — see `compile-loop`'s doc comment) right before
+;; that same jump, which discards this exact root along with any other open
+;; scope's, however many are nested between here and the loop. This function
+;; only ever needs to handle the *normal* (falls off the end of the body)
+;; exit path now.
 (defun unroot-let-sexpr-values ((builder llvm-builder) (m llvm-module) (bindings Sexpr)) ()
   (match bindings
     ((Cons pair rest)
@@ -798,7 +806,7 @@ pub const SOURCE: &str = r#"
             (bind-params env builder f param-names 0)
             (retain-bindings builder m env param-names)
             (let ((fn-env (new-fn-env)))
-              (labels ((compile-value ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+              (labels ((compile-value ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (match (car e)
                            ((Sym s)
                             (if (eq s "int")
@@ -810,39 +818,39 @@ pub const SOURCE: &str = r#"
                                         (if (eq s "var")
                                             (compile-var builder env fn-env captured e)
                                             (if (eq s "assoc")
-                                                (compile-assoc builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                (compile-assoc builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                 (if (eq s "apply")
-                                                    (compile-apply builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                    (compile-apply builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                     (if (eq s "labels")
-                                                        (compile-labels builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                        (compile-labels builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                         (if (eq s "call")
-                                                            (compile-call builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                            (compile-call builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                             (if (eq s "lambda")
                                                                 (compile-lambda builder env fn-env captured e)
                                                                 (if (eq s "apply-indirect")
-                                                                    (compile-apply-indirect builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                    (compile-apply-indirect builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                     (if (eq s "if")
-                                                                        (compile-if builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                        (compile-if builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                         (if (eq s "let")
-                                                                            (compile-let builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                            (compile-let builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                             (if (eq s "loop")
                                                                                 (compile-loop builder env fn-env captured cur-fn e)
                                                                                 (if (eq s "break")
-                                                                                    (compile-break builder loop-exit loop-slot)
+                                                                                    (compile-break builder loop-exit loop-slot loop-root-base)
                                                                                     (if (eq s "return")
-                                                                                        (compile-return builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                                        (compile-return builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                         (if (eq s "set")
-                                                                                            (compile-set builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                                            (compile-set builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                             (if (eq s "match")
-                                                                                                (compile-match builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                                                (compile-match builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                 (if (eq s "construct")
-                                                                                                    (compile-construct builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                                                    (compile-construct builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                     (if (eq s "field-get")
-                                                                                                        (compile-field-get builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                                                        (compile-field-get builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                         (if (eq s "field-set")
-                                                                                                            (compile-field-set builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                                                            (compile-field-set builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                             (if (eq s "trait-call")
-                                                                                                                (compile-trait-call builder env fn-env captured cur-fn loop-exit loop-slot e)
+                                                                                                                (compile-trait-call builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                                 (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))
                            (_ (panic "compile-value: malformed node, expected a tagged list"))))
                        ;; `(unit)` — `Expr::Unit`, represented (like every
@@ -1076,13 +1084,13 @@ pub const SOURCE: &str = r#"
                        ;; with no compiled implementation, e.g. `f64`/`str`/
                        ;; `char`, still out of scope), it panics clearly on
                        ;; its own.
-                       (compile-assoc ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       (compile-assoc ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((type-name (sexpr-str (car (cdr e)))))
                            (let ((method (sexpr-str (car (cdr (cdr e))))))
                              (let ((rest (cdr (cdr (cdr (cdr e))))))
                                (if (if (eq type-name "i64") true (eq type-name "i32"))
-                                   (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (cdr (car rest)))))
-                                     (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (cdr (car (cdr rest))))))
+                                   (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (cdr (car rest)))))
+                                     (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (cdr (car (cdr rest))))))
                                        (if (eq method "+")
                                            (build-add builder a b2)
                                            (if (eq method "-")
@@ -1106,7 +1114,7 @@ pub const SOURCE: &str = r#"
                                      (let ((argc (sexpr-list-length rest)))
                                        (let ((args-ptr (alloca-args builder argc)))
                                          (let ((pending-ptr (alloca-args builder argc)))
-                                           (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr rest 0)))
+                                           (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr pending-ptr rest 0)))
                                              (let ((result (build-call builder (get-function m mangled) args-ptr argc)))
                                                (release-pending-args builder m pending-ptr argc 0)
                                                (pop-sexpr-roots builder m sexpr-roots)
@@ -1140,12 +1148,12 @@ pub const SOURCE: &str = r#"
                        ;; `compile-apply-indirect`) knows how many
                        ;; `pop-sexpr-root` calls to make once the call these
                        ;; roots were protecting is done.
-                       (compile-call-args ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (args-ptr llvm-value) (pending-ptr llvm-value) (forms Sexpr) (idx i32)) i32
+                       (compile-call-args ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (args-ptr llvm-value) (pending-ptr llvm-value) (forms Sexpr) (idx i32)) i32
                          (match forms
                            ((Cons arg-pair rest)
                             (let ((kind (sexpr-int (car arg-pair))))
                               (let ((form (cdr arg-pair)))
-                                (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot form)))
+                                (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base form)))
                                   (store-arg builder args-ptr idx v)
                                   (if (eq kind 1)
                                       (if (form-is-borrowed? env form)
@@ -1154,8 +1162,8 @@ pub const SOURCE: &str = r#"
                                       (store-arg builder pending-ptr idx (const-i64 builder 0)))
                                   (if (eq kind 2)
                                       (let ((ignored (push-sexpr-root builder m v)))
-                                        (+ 1 (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr rest (+ idx 1))))
-                                      (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr rest (+ idx 1)))))))
+                                        (+ 1 (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr pending-ptr rest (+ idx 1))))
+                                      (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr pending-ptr rest (+ idx 1)))))))
                            (_ 0)))
                        ;; `(apply name (is-fn . arg-form)...)` — a direct
                        ;; call to a name `ast_bridge::translate_apply`
@@ -1175,13 +1183,13 @@ pub const SOURCE: &str = r#"
                        ;; any) is released right after the call returns —
                        ;; never before, since the value has to stay valid
                        ;; for the call's full duration.
-                       (compile-apply ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       (compile-apply ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((nm (sexpr-str (car (cdr e)))))
                            (let ((arg-forms (cdr (cdr e))))
                              (let ((argc (sexpr-list-length arg-forms)))
                                (let ((args-ptr (alloca-args builder argc)))
                                  (let ((pending-ptr (alloca-args builder argc)))
-                                   (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr arg-forms 0)))
+                                   (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr pending-ptr arg-forms 0)))
                                      (match (get fn-env nm)
                                        ((Some target)
                                         (let ((env-len (sexpr-list-length captured)))
@@ -1233,7 +1241,7 @@ pub const SOURCE: &str = r#"
                        ;; `nm` is `name` itself, already declared by
                        ;; `compile-function`'s own first step (`add-function`,
                        ;; above) before this body was ever reached.
-                       (compile-call ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       (compile-call ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((raw-nm (sexpr-str (car (cdr e)))))
                            (let ((nm (if (eq raw-nm "car") "rt_car"
                                          (if (eq raw-nm "cdr") "rt_cdr"
@@ -1245,7 +1253,7 @@ pub const SOURCE: &str = r#"
                                (let ((argc (sexpr-list-length arg-forms)))
                                  (let ((args-ptr (alloca-args builder argc)))
                                    (let ((pending-ptr (alloca-args builder argc)))
-                                     (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr arg-forms 0)))
+                                     (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr pending-ptr arg-forms 0)))
                                        (let ((result (build-call builder (get-function m nm) args-ptr argc)))
                                          (release-pending-args builder m pending-ptr argc 0)
                                          (pop-sexpr-roots builder m sexpr-roots)
@@ -1276,14 +1284,14 @@ pub const SOURCE: &str = r#"
                        ;; `labels` sibling boxed on the spot by
                        ;; `resolve-value`, would otherwise leak one box per
                        ;; call).
-                       (compile-apply-indirect ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       (compile-apply-indirect ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((callee-form (car (cdr e))))
-                           (let ((closure (compile-value builder env fn-env captured cur-fn loop-exit loop-slot callee-form)))
+                           (let ((closure (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base callee-form)))
                              (let ((arg-forms (cdr (cdr e))))
                                (let ((argc (sexpr-list-length arg-forms)))
                                  (let ((args-ptr (alloca-args builder argc)))
                                    (let ((pending-ptr (alloca-args builder argc)))
-                                     (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr arg-forms 0)))
+                                     (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr pending-ptr arg-forms 0)))
                                        (let ((result (build-closure-apply builder closure args-ptr argc)))
                                          (release-pending-args builder m pending-ptr argc 0)
                                          (pop-sexpr-roots builder m sexpr-roots)
@@ -1315,8 +1323,8 @@ pub const SOURCE: &str = r#"
                        ;; target variable's own slot), exactly the same
                        ;; boundary an `if` merge crosses, so the same fix
                        ;; applies unchanged.
-                       (compile-if-branch ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (is-fn bool) (form Sexpr)) llvm-value
-                         (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot form)))
+                       (compile-if-branch ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (is-fn bool) (form Sexpr)) llvm-value
+                         (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base form)))
                            (if (if is-fn (form-is-borrowed? env form) false)
                                (build-closure-retain builder v)
                                v)))
@@ -1356,25 +1364,25 @@ pub const SOURCE: &str = r#"
                        ;; terminator comes from whatever code the caller
                        ;; emits next, exactly as before this addition (see
                        ;; this module's doc comment).
-                       (compile-if ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       (compile-if ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((is-fn (sexpr-bool (car (cdr e)))))
                            (let ((cond-form (car (cdr (cdr e)))))
                              (let ((then-form (car (cdr (cdr (cdr e))))))
                                (let ((else-form (car (cdr (cdr (cdr (cdr e)))))))
-                                 (let ((cond-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot cond-form)))
+                                 (let ((cond-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base cond-form)))
                                    (let ((then-block (append-block cur-fn "if-then")))
                                      (let ((else-block (append-block cur-fn "if-else")))
                                        (let ((merge-block (append-block cur-fn "if-merge")))
                                          (let ((slot (alloca-args builder 1)))
                                            (build-cond-br builder cond-v then-block else-block)
                                            (position-at-end builder then-block)
-                                           (let ((then-v (compile-if-branch builder env fn-env captured cur-fn loop-exit loop-slot is-fn then-form)))
+                                           (let ((then-v (compile-if-branch builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base is-fn then-form)))
                                              (if (block-terminated? builder)
                                                  ()
                                                  (let ((ignored (store-arg builder slot 0 then-v)))
                                                    (build-br builder merge-block))))
                                            (position-at-end builder else-block)
-                                           (let ((else-v (compile-if-branch builder env fn-env captured cur-fn loop-exit loop-slot is-fn else-form)))
+                                           (let ((else-v (compile-if-branch builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base is-fn else-form)))
                                              (if (block-terminated? builder)
                                                  ()
                                                  (let ((ignored (store-arg builder slot 0 else-v)))
@@ -1392,14 +1400,14 @@ pub const SOURCE: &str = r#"
                        ;; into that later computation. Lives in this `labels`
                        ;; ring (unlike `bind-let-values`/`restore-let-values`)
                        ;; purely because it calls `compile-value`.
-                       (compile-let-values ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (bindings Sexpr) (acc HashTable<string,llvm-value>)) ()
+                       (compile-let-values ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (bindings Sexpr) (acc HashTable<string,llvm-value>)) ()
                          (match bindings
                            ((Cons pair rest)
                             (let ((nm (sexpr-sym-name (car (car pair)))))
                               (let ((form (cdr pair)))
-                                (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot form)))
+                                (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base form)))
                                   (set acc nm v)
-                                  (compile-let-values builder env fn-env captured cur-fn loop-exit loop-slot rest acc)))))
+                                  (compile-let-values builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base rest acc)))))
                            (_ ())))
                        ;; Stage 8 of the Sexpr-representation plan
                        ;; (`docs/implementation-log.md`): compiles a `let` body's statement
@@ -1421,14 +1429,14 @@ pub const SOURCE: &str = r#"
                        ;; CL `let`'s own `Unit`-typed case) compiles to
                        ;; `compile-unit`, the same `Unit` encoding every other
                        ;; empty-body shape in this module already uses.
-                       (compile-let-body ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (forms Sexpr)) llvm-value
+                       (compile-let-body ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (forms Sexpr)) llvm-value
                          (match forms
                            ((Cons form rest)
-                            (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot form)))
+                            (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base form)))
                               (if (block-terminated? builder)
                                   v
                                   (match rest
-                                    ((Cons _ _) (compile-let-body builder env fn-env captured cur-fn loop-exit loop-slot rest))
+                                    ((Cons _ _) (compile-let-body builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base rest))
                                     (_ v)))))
                            (_ (compile-unit builder))))
                        ;; `(let ((name-sym . value-form)...) body-form...)`
@@ -1464,14 +1472,14 @@ pub const SOURCE: &str = r#"
                        ;; tradeoff as an unreferenced boxed `labels` sibling
                        ;; or a captured reference cycle (see this module's
                        ;; doc comment).
-                       (compile-let ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       (compile-let ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((bindings (car (cdr e))))
                            (let ((body-forms (cdr (cdr e))))
                              (let ((acc (new-acc-table)))
-                               (compile-let-values builder env fn-env captured cur-fn loop-exit loop-slot bindings acc)
+                               (compile-let-values builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base bindings acc)
                                (push-frame env)
                                (bind-let-values builder m env bindings acc)
-                               (let ((result (compile-let-body builder env fn-env captured cur-fn loop-exit loop-slot body-forms)))
+                               (let ((result (compile-let-body builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base body-forms)))
                                  (if (block-terminated? builder)
                                      ()
                                      (unroot-let-sexpr-values builder m bindings))
@@ -1532,7 +1540,7 @@ pub const SOURCE: &str = r#"
                                          ;; enclosing loop at all, regardless
                                          ;; of whatever loop (if any) the
                                          ;; `lambda` form itself sits inside.
-                                         (let ((v (compile-value nested-builder nested-env (new-fn-env) lcaptured nested-fn (Option::none) (Option::none) lbody)))
+                                         (let ((v (compile-value nested-builder nested-env (new-fn-env) lcaptured nested-fn (Option::none) (Option::none) (Option::none) lbody)))
                                            (let ((protected (bare-returned-own-name lbody lparams lcaptured)))
                                              (release-bindings nested-builder m nested-env lparams protected)
                                              (release-bindings nested-builder m nested-env lcaptured protected)
@@ -1634,7 +1642,7 @@ pub const SOURCE: &str = r#"
                                            ;; comment), so no enclosing loop
                                            ;; here either.
                                            (let ((sib-fn-env (clone-frames inner-fn-env)))
-                                             (let ((v (compile-value sib-builder sib-env sib-fn-env captured sib-fn (Option::none) (Option::none) def-body)))
+                                             (let ((v (compile-value sib-builder sib-env sib-fn-env captured sib-fn (Option::none) (Option::none) (Option::none) def-body)))
                                                (let ((protected (bare-returned-own-name def-body param-syms captured)))
                                                  (release-bindings sib-builder m sib-env param-syms protected)
                                                  (release-bindings sib-builder m sib-env captured protected)
@@ -1671,7 +1679,7 @@ pub const SOURCE: &str = r#"
                        ;; result ultimately flows back up into — this
                        ;; function introduces no function activation of its
                        ;; own, so no R1/R2 here.
-                       (compile-labels ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       (compile-labels ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((inner-captured (car (cdr e))))
                            (let ((defs (car (cdr (cdr e)))))
                              (let ((trailing (car (cdr (cdr (cdr e))))))
@@ -1685,7 +1693,7 @@ pub const SOURCE: &str = r#"
                                ;; comment), so `loop-exit`/`loop-slot` are
                                ;; forwarded unchanged here, unlike each
                                ;; def's own body just above.
-                               (let ((result (compile-value builder env fn-env inner-captured cur-fn loop-exit loop-slot trailing)))
+                               (let ((result (compile-value builder env fn-env inner-captured cur-fn loop-exit loop-slot loop-root-base trailing)))
                                  (pop-frame fn-env)
                                  result)))))
                        ;; `(loop body-form...)` — `Expr::Loop` (`loop`/
@@ -1696,33 +1704,52 @@ pub const SOURCE: &str = r#"
                        ;; n-way set of `break`/`return` exits instead),
                        ;; branches into a fresh loop-body block, and compiles
                        ;; `body-forms` there in sequence (`compile-loop-body`)
-                       ;; — installing `(Option::some ...)` for both as it
-                       ;; recurses into its own body is what makes a nested
-                       ;; `break`/`return` resolve to *this* loop rather than
-                       ;; whatever (if any) loop encloses it; nothing further
-                       ;; is needed to support nesting, since ordinary call-
-                       ;; stack scoping restores the outer loop's own pair
-                       ;; the moment this call returns (just like `cur-fn`/
-                       ;; `captured` already do for `labels`/`lambda`
-                       ;; nesting). Loops back to the body block unless the
-                       ;; body's own last statement already terminated it (a
-                       ;; bare `break`/`return` reached without falling
-                       ;; through) — `block-terminated?` is the same check
-                       ;; `compile-if`'s own branches make, for the identical
-                       ;; reason (one terminator per block, max).
+                       ;; — installing `(Option::some ...)` for all three as
+                       ;; it recurses into its own body is what makes a
+                       ;; nested `break`/`return` resolve to *this* loop
+                       ;; rather than whatever (if any) loop encloses it;
+                       ;; nothing further is needed to support nesting, since
+                       ;; ordinary call-stack scoping restores the outer
+                       ;; loop's own trio the moment this call returns (just
+                       ;; like `cur-fn`/`captured` already do for `labels`/
+                       ;; `lambda` nesting). Loops back to the body block
+                       ;; unless the body's own last statement already
+                       ;; terminated it (a bare `break`/`return` reached
+                       ;; without falling through) — `block-terminated?` is
+                       ;; the same check `compile-if`'s own branches make,
+                       ;; for the identical reason (one terminator per block,
+                       ;; max).
+                       ;;
+                       ;; `root-base` (the third of the trio, alongside
+                       ;; `exit-block`/`slot`): reads the GC root stack's
+                       ;; current depth (`rt_root_count`) once, in the
+                       ;; pre-header block, *before* the loop's own body ever
+                       ;; runs — every ordinary iteration returns the root
+                       ;; stack to this exact depth on its own (each nested
+                       ;; `let`/`match` scope pops what it pushed as control
+                       ;; flow passes back out through it), so this is the
+                       ;; depth a `break`/`return` reached from *anywhere*
+                       ;; inside this loop's body — however many scopes deep
+                       ;; — needs to unwind back to. See `compile-break`/
+                       ;; `compile-return`'s own doc comments for why a
+                       ;; single `rt_truncate_sexpr_roots` call against this
+                       ;; value, rather than each scope's own ordinary pop,
+                       ;; is what makes that unwind correct regardless of
+                       ;; nesting depth.
                        (compile-loop ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (e Sexpr)) llvm-value
                          (let ((body-forms (cdr e)))
                            (let ((loop-block (append-block cur-fn "loop-body")))
                              (let ((exit-block (append-block cur-fn "loop-exit")))
                                (let ((slot (alloca-args builder 1)))
-                                 (build-br builder loop-block)
-                                 (position-at-end builder loop-block)
-                                 (compile-loop-body builder env fn-env captured cur-fn (Option::some exit-block) (Option::some slot) body-forms)
-                                 (if (block-terminated? builder)
-                                     ()
-                                     (build-br builder loop-block))
-                                 (position-at-end builder exit-block)
-                                 (load-raw builder slot 0))))))
+                                 (let ((root-base (build-call builder (get-function m "rt_root_count") (alloca-args builder 0) 0)))
+                                   (build-br builder loop-block)
+                                   (position-at-end builder loop-block)
+                                   (compile-loop-body builder env fn-env captured cur-fn (Option::some exit-block) (Option::some slot) (Option::some root-base) body-forms)
+                                   (if (block-terminated? builder)
+                                       ()
+                                       (build-br builder loop-block))
+                                   (position-at-end builder exit-block)
+                                   (load-raw builder slot 0)))))))
                        ;; Compiles a `loop` body's statement sequence one
                        ;; form at a time, for effect, stopping the moment any
                        ;; one of them leaves the current block already
@@ -1732,41 +1759,65 @@ pub const SOURCE: &str = r#"
                        ;; still queued after that point is unreachable, and
                        ;; emitting its IR into an already-terminated block
                        ;; would be malformed (LLVM allows only one terminator
-                       ;; per block). `loop-exit`/`loop-slot` are always
-                       ;; `Option::some` here (`compile-loop` installs them
-                       ;; right before this is first called) — threaded as
-                       ;; `Option` only because `compile-value`'s shared
-                       ;; signature must also serve every *other* call site,
-                       ;; where there may be no enclosing loop at all.
-                       (compile-loop-body ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (forms Sexpr)) ()
+                       ;; per block). `loop-exit`/`loop-slot`/`loop-root-base`
+                       ;; are always `Option::some` here (`compile-loop`
+                       ;; installs them right before this is first called) —
+                       ;; threaded as `Option` only because `compile-value`'s
+                       ;; shared signature must also serve every *other* call
+                       ;; site, where there may be no enclosing loop at all.
+                       (compile-loop-body ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (forms Sexpr)) ()
                          (match forms
                            ((Cons form rest)
-                            (let ((ignored (compile-value builder env fn-env captured cur-fn loop-exit loop-slot form)))
+                            (let ((ignored (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base form)))
                               (if (block-terminated? builder)
                                   ()
-                                  (compile-loop-body builder env fn-env captured cur-fn loop-exit loop-slot rest))))
+                                  (compile-loop-body builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base rest))))
                            (_ ())))
                        ;; `(break)` — unconditionally jumps to the nearest
                        ;; enclosing loop's exit block, storing `Unit` (`0`,
                        ;; the same encoding `compile-unit`/`compile-bool`'s
                        ;; `false` use) as the loop's result. `loop-exit`/
-                       ;; `loop-slot` are always `Option::some` in any
-                       ;; program that reaches this at all —
-                       ;; `Checker::check_break` already rejects a `break`
-                       ;; outside of a loop at type-checking time, long
-                       ;; before this runs — so the `None` arms are purely
-                       ;; defensive, the same role `resolve-value`'s "unbound
-                       ;; variable" panic plays for an analogous "the type
-                       ;; checker already ruled this out" situation.
-                       (compile-break ((builder llvm-builder) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>)) llvm-value
+                       ;; `loop-slot`/`loop-root-base` are always
+                       ;; `Option::some` in any program that reaches this at
+                       ;; all — `Checker::check_break` already rejects a
+                       ;; `break` outside of a loop at type-checking time,
+                       ;; long before this runs — so the `None` arms are
+                       ;; purely defensive, the same role `resolve-value`'s
+                       ;; "unbound variable" panic plays for an analogous
+                       ;; "the type checker already ruled this out"
+                       ;; situation.
+                       ;;
+                       ;; `rt_truncate_sexpr_roots(rb)`, right before the
+                       ;; jump: discards every `Sexpr`-typed GC root any
+                       ;; `let`/`match` scope between here and the loop
+                       ;; pushed and would otherwise never get the chance to
+                       ;; pop, since this jump skips straight past their own
+                       ;; ordinary pop-on-scope-exit code entirely (that code
+                       ;; only runs when control falls back *out* of a scope
+                       ;; normally — `compile-let`'s `block-terminated?`
+                       ;; guard around `unroot-let-sexpr-values`, and
+                       ;; `compile-match`'s `pop-sexpr-root` at its own
+                       ;; merge block, both explicitly skip that pop for
+                       ;; exactly this reason, deferring the cleanup to
+                       ;; here instead). A no-op if nothing is open above
+                       ;; the loop (`rb` already equals the current root
+                       ;; count) — see `typelisp_rt::rt_truncate_sexpr_roots`'s
+                       ;; own doc comment.
+                       (compile-break ((builder llvm-builder) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>)) llvm-value
                          (match loop-exit
                            ((Some eb)
                             (match loop-slot
                               ((Some slot)
-                               (let ((zero (const-i64 builder 0)))
-                                 (store-arg builder slot 0 zero)
-                                 (build-br builder eb)
-                                 zero))
+                               (match loop-root-base
+                                 ((Some rb)
+                                  (let ((truncate-args (alloca-args builder 1)))
+                                    (store-arg builder truncate-args 0 rb)
+                                    (let ((ignored (build-call builder (get-function m "rt_truncate_sexpr_roots") truncate-args 1))) ())
+                                    (let ((zero (const-i64 builder 0)))
+                                      (store-arg builder slot 0 zero)
+                                      (build-br builder eb)
+                                      zero)))
+                                 (None (panic "compile-break: not inside a loop"))))
                               (None (panic "compile-break: not inside a loop"))))
                            (None (panic "compile-break: not inside a loop"))))
                        ;; `(return is-fn value-form)` — `Expr::Return`,
@@ -1781,18 +1832,33 @@ pub const SOURCE: &str = r#"
                        ;; activation has nothing more to say about it),
                        ;; exactly the same boundary `compile-if-branch`
                        ;; already closes for an `if`'s own branches — reused
-                       ;; here rather than duplicated a third time.
-                       (compile-return ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       ;; here rather than duplicated a third time. Same
+                       ;; `rt_truncate_sexpr_roots(rb)` call as `compile-break`,
+                       ;; for the identical reason — see that function's doc
+                       ;; comment — placed after `v` itself is computed
+                       ;; (`compile-if-branch` may recurse through further
+                       ;; nested scopes to get there) but before `v` is
+                       ;; stored into the loop's merge slot; `rt_truncate_
+                       ;; sexpr_roots` never allocates, so there's no GC
+                       ;; between computing `v` and storing it this couldn't
+                       ;; already have happened without this call.
+                       (compile-return ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((is-fn (sexpr-bool (car (cdr e)))))
                            (let ((value-form (car (cdr (cdr e)))))
-                             (let ((v (compile-if-branch builder env fn-env captured cur-fn loop-exit loop-slot is-fn value-form)))
+                             (let ((v (compile-if-branch builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base is-fn value-form)))
                                (match loop-exit
                                  ((Some eb)
                                   (match loop-slot
                                     ((Some slot)
-                                     (store-arg builder slot 0 v)
-                                     (build-br builder eb)
-                                     v)
+                                     (match loop-root-base
+                                       ((Some rb)
+                                        (let ((truncate-args (alloca-args builder 1)))
+                                          (store-arg builder truncate-args 0 rb)
+                                          (let ((ignored (build-call builder (get-function m "rt_truncate_sexpr_roots") truncate-args 1))) ())
+                                          (store-arg builder slot 0 v)
+                                          (build-br builder eb)
+                                          v))
+                                       (None (panic "compile-return: not inside a loop"))))
                                     (None (panic "compile-return: not inside a loop"))))
                                  (None (panic "compile-return: not inside a loop")))))))
                        ;; `(set name-str kind value-form)` — `Expr::Set`
@@ -1833,12 +1899,12 @@ pub const SOURCE: &str = r#"
                        ;; binding's scope — `typelisp-rt`'s
                        ;; `a_setf_reassigned_sexpr_value_is_corrupted_by_a_gc_triggered_by_other_allocations_without_rt_set_sexpr_root`
                        ;; test demonstrates the resulting corruption directly.
-                       (compile-set ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       (compile-set ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((nm (sexpr-str (car (cdr e)))))
                            (let ((kind (sexpr-int (car (cdr (cdr e))))))
                              (let ((is-fn (eq kind 1)))
                                (let ((value-form (car (cdr (cdr (cdr e))))))
-                                 (let ((v (compile-if-branch builder env fn-env captured cur-fn loop-exit loop-slot is-fn value-form)))
+                                 (let ((v (compile-if-branch builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base is-fn value-form)))
                                    (match (get env nm)
                                      ((Some slot)
                                       (store-arg builder slot 0 v)
@@ -1947,23 +2013,26 @@ pub const SOURCE: &str = r#"
                        ;; without `compile-if`/`compile-let-body`'s usual
                        ;; termination guard) — an arm that exits via a bare
                        ;; `break`/`return` instead never reaches
-                       ;; `merge-block` at all, so that one path leaks this
-                       ;; root, the same accepted class of gap this file's
-                       ;; own module doc comment already documents for a
-                       ;; `labels` sibling boxed but never invoked (out of
-                       ;; scope for the same reason: closing it needs a
-                       ;; general unwind-through-`break`/`return` mechanism
-                       ;; this compiler doesn't have yet, not something
-                       ;; specific to `match`).
-                       (compile-match ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       ;; `merge-block` at all, so this `pop-sexpr-root` never
+                       ;; runs on that path. No longer a leak, though:
+                       ;; `compile-break`/`compile-return` themselves
+                       ;; unconditionally truncate the GC root stack back to
+                       ;; the nearest enclosing loop's own entry depth
+                       ;; (`rt_truncate_sexpr_roots`, keyed off
+                       ;; `loop-root-base` — see `compile-loop`'s doc
+                       ;; comment) right before that jump, which discards
+                       ;; this exact root along with any other open scope's,
+                       ;; regardless of how many `let`/`match` levels are
+                       ;; nested between the exit site and the loop.
+                       (compile-match ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((is-fn (sexpr-bool (car (cdr e)))))
                            (let ((scrut-form (car (cdr (cdr e)))))
                              (let ((arms (car (cdr (cdr (cdr e))))))
-                               (let ((scrut-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot scrut-form)))
+                               (let ((scrut-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base scrut-form)))
                                  (let ((ignored (push-sexpr-root builder m scrut-v)))
                                    (let ((merge-block (append-block cur-fn "match-merge")))
                                      (let ((slot (alloca-args builder 1)))
-                                       (compile-match-arms builder env fn-env captured cur-fn loop-exit loop-slot is-fn scrut-v slot merge-block arms)
+                                       (compile-match-arms builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base is-fn scrut-v slot merge-block arms)
                                        (position-at-end builder merge-block)
                                        (let ((result (load-raw builder slot 0)))
                                          (let ((ignored2 (pop-sexpr-root builder m)))
@@ -2004,7 +2073,7 @@ pub const SOURCE: &str = r#"
                        ;; was somehow wrong, the same role
                        ;; `resolve-value`'s "unbound variable" panic plays
                        ;; elsewhere in this file.
-                       (compile-match-arms ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (is-fn bool) (scrut-v llvm-value) (slot llvm-value) (merge-block llvm-basic-block) (arms Sexpr)) ()
+                       (compile-match-arms ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (is-fn bool) (scrut-v llvm-value) (slot llvm-value) (merge-block llvm-basic-block) (arms Sexpr)) ()
                          (match arms
                            ((Cons arm rest)
                             (let ((pat (car arm)))
@@ -2012,14 +2081,14 @@ pub const SOURCE: &str = r#"
                                 (push-frame env)
                                 (let ((next-block (append-block cur-fn "match-next")))
                                   (compile-pattern-test builder env cur-fn scrut-v pat next-block)
-                                  (let ((body-v (compile-if-branch builder env fn-env captured cur-fn loop-exit loop-slot is-fn body-form)))
+                                  (let ((body-v (compile-if-branch builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base is-fn body-form)))
                                     (pop-frame env)
                                     (if (block-terminated? builder)
                                         ()
                                         (let ((ignored (store-arg builder slot 0 body-v)))
                                           (build-br builder merge-block))))
                                   (position-at-end builder next-block)
-                                  (compile-match-arms builder env fn-env captured cur-fn loop-exit loop-slot is-fn scrut-v slot merge-block rest)))))
+                                  (compile-match-arms builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base is-fn scrut-v slot merge-block rest)))))
                            (_ (let ((args-ptr (alloca-args builder 0)))
                                 (let ((fallback (build-call builder (get-function m "rt_match_fail") args-ptr 0)))
                                   (store-arg builder slot 0 fallback)
@@ -2033,14 +2102,14 @@ pub const SOURCE: &str = r#"
                        ;; general `malloc`'d-box representation
                        ;; (`compile-construct-box`) — see those two
                        ;; functions' doc comments.
-                       (compile-construct ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       (compile-construct ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((is-sexpr (sexpr-bool (car (cdr e)))))
                            (let ((type-id (sexpr-int (car (cdr (cdr e))))))
                              (let ((variant (sexpr-int (car (cdr (cdr (cdr e)))))))
                                (let ((arg-forms (cdr (cdr (cdr (cdr e))))))
                                  (if is-sexpr
-                                     (compile-construct-sexpr builder env fn-env captured cur-fn loop-exit loop-slot variant arg-forms)
-                                     (compile-construct-box builder env fn-env captured cur-fn loop-exit loop-slot type-id variant arg-forms)))))))
+                                     (compile-construct-sexpr builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base variant arg-forms)
+                                     (compile-construct-box builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-id variant arg-forms)))))))
                        ;; Builds a general-ADT box (`Option`/`Result`/a
                        ;; `defstruct`, sum or struct kind alike): a fresh
                        ;; `build-malloc`'d `[2 + argc]`-slot array, slot `0`
@@ -2061,12 +2130,12 @@ pub const SOURCE: &str = r#"
                        ;; — see this file's own module doc comment for the
                        ;; same accepted leak this codebase already takes for
                        ;; an unreferenced boxed `labels` sibling.
-                       (compile-construct-box ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (type-id i64) (variant i64) (arg-forms Sexpr)) llvm-value
+                       (compile-construct-box ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (type-id i64) (variant i64) (arg-forms Sexpr)) llvm-value
                          (let ((argc (sexpr-list-length arg-forms)))
                            (let ((ptr (build-malloc builder (+ argc 2))))
                              (store-arg builder ptr 0 (const-i64 builder type-id))
                              (store-arg builder ptr 1 (const-i64 builder variant))
-                             (compile-construct-box-fields builder env fn-env captured cur-fn loop-exit loop-slot ptr arg-forms 2)
+                             (compile-construct-box-fields builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base ptr arg-forms 2)
                              (build-ptr-to-int builder ptr))))
                        ;; Fills a `compile-construct-box`-allocated array,
                        ;; one compiled field per slot starting at `idx`
@@ -2093,17 +2162,17 @@ pub const SOURCE: &str = r#"
                        ;; from under the box. See `push-permanent-sexpr-root`'s
                        ;; doc comment for why this needs its own root list
                        ;; rather than the ordinary `push-sexpr-root`.
-                       (compile-construct-box-fields ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (ptr llvm-value) (forms Sexpr) (idx i32)) ()
+                       (compile-construct-box-fields ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (ptr llvm-value) (forms Sexpr) (idx i32)) ()
                          (match forms
                            ((Cons field-pair rest)
                             (let ((kind (sexpr-int (car field-pair))))
                               (let ((form (cdr field-pair)))
-                                (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot form)))
+                                (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base form)))
                                   (store-arg builder ptr idx v)
                                   (if (eq kind 2)
                                       (push-permanent-sexpr-root builder m v)
                                       ())
-                                  (compile-construct-box-fields builder env fn-env captured cur-fn loop-exit loop-slot ptr rest (+ idx 1))))))
+                                  (compile-construct-box-fields builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base ptr rest (+ idx 1))))))
                            (_ ())))
                        ;; `Sexpr`'s own 8 variants, encoded directly as the
                        ;; tagged `i64` `typelisp-rt`'s `encode` (and this
@@ -2118,24 +2187,24 @@ pub const SOURCE: &str = r#"
                        ;; stage), so constructing either panics clearly —
                        ;; symmetric with `compile-sexpr-field`'s own
                        ;; extraction panicking on the same three.
-                       (compile-construct-sexpr ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (variant i64) (arg-forms Sexpr)) llvm-value
+                       (compile-construct-sexpr ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (variant i64) (arg-forms Sexpr)) llvm-value
                          (if (eq variant 0)
                              (const-i64 builder 6)
                              (if (eq variant 1)
-                                 (build-shl builder (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car arg-forms)) (const-i64 builder 3))
+                                 (build-shl builder (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (car arg-forms)) (const-i64 builder 3))
                                  (if (eq variant 3)
                                      (build-or builder
-                                                (build-shl builder (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car arg-forms)) (const-i64 builder 3))
+                                                (build-shl builder (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (car arg-forms)) (const-i64 builder 3))
                                                 (const-i64 builder 4))
                                      (if (eq variant 4)
-                                         (let ((b (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car arg-forms))))
+                                         (let ((b (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (car arg-forms))))
                                            (build-or builder (build-shl builder (build-add builder b (const-i64 builder 1)) (const-i64 builder 3)) (const-i64 builder 6)))
                                          (if (eq variant 7)
                                              (let ((args-ptr (alloca-args builder 2)))
-                                               (let ((car-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car arg-forms))))
+                                               (let ((car-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (car arg-forms))))
                                                  (store-arg builder args-ptr 0 car-v)
                                                  (push-sexpr-root builder m car-v)
-                                                 (let ((cdr-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot (car (cdr arg-forms)))))
+                                                 (let ((cdr-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (car (cdr arg-forms)))))
                                                    (store-arg builder args-ptr 1 cdr-v)
                                                    (push-sexpr-root builder m cdr-v)
                                                    (let ((result (build-call builder (get-function m "rt_cons") args-ptr 2)))
@@ -2157,23 +2226,23 @@ pub const SOURCE: &str = r#"
                        ;; `idx-unary-list`'s own length
                        ;; (`ast_bridge::idx_unary_list`'s doc comment
                        ;; explains why it isn't simply a `Sexpr` `Int`).
-                       (compile-field-get ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       (compile-field-get ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((idx (+ (sexpr-list-length (car (cdr e))) 2)))
                            (let ((obj-form (car (cdr (cdr e)))))
-                             (let ((obj-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot obj-form)))
+                             (let ((obj-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base obj-form)))
                                (let ((ptr (build-int-to-ptr builder obj-v)))
                                  (load-raw builder ptr idx))))))
                        ;; `(field-set idx-unary-list obj-form value-form)`
                        ;; (Stage 6) — see `compile-field-get`; evaluates to
                        ;; `Unit` (`0`, `compile-unit`'s own convention),
                        ;; matching `Expr::FieldSet`'s own checked type.
-                       (compile-field-set ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       (compile-field-set ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((idx (+ (sexpr-list-length (car (cdr e))) 2)))
                            (let ((obj-form (car (cdr (cdr e)))))
                              (let ((value-form (car (cdr (cdr (cdr e))))))
-                               (let ((obj-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot obj-form)))
+                               (let ((obj-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base obj-form)))
                                  (let ((ptr (build-int-to-ptr builder obj-v)))
-                                   (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot value-form)))
+                                   (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base value-form)))
                                      (store-arg builder ptr idx v)
                                      (const-i64 builder 0))))))))
                        ;; `(trait-call method-str candidates-list arg-form...)`
@@ -2205,14 +2274,14 @@ pub const SOURCE: &str = r#"
                        ;; candidate block) since only one candidate's call
                        ;; block ever actually runs, and the merge block
                        ;; post-dominates every one of them.
-                       (compile-trait-call ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (e Sexpr)) llvm-value
+                       (compile-trait-call ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((method (sexpr-str (car (cdr e)))))
                            (let ((candidates (car (cdr (cdr e)))))
                              (let ((arg-forms (cdr (cdr (cdr e)))))
                                (let ((argc (sexpr-list-length arg-forms)))
                                  (let ((args-ptr (alloca-args builder argc)))
                                    (let ((pending-ptr (alloca-args builder argc)))
-                                     (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot args-ptr pending-ptr arg-forms 0)))
+                                     (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr pending-ptr arg-forms 0)))
                                        (let ((recv (load-raw builder args-ptr 0)))
                                          (let ((recv-ptr (build-int-to-ptr builder recv)))
                                            (let ((type-id (load-raw builder recv-ptr 0)))
@@ -2261,7 +2330,7 @@ pub const SOURCE: &str = r#"
                                 (let ((fallback (build-call builder (get-function m "rt_trait_call_fail") fail-args 0)))
                                   (store-arg builder slot 0 fallback)
                                   (build-br builder merge-block)))))))
-                (let ((v (compile-value builder env fn-env '() f (Option::none) (Option::none) body)))
+                (let ((v (compile-value builder env fn-env '() f (Option::none) (Option::none) (Option::none) body)))
                   (let ((protected (bare-returned-own-name body param-names '())))
                     (release-bindings builder m env param-names protected)
                     (build-ret builder v)

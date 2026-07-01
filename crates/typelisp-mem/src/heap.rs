@@ -131,6 +131,23 @@ impl Heap {
         self.roots.len()
     }
 
+    /// Discards every root pushed since the stack was `len` roots deep, in
+    /// one shot — the "unwind to a known depth" a `break`/`return` that
+    /// jumps out of an arbitrary number of nested lexical scopes needs,
+    /// where the strict one-at-a-time LIFO discipline
+    /// [`push_root`](Self::push_root)/[`pop_root`](Self::pop_root) assume
+    /// (every scope pops exactly what it pushed, in order, as control flow
+    /// passes back through it) breaks down: a `break`/`return` skips that
+    /// unwind entirely, jumping straight past however many enclosing
+    /// `let`/`match` scopes happen to be open. A no-op if `len >= root_count()`
+    /// already (a `break`/`return` with nothing open above the loop it's
+    /// jumping out of) — same "truncating to at-or-past the current length
+    /// does nothing" behavior as [`Vec::truncate`], which this delegates to
+    /// directly.
+    pub fn truncate_roots(&mut self, len: usize) {
+        self.roots.truncate(len);
+    }
+
     /// Overwrites the root at absolute stack position `idx` in place — unlike
     /// [`push_root`](Self::push_root)/[`pop_root`](Self::pop_root) (strict
     /// LIFO), this lets a caller that already knows a specific root's stack

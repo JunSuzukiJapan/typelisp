@@ -496,6 +496,39 @@ pub unsafe extern "C" fn rt_set_sexpr_root(args: *const i64, argc: u32) -> i64 {
     tagged
 }
 
+/// `compiler.rs`'s `compile-break`/`compile-return` call this, with
+/// `args[0]` set to the root count `compile-loop` read (`rt_root_count`)
+/// right before entering the loop's own body, immediately before building
+/// the jump to the loop's exit block — discarding, in one call
+/// (`Heap::truncate_roots`), every `Sexpr`-typed GC root any number of
+/// nested `let`/`match` scopes between the `break`/`return` site and the
+/// loop pushed and never got the chance to pop, since a `break`/`return`
+/// jumps straight past their own ordinary pop-on-scope-exit code
+/// (`compile-let`'s `unroot-let-sexpr-values`, `compile-match`'s
+/// `pop-sexpr-root` at its merge block — both skip that pop specifically
+/// *because* the block is already terminated by the jump this truncates
+/// for). Unlike [`rt_pop_sexpr_root`], which is fatal on an empty stack,
+/// this is a no-op if `args[0] >= rt_root_count()` already (a `break`/
+/// `return` with no scopes open above the loop itself) — the same
+/// "truncating to at-or-past the current length does nothing" behavior
+/// [`typelisp_mem::Heap::truncate_roots`] gets from `Vec::truncate`.
+///
+/// Returns `0` — nothing meaningful to hand back, like [`rt_heap_init`].
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`; a
+/// `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_truncate_sexpr_roots(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_truncate_sexpr_roots: expected 1 argument");
+    }
+    let len = *args as usize;
+    active_heap().truncate_roots(len);
+    0
+}
+
 // ---- Stage 5: Match -----------------------------------------------------
 
 /// `compiler.rs`'s `compile-match-arms` calls this once every arm's

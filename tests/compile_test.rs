@@ -1599,6 +1599,23 @@ fn compile_dispatches_nested_loops_where_an_inner_break_only_exits_the_inner_loo
 /// verifies for `if`. Reuses that test's helper functions
 /// (`identity`/`read_rc`/`make_box`/`release_box`) against a new
 /// loop-returning function instead of an `if`-branching one.
+///
+/// This module is built entirely by hand (`llvm-module::create`, no
+/// `Interp::compile_function`/`add_compiled_function` in the loop) and its
+/// JIT engine is created with no `externals`/`add_global_mapping` step at
+/// all — every extern call it makes (`__typelisp_closure_release`, via
+/// `build-closure-release`) resolves purely through LLVM's default
+/// process-symbol lookup, since every `rt_*`/`__typelisp_*` function is a
+/// `#[no_mangle]` symbol already linked into this very test binary. Once
+/// `compile-loop`/`compile-return` started unconditionally reading and
+/// truncating the GC root stack (`rt_root_count`/`rt_truncate_sexpr_roots` —
+/// see `compiler.rs`'s `compile-loop`/`compile-break`/`compile-return` doc
+/// comments), this module needs *some* declaration of those two names for
+/// `get-function` to find, even though `pick_via_loop`'s own body never
+/// touches a `Sexpr`-typed value — the two `add-function` calls below add
+/// exactly that (a body-less declaration, the same shape
+/// `Interp::compile_function`'s `declare_external_function` builds), relying
+/// on the same automatic symbol resolution `release_box` above already does.
 #[test]
 fn compile_loop_retains_a_borrowed_return_value_before_it_escapes() {
     let module = match eval_ok_with_compiler(
@@ -1626,6 +1643,8 @@ fn compile_loop_retains_a_borrowed_return_value_before_it_escapes() {
                   (position-at-end builder b)
                   (build-closure-release builder m (load-arg builder release-fn 0))
                   (build-ret builder (const-i64 builder 0)))))
+            (let ((ignored-rc-decl (add-function m "rt_root_count"))) ())
+            (let ((ignored-trunc-decl (add-function m "rt_truncate_sexpr_roots"))) ())
             (compile-function m "pick_via_loop" '((f . 1))
               '(loop (return true (var "f" true))))
             m))
@@ -1643,6 +1662,18 @@ fn compile_loop_retains_a_borrowed_return_value_before_it_escapes() {
         unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("release_box").expect("failed to look up `release_box`") };
     let pick_via_loop =
         unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("pick_via_loop").expect("failed to look up `pick_via_loop`") };
+
+    // `pick_via_loop`'s body never touches a `Sexpr`/cons-heap value, but
+    // `compile-loop`/`compile-return` now unconditionally call
+    // `rt_root_count`/`rt_truncate_sexpr_roots` regardless (see this test's
+    // own doc comment) — both dereference the active `Heap` (`typelisp_rt`'s
+    // `active_heap()`), which every *real* caller already has registered by
+    // the time compiled code runs (`Interp::eval`'s compiled-call dispatch).
+    // This test calls the JIT'd functions directly, bypassing `Interp`
+    // entirely, so it has to register one itself — the same
+    // `set_active_heap` call that dispatch path makes.
+    let mut heap = Heap::with_capacity(1 << 12);
+    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
 
     let f_box = unsafe { make_box.call(std::ptr::null(), 0) };
     let rc_before = unsafe { read_rc.call([f_box].as_ptr(), 1) };
@@ -2822,4 +2853,83 @@ fn compile_let_does_not_emit_instructions_after_an_early_return_from_its_body() 
     )
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(42));
+}
+
+/// The general fix `compile_let_does_not_emit_instructions_after_an_early_return_from_its_body`'s
+/// own doc comment flags as a follow-up: `block-terminated?` there stops
+/// `compile-let` from generating invalid IR, but the `Sexpr`-typed binding's
+/// GC root still went unpopped on that path — a leak that grows by one every
+/// time such a function is *called*, not just once, since `Heap` (and its
+/// root stack) persists across every compiled call made through the same
+/// `Interp`. `compile-loop` now reads the root stack's depth once on entry
+/// (`rt_root_count`) and `compile-break`/`compile-return` unconditionally
+/// reset it back there (`rt_truncate_sexpr_roots`) right before jumping out,
+/// regardless of how many `let`/`match` scopes are open above them — see
+/// `compiler.rs`'s `compile-loop`/`compile-break`/`compile-return` doc
+/// comments.
+///
+/// `Heap::root_count()` isn't purely a compiled-code metric, though — the
+/// tree-walking interpreter's own `Interp::sync_roots` also grows the same
+/// stack by a small, unrelated amount on every top-level call (its own
+/// GC-safety bookkeeping, nothing to do with this fix), so a bare "must stay
+/// at exactly its post-setup value" assertion would be comparing against
+/// noise. Instead this measures `leaky-inner`'s (a `let` binding a fresh
+/// `Sexpr` immediately followed by an unconditional `return`, inside a
+/// `loop`) net root growth over many calls against `trivial`'s (a
+/// same-shape, no-`Sexpr`, non-looping compiled function) over the same
+/// number of calls: if `compile-return`'s truncation is working, `leaky-inner`
+/// should leak *nothing beyond* whatever background growth `trivial` already
+/// has, so the two deltas should come out equal. Reverting the
+/// `compile-break`/`compile-return` truncation (while keeping the
+/// `block-terminated?` guard, so the IR stays valid) reliably reproduces
+/// `leaky-inner` growing by one root more than `trivial` per call, the
+/// failure this test guards against.
+#[test]
+fn compile_return_truncates_a_sexpr_lets_gc_root_on_every_call_not_just_the_first() {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+
+    let setup = r#"
+        (defun trivial () i32 7)
+        (compile trivial)
+        (defun leaky-inner () i32
+          (loop
+            (let ((s (Cons (Int 1) (Int 2))))
+              (return 7))))
+        (compile leaky-inner)
+        "#;
+    for v in r.read_all(&mut h, setup).expect("read failed") {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        interp.exec(&mut h, tl).expect("exec failed");
+    }
+
+    const CALLS: usize = 500;
+
+    let before_trivial = h.root_count();
+    for _ in 0..CALLS {
+        for v in r.read_all(&mut h, "(trivial)").expect("read failed") {
+            let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+            let result = interp.exec(&mut h, tl).expect("exec failed").expect("trivial should produce a value");
+            assert_eq!(result, RtValue::Int(7));
+        }
+    }
+    let trivial_growth = h.root_count() - before_trivial;
+
+    let before_leaky = h.root_count();
+    for _ in 0..CALLS {
+        for v in r.read_all(&mut h, "(leaky-inner)").expect("read failed") {
+            let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+            let result = interp.exec(&mut h, tl).expect("exec failed").expect("leaky-inner should produce a value");
+            assert_eq!(result, RtValue::Int(7));
+        }
+    }
+    let leaky_growth = h.root_count() - before_leaky;
+
+    assert_eq!(
+        leaky_growth, trivial_growth,
+        "leaky-inner's own let-bound Sexpr root must not leak beyond whatever background growth an equivalent non-Sexpr, non-looping compiled function already has"
+    );
 }

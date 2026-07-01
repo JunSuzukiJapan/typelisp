@@ -18,17 +18,13 @@
    ——[[feedback-impl-priority]]、詳細は[implementation-log.md](implementation-log.md)の
    「compile機能の残課題の一部対応」節参照）。`Expr::TraitCall`の実runtime dispatch対応・
    `compile-match`のGCルート漏れ修正・retain/release対の重複除去パス・`compile-let`の
-   `unroot-let-sexpr-values`不正IRリスク修正は2026-07-01に対応済み
-   （詳細はimplementation-log.mdの該当節参照）。残っているのは:
+   `unroot-let-sexpr-values`不正IRリスク修正は2026-07-01に対応済み。同日、
+   `compile-loop`/`compile-break`/`compile-return`に一般的なGCルート巻き戻し機構
+   （`loop-root-base` + `rt_truncate_sexpr_roots`）を追加し、`compile-match`の
+   scrutinee・`compile-let`の`Sexpr`束縛のいずれも`break`/`return`早期脱出時に
+   GCルートが漏れる問題を解消済み（詳細はimplementation-log.mdの該当節参照）。
+   残っているのは:
    - Stage 7: 文字列対応（優先度低、計画上も最後に残されたステージ）。
-   - `compile-match`のscrutinee GCルート・`compile-let`の`Sexpr`束縛GCルートは、
-     いずれもarm/let本体が`break`/`return`で早期脱出する経路では
-     `pop-sexpr-root`されない（既知の許容リーク——`break`/`return`をまたぐルート
-     巻き戻し機構自体がこのコンパイラにまだ無いため。`labels`兄弟の未呼び出しbox
-     リークと同種、`compiler.rs`の`compile-match`/`unroot-let-sexpr-values`の
-     doc comment参照）。`compile-let`側は不正IR化（`module.verify()`失敗）は
-     `block-terminated?`ガードで解消済み——残るのはリークのみ。一般的な巻き戻し
-     機構の設計は未着手。
 
 ---
 

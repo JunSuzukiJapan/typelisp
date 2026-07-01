@@ -2154,3 +2154,69 @@ scrutinee自身さえ生きていればGCのmarkフェーズがそこから辿�
 （`break`/`return`をまたぐ巻き戻し機構がこのコンパイラにまだ無いための、`labels`兄弟の
 未呼び出しboxリークと同種の意図的スコープ外）に完全に一致する形へ帰着した。
 一般的な巻き戻し機構の設計自体は今回も引き続き未着手。
+
+## `compile-loop`/`compile-break`/`compile-return`に一般的なGCルート巻き戻し機構を追加（2026-07-01）
+
+上2節で「意図的スコープ外」として温存していた`compile-match`のscrutinee・`compile-let`の
+`Sexpr`束縛、いずれの残課題（`break`/`return`早期脱出時にGCルートpopがスキップされる）も
+同日中に一般的な機構で解消した。ユーザーからの「popをスキップしないようにはできないのか」
+という質問がきっかけ——実装コストを提示した上でユーザーが「今すぐ実装する」を選択。
+
+**設計**: `Heap.roots`（GCルートスタック）の実体は素の`Vec<Value>`（`typelisp-mem`の
+`Heap`構造体）なので、1個ずつpop数を数え上げる代わりに「特定の深さまで一括truncateする」
+操作を追加すれば、ネストした`let`/`match`スコープが何段開いていようと`break`/`return`が
+一発で正しく巻き戻せる、という設計に着地した:
+
+- `Heap::truncate_roots(len)`（`self.roots.truncate(len)`）を`typelisp-mem`に新設
+- `typelisp-rt`に`rt_truncate_sexpr_roots`を新設（`args[0]`を`Heap::truncate_roots`に
+  渡すだけ。`args[0] >= 現在のroot数`ならno-op——`Vec::truncate`と同じ挙動）
+- `compiler.rs`の`loop-exit`/`loop-slot`が流れているのと全く同じ経路
+  （`compile-value`始め、シグネチャが`(loop-exit ...) (loop-slot ...)`を持つ関数
+  すべて25箇所）に、3つ目の道連れ引数`loop-root-base`（`Option<llvm-value>`）を追加。
+  `compile-loop`が自分の本体に入る直前（pre-header）で`rt_root_count`を1回読み、
+  それを`(Option::some root-base)`として`compile-loop-body`以下に渡す
+  （`loop-exit`/`loop-slot`と全く同じ「ネストするたびに新しいtrioをインストールし、
+  呼び出しスタックのスコープ復元に任せる」設計）。
+- `compile-break`/`compile-return`は、ジャンプ（`build-br`）を積む直前に
+  `rt_truncate_sexpr_roots(loop-root-base)`を無条件で呼ぶ。`break`/`return`と
+  ループの間に`let`/`match`が何段ネストしていても、個々のpushを数える必要なく
+  正しい深さまで一括で戻せる——`compile-match`のscrutinee・`compile-let`の
+  `Sexpr`束縛、双方の既知の残課題がこの一箇所の追加で同時に解消した。
+
+**副作用として発覚した既存呼び出し側の穴**: `compile-value`の全再帰呼び出しは
+機械的な文字列置換（`(loop-exit ...) (loop-slot ...)` → 同+`(loop-root-base ...)`、
+`loop-exit loop-slot` → 同+` loop-root-base`）で一括対応できたが、`compile-lambda`/
+`compile-labels-bodies`の「新しい関数境界なので`(Option::none) (Option::none)`で
+リセットする」3箇所（`compile-loop`自身の呼び出し元も含む）は`loop-exit`/`loop-slot`
+という裸のシンボルではなく`(Option::none)`リテラルを直接渡していたため機械的置換の
+対象外で、個別に3つ目の`(Option::none)`を追記する必要があった——見落とすと
+チェッカーが`"function expects 9 argument(s), got 8"`で検出してくれた。
+
+**既存テストで踏んだ地雷**: `tests/compile_test.rs`の
+`compile_loop_retains_a_borrowed_return_value_before_it_escapes`は、
+`Interp::compile_function`を経由せず`llvm-module::create`から手作りしたモジュールを
+`create_jit_execution_engine`に直接渡すテストで、`rt_extern_functions()`による
+自動前方宣言の恩恵を受けていなかった。`compile-loop`/`compile-return`が無条件で
+`rt_root_count`/`rt_truncate_sexpr_roots`を呼ぶようになったことで、このテストの
+モジュールにもこの2つの宣言（`(add-function m "rt_root_count")`のような、
+本体なしの宣言のみ）が新たに必要になった——さらに、このテストは`Interp::eval`を
+経由せず生成した関数を直接呼ぶため`set_active_heap`が一度も呼ばれておらず、
+`rt_root_count`内部の`active_heap()`が`debug_assert!`で失敗し
+「non-unwinding panic, aborting」（SIGABRT）でテストプロセスごと落ちた——
+FFI境界を越えたRust panicはunwindできないため、これは"catchable"な失敗にはならない。
+危険な実地検証を避けるため、まず`Interp::compile_function`（JIT経路）に
+`aot.rs`と同じ`module.verify()`呼び出しを追加してから再現・確認する、という
+安全な手順を踏んだ（このverify()呼び出し自体も今回のこの変更にとって
+有用な恒久的な堅牢化——不正なIRを未定義動作クラッシュではなく捕捉可能な
+`EvalError::Panic`に変える）。
+
+**実証テスト**: `compile_return_truncates_a_sexpr_lets_gc_root_on_every_call_not_just_the_first`
+（`tests/compile_test.rs`）。`Heap::root_count()`はコンパイル済みコードだけでなく
+ツリーウォーク・インタプリタ自身の`Interp::sync_roots`（無関係なGC安全性の仕組み）でも
+毎回のトップレベル呼び出しごとに一定量伸びるため、単純に「呼び出し前後で0のまま」とは
+アサートできない——`Sexpr`束縛なし・ループなしの対照関数`trivial`と、`Sexpr`束縛+
+即`return`の`leaky-inner`それぞれを500回ずつ呼び、両者の`root_count()`増分が
+**一致する**（`leaky-inner`が`trivial`より余分にリークしていない）ことを検証する形にした。
+`rt_truncate_sexpr_roots`の中身を一時的に無効化して確認したところ、
+`leaky-inner`の増分だけが`trivial`のちょうど2倍（500回呼んで500余分にリーク）になり、
+実際に1呼び出しにつき1ルートずつ着実に漏れていたことを確認してから元に戻した。
