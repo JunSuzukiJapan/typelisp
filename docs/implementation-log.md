@@ -2384,3 +2384,27 @@ clippy警告0。
 依然falseのままであることの確認、`int->float`/`float->int`単体テスト
 （i32/i64双方からの変換、負数の0方向丸め）を追加。全体テスト
 （`./scripts/with-llvm-env.sh cargo test`、workspace全体）green。
+
+## `char->int`/`int->char`/`symbol->string`/`string->symbol`を追加（2026-07-01）
+
+`docs/language-design.md` §4.1の変換カタログに名前だけ予約されていた残り4件を実装し、
+`int->float`/`float->int`に続いて変換カタログを完成させた。
+
+**`char->int`/`int->char`**（`registry::char_assoc`/`int_assoc`、`eval::interp`）:
+`int->float`/`float->int`と同じ「レシーバ型のinstanceメソッド」パターン。`char->int`は
+`char`のUnicodeスカラー値を`i32`として返す（常に成功——`char`は既に有効なスカラー値）。
+`int->char`は逆方向で、サロゲート範囲や`U+10FFFF`超えなど無効な値では`car`/`cdr`の非`Cons`
+panicと同じ前例で実行時panic（型システムでは「有効なスカラー値」を表現できないため）。
+`u32::try_from`はedition 2018では暗黙にスコープに無く（`use std::convert::TryFrom`が要る）、
+インポートを増やす代わりに範囲チェック+`as u32`キャストで済ませた。
+
+**`symbol->string`/`string->symbol`**（`prelude.rs`、Rustビルトイン不要）: `registry::sexpr_def`
+の`sym`ヴァリアントのフィールド型が既に`Type::Str`（プレーンな`string`）だったため、
+`symbol->string`は`(Sym name) -> name`という`match`一発で書け、`string->symbol`も裸の`Sym`
+コンストラクタ`(Sym s)`をそのまま返すだけで済んだ——コンストラクタ経由のインターン処理
+（`Interp`の値構築ロジック、`SEXPR_SYM`分岐で`heap.intern_symbol`を呼ぶ）は`gensym`と同じ
+既存の仕組みに乗っているため、新規のRust実装は一切不要だった。
+
+**テスト**: `tests/prelude_test.rs`に`char->int`/`int->char`（往復、サロゲート・範囲外での
+panicの両方）、`symbol->string`/`string->symbol`（往復、非symbolでのpanic）を追加。全体テスト
+（`./scripts/with-llvm-env.sh cargo test`、workspace全体）green。

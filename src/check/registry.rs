@@ -1050,6 +1050,10 @@ fn char_assoc() -> HashMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), method(vec![Type::Char, Type::Char], Type::Bool));
     }
+    // `char->int`: a `char`'s Unicode scalar value as `i32` (`docs/
+    // language-design.md` §4.1's planned conversion catalog) — the other
+    // half is `int_assoc`'s `int->char`.
+    m.insert("char->int".to_string(), method(vec![Type::Char], Type::I32));
     m
 }
 
@@ -1090,6 +1094,12 @@ fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
     // (`prelude.rs`) needed and previously lacked (see
     // `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section).
     m.insert("int->float".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::F64, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    // `int->char`: the other half of `char_assoc`'s `char->int` — a Unicode
+    // scalar value back to `char`. Panics at runtime on a value outside the
+    // valid range (surrogates, or past `U+10FFFF`) — the type system can't
+    // express "valid scalar value", same precedent as `car`/`cdr` on a
+    // non-`Cons` `Sexpr` or division by zero.
+    m.insert("int->char".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Char, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m
 }
 

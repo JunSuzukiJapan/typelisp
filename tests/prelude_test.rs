@@ -334,6 +334,45 @@ fn float_to_int_truncates_toward_zero() {
     assert_eq!(eval_ok("(float->int -3.9)"), RtValue::Int(-3));
 }
 
+// ---- char->int / int->char: Unicode scalar value conversion --------------------
+
+#[test]
+fn char_to_int_returns_the_scalar_value() {
+    assert_eq!(eval_ok(r"(char->int #\A)"), RtValue::Int(65));
+}
+
+#[test]
+fn int_to_char_round_trips_char_to_int() {
+    assert_eq!(eval_ok("(int->char 65)"), RtValue::Char('A'));
+}
+
+#[test]
+fn int_to_char_panics_on_a_surrogate_code_point() {
+    assert!(matches!(run("(int->char 55296)"), Err(EvalError::Panic(_))));
+}
+
+#[test]
+fn int_to_char_panics_past_the_max_scalar_value() {
+    assert!(matches!(run("(int->char 1114112)"), Err(EvalError::Panic(_))));
+}
+
+// ---- symbol->string / string->symbol --------------------------------------------
+
+#[test]
+fn symbol_to_string_extracts_the_name() {
+    assert_eq!(eval_ok("(symbol->string (quote foo))"), RtValue::Str("foo".into()));
+}
+
+#[test]
+fn symbol_to_string_panics_on_a_non_symbol() {
+    assert!(matches!(run("(symbol->string (quote 1))"), Err(EvalError::Panic(_))));
+}
+
+#[test]
+fn string_to_symbol_round_trips_symbol_to_string() {
+    assert_eq!(eval_ok(r#"(equal (string->symbol "foo") (quote foo))"#), RtValue::Bool(true));
+}
+
 // ---- step 7b: Sexpr-list library ------------------------------------------------
 
 fn eval_true(src: &str) {

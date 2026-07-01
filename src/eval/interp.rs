@@ -1340,6 +1340,24 @@ fn float_to_int(args: &[RtValue]) -> Result<RtValue, EvalError> {
     }
 }
 
+/// `int->char` (`registry::int_assoc`): a Unicode scalar value back to
+/// `char`. Panics (same precedent as `car`/`cdr` on a non-`Cons` `Sexpr`) if
+/// the value is outside the valid range — a surrogate code point or past
+/// `U+10FFFF` — since the type system can't express "valid scalar value".
+fn int_to_char(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    match args.first() {
+        Some(RtValue::Int(n)) => {
+            let in_u32_range = *n >= 0 && *n <= i64::from(u32::MAX);
+            in_u32_range
+                .then(|| *n as u32)
+                .and_then(char::from_u32)
+                .map(RtValue::Char)
+                .ok_or_else(|| EvalError::Panic(format!("int->char: {} is not a valid Unicode scalar value", n)))
+        }
+        other => Err(EvalError::Internal(format!("int->char: expected an integer, got {:?}", other))),
+    }
+}
+
 /// Evaluate a built-in `f64` arithmetic/comparison instance method
 /// (`registry::float_assoc`). Unlike [`eval_int_builtin`], `/`/`mod` never
 /// panic on a zero divisor — IEEE-754 division yields `inf`/`NaN` instead,
@@ -1485,6 +1503,7 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             // is case-insensitive (see `registry::char_assoc`'s doc comment).
             "eq" | "eql" | "equal" => Some(char_eq(args)),
             "equalp" => Some(char_eqp(args)),
+            "char->int" => Some(char_to_int(args)),
             _ => None,
         };
     }
@@ -1499,6 +1518,7 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             // diverge from `=` here).
             "eq" | "eql" | "equal" | "equalp" => eval_int_builtin("=", args),
             "int->float" => Some(int_to_float(args)),
+            "int->char" => Some(int_to_char(args)),
             _ => None,
         };
     }
@@ -2769,6 +2789,14 @@ fn expect_char(v: &RtValue) -> Result<char, EvalError> {
         RtValue::Char(c) => Ok(*c),
         other => Err(EvalError::Internal(format!("expected a Char, got {:?}", other))),
     }
+}
+
+/// `char->int` (`registry::char_assoc`): a `char`'s Unicode scalar value as
+/// `i32` (uniformly `RtValue::Int(i64)` at runtime — see
+/// `eval_int_builtin`'s doc comment). Always succeeds — every `char` is
+/// already a valid scalar value, unlike `int->char`'s reverse direction.
+fn char_to_int(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    expect_char(&args[0]).map(|c| RtValue::Int(c as i64))
 }
 
 fn string_length(args: &[RtValue]) -> Result<RtValue, EvalError> {
