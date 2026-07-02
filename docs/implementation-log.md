@@ -1582,10 +1582,12 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
 ### compile機能の残課題の一部対応（2026-06-27）
 
 下記3件は完了（一般ADT箱のフィールドGCルート保護は同日後刻、[[feedback-impl-priority]]の
-影響範囲基準で残課題群の最優先として追加対応）。**完了していない残課題（mark-and-sweep
-サイクル収集・ネストしたlabelsのknown limitation・retain/release重複除去・break/returnの
-対応範囲拡大・compile-if-branchのkind対応・compile-assocのユーザー定義メソッド呼び出し
-対応、いずれも優先順位はユーザー未確認）は [TODO.md](TODO.md) を参照**。
+影響範囲基準で残課題群の最優先として追加対応）。**この時点で完了していなかった残課題
+（mark-and-sweepサイクル収集・ネストしたlabelsのknown limitation・retain/release重複除去・
+break/returnの対応範囲拡大・compile-if-branchのkind対応・compile-assocのユーザー定義
+メソッド呼び出し対応）は、その後2026-07-01までにいずれも解消済み——本ファイル後続の各節を参照
+（サイクル収集のみ実装ではなく「既存設計ではサイクル構築自体が不可能なため不要」という
+判断で決着、前掲「ClosureBoxの自動retain/release挿入」節のスコープ外注記参照）**。
 
 - **`compile`をインスタンスメソッド（`self.methods`）にも対応させる**
   （Stage 6で判明、2026-06-27対応済み）: `(compile type::method)`という
@@ -1611,7 +1613,8 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   別の正しさ問題を生んでいたはず）。
 
   （`compile-assoc`がユーザー定義メソッド呼び出しを認識しない、という独立した
-  gapが残った——詳細はTODO.md参照。今回はメソッド単体のcompile+`Expr::Assoc`からの
+  gapが残った——翌日2026-06-28に解消、本ファイル後述の「`compile-assoc`のユーザー定義
+  メソッド呼び出し対応」節参照。今回はメソッド単体のcompile+`Expr::Assoc`からの
   ネイティブ呼び出しのみが対象。）
 
   テスト: `tests/compile_test.rs`に4件追加（`point::x`アクセサの
@@ -1673,7 +1676,9 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
   挟んでも、popされる値が変わらないこと）を確認する単体テストも追加。全体テスト3回連続
   green、clippy警告0（`--workspace`）。
 
-  `compile-if-branch`経由の値のkind対応はまだ未対応（詳細・理由はTODO.md参照）。
+  `compile-if-branch`経由の値のkind対応はこの時点ではまだ未対応（後日2026-07-01に解消
+  ——調査の結果、実際に脆弱だったのは`compile-match`のscrutineeだったと判明。本ファイル
+  後述の「compile-matchのGCルート漏れ修正」の段落を参照）。
 
 ## `compile-assoc`のユーザー定義メソッド呼び出し対応（2026-06-28）
 
@@ -1724,7 +1729,8 @@ GCヒープへの経路も無い**こと（`registry::llvm_module_def`の方針�
 `collect_assoc_targets`の単体テスト3件追加。全体テスト3回連続green、
 clippy警告0（`--workspace --all-targets`）。
 
-残課題はTODO.mdの「compile機能の残課題」節を参照（本対応で1項目解消）。
+本対応で当時の残課題リスト（前掲2026-06-27節）の1項目を解消。残りの項目も
+2026-07-01までに全て解消済み——本ファイル後続の各節を参照。
 
 ## ネストした`labels`が外側`labels`の兄弟を参照できるよう修正（2026-06-29）
 
@@ -1876,8 +1882,10 @@ TODO.mdの「`compile-if-branch`経由の値のkind対応」のうち、`setf`�
 具体的に実証・修正した。残り（`if`/`match`自身のmerge slot・`return`の
 loop-slotを素通りする束縛されない一時値）は引き続き「store直後にload する
 隣接命令なので単体では安全、消費先も呼び出し引数・Cons構築・一般ADT
-フィールド経由で既に対応済み」という従来の分析のまま、未着手（具体的な
-破壊を実証するテストはまだ書けていない）。
+フィールド経由で既に対応済み」という従来の分析のまま、この時点では未着手
+（後日2026-07-01に決着——調査の結果`if`/`return`自身は常に安全と判明し、
+実際に脆弱だった`compile-match`のscrutineeを実証テスト付きで修正。本ファイル
+後述の「compile-matchのGCルート漏れ修正」の段落を参照）。
 
 **根本原因**: `bind-params`/`bind-captures`/`bind-let-values`は`kind = 2`
 （`Sexpr`型）の束縛に対して`rt_push_sexpr_root`でGCルートを1回だけ積むが、
@@ -1982,7 +1990,8 @@ TODO.mdの最優先課題`doiter`（「何に対する反復か」仕様未確�
   **同じ`methods`テーブル**を引く。vtable等の専用間接構造ではなく、型消去インタプリタが要求する
   最小限の動的型タグ参照という整理。
 - `Env`に`bounds: Rc<HashMap<String,Vec<Path>>>`追加（`where`節の宣言を関数本体チェック時のみ
-  伝播、呼び出し側シグネチャには影響しない——呼び出し側での境界検証は未実装のまま、TODO.md参照）。
+  伝播、呼び出し側シグネチャには影響しない——呼び出し側での境界検証はこの時点では未実装、
+  同日の後続作業で解消——下記「where節の関連型pin + 呼び出し側境界検証」節参照）。
 - `tests/trait_test.rs`新設（具体型ディスパッチ、`where`境界経由のジェネリック呼び出し、型ごとの
   独立ディスパッチ、未実装trait呼び出しの型エラーを検証）。
 
