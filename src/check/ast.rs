@@ -117,11 +117,13 @@ pub enum Expr {
         /// `AdtKind::Sum` — set by `Checker::check_construct` from the
         /// resolved `AdtDef::kind`. Chooses the interpreter's runtime
         /// representation: `true` builds a mutable, reference-semantics
-        /// `RtValue::Struct`; `false` (every built-in ADT) builds the
-        /// existing value-semantics `RtValue::Data`, unchanged.
+        /// boxed struct (`RtValue::Sexpr` wrapping a `BoxedObj::Struct`);
+        /// `false` (every built-in ADT) builds the existing value-semantics
+        /// `RtValue::Data`, unchanged.
         mutable: bool,
     },
-    /// Reads field `.1` of a `defstruct` instance (`RtValue::Struct`) by
+    /// Reads field `.1` of a `defstruct` instance (a boxed struct, see
+    /// `Expr::Construct`'s `mutable` doc comment) by
     /// position. Synthesized only by `Checker::check_defstruct` as a field
     /// accessor's body (the `p::x` surface syntax desugars to an ordinary
     /// instance-method call on that accessor, `Expr::Assoc` — see

@@ -2418,7 +2418,7 @@ panicと同じ前例で実行時panic（型システムでは「有効なスカ�
 panicの両方）、`symbol->string`/`string->symbol`（往復、非symbolでのpanic）を追加。全体テスト
 （`./scripts/with-llvm-env.sh cargo test`、workspace全体）green。
 
-## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-1完了・Stage 2-8未着手）
+## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-2完了・Stage 3-8未着手）
 
 `HashTable<K,V>::entries`のペア型を巡る議論の中で、ユーザーから「`Sexpr`と`RtValue`という
 2つの並行した実行時値表現に分かれていること自体がおかしい」という指摘を受けた。実際の
@@ -2503,9 +2503,35 @@ FFIハンドルだけを`RtValue`に残す。さらに調査で判明した事�
   検証するテストを追加、`crates/typelisp-rt`の`src/lib.rs`内テストモジュールに
   `rt_struct_new`/`rt_struct_field_get`/`rt_struct_field_set`のABI往復・GCルート保護の
   テストを追加。全体テスト（31クレート）+ Miri（`mem_test`、`typelisp-rt`）green。
-- **Stage 2（未着手）**: Struct: インタプリタ結線——`RtValue::Struct`/`StructData`を削除し
-  `Expr::Construct`/`FieldGet`/`FieldSet`を新表現に接続。`Vector<T>`/`cons-cell<K,V>`も
-  この時点で自動的に新表現に乗る。
+- **Stage 2（完了、2026-07-02）**: Struct: インタプリタ結線。`RtValue::Struct`/`StructData`を
+  完全に削除し、`defstruct`/`Vector<T>`/`cons-cell<K,V>`インスタンスすべてを
+  `RtValue::Sexpr`が包む`Value::Boxed`/`BoxedObj::Struct`に統合した（`Vector<T>`/
+  `cons-cell<K,V>`は当初の見立て通り、専用の書き換えなしで自動的に新表現に乗った——
+  どちらも`prelude.rs`側は普通の`defstruct`として書かれており、Rust側の特別扱いは
+  `eval_builtin_method`の`"vector"`アーム、および`hashtable_keys`/`values`/`entries`が
+  `cons-cell`インスタンスを直接組み立てる箇所だけだった）。
+  変更点: `Expr::Construct`の`mutable`分岐が`heap.alloc_struct`を呼ぶように変更、
+  `Expr::FieldGet`/`FieldSet`が`heap.struct_field`/`struct_set_field`経由に変更、
+  `eval_builtin_method`を`heap: &Heap`から`heap: &mut Heap`に変更（`vector`/`hashtable`の
+  各アームがstruct構築・変異のため）、`match`のstructパターン（`Pattern::Ctor`）と
+  REPLの`format_sexpr`（`main.rs`）を新表現に対応。`RtValue`とmem層の`Value`の境界を
+  越える変換ヘルパーとして`rtvalue_to_struct_field`（encode、フィールドの実行時shapeから
+  一意に決まるため型情報不要）/`decode_struct_field`（decode、非struct`Boxed`は常に
+  `Float`とみなうヒューリスティック——`Sexpr`型フィールドがたまたま浮動小数点リテラルを
+  保持するケースとの理論上の曖昧性は残るが、現在のテスト/組み込みのどこからも
+  到達しない未使用経路であり、`Registry`アクセス不要な設計を優先して許容した）を新設。
+  `crates/typelisp-mem::Heap`に`struct_push_field`（`Vector<T>::push`用、フィールド数を
+  事後的に伸長する唯一の操作）と`is_struct`（`Boxed`が`Struct`か`Float`かの判別、
+  `float_value`の"wrong kind"パニックを避けるため）を追加。`RtValue::Data`（`Option`/
+  `Result`/ユーザーsum型）・`Closure`・`HashTable`・`Scope`型のフィールドは
+  `crate::mem::Value`で表現できないため、`rtvalue_to_struct_field`は明示的に
+  `EvalError::Internal`を返す（後続StageのClosure/HashTable統合が閉じるべきギャップで、
+  Stage 2のスコープ外——現状のテスト/組み込みはスカラー・文字列・`Sexpr`・ネストした
+  構造体フィールドしか使っていないため到達しない）。
+  テスト: `tests/mem_test.rs`に`struct_push_field`/`is_struct`のテストを追加、
+  `tests/struct_test.rs`の直接`RtValue::Struct`をパターンマッチしていた3テストを
+  `Heap`の構造体アクセサ経由に書き換え。全体テスト（cargo test、31クレート＋LLVM経由の
+  compile系）+ Miri（`mem_test`/`read_test`/`typelisp-rt`）green。
 - **Stage 3（未着手）**: Struct: コンパイラ結線——`mutable`フラグ分岐、
   `compile-construct-boxed-struct`新設。
 - **Stage 4（未着手）**: HashTable: `StructPayload::Map`のmem/rt層プラミング

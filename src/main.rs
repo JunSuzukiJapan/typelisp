@@ -203,17 +203,6 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
         RtValue::BuiltinMethod(type_name, method) => format!("#<builtin {}::{}>", type_name, method),
         RtValue::HashTable(map) => format!("#<hashtable count={}>", map.borrow().len()),
         RtValue::Scope(frames) => format!("#<scope depth={}>", frames.borrow().len()),
-        RtValue::Struct(s) => {
-            // Positional, not named — `StructData` deliberately doesn't
-            // carry field names at runtime (see its doc comment), and this
-            // printer has no module-qualified `Path` to look the type's
-            // `AdtDef::field_names` back up by (`type_name` is a bare
-            // `String`), so it stays consistent with that and prints values
-            // only, like `RtValue::Data`'s field list above.
-            let s = s.borrow();
-            let parts: Vec<String> = s.fields.iter().map(|f| format_value(heap, reg, f)).collect();
-            format!("#<{} {}>", s.type_name, parts.join(" "))
-        }
         // Compiler-internal handles; not meant to be printed by user code,
         // so a terse opaque tag is enough.
         RtValue::LlvmModule(_) => "#<llvm-module>".to_string(),
@@ -230,10 +219,16 @@ fn format_sexpr(heap: &Heap, v: Value) -> String {
     match v {
         Value::Empty => "()".to_string(),
         Value::Int(i) => i.to_string(),
-        // `Sexpr::Float` is heap-boxed (`Value::Boxed`, see `BoxedObj`) —
-        // today it's the only thing a `Value::Boxed` can hold, so this is
-        // safe; a later `BoxedObj` kind (struct/closure/...) will need this
-        // to dispatch on the boxed payload's own shape instead.
+        // `Sexpr::Float` and a `defstruct`/`Vector<T>`/`cons-cell<K,V>`
+        // instance are both heap-boxed (`Value::Boxed`, see `BoxedObj`) —
+        // `heap.is_struct` tells them apart. A boxed struct prints
+        // positionally (no field names at runtime, same as `RtValue::Data`'s
+        // field list), recursing through this same function for each field.
+        Value::Boxed(id) if heap.is_struct(id) => {
+            let parts: Vec<String> =
+                (0..heap.struct_field_count(id)).map(|i| format_sexpr(heap, heap.struct_field(id, i))).collect();
+            format!("#<{} {}>", heap.struct_type_name(id), parts.join(" "))
+        }
         Value::Boxed(id) => format_float(heap.float_value(id)),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),

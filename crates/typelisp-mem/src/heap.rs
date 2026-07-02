@@ -371,6 +371,29 @@ impl Heap {
         }
     }
 
+    /// Appends a new field, growing a boxed struct's field count by one —
+    /// `Vector<T>::push`'s primitive (a `defstruct` instance's field count is
+    /// otherwise fixed for its lifetime once [`alloc_struct`](Self::alloc_struct)
+    /// returns, since only `Vector<T>`'s builtin methods ever call this).
+    /// Panics if `id` doesn't hold a `BoxedObj::Struct`.
+    pub fn struct_push_field(&mut self, id: BoxId, val: Value) {
+        match self.box_slots[id.0 as usize].as_mut() {
+            Some(BoxedObj::Struct { payload: StructPayload::Fields(fields), .. }) => fields.push(val),
+            _ => panic!("BoxId does not hold a Struct"),
+        }
+    }
+
+    /// True if `id` holds a `BoxedObj::Struct` rather than a `BoxedObj::Float`
+    /// — lets a caller holding only a `Value::Boxed` (no independent
+    /// knowledge of what it was built from, e.g. decoding a struct field or
+    /// a generic `match` scrutinee back into an interpreter-level value)
+    /// tell a nested struct/`Vector<T>`/`cons-cell<K,V>` apart from a boxed
+    /// float without risking [`float_value`](Self::float_value)'s "wrong
+    /// kind" panic.
+    pub fn is_struct(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Struct { .. }))
+    }
+
     // ---- allocation -------------------------------------------------------
 
     /// Allocate a cons cell `(car . cdr)`. Runs a GC if the free list is empty;

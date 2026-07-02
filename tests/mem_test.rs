@@ -520,6 +520,55 @@ fn gc_traces_into_a_rooted_structs_fields() {
     assert_accounting(&h);
 }
 
+// ---- boxed structs (Sexpr/RtValue unification, Stage 2 additions) -------
+//
+// `struct_push_field`/`is_struct` were added alongside the interpreter
+// wiring (Stage 2) — `Vector<T>::push` needs a field count that can grow
+// after `alloc_struct`, and decoding a struct field/`match` scrutinee back
+// into an interpreter value needs to tell a boxed struct apart from a boxed
+// float without risking `float_value`'s panic.
+
+#[test]
+fn struct_push_field_grows_field_count() {
+    let mut h = Heap::with_capacity(8);
+    let s = h.alloc_struct("vector".to_string(), vec![]);
+    let id = match s {
+        Value::Boxed(id) => id,
+        other => panic!("expected a boxed struct, got {:?}", other),
+    };
+    assert_eq!(h.struct_field_count(id), 0);
+    h.struct_push_field(id, Value::Int(1));
+    h.struct_push_field(id, Value::Int(2));
+    assert_eq!(h.struct_field_count(id), 2);
+    assert_eq!(h.struct_field(id, 0), Value::Int(1));
+    assert_eq!(h.struct_field(id, 1), Value::Int(2));
+}
+
+#[test]
+#[should_panic(expected = "does not hold a Struct")]
+fn struct_push_field_on_a_boxed_float_panics() {
+    let mut h = Heap::with_capacity(8);
+    let f = h.alloc_float(1.5);
+    let id = match f {
+        Value::Boxed(id) => id,
+        other => panic!("expected a boxed float, got {:?}", other),
+    };
+    h.struct_push_field(id, Value::Int(1));
+}
+
+#[test]
+fn is_struct_distinguishes_struct_from_float() {
+    let mut h = Heap::with_capacity(8);
+    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1)]);
+    let f = h.alloc_float(1.5);
+    let (sid, fid) = match (s, f) {
+        (Value::Boxed(sid), Value::Boxed(fid)) => (sid, fid),
+        other => panic!("expected two boxed values, got {:?}", other),
+    };
+    assert!(h.is_struct(sid));
+    assert!(!h.is_struct(fid));
+}
+
 // ---- roots bookkeeping --------------------------------------------------
 
 #[test]

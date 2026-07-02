@@ -22,17 +22,26 @@
      `BoxedObj::Struct`/`StructPayload::Fields`のmem/rt層プラミング
      （`Heap::alloc_struct`等、`rt_struct_new`/`rt_struct_field_get`/`rt_struct_field_set`）。
      まだ`RtValue::Struct`と並存するだけで、インタプリタ/コンパイラのどちらにも未配線。
-   - **Stage 2-3（未着手）**: Struct: インタプリタ結線 → コンパイラ結線の2段階。
+   - **Stage 2（完了）**: Struct: インタプリタ結線——`RtValue::Struct`/`StructData`を削除し
+     `Expr::Construct`/`FieldGet`/`FieldSet`を新表現（`RtValue::Sexpr`が包む
+     `Value::Boxed`/`BoxedObj::Struct`）に接続。`Vector<T>`/`cons-cell<K,V>`も自動的に
+     新表現に乗った。
+   - **Stage 3（未着手）**: Struct: コンパイラ結線（`mutable`フラグ分岐、
+     `compile-construct-boxed-struct`新設）。
    - **Stage 4-5（未着手）**: `HashTable<K,V>`を`BoxedObj::Struct`（`StructPayload::Map`）に統合。
    - **Stage 6a-6b（未着手）**: 変数束縛スロットの`BoxedObj::Cell`化 → `RtValue::Closure`を
      `BoxedObj::Closure`に統合。
    - **Stage 7-8（未着手）**: `Scope<V>`を`BoxedObj::Struct`（`StructPayload::Frames`）に統合
      （自己ホスティングコンパイラ自体がScopeに依存するため最後に単独で着地）。
 
-直近完了: Sexpr/RtValue内部表現統合Stage 1（2026-07-02）——`BoxedObj::Struct`/
-`StructPayload::Fields`のmem/rt層プラミング（`Heap::alloc_struct`等、
-`rt_struct_new`/`rt_struct_field_get`/`rt_struct_field_set`）。インタプリタ/コンパイラは
-まだ無配線（Stage 2-3）、詳細は[implementation-log.md](implementation-log.md)参照。
+直近完了: Sexpr/RtValue内部表現統合Stage 2（2026-07-02）——`RtValue::Struct`/`StructData`を
+完全に削除し、`defstruct`/`Vector<T>`/`cons-cell<K,V>`インスタンスを`RtValue::Sexpr`が包む
+`Value::Boxed`/`BoxedObj::Struct`に統合。`Expr::Construct`（`mutable`分岐）/`FieldGet`/
+`FieldSet`、`eval_builtin_method`（`&mut Heap`化、`"vector"`/`"hashtable"`の
+keys/values/entries）、`match`のstructパターン、REPLプリンタを新表現に接続。
+`crates/typelisp-mem::Heap`に`struct_push_field`/`is_struct`を追加（`Vector<T>::push`と
+構造体/浮動小数点の判別に必要）。コンパイラ（Stage 3）はまだ無配線。詳細は
+[implementation-log.md](implementation-log.md)参照。
 
 その前に完了: `HashTable<K,V>`への`Iter`実装（2026-07-02）——`keys`/`values`/`entries`
 （Rust builtin、`registry::hashtable_def`/`eval_builtin_method`）を新設し、`entries`が返す

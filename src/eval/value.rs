@@ -53,21 +53,6 @@ pub struct Closure {
     pub env: Vec<(String, Rc<RefCell<RtValue>>)>,
 }
 
-/// A `defstruct` instance's fields, behind the `Rc<RefCell<..>>` that gives
-/// [`RtValue::Struct`] its reference (not value) semantics. `type_name` is a
-/// plain `String`, not a [`Path`] like [`RtValue::Data`]'s — name resolution
-/// is finished by check time, so a runtime value only ever needs this for
-/// display (`Debug`/the REPL printer), never to look anything back up (see
-/// that field's doc comment for why `Data` itself doesn't actually need a
-/// `Path` either). Fields are positional, not named — `Checker::check_defstruct`
-/// resolves a field name to its index once, at check time (`Expr::FieldGet`/
-/// `FieldSet`), so the runtime representation doesn't need to carry names.
-#[derive(Clone, Debug, PartialEq)]
-pub struct StructData {
-    pub type_name: String,
-    pub fields: Vec<RtValue>,
-}
-
 /// A runtime value. Data-type instances (constructors of `Option`/`Result`/
 /// user structs) are represented uniformly by [`RtValue::Data`]; `Sexpr` is
 /// the one exception — it is the cons/nil-bearing builtin the GC-managed cons
@@ -108,7 +93,14 @@ pub enum RtValue {
     /// A `Sexpr` value (`Nil`/`Int`/`Float`/`Char`/`Bool`/`Sym`/`Str`/`Cons`),
     /// backed by the GC-managed cons heap shared with the reader rather than a
     /// Rust-heap encoding — so `cons` cells built at runtime are subject to the
-    /// same mark-sweep collection as ones read from source.
+    /// same mark-sweep collection as ones read from source. Since the
+    /// `Sexpr`/`RtValue` unification's Stage 2, this is also where a
+    /// `defstruct` instance/`Vector<T>`/`cons-cell<K,V>` lives: each is a
+    /// `Value::Boxed` pointing at a `BoxedObj::Struct` (see `crate::mem`),
+    /// wrapped in this same variant rather than a dedicated `RtValue::Struct`
+    /// — `heap.is_struct`/`struct_type_name`/`struct_field`/etc. distinguish
+    /// it from a boxed float or a genuine quoted `Sexpr` datum at each read
+    /// site (`interp.rs`'s `expect_struct_box`/`decode_struct_field`).
     Sexpr(Value),
     /// A function value (from a `lambda` or a reified named function).
     Closure(Rc<Closure>),
@@ -139,12 +131,6 @@ pub enum RtValue {
     /// work) and exactly what lets a `labels` def's own new scope start from
     /// every enclosing scope's frames without copying their contents.
     Scope(Rc<RefCell<Vec<ScopeFrame>>>),
-    /// A `defstruct` instance — mutable, reference-identity-bearing, unlike
-    /// `Data`'s value semantics (see [`StructData`]'s doc comment for why
-    /// this needed its own variant rather than reusing `Data`). Lives in
-    /// ordinary Rust-managed memory, the same `Rc<RefCell<..>>` pattern as
-    /// `HashTable` above (and the same accepted cycle-leak trade-off).
-    Struct(Rc<RefCell<StructData>>),
     /// An in-progress LLVM module being built by the (typelisp-hosted)
     /// compiler. `Rc<RefCell<..>>` because `inkwell::module::Module` owns
     /// the underlying LLVM module and isn't `Clone` (dropping it disposes
@@ -182,7 +168,6 @@ impl PartialEq for RtValue {
             }
             (RtValue::HashTable(a), RtValue::HashTable(b)) => *a.borrow() == *b.borrow(),
             (RtValue::Scope(a), RtValue::Scope(b)) => *a.borrow() == *b.borrow(),
-            (RtValue::Struct(a), RtValue::Struct(b)) => *a.borrow() == *b.borrow(),
             // Compiler-internal LLVM handles have no meaningful structural
             // equality, and inkwell's types don't implement `PartialEq`
             // anyway — they (and any other non-matching pair) fall through.

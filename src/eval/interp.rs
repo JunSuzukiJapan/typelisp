@@ -24,9 +24,9 @@ use inkwell::module::Module;
 use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::AddressSpace;
 
-use crate::{Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
+use crate::{BoxId, Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
 
-use super::value::{Closure, EvalError, HashKey, RtValue, ScopeFrame, StructData};
+use super::value::{Closure, EvalError, HashKey, RtValue, ScopeFrame};
 
 /// A registered function or method body with its parameter names.
 struct FnDef {
@@ -363,7 +363,7 @@ impl Interp {
                 // `Expr::Assoc` (below) reads, since `Checker::check_impl`
                 // inserted this method there as a plain `defmethod`.
                 let (argv, _slots) = self.eval_args(heap, args, env)?;
-                let type_path = rtvalue_type_path(&argv[0])
+                let type_path = rtvalue_type_path(heap, &argv[0])
                     .ok_or_else(|| EvalError::Panic(format!("{}: no implementation for this value", method)))?;
                 let key = (type_path, method.clone());
                 if let Some(m) = self.methods.get(&key) {
@@ -380,10 +380,11 @@ impl Interp {
                     self.construct_sexpr(heap, *variant, args, env)
                 } else if *mutable {
                     let (fields, _slots) = self.eval_args(heap, args, env)?;
-                    Ok(RtValue::Struct(Rc::new(RefCell::new(StructData {
-                        type_name: type_name.to_string(),
-                        fields,
-                    }))))
+                    let mem_fields = fields
+                        .iter()
+                        .map(|f| rtvalue_to_struct_field(heap, f))
+                        .collect::<Result<Vec<Value>, EvalError>>()?;
+                    Ok(RtValue::Sexpr(heap.alloc_struct(type_name.to_string(), mem_fields)))
                 } else {
                     let (fields, _slots) = self.eval_args(heap, args, env)?;
                     Ok(RtValue::Data { type_name: type_name.clone(), variant: *variant, fields })
@@ -425,18 +426,17 @@ impl Interp {
                     _ => Err(EvalError::Internal("apply of a non-function value".into())),
                 }
             }
-            Expr::FieldGet(obj, idx) => match self.eval(heap, obj, env)? {
-                RtValue::Struct(s) => Ok(s.borrow().fields[*idx].clone()),
-                other => Err(EvalError::Internal(format!("FieldGet on a non-Struct value: {:?}", other))),
-            },
-            Expr::FieldSet(obj, idx, value) => match self.eval(heap, obj, env)? {
-                RtValue::Struct(s) => {
-                    let v = self.eval(heap, value, env)?;
-                    s.borrow_mut().fields[*idx] = v;
-                    Ok(RtValue::Unit)
-                }
-                other => Err(EvalError::Internal(format!("FieldSet on a non-Struct value: {:?}", other))),
-            },
+            Expr::FieldGet(obj, idx) => {
+                let id = expect_struct_box(&self.eval(heap, obj, env)?)?;
+                Ok(decode_struct_field(heap, heap.struct_field(id, *idx)))
+            }
+            Expr::FieldSet(obj, idx, value) => {
+                let id = expect_struct_box(&self.eval(heap, obj, env)?)?;
+                let v = self.eval(heap, value, env)?;
+                let mv = rtvalue_to_struct_field(heap, &v)?;
+                heap.struct_set_field(id, *idx, mv);
+                Ok(RtValue::Unit)
+            }
             Expr::Match(scrut, arms) => {
                 let v = self.eval(heap, scrut, env)?;
                 for arm in arms {
@@ -571,11 +571,11 @@ impl Interp {
     /// plain `i64` at the compiled ABI level — true for an `i64`/`i32`
     /// itself, and for a general-ADT pointer (`Option`/`defstruct`, Stage 6)
     /// that *already* crossed this same boundary once (so it's sitting in
-    /// `argv` as `RtValue::Int`, not decoded into `RtValue::Struct`/etc. —
-    /// general-ADT bridging at this boundary isn't implemented, a
+    /// `argv` as `RtValue::Int`, not decoded into a boxed struct/`Data`/etc.
+    /// — general-ADT bridging at this boundary isn't implemented, a
     /// pre-existing, separate gap). Calling a compiled method on a receiver
-    /// built by *pure* interpretation (a real `RtValue::Struct`, never
-    /// touched by compiled code) hits the same wall an analogous top-level
+    /// built by *pure* interpretation (a real boxed-struct `RtValue::Sexpr`,
+    /// never touched by compiled code) hits the same wall an analogous top-level
     /// `Expr::Call` already would for a general-ADT parameter — a clear
     /// internal error here, not a silent misread of unrelated bits.
     fn call_compiled(
@@ -1196,7 +1196,13 @@ fn type_is_sexpr(ty: &Type) -> bool {
 /// `Data` fields or `HashTable` values (a `Closure`'s captured environment is
 /// covered separately, since each of its slots is already registered in
 /// [`Interp::slots`]). `HashTable` keys never need walking — [`HashKey`] is
-/// restricted to scalar variants that can't carry a `Sexpr`.
+/// restricted to scalar variants that can't carry a `Sexpr`. A boxed struct
+/// (`RtValue::Sexpr(Value::Boxed(_))`, since the `Sexpr`/`RtValue`
+/// unification's Stage 2) needs no separate arm here — the plain `Sexpr` one
+/// already pushes its `Value::Boxed` root, and `Heap::gc`'s mark phase
+/// traces *into* a `BoxedObj::Struct`'s own fields from there (see
+/// `Heap::push_boxed_nested`), the same way it already does for a `Cons`
+/// cell's `car`/`cdr`.
 fn collect_sexpr_roots(v: &RtValue, out: &mut Vec<Value>) {
     match v {
         RtValue::Sexpr(val) => out.push(*val),
@@ -1215,11 +1221,6 @@ fn collect_sexpr_roots(v: &RtValue, out: &mut Vec<Value>) {
                 for f in frame.borrow().values() {
                     collect_sexpr_roots(f, out);
                 }
-            }
-        }
-        RtValue::Struct(s) => {
-            for f in &s.borrow().fields {
-                collect_sexpr_roots(f, out);
             }
         }
         _ => {}
@@ -1440,7 +1441,7 @@ fn eval_random(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// need) for `sexpr`'s `eql`, which must read a boxed `Sexpr::Float`'s
 /// actual value (`Heap::float_value`) to tell it apart from `eq`'s identity
 /// comparison — see `sexpr_eql`'s doc comment.
-fn eval_builtin_method(heap: &Heap, type_name: &Path, method: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
     if *type_name == Path::root("hashtable") {
         return match method {
             "new" => Some(Ok(RtValue::HashTable(Rc::new(RefCell::new(HashMap::new()))))),
@@ -1449,19 +1450,19 @@ fn eval_builtin_method(heap: &Heap, type_name: &Path, method: &str, args: &[RtVa
             "remove" => Some(hashtable_remove(args)),
             "count" => Some(hashtable_count(args)),
             "clear" => Some(hashtable_clear(args)),
-            "keys" => Some(hashtable_keys(args)),
-            "values" => Some(hashtable_values(args)),
-            "entries" => Some(hashtable_entries(args)),
+            "keys" => Some(hashtable_keys(heap, args)),
+            "values" => Some(hashtable_values(heap, args)),
+            "entries" => Some(hashtable_entries(heap, args)),
             _ => None,
         };
     }
     if *type_name == Path::root("vector") {
         return match method {
-            "new" => Some(Ok(RtValue::Struct(Rc::new(RefCell::new(StructData { type_name: "vector".to_string(), fields: Vec::new() }))))),
-            "push" => Some(vector_push(args)),
-            "get" => Some(vector_get(args)),
-            "set" => Some(vector_set(args)),
-            "len" => Some(vector_len(args)),
+            "new" => Some(Ok(RtValue::Sexpr(heap.alloc_struct("vector".to_string(), Vec::new())))),
+            "push" => Some(vector_push(heap, args)),
+            "get" => Some(vector_get(heap, args)),
+            "set" => Some(vector_set(heap, args)),
+            "len" => Some(vector_len(heap, args)),
             _ => None,
         };
     }
@@ -2666,39 +2667,46 @@ fn hashkey_to_rtvalue(k: &HashKey) -> RtValue {
     }
 }
 
-/// Builds a `Vector<T>` runtime value (`RtValue::Struct`'s variable-length
+/// Builds a `Vector<T>` runtime value (the boxed-struct variable-length
 /// `"vector"` representation, see `vector_def`'s doc comment) out of an
 /// already-collected field list — the shared tail of `hashtable_keys`/
-/// `hashtable_values`/`hashtable_entries`.
-fn vector_of(fields: Vec<RtValue>) -> RtValue {
-    RtValue::Struct(Rc::new(RefCell::new(StructData { type_name: "vector".to_string(), fields })))
+/// `hashtable_values`/`hashtable_entries`. Each field is encoded through
+/// `rtvalue_to_struct_field`, same as `Expr::Construct`'s own struct path.
+fn vector_of(heap: &mut Heap, fields: Vec<RtValue>) -> Result<RtValue, EvalError> {
+    let mem_fields = fields
+        .iter()
+        .map(|f| rtvalue_to_struct_field(heap, f))
+        .collect::<Result<Vec<Value>, EvalError>>()?;
+    Ok(RtValue::Sexpr(heap.alloc_struct("vector".to_string(), mem_fields)))
 }
 
-fn hashtable_keys(args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn hashtable_keys(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let map = expect_hashtable(&args[0])?;
     let fields = map.borrow().keys().map(hashkey_to_rtvalue).collect();
-    Ok(vector_of(fields))
+    vector_of(heap, fields)
 }
 
-fn hashtable_values(args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn hashtable_values(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let map = expect_hashtable(&args[0])?;
     let fields = map.borrow().values().cloned().collect();
-    Ok(vector_of(fields))
+    vector_of(heap, fields)
 }
 
 /// Each entry becomes a `cons-cell<K,V>` (`prelude.rs`'s generic `car`/`cdr`
-/// `defstruct` — `RtValue::Struct` with `type_name: "cons-cell"`, matching
+/// `defstruct`, now the boxed-struct `"cons-cell"` representation, matching
 /// how `Checker::check_construct` would build one from typelisp source;
 /// built directly here since a defstruct instance is just tagged field
 /// data, not something only the checker/prelude can construct).
-fn hashtable_entries(args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn hashtable_entries(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let map = expect_hashtable(&args[0])?;
-    let fields = map
-        .borrow()
-        .iter()
-        .map(|(k, v)| RtValue::Struct(Rc::new(RefCell::new(StructData { type_name: "cons-cell".to_string(), fields: vec![hashkey_to_rtvalue(k), v.clone()] }))))
-        .collect();
-    Ok(vector_of(fields))
+    let entries: Vec<(HashKey, RtValue)> = map.borrow().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let mut fields = Vec::with_capacity(entries.len());
+    for (k, v) in entries {
+        let kf = rtvalue_to_struct_field(heap, &hashkey_to_rtvalue(&k))?;
+        let vf = rtvalue_to_struct_field(heap, &v)?;
+        fields.push(RtValue::Sexpr(heap.alloc_struct("cons-cell".to_string(), vec![kf, vf])));
+    }
+    vector_of(heap, fields)
 }
 
 /// The type tag a runtime value carries — what `Expr::TraitCall`'s eval arm
@@ -2709,9 +2717,11 @@ fn hashtable_entries(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// plausibly be are covered — a closure/`HashTable`/LLVM-builder receiver
 /// can't have gone through `Checker::check_impl` today, so `None` for those
 /// is unreachable in practice, not a missing case.
-fn rtvalue_type_path(v: &RtValue) -> Option<Path> {
+fn rtvalue_type_path(heap: &Heap, v: &RtValue) -> Option<Path> {
     match v {
-        RtValue::Struct(s) => Some(Path::root(&s.borrow().type_name)),
+        RtValue::Sexpr(Value::Boxed(id)) if heap.is_struct(*id) => {
+            Some(Path::root(heap.struct_type_name(*id)))
+        }
         RtValue::Data { type_name, .. } => Some(type_name.clone()),
         RtValue::Bool(_) => Some(Path::root("bool")),
         RtValue::Char(_) => Some(Path::root("char")),
@@ -2721,10 +2731,69 @@ fn rtvalue_type_path(v: &RtValue) -> Option<Path> {
     }
 }
 
-fn expect_struct(v: &RtValue) -> Result<&Rc<RefCell<StructData>>, EvalError> {
+/// The `BoxId` behind a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance —
+/// see [`RtValue::Sexpr`]'s doc comment for why these no longer get their
+/// own `RtValue` variant. Doesn't itself check `Heap::is_struct` (a
+/// mismatched-kind `BoxId` — e.g. a boxed float reaching here — is caught by
+/// the panic in whichever `Heap` struct accessor the caller goes on to call,
+/// the same internal-invariant-trap convention `Heap::struct_field` etc.
+/// already use).
+fn expect_struct_box(v: &RtValue) -> Result<BoxId, EvalError> {
     match v {
-        RtValue::Struct(s) => Ok(s),
-        other => Err(EvalError::Internal(format!("expected a Vector, got {:?}", other))),
+        RtValue::Sexpr(Value::Boxed(id)) => Ok(*id),
+        other => Err(EvalError::Internal(format!("expected a boxed struct, got {:?}", other))),
+    }
+}
+
+/// Converts an already-evaluated `RtValue` into the `mem::Value` a
+/// `BoxedObj::Struct` field stores — the encode half of the struct-field
+/// boundary crossing (`decode_struct_field` is the other direction).
+/// Unambiguous regardless of the field's static type: every supported
+/// `RtValue` variant maps to exactly one `Value` shape. The variants a
+/// `defstruct`/`Vector<T>` field can't yet hold — `Data` (`Option`/`Result`/
+/// a user sum type), `Closure`, `HashTable`, `Scope` — aren't representable
+/// in `crate::mem::Value` at all (that crate can't depend on `RtValue`), so
+/// they're a clear internal error here rather than a silent corruption; a
+/// later stage of the unification plan (`Closure`'s Stage 6, `HashTable`'s
+/// Stage 4-5) is what would close this gap, not Stage 2's struct wiring.
+fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Value, EvalError> {
+    match v {
+        RtValue::Int(n) => Ok(Value::Int(*n)),
+        RtValue::Bool(b) => Ok(Value::Bool(*b)),
+        RtValue::Char(c) => Ok(Value::Char(*c)),
+        RtValue::Str(s) => Ok(heap.alloc_string(s.to_string())),
+        RtValue::Float(f) => Ok(heap.alloc_float(*f)),
+        RtValue::Sexpr(v) => Ok(*v),
+        other => Err(EvalError::Internal(format!(
+            "struct field: {:?} is not yet representable in the boxed struct representation",
+            other
+        ))),
+    }
+}
+
+/// Converts a `mem::Value` read out of a `BoxedObj::Struct` field back into
+/// an `RtValue` — `rtvalue_to_struct_field`'s inverse. Driven entirely by
+/// the value's own runtime shape, not a static field type (`Interp` doesn't
+/// carry the `Registry` a field type lookup would need) — sound for every
+/// case actually reachable through a struct field today: `Int`/`Bool`/
+/// `Char`/`Str` map straight back, a non-struct `Boxed` is a boxed float
+/// (`RtValue::Float`), and anything else (`Empty`/`Cons`/`Symbol`/`Path`, or
+/// a `Boxed` struct — a nested `defstruct`/`Vector<T>`/`cons-cell<K,V>`)
+/// becomes `RtValue::Sexpr`, the same wrapper a top-level struct value
+/// itself uses. The one shape this can't tell apart from a plain `f64`
+/// field is a genuinely `Sexpr`-typed field that happens to hold a quoted
+/// float literal (both are a boxed float at this layer) — not reachable by
+/// any current test/builtin, and a static-type-driven decode would need
+/// `Registry` access `Interp` doesn't have; left as a known imprecision
+/// rather than plumbing that through for a case nothing exercises.
+fn decode_struct_field(heap: &Heap, v: Value) -> RtValue {
+    match v {
+        Value::Int(n) => RtValue::Int(n),
+        Value::Bool(b) => RtValue::Bool(b),
+        Value::Char(c) => RtValue::Char(c),
+        Value::Str(id) => RtValue::Str(heap.string(id).into()),
+        Value::Boxed(id) if !heap.is_struct(id) => RtValue::Float(heap.float_value(id)),
+        other => RtValue::Sexpr(other),
     }
 }
 
@@ -2735,36 +2804,36 @@ fn expect_int_index(v: &RtValue) -> Result<usize, EvalError> {
     }
 }
 
-fn vector_push(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let v = expect_struct(&args[0])?;
-    v.borrow_mut().fields.push(args[1].clone());
+fn vector_push(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    let v = rtvalue_to_struct_field(heap, &args[1])?;
+    heap.struct_push_field(id, v);
     Ok(RtValue::Unit)
 }
 
-fn vector_get(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let v = expect_struct(&args[0])?;
+fn vector_get(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
     let i = expect_int_index(&args[1])?;
-    v.borrow()
-        .fields
-        .get(i)
-        .cloned()
-        .ok_or_else(|| EvalError::Panic(format!("Vector: index {} out of bounds", i)))
-}
-
-fn vector_set(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let v = expect_struct(&args[0])?;
-    let i = expect_int_index(&args[1])?;
-    let mut s = v.borrow_mut();
-    if i >= s.fields.len() {
+    if i >= heap.struct_field_count(id) {
         return Err(EvalError::Panic(format!("Vector: index {} out of bounds", i)));
     }
-    s.fields[i] = args[2].clone();
+    Ok(decode_struct_field(heap, heap.struct_field(id, i)))
+}
+
+fn vector_set(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    let i = expect_int_index(&args[1])?;
+    if i >= heap.struct_field_count(id) {
+        return Err(EvalError::Panic(format!("Vector: index {} out of bounds", i)));
+    }
+    let v = rtvalue_to_struct_field(heap, &args[2])?;
+    heap.struct_set_field(id, i, v);
     Ok(RtValue::Unit)
 }
 
-fn vector_len(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let v = expect_struct(&args[0])?;
-    Ok(RtValue::Int(v.borrow().fields.len() as i64))
+fn vector_len(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    Ok(RtValue::Int(heap.struct_field_count(id) as i64))
 }
 
 fn expect_scope(v: &RtValue) -> Result<&Rc<RefCell<Vec<ScopeFrame>>>, EvalError> {
@@ -3008,12 +3077,16 @@ fn match_pattern(heap: &Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(String,
             }
             // A `defstruct` has exactly one variant (`"new"`, index 0), so
             // `variant` always matches here — only the field count/pattern
-            // shape can fail. Reads a clone of each field out of the
-            // `RefCell`, same as `Expr::FieldGet`.
-            RtValue::Struct(s) if *variant == 0 && s.borrow().fields.len() == args.len() => {
+            // shape can fail. Guarded on `heap.is_struct` first so a value
+            // that's a genuine `Sexpr` datum (not a boxed struct) falls
+            // through to the `RtValue::Sexpr` arm below instead.
+            RtValue::Sexpr(Value::Boxed(id))
+                if heap.is_struct(*id) && *variant == 0 && heap.struct_field_count(*id) == args.len() =>
+            {
                 let mut binds = Vec::new();
-                for (p, f) in args.iter().zip(s.borrow().fields.iter()) {
-                    binds.extend(match_pattern(heap, p, f)?);
+                for (i, p) in args.iter().enumerate() {
+                    let f = decode_struct_field(heap, heap.struct_field(*id, i));
+                    binds.extend(match_pattern(heap, p, &f)?);
                 }
                 Some(binds)
             }

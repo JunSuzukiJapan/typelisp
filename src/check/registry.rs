@@ -108,10 +108,11 @@ pub struct VarInfo {
 /// user ADT) from a `defstruct` product type. The two are otherwise the same
 /// `AdtDef`/`Variant` machinery (a struct registers exactly one variant,
 /// named `"new"` — see `Checker::check_defstruct`), but only a `Struct`
-/// constructs a mutable [`crate::eval::RtValue::Struct`] instead of an
-/// immutable [`crate::eval::RtValue::Data`] (`Checker::check_construct`
-/// decides which by this field) — see [`AdtDef::field_names`] for the other
-/// `Struct`-only piece of metadata.
+/// constructs a mutable boxed struct (a `BoxedObj::Struct`, wrapped in
+/// [`crate::eval::RtValue::Sexpr`]) instead of an immutable
+/// [`crate::eval::RtValue::Data`] (`Checker::check_construct` decides which
+/// by this field) — see [`AdtDef::field_names`] for the other `Struct`-only
+/// piece of metadata.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdtKind {
     Sum,
@@ -642,11 +643,12 @@ fn vector_ty() -> Type {
     Type::Named(Path::root("vector"), vec![tvar("t")])
 }
 
-/// `Vector<T>`: a builtin growable sequence. Reuses [`crate::eval::RtValue::Struct`]
-/// (the same representation `defstruct` instances get) rather than a dedicated
-/// `RtValue` variant — a `Vector<T>` instance's `StructData::fields` is simply
-/// treated as variable-length instead of the fixed, name-indexed layout a
-/// `defstruct`'s fields have (see `eval_builtin_method`'s `"vector"` arm).
+/// `Vector<T>`: a builtin growable sequence. Reuses the same boxed-struct
+/// representation `defstruct` instances get (a `BoxedObj::Struct`, wrapped
+/// in [`crate::eval::RtValue::Sexpr`]) rather than a dedicated `RtValue`
+/// variant — a `Vector<T>` instance's fields are simply treated as
+/// variable-length instead of the fixed, name-indexed layout a `defstruct`'s
+/// fields have (see `eval_builtin_method`'s `"vector"` arm).
 /// All methods here are metadata only — there is no `defmethod` body to
 /// check; the runtime implementation lives in `eval_builtin_method` in
 /// `crate::eval::interp`.

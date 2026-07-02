@@ -9,7 +9,7 @@
 //! `Result::ok` in `namespace_test.rs`).
 
 extern crate typelisp;
-use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, RtValue, TopLevel};
+use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, RtValue, TopLevel, Value};
 
 /// Check every form in `src` with one `Checker`; return the last result.
 fn check(src: &str) -> Result<TopLevel, Error> {
@@ -47,6 +47,26 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+/// Like [`run`], but also returns the `Heap` — needed to inspect a
+/// `defstruct` instance's contents directly, since it's now `RtValue::Sexpr(
+/// Value::Boxed(_))` (a boxed struct, see the `Sexpr`/`RtValue` unification
+/// plan's Stage 2) rather than its own `RtValue` variant.
+fn run_with_heap(src: &str) -> Result<(Heap, RtValue), EvalError> {
+    let mut h = Heap::with_capacity(8192);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(v) = interp.exec(&mut h, tl)? {
+            last = v;
+        }
+    }
+    Ok((h, last))
+}
+
 // ---- Phase 4: registration + construction -----------------------------------
 
 #[test]
@@ -68,13 +88,15 @@ fn defstruct_registers_a_type() {
 #[test]
 fn struct_new_constructs_an_instance() {
     let src = "(defstruct point (x i32) (y i32)) (point::new 1 2)";
-    match eval_ok(src) {
-        RtValue::Struct(s) => {
-            let s = s.borrow();
-            assert_eq!(s.type_name, "point");
-            assert_eq!(s.fields, vec![RtValue::Int(1), RtValue::Int(2)]);
+    let (h, v) = run_with_heap(src).expect("eval failed");
+    match v {
+        RtValue::Sexpr(Value::Boxed(id)) => {
+            assert_eq!(h.struct_type_name(id), "point");
+            assert_eq!(h.struct_field_count(id), 2);
+            assert_eq!(h.struct_field(id, 0), Value::Int(1));
+            assert_eq!(h.struct_field(id, 1), Value::Int(2));
         }
-        other => panic!("expected a Struct, got {:?}", other),
+        other => panic!("expected a boxed Struct, got {:?}", other),
     }
 }
 
@@ -124,9 +146,10 @@ fn two_different_struct_types_do_not_collide() {
     let src = "(defstruct point (x i32) (y i32)) \
                (defstruct rect (w i32) (h i32)) \
                (point::new 1 2)";
-    match eval_ok(src) {
-        RtValue::Struct(s) => assert_eq!(s.borrow().type_name, "point"),
-        other => panic!("expected a Struct, got {:?}", other),
+    let (h, v) = run_with_heap(src).expect("eval failed");
+    match v {
+        RtValue::Sexpr(Value::Boxed(id)) => assert_eq!(h.struct_type_name(id), "point"),
+        other => panic!("expected a boxed Struct, got {:?}", other),
     }
 }
 
@@ -299,13 +322,14 @@ fn match_on_a_struct_binds_fields_by_position() {
 #[test]
 fn generic_defstruct_constructs_an_instance() {
     let src = "(defstruct (pair T U) (first T) (second U)) (pair::new 1 true)";
-    match eval_ok(src) {
-        RtValue::Struct(s) => {
-            let s = s.borrow();
-            assert_eq!(s.type_name, "pair");
-            assert_eq!(s.fields, vec![RtValue::Int(1), RtValue::Bool(true)]);
+    let (h, v) = run_with_heap(src).expect("eval failed");
+    match v {
+        RtValue::Sexpr(Value::Boxed(id)) => {
+            assert_eq!(h.struct_type_name(id), "pair");
+            assert_eq!(h.struct_field(id, 0), Value::Int(1));
+            assert_eq!(h.struct_field(id, 1), Value::Bool(true));
         }
-        other => panic!("expected a Struct, got {:?}", other),
+        other => panic!("expected a boxed Struct, got {:?}", other),
     }
 }
 
