@@ -61,6 +61,33 @@ fn tagged(heap: &mut Heap, tag: &str, items: &[Value]) -> Result<Value, Error> {
     result
 }
 
+/// Builds a `(str (int c0) (int c1) ...)` node for a compile-time-known
+/// host `&str` — [`ast_to_sexpr_scoped`]'s `Expr::Str` arm and
+/// [`translate_construct`]'s `type-name-str` header field (Stage 3 of the
+/// Sexpr/RtValue unification plan, `docs/implementation-log.md`) both need
+/// this. Not a pre-allocated `Value::Str`: a literal's content is entirely
+/// known at compile time, but the `StrId` a compile-time `Heap::alloc_string`
+/// would produce here is meaningless to the *target* program — the JIT's own
+/// running `Heap` outlives this call, but AOT's compiled executable
+/// allocates its own `Heap` from scratch at startup (`rt_heap_init`), with no
+/// `StrId` table shared with this one at all. So each character becomes an
+/// ordinary `(int c)` node instead, letting `compiler.rs`'s `compile-str`
+/// re-embed the content as `const-i64` operands and rebuild the string at
+/// *run* time via `rt_str_new`.
+fn str_literal_form(heap: &mut Heap, s: &str) -> Result<Value, Error> {
+    let mut char_nodes = Vec::with_capacity(s.chars().count());
+    for c in s.chars() {
+        let node = tagged(heap, "int", &[Value::Int(c as i64)])?;
+        heap.push_root(node);
+        char_nodes.push(node);
+    }
+    let result = tagged(heap, "str", &char_nodes);
+    for _ in 0..char_nodes.len() {
+        heap.pop_root();
+    }
+    result
+}
+
 /// `binding_kind`'s three possible results — see that function's doc
 /// comment. Kept as plain `i64` constants (not a Rust enum) since the only
 /// thing that ever consumes one is `compiler.rs`, as a `Sexpr` `Int`.
@@ -136,6 +163,53 @@ pub(crate) fn tagged_sym_list(heap: &mut Heap, names: &[(String, Type)]) -> Resu
     Ok(acc)
 }
 
+/// Classifies a `defstruct`/`Vector<T>`/`cons-cell<K,V>` field's static type
+/// for the tagged-`Sexpr` encode/decode `compile-construct-boxed-struct`/
+/// `compile-field-get`/`compile-field-set` must do at the `BoxedObj::Struct`
+/// boundary (Stage 3 of the Sexpr/RtValue unification plan,
+/// `docs/implementation-log.md`) — every field, not just a `Sexpr`/
+/// `Str`-typed one, crosses that boundary as a properly tagged `i64`
+/// (`rt_struct_new`'s own `decode()` call on each argument), unlike a
+/// general-ADT box's untagged raw slots ([`binding_kind`]'s `KIND_PLAIN`).
+/// Reuses `Sexpr`'s own variant numbering (`registry::sexpr_def`'s `1`=int
+/// `2`=float `3`=char `4`=bool `6`=str) rather than inventing a parallel
+/// scheme, so `compiler.rs`'s `compile-sexpr-field` (decode) and a
+/// symmetrical `compile-tag-struct-field` (encode) can reuse that same
+/// per-variant bit manipulation verbatim instead of duplicating it. A
+/// `Type::Named` field type splits on `structs` — the set of type paths the
+/// checker resolved to `AdtKind::Struct` (the exact same check-time fact
+/// `Expr::Construct`'s `mutable` field carries per construct site, handed in
+/// as plain pre-resolved data so this module still needs no live `Registry`):
+/// a nested `defstruct`/`Vector<T>`/`cons-cell<K,V>` field is itself already
+/// a boxed-struct-tagged `Sexpr` value, so it joins `Str`/`Sexpr`'s
+/// passthrough kind `6` (both `compile-tag-struct-field` and
+/// `compile-sexpr-field` leave a kind-`6` value untouched — exactly right
+/// for a value that is already properly tagged). `0` (otherwise `nil`, never
+/// a valid field type) marks the types with a genuine representation gap
+/// left: `Type::Fn` (no `ClosureBox` integration with a GC-tracked struct
+/// field yet — Closure unification, Stage 6a-6b), a general-ADT `Option`/
+/// `Result`/user sum type (an untagged raw `malloc`'d pointer that must
+/// *not* flow into `rt_struct_new` unconverted — it has no GC-heap
+/// representation until general ADTs are themselves boxed), and a still-
+/// generic type variable (a `defstruct`'s own `T` field compiled from the
+/// generic definition — resolving it would take monomorphized compilation,
+/// not more type information at this site). A clear compile-time panic
+/// (`compile-tag-struct-field`/`compile-sexpr-field`'s own existing "not
+/// representable yet" message) is the accepted result for those, the same
+/// as a `Sym` field in a `Sexpr` construct.
+fn struct_field_kind(ty: &Type, structs: &HashSet<Path>) -> i64 {
+    match ty {
+        Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Isize | Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::Usize => 1,
+        Type::F32 | Type::F64 => 2,
+        Type::Char => 3,
+        Type::Bool => 4,
+        Type::Str => 6,
+        _ if is_sexpr_type(ty) => 6,
+        Type::Named(p, _) if structs.contains(p) => 6,
+        _ => 0,
+    }
+}
+
 /// `(unsupported "<Variant>")` — see this module's doc comment.
 fn unsupported(heap: &mut Heap, variant: &str) -> Result<Value, Error> {
     let name = heap.alloc_string(variant.to_string());
@@ -151,10 +225,10 @@ fn unsupported(heap: &mut Heap, variant: &str) -> Result<Value, Error> {
 /// arm below). On error, pops everything pushed so far before propagating.
 /// `direct` is threaded through unchanged — see [`ast_to_sexpr_scoped`]'s
 /// doc comment.
-fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Vec<Value>, Error> {
+fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Vec<Value>, Error> {
     let mut values = Vec::with_capacity(items.len());
     for item in items {
-        match ast_to_sexpr_scoped(heap, item, direct, outer_captured) {
+        match ast_to_sexpr_scoped(heap, item, direct, outer_captured, structs) {
             Ok(v) => {
                 heap.push_root(v);
                 values.push(v);
@@ -188,10 +262,35 @@ fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>,
 /// [`tagged_sym_list`]'s own pair shape was in Stage 6, reusing
 /// [`binding_kind`] rather than re-deriving the same 3-way classification a
 /// third time.
-fn tagged_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Vec<Value>, Error> {
+fn tagged_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Vec<Value>, Error> {
+    tagged_ast_list_to_sexpr_with(heap, items, direct, outer_captured, structs, |ty| binding_kind(ty))
+}
+
+/// [`translate_construct`]'s `mutable` (`defstruct`/`Vector<T>`/
+/// `cons-cell<K,V>`) branch counterpart of [`tagged_ast_list_to_sexpr`] —
+/// identical `(kind . form)` tagging, just classified by [`struct_field_kind`]
+/// instead of [`binding_kind`] (Stage 3 of the Sexpr/RtValue unification
+/// plan, `docs/implementation-log.md`): a `BoxedObj::Struct` field's encode
+/// needs to know exactly *which* tagged-`Sexpr` shape to build, not merely
+/// whether it needs GC-root/`ClosureBox` bookkeeping.
+fn struct_field_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Vec<Value>, Error> {
+    tagged_ast_list_to_sexpr_with(heap, items, direct, outer_captured, structs, |ty| struct_field_kind(ty, structs))
+}
+
+/// Shared by [`tagged_ast_list_to_sexpr`]/[`struct_field_ast_list_to_sexpr`]
+/// — see either's doc comment for the two `kind_fn` classifiers this is
+/// parameterized over.
+fn tagged_ast_list_to_sexpr_with(
+    heap: &mut Heap,
+    items: &[Typed],
+    direct: &HashSet<String>,
+    outer_captured: &[(String, Type)],
+    structs: &HashSet<Path>,
+    kind_fn: impl Fn(&Type) -> i64,
+) -> Result<Vec<Value>, Error> {
     let mut values = Vec::with_capacity(items.len());
     for item in items {
-        let form = match ast_to_sexpr_scoped(heap, item, direct, outer_captured) {
+        let form = match ast_to_sexpr_scoped(heap, item, direct, outer_captured, structs) {
             Ok(v) => v,
             Err(e) => {
                 for _ in 0..values.len() {
@@ -200,7 +299,7 @@ fn tagged_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<S
                 return Err(e);
             }
         };
-        let kind = Value::Int(binding_kind(&item.ty));
+        let kind = Value::Int(kind_fn(&item.ty));
         heap.push_root(form);
         let pair = heap.cons(kind, form);
         heap.pop_root();
@@ -221,8 +320,11 @@ fn tagged_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], direct: &HashSet<S
 
 /// Translates one typed AST node. See the module doc comment for the tagged
 /// shape and which variants are real vs. `unsupported` placeholders today.
-pub fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
-    ast_to_sexpr_scoped(heap, typed, &HashSet::new(), &[])
+/// `structs` is the set of type paths the checker resolved to
+/// `AdtKind::Struct` (`Interp::struct_types` at the only real call site) —
+/// see [`struct_field_kind`] for the one classification it drives.
+pub fn ast_to_sexpr(heap: &mut Heap, typed: &Typed, structs: &HashSet<Path>) -> Result<Value, Error> {
+    ast_to_sexpr_scoped(heap, typed, &HashSet::new(), &[], structs)
 }
 
 /// `direct` is the set of names that resolve to a direct call rather than
@@ -231,7 +333,7 @@ pub fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
 /// see [`translate_apply`]. Empty at the top level (a `defun`'s own body
 /// has no such names; they only come into existence inside a `labels`
 /// form, see [`translate_labels`]).
-fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
     match &typed.expr {
         Expr::Int(n) => tagged(heap, "int", &[Value::Int(*n)]),
         // The `f64`'s raw bit pattern (`f64::to_bits`), *not* a pre-boxed
@@ -246,33 +348,10 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>,
         Expr::Float(f) => tagged(heap, "float", &[Value::Int(f.to_bits() as i64)]),
         Expr::Bool(b) => tagged(heap, "bool", &[Value::Bool(*b)]),
         Expr::Char(c) => tagged(heap, "char", &[Value::Char(*c)]),
-        // `(str (int c0) (int c1) ...)`, not a pre-allocated `Value::Str` —
-        // Stage 7 of the Sexpr-representation plan (`docs/implementation-log.md`):
-        // a literal's content is entirely known at compile time, but the
-        // `StrId` a compile-time `Heap::alloc_string` would produce here is
-        // meaningless to the *target* program (the JIT's own running `Heap`
-        // outlives this call, but AOT's compiled executable allocates its
-        // own `Heap` from scratch at startup, via `rt_heap_init` — see that
-        // function's doc comment — with no `StrId` table shared with this
-        // one at all). So each character becomes an ordinary `(int c)` node
-        // instead, letting `compiler.rs`'s `compile-str` re-embed the
-        // content as `const-i64` operands and rebuild the string at *run*
-        // time via `rt_str_new` — reusing `compile-value`'s already-working
-        // `int` handling for every character rather than needing a new
-        // literal-embedding mechanism of its own.
-        Expr::Str(s) => {
-            let mut char_nodes = Vec::with_capacity(s.chars().count());
-            for c in s.chars() {
-                let node = tagged(heap, "int", &[Value::Int(c as i64)])?;
-                heap.push_root(node);
-                char_nodes.push(node);
-            }
-            let result = tagged(heap, "str", &char_nodes);
-            for _ in 0..char_nodes.len() {
-                heap.pop_root();
-            }
-            result
-        }
+        // `(str (int c0) (int c1) ...)` — Stage 7 of the Sexpr-representation
+        // plan (`docs/implementation-log.md`). See [`str_literal_form`]'s doc
+        // comment for why not a pre-allocated `Value::Str`.
+        Expr::Str(s) => str_literal_form(heap, s),
         Expr::Unit => tagged(heap, "unit", &[]),
         // Always `(var name)`, even when `name` is a currently in-scope
         // `labels` sibling/self (`direct.contains(name)`) — that only
@@ -319,7 +398,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>,
             heap.push_root(type_name_v);
             let method_v = heap.alloc_string(method.clone());
             heap.push_root(method_v);
-            let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured) {
+            let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured, structs) {
                 Ok(v) => v,
                 Err(e) => {
                     heap.pop_root(); // method_v
@@ -347,24 +426,24 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>,
         Expr::Global(_) => unsupported(heap, "Global"),
         Expr::FnRef(path) => translate_fnref(heap, path, &typed.ty),
         Expr::MethodRef { .. } => unsupported(heap, "MethodRef"),
-        Expr::If(cond, then, els) => translate_if(heap, cond, then, els, &typed.ty, direct, outer_captured),
-        Expr::Let(binds, body) => translate_let(heap, binds, body, direct, outer_captured),
-        Expr::Call(path, args) => translate_call(heap, path, args, direct, outer_captured),
-        Expr::Lambda { params, body } => translate_lambda(heap, params, body),
-        Expr::Labels { defs, body } => translate_labels(heap, defs, body, direct, outer_captured),
-        Expr::Apply(callee, args) => translate_apply(heap, callee, args, direct, outer_captured),
-        Expr::Construct { type_name, variant, args, .. } => translate_construct(heap, type_name, &typed.ty, *variant, args, direct, outer_captured),
-        Expr::FieldGet(obj, idx) => translate_field_get(heap, obj, *idx, direct, outer_captured),
-        Expr::FieldSet(obj, idx, value) => translate_field_set(heap, obj, *idx, value, direct, outer_captured),
-        Expr::Match(scrut, arms) => translate_match(heap, scrut, arms, &typed.ty, direct, outer_captured),
-        Expr::Set(name, value) => translate_set(heap, name, value, &typed.ty, direct, outer_captured),
+        Expr::If(cond, then, els) => translate_if(heap, cond, then, els, &typed.ty, direct, outer_captured, structs),
+        Expr::Let(binds, body) => translate_let(heap, binds, body, direct, outer_captured, structs),
+        Expr::Call(path, args) => translate_call(heap, path, args, direct, outer_captured, structs),
+        Expr::Lambda { params, body } => translate_lambda(heap, params, body, structs),
+        Expr::Labels { defs, body } => translate_labels(heap, defs, body, direct, outer_captured, structs),
+        Expr::Apply(callee, args) => translate_apply(heap, callee, args, direct, outer_captured, structs),
+        Expr::Construct { type_name, variant, args, mutable } => translate_construct(heap, type_name, &typed.ty, *variant, args, *mutable, direct, outer_captured, structs),
+        Expr::FieldGet(obj, idx) => translate_field_get(heap, obj, *idx, &typed.ty, direct, outer_captured, structs),
+        Expr::FieldSet(obj, idx, value) => translate_field_set(heap, obj, *idx, value, direct, outer_captured, structs),
+        Expr::Match(scrut, arms) => translate_match(heap, scrut, arms, &typed.ty, direct, outer_captured, structs),
+        Expr::Set(name, value) => translate_set(heap, name, value, &typed.ty, direct, outer_captured, structs),
         Expr::SetGlobal(..) => unsupported(heap, "SetGlobal"),
-        Expr::Loop(body) => translate_loop(heap, body, direct, outer_captured),
+        Expr::Loop(body) => translate_loop(heap, body, direct, outer_captured, structs),
         Expr::Break => tagged(heap, "break", &[]),
-        Expr::Return(value) => translate_return(heap, value, direct, outer_captured),
+        Expr::Return(value) => translate_return(heap, value, direct, outer_captured, structs),
         Expr::Panic(_) => unsupported(heap, "Panic"),
         Expr::Quote(_) => unsupported(heap, "Quote"),
-        Expr::TraitCall { method, impls, args, .. } => translate_trait_call(heap, method, impls, args, direct, outer_captured),
+        Expr::TraitCall { method, impls, args, .. } => translate_trait_call(heap, method, impls, args, direct, outer_captured, structs),
     }
 }
 
@@ -383,11 +462,11 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>,
 /// boundary that already freshens its result, so `if` is the one place this
 /// module needs to carry that information explicitly rather than letting
 /// `compiler.rs` assume it.
-fn translate_if(heap: &mut Heap, cond: &Typed, then: &Typed, els: &Typed, ty: &Type, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+fn translate_if(heap: &mut Heap, cond: &Typed, then: &Typed, els: &Typed, ty: &Type, direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
     let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
-    let cond_v = ast_to_sexpr_scoped(heap, cond, direct, outer_captured)?;
+    let cond_v = ast_to_sexpr_scoped(heap, cond, direct, outer_captured, structs)?;
     heap.push_root(cond_v);
-    let then_v = match ast_to_sexpr_scoped(heap, then, direct, outer_captured) {
+    let then_v = match ast_to_sexpr_scoped(heap, then, direct, outer_captured, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // cond_v
@@ -395,7 +474,7 @@ fn translate_if(heap: &mut Heap, cond: &Typed, then: &Typed, els: &Typed, ty: &T
         }
     };
     heap.push_root(then_v);
-    let els_v = match ast_to_sexpr_scoped(heap, els, direct, outer_captured) {
+    let els_v = match ast_to_sexpr_scoped(heap, els, direct, outer_captured, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // then_v
@@ -433,7 +512,7 @@ fn translate_if(heap: &mut Heap, cond: &Typed, then: &Typed, els: &Typed, ty: &T
 /// wins" semantics (lifted for Stage 8 of the Sexpr-representation plan,
 /// `docs/implementation-log.md` — `dolist`'s own macro expansion always produces a
 /// multi-statement inner `let` body: `,@body` followed by a hidden `setf`).
-fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
     let mut pair_values = Vec::with_capacity(binds.len());
     for (name, val) in binds {
         let name_sym = heap.intern_symbol(name);
@@ -451,7 +530,7 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], dir
             }
         };
         heap.push_root(name_pair);
-        let val_v = match ast_to_sexpr_scoped(heap, val, direct, outer_captured) {
+        let val_v = match ast_to_sexpr_scoped(heap, val, direct, outer_captured, structs) {
             Ok(v) => v,
             Err(e) => {
                 heap.pop_root(); // name_pair
@@ -490,7 +569,7 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], dir
         heap.pop_root();
     }
     heap.push_root(bindings_list);
-    let body_values = match ast_list_to_sexpr(heap, body, direct, outer_captured) {
+    let body_values = match ast_list_to_sexpr(heap, body, direct, outer_captured, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // bindings_list
@@ -532,11 +611,11 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], dir
 /// demonstrates exactly this at the raw-builtin level). `compile-set` calls
 /// `rt_set_sexpr_root` with that recorded index to fix the *same* root entry
 /// in place instead.
-fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
     let kind = Value::Int(binding_kind(ty));
-    let form = match ast_to_sexpr_scoped(heap, value, direct, outer_captured) {
+    let form = match ast_to_sexpr_scoped(heap, value, direct, outer_captured, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // name_v
@@ -558,8 +637,8 @@ fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, direct: 
 /// see [`translate_return`]). `compiler.rs`'s `compile-loop` builds the
 /// actual loop/exit blocks and merge slot; `compile-loop-body` walks this
 /// list.
-fn translate_loop(heap: &mut Heap, body: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
-    let body_values = ast_list_to_sexpr(heap, body, direct, outer_captured)?;
+fn translate_loop(heap: &mut Heap, body: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
+    let body_values = ast_list_to_sexpr(heap, body, direct, outer_captured, structs)?;
     let result = tagged(heap, "loop", &body_values);
     for _ in 0..body_values.len() {
         heap.pop_root();
@@ -576,11 +655,11 @@ fn translate_loop(heap: &mut Heap, body: &[Typed], direct: &HashSet<String>, out
 /// the exact same path this way. `(break)`, by contrast, never carries a
 /// value at all (not even an implicit `Unit` one) — see its own tag, built
 /// directly in [`ast_to_sexpr_scoped`].
-fn translate_return(heap: &mut Heap, value: &Option<Box<Typed>>, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+fn translate_return(heap: &mut Heap, value: &Option<Box<Typed>>, direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
     match value {
         Some(v) => {
             let is_fn = Value::Bool(matches!(v.ty, Type::Fn(..)));
-            let form = ast_to_sexpr_scoped(heap, v, direct, outer_captured)?;
+            let form = ast_to_sexpr_scoped(heap, v, direct, outer_captured, structs)?;
             heap.push_root(form);
             let result = tagged(heap, "return", &[is_fn, form]);
             heap.pop_root();
@@ -626,7 +705,7 @@ fn translate_return(heap: &mut Heap, value: &Option<Box<Typed>>, direct: &HashSe
 /// same restriction `Interp::add_compiled_function` already applies to a
 /// `defun`'s own body, just extended uniformly to `labels` rather than
 /// lifted here.
-fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
     let mut siblings = direct.clone();
     for (name, _, _) in defs {
         siblings.insert(name.clone());
@@ -648,7 +727,7 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: 
                 name
             )));
         }
-        match translate_labels_def(heap, name, params, &fbody[0], &siblings, &captured_names) {
+        match translate_labels_def(heap, name, params, &fbody[0], &siblings, &captured_names, structs) {
             Ok(v) => {
                 heap.push_root(v);
                 def_values.push(v);
@@ -682,7 +761,7 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], direct: 
         heap.pop_root(); // captured_list
         return Err(Error::TypeError("compile: labels body has a multi-expression body, not yet supported".into()));
     }
-    let body_v = match ast_to_sexpr_scoped(heap, &body[0], &siblings, &captured_names) {
+    let body_v = match ast_to_sexpr_scoped(heap, &body[0], &siblings, &captured_names, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // defs_list
@@ -708,6 +787,7 @@ fn translate_labels_def(
     body: &Typed,
     siblings: &HashSet<String>,
     outer_captured: &[(String, Type)],
+    structs: &HashSet<Path>,
 ) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
@@ -719,7 +799,7 @@ fn translate_labels_def(
         }
     };
     heap.push_root(param_list);
-    let body_v = match ast_to_sexpr_scoped(heap, body, siblings, outer_captured) {
+    let body_v = match ast_to_sexpr_scoped(heap, body, siblings, outer_captured, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -745,20 +825,20 @@ fn translate_labels_def(
 ///   own parameter, ...) -> [`translate_indirect_apply`] — `callee`'s value
 ///   is evaluated and called through at runtime, since nothing here can
 ///   know ahead of time which `ClosureBox` it'll be.
-fn translate_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+fn translate_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
     match &callee.expr {
-        Expr::Var(n) if direct.contains(n) => translate_direct_apply(heap, n, args, direct, outer_captured),
-        Expr::Lambda { params, body } => translate_immediate_lambda_call(heap, params, body, args, direct, outer_captured),
-        _ => translate_indirect_apply(heap, callee, args, direct, outer_captured),
+        Expr::Var(n) if direct.contains(n) => translate_direct_apply(heap, n, args, direct, outer_captured, structs),
+        Expr::Lambda { params, body } => translate_immediate_lambda_call(heap, params, body, args, direct, outer_captured, structs),
+        _ => translate_indirect_apply(heap, callee, args, direct, outer_captured, structs),
     }
 }
 
 /// `(apply name arg...)` — a direct call to a `labels` sibling/self
 /// (Stage 1 scope, unchanged).
-fn translate_direct_apply(heap: &mut Heap, name: &str, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+fn translate_direct_apply(heap: &mut Heap, name: &str, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
-    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured) {
+    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -801,6 +881,7 @@ fn translate_immediate_lambda_call(
     args: &[Typed],
     direct: &HashSet<String>,
     outer_captured: &[(String, Type)],
+    structs: &HashSet<Path>,
 ) -> Result<Value, Error> {
     let name = fresh_lambda_name("__lambda");
     let dummy_ty = Type::Unit;
@@ -809,7 +890,7 @@ fn translate_immediate_lambda_call(
         expr: Expr::Apply(Box::new(Typed { expr: Expr::Var(name), ty: dummy_ty.clone() }), args.to_vec()),
         ty: dummy_ty,
     };
-    translate_labels(heap, &[def], std::slice::from_ref(&call), direct, outer_captured)
+    translate_labels(heap, &[def], std::slice::from_ref(&call), direct, outer_captured, structs)
 }
 
 /// `(apply-indirect callee-form arg...)` — the general indirect-dispatch
@@ -821,10 +902,10 @@ fn translate_immediate_lambda_call(
 /// unification — so Stage 1-3's already-shipped `(apply name arg...)` shape
 /// (and `compiler.rs`'s/tests' existing assumptions about it) needs no
 /// change at all.
-fn translate_indirect_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
-    let callee_v = ast_to_sexpr_scoped(heap, callee, direct, outer_captured)?;
+fn translate_indirect_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
+    let callee_v = ast_to_sexpr_scoped(heap, callee, direct, outer_captured, structs)?;
     heap.push_root(callee_v);
-    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured) {
+    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -898,7 +979,7 @@ fn build_lambda_tag(heap: &mut Heap, name: &str, captured: &[(String, Type)], pa
 /// `compile-env-args`/`resolve-value` box the sibling there, and the boxed
 /// value flows into this lambda's own `env` via the ordinary `bind-captures`
 /// path — no special-casing needed inside the lambda's own body at all.
-fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed]) -> Result<Value, Error> {
+fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed], structs: &HashSet<Path>) -> Result<Value, Error> {
     if body.len() != 1 {
         return Err(Error::TypeError("compile: lambda has a multi-expression body, not yet supported".into()));
     }
@@ -909,7 +990,7 @@ fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed]) 
     // (`compile-lambda`'s own `(new-fn-env)`) — so a `labels` block nested
     // inside *this* body has no enclosing block's captured-list to prefix
     // its own with, regardless of what scope the `lambda` itself sits in.
-    let body_v = ast_to_sexpr_scoped(heap, &body[0], &HashSet::new(), &[])?;
+    let body_v = ast_to_sexpr_scoped(heap, &body[0], &HashSet::new(), &[], structs)?;
     heap.push_root(body_v);
     let result = build_lambda_tag(heap, &fresh_lambda_name("lambda"), &captured_names, params, body_v);
     heap.pop_root(); // body_v
@@ -1009,10 +1090,10 @@ fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Err
 /// looks the callee up by that same plain name via `get-function` against
 /// the destination module, matching how every compiled top-level function
 /// is itself declared under its local name (`Interp::add_compiled_function`).
-fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
     let name_v = heap.alloc_string(path.local().to_string());
     heap.push_root(name_v);
-    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured) {
+    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -1121,14 +1202,14 @@ fn pattern_list_to_sexpr(heap: &mut Heap, pats: &[Pattern]) -> Result<Vec<Value>
 /// body is restricted to a single expression, the same limit every other
 /// multi-expression body shape in this module has ([`translate_let`]'s
 /// body, a `labels` def's body, ...).
-fn translate_match(heap: &mut Heap, scrut: &Typed, arms: &[Arm], ty: &Type, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+fn translate_match(heap: &mut Heap, scrut: &Typed, arms: &[Arm], ty: &Type, direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
     if !is_sexpr_type(&scrut.ty) {
         return unsupported(heap, "Match");
     }
     let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
-    let scrut_v = ast_to_sexpr_scoped(heap, scrut, direct, outer_captured)?;
+    let scrut_v = ast_to_sexpr_scoped(heap, scrut, direct, outer_captured, structs)?;
     heap.push_root(scrut_v);
-    let arm_values = match translate_arms(heap, arms, direct, outer_captured) {
+    let arm_values = match translate_arms(heap, arms, direct, outer_captured, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // scrut_v
@@ -1159,7 +1240,7 @@ fn translate_match(heap: &mut Heap, scrut: &Typed, arms: &[Arm], ty: &Type, dire
 /// rooting every pair as it goes — [`translate_match`]'s own helper, kept
 /// separate purely to give the per-arm rooting its own clean error-
 /// cleanup scope (mirrors [`ast_list_to_sexpr`]'s shape, one level up).
-fn translate_arms(heap: &mut Heap, arms: &[Arm], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Vec<Value>, Error> {
+fn translate_arms(heap: &mut Heap, arms: &[Arm], direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Vec<Value>, Error> {
     let mut values = Vec::with_capacity(arms.len());
     for arm in arms {
         if arm.body.len() != 1 {
@@ -1178,7 +1259,7 @@ fn translate_arms(heap: &mut Heap, arms: &[Arm], direct: &HashSet<String>, outer
             }
         };
         heap.push_root(pat_v);
-        let body_v = match ast_to_sexpr_scoped(heap, &arm.body[0], direct, outer_captured) {
+        let body_v = match ast_to_sexpr_scoped(heap, &arm.body[0], direct, outer_captured, structs) {
             Ok(v) => v,
             Err(e) => {
                 heap.pop_root(); // pat_v
@@ -1263,7 +1344,7 @@ fn is_compilable_trait_impl(type_name: &Path) -> bool {
 /// possibility once one exists), this falls back to the ordinary
 /// `unsupported` placeholder rather than emitting a `trait-call` node with
 /// no candidates for `compiler.rs` to dispatch to.
-fn translate_trait_call(heap: &mut Heap, method: &str, impls: &[Path], args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+fn translate_trait_call(heap: &mut Heap, method: &str, impls: &[Path], args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
     let candidates: Vec<&Path> = impls.iter().filter(|p| is_compilable_trait_impl(p)).collect();
     if candidates.is_empty() {
         return unsupported(heap, "TraitCall");
@@ -1307,7 +1388,7 @@ fn translate_trait_call(heap: &mut Heap, method: &str, impls: &[Path], args: &[T
     }
     heap.push_root(cand_list);
 
-    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured) {
+    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // cand_list
@@ -1344,33 +1425,46 @@ fn collect_trait_call_targets(method: &str, impls: &[Path], targets: &mut CallTa
     }
 }
 
-/// `Expr::Construct { variant, args, .. }` -> `(construct is-sexpr-bool
-/// type-id-i64 variant-i64 arg-form...)` (Stage 6 of the Sexpr-representation plan,
-/// `docs/implementation-log.md`). `is-sexpr` ([`is_sexpr_type`], read off `ty` — the
-/// node's own checked type, `Type::Named(type_name, _)`, the same `Path`
-/// `Checker::check_construct` built `type_name` from — so this needs no
-/// separate `type_name` field of its own) is the dispatch `compiler.rs`'s
-/// `compile-construct` makes between its two representations: `true` builds
-/// one of `Sexpr`'s own 8 variants out of the tagged-`i64`/`rt_cons`
-/// representation Stage 2/3/4/5 already built (the inverse of
-/// `compile-sexpr-field`'s extraction); `false` (every other ADT —
-/// `Option`/`Result`/a `defstruct`, sum or struct kind alike) allocates a
-/// fresh `malloc`'d box instead (a variant-tag slot, then one slot per
-/// field) — deciding this here, from `ty`, is what lets `compiler.rs` stay
-/// registry-free, the same reason [`translate_match`] reads `is_sexpr_type`
-/// off the scrutinee rather than `compile-match` re-deriving it from a type
-/// name string.
+/// `Expr::Construct { variant, args, mutable }` -> `(construct is-sexpr-bool
+/// mutable-bool type-id-i64 type-name-str variant-i64 arg-form...)` (Stage 6
+/// of the Sexpr-representation plan for the header's first three fields,
+/// extended by Stage 3 of the Sexpr/RtValue unification plan —
+/// `docs/implementation-log.md` — with `mutable`/`type-name-str`). `is-sexpr`
+/// ([`is_sexpr_type`], read off `ty` — the node's own checked type,
+/// `Type::Named(type_name, _)`, the same `Path` `Checker::check_construct`
+/// built `type_name` from) and `mutable` (threaded straight through from
+/// `Expr::Construct`'s own field, `Checker::check_construct`'s
+/// `def.kind == AdtKind::Struct`) together drive the 3-way dispatch
+/// `compiler.rs`'s `compile-construct` makes: `is-sexpr` builds one of
+/// `Sexpr`'s own 8 variants out of the tagged-`i64`/`rt_cons` representation
+/// Stage 2/3/4/5 already built (the inverse of `compile-sexpr-field`'s
+/// extraction); `mutable` (a `defstruct`/`Vector<T>`/`cons-cell<K,V>`
+/// instance) builds a `BoxedObj::Struct` via `rt_struct_new`
+/// (`compile-construct-boxed-struct`) — the same tagged `Value::Boxed`
+/// representation the interpreter's own `Expr::Construct` `mutable` arm
+/// already uses (`heap.alloc_struct`), so a value either side builds
+/// interoperates with the other; every other ADT (`Option`/`Result`/a user
+/// sum type) allocates a fresh `malloc`'d box instead
+/// (`compile-construct-box`, a variant-tag slot then one slot per field) —
+/// deciding all of this here, from `ty`/`mutable`, is what lets
+/// `compiler.rs` stay registry-free, the same reason [`translate_match`]
+/// reads `is_sexpr_type` off the scrutinee rather than `compile-match`
+/// re-deriving it from a type name string.
 ///
-/// `args`' own translation differs between the two branches: the `is-sexpr`
-/// case stays plain/untagged ([`ast_list_to_sexpr`], the same as
-/// `Expr::Assoc`'s own arithmetic operands) — `Sexpr`'s own fields (an
-/// `Int`'s payload, a `Cons`'s two `Sexpr` fields, ...) are never `Fn`- or
-/// (recursively) `Sexpr`-typed in a way `compile-construct-sexpr` doesn't
-/// already special-case (its `Cons` arm roots both fields itself). The
-/// general-ADT case instead reuses [`tagged_ast_list_to_sexpr`] — the exact
-/// same `(kind . form)` wrapping `Expr::Call`'s own call-argument list gets
-/// — so `compile-construct-box-fields` can tell which fields are
-/// `Sexpr`-typed (`kind = 2`) and need [`crate::compile::runtime::rt_push_permanent_sexpr_root`]'s
+/// `args`' own translation differs between the three branches: `is-sexpr`
+/// stays plain/untagged ([`ast_list_to_sexpr`], the same as `Expr::Assoc`'s
+/// own arithmetic operands) — `Sexpr`'s own fields (an `Int`'s payload, a
+/// `Cons`'s two `Sexpr` fields, ...) are never `Fn`- or (recursively)
+/// `Sexpr`-typed in a way `compile-construct-sexpr` doesn't already
+/// special-case (its `Cons` arm roots both fields itself). `mutable` uses
+/// [`struct_field_ast_list_to_sexpr`] — a `(kind . form)` tagging by
+/// [`struct_field_kind`] (not [`binding_kind`]: a struct field's `kind` must
+/// pick the exact tagged-`Sexpr` shape to build, not merely whether GC-root/
+/// `ClosureBox` bookkeeping is needed). The remaining (general-ADT) case
+/// reuses [`tagged_ast_list_to_sexpr`] — the exact same `(kind . form)`
+/// wrapping `Expr::Call`'s own call-argument list gets — so
+/// `compile-construct-box-fields` can tell which fields are `Sexpr`-typed
+/// (`kind = 2`) and need [`crate::compile::runtime::rt_push_permanent_sexpr_root`]'s
 /// protection once stored into the box: unlike a call argument's root (popped
 /// right after the call returns), a box field's value must stay reachable
 /// for the box's own lifetime, which can outlive this activation — see that
@@ -1379,25 +1473,58 @@ fn collect_trait_call_targets(method: &str, impls: &[Path], targets: &mut CallTa
 /// `compiler.rs`'s `compile-construct-box` doc comment); only the
 /// GC-root gap this tag closes is in scope here.
 ///
-/// `type_name` (new alongside `type-id-i64` — [`translate_trait_call`]'s
-/// dispatch counterpart, so a box built by one already-`compile`d function
-/// can be recognized by a `compile-trait-call` chain compiled separately,
-/// possibly later, in another function — [`type_id_hash`]'s doc comment) is
-/// only ever embedded for the general-ADT (non-`Sexpr`) branch; the `is-sexpr`
-/// branch ignores it (there's no user-`impl`-able `Sexpr` box to identify —
-/// see [`is_compilable_trait_impl`]), but it's still always present in the
-/// tagged shape (`0` there) for a uniform four-field header regardless of
+/// `type-id-i64` ([`translate_trait_call`]'s dispatch counterpart, so a box
+/// built by one already-`compile`d function can be recognized by a
+/// `compile-trait-call` chain compiled separately, possibly later, in
+/// another function — [`type_id_hash`]'s doc comment) is only meaningful for
+/// the general-ADT branch (`0` elsewhere); a `mutable` struct's own runtime
+/// type-id is instead recovered *at run time*, by hashing its
+/// `BoxedObj::Struct`-carried `type_name` string
+/// (`typelisp_rt::rt_struct_type_id_hash`, `compiler.rs`'s
+/// `compile-recv-type-id`) — the header's `type-id-i64` would be a
+/// compile-time constant baked into only *this* `Expr::Construct` site,
+/// useless to a `compile-trait-call` chain built in a different,
+/// independently-`compile`d function. `type-name-str` ([`str_literal_form`])
+/// is that struct's own local type name, only ever built for the `mutable`
+/// branch (an empty placeholder, `Value::Empty`, elsewhere); still always
+/// present in the tagged shape for a uniform five-field header regardless of
 /// which branch `compiler.rs`'s `compile-construct` takes.
-fn translate_construct(heap: &mut Heap, type_name: &Path, ty: &Type, variant: usize, args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+fn translate_construct(
+    heap: &mut Heap,
+    type_name: &Path,
+    ty: &Type,
+    variant: usize,
+    args: &[Typed],
+    mutable: bool,
+    direct: &HashSet<String>,
+    outer_captured: &[(String, Type)],
+    structs: &HashSet<Path>,
+) -> Result<Value, Error> {
     let is_sexpr = is_sexpr_type(ty);
     let type_id = if is_sexpr { 0 } else { type_id_hash(type_name.local()) };
-    let arg_values = if is_sexpr { ast_list_to_sexpr(heap, args, direct, outer_captured)? } else { tagged_ast_list_to_sexpr(heap, args, direct, outer_captured)? };
-    let mut items = vec![Value::Bool(is_sexpr), Value::Int(type_id), Value::Int(variant as i64)];
+    let type_name_form = if !is_sexpr && mutable { str_literal_form(heap, type_name.local())? } else { Value::Empty };
+    heap.push_root(type_name_form);
+    let arg_result = if is_sexpr {
+        ast_list_to_sexpr(heap, args, direct, outer_captured, structs)
+    } else if mutable {
+        struct_field_ast_list_to_sexpr(heap, args, direct, outer_captured, structs)
+    } else {
+        tagged_ast_list_to_sexpr(heap, args, direct, outer_captured, structs)
+    };
+    let arg_values = match arg_result {
+        Ok(v) => v,
+        Err(e) => {
+            heap.pop_root(); // type_name_form
+            return Err(e);
+        }
+    };
+    let mut items = vec![Value::Bool(is_sexpr), Value::Bool(mutable), Value::Int(type_id), type_name_form, Value::Int(variant as i64)];
     items.extend(arg_values.iter().copied());
     let result = tagged(heap, "construct", &items);
     for _ in 0..arg_values.len() {
         heap.pop_root();
     }
+    heap.pop_root(); // type_name_form
     result
 }
 
@@ -1423,18 +1550,26 @@ fn idx_unary_list(heap: &mut Heap, idx: usize) -> Result<Value, Error> {
     list_of(heap, &vec![Value::Bool(false); idx])
 }
 
-/// `Expr::FieldGet(obj, idx)` -> `(field-get idx-unary-list obj-form)`
-/// (Stage 6) — see [`idx_unary_list`] for why `idx` isn't simply a `Sexpr`
-/// `Int`. Always targets a general-ADT box `compiler.rs`'s
-/// `compile-construct` built — this node is only ever synthesized by
-/// `Checker::check_defstruct` as a field accessor's own body (see
-/// `Expr::FieldGet`'s doc comment), so `obj`'s static type is always some
+/// `Expr::FieldGet(obj, idx)` -> `(field-get idx-unary-list kind-i64
+/// obj-form)` (Stage 6, extended by Stage 3 of the Sexpr/RtValue
+/// unification plan — `docs/implementation-log.md` — with `kind-i64`) — see
+/// [`idx_unary_list`] for why `idx` isn't simply a `Sexpr` `Int`. Always
+/// targets a `BoxedObj::Struct` `compiler.rs`'s `compile-construct-boxed-struct`
+/// built — this node is only ever synthesized by `Checker::check_defstruct`
+/// as a field accessor's own body (see `Expr::FieldGet`'s doc comment), and
+/// every `defstruct` is `mutable` (`Checker::check_construct`'s
+/// `def.kind == AdtKind::Struct`), so `obj`'s static type is always some
 /// `defstruct`, never `Sexpr` — no `is_sexpr_type` dispatch is needed here
-/// the way [`translate_construct`] needs one.
-fn translate_field_get(heap: &mut Heap, obj: &Typed, idx: usize, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+/// the way [`translate_construct`] needs one. `kind` ([`struct_field_kind`]
+/// of `field_ty`, the field's own static type — `typed.ty` at this node's
+/// call site, since a `FieldGet`'s checked type *is* the field's type) tells
+/// `compile-field-get` how to decode the raw `Sexpr` `rt_struct_field_get`
+/// returns back into this field's own compiled representation (`compile-
+/// sexpr-field`'s exact per-variant bit manipulation, reused verbatim).
+fn translate_field_get(heap: &mut Heap, obj: &Typed, idx: usize, field_ty: &Type, direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
     let idx_list = idx_unary_list(heap, idx)?;
     heap.push_root(idx_list);
-    let obj_v = match ast_to_sexpr_scoped(heap, obj, direct, outer_captured) {
+    let obj_v = match ast_to_sexpr_scoped(heap, obj, direct, outer_captured, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // idx_list
@@ -1442,20 +1577,27 @@ fn translate_field_get(heap: &mut Heap, obj: &Typed, idx: usize, direct: &HashSe
         }
     };
     heap.push_root(obj_v);
-    let result = tagged(heap, "field-get", &[idx_list, obj_v]);
+    let kind = Value::Int(struct_field_kind(field_ty, structs));
+    let result = tagged(heap, "field-get", &[idx_list, kind, obj_v]);
     heap.pop_root(); // obj_v
     heap.pop_root(); // idx_list
     result
 }
 
-/// `Expr::FieldSet(obj, idx, value)` -> `(field-set idx-unary-list obj-form
-/// value-form)` (Stage 6) — see [`translate_field_get`]; `value` carries no
-/// `is-fn`-style retain tag for the same reason a `construct` field
-/// doesn't.
-fn translate_field_set(heap: &mut Heap, obj: &Typed, idx: usize, value: &Typed, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
+/// `Expr::FieldSet(obj, idx, value)` -> `(field-set idx-unary-list kind-i64
+/// obj-form value-form)` (Stage 6, extended the same way
+/// [`translate_field_get`] was) — `kind` is [`struct_field_kind`] of
+/// `value`'s own static type (equal to the field's, by the checker's own
+/// `Expr::FieldSet` construction — see `Checker::check_defstruct`'s setter
+/// body), telling `compile-field-set` how to *encode* the already-compiled
+/// value before `rt_struct_field_set` stores it (`compile-tag-struct-field`,
+/// the encode-side mirror of `compile-sexpr-field`'s decode `compile-field-get`
+/// reuses). `value` carries no `is-fn`-style retain tag for the same reason
+/// a `construct` field doesn't.
+fn translate_field_set(heap: &mut Heap, obj: &Typed, idx: usize, value: &Typed, direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
     let idx_list = idx_unary_list(heap, idx)?;
     heap.push_root(idx_list);
-    let obj_v = match ast_to_sexpr_scoped(heap, obj, direct, outer_captured) {
+    let obj_v = match ast_to_sexpr_scoped(heap, obj, direct, outer_captured, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // idx_list
@@ -1463,7 +1605,7 @@ fn translate_field_set(heap: &mut Heap, obj: &Typed, idx: usize, value: &Typed, 
         }
     };
     heap.push_root(obj_v);
-    let value_v = match ast_to_sexpr_scoped(heap, value, direct, outer_captured) {
+    let value_v = match ast_to_sexpr_scoped(heap, value, direct, outer_captured, structs) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // obj_v
@@ -1472,7 +1614,8 @@ fn translate_field_set(heap: &mut Heap, obj: &Typed, idx: usize, value: &Typed, 
         }
     };
     heap.push_root(value_v);
-    let result = tagged(heap, "field-set", &[idx_list, obj_v, value_v]);
+    let kind = Value::Int(struct_field_kind(&value.ty, structs));
+    let result = tagged(heap, "field-set", &[idx_list, kind, obj_v, value_v]);
     heap.pop_root(); // value_v
     heap.pop_root(); // obj_v
     heap.pop_root(); // idx_list
@@ -1664,6 +1807,15 @@ mod tests {
 
     fn typed(expr: Expr, ty: Type) -> Typed {
         Typed { expr, ty }
+    }
+
+    /// Shadows `super::ast_to_sexpr` with an empty `structs` set — the
+    /// pre-existing tests here never involve a struct-typed field, so
+    /// threading the set through each call adds nothing. A test that *does*
+    /// care (nested-struct field classification) calls `super::ast_to_sexpr`
+    /// with a real set instead.
+    fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
+        super::ast_to_sexpr(heap, typed, &HashSet::new())
     }
 
     /// Unpacks a tagged-list `Value` into (tag name, field values), asserting
@@ -2394,7 +2546,7 @@ mod tests {
         let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
         let arms = vec![
             Arm {
-                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, Pattern::Wildcard] },
+                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, Pattern::Wildcard], sexpr_fields: vec![true, true] },
                 body: vec![typed(Expr::Bool(true), Type::Bool)],
             },
             Arm { pat: Pattern::Wildcard, body: vec![typed(Expr::Bool(false), Type::Bool)] },
@@ -2446,7 +2598,7 @@ mod tests {
         let mut heap = Heap::with_capacity(1 << 10);
         let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
         let arms = vec![Arm {
-            pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Bind("h".to_string()), Pattern::Wildcard] },
+            pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Bind("h".to_string()), Pattern::Wildcard], sexpr_fields: vec![true, true] },
             body: vec![typed(Expr::Var("h".to_string()), sexpr_ty())],
         }];
         let v = ast_to_sexpr(&mut heap, &typed(Expr::Match(Box::new(scrut), arms), sexpr_ty())).unwrap();
@@ -2467,10 +2619,10 @@ mod tests {
     fn translates_a_nested_ctor_subpattern() {
         let mut heap = Heap::with_capacity(1 << 10);
         let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
-        let inner_nil = Pattern::Ctor { type_name: Path::root("sexpr"), variant: 0, args: vec![] };
+        let inner_nil = Pattern::Ctor { type_name: Path::root("sexpr"), variant: 0, args: vec![], sexpr_fields: vec![] };
         let arms = vec![
             Arm {
-                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, inner_nil] },
+                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, inner_nil], sexpr_fields: vec![true, true] },
                 body: vec![typed(Expr::Bool(true), Type::Bool)],
             },
             Arm { pat: Pattern::Wildcard, body: vec![typed(Expr::Bool(false), Type::Bool)] },
@@ -2543,10 +2695,13 @@ mod tests {
     // ---- Stage 6 of the Sexpr-representation plan: Construct/FieldGet/FieldSet --
 
     /// `Expr::Construct` over `Sexpr` itself (`(Int n)`'s own typed shape)
-    /// -> `(construct true variant-i64 arg-form...)` — `is-sexpr` is `true`
-    /// since the node's own checked type is `Sexpr`, dispatching
-    /// `compiler.rs`'s `compile-construct` to `compile-construct-sexpr`
-    /// rather than the general box path.
+    /// -> `(construct true false 0 empty variant-i64 arg-form...)` —
+    /// `is-sexpr` is `true` since the node's own checked type is `Sexpr`,
+    /// dispatching `compiler.rs`'s `compile-construct` to
+    /// `compile-construct-sexpr` rather than either boxed path; `mutable` is
+    /// always `false` here (no user-`impl`-able `Sexpr` box, see
+    /// `is_compilable_trait_impl`), and `type-id`/`type-name-str` are both
+    /// unused placeholders.
     #[test]
     fn translates_a_sexpr_construct() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -2560,16 +2715,19 @@ mod tests {
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "construct");
         assert_eq!(fields[0], Value::Bool(true), "Sexpr's own Construct dispatches to the tagged-i64 path");
-        assert_eq!(fields[1], Value::Int(0), "type-id is unused (0) for the is-sexpr branch");
-        assert_eq!(fields[2], Value::Int(1));
-        let (arg_tag, arg_fields) = untag(&heap, fields[3]);
+        assert_eq!(fields[1], Value::Bool(false), "mutable is always false for a Sexpr construct");
+        assert_eq!(fields[2], Value::Int(0), "type-id is unused (0) for the is-sexpr branch");
+        assert!(fields[3].is_empty(), "type-name-str is an unused placeholder for the is-sexpr branch");
+        assert_eq!(fields[4], Value::Int(1));
+        let (arg_tag, arg_fields) = untag(&heap, fields[5]);
         assert_eq!(arg_tag, "int");
         assert_eq!(arg_fields, vec![Value::Int(5)]);
     }
 
     /// `Expr::Construct` over a general ADT (`Option<i64>`'s `Some`, an
-    /// `AdtKind::Sum`) -> `(construct false type-id-i64 variant-i64 (kind . arg-form)...)`
-    /// — `is-sexpr` is `false`, dispatching to `compile-construct-box`'s
+    /// `AdtKind::Sum`) -> `(construct false false type-id-i64 empty
+    /// variant-i64 (kind . arg-form)...)` — `is-sexpr` is `false` and
+    /// `mutable` is `false`, dispatching to `compile-construct-box`'s
     /// `malloc`'d-box path. Multiple args are each translated in order, each
     /// wrapped in the same `(kind . form)` shape `Expr::Call`'s own argument
     /// list gets (`tagged_ast_list_to_sexpr`/`binding_kind`) — an `i64` field
@@ -2589,22 +2747,24 @@ mod tests {
         let v = ast_to_sexpr(&mut heap, &typed(ctor, ty)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "construct");
-        assert_eq!(fields[0], Value::Bool(false), "a non-Sexpr ADT dispatches to the malloc'd-box path");
-        assert_eq!(fields[1], Value::Int(type_id_hash("option")), "type-id is the hash of the type's local name");
-        assert_eq!(fields[2], Value::Int(0));
-        let (kind0, arg0_form) = untag_arg(&heap, fields[3]);
+        assert_eq!(fields[0], Value::Bool(false), "a non-Sexpr ADT dispatches to a boxed path");
+        assert_eq!(fields[1], Value::Bool(false), "an AdtKind::Sum construct is not mutable");
+        assert_eq!(fields[2], Value::Int(type_id_hash("option")), "type-id is the hash of the type's local name");
+        assert!(fields[3].is_empty(), "type-name-str is an unused placeholder for the general-ADT branch");
+        assert_eq!(fields[4], Value::Int(0));
+        let (kind0, arg0_form) = untag_arg(&heap, fields[5]);
         assert_eq!(kind0, 0, "an i64 field is KIND_PLAIN");
         let (arg0_tag, arg0_fields) = untag(&heap, arg0_form);
         assert_eq!(arg0_tag, "int");
         assert_eq!(arg0_fields, vec![Value::Int(7)]);
-        let (kind1, arg1_form) = untag_arg(&heap, fields[4]);
+        let (kind1, arg1_form) = untag_arg(&heap, fields[6]);
         assert_eq!(kind1, 0, "a bool field is KIND_PLAIN");
         let (arg1_tag, _) = untag(&heap, arg1_form);
         assert_eq!(arg1_tag, "bool");
     }
 
-    /// A `Sexpr`-typed field of a general ADT (e.g. a `defstruct` field
-    /// declared `Sexpr`) is tagged `KIND_SEXPR` — the case
+    /// A `Sexpr`-typed field of a general ADT (e.g. an `Option<Sexpr>`
+    /// field) is tagged `KIND_SEXPR` — the case
     /// `compile-construct-box-fields` actually roots.
     #[test]
     fn a_sexpr_typed_field_of_a_general_adt_construct_is_tagged_kind_sexpr() {
@@ -2618,12 +2778,53 @@ mod tests {
         let ty = Type::Named(Path::root("holder"), vec![]);
         let v = ast_to_sexpr(&mut heap, &typed(ctor, ty)).unwrap();
         let (_, fields) = untag(&heap, v);
-        let (kind, _) = untag_arg(&heap, fields[3]);
+        let (kind, _) = untag_arg(&heap, fields[5]);
         assert_eq!(kind, 2, "a Sexpr-typed field is KIND_SEXPR");
     }
 
+    /// `Expr::Construct` over a `mutable` `defstruct` (`AdtKind::Struct`) ->
+    /// `(construct false true 0 type-name-str variant-i64 (kind . arg-form)...)`
+    /// (Stage 3 of the Sexpr/RtValue unification plan,
+    /// `docs/implementation-log.md`) — `mutable` is `true`, dispatching to
+    /// `compile-construct-boxed-struct`'s `rt_struct_new` path.
+    /// `type-name-str` is the struct's own local name, embedded as a
+    /// `(str (int c0) ...)` literal form (`str_literal_form`) rather than a
+    /// pre-allocated `Value::Str` (see that function's doc comment). Each
+    /// field is tagged by `struct_field_kind`, not `binding_kind` — an `i64`
+    /// field is kind `1`, a `bool` field kind `4`.
+    #[test]
+    fn translates_a_mutable_struct_construct() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let ctor = Expr::Construct {
+            type_name: Path::root("point"),
+            variant: 0,
+            args: vec![typed(Expr::Int(3), Type::I64), typed(Expr::Bool(true), Type::Bool)],
+            mutable: true,
+        };
+        let ty = Type::Named(Path::root("point"), vec![]);
+        let v = ast_to_sexpr(&mut heap, &typed(ctor, ty)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "construct");
+        assert_eq!(fields[0], Value::Bool(false), "a defstruct is never Sexpr-typed");
+        assert_eq!(fields[1], Value::Bool(true), "an AdtKind::Struct construct is mutable");
+        let (name_tag, name_fields) = untag(&heap, fields[3]);
+        assert_eq!(name_tag, "str", "type-name-str is a (str (int c)...) literal form");
+        let (c0_tag, c0_fields) = untag(&heap, name_fields[0]);
+        assert_eq!(c0_tag, "int");
+        assert_eq!(c0_fields, vec![Value::Int('p' as i64)]);
+        assert_eq!(fields[4], Value::Int(0));
+        let (kind0, arg0_form) = untag_arg(&heap, fields[5]);
+        assert_eq!(kind0, 1, "an i64 field is struct-field-kind Int");
+        let (arg0_tag, arg0_fields) = untag(&heap, arg0_form);
+        assert_eq!(arg0_tag, "int");
+        assert_eq!(arg0_fields, vec![Value::Int(3)]);
+        let (kind1, _) = untag_arg(&heap, fields[6]);
+        assert_eq!(kind1, 4, "a bool field is struct-field-kind Bool");
+    }
+
     /// A field-less `Construct` (e.g. `None`) still produces a well-formed
-    /// `(construct false variant-i64)` tag with no trailing argument forms.
+    /// `(construct false false 0 empty variant-i64)` tag with no trailing
+    /// argument forms.
     #[test]
     fn translates_a_field_less_construct() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -2632,13 +2833,14 @@ mod tests {
         let v = ast_to_sexpr(&mut heap, &typed(ctor, ty)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "construct");
-        assert_eq!(fields.len(), 3, "no field-arguments beyond is-sexpr/type-id/variant");
+        assert_eq!(fields.len(), 5, "no field-arguments beyond is-sexpr/mutable/type-id/type-name-str/variant");
     }
 
-    /// `Expr::FieldGet(obj, idx)` -> `(field-get idx-unary-list obj-form)`
-    /// — `idx` is recovered from the *length* of an otherwise-meaningless
-    /// list (`idx_unary_list`'s doc comment explains why a plain `Sexpr`
-    /// `Int` can't carry it instead).
+    /// `Expr::FieldGet(obj, idx)` -> `(field-get idx-unary-list kind-i64
+    /// obj-form)` — `idx` is recovered from the *length* of an
+    /// otherwise-meaningless list (`idx_unary_list`'s doc comment explains
+    /// why a plain `Sexpr` `Int` can't carry it instead); `kind` is the
+    /// field's own `struct_field_kind` (here `Type::I64`, kind `1`).
     #[test]
     fn translates_a_field_get() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -2648,15 +2850,16 @@ mod tests {
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "field-get");
         assert_eq!(list_elems(&heap, fields[0]).len(), 2, "idx 2 encoded as a 2-element unary list");
-        let (obj_tag, obj_fields) = untag(&heap, fields[1]);
+        assert_eq!(fields[1], Value::Int(1), "an i64 field's kind is struct-field-kind Int");
+        let (obj_tag, obj_fields) = untag(&heap, fields[2]);
         assert_eq!(obj_tag, "var");
         assert_eq!(expect_str(&heap, obj_fields[0]), "p");
     }
 
     /// `idx = 0` encodes as the *empty* list — `sexpr-list-length` on
     /// `Empty` is `0`, so `compile-field-get`/`compile-field-set` recover
-    /// the right offset (`1`, after the variant-tag slot) with no special
-    /// case needed for the first field.
+    /// the right offset (`0`, no header slots in a `BoxedObj::Struct`'s own
+    /// field vector) with no special case needed for the first field.
     #[test]
     fn a_field_index_of_zero_encodes_as_an_empty_list() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -2668,7 +2871,7 @@ mod tests {
     }
 
     /// `Expr::FieldSet(obj, idx, value)` -> `(field-set idx-unary-list
-    /// obj-form value-form)`.
+    /// kind-i64 obj-form value-form)`.
     #[test]
     fn translates_a_field_set() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -2679,10 +2882,11 @@ mod tests {
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "field-set");
         assert_eq!(list_elems(&heap, fields[0]).len(), 1);
-        let (obj_tag, obj_fields) = untag(&heap, fields[1]);
+        assert_eq!(fields[1], Value::Int(1), "the stored value's kind is struct-field-kind Int");
+        let (obj_tag, obj_fields) = untag(&heap, fields[2]);
         assert_eq!(obj_tag, "var");
         assert_eq!(expect_str(&heap, obj_fields[0]), "p");
-        let (value_tag, value_fields) = untag(&heap, fields[2]);
+        let (value_tag, value_fields) = untag(&heap, fields[3]);
         assert_eq!(value_tag, "int");
         assert_eq!(value_fields, vec![Value::Int(99)]);
     }

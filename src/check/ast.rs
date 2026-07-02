@@ -201,5 +201,18 @@ pub enum Pattern {
         type_name: Path,
         variant: usize,
         args: Vec<Pattern>,
+        /// Per-field: whether the matched field's declared type (as
+        /// instantiated by the scrutinee's own type arguments —
+        /// `Checker::check_ctor_pattern`'s `subst`) is the built-in `Sexpr`.
+        /// Resolved fully at check time, the same convention
+        /// `Expr::Construct::mutable` follows, so the interpreter's boxed-
+        /// struct destructuring arm can hand a `Sexpr`-declared field back
+        /// as the `Sexpr` it is instead of running `decode_struct_field`'s
+        /// shape heuristic on it (which would rebind a stored quoted
+        /// `42`/`3.14` as a plain `Int`/`Float`, contradicting the static
+        /// type). Only consulted for a boxed-struct scrutinee — a sum-type
+        /// `RtValue::Data`'s fields are already `RtValue`s and a `Sexpr`
+        /// scrutinee's destructuring (`match_sexpr_ctor`) is variant-driven.
+        sexpr_fields: Vec<bool>,
     },
 }

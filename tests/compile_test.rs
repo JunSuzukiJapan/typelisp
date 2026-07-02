@@ -2162,7 +2162,7 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_str_local_rooted_across_
         (compile str-survives-gc)
         (str-survives-gc 5000)
         "#,
-        1 << 13,
+        10500,
     )
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(11), "\"hello world\" has 11 characters, even after many unrelated conses force a gc()");
@@ -2231,12 +2231,19 @@ fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_cod
     assert_eq!(field0, 42);
 }
 
-/// The same `malloc`'d-box representation for an `AdtKind::Struct`
-/// (`defstruct`) instance — `point::new`'s `Expr::Construct` is
-/// indistinguishable from `Some`'s above at this stage (both `mutable` and
-/// non-`mutable` ADTs share one box layout, see `compile-construct`'s doc
-/// comment), just with 2 fields instead of 1 and a single always-`0`
-/// variant tag.
+/// A `mutable` `AdtKind::Struct` (`defstruct`) instance, unlike `Some`'s
+/// `malloc`'d-box representation above — `point::new`'s `Expr::Construct`
+/// dispatches to `compile-construct-boxed-struct` instead (Stage 3 of the
+/// Sexpr/RtValue unification plan, `docs/implementation-log.md`: the
+/// `mutable` flag `Checker::check_construct` sets for an `AdtKind::Struct`
+/// def), building a `BoxedObj::Struct` via `rt_struct_new` — the exact same
+/// tagged `Value::Boxed` representation the interpreter's own
+/// `Expr::Construct` `mutable` arm already builds (`heap.alloc_struct`), so
+/// `Interp::call_compiled` decodes `make-point`'s raw compiled return value
+/// back into `RtValue::Sexpr(Value::Boxed(_))` (`Self::is_boxed_sexpr_type`,
+/// `point` recorded in `Self::struct_types` by its own `TopLevel::Defstruct`)
+/// rather than treating it as a raw pointer `RtValue::Int`, unlike the
+/// pre-Stage-3 general-ADT box case.
 ///
 /// `compile-field-get`/`compile-field-set` themselves aren't exercised
 /// end-to-end *here* — `p::x`/`(setf p::y v)` surface syntax always
@@ -2269,18 +2276,10 @@ fn compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_
         "#,
     )
     .expect("eval failed");
-    let raw = match v {
-        RtValue::Int(n) => n,
-        other => panic!("expected the box's raw address as an Int, got {:?}", other),
-    };
-    // SAFETY: same reasoning as the `Option` box test above, just 2 fields.
-    let (variant, x, y) = unsafe {
-        let p = raw as *const i64;
-        (*p.add(1), *p.add(2), *p.add(3))
-    };
-    assert_eq!(variant, 0, "a defstruct's lone variant is always index 0 (\"new\")");
-    assert_eq!(x, 3);
-    assert_eq!(y, 4);
+    match v {
+        RtValue::Sexpr(Value::Boxed(_)) => {}
+        other => panic!("expected a boxed struct Sexpr (compile-construct-boxed-struct), got {:?}", other),
+    }
 }
 
 /// `(compile point::x)`: `Interp::method_key`/`resolve_fn_def` resolve a
@@ -2517,12 +2516,15 @@ fn compile_of_a_string_literal_is_a_type_error() {
 /// test demonstrates at the raw-builtin level) — this test demonstrates the
 /// *wiring* (`bind-let-values`/`restore-let-values` actually calling it)
 /// through a real compiled function instead. Loading the compiler itself
-/// (`run_with_compiler_and_capacity`) already leaves a bit over 6300 cells
+/// (`run_with_compiler_and_capacity`) already leaves a bit over 8500 cells
 /// live by the time `churn-and-check` is compiled (measured directly via
-/// `Heap::live_count`), so a capacity of `1 << 13` (8192) leaves only a
-/// couple thousand free — comfortably exhausted (forcing several real
-/// `gc()` calls) by 5000 throwaway `(Cons s s)` iterations, each one
-/// otherwise indistinguishable from a value that's about to be reclaimed.
+/// `Heap::live_count` — grew from ~6300 with the `compile-construct-boxed-struct`/
+/// `compile-field-get`/`compile-field-set`/`compile-recv-type-id` additions,
+/// Stage 3 of the Sexpr/RtValue unification plan, `docs/implementation-log.md`),
+/// so a capacity of `10500` leaves only about 2000 free — comfortably
+/// exhausted (forcing several real `gc()` calls) by 5000 throwaway `(Cons s
+/// s)` iterations, each one otherwise indistinguishable from a value that's
+/// about to be reclaimed.
 #[test]
 fn compile_dispatches_a_function_that_keeps_a_let_bound_sexpr_local_rooted_across_many_allocations() {
     let v = run_with_compiler_and_capacity(
@@ -2539,7 +2541,7 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_sexpr_local_rooted_acros
         (compile churn-and-check)
         (churn-and-check 5000)
         "#,
-        1 << 13,
+        10500,
     )
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(1), "s's contents must survive every intervening allocation");
@@ -2571,7 +2573,7 @@ fn compile_dispatches_a_function_that_keeps_a_setf_reassigned_sexpr_local_rooted
         (compile churn-and-check)
         (churn-and-check 5000)
         "#,
-        1 << 13,
+        10500,
     )
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(1), "s's reassigned contents must survive every intervening allocation");
@@ -2606,7 +2608,7 @@ fn compile_dispatches_a_function_that_keeps_a_fresh_cons_car_rooted_while_its_cd
         (compile make-and-check)
         (make-and-check 5000)
         "#,
-        1 << 13,
+        10500,
     )
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(333), "the car cons cell's contents must survive the cdr sub-expression's own allocations");
@@ -2641,7 +2643,7 @@ fn compile_dispatches_a_call_that_keeps_an_earlier_fresh_sexpr_argument_rooted_w
         (compile make-and-check)
         (make-and-check 5000)
         "#,
-        1 << 13,
+        10500,
     )
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(333), "combine's first argument must survive its second argument's own allocations");
@@ -2683,7 +2685,7 @@ fn compile_dispatches_a_function_that_keeps_a_general_adt_box_field_rooted_acros
               ((Cons (Int a) (Int b)) (+ a b))
               (_ -1))))
         "#,
-        1 << 13,
+        10500,
     )
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(333), "holder::s's contents must survive churn's own unrelated allocations after make-holder returns");
@@ -3077,4 +3079,67 @@ fn compile_return_truncates_a_sexpr_lets_gc_root_on_every_call_not_just_the_firs
         leaky_growth, trivial_growth,
         "leaky-inner's own let-bound Sexpr root must not leak beyond whatever background growth an equivalent non-Sexpr, non-looping compiled function already has"
     );
+}
+
+// ---- nested boxed-struct fields ---------------------------------------------
+//
+// A `defstruct` field whose declared type is *itself* a `defstruct` (an
+// `AdtKind::Struct` `Type::Named`) compiles as `struct_field_kind` `6` — the
+// value is already a properly tagged boxed-struct `Sexpr`, so both
+// `compile-tag-struct-field` (encode) and `compile-sexpr-field` (decode)
+// pass it through unchanged, exactly like a `Str`/`Sexpr` field. Before
+// `ast_bridge` was handed the checker-resolved struct-type set
+// (`Interp::struct_types`), such a field fell into the `0` "not
+// representable" kind — the compile below panicked — for a *wrong* reason:
+// the classification (`AdtDef::kind`) was fully known at check time, the
+// bridge just had no channel for it.
+
+/// Construction with a struct-typed field (`outer::new`'s `inner` argument,
+/// `compile-construct-boxed-struct-fields`' kind-6 passthrough) plus a read
+/// back through both compiled accessors (`outer::child`'s own body is an
+/// `Expr::FieldGet` whose type is `inner` — kind 6 on the decode side).
+#[test]
+fn compile_dispatches_a_function_that_constructs_a_nested_defstruct_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defstruct inner (v i64))
+        (defstruct outer (child inner))
+        (defun make-outer ((n i64)) outer (outer::new (inner::new n)))
+        (compile make-outer)
+        (compile inner::v)
+        (compile outer::child)
+        (defun read-nested ((o outer)) i64 (v o::child))
+        (compile read-nested)
+        (read-nested (make-outer 41))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(41));
+}
+
+/// The `FieldSet` counterpart: a compiled setter whose value operand is a
+/// struct-typed field (`compile-field-set`'s `compile-tag-struct-field`
+/// kind-6 passthrough), replacing the nested instance in place; the
+/// replacement is constructed by the *interpreter* (`heap.alloc_struct`) and
+/// crosses into compiled code through `Interp::call_compiled`'s ordinary
+/// `RtValue::Sexpr` encoding — pinning that the two sides still agree on
+/// the representation for nested structs.
+#[test]
+fn compile_dispatches_a_nested_defstruct_field_setter_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defstruct inner (v i64))
+        (defstruct outer (child inner))
+        (defun make-outer ((n i64)) outer (outer::new (inner::new n)))
+        (compile make-outer)
+        (compile inner::v)
+        (compile outer::child)
+        (compile outer::set-child)
+        (let ((o (make-outer 1)))
+          (setf o::child (inner::new 9))
+          (v o::child))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(9));
 }

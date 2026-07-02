@@ -14,7 +14,7 @@
 //! that could trigger a collection.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
 
 use inkwell::basic_block::BasicBlock;
@@ -97,6 +97,21 @@ pub struct Interp {
     /// already is, so the two can never drift. `Expr::Assoc`'s eval arm
     /// checks here first, mirroring `Expr::Call`'s own `compiled` check.
     compiled_methods: RefCell<HashMap<(Path, String), crate::compile::CompiledFn>>,
+    /// Every `Type::Named` path whose compiled representation is a tagged
+    /// `Sexpr` `Value::Boxed` struct (Stage 3 of the Sexpr/RtValue
+    /// unification plan, `docs/implementation-log.md`) — a user `defstruct`
+    /// (inserted on its own `TopLevel::Defstruct` exec, below) or `vector`
+    /// (`registry::vector_def`'s `AdtKind::Struct`, the one builtin type
+    /// that shares this same shape without ever producing a
+    /// `TopLevel::Defstruct` of its own, seeded in [`Self::new`] — see that
+    /// registration's own comment for why `hashtable`/`scope` don't need the
+    /// same treatment). Needed at the compiled/interpreted call boundary
+    /// ([`Self::call_compiled`], via [`Self::is_boxed_sexpr_type`]) to
+    /// decode/encode such a value the same way a `Sexpr`-typed one already
+    /// is — `crate::compile::ast_bridge` can't answer this itself
+    /// (deliberately `Registry`-free, see that module's `is_sexpr_type` doc
+    /// comment), so `Interp` tracks it independently.
+    struct_types: HashSet<Path>,
 }
 
 impl Interp {
@@ -110,6 +125,17 @@ impl Interp {
             gensym_counter: Cell::new(0),
             compiled: RefCell::new(HashMap::new()),
             compiled_methods: RefCell::new(HashMap::new()),
+            // `vector` is registered directly in `Registry::with_builtins`
+            // (`registry::vector_def`) with `AdtKind::Struct`, so its
+            // `Expr::Construct` sites already get `mutable = true`
+            // (`Checker::check_construct`) — but it never executes a
+            // `TopLevel::Defstruct`, the only other place `struct_types`
+            // gets populated, so it's seeded here by hand. `hashtable`/
+            // `scope` don't need this: both are still `AdtKind::Sum`
+            // (`registry::hashtable_def`/`scope_def`), a historical
+            // asymmetry `docs/TODO.md`'s Stage 4/5 will eventually close,
+            // not Stage 3's.
+            struct_types: HashSet::from([Path::root("vector")]),
         }
     }
 
@@ -176,11 +202,17 @@ impl Interp {
                 Ok(None)
             }
             TopLevel::Use { .. } => Ok(None),
-            // The type was already registered in the checker's `Registry` at
-            // check time; there's nothing for the interpreter to do, the
-            // same as `Option`/`Result` needing no runtime registration of
-            // their own — see `TopLevel::Defstruct`'s doc comment.
-            TopLevel::Defstruct { .. } => Ok(None),
+            // The type itself was already registered in the checker's
+            // `Registry` at check time — there's nothing else for the
+            // interpreter to do, the same as `Option`/`Result` needing no
+            // runtime registration of their own. Recording `name` in
+            // `struct_types` is the one exception (Stage 3 of the
+            // Sexpr/RtValue unification plan, `docs/implementation-log.md`
+            // — see that field's doc comment).
+            TopLevel::Defstruct { name } => {
+                self.struct_types.insert(name);
+                Ok(None)
+            }
             TopLevel::Defvar { name, value, .. } => {
                 let v = self.eval(heap, &value, &Env::new())?;
                 self.globals.insert(name, self.slot(v));
@@ -311,12 +343,12 @@ impl Interp {
                     // without first going through `compiled_fn_body`, which
                     // requires `fns[name].sig` to be `Some` — so this is an
                     // internal invariant, not a user-reachable error.
-                    let (param_tys, ret_ty) = self
+                    let (_, ret_ty) = self
                         .fns
                         .get(name)
                         .and_then(|f| f.sig.as_ref())
                         .expect("a compiled function always has a type signature");
-                    return self.call_compiled(heap, compiled, &argv, param_tys, ret_ty);
+                    return self.call_compiled(heap, compiled, &argv, ret_ty);
                 }
                 if let Some(f) = self.fns.get(name) {
                     self.apply(heap, &f.params, &f.body, argv)
@@ -337,17 +369,17 @@ impl Interp {
                 // comment for the one extra risk a method's receiver carries
                 // that a plain function's parameters never do.
                 if let Some(compiled) = self.compiled_methods.borrow().get(&key) {
-                    let (param_tys, ret_ty) = self
+                    let (_, ret_ty) = self
                         .methods
                         .get(&key)
                         .and_then(|f| f.sig.as_ref())
                         .expect("a compiled method always has a type signature");
-                    return self.call_compiled(heap, compiled, &argv, param_tys, ret_ty);
+                    return self.call_compiled(heap, compiled, &argv, ret_ty);
                 }
                 if let Some(m) = self.methods.get(&key) {
                     self.apply(heap, &m.params, &m.body, argv)
                 } else {
-                    match eval_builtin_method(heap, type_name, method, &argv) {
+                    match eval_builtin_method(heap, type_name, method, &argv, &t.ty) {
                         Some(result) => result,
                         None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
                     }
@@ -369,7 +401,7 @@ impl Interp {
                 if let Some(m) = self.methods.get(&key) {
                     self.apply(heap, &m.params, &m.body, argv)
                 } else {
-                    match eval_builtin_method(heap, &key.0, method, &argv) {
+                    match eval_builtin_method(heap, &key.0, method, &argv, &t.ty) {
                         Some(result) => result,
                         None => Err(EvalError::NoSuchFunction(format!("{}::{}", key.0, method))),
                     }
@@ -418,7 +450,7 @@ impl Interp {
                         None => Err(EvalError::NoSuchFunction(name)),
                     },
                     RtValue::BuiltinMethod(type_name, method) => {
-                        match eval_builtin_method(heap, &type_name, &method, &argv) {
+                        match eval_builtin_method(heap, &type_name, &method, &argv, &t.ty) {
                             Some(r) => r,
                             None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
                         }
@@ -428,7 +460,17 @@ impl Interp {
             }
             Expr::FieldGet(obj, idx) => {
                 let id = expect_struct_box(&self.eval(heap, obj, env)?)?;
-                Ok(decode_struct_field(heap, heap.struct_field(id, *idx)))
+                let raw = heap.struct_field(id, *idx);
+                // A `FieldGet`'s checked type *is* the field's declared type
+                // (`Checker::check_defstruct`'s accessor synthesis), so a
+                // `Sexpr`-declared field is returned as the `Sexpr` it
+                // already is — never through `decode_struct_field`'s
+                // shape-driven mapping, which would turn a stored quoted
+                // `42`/`3.14`/`"s"` into a plain `Int`/`Float`/`Str` and
+                // contradict the static type. Only a still-generic field
+                // (`ty` a type variable, evaluated type-erased) falls back
+                // to the shape heuristic — see `decode_struct_field`.
+                Ok(if is_sexpr_ty(&t.ty) { RtValue::Sexpr(raw) } else { decode_struct_field(heap, raw) })
             }
             Expr::FieldSet(obj, idx, value) => {
                 let id = expect_struct_box(&self.eval(heap, obj, env)?)?;
@@ -578,22 +620,24 @@ impl Interp {
     /// never touched by compiled code) hits the same wall an analogous top-level
     /// `Expr::Call` already would for a general-ADT parameter — a clear
     /// internal error here, not a silent misread of unrelated bits.
-    fn call_compiled(
-        &self,
-        heap: &mut Heap,
-        compiled: &crate::compile::CompiledFn,
-        argv: &[RtValue],
-        param_tys: &[Type],
-        ret_ty: &Type,
-    ) -> Result<RtValue, EvalError> {
+    fn call_compiled(&self, heap: &mut Heap, compiled: &crate::compile::CompiledFn, argv: &[RtValue], ret_ty: &Type) -> Result<RtValue, EvalError> {
+        // Encoded off `argv`'s own runtime shape, not each parameter's
+        // *static* type (unlike `ret_ty`'s decode below) — a generic
+        // parameter (`(defun (describe T) ((it T)) ...)`) has no concrete
+        // `Type` to classify at all here, only whatever `T` happened to be
+        // substituted with at this call site, and `Self::struct_types`
+        // (keyed by concrete type `Path`, never a type variable) can't
+        // answer that. `RtValue::Sexpr`/`RtValue::Int` are themselves
+        // unambiguous — a well-typed argument's `RtValue` variant is already
+        // exactly the one `Self::is_boxed_sexpr_type` would have derived
+        // from its (possibly-generic) static type anyway, so no information
+        // is lost by reading it directly off the value instead.
         let int_args = argv
             .iter()
-            .zip(param_tys.iter())
-            .map(|(v, ty)| match (v, type_is_sexpr(ty)) {
-                (RtValue::Sexpr(sv), true) => Ok(crate::compile::runtime::encode(*sv)),
-                (RtValue::Int(n), false) => Ok(*n),
-                (other, true) => Err(EvalError::Internal(format!("compiled call: expected a Sexpr argument, got {:?}", other))),
-                (other, false) => Err(EvalError::Internal(format!("compiled call: expected an Int argument, got {:?}", other))),
+            .map(|v| match v {
+                RtValue::Sexpr(sv) => Ok(crate::compile::runtime::encode(*sv)),
+                RtValue::Int(n) => Ok(*n),
+                other => Err(EvalError::Internal(format!("compiled call: unsupported argument {:?}", other))),
             })
             .collect::<Result<Vec<i64>, EvalError>>()?;
         // Registers `heap` as this thread's active `Heap` (see
@@ -605,11 +649,21 @@ impl Interp {
         // callee might transitively touch the heap" ahead of time.
         crate::compile::runtime::set_active_heap(heap as *mut Heap);
         let raw = compiled.call(&int_args);
-        Ok(if type_is_sexpr(ret_ty) {
+        Ok(if self.is_boxed_sexpr_type(ret_ty) {
             RtValue::Sexpr(crate::compile::runtime::decode(raw))
         } else {
             RtValue::Int(raw)
         })
+    }
+
+    /// Whether `ty`'s compiled representation crosses the typelisp-call-
+    /// syntax/compiled-code boundary as a tagged `Sexpr`
+    /// (`compile::runtime::encode`/`decode`, [`Self::call_compiled`]) rather
+    /// than a plain `i64` — `Sexpr` itself, or any `Type::Named` this
+    /// `Interp` has recorded in [`Self::struct_types`] (Stage 3 of the
+    /// Sexpr/RtValue unification plan, `docs/implementation-log.md`).
+    fn is_boxed_sexpr_type(&self, ty: &Type) -> bool {
+        matches!(ty, Type::Named(p, _) if is_sexpr_type(p) || self.struct_types.contains(p))
     }
 
     /// Finds the registered `(Path, String)` key for a `"type::method"`
@@ -724,7 +778,7 @@ impl Interp {
             Err(e) => return Err(EvalError::Panic(e.to_string())),
         };
         heap.push_root(param_list);
-        let body_sexpr = match crate::compile::ast_bridge::ast_to_sexpr(heap, &body) {
+        let body_sexpr = match crate::compile::ast_bridge::ast_to_sexpr(heap, &body, &self.struct_types) {
             Ok(v) => v,
             Err(e) => {
                 heap.pop_root(); // param_list
@@ -1181,14 +1235,15 @@ fn is_sexpr_type(type_name: &Path) -> bool {
     *type_name == Path::root("sexpr")
 }
 
-/// The [`Type`]-level counterpart of [`is_sexpr_type`] — whether `ty` is
-/// `Sexpr` itself (as opposed to some other `Type::Named` ADT). Used by
-/// the compiled-call dispatch (`Expr::Call`'s `eval` arm) to decide, per
-/// parameter/return type, whether a value crossing the typelisp-call-
-/// syntax/compiled-code boundary needs `compile::runtime::encode`/`decode`
-/// (a `Sexpr`) or is already a plain `i64` (everything else this compiler
-/// can produce today — see `docs/implementation-log.md`'s Stage 5 entry).
-fn type_is_sexpr(ty: &Type) -> bool {
+/// The `Type`-level counterpart of [`is_sexpr_type`] — whether a *declared*
+/// (checker-resolved) type is the built-in `Sexpr`. This is what lets a
+/// struct-field read be decoded by its static type instead of
+/// [`decode_struct_field`]'s shape heuristic wherever that type is concrete
+/// (`Expr::FieldGet`'s own node type, a builtin method's checked return
+/// type): the checker always knew it — only a still-generic type variable
+/// (a generic accessor body evaluated type-erased) genuinely has nothing
+/// static to offer here.
+fn is_sexpr_ty(ty: &Type) -> bool {
     matches!(ty, Type::Named(p, _) if is_sexpr_type(p))
 }
 
@@ -1441,7 +1496,11 @@ fn eval_random(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// need) for `sexpr`'s `eql`, which must read a boxed `Sexpr::Float`'s
 /// actual value (`Heap::float_value`) to tell it apart from `eq`'s identity
 /// comparison — see `sexpr_eql`'s doc comment.
-fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+/// `ret_ty` is the call site's checked return type (`Expr::Assoc`/
+/// `Expr::TraitCall`/`Expr::Apply`'s own node type) — only [`vector_get`]
+/// consumes it today, to decode a `Vector<Sexpr>` element by its static
+/// type rather than [`decode_struct_field`]'s shape heuristic.
+fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[RtValue], ret_ty: &Type) -> Option<Result<RtValue, EvalError>> {
     if *type_name == Path::root("hashtable") {
         return match method {
             "new" => Some(Ok(RtValue::HashTable(Rc::new(RefCell::new(HashMap::new()))))),
@@ -1460,7 +1519,7 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[
         return match method {
             "new" => Some(Ok(RtValue::Sexpr(heap.alloc_struct("vector".to_string(), Vec::new())))),
             "push" => Some(vector_push(heap, args)),
-            "get" => Some(vector_get(heap, args)),
+            "get" => Some(vector_get(heap, args, ret_ty)),
             "set" => Some(vector_set(heap, args)),
             "len" => Some(vector_len(heap, args)),
             _ => None,
@@ -1790,11 +1849,20 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// `BoxedObj`) — the first `rt_*` pair for the new boxed-object store, same
 /// declare-into-every-module mechanism every other `rt_*` function here
 /// already uses.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 20] {
+///
+/// `rt_struct_new`/`rt_struct_field_get`/`rt_struct_field_set`/
+/// `rt_struct_type_id_hash` (Sexpr/RtValue unification, Stage 3):
+/// `compiler.rs`'s `compile-construct-boxed-struct`/`compile-field-get`/
+/// `compile-field-set`/`compile-recv-type-id` call these to build/read/write
+/// a `BoxedObj::Struct` and (for a `defstruct`/`Vector<T>` trait-call
+/// receiver) recover its runtime type-id — the same `BoxedObj::Struct`
+/// mem/rt-layer plumbing Stage 1 already exercised in isolation, wired to
+/// the compiler for the first time here.
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 24] {
     use crate::compile::runtime::{
         rt_car, rt_cdr, rt_cons, rt_float_new, rt_float_value, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root,
-        rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_new, rt_str_ref, rt_trait_call_fail,
-        rt_truncate_sexpr_roots,
+        rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_new, rt_str_ref,
+        rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_struct_type_id_hash, rt_trait_call_fail, rt_truncate_sexpr_roots,
     };
     [
         ("rt_car", rt_car as usize),
@@ -1817,6 +1885,10 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 20] {
         ("rt_str_append", rt_str_append as usize),
         ("rt_float_new", rt_float_new as usize),
         ("rt_float_value", rt_float_value as usize),
+        ("rt_struct_new", rt_struct_new as usize),
+        ("rt_struct_field_get", rt_struct_field_get as usize),
+        ("rt_struct_field_set", rt_struct_field_set as usize),
+        ("rt_struct_type_id_hash", rt_struct_type_id_hash as usize),
     ]
 }
 
@@ -2772,20 +2844,28 @@ fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Value, EvalEr
 }
 
 /// Converts a `mem::Value` read out of a `BoxedObj::Struct` field back into
-/// an `RtValue` — `rtvalue_to_struct_field`'s inverse. Driven entirely by
-/// the value's own runtime shape, not a static field type (`Interp` doesn't
-/// carry the `Registry` a field type lookup would need) — sound for every
-/// case actually reachable through a struct field today: `Int`/`Bool`/
-/// `Char`/`Str` map straight back, a non-struct `Boxed` is a boxed float
-/// (`RtValue::Float`), and anything else (`Empty`/`Cons`/`Symbol`/`Path`, or
-/// a `Boxed` struct — a nested `defstruct`/`Vector<T>`/`cons-cell<K,V>`)
-/// becomes `RtValue::Sexpr`, the same wrapper a top-level struct value
-/// itself uses. The one shape this can't tell apart from a plain `f64`
-/// field is a genuinely `Sexpr`-typed field that happens to hold a quoted
-/// float literal (both are a boxed float at this layer) — not reachable by
-/// any current test/builtin, and a static-type-driven decode would need
-/// `Registry` access `Interp` doesn't have; left as a known imprecision
-/// rather than plumbing that through for a case nothing exercises.
+/// an `RtValue` — `rtvalue_to_struct_field`'s inverse. Driven by the
+/// value's own runtime shape: `Int`/`Bool`/`Char`/`Str` map straight back,
+/// a non-struct `Boxed` is a boxed float (`RtValue::Float`), and anything
+/// else (`Empty`/`Cons`/`Symbol`/`Path`, or a `Boxed` struct — a nested
+/// `defstruct`/`Vector<T>`/`cons-cell<K,V>`) becomes `RtValue::Sexpr`, the
+/// same wrapper a top-level struct value itself uses.
+///
+/// A shape-driven decode is *wrong* for a `Sexpr`-declared field holding a
+/// scalar datum (a stored quoted `42` is a `Value::Int` here — decoding it
+/// as `RtValue::Int` contradicts the field's static type), so every caller
+/// that has the declared type in hand checks it *before* falling back to
+/// this: `Expr::FieldGet`'s eval arm (the node's own checked type is the
+/// field's type), [`vector_get`] (the call site's checked return type), and
+/// `match_pattern`'s boxed-struct arm (`Pattern::Ctor::sexpr_fields`, baked
+/// at check time). What reaches this function is therefore only the
+/// genuinely type-erased residue — a still-generic field type inside a
+/// generic accessor/method body evaluated without monomorphization, where
+/// the tree-walker really has no static type to consult; for a type
+/// variable instantiated to `Sexpr` holding a scalar datum the shape
+/// heuristic still misdecodes, a known erasure limitation (fixing it takes
+/// monomorphized evaluation or instantiated-type info on the box itself,
+/// not more lookups at this site).
 fn decode_struct_field(heap: &Heap, v: Value) -> RtValue {
     match v {
         Value::Int(n) => RtValue::Int(n),
@@ -2811,13 +2891,19 @@ fn vector_push(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> 
     Ok(RtValue::Unit)
 }
 
-fn vector_get(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+/// `ret_ty` is the call site's checked return type — `Vector<Sexpr>`'s `get`
+/// returns `Sexpr` there, which must bypass [`decode_struct_field`]'s shape
+/// heuristic exactly like `Expr::FieldGet`'s own `Sexpr`-declared case (see
+/// that eval arm). In a generic context (`ret_ty` still a type variable) the
+/// heuristic is all that's left, same as everywhere else.
+fn vector_get(heap: &Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtValue, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let i = expect_int_index(&args[1])?;
     if i >= heap.struct_field_count(id) {
         return Err(EvalError::Panic(format!("Vector: index {} out of bounds", i)));
     }
-    Ok(decode_struct_field(heap, heap.struct_field(id, i)))
+    let raw = heap.struct_field(id, i);
+    Ok(if is_sexpr_ty(ret_ty) { RtValue::Sexpr(raw) } else { decode_struct_field(heap, raw) })
 }
 
 fn vector_set(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -3067,7 +3153,7 @@ fn match_pattern(heap: &Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(String,
             RtValue::Char(m) if m == c => Some(Vec::new()),
             _ => None,
         },
-        Pattern::Ctor { variant, args, .. } => match v {
+        Pattern::Ctor { variant, args, sexpr_fields, .. } => match v {
             RtValue::Data { variant: vv, fields, .. } if vv == variant && fields.len() == args.len() => {
                 let mut binds = Vec::new();
                 for (p, f) in args.iter().zip(fields.iter()) {
@@ -3085,7 +3171,16 @@ fn match_pattern(heap: &Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(String,
             {
                 let mut binds = Vec::new();
                 for (i, p) in args.iter().enumerate() {
-                    let f = decode_struct_field(heap, heap.struct_field(*id, i));
+                    let raw = heap.struct_field(*id, i);
+                    // A `Sexpr`-declared field (known statically —
+                    // `Pattern::Ctor::sexpr_fields`, baked at check time) is
+                    // handed on as the `Sexpr` it is; everything else
+                    // decodes by shape as before.
+                    let f = if sexpr_fields.get(i).copied().unwrap_or(false) {
+                        RtValue::Sexpr(raw)
+                    } else {
+                        decode_struct_field(heap, raw)
+                    };
                     binds.extend(match_pattern(heap, p, &f)?);
                 }
                 Some(binds)

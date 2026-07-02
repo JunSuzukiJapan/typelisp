@@ -643,6 +643,20 @@ pub const SOURCE: &str = r#"
     ((Cons _ rest) (+ 1 (sexpr-list-length rest)))
     (_ 0)))
 
+;; The `i64` counterpart of `sexpr-list-length`, needed wherever the count
+;; itself must become a real `const-i64` runtime value rather than only a
+;; host-side `alloca-args`/`store-arg`/`load-raw` slot-index constant — the
+;; language has no `i32`-to-`i64` widening cast, so `sexpr-list-length`'s own
+;; `i32` result can't simply be reused for that. `compile-field-get`/
+;; `compile-field-set` (Stage 3 of the Sexpr/RtValue unification plan,
+;; `docs/implementation-log.md`) use this to recover `idx-unary-list`'s
+;; length as the raw field-index argument `rt_struct_field_get`/
+;; `rt_struct_field_set` expect.
+(defun sexpr-list-length-i64 ((s Sexpr)) i64
+  (match s
+    ((Cons _ rest) (+ (sexpr-list-length-i64 rest) 1))
+    (_ 0)))
+
 ;; Writes each `((name . kind) . value-form)` binding's already-computed
 ;; value (`acc`, built by `compile-let-values` against `env` *unmodified* —
 ;; see that function's doc comment for why this can't be one combined pass)
@@ -807,6 +821,82 @@ pub const SOURCE: &str = r#"
                   (if (eq variant 6)
                       v
                       (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))))))
+
+;; The encode-side mirror of `compile-sexpr-field`'s decode, over the exact
+;; same `ast_bridge::struct_field_kind`/`Sexpr`-variant numbering (`1`=int
+;; `2`=float `3`=char `4`=bool `6`=str/`Sexpr`/nested-boxed-struct
+;; passthrough — a `defstruct`/`Vector<T>`/`cons-cell<K,V>`-typed field's
+;; value is already a properly tagged `Sexpr`, so it passes through
+;; unchanged exactly like a `Str` — `0`=not representable yet: a `Fn`/
+;; general-ADT/still-generic field) — `compile-construct-boxed-struct-fields`/
+;; `compile-field-set` both call this to turn an already-compiled field
+;; value `v` (a scalar kind's own untagged bit pattern, or an already-tagged
+;; `Sexpr` for kind `6`) into the properly tagged `Sexpr` `rt_struct_new`/
+;; `rt_struct_field_set` require (Stage 3 of the Sexpr/RtValue unification
+;; plan, `docs/implementation-log.md`). Mirrors `compile-construct-sexpr`'s
+;; own per-variant `int`/`float`/`char`/`bool`/`str` arms bit-for-bit rather
+;; than calling into that function directly, since here `v` is already a
+;; compiled value (there is no `arg-forms` sub-expression left to compile) --
+;; see that function's own doc comment for why each shift/tag constant is
+;; what it is.
+(defun compile-tag-struct-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (kind i64)) llvm-value
+  (if (eq kind 1)
+      (build-shl builder v (const-i64 builder 3))
+      (if (eq kind 2)
+          (let ((args-ptr (alloca-args builder 1)))
+            (store-arg builder args-ptr 0 v)
+            (build-call builder (get-function m "rt_float_new") args-ptr 1))
+          (if (eq kind 3)
+              (build-or builder (build-shl builder v (const-i64 builder 3)) (const-i64 builder 4))
+              (if (eq kind 4)
+                  (build-or builder (build-shl builder (build-add builder v (const-i64 builder 1)) (const-i64 builder 3)) (const-i64 builder 6))
+                  (if (eq kind 6)
+                      v
+                      (panic "compile-tag-struct-field: field type is not representable in compiled code yet")))))))
+
+;; Reads a `compile-trait-call` receiver's own runtime type-id, regardless
+;; of which of `compile-construct`'s two boxed representations built it
+;; (Stage 3 of the Sexpr/RtValue unification plan,
+;; `docs/implementation-log.md`) — a general-ADT `malloc`'d box
+;; (`compile-construct-box`, its own header slot `0`, a raw untagged
+;; pointer cast to `i64`) or a `mutable` `defstruct`/`Vector<T>`/
+;; `cons-cell<K,V>` instance (`compile-construct-boxed-struct`'s
+;; `TAG_BOXED`-tagged `Value::Boxed`, whose own runtime type-id is instead
+;; recovered by hashing its `BoxedObj::Struct`-carried type name,
+;; `rt_struct_type_id_hash` — the same FNV-1a algorithm
+;; `ast_bridge::type_id_hash` computes at compile time for a general-ADT
+;; box's own header, just computed at run time here since a `BoxedObj::Struct`
+;; carries no compile-time-constant header slot of its own). The two are
+;; told apart by `recv`'s own low 3 tag bits, the same way
+;; `compile-sexpr-tag-test` already inspects a tagged `Sexpr`'s tag: a real
+;; heap/`malloc` pointer is always at least word-aligned (never `0b111` in
+;; its own low bits, `typelisp-rt`'s `TAG_BOXED`), so the two representations
+;; can never collide. A real two-way branch (rather than value-level
+;; `select`) is needed since one arm makes an actual `rt_*` call and the
+;; other doesn't — merged into a shared 1-slot result the same
+;; `alloca-args`/`store-arg`/`load-raw` way `compile-if`'s own 2-way merge
+;; already works.
+(defun compile-recv-type-id ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (recv llvm-value)) llvm-value
+  (let ((tag (build-and builder recv (const-i64 builder 7))))
+    (let ((is-boxed (build-icmp-eq builder tag (const-i64 builder 7))))
+      (let ((boxed-block (append-block cur-fn "recv-type-id-boxed")))
+        (let ((raw-block (append-block cur-fn "recv-type-id-raw")))
+          (let ((merge-block (append-block cur-fn "recv-type-id-merge")))
+            (let ((slot (alloca-args builder 1)))
+              (build-cond-br builder is-boxed boxed-block raw-block)
+              (position-at-end builder boxed-block)
+              (let ((args-ptr (alloca-args builder 1)))
+                (store-arg builder args-ptr 0 recv)
+                (let ((hash (build-call builder (get-function m "rt_struct_type_id_hash") args-ptr 1)))
+                  (store-arg builder slot 0 hash)
+                  (build-br builder merge-block)))
+              (position-at-end builder raw-block)
+              (let ((recv-ptr (build-int-to-ptr builder recv)))
+                (let ((raw-id (load-raw builder recv-ptr 0)))
+                  (store-arg builder slot 0 raw-id)
+                  (build-br builder merge-block)))
+              (position-at-end builder merge-block)
+              (load-raw builder slot 0))))))))
 
 ;; Shared by every atomic pattern test (`pat-lit`'s literal-equality
 ;; check, a Ctor pattern's tag test): appends a fresh "this test passed"
@@ -2213,23 +2303,106 @@ pub const SOURCE: &str = r#"
                                 (let ((fallback (build-call builder (get-function m "rt_match_fail") args-ptr 0)))
                                   (store-arg builder slot 0 fallback)
                                   (build-br builder merge-block))))))
-                       ;; `(construct is-sexpr variant-i64 arg-form...)`
-                       ;; (Stage 6 of the Sexpr-representation plan,
-                       ;; `docs/implementation-log.md`) — `is-sexpr` (`ast_bridge::is_sexpr_type`,
-                       ;; read off the node's own checked type) dispatches
-                       ;; between `Sexpr`'s own 8 variants
-                       ;; (`compile-construct-sexpr`) and every other ADT's
-                       ;; general `malloc`'d-box representation
-                       ;; (`compile-construct-box`) — see those two
+                       ;; `(construct is-sexpr mutable type-id type-name-str
+                       ;; variant-i64 arg-form...)` (Stage 6 of the
+                       ;; Sexpr-representation plan, extended by Stage 3 of
+                       ;; the Sexpr/RtValue unification plan —
+                       ;; `docs/implementation-log.md` — with `mutable`/
+                       ;; `type-name-str`) — `is-sexpr`/`mutable`
+                       ;; (`ast_bridge::is_sexpr_type`/`translate_construct`'s
+                       ;; own `mutable` parameter, read off `Expr::Construct`'s
+                       ;; field) together dispatch between `Sexpr`'s own 8
+                       ;; variants (`compile-construct-sexpr`), a `mutable`
+                       ;; `defstruct`/`Vector<T>`/`cons-cell<K,V>`'s
+                       ;; GC-tracked boxed-struct representation
+                       ;; (`compile-construct-boxed-struct`), and every other
+                       ;; ADT's general `malloc`'d-box representation
+                       ;; (`compile-construct-box`) — see those three
                        ;; functions' doc comments.
                        (compile-construct ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((is-sexpr (sexpr-bool (car (cdr e)))))
-                           (let ((type-id (sexpr-int (car (cdr (cdr e))))))
-                             (let ((variant (sexpr-int (car (cdr (cdr (cdr e)))))))
-                               (let ((arg-forms (cdr (cdr (cdr (cdr e))))))
-                                 (if is-sexpr
-                                     (compile-construct-sexpr builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base variant arg-forms)
-                                     (compile-construct-box builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-id variant arg-forms)))))))
+                           (let ((mutable (sexpr-bool (car (cdr (cdr e))))))
+                             (let ((type-id (sexpr-int (car (cdr (cdr (cdr e)))))))
+                               (let ((type-name-form (car (cdr (cdr (cdr (cdr e)))))))
+                                 (let ((variant (sexpr-int (car (cdr (cdr (cdr (cdr (cdr e)))))))))
+                                   (let ((arg-forms (cdr (cdr (cdr (cdr (cdr (cdr e))))))))
+                                     (if is-sexpr
+                                         (compile-construct-sexpr builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base variant arg-forms)
+                                         (if mutable
+                                             (compile-construct-boxed-struct builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name-form arg-forms)
+                                             (compile-construct-box builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-id variant arg-forms))))))))))
+                       ;; Builds a `BoxedObj::Struct` (Stage 3 of the
+                       ;; Sexpr/RtValue unification plan,
+                       ;; `docs/implementation-log.md`) for a `mutable`
+                       ;; `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance —
+                       ;; the same tagged `Value::Boxed` representation the
+                       ;; interpreter's own `Expr::Construct` `mutable` arm
+                       ;; already builds (`heap.alloc_struct`), so a value
+                       ;; either side constructs interoperates with the
+                       ;; other (unlike `compile-construct-box`'s
+                       ;; never-GC-tracked `malloc`'d array). `type-name-form`
+                       ;; is `translate_construct`'s own `(str (int c)...)`
+                       ;; literal form for the struct's local type name
+                       ;; (`str_literal_form` — never a pre-allocated
+                       ;; `Value::Str`, since AOT's target program shares no
+                       ;; `Heap`/`StrId` table with this one), compiled once
+                       ;; and passed as `rt_struct_new`'s own `args[0]`
+                       ;; (that function's doc comment: a tagged `Sexpr`
+                       ;; `Str`, exactly what `compile-str` already produces).
+                       ;; Each remaining field is compiled then re-tagged by
+                       ;; `compile-tag-struct-field` per its own
+                       ;; `ast_bridge::struct_field_kind`
+                       ;; (`compile-construct-boxed-struct-fields`) before
+                       ;; being handed to `rt_struct_new`, which expects
+                       ;; every argument after the type name to already be a
+                       ;; properly tagged `Sexpr` (that function's own
+                       ;; `decode()` call on each). The freshly built struct
+                       ;; is `push-permanent-sexpr-root`ed immediately —
+                       ;; unlike a `let`/parameter binding's own scope-based
+                       ;; `kind = 2` rooting (`ast_bridge::binding_kind`
+                       ;; deliberately doesn't classify a `mutable` struct
+                       ;; type as `KIND_SEXPR`: this permanent root already
+                       ;; keeps every boxed struct alive from birth, so
+                       ;; per-binding push/pop would only add redundant
+                       ;; bookkeeping to every scope the value crosses),
+                       ;; a permanent root is the same accepted-leak
+                       ;; treatment `compile-construct-box-fields` already
+                       ;; gives a general-ADT box's own `Sexpr`-typed fields,
+                       ;; just applied to the struct itself rather than one
+                       ;; of its fields — sidesteps needing to track this
+                       ;; struct's own binding scope at all.
+                       (compile-construct-boxed-struct ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (type-name-form Sexpr) (arg-forms Sexpr)) llvm-value
+                         (let ((argc (sexpr-list-length arg-forms)))
+                           (let ((args-ptr (alloca-args builder (+ argc 1))))
+                             (let ((name-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name-form)))
+                               (store-arg builder args-ptr 0 name-v)
+                               (compile-construct-boxed-struct-fields builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr arg-forms 1)
+                               (let ((result (build-call builder (get-function m "rt_struct_new") args-ptr (+ argc 1))))
+                                 (push-permanent-sexpr-root builder m result)
+                                 result)))))
+                       ;; Fills a `compile-construct-boxed-struct`-allocated
+                       ;; argument array, one compiled-then-tagged field per
+                       ;; slot starting at `idx` (`1`, skipping the type-name
+                       ;; slot `rt_struct_new`'s own `args[0]` occupies) —
+                       ;; the boxed-struct analogue of
+                       ;; `compile-construct-box-fields`. Each `forms`
+                       ;; element is a `(kind . field-form)` pair
+                       ;; (`ast_bridge::struct_field_ast_list_to_sexpr`,
+                       ;; tagged by `ast_bridge::struct_field_kind` rather
+                       ;; than `binding_kind`); `compile-tag-struct-field`
+                       ;; turns the field's own compiled (untagged, for a
+                       ;; scalar kind) value into the tagged `Sexpr`
+                       ;; `rt_struct_new` requires.
+                       (compile-construct-boxed-struct-fields ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (args-ptr llvm-value) (forms Sexpr) (idx i32)) ()
+                         (match forms
+                           ((Cons field-pair rest)
+                            (let ((kind (sexpr-int (car field-pair))))
+                              (let ((form (cdr field-pair)))
+                                (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base form)))
+                                  (let ((tagged-v (compile-tag-struct-field builder m v kind)))
+                                    (store-arg builder args-ptr idx tagged-v)
+                                    (compile-construct-boxed-struct-fields builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr rest (+ idx 1)))))))
+                           (_ ())))
                        ;; Builds a general-ADT box (`Option`/`Result`/a
                        ;; `defstruct`, sum or struct kind alike): a fresh
                        ;; `build-malloc`'d `[2 + argc]`-slot array, slot `0`
@@ -2354,39 +2527,66 @@ pub const SOURCE: &str = r#"
                                              (if (eq variant 6)
                                                  (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (car arg-forms))
                                                  (panic "compile-construct-sexpr: field type is not representable in compiled code yet")))))))))
-                       ;; `(field-get idx-unary-list obj-form)` (Stage 6) —
-                       ;; always a general-ADT box `compile-construct-box`
-                       ;; built (this tag is only ever synthesized by
-                       ;; `Checker::check_defstruct` as a field accessor's
-                       ;; own body, never for a `Sexpr` — see
-                       ;; `ast_bridge::translate_field_get`'s doc comment):
-                       ;; the object's own value is reinterpreted as a
-                       ;; pointer (`build-int-to-ptr`, the inverse of
-                       ;; `compile-construct-box`'s final `build-ptr-to-int`)
-                       ;; and read at slot `2 + idx` (skipping the type-id
-                       ;; and variant-tag slots). `idx` is recovered from
-                       ;; `idx-unary-list`'s own length
+                       ;; `(field-get idx-unary-list kind-i64 obj-form)`
+                       ;; (Stage 6, extended by Stage 3 of the Sexpr/RtValue
+                       ;; unification plan — `docs/implementation-log.md` —
+                       ;; with `kind-i64`) — always a `BoxedObj::Struct`
+                       ;; `compile-construct-boxed-struct` built (this tag is
+                       ;; only ever synthesized by `Checker::check_defstruct`
+                       ;; as a field accessor's own body, never for a `Sexpr`
+                       ;; — see `ast_bridge::translate_field_get`'s doc
+                       ;; comment, and every `defstruct` is `mutable`): the
+                       ;; object's own tagged value is handed straight to
+                       ;; `rt_struct_field_get` (which decodes/re-indexes it
+                       ;; itself, no `build-int-to-ptr` needed the way a
+                       ;; general-ADT box's raw pointer required), and the
+                       ;; raw `Sexpr` it returns is decoded back into this
+                       ;; field's own compiled representation by
+                       ;; `compile-sexpr-field` (reused verbatim — `kind`
+                       ;; *is* `ast_bridge::struct_field_kind`'s value, the
+                       ;; same `Sexpr`-variant numbering `compile-sexpr-field`
+                       ;; already expects; its own `idx` parameter is unused
+                       ;; for every kind this can produce, so `0` is passed).
+                       ;; `idx` (the *field* index, unrelated to `kind`) is
+                       ;; recovered from `idx-unary-list`'s own length
                        ;; (`ast_bridge::idx_unary_list`'s doc comment
-                       ;; explains why it isn't simply a `Sexpr` `Int`).
+                       ;; explains why it isn't simply a `Sexpr` `Int`) — no
+                       ;; `+ 2` header offset here, unlike the old general-ADT
+                       ;; box layout: a `BoxedObj::Struct`'s own field vector
+                       ;; has no type-id/variant-tag slots of its own.
                        (compile-field-get ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
-                         (let ((idx (+ (sexpr-list-length (car (cdr e))) 2)))
-                           (let ((obj-form (car (cdr (cdr e)))))
-                             (let ((obj-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base obj-form)))
-                               (let ((ptr (build-int-to-ptr builder obj-v)))
-                                 (load-raw builder ptr idx))))))
-                       ;; `(field-set idx-unary-list obj-form value-form)`
-                       ;; (Stage 6) — see `compile-field-get`; evaluates to
-                       ;; `Unit` (`0`, `compile-unit`'s own convention),
-                       ;; matching `Expr::FieldSet`'s own checked type.
-                       (compile-field-set ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
-                         (let ((idx (+ (sexpr-list-length (car (cdr e))) 2)))
-                           (let ((obj-form (car (cdr (cdr e)))))
-                             (let ((value-form (car (cdr (cdr (cdr e))))))
+                         (let ((idx (sexpr-list-length-i64 (car (cdr e)))))
+                           (let ((kind (sexpr-int (car (cdr (cdr e))))))
+                             (let ((obj-form (car (cdr (cdr (cdr e))))))
                                (let ((obj-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base obj-form)))
-                                 (let ((ptr (build-int-to-ptr builder obj-v)))
+                                 (let ((args-ptr (alloca-args builder 2)))
+                                   (store-arg builder args-ptr 0 obj-v)
+                                   (store-arg builder args-ptr 1 (const-i64 builder idx))
+                                   (let ((raw (build-call builder (get-function m "rt_struct_field_get") args-ptr 2)))
+                                     (compile-sexpr-field builder m raw kind 0))))))))
+                       ;; `(field-set idx-unary-list kind-i64 obj-form
+                       ;; value-form)` (Stage 6, extended the same way
+                       ;; `compile-field-get` was) — see that function's doc
+                       ;; comment; `compile-tag-struct-field` (the encode-side
+                       ;; mirror of `compile-sexpr-field`'s decode) tags the
+                       ;; already-compiled `value-form` before
+                       ;; `rt_struct_field_set` stores it. Evaluates to `Unit`
+                       ;; (`0`, `compile-unit`'s own convention), matching
+                       ;; `Expr::FieldSet`'s own checked type.
+                       (compile-field-set ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((idx (sexpr-list-length-i64 (car (cdr e)))))
+                           (let ((kind (sexpr-int (car (cdr (cdr e))))))
+                             (let ((obj-form (car (cdr (cdr (cdr e))))))
+                               (let ((value-form (car (cdr (cdr (cdr (cdr e)))))))
+                                 (let ((obj-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base obj-form)))
                                    (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base value-form)))
-                                     (store-arg builder ptr idx v)
-                                     (const-i64 builder 0))))))))
+                                     (let ((tagged-v (compile-tag-struct-field builder m v kind)))
+                                       (let ((args-ptr (alloca-args builder 3)))
+                                         (store-arg builder args-ptr 0 obj-v)
+                                         (store-arg builder args-ptr 1 (const-i64 builder idx))
+                                         (store-arg builder args-ptr 2 tagged-v)
+                                         (let ((ignored (build-call builder (get-function m "rt_struct_field_set") args-ptr 3)))
+                                           (const-i64 builder 0)))))))))))
                        ;; `(trait-call method-str candidates-list arg-form...)`
                        ;; — `Expr::TraitCall`'s compile counterpart:
                        ;; `candidates-list` is a plain list of
@@ -2401,21 +2601,29 @@ pub const SOURCE: &str = r#"
                        ;; slot `0` of that same array (`load-raw`) rather
                        ;; than compiling it a second time — the call
                        ;; argument list already holds it, exactly the trick
-                       ;; `compile-field-get` uses to read a box field, just
-                       ;; applied to the local argument array instead of a
-                       ;; heap box. Reinterprets that receiver as a pointer
-                       ;; and reads its own type-id (`compile-construct-box`'s
-                       ;; slot `0`) to drive `compile-trait-dispatch`'s
-                       ;; runtime chain, merged into one shared 1-slot
-                       ;; result the same `alloca-args`/`store-arg`/
-                       ;; `load-raw` way `compile-if`'s 2-way merge already
-                       ;; works, just for an n-way (one per candidate) set of
-                       ;; blocks instead. `release-pending-args`/
-                       ;; `pop-sexpr-roots` run once, at the merge point —
-                       ;; safe (and simpler than duplicating them into every
-                       ;; candidate block) since only one candidate's call
-                       ;; block ever actually runs, and the merge block
-                       ;; post-dominates every one of them.
+                       ;; `compile-field-get` used to use to read a box field
+                       ;; before Stage 3 of the Sexpr/RtValue unification
+                       ;; plan, just applied to the local argument array
+                       ;; instead of a heap box. Reads that receiver's own
+                       ;; runtime type-id via `compile-recv-type-id` — which,
+                       ;; unlike a plain `compile-construct-box`-only
+                       ;; `slot 0` read, also handles a `mutable`
+                       ;; `defstruct`/`Vector<T>`/`cons-cell<K,V>` receiver
+                       ;; (`compile-construct-boxed-struct`'s
+                       ;; `TAG_BOXED`-tagged representation — every
+                       ;; currently-`compile`d trait `impl` target — see that
+                       ;; function's own doc comment) — to drive
+                       ;; `compile-trait-dispatch`'s runtime chain, merged
+                       ;; into one shared 1-slot result the same
+                       ;; `alloca-args`/`store-arg`/`load-raw` way
+                       ;; `compile-if`'s 2-way merge already works, just for
+                       ;; an n-way (one per candidate) set of blocks instead.
+                       ;; `release-pending-args`/`pop-sexpr-roots` run once,
+                       ;; at the merge point — safe (and simpler than
+                       ;; duplicating them into every candidate block) since
+                       ;; only one candidate's call block ever actually runs,
+                       ;; and the merge block post-dominates every one of
+                       ;; them.
                        (compile-trait-call ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((method (sexpr-str (car (cdr e)))))
                            (let ((candidates (car (cdr (cdr e)))))
@@ -2425,8 +2633,7 @@ pub const SOURCE: &str = r#"
                                    (let ((pending-ptr (alloca-args builder argc)))
                                      (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr pending-ptr arg-forms 0)))
                                        (let ((recv (load-raw builder args-ptr 0)))
-                                         (let ((recv-ptr (build-int-to-ptr builder recv)))
-                                           (let ((type-id (load-raw builder recv-ptr 0)))
+                                         (let ((type-id (compile-recv-type-id builder m cur-fn recv)))
                                              (let ((merge-block (append-block cur-fn "trait-call-merge")))
                                                (let ((slot (alloca-args builder 1)))
                                                  (compile-trait-dispatch builder cur-fn args-ptr argc method type-id merge-block slot candidates)
@@ -2434,7 +2641,7 @@ pub const SOURCE: &str = r#"
                                                  (let ((result (load-raw builder slot 0)))
                                                    (release-pending-args builder m pending-ptr argc 0)
                                                    (pop-sexpr-roots builder m sexpr-roots)
-                                                   result))))))))))))))
+                                                   result)))))))))))))
                        ;; Walks `candidates` (`(type-id-i64 . type-name-str)`
                        ;; pairs), building one two-way test per entry: if the
                        ;; runtime `type-id` matches this candidate's, call

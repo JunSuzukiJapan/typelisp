@@ -505,6 +505,43 @@ pub unsafe extern "C" fn rt_struct_field_set(args: *const i64, argc: u32) -> i64
     0
 }
 
+/// `(rt-struct-type-id-hash s)` for compiled code — `compiler.rs`'s
+/// `compile-recv-type-id` (Stage 3 of the Sexpr/RtValue unification plan,
+/// `docs/implementation-log.md`) needs a receiver's own runtime type-id the
+/// same way a general-ADT `compile-construct-box` already carries one in its
+/// own header slot 0, but a `BoxedObj::Struct` has no such slot — it carries
+/// its `type_name` as an owned `String` instead (`Heap::alloc_struct`).
+/// Hashes that name with the exact same FNV-1a algorithm
+/// `ast_bridge::type_id_hash` already uses at *compile* time over a
+/// candidate `impl`'s type name, so the two always agree on the same id for
+/// the same type — this is the only place that hash is computed at *run*
+/// time instead. Returns the hash itself as a raw (untagged) `i64`, matching
+/// `compile-trait-dispatch`'s own `cand-id` comparand (never a tagged
+/// `Sexpr`).
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`,
+/// decoding to a `Value::Boxed` struct; a `Heap` must already be registered
+/// on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_struct_type_id_hash(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_struct_type_id_hash: expected 1 argument");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal("rt_struct_type_id_hash: argument is not a boxed Sexpr"),
+    };
+    let name = active_heap().struct_type_name(id);
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in name.as_bytes() {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash as i64
+}
+
 // ---- Stage 4: GC root safety -------------------------------------------
 
 /// Registers a `Sexpr`-typed value as a GC root for as long as it's live in

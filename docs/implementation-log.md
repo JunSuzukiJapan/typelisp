@@ -2418,7 +2418,7 @@ panicと同じ前例で実行時panic（型システムでは「有効なスカ�
 panicの両方）、`symbol->string`/`string->symbol`（往復、非symbolでのpanic）を追加。全体テスト
 （`./scripts/with-llvm-env.sh cargo test`、workspace全体）green。
 
-## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-2完了・Stage 3-8未着手）
+## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-3完了・Stage 4-8未着手）
 
 `HashTable<K,V>::entries`のペア型を巡る議論の中で、ユーザーから「`Sexpr`と`RtValue`という
 2つの並行した実行時値表現に分かれていること自体がおかしい」という指摘を受けた。実際の
@@ -2532,8 +2532,63 @@ FFIハンドルだけを`RtValue`に残す。さらに調査で判明した事�
   `tests/struct_test.rs`の直接`RtValue::Struct`をパターンマッチしていた3テストを
   `Heap`の構造体アクセサ経由に書き換え。全体テスト（cargo test、31クレート＋LLVM経由の
   compile系）+ Miri（`mem_test`/`read_test`/`typelisp-rt`）green。
-- **Stage 3（未着手）**: Struct: コンパイラ結線——`mutable`フラグ分岐、
-  `compile-construct-boxed-struct`新設。
+- **Stage 3（完了、2026-07-02）**: Struct: コンパイラ結線。`ast_bridge::translate_construct`が
+  `Expr::Construct`の`mutable`フィールドを`construct`タグに追加フィールド（`mutable`/
+  `type-id`/`type-name-str`の4フィールド化、`type-name-str`は型名を`str_literal_form`で
+  `(str (int c)...)`literal化——AOT先の`Heap`とは`StrId`テーブルを共有しないため
+  compile時にpre-alloc不可、Stage 7の`Expr::Str`と同じ制約）として伝搬し、
+  `compiler.rs`の`compile-construct`を3分岐化（`is-sexpr`→既存`compile-construct-sexpr`、
+  `mutable`→新設`compile-construct-boxed-struct`、それ以外→既存`compile-construct-box`
+  無変更）。フィールド値のエンコードは`ast_bridge::struct_field_kind`（`Sexpr`のvariant番号
+  1=int/2=float/3=char/4=bool/6=str・Sexpr素通し/0=未対応を再利用、`binding_kind`とは別軸の
+  分類——`compile-construct-box-fields`のGCルート要否ではなく`rt_struct_new`に渡す前に
+  必要なタグ変換の種類を表す）でタグ付けした`(kind . form)`リストを
+  `struct_field_ast_list_to_sexpr`（`tagged_ast_list_to_sexpr`を`kind_fn`パラメータ化した
+  共通実装`tagged_ast_list_to_sexpr_with`経由）で構築し、新設`compile-tag-struct-field`
+  （`compile-sexpr-field`のデコードと対称なエンコード、`compile-construct-sexpr`の
+  各variant分岐のビット操作を値ベースで再実装）が実際のタグ付けを行う。
+  構築した`BoxedObj::Struct`は`push-permanent-sexpr-root`で即座に永続ルート化——
+  `binding_kind`はregistry-freeなので構造体型をKIND_SEXPRに分類できず、スコープベースの
+  GCルート追跡を素通りする代わりに、`compile-construct-box-fields`の`Sexpr`型フィールド
+  既存の「意図的リーク」パターンを構造体自身に適用した設計判断。
+  `compile-field-get`/`compile-field-set`は旧`malloc`box前提の`+2`オフセット読み書き
+  （`build-int-to-ptr`+`load-raw`/`store-arg`）を全廃し、`rt_struct_field_get`/`_set`
+  経由に書き換え（`defstruct`のFieldGet/FieldSetは常にmutable、つまり常にboxed-struct
+  なので分岐不要）——タグ付き`Sexpr`⇔フィールド自身の表現の往復に`compile-sexpr-field`
+  （デコード、既存関数を`kind`引数に流用）/`compile-tag-struct-field`（エンコード）を使う。
+  `idx-unary-list`の長さを`i64`定数として使う箇所向けに`sexpr-list-length-i64`を新設
+  （`sexpr-list-length`は`i32`返り、`i32`→`i64`への暗黙変換がこの言語に存在しないため）。
+  `compile-trait-call`のレシーバ型ID読み出し（旧: レシーバを常に`malloc`'d boxのポインタと
+  仮定して`load-raw`でslot 0を読む）は新設`compile-recv-type-id`で表現非依存化——
+  レシーバの下位3bitタグで`TAG_BOXED`（boxed-struct）か生ポインタ（malloc'd box）かを
+  実行時分岐し、前者は新設Rust側`rt_struct_type_id_hash`（構造体の`type_name`文字列に
+  `ast_bridge::type_id_hash`と同じFNV-1aを実行時計算）、後者は従来通りslot 0読み出し。
+  現状すべての`compile`済みtrait-callレシーバは`defstruct`（boxed-struct表現）のみだが、
+  一般ADT側の経路も表現として残すことで将来の回帰を防ぐ設計。
+  `src/eval/interp.rs`に`Interp::struct_types: HashSet<Path>`を追加（`TopLevel::Defstruct`
+  実行時に型名を記録、`vector`型のみ`registry::vector_def`がRust側で直接`AdtKind::Struct`
+  登録するため`TopLevel::Defstruct`を経由せず`Interp::new`で個別シード——`hashtable`/`scope`は
+  `AdtKind::Sum`のままなので対象外）し、`call_compiled`の返り値デコード判定
+  （`is_boxed_sexpr_type`、旧`type_is_sexpr`を置換）に使用。引数エンコード側は逆に
+  静的型ではなく`RtValue`自身の実行時shape（`Sexpr`か`Int`か）で判定するよう設計変更——
+  ジェネリック関数（`(defun (describe T) ((it T)) ...)`）の型変数`T`は`struct_types`に
+  照会できる具体的な`Path`を持たないため、静的型ベースの判定では
+  `compile_dispatches_a_trait_call_with_*_impl_to_native_code`のような「boxed-struct受け手を
+  ジェネリック経由で呼ぶ」ケースが解決不能——`RtValue`の実行時variant自体は型付けが正しい
+  プログラムなら常に一意に決まるため、静的型を経由せず直接判定する方が単純かつ正しい。
+  既存の`compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_code`
+  テストは表現変更（生ポインタ→タグ付き`Value::Boxed`）に伴い、フィールド値を直接メモリ越しに
+  検証する方式から`RtValue::Sexpr(Value::Boxed(_))`という形だけを検証する方式に書き換え
+  （フィールド値自体の正しさはfield-accessorテストが別途検証）。GC-rootストレステスト6件
+  （`1 << 13`容量、コンパイラ本体ロード直後のbaseline live_countが約6300→約8500に増加した
+  ため`10500`に拡大）も容量調整。ネストした構造体フィールド・`Fn`型フィールドは
+  `struct_field_kind`が`0`（未対応）を返しコンパイル時に明示的panicする既知のギャップ
+  （当時の記録は「`ast_bridge`がregistry-freeなため`AdtKind::Struct`と一般ADTの
+  `Type::Named`を区別できない」を理由としていたが、この理由付けは誤りで、ネスト構造体
+  フィールドは同日中に対応済み——下記「『型が分からない』を誤った理由とする未対応箇所の
+  一掃」節参照。`Fn`型・一般ADTフィールドの未対応は表現ギャップとして正当、同節参照）。
+  テスト: 全体テスト（cargo test、31クレート＋LLVM経由のcompile系）+ Miri
+  （`mem_test`/`read_test`/`typelisp-rt`）green。
 - **Stage 4（未着手）**: HashTable: `StructPayload::Map`のmem/rt層プラミング
   （`HashKey`を`MemHashKey`として`typelisp-mem`に移植）。
 - **Stage 5（未着手）**: HashTable: インタプリタ結線——`RtValue::HashTable`削除、
@@ -2556,3 +2611,72 @@ FFIハンドルだけを`RtValue`に残す。さらに調査で判明した事�
 （名前はそのまま維持、リネームは今回のスコープ外）。詳細な実装計画は
 `/Users/suzukijun/.claude/plans/sexpr-lisp-lisp-s-s-lisp-lisp-sexpr-rtv-eager-garden.md`
 （Plan mode成果物）参照。
+
+## 「型が分からない」を誤った理由とする未対応箇所の一掃（2026-07-02）
+
+Stage 3完了報告の際に「ネストした構造体フィールドは`ast_bridge`がregistry-freeな設計のため
+型が分からず未対応」と説明したところ、ユーザーから「typelispは静的型付けの言語なのに、
+扱っているアイテムの型が分からない状況があるのはおかしい」という指摘を受けた。調査の結果、
+指摘は正しい: checkerは検査完了時点で全式・全フィールドの型を完全に把握しており
+（`Checker::registry()`、`AdtDef::kind`）、欠けていたのは型情報そのものではなく
+**分類情報（`AdtKind`）を`ast_bridge`/interpの利用地点まで運ぶ経路**だけだった。
+`Expr::Construct::mutable`が既にやっている「check時に解決してASTに焼き込む/解決済みデータを
+手渡す」方式を各所に拡張し、「型が分からない」を理由にしていた未対応・不正確箇所を全て解消した。
+
+1. **ネスト構造体フィールドのcompile対応**（`src/compile/ast_bridge.rs`）:
+   `ast_to_sexpr`のシグネチャに`structs: &HashSet<Path>`（`AdtKind::Struct`と解決済みの
+   型Path集合——唯一の実呼び出し元`Interp::add_compiled_function`が`Interp::struct_types`を
+   渡す）を追加し、翻訳再帰全体（`ast_to_sexpr_scoped`/`translate_*`、`direct`/
+   `outer_captured`と同じ経路）にスレッド。`struct_field_kind`は`Type::Named(p, _)`が
+   `structs`に含まれればkind `6`（パススルー）に分類——ネスト構造体フィールドの値は
+   それ自体がタグ付きboxed-struct `Sexpr`なので、`Str`/`Sexpr`フィールドと同じく
+   エンコード（`compile-tag-struct-field`）・デコード（`compile-sexpr-field`）とも
+   素通しで正しい。**`compiler.rs`側はkind 6が最初からパススルーなのでコード変更ゼロ**
+   （コメントのみ更新）。construct引数・field-get・field-setの3経路全てで、
+   ネストした`defstruct`/`Vector<T>`/`cons-cell<K,V>`型フィールドを含む関数が
+   compile可能になった。`tagged_ast_list_to_sexpr_with`の`kind_fn`は
+   `fn(&Type) -> i64`→`impl Fn(&Type) -> i64`（`structs`をキャプチャする
+   クロージャを渡すため）。
+   - kind `0`（明示的panic）に残るのは正当な表現ギャップのみ:
+     `Type::Fn`（ClosureBoxとGC構造体フィールドの統合はStage 6a-6bの領分）、
+     一般ADT（生`malloc`ポインタはGC走査対象の構造体フィールドに置けない——
+     ADT自体のGC-box化までは本質的に不可能）、ジェネリック型変数
+     （ジェネリック定義を1回だけcompileする現方式ではmonomorphizationなしに
+     決まらない——これは型消去/パラメトリシティの問題であって
+     「registryがないから」ではない）。`struct_field_kind`のdocを正確な理由に全面書き換え。
+2. **interpのSexpr宣言フィールドdecode誤りを修正**（`src/eval/interp.rs`）:
+   `decode_struct_field`のshapeヒューリスティックは、`Sexpr`宣言フィールドに格納された
+   quoted `42`/`3.14`/`"s"`を`RtValue::Int`/`Float`/`Str`に誤変換していた（静的型と矛盾。
+   旧docは「静的型駆動のdecodeには`Interp`が持たない`Registry`アクセスが要る」として
+   Float曖昧性を既知の不正確さとして放置していたが、実際にはフィールドの静的型は
+   利用地点に既にあった）。3経路をガード:
+   - `Expr::FieldGet`のeval arm: FieldGetノード自身の`t.ty`（=フィールドの宣言型）が
+     `Sexpr`なら`RtValue::Sexpr(raw)`を直接返す（新設ヘルパー`is_sexpr_ty`）。
+   - `vector_get`: 呼び出しサイトのcheck済み返り値型で判定——`eval_builtin_method`に
+     `ret_ty: &Type`を追加し、`Expr::Assoc`/`TraitCall`/`Apply`の3呼び出し元が
+     `&t.ty`を渡す（`Vector<Sexpr>`の`get`が対象）。
+   - `match`のboxed-structパターン: `Pattern::Ctor`に`sexpr_fields: Vec<bool>`を追加、
+     `Checker::check_ctor_pattern`がフィールドのインスタンス化済み型（`subst_apply`後）
+     から**check時に焼き込む**——`Expr::Construct::mutable`と同一の方式。
+   - shapeヒューリスティックが残るのはジェネリックbody内（アクセサ本体の`ty`が型変数の
+     まま型消去評価されるケース）のみで、これは真の型消去限界としてdocに明記
+     （monomorphized評価かbox側への型引数記録が要る、という設計次元の課題）。
+3. **`binding_kind`が構造体型を`KIND_SEXPR`にしない理由のコメント訂正**（`src/compiler.rs`
+   `compile-construct-boxed-struct`のdoc）: 旧「registry-freeで構造体型と一般ADT型を
+   区別できないから」→ 正「boxed-structは出生時に`push-permanent-sexpr-root`で
+   永続保護済みなので、束縛単位のpush/popは冗長なブックキーピングにしかならないから」。
+
+検証: `scripts/with-llvm-env.sh cargo test`全31バイナリ812件green（回帰テスト7件追加:
+`struct_test.rs`にSexpr宣言フィールドのアクセサ/setf/match destructuring 4件、
+`vector_test.rs`に`Vector<Sexpr>::get` 1件、`compile_test.rs`にネスト構造体の
+compile済みconstruct+accessor/setter 2件）。`compiler.rs`本体はコメント変更のみのため
+ヒープ容量調整は不要。
+
+教訓（メモリ`feedback-static-types-are-always-known`に記録）: 静的型付け言語の処理系開発で
+「この地点では型が分からない」という説明が出てきたら、それはほぼ常に「checkerが持っている
+情報を運ぶ経路を作っていない」の言い換えであり、実装を諦める理由にならない。
+`Expr::Construct::mutable`/`TraitCall::impls`/`Pattern::Ctor::sexpr_fields`のように
+check時に解決してASTに焼き込むか、`ast_to_sexpr`の`structs`のように解決済みデータを
+引数で手渡せばよい。真に静的に決まらないのは、ジェネリック定義を型消去のまま
+1回だけ評価/compileする場合の型変数（monomorphizationの問題）と、マクロ展開時
+（型検査前なので型が存在しない）だけ。
