@@ -18,15 +18,23 @@
    `RtValue`に残す。設計・ステージ分割の詳細は
    [implementation-log.md](implementation-log.md)の「Sexpr/RtValue内部表現統合 実装計画」節参照。
    - **Stage 0（完了）**: `Value::Boxed`/`BoxedObj::Float`の骨組み、`TAG_FLOAT`→`TAG_BOXED`再利用。
-   - **Stage 1-3（未着手）**: `defstruct`/`Vector<T>`/`cons-cell<K,V>`を`BoxedObj::Struct`に統合
-     （mem/rt層 → インタプリタ結線 → コンパイラ結線の3段階）。
+   - **Stage 1（完了）**: `defstruct`/`Vector<T>`/`cons-cell<K,V>`が最終的に載る
+     `BoxedObj::Struct`/`StructPayload::Fields`のmem/rt層プラミング
+     （`Heap::alloc_struct`等、`rt_struct_new`/`rt_struct_field_get`/`rt_struct_field_set`）。
+     まだ`RtValue::Struct`と並存するだけで、インタプリタ/コンパイラのどちらにも未配線。
+   - **Stage 2-3（未着手）**: Struct: インタプリタ結線 → コンパイラ結線の2段階。
    - **Stage 4-5（未着手）**: `HashTable<K,V>`を`BoxedObj::Struct`（`StructPayload::Map`）に統合。
    - **Stage 6a-6b（未着手）**: 変数束縛スロットの`BoxedObj::Cell`化 → `RtValue::Closure`を
      `BoxedObj::Closure`に統合。
    - **Stage 7-8（未着手）**: `Scope<V>`を`BoxedObj::Struct`（`StructPayload::Frames`）に統合
      （自己ホスティングコンパイラ自体がScopeに依存するため最後に単独で着地）。
 
-直近完了: `HashTable<K,V>`への`Iter`実装（2026-07-02）——`keys`/`values`/`entries`
+直近完了: Sexpr/RtValue内部表現統合Stage 1（2026-07-02）——`BoxedObj::Struct`/
+`StructPayload::Fields`のmem/rt層プラミング（`Heap::alloc_struct`等、
+`rt_struct_new`/`rt_struct_field_get`/`rt_struct_field_set`）。インタプリタ/コンパイラは
+まだ無配線（Stage 2-3）、詳細は[implementation-log.md](implementation-log.md)参照。
+
+その前に完了: `HashTable<K,V>`への`Iter`実装（2026-07-02）——`keys`/`values`/`entries`
 （Rust builtin、`registry::hashtable_def`/`eval_builtin_method`）を新設し、`entries`が返す
 `Vector<cons-cell<K,V>>`（`cons-cell<A,B>`は`prelude.rs`の汎用`car`/`cdr`構造体）を
 `hashtable-iter<K,V>`が`vector-iter<T>`と同じカーソル走査で辿る形で`Iter`を実装。`HashMap`に

@@ -407,6 +407,104 @@ pub unsafe extern "C" fn rt_float_value(args: *const i64, argc: u32) -> i64 {
     }
 }
 
+// ---- Sexpr/RtValue unification, Stage 1: boxed objects (Struct) --------
+//
+// `BoxedObj::Struct` (`typelisp-mem`) is the shared runtime shape behind a
+// `defstruct` instance, `Vector<T>`, and `cons-cell<K,V>` alike — see its
+// doc comment. This mem/rt-layer plumbing is deliberately unwired from
+// `compiler.rs`/the interpreter for now (that's Stage 2/3 of the
+// unification plan, per `docs/TODO.md`): these three functions exist so the
+// representation itself can be exercised and tested in isolation first.
+
+/// `(rt-struct-new type-name field0 field1 ...)` for compiled code —
+/// allocates a boxed `Sexpr` struct. `args[0]` is a tagged `Sexpr` `Str`
+/// (the struct's type name, read once here rather than kept as a live
+/// `Sexpr` reference — `Heap::alloc_struct` copies it out into an owned
+/// `String`, like every other `BoxedObj` payload); `args[1..argc]` are the
+/// field values, already-tagged `Sexpr`s copied into the new struct's field
+/// vector unchanged (this function doesn't interpret them, same as
+/// [`rt_cons`] doesn't interpret its `car`/`cdr`).
+///
+/// # Safety
+///
+/// `argc` must be `>= 1`, `args` must point to at least `argc` valid `i64`s,
+/// and `args[0]` must decode to a `Value::Str`; a `Heap` must already be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_struct_new(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_struct_new: expected at least 1 argument (the type name)");
+    }
+    let type_name = match decode(*args) {
+        Value::Str(id) => active_heap().string(id).to_string(),
+        _ => fatal("rt_struct_new: first argument is not a Str"),
+    };
+    let mut fields = Vec::with_capacity(argc as usize - 1);
+    for i in 1..argc as isize {
+        fields.push(decode(*args.offset(i)));
+    }
+    encode(active_heap().alloc_struct(type_name, fields))
+}
+
+/// `(rt-struct-field-get s idx)` for compiled code — the `idx`-th field of
+/// boxed struct `args[0]` (a tagged `Sexpr`), where `args[1]` is a *raw*
+/// (untagged) `i64` index, matching [`rt_str_ref`]'s convention for its own
+/// raw index argument. Fatal if `args[0]` isn't a boxed struct or `idx` is
+/// out of range — the checker (a `defstruct` field access) or the builtin
+/// method itself (`Vector<T>`'s own bounds check) is responsible for
+/// guaranteeing that never happens once this is wired up, the same
+/// convention every other `rt_*` bounds violation here follows.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s,
+/// the first decoding to a `Value::Boxed` struct; a `Heap` must already be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_struct_field_get(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_struct_field_get: expected 2 arguments");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal("rt_struct_field_get: first argument is not a boxed Sexpr"),
+    };
+    let idx = *args.add(1);
+    if idx < 0 {
+        fatal("rt_struct_field_get: negative field index");
+    }
+    encode(active_heap().struct_field(id, idx as usize))
+}
+
+/// `(rt-struct-field-set! s idx val)` for compiled code — overwrites the
+/// `idx`-th field of boxed struct `args[0]` in place with `args[2]` (a
+/// tagged `Sexpr`); `args[1]` is a raw index, like [`rt_struct_field_get`].
+/// Returns the compiled representation of `Unit` (`0`), the same convention
+/// [`rt_set_car`]/[`rt_set_cdr`] use for their own in-place mutation.
+///
+/// # Safety
+///
+/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s,
+/// the first decoding to a `Value::Boxed` struct; a `Heap` must already be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_struct_field_set(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_struct_field_set: expected 3 arguments");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal("rt_struct_field_set: first argument is not a boxed Sexpr"),
+    };
+    let idx = *args.add(1);
+    if idx < 0 {
+        fatal("rt_struct_field_set: negative field index");
+    }
+    let val = decode(*args.add(2));
+    active_heap().struct_set_field(id, idx as usize, val);
+    0
+}
+
 // ---- Stage 4: GC root safety -------------------------------------------
 
 /// Registers a `Sexpr`-typed value as a GC root for as long as it's live in
@@ -789,7 +887,7 @@ mod tests {
     use super::{
         active_heap, decode, encode, rt_car, rt_cdr, rt_cons, rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root,
         rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append,
-        rt_str_eq, rt_str_length, rt_str_new, rt_str_ref, set_active_heap,
+        rt_str_eq, rt_str_length, rt_str_new, rt_str_ref, rt_struct_field_get, rt_struct_field_set, rt_struct_new, set_active_heap,
     };
 
     #[test]
@@ -1169,5 +1267,126 @@ mod tests {
             Value::Str(id) => assert_eq!(unsafe { active_heap() }.string(id), "foobar"),
             other => panic!("expected a Str, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn rt_struct_new_builds_a_boxed_struct_with_its_fields() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let type_name = make_str("point");
+        let x = encode(Value::Int(1));
+        let y = encode(Value::Int(2));
+        let args = [type_name, x, y];
+        let tagged = unsafe { rt_struct_new(args.as_ptr(), 3) };
+
+        match decode(tagged) {
+            Value::Boxed(id) => {
+                let h = unsafe { active_heap() };
+                assert_eq!(h.struct_type_name(id), "point");
+                assert_eq!(h.struct_field_count(id), 2);
+            }
+            other => panic!("expected a boxed struct, got {:?}", other),
+        }
+
+        let get_x = [tagged, 0];
+        let get_y = [tagged, 1];
+        assert_eq!(decode(unsafe { rt_struct_field_get(get_x.as_ptr(), 2) }), Value::Int(1));
+        assert_eq!(decode(unsafe { rt_struct_field_get(get_y.as_ptr(), 2) }), Value::Int(2));
+    }
+
+    #[test]
+    fn rt_struct_new_with_no_fields_builds_an_empty_struct() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let type_name = make_str("unit-struct");
+        let args = [type_name];
+        let tagged = unsafe { rt_struct_new(args.as_ptr(), 1) };
+
+        match decode(tagged) {
+            Value::Boxed(id) => assert_eq!(unsafe { active_heap() }.struct_field_count(id), 0),
+            other => panic!("expected a boxed struct, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rt_struct_field_set_mutates_in_place() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let type_name = make_str("point");
+        let args = [type_name, encode(Value::Int(1)), encode(Value::Int(2))];
+        let tagged = unsafe { rt_struct_new(args.as_ptr(), 3) };
+
+        let set_args = [tagged, 0, encode(Value::Int(99))];
+        assert_eq!(unsafe { rt_struct_field_set(set_args.as_ptr(), 3) }, 0, "field-set returns Unit (0)");
+
+        let get_x = [tagged, 0];
+        let get_y = [tagged, 1];
+        assert_eq!(decode(unsafe { rt_struct_field_get(get_x.as_ptr(), 2) }), Value::Int(99));
+        assert_eq!(decode(unsafe { rt_struct_field_get(get_y.as_ptr(), 2) }), Value::Int(2), "the other field is untouched");
+    }
+
+    /// A struct field that itself holds a cons must survive a GC the same
+    /// way a cons reachable through *another* cons's `car`/`cdr` does — the
+    /// direct test that `Heap::gc`'s mark phase actually traces into a
+    /// `BoxedObj::Struct`'s fields (`push_boxed_nested`), not just marks the
+    /// box slot itself and stops.
+    #[test]
+    fn gc_traces_into_a_rooted_structs_fields() {
+        let mut heap = Heap::with_capacity(16);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let inner_args = [encode(Value::Int(111)), encode(Value::Int(222))];
+        let inner_cons = unsafe { rt_cons(inner_args.as_ptr(), 2) };
+
+        let type_name = make_str("wrapper");
+        let struct_args = [type_name, inner_cons];
+        let boxed = unsafe { rt_struct_new(struct_args.as_ptr(), 2) };
+        unsafe { rt_push_sexpr_root(&boxed as *const i64, 1) };
+
+        // Exhaust the remaining free cells with unrelated garbage to force a
+        // real GC.
+        for i in 0..20 {
+            let args = [encode(Value::Int(i)), encode(Value::Int(i))];
+            unsafe { rt_cons(args.as_ptr(), 2) };
+        }
+
+        let get_field = [boxed, 0];
+        let field = unsafe { rt_struct_field_get(get_field.as_ptr(), 2) };
+        let one_arg = [field];
+        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(111));
+        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Int(222));
+    }
+
+    /// The negative-case counterpart to the test above — an *unrooted*
+    /// struct's field-held cons is not protected from a GC triggered by
+    /// other allocations, confirming the previous test's positive result
+    /// isn't a coincidence of a GC never actually running.
+    #[test]
+    fn gc_reclaims_an_unrooted_structs_fields() {
+        let mut heap = Heap::with_capacity(16);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let inner_args = [encode(Value::Int(111)), encode(Value::Int(222))];
+        let inner_cons = unsafe { rt_cons(inner_args.as_ptr(), 2) };
+
+        let type_name = make_str("wrapper");
+        let struct_args = [type_name, inner_cons];
+        let _boxed = unsafe { rt_struct_new(struct_args.as_ptr(), 2) };
+        // Deliberately not rooted.
+
+        for i in 0..20 {
+            let args = [encode(Value::Int(i)), encode(Value::Int(i))];
+            unsafe { rt_cons(args.as_ptr(), 2) };
+        }
+        unsafe { active_heap() }.gc();
+
+        // The struct itself is unreachable, so its box slot was recycled by
+        // the sweep above — and with it, the only path that kept the
+        // field's cons cell (already exercised as garbage by the unrelated
+        // allocations, but this pins down the box side specifically).
+        assert_eq!(unsafe { active_heap() }.box_count(), 0, "the unrooted struct was reclaimed");
     }
 }

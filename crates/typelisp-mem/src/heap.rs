@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::ptr;
 
 use crate::Error;
-use super::value::{BoxId, BoxedObj, Cell, ConsRef, PathId, StrId, SymId, Value};
+use super::value::{BoxId, BoxedObj, Cell, ConsRef, PathId, StrId, StructPayload, SymId, Value};
 
 pub struct Heap {
     base: *mut Cell, // start of the cons arena; owns the allocation
@@ -302,9 +302,72 @@ impl Heap {
     /// panic already uses: a correctly type-checked program never passes a
     /// mismatched `BoxId` here.
     pub fn float_value(&self, id: BoxId) -> f64 {
-        match self.box_slots[id.0 as usize] {
-            Some(BoxedObj::Float(f)) => f,
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Float(f)) => *f,
             _ => panic!("BoxId does not hold a Float"),
+        }
+    }
+
+    /// Store a struct-shaped [`BoxedObj`] with fixed- or variable-length
+    /// `fields`, returning its `Value::Boxed` — the runtime representation a
+    /// `defstruct` instance, `Vector<T>`, and `cons-cell<K,V>` all share
+    /// (see `BoxedObj`'s doc comment). `type_name` is what a later builtin
+    /// method dispatch (`eval_builtin_method`) uses to decide what the
+    /// fields mean; this layer itself doesn't interpret it.
+    pub fn alloc_struct(&mut self, type_name: String, fields: Vec<Value>) -> Value {
+        self.alloc_boxed(BoxedObj::Struct { type_name, payload: StructPayload::Fields(fields) })
+    }
+
+    /// The type name of a boxed struct. Panics if `id` doesn't hold a
+    /// `BoxedObj::Struct` — same internal-invariant-trap convention as
+    /// [`float_value`](Self::float_value).
+    pub fn struct_type_name(&self, id: BoxId) -> &str {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Struct { type_name, .. }) => type_name,
+            _ => panic!("BoxId does not hold a Struct"),
+        }
+    }
+
+    /// The number of fields a boxed struct holds — e.g. `Vector<T>::length`
+    /// reads this directly, unlike a `defstruct` instance's fixed arity
+    /// (known statically, so callers with a static field index rarely need
+    /// this). Panics if `id` doesn't hold a `BoxedObj::Struct`.
+    pub fn struct_field_count(&self, id: BoxId) -> usize {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Struct { payload: StructPayload::Fields(fields), .. }) => fields.len(),
+            _ => panic!("BoxId does not hold a Struct"),
+        }
+    }
+
+    /// The `idx`-th field of a boxed struct. Panics if `id` doesn't hold a
+    /// `BoxedObj::Struct`, or if `idx` is out of range — the checker (for a
+    /// `defstruct` field access) or the builtin method itself (for
+    /// `Vector<T>`'s own bounds check) is responsible for guaranteeing that
+    /// never happens, the same convention [`car`](Self::car)/[`cdr`](Self::cdr)
+    /// use for a non-cons argument.
+    pub fn struct_field(&self, id: BoxId, idx: usize) -> Value {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Struct { payload: StructPayload::Fields(fields), .. }) => {
+                *fields.get(idx).unwrap_or_else(|| panic!("struct field index {} out of range", idx))
+            }
+            _ => panic!("BoxId does not hold a Struct"),
+        }
+    }
+
+    /// Overwrites the `idx`-th field of a boxed struct in place — the
+    /// mutable-reference-semantics counterpart to [`struct_field`](Self::struct_field),
+    /// mirroring [`set_car`](Self::set_car)/[`set_cdr`](Self::set_cdr)'s
+    /// in-place mutation of a cons cell. Panics under the same conditions as
+    /// [`struct_field`](Self::struct_field).
+    pub fn struct_set_field(&mut self, id: BoxId, idx: usize, val: Value) {
+        match self.box_slots[id.0 as usize].as_mut() {
+            Some(BoxedObj::Struct { payload: StructPayload::Fields(fields), .. }) => {
+                if idx >= fields.len() {
+                    panic!("struct field index {} out of range", idx);
+                }
+                fields[idx] = val;
+            }
+            _ => panic!("BoxId does not hold a Struct"),
         }
     }
 
@@ -392,12 +455,20 @@ impl Heap {
 
     /// Push every `Value` nested directly inside a `BoxedObj`'s payload onto
     /// `stack`, for `gc`'s mark phase to trace into. `Float` holds no nested
-    /// `Value` (a fully-immediate `f64` payload), so this is a no-op today —
-    /// later `BoxedObj` kinds (struct fields, a closure's captured
-    /// environment, ...) will extend this `match` with real fan-out.
-    fn push_boxed_nested(obj: &BoxedObj, _stack: &mut Vec<Value>) {
+    /// `Value` (a fully-immediate `f64` payload), so that arm is a no-op —
+    /// `Struct` holds a `Vec<Value>` of fields, each of which must be traced
+    /// the same as a cons cell's `car`/`cdr` (a struct field can itself hold
+    /// a cons, a string, or another boxed struct). Later `BoxedObj` kinds (a
+    /// closure's captured environment, ...) will extend this `match` with
+    /// their own fan-out.
+    fn push_boxed_nested(obj: &BoxedObj, stack: &mut Vec<Value>) {
         match obj {
             BoxedObj::Float(_) => {}
+            BoxedObj::Struct { payload: StructPayload::Fields(fields), .. } => {
+                for &v in fields {
+                    stack.push(v);
+                }
+            }
         }
     }
 

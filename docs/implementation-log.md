@@ -2418,7 +2418,7 @@ panicと同じ前例で実行時panic（型システムでは「有効なスカ�
 panicの両方）、`symbol->string`/`string->symbol`（往復、非symbolでのpanic）を追加。全体テスト
 （`./scripts/with-llvm-env.sh cargo test`、workspace全体）green。
 
-## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0完了・Stage 1-8未着手）
+## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-1完了・Stage 2-8未着手）
 
 `HashTable<K,V>::entries`のペア型を巡る議論の中で、ユーザーから「`Sexpr`と`RtValue`という
 2つの並行した実行時値表現に分かれていること自体がおかしい」という指摘を受けた。実際の
@@ -2487,7 +2487,22 @@ FFIハンドルだけを`RtValue`に残す。さらに調査で判明した事�
   テスト: `tests/eval_test.rs`/`tests/prelude_test.rs`/`tests/compile_test.rs`に
   Float構築・eq/eql/equal/equalp分岐・JIT経由の往復テストを追加。全体テスト
   （31クレート）+ Miri（`mem_test`、`typelisp-rt`）green。
-- **Stage 1（未着手）**: `StructPayload::Fields`のmem/rt層プラミング（`rt_struct_new/get/set`）。
+- **Stage 1（完了、2026-07-02）**: `StructPayload::Fields`のmem/rt層プラミング。
+  `crates/typelisp-mem`（`BoxedObj::Struct{type_name, payload}`、`StructPayload::Fields(Vec<Value>)`、
+  `Heap::alloc_struct/struct_type_name/struct_field_count/struct_field/struct_set_field`、
+  `push_boxed_nested`のStruct対応でGC mark loopがフィールド内の`Value`まで辿るように拡張）、
+  `crates/typelisp-rt`（`rt_struct_new`/`rt_struct_field_get`/`rt_struct_field_set`、
+  型名は引数`args[0]`のタグ付き`Sexpr` `Str`として渡す設計——`rt_str_new`と同じ「呼び出し側が
+  文字列を作ってから渡す」規約）を実装。`BoxedObj`は`Struct`が`Vec<Value>`を所有するため
+  `Copy`を外し（`Clone`のみ）、`Heap::float_value`等の既存読み出し側を参照経由の借用に修正。
+  **意図的にこのStageでは`src/compiler.rs`/`src/eval/interp.rs`のどちらにも配線しない**——
+  `RtValue::Struct`/`StructData`は無変更のまま並存させ、新しいmem/rt層の表現だけを単独で
+  テスト可能な状態にする（Stage 2でインタプリタを、Stage 3でコンパイラを繋ぐ）。
+  テスト: `crates/typelisp-mem`の`tests/mem_test.rs`にフィールド読み書き・GCが構造体の
+  フィールド経由でconsを辿る（トレース）こと・非構造体`BoxId`へのアクセスがpanicすることを
+  検証するテストを追加、`crates/typelisp-rt`の`src/lib.rs`内テストモジュールに
+  `rt_struct_new`/`rt_struct_field_get`/`rt_struct_field_set`のABI往復・GCルート保護の
+  テストを追加。全体テスト（31クレート）+ Miri（`mem_test`、`typelisp-rt`）green。
 - **Stage 2（未着手）**: Struct: インタプリタ結線——`RtValue::Struct`/`StructData`を削除し
   `Expr::Construct`/`FieldGet`/`FieldSet`を新表現に接続。`Vector<T>`/`cons-cell<K,V>`も
   この時点で自動的に新表現に乗る。

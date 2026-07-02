@@ -152,9 +152,34 @@ impl BoxId {
 /// it here (heap-resident behind a small index, exactly like `Value::Str`
 /// already is) is what makes it representable, closing that gap as the
 /// first proof of this mechanism.
-#[derive(Clone, Copy, Debug)]
+///
+/// `Struct` is the second case: `defstruct` instances, `Vector<T>`, and
+/// `cons-cell<K,V>` all share this one variant rather than getting one each
+/// — `type_name` plus whichever builtin method dispatches on it is what
+/// gives the fields their meaning (the same "no special-cased runtime
+/// shape, just a box + a name" treatment `Vector<T>` already got when it was
+/// reintroduced on top of `RtValue::Struct`), not three parallel encodings
+/// of the same "a name and some fields" shape.
+///
+/// No longer `Copy` (a `Struct`'s `Vec<Value>` owns heap memory of its own,
+/// unlike `Float`'s bare `f64`) — every read site now borrows instead of
+/// implicitly copying, e.g. [`super::heap::Heap::float_value`].
+#[derive(Clone, Debug)]
 pub(crate) enum BoxedObj {
     Float(f64),
+    Struct { type_name: String, payload: StructPayload },
+}
+
+/// The fields behind a [`BoxedObj::Struct`]. `Fields` is the only shape
+/// today (a fixed-length `defstruct` instance and a variable-length
+/// `Vector<T>`/`cons-cell<K,V>` are both just "a `Vec<Value>`" at this
+/// layer — length-checking a fixed-arity struct's field count is the
+/// caller's job, same as it already is for `RtValue::Struct`). `Map`
+/// (`HashTable<K,V>`) and `Frames` (`Scope<V>`) are planned additions from
+/// later stages of the unification plan, not implemented yet.
+#[derive(Clone, Debug)]
+pub(crate) enum StructPayload {
+    Fields(Vec<Value>),
 }
 
 /// A Lisp value — the runtime encoding of `Sexpr`.

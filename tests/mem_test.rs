@@ -403,6 +403,123 @@ fn string_slots_are_recycled() {
     assert!(h.string_count() <= 1);
 }
 
+// ---- boxed structs (Sexpr/RtValue unification, Stage 1) -----------------
+//
+// `alloc_struct`/`struct_type_name`/`struct_field`/`struct_set_field` are
+// the mem-layer representation `defstruct`/`Vector<T>`/`cons-cell<K,V>` are
+// all meant to share once the interpreter/compiler are wired up to them
+// (Stage 2/3) — see `docs/TODO.md`'s Sexpr/RtValue unification plan. These
+// tests exercise the representation itself, independent of that wiring.
+
+#[test]
+fn structs_store_and_read_back_fields() {
+    let mut h = Heap::with_capacity(8);
+    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1), Value::Int(2)]);
+    match s {
+        Value::Boxed(id) => {
+            assert_eq!(h.struct_type_name(id), "point");
+            assert_eq!(h.struct_field_count(id), 2);
+            assert_eq!(h.struct_field(id, 0), Value::Int(1));
+            assert_eq!(h.struct_field(id, 1), Value::Int(2));
+        }
+        other => panic!("expected a boxed struct, got {:?}", other),
+    }
+    assert_eq!(h.box_count(), 1);
+}
+
+#[test]
+fn struct_with_no_fields_has_zero_field_count() {
+    let mut h = Heap::with_capacity(8);
+    let s = h.alloc_struct("unit-struct".to_string(), vec![]);
+    match s {
+        Value::Boxed(id) => assert_eq!(h.struct_field_count(id), 0),
+        other => panic!("expected a boxed struct, got {:?}", other),
+    }
+}
+
+#[test]
+fn struct_set_field_mutates_in_place() {
+    let mut h = Heap::with_capacity(8);
+    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1), Value::Int(2)]);
+    let id = match s {
+        Value::Boxed(id) => id,
+        other => panic!("expected a boxed struct, got {:?}", other),
+    };
+    h.struct_set_field(id, 0, Value::Int(99));
+    assert_eq!(h.struct_field(id, 0), Value::Int(99));
+    assert_eq!(h.struct_field(id, 1), Value::Int(2), "the other field is untouched");
+}
+
+#[test]
+#[should_panic(expected = "out of range")]
+fn struct_field_out_of_range_panics() {
+    let mut h = Heap::with_capacity(8);
+    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1)]);
+    let id = match s {
+        Value::Boxed(id) => id,
+        other => panic!("expected a boxed struct, got {:?}", other),
+    };
+    h.struct_field(id, 1);
+}
+
+#[test]
+#[should_panic(expected = "does not hold a Struct")]
+fn struct_accessor_on_a_boxed_float_panics() {
+    let mut h = Heap::with_capacity(8);
+    let f = h.alloc_float(1.5);
+    let id = match f {
+        Value::Boxed(id) => id,
+        other => panic!("expected a boxed float, got {:?}", other),
+    };
+    h.struct_type_name(id);
+}
+
+#[test]
+fn unreachable_structs_are_collected() {
+    let mut h = Heap::with_capacity(8);
+    let _ = h.alloc_struct("garbage".to_string(), vec![Value::Int(1)]);
+    assert_eq!(h.box_count(), 1);
+    h.gc(); // not rooted, not in any cell -> reclaimed
+    assert_eq!(h.box_count(), 0);
+}
+
+#[test]
+fn struct_reachable_via_rooted_cons_survives() {
+    let mut h = Heap::with_capacity(8);
+    let s = h.alloc_struct("keep".to_string(), vec![Value::Int(1)]);
+    let cell = h.cons(s, Value::Empty).unwrap();
+    h.push_root(cell);
+    let _ = h.alloc_struct("drop".to_string(), vec![Value::Int(2)]); // unrooted garbage
+    h.gc();
+    assert_eq!(h.box_count(), 1); // only "keep" survives
+    match h.car(cell).unwrap() {
+        Value::Boxed(id) => assert_eq!(h.struct_type_name(id), "keep"),
+        other => panic!("expected a boxed struct in car, got {:?}", other),
+    }
+}
+
+/// A struct field that itself holds an unrelated cons must survive a GC
+/// through that field alone — the direct test that `gc`'s mark phase traces
+/// *into* `BoxedObj::Struct`'s fields (not just marks the struct's own box
+/// slot and stops).
+#[test]
+fn gc_traces_into_a_rooted_structs_fields() {
+    let mut h = Heap::with_capacity(64);
+    let inner = list_of(&mut h, &[10, 20, 30]);
+    let s = h.alloc_struct("wrapper".to_string(), vec![inner]);
+    h.push_root(s);
+    for i in 0..20 {
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap(); // unrelated garbage
+    }
+    h.gc();
+    let id = match s {
+        Value::Boxed(id) => id,
+        other => panic!("expected a boxed struct, got {:?}", other),
+    };
+    assert_eq!(to_vec(&h, h.struct_field(id, 0)), vec![10, 20, 30]);
+    assert_accounting(&h);
+}
+
 // ---- roots bookkeeping --------------------------------------------------
 
 #[test]
