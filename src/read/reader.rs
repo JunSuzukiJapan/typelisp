@@ -393,7 +393,7 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
         cur.next();
     }
     // tok is non-empty: read_datum only dispatches here on a non-delimiter.
-    if let Some(v) = parse_number(&tok) {
+    if let Some(v) = parse_number(heap, &tok) {
         return Ok(v);
     }
     match tok.to_lowercase().as_str() {
@@ -450,8 +450,11 @@ fn split_path_top_level(tok: &str) -> Option<Vec<&str>> {
     Some(parts)
 }
 
-/// Interpret a token as a number, or `None` if it is a symbol.
-fn parse_number(tok: &str) -> Option<Value> {
+/// Interpret a token as a number, or `None` if it is a symbol. Takes `heap`
+/// (unlike an otherwise-pure parser) because a float literal must be
+/// heap-boxed (`Heap::alloc_float`, see `BoxedObj`'s doc comment) — an `f64`
+/// doesn't fit alongside `Value`'s tag the way an int/char does.
+fn parse_number(heap: &mut Heap, tok: &str) -> Option<Value> {
     let (neg, body) = if let Some(r) = tok.strip_prefix('-') {
         (true, r)
     } else if let Some(r) = tok.strip_prefix('+') {
@@ -484,7 +487,7 @@ fn parse_number(tok: &str) -> Option<Value> {
         && (body.contains('.') || body.contains('e') || body.contains('E'))
     {
         if let Ok(f) = body.parse::<f64>() {
-            return Some(Value::Float(if neg { -f } else { f }));
+            return Some(heap.alloc_float(if neg { -f } else { f }));
         }
     }
     None

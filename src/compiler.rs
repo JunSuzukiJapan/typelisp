@@ -776,17 +776,24 @@ pub const SOURCE: &str = r#"
 ;; `rt_push_sexpr_root`/`rt_pop_sexpr_root`'s existing generic `decode` --
 ;; stripping the tag the way `char` does would make a `Str` field
 ;; indistinguishable from a plain integer to that machinery, silently
-;; reopening the exact GC-safety gap Stage 4/6 closed for `Sexpr`. `sym`'s
-;; `Str` field and `float`'s `f64` field still aren't representable in
-;; compiled code (a `Sym`'s tagged payload is a `SymId`, not a `StrId` --
-;; extracting its *name* as a string needs its own interning primitive, a
-;; separate gap from this stage's `str`), so a `Bind` pattern trying to
-;; extract either still panics clearly here rather than producing garbage --
-;; never reached for a `Wildcard` sub-pattern (`compile-ctor-subpatterns`
-;; skips the call entirely then).
+;; reopening the exact GC-safety gap Stage 4/6 closed for `Sexpr`. `float`'s
+;; `f64` field (Sexpr/RtValue unification, Stage 0) goes through
+;; `rt_float_value` -- a real heap read, like `cons`, since a float is now
+;; boxed rather than an immediate bit pattern (see `typelisp-rt`'s
+;; `TAG_BOXED`). `sym`'s `Str` field still isn't representable in compiled
+;; code (a `Sym`'s tagged payload is a `SymId`, not a `StrId` -- extracting
+;; its *name* as a string needs its own interning primitive, a separate gap
+;; from `str`'s own), so a `Bind` pattern trying to extract it still panics
+;; clearly here rather than producing garbage -- never reached for a
+;; `Wildcard` sub-pattern (`compile-ctor-subpatterns` skips the call
+;; entirely then).
 (defun compile-sexpr-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant i64) (idx i32)) llvm-value
   (if (eq variant 1)
       (build-ashr builder v (const-i64 builder 3))
+      (if (eq variant 2)
+          (let ((args-ptr (alloca-args builder 1)))
+            (store-arg builder args-ptr 0 v)
+            (build-call builder (get-function m "rt_float_value") args-ptr 1))
       (if (eq variant 3)
           (build-lshr builder v (const-i64 builder 3))
           (if (eq variant 4)
@@ -799,7 +806,7 @@ pub const SOURCE: &str = r#"
                         (build-call builder (get-function m "rt_cdr") args-ptr 1)))
                   (if (eq variant 6)
                       v
-                      (panic "compile-sexpr-field: field type is not representable in compiled code yet")))))))
+                      (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))))))
 
 ;; Shared by every atomic pattern test (`pat-lit`'s literal-equality
 ;; check, a Ctor pattern's tag test): appends a fresh "this test passed"
@@ -828,6 +835,8 @@ pub const SOURCE: &str = r#"
                                 (compile-int builder e)
                                 (if (equal s "bool")
                                     (compile-bool builder e)
+                                    (if (equal s "float")
+                                        (compile-float builder e)
                                     (if (equal s "str")
                                         (compile-str builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                     (if (equal s "unit")
@@ -868,7 +877,7 @@ pub const SOURCE: &str = r#"
                                                                                                             (compile-field-set builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                             (if (equal s "trait-call")
                                                                                                                 (compile-trait-call builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                (panic (append "compile-value: unsupported tag " s)))))))))))))))))))))))))
+                                                                                                                (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))
                            (_ (panic "compile-value: malformed node, expected a tagged list"))))
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -894,6 +903,25 @@ pub const SOURCE: &str = r#"
                          (match (car (cdr e))
                            ((Bool b) (if b (const-i64 builder 1) (const-i64 builder 0)))
                            (_ (panic "compile-bool: malformed bool node"))))
+                       ;; `(float bits)` (Sexpr/RtValue unification, Stage 0)
+                       ;; -- a bare `f64` literal. `bits` is the literal's raw
+                       ;; `f64::to_bits` pattern embedded as a plain `Int`
+                       ;; node by `ast_bridge::ast_to_sexpr_scoped`'s
+                       ;; `Expr::Float` arm. Like `compile-int`, this returns
+                       ;; the *plain, untagged* bit pattern -- **not** a boxed
+                       ;; `Sexpr::Float` (that would be `rt_float_new`,
+                       ;; wrongly called twice: once here, once more by
+                       ;; `compile-construct-sexpr`'s own variant-2 arm on
+                       ;; the tagged result this function already returned --
+                       ;; boxing belongs to construct-sexpr alone, the exact
+                       ;; same division of labor `compile-int`/variant-1
+                       ;; already has: `compile-int` returns a bare `i64`,
+                       ;; `compile-construct-sexpr`'s `build-shl`/tag-OR is
+                       ;; what actually makes it a `Sexpr::Int`).
+                       (compile-float ((builder llvm-builder) (e Sexpr)) llvm-value
+                         (match (car (cdr e))
+                           ((Int bits) (const-i64 builder bits))
+                           (_ (panic "compile-float: malformed float node"))))
                        ;; `(str (int c0) (int c1) ...)` (Stage 7 of the
                        ;; Sexpr-representation plan, `docs/implementation-log.md`)
                        ;; — a string literal's content, one `(int c)` node per
@@ -2282,17 +2310,28 @@ pub const SOURCE: &str = r#"
                        ;; and a `Sexpr::Str` are the same bits) — so unlike
                        ;; every other variant here, `str` needs no further bit
                        ;; manipulation at all, just the field's own compiled
-                       ;; value passed straight through. `sym`'s `Str` field
-                       ;; and `float`'s `f64` field still aren't representable
-                       ;; in compiled code yet (a `Sym`'s tag payload is a
-                       ;; `SymId`, a separate gap from `str`'s own — see
-                       ;; `compile-sexpr-field`'s doc comment), so constructing
-                       ;; either still panics clearly.
+                       ;; value passed straight through. `float`'s `f64`
+                       ;; field (Sexpr/RtValue unification, Stage 0) is
+                       ;; boxed via `rt_float_new` (`typelisp-rt`'s
+                       ;; `TAG_BOXED`) rather than any bit manipulation here
+                       ;; — `f64` doesn't fit alongside a 3-bit tag the way
+                       ;; `int`/`char`/`bool` do. The field's own compiled
+                       ;; value is already the raw `f64` bit pattern
+                       ;; (`f64::to_bits`), the convention `rt_float_new`
+                       ;; expects. `sym`'s `Str` field still isn't
+                       ;; representable in compiled code yet (a `Sym`'s tag
+                       ;; payload is a `SymId`, a separate gap from `str`'s
+                       ;; own — see `compile-sexpr-field`'s doc comment), so
+                       ;; constructing one still panics clearly.
                        (compile-construct-sexpr ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (variant i64) (arg-forms Sexpr)) llvm-value
                          (if (eq variant 0)
                              (const-i64 builder 6)
                              (if (eq variant 1)
                                  (build-shl builder (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (car arg-forms)) (const-i64 builder 3))
+                                 (if (eq variant 2)
+                                     (let ((args-ptr (alloca-args builder 1)))
+                                       (store-arg builder args-ptr 0 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (car arg-forms)))
+                                       (build-call builder (get-function m "rt_float_new") args-ptr 1))
                                  (if (eq variant 3)
                                      (build-or builder
                                                 (build-shl builder (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (car arg-forms)) (const-i64 builder 3))
@@ -2314,7 +2353,7 @@ pub const SOURCE: &str = r#"
                                                      result))))
                                              (if (eq variant 6)
                                                  (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (car arg-forms))
-                                                 (panic "compile-construct-sexpr: field type is not representable in compiled code yet"))))))))
+                                                 (panic "compile-construct-sexpr: field type is not representable in compiled code yet")))))))))
                        ;; `(field-get idx-unary-list obj-form)` (Stage 6) —
                        ;; always a general-ADT box `compile-construct-box`
                        ;; built (this tag is only ever synthesized by

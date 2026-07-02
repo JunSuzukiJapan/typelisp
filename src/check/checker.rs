@@ -1598,7 +1598,9 @@ impl Checker {
     ) -> Result<Typed, Error> {
         let typed = match v {
             Value::Int(n) => Typed { expr: Expr::Int(n), ty: int_lit_ty(expected) },
-            Value::Float(f) => Typed { expr: Expr::Float(f), ty: float_lit_ty(expected) },
+            // `Sexpr::Float` is heap-boxed (`Value::Boxed`, see `BoxedObj`)
+            // — today the only thing a `Value::Boxed` read-literal can be.
+            Value::Boxed(id) => Typed { expr: Expr::Float(heap.float_value(id)), ty: float_lit_ty(expected) },
             Value::Bool(b) => Typed { expr: Expr::Bool(b), ty: Type::Bool },
             Value::Char(c) => Typed { expr: Expr::Char(c), ty: Type::Char },
             Value::Str(s) => Typed { expr: Expr::Str(heap.string(s).to_string()), ty: Type::Str },
@@ -3224,7 +3226,8 @@ fn value_to_quoted(heap: &Heap, v: Value) -> Result<QuotedSexpr, Error> {
     Ok(match v {
         Value::Empty => QuotedSexpr::Nil,
         Value::Int(n) => QuotedSexpr::Int(n),
-        Value::Float(f) => QuotedSexpr::Float(f),
+        // `Sexpr::Float` is heap-boxed (`Value::Boxed`, see `BoxedObj`).
+        Value::Boxed(id) => QuotedSexpr::Float(heap.float_value(id)),
         Value::Char(c) => QuotedSexpr::Char(c),
         Value::Bool(b) => QuotedSexpr::Bool(b),
         Value::Symbol(id) => QuotedSexpr::Sym(heap.symbol_name(id).to_string()),

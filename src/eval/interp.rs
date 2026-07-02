@@ -347,7 +347,7 @@ impl Interp {
                 if let Some(m) = self.methods.get(&key) {
                     self.apply(heap, &m.params, &m.body, argv)
                 } else {
-                    match eval_builtin_method(type_name, method, &argv) {
+                    match eval_builtin_method(heap, type_name, method, &argv) {
                         Some(result) => result,
                         None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
                     }
@@ -369,7 +369,7 @@ impl Interp {
                 if let Some(m) = self.methods.get(&key) {
                     self.apply(heap, &m.params, &m.body, argv)
                 } else {
-                    match eval_builtin_method(&key.0, method, &argv) {
+                    match eval_builtin_method(heap, &key.0, method, &argv) {
                         Some(result) => result,
                         None => Err(EvalError::NoSuchFunction(format!("{}::{}", key.0, method))),
                     }
@@ -417,7 +417,7 @@ impl Interp {
                         None => Err(EvalError::NoSuchFunction(name)),
                     },
                     RtValue::BuiltinMethod(type_name, method) => {
-                        match eval_builtin_method(&type_name, &method, &argv) {
+                        match eval_builtin_method(heap, &type_name, &method, &argv) {
                             Some(r) => r,
                             None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
                         }
@@ -505,7 +505,7 @@ impl Interp {
         let v = match variant {
             SEXPR_NIL => Value::Empty,
             SEXPR_INT => Value::Int(rt_i64(&vs[0])?),
-            SEXPR_FLOAT => Value::Float(rt_f64(&vs[0])?),
+            SEXPR_FLOAT => heap.alloc_float(rt_f64(&vs[0])?),
             SEXPR_CHAR => Value::Char(rt_char(&vs[0])?),
             SEXPR_BOOL => Value::Bool(rt_bool(&vs[0])?),
             SEXPR_SYM => heap.intern_symbol(&rt_str(vs[0].clone())?),
@@ -1150,7 +1150,7 @@ fn alloc_quoted(heap: &mut Heap, qs: &QuotedSexpr) -> Result<Value, EvalError> {
     match qs {
         QuotedSexpr::Nil => Ok(Value::Empty),
         QuotedSexpr::Int(n) => Ok(Value::Int(*n)),
-        QuotedSexpr::Float(f) => Ok(Value::Float(*f)),
+        QuotedSexpr::Float(f) => Ok(heap.alloc_float(*f)),
         QuotedSexpr::Char(c) => Ok(Value::Char(*c)),
         QuotedSexpr::Bool(b) => Ok(Value::Bool(*b)),
         QuotedSexpr::Sym(s) => Ok(heap.intern_symbol(s)),
@@ -1436,8 +1436,11 @@ fn eval_random(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// tries `Interp::methods` (user `defmethod`s) first, falling back to this.
 /// Argument count/types are trusted (the checker already validated them
 /// against the type's `AdtDef` signatures), so arms index `args` directly
-/// rather than re-checking shape.
-fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+/// rather than re-checking shape. Takes `heap` (unlike most of these arms
+/// need) for `sexpr`'s `eql`, which must read a boxed `Sexpr::Float`'s
+/// actual value (`Heap::float_value`) to tell it apart from `eq`'s identity
+/// comparison — see `sexpr_eql`'s doc comment.
+fn eval_builtin_method(heap: &Heap, type_name: &Path, method: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
     if *type_name == Path::root("hashtable") {
         return match method {
             "new" => Some(Ok(RtValue::HashTable(Rc::new(RefCell::new(HashMap::new()))))),
@@ -1446,6 +1449,9 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
             "remove" => Some(hashtable_remove(args)),
             "count" => Some(hashtable_count(args)),
             "clear" => Some(hashtable_clear(args)),
+            "keys" => Some(hashtable_keys(args)),
+            "values" => Some(hashtable_values(args)),
+            "entries" => Some(hashtable_entries(args)),
             _ => None,
         };
     }
@@ -1546,13 +1552,16 @@ fn eval_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Opti
     }
     if *type_name == Path::root("sexpr") {
         return match method {
-            // `eql` is a plain alias of `eq` here — see `registry::sexpr_assoc`'s
-            // doc comment (they only diverge once a boxed numeric
-            // representation exists, which this implementation doesn't have
-            // yet). `equal`/`equalp` are `prelude.rs` free functions
-            // (structural recursion via `match`), not registered here, the
-            // same as `length`/`append` for `Sexpr` lists.
-            "eq" | "eql" => Some(sexpr_eq(args)),
+            // `eq`/`eql` now diverge, as anticipated by this arm's own prior
+            // history (see `sexpr_eql`'s doc comment): `Sexpr::Float` became
+            // heap-boxed (`Value::Boxed`, see `BoxedObj`) for the `Sexpr`/
+            // `RtValue` unification plan, the "boxed numeric representation"
+            // this comment used to say didn't exist yet. `equal`/`equalp`
+            // are `prelude.rs` free functions (structural recursion via
+            // `match`), not registered here, the same as `length`/`append`
+            // for `Sexpr` lists.
+            "eq" => Some(sexpr_eq(args)),
+            "eql" => Some(sexpr_eql(heap, args)),
             _ => None,
         };
     }
@@ -1773,10 +1782,18 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// binding's *existing* root in place instead of leaving a freshly assigned
 /// value with no root at all — see `typelisp_rt::rt_set_sexpr_root`'s doc
 /// comment for the corruption this closes.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 18] {
+///
+/// `rt_float_new`/`rt_float_value` (Sexpr/RtValue unification, Stage 0):
+/// `compiler.rs`'s `compile-construct-sexpr`/`compile-sexpr-field` variant-2
+/// arms call these to box/unbox a `Sexpr::Float` (`Value::Boxed`, see
+/// `BoxedObj`) — the first `rt_*` pair for the new boxed-object store, same
+/// declare-into-every-module mechanism every other `rt_*` function here
+/// already uses.
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 20] {
     use crate::compile::runtime::{
-        rt_car, rt_cdr, rt_cons, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car,
-        rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_new, rt_str_ref, rt_trait_call_fail, rt_truncate_sexpr_roots,
+        rt_car, rt_cdr, rt_cons, rt_float_new, rt_float_value, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root,
+        rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_new, rt_str_ref, rt_trait_call_fail,
+        rt_truncate_sexpr_roots,
     };
     [
         ("rt_car", rt_car as usize),
@@ -1797,6 +1814,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 18] {
         ("rt_str_ref", rt_str_ref as usize),
         ("rt_str_eq", rt_str_eq as usize),
         ("rt_str_append", rt_str_append as usize),
+        ("rt_float_new", rt_float_new as usize),
+        ("rt_float_value", rt_float_value as usize),
     ]
 }
 
@@ -2635,6 +2654,53 @@ fn hashtable_clear(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Unit)
 }
 
+/// Reconstructs the original key `RtValue` a [`HashKey`] was built from
+/// (`HashKey::from_rtvalue`'s inverse) — sound because every `HashKey`
+/// variant maps to exactly one `RtValue` variant/value.
+fn hashkey_to_rtvalue(k: &HashKey) -> RtValue {
+    match k {
+        HashKey::Int(n) => RtValue::Int(*n),
+        HashKey::Bool(b) => RtValue::Bool(*b),
+        HashKey::Char(c) => RtValue::Char(*c),
+        HashKey::Str(s) => RtValue::Str(Rc::from(s.as_str())),
+    }
+}
+
+/// Builds a `Vector<T>` runtime value (`RtValue::Struct`'s variable-length
+/// `"vector"` representation, see `vector_def`'s doc comment) out of an
+/// already-collected field list — the shared tail of `hashtable_keys`/
+/// `hashtable_values`/`hashtable_entries`.
+fn vector_of(fields: Vec<RtValue>) -> RtValue {
+    RtValue::Struct(Rc::new(RefCell::new(StructData { type_name: "vector".to_string(), fields })))
+}
+
+fn hashtable_keys(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let map = expect_hashtable(&args[0])?;
+    let fields = map.borrow().keys().map(hashkey_to_rtvalue).collect();
+    Ok(vector_of(fields))
+}
+
+fn hashtable_values(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let map = expect_hashtable(&args[0])?;
+    let fields = map.borrow().values().cloned().collect();
+    Ok(vector_of(fields))
+}
+
+/// Each entry becomes a `cons-cell<K,V>` (`prelude.rs`'s generic `car`/`cdr`
+/// `defstruct` — `RtValue::Struct` with `type_name: "cons-cell"`, matching
+/// how `Checker::check_construct` would build one from typelisp source;
+/// built directly here since a defstruct instance is just tagged field
+/// data, not something only the checker/prelude can construct).
+fn hashtable_entries(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let map = expect_hashtable(&args[0])?;
+    let fields = map
+        .borrow()
+        .iter()
+        .map(|(k, v)| RtValue::Struct(Rc::new(RefCell::new(StructData { type_name: "cons-cell".to_string(), fields: vec![hashkey_to_rtvalue(k), v.clone()] }))))
+        .collect();
+    Ok(vector_of(fields))
+}
+
 /// The type tag a runtime value carries — what `Expr::TraitCall`'s eval arm
 /// reads off the receiver to learn which `impl`'s methods apply, since the
 /// checker erased that information down to "some type bound to the trait"
@@ -2889,6 +2955,30 @@ fn sexpr_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Bool(rt_sexpr(&args[0])? == rt_sexpr(&args[1])?))
 }
 
+/// `eql` on `Sexpr`: CL's `eql` is `eq` plus "two numbers of the same type
+/// and value are equivalent even when they aren't the same object" — the
+/// one case that can actually diverge from `eq`'s plain `Value` equality
+/// now that `Sexpr::Float` is heap-boxed (`Value::Boxed`, see `BoxedObj`):
+/// `eq`'s `==` compares two boxed floats by `BoxId` identity (correctly not
+/// `eq` for separately-allocated equal floats, the same way two separately
+/// built `Str`s aren't `eq` — see `registry::sexpr_assoc`'s doc comment),
+/// but they must still be `eql`. Every other `Sexpr` variant is either
+/// immediate (`Int`/`Char`/`Bool`/`Sym`, already value-equal under `eq`) or
+/// `eq`-as-identity by design (`Cons`/`Str`) — CL's own `eql` agrees `eq` is
+/// already correct for those, so this only special-cases `Boxed`.
+///
+/// `Value::Boxed` holds only `BoxedObj::Float` today (the `Sexpr`/`RtValue`
+/// unification plan's first case) — once other boxed kinds exist, this will
+/// need to check which kind before assuming `float_value` applies.
+fn sexpr_eql(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let a = rt_sexpr(&args[0])?;
+    let b = rt_sexpr(&args[1])?;
+    if let (Value::Boxed(ia), Value::Boxed(ib)) = (a, b) {
+        return Ok(RtValue::Bool(heap.float_value(ia) == heap.float_value(ib)));
+    }
+    Ok(RtValue::Bool(a == b))
+}
+
 /// Try to match a pattern against a value, returning the bindings on success.
 /// `heap` is needed to destructure `Sexpr` values (`RtValue::Sexpr`), which
 /// hold their `Cons`/`Str`/`Sym` payloads in the cons heap.
@@ -2940,7 +3030,7 @@ fn match_sexpr_ctor(heap: &Heap, variant: usize, args: &[Pattern], v: Value) -> 
     match (variant, v) {
         (SEXPR_NIL, Value::Empty) => Some(Vec::new()),
         (SEXPR_INT, Value::Int(n)) => match_pattern(heap, &args[0], &RtValue::Int(n)),
-        (SEXPR_FLOAT, Value::Float(f)) => match_pattern(heap, &args[0], &RtValue::Float(f)),
+        (SEXPR_FLOAT, Value::Boxed(id)) => match_pattern(heap, &args[0], &RtValue::Float(heap.float_value(id))),
         (SEXPR_CHAR, Value::Char(c)) => match_pattern(heap, &args[0], &RtValue::Char(c)),
         (SEXPR_BOOL, Value::Bool(b)) => match_pattern(heap, &args[0], &RtValue::Bool(b)),
         (SEXPR_SYM, Value::Symbol(id)) => {

@@ -152,7 +152,7 @@ pub unsafe extern "C" fn rt_heap_live_count(_args: *const i64, _argc: u32) -> i6
 
 // ---- Stage 2/3: the tagged `Sexpr` representation ----------------------
 
-use typelisp_mem::{ConsRef, PathId, StrId, SymId, Value};
+use typelisp_mem::{BoxId, ConsRef, PathId, StrId, SymId, Value};
 
 const TAG_BITS: i64 = 3;
 const TAG_MASK: i64 = 0b111;
@@ -161,7 +161,15 @@ const TAG_MASK: i64 = 0b111;
 // `Bool` share one "immediate constant" tag (`TAG_IMMEDIATE`) since `Value`
 // has 9 variants but only 8 tag slots — see that doc for the full rationale
 // (why this needs no more than 3 bits, the alignment argument for `Cons`
-// pointers, etc.).
+// pointers, etc.). `TAG_BOXED` (formerly `TAG_FLOAT`, reclaimed by the
+// `Sexpr`/`RtValue` unification plan — see `BoxedObj`'s doc comment in
+// `typelisp-mem`): `Value::Float` used to claim this tag directly and was
+// never actually representable in compiled code (`encode`/`decode` both
+// `fatal()`ed on it); an `f64` doesn't fit losslessly in the remaining bits
+// alongside a tag anyway, so this tag now means "payload is a `BoxId` into
+// the heap's boxed-object store" instead of trying to pack an immediate
+// float — `Float` is that store's first occupant, with more (structs,
+// closures, `HashTable<K,V>`, `Scope<V>`) planned to follow.
 const TAG_FIXNUM: i64 = 0b000;
 const TAG_CONS: i64 = 0b001;
 const TAG_SYMBOL: i64 = 0b010;
@@ -169,7 +177,7 @@ const TAG_STR: i64 = 0b011;
 const TAG_CHAR: i64 = 0b100;
 const TAG_PATH: i64 = 0b101;
 const TAG_IMMEDIATE: i64 = 0b110;
-const TAG_FLOAT: i64 = 0b111;
+const TAG_BOXED: i64 = 0b111;
 
 const IMMEDIATE_NIL: i64 = 0;
 const IMMEDIATE_FALSE: i64 = 1;
@@ -190,10 +198,12 @@ fn fatal(msg: &str) -> ! {
 }
 
 /// Encodes a `Value` into the tagged `i64` representation compiled code
-/// uses for a `Sexpr`. `Value::Float` isn't representable yet — it needs
-/// heap-boxing (a `ClosureBox`-style malloc+refcount allocation), out of
-/// scope for Stage 3 (see `docs/TODO.md`); callers that might encounter a
-/// `Sexpr` float should not reach this function yet.
+/// uses for a `Sexpr`. `Value::Boxed` needs no allocation here — unlike a
+/// hypothetical unboxed `Float` payload, a `BoxId` is already just a small
+/// integer index, exactly like `Symbol`/`Str`/`Path`; the caller must have
+/// already allocated the box (via e.g. `Heap::alloc_float`) the same way a
+/// `Value::Cons` must already be a live heap cell before reaching this
+/// function.
 ///
 /// `pub`, not `pub(crate)`: Stage 5's `Expr::Call` dispatch
 /// (`typelisp::eval::Interp::eval`) needs this same encoding from the
@@ -213,7 +223,7 @@ pub fn encode(v: Value) -> i64 {
         Value::Empty => (IMMEDIATE_NIL << TAG_BITS) | TAG_IMMEDIATE,
         Value::Bool(false) => (IMMEDIATE_FALSE << TAG_BITS) | TAG_IMMEDIATE,
         Value::Bool(true) => (IMMEDIATE_TRUE << TAG_BITS) | TAG_IMMEDIATE,
-        Value::Float(_) => fatal("encode: Sexpr Float is not yet representable in compiled code (boxing not implemented)"),
+        Value::Boxed(id) => ((id.as_u32() as i64) << TAG_BITS) | TAG_BOXED,
     }
 }
 
@@ -236,7 +246,7 @@ pub fn decode(tagged: i64) -> Value {
             IMMEDIATE_TRUE => Value::Bool(true),
             other => fatal(&format!("decode: unknown immediate tag payload {}", other)),
         },
-        TAG_FLOAT => fatal("decode: Sexpr Float is not yet representable in compiled code (boxing not implemented)"),
+        TAG_BOXED => Value::Boxed(BoxId::from_u32((tagged >> TAG_BITS) as u32)),
         _ => unreachable!("a 3-bit mask is always one of the 8 arms above"),
     }
 }
@@ -341,6 +351,59 @@ pub unsafe extern "C" fn rt_set_cdr(args: *const i64, argc: u32) -> i64 {
     match active_heap().set_cdr(c, val) {
         Ok(()) => 0,
         Err(_) => fatal("rt_set_cdr: first argument is not a cons"),
+    }
+}
+
+// ---- Sexpr/RtValue unification, Stage 0: boxed objects (Float) ---------
+//
+// `Value::Boxed` (`TAG_BOXED`) is the tagged representation for the heap's
+// general boxed-object store (`BoxedObj`, in `typelisp-mem`) — the
+// mechanism the `Sexpr`/`RtValue` unification plan uses to bring
+// struct/closure/`HashTable<K,V>`/`Scope<V>` values into `Sexpr` uniformly,
+// instead of leaving them in a separate `Rc`-managed `RtValue` universe.
+// `Float` is the first, deliberately trivial occupant (an `f64` doesn't fit
+// losslessly alongside a 3-bit tag, so `Sexpr::Float` was never actually
+// representable in compiled code before this). Unlike `rt_cons`'s `car`/
+// `cdr` (already-tagged `Sexpr` values), `rt_float_new`'s argument is a raw
+// `f64` bit pattern (`f64::to_bits`), not a tagged `Sexpr` — there is no
+// existing `Sexpr` value to decode, this constructs a brand new one, the
+// same way `compile-construct-sexpr`'s other constructors take their raw
+// field payloads (an `Int` literal's bits, a `Char`'s scalar value, ...)
+// rather than already-tagged `Sexpr`s.
+
+/// Allocates a boxed `Sexpr` float from a raw `f64` bit pattern.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// (the `f64`'s `to_bits()` reinterpreted as `i64`); a `Heap` must already
+/// be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_float_new(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_float_new: expected 1 argument");
+    }
+    let f = f64::from_bits(*args as u64);
+    encode(active_heap().alloc_float(f))
+}
+
+/// Reads the `f64` bit pattern out of a boxed `Sexpr` float — `args[0]` is a
+/// tagged `Sexpr` value (as [`rt_car`] etc. take), unlike `rt_float_new`'s
+/// raw payload. Fatal if it isn't actually a boxed float — the checker is
+/// responsible for guaranteeing that never happens, same convention as
+/// [`rt_car`] on a non-cons.
+///
+/// # Safety
+///
+/// Same as [`rt_float_new`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_float_value(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_float_value: expected 1 argument");
+    }
+    match decode(*args) {
+        Value::Boxed(id) => active_heap().float_value(id).to_bits() as i64,
+        _ => fatal("rt_float_value: argument is not a boxed Sexpr"),
     }
 }
 

@@ -15,4 +15,4 @@ pub mod value;
 
 pub use errors::Error;
 pub use heap::Heap;
-pub use value::{ConsRef, PathId, StrId, SymId, Value};
+pub use value::{BoxId, ConsRef, PathId, StrId, SymId, Value};

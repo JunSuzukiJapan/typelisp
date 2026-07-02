@@ -403,11 +403,13 @@ fn eval_sexpr(src: &str) -> (Heap, Value) {
 
 /// Structural equality for `Sexpr` values: `Value::Cons`'s derived
 /// `PartialEq` is pointer identity, so cons-shaped results need this instead.
+/// `Value::Boxed` (a `Sexpr::Float` today, see `BoxedObj`) is identity-based
+/// for the same reason, so it needs the same treatment.
 fn sexpr_eq(h: &Heap, a: Value, b: Value) -> bool {
     match (a, b) {
         (Value::Empty, Value::Empty) => true,
         (Value::Int(x), Value::Int(y)) => x == y,
-        (Value::Float(x), Value::Float(y)) => x == y,
+        (Value::Boxed(x), Value::Boxed(y)) => h.float_value(x) == h.float_value(y),
         (Value::Char(x), Value::Char(y)) => x == y,
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Symbol(x), Value::Symbol(y)) => h.symbol_name(x) == h.symbol_name(y),
@@ -433,6 +435,22 @@ fn cons_car_cdr() {
     assert_sexpr_eq("(cons (Int 1) (Nil))", |h| h.cons(Value::Int(1), Value::Empty).unwrap());
     assert_sexpr_eq("(car (cons (Int 1) (Nil)))", |_| Value::Int(1));
     assert_sexpr_eq("(cdr (cons (Int 1) (Nil)))", |_| Value::Empty);
+}
+
+#[test]
+fn float_sexpr_constructs_and_extracts_through_a_heap_boxed_value() {
+    // `Sexpr::Float` is heap-boxed (`Value::Boxed`, see `BoxedObj`) — this
+    // exercises `Heap::alloc_float`/`Interp::construct_sexpr`'s `SEXPR_FLOAT`
+    // arm end to end, not just the mem-layer plumbing `mem_test.rs` covers.
+    assert_sexpr_eq("(Float 3.5)", |h| h.alloc_float(3.5));
+    assert_sexpr_eq("(cons (Float 1.5) (Nil))", |h| {
+        let f = h.alloc_float(1.5);
+        h.cons(f, Value::Empty).unwrap()
+    });
+    assert_sexpr_eq(
+        "(match (Float 2.0) ((Float f) (Float f)) (_ (Nil)))",
+        |h| h.alloc_float(2.0),
+    );
 }
 
 #[test]

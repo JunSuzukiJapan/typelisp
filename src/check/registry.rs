@@ -590,6 +590,42 @@ fn hashtable_def() -> AdtDef {
         "clear".to_string(),
         AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
     );
+    // `keys`/`values`/`entries` (TODO.md's `HashTable<K,V>`-traversal item):
+    // a Rust `HashMap` has no stable, resumable cursor the way `Vector<T>`'s
+    // own index-based iterator does, so each call snapshots the table's
+    // current contents into a fresh `Vector` rather than exposing a live
+    // cursor — `eval_builtin_method`'s `"hashtable"` arm builds these
+    // (`hashtable_keys`/`hashtable_values`/`hashtable_entries`). `entries`'
+    // element type is `cons-cell<K,V>` (`prelude.rs`'s generic `car`/`cdr`
+    // product — there's no built-in tuple syntax, so this mirrors Lisp's
+    // own two-value-storage convention rather than an arbitrary
+    // `first`/`second` struct), which `hashtable-iter<K,V>` (also
+    // `prelude.rs`) walks to give `HashTable<K,V>` an `Iter` impl on top of
+    // this snapshot, the same way `vector-iter<T>` walks `Vector<T>`.
+    assoc.insert(
+        "keys".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Named(Path::root("vector"), vec![tvar("k")]), public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
+    );
+    assoc.insert(
+        "values".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Named(Path::root("vector"), vec![tvar("v")]), public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
+    );
+    assoc.insert(
+        "entries".to_string(),
+        AssocFn {
+            sig: FnSig {
+                type_params: vec![],
+                rest: None,
+                params: vec![hashtable_ty()],
+                ret: Type::Named(Path::root("vector"), vec![Type::Named(Path::root("cons-cell"), vec![tvar("k"), tvar("v")])]),
+                public: true,
+                builtin: true,
+                bounds: HashMap::new(),
+            },
+            instance: true,
+            builtin: true,
+        },
+    );
     AdtDef {
         name: Path::root("hashtable"),
         params: vec!["k".to_string(), "v".to_string()],

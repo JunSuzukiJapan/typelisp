@@ -141,16 +141,20 @@ pub const SOURCE: &str = r#"
           (car args)
           (list (quote if) (car args) (quote true) (cons (quote or) (cdr args))))))
 
-;; CL's `equal`: `eql` (here, `eq` — the two coincide in this representation,
-;; see `registry::sexpr_assoc`'s doc comment) plus structural recursion into
-;; `Cons` and case-sensitive content comparison for `Str` (`Str::equal`, not
-;; `Str::eq` — two separately-built `Str`s with equal content are never `eq`,
-;; see `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section).
+;; CL's `equal`: `eql` on everything but `Cons`/`Str`, which get structural
+;; recursion and case-sensitive content comparison respectively (`Str::equal`,
+;; not `Str::eq` — two separately-built `Str`s with equal content are never
+;; `eq`, see `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section).
+;; The catch-all is `eql`, not `eq`: they coincide for every immediate
+;; variant (`Int`/`Char`/`Bool`/`Sym`), but a boxed `Sexpr::Float`
+;; (`Value::Boxed`, see `BoxedObj`) is only `eql` — two separately-built
+;; equal floats are correctly never `eq` (identity, like `Str`/`Cons`), the
+;; same reason `eq` alone would be wrong here now.
 (defun equal ((a Sexpr) (b Sexpr)) bool
   (match a
     ((Cons a1 a2) (match b ((Cons b1 b2) (and (equal a1 b1) (equal a2 b2))) (_ false)))
     ((Str s1) (match b ((Str s2) (equal s1 s2)) (_ false)))
-    (_ (eq a b))))
+    (_ (eql a b))))
 
 ;; CL's `equalp`: like `equal`, but `Str`/`Char` fields compare
 ;; case-insensitively (`Str::equalp`/`Char::equalp`), and numbers compare by
@@ -631,6 +635,53 @@ pub const SOURCE: &str = r#"
           (Option::some v))
         (Option::none))))
 (defmethod iter ((self Vector<T>)) vector-iter<T> (vector-iter::new self 0))
+
+;; `cons-cell<A,B>`: a generic 2-field product, needed below purely because
+;; typelisp has no built-in tuple syntax. Named and shaped after Lisp's own
+;; convention for storing two values — a cons cell, `car`/`cdr` — rather
+;; than an arbitrary `first`/`second` struct; unlike the built-in `Sexpr`
+;; `Cons` (whose `car`/`cdr` are each dynamically, independently typed —
+;; see the note on `Sexpr` deliberately having no `Iter` impl, just below),
+;; `cons-cell<A,B>`'s `car`/`cdr` are the type parameters `A`/`B`, fixed
+;; once per instantiation — sound to build generically the same way
+;; `Vector<T>`/`vector-iter<T>` are. `HashTable<K,V>::entries`
+;; (`registry::hashtable_def`) yields a `Vector<cons-cell<K,V>>` of `(key
+;; . value)` pairs.
+(defstruct (cons-cell A B) (car A) (cdr B))
+
+;; `Sexpr` deliberately has **no** `Iter` impl: `Iter`'s `Item` must be one
+;; fixed type per impl (`vector-iter<T>`'s `Item` is `T`, `hashtable-
+;; iter<K,V>`'s is `cons-cell<K,V>`, both parameters fixed once per
+;; instantiation) — but a `Sexpr` list has no such parameter. Each `cons`
+;; cell's `car` is independently, dynamically typed (`(1 "a" foo)` is a
+;; perfectly ordinary list), so there is no single, correct `Item` to
+;; declare; `Item = Sexpr` would type-check but throws away exactly the
+;; static type information `Iter`/`doiter` exist to provide. Plain `Sexpr`
+;; recursion (`car`/`cdr`/`consp`/`null`) or `dolist` (which needs no
+;; `Item` — it just binds each element's type as `Sexpr`, same as this
+;; would, but without pretending to be a generic trait impl) are the
+;; correct way to walk a `Sexpr` list.
+
+;; `HashTable<K,V>` iteration (TODO.md's remaining item): `keys`/`values`/
+;; `entries` are Rust builtins (`registry::hashtable_def`,
+;; `eval_builtin_method`'s `"hashtable"` arm) — a `HashMap` has no stable,
+;; resumable cursor the way `Vector<T>`'s index does, so each call snapshots
+;; the table's current contents into a fresh `Vector`, the same "iterating
+;; over a snapshot" trade-off `vector-iter<T>` itself already makes for
+;; `Vector<T>` (mutating the source table mid-iteration is simply not
+;; observed, unlike `vector-iter<T>`'s shared reference). `hashtable-iter<K,V>`
+;; reuses `vector-iter<T>`'s exact cursor logic over that snapshot rather
+;; than duplicating it.
+(defstruct (hashtable-iter K V) (snapshot Vector<cons-cell<K,V>>) (pos i32))
+(impl Iter hashtable-iter<K,V>
+  (type Item cons-cell<K,V>)
+  (next ((self Self)) Option<cons-cell<K,V>>
+    (if (< self::pos (len self::snapshot))
+        (let ((e (get self::snapshot self::pos)))
+          (setf self::pos (+ self::pos 1))
+          (Option::some e))
+        (Option::none))))
+(defmethod iter ((self HashTable<K,V>)) hashtable-iter<K,V> (hashtable-iter::new (entries self) 0))
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,

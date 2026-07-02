@@ -15,7 +15,10 @@
 //! Cons cells live in a [`Heap`](super::heap::Heap) arena and are referenced
 //! through the opaque [`ConsRef`] (a raw pointer that is never dereferenced
 //! outside `mem`). Symbols and strings are stored in the heap and referenced by
-//! [`SymId`] / [`StrId`]. The public surface is entirely safe.
+//! [`SymId`] / [`StrId`]. `Float` is heap-resident too, behind [`BoxId`] (see
+//! [`BoxedObj`]) — an `f64` doesn't fit alongside a tag in one 64-bit word,
+//! the same reason `Str` isn't stored inline. The public surface is entirely
+//! safe.
 
 use std::fmt;
 
@@ -117,13 +120,49 @@ impl PathId {
     }
 }
 
+/// Reference to a boxed (heap-resident, GC-collected) object in the heap's
+/// box store — see [`BoxedObj`] and `Heap`'s `box_slots`. The general-purpose
+/// counterpart to [`StrId`]: unlike a string, a boxed object's payload may
+/// itself hold nested `Value`s (a struct's fields, a closure's captured
+/// environment, ...), so the mark phase must trace *into* it, not just flag
+/// the slot — see `Heap::gc`'s unified `Vec<Value>` mark stack.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct BoxId(pub(crate) u32);
+
+impl BoxId {
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+
+    pub fn from_u32(v: u32) -> BoxId {
+        BoxId(v)
+    }
+}
+
+/// The payload behind a [`Value::Boxed`] slot. Every "Lisp-writable" value
+/// beyond `Sexpr`'s own remaining built-in immediate/heap shapes (structs/
+/// `Vector<T>`/`HashTable<K,V>`/`Scope<V>`/closures) is meant to eventually
+/// live here, as one uniform heap-resident, GC-traced representation instead
+/// of a separate, `Rc`-managed value universe — see the project's `Sexpr`/
+/// `RtValue` unification plan. `Float` is the first case, and a deliberately
+/// forced one: an `f64` doesn't fit losslessly alongside a 3-bit tag in a
+/// 64-bit word (unlike `Int`/`Char`/`Bool`/every interned-index variant), so
+/// `Sexpr::Float` was never representable in the tagged compiled-code ABI at
+/// all (`typelisp-rt`'s `encode`/`decode` used to `fatal()` on it) — boxing
+/// it here (heap-resident behind a small index, exactly like `Value::Str`
+/// already is) is what makes it representable, closing that gap as the
+/// first proof of this mechanism.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum BoxedObj {
+    Float(f64),
+}
+
 /// A Lisp value — the runtime encoding of `Sexpr`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Value {
     /// The empty list `()` — `Sexpr::Nil`.
     Empty,
     Int(i64),
-    Float(f64),
     Char(char),
     Bool(bool),
     Symbol(SymId),
@@ -133,6 +172,12 @@ pub enum Value {
     /// reader by splitting the token into interned symbol segments. The checker
     /// decides whether each segment names a module or a type.
     Path(PathId),
+    /// A heap-resident, GC-collected boxed object — see [`BoxedObj`].
+    /// `Sexpr::Float` is the first case (`f64` doesn't fit an immediate
+    /// tagged word); further "Lisp-writable" runtime values (structs,
+    /// closures, `HashTable<K,V>`, `Scope<V>`) are planned to migrate here
+    /// too, per the `Sexpr`/`RtValue` unification plan.
+    Boxed(BoxId),
 }
 
 impl Value {

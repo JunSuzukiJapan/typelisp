@@ -280,9 +280,13 @@ fn set_car_and_set_cdr_mutate() {
     let mut h = Heap::with_capacity(8);
     let c = h.cons(Value::Int(1), Value::Int(2)).unwrap();
     h.set_car(c, Value::Char('x')).unwrap();
-    h.set_cdr(c, Value::Float(3.5)).unwrap();
+    let fv = h.alloc_float(3.5);
+    h.set_cdr(c, fv).unwrap();
     assert_eq!(h.car(c).unwrap(), Value::Char('x'));
-    assert_eq!(h.cdr(c).unwrap(), Value::Float(3.5));
+    match h.cdr(c).unwrap() {
+        Value::Boxed(id) => assert_eq!(h.float_value(id), 3.5),
+        other => panic!("expected a boxed float, got {:?}", other),
+    }
 }
 
 #[test]

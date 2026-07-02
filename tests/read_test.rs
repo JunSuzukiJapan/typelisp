@@ -8,7 +8,7 @@ fn show(h: &Heap, v: Value) -> String {
     match v {
         Value::Empty => "()".to_string(),
         Value::Int(n) => n.to_string(),
-        Value::Float(f) => f.to_string(),
+        Value::Boxed(id) => h.float_value(id).to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),
         Value::Symbol(id) => h.symbol_name(id).to_string(),

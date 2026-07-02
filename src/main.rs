@@ -230,7 +230,11 @@ fn format_sexpr(heap: &Heap, v: Value) -> String {
     match v {
         Value::Empty => "()".to_string(),
         Value::Int(i) => i.to_string(),
-        Value::Float(f) => format_float(f),
+        // `Sexpr::Float` is heap-boxed (`Value::Boxed`, see `BoxedObj`) —
+        // today it's the only thing a `Value::Boxed` can hold, so this is
+        // safe; a later `BoxedObj` kind (struct/closure/...) will need this
+        // to dispatch on the boxed payload's own shape instead.
+        Value::Boxed(id) => format_float(heap.float_value(id)),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),
         Value::Symbol(id) => heap.symbol_name(id).to_string(),

@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-06-29 / ブランチ: `feature/compile-sexpr`
+最終更新: 2026-07-02 / ブランチ: `feature/compile-sexpr`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -2408,3 +2408,101 @@ panicと同じ前例で実行時panic（型システムでは「有効なスカ�
 **テスト**: `tests/prelude_test.rs`に`char->int`/`int->char`（往復、サロゲート・範囲外での
 panicの両方）、`symbol->string`/`string->symbol`（往復、非symbolでのpanic）を追加。全体テスト
 （`./scripts/with-llvm-env.sh cargo test`、workspace全体）green。
+
+## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0完了・Stage 1-8未着手）
+
+`HashTable<K,V>::entries`のペア型を巡る議論の中で、ユーザーから「`Sexpr`と`RtValue`という
+2つの並行した実行時値表現に分かれていること自体がおかしい」という指摘を受けた。実際の
+Lisp実装（SBCL等）は、言語仕様が動的型付けか静的型付けかに関わらず、ヒープ上の値を
+すべて均一なタグ付きポインタ表現で扱い、単一のGCが一様にトレースする——typelispのように
+「S式（quote/macro用データ）専用のSexprと、それ以外全部のRtValue」という2つの値の宇宙に
+分かれているのは、その意味で内部表現として不自然だという指摘は妥当と判断した（詳細な
+経緯・検討過程はセッション記録参照——「読み書き可能性」という筋の悪い反論を一度行い
+訂正した上で、内部表現の均一性という論点で合意）。
+
+**方針**: `defstruct`インスタンス（`Vector<T>`/`cons-cell<K,V>`含む）・クロージャ・
+`HashTable<K,V>`・`Scope<V>`——ユーザーが typelisp で作れる値はすべて`Sexpr`
+（`crates/typelisp-mem::Value`）の内部表現に統合し、LLVM builder等コンパイラ内部専用の
+FFIハンドルだけを`RtValue`に残す。さらに調査で判明した事実として、`HashTable<K,V>`/
+`Scope<V>`は現在`RtValue`の専用enumバリアントを持つが、これは2026-06-23の`Vector<T>`/
+`defstruct`全面リバート後に確立された「専用バリアントを作らずユーザー定義型と対称に扱う」
+という原則（[[typelisp-vector-defstruct-revert]]参照）を、HashTable/Scopeにだけ
+適用し忘れていた歴史的な取りこぼしだった。今回の統合はこの非対称性も同時に解消する。
+
+**設計の要点**:
+- `Value`に1つだけ新しいヒープ常駐バリアント`Value::Boxed(BoxId)`を追加。`BoxId`は
+  `Heap`内の伸長可能なスロットストア（`box_slots: Vec<Option<BoxedObj>>` + フリーリスト +
+  markビット配列）への小さいインデックス——既存の`str_slots`（文字列専用の同種の仕組み、
+  固定consアリーナとは別に伸長可能でmark-sweepされる）と全く同じパターンの一般化。
+- `BoxedObj`はStage毎に増えていく想定: `Float(f64)`（Stage 0）、
+  `Struct{type_name, payload: StructPayload}`（Stage 1、`Vector<T>`/`cons-cell<K,V>`/
+  `HashTable<K,V>`/`Scope<V>`すべて同じ箱として扱う——特別扱いしない、という
+  ユーザー指摘の反映。`StructPayload::Fields(Vec<Value>)`が固定長/可変長共通、
+  `Map(HashMap<MemHashKey,Value>)`がHashTable、`Frames(Vec<HashMap<String,Value>>)`が
+  Scope）、`Closure{body_token, env: Vec<Value>}`（bodyは`typelisp-mem`が依存できない
+  `Typed`/`Expr`を含むため不透明トークン化、実体は呼び出し元クレート側のサイドテーブルで
+  管理）、`Cell(Value)`（let/引数/クロージャ捕捉環境が共有する可変スロットのプリミティブ、
+  `Rc<RefCell<RtValue>>`の置き換え）。
+- タグ予算: `crates/typelisp-rt`の3bitタグは8種全て使用済みだが、`TAG_FLOAT`は実際には
+  `encode`/`decode`が`fatal()`するだけの完全な未実装だったため`TAG_BOXED`として再利用——
+  新しいタグビットの追加（4bit化、`Cons`のポインタ下位ビット依存や`compiler.rs`に
+  ハードコードされたタグ定数全ての再設計が必要になる）を回避できた。
+- GCのmark loopは`Vec<Value>`の反復ワークリストに一般化し、`Value::Boxed`を見たら
+  markを立てた上でその`BoxedObj`が内部に保持する`Value`を同じスタックに積む
+  （ネイティブ再帰なしという既存制約を維持）。副次的benefit: 今`HashTable`/`Struct`/
+  `Closure`はRcベースで循環参照が意図的にリークする設計だが、mark-sweepの対象になることで
+  正しく回収されるようになる。
+- コンパイラ側（`src/compiler.rs`）は`Expr::Construct`の既存`mutable`フラグ
+  （`AdtKind::Struct`かどうか、追加のASTプラミング不要）で3分岐: `is_sexpr` →
+  既存の`compile-construct-sexpr`、`mutable`（構造体系） → 新設`compile-construct-boxed-struct`、
+  それ以外（`Data`/Option/Result等の値semantics ADT） → 既存の`compile-construct-box`
+  （無変更、スコープ外）。現状`HashTable`/`Scope`/`Closure`はJIT/AOTコンパイル対応が
+  一切ないため、今回は内部表現の統合のみを行い、新規のコンパイル対応はスコープ外とする。
+
+**ステージ分割**（本ドキュメント前掲「Sexpr表現+Match/Construct/共有Rustライブラリ
+実装計画」（2026-06-26起案、Stage 0-8全完了）と同じ粒度）:
+
+- **Stage 0（完了、2026-07-02）**: `Value::Boxed`/`BoxId`/`BoxedObj::Float`の骨組み。
+  `crates/typelisp-mem`（`box_slots`、GC mark loopの`Vec<Value>`一般化）、
+  `crates/typelisp-rt`（`TAG_FLOAT`→`TAG_BOXED`、`rt_float_new`/`rt_float_value`）、
+  `src/compiler.rs`（`compile-float`新設、`compile-construct-sexpr`/`compile-sexpr-field`の
+  variant-2対応、`rt_extern_functions`への登録）を実装。`Value::Float(f64)`という
+  bareバリアントを削除し、`Sexpr::Float`は`Str`と同じ「ヒープ格納・identityベースの`eq`」
+  になった——これに伴い、以前から用意されていた通り`eq`/`eql`が初めて分岐する必要が生じ
+  （CLの`eql`は数値を値で比較する）、`sexpr_eql`をRust側に新設し`prelude.rs`の`equal`の
+  catch-allを`eq`から`eql`に修正（CL仕様: `equal`は非cons/str atomに対し`eql`委譲）。
+  実装中に発見・修正したバグ: `compile-float`が`compile-int`と同じ「素のビット値を返す、
+  タグ付けは呼び出し元（`compile-construct-sexpr`）の仕事」という規約を誤解し、
+  自身で`rt_float_new`を呼んでいたため二重boxingになりコンパイル済みコードでの
+  `(Float ...)`構築が壊れたビット値を生成していた（実機テストで発見）。
+  テスト: `tests/eval_test.rs`/`tests/prelude_test.rs`/`tests/compile_test.rs`に
+  Float構築・eq/eql/equal/equalp分岐・JIT経由の往復テストを追加。全体テスト
+  （31クレート）+ Miri（`mem_test`、`typelisp-rt`）green。
+- **Stage 1（未着手）**: `StructPayload::Fields`のmem/rt層プラミング（`rt_struct_new/get/set`）。
+- **Stage 2（未着手）**: Struct: インタプリタ結線——`RtValue::Struct`/`StructData`を削除し
+  `Expr::Construct`/`FieldGet`/`FieldSet`を新表現に接続。`Vector<T>`/`cons-cell<K,V>`も
+  この時点で自動的に新表現に乗る。
+- **Stage 3（未着手）**: Struct: コンパイラ結線——`mutable`フラグ分岐、
+  `compile-construct-boxed-struct`新設。
+- **Stage 4（未着手）**: HashTable: `StructPayload::Map`のmem/rt層プラミング
+  （`HashKey`を`MemHashKey`として`typelisp-mem`に移植）。
+- **Stage 5（未着手）**: HashTable: インタプリタ結線——`RtValue::HashTable`削除、
+  `Vector<T>`と同じ「type_name駆動の`eval_builtin_method`分岐」パターンで
+  `get/set/remove/count/clear/keys/values/entries`を再実装。
+- **Stage 6a（未着手）**: `BoxedObj::Cell`導入 + `Interp::slot`/`Env`/`sync_roots`を
+  `Rc<RefCell<RtValue>>`から`Value::Boxed(Cell)`に置き換え（let/引数/matchバインディング/
+  globals全部に影響）。
+- **Stage 6b（未着手）**: `RtValue::Closure`自体を`BoxedObj::Closure{body_token, env}`+
+  外側クレートの`ClosureBody`サイドテーブルに移行。
+- **Stage 7（未着手）**: Scope: `StructPayload::Frames`のmem/rt層プラミング。
+- **Stage 8（未着手）**: Scope: インタプリタ結線（最後に単独で着地——
+  `src/compiler.rs`自体が`Scope<llvm-value>`で自身のenv/fn-envを構築しているため、
+  ここのバグは自己ホスティングコンパイラ全体を静かに壊しうる。
+  `tests/compile_test.rs`/`tests/compile_file_test.rs`のフルパスを退行チェックの
+  必須ゲートとする）。
+
+各段階で`RtValue`からバリアントが1つずつ消えていき、最終的に`RtValue`には
+`Int/Float/Bool/Char/Str/Unit/Data/Sexpr(Value)/Builtin/BuiltinMethod`とLLVM系5種が残る
+（名前はそのまま維持、リネームは今回のスコープ外）。詳細な実装計画は
+`/Users/suzukijun/.claude/plans/sexpr-lisp-lisp-s-s-lisp-lisp-sexpr-rtv-eager-garden.md`
+（Plan mode成果物）参照。

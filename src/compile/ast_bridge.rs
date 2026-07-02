@@ -234,7 +234,16 @@ pub fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
 fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>, outer_captured: &[(String, Type)]) -> Result<Value, Error> {
     match &typed.expr {
         Expr::Int(n) => tagged(heap, "int", &[Value::Int(*n)]),
-        Expr::Float(f) => tagged(heap, "float", &[Value::Float(*f)]),
+        // The `f64`'s raw bit pattern (`f64::to_bits`), *not* a pre-boxed
+        // `Value::Boxed` — same reason `Expr::Str` embeds raw characters
+        // instead of a pre-allocated `Value::Str` below: a compile-time
+        // `Heap::alloc_float`'s `BoxId` would be meaningless to the *target*
+        // program (AOT's compiled executable allocates its own fresh `Heap`
+        // at startup, with no boxed-object table shared with this one).
+        // `compiler.rs`'s `compile-float` boxes it for real at IR-build
+        // time, via a fresh `rt_float_new` call in the compiled function
+        // itself — mirroring `compile-str`'s own `rt_str_new` call.
+        Expr::Float(f) => tagged(heap, "float", &[Value::Int(f.to_bits() as i64)]),
         Expr::Bool(b) => tagged(heap, "bool", &[Value::Bool(*b)]),
         Expr::Char(c) => tagged(heap, "char", &[Value::Char(*c)]),
         // `(str (int c0) (int c1) ...)`, not a pre-allocated `Value::Str` —

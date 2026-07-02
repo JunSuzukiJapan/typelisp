@@ -145,6 +145,35 @@ fn call_site_rejects_a_pinned_item_that_does_not_match_the_real_associated_type(
     assert!(check(src).is_err());
 }
 
+// `Sexpr` has no `Iter` impl (see `src/prelude.rs`'s comment above
+// `hashtable-iter<K,V>`): each `cons` cell's `car` is independently,
+// dynamically typed, so there is no single, correct `Item` for a generic
+// trait to declare — plain recursion or `dolist` are the right tools for a
+// `Sexpr` list.
+
+// ---- `HashTable<K,V>` (`hashtable-iter<K,V>`, `src/prelude.rs`) -----------
+
+#[test]
+fn doiter_sums_hashtable_values() {
+    let src = "(defun make-h () HashTable<i32,i32> (HashTable::new))
+               (let ((h (make-h)) (acc 0))
+                 (set h 1 10)
+                 (set h 2 20)
+                 (set h 3 30)
+                 (doiter (p (iter h)) (setf acc (+ acc (cdr p))))
+                 acc)";
+    assert_eq!(eval_ok(src), RtValue::Int(60));
+}
+
+#[test]
+fn doiter_over_an_empty_hashtable_runs_zero_times() {
+    let src = "(defun make-h () HashTable<i32,i32> (HashTable::new))
+               (let ((h (make-h)) (acc 0))
+                 (doiter (p (iter h)) (setf acc (+ acc 1)))
+                 acc)";
+    assert_eq!(eval_ok(src), RtValue::Int(0));
+}
+
 #[test]
 fn nested_doiter_loops_do_not_interfere() {
     let src = "(defun make-v () Vector<i32> (Vector::new))

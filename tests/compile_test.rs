@@ -2023,6 +2023,33 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
     assert_eq!(v, RtValue::Sexpr(Value::Empty));
 }
 
+/// `Sexpr::Float` (Sexpr/RtValue unification, Stage 0) is heap-boxed
+/// (`Value::Boxed`, see `BoxedObj`), so this exercises the new
+/// `compile-float` (a bare `3.5` literal), `compile-construct-sexpr`'s new
+/// variant-2 arm (`(Float f)`, both for the literal and for the value `f`
+/// a `match` bound), and `compile-sexpr-field`'s new variant-2 arm (the
+/// `match`'s own extraction) — all through one JIT-compiled function whose
+/// parameter/return types stay `Sexpr` throughout, since a *bare* `f64`
+/// parameter/return crossing the interpreter/compiled-call boundary is a
+/// separate, pre-existing gap `call_compiled` doesn't handle yet (it only
+/// marshals `Sexpr` or already-`RtValue::Int` values — see its own doc
+/// comment). The result is compared via `equal` (not `eq`/`==`, which would
+/// be `Value::Boxed`'s identity, always false for two separately
+/// constructed floats) against a fresh interpreter-side `(Float 3.5)`.
+#[test]
+fn compile_dispatches_a_function_that_round_trips_a_sexpr_float_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun float-roundtrip () Sexpr
+          (match (Float 3.5) ((Float f) (Float f)) (_ (Nil))))
+        (compile float-roundtrip)
+        (equal (float-roundtrip) (Float 3.5))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Bool(true));
+}
+
 // ---- Stage 7 of the Sexpr-representation plan: `str` -----------------
 
 /// `(Str "hi")` — `compile-str`'s literal-embedding path (each character

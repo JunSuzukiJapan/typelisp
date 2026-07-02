@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::ptr;
 
 use crate::Error;
-use super::value::{Cell, ConsRef, PathId, StrId, SymId, Value};
+use super::value::{BoxId, BoxedObj, Cell, ConsRef, PathId, StrId, SymId, Value};
 
 pub struct Heap {
     base: *mut Cell, // start of the cons arena; owns the allocation
@@ -51,6 +51,14 @@ pub struct Heap {
     str_slots: Vec<Option<String>>,
     str_free: Vec<u32>,
     str_marks: Vec<bool>,
+
+    // GC-managed general boxed-object store (see `BoxedObj`) — same
+    // growable-slot-store shape as the string store above, generalized to
+    // hold a payload that may itself reference nested `Value`s (so the mark
+    // phase must trace into it, not just flag the slot).
+    box_slots: Vec<Option<BoxedObj>>,
+    box_free: Vec<u32>,
+    box_marks: Vec<bool>,
 }
 
 impl Heap {
@@ -84,6 +92,9 @@ impl Heap {
             str_slots: Vec::new(),
             str_free: Vec::new(),
             str_marks: Vec::new(),
+            box_slots: Vec::new(),
+            box_free: Vec::new(),
+            box_marks: Vec::new(),
         }
     }
 
@@ -112,6 +123,11 @@ impl Heap {
     /// Strings currently allocated (occupied slots).
     pub fn string_count(&self) -> usize {
         self.str_slots.iter().filter(|s| s.is_some()).count()
+    }
+
+    /// Boxed objects currently allocated (occupied slots) — see [`BoxedObj`].
+    pub fn box_count(&self) -> usize {
+        self.box_slots.iter().filter(|b| b.is_some()).count()
     }
 
     // ---- roots ------------------------------------------------------------
@@ -252,6 +268,46 @@ impl Heap {
         self.str_slots[id.0 as usize].as_deref().expect("dangling StrId")
     }
 
+    // ---- boxed objects ------------------------------------------------------
+
+    /// Store a [`BoxedObj`], returning its `Value::Boxed`. Boxed objects are
+    /// GC-collected — same growable-slot-store shape as
+    /// [`alloc_string`](Self::alloc_string), generalized so `gc`'s mark phase
+    /// can trace into whatever `Value`s the payload itself holds (see
+    /// [`gc`](Self::gc)).
+    fn alloc_boxed(&mut self, obj: BoxedObj) -> Value {
+        if let Some(idx) = self.box_free.pop() {
+            self.box_slots[idx as usize] = Some(obj);
+            self.box_marks[idx as usize] = false;
+            Value::Boxed(BoxId(idx))
+        } else {
+            let idx = self.box_slots.len() as u32;
+            self.box_slots.push(Some(obj));
+            self.box_marks.push(false);
+            Value::Boxed(BoxId(idx))
+        }
+    }
+
+    /// Store an `f64`, returning its `Value::Boxed` — `Sexpr::Float`'s
+    /// runtime representation (see [`BoxedObj`]'s doc comment for why a
+    /// float can't be an immediate `Value` variant the way `Int`/`Char`/
+    /// `Bool` are).
+    pub fn alloc_float(&mut self, f: f64) -> Value {
+        self.alloc_boxed(BoxedObj::Float(f))
+    }
+
+    /// The `f64` behind a boxed float. Panics if `id` doesn't hold a
+    /// `BoxedObj::Float` — an internal-invariant trap, not a user-facing
+    /// error, the same convention [`string`](Self::string)'s dangling-`StrId`
+    /// panic already uses: a correctly type-checked program never passes a
+    /// mismatched `BoxId` here.
+    pub fn float_value(&self, id: BoxId) -> f64 {
+        match self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Float(f)) => f,
+            _ => panic!("BoxId does not hold a Float"),
+        }
+    }
+
     // ---- allocation -------------------------------------------------------
 
     /// Allocate a cons cell `(car . cdr)`. Runs a GC if the free list is empty;
@@ -334,10 +390,24 @@ impl Heap {
 
     // ---- collection -------------------------------------------------------
 
+    /// Push every `Value` nested directly inside a `BoxedObj`'s payload onto
+    /// `stack`, for `gc`'s mark phase to trace into. `Float` holds no nested
+    /// `Value` (a fully-immediate `f64` payload), so this is a no-op today —
+    /// later `BoxedObj` kinds (struct fields, a closure's captured
+    /// environment, ...) will extend this `match` with real fan-out.
+    fn push_boxed_nested(obj: &BoxedObj, _stack: &mut Vec<Value>) {
+        match obj {
+            BoxedObj::Float(_) => {}
+        }
+    }
+
     /// Run a mark-sweep collection. Returns the number of cons cells reclaimed.
     pub fn gc(&mut self) -> usize {
-        // reset string marks
+        // reset string/box marks
         for m in self.str_marks.iter_mut() {
+            *m = false;
+        }
+        for m in self.box_marks.iter_mut() {
             *m = false;
         }
 
@@ -345,34 +415,40 @@ impl Heap {
         // independent root sets feed the same walk — `roots` (the strict
         // LIFO call-stack discipline) and `permanent_roots` (never popped,
         // see `push_permanent_root`) — a value is live if either reaches it.
-        let mut stack: Vec<*mut Cell> = Vec::new();
+        // The worklist holds `Value`s directly (not just `*mut Cell`) so a
+        // `Value::Boxed` payload's own nested `Value`s can be pushed onto
+        // the very same stack once traced — see `push_boxed_nested`.
+        let mut stack: Vec<Value> = Vec::new();
         for i in 0..self.roots.len() {
-            match self.roots[i] {
-                Value::Cons(c) => stack.push(c.0),
-                Value::Str(s) => self.str_marks[s.0 as usize] = true,
-                _ => {}
-            }
+            stack.push(self.roots[i]);
         }
         for i in 0..self.permanent_roots.len() {
-            match self.permanent_roots[i] {
-                Value::Cons(c) => stack.push(c.0),
-                Value::Str(s) => self.str_marks[s.0 as usize] = true,
-                _ => {}
-            }
+            stack.push(self.permanent_roots[i]);
         }
-        while let Some(p) = stack.pop() {
-            unsafe {
-                if (*p).mark {
-                    continue;
+        while let Some(v) = stack.pop() {
+            match v {
+                Value::Cons(c) => unsafe {
+                    if (*c.0).mark {
+                        continue;
+                    }
+                    (*c.0).mark = true;
+                    stack.push((*c.0).car);
+                    stack.push((*c.0).cdr);
+                },
+                Value::Str(s) => {
+                    self.str_marks[s.0 as usize] = true;
                 }
-                (*p).mark = true;
-                for v in [(*p).car, (*p).cdr] {
-                    match v {
-                        Value::Cons(c) if !(*c.0).mark => stack.push(c.0),
-                        Value::Str(s) => self.str_marks[s.0 as usize] = true,
-                        _ => {}
+                Value::Boxed(b) => {
+                    let idx = b.0 as usize;
+                    if self.box_marks[idx] {
+                        continue;
+                    }
+                    self.box_marks[idx] = true;
+                    if let Some(obj) = &self.box_slots[idx] {
+                        Self::push_boxed_nested(obj, &mut stack);
                     }
                 }
+                _ => {}
             }
         }
 
@@ -402,6 +478,14 @@ impl Heap {
             if self.str_slots[i].is_some() && !self.str_marks[i] {
                 self.str_slots[i] = None;
                 self.str_free.push(i as u32);
+            }
+        }
+
+        // SWEEP boxed objects: same recycling scheme as strings.
+        for i in 0..self.box_slots.len() {
+            if self.box_slots[i].is_some() && !self.box_marks[i] {
+                self.box_slots[i] = None;
+                self.box_free.push(i as u32);
             }
         }
 

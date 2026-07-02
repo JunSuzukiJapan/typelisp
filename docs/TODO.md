@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-07-01 / ブランチ: `feature/compile-sexpr`
+最終更新: 2026-07-02 / ブランチ: `feature/compile-sexpr`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離した）。
@@ -10,10 +10,29 @@
 
 ## 残っている作業（影響範囲の大きさで優先順位付け——[[feedback-impl-priority]]）
 
-1. **`Sexpr`/`HashTable<K,V>`への`Iter`実装** — `doiter`は意図的に`Vector<T>`のみで動作確認した
-   （`Sexpr`は要素型が固定されないため`Iter<Item>`を実装すべきでない、というユーザー判断
-   ——詳細は[implementation-log.md](implementation-log.md)の「trait機構+doiter」節参照）。
-   `HashTable<K,V>`への走査API（keys/values/entries相当）自体が未実装。
+1. **Sexpr/RtValue内部表現統合**（2026-07-02起案、進行中）——`Sexpr`（`crates/typelisp-mem::Value`）
+   と`RtValue`（`src/eval/value.rs`）という2つの並行した実行時値表現に分かれているのは
+   内部表現として不自然、というユーザー指摘を受けて着手。`defstruct`インスタンス
+   （`Vector<T>`/`cons-cell<K,V>`含む）・クロージャ・`HashTable<K,V>`・`Scope<V>`を
+   `Sexpr`側の`Value::Boxed`表現に統合し、LLVM builder等コンパイラ内部専用のFFIハンドルだけを
+   `RtValue`に残す。設計・ステージ分割の詳細は
+   [implementation-log.md](implementation-log.md)の「Sexpr/RtValue内部表現統合 実装計画」節参照。
+   - **Stage 0（完了）**: `Value::Boxed`/`BoxedObj::Float`の骨組み、`TAG_FLOAT`→`TAG_BOXED`再利用。
+   - **Stage 1-3（未着手）**: `defstruct`/`Vector<T>`/`cons-cell<K,V>`を`BoxedObj::Struct`に統合
+     （mem/rt層 → インタプリタ結線 → コンパイラ結線の3段階）。
+   - **Stage 4-5（未着手）**: `HashTable<K,V>`を`BoxedObj::Struct`（`StructPayload::Map`）に統合。
+   - **Stage 6a-6b（未着手）**: 変数束縛スロットの`BoxedObj::Cell`化 → `RtValue::Closure`を
+     `BoxedObj::Closure`に統合。
+   - **Stage 7-8（未着手）**: `Scope<V>`を`BoxedObj::Struct`（`StructPayload::Frames`）に統合
+     （自己ホスティングコンパイラ自体がScopeに依存するため最後に単独で着地）。
+
+直近完了: `HashTable<K,V>`への`Iter`実装（2026-07-02）——`keys`/`values`/`entries`
+（Rust builtin、`registry::hashtable_def`/`eval_builtin_method`）を新設し、`entries`が返す
+`Vector<cons-cell<K,V>>`（`cons-cell<A,B>`は`prelude.rs`の汎用`car`/`cdr`構造体）を
+`hashtable-iter<K,V>`が`vector-iter<T>`と同じカーソル走査で辿る形で`Iter`を実装。`HashMap`に
+安定した再開可能カーソルがないため、スナップショット方式（呼び出し時点のコピー）。`Sexpr`は
+意図的に`Iter`非対応のまま——各`cons`セルの`car`が独立に動的型付けされるため`Iter`が要求する
+「1つの`Item`型」を正しく宣言できない。詳細は[implementation-log.md](implementation-log.md)参照。
 
 compile 機能（LLVM JIT/AOT コンパイラ）の残課題は2026-07-01時点で全て解消済み——
 Stage 7（文字列対応、計画上最後に残されていたステージ）を含め、詳細は

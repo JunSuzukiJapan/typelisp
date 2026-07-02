@@ -87,7 +87,7 @@ fn sexpr_to_string(heap: &Heap, v: Value) -> String {
     match v {
         Value::Empty => "()".to_string(),
         Value::Int(i) => i.to_string(),
-        Value::Float(f) => f.to_string(),
+        Value::Boxed(id) => heap.float_value(id).to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),
         Value::Symbol(id) => heap.symbol_name(id).to_string(),
@@ -265,6 +265,55 @@ fn instance_method_dispatch_substitutes_k_and_v_independently() {
                    (match (get a 1) ((Some v) v) ((None) 0))))
                (f)";
     assert_eq!(eval_ok(src), RtValue::Int(100));
+}
+
+// ---- traversal (keys/values/entries) ---------------------------------------
+
+#[test]
+fn keys_returns_a_vector_with_one_entry_per_distinct_key() {
+    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
+               (defun f () i32
+                 (let ((h (make-h)))
+                   (set h 1 \"a\")
+                   (set h 2 \"b\")
+                   (len (keys h))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Int(2));
+}
+
+#[test]
+fn values_returns_a_vector_with_one_entry_per_distinct_key() {
+    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
+               (defun f () i32
+                 (let ((h (make-h)))
+                   (set h 1 \"a\")
+                   (set h 2 \"b\")
+                   (len (values h))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Int(2));
+}
+
+#[test]
+fn entries_returns_a_vector_with_one_entry_per_distinct_key() {
+    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
+               (defun f () i32
+                 (let ((h (make-h)))
+                   (set h 1 \"a\")
+                   (set h 2 \"b\")
+                   (set h 1 \"c\")
+                   (len (entries h))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Int(2));
+}
+
+#[test]
+fn keys_values_entries_on_an_empty_table_are_empty() {
+    let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
+               (defun f () i32
+                 (let ((h (make-h)))
+                   (+ (len (keys h)) (+ (len (values h)) (len (entries h))))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Int(0));
 }
 
 // ---- GC pressure ------------------------------------------------------------

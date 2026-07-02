@@ -178,6 +178,49 @@ fn eq_on_sexpr_cons_is_identity_not_structural() {
     assert_eq!(eval_ok(src), RtValue::Bool(false));
 }
 
+#[test]
+fn eq_on_sexpr_float_is_identity_not_value() {
+    // `Sexpr::Float` is heap-boxed (`Value::Boxed`, see `BoxedObj`), so two
+    // separately-quoted equal floats are `Cons`/`Str`-like: not the same
+    // box, hence not `eq` — see `eql_on_sexpr_float_compares_by_value` for
+    // the predicate that *does* treat them as equivalent.
+    assert_eq!(eval_ok("(eq (quote 1.5) (quote 1.5))"), RtValue::Bool(false));
+}
+
+#[test]
+fn eql_on_sexpr_float_compares_by_value() {
+    // CL's `eql`: two numbers of the same type and value are `eql` even when
+    // they aren't the same object — the one case `eql` actually diverges
+    // from `eq` in this representation (`sexpr_eql`'s doc comment).
+    assert_eq!(eval_ok("(eql (quote 1.5) (quote 1.5))"), RtValue::Bool(true));
+}
+
+#[test]
+fn eql_on_sexpr_float_is_false_for_different_values() {
+    assert_eq!(eval_ok("(eql (quote 1.5) (quote 2.5))"), RtValue::Bool(false));
+}
+
+#[test]
+fn equal_on_sexpr_float_compares_by_value() {
+    // `equal` delegates to `eql` for non-`Cons`/`Str` atoms (CL's own
+    // definition) — regression check for the catch-all arm switching from
+    // `eq` to `eql` when `Sexpr::Float` became heap-boxed.
+    assert_eq!(eval_ok("(equal (quote 1.5) (quote 1.5))"), RtValue::Bool(true));
+}
+
+#[test]
+fn equal_on_sexpr_float_nested_in_a_cons_compares_by_value() {
+    assert_eq!(
+        eval_ok("(equal (quote (1.5 2.5)) (quote (1.5 2.5)))"),
+        RtValue::Bool(true)
+    );
+}
+
+#[test]
+fn equalp_on_sexpr_float_compares_by_value() {
+    assert_eq!(eval_ok("(equalp (quote 1.5) (quote 1.5))"), RtValue::Bool(true));
+}
+
 // ---- consp / null / atom ----------------------------------------------------
 
 #[test]
