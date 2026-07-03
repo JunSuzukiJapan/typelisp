@@ -26,7 +26,7 @@ use inkwell::AddressSpace;
 
 use crate::{BoxId, Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
 
-use super::value::{Closure, EvalError, RtValue, ScopeFrame, Slot, SlotKind};
+use super::value::{Capture, ClosureBody, EvalError, RtValue, ScopeFrame, Slot, SlotKind};
 
 /// A registered function or method body with its parameter names.
 struct FnDef {
@@ -98,6 +98,20 @@ pub struct Interp {
     /// already is, so the two can never drift. `Expr::Assoc`'s eval arm
     /// checks here first, mirroring `Expr::Call`'s own `compiled` check.
     compiled_methods: RefCell<HashMap<(Path, String), crate::compile::CompiledFn>>,
+    /// The interpreter-side half of every live closure (body + `Native`
+    /// captures), keyed by the token its heap box carries — see
+    /// [`ClosureBody`]/`BoxedObj::Closure`. Entries are inserted by
+    /// [`Self::make_closure`] and removed by [`Self::sync_roots`] as the GC
+    /// reports their boxes swept (`Heap::take_dead_closure_tokens`), so the
+    /// table tracks heap liveness with at most one allocation of lag.
+    /// `Rc<ClosureBody>` so an in-flight `Expr::Apply` keeps the body alive
+    /// even if the box (and hence this entry) dies mid-call. Assumes the
+    /// one-`Heap`-per-`Interp` usage every caller already follows — tokens
+    /// from another heap would be meaningless here.
+    closure_bodies: RefCell<HashMap<u32, Rc<ClosureBody>>>,
+    /// Monotonic token source for `closure_bodies` — never reused, so a
+    /// swept box's token can't be mistaken for a newer closure's (no ABA).
+    closure_tokens: Cell<u32>,
     /// Every `Type::Named` path whose compiled representation is a tagged
     /// `Sexpr` `Value::Boxed` struct (Stage 3 of the Sexpr/RtValue
     /// unification plan, `docs/implementation-log.md`) — a user `defstruct`
@@ -122,6 +136,8 @@ impl Interp {
             methods: HashMap::new(),
             globals: HashMap::new(),
             slots: RefCell::new(Vec::new()),
+            closure_bodies: RefCell::new(HashMap::new()),
+            closure_tokens: Cell::new(0),
             rooted: Cell::new(0),
             gensym_counter: Cell::new(0),
             compiled: RefCell::new(HashMap::new()),
@@ -169,6 +185,45 @@ impl Interp {
         Slot::Native(s)
     }
 
+    /// The number of live entries in the closure side table — exposed for
+    /// tests proving the table shrinks in step with the GC (see
+    /// `closure_bodies`); not meaningful to ordinary callers.
+    pub fn closure_body_count(&self) -> usize {
+        self.closure_bodies.borrow().len()
+    }
+
+    /// Builds a closure value: splits the captured environment by slot tier
+    /// — heap cells into the closure box's GC-traced `env`, `Native` slots
+    /// into the side-table [`ClosureBody`] — and returns the box as the
+    /// `RtValue::Sexpr` every function value now is. (`Heap::alloc_closure`
+    /// never itself collects, so the env walk needs no rooting.)
+    fn make_closure(
+        &self,
+        heap: &mut Heap,
+        params: Vec<(String, SlotKind)>,
+        body: Vec<Typed>,
+        env: &Env,
+    ) -> RtValue {
+        let mut heap_env: Vec<Value> = Vec::new();
+        let mut layout: Vec<(String, Capture)> = Vec::with_capacity(env.len());
+        for (name, slot) in env {
+            let cap = match slot {
+                Slot::Heap(id) => {
+                    heap_env.push(Value::Boxed(**id));
+                    Capture::Heap(heap_env.len() - 1)
+                }
+                Slot::Native(rc) => Capture::Native(rc.clone()),
+            };
+            layout.push((name.clone(), cap));
+        }
+        let token = self.closure_tokens.get();
+        self.closure_tokens.set(token + 1);
+        self.closure_bodies
+            .borrow_mut()
+            .insert(token, Rc::new(ClosureBody { params, body, layout }));
+        RtValue::Sexpr(heap.alloc_closure(token, heap_env))
+    }
+
     /// Whether a declared type's runtime representation is always
     /// `RtValue::Sexpr` — the interpreter-side twin of the checker's
     /// `Checker::is_heap_repr` (which bakes the same bit into
@@ -196,6 +251,12 @@ impl Interp {
     /// triggered from *anywhere* — including compiled code, which never
     /// re-syncs the interpreter's roots.
     fn sync_roots(&self, heap: &mut Heap) {
+        // Release the interpreter-side half of every closure the GC swept
+        // since the last sync — see `closure_bodies`. Dropping an entry also
+        // drops its `Capture::Native` `Rc`s (LLVM handles included).
+        for t in heap.take_dead_closure_tokens() {
+            self.closure_bodies.borrow_mut().remove(&t);
+        }
         for _ in 0..self.rooted.replace(0) {
             heap.pop_root();
         }
@@ -312,21 +373,21 @@ impl Interp {
                 .ok_or_else(|| EvalError::Unbound(path.to_string())),
             Expr::FnRef(path) => Ok(match self.fns.get(path) {
                 // Reify a user function as a closure with no captured environment.
-                Some(f) => RtValue::Closure(Rc::new(Closure {
-                    params: f.params.iter().cloned().zip(f.kinds.iter().copied()).collect(),
-                    body: f.body.clone(),
-                    env: Vec::new(),
-                })),
+                Some(f) => {
+                    let params = f.params.iter().cloned().zip(f.kinds.iter().copied()).collect();
+                    let body = f.body.clone();
+                    self.make_closure(heap, params, body, &Env::new())
+                }
                 // Otherwise a built-in operator (lives at the root, simple path).
                 None => RtValue::Builtin(path.local().to_string()),
             }),
             Expr::MethodRef { type_name, method } => {
                 Ok(match self.methods.get(&(type_name.clone(), method.clone())) {
-                    Some(m) => RtValue::Closure(Rc::new(Closure {
-                        params: m.params.iter().cloned().zip(m.kinds.iter().copied()).collect(),
-                        body: m.body.clone(),
-                        env: Vec::new(),
-                    })),
+                    Some(m) => {
+                        let params = m.params.iter().cloned().zip(m.kinds.iter().copied()).collect();
+                        let body = m.body.clone();
+                        self.make_closure(heap, params, body, &Env::new())
+                    }
                     None => RtValue::BuiltinMethod(type_name.clone(), method.clone()),
                 })
             }
@@ -385,27 +446,30 @@ impl Interp {
                 // already contains all of them — including its own slot, the
                 // self-reference `lambda` has no way to express. Only once
                 // `child` is complete does each slot get overwritten with the
-                // real closure that captured it. Function-typed bindings are
-                // `Native` (a function value may also be an `RtValue::Builtin`,
-                // which has no heap representation).
+                // real closure that captured it.
+                //
+                // The placeholders are *heap cells* (unlike other
+                // function-typed bindings, which stay `Native` because a
+                // function value may also be a heap-less `RtValue::Builtin`):
+                // a labels sibling is always a closure, and a heap cell makes
+                // the whole mutual-recursion knot — cell -> closure box ->
+                // sibling cell -> ... — a plain heap cycle mark-sweep
+                // reclaims once the labels scope dies. (The old `Rc`-based
+                // representation leaked exactly this cycle by design.)
                 let mut child = env.clone();
-                let slots: Vec<Slot> = defs.iter().map(|_| self.native_slot(RtValue::Unit)).collect();
-                for ((name, _, _), slot) in defs.iter().zip(&slots) {
-                    child.push((name.clone(), slot.clone()));
+                let mut slots: Vec<Slot> = Vec::with_capacity(defs.len());
+                for (name, _, _) in defs {
+                    let s = self.slot(heap, SlotKind::Heap, RtValue::Sexpr(Value::Empty))?;
+                    child.push((name.clone(), s.clone()));
+                    slots.push(s);
                 }
                 for ((_, params, fbody), slot) in defs.iter().zip(&slots) {
                     let kinds: Vec<(String, SlotKind)> = params
                         .iter()
                         .map(|(n, ty)| (n.clone(), self.heap_repr_kind(ty)))
                         .collect();
-                    slot.set(
-                        heap,
-                        RtValue::Closure(Rc::new(Closure {
-                            params: kinds,
-                            body: fbody.clone(),
-                            env: child.clone(),
-                        })),
-                    )?;
+                    let closure = self.make_closure(heap, kinds, fbody.clone(), &child);
+                    slot.set(heap, closure)?;
                 }
                 self.eval_seq(heap, body, &child)
             }
@@ -498,26 +562,57 @@ impl Interp {
                 // closure, recording each parameter's slot routing from its
                 // declared type.
                 let kinds = params.iter().map(|(n, ty)| (n.clone(), self.heap_repr_kind(ty))).collect();
-                Ok(RtValue::Closure(Rc::new(Closure {
-                    params: kinds,
-                    body: body.clone(),
-                    env: env.clone(),
-                })))
+                Ok(self.make_closure(heap, kinds, body.clone(), env))
             }
             Expr::Apply(callee, args) => {
                 let f = self.eval(heap, callee, env)?;
+                // The callee is a GC-heap value now (a closure box) — anchor
+                // it before evaluating the arguments, whose own allocations
+                // may collect. Without this, an unnamed callee (e.g.
+                // `((make-adder 1) ...)`) has no binding keeping its box
+                // alive across the argument churn.
+                let _f_anchor = self.native_slot(f.clone());
                 let (argv, _slots) = self.eval_args(heap, args, env)?;
                 match f {
-                    RtValue::Closure(c) => {
-                        if c.params.len() != argv.len() {
+                    RtValue::Sexpr(Value::Boxed(id)) if heap.is_closure(id) => {
+                        let token = heap.closure_token(id);
+                        // Cloned out so the body survives even if the box —
+                        // and with it this table entry — is swept mid-call.
+                        let cb = self
+                            .closure_bodies
+                            .borrow()
+                            .get(&token)
+                            .cloned()
+                            .ok_or_else(|| EvalError::Internal("closure body missing from side table".into()))?;
+                        if cb.params.len() != argv.len() {
                             return Err(EvalError::Internal("closure arity mismatch".into()));
                         }
-                        let mut cenv = c.env.clone();
-                        for ((n, kind), v) in c.params.iter().zip(argv) {
+                        // Rebuild the captured environment in layout order.
+                        // Heap captures are re-owned (`Heap::adopt_cell`) so
+                        // each frame binding keeps its cell alive on its
+                        // own, independent of the closure box.
+                        let heap_env: Vec<Value> = heap.closure_env(id).to_vec();
+                        let mut cenv: Env = Vec::with_capacity(cb.layout.len() + argv.len());
+                        for (name, cap) in &cb.layout {
+                            let slot = match cap {
+                                Capture::Heap(i) => match heap_env[*i] {
+                                    Value::Boxed(cell) => Slot::Heap(heap.adopt_cell(cell)),
+                                    other => {
+                                        return Err(EvalError::Internal(format!(
+                                            "closure env slot {} is not a cell: {:?}",
+                                            i, other
+                                        )))
+                                    }
+                                },
+                                Capture::Native(rc) => Slot::Native(rc.clone()),
+                            };
+                            cenv.push((name.clone(), slot));
+                        }
+                        for ((n, kind), v) in cb.params.iter().zip(argv) {
                             let s = self.slot(heap, *kind, v)?;
                             cenv.push((n.clone(), s));
                         }
-                        self.eval_seq(heap, &c.body, &cenv)
+                        self.eval_seq(heap, &cb.body, &cenv)
                     }
                     RtValue::Builtin(name) => match self.eval_builtin(heap, &name, &argv) {
                         Some(r) => r,
@@ -713,6 +808,16 @@ impl Interp {
         let int_args = argv
             .iter()
             .map(|v| match v {
+                // An *interpreted* closure box must not silently cross this
+                // boundary: compiled code represents function values as its
+                // own `ClosureBox` (a malloc'd i64 pointer), and a tagged
+                // interp closure handed over as a plain `Sexpr` would be
+                // dereferenced as one — same "clear internal error, not a
+                // silent misread" stance the pre-6b `RtValue::Closure`
+                // rejection took.
+                RtValue::Sexpr(Value::Boxed(id)) if heap.is_closure(*id) => Err(EvalError::Internal(
+                    "compiled call: an interpreted closure cannot be passed to compiled code".into(),
+                )),
                 RtValue::Sexpr(sv) => Ok(crate::compile::runtime::encode(*sv)),
                 RtValue::Int(n) => Ok(*n),
                 other => Err(EvalError::Internal(format!("compiled call: unsupported argument {:?}", other))),
@@ -1338,9 +1443,11 @@ fn option_payload_ty(ret_ty: &Type) -> Result<Type, EvalError> {
 }
 
 /// Recursively gather every `Sexpr` value reachable from `v` through nested
-/// `Data` fields or `Scope` frames (a `Closure`'s captured environment is
-/// covered separately, since each of its slots is already registered in
-/// [`Interp::slots`]). A boxed struct (`RtValue::Sexpr(Value::Boxed(_))`,
+/// `Data` fields or `Scope` frames. (A closure needs no arm of its own:
+/// since Stage 6b it *is* an `RtValue::Sexpr` closure box — pushed by the
+/// plain `Sexpr` arm, with the GC tracing its heap-cell captures from
+/// there — while its `Native` captures are each already registered in
+/// [`Interp::slots`].) A boxed struct (`RtValue::Sexpr(Value::Boxed(_))`,
 /// since the `Sexpr`/`RtValue` unification's Stage 2 — `HashTable<K,V>`
 /// included, since Stage 5) needs no separate arm here — the plain `Sexpr`
 /// one already pushes its `Value::Boxed` root, and `Heap::gc`'s mark phase
@@ -2887,12 +2994,12 @@ fn expect_struct_box(v: &RtValue) -> Result<BoxId, EvalError> {
 /// covers `HashTable<K,V>` too, since the `Sexpr`/`RtValue` unification's
 /// Stage 5 — a boxed `HashTable` is a `mem::Value::Boxed` like any other
 /// boxed struct. The variants a `defstruct`/`Vector<T>`/`HashTable<K,V>`
-/// field still can't hold — `Data` (`Option`/`Result`/a user sum type),
-/// `Closure`, `Scope` — aren't representable in `crate::mem::Value` at all
-/// (that crate can't depend on `RtValue`), so they're a clear internal error
-/// here rather than a silent corruption; a later stage of the unification
-/// plan (`Closure`'s Stage 6) is what would close this remaining gap, not
-/// Stage 2's struct wiring.
+/// field still can't hold — `Data` (`Option`/`Result`/a user sum type) and
+/// `Scope` — aren't representable in `crate::mem::Value` (that crate can't
+/// depend on `RtValue`), so they're a clear internal error here rather than
+/// a silent corruption. Closures stopped being on that list at Stage 6b:
+/// a function value is a `Value::Boxed` closure box riding in
+/// `RtValue::Sexpr`, storable like any other boxed value.
 fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Value, EvalError> {
     match v {
         RtValue::Int(n) => Ok(Value::Int(*n)),
@@ -2946,7 +3053,7 @@ fn decode_nonsexpr_field(heap: &Heap, v: Value) -> RtValue {
         Value::Bool(b) => RtValue::Bool(b),
         Value::Char(c) => RtValue::Char(c),
         Value::Str(id) => RtValue::Str(heap.string(id).into()),
-        Value::Boxed(id) if !heap.is_struct(id) && !heap.is_hashtable(id) => RtValue::Float(heap.float_value(id)),
+        Value::Boxed(id) if heap.is_float(id) => RtValue::Float(heap.float_value(id)),
         other => RtValue::Sexpr(other),
     }
 }
@@ -3195,14 +3302,17 @@ fn sexpr_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// `eq`-as-identity by design (`Cons`/`Str`) — CL's own `eql` agrees `eq` is
 /// already correct for those, so this only special-cases `Boxed`.
 ///
-/// `Value::Boxed` holds only `BoxedObj::Float` today (the `Sexpr`/`RtValue`
-/// unification plan's first case) — once other boxed kinds exist, this will
-/// need to check which kind before assuming `float_value` applies.
+/// `Value::Boxed` now holds more than floats (structs, hash tables, binding
+/// cells, closures) — only a *float* box gets content comparison here; every
+/// other boxed kind is an aggregate/identity object for which CL's `eql` is
+/// `eq` anyway, so they fall through to the identity comparison below.
 fn sexpr_eql(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let a = rt_sexpr(&args[0])?;
     let b = rt_sexpr(&args[1])?;
     if let (Value::Boxed(ia), Value::Boxed(ib)) = (a, b) {
-        return Ok(RtValue::Bool(heap.float_value(ia) == heap.float_value(ib)));
+        if heap.is_float(ia) && heap.is_float(ib) {
+            return Ok(RtValue::Bool(heap.float_value(ia) == heap.float_value(ib)));
+        }
     }
     Ok(RtValue::Bool(a == b))
 }
@@ -3275,7 +3385,9 @@ fn match_sexpr_ctor(heap: &Heap, variant: usize, args: &[Pattern], v: Value) -> 
     match (variant, v) {
         (SEXPR_NIL, Value::Empty) => Some(Vec::new()),
         (SEXPR_INT, Value::Int(n)) => match_pattern(heap, &args[0], &RtValue::Int(n)),
-        (SEXPR_FLOAT, Value::Boxed(id)) => match_pattern(heap, &args[0], &RtValue::Float(heap.float_value(id))),
+        (SEXPR_FLOAT, Value::Boxed(id)) if heap.is_float(id) => {
+            match_pattern(heap, &args[0], &RtValue::Float(heap.float_value(id)))
+        }
         (SEXPR_CHAR, Value::Char(c)) => match_pattern(heap, &args[0], &RtValue::Char(c)),
         (SEXPR_BOOL, Value::Bool(b)) => match_pattern(heap, &args[0], &RtValue::Bool(b)),
         (SEXPR_SYM, Value::Symbol(id)) => {

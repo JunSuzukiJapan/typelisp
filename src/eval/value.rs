@@ -97,16 +97,36 @@ impl Slot {
     }
 }
 
-/// A closure: a lambda body with its parameter names and the lexical environment
-/// captured at creation (shared slots, so captured mutable variables persist).
-/// Each parameter carries its [`SlotKind`] (derived from the parameter's
-/// declared type at the closure's creation site) so applying the closure can
-/// route each argument's binding without any type information at the call.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Closure {
+/// Where one of a closure's captured bindings lives — the two-tier [`Slot`]
+/// split carried through capture:
+///
+/// * `Heap(i)` — the capture is a heap cell; index `i` into the closure
+///   box's own `env: Vec<Value>` (`BoxedObj::Closure`), which is the part
+///   the GC traces.
+/// * `Native(rc)` — the capture is a `Native` slot (a scalar, an LLVM
+///   handle, ...); held right here in the side table, invisible to the GC
+///   by construction.
+///
+/// `layout` (below) keeps name → capture in original environment order, so
+/// shadowing resolves exactly as it did in the defining scope.
+#[derive(Clone, Debug)]
+pub enum Capture {
+    Heap(usize),
+    Native(Rc<RefCell<RtValue>>),
+}
+
+/// The interpreter-side half of a closure — everything `crate::mem` cannot
+/// hold: the checked body, the parameter names/slot kinds, and the `Native`
+/// captures. Lives in `Interp`'s side table keyed by the closure box's
+/// `body_token` (`BoxedObj::Closure`), and is dropped when the GC reports
+/// the box swept (`Heap::take_dead_closure_tokens`) — which releases the
+/// `Native` captures' `Rc`s (LLVM handles included), so the side table can
+/// never leak what the heap already freed.
+#[derive(Debug)]
+pub struct ClosureBody {
     pub params: Vec<(String, SlotKind)>,
     pub body: Vec<Typed>,
-    pub env: Vec<(String, Slot)>,
+    pub layout: Vec<(String, Capture)>,
 }
 
 /// A runtime value. Data-type instances (constructors of `Option`/`Result`/
@@ -157,9 +177,13 @@ pub enum RtValue {
     /// — `heap.is_struct`/`struct_type_name`/`struct_field`/etc. distinguish
     /// it from a boxed float or a genuine quoted `Sexpr` datum at each read
     /// site (`interp.rs`'s `expect_struct_box`/`decode_field_typed`).
+    /// Since Stage 6b this is also where a *closure* lives: a
+    /// `Value::Boxed` pointing at a `BoxedObj::Closure` (heap-cell captures
+    /// + a token into `Interp`'s `ClosureBody` side table) — so closure
+    /// identity, GC tracing, and cycle collection (`labels`) all come from
+    /// the same heap machinery as every other boxed value, and no dedicated
+    /// `RtValue::Closure` variant exists anymore.
     Sexpr(Value),
-    /// A function value (from a `lambda` or a reified named function).
-    Closure(Rc<Closure>),
     /// A built-in *free* function used as a function value (e.g. `gensym`).
     Builtin(String),
     /// A built-in *instance method* used as a function value (e.g. `+` on
@@ -204,8 +228,10 @@ impl PartialEq for RtValue {
                 RtValue::Data { type_name: tn1, variant: v1, fields: f1 },
                 RtValue::Data { type_name: tn2, variant: v2, fields: f2 },
             ) => tn1 == tn2 && v1 == v2 && f1 == f2,
+            // Closures compare as the `Sexpr` boxes they are — `Value`'s
+            // own `Boxed(id) == Boxed(id)`, i.e. identity, matching the old
+            // dedicated variant's `Rc` semantics.
             (RtValue::Sexpr(a), RtValue::Sexpr(b)) => a == b,
-            (RtValue::Closure(a), RtValue::Closure(b)) => a == b,
             (RtValue::Builtin(a), RtValue::Builtin(b)) => a == b,
             (RtValue::BuiltinMethod(p1, m1), RtValue::BuiltinMethod(p2, m2)) => {
                 p1 == p2 && m1 == m2

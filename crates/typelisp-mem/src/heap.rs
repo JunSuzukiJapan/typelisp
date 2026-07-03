@@ -76,6 +76,15 @@ pub struct Heap {
     // compiled code, which knows nothing about the interpreter's
     // root-resyncing) can never sweep a live binding cell.
     cell_registry: Vec<std::rc::Weak<BoxId>>,
+
+    // Tokens of `BoxedObj::Closure`s freed by the most recent sweeps, not
+    // yet drained by the interpreter (`take_dead_closure_tokens`) — the
+    // bridge that lets the side table holding each closure's body (and its
+    // GC-invisible `Native` captures) release entries in step with the
+    // heap. Accumulated rather than returned from `gc()` because most
+    // collections run *implicitly* inside `cons()`, where a return value
+    // has no consumer.
+    dead_closure_tokens: Vec<u32>,
 }
 
 impl Heap {
@@ -114,6 +123,7 @@ impl Heap {
             box_free: Vec::new(),
             box_marks: Vec::new(),
             cell_registry: Vec::new(),
+            dead_closure_tokens: Vec::new(),
         }
     }
 
@@ -503,6 +513,72 @@ impl Heap {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Cell(_)))
     }
 
+    /// Re-registers an *existing*, live cell in the liveness registry,
+    /// returning a fresh owning handle — for a caller that reached the cell
+    /// through a heap reference (a closure's captured environment) rather
+    /// than an `Rc` it already holds, and now needs the cell to outlive
+    /// that reference (e.g. a call frame binding that must survive the
+    /// closure box itself being swept mid-call). Panics if `id` is not a
+    /// live cell, same convention as [`cell_get`](Self::cell_get).
+    pub fn adopt_cell(&mut self, id: BoxId) -> std::rc::Rc<BoxId> {
+        assert!(self.is_cell(id), "adopt_cell: BoxId does not hold a live Cell");
+        let rc = std::rc::Rc::new(id);
+        self.cell_registry.push(std::rc::Rc::downgrade(&rc));
+        rc
+    }
+
+    // ---- closures --------------------------------------------------------------
+
+    /// Store a function value, returning its `Value::Boxed` — see
+    /// [`BoxedObj::Closure`]. `env` must hold only `Value::Boxed` cell
+    /// references (the closure's heap-cell captures); the body lives in the
+    /// caller's side table under `body_token`. Like
+    /// [`alloc_cell`](Self::alloc_cell), never itself triggers a collection.
+    pub fn alloc_closure(&mut self, body_token: u32, env: Vec<Value>) -> Value {
+        self.alloc_boxed(BoxedObj::Closure { body_token, env })
+    }
+
+    /// True if `id` holds a `BoxedObj::Closure`.
+    pub fn is_closure(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Closure { .. }))
+    }
+
+    /// True if `id` holds a `BoxedObj::Float` — the *positive* float test
+    /// callers decoding an unknown `Value::Boxed` must use now that "not a
+    /// struct and not a hashtable" no longer implies float (cells and
+    /// closures are boxed too).
+    pub fn is_float(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Float(_)))
+    }
+
+    /// A closure's side-table key. Panics if `id` doesn't hold a
+    /// `BoxedObj::Closure` — same internal-invariant-trap convention as
+    /// [`float_value`](Self::float_value).
+    pub fn closure_token(&self, id: BoxId) -> u32 {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Closure { body_token, .. }) => *body_token,
+            _ => panic!("BoxId does not hold a Closure"),
+        }
+    }
+
+    /// A closure's heap-cell captures, in layout order. Panics like
+    /// [`closure_token`](Self::closure_token).
+    pub fn closure_env(&self, id: BoxId) -> &[Value] {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Closure { env, .. }) => env,
+            _ => panic!("BoxId does not hold a Closure"),
+        }
+    }
+
+    /// Drains the tokens of every closure freed by collections since the
+    /// last drain — see the `dead_closure_tokens` field. The interpreter
+    /// calls this from `sync_roots` (which precedes every allocation) so a
+    /// side-table entry outlives its swept closure by at most one
+    /// allocation.
+    pub fn take_dead_closure_tokens(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.dead_closure_tokens)
+    }
+
     // ---- hash tables --------------------------------------------------------
 
     /// Converts a key argument at the `HashTable` method boundary into a
@@ -750,6 +826,15 @@ impl Heap {
             }
             // A live binding cell keeps whatever it currently holds live.
             BoxedObj::Cell(v) => stack.push(*v),
+            // A live closure keeps its captured cells (and, through them,
+            // their contents) live — including a `labels` cycle
+            // (cell -> closure -> sibling cell -> ...), which mark-sweep
+            // reclaims as a unit once nothing external reaches it.
+            BoxedObj::Closure { env, .. } => {
+                for &v in env {
+                    stack.push(v);
+                }
+            }
         }
     }
 
@@ -843,9 +928,14 @@ impl Heap {
             }
         }
 
-        // SWEEP boxed objects: same recycling scheme as strings.
+        // SWEEP boxed objects: same recycling scheme as strings. A swept
+        // closure additionally reports its side-table token — see
+        // `take_dead_closure_tokens`.
         for i in 0..self.box_slots.len() {
             if self.box_slots[i].is_some() && !self.box_marks[i] {
+                if let Some(BoxedObj::Closure { body_token, .. }) = &self.box_slots[i] {
+                    self.dead_closure_tokens.push(*body_token);
+                }
                 self.box_slots[i] = None;
                 self.box_free.push(i as u32);
             }

@@ -182,6 +182,19 @@ pub(crate) enum BoxedObj {
     /// LLVM handles — nothing the GC needs to trace, or nothing `Value` can
     /// represent) stay in Rust-side cells; see `Interp`'s `Slot`.
     Cell(Value),
+    /// A function value (a `lambda`, a `labels` sibling, or a reified named
+    /// function). The body (a checked `Typed` AST this crate cannot depend
+    /// on) lives in the *interpreter's* side table, keyed by the opaque
+    /// `body_token`; `env` holds only the closure's **heap-cell captures**
+    /// (each a `Value::Boxed` pointing at a [`BoxedObj::Cell`]), which is
+    /// exactly the part the GC must trace — captures of `Native`-slot
+    /// bindings (scalars, LLVM handles, ...) are GC-invisible by
+    /// construction and ride in the side table with the body. When the
+    /// sweep frees an unreachable closure it reports the token
+    /// (`Heap::take_dead_closure_tokens`) so the interpreter can drop the
+    /// side-table entry too — including its `Native` captures (LLVM handles
+    /// among them), so nothing leaks.
+    Closure { body_token: u32, env: Vec<Value> },
 }
 
 /// A `HashTable<K,V>` key at the mem layer — the runtime encoding of a

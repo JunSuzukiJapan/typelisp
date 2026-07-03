@@ -52,7 +52,8 @@
 //! mutates this activation's own local copy (loaded once into its own slot
 //! by `bind-captures`) — it does not write back to the original binding or
 //! propagate to any other closure sharing that logical capture, unlike the
-//! tree-walking interpreter's true shared-cell closures (`RtValue::Closure`).
+//! tree-walking interpreter's true shared-cell closures (heap-cell captures,
+//! see `BoxedObj::Closure`/`ClosureBody`).
 //! Accepted as a documented gap rather than solved: none of `while`/
 //! `dotimes`/`dolist` (or anything else this compiler is exercised against)
 //! ever `setf`s a captured name, only a `let`-bound loop counter local to

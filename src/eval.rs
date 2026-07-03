@@ -5,5 +5,5 @@
 mod value;
 pub(crate) mod interp;
 
-pub use value::{Closure, EvalError, RtValue};
+pub use value::{ClosureBody, EvalError, RtValue};
 pub use interp::Interp;

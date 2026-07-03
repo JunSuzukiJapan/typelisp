@@ -826,3 +826,75 @@ fn a_lambda_captured_sexpr_binding_survives_gc_pressure() {
                    (f)))";
     assert_eq!(eval_under_gc_pressure(src, 4), RtValue::Sexpr(Value::Int(6)));
 }
+
+// ---- heap-boxed closures (Sexpr/RtValue unification Stage 6b) ----------------
+
+#[test]
+fn an_unnamed_callee_survives_argument_evaluation_under_gc_pressure() {
+    // `((f ...) arg)`-shaped calls bind the callee to nothing — only
+    // `Expr::Apply`'s own anchor keeps the closure box alive while the
+    // argument churns allocations. 6 cells: enough for the loop to run only
+    // if garbage is collected, which would sweep an unanchored callee.
+    let src = "(let ((mk (lambda ((s Sexpr)) (fn (i32) Sexpr) (lambda ((n i32)) Sexpr (car s))))) \
+                 (let ((f (mk (cons (Int 4) (Nil))))) \
+                   (dotimes (i 40) (cons (Int 2) (Nil))) \
+                   (f 0)))";
+    assert_eq!(eval_under_gc_pressure(src, 6), RtValue::Sexpr(Value::Int(4)));
+}
+
+#[test]
+fn labels_siblings_mutually_recurse_under_gc_pressure() {
+    let src = "(labels ((is-even ((n i32)) bool (if (= n 0) true (is-odd (- n 1)))) \
+                        (is-odd ((n i32)) bool (if (= n 0) false (is-even (- n 1))))) \
+                 (dotimes (i 30) (cons (Int 2) (Nil))) \
+                 (if (is-even 10) (Int 1) (Int 0)))";
+    assert_eq!(eval_under_gc_pressure(src, 4), RtValue::Sexpr(Value::Int(1)));
+}
+
+#[test]
+fn setf_through_a_shared_capture_is_visible_to_the_sibling_closure() {
+    // Two closures capture the same `Sexpr` binding; a write through one is
+    // observed by the other — the shared-mutable-cell semantics the heap
+    // cell representation must preserve.
+    let src = "(let ((s (cons (Int 1) (Nil)))) \
+                 (let ((write (lambda () () (setf s (cons (Int 9) (Nil))) ())) \
+                       (read (lambda () Sexpr (car s)))) \
+                   (write) \
+                   (read)))";
+    assert_eq!(eval_ok_with_prelude(src), RtValue::Sexpr(Value::Int(9)));
+}
+
+#[test]
+fn the_closure_side_table_shrinks_when_the_gc_sweeps_closure_boxes() {
+    // Each loop iteration creates a lambda and drops it; the side table must
+    // track the heap (via `take_dead_closure_tokens`) instead of growing
+    // forever — including the `labels`-style cell<->closure cycle, which the
+    // old `Rc` representation leaked by design.
+    let mut h = Heap::with_capacity(1 << 16);
+    let r = Reader::new();
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let src = "(dotimes (i 50) \
+                 (labels ((self-ref ((n i32)) i32 (if (= n 0) 0 (self-ref (- n 1))))) \
+                   (self-ref 3)))";
+    for v in r.read_all(&mut h, src).expect("read failed") {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        interp.exec(&mut h, tl).expect("eval failed");
+    }
+    let before = interp.closure_body_count();
+    // Everything above is out of scope; a collection plus one sync (any
+    // allocating evaluation) must drain the dead closures' side entries.
+    h.gc();
+    for v in r.read_all(&mut h, "(cons (Int 1) (Nil))").expect("read failed") {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        interp.exec(&mut h, tl).expect("eval failed");
+    }
+    let after = interp.closure_body_count();
+    assert!(
+        after < before && after <= 2,
+        "side table must shrink with the GC: before={} after={}",
+        before,
+        after
+    );
+}

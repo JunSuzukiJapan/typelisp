@@ -217,7 +217,6 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
             }
         }
         RtValue::Sexpr(sv) => format_sexpr(heap, *sv),
-        RtValue::Closure(_) => "#<closure>".to_string(),
         RtValue::Builtin(name) => format!("#<builtin {}>", name),
         RtValue::BuiltinMethod(type_name, method) => format!("#<builtin {}::{}>", type_name, method),
         RtValue::Scope(frames) => format!("#<scope depth={}>", frames.borrow().len()),
@@ -249,6 +248,9 @@ fn format_sexpr(heap: &Heap, v: Value) -> String {
             format!("#<{} {}>", heap.struct_type_name(id), parts.join(" "))
         }
         Value::Boxed(id) if heap.is_hashtable(id) => format!("#<hashtable count={}>", heap.hashtable_count(id)),
+        // A closure is a boxed value too since Stage 6b — printed opaquely,
+        // as the old dedicated `RtValue::Closure` arm did.
+        Value::Boxed(id) if heap.is_closure(id) => "#<closure>".to_string(),
         Value::Boxed(id) => format_float(heap.float_value(id)),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),
