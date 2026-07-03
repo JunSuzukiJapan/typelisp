@@ -169,6 +169,19 @@ impl BoxId {
 pub(crate) enum BoxedObj {
     Float(f64),
     Struct { type_name: String, payload: StructPayload },
+    /// A shared mutable variable slot — the heap-resident replacement for
+    /// the interpreter's `Rc<RefCell<RtValue>>` binding cells, for bindings
+    /// whose static type's runtime representation is a `Value` (`Sexpr`,
+    /// boxed structs, `HashTable<K,V>`): `let`/parameters/`match` bindings/
+    /// globals of those types, and (Stage 6b) the slots sibling closures
+    /// share. Living here — instead of Rust-side `Rc` cells the GC can't
+    /// see — makes the binding itself traceable: rooting the cell keeps its
+    /// current contents live with no per-slot re-collection pass, and a
+    /// closure's captured environment can be an ordinary `Vec<Value>` of
+    /// these. Bindings of every *other* type (scalars, `Option`/`Result`,
+    /// LLVM handles — nothing the GC needs to trace, or nothing `Value` can
+    /// represent) stay in Rust-side cells; see `Interp`'s `Slot`.
+    Cell(Value),
 }
 
 /// A `HashTable<K,V>` key at the mem layer — the runtime encoding of a

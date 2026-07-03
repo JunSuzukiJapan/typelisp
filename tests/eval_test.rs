@@ -543,11 +543,16 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
         }
     }
     assert_eq!(last, RtValue::Sexpr(Value::Int(1)));
-    // GC is lazy (it only runs when an allocation needs space), so the final
-    // iteration's garbage cell is still live; one more collection reclaims it.
-    // `kept`'s cell — still rooted — is the only thing left afterwards.
+    // GC is lazy (it only runs when an allocation needs space), so one more
+    // collection reclaims whatever the evaluation left behind — *everything*:
+    // `kept`'s binding was a heap cell (`Slot::Heap`) whose liveness follows
+    // the binding itself (`Heap::alloc_cell`'s registry), so once the `let`
+    // scope ended nothing keeps its cons alive. (Before the two-tier `Slot`,
+    // `sync_roots`' stale post-evaluation root stack happened to keep it
+    // "live" here — the survival *during* the loop, which is what this test
+    // actually guards, is already proven by the `(car kept)` assertion above.)
     rt_heap.gc();
-    assert_eq!(rt_heap.live_count(), 1);
+    assert_eq!(rt_heap.live_count(), 0);
 }
 
 // ---- global definitions: defvar / defconstant ------------------------------
@@ -754,4 +759,70 @@ fn unreachable_panics() {
 fn todo_panics() {
     let src = "(defun boom () i32 (todo)) (boom)";
     assert_eq!(run_with_prelude(src), Err(EvalError::Panic("todo".into())));
+}
+
+// ---- two-tier binding slots (Sexpr/RtValue unification Stage 6a) -------------
+
+/// Shared harness for the heap-cell binding tests below: read/check `src`
+/// against a roomy heap (with the prelude, for `dotimes`), then execute
+/// against a tiny `rt_cells`-cell heap so the churn forces repeated
+/// collections — any `Sexpr`-typed binding not protected by its heap cell
+/// (`Slot::Heap` / `Heap::alloc_cell`'s registry) would be corrupted.
+fn eval_under_gc_pressure(src: &str, rt_cells: usize) -> RtValue {
+    let mut src_heap = Heap::with_capacity(1 << 16);
+    let r = Reader::new();
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut src_heap, &mut chk, &mut interp);
+    let vs = r.read_all(&mut src_heap, src).expect("read failed");
+    let tls: Vec<_> = vs
+        .into_iter()
+        .map(|v| chk.check_form(&mut src_heap, &interp, v).expect("check failed"))
+        .collect();
+    let mut rt_heap = Heap::with_capacity(rt_cells);
+    let mut last = RtValue::Unit;
+    for tl in tls {
+        if let Some(val) = interp.exec(&mut rt_heap, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    last
+}
+
+#[test]
+fn setf_on_a_sexpr_binding_survives_gc_and_releases_the_old_value() {
+    // `s` is rebound mid-loop; the *new* cons must survive every later
+    // collection and the old one must be reclaimable (with only 3 cells,
+    // the loop can't run at all unless the old value's cell is freed).
+    let src = "(let ((s (cons (Int 1) (Nil)))) \
+                 (setf s (cons (Int 5) (Nil))) \
+                 (dotimes (i 40) (cons (Int 2) (Nil))) \
+                 (car s))";
+    assert_eq!(eval_under_gc_pressure(src, 3), RtValue::Sexpr(Value::Int(5)));
+}
+
+#[test]
+fn a_match_bound_sexpr_survives_gc_pressure() {
+    let src = "(let ((s (cons (Int 8) (Nil)))) \
+                 (match s \
+                   ((Cons h _) (dotimes (i 40) (cons (Int 2) (Nil))) h) \
+                   (_ (Int 0))))";
+    assert_eq!(eval_under_gc_pressure(src, 4), RtValue::Sexpr(Value::Int(8)));
+}
+
+#[test]
+fn a_defvar_sexpr_global_survives_gc_pressure_across_forms() {
+    let src = "(defvar g (cons (Int 3) (Nil))) \
+               (dotimes (i 40) (cons (Int 2) (Nil))) \
+               (car g)";
+    assert_eq!(eval_under_gc_pressure(src, 3), RtValue::Sexpr(Value::Int(3)));
+}
+
+#[test]
+fn a_lambda_captured_sexpr_binding_survives_gc_pressure() {
+    let src = "(let ((s (cons (Int 6) (Nil)))) \
+                 (let ((f (lambda () Sexpr (car s)))) \
+                   (dotimes (i 40) (cons (Int 2) (Nil))) \
+                   (f)))";
+    assert_eq!(eval_under_gc_pressure(src, 4), RtValue::Sexpr(Value::Int(6)));
 }

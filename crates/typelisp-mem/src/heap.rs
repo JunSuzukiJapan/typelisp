@@ -65,6 +65,17 @@ pub struct Heap {
     box_slots: Vec<Option<BoxedObj>>,
     box_free: Vec<u32>,
     box_marks: Vec<bool>,
+
+    // Liveness registry for `BoxedObj::Cell`s (see `alloc_cell`): a cell is
+    // an *implicit* GC root for exactly as long as some binding holds the
+    // `Rc<BoxId>` handed out at allocation. Registered here (weakly) rather
+    // than through the caller-managed `roots`/`permanent_roots` stacks
+    // because a binding's lifetime follows Rust scopes, not this heap's
+    // strict LIFO root discipline — and, crucially, `gc()` reads this
+    // registry *itself*, so a collection triggered from anywhere (including
+    // compiled code, which knows nothing about the interpreter's
+    // root-resyncing) can never sweep a live binding cell.
+    cell_registry: Vec<std::rc::Weak<BoxId>>,
 }
 
 impl Heap {
@@ -102,6 +113,7 @@ impl Heap {
             box_slots: Vec::new(),
             box_free: Vec::new(),
             box_marks: Vec::new(),
+            cell_registry: Vec::new(),
         }
     }
 
@@ -442,6 +454,55 @@ impl Heap {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Map(_), .. }))
     }
 
+    // ---- cells ----------------------------------------------------------------
+
+    /// Store a mutable variable slot holding `v`, returning an owning
+    /// `Rc<BoxId>` handle — see [`BoxedObj::Cell`]. The cell (and thus its
+    /// current contents) stays live for exactly as long as any clone of the
+    /// handle does: `gc()` treats every still-referenced cell as a root by
+    /// consulting the weak registry this populates (`cell_registry`), so no
+    /// caller-side root bookkeeping exists for cells at all — a collection
+    /// triggered from *anywhere* (interpreter or compiled code) sees them.
+    /// Unlike [`cons`](Self::cons), this can never itself trigger a
+    /// collection (the box store grows on demand, it is not a fixed arena),
+    /// so `v` may be un-rooted at the moment of the call.
+    pub fn alloc_cell(&mut self, v: Value) -> std::rc::Rc<BoxId> {
+        let id = match self.alloc_boxed(BoxedObj::Cell(v)) {
+            Value::Boxed(id) => id,
+            _ => unreachable!("alloc_boxed always returns Value::Boxed"),
+        };
+        let rc = std::rc::Rc::new(id);
+        self.cell_registry.push(std::rc::Rc::downgrade(&rc));
+        rc
+    }
+
+    /// The current contents of a cell. Panics if `id` doesn't hold a
+    /// `BoxedObj::Cell` — same internal-invariant-trap convention as
+    /// [`float_value`](Self::float_value).
+    pub fn cell_get(&self, id: BoxId) -> Value {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Cell(v)) => *v,
+            _ => panic!("BoxId does not hold a Cell"),
+        }
+    }
+
+    /// Overwrites a cell's contents in place — `setf`'s primitive for a
+    /// heap-cell-backed binding. Panics under the same conditions as
+    /// [`cell_get`](Self::cell_get).
+    pub fn cell_set(&mut self, id: BoxId, v: Value) {
+        match self.box_slots[id.0 as usize].as_mut() {
+            Some(BoxedObj::Cell(slot)) => *slot = v,
+            _ => panic!("BoxId does not hold a Cell"),
+        }
+    }
+
+    /// True if `id` holds a `BoxedObj::Cell` — the peer of
+    /// [`is_struct`](Self::is_struct)/[`is_hashtable`](Self::is_hashtable)
+    /// for callers that decode a `Value::Boxed` without knowing its kind.
+    pub fn is_cell(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Cell(_)))
+    }
+
     // ---- hash tables --------------------------------------------------------
 
     /// Converts a key argument at the `HashTable` method boundary into a
@@ -687,6 +748,8 @@ impl Heap {
                     stack.push(v);
                 }
             }
+            // A live binding cell keeps whatever it currently holds live.
+            BoxedObj::Cell(v) => stack.push(*v),
         }
     }
 
@@ -713,6 +776,16 @@ impl Heap {
         }
         for i in 0..self.permanent_roots.len() {
             stack.push(self.permanent_roots[i]);
+        }
+        // Every binding cell still referenced by a live `Rc<BoxId>` handle
+        // is a root of its own — see `alloc_cell`. Dead entries (the last
+        // handle dropped) are pruned here; their cells become collectible
+        // like any other unreachable box.
+        self.cell_registry.retain(|w| w.upgrade().is_some());
+        for w in &self.cell_registry {
+            if let Some(id) = w.upgrade() {
+                stack.push(Value::Boxed(*id));
+            }
         }
         while let Some(v) = stack.pop() {
             match v {

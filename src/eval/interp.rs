@@ -26,12 +26,17 @@ use inkwell::AddressSpace;
 
 use crate::{BoxId, Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
 
-use super::value::{Closure, EvalError, RtValue, ScopeFrame};
+use super::value::{Closure, EvalError, RtValue, ScopeFrame, Slot, SlotKind};
 
 /// A registered function or method body with its parameter names.
 struct FnDef {
     /// Parameter names, including the receiver name first for instance methods.
     params: Vec<String>,
+    /// Each parameter's binding-slot routing, parallel to `params` — derived
+    /// once at registration from the declared parameter types (`sig`; a
+    /// `defmacro`'s parameters are all `Sexpr`, hence all `Heap`), so
+    /// `Interp::apply` needs no type information per call.
+    kinds: Vec<SlotKind>,
     body: Vec<Typed>,
     /// Only ever set for a `defmacro` with a trailing `&rest` parameter (see
     /// [`Interp::expand_macro`]); always `false` for `defun`/`defmethod`,
@@ -48,10 +53,6 @@ struct FnDef {
     /// access to).
     sig: Option<(Vec<Type>, Type)>,
 }
-
-/// A mutable variable slot (shared so `setf` mutations are visible to every
-/// holder of the binding, e.g. across `loop` iterations).
-type Slot = Rc<RefCell<RtValue>>;
 
 /// A lexical environment: name -> slot, searched from the back (innermost).
 type Env = Vec<(String, Slot)>;
@@ -71,7 +72,7 @@ pub struct Interp {
     fns: HashMap<Path, FnDef>,
     methods: HashMap<(Path, String), FnDef>,
     globals: HashMap<Path, Slot>,
-    /// Every mutable slot ever created, held weakly. A slot stays discoverable
+    /// Every `Native` slot ever created, held weakly. A slot stays discoverable
     /// here for exactly as long as it's reachable some other way (an env frame
     /// on the call stack, `globals`, or a closure's captured environment) —
     /// once that owner drops the `Rc`, the entry quietly goes dead and is
@@ -139,20 +140,61 @@ impl Interp {
         }
     }
 
-    /// Wrap `v` in a fresh mutable slot and register it (weakly) for GC
-    /// rooting purposes. Every binding site (`let`, parameters, closure
-    /// capture, `match` bindings, globals) goes through here.
-    fn slot(&self, v: RtValue) -> Slot {
+    /// Wrap `v` in a fresh mutable slot of the statically-determined `kind`
+    /// and register it (weakly) for GC rooting purposes. Every binding site
+    /// (`let`, parameters, `match` bindings, globals) goes through here.
+    /// A `Heap`-kind binding must hold an `RtValue::Sexpr` — anything else
+    /// is a checker/interpreter invariant violation, never a user error.
+    /// (`Heap::alloc_cell` cannot trigger a collection — the box store is
+    /// growable — so `v`'s payload needs no rooting across this call.)
+    fn slot(&self, heap: &mut Heap, kind: SlotKind, v: RtValue) -> Result<Slot, EvalError> {
+        match kind {
+            SlotKind::Heap => match v {
+                RtValue::Sexpr(val) => Ok(Slot::Heap(heap.alloc_cell(val))),
+                other => Err(EvalError::Internal(format!(
+                    "heap-cell binding initialized with a non-Sexpr value: {:?}",
+                    other
+                ))),
+            },
+            SlotKind::Native => Ok(self.native_slot(v)),
+        }
+    }
+
+    /// A bare `Native` slot — for binding sites that are `Native` by
+    /// construction (`labels` placeholders, `eval_args`'s GC-protection
+    /// anchors) rather than by a declared type's [`SlotKind`].
+    fn native_slot(&self, v: RtValue) -> Slot {
         let s = Rc::new(RefCell::new(v));
         self.slots.borrow_mut().push(Rc::downgrade(&s));
-        s
+        Slot::Native(s)
+    }
+
+    /// Whether a declared type's runtime representation is always
+    /// `RtValue::Sexpr` — the interpreter-side twin of the checker's
+    /// `Checker::is_heap_repr` (which bakes the same bit into
+    /// `Pattern::Bind`), deciding [`SlotKind`] at binding sites whose AST
+    /// carries a `Type` (`let`'s bound `Typed`, parameter lists, `defvar`).
+    fn heap_repr_kind(&self, ty: &Type) -> SlotKind {
+        match ty {
+            Type::Named(p, _)
+                if is_sexpr_type(p) || *p == Path::root("hashtable") || self.struct_types.contains(p) =>
+            {
+                SlotKind::Heap
+            }
+            _ => SlotKind::Native,
+        }
     }
 
     /// Recompute the cons heap's root set from every `Sexpr` value reachable
-    /// through a currently-live slot. Must be called right before any
-    /// operation that might allocate a cons cell (i.e. [`Heap::cons`]), since
-    /// otherwise a GC during evaluation could reclaim a cons cell still
-    /// referenced from a local, global, or closure.
+    /// through a currently-live `Native` slot (a `Data`/`Scope` may hold
+    /// `Sexpr`s inside). Must be called right before any operation that
+    /// might allocate a cons cell (i.e. [`Heap::cons`]), since otherwise a
+    /// GC during evaluation could reclaim a cons cell still referenced from
+    /// a local, global, or closure. `Heap`-cell slots need no handling here
+    /// at all: a live cell is an implicit root of the heap's own
+    /// (`Heap::alloc_cell`'s `cell_registry`), visible to a collection
+    /// triggered from *anywhere* — including compiled code, which never
+    /// re-syncs the interpreter's roots.
     fn sync_roots(&self, heap: &mut Heap) {
         for _ in 0..self.rooted.replace(0) {
             heap.pop_root();
@@ -187,7 +229,8 @@ impl Interp {
                     return Ok(None);
                 }
                 let (names, types): (Vec<String>, Vec<Type>) = params.into_iter().unzip();
-                self.fns.insert(name, FnDef { params: names, body, rest: false, sig: Some((types, ret)) });
+                let kinds = types.iter().map(|ty| self.heap_repr_kind(ty)).collect();
+                self.fns.insert(name, FnDef { params: names, kinds, body, rest: false, sig: Some((types, ret)) });
                 Ok(None)
             }
             TopLevel::Defmethod { type_name, method, self_name, params, ret, body, type_params, .. } => {
@@ -207,14 +250,18 @@ impl Interp {
                     names.push(n);
                     types.push(t);
                 }
-                self.methods.insert((type_name, method), FnDef { params: names, body, rest: false, sig: Some((types, ret)) });
+                let kinds = types.iter().map(|ty| self.heap_repr_kind(ty)).collect();
+                self.methods.insert((type_name, method), FnDef { params: names, kinds, body, rest: false, sig: Some((types, ret)) });
                 Ok(None)
             }
             TopLevel::Defmacro { name, params, body, rest } => {
                 // A macro's body is callable exactly like a `defun`'s — see
                 // `MacroExpander`/`Self::expand_macro` — so it's stored in
                 // the very same `fns` table; no separate macro table exists.
-                self.fns.insert(name, FnDef { params, body, rest, sig: None });
+                // Every macro parameter is `Sexpr` by definition, hence all
+                // `Heap` slots.
+                let kinds = vec![SlotKind::Heap; params.len()];
+                self.fns.insert(name, FnDef { params, kinds, body, rest, sig: None });
                 Ok(None)
             }
             TopLevel::Use { .. } => Ok(None),
@@ -229,9 +276,11 @@ impl Interp {
                 self.struct_types.insert(name);
                 Ok(None)
             }
-            TopLevel::Defvar { name, value, .. } => {
+            TopLevel::Defvar { name, ty, value, .. } => {
                 let v = self.eval(heap, &value, &Env::new())?;
-                self.globals.insert(name, self.slot(v));
+                let kind = self.heap_repr_kind(&ty);
+                let s = self.slot(heap, kind, v)?;
+                self.globals.insert(name, s);
                 Ok(None)
             }
             TopLevel::Module { body, .. } => {
@@ -254,17 +303,17 @@ impl Interp {
             Expr::Str(s) => Ok(RtValue::Str(s.as_str().into())),
             Expr::Unit => Ok(RtValue::Unit),
             Expr::Var(n) => env_get(env, n)
-                .map(|s| s.borrow().clone())
+                .map(|s| s.get(heap))
                 .ok_or_else(|| EvalError::Unbound(n.clone())),
             Expr::Global(path) => self
                 .globals
                 .get(path)
-                .map(|s| s.borrow().clone())
+                .map(|s| s.get(heap))
                 .ok_or_else(|| EvalError::Unbound(path.to_string())),
             Expr::FnRef(path) => Ok(match self.fns.get(path) {
                 // Reify a user function as a closure with no captured environment.
                 Some(f) => RtValue::Closure(Rc::new(Closure {
-                    params: f.params.clone(),
+                    params: f.params.iter().cloned().zip(f.kinds.iter().copied()).collect(),
                     body: f.body.clone(),
                     env: Vec::new(),
                 })),
@@ -274,7 +323,7 @@ impl Interp {
             Expr::MethodRef { type_name, method } => {
                 Ok(match self.methods.get(&(type_name.clone(), method.clone())) {
                     Some(m) => RtValue::Closure(Rc::new(Closure {
-                        params: m.params.clone(),
+                        params: m.params.iter().cloned().zip(m.kinds.iter().copied()).collect(),
                         body: m.body.clone(),
                         env: Vec::new(),
                     })),
@@ -318,10 +367,15 @@ impl Interp {
             }
             Expr::Let(binds, body) => {
                 // CL `let`: binding values are evaluated in the outer environment.
+                // Slot routing comes from each binding's checked type
+                // (`val.ty`) — static information carried by the AST, never
+                // the evaluated value's shape.
                 let mut child = env.clone();
                 for (name, val) in binds {
                     let v = self.eval(heap, val, env)?;
-                    child.push((name.clone(), self.slot(v)));
+                    let kind = self.heap_repr_kind(&val.ty);
+                    let s = self.slot(heap, kind, v)?;
+                    child.push((name.clone(), s));
                 }
                 self.eval_seq(heap, body, &child)
             }
@@ -331,19 +385,27 @@ impl Interp {
                 // already contains all of them — including its own slot, the
                 // self-reference `lambda` has no way to express. Only once
                 // `child` is complete does each slot get overwritten with the
-                // real closure that captured it.
+                // real closure that captured it. Function-typed bindings are
+                // `Native` (a function value may also be an `RtValue::Builtin`,
+                // which has no heap representation).
                 let mut child = env.clone();
-                let slots: Vec<Slot> = defs.iter().map(|_| self.slot(RtValue::Unit)).collect();
+                let slots: Vec<Slot> = defs.iter().map(|_| self.native_slot(RtValue::Unit)).collect();
                 for ((name, _, _), slot) in defs.iter().zip(&slots) {
                     child.push((name.clone(), slot.clone()));
                 }
                 for ((_, params, fbody), slot) in defs.iter().zip(&slots) {
-                    let names = params.iter().map(|(n, _)| n.clone()).collect();
-                    *slot.borrow_mut() = RtValue::Closure(Rc::new(Closure {
-                        params: names,
-                        body: fbody.clone(),
-                        env: child.clone(),
-                    }));
+                    let kinds: Vec<(String, SlotKind)> = params
+                        .iter()
+                        .map(|(n, ty)| (n.clone(), self.heap_repr_kind(ty)))
+                        .collect();
+                    slot.set(
+                        heap,
+                        RtValue::Closure(Rc::new(Closure {
+                            params: kinds,
+                            body: fbody.clone(),
+                            env: child.clone(),
+                        })),
+                    )?;
                 }
                 self.eval_seq(heap, body, &child)
             }
@@ -367,7 +429,7 @@ impl Interp {
                     return self.call_compiled(heap, compiled, &argv, ret_ty);
                 }
                 if let Some(f) = self.fns.get(name) {
-                    self.apply(heap, &f.params, &f.body, argv)
+                    self.apply(heap, f, argv)
                 } else if name.is_simple() {
                     match self.eval_builtin(heap, name.local(), &argv) {
                         Some(result) => result,
@@ -393,7 +455,7 @@ impl Interp {
                     return self.call_compiled(heap, compiled, &argv, ret_ty);
                 }
                 if let Some(m) = self.methods.get(&key) {
-                    self.apply(heap, &m.params, &m.body, argv)
+                    self.apply(heap, m, argv)
                 } else {
                     match eval_builtin_method(heap, type_name, method, &argv, &t.ty) {
                         Some(result) => result,
@@ -432,10 +494,12 @@ impl Interp {
                 }
             }
             Expr::Lambda { params, body } => {
-                // Capture the current environment (shared slots) for the closure.
-                let names = params.iter().map(|(n, _)| n.clone()).collect();
+                // Capture the current environment (shared slots) for the
+                // closure, recording each parameter's slot routing from its
+                // declared type.
+                let kinds = params.iter().map(|(n, ty)| (n.clone(), self.heap_repr_kind(ty))).collect();
                 Ok(RtValue::Closure(Rc::new(Closure {
-                    params: names,
+                    params: kinds,
                     body: body.clone(),
                     env: env.clone(),
                 })))
@@ -449,8 +513,9 @@ impl Interp {
                             return Err(EvalError::Internal("closure arity mismatch".into()));
                         }
                         let mut cenv = c.env.clone();
-                        for (n, v) in c.params.iter().zip(argv) {
-                            cenv.push((n.clone(), self.slot(v)));
+                        for ((n, kind), v) in c.params.iter().zip(argv) {
+                            let s = self.slot(heap, *kind, v)?;
+                            cenv.push((n.clone(), s));
                         }
                         self.eval_seq(heap, &c.body, &cenv)
                     }
@@ -488,8 +553,15 @@ impl Interp {
                 let v = self.eval(heap, scrut, env)?;
                 for arm in arms {
                     if let Some(binds) = match_pattern(heap, &arm.pat, &v) {
+                        // Each binding's slot routing was baked into the
+                        // pattern at check time (`Pattern::Bind`'s bool) —
+                        // the one binding site whose type the evaluator
+                        // can't read off its own AST node.
                         let mut child = env.clone();
-                        child.extend(binds.into_iter().map(|(n, v)| (n, self.slot(v))));
+                        for (n, kind, bv) in binds {
+                            let s = self.slot(heap, kind, bv)?;
+                            child.push((n, s));
+                        }
                         return self.eval_seq(heap, &arm.body, &child);
                     }
                 }
@@ -497,8 +569,8 @@ impl Interp {
             }
             Expr::Set(name, value) => {
                 let v = self.eval(heap, value, env)?;
-                let cell = env_get(env, name).ok_or_else(|| EvalError::Unbound(name.clone()))?;
-                *cell.borrow_mut() = v.clone();
+                let cell = env_get(env, name).ok_or_else(|| EvalError::Unbound(name.clone()))?.clone();
+                cell.set(heap, v.clone())?;
                 Ok(v)
             }
             Expr::SetGlobal(path, value) => {
@@ -506,8 +578,9 @@ impl Interp {
                 let cell = self
                     .globals
                     .get(path)
-                    .ok_or_else(|| EvalError::Unbound(path.to_string()))?;
-                *cell.borrow_mut() = v.clone();
+                    .ok_or_else(|| EvalError::Unbound(path.to_string()))?
+                    .clone();
+                cell.set(heap, v.clone())?;
                 Ok(v)
             }
             Expr::Loop(body) => loop {
@@ -594,19 +667,19 @@ impl Interp {
         Ok(None)
     }
 
-    /// Apply a function/method body: bind `params` to `args` and run the body.
-    fn apply(
-        &self,
-        heap: &mut Heap,
-        params: &[String],
-        body: &[Typed],
-        args: Vec<RtValue>,
-    ) -> Result<RtValue, EvalError> {
-        if params.len() != args.len() {
+    /// Apply a function/method body: bind its parameters to `args` (each
+    /// slot routed by the `FnDef`'s registration-time `kinds`) and run the
+    /// body.
+    fn apply(&self, heap: &mut Heap, def: &FnDef, args: Vec<RtValue>) -> Result<RtValue, EvalError> {
+        if def.params.len() != args.len() {
             return Err(EvalError::Internal("arity mismatch".into()));
         }
-        let env: Env = params.iter().cloned().zip(args.into_iter().map(|v| self.slot(v))).collect();
-        self.eval_seq(heap, body, &env)
+        let mut env: Env = Vec::with_capacity(args.len());
+        for ((name, kind), v) in def.params.iter().zip(def.kinds.iter()).zip(args) {
+            let s = self.slot(heap, *kind, v)?;
+            env.push((name.clone(), s));
+        }
+        self.eval_seq(heap, &def.body, &env)
     }
 
     /// Runs already-evaluated `argv` (`param_tys`-typed, `ret_ty`-returning)
@@ -793,16 +866,12 @@ impl Interp {
         heap.pop_root(); // param_list
 
         let compiler_path = Path::root("compile-function");
-        let (compiler_params, compiler_body) = {
-            let f = self.fns.get(&compiler_path).ok_or_else(|| {
-                EvalError::Internal("compile: compiler body not loaded — call load_compiler first".into())
-            })?;
-            (f.params.clone(), f.body.clone())
-        };
+        let compiler_def = self.fns.get(&compiler_path).ok_or_else(|| {
+            EvalError::Internal("compile: compiler body not loaded — call load_compiler first".into())
+        })?;
         self.apply(
             heap,
-            &compiler_params,
-            &compiler_body,
+            compiler_def,
             vec![
                 RtValue::LlvmModule(module),
                 RtValue::Str(internal_name.into()),
@@ -1005,7 +1074,9 @@ impl Interp {
         let mut slots = Vec::with_capacity(args.len());
         for a in args {
             let v = self.eval(heap, a, env)?;
-            slots.push(self.slot(v.clone()));
+            // Not a program-visible binding — a pure GC-protection anchor,
+            // so `Native` unconditionally (`collect_sexpr_roots` covers it).
+            slots.push(self.native_slot(v.clone()));
             vs.push(v);
         }
         Ok((vs, slots))
@@ -1159,7 +1230,7 @@ impl MacroExpander for Interp {
             heap.push_root(*v);
         }
         let result = match self.bind_macro_args(heap, f, &raw_args, fixed) {
-            Ok(argv) => self.apply(heap, &f.params, &f.body, argv),
+            Ok(argv) => self.apply(heap, f, argv),
             Err(e) => Err(e),
         };
         for _ in 0..self.rooted.replace(0) {
@@ -3139,10 +3210,13 @@ fn sexpr_eql(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// Try to match a pattern against a value, returning the bindings on success.
 /// `heap` is needed to destructure `Sexpr` values (`RtValue::Sexpr`), which
 /// hold their `Cons`/`Str`/`Sym` payloads in the cons heap.
-fn match_pattern(heap: &Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(String, RtValue)>> {
+fn match_pattern(heap: &Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(String, SlotKind, RtValue)>> {
     match pat {
         Pattern::Wildcard => Some(Vec::new()),
-        Pattern::Bind(n) => Some(vec![(n.clone(), v.clone())]),
+        Pattern::Bind(n, heap_bind) => {
+            let kind = if *heap_bind { SlotKind::Heap } else { SlotKind::Native };
+            Some(vec![(n.clone(), kind, v.clone())])
+        }
         Pattern::Int(n) => match v {
             RtValue::Int(m) if m == n => Some(Vec::new()),
             _ => None,
@@ -3197,7 +3271,7 @@ fn match_pattern(heap: &Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(String,
 /// Match a `Sexpr` constructor pattern against a heap-backed `Sexpr` value,
 /// destructuring through `heap` (`car`/`cdr`/`symbol_name`/`string`) rather
 /// than an `RtValue::Data` shape.
-fn match_sexpr_ctor(heap: &Heap, variant: usize, args: &[Pattern], v: Value) -> Option<Vec<(String, RtValue)>> {
+fn match_sexpr_ctor(heap: &Heap, variant: usize, args: &[Pattern], v: Value) -> Option<Vec<(String, SlotKind, RtValue)>> {
     match (variant, v) {
         (SEXPR_NIL, Value::Empty) => Some(Vec::new()),
         (SEXPR_INT, Value::Int(n)) => match_pattern(heap, &args[0], &RtValue::Int(n)),

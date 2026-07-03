@@ -182,8 +182,16 @@ pub struct Arm {
 pub enum Pattern {
     /// `_` — matches anything, binds nothing.
     Wildcard,
-    /// A variable pattern — matches anything, binding it to the named variable.
-    Bind(String),
+    /// A variable pattern — matches anything, binding it to the named
+    /// variable. The `bool` is whether the binding's static type (known at
+    /// this pattern position at check time — `Checker::check_pattern`'s
+    /// `expected`) has the heap-cell runtime representation (`Sexpr`/boxed
+    /// struct/`HashTable<K,V>` — `Checker::is_heap_repr`), which decides the
+    /// binding-slot routing (`Interp`'s `Slot::Heap` vs `Slot::Native`) —
+    /// baked here because the evaluator's `match_pattern` otherwise sees
+    /// only the bound *value*, and slot routing is deliberately static-type-
+    /// driven, never value-shape-driven.
+    Bind(String, bool),
     Int(i64),
     Bool(bool),
     Char(char),

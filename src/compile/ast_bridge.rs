@@ -1134,7 +1134,7 @@ fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], direct: &HashSet
 fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern) -> Result<Value, Error> {
     match pat {
         Pattern::Wildcard => tagged(heap, "pat-wild", &[]),
-        Pattern::Bind(name) => {
+        Pattern::Bind(name, _) => {
             let v = heap.alloc_string(name.clone());
             tagged(heap, "pat-bind", &[v])
         }
@@ -2598,7 +2598,7 @@ mod tests {
         let mut heap = Heap::with_capacity(1 << 10);
         let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
         let arms = vec![Arm {
-            pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Bind("h".to_string()), Pattern::Wildcard], sexpr_fields: vec![true, true] },
+            pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Bind("h".to_string(), true), Pattern::Wildcard], sexpr_fields: vec![true, true] },
             body: vec![typed(Expr::Var("h".to_string()), sexpr_ty())],
         }];
         let v = ast_to_sexpr(&mut heap, &typed(Expr::Match(Box::new(scrut), arms), sexpr_ty())).unwrap();

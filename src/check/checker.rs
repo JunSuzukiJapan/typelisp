@@ -1361,6 +1361,26 @@ impl Checker {
         Ok(TopLevel::Defun { name: mangled.clone(), type_params: Vec::new(), params, ret, body })
     }
 
+    /// Whether a declared type's *runtime representation* is a heap value
+    /// (`RtValue::Sexpr` wrapping a `mem::Value`) — the built-in `Sexpr`
+    /// itself, any `AdtKind::Struct` type (`defstruct`/`Vector<T>`/
+    /// `cons-cell<K,V>`), or `HashTable<K,V>` (boxed since the unification's
+    /// Stage 5, though its `AdtDef` still says `Sum` — a recorded historical
+    /// asymmetry). This is the checker-side twin of the interpreter's
+    /// `Interp::is_heap_repr_ty`, used to bake binding-slot routing into
+    /// `Pattern::Bind` (the one binding site whose type the evaluator can't
+    /// read off its own AST node).
+    fn is_heap_repr(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Named(p, _) => {
+                *p == Path::root("sexpr")
+                    || *p == Path::root("hashtable")
+                    || self.reg.type_def(p).map(|d| d.kind == AdtKind::Struct).unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
     /// Whether `t` still mentions an unresolved type variable — a
     /// single-segment `Named` with no registered type definition, the same
     /// convention `check_call`'s where-clause validation already reads
@@ -3746,7 +3766,7 @@ impl Checker {
                 Pattern::Ctor { variant, .. } => {
                     covered.insert(*variant);
                 }
-                Pattern::Wildcard | Pattern::Bind(_) => catchall = true,
+                Pattern::Wildcard | Pattern::Bind(..) => catchall = true,
                 _ => {}
             }
             let arm_env = env.extended(binds);
@@ -3787,7 +3807,10 @@ impl Checker {
                 if name == "_" {
                     Ok((Pattern::Wildcard, Vec::new()))
                 } else {
-                    Ok((Pattern::Bind(name.to_string()), vec![(name.to_string(), expected.clone())]))
+                    Ok((
+                        Pattern::Bind(name.to_string(), self.is_heap_repr(expected)),
+                        vec![(name.to_string(), expected.clone())],
+                    ))
                 }
             }
             Value::Int(n) => {

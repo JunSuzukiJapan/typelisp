@@ -213,7 +213,7 @@ fn walk(typed: &Typed, bound: &HashSet<String>, siblings: &HashSet<String>, seen
 fn collect_pattern_bindings(pat: &Pattern, bound: &mut HashSet<String>) {
     match pat {
         Pattern::Wildcard | Pattern::Int(_) | Pattern::Bool(_) | Pattern::Char(_) => {}
-        Pattern::Bind(name) => {
+        Pattern::Bind(name, _) => {
             bound.insert(name.clone());
         }
         Pattern::Ctor { args, .. } => {

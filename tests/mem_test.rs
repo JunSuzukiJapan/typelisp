@@ -878,3 +878,76 @@ fn many_heaps_create_and_drop_cleanly() {
         // dropped here: arena must be freed (Miri checks for leaks)
     }
 }
+
+// ---- binding cells (`BoxedObj::Cell`, Sexpr/RtValue unification Stage 6a) ----
+
+#[test]
+fn cell_round_trips_get_and_set() {
+    let mut h = Heap::with_capacity(4);
+    let cell = h.alloc_cell(Value::Int(1));
+    assert!(h.is_cell(*cell));
+    assert_eq!(h.cell_get(*cell), Value::Int(1));
+    h.cell_set(*cell, Value::Bool(true));
+    assert_eq!(h.cell_get(*cell), Value::Bool(true));
+    assert_accounting(&h);
+}
+
+#[test]
+fn a_live_cell_keeps_its_cons_contents_across_gc() {
+    // The cell is never on the root stack at all — its liveness comes purely
+    // from the `Rc<BoxId>` handle (`Heap::alloc_cell`'s registry), which is
+    // exactly what protects a binding against a collection triggered from
+    // anywhere (including compiled code that never re-syncs interp roots).
+    let mut h = Heap::with_capacity(4);
+    let kept = h.cons(Value::Int(7), Value::Empty).unwrap();
+    let cell = h.alloc_cell(kept);
+    h.gc();
+    let held = h.cell_get(*cell);
+    assert_eq!(h.car(held).unwrap(), Value::Int(7));
+    assert_eq!(h.live_count(), 1);
+    assert_accounting(&h);
+}
+
+#[test]
+fn dropping_the_cell_handle_makes_cell_and_contents_collectable() {
+    let mut h = Heap::with_capacity(4);
+    let kept = h.cons(Value::Int(7), Value::Empty).unwrap();
+    let cell = h.alloc_cell(kept);
+    assert_eq!(h.box_count(), 1);
+    drop(cell);
+    h.gc();
+    assert_eq!(h.box_count(), 0, "the dead binding cell itself is swept");
+    assert_eq!(h.live_count(), 0, "and nothing keeps its old contents alive");
+}
+
+#[test]
+fn cell_set_releases_the_old_value_and_protects_the_new() {
+    let mut h = Heap::with_capacity(2);
+    let first = h.cons(Value::Int(1), Value::Empty).unwrap();
+    let cell = h.alloc_cell(first);
+    // Overwrite the binding; the old cons becomes garbage, so the next
+    // allocation can reclaim it even on this 2-cell heap.
+    h.cell_set(*cell, Value::Int(0));
+    let second = h.cons(Value::Int(2), Value::Empty).unwrap();
+    h.cell_set(*cell, second);
+    let third = h.cons(Value::Int(3), Value::Empty).unwrap(); // forces a GC over `first`
+    let held = h.cell_get(*cell);
+    assert_eq!(h.car(held).unwrap(), Value::Int(2));
+    assert_eq!(h.car(third).unwrap(), Value::Int(3));
+    assert_accounting(&h);
+}
+
+#[test]
+fn gc_traces_through_cell_then_struct_then_cons() {
+    let mut h = Heap::with_capacity(4);
+    let leaf = h.cons(Value::Int(9), Value::Empty).unwrap();
+    let boxed = h.alloc_struct("wrapper".to_string(), vec![leaf]);
+    let cell = h.alloc_cell(boxed);
+    h.gc();
+    let id = match h.cell_get(*cell) {
+        Value::Boxed(id) => id,
+        other => panic!("expected the struct back, got {:?}", other),
+    };
+    assert_eq!(h.car(h.struct_field(id, 0)).unwrap(), Value::Int(9));
+    assert_eq!(h.live_count(), 1);
+}

@@ -10,18 +10,103 @@ use inkwell::builder::Builder;
 use inkwell::module::Module;
 use inkwell::values::{BasicValueEnum, FunctionValue};
 
-use crate::{Path, Typed, Value};
+use crate::{BoxId, Heap, Path, Typed, Value};
 
 /// One `Scope<V>` frame — see [`RtValue::Scope`]'s doc comment.
 pub type ScopeFrame = Rc<RefCell<HashMap<String, RtValue>>>;
 
+/// Which of the interpreter's two binding-slot representations a binding
+/// uses — decided *statically*, from the binding's declared type, never from
+/// a value's runtime shape:
+///
+/// * `Heap` — the type's runtime representation is always
+///   `RtValue::Sexpr(Value)` (the built-in `Sexpr`, `defstruct`/`Vector<T>`/
+///   `cons-cell<K,V>` boxed structs, `HashTable<K,V>`), so the binding lives
+///   in a GC-heap `BoxedObj::Cell` the collector traces directly.
+/// * `Native` — everything else: scalars (whose `mem::Value` encodings would
+///   be ambiguous to decode — a cell holding `Value::Int(42)` couldn't say
+///   whether it was an `i32` or a quoted `Sexpr` datum), `Str` (whose
+///   `Rc::ptr_eq` `eq`-identity a `StrId` round-trip would destroy),
+///   `Data`/`Scope`/function values (not `Value`-representable), and the
+///   five LLVM FFI handle kinds (never `Value`-representable **by design** —
+///   this split is what keeps the compiler-internal LLVM universe strictly
+///   out of the GC heap).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlotKind {
+    Heap,
+    Native,
+}
+
+/// A mutable variable slot (shared so `setf` mutations are visible to every
+/// holder of the binding, e.g. across `loop` iterations). Two-tier, routed
+/// by the binding's *static type* ([`SlotKind`], never a value's runtime
+/// shape):
+///
+/// * `Heap` — a GC-heap `BoxedObj::Cell` (see `Heap::alloc_cell`), for
+///   bindings whose runtime representation is always `RtValue::Sexpr`. The
+///   collector traces the cell (and thus its current contents) directly;
+///   [`Interp::sync_roots`] only has to push one root per live cell. The
+///   `Rc` wrapper exists purely so cell liveness is observable through a
+///   `Weak` (a bare `BoxId` is `Copy` and its drop invisible) — the cell
+///   payload itself lives in the heap, not behind this `Rc`.
+/// * `Native` — the classic `Rc<RefCell<RtValue>>`, for every type whose
+///   values a `mem::Value` can't (or must not) carry — scalars, `Str`,
+///   `Data`, function values, `Scope`, and the five compiler-internal LLVM
+///   handle kinds, which this split keeps out of the GC heap *structurally*:
+///   a `Slot::Heap` can only ever be created from an `RtValue::Sexpr`.
+/// (`PartialEq`/`Debug` exist only for `Closure`'s own derives: a `Heap`
+/// slot compares by cell identity (`BoxId`), a `Native` one by contents —
+/// the same contents-comparison `Rc<RefCell<..>>` always had here.)
+#[derive(Clone, Debug, PartialEq)]
+pub enum Slot {
+    Heap(Rc<BoxId>),
+    Native(Rc<RefCell<RtValue>>),
+}
+
+impl Slot {
+    /// The binding's current value.
+    pub fn get(&self, heap: &Heap) -> RtValue {
+        match self {
+            Slot::Heap(id) => RtValue::Sexpr(heap.cell_get(**id)),
+            Slot::Native(rc) => rc.borrow().clone(),
+        }
+    }
+
+    /// Overwrites the binding (`setf`). Writing a non-`Sexpr` value into a
+    /// `Heap` slot is an internal invariant violation — the checker
+    /// guarantees a binding's static type (and hence its runtime
+    /// representation) never changes over its lifetime — reported loudly
+    /// rather than silently mis-stored.
+    pub fn set(&self, heap: &mut Heap, v: RtValue) -> Result<(), EvalError> {
+        match self {
+            Slot::Heap(id) => match v {
+                RtValue::Sexpr(val) => {
+                    heap.cell_set(**id, val);
+                    Ok(())
+                }
+                other => Err(EvalError::Internal(format!(
+                    "heap-cell binding assigned a non-Sexpr value: {:?}",
+                    other
+                ))),
+            },
+            Slot::Native(rc) => {
+                *rc.borrow_mut() = v;
+                Ok(())
+            }
+        }
+    }
+}
+
 /// A closure: a lambda body with its parameter names and the lexical environment
 /// captured at creation (shared slots, so captured mutable variables persist).
+/// Each parameter carries its [`SlotKind`] (derived from the parameter's
+/// declared type at the closure's creation site) so applying the closure can
+/// route each argument's binding without any type information at the call.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Closure {
-    pub params: Vec<String>,
+    pub params: Vec<(String, SlotKind)>,
     pub body: Vec<Typed>,
-    pub env: Vec<(String, Rc<RefCell<RtValue>>)>,
+    pub env: Vec<(String, Slot)>,
 }
 
 /// A runtime value. Data-type instances (constructors of `Option`/`Result`/
