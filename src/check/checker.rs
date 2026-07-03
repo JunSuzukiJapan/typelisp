@@ -3366,8 +3366,16 @@ impl Checker {
         )
     }
 
-    /// `(defvar name value)` / `(defconstant name value)`, with an optional
-    /// `(name Type)` annotation. Registers a global in the current namespace.
+    /// `(defvar (name Type) value)` / `(defconstant (name Type) value)`.
+    /// Registers a global in the current namespace. The declared type is
+    /// *mandatory* — a global's type is part of the program's public
+    /// surface, so it is never inferred from the initializer (unlike a
+    /// `let` binding, whose whole scope is in view; the untyped
+    /// `(defvar name value)` form was removed 2026-07-03). The annotation
+    /// also gives the initializer its expected type, which
+    /// post-monomorphization is what lets e.g. a generic function value
+    /// (`(defvar (f (fn (i32) i32)) identity)`) resolve its type arguments
+    /// at all.
     fn check_defvar(
         &mut self,
         heap: &mut Heap,
@@ -3377,27 +3385,32 @@ impl Checker {
         public: bool,
     ) -> Result<TopLevel, Error> {
         if parts.len() != 2 {
-            return Err(Error::TypeError("defvar/defconstant: (defvar name value)".into()));
+            return Err(Error::TypeError("defvar/defconstant: (defvar (name Type) value)".into()));
         }
         let (name, ann) = match parts[0] {
-            Value::Symbol(id) => (heap.symbol_name(id).to_string(), None),
             Value::Cons(_) => {
                 let pair = heap.list_to_vec(parts[0])?;
                 if pair.len() != 2 {
-                    return Err(Error::TypeError("defvar: typed name must be (name type)".into()));
+                    return Err(Error::TypeError("defvar: name must be (name Type)".into()));
                 }
                 let name = match pair[0] {
                     Value::Symbol(id) => heap.symbol_name(id).to_string(),
                     _ => return Err(Error::TypeError("defvar: name must be a symbol".into())),
                 };
-                (name, Some(self.canon(&parse_type(heap, pair[1])?)))
+                (name, self.canon(&parse_type(heap, pair[1])?))
             }
-            _ => return Err(Error::TypeError("defvar: name must be a symbol or (name type)".into())),
+            Value::Symbol(id) => {
+                return Err(Error::TypeError(format!(
+                    "defvar: a global needs a declared type — write (defvar ({} Type) value)",
+                    heap.symbol_name(id)
+                )))
+            }
+            _ => return Err(Error::TypeError("defvar: name must be (name Type)".into())),
         };
         // The value is checked at the top level (no locals), but globals/fns are
         // visible via the registry.
-        let value = self.check(heap, interp, &Env::new(), parts[1], ann.as_ref())?;
-        let ty = ann.unwrap_or_else(|| value.ty.clone());
+        let value = self.check(heap, interp, &Env::new(), parts[1], Some(&ann))?;
+        let ty = ann;
         self.check_redef("variable", &name, self.cur_ns().vars.get(&name))?;
         self.reg
             .root

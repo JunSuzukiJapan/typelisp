@@ -2878,3 +2878,14 @@ sweepが未到達クロージャのtokenを蓄積（gc()はcons()内から暗黙
 `RtValue`の残バリアント: `Int/Float/Bool/Char/Str/Unit/Data/Sexpr/Builtin/BuiltinMethod/
 Scope` + LLVM系5種。テスト: monomorph_test 27本新設、mem/evalにGC実証テスト群
 （セル・クロージャ・循環回収・サイドテーブル同期）。全32ターゲット+miri green。
+
+## `defvar`/`defconstant`の型注釈を必須化（2026-07-03）
+
+`(defvar name value)`（初期化子からの型推論）を削除し、`(defvar (name Type) value)`のみ許可
+（ユーザー指示「defvarで型がない変数を定義できるのがおかしい」）。グローバルの型はプログラムの
+公開サーフェスなので推論しない、という位置付け。`check_defvar`の`Value::Symbol`分岐を
+理由付きTypeErrorに変更。副次的な整合: 単型化（M3）後、型注釈が初期化子のexpected型として
+効くため、`(defvar (f (fn (i32) i32)) identity)`のようなジェネリック関数値のdefvar束縛が
+（型なし時代は原理的に不可能だったのに対し）正しく特殊化されて動く——monomorph_testに
+正のテストを追加し、「文脈なしのジェネリック値化はエラー」のテストはlet束縛経由に変更。
+既存テスト17箇所を型付き形式へ更新、language-design.mdの仕様記述を更新。

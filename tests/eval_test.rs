@@ -559,17 +559,17 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
 
 #[test]
 fn defvar_global_read() {
-    assert_eq!(eval_ok("(defvar g 42) g"), RtValue::Int(42));
+    assert_eq!(eval_ok("(defvar (g i32) 42) g"), RtValue::Int(42));
 }
 
 #[test]
 fn defvar_visible_in_function() {
-    assert_eq!(eval_ok("(defvar g 10) (defun f () i32 g) (f)"), RtValue::Int(10));
+    assert_eq!(eval_ok("(defvar (g i32) 10) (defun f () i32 g) (f)"), RtValue::Int(10));
 }
 
 #[test]
 fn defvar_is_mutable() {
-    let src = "(defvar c 0) \
+    let src = "(defvar (c i32) 0) \
                (defun bump () i32 (setf c (+ c 1))) \
                (bump) (bump) c";
     assert_eq!(eval_ok(src), RtValue::Int(2));
@@ -577,7 +577,7 @@ fn defvar_is_mutable() {
 
 #[test]
 fn defconstant_read() {
-    assert_eq!(eval_ok("(defconstant k 5) k"), RtValue::Int(5));
+    assert_eq!(eval_ok("(defconstant (k i32) 5) k"), RtValue::Int(5));
 }
 
 #[test]
@@ -587,7 +587,7 @@ fn typed_defvar() {
 
 #[test]
 fn module_global_via_path() {
-    assert_eq!(eval_ok("(module m (pub defvar g 7)) m::g"), RtValue::Int(7));
+    assert_eq!(eval_ok("(module m (pub defvar (g i32) 7)) m::g"), RtValue::Int(7));
 }
 
 #[test]
@@ -812,7 +812,7 @@ fn a_match_bound_sexpr_survives_gc_pressure() {
 
 #[test]
 fn a_defvar_sexpr_global_survives_gc_pressure_across_forms() {
-    let src = "(defvar g (cons (Int 3) (Nil))) \
+    let src = "(defvar (g Sexpr) (cons (Int 3) (Nil))) \
                (dotimes (i 40) (cons (Int 2) (Nil))) \
                (car g)";
     assert_eq!(eval_under_gc_pressure(src, 3), RtValue::Sexpr(Value::Int(3)));

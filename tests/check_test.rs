@@ -299,7 +299,7 @@ fn setf_unbound_variable_errors() {
 fn cannot_assign_to_constant() {
     let mut h = typelisp::Heap::with_capacity(1024);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, "(defconstant k 5) (setf k 6)").unwrap();
+    let vs = r.read_all(&mut h, "(defconstant (k i32) 5) (setf k 6)").unwrap();
     let mut chk = Checker::new();
     let interp = typelisp::Interp::new();
     let mut result = Ok(());

@@ -11,7 +11,7 @@
 
 - **静的型付け**: すべての式が静的型を持つ。動的タグ付き Lisp（旧 3ab5599 の `Object`）ではない。
 - **文法は macro-lisp 準拠**: `/Users/suzukijun/Program/Rust/macro-lisp` の**構文**に従う（実装は参考にしない）。
-  `defun`/`defvar`/`defconstant`/`let`/`if`/`when`/`unless`/`cond`/`match`/`loop`/`while`/`dotimes`/`do`/`doiter`/`while-let`/`if-let`/`lambda`/`progn`/`module` 等。関数の引数・戻り型は必須、局所束縛は型推論可。
+  `defun`/`defvar`/`defconstant`/`let`/`if`/`when`/`unless`/`cond`/`match`/`loop`/`while`/`dotimes`/`do`/`doiter`/`while-let`/`if-let`/`lambda`/`progn`/`module` 等。関数の引数・戻り型とグローバル（`defvar`/`defconstant`）の型は必須、局所束縛（`let`）のみ型推論可。
   （`defstruct` はユーザ定義型機構として実装されたが、フィールドの読み書き手段が無い不完全な
   設計と判明し2026-06-23に削除・再設計待ち——[[typelisp-vector-defstruct-revert]]参照。
   ユーザ定義型は当面言語に存在しない。）
@@ -96,7 +96,7 @@
 
 | 分類 | 特殊形 | 備考 |
 |---|---|---|
-| 定義 | `defun` `defvar` `defconstant` `defmethod` `defmacro` `module` `use` `lambda` `deftrait` `impl` | 引数・戻り型は明示（局所束縛は推論可。`defmacro` は全パラメータ・戻りが `Sexpr` 固定なので型注釈なし、末尾 `&rest name` で可変長対応）。`defstruct`（ユーザ定義型）は2026-06-23に削除・再設計待ち。`deftrait`/`impl`（trait機構、§5.1）は2026-06-30実装 |
+| 定義 | `defun` `defvar` `defconstant` `defmethod` `defmacro` `module` `use` `lambda` `deftrait` `impl` | 引数・戻り型・グローバルの型は明示（`defvar`/`defconstant`は`(defvar (name Type) value)`で型必須、2026-07-03に型なし形式を削除。局所束縛`let`のみ推論可。`defmacro` は全パラメータ・戻りが `Sexpr` 固定なので型注釈なし、末尾 `&rest name` で可変長対応）。`defstruct`（ユーザ定義型）は2026-06-23に削除・再設計待ち。`deftrait`/`impl`（trait機構、§5.1）は2026-06-30実装 |
 | 束縛 | `let` `let*` | |
 | 制御 | `if` `when` `unless` `cond` `case` `match` `if-let` `while-let` `and` `or` `progn` `the` | `and`/`or` は短絡のため特殊形。`the` は型注釈 |
 | 反復 | `loop` `while` `until` `dotimes` `dolist` `do` `doiter` | |
@@ -119,8 +119,11 @@
 [implementation-log.md](implementation-log.md) のステップ 4k を参照。`defstruct` は実装後2026-06-23に削除・再設計待ち。
 `when`/`unless`/`and`/`or`/`cond`/`let*` は `if`/`let` への脱糖。`setf`（可変ローカル/グローバル変数）/`while` は専用 AST
 ノード（eval 環境は `Rc<RefCell>` の可変スロット）。`defvar`（可変）/`defconstant`（不変）はグローバル変数を現在の
-名前空間に登録し、型注釈 `(name Type)` は任意（省略時は値から推論）。
-**`lambda`** は関数を第一級の値（`RtValue::Closure`）にする: `(lambda (params) ret body...)`、型は `(fn ...)`。
+名前空間に登録する。型注釈は**必須**——`(defvar (name Type) value)`（グローバルの型はプログラムの
+公開サーフェスであり初期化子から推論しない。型なしの`(defvar name value)`形式は2026-07-03に削除。
+副次的に、注釈が初期化子のexpected型になるため`(defvar (f (fn (i32) i32)) identity)`のような
+ジェネリック関数値の単型化解決もここから効く）。
+**`lambda`** は関数を第一級の値（GCヒープ上のクロージャボックス、`BoxedObj::Closure`）にする: `(lambda (params) ret body...)`、型は `(fn ...)`。
 定義時の環境（可変スロット）を捕捉する真のクロージャ。関数値の呼び出しは頭がローカル変数・グローバル変数・任意の式
 （例 `((lambda ...) x)`）のとき `Expr::Apply` に。**名前付き関数も値化可能**（`id` 等を高階関数へ渡せる。`Expr::FnRef`、
 組み込みは `RtValue::Builtin`）。**`dotimes`** `(dotimes (var count) body...)` は `let`+`while`+`setf` への脱糖。

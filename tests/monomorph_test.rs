@@ -153,7 +153,7 @@ fn generic_body_calling_another_generic_specializes_transitively() {
 fn a_generic_instantiated_from_a_defvar_initializer_works() {
     let src = r#"
         (defun (identity T) ((x T)) T x)
-        (defvar g (identity 11))
+        (defvar (g i32) (identity 11))
         g
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(11));
@@ -256,7 +256,7 @@ fn a_generic_method_with_a_match_body_specializes() {
 fn generic_defstruct_field_read_and_setf_work_through_specialized_accessors() {
     let src = r#"
         (defstruct (box T) (v T))
-        (defvar b (box::new 1))
+        (defvar (b box<i32>) (box::new 1))
         (setf b::v 5)
         b::v
     "#;
@@ -287,7 +287,7 @@ fn a_sexpr_instantiated_generic_field_returns_the_datum_not_a_misdecoded_scalar(
     // node type `Sexpr`) the decode is type-directed and exact.
     let src = r#"
         (defstruct (box T) (v T))
-        (defvar b (box::new '42))
+        (defvar (b box<Sexpr>) (box::new '42))
         b::v
     "#;
     match run(src).expect("eval failed") {
@@ -301,7 +301,7 @@ fn a_vector_of_sexpr_element_returns_the_datum() {
     // `Vector<Sexpr>`'s `get` return type is `Sexpr` at every (specialized)
     // call site, so the element decode is type-directed the same way.
     let src = r#"
-        (defvar v (the Vector<Sexpr> (Vector::new)))
+        (defvar (v Vector<Sexpr>) (Vector::new))
         (push v '7)
         (get v 0)
     "#;
@@ -346,12 +346,27 @@ fn a_generic_method_passed_as_an_argument_specializes() {
 
 #[test]
 fn a_generic_function_value_without_type_context_is_a_check_error() {
-    // `(defvar f identity)` gives the checker no function type to resolve T
-    // from — there is no erased generic value to fall back to anymore.
-    match check_all("(defun (identity T) ((x T)) T x) (defvar f identity)") {
+    // An unannotated `let` binding gives the checker no function type to
+    // resolve T from — there is no erased generic value to fall back to
+    // anymore. (`defvar` can't even express the untyped case: its type
+    // annotation is mandatory.)
+    match check_all("(defun (identity T) ((x T)) T x) (let ((f identity)) 0)") {
         Err(Error::TypeError(msg)) => assert!(msg.contains("generic function"), "unexpected: {}", msg),
         other => panic!("expected TypeError, got {:?}", other),
     }
+}
+
+#[test]
+fn a_generic_function_value_in_a_typed_defvar_specializes() {
+    // `defvar`'s mandatory type annotation is exactly the context a generic
+    // function value needs: `f`'s declared `(fn (i32) i32)` resolves T=i32
+    // and the global ends up holding the specialization.
+    let src = r#"
+        (defun (identity T) ((x T)) T x)
+        (defvar (f (fn (i32) i32)) identity)
+        (f 41)
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Int(41));
 }
 
 #[test]

@@ -65,8 +65,9 @@
      ソース到達不能になった——削除待ち。
    計画詳細は`~/.claude/plans/zippy-jingling-popcorn.md`（承認済みプラン）参照。
 
-直近完了: ジェネリック単型化M1-M4 + Sexpr/RtValue統合Stage 6a/6b（2026-07-03、6コミット）。
-詳細は上記の各項目と[implementation-log.md](implementation-log.md)の
+直近完了: `defvar`/`defconstant`の型注釈必須化（2026-07-03）——`(defvar (name Type) value)`のみ
+許可、型なし形式を削除。その前にジェネリック単型化M1-M4 + Sexpr/RtValue統合Stage 6a/6b
+（2026-07-03、6コミット）。詳細は上記の各項目と[implementation-log.md](implementation-log.md)の
 「ジェネリック単型化とSexpr/RtValue統合Stage 6」節参照。
 
 その前に完了: Sexpr/RtValue内部表現統合Stage 5（2026-07-03）——HashTable: インタプリタ結線。

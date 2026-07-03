@@ -183,7 +183,7 @@ fn field_path_sugar_and_plain_call_agree() {
 
 #[test]
 fn field_path_sugar_works_on_a_global() {
-    let src = "(defstruct point (x i32) (y i32)) (defvar p (point::new 3 4)) p::x";
+    let src = "(defstruct point (x i32) (y i32)) (defvar (p point) (point::new 3 4)) p::x";
     assert_eq!(eval_ok(src), RtValue::Int(3));
 }
 
@@ -237,7 +237,7 @@ fn setf_field_path_returns_unit() {
 #[test]
 fn setf_field_path_on_a_global_writes_in_place() {
     let src = "(defstruct point (x i32) (y i32)) \
-               (defvar p (point::new 1 2)) (setf p::x 99) p::x";
+               (defvar (p point) (point::new 1 2)) (setf p::x 99) p::x";
     assert_eq!(eval_ok(src), RtValue::Int(99));
 }
 

@@ -93,7 +93,7 @@ fn redefining_a_user_macro_warns_by_default() {
 
 #[test]
 fn redefining_a_user_var_warns_by_default() {
-    let src = "(defvar x 1) (defvar x 2)";
+    let src = "(defvar (x i32) 1) (defvar (x i32) 2)";
     let (warnings, result) = run(src, RedefPolicy::Warn);
     assert!(result.is_ok());
     assert_eq!(warnings.len(), 1);

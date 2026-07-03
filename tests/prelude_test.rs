@@ -948,7 +948,7 @@ fn case_matches_string_keys_by_content() {
 #[test]
 fn case_evaluates_its_expr_exactly_once() {
     let src = r#"
-        (defvar calls 0)
+        (defvar (calls i32) 0)
         (defun next-call () i32 (progn (setf calls (+ calls 1)) calls))
         (progn (case (next-call) (1 100) (else 0)) calls)
     "#;
