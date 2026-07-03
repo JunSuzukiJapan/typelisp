@@ -401,27 +401,20 @@ impl Interp {
                     }
                 }
             }
-            Expr::TraitCall { method, args, .. } => {
-                // The checker resolved this call only as far as "some type
-                // bound to `Iter`/etc. has a `next`" (`Checker::check_instance_method`'s
-                // type-variable branch) — *which* type is only known once
-                // `args[0]` (the receiver) is evaluated. `rtvalue_type_path`
-                // reads that off the value's own runtime type tag, then this
-                // is an ordinary `methods` lookup — the exact same table
-                // `Expr::Assoc` (below) reads, since `Checker::check_impl`
-                // inserted this method there as a plain `defmethod`.
-                let (argv, _slots) = self.eval_args(heap, args, env)?;
-                let type_path = rtvalue_type_path(heap, &argv[0])
-                    .ok_or_else(|| EvalError::Panic(format!("{}: no implementation for this value", method)))?;
-                let key = (type_path, method.clone());
-                if let Some(m) = self.methods.get(&key) {
-                    self.apply(heap, &m.params, &m.body, argv)
-                } else {
-                    match eval_builtin_method(heap, &key.0, method, &argv, &t.ty) {
-                        Some(result) => result,
-                        None => Err(EvalError::NoSuchFunction(format!("{}::{}", key.0, method))),
-                    }
-                }
+            Expr::TraitCall { method, .. } => {
+                // The checker only produces this node inside a where-bounded
+                // *generic* body (`Checker::check_instance_method`'s
+                // type-variable branch) — which, post-monomorphization, is a
+                // diagnostics-only artifact that never executes: each
+                // specialization re-checks the same call with the receiver
+                // type concrete and resolves it statically to `Expr::Assoc`.
+                // The old runtime dispatch (reading the receiver value's own
+                // type tag) was the last value-shape fallback in the
+                // evaluator; reaching here now is a checker/interpreter bug.
+                Err(EvalError::Internal(format!(
+                    "TraitCall `{}` reached the evaluator — an erased generic body executed",
+                    method
+                )))
             }
             Expr::Construct { type_name, variant, args, mutable } => {
                 if is_sexpr_type(type_name) {
@@ -478,15 +471,11 @@ impl Interp {
                 let id = expect_struct_box(&self.eval(heap, obj, env)?)?;
                 let raw = heap.struct_field(id, *idx);
                 // A `FieldGet`'s checked type *is* the field's declared type
-                // (`Checker::check_defstruct`'s accessor synthesis), so a
-                // `Sexpr`-declared field is returned as the `Sexpr` it
-                // already is — never through `decode_struct_field`'s
-                // shape-driven mapping, which would turn a stored quoted
-                // `42`/`3.14`/`"s"` into a plain `Int`/`Float`/`Str` and
-                // contradict the static type. Only a still-generic field
-                // (`ty` a type variable, evaluated type-erased) falls back
-                // to the shape heuristic — see `decode_struct_field`.
-                Ok(if is_sexpr_ty(&t.ty) { RtValue::Sexpr(raw) } else { decode_struct_field(heap, raw) })
+                // (`Checker::check_defstruct`'s accessor synthesis) — always
+                // concrete now that generic accessors are monomorphized —
+                // so the decode is fully type-directed; see
+                // `decode_field_typed`.
+                Ok(decode_field_typed(heap, raw, &t.ty))
             }
             Expr::FieldSet(obj, idx, value) => {
                 let id = expect_struct_box(&self.eval(heap, obj, env)?)?;
@@ -1252,25 +1241,29 @@ fn is_sexpr_type(type_name: &Path) -> bool {
 }
 
 /// The `Type`-level counterpart of [`is_sexpr_type`] — whether a *declared*
-/// (checker-resolved) type is the built-in `Sexpr`. This is what lets a
-/// struct-field read be decoded by its static type instead of
-/// [`decode_struct_field`]'s shape heuristic wherever that type is concrete
-/// (`Expr::FieldGet`'s own node type, a builtin method's checked return
-/// type): the checker always knew it — only a still-generic type variable
-/// (a generic accessor body evaluated type-erased) genuinely has nothing
-/// static to offer here.
+/// (checker-resolved) type is the built-in `Sexpr`. The one bit
+/// [`decode_field_typed`] needs: post-monomorphization every field/element
+/// read site carries a concrete declared type (`Expr::FieldGet`'s own node
+/// type, a builtin method's checked return type), so this fully decides the
+/// decode — no value-shape guessing remains.
 fn is_sexpr_ty(ty: &Type) -> bool {
     matches!(ty, Type::Named(p, _) if is_sexpr_type(p))
 }
 
-/// Whether `ty` is `Option<Sexpr>` — `HashTable<K,V>::get`/`remove`'s checked
-/// return type (`hashtable_def`'s `option_of(tvar("v"))`) is always `Option<V>`,
-/// never `V` directly, so this unwraps one layer before delegating to
-/// [`is_sexpr_ty`]. Lets `hashtable_get`/`hashtable_remove` bypass
-/// [`decode_struct_field`]'s shape heuristic for a `HashTable<K,Sexpr>` the
-/// same way [`vector_get`] already does for `Vector<Sexpr>`.
-fn is_option_of_sexpr_ty(ty: &Type) -> bool {
-    matches!(ty, Type::Named(p, args) if *p == Path::root("option") && args.first().map(is_sexpr_ty).unwrap_or(false))
+/// The `V` in an `Option<V>` return type — `HashTable<K,V>::get`/`remove`'s
+/// checked return type (`hashtable_def`'s `option_of(tvar("v"))`) is always
+/// `Option<V>`, never `V` directly, so the stored value's declared type for
+/// [`decode_field_typed`] sits one layer down. Anything else here is a
+/// checker/interpreter bug (the builtin's registered signature guarantees
+/// the shape), hence `Internal` rather than a panic.
+fn option_payload_ty(ret_ty: &Type) -> Result<Type, EvalError> {
+    match ret_ty {
+        Type::Named(p, args) if *p == Path::root("option") && args.len() == 1 => Ok(args[0].clone()),
+        other => Err(EvalError::Internal(format!(
+            "expected an Option<V> return type at a HashTable get/remove site, got {:?}",
+            other
+        ))),
+    }
 }
 
 /// Recursively gather every `Sexpr` value reachable from `v` through nested
@@ -1520,7 +1513,7 @@ fn eval_random(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// `ret_ty` is the call site's checked return type (`Expr::Assoc`/
 /// `Expr::TraitCall`/`Expr::Apply`'s own node type) — only [`vector_get`]
 /// consumes it today, to decode a `Vector<Sexpr>` element by its static
-/// type rather than [`decode_struct_field`]'s shape heuristic.
+/// type — see [`decode_field_typed`].
 fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[RtValue], ret_ty: &Type) -> Option<Result<RtValue, EvalError>> {
     if *type_name == Path::root("hashtable") {
         return match method {
@@ -2731,10 +2724,8 @@ fn hashtable_get(heap: &mut Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtV
     let id = expect_struct_box(&args[0])?;
     expect_hashable_key(&args[1])?;
     let key = rtvalue_to_struct_field(heap, &args[1])?;
-    let as_sexpr = is_option_of_sexpr_ty(ret_ty);
-    Ok(option_value(
-        heap.hashtable_get(id, key).map(|v| if as_sexpr { RtValue::Sexpr(v) } else { decode_struct_field(heap, v) }),
-    ))
+    let val_ty = option_payload_ty(ret_ty)?;
+    Ok(option_value(heap.hashtable_get(id, key).map(|v| decode_field_typed(heap, v, &val_ty))))
 }
 
 fn hashtable_set(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -2750,10 +2741,8 @@ fn hashtable_remove(heap: &mut Heap, args: &[RtValue], ret_ty: &Type) -> Result<
     let id = expect_struct_box(&args[0])?;
     expect_hashable_key(&args[1])?;
     let key = rtvalue_to_struct_field(heap, &args[1])?;
-    let as_sexpr = is_option_of_sexpr_ty(ret_ty);
-    Ok(option_value(
-        heap.hashtable_remove(id, key).map(|v| if as_sexpr { RtValue::Sexpr(v) } else { decode_struct_field(heap, v) }),
-    ))
+    let val_ty = option_payload_ty(ret_ty)?;
+    Ok(option_value(heap.hashtable_remove(id, key).map(|v| decode_field_typed(heap, v, &val_ty))))
 }
 
 fn hashtable_count(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -2805,34 +2794,6 @@ fn hashtable_entries(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalE
     Ok(vector_of_raw(heap, fields))
 }
 
-/// The type tag a runtime value carries — what `Expr::TraitCall`'s eval arm
-/// reads off the receiver to learn which `impl`'s methods apply, since the
-/// checker erased that information down to "some type bound to the trait"
-/// (see `Checker::check_instance_method`'s type-variable branch and
-/// `Expr::TraitCall`'s doc comment). Only the variants an `impl` target can
-/// plausibly be are covered — a closure/LLVM-builder receiver can't have
-/// gone through `Checker::check_impl` today, so `None` for those is
-/// unreachable in practice, not a missing case. A boxed `HashTable<K,V>` gets
-/// its own arm (rather than falling into the catch-all `Sexpr` one below,
-/// which would misreport it as the `sexpr` type) even though no `impl`
-/// targets `HashTable<K,V>` directly today — only `hashtable-iter<K,V>`
-/// (`prelude.rs`'s `Iter` impl) does — so this is precise rather than
-/// currently load-bearing.
-fn rtvalue_type_path(heap: &Heap, v: &RtValue) -> Option<Path> {
-    match v {
-        RtValue::Sexpr(Value::Boxed(id)) if heap.is_struct(*id) => {
-            Some(Path::root(heap.struct_type_name(*id)))
-        }
-        RtValue::Sexpr(Value::Boxed(id)) if heap.is_hashtable(*id) => Some(Path::root("hashtable")),
-        RtValue::Data { type_name, .. } => Some(type_name.clone()),
-        RtValue::Bool(_) => Some(Path::root("bool")),
-        RtValue::Char(_) => Some(Path::root("char")),
-        RtValue::Str(_) => Some(Path::root("string")),
-        RtValue::Sexpr(_) => Some(Path::root("sexpr")),
-        _ => None,
-    }
-}
-
 /// The `BoxId` behind a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance —
 /// see [`RtValue::Sexpr`]'s doc comment for why these no longer get their
 /// own `RtValue` variant. Doesn't itself check `Heap::is_struct` (a
@@ -2849,7 +2810,7 @@ fn expect_struct_box(v: &RtValue) -> Result<BoxId, EvalError> {
 
 /// Converts an already-evaluated `RtValue` into the `mem::Value` a
 /// `BoxedObj::Struct` field stores — the encode half of the struct-field
-/// boundary crossing (`decode_struct_field` is the other direction).
+/// boundary crossing (`decode_field_typed` is the other direction).
 /// Unambiguous regardless of the field's static type: every supported
 /// `RtValue` variant maps to exactly one `Value` shape. `RtValue::Sexpr`
 /// covers `HashTable<K,V>` too, since the `Sexpr`/`RtValue` unification's
@@ -2876,32 +2837,39 @@ fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Value, EvalEr
     }
 }
 
-/// Converts a `mem::Value` read out of a `BoxedObj::Struct` field back into
-/// an `RtValue` — `rtvalue_to_struct_field`'s inverse. Driven by the
-/// value's own runtime shape: `Int`/`Bool`/`Char`/`Str` map straight back, a
-/// `Boxed` that is neither a `Fields`-payload struct nor a `Map`-payload
-/// `HashTable` (`Heap::is_struct`/`is_hashtable`) is a boxed float
-/// (`RtValue::Float`), and anything else (`Empty`/`Cons`/`Symbol`/`Path`, a
-/// `Boxed` struct — a nested `defstruct`/`Vector<T>`/`cons-cell<K,V>` — or a
-/// `Boxed` `HashTable<K,V>`) becomes `RtValue::Sexpr`, the same wrapper a
-/// top-level struct value itself uses.
-///
-/// A shape-driven decode is *wrong* for a `Sexpr`-declared field holding a
-/// scalar datum (a stored quoted `42` is a `Value::Int` here — decoding it
-/// as `RtValue::Int` contradicts the field's static type), so every caller
-/// that has the declared type in hand checks it *before* falling back to
-/// this: `Expr::FieldGet`'s eval arm (the node's own checked type is the
-/// field's type), [`vector_get`] (the call site's checked return type), and
-/// `match_pattern`'s boxed-struct arm (`Pattern::Ctor::sexpr_fields`, baked
-/// at check time). What reaches this function is therefore only the
-/// genuinely type-erased residue — a still-generic field type inside a
-/// generic accessor/method body evaluated without monomorphization, where
-/// the tree-walker really has no static type to consult; for a type
-/// variable instantiated to `Sexpr` holding a scalar datum the shape
-/// heuristic still misdecodes, a known erasure limitation (fixing it takes
-/// monomorphized evaluation or instantiated-type info on the box itself,
-/// not more lookups at this site).
-fn decode_struct_field(heap: &Heap, v: Value) -> RtValue {
+/// Decodes a `mem::Value` read out of a `BoxedObj::Struct` field (or
+/// `Vector<T>` element, `HashTable<K,V>` value) as the slot's *declared*
+/// type directs — `rtvalue_to_struct_field`'s inverse, and the type-driven
+/// replacement for the value-shape heuristic that existed under type-erased
+/// generic evaluation. Post-monomorphization every reader has the concrete
+/// declared type in hand (an accessor's `FieldGet` node type, a builtin
+/// call site's checked return type), so the one genuine ambiguity — a
+/// `Sexpr`-declared slot holding a scalar datum, where a stored quoted `42`
+/// is a `Value::Int` that must come back as the `Sexpr` it is, not as
+/// `RtValue::Int` — is decided statically here, never guessed from the
+/// value.
+fn decode_field_typed(heap: &Heap, v: Value, ty: &Type) -> RtValue {
+    if is_sexpr_ty(ty) {
+        RtValue::Sexpr(v)
+    } else {
+        decode_nonsexpr_field(heap, v)
+    }
+}
+
+/// [`decode_field_typed`]'s non-`Sexpr` half: for every declared type
+/// *other than* `Sexpr`, `rtvalue_to_struct_field`'s encoding is injective —
+/// `Int`/`Bool`/`Char`/`Str` map straight back, a `Boxed` that is neither a
+/// `Fields`-payload struct nor a `Map`-payload `HashTable`
+/// (`Heap::is_struct`/`is_hashtable`) is a boxed float (`RtValue::Float`),
+/// and a `Boxed` struct/`HashTable` (a nested `defstruct`/`Vector<T>`/
+/// `cons-cell<K,V>`/`HashTable<K,V>`, whose declared type is some concrete
+/// named struct type) becomes `RtValue::Sexpr`, the same wrapper a top-level
+/// struct value itself uses — so the stored shape alone determines the
+/// result with no ambiguity. Also reached directly by `match_pattern`'s
+/// boxed-struct arm, whose per-field `Pattern::Ctor::sexpr_fields` (baked at
+/// check time, exact post-monomorphization) is precisely the
+/// "`Sexpr`-declared or not" bit `decode_field_typed` reads off a `Type`.
+fn decode_nonsexpr_field(heap: &Heap, v: Value) -> RtValue {
     match v {
         Value::Int(n) => RtValue::Int(n),
         Value::Bool(b) => RtValue::Bool(b),
@@ -2926,11 +2894,10 @@ fn vector_push(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> 
     Ok(RtValue::Unit)
 }
 
-/// `ret_ty` is the call site's checked return type — `Vector<Sexpr>`'s `get`
-/// returns `Sexpr` there, which must bypass [`decode_struct_field`]'s shape
-/// heuristic exactly like `Expr::FieldGet`'s own `Sexpr`-declared case (see
-/// that eval arm). In a generic context (`ret_ty` still a type variable) the
-/// heuristic is all that's left, same as everywhere else.
+/// `ret_ty` is the call site's checked return type — always the concrete
+/// element type post-monomorphization (`Vector<Sexpr>`'s `get` returns
+/// `Sexpr` there), so the element decode is fully type-directed; see
+/// [`decode_field_typed`].
 fn vector_get(heap: &Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtValue, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let i = expect_int_index(&args[1])?;
@@ -2938,7 +2905,7 @@ fn vector_get(heap: &Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtValue, E
         return Err(EvalError::Panic(format!("Vector: index {} out of bounds", i)));
     }
     let raw = heap.struct_field(id, i);
-    Ok(if is_sexpr_ty(ret_ty) { RtValue::Sexpr(raw) } else { decode_struct_field(heap, raw) })
+    Ok(decode_field_typed(heap, raw, ret_ty))
 }
 
 fn vector_set(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -3207,14 +3174,15 @@ fn match_pattern(heap: &Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(String,
                 let mut binds = Vec::new();
                 for (i, p) in args.iter().enumerate() {
                     let raw = heap.struct_field(*id, i);
-                    // A `Sexpr`-declared field (known statically —
-                    // `Pattern::Ctor::sexpr_fields`, baked at check time) is
-                    // handed on as the `Sexpr` it is; everything else
-                    // decodes by shape as before.
+                    // `sexpr_fields` (baked at check time, exact now that
+                    // generic patterns are checked monomorphized) is the
+                    // "`Sexpr`-declared or not" bit `decode_field_typed`
+                    // reads off a `Type` — same type-directed decode, with
+                    // the bit precomputed per field.
                     let f = if sexpr_fields.get(i).copied().unwrap_or(false) {
                         RtValue::Sexpr(raw)
                     } else {
-                        decode_struct_field(heap, raw)
+                        decode_nonsexpr_field(heap, raw)
                     };
                     binds.extend(match_pattern(heap, p, &f)?);
                 }

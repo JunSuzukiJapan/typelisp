@@ -10,7 +10,7 @@
 //! tests below pin that contract down.
 
 extern crate typelisp;
-use typelisp::{Checker, Error, Heap, Interp, Reader, RtValue, TopLevel, MONO_BUNDLE_MODULE, Path};
+use typelisp::{Checker, Error, Heap, Interp, Reader, RtValue, TopLevel, Value, MONO_BUNDLE_MODULE, Path};
 
 fn run(src: &str) -> Result<RtValue, Error> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -272,6 +272,43 @@ fn one_generic_type_instantiated_at_two_types_gets_independent_methods() {
           (if (get-v b) (get-v a) 0))
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(1));
+}
+
+// ---- type-directed decoding (the erasure misdecode, fixed) --------------------
+
+#[test]
+fn a_sexpr_instantiated_generic_field_returns_the_datum_not_a_misdecoded_scalar() {
+    // The exact misdecode the old shape heuristic documented as a known
+    // erasure limitation (pre-monomorphization `interp.rs`'s
+    // `decode_struct_field` doc comment): a `box<Sexpr>` field holding the
+    // quoted datum `42` is stored as a bare `Value::Int`, and a shape-driven
+    // decode handed it back as `RtValue::Int` — contradicting the field's
+    // static type. With the accessor monomorphized (`v <sexpr>`, `FieldGet`
+    // node type `Sexpr`) the decode is type-directed and exact.
+    let src = r#"
+        (defstruct (box T) (v T))
+        (defvar b (box::new '42))
+        b::v
+    "#;
+    match run(src).expect("eval failed") {
+        RtValue::Sexpr(Value::Int(42)) => {}
+        other => panic!("expected the Sexpr datum 42, got {:?}", other),
+    }
+}
+
+#[test]
+fn a_vector_of_sexpr_element_returns_the_datum() {
+    // `Vector<Sexpr>`'s `get` return type is `Sexpr` at every (specialized)
+    // call site, so the element decode is type-directed the same way.
+    let src = r#"
+        (defvar v (the Vector<Sexpr> (Vector::new)))
+        (push v '7)
+        (get v 0)
+    "#;
+    match run(src).expect("eval failed") {
+        RtValue::Sexpr(Value::Int(7)) => {}
+        other => panic!("expected the Sexpr datum 7, got {:?}", other),
+    }
 }
 
 // ---- generic functions as values (FnRef/MethodRef) -----------------------------

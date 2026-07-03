@@ -71,7 +71,7 @@ pub enum RtValue {
     /// wrapped in this same variant rather than a dedicated `RtValue::Struct`
     /// — `heap.is_struct`/`struct_type_name`/`struct_field`/etc. distinguish
     /// it from a boxed float or a genuine quoted `Sexpr` datum at each read
-    /// site (`interp.rs`'s `expect_struct_box`/`decode_struct_field`).
+    /// site (`interp.rs`'s `expect_struct_box`/`decode_field_typed`).
     Sexpr(Value),
     /// A function value (from a `lambda` or a reified named function).
     Closure(Rc<Closure>),

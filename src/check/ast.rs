@@ -72,37 +72,28 @@ pub enum Expr {
     /// A call to a trait method on a still-generic type-variable receiver
     /// inside a `where`-bounded function body (`Checker::check_instance_method`'s
     /// type-variable branch) — e.g. `(next it)` where `it: T` and the
-    /// enclosing function declared `(where (Iter T))`. Unlike `Expr::Assoc`,
-    /// whose `type_name` is a concrete `Path` fixed at check time, here the
-    /// implementing type is only known once `args[0]` is *evaluated* — the
-    /// interpreter reads it off the runtime value's own type tag (see
-    /// `Interp::eval`'s `TraitCall` arm) and looks it up in the very same
-    /// `Interp::methods` table an `Expr::Assoc` call uses, since
-    /// `Checker::check_impl` inserts each `impl`ed method there as an
-    /// ordinary `defmethod`. This keeps dispatch static in spirit (one fixed
-    /// table, no indirection through a vtable) while still being the one
-    /// point where *which* entry to read isn't known until runtime — the
-    /// minimum a type-erasing tree-walker needs for a generic function body
-    /// to call a trait method on its own type parameter.
+    /// enclosing function declared `(where (Iter T))`.
+    ///
+    /// **Diagnostics-only since monomorphization**: this node only ever
+    /// appears in a generic function's definition-time body check, which is
+    /// never executed (`Interp::exec` skips registering an erased generic
+    /// body) — each specialization re-checks the same call with the receiver
+    /// type concrete, where `check_instance_method` resolves it statically
+    /// to an ordinary `Expr::Assoc`. The interpreter's `TraitCall` eval arm
+    /// is accordingly an internal-error trap, and the old runtime dispatch
+    /// (reading the receiver value's own type tag) is gone. The `compile`
+    /// pipeline's own `TraitCall` lowering (`ast_bridge`/`compiler.rs`'s
+    /// dispatch chain) is likewise unreachable from source — a generic
+    /// function can't be `compile`d — and is kept only pending its own
+    /// removal.
     TraitCall {
         trait_name: Path,
         method: String,
         /// Every concrete type registered (in `Registry`) as `impl`ing
         /// `trait_name` as of this call site's own check time — resolved
         /// once, here, purely so `compile`'s `ast_bridge`/`compiler.rs` can
-        /// build a closed dispatch chain (embed each candidate's own
-        /// type-id/mangled method name as LLVM constants) without needing
-        /// registry access of their own, the same "resolve fully at check
-        /// time" convention `Expr::Assoc`'s own `type_name` already follows.
-        /// **Not** consulted by the interpreter's own `TraitCall` eval arm at
-        /// all (`Interp::eval` reads the receiver's live runtime type tag
-        /// instead, via `rtvalue_type_path`) — so an `impl` registered
-        /// *after* this call site checks still dispatches correctly when
-        /// tree-walked, just not when `compile`d (a `compile`d call only
-        /// ever resolves to whichever impls existed at this point in the
-        /// source; a later impl needs the generic function re-checked to be
-        /// reachable there). See `Checker::check_instance_method`'s doc
-        /// comment for how this list is built.
+        /// build a closed dispatch chain without registry access of their
+        /// own. Unreachable from source today (see above).
         impls: Vec<Path>,
         args: Vec<Typed>,
     },
@@ -207,10 +198,13 @@ pub enum Pattern {
         /// Resolved fully at check time, the same convention
         /// `Expr::Construct::mutable` follows, so the interpreter's boxed-
         /// struct destructuring arm can hand a `Sexpr`-declared field back
-        /// as the `Sexpr` it is instead of running `decode_struct_field`'s
-        /// shape heuristic on it (which would rebind a stored quoted
-        /// `42`/`3.14` as a plain `Int`/`Float`, contradicting the static
-        /// type). Only consulted for a boxed-struct scrutinee — a sum-type
+        /// as the `Sexpr` it is (`interp.rs`'s `decode_field_typed` makes
+        /// the same decision from a `Type`; this is that bit precomputed
+        /// per field — a stored quoted `42`/`3.14` must not rebind as a
+        /// plain `Int`/`Float`, contradicting the static type). Exact even
+        /// for a generic scrutinee, since generic bodies/patterns are
+        /// checked monomorphized. Only consulted for a boxed-struct
+        /// scrutinee — a sum-type
         /// `RtValue::Data`'s fields are already `RtValue`s and a `Sexpr`
         /// scrutinee's destructuring (`match_sexpr_ctor`) is variant-driven.
         sexpr_fields: Vec<bool>,
