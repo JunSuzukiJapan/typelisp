@@ -190,7 +190,13 @@ impl Interp {
                 self.fns.insert(name, FnDef { params: names, body, rest: false, sig: Some((types, ret)) });
                 Ok(None)
             }
-            TopLevel::Defmethod { type_name, method, self_name, params, ret, body, .. } => {
+            TopLevel::Defmethod { type_name, method, self_name, params, ret, body, type_params, .. } => {
+                // A generic-owner method's erased body is diagnostics-only,
+                // exactly like a generic `Defun`'s above — every call site
+                // was rewritten to a monomorphized specialization.
+                if !type_params.is_empty() {
+                    return Ok(None);
+                }
                 let mut names: Vec<String> = Vec::new();
                 let mut types: Vec<Type> = Vec::new();
                 if let Some(s) = self_name {

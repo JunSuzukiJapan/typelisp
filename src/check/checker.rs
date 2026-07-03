@@ -58,6 +58,12 @@ pub enum TopLevel {
         params: Vec<(String, Type)>,
         ret: Type,
         body: Vec<Typed>,
+        /// The owner type's parameters as the receiver spelled them
+        /// (`(self Option<U>)` -> `["u"]`) when this is a *generic-owner*
+        /// method — the erased, diagnostics-only artifact `Interp::exec`
+        /// must skip, exactly like `Defun::type_params`; empty for a
+        /// concrete method or a generated specialization.
+        type_params: Vec<String>,
     },
     /// A `defmacro`: a compile-time, `Sexpr`-to-`Sexpr` code transformer.
     /// Stored as an ordinary callable body — calling it (at macro-expansion
@@ -221,16 +227,55 @@ struct FnTemplate {
     type_params: Vec<String>,
 }
 
-/// One queued "generate `base` instantiated at `args`, as `mangled`" work
-/// item — see [`Checker::request_fn_specialization`] (producer, called from
-/// the `&self` expression-checking context) and
+/// One queued "generate this instantiation" work item — see
+/// [`Checker::request_fn_specialization`]/[`Checker::request_method_specialization`]
+/// (producers, called from the `&self` expression-checking context) and
 /// [`Checker::drain_specializations`] (consumer, run by `check_form` with
 /// `&mut self`). The two-phase split exists because expression checking
-/// (`check_call`) cannot re-enter top-level definition checking itself.
-struct SpecRequest {
-    base: Path,
-    args: Vec<Type>,
-    mangled: Path,
+/// (`check_call`/`check_assoc_call`) cannot re-enter top-level definition
+/// checking itself.
+enum SpecRequest {
+    /// A generic free function (`FnTemplate`) at concrete `args`.
+    Fn { base: Path, args: Vec<Type>, mangled: Path },
+    /// A generic-owner associated method (`MethodTemplate`, keyed
+    /// `(type_fq, base)`) at the owner's concrete type arguments `args`.
+    Method { type_fq: Path, base: String, args: Vec<Type>, mangled: String },
+}
+
+/// A generic *type*'s associated method, retained for per-instantiation
+/// re-generation — the method-side counterpart of [`FnTemplate`]. A method
+/// is generic through its *owner* (`Option<T>`'s `unwrap`, a generic
+/// `defstruct`'s accessors), never through parameters of its own, so the
+/// instantiation arguments are always the owner's type arguments.
+#[derive(Clone)]
+enum MethodTemplate {
+    /// A written `defmethod` whose receiver names the owner's type
+    /// parameters (directly, or synthesized by `check_impl`'s
+    /// `Self`-substitution). `written_vars` are the type-variable names *as
+    /// the receiver spelled them* (`(self Option<U>)` -> `["u"]`), zipped
+    /// positionally with the owner's concrete type arguments at
+    /// specialization time — they need not match the `AdtDef::params`
+    /// names the call site's substitution is keyed by.
+    Form { parts: Vec<Value>, ns: Vec<String>, written_vars: Vec<String> },
+    /// A generic `defstruct` field getter — there is no raw form to
+    /// re-check (`check_defstruct` synthesizes accessor ASTs directly), so
+    /// specialization re-synthesizes the `FieldGet` with the field type
+    /// substituted from the owner's `AdtDef`.
+    Getter { index: usize },
+    /// The matching `set-<field>` setter (`FieldSet`).
+    Setter { index: usize },
+}
+
+/// [`Checker::parse_defmethod_sig`]'s output — a `defmethod` form's parsed
+/// header, shared between definition checking and template specialization.
+struct MethodSig {
+    method: String,
+    instance: bool,
+    self_name: Option<String>,
+    recv_ty: Type,
+    type_fq: Path,
+    params: Vec<(String, Type)>,
+    ret: Type,
 }
 
 /// The synthetic `TopLevel::Module` path under which `check_form` bundles
@@ -271,20 +316,24 @@ pub struct Checker {
     /// Every generic `defun`'s retained source form, keyed by its
     /// fully-qualified path — see [`FnTemplate`].
     generic_fn_templates: HashMap<Path, FnTemplate>,
-    /// Instantiations already requested *during the current top-level form*
-    /// (mangled path -> base generic path), so one form's many calls to the
-    /// same instantiation — including a specialization's own recursive call
-    /// to itself — produce exactly one definition. Deliberately cleared at
-    /// the end of every `check_form` rather than kept for the checker's
-    /// lifetime: each form's output bundle is then self-contained, so a
-    /// caller that checks several forms but discards some without executing
-    /// them (the REPL does exactly this when a later form in the same paste
-    /// fails to check) can never leave a later form referring to a
-    /// specialization whose defining bundle was thrown away. The cost — a
-    /// later form re-generating an instantiation an earlier form already
-    /// produced, and `Interp::exec` silently overwriting the identical
-    /// earlier registration — is compile-time-only.
-    spec_memo: RefCell<HashMap<Path, Path>>,
+    /// Every generic-owner method's retained template, keyed by
+    /// `(owner type path, method name)` — see [`MethodTemplate`].
+    generic_method_templates: HashMap<(Path, String), MethodTemplate>,
+    /// Instantiations already requested *during the current top-level form* —
+    /// a free function as `(mangled path, None)`, a method as
+    /// `(owner type path, Some(mangled method))` — so one form's many calls
+    /// to the same instantiation — including a specialization's own
+    /// recursive call to itself — produce exactly one definition.
+    /// Deliberately cleared at the end of every `check_form` rather than
+    /// kept for the checker's lifetime: each form's output bundle is then
+    /// self-contained, so a caller that checks several forms but discards
+    /// some without executing them (the REPL does exactly this when a later
+    /// form in the same paste fails to check) can never leave a later form
+    /// referring to a specialization whose defining bundle was thrown away.
+    /// The cost — a later form re-generating an instantiation an earlier
+    /// form already produced, and `Interp::exec` silently overwriting the
+    /// identical earlier registration — is compile-time-only.
+    spec_memo: RefCell<HashSet<(Path, Option<String>)>>,
     /// Instantiations requested but not yet generated — see [`SpecRequest`].
     /// Always empty outside `check_form`.
     spec_pending: RefCell<Vec<SpecRequest>>,
@@ -307,7 +356,8 @@ impl Checker {
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
             generic_fn_templates: HashMap::new(),
-            spec_memo: RefCell::new(HashMap::new()),
+            generic_method_templates: HashMap::new(),
+            spec_memo: RefCell::new(HashSet::new()),
             spec_pending: RefCell::new(Vec::new()),
             type_var_bindings: HashMap::new(),
         }
@@ -997,10 +1047,28 @@ impl Checker {
     fn request_fn_specialization(&self, base: &Path, args: Vec<Type>) -> Path {
         let mangled = mangled_fn_path(base, &args);
         let mut memo = self.spec_memo.borrow_mut();
-        if !memo.contains_key(&mangled) {
-            memo.insert(mangled.clone(), base.clone());
-            self.spec_pending.borrow_mut().push(SpecRequest {
+        if memo.insert((mangled.clone(), None)) {
+            self.spec_pending.borrow_mut().push(SpecRequest::Fn {
                 base: base.clone(),
+                args,
+                mangled: mangled.clone(),
+            });
+        }
+        mangled
+    }
+
+    /// [`Self::request_fn_specialization`]'s method-side counterpart: records
+    /// that `type_fq`'s method `base` needs generating at the owner's
+    /// concrete type arguments `args`, returning the mangled method name for
+    /// the `Expr::Assoc` node to reference. Only ever called when a
+    /// [`MethodTemplate`] is retained for the pair.
+    fn request_method_specialization(&self, type_fq: &Path, base: &str, args: Vec<Type>) -> String {
+        let mangled = mangled_method_name(base, &args);
+        let mut memo = self.spec_memo.borrow_mut();
+        if memo.insert((type_fq.clone(), Some(mangled.clone()))) {
+            self.spec_pending.borrow_mut().push(SpecRequest::Method {
+                type_fq: type_fq.clone(),
+                base: base.to_string(),
                 args,
                 mangled: mangled.clone(),
             });
@@ -1023,14 +1091,21 @@ impl Checker {
             let req = self.spec_pending.borrow_mut().pop();
             let Some(req) = req else { break };
             if out.len() >= SPECIALIZATION_BUDGET {
+                let last = match &req {
+                    SpecRequest::Fn { mangled, .. } => mangled.to_string(),
+                    SpecRequest::Method { type_fq, mangled, .. } => format!("{}::{}", type_fq, mangled),
+                };
                 return Err(Error::TypeError(format!(
                     "monomorphization did not converge after {} instantiations (a polymorphically \
                      recursive generic function — one that calls itself at an ever-growing type — \
                      cannot be compiled; last requested: {})",
-                    SPECIALIZATION_BUDGET, req.mangled
+                    SPECIALIZATION_BUDGET, last
                 )));
             }
-            out.push(self.specialize_defun(heap, interp, &req)?);
+            out.push(match req {
+                SpecRequest::Fn { .. } => self.specialize_defun(heap, interp, &req)?,
+                SpecRequest::Method { .. } => self.specialize_method(heap, interp, &req)?,
+            });
         }
         Ok(out)
     }
@@ -1047,21 +1122,159 @@ impl Checker {
         interp: &dyn MacroExpander,
         req: &SpecRequest,
     ) -> Result<TopLevel, Error> {
+        let SpecRequest::Fn { base, args, mangled } = req else {
+            unreachable!("drain routes Fn requests here")
+        };
         let tmpl = self
             .generic_fn_templates
-            .get(&req.base)
+            .get(base)
             .expect("a specialization is only ever requested for a retained template")
             .clone();
         let bindings: HashMap<String, Type> =
-            tmpl.type_params.iter().cloned().zip(req.args.iter().cloned()).collect();
-        let saved_ns = std::mem::replace(&mut self.ns, tmpl.ns.clone());
+            tmpl.type_params.iter().cloned().zip(args.iter().cloned()).collect();
+        let (saved_ns, saved_loops, saved_bindings) = self.enter_specialization(tmpl.ns.clone(), bindings);
+        let result = self.specialize_defun_body(heap, interp, &tmpl, mangled);
+        self.exit_specialization(saved_ns, saved_loops, saved_bindings);
+        result
+    }
+
+    /// Swaps in a specialization re-check's context — the template's defining
+    /// namespace, a fresh loop stack (the same isolation `check_lambda`
+    /// applies to a nested function body: a specialization requested from
+    /// inside somebody's `loop` must not see that loop as its own), and the
+    /// type-variable bindings `canon` substitutes — returning the saved state
+    /// for [`Self::exit_specialization`] to restore.
+    fn enter_specialization(
+        &mut self,
+        ns: Vec<String>,
+        bindings: HashMap<String, Type>,
+    ) -> (Vec<String>, Vec<Type>, HashMap<String, Type>) {
+        let saved_ns = std::mem::replace(&mut self.ns, ns);
         let saved_loops = std::mem::take(&mut *self.loop_stack.borrow_mut());
         let saved_bindings = std::mem::replace(&mut self.type_var_bindings, bindings);
-        let result = self.specialize_defun_body(heap, interp, &tmpl, &req.mangled);
+        (saved_ns, saved_loops, saved_bindings)
+    }
+
+    fn exit_specialization(
+        &mut self,
+        saved_ns: Vec<String>,
+        saved_loops: Vec<Type>,
+        saved_bindings: HashMap<String, Type>,
+    ) {
         self.type_var_bindings = saved_bindings;
         *self.loop_stack.borrow_mut() = saved_loops;
         self.ns = saved_ns;
-        result
+    }
+
+    /// Re-checks or re-synthesizes a generic-owner method at the owner's
+    /// concrete type arguments — [`Self::specialize_defun`]'s method-side
+    /// counterpart. A written method ([`MethodTemplate::Form`]) is re-checked
+    /// from its retained source with the *receiver-written* type-variable
+    /// names bound; a generic `defstruct` accessor (`Getter`/`Setter`) has no
+    /// source to re-check and is re-synthesized from the `AdtDef`'s field
+    /// types instead (the same ASTs `check_defstruct` builds, with the field
+    /// type substituted).
+    fn specialize_method(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        req: &SpecRequest,
+    ) -> Result<TopLevel, Error> {
+        let SpecRequest::Method { type_fq, base, args, mangled } = req else {
+            unreachable!("drain routes Method requests here")
+        };
+        let tmpl = self
+            .generic_method_templates
+            .get(&(type_fq.clone(), base.clone()))
+            .expect("a method specialization is only ever requested for a retained template")
+            .clone();
+        match tmpl {
+            MethodTemplate::Form { parts, ns, written_vars } => {
+                let bindings: HashMap<String, Type> =
+                    written_vars.into_iter().zip(args.iter().cloned()).collect();
+                let (saved_ns, saved_loops, saved_bindings) = self.enter_specialization(ns, bindings);
+                let result = self.specialize_method_form(heap, interp, &parts, mangled);
+                self.exit_specialization(saved_ns, saved_loops, saved_bindings);
+                result
+            }
+            MethodTemplate::Getter { index } => Ok(self.synthesize_accessor(type_fq, args, index, mangled, true)),
+            MethodTemplate::Setter { index } => Ok(self.synthesize_accessor(type_fq, args, index, mangled, false)),
+        }
+    }
+
+    fn specialize_method_form(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        mangled: &str,
+    ) -> Result<TopLevel, Error> {
+        let MethodSig { instance, self_name, recv_ty, type_fq, params, ret, .. } =
+            self.parse_defmethod_sig(heap, parts)?;
+        let mut binds: Vec<(String, Type)> = Vec::new();
+        if let Some(s) = &self_name {
+            binds.push((s.clone(), recv_ty));
+        }
+        binds.extend(params.clone());
+        let env = Env::new().extended(binds);
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[3..], Some(&ret))?;
+        Ok(TopLevel::Defmethod {
+            type_name: type_fq,
+            method: mangled.to_string(),
+            instance,
+            self_name,
+            params,
+            ret,
+            body,
+            type_params: Vec::new(),
+        })
+    }
+
+    /// Builds a concrete accessor `TopLevel::Defmethod` for a generic
+    /// `defstruct`'s field `index`, with the field type substituted at the
+    /// owner's concrete `args` — mirrors the ASTs `check_defstruct`
+    /// synthesizes, minus any registry mutation.
+    fn synthesize_accessor(
+        &self,
+        type_fq: &Path,
+        args: &[Type],
+        index: usize,
+        mangled: &str,
+        getter: bool,
+    ) -> TopLevel {
+        let def = self.reg.type_def(type_fq).expect("an accessor template implies the type exists");
+        let subst: HashMap<String, Type> =
+            def.params.iter().cloned().zip(args.iter().cloned()).collect();
+        let field_ty = subst_apply(&def.variants[0].fields[index], &subst);
+        let recv_ty = Type::Named(type_fq.clone(), args.to_vec());
+        let self_var = Typed { expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
+        if getter {
+            TopLevel::Defmethod {
+                type_name: type_fq.clone(),
+                method: mangled.to_string(),
+                instance: true,
+                self_name: Some("self".to_string()),
+                params: Vec::new(),
+                ret: field_ty.clone(),
+                body: vec![Typed { expr: Expr::FieldGet(Box::new(self_var), index), ty: field_ty }],
+                type_params: Vec::new(),
+            }
+        } else {
+            let value_var = Typed { expr: Expr::Var("value".to_string()), ty: field_ty.clone() };
+            TopLevel::Defmethod {
+                type_name: type_fq.clone(),
+                method: mangled.to_string(),
+                instance: true,
+                self_name: Some("self".to_string()),
+                params: vec![("value".to_string(), field_ty)],
+                ret: Type::Unit,
+                body: vec![Typed {
+                    expr: Expr::FieldSet(Box::new(self_var), index, Box::new(value_var)),
+                    ty: Type::Unit,
+                }],
+                type_params: Vec::new(),
+            }
+        }
     }
 
     fn specialize_defun_body(
@@ -1618,6 +1831,79 @@ impl Checker {
         parts: &[Value],
         public: bool,
     ) -> Result<TopLevel, Error> {
+        let MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret } =
+            self.parse_defmethod_sig(heap, parts)?;
+
+        // A method on a *generic* type whose receiver spells the owner's
+        // type parameters out as bare type variables (`(self Option<U>)`) is
+        // generic through its owner — retain a re-checkable template (see
+        // `MethodTemplate::Form`) and mark the erased `TopLevel` so
+        // `Interp::exec` skips it, exactly like a generic `defun`. Any other
+        // receiver shape (concrete arguments, no arguments on a static
+        // method) declares a method whose signature can't mention the
+        // owner's parameters, so it stays on the ordinary path.
+        let written_vars: Vec<String> = match &recv_ty {
+            Type::Named(_, targs) if !targs.is_empty() => targs
+                .iter()
+                .filter_map(|t| match t {
+                    Type::Named(n, a) if a.is_empty() && n.is_simple() && self.reg.type_def(n).is_none() => {
+                        Some(n.local().to_string())
+                    }
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let owner_params = self.reg.type_def(&type_fq).map(|d| d.params.len()).unwrap_or(0);
+        let is_generic_template = !written_vars.is_empty()
+            && written_vars.len() == owner_params
+            && matches!(&recv_ty, Type::Named(_, targs) if targs.len() == written_vars.len())
+            && {
+                let mut distinct = written_vars.clone();
+                distinct.sort();
+                distinct.dedup();
+                distinct.len() == written_vars.len()
+            };
+        if is_generic_template {
+            for &p in parts {
+                heap.push_permanent_root(p);
+            }
+            self.generic_method_templates.insert(
+                (type_fq.clone(), method.clone()),
+                MethodTemplate::Form { parts: parts.to_vec(), ns: self.ns.clone(), written_vars: written_vars.clone() },
+            );
+        }
+
+        // Register the signature before checking the body (self-recursion).
+        let mut sig_params: Vec<Type> = Vec::new();
+        if instance {
+            sig_params.push(recv_ty.clone());
+        }
+        sig_params.extend(params.iter().map(|(_, t)| t.clone()));
+        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public, rest: None, builtin: false, bounds: HashMap::new() };
+        self.check_redef("method", &method, self.reg.type_def(&type_fq).and_then(|d| d.assoc.get(&method)))?;
+        if let Some(def) = self.reg.type_def_mut(&type_fq) {
+            def.assoc.insert(method.clone(), AssocFn { sig, instance, builtin: false });
+        }
+
+        let mut binds: Vec<(String, Type)> = Vec::new();
+        if let Some(s) = &self_name {
+            binds.push((s.clone(), recv_ty.clone()));
+        }
+        binds.extend(params.clone());
+        let env = Env::new().extended(binds);
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[3..], Some(&ret))?;
+        let type_params = if is_generic_template { written_vars } else { Vec::new() };
+        Ok(TopLevel::Defmethod { type_name: type_fq, method, instance, self_name, params, ret, body, type_params })
+    }
+
+    /// Parses a `defmethod` form's name, receiver, parameters, and return
+    /// type (`parts` = everything after the `defmethod` keyword) — shared by
+    /// [`Self::check_defmethod`] and [`Self::specialize_method`], the latter
+    /// re-parsing a retained [`MethodTemplate::Form`] with
+    /// `type_var_bindings` in effect so the receiver/parameter/return
+    /// annotations come back concrete.
+    fn parse_defmethod_sig(&self, heap: &mut Heap, parts: &[Value]) -> Result<MethodSig, Error> {
         if parts.len() < 3 {
             return Err(Error::TypeError(
                 "defmethod: (defmethod name (receiver params...) ret body...)".into(),
@@ -1660,27 +1946,7 @@ impl Checker {
         }
         let params = self.parse_param_pairs(heap, &sig_list[1..])?;
         let ret = self.canon(&parse_type(heap, parts[2])?);
-
-        // Register the signature before checking the body (self-recursion).
-        let mut sig_params: Vec<Type> = Vec::new();
-        if instance {
-            sig_params.push(recv_ty.clone());
-        }
-        sig_params.extend(params.iter().map(|(_, t)| t.clone()));
-        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public, rest: None, builtin: false, bounds: HashMap::new() };
-        self.check_redef("method", &method, self.reg.type_def(&type_fq).and_then(|d| d.assoc.get(&method)))?;
-        if let Some(def) = self.reg.type_def_mut(&type_fq) {
-            def.assoc.insert(method.clone(), AssocFn { sig, instance, builtin: false });
-        }
-
-        let mut binds: Vec<(String, Type)> = Vec::new();
-        if let Some(s) = &self_name {
-            binds.push((s.clone(), recv_ty.clone()));
-        }
-        binds.extend(params.clone());
-        let env = Env::new().extended(binds);
-        let (body, _) = self.check_seq(heap, interp, &env, &parts[3..], Some(&ret))?;
-        Ok(TopLevel::Defmethod { type_name: type_fq, method, instance, self_name, params, ret, body })
+        Ok(MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret })
     }
 
     /// `(defstruct Name (field Type)...)` — or, generically,
@@ -1755,6 +2021,7 @@ impl Checker {
                 params: Vec::new(),
                 ret: field_ty.clone(),
                 body: vec![Typed { expr: Expr::FieldGet(Box::new(self_var), i), ty: field_ty.clone() }],
+                type_params: type_params.clone(),
             });
 
             // Setter (`set-car`/`set-cdr`'s `set-` prefix, no `!` — see
@@ -1774,7 +2041,7 @@ impl Checker {
             let value_var = Typed { expr: Expr::Var("value".to_string()), ty: field_ty.clone() };
             accessors.push(TopLevel::Defmethod {
                 type_name: type_fq.clone(),
-                method: setter_name,
+                method: setter_name.clone(),
                 instance: true,
                 self_name: Some("self".to_string()),
                 params: vec![("value".to_string(), field_ty.clone())],
@@ -1783,7 +2050,23 @@ impl Checker {
                     expr: Expr::FieldSet(Box::new(self_var), i, Box::new(value_var)),
                     ty: Type::Unit,
                 }],
+                type_params: type_params.clone(),
             });
+
+            // A generic defstruct's accessors mention the type parameters
+            // through the field types, so — like every generic-owner method —
+            // the erased pair above is diagnostics-only (`type_params`
+            // non-empty, skipped by `Interp::exec`) and each concrete
+            // instantiation is generated on demand from these templates.
+            // There is no raw source form to re-check (the accessor ASTs are
+            // synthesized right here), hence the dedicated `Getter`/`Setter`
+            // template kinds — see `Checker::synthesize_accessor`.
+            if !type_params.is_empty() {
+                self.generic_method_templates
+                    .insert((type_fq.clone(), field_name.clone()), MethodTemplate::Getter { index: i });
+                self.generic_method_templates
+                    .insert((type_fq.clone(), setter_name), MethodTemplate::Setter { index: i });
+            }
         }
 
         let def = AdtDef {
@@ -2586,10 +2869,26 @@ impl Checker {
                 )));
             }
         }
+        // Monomorphization, method side: a call on a generic owner whose
+        // type arguments are fully concrete is rewritten to the specialized
+        // method (generated by `check_form`'s drain) — the mirror of
+        // `check_call`'s free-function rewrite. Only methods with a retained
+        // template qualify: builtin generic methods (`Vector<T>::get`, ...)
+        // are Rust implementations dispatched by their plain name, and stay
+        // untouched.
+        let mut method_name = method.to_string();
+        if !def.params.is_empty()
+            && self.generic_method_templates.contains_key(&(type_fq.clone(), method.to_string()))
+        {
+            let targs: Vec<Type> = def.params.iter().map(|p| subst[p.as_str()].clone()).collect();
+            if !targs.iter().any(|t| self.type_is_open(t)) {
+                method_name = self.request_method_specialization(type_fq, method, targs);
+            }
+        }
         Ok(Typed {
             expr: Expr::Assoc {
                 type_name: type_fq.clone(),
-                method: method.to_string(),
+                method: method_name,
                 instance,
                 args: typed,
             },
@@ -3710,14 +4009,16 @@ fn mangle_type(t: &Type) -> String {
 /// identity<i32> ...)` (a perfectly legal token) can therefore never collide
 /// with a generated specialization in `Interp`'s function table.
 fn mangled_fn_path(base: &Path, args: &[Type]) -> Path {
-    let local = format!(
-        "{} <{}>",
-        base.local(),
-        args.iter().map(mangle_type).collect::<Vec<_>>().join(",")
-    );
     let mut segs = base.parent().to_vec();
-    segs.push(local);
+    segs.push(mangled_method_name(base.local(), args));
     Path::from_segments(segs)
+}
+
+/// The mangled *local* name shared by function and method specializations —
+/// e.g. `"unwrap <i32>"`. See [`mangled_fn_path`]'s doc comment for why the
+/// space makes collisions with source-written names impossible.
+fn mangled_method_name(base: &str, args: &[Type]) -> String {
+    format!("{} <{}>", base, args.iter().map(mangle_type).collect::<Vec<_>>().join(","))
 }
 
 /// Replace type parameters in `t` with their bindings from `subst`.

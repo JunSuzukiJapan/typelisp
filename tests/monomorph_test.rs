@@ -205,6 +205,75 @@ fn a_type_parameter_shadows_a_user_type_of_the_same_name() {
     assert_eq!(eval_ok(src), RtValue::Int(42));
 }
 
+// ---- generic-owner methods (defmethod / defstruct accessors) ------------------
+
+#[test]
+fn a_method_on_a_generic_type_specializes_at_the_call_site() {
+    let tls = check_all(
+        "(defstruct (box T) (v T)) \
+         (defmethod get-v ((self box<T>)) T self::v) \
+         (get-v (box::new 42))",
+    )
+    .unwrap();
+    // The call bundles the specialized `get-v` — and, transitively, the
+    // specialized `v` field getter its body's `self::v` needs.
+    let specs = bundled_specs(&tls[2]);
+    let methods: Vec<&str> = specs
+        .iter()
+        .filter_map(|tl| match tl {
+            TopLevel::Defmethod { method, type_params, .. } => {
+                assert!(type_params.is_empty(), "specializations are concrete");
+                Some(method.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(methods.iter().any(|m| m.starts_with("get-v <")), "specialized get-v in {:?}", methods);
+    assert!(methods.iter().any(|m| m.starts_with("v <")), "transitively specialized getter in {:?}", methods);
+}
+
+#[test]
+fn a_generic_method_call_evaluates_through_its_specialization() {
+    let src = r#"
+        (defstruct (box T) (v T))
+        (defmethod get-v ((self box<T>)) T self::v)
+        (get-v (box::new 42))
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Int(42));
+}
+
+#[test]
+fn a_generic_method_with_a_match_body_specializes() {
+    let src = r#"
+        (defmethod unwrap2 ((self Option<T>)) T
+          (match self ((some x) x) ((none) (panic "none"))))
+        (unwrap2 (option::some 9))
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Int(9));
+}
+
+#[test]
+fn generic_defstruct_field_read_and_setf_work_through_specialized_accessors() {
+    let src = r#"
+        (defstruct (box T) (v T))
+        (defvar b (box::new 1))
+        (setf b::v 5)
+        b::v
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Int(5));
+}
+
+#[test]
+fn one_generic_type_instantiated_at_two_types_gets_independent_methods() {
+    let src = r#"
+        (defstruct (box T) (v T))
+        (defmethod get-v ((self box<T>)) T self::v)
+        (let ((a (box::new 1)) (b (box::new true)))
+          (if (get-v b) (get-v a) 0))
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Int(1));
+}
+
 // ---- erased bodies never run --------------------------------------------------
 
 #[test]
