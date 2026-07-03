@@ -2418,7 +2418,7 @@ panicと同じ前例で実行時panic（型システムでは「有効なスカ�
 panicの両方）、`symbol->string`/`string->symbol`（往復、非symbolでのpanic）を追加。全体テスト
 （`./scripts/with-llvm-env.sh cargo test`、workspace全体）green。
 
-## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-5完了・Stage 6-8未着手）
+## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-6完了・Stage 7-8未着手 ※Stage 6の実装記録は「ジェネリック単型化とSexpr/RtValue統合Stage 6」節）
 
 `HashTable<K,V>::entries`のペア型を巡る議論の中で、ユーザーから「`Sexpr`と`RtValue`という
 2つの並行した実行時値表現に分かれていること自体がおかしい」という指摘を受けた。実際の
@@ -2788,3 +2788,93 @@ check時に解決してASTに焼き込むか、`ast_to_sexpr`の`structs`のよ�
 引数で手渡せばよい。真に静的に決まらないのは、ジェネリック定義を型消去のまま
 1回だけ評価/compileする場合の型変数（monomorphizationの問題）と、マクロ展開時
 （型検査前なので型が存在しない）だけ。
+
+## ジェネリック単型化とSexpr/RtValue統合Stage 6（2026-07-03、6コミット）
+
+Stage 6a（束縛スロットの`BoxedObj::Cell`化）の設計中に2つのユーザー指示を受け、
+実装が「単型化 → 6a → 6b」の3段に再構成された:
+
+1. **「LLVM系5種とそれ以外のデータを一緒に扱うのが間違い。必要な場所と不要な場所を
+   厳密に区分して」**——LLVM値がスロット/クロージャに流れるのは`src/compiler.rs`の
+   SOURCE解釈時のみ（.typl/prelude/defvarには一切ない）と調査で確定。LLVM値はSexprを
+   内包せず、GC宇宙とLLVM宇宙は互いに参照しない分離した世界。
+2. **「型消去実行（1共有ASTボディを全インスタンス化で使い回す）をやめ、特殊化された
+   時点で型変数にあわせた関数を生成して使う。実行時の値形状フォールバックはすべて
+   無くす」**——型消去下では束縛スロットの振り分けに実行時の値形状判定が9箇所
+   （preludeのunwrap系match束縛・identity等のパラメータ・vector-iter::nextのlet束縛）で
+   必要だったが、単型化後は静的型駆動に一本化できる。
+
+### ジェネリック単型化（M1-M4）
+
+**方式は再check**: 生Sexprテンプレート（`FnTemplate`/`MethodTemplate`、恒久ルート化）を
+保持し、インスタンス化ごとに`type_var_bindings`（`canon`の単一フックで置換、型パーサ
+無変更）の下で再checkする。check済みTyped ASTへの型置換は`Assoc`解決/`TraitCall`→`Assoc`
+昇格/`Construct::mutable`/`sexpr_fields`の再導出が必要で実質check再実行になるため不採用。
+
+- **M1（defun）**: `check_call`（`&self`）はメモ照会+`spec_pending`へのリクエスト積みのみ、
+  特殊化生成は`check_form`（`&mut self`）が主check成功後にワークリストでドレインし
+  `TopLevel::Module`（`MONO_BUNDLE_MODULE`、空白入りパスでリーダから構造的に到達不能）に
+  [特殊化群..., 主フォーム]をバンドル——既存のcheck→execパイプラインは無変更で透過。
+  マングル名は空白入り（`"identity <i32>"`）で衝突が構造的に不可能、レジストリ非登録で
+  RedefPolicy/可視性と干渉しない。`spec_memo`はフォーム単位でクリア（バンドル自己完結、
+  REPLがバッチを破棄しても宙に浮いた参照が残らない）。`Interp::exec`はtype_params非空の
+  Defun/Defmethod登録をスキップ（消去済みボディの実行を構造的に排除）。多相再帰は
+  budget 512の発散ガードでTypeError化。副産物: compileされたTraitCallディスパッチが
+  ソース到達不能化（compile_testの該当2テストは新セマンティクスの検証に書き換え）。
+- **M2（defmethod/impl/accessor）**: 所有型経由のジェネリックメソッドを特殊化。
+  written_vars（レシーバに書かれた型変数名を位置zip）で束縛。defstructアクセサは
+  生フォームが無いため`Getter`/`Setter`テンプレートからAdtDefのフィールド型に
+  subst_applyして再合成。
+- **M3（FnRef/MethodRef）**: 関数値化はexpected関数型からunifyで型引数を解決して
+  特殊化参照へ。文脈が無い場合はcheck時TypeError（M1以降どのみち実行不能だったものが
+  早く明確に）。`(compile generic)`もcheck時に理由付きで拒否。
+- **M4（フォールバック全廃）**: `decode_struct_field`の形状ヒューリスティック→型駆動
+  `decode_field_typed`（+非Sexpr側`decode_nonsexpr_field`）。Sexpr宣言スロットの
+  クオート済みスカラ誤デコード（旧docコメントが「単型化評価が必要」と明記していた
+  既知欠陥）が解消。TraitCall evalアームをInternal化、`rtvalue_type_path`
+  （最後の値形状ディスパッチ）を削除。
+
+### Stage 6a: `BoxedObj::Cell` + 静的型駆動二層Slot
+
+`Slot::Heap(Rc<BoxId>)`＝ランタイム表現が常に`RtValue::Sexpr`の型（Sexpr・boxed struct・
+hashtable）のみ／`Slot::Native(Rc<RefCell<RtValue>>)`＝それ以外。振り分けは束縛点の
+静的型のみ（Let=束縛値のTyped.ty、Defvar=宣言ty、パラメータ=FnDef登録時kinds、
+lambda/labels=ASTのType、matchは`Pattern::Bind`へcheck時焼き込み）。スカラ/Str/Floatは
+decode曖昧性とeq同一性（`Rc::ptr_eq`）のためCell化しない。
+
+**セル生存管理はHeap自身が持つ**（`cell_registry: Vec<Weak<BoxId>>`、`alloc_cell`が
+`Rc<BoxId>`ハンドルを返し、gc()が生存セルを暗黙ルートとして自らmark）。当初は
+interp側weakリスト+sync_roots拡張で実装したが、**compiledコード内で発生するGCは
+interpのsync_roots規約の外**であり、`call_compiled`前の強制syncはルートスタック会計
+テストと干渉した——Heap内レジストリなら「どこから起きたGCも生存セルを見る」が
+構造的に成立する。副産物として「最終sync以降に作られたSexpr束縛がcompiledコードの
+GCに晒される」pre-existingの穴もSexpr系束縛については閉じた。挙動改善: 束縛が
+死んだ時点で値が回収可能になる（旧実装は評価終了後もsync_rootsの残留ルートが値を
+生かし続けた——`runtime_cons_cells_survive_gc_when_rooted`の最終断言をlive_count 0に更新）。
+
+### Stage 6b: `BoxedObj::Closure` + サイドテーブル、`RtValue::Closure`削除
+
+クロージャは`Value::Boxed`のクロージャボックス（`BoxedObj::Closure{body_token,
+env=ヒープセルキャプチャのみ}`）を包む`RtValue::Sexpr`になった。ボディ（Typed AST、
+memクレートは依存不可）とNativeキャプチャ（スカラ・LLVMハンドル等）は`Interp`の
+サイドテーブル（`closure_bodies: HashMap<u32, Rc<ClosureBody>>`）へ——**LLVM系が
+GCヒープに入らない区分はクロージャ内部でも`Capture::Heap(idx)/Native(Rc)`として維持**。
+sweepが未到達クロージャのtokenを蓄積（gc()はcons()内から暗黙に走るため戻り値方式は
+不可）、sync_roots冒頭でドレイン→`ClosureBody`のdropでNativeキャプチャのRcも連鎖解放、
+リークなし（`closure_body_count`で実証）。
+
+- labelsのプレースホルダをヒープセル化: cell→closure box→sibling cell→…の相互再帰の
+  結び目が純粋なヒープ循環になりmark-sweepが丸ごと回収——旧Rc表現が設計上リーク
+  していた循環の実質修正。
+- 新規GCハザード: calleeがGC管理値になったため`Expr::Apply`は引数評価前に
+  `_f_anchor`で保護（無名callee`((f x) y)`形、極小ヒープテストで実証）。
+  キャプチャセルは`Heap::adopt_cell`で再所有し、box自体が呼び出し中に死んでも
+  フレーム束縛が独立に生存。
+- 周辺: 「struct/hashtable以外のBoxed=Float」前提を`is_float`陽性判定に反転、
+  `call_compiled`にインタプリタクロージャの越境ガード（compiledの`ClosureBox`と
+  ABI非互換）、クロージャがstructフィールドに格納可能になった（`rtvalue_to_struct_field`は
+  Sexprとして受ける）。
+
+`RtValue`の残バリアント: `Int/Float/Bool/Char/Str/Unit/Data/Sexpr/Builtin/BuiltinMethod/
+Scope` + LLVM系5種。テスト: monomorph_test 27本新設、mem/evalにGC実証テスト群
+（セル・クロージャ・循環回収・サイドテーブル同期）。全32ターゲット+miri green。

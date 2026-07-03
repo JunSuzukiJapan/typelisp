@@ -35,39 +35,39 @@
    - **Stage 5（完了）**: HashTable: インタプリタ結線——`RtValue::HashTable`/`HashKey`削除、
      `Vector<T>`と同じ「type_name駆動の`eval_builtin_method`分岐」パターンで
      `get/set/remove/count/clear/keys/values/entries`を再実装。
-   - **Stage 6前提: ジェネリック単型化（M1完了、M2-M4進行中）**——Stage 6aの束縛スロット
-     二層化（GCヒープCell vs Native）は「LLVM系5種とそれ以外を厳密に区分し、実行時の
+   - **Stage 6前提: ジェネリック単型化（M1-M4、全完了 2026-07-03）**——Stage 6aの束縛
+     スロット二層化（GCヒープCell vs Native）は「LLVM系5種とそれ以外を厳密に区分し、実行時の
      値形状フォールバックを全廃して静的型駆動にする」というユーザー指示（2026-07-03）を
      受け、型消去実行の廃止（=呼び出しサイトで具体型が確定した時点で型変数を置換した
-     特殊化関数を生成・使用）が前提となった。
-     - **M1（完了）**: defun単型化基盤——`FnTemplate`（生Sexprテンプレート保持+恒久ルート）、
-       `canon`の型変数束縛フック、空白入りマングル名（`"identity <i32>"`、リーダから構造的に
-       生成不能）、`check_call`での呼び換え+`spec_pending`キュー、`check_form`でのドレイン+
-       `TopLevel::Module`（`MONO_BUNDLE_MODULE`）バンドル、`Interp::exec`の消去済み
-       ジェネリックDefun登録スキップ、多相再帰の発散ガード（budget 512）。
-       `tests/monomorph_test.rs`（15本）。
-     - **M2（未着手）**: defmethod/impl/defstructアクセサの単型化。
-     - **M3（未着手）**: FnRef特殊化（ジェネリック関数の値化）。
-     - **M4（未着手）**: 型消去フォールバック除去——`decode_struct_field`の形状
-       ヒューリスティック→型駆動`decode_field_typed`化、TraitCall evalアーム+
-       `rtvalue_type_path`削除（compile側TraitCall機構はM1時点で既に到達不能、
-       削除は後続クリーンアップ）。
-   - **Stage 6a（未着手）**: `BoxedObj::Cell`導入+束縛スロットの静的型駆動二層化
-     （`Slot::Heap(Cell)`=Sexpr系型のみ / `Slot::Native`=LLVM系5種・Data・スカラー等）。
-   - **Stage 6b（未着手）**: `RtValue::Closure`を`BoxedObj::Closure{body_token, env}`+
-     evalサイドテーブルに統合（混合キャプチャは`Capture::Heap/Native`で区分維持）。
+     特殊化関数を生成・使用）が前提となった。M1=defun単型化基盤（`FnTemplate`再check方式、
+     空白入りマングル名、`MONO_BUNDLE_MODULE`バンドル、多相再帰の発散ガード）、
+     M2=defmethod/impl/defstructアクセサ、M3=FnRef/MethodRef特殊化（値化はexpected関数型
+     から解決、文脈なしはcheckエラー）、M4=型消去フォールバック全廃
+     （`decode_field_typed`への型駆動化、TraitCall evalアーム+`rtvalue_type_path`削除）。
+     `tests/monomorph_test.rs`（27本）。
+   - **Stage 6a（完了 2026-07-03）**: `BoxedObj::Cell`+束縛スロットの静的型駆動二層化。
+     `Slot::Heap(Rc<BoxId>)`=ランタイム表現が常に`RtValue::Sexpr`の型
+     （Sexpr/boxed struct/hashtable）のみ、`Slot::Native`=それ以外（LLVM系5種・Data・
+     スカラー・Str・関数型・Scope）。**LLVM系はValue表現を持たないためGCヒープ混入が
+     enumレベルで構造的に不可能**。セルの生存管理はHeap自身の`cell_registry`
+     （Weak<BoxId>、gc()が生存セルを暗黙ルートとして自らmark）——compiledコード内で
+     発生するGC（interpのsync_roots規約の外）からも構造的に保護される。
+   - **Stage 6b（完了 2026-07-03）**: `RtValue::Closure`削除。クロージャは
+     `BoxedObj::Closure{body_token, env=ヒープセルキャプチャのみ}`+evalサイドテーブル
+     （`ClosureBody{params, body, layout}`、Nativeキャプチャは`Capture::Native`でGC不可視のまま
+     テーブル側）。sweepがtokenを報告→sync_rootsでドレイン、リークなし。labelsの
+     cell↔closure循環はヒープ循環としてmark-sweepが丸ごと回収
+     （旧Rc表現の設計上のリークを解消）。
    - **Stage 7-8（未着手）**: `Scope<V>`を`BoxedObj::Struct`（`StructPayload::Frames`）に統合
      （自己ホスティングコンパイラ自体がScopeに依存するため最後に単独で着地）。
+   - **後続クリーンアップ（未着手）**: compile側TraitCall機構（`ast_bridge`の
+     `translate_trait_call`/`compiler.rs`の`compile-trait-dispatch`）は単型化により
+     ソース到達不能になった——削除待ち。
    計画詳細は`~/.claude/plans/zippy-jingling-popcorn.md`（承認済みプラン）参照。
 
-直近完了: ジェネリック単型化M1（2026-07-03）——型消去実行の廃止に向けたdefun単型化基盤。
-呼び出しサイトで具体型が確定した時点で生Sexprテンプレートを型変数束縛下で再checkし、
-特殊化defun（空白入りマングル名）を生成・呼び換える。副産物として「compileされた
-TraitCallディスパッチ」（`compile-trait-dispatch`）はソースから到達不能になった
-（ジェネリック関数の`(compile name)`が不可能になり、where境界付きボディは特殊化時に
-具体的な`Expr::Assoc`へ解決されるため）——compile側機構の削除はM4後のクリーンアップ。
-`tests/compile_test.rs`の該当2テストは単型化後のセマンティクス
-（特殊化ボディ→compiled methodディスパッチ）の検証に書き換えた。
+直近完了: ジェネリック単型化M1-M4 + Sexpr/RtValue統合Stage 6a/6b（2026-07-03、6コミット）。
+詳細は上記の各項目と[implementation-log.md](implementation-log.md)の
+「ジェネリック単型化とSexpr/RtValue統合Stage 6」節参照。
 
 その前に完了: Sexpr/RtValue内部表現統合Stage 5（2026-07-03）——HashTable: インタプリタ結線。
 `src/eval/value.rs`から`RtValue::HashTable`/`HashKey`を削除し、`eval_builtin_method`の
