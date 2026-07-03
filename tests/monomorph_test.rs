@@ -274,6 +274,57 @@ fn one_generic_type_instantiated_at_two_types_gets_independent_methods() {
     assert_eq!(eval_ok(src), RtValue::Int(1));
 }
 
+// ---- generic functions as values (FnRef/MethodRef) -----------------------------
+
+#[test]
+fn a_generic_function_passed_as_an_argument_specializes_from_the_parameter_type() {
+    let src = r#"
+        (defun (identity T) ((x T)) T x)
+        (defun call-it ((f (fn (i32) i32)) (n i32)) i32 (f n))
+        (call-it identity 41)
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Int(41));
+}
+
+#[test]
+fn a_generic_function_annotated_with_the_specializes() {
+    let src = r#"
+        (defun (identity T) ((x T)) T x)
+        (defun apply1 ((f (fn (bool) bool))) bool (f true))
+        (apply1 (the (fn (bool) bool) identity))
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Bool(true));
+}
+
+#[test]
+fn a_generic_method_passed_as_an_argument_specializes() {
+    let src = r#"
+        (defstruct (box T) (v T))
+        (defmethod get-v ((self box<T>)) T self::v)
+        (defun call-it ((f (fn (box<i32>) i32)) (b box<i32>)) i32 (f b))
+        (call-it get-v (box::new 7))
+    "#;
+    assert_eq!(eval_ok(src), RtValue::Int(7));
+}
+
+#[test]
+fn a_generic_function_value_without_type_context_is_a_check_error() {
+    // `(defvar f identity)` gives the checker no function type to resolve T
+    // from — there is no erased generic value to fall back to anymore.
+    match check_all("(defun (identity T) ((x T)) T x) (defvar f identity)") {
+        Err(Error::TypeError(msg)) => assert!(msg.contains("generic function"), "unexpected: {}", msg),
+        other => panic!("expected TypeError, got {:?}", other),
+    }
+}
+
+#[test]
+fn compiling_a_generic_function_is_a_check_error() {
+    match check_all("(defun (identity T) ((x T)) T x) (compile identity)") {
+        Err(Error::TypeError(msg)) => assert!(msg.contains("generic"), "unexpected: {}", msg),
+        other => panic!("expected TypeError, got {:?}", other),
+    }
+}
+
 // ---- erased bodies never run --------------------------------------------------
 
 #[test]

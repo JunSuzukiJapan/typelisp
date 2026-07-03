@@ -802,23 +802,63 @@ impl Checker {
     }
 
     /// Reify a bare free-function name as a function value (`FnRef`), if it names
-    /// one.
-    fn fn_value(&self, name: &str) -> Option<Typed> {
+    /// one. `Some(Err(..))` when the name resolves but is a generic function
+    /// that can't be instantiated here — see [`Self::fn_ref_node`].
+    fn fn_value(&self, name: &str, expected: Option<&Type>) -> Option<Result<Typed, Error>> {
         let fq = self.resolve_fn(name)?;
-        Some(self.fn_ref_node(fq))
+        Some(self.fn_ref_node(fq, expected))
     }
 
     /// Reify a qualified free-function path as a function value (`FnRef`).
-    fn fn_path_value(&self, segs: &[String]) -> Option<Typed> {
+    fn fn_path_value(&self, segs: &[String], expected: Option<&Type>) -> Option<Result<Typed, Error>> {
         let fq = self.resolve_fn_path(segs)?;
-        Some(self.fn_ref_node(fq))
+        Some(self.fn_ref_node(fq, expected))
     }
 
     /// Build an `FnRef` node carrying the function's `(fn ...)` type.
-    fn fn_ref_node(&self, fq: Path) -> Typed {
+    ///
+    /// A *generic* function has no single value to reference — post-
+    /// monomorphization, only concrete specializations exist at runtime — so
+    /// its type parameters are resolved against the `expected` function type
+    /// (the only call-site information a bare name carries, e.g. a typed
+    /// `let` binding or the parameter an argument is checked against) and
+    /// the reference is rewritten to the specialization, requested exactly
+    /// like a direct call's. With no expectation to resolve from this is a
+    /// check-time error (previously it produced a type-variable-ridden
+    /// `FnRef` that could never be applied anyway).
+    fn fn_ref_node(&self, fq: Path, expected: Option<&Type>) -> Result<Typed, Error> {
         let sig = self.reg.fn_sig(&fq).expect("resolved fn exists").clone();
-        let ty = Type::Fn(sig.params, sig.rest.map(Box::new), Box::new(sig.ret));
-        Typed { expr: Expr::FnRef(fq), ty }
+        let tmpl_ty = Type::Fn(sig.params.clone(), sig.rest.clone().map(Box::new), Box::new(sig.ret.clone()));
+        if sig.type_params.is_empty() {
+            return Ok(Typed { expr: Expr::FnRef(fq), ty: tmpl_ty });
+        }
+        if let Some(exp) = expected {
+            let params: HashSet<String> = sig.type_params.iter().cloned().collect();
+            let mut subst: HashMap<String, Type> = HashMap::new();
+            if unify(&params, &tmpl_ty, exp, &mut subst).is_ok()
+                && sig.type_params.iter().all(|p| subst.contains_key(p))
+            {
+                let targs: Vec<Type> = sig.type_params.iter().map(|p| subst[p.as_str()].clone()).collect();
+                let resolved_ty = subst_apply(&tmpl_ty, &subst);
+                if !targs.iter().any(|t| self.type_is_open(t)) && self.generic_fn_templates.contains_key(&fq) {
+                    let mangled = self.request_fn_specialization(&fq, targs);
+                    return Ok(Typed { expr: Expr::FnRef(mangled), ty: resolved_ty });
+                }
+                // Open type arguments: we're inside another generic
+                // function's diagnostics-only body check — the node is never
+                // executed, and that function's own specialization will
+                // re-check this reference with the types concrete.
+                return Ok(Typed { expr: Expr::FnRef(fq), ty: resolved_ty });
+            }
+            // Shape mismatch: hand back the generic node so `check`'s
+            // ordinary expected-vs-actual reconciliation reports it.
+            return Ok(Typed { expr: Expr::FnRef(fq), ty: tmpl_ty });
+        }
+        Err(Error::TypeError(format!(
+            "generic function `{}` used as a value needs a concrete function-type context \
+             (e.g. a typed let binding, parameter position, or `the`)",
+            fq
+        )))
     }
 
     /// Reify a bare name as an *instance method* value (`MethodRef`), e.g.
@@ -826,12 +866,14 @@ impl Checker {
     /// [`builtin_as_value`](../../../tests/eval_test.rs)-style usage of
     /// `registry::int_assoc`'s arithmetic). Unlike a real call site, there is
     /// no receiver expression to dispatch on, so the receiver type is read
-    /// off `expected`'s first parameter instead — this only resolves
-    /// non-generic instance methods (the receiver's own type fully
-    /// determines the method's signature with no substitution needed), which
-    /// covers `i32`/`i64`/`f64`/`string`/`char`; a generic method (e.g.
-    /// `HashTable::get`) can't be reified this way since there's no call-site
-    /// type argument to substitute, and simply fails to match below.
+    /// off `expected`'s first parameter instead.
+    ///
+    /// A generic-*owner* method with a retained [`MethodTemplate`] resolves
+    /// the owner's type arguments from `expected` (its first parameter is
+    /// the receiver's concrete type) and is rewritten to the specialization,
+    /// mirroring [`Self::fn_ref_node`]. A generic method *without* a
+    /// template (a Rust builtin like `HashTable::get`) still can't be
+    /// reified and fails to match, as before.
     fn method_value(&self, name: &str, expected: Option<&Type>) -> Option<Typed> {
         let Type::Fn(params, _, _) = expected? else { return None };
         let type_fq = match params.first()? {
@@ -844,6 +886,25 @@ impl Checker {
             return None;
         }
         let ty = Type::Fn(af.sig.params.clone(), af.sig.rest.clone().map(Box::new), Box::new(af.sig.ret.clone()));
+        if !def.params.is_empty() {
+            let tparams: HashSet<String> = def.params.iter().cloned().collect();
+            let mut subst: HashMap<String, Type> = HashMap::new();
+            if unify(&tparams, &ty, expected.unwrap(), &mut subst).is_ok()
+                && def.params.iter().all(|p| subst.contains_key(p))
+            {
+                let targs: Vec<Type> = def.params.iter().map(|p| subst[p.as_str()].clone()).collect();
+                if !targs.iter().any(|t| self.type_is_open(t))
+                    && self.generic_method_templates.contains_key(&(type_fq.clone(), name.to_string()))
+                {
+                    let mangled = self.request_method_specialization(&type_fq, name, targs);
+                    return Some(Typed {
+                        expr: Expr::MethodRef { type_name: type_fq, method: mangled },
+                        ty: subst_apply(&ty, &subst),
+                    });
+                }
+            }
+            return None;
+        }
         if &ty != expected.unwrap() {
             return None;
         }
@@ -2206,8 +2267,8 @@ impl Checker {
                     Typed { expr: Expr::Var(name.to_string()), ty: t.clone() }
                 } else if let Some((path, vi)) = self.resolve_global(name) {
                     Typed { expr: Expr::Global(path), ty: vi.ty }
-                } else if let Some(t) = self.fn_value(name) {
-                    t
+                } else if let Some(t) = self.fn_value(name, expected) {
+                    t?
                 } else if let Some(t) = self.method_value(name, expected) {
                     t
                 } else {
@@ -2233,8 +2294,8 @@ impl Checker {
                     result?
                 } else if let Some((path, vi)) = self.resolve_global_path(&segs) {
                     Typed { expr: Expr::Global(path), ty: vi.ty }
-                } else if let Some(t) = self.fn_path_value(&segs) {
-                    t
+                } else if let Some(t) = self.fn_path_value(&segs, expected) {
+                    t?
                 } else {
                     return Err(Error::TypeError(format!("unresolved path: {}", segs.join("::"))));
                 }
@@ -2981,6 +3042,29 @@ impl Checker {
                 ))
             }
         };
+        // A generic target has no erased runtime body to compile — post-
+        // monomorphization only concrete specializations exist, generated
+        // per call site. Rejected here with a real explanation instead of
+        // the bare runtime `NoSuchFunction` the missing registration would
+        // otherwise produce.
+        let is_generic = match name.rsplit_once("::") {
+            None => self
+                .resolve_fn(&name)
+                .map(|fq| self.generic_fn_templates.contains_key(&fq))
+                .unwrap_or(false),
+            Some((type_part, method)) => {
+                let segs: Vec<String> = type_part.split("::").map(|s| s.to_string()).collect();
+                let type_fq = self.resolve_type_name(&Path::from_segments(segs));
+                self.generic_method_templates.contains_key(&(type_fq, method.to_string()))
+            }
+        };
+        if is_generic {
+            return Err(Error::TypeError(format!(
+                "compile: `{}` is generic — a generic function has no single compiled body; \
+                 call it at concrete types and compile those uses' enclosing functions instead",
+                name
+            )));
+        }
         let sig = self.reg.fn_sig(&Path::root("compile")).expect("compile is always registered");
         Ok(Typed {
             expr: Expr::Call(Path::root("compile"), vec![Typed { expr: Expr::Str(name), ty: Type::Str }]),
