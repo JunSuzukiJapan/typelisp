@@ -198,6 +198,56 @@ impl Definable for TraitDef {
     }
 }
 
+/// A generic `defun`'s retained raw source form, for re-checking at each
+/// concrete instantiation — see [`Checker::specialize_defun`]. The checked
+/// `Typed` body can't serve this purpose: it was lowered once with the type
+/// variables still abstract, and everything the checker *derives* from types
+/// (`Expr::Construct::mutable`, `Pattern::Ctor::sexpr_fields`, method
+/// resolution, `Expr::TraitCall` vs `Expr::Assoc`) would have to be re-derived
+/// anyway — re-running the checker on the source with the type variables
+/// bound (see `Checker::type_var_bindings`) gets all of that for free.
+#[derive(Clone)]
+struct FnTemplate {
+    /// The `defun` form's parts (everything after the `defun` symbol),
+    /// exactly as `check_defun` received them. Each `Value` is permanently
+    /// rooted in the heap (`Heap::push_permanent_root`) — a template must
+    /// outlive any number of GC cycles between its definition and its last
+    /// instantiation.
+    parts: Vec<Value>,
+    /// The namespace the `defun` was defined in — specialization re-checks
+    /// the body under the *defining* module's name resolution, not the
+    /// caller's.
+    ns: Vec<String>,
+    type_params: Vec<String>,
+}
+
+/// One queued "generate `base` instantiated at `args`, as `mangled`" work
+/// item — see [`Checker::request_fn_specialization`] (producer, called from
+/// the `&self` expression-checking context) and
+/// [`Checker::drain_specializations`] (consumer, run by `check_form` with
+/// `&mut self`). The two-phase split exists because expression checking
+/// (`check_call`) cannot re-enter top-level definition checking itself.
+struct SpecRequest {
+    base: Path,
+    args: Vec<Type>,
+    mangled: Path,
+}
+
+/// The synthetic `TopLevel::Module` path under which `check_form` bundles
+/// monomorphized specializations together with the form that requested them.
+/// Contains a space, which [`crate::read::Reader`] treats as a delimiter — so
+/// no user-written `module` form can ever collide with it (see
+/// `mangled_fn_path` for the same trick on function names).
+pub const MONO_BUNDLE_MODULE: &str = "<monomorph specializations>";
+
+/// Upper bound on specializations generated while draining one top-level
+/// form's requests — the convergence guard for polymorphic recursion (a
+/// generic function calling itself at an ever-growing type, e.g. `(f T)`
+/// recursing as `(f Option<T>)`), which memoization alone cannot stop since
+/// every instantiation is new. Ordinary programs instantiate a handful of
+/// generics per form; hitting this is a `TypeError`, not a hang.
+const SPECIALIZATION_BUDGET: usize = 512;
+
 /// The type checker, holding the data-type and function registries plus the
 /// current namespace (module) path.
 pub struct Checker {
@@ -218,6 +268,34 @@ pub struct Checker {
     /// Non-fatal diagnostics accumulated by [`Self::check_redef`] (currently
     /// just `RedefPolicy::Warn` redefinitions); drained by [`Self::take_warnings`].
     warnings: RefCell<Vec<String>>,
+    /// Every generic `defun`'s retained source form, keyed by its
+    /// fully-qualified path — see [`FnTemplate`].
+    generic_fn_templates: HashMap<Path, FnTemplate>,
+    /// Instantiations already requested *during the current top-level form*
+    /// (mangled path -> base generic path), so one form's many calls to the
+    /// same instantiation — including a specialization's own recursive call
+    /// to itself — produce exactly one definition. Deliberately cleared at
+    /// the end of every `check_form` rather than kept for the checker's
+    /// lifetime: each form's output bundle is then self-contained, so a
+    /// caller that checks several forms but discards some without executing
+    /// them (the REPL does exactly this when a later form in the same paste
+    /// fails to check) can never leave a later form referring to a
+    /// specialization whose defining bundle was thrown away. The cost — a
+    /// later form re-generating an instantiation an earlier form already
+    /// produced, and `Interp::exec` silently overwriting the identical
+    /// earlier registration — is compile-time-only.
+    spec_memo: RefCell<HashMap<Path, Path>>,
+    /// Instantiations requested but not yet generated — see [`SpecRequest`].
+    /// Always empty outside `check_form`.
+    spec_pending: RefCell<Vec<SpecRequest>>,
+    /// The current specialization's type-variable bindings (`T` -> concrete
+    /// type), consulted by [`Self::canon`] — the one chokepoint every parsed
+    /// type annotation passes through, which is what makes "re-check the
+    /// template with its type variables bound" work without touching the
+    /// type parser: `Option<T>`'s `T` arrives here already split out as a
+    /// structured `Type::Named` argument. Non-empty only while
+    /// [`Self::specialize_defun`] runs.
+    type_var_bindings: HashMap<String, Type>,
 }
 
 impl Checker {
@@ -228,6 +306,10 @@ impl Checker {
             loop_stack: RefCell::new(Vec::new()),
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
+            generic_fn_templates: HashMap::new(),
+            spec_memo: RefCell::new(HashMap::new()),
+            spec_pending: RefCell::new(Vec::new()),
+            type_var_bindings: HashMap::new(),
         }
     }
 
@@ -281,7 +363,42 @@ impl Checker {
     /// Check one top-level form. Definition forms (`defun`/`module`/
     /// `defmethod`/`use`) register into the current namespace; anything else is
     /// checked as an expression.
+    ///
+    /// If checking the form instantiated any generic function at concrete
+    /// types (see [`Self::request_fn_specialization`]), the generated
+    /// specializations are bundled *with* the form into a single synthetic
+    /// `TopLevel::Module` (path [`MONO_BUNDLE_MODULE`], specializations
+    /// first) — `Interp::exec`'s `Module` arm runs the body in order, so the
+    /// caller needs no new handling, and the bundle is self-contained: a
+    /// form's specializations can never be separated from the form that
+    /// needs them (see `spec_memo`'s doc comment for why that matters).
     pub fn check_form(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value) -> Result<TopLevel, Error> {
+        debug_assert!(
+            self.spec_pending.borrow().is_empty(),
+            "specialization requests must never leak across check_form calls"
+        );
+        let primary = self.check_form_dispatch(heap, interp, v);
+        let bundled = primary.and_then(|tl| Ok((self.drain_specializations(heap, interp)?, tl)));
+        // Both maps reset per form regardless of outcome — see `spec_memo`'s
+        // doc comment for why the memo must not outlive the form.
+        self.spec_memo.borrow_mut().clear();
+        match bundled {
+            Ok((specs, tl)) if specs.is_empty() => Ok(tl),
+            Ok((mut specs, tl)) => {
+                specs.push(tl);
+                Ok(TopLevel::Module { path: Path::root(MONO_BUNDLE_MODULE), body: specs })
+            }
+            Err(e) => {
+                self.spec_pending.borrow_mut().clear();
+                Err(e)
+            }
+        }
+    }
+
+    /// [`Self::check_form`]'s dispatch body (the pre-monomorphization
+    /// `check_form`, unchanged) — split out so the public entry point can
+    /// wrap it with specialization draining.
+    fn check_form_dispatch(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value) -> Result<TopLevel, Error> {
         if let Value::Cons(_) = v {
             let elems = heap.list_to_vec(v)?;
             if let Some(Value::Symbol(id)) = elems.first() {
@@ -731,12 +848,26 @@ impl Checker {
 
     /// Canonicalize a parsed type: resolve every nominal name to its located
     /// [`Path`] so that types compare equal across module boundaries.
+    ///
+    /// This is also monomorphization's substitution point: while a generic
+    /// template is being re-checked ([`Self::specialize_defun`]), a
+    /// single-segment name bound in `type_var_bindings` resolves to its
+    /// concrete type instead — checked *before* `resolve_type_name` so a
+    /// user-defined type that happens to share a type parameter's name can
+    /// never shadow the binding.
     fn canon(&self, t: &Type) -> Type {
         match t {
-            Type::Named(n, args) => Type::Named(
-                self.resolve_type_name(n),
-                args.iter().map(|a| self.canon(a)).collect(),
-            ),
+            Type::Named(n, args) => {
+                if args.is_empty() && n.is_simple() {
+                    if let Some(bound) = self.type_var_bindings.get(n.local()) {
+                        return bound.clone();
+                    }
+                }
+                Type::Named(
+                    self.resolve_type_name(n),
+                    args.iter().map(|a| self.canon(a)).collect(),
+                )
+            }
             Type::Fn(ps, rest, r) => Type::Fn(
                 ps.iter().map(|p| self.canon(p)).collect(),
                 rest.as_ref().map(|t| Box::new(self.canon(t))),
@@ -768,33 +899,30 @@ impl Checker {
         parts: &[Value],
         public: bool,
     ) -> Result<TopLevel, Error> {
-        if parts.len() < 3 {
-            return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
-        }
+        let (params, rest, ret, bounds, body_start) = self.parse_defun_sig(heap, parts)?;
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
-        let (params, rest) = self.parse_params_rest(heap, parts[1])?;
-        let ret = self.canon(&parse_type(heap, parts[2])?);
         let fq_name = self.fq(&name);
-
-        // An optional `(where (Trait T (Assoc Concrete)...)...)` clause right
-        // after the return type declares trait bounds on this `defun`'s own
-        // type parameters. Parsed *before* the `FnSig` below is registered
-        // (only `parts`/`heap` are needed, nothing computed later) so the
-        // bounds can be stored on the signature itself — `Checker::check_call`
-        // consults them for call-site validation, not just body-checking's
-        // `Env` as before bounds existed.
-        let mut body_start = 3;
-        let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
-        if let Some(form) = parts.get(3) {
-            if self.is_where_clause(heap, *form)? {
-                bounds = self.parse_where_clause(heap, *form)?;
-                body_start = 4;
-            }
-        }
 
         // Register the signature in the current namespace before checking the
         // body so self-recursion works.
         self.check_redef("function", &name, self.cur_ns().fns.get(&name))?;
+
+        // A generic defun additionally retains its raw source form for
+        // per-instantiation re-checking — see `FnTemplate`. Retained *before*
+        // the body check below: the body may itself contain a call that
+        // instantiates this very function at concrete types (polymorphic
+        // recursion — rejected later by `SPECIALIZATION_BUDGET`, but the
+        // request still consults the template map first).
+        if !type_params.is_empty() {
+            for &p in parts {
+                heap.push_permanent_root(p);
+            }
+            self.generic_fn_templates.insert(
+                fq_name.clone(),
+                FnTemplate { parts: parts.to_vec(), ns: self.ns.clone(), type_params: type_params.clone() },
+            );
+        }
+
         let sig = FnSig {
             type_params: type_params.clone(),
             params: params.iter().map(|(_, t)| t.clone()).collect(),
@@ -821,6 +949,165 @@ impl Checker {
         let env = Env::new().with_bounds(bounds).extended(params.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], Some(&ret))?;
         Ok(TopLevel::Defun { name: fq_name, type_params, params, ret, body })
+    }
+
+    /// Parses a `defun` form's parameter list, return type, and optional
+    /// `(where ...)` clause (`parts` = everything after the `defun` keyword),
+    /// returning them plus the body's starting index in `parts`. Shared by
+    /// [`Self::check_defun`] and [`Self::specialize_defun`] — the latter
+    /// re-parses a retained generic template with `type_var_bindings` in
+    /// effect, so the very same source annotations come back concrete.
+    ///
+    /// The `where` clause is parsed *before* the `FnSig` is registered (only
+    /// `parts`/`heap` are needed, nothing computed later) so the bounds can
+    /// be stored on the signature itself — `Checker::check_call` consults
+    /// them for call-site validation, not just body-checking's `Env`.
+    #[allow(clippy::type_complexity)]
+    fn parse_defun_sig(
+        &self,
+        heap: &Heap,
+        parts: &[Value],
+    ) -> Result<(Vec<(String, Type)>, Option<(String, Type)>, Type, HashMap<String, Vec<TraitBound>>, usize), Error>
+    {
+        if parts.len() < 3 {
+            return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
+        }
+        let (params, rest) = self.parse_params_rest(heap, parts[1])?;
+        let ret = self.canon(&parse_type(heap, parts[2])?);
+        let mut body_start = 3;
+        let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
+        if let Some(form) = parts.get(3) {
+            if self.is_where_clause(heap, *form)? {
+                bounds = self.parse_where_clause(heap, *form)?;
+                body_start = 4;
+            }
+        }
+        Ok((params, rest, ret, bounds, body_start))
+    }
+
+    // ---- monomorphization ---------------------------------------------------
+
+    /// Records that the current form needs `base` (a generic `defun` with a
+    /// retained [`FnTemplate`]) instantiated at the concrete `args`, and
+    /// returns the specialized function's mangled [`Path`] for the call site
+    /// to reference instead of `base`. Idempotent within one top-level form
+    /// (`spec_memo`); the actual definition is generated later by
+    /// [`Self::drain_specializations`], because this runs inside expression
+    /// checking (`&self`) which cannot re-enter definition checking.
+    fn request_fn_specialization(&self, base: &Path, args: Vec<Type>) -> Path {
+        let mangled = mangled_fn_path(base, &args);
+        let mut memo = self.spec_memo.borrow_mut();
+        if !memo.contains_key(&mangled) {
+            memo.insert(mangled.clone(), base.clone());
+            self.spec_pending.borrow_mut().push(SpecRequest {
+                base: base.clone(),
+                args,
+                mangled: mangled.clone(),
+            });
+        }
+        mangled
+    }
+
+    /// Generates every specialization the current form requested (and any a
+    /// specialization's own body requests in turn — the worklist converges
+    /// for ordinary mutual recursion because `spec_memo` dedupes by mangled
+    /// name, and is cut off by [`SPECIALIZATION_BUDGET`] for polymorphic
+    /// recursion, which produces a genuinely new instantiation every step).
+    fn drain_specializations(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+    ) -> Result<Vec<TopLevel>, Error> {
+        let mut out = Vec::new();
+        loop {
+            let req = self.spec_pending.borrow_mut().pop();
+            let Some(req) = req else { break };
+            if out.len() >= SPECIALIZATION_BUDGET {
+                return Err(Error::TypeError(format!(
+                    "monomorphization did not converge after {} instantiations (a polymorphically \
+                     recursive generic function — one that calls itself at an ever-growing type — \
+                     cannot be compiled; last requested: {})",
+                    SPECIALIZATION_BUDGET, req.mangled
+                )));
+            }
+            out.push(self.specialize_defun(heap, interp, &req)?);
+        }
+        Ok(out)
+    }
+
+    /// Re-checks `req.base`'s retained template with its type variables bound
+    /// to `req.args`, producing a fully concrete `TopLevel::Defun` named
+    /// `req.mangled`. The re-check runs under the template's *defining*
+    /// namespace and a fresh loop stack (the same isolation `check_lambda`
+    /// applies to a nested function body — a specialization requested from
+    /// inside somebody's `loop` must not see that loop as its own).
+    fn specialize_defun(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        req: &SpecRequest,
+    ) -> Result<TopLevel, Error> {
+        let tmpl = self
+            .generic_fn_templates
+            .get(&req.base)
+            .expect("a specialization is only ever requested for a retained template")
+            .clone();
+        let bindings: HashMap<String, Type> =
+            tmpl.type_params.iter().cloned().zip(req.args.iter().cloned()).collect();
+        let saved_ns = std::mem::replace(&mut self.ns, tmpl.ns.clone());
+        let saved_loops = std::mem::take(&mut *self.loop_stack.borrow_mut());
+        let saved_bindings = std::mem::replace(&mut self.type_var_bindings, bindings);
+        let result = self.specialize_defun_body(heap, interp, &tmpl, &req.mangled);
+        self.type_var_bindings = saved_bindings;
+        *self.loop_stack.borrow_mut() = saved_loops;
+        self.ns = saved_ns;
+        result
+    }
+
+    fn specialize_defun_body(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        tmpl: &FnTemplate,
+        mangled: &Path,
+    ) -> Result<TopLevel, Error> {
+        // `bounds` deliberately dropped: the type variables are concrete
+        // here, so method calls on them resolve directly against the real
+        // receiver type (`check_instance_method`'s ordinary branch, never
+        // the bounds branch), and the bounds' own validity was already
+        // verified at the call site that requested this instantiation
+        // (`check_call`'s where-clause validation).
+        let (params, rest, ret, _bounds, body_start) = self.parse_defun_sig(heap, &tmpl.parts)?;
+        let mut params = params;
+        if let Some((rname, _)) = &rest {
+            params.push((rname.clone(), sexpr_ty()));
+        }
+        let env = Env::new().extended(params.clone());
+        let (body, _) = self.check_seq(heap, interp, &env, &tmpl.parts[body_start..], Some(&ret))?;
+        Ok(TopLevel::Defun { name: mangled.clone(), type_params: Vec::new(), params, ret, body })
+    }
+
+    /// Whether `t` still mentions an unresolved type variable — a
+    /// single-segment `Named` with no registered type definition, the same
+    /// convention `check_call`'s where-clause validation already reads
+    /// (post-`canon`, every *real* nominal type resolved to a located path
+    /// with a `type_def`). True means the surrounding call is being checked
+    /// inside another generic function's own (diagnostic) body, where the
+    /// type only becomes concrete once *that* function is specialized — so
+    /// no instantiation can be generated yet.
+    fn type_is_open(&self, t: &Type) -> bool {
+        match t {
+            Type::Named(n, args) => {
+                (args.is_empty() && n.is_simple() && self.reg.type_def(n).is_none())
+                    || args.iter().any(|a| self.type_is_open(a))
+            }
+            Type::Fn(ps, rest, r) => {
+                ps.iter().any(|p| self.type_is_open(p))
+                    || matches!(rest, Some(t) if self.type_is_open(t))
+                    || self.type_is_open(r)
+            }
+            _ => false,
+        }
     }
 
     /// Whether `v` is a `(where ...)` clause (vs. an ordinary body form) —
@@ -2959,7 +3246,22 @@ impl Checker {
                 }
             }
         }
-        Ok(Typed { expr: Expr::Call(name.clone(), typed), ty: subst_apply(&sig.ret, &subst) })
+        // Monomorphization: a call that instantiates a generic function at
+        // fully concrete types is rewritten to reference the specialized
+        // definition (generated by `check_form`'s drain). If any type
+        // argument is still open we are inside another generic function's
+        // diagnostic body-check — keep the original (never-executed) call;
+        // the enclosing function's own specialization will re-check this
+        // very call with the types concrete. Builtin generic free functions
+        // (no template) keep their runtime-dispatched call as-is.
+        let mut call_path = name.clone();
+        if !sig.type_params.is_empty() && self.generic_fn_templates.contains_key(name) {
+            let targs: Vec<Type> = sig.type_params.iter().map(|p| subst[p.as_str()].clone()).collect();
+            if !targs.iter().any(|t| self.type_is_open(t)) {
+                call_path = self.request_fn_specialization(name, targs);
+            }
+        }
+        Ok(Typed { expr: Expr::Call(call_path, typed), ty: subst_apply(&sig.ret, &subst) })
     }
 
     /// `ctor` is `(type path, variant index)` — the same pair [`Self::resolve_ctor`]
@@ -3361,6 +3663,61 @@ fn type_has_param(t: &Type, params: &HashSet<String>) -> bool {
         }
         _ => false,
     }
+}
+
+/// Renders a canonicalized (fully module-qualified) type as the string used
+/// inside a specialization's mangled name — a faithful, unambiguous
+/// serialization, so two distinct canonical types can never render equal
+/// (which is what lets `mangled_fn_path` double as the instantiation's
+/// identity). Nested generics render Rust-style: `vector<cons-cell<string,i32>>`.
+fn mangle_type(t: &Type) -> String {
+    match t {
+        Type::I8 => "i8".into(),
+        Type::I16 => "i16".into(),
+        Type::I32 => "i32".into(),
+        Type::I64 => "i64".into(),
+        Type::Isize => "isize".into(),
+        Type::U8 => "u8".into(),
+        Type::U16 => "u16".into(),
+        Type::U32 => "u32".into(),
+        Type::U64 => "u64".into(),
+        Type::Usize => "usize".into(),
+        Type::F32 => "f32".into(),
+        Type::F64 => "f64".into(),
+        Type::Bool => "bool".into(),
+        Type::Char => "char".into(),
+        Type::Str => "string".into(),
+        Type::Unit => "()".into(),
+        Type::Never => "!".into(),
+        Type::Named(p, args) if args.is_empty() => p.to_string(),
+        Type::Named(p, args) => {
+            format!("{}<{}>", p, args.iter().map(mangle_type).collect::<Vec<_>>().join(","))
+        }
+        Type::Fn(ps, rest, r) => {
+            let mut inner: Vec<String> = ps.iter().map(mangle_type).collect();
+            if let Some(t) = rest {
+                inner.push(format!("&rest {}", mangle_type(t)));
+            }
+            format!("(fn ({}) {})", inner.join(","), mangle_type(r))
+        }
+    }
+}
+
+/// The specialized function's [`Path`] for `base` instantiated at `args`:
+/// the base path with its final segment rewritten to e.g. `"identity <i32>"`.
+/// The space is load-bearing: the reader treats whitespace as a delimiter,
+/// so no source-written symbol can ever spell this name — a user `(defun
+/// identity<i32> ...)` (a perfectly legal token) can therefore never collide
+/// with a generated specialization in `Interp`'s function table.
+fn mangled_fn_path(base: &Path, args: &[Type]) -> Path {
+    let local = format!(
+        "{} <{}>",
+        base.local(),
+        args.iter().map(mangle_type).collect::<Vec<_>>().join(",")
+    );
+    let mut segs = base.parent().to_vec();
+    segs.push(local);
+    Path::from_segments(segs)
 }
 
 /// Replace type parameters in `t` with their bindings from `subst`.

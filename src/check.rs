@@ -10,4 +10,4 @@ pub mod checker;
 
 pub use ast::{Arm, Expr, LabelDef, Pattern, QuotedSexpr, Typed};
 pub use registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};
-pub use checker::{Checker, MacroExpander, RedefPolicy, TopLevel};
+pub use checker::{Checker, MacroExpander, RedefPolicy, TopLevel, MONO_BUNDLE_MODULE};

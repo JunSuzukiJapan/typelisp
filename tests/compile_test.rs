@@ -2849,24 +2849,27 @@ fn compile_dispatches_a_nested_labels_inner_sibling_that_boxes_an_outer_sibling_
     }
 }
 
-// ---- Expr::TraitCall: runtime dispatch through a where-bounded generic ----
+// ---- where-bounded generics × compiled methods (monomorphization) ----------
+//
+// Before monomorphization these two tests exercised `(compile describe)` —
+// compiling the *generic* `describe` itself, whose body checked as
+// `Expr::TraitCall` and lowered to `compile-trait-dispatch`'s runtime
+// type-id chain. Monomorphization made that whole configuration
+// unrepresentable: a generic `defun`'s erased body is never registered in
+// `Interp::fns` (see `Interp::exec`'s `Defun` arm), so it cannot be
+// `compile`d — each call site instead instantiates a fully concrete
+// specialization whose `(count it)` resolves statically to `Expr::Assoc`.
+// What's still worth proving here is the boundary the old tests also
+// covered: a specialized generic body dispatching into already-`compile`d
+// methods on a receiver built by already-`compile`d code.
 
-/// `describe`'s body — `(count it)` where `it: T`, `(where (Counted T))` —
-/// checks as `Expr::TraitCall`, not `Expr::Assoc` (see that node's own doc
-/// comment): the implementing type is only known once a concrete `T` is
-/// substituted at a call site, unlike a call through a concrete receiver
-/// type. With exactly one type (`box-a`) registered as `impl Counted` by the
-/// time `describe` is checked, `ast_bridge::translate_trait_call`'s
-/// candidate list has one entry — still a real runtime dispatch chain
-/// (`compile-trait-dispatch`), just one comparison deep. `make-box-a`'s own
-/// `Expr::Construct` must itself be `compile`d for the receiver `describe`
-/// sees to actually be a type-id-tagged `compile-construct-box` box (an
-/// *interpreted* `box-a::new` would instead produce an `RtValue::Struct`,
-/// never reaching compiled code at all) — see
-/// `compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_code`
-/// for the same requirement.
+/// `describe`'s call site instantiates `describe <box-a>`, whose re-checked
+/// body resolves `(count it)` to a plain `Expr::Assoc` on `box-a` — which
+/// `Interp`'s `Assoc` arm routes to the *compiled* `box-a::count`
+/// (`compiled_methods` is consulted first), with the receiver itself built
+/// by the compiled `make-box-a`.
 #[test]
-fn compile_dispatches_a_trait_call_with_a_single_impl_to_native_code() {
+fn a_where_bounded_generic_specializes_and_dispatches_into_compiled_methods() {
     let v = run_with_compiler(
         r#"
         (deftrait Counted (count ((self Self)) i32))
@@ -2877,7 +2880,6 @@ fn compile_dispatches_a_trait_call_with_a_single_impl_to_native_code() {
         (compile box-a::n)
         (compile box-a::count)
         (compile make-box-a)
-        (compile describe)
         (describe (make-box-a 7))
         "#,
     )
@@ -2885,20 +2887,13 @@ fn compile_dispatches_a_trait_call_with_a_single_impl_to_native_code() {
     assert_eq!(v, RtValue::Int(7));
 }
 
-/// The multi-impl counterpart of the test above — mirrors
+/// The multi-impl counterpart: two call sites instantiate `describe <box-a>`
+/// and `describe <box-b>` independently, and each specialization's static
+/// `Assoc` reaches the *right* compiled method — mirrors
 /// `two_types_implementing_the_same_trait_dispatch_independently`
-/// (`tests/trait_test.rs`), but with `describe` itself `compile`d: both
-/// `box-a::count`/`box-b::count` must already be `compile`d before
-/// `describe` is (`Interp::compile_function`'s `method_targets` check —
-/// the same requirement an ordinary `Expr::Assoc` target already has), and
-/// `compile-trait-dispatch`'s chain must pick the *right* one of the two at
-/// runtime purely from each receiver's own type-id header
-/// (`compile-construct-box`'s slot `0`), proving this isn't just the
-/// single-candidate fast path the test above alone could pass by
-/// coincidence (e.g. an always-branch-to-the-first-candidate bug would
-/// still pass a single-impl test but fail this one on `box-b`).
+/// (`tests/trait_test.rs`), with the method bodies native.
 #[test]
-fn compile_dispatches_a_trait_call_with_multiple_impls_to_native_code() {
+fn a_where_bounded_generic_specializes_per_impl_and_dispatches_into_compiled_methods() {
     let v = run_with_compiler(
         r#"
         (deftrait Counted (count ((self Self)) i32))
@@ -2915,7 +2910,6 @@ fn compile_dispatches_a_trait_call_with_multiple_impls_to_native_code() {
         (compile box-b::count)
         (compile make-box-a)
         (compile make-box-b)
-        (compile describe)
         (+ (describe (make-box-a 3)) (describe (make-box-b 3)))
         "#,
     )

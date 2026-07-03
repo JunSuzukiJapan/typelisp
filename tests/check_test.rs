@@ -5,7 +5,20 @@
 //! non-exhaustive / type-mismatched forms are rejected.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, Expr, Heap, Interp, Path, Reader, TopLevel, Type, Typed};
+use typelisp::{load_prelude, Checker, Error, Expr, Heap, Interp, Path, Reader, TopLevel, Type, Typed, MONO_BUNDLE_MODULE};
+
+/// Peels the checker's synthetic monomorphization bundle (if any), returning
+/// the primary form — always the bundle's *last* element (the
+/// specializations it needs come first). A form that instantiates no generic
+/// function is returned unchanged.
+fn primary(tl: TopLevel) -> TopLevel {
+    match tl {
+        TopLevel::Module { path, mut body } if path == Path::root(MONO_BUNDLE_MODULE) => {
+            body.pop().expect("a monomorph bundle always ends with its primary form")
+        }
+        other => other,
+    }
+}
 
 /// Read one datum and check it as a single top-level form.
 fn form(src: &str) -> Result<TopLevel, Error> {
@@ -60,7 +73,7 @@ fn ty(src: &str) -> Type {
 
 /// Like [`ty`], but with the prelude loaded first — see [`program_with_prelude`].
 fn ty_with_prelude(src: &str) -> Type {
-    match program_with_prelude(src).expect("check failed") {
+    match primary(program_with_prelude(src).expect("check failed")) {
         TopLevel::Expr(t) => t.ty,
         other => panic!("expected expression, got {:?}", other),
     }
@@ -161,7 +174,7 @@ fn call_rejects_wrong_argument_type() {
 
 /// Like `ty` but over a multi-form program (last form's type).
 fn ty_program(src: &str) -> Type {
-    match program(src).expect("check failed") {
+    match primary(program(src).expect("check failed")) {
         TopLevel::Expr(t) => t.ty,
         other => panic!("expected expression, got {:?}", other),
     }

@@ -79,12 +79,22 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     let mut fn_names: Vec<String> = Vec::new();
     for v in forms {
         let tl = chk.check_form(&mut heap, &interp, v).map_err(|e| e.to_string())?;
-        let name = match &tl {
-            TopLevel::Defun { name, .. } => name.local().to_string(),
-            other => return Err(format!("compile-file only supports top-level `defun`, found {:?}", other)),
+        // A defun that instantiates a generic function comes back bundled
+        // with the (concrete, hence themselves compilable) specializations
+        // it needs — flatten the synthetic module and treat each entry as a
+        // top-level defun of this file.
+        let items = match tl {
+            TopLevel::Module { path, body } if path == crate::Path::root(crate::MONO_BUNDLE_MODULE) => body,
+            other => vec![other],
         };
-        interp.exec(&mut heap, tl).map_err(|e| e.to_string())?;
-        fn_names.push(name);
+        for tl in items {
+            let name = match &tl {
+                TopLevel::Defun { name, .. } => name.local().to_string(),
+                other => return Err(format!("compile-file only supports top-level `defun`, found {:?}", other)),
+            };
+            interp.exec(&mut heap, tl).map_err(|e| e.to_string())?;
+            fn_names.push(name);
+        }
     }
 
     if !fn_names.iter().any(|n| n == ENTRY_POINT_NAME) {

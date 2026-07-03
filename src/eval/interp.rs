@@ -175,7 +175,17 @@ impl Interp {
     /// a bare expression returns `Some(value)`.
     pub fn exec(&mut self, heap: &mut Heap, tl: TopLevel) -> Result<Option<RtValue>, EvalError> {
         match tl {
-            TopLevel::Defun { name, params, ret, body, .. } => {
+            TopLevel::Defun { name, type_params, params, ret, body } => {
+                // A generic defun's own body was checked with its type
+                // variables still abstract — a type-erased artifact kept only
+                // for definition-time diagnostics. It must never run: every
+                // call site was rewritten by the checker to a monomorphized
+                // specialization (`Checker::request_fn_specialization`), and
+                // registering the erased body here would leave a silently
+                // callable stale twin behind.
+                if !type_params.is_empty() {
+                    return Ok(None);
+                }
                 let (names, types): (Vec<String>, Vec<Type>) = params.into_iter().unzip();
                 self.fns.insert(name, FnDef { params: names, body, rest: false, sig: Some((types, ret)) });
                 Ok(None)

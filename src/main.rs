@@ -133,7 +133,7 @@ fn try_run_pending(
             eprintln!("{}", w);
         }
         match result {
-            Ok(tl @ TopLevel::Defmacro { .. }) => {
+            Ok(tl) if needs_immediate_exec(&tl) => {
                 let _ = interp.exec(heap, tl);
             }
             Ok(tl) => checked.push(tl),
@@ -162,6 +162,25 @@ fn try_run_pending(
                 break;
             }
         }
+    }
+}
+
+/// True for a `Defmacro` — or a checker-synthesized monomorphization bundle
+/// (see [`MONO_BUNDLE_MODULE`]) containing one: a macro whose body calls a
+/// generic function comes back wrapped in a `Module` alongside the
+/// specializations that call needs. Either way, everything inside is a pure
+/// registration (`Defun`/`Defmacro` — the bundle's primary form *is* the
+/// macro), so executing it early keeps the "exec never touches the root
+/// stack here" invariant `try_run_pending` relies on. A user-written
+/// `module` is deliberately *not* matched — executing one early would run
+/// arbitrary body expressions out of order.
+fn needs_immediate_exec(tl: &TopLevel) -> bool {
+    match tl {
+        TopLevel::Defmacro { .. } => true,
+        TopLevel::Module { path, body } if *path == Path::root(MONO_BUNDLE_MODULE) => {
+            body.iter().any(needs_immediate_exec)
+        }
+        _ => false,
     }
 }
 
