@@ -26,7 +26,7 @@ use inkwell::AddressSpace;
 
 use crate::{BoxId, Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
 
-use super::value::{Closure, EvalError, HashKey, RtValue, ScopeFrame};
+use super::value::{Closure, EvalError, RtValue, ScopeFrame};
 
 /// A registered function or method body with its parameter names.
 struct FnDef {
@@ -1247,15 +1247,25 @@ fn is_sexpr_ty(ty: &Type) -> bool {
     matches!(ty, Type::Named(p, _) if is_sexpr_type(p))
 }
 
+/// Whether `ty` is `Option<Sexpr>` — `HashTable<K,V>::get`/`remove`'s checked
+/// return type (`hashtable_def`'s `option_of(tvar("v"))`) is always `Option<V>`,
+/// never `V` directly, so this unwraps one layer before delegating to
+/// [`is_sexpr_ty`]. Lets `hashtable_get`/`hashtable_remove` bypass
+/// [`decode_struct_field`]'s shape heuristic for a `HashTable<K,Sexpr>` the
+/// same way [`vector_get`] already does for `Vector<Sexpr>`.
+fn is_option_of_sexpr_ty(ty: &Type) -> bool {
+    matches!(ty, Type::Named(p, args) if *p == Path::root("option") && args.first().map(is_sexpr_ty).unwrap_or(false))
+}
+
 /// Recursively gather every `Sexpr` value reachable from `v` through nested
-/// `Data` fields or `HashTable` values (a `Closure`'s captured environment is
+/// `Data` fields or `Scope` frames (a `Closure`'s captured environment is
 /// covered separately, since each of its slots is already registered in
-/// [`Interp::slots`]). `HashTable` keys never need walking — [`HashKey`] is
-/// restricted to scalar variants that can't carry a `Sexpr`. A boxed struct
-/// (`RtValue::Sexpr(Value::Boxed(_))`, since the `Sexpr`/`RtValue`
-/// unification's Stage 2) needs no separate arm here — the plain `Sexpr` one
-/// already pushes its `Value::Boxed` root, and `Heap::gc`'s mark phase
-/// traces *into* a `BoxedObj::Struct`'s own fields from there (see
+/// [`Interp::slots`]). A boxed struct (`RtValue::Sexpr(Value::Boxed(_))`,
+/// since the `Sexpr`/`RtValue` unification's Stage 2 — `HashTable<K,V>`
+/// included, since Stage 5) needs no separate arm here — the plain `Sexpr`
+/// one already pushes its `Value::Boxed` root, and `Heap::gc`'s mark phase
+/// traces *into* a `BoxedObj::Struct`'s own fields (or, for a `HashTable`,
+/// its `StructPayload::Map` keys/values) from there (see
 /// `Heap::push_boxed_nested`), the same way it already does for a `Cons`
 /// cell's `car`/`cdr`.
 fn collect_sexpr_roots(v: &RtValue, out: &mut Vec<Value>) {
@@ -1263,11 +1273,6 @@ fn collect_sexpr_roots(v: &RtValue, out: &mut Vec<Value>) {
         RtValue::Sexpr(val) => out.push(*val),
         RtValue::Data { fields, .. } => {
             for f in fields {
-                collect_sexpr_roots(f, out);
-            }
-        }
-        RtValue::HashTable(map) => {
-            for f in map.borrow().values() {
                 collect_sexpr_roots(f, out);
             }
         }
@@ -1503,12 +1508,12 @@ fn eval_random(args: &[RtValue]) -> Result<RtValue, EvalError> {
 fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[RtValue], ret_ty: &Type) -> Option<Result<RtValue, EvalError>> {
     if *type_name == Path::root("hashtable") {
         return match method {
-            "new" => Some(Ok(RtValue::HashTable(Rc::new(RefCell::new(HashMap::new()))))),
-            "get" => Some(hashtable_get(args)),
-            "set" => Some(hashtable_set(args)),
-            "remove" => Some(hashtable_remove(args)),
-            "count" => Some(hashtable_count(args)),
-            "clear" => Some(hashtable_clear(args)),
+            "new" => Some(Ok(RtValue::Sexpr(heap.alloc_hashtable()))),
+            "get" => Some(hashtable_get(heap, args, ret_ty)),
+            "set" => Some(hashtable_set(heap, args)),
+            "remove" => Some(hashtable_remove(heap, args, ret_ty)),
+            "count" => Some(hashtable_count(heap, args)),
+            "clear" => Some(hashtable_clear(heap, args)),
             "keys" => Some(hashtable_keys(heap, args)),
             "values" => Some(hashtable_values(heap, args)),
             "entries" => Some(hashtable_entries(heap, args)),
@@ -2681,13 +2686,6 @@ fn llvm_builder_build_ptr_to_int(args: &[RtValue]) -> Result<RtValue, EvalError>
     Ok(RtValue::LlvmValue(v.into()))
 }
 
-fn expect_hashtable(v: &RtValue) -> Result<&Rc<RefCell<HashMap<HashKey, RtValue>>>, EvalError> {
-    match v {
-        RtValue::HashTable(m) => Ok(m),
-        other => Err(EvalError::Internal(format!("expected a HashTable, got {:?}", other))),
-    }
-}
-
 /// `Some(v)`/`None` as an `RtValue::Data`, matching `option_def`'s variant
 /// order (`some` = 0, `none` = 1).
 fn option_value(v: Option<RtValue>) -> RtValue {
@@ -2697,88 +2695,98 @@ fn option_value(v: Option<RtValue>) -> RtValue {
     }
 }
 
-fn hashtable_get(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let map = expect_hashtable(&args[0])?;
-    let key = HashKey::from_rtvalue(&args[1])?;
-    Ok(option_value(map.borrow().get(&key).cloned()))
-}
-
-fn hashtable_set(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let map = expect_hashtable(&args[0])?;
-    let key = HashKey::from_rtvalue(&args[1])?;
-    map.borrow_mut().insert(key, args[2].clone());
-    Ok(RtValue::Unit)
-}
-
-fn hashtable_remove(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let map = expect_hashtable(&args[0])?;
-    let key = HashKey::from_rtvalue(&args[1])?;
-    Ok(option_value(map.borrow_mut().remove(&key)))
-}
-
-fn hashtable_count(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let map = expect_hashtable(&args[0])?;
-    Ok(RtValue::Int(map.borrow().len() as i64))
-}
-
-fn hashtable_clear(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let map = expect_hashtable(&args[0])?;
-    map.borrow_mut().clear();
-    Ok(RtValue::Unit)
-}
-
-/// Reconstructs the original key `RtValue` a [`HashKey`] was built from
-/// (`HashKey::from_rtvalue`'s inverse) — sound because every `HashKey`
-/// variant maps to exactly one `RtValue` variant/value.
-fn hashkey_to_rtvalue(k: &HashKey) -> RtValue {
-    match k {
-        HashKey::Int(n) => RtValue::Int(*n),
-        HashKey::Bool(b) => RtValue::Bool(*b),
-        HashKey::Char(c) => RtValue::Char(*c),
-        HashKey::Str(s) => RtValue::Str(Rc::from(s.as_str())),
+/// Rejects a `HashTable<K,V>` key argument before it ever reaches
+/// `Heap::hashtable_get`/`_set`/`_remove` — those panic (a hard internal-
+/// invariant trap, the same convention every other `Heap` accessor uses) on
+/// an unhashable `Value` shape, since the type checker can't express a
+/// "hashable" bound (no traits in this language) and so can't rule out e.g.
+/// `HashTable<f64,T>` at check time. Catching it here instead, as an
+/// `EvalError::Panic`, keeps a user mistake (an unsupported `K`) a catchable
+/// evaluation error rather than an uncatchable Rust panic unwinding out of
+/// `Heap` — mirroring the pre-unification `HashKey::from_rtvalue`'s contract.
+fn expect_hashable_key(v: &RtValue) -> Result<(), EvalError> {
+    match v {
+        RtValue::Int(_) | RtValue::Bool(_) | RtValue::Char(_) | RtValue::Str(_) => Ok(()),
+        other => Err(EvalError::Panic(format!("HashTable: unsupported key type {:?}", other))),
     }
+}
+
+fn hashtable_get(heap: &mut Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    expect_hashable_key(&args[1])?;
+    let key = rtvalue_to_struct_field(heap, &args[1])?;
+    let as_sexpr = is_option_of_sexpr_ty(ret_ty);
+    Ok(option_value(
+        heap.hashtable_get(id, key).map(|v| if as_sexpr { RtValue::Sexpr(v) } else { decode_struct_field(heap, v) }),
+    ))
+}
+
+fn hashtable_set(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    expect_hashable_key(&args[1])?;
+    let key = rtvalue_to_struct_field(heap, &args[1])?;
+    let val = rtvalue_to_struct_field(heap, &args[2])?;
+    heap.hashtable_set(id, key, val);
+    Ok(RtValue::Unit)
+}
+
+fn hashtable_remove(heap: &mut Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    expect_hashable_key(&args[1])?;
+    let key = rtvalue_to_struct_field(heap, &args[1])?;
+    let as_sexpr = is_option_of_sexpr_ty(ret_ty);
+    Ok(option_value(
+        heap.hashtable_remove(id, key).map(|v| if as_sexpr { RtValue::Sexpr(v) } else { decode_struct_field(heap, v) }),
+    ))
+}
+
+fn hashtable_count(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    Ok(RtValue::Int(heap.hashtable_count(id) as i64))
+}
+
+fn hashtable_clear(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    heap.hashtable_clear(id);
+    Ok(RtValue::Unit)
 }
 
 /// Builds a `Vector<T>` runtime value (the boxed-struct variable-length
-/// `"vector"` representation, see `vector_def`'s doc comment) out of an
-/// already-collected field list — the shared tail of `hashtable_keys`/
-/// `hashtable_values`/`hashtable_entries`. Each field is encoded through
-/// `rtvalue_to_struct_field`, same as `Expr::Construct`'s own struct path.
-fn vector_of(heap: &mut Heap, fields: Vec<RtValue>) -> Result<RtValue, EvalError> {
-    let mem_fields = fields
-        .iter()
-        .map(|f| rtvalue_to_struct_field(heap, f))
-        .collect::<Result<Vec<Value>, EvalError>>()?;
-    Ok(RtValue::Sexpr(heap.alloc_struct("vector".to_string(), mem_fields)))
+/// `"vector"` representation, see `vector_def`'s doc comment) directly out of
+/// already-encoded `mem::Value` fields — the shared tail of `hashtable_keys`/
+/// `hashtable_values`/`hashtable_entries`, whose fields come straight from
+/// `Heap::hashtable_pairs` and so need no `RtValue` round-trip.
+fn vector_of_raw(heap: &mut Heap, fields: Vec<Value>) -> RtValue {
+    RtValue::Sexpr(heap.alloc_struct("vector".to_string(), fields))
 }
 
 fn hashtable_keys(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let map = expect_hashtable(&args[0])?;
-    let fields = map.borrow().keys().map(hashkey_to_rtvalue).collect();
-    vector_of(heap, fields)
+    let id = expect_struct_box(&args[0])?;
+    let fields = heap.hashtable_pairs(id).into_iter().map(|(k, _)| k).collect();
+    Ok(vector_of_raw(heap, fields))
 }
 
 fn hashtable_values(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let map = expect_hashtable(&args[0])?;
-    let fields = map.borrow().values().cloned().collect();
-    vector_of(heap, fields)
+    let id = expect_struct_box(&args[0])?;
+    let fields = heap.hashtable_pairs(id).into_iter().map(|(_, v)| v).collect();
+    Ok(vector_of_raw(heap, fields))
 }
 
 /// Each entry becomes a `cons-cell<K,V>` (`prelude.rs`'s generic `car`/`cdr`
-/// `defstruct`, now the boxed-struct `"cons-cell"` representation, matching
-/// how `Checker::check_construct` would build one from typelisp source;
-/// built directly here since a defstruct instance is just tagged field
-/// data, not something only the checker/prelude can construct).
+/// `defstruct`, the boxed-struct `"cons-cell"` representation, matching how
+/// `Checker::check_construct` would build one from typelisp source; built
+/// directly here since a defstruct instance is just tagged field data, not
+/// something only the checker/prelude can construct) wrapping the pair's
+/// already-encoded key/value `mem::Value`s straight from
+/// `Heap::hashtable_pairs`.
 fn hashtable_entries(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let map = expect_hashtable(&args[0])?;
-    let entries: Vec<(HashKey, RtValue)> = map.borrow().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    let mut fields = Vec::with_capacity(entries.len());
-    for (k, v) in entries {
-        let kf = rtvalue_to_struct_field(heap, &hashkey_to_rtvalue(&k))?;
-        let vf = rtvalue_to_struct_field(heap, &v)?;
-        fields.push(RtValue::Sexpr(heap.alloc_struct("cons-cell".to_string(), vec![kf, vf])));
-    }
-    vector_of(heap, fields)
+    let id = expect_struct_box(&args[0])?;
+    let fields = heap
+        .hashtable_pairs(id)
+        .into_iter()
+        .map(|(k, v)| heap.alloc_struct("cons-cell".to_string(), vec![k, v]))
+        .collect();
+    Ok(vector_of_raw(heap, fields))
 }
 
 /// The type tag a runtime value carries — what `Expr::TraitCall`'s eval arm
@@ -2786,14 +2794,20 @@ fn hashtable_entries(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalE
 /// checker erased that information down to "some type bound to the trait"
 /// (see `Checker::check_instance_method`'s type-variable branch and
 /// `Expr::TraitCall`'s doc comment). Only the variants an `impl` target can
-/// plausibly be are covered — a closure/`HashTable`/LLVM-builder receiver
-/// can't have gone through `Checker::check_impl` today, so `None` for those
-/// is unreachable in practice, not a missing case.
+/// plausibly be are covered — a closure/LLVM-builder receiver can't have
+/// gone through `Checker::check_impl` today, so `None` for those is
+/// unreachable in practice, not a missing case. A boxed `HashTable<K,V>` gets
+/// its own arm (rather than falling into the catch-all `Sexpr` one below,
+/// which would misreport it as the `sexpr` type) even though no `impl`
+/// targets `HashTable<K,V>` directly today — only `hashtable-iter<K,V>`
+/// (`prelude.rs`'s `Iter` impl) does — so this is precise rather than
+/// currently load-bearing.
 fn rtvalue_type_path(heap: &Heap, v: &RtValue) -> Option<Path> {
     match v {
         RtValue::Sexpr(Value::Boxed(id)) if heap.is_struct(*id) => {
             Some(Path::root(heap.struct_type_name(*id)))
         }
+        RtValue::Sexpr(Value::Boxed(id)) if heap.is_hashtable(*id) => Some(Path::root("hashtable")),
         RtValue::Data { type_name, .. } => Some(type_name.clone()),
         RtValue::Bool(_) => Some(Path::root("bool")),
         RtValue::Char(_) => Some(Path::root("char")),
@@ -2821,13 +2835,16 @@ fn expect_struct_box(v: &RtValue) -> Result<BoxId, EvalError> {
 /// `BoxedObj::Struct` field stores — the encode half of the struct-field
 /// boundary crossing (`decode_struct_field` is the other direction).
 /// Unambiguous regardless of the field's static type: every supported
-/// `RtValue` variant maps to exactly one `Value` shape. The variants a
-/// `defstruct`/`Vector<T>` field can't yet hold — `Data` (`Option`/`Result`/
-/// a user sum type), `Closure`, `HashTable`, `Scope` — aren't representable
-/// in `crate::mem::Value` at all (that crate can't depend on `RtValue`), so
-/// they're a clear internal error here rather than a silent corruption; a
-/// later stage of the unification plan (`Closure`'s Stage 6, `HashTable`'s
-/// Stage 4-5) is what would close this gap, not Stage 2's struct wiring.
+/// `RtValue` variant maps to exactly one `Value` shape. `RtValue::Sexpr`
+/// covers `HashTable<K,V>` too, since the `Sexpr`/`RtValue` unification's
+/// Stage 5 — a boxed `HashTable` is a `mem::Value::Boxed` like any other
+/// boxed struct. The variants a `defstruct`/`Vector<T>`/`HashTable<K,V>`
+/// field still can't hold — `Data` (`Option`/`Result`/a user sum type),
+/// `Closure`, `Scope` — aren't representable in `crate::mem::Value` at all
+/// (that crate can't depend on `RtValue`), so they're a clear internal error
+/// here rather than a silent corruption; a later stage of the unification
+/// plan (`Closure`'s Stage 6) is what would close this remaining gap, not
+/// Stage 2's struct wiring.
 fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Value, EvalError> {
     match v {
         RtValue::Int(n) => Ok(Value::Int(*n)),
@@ -2845,11 +2862,13 @@ fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Value, EvalEr
 
 /// Converts a `mem::Value` read out of a `BoxedObj::Struct` field back into
 /// an `RtValue` — `rtvalue_to_struct_field`'s inverse. Driven by the
-/// value's own runtime shape: `Int`/`Bool`/`Char`/`Str` map straight back,
-/// a non-struct `Boxed` is a boxed float (`RtValue::Float`), and anything
-/// else (`Empty`/`Cons`/`Symbol`/`Path`, or a `Boxed` struct — a nested
-/// `defstruct`/`Vector<T>`/`cons-cell<K,V>`) becomes `RtValue::Sexpr`, the
-/// same wrapper a top-level struct value itself uses.
+/// value's own runtime shape: `Int`/`Bool`/`Char`/`Str` map straight back, a
+/// `Boxed` that is neither a `Fields`-payload struct nor a `Map`-payload
+/// `HashTable` (`Heap::is_struct`/`is_hashtable`) is a boxed float
+/// (`RtValue::Float`), and anything else (`Empty`/`Cons`/`Symbol`/`Path`, a
+/// `Boxed` struct — a nested `defstruct`/`Vector<T>`/`cons-cell<K,V>` — or a
+/// `Boxed` `HashTable<K,V>`) becomes `RtValue::Sexpr`, the same wrapper a
+/// top-level struct value itself uses.
 ///
 /// A shape-driven decode is *wrong* for a `Sexpr`-declared field holding a
 /// scalar datum (a stored quoted `42` is a `Value::Int` here — decoding it
@@ -2872,7 +2891,7 @@ fn decode_struct_field(heap: &Heap, v: Value) -> RtValue {
         Value::Bool(b) => RtValue::Bool(b),
         Value::Char(c) => RtValue::Char(c),
         Value::Str(id) => RtValue::Str(heap.string(id).into()),
-        Value::Boxed(id) if !heap.is_struct(id) => RtValue::Float(heap.float_value(id)),
+        Value::Boxed(id) if !heap.is_struct(id) && !heap.is_hashtable(id) => RtValue::Float(heap.float_value(id)),
         other => RtValue::Sexpr(other),
     }
 }

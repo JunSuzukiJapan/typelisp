@@ -261,7 +261,7 @@
 //! Doesn't depend on `prelude.rs` (no `cond`/`when`/...) — only the
 //! checker's native special forms (`if`/`let`/`match`/`labels`/`loop`/
 //! `break`/`return`/`setf`) and builtins (`eq`/`append`/`car`/`cdr`/
-//! `HashTable`'s methods, `Option`'s `some`/`none`/pattern-matching), so
+//! `Scope`'s methods, `Option`'s `some`/`none`/pattern-matching), so
 //! loading order relative to the prelude doesn't matter.
 
 use crate::{Checker, Heap, Interp, Reader};
@@ -626,14 +626,18 @@ pub const SOURCE: &str = r#"
 ;; already-declared `llvm-function` `compile-apply` calls.
 (defun new-fn-env () Scope<llvm-function> (Scope::new))
 
-;; A plain (non-`Scope`) `HashTable`, for `compile-let`'s own `acc` —
-;; `compile-let-values`'s scratch accumulator of each binding's freshly
-;; computed value, keyed by name. This is never pushed/popped as a frame of
-;; its own (it's discarded the moment `bind-let-values` has read every value
-;; back out of it into `env`'s real new frame), so it has no need for
-;; `Scope`'s stack — see `new-env`'s comment for why this still needs its
-;; own tiny wrapper rather than an inline `(HashTable::new)`.
-(defun new-acc-table () HashTable<string,llvm-value> (HashTable::new))
+;; `compile-let`'s own `acc` — `compile-let-values`'s scratch accumulator of
+;; each binding's freshly computed value, keyed by name. This is never
+;; pushed/popped as a frame of its own (it's discarded the moment
+;; `bind-let-values` has read every value back out of it into `env`'s real
+;; new frame); a single-frame `Scope` (rather than a plain `HashTable`, which
+;; Stage 5 of the Sexpr/RtValue unification moved onto the GC-managed cons
+;; heap's boxed-struct representation — `crate::mem::Value` can't hold an
+;; opaque `llvm-value` handle, unlike this `RtValue`-native `Scope`) is what
+;; gives `acc` a place to live that can — see `new-env`'s comment for why
+;; this still needs its own tiny wrapper rather than an inline
+;; `(Scope::new)`.
+(defun new-acc-table () Scope<llvm-value> (Scope::new))
 
 ;; Counts a plain `Sexpr` list's elements — used to size the `i64*` args
 ;; array a direct call needs (`compile-apply`'s `alloca-args`/`build-call`),
@@ -690,7 +694,7 @@ pub const SOURCE: &str = r#"
 ;; (`bind-params`'s doc comment), the GC-root stack index this `rt_push_sexpr_root`
 ;; call is about to occupy (`rt_root_count`, called first) — `compile-set`
 ;; reads it back to update that exact root in place on a later `setf`.
-(defun bind-let-values ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (bindings Sexpr) (acc HashTable<string,llvm-value>)) ()
+(defun bind-let-values ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (bindings Sexpr) (acc Scope<llvm-value>)) ()
   (match bindings
     ((Cons pair rest)
      (let ((name-pair (car pair)))
@@ -1610,7 +1614,7 @@ pub const SOURCE: &str = r#"
                        ;; into that later computation. Lives in this `labels`
                        ;; ring (unlike `bind-let-values`/`restore-let-values`)
                        ;; purely because it calls `compile-value`.
-                       (compile-let-values ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (bindings Sexpr) (acc HashTable<string,llvm-value>)) ()
+                       (compile-let-values ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (bindings Sexpr) (acc Scope<llvm-value>)) ()
                          (match bindings
                            ((Cons pair rest)
                             (let ((nm (sexpr-sym-name (car (car pair)))))

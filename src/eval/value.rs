@@ -15,35 +15,6 @@ use crate::{Path, Typed, Value};
 /// One `Scope<V>` frame — see [`RtValue::Scope`]'s doc comment.
 pub type ScopeFrame = Rc<RefCell<HashMap<String, RtValue>>>;
 
-/// A `HashTable<K,V>` key. Restricted to the scalar `RtValue` variants with a
-/// natural, total `Eq`/`Hash` (notably excluding `Float` — `f64` has no `Eq`
-/// because of `NaN` — and any reference-counted variant, where a structural
-/// notion of equality wouldn't be meaningful). See [`HashKey::from_rtvalue`].
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum HashKey {
-    Int(i64),
-    Bool(bool),
-    Char(char),
-    Str(String),
-}
-
-impl HashKey {
-    /// Converts a key argument at the `HashTable` method boundary. The type
-    /// checker can't express a "hashable" bound (no traits in this language),
-    /// so an unsupported key type — `Float`/`Closure`/`HashTable` itself, or a
-    /// user `Data` instance — is a runtime panic, the same fallback used for
-    /// e.g. `car`/`cdr` on a non-`Cons` `Sexpr`.
-    pub fn from_rtvalue(v: &RtValue) -> Result<HashKey, EvalError> {
-        match v {
-            RtValue::Int(n) => Ok(HashKey::Int(*n)),
-            RtValue::Bool(b) => Ok(HashKey::Bool(*b)),
-            RtValue::Char(c) => Ok(HashKey::Char(*c)),
-            RtValue::Str(s) => Ok(HashKey::Str(s.to_string())),
-            other => Err(EvalError::Panic(format!("HashTable: unsupported key type {:?}", other))),
-        }
-    }
-}
-
 /// A closure: a lambda body with its parameter names and the lexical environment
 /// captured at creation (shared slots, so captured mutable variables persist).
 #[derive(Clone, Debug, PartialEq)]
@@ -109,24 +80,12 @@ pub enum RtValue {
     /// A built-in *instance method* used as a function value (e.g. `+` on
     /// `i32` — see [`Expr::MethodRef`](crate::Expr::MethodRef)).
     BuiltinMethod(Path, String),
-    /// A `HashTable<K,V>`. Lives in ordinary Rust-managed memory
-    /// (`Rc<RefCell<..>>`, reclaimed by reference counting), not the
-    /// GC-managed cons heap — the same pattern [`RtValue::Data`] and
-    /// [`Closure::env`]'s captured slots already use; see
-    /// `crate::eval::interp::collect_sexpr_roots` for how a `Sexpr` value
-    /// nested inside one stays rooted. A `HashTable` holding itself (directly
-    /// or through a cycle of values) leaks rather than being collected —
-    /// the same accepted trade-off `Closure`'s captured-slot cycles already
-    /// have; mark-sweep cycle collection is deliberately only for the cons
-    /// heap (`Sexpr`/`cons`/strings).
-    HashTable(Rc<RefCell<HashMap<HashKey, RtValue>>>),
     /// A `Scope<V>`: a stack of frames (each an ordinary `String`-keyed map),
     /// used by the (typelisp-hosted) compiler body (`src/compiler.rs`) to
     /// track lexically-nested name resolution (`env`/`fn-env`) the way a
     /// real interpreter's environment chain would — see that module's doc
     /// comment for the "list of scopes" model this implements. A frame is
-    /// `Rc<RefCell<HashMap<..>>>` (the same representation `HashTable`
-    /// already uses) specifically so a "clone the frame list" operation
+    /// `Rc<RefCell<HashMap<..>>>` specifically so a "clone the frame list" operation
     /// is just a `Vec` of cloned `Rc`s — cheap (pointer copies, no per-entry
     /// work) and exactly what lets a `labels` def's own new scope start from
     /// every enclosing scope's frames without copying their contents.
@@ -166,7 +125,6 @@ impl PartialEq for RtValue {
             (RtValue::BuiltinMethod(p1, m1), RtValue::BuiltinMethod(p2, m2)) => {
                 p1 == p2 && m1 == m2
             }
-            (RtValue::HashTable(a), RtValue::HashTable(b)) => *a.borrow() == *b.borrow(),
             (RtValue::Scope(a), RtValue::Scope(b)) => *a.borrow() == *b.borrow(),
             // Compiler-internal LLVM handles have no meaningful structural
             // equality, and inkwell's types don't implement `PartialEq`

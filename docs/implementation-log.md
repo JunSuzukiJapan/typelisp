@@ -2418,7 +2418,7 @@ panicと同じ前例で実行時panic（型システムでは「有効なスカ�
 panicの両方）、`symbol->string`/`string->symbol`（往復、非symbolでのpanic）を追加。全体テスト
 （`./scripts/with-llvm-env.sh cargo test`、workspace全体）green。
 
-## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-4完了・Stage 5-8未着手）
+## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-5完了・Stage 6-8未着手）
 
 `HashTable<K,V>::entries`のペア型を巡る議論の中で、ユーザーから「`Sexpr`と`RtValue`という
 2つの並行した実行時値表現に分かれていること自体がおかしい」という指摘を受けた。実際の
@@ -2637,9 +2637,71 @@ FFIハンドルだけを`RtValue`に残す。さらに調査で判明した事�
   mapの値/文字列キー双方をmark phaseが辿ること（辿らない場合に無関係な文字列アロケーションの
   churnで破損する、という直接的な回帰テスト）。全体テスト（`scripts/with-llvm-env.sh cargo test`、
   31クレート＋LLVM経由のcompile系）+ Miri（`mem_test`）green。
-- **Stage 5（未着手）**: HashTable: インタプリタ結線——`RtValue::HashTable`削除、
-  `Vector<T>`と同じ「type_name駆動の`eval_builtin_method`分岐」パターンで
-  `get/set/remove/count/clear/keys/values/entries`を再実装。
+- **Stage 5（完了、2026-07-03）**: HashTable: インタプリタ結線。`src/eval/value.rs`から
+  `RtValue::HashTable`と`HashKey`を削除し、`eval_builtin_method`の`"hashtable"`アームを
+  `Vector<T>`と同じ「type_name駆動の分岐」パターンで再実装——`new`は
+  `RtValue::Sexpr(heap.alloc_hashtable())`、`get`/`set`/`remove`/`count`/`clear`は
+  `expect_struct_box`でレシーバの`BoxId`を取り出し`Heap::hashtable_get`/`_set`/`_remove`/
+  `_count`/`_clear`を呼ぶだけになった。
+  `HashTable`のキー引数はStage 4で`Heap::lookup_hash_key`/`intern_hash_key`が非対応形状
+  （例えば`HashTable<f64,_>`のような、traitがないこの言語では型検査で弾けない
+  「hashable」違反）に対して素の`panic!`を投げる設計になっていた——このまま呼び出すと
+  ユーザーの型選択ミス一つで`EvalError`を経由せずRustパニックが素通しになり、統合前の
+  `HashKey::from_rtvalue`が持っていた「`EvalError::Panic`として捕捉可能」という契約を
+  壊してしまう。`expect_hashable_key`を新設し、`Heap`に渡す前にインタプリタ側で
+  同じ判定を先取りして`EvalError::Panic`に変換することでこの契約を維持した。
+  `keys`/`values`/`entries`用に、Stage 4では用意していなかった走査API
+  `Heap::hashtable_pairs(id) -> Vec<(Value, Value)>`を新設（`MemHashKey`→`Value`の
+  逆変換を内包、`HashKey::from_rtvalue`の逆——旧`hashkey_to_rtvalue`のmem層移植版）。
+  返ってくる`(Value, Value)`は`Vector<T>`/`cons-cell<K,V>`の生フィールドとしてそのまま
+  使えるため、旧実装が行っていた「`RtValue`にデコード→`rtvalue_to_struct_field`で
+  再エンコード」という往復が丸ごと不要になった（`vector_of`を`vector_of_raw`に置き換え、
+  `Vec<Value>`を直接受けて`heap.alloc_struct`するだけに簡素化）。
+  `decode_struct_field`の「非struct `Boxed`は常にfloat」という2値判定
+  （Stage 2で導入、当時は`HashTable`がまだヒープ外にあったため無害だった）は、
+  ヒープ常駐の`HashTable`が増えたことで誤判定になる——`Heap::is_hashtable`もチェックする
+  3値判定に修正（放置していた場合`(print (HashTable::new))`や`Vector<HashTable<K,V>>`の
+  要素読み出しが`heap.float_value`のpanicになっていたはずの潜在バグ）。同じ理由で
+  `main.rs`の`format_sexpr`にも`is_hashtable`分岐を追加（REPLでの`HashTable`表示、
+  旧`format_value`の`RtValue::HashTable`専用アームの後継）。`get`/`remove`はさらに
+  `vector_get`と同じ理由で呼び出し元の検査済み戻り型（`Option<V>`、`hashtable_def`の
+  シグネチャ通り）を受け取り、1段`Option`を剥がした上で`V`が`Sexpr`かどうかを
+  `decode_struct_field`の形状ヒューリスティックより優先する`is_option_of_sexpr_ty`を新設
+  （`HashTable<K,Sexpr>`が量子化リテラルをキー/値に持つケースの誤デコードを避ける、
+  `Vector<Sexpr>::get`がとっくに対応していたのと同じ理由）。`rtvalue_type_path`
+  （`Expr::TraitCall`のレシーバ型解決）にも`is_hashtable`専用アームを追加——それまでは
+  ヒープ常駐化した`HashTable`ボックスがcatch-allの`RtValue::Sexpr(_) => "sexpr"`に
+  落ちてしまい、実際には型`"hashtable"`であるべきところを`"sexpr"`と誤解決する経路に
+  なっていた（今のところ`HashTable<K,V>`自身に`impl`するtraitはない——`Iter`は
+  `hashtable-iter<K,V>`側に実装——ため到達しないが、`Sexpr`/`RtValue`統合が
+  一貫して守ってきた「型は常に分かるはずなので誤魔化さない」という方針
+  （[[feedback-static-types-are-always-known]]）に合わせて先に直した）。
+  `collect_sexpr_roots`の`RtValue::HashTable`専用アームは削除——`HashTable`が
+  `RtValue::Sexpr`に統一されたことで、他の`Sexpr`ボックス同様プレーンな
+  `RtValue::Sexpr(val) => out.push(*val)`だけでルート化され、`Heap::push_boxed_nested`
+  （`StructPayload::Map`のkey/valueトレース、Stage 4で実装済み）がマーク段階での
+  再帰を担うため個別対応が不要になった。
+  **実装中に発覚した想定外の依存**: `src/compiler.rs`（typelisp自身で書かれた
+  自己ホスティングコンパイラ本体）が`compile-let`/`compile-let-values`の
+  スクラッチアキュムレータ`acc`として`HashTable<string,llvm-value>`を使っており、
+  `RtValue::LlvmValue`（inkwellのコンパイラ内部限定ハンドル）を値として格納していた。
+  この値は`crate::mem::Value`で表現不可能（`typelisp-mem`クレートはinkwellは疎か
+  `RtValue`にも依存できない）なため、`rtvalue_to_struct_field`が
+  `EvalError::Internal`を返し、`tests/compile_file_test.rs`の`let`を含む3テスト
+  （`compiles_and_runs_a_loop_based_sum_through_a_helper`等）が壊れて発覚した。
+  `Scope<V>`（Stage 7-8まで未着手、今も`RtValue::Scope`のRust-native表現のまま）なら
+  `RtValue`を無変換で保持できるため、`acc`の型を`HashTable<string,llvm-value>`から
+  単一フレームの`Scope<llvm-value>`に切り替えて解決（`new-acc-table`の本体を
+  `(HashTable::new)`→`(Scope::new)`に、`bind-let-values`/`compile-let-values`の`acc`引数
+  型注釈を追随。`acc`は`get`/`set`しか使わず、push/pop-frameによるネストも一切ないため、
+  「常に最新フレームに書く」`Scope::set`と「最新フレームから検索する」`Scope::get`は
+  単一フレームの`HashTable`と完全に等価——意味論上のリグレッションなし）。
+  テスト: 既存の`tests/hashtable_test.rs`（16件、GC圧テスト`sexpr_values_survive_gc_pressure`
+  含む）・`tests/mem_test.rs`（58件）・`tests/dispatch_test.rs`・`tests/doiter_test.rs`が
+  無改修のままgreen——Stage 4までに用意されていたテストが実装の正しさをそのまま検証できた
+  （新規テスト追加は不要と判断）。全体テスト（`scripts/with-llvm-env.sh cargo test`、
+  31クレート＋LLVM経由のcompile_file_test含む）green。Miriは実行不要
+  （[[feedback-miri-timing]]、コミット前は通常の`cargo test`で十分という既存合意）。
 - **Stage 6a（未着手）**: `BoxedObj::Cell`導入 + `Interp::slot`/`Env`/`sync_roots`を
   `Rc<RefCell<RtValue>>`から`Value::Boxed(Cell)`に置き換え（let/引数/matchバインディング/
   globals全部に影響）。

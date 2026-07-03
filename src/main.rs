@@ -201,7 +201,6 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
         RtValue::Closure(_) => "#<closure>".to_string(),
         RtValue::Builtin(name) => format!("#<builtin {}>", name),
         RtValue::BuiltinMethod(type_name, method) => format!("#<builtin {}::{}>", type_name, method),
-        RtValue::HashTable(map) => format!("#<hashtable count={}>", map.borrow().len()),
         RtValue::Scope(frames) => format!("#<scope depth={}>", frames.borrow().len()),
         // Compiler-internal handles; not meant to be printed by user code,
         // so a terse opaque tag is enough.
@@ -219,16 +218,18 @@ fn format_sexpr(heap: &Heap, v: Value) -> String {
     match v {
         Value::Empty => "()".to_string(),
         Value::Int(i) => i.to_string(),
-        // `Sexpr::Float` and a `defstruct`/`Vector<T>`/`cons-cell<K,V>`
-        // instance are both heap-boxed (`Value::Boxed`, see `BoxedObj`) —
-        // `heap.is_struct` tells them apart. A boxed struct prints
-        // positionally (no field names at runtime, same as `RtValue::Data`'s
-        // field list), recursing through this same function for each field.
+        // `Sexpr::Float`, a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance,
+        // and a `HashTable<K,V>` are all heap-boxed (`Value::Boxed`, see
+        // `BoxedObj`) — `heap.is_struct`/`is_hashtable` tell them apart. A
+        // boxed struct prints positionally (no field names at runtime, same
+        // as `RtValue::Data`'s field list), recursing through this same
+        // function for each field.
         Value::Boxed(id) if heap.is_struct(id) => {
             let parts: Vec<String> =
                 (0..heap.struct_field_count(id)).map(|i| format_sexpr(heap, heap.struct_field(id, i))).collect();
             format!("#<{} {}>", heap.struct_type_name(id), parts.join(" "))
         }
+        Value::Boxed(id) if heap.is_hashtable(id) => format!("#<hashtable count={}>", heap.hashtable_count(id)),
         Value::Boxed(id) => format_float(heap.float_value(id)),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),

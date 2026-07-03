@@ -546,6 +546,35 @@ impl Heap {
         }
     }
 
+    /// Every `(key, value)` pair currently stored, as plain [`Value`]s — the
+    /// primitive `HashTable<K,V>::keys`/`values`/`entries` snapshot off of
+    /// (see those builtins in `crate::eval::interp`'s `"hashtable"` arm).
+    /// [`MemHashKey`] has no direct `Value` counterpart (that's the whole
+    /// point of interning it in the first place — see that type's doc
+    /// comment), so this reconstructs one from each key, the mem-layer
+    /// mirror of the pre-unification `HashKey::from_rtvalue`'s inverse.
+    /// Order is whatever the underlying `HashMap` iterates in (unspecified,
+    /// like `HashTable<K,V>`'s method surface always has been). Panics if
+    /// `id` doesn't hold a `BoxedObj::Struct` with a `StructPayload::Map`
+    /// payload.
+    pub fn hashtable_pairs(&self, id: BoxId) -> Vec<(Value, Value)> {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => {
+                map.iter().map(|(k, v)| (Self::hash_key_to_value(*k), *v)).collect()
+            }
+            _ => panic!("BoxId does not hold a HashTable"),
+        }
+    }
+
+    fn hash_key_to_value(k: MemHashKey) -> Value {
+        match k {
+            MemHashKey::Int(n) => Value::Int(n),
+            MemHashKey::Bool(b) => Value::Bool(b),
+            MemHashKey::Char(c) => Value::Char(c),
+            MemHashKey::Str(id) => Value::Str(id),
+        }
+    }
+
     // ---- allocation -------------------------------------------------------
 
     /// Allocate a cons cell `(car . cdr)`. Runs a GC if the free list is empty;
