@@ -14,7 +14,7 @@
 //!   cargo +nightly miri test --test mem_test
 
 extern crate typelisp;
-use typelisp::{Error, Heap, Value};
+use typelisp::{BoxId, Error, Heap, Value};
 
 // ---- helpers ------------------------------------------------------------
 
@@ -567,6 +567,219 @@ fn is_struct_distinguishes_struct_from_float() {
     };
     assert!(h.is_struct(sid));
     assert!(!h.is_struct(fid));
+}
+
+// ---- boxed hash tables (Sexpr/RtValue unification, Stage 4) -------------
+//
+// `alloc_hashtable`/`hashtable_get`/`hashtable_set`/`hashtable_remove`/
+// `hashtable_count`/`hashtable_clear` are the mem-layer representation
+// `HashTable<K,V>` is meant to share once the interpreter is wired up to it
+// (Stage 5) — see `docs/TODO.md`'s Sexpr/RtValue unification plan. These
+// tests exercise the representation itself, independent of that wiring.
+
+fn as_boxed(v: Value) -> BoxId {
+    match v {
+        Value::Boxed(id) => id,
+        other => panic!("expected a boxed value, got {:?}", other),
+    }
+}
+
+#[test]
+fn hashtable_starts_empty() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_hashtable());
+    assert_eq!(h.hashtable_count(id), 0);
+    assert_eq!(h.hashtable_get(id, Value::Int(1)), None);
+}
+
+#[test]
+fn hashtable_stores_and_reads_back_values() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_hashtable());
+    assert_eq!(h.hashtable_set(id, Value::Int(1), Value::Char('a')), None);
+    assert_eq!(h.hashtable_set(id, Value::Bool(true), Value::Char('b')), None);
+    assert_eq!(h.hashtable_get(id, Value::Int(1)), Some(Value::Char('a')));
+    assert_eq!(h.hashtable_get(id, Value::Bool(true)), Some(Value::Char('b')));
+    assert_eq!(h.hashtable_count(id), 2);
+}
+
+#[test]
+fn hashtable_set_on_existing_key_returns_previous_value() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_hashtable());
+    assert_eq!(h.hashtable_set(id, Value::Int(1), Value::Int(10)), None);
+    assert_eq!(h.hashtable_set(id, Value::Int(1), Value::Int(20)), Some(Value::Int(10)));
+    assert_eq!(h.hashtable_get(id, Value::Int(1)), Some(Value::Int(20)));
+    assert_eq!(h.hashtable_count(id), 1, "overwrite must not grow the entry count");
+}
+
+#[test]
+fn hashtable_remove_deletes_the_entry() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_hashtable());
+    h.hashtable_set(id, Value::Int(1), Value::Int(10));
+    assert_eq!(h.hashtable_remove(id, Value::Int(1)), Some(Value::Int(10)));
+    assert_eq!(h.hashtable_get(id, Value::Int(1)), None);
+    assert_eq!(h.hashtable_count(id), 0);
+}
+
+#[test]
+fn hashtable_remove_of_missing_key_is_none() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_hashtable());
+    assert_eq!(h.hashtable_remove(id, Value::Int(1)), None);
+}
+
+#[test]
+fn hashtable_clear_empties_the_map() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_hashtable());
+    h.hashtable_set(id, Value::Int(1), Value::Int(10));
+    h.hashtable_set(id, Value::Int(2), Value::Int(20));
+    h.hashtable_clear(id);
+    assert_eq!(h.hashtable_count(id), 0);
+    assert_eq!(h.hashtable_get(id, Value::Int(1)), None);
+}
+
+/// Two distinct `alloc_string` calls with identical content are two
+/// distinct, non-`eq` `Value::Str`s — but as `HashTable` keys they must
+/// still compare equal ("equal, not eq" — see `MemHashKey`'s doc comment).
+#[test]
+fn string_keys_hash_by_content_not_by_allocation_identity() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_hashtable());
+    let key_in = h.alloc_string("x".to_string());
+    h.hashtable_set(id, key_in, Value::Int(42));
+    let key_out = h.alloc_string("x".to_string()); // separate allocation, same content
+    assert_ne!(key_in, key_out, "sanity: alloc_string does not itself dedupe");
+    assert_eq!(h.hashtable_get(id, key_out), Some(Value::Int(42)));
+}
+
+#[test]
+fn string_keys_with_different_content_do_not_collide() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_hashtable());
+    let x = h.alloc_string("x".to_string());
+    let y = h.alloc_string("y".to_string());
+    h.hashtable_set(id, x, Value::Int(1));
+    h.hashtable_set(id, y, Value::Int(2));
+    assert_eq!(h.hashtable_get(id, x), Some(Value::Int(1)));
+    assert_eq!(h.hashtable_get(id, y), Some(Value::Int(2)));
+}
+
+/// `MemHashKey`'s variants must not collide across key *types* that happen
+/// to encode to the same underlying integer bit pattern.
+#[test]
+fn keys_of_different_types_do_not_collide() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_hashtable());
+    h.hashtable_set(id, Value::Int(0), Value::Char('i'));
+    h.hashtable_set(id, Value::Bool(false), Value::Char('b'));
+    assert_eq!(h.hashtable_get(id, Value::Int(0)), Some(Value::Char('i')));
+    assert_eq!(h.hashtable_get(id, Value::Bool(false)), Some(Value::Char('b')));
+    assert_eq!(h.hashtable_count(id), 2);
+}
+
+#[test]
+#[should_panic(expected = "does not hold a HashTable")]
+fn hashtable_accessor_on_a_boxed_float_panics() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_float(1.5));
+    h.hashtable_count(id);
+}
+
+#[test]
+#[should_panic(expected = "does not hold a HashTable")]
+fn hashtable_accessor_on_a_boxed_struct_panics() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_struct("point".to_string(), vec![Value::Int(1)]));
+    h.hashtable_count(id);
+}
+
+#[test]
+#[should_panic(expected = "unsupported key type")]
+fn unsupported_key_type_panics() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_hashtable());
+    let bad_key = h.cons(Value::Int(1), Value::Empty).unwrap();
+    h.hashtable_set(id, bad_key, Value::Int(1));
+}
+
+#[test]
+fn is_hashtable_distinguishes_hashtable_from_struct_and_float() {
+    let mut h = Heap::with_capacity(8);
+    let map = as_boxed(h.alloc_hashtable());
+    let s = as_boxed(h.alloc_struct("point".to_string(), vec![Value::Int(1)]));
+    let f = as_boxed(h.alloc_float(1.5));
+    assert!(h.is_hashtable(map));
+    assert!(!h.is_hashtable(s));
+    assert!(!h.is_hashtable(f));
+    assert!(h.is_struct(s));
+    assert!(!h.is_struct(map));
+}
+
+#[test]
+fn unreachable_hashtables_are_collected() {
+    let mut h = Heap::with_capacity(8);
+    let _ = h.alloc_hashtable();
+    assert_eq!(h.box_count(), 1);
+    h.gc(); // not rooted, not in any cell -> reclaimed
+    assert_eq!(h.box_count(), 0);
+}
+
+#[test]
+fn hashtable_reachable_via_rooted_cons_survives() {
+    let mut h = Heap::with_capacity(8);
+    let map = h.alloc_hashtable();
+    let id = as_boxed(map);
+    h.hashtable_set(id, Value::Int(1), Value::Int(99));
+    let cell = h.cons(map, Value::Empty).unwrap();
+    h.push_root(cell);
+    let _ = h.alloc_hashtable(); // unrooted garbage
+    h.gc();
+    assert_eq!(h.box_count(), 1); // only the rooted map survives
+    assert_eq!(h.hashtable_get(id, Value::Int(1)), Some(Value::Int(99)));
+}
+
+/// A hash-table value that itself holds an unrelated cons must survive a GC
+/// through that value alone — the direct test that `gc`'s mark phase traces
+/// *into* `BoxedObj::Struct`'s `Map` payload values, not just marks the
+/// map's own box slot and stops.
+#[test]
+fn gc_traces_into_a_rooted_hashtables_values() {
+    let mut h = Heap::with_capacity(64);
+    let inner = list_of(&mut h, &[10, 20, 30]);
+    let map = h.alloc_hashtable();
+    let id = as_boxed(map);
+    h.hashtable_set(id, Value::Int(1), inner);
+    h.push_root(map);
+    for i in 0..20 {
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap(); // unrelated garbage
+    }
+    h.gc();
+    assert_eq!(to_vec(&h, h.hashtable_get(id, Value::Int(1)).unwrap()), vec![10, 20, 30]);
+    assert_accounting(&h);
+}
+
+/// A string used as a hash-table key must survive a GC through the map
+/// alone (the key, not just the value, must be traced) — otherwise a
+/// second, unrelated GC pass could recycle its `StrId` slot for something
+/// else while the map still holds it.
+#[test]
+fn gc_keeps_a_rooted_hashtables_string_keys_alive() {
+    let mut h = Heap::with_capacity(64);
+    let map = h.alloc_hashtable();
+    let id = as_boxed(map);
+    let key = h.alloc_string("k".to_string());
+    h.hashtable_set(id, key, Value::Int(1));
+    h.push_root(map);
+    for i in 0..20 {
+        let _ = h.alloc_string(format!("garbage{}", i)); // unrooted garbage strings
+    }
+    h.gc();
+    // the key string must still resolve to the stored value after GC
+    let key2 = h.alloc_string("k".to_string());
+    assert_eq!(h.hashtable_get(id, key2), Some(Value::Int(1)));
 }
 
 // ---- roots bookkeeping --------------------------------------------------

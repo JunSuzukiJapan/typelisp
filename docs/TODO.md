@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-07-02 / ブランチ: `feature/compile-sexpr`
+最終更新: 2026-07-03 / ブランチ: `feature/compile-sexpr`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離した）。
@@ -28,13 +28,44 @@
      新表現に乗った。
    - **Stage 3（完了）**: Struct: コンパイラ結線——`mutable`フラグ分岐、
      `compile-construct-boxed-struct`新設。
-   - **Stage 4-5（未着手）**: `HashTable<K,V>`を`BoxedObj::Struct`（`StructPayload::Map`）に統合。
+   - **Stage 4（完了）**: HashTable: `StructPayload::Map`のmem層プラミング
+     （`MemHashKey`、`Heap::alloc_hashtable`/`hashtable_get`/`_set`/`_remove`/`_count`/`_clear`、
+     文字列キーの内容ベース等価性のための`Heap::intern_string`）。コンパイル対応は最初から
+     スコープ外（HashTable/Scope/ClosureはJIT/AOT非対応のまま）なので`typelisp-rt`側の変更なし。
+   - **Stage 5（未着手）**: HashTable: インタプリタ結線——`RtValue::HashTable`削除、
+     `Vector<T>`と同じ「type_name駆動の`eval_builtin_method`分岐」パターンで
+     `get/set/remove/count/clear/keys/values/entries`を再実装。
    - **Stage 6a-6b（未着手）**: 変数束縛スロットの`BoxedObj::Cell`化 → `RtValue::Closure`を
      `BoxedObj::Closure`に統合。
    - **Stage 7-8（未着手）**: `Scope<V>`を`BoxedObj::Struct`（`StructPayload::Frames`）に統合
      （自己ホスティングコンパイラ自体がScopeに依存するため最後に単独で着地）。
 
-直近完了: 「型が分からない」を誤った理由とする未対応箇所の一掃（2026-07-02、Stage 3の直後）——
+直近完了: Sexpr/RtValue内部表現統合Stage 4（2026-07-03）——`HashTable<K,V>`の`StructPayload::Map`
+mem層プラミング。`crates/typelisp-mem`に`MemHashKey`（`Int`/`Bool`/`Char`/`Str(StrId)`、
+`src/eval/value.rs`の（Stage 5で削除予定の）`HashKey`のmem層移植版）と`StructPayload::Map(HashMap<MemHashKey,Value>)`
+を追加し、`Heap`に`alloc_hashtable`/`hashtable_get`/`_set`/`_remove`/`_count`/`_clear`と
+`is_hashtable`（既存`is_struct`は`StructPayload::Fields`限定に絞り込み、ペイロード種別を
+正しく判別できるよう修正）を新設。文字列キーは`Heap::intern_string`（内容ベース重複排除、
+一致したら既存`StrId`を返す）経由でのみ`MemHashKey::Str`化する——`alloc_string`自体は
+`Sexpr::Str`の`eq`が識別子ベースであるべきという理由で意図的に重複排除しないため
+（`docs/cl-equivalence-catalog.md`）、素の`StrId`をキーにすると同一内容でも別キー扱いになり
+`HashTable`の「内容が同じなら同じキー」という要求（CLの`equal`ベースhash table相当）を
+満たせない。この非対称性を`Heap`内部（`lookup_hash_key`/`intern_hash_key`という非公開ヘルパー）
+に閉じ込め、呼び出し側は普通の`Value::Str`を渡すだけでよい設計にした。内容重複排除された
+文字列は`push_permanent_root`で永続ルート化（symbolのinternと同じ「二度と解放しない」トレード
+オフ、間違ったStrIdへの解決を防ぐため）。GCのmark loop（`push_boxed_nested`）も`Map`ペイロード
+対応——値に加えて`MemHashKey::Str`が持つキー文字列も辿る（永続ルート化により理論上は不要だが、
+「生きているmapは自身のキー/値を生かす」という不変条件をmark phase単独で成立させる防御的実装）。
+コンパイル（LLVM JIT/AOT）対応は計画当初からスコープ外（`HashTable`/`Scope`/`Closure`は
+コンパイル済みコードから呼べない）のため`crates/typelisp-rt`側の変更なし——Stage 1（Struct）が
+`rt_struct_new`等を追加したのとは対照的。インタプリタへの結線（`RtValue::HashTable`削除等）は
+Stage 5で行う、本StageはRust側`Heap`APIの単体テストのみ。テスト:
+`tests/mem_test.rs`に19件追加（内容ベースキー等価性・型間の非衝突・GCがmapの値/文字列キー双方を
+辿ること・非HashTable箱へのアクセサ呼び出しがpanicすることなど）。全体テスト
+（scripts/with-llvm-env.sh cargo test、31クレート＋LLVM経由のcompile系）+ Miri
+（`mem_test`）green。
+
+その前に完了: 「型が分からない」を誤った理由とする未対応箇所の一掃（2026-07-02、Stage 3の直後）——
 ユーザー指摘「静的型付け言語なのに型が分からない状況があるのはおかしい」を受け、checkerが
 持つ型分類情報を利用地点まで運ぶ経路を整備して全件解消。(1)`ast_to_sexpr`に
 `structs: &HashSet<Path>`（`Interp::struct_types`）をスレッドし、ネストした

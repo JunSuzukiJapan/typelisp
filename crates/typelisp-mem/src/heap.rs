@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::ptr;
 
 use crate::Error;
-use super::value::{BoxId, BoxedObj, Cell, ConsRef, PathId, StrId, StructPayload, SymId, Value};
+use super::value::{BoxId, BoxedObj, Cell, ConsRef, MemHashKey, PathId, StrId, StructPayload, SymId, Value};
 
 pub struct Heap {
     base: *mut Cell, // start of the cons arena; owns the allocation
@@ -51,6 +51,12 @@ pub struct Heap {
     str_slots: Vec<Option<String>>,
     str_free: Vec<u32>,
     str_marks: Vec<bool>,
+
+    // content -> StrId for strings interned via `intern_string` (HashTable
+    // string keys) — a separate index from the ordinary string store above,
+    // which deliberately does *not* dedupe (see `alloc_string`'s doc
+    // comment on `Sexpr::Str`'s `eq`-by-identity semantics).
+    str_intern: HashMap<String, StrId>,
 
     // GC-managed general boxed-object store (see `BoxedObj`) — same
     // growable-slot-store shape as the string store above, generalized to
@@ -92,6 +98,7 @@ impl Heap {
             str_slots: Vec::new(),
             str_free: Vec::new(),
             str_marks: Vec::new(),
+            str_intern: HashMap::new(),
             box_slots: Vec::new(),
             box_free: Vec::new(),
             box_marks: Vec::new(),
@@ -268,6 +275,37 @@ impl Heap {
         self.str_slots[id.0 as usize].as_deref().expect("dangling StrId")
     }
 
+    /// Stores a string with content-based deduplication, returning its
+    /// `Value::Str` — unlike [`alloc_string`](Self::alloc_string) (a fresh,
+    /// independently-identified allocation every call, preserving `Sexpr`'s
+    /// `eq`-by-identity semantics for ordinary strings), a repeated call
+    /// with equal content always returns the *same* `StrId`. This is what
+    /// gives a `HashTable<K,V>` string key "equal, not eq" lookup semantics
+    /// (see [`MemHashKey`]'s doc comment) — it is not meant as a
+    /// general-purpose string constructor.
+    ///
+    /// Interned strings are rooted permanently (never swept, like
+    /// [`push_permanent_root`](Self::push_permanent_root)): a `str_intern`
+    /// entry pointing at a since-freed slot would let a later call silently
+    /// hand back a dangling/reused `StrId`, so this trades "a key string
+    /// leaks for the heap's lifetime once interned" for that correctness —
+    /// the same leak-forever trade-off already accepted elsewhere for
+    /// low-cardinality, long-lived heap-external data (e.g. interned
+    /// symbols, compiled code's box fields).
+    pub fn intern_string(&mut self, s: &str) -> Value {
+        if let Some(&id) = self.str_intern.get(s) {
+            return Value::Str(id);
+        }
+        let v = self.alloc_string(s.to_string());
+        let id = match v {
+            Value::Str(id) => id,
+            _ => unreachable!("alloc_string always returns Value::Str"),
+        };
+        self.str_intern.insert(s.to_string(), id);
+        self.permanent_roots.push(v);
+        v
+    }
+
     // ---- boxed objects ------------------------------------------------------
 
     /// Store a [`BoxedObj`], returning its `Value::Boxed`. Boxed objects are
@@ -383,15 +421,129 @@ impl Heap {
         }
     }
 
-    /// True if `id` holds a `BoxedObj::Struct` rather than a `BoxedObj::Float`
-    /// — lets a caller holding only a `Value::Boxed` (no independent
-    /// knowledge of what it was built from, e.g. decoding a struct field or
-    /// a generic `match` scrutinee back into an interpreter-level value)
-    /// tell a nested struct/`Vector<T>`/`cons-cell<K,V>` apart from a boxed
-    /// float without risking [`float_value`](Self::float_value)'s "wrong
-    /// kind" panic.
+    /// True if `id` holds a `BoxedObj::Struct` with a `StructPayload::Fields`
+    /// payload (a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance) —
+    /// deliberately narrower than "any `Struct`" now that [`StructPayload`]
+    /// has more than one shape (see [`is_hashtable`](Self::is_hashtable)),
+    /// so a caller holding only a `Value::Boxed` (e.g. decoding a struct
+    /// field or a generic `match` scrutinee back into an interpreter-level
+    /// value) can tell a nested struct apart from a boxed float *or* a
+    /// `HashTable` without risking [`float_value`](Self::float_value)'s or
+    /// [`struct_field`](Self::struct_field)'s "wrong kind" panic.
     pub fn is_struct(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Struct { .. }))
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Fields(_), .. }))
+    }
+
+    /// True if `id` holds a `BoxedObj::Struct` with a `StructPayload::Map`
+    /// payload (a `HashTable<K,V>` instance) — see
+    /// [`is_struct`](Self::is_struct)'s doc comment for why this needs to be
+    /// a separate predicate rather than folded into it.
+    pub fn is_hashtable(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Map(_), .. }))
+    }
+
+    // ---- hash tables --------------------------------------------------------
+
+    /// Converts a key argument at the `HashTable` method boundary into a
+    /// [`MemHashKey`] *without* interning a not-yet-seen string — used by
+    /// read-only lookups ([`hashtable_get`](Self::hashtable_get)/
+    /// [`hashtable_remove`](Self::hashtable_remove)): if `key`'s content was
+    /// never interned, it cannot possibly be present as a map key (every key
+    /// actually stored went through [`intern_hash_key`](Self::intern_hash_key)
+    /// first), so `None` here correctly means "not in the map" rather than
+    /// requiring a spurious allocation just to look. Panics on a
+    /// non-hashable `Value` shape (`Cons`/`Symbol`/`Path`/a non-`Float`
+    /// boxed object) — the type checker can't express a "hashable" bound (no
+    /// traits in this language), so this is the same runtime-panic fallback
+    /// [`struct_field`](Self::struct_field) uses for an out-of-range index.
+    fn lookup_hash_key(&self, key: Value) -> Option<MemHashKey> {
+        match key {
+            Value::Int(n) => Some(MemHashKey::Int(n)),
+            Value::Bool(b) => Some(MemHashKey::Bool(b)),
+            Value::Char(c) => Some(MemHashKey::Char(c)),
+            Value::Str(id) => self.str_intern.get(self.string(id)).copied().map(MemHashKey::Str),
+            other => panic!("HashTable: unsupported key type {:?}", other),
+        }
+    }
+
+    /// [`lookup_hash_key`](Self::lookup_hash_key)'s mutating counterpart,
+    /// used by [`hashtable_set`](Self::hashtable_set): interns `key`'s
+    /// string content (via [`intern_string`](Self::intern_string)) if this
+    /// is the first time it's been used as a key, so the resulting
+    /// `MemHashKey::Str` will compare equal to any other string with the
+    /// same content used as a key from now on.
+    fn intern_hash_key(&mut self, key: Value) -> MemHashKey {
+        match key {
+            Value::Int(n) => MemHashKey::Int(n),
+            Value::Bool(b) => MemHashKey::Bool(b),
+            Value::Char(c) => MemHashKey::Char(c),
+            Value::Str(id) => {
+                let s = self.string(id).to_string();
+                match self.intern_string(&s) {
+                    Value::Str(interned) => MemHashKey::Str(interned),
+                    _ => unreachable!("intern_string always returns Value::Str"),
+                }
+            }
+            other => panic!("HashTable: unsupported key type {:?}", other),
+        }
+    }
+
+    /// Stores an empty hash map, returning its `Value::Boxed` —
+    /// `HashTable<K,V>`'s runtime representation (see `BoxedObj`/
+    /// `StructPayload::Map`'s doc comments).
+    pub fn alloc_hashtable(&mut self) -> Value {
+        self.alloc_boxed(BoxedObj::Struct { type_name: "hashtable".to_string(), payload: StructPayload::Map(HashMap::new()) })
+    }
+
+    /// `(gethash key table)`'s primitive: the value `key` maps to, or `None`
+    /// if absent. Panics if `id` doesn't hold a `BoxedObj::Struct` with a
+    /// `StructPayload::Map` payload.
+    pub fn hashtable_get(&self, id: BoxId, key: Value) -> Option<Value> {
+        let hk = self.lookup_hash_key(key)?;
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => map.get(&hk).copied(),
+            _ => panic!("BoxId does not hold a HashTable"),
+        }
+    }
+
+    /// `(sethash key table val)`'s primitive: inserts/overwrites `key` ->
+    /// `val`, returning the previous value if `key` was already present
+    /// (same convention as `HashMap::insert`). Panics if `id` doesn't hold a
+    /// `BoxedObj::Struct` with a `StructPayload::Map` payload.
+    pub fn hashtable_set(&mut self, id: BoxId, key: Value, val: Value) -> Option<Value> {
+        let hk = self.intern_hash_key(key);
+        match self.box_slots[id.0 as usize].as_mut() {
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => map.insert(hk, val),
+            _ => panic!("BoxId does not hold a HashTable"),
+        }
+    }
+
+    /// Removes `key`, returning its value if it was present. Panics if `id`
+    /// doesn't hold a `BoxedObj::Struct` with a `StructPayload::Map` payload.
+    pub fn hashtable_remove(&mut self, id: BoxId, key: Value) -> Option<Value> {
+        let hk = self.lookup_hash_key(key)?;
+        match self.box_slots[id.0 as usize].as_mut() {
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => map.remove(&hk),
+            _ => panic!("BoxId does not hold a HashTable"),
+        }
+    }
+
+    /// The number of entries in a boxed hash map. Panics if `id` doesn't
+    /// hold a `BoxedObj::Struct` with a `StructPayload::Map` payload.
+    pub fn hashtable_count(&self, id: BoxId) -> usize {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => map.len(),
+            _ => panic!("BoxId does not hold a HashTable"),
+        }
+    }
+
+    /// Removes every entry in place. Panics if `id` doesn't hold a
+    /// `BoxedObj::Struct` with a `StructPayload::Map` payload.
+    pub fn hashtable_clear(&mut self, id: BoxId) {
+        match self.box_slots[id.0 as usize].as_mut() {
+            Some(BoxedObj::Struct { payload: StructPayload::Map(map), .. }) => map.clear(),
+            _ => panic!("BoxId does not hold a HashTable"),
+        }
     }
 
     // ---- allocation -------------------------------------------------------
@@ -479,16 +631,30 @@ impl Heap {
     /// Push every `Value` nested directly inside a `BoxedObj`'s payload onto
     /// `stack`, for `gc`'s mark phase to trace into. `Float` holds no nested
     /// `Value` (a fully-immediate `f64` payload), so that arm is a no-op —
-    /// `Struct` holds a `Vec<Value>` of fields, each of which must be traced
-    /// the same as a cons cell's `car`/`cdr` (a struct field can itself hold
-    /// a cons, a string, or another boxed struct). Later `BoxedObj` kinds (a
-    /// closure's captured environment, ...) will extend this `match` with
-    /// their own fan-out.
+    /// `Struct`'s `Fields` payload holds a `Vec<Value>` of fields, each of
+    /// which must be traced the same as a cons cell's `car`/`cdr` (a struct
+    /// field can itself hold a cons, a string, or another boxed struct).
+    /// `Struct`'s `Map` payload traces both the values *and* any `Str` keys
+    /// (`MemHashKey`'s other variants are immediate, nothing to trace) —
+    /// belt-and-suspenders alongside `intern_string`'s permanent rooting:
+    /// tracing here keeps the invariant "a live map keeps its own keys/
+    /// values live" true from the mark phase's perspective alone, without
+    /// leaning on that rooting detail. Later `BoxedObj` kinds (a closure's
+    /// captured environment, ...) will extend this `match` with their own
+    /// fan-out.
     fn push_boxed_nested(obj: &BoxedObj, stack: &mut Vec<Value>) {
         match obj {
             BoxedObj::Float(_) => {}
             BoxedObj::Struct { payload: StructPayload::Fields(fields), .. } => {
                 for &v in fields {
+                    stack.push(v);
+                }
+            }
+            BoxedObj::Struct { payload: StructPayload::Map(map), .. } => {
+                for (k, &v) in map {
+                    if let MemHashKey::Str(id) = k {
+                        stack.push(Value::Str(*id));
+                    }
                     stack.push(v);
                 }
             }

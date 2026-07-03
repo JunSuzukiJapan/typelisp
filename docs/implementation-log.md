@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-07-02 / ブランチ: `feature/compile-sexpr`
+最終更新: 2026-07-03 / ブランチ: `feature/compile-sexpr`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -2418,7 +2418,7 @@ panicと同じ前例で実行時panic（型システムでは「有効なスカ�
 panicの両方）、`symbol->string`/`string->symbol`（往復、非symbolでのpanic）を追加。全体テスト
 （`./scripts/with-llvm-env.sh cargo test`、workspace全体）green。
 
-## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-3完了・Stage 4-8未着手）
+## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-4完了・Stage 5-8未着手）
 
 `HashTable<K,V>::entries`のペア型を巡る議論の中で、ユーザーから「`Sexpr`と`RtValue`という
 2つの並行した実行時値表現に分かれていること自体がおかしい」という指摘を受けた。実際の
@@ -2589,8 +2589,54 @@ FFIハンドルだけを`RtValue`に残す。さらに調査で判明した事�
   一掃」節参照。`Fn`型・一般ADTフィールドの未対応は表現ギャップとして正当、同節参照）。
   テスト: 全体テスト（cargo test、31クレート＋LLVM経由のcompile系）+ Miri
   （`mem_test`/`read_test`/`typelisp-rt`）green。
-- **Stage 4（未着手）**: HashTable: `StructPayload::Map`のmem/rt層プラミング
-  （`HashKey`を`MemHashKey`として`typelisp-mem`に移植）。
+- **Stage 4（完了、2026-07-03）**: HashTable: `StructPayload::Map`のmem層プラミング。
+  `crates/typelisp-mem`に`MemHashKey`（`Int(i64)`/`Bool(bool)`/`Char(char)`/`Str(StrId)`、
+  `src/eval/value.rs`の`HashKey`のmem層移植版——`Float`は除外、除外理由も含め既存の`HashKey`の
+  doc commentをそのまま踏襲）と`StructPayload::Map(HashMap<MemHashKey, Value>)`を追加し、
+  `Heap`に`alloc_hashtable`/`hashtable_get`/`hashtable_set`（`HashMap::insert`と同じ「前の値を
+  返す」規約）/`hashtable_remove`/`hashtable_count`/`hashtable_clear`を新設。
+  文字列キー特有の問題として、`Value::Str`同士の等価性は`StrId`（アロケーション識別子）基準
+  ——`alloc_string`は意図的に内容で重複排除しない（`Sexpr::Str`の`eq`が識別子ベースであるべき
+  という2026-07-01の`eq`/`eql`/`equal`/`equalp`再設計の帰結、`docs/cl-equivalence-catalog.md`
+  参照）——だが、`HashTable`のキーとしては「内容が同じなら同じキー」（CLの`equal`ベース
+  hash table相当）が必要で、素の`StrId`をそのままキーにすると同一内容の文字列リテラルが
+  複数回評価されるたび別キー扱いになってしまう（`hashtable_test.rs`の`string_keys_work`が
+  実際にこのパターンで書かれている）。解消策として`Heap::intern_string`（内容ベース重複排除、
+  一致する内容が既にあれば既存`StrId`を返す、シンボルinternと同じパターン）を新設し、
+  `HashTable`の文字列キーだけがこの経路を通る設計にした——`alloc_string`自体は無変更のまま
+  （一般の`Sexpr::Str`のidentityベース`eq`セマンティクスに影響なし）。この非対称性
+  （読み取り専用の`hashtable_get`/`hashtable_remove`は`lookup_hash_key`で「未internなら
+  存在しないキー」と判定するだけで済むため`&self`のみ、書き込みの`hashtable_set`は
+  `intern_hash_key`で新規内容なら`intern_string`を呼ぶため`&mut self`が必要）は`Heap`内部の
+  非公開ヘルパー2つに閉じ込め、呼び出し側は普通の`Value::Str`を渡すだけでよい。内容重複排除
+  された文字列は`push_permanent_root`で永続ルート化した（symbolのinternと同じ「二度と解放
+  しない」トレードオフを採用——`str_intern`という別のcontent→StrId逆引きテーブル自体が
+  GCの管理外にあるため、対応する文字列スロットがGCで回収されてしまうと逆引きテーブルが
+  無効な/再利用されたStrIdを指す状態になり得るバグを防ぐため）。
+  GCのmark loop（`Heap::push_boxed_nested`）も`Map`ペイロード対応——値に加えて
+  `MemHashKey::Str`が持つキー文字列（`Value::Str`化して同じワークリストに積む）も辿るように
+  拡張した（永続ルート化により実際には冗長だが、「生きているmapは自身のキー/値を生かす」
+  という不変条件をmark phase単独の視点でも成立させる防御的実装、という位置づけ）。
+  既存の`Heap::is_struct`は`BoxedObj::Struct`であること全般を見ていたため、`Map`ペイロードの
+  箱も`true`を返すようになってしまう問題があり、`StructPayload::Fields`限定に絞り込んだ上で
+  対称な`is_hashtable`（`StructPayload::Map`限定）を新設——両者を明確に分離することで、
+  Stage 5でデコード判定に使う際に取り違えを防ぐ。
+  コンパイル（LLVM JIT/AOT）対応は計画当初から`HashTable`/`Scope`/`Closure`ともスコープ外
+  （コンパイル済みコードから直接呼べる機能を新規追加しない）と明記されているため、
+  Stage 1（Struct）が`rt_struct_new`/`rt_struct_field_get`/`_set`を`typelisp-rt`に追加したのとは
+  対照的に、今回は`crates/typelisp-rt`側の変更が一切ない——`mem`層のみで完結する唯一のStage。
+  **意図的にこのStageでは`src/eval/interp.rs`を配線しない**——`RtValue::HashTable`は無変更の
+  まま並存させ、新しい`Heap`APIだけを単独でテスト可能な状態にする（Stage 2がStructでやった
+  のと同じ段階分け）。
+  テスト: `tests/mem_test.rs`に19件追加——基本CRUD（get/set/remove/count/clear、上書き時に
+  前の値を返す）、内容ベースの文字列キー等価性（別々の`alloc_string`呼び出しでも同内容なら
+  同じキーとして扱われる/異なる内容は衝突しない）、キー型間の非衝突（`Int(0)`と`Bool(false)`
+  が別キーであることを明示的に検証）、`HashTable`以外の箱（Float/Struct）へのアクセサ呼び出し
+  がpanicすること、非対応キー型（Cons）がpanicすること、`is_hashtable`/`is_struct`の判別、
+  GCが未到達`HashTable`を回収すること・rooted consを介して到達可能な`HashTable`が生き残ること・
+  mapの値/文字列キー双方をmark phaseが辿ること（辿らない場合に無関係な文字列アロケーションの
+  churnで破損する、という直接的な回帰テスト）。全体テスト（`scripts/with-llvm-env.sh cargo test`、
+  31クレート＋LLVM経由のcompile系）+ Miri（`mem_test`）green。
 - **Stage 5（未着手）**: HashTable: インタプリタ結線——`RtValue::HashTable`削除、
   `Vector<T>`と同じ「type_name駆動の`eval_builtin_method`分岐」パターンで
   `get/set/remove/count/clear/keys/values/entries`を再実装。

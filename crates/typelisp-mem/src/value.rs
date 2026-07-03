@@ -20,6 +20,7 @@
 //! the same reason `Str` isn't stored inline. The public surface is entirely
 //! safe.
 
+use std::collections::HashMap;
 use std::fmt;
 
 /// One cons cell as laid out in the arena.
@@ -170,16 +171,44 @@ pub(crate) enum BoxedObj {
     Struct { type_name: String, payload: StructPayload },
 }
 
-/// The fields behind a [`BoxedObj::Struct`]. `Fields` is the only shape
-/// today (a fixed-length `defstruct` instance and a variable-length
-/// `Vector<T>`/`cons-cell<K,V>` are both just "a `Vec<Value>`" at this
-/// layer — length-checking a fixed-arity struct's field count is the
-/// caller's job, same as it already is for `RtValue::Struct`). `Map`
-/// (`HashTable<K,V>`) and `Frames` (`Scope<V>`) are planned additions from
-/// later stages of the unification plan, not implemented yet.
+/// A `HashTable<K,V>` key at the mem layer — the runtime encoding of a
+/// hashable `Sexpr`/language scalar. Restricted to the same set the
+/// pre-unification interpreter-level `HashKey` (`src/eval/value.rs`)
+/// accepted: `Int`/`Bool`/`Char`/`Str` — notably excluding `Float` (`f64`
+/// has no total `Eq` because of `NaN`) and any heap-aggregate shape (a
+/// structural notion of key equality wouldn't be meaningful for those).
+///
+/// `Str` holds a [`StrId`] rather than an owned `String` — but *only* ever
+/// one produced by [`super::heap::Heap::intern_string`], which deduplicates
+/// by content: two `"foo"` string values (even from separate, non-`eq`
+/// `Sexpr::Str` allocations, since ordinary [`super::heap::Heap::alloc_string`]
+/// does not intern) must still hash/compare equal as *keys* — the same
+/// "equal, not eq" semantics `equal`-based hash tables use elsewhere in this
+/// language (see `docs/cl-equivalence-catalog.md`). An arbitrary,
+/// non-interned `Value::Str` must never be wrapped here directly; the only
+/// constructors are `Heap`'s private `lookup_hash_key`/`intern_hash_key`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum MemHashKey {
+    Int(i64),
+    Bool(bool),
+    Char(char),
+    Str(StrId),
+}
+
+/// The fields behind a [`BoxedObj::Struct`]. `Fields` is a fixed-length
+/// `defstruct` instance or a variable-length `Vector<T>`/`cons-cell<K,V>`
+/// (both just "a `Vec<Value>`" at this layer — length-checking a fixed-arity
+/// struct's field count is the caller's job, same as it already is for the
+/// pre-unification `RtValue::Struct`). `Map` is a `HashTable<K,V>` — the
+/// `HashMap`'s own bucket storage is ordinary Rust memory (like
+/// `str_slots`'s `String` buffers), so the mark phase only needs to trace
+/// the [`Value`]s it holds (both keys — [`MemHashKey::Str`]'s `StrId` — and
+/// values), not the map structure itself. `Frames` (`Scope<V>`) is a planned
+/// addition from a later stage of the unification plan, not implemented yet.
 #[derive(Clone, Debug)]
 pub(crate) enum StructPayload {
     Fields(Vec<Value>),
+    Map(HashMap<MemHashKey, Value>),
 }
 
 /// A Lisp value — the runtime encoding of `Sexpr`.
