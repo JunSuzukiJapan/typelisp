@@ -157,6 +157,7 @@ pub enum SlotKind {
 ///   compiler-internal LLVM
 ///   handle kinds, which this split keeps out of the GC heap *structurally*:
 ///   a `Slot::Heap` can only ever be created from an `RtValue::Sexpr`.
+///
 /// (`PartialEq`/`Debug` exist only for `Closure`'s own derives: a `Heap`
 /// slot compares by cell identity (`BoxId`), a `Native` one by contents —
 /// the same contents-comparison `Rc<RefCell<..>>` always had here.)
@@ -281,8 +282,8 @@ pub enum RtValue {
     /// it from a boxed float or a genuine quoted `Sexpr` datum at each read
     /// site (`interp.rs`'s `expect_struct_box`/`decode_field_typed`).
     /// Since Stage 6b this is also where a *closure* lives: a
-    /// `Value::Boxed` pointing at a `BoxedObj::Closure` (heap-cell captures
-    /// + a token into `Interp`'s `ClosureBody` side table) — so closure
+    /// `Value::Boxed` pointing at a `BoxedObj::Closure` (heap-cell captures +
+    /// a token into `Interp`'s `ClosureBody` side table) — so closure
     /// identity, GC tracing, and cycle collection (`labels`) all come from
     /// the same heap machinery as every other boxed value, and no dedicated
     /// `RtValue::Closure` variant exists anymore.
