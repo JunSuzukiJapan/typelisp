@@ -2194,9 +2194,7 @@ fn compile_dispatches_a_function_that_constructs_a_cons_via_construct_to_native_
 
 /// A general ADT (`Option<i64>`'s `Some`, `AdtKind::Sum`) constructs via
 /// `compile-construct-box`'s `malloc`'d-box path instead —
-/// `[type-id, 0, field0]`: slot `0` the box's own type-id (added for
-/// `compile-trait-call`'s runtime dispatch, `ast_bridge::type_id_hash`),
-/// slot `1` the variant tag, slot `2` the lone field.
+/// `[0, field0]`: slot `0` the variant tag, slot `1` the lone field.
 /// `Expr::Call`'s existing `Sexpr`-only decode step (Stage 5) doesn't know
 /// about this representation, so the box's raw address surfaces as a
 /// (representationally faithful, just not yet correctly *typed*)
@@ -2220,12 +2218,11 @@ fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_cod
         other => panic!("expected the box's raw address as an Int (see this test's doc comment), got {:?}", other),
     };
     // SAFETY: `raw` is `build-ptr-to-int`'s result over a `build-malloc`'d,
-    // never-freed `[3 x i64]` array (`compile-construct-box`'s layout: slot
-    // 0 = type-id, slot 1 = variant tag, slot 2 = the lone field) — still
-    // valid to read.
+    // never-freed `[2 x i64]` array (`compile-construct-box`'s layout: slot
+    // 0 = variant tag, slot 1 = the lone field) — still valid to read.
     let (variant, field0) = unsafe {
         let p = raw as *const i64;
-        (*p.add(1), *p.add(2))
+        (*p.add(0), *p.add(1))
     };
     assert_eq!(variant, 0, "Some is option_def's variant 0");
     assert_eq!(field0, 42);

@@ -2840,9 +2840,8 @@ impl Checker {
                         // `tb.assoc` is empty, exactly matching pre-pin
                         // behavior.
                         let ret_ty = subst_apply(&sig.ret, &tb.assoc);
-                        let impls = self.trait_impls(&tb.trait_path);
                         return Ok(Typed {
-                            expr: Expr::TraitCall { trait_name: tb.trait_path.clone(), method: method.to_string(), impls, args: typed_args },
+                            expr: Expr::TraitCall { method: method.to_string(), args: typed_args },
                             ty: ret_ty,
                         });
                     }
@@ -2850,34 +2849,6 @@ impl Checker {
             }
         }
         Err(Error::NoSuchFunction(method.to_string()))
-    }
-
-    /// Every concrete type currently registered as `impl`ing `trait_fq`
-    /// (`AdtDef::impls`, populated by `Checker::check_impl`), searched
-    /// recursively through every module — `Registry` indexes types by
-    /// *trait-less* name within each `Namespace`, so there's no reverse
-    /// "trait -> implementers" index to look up directly; this walks the
-    /// whole tree instead, which is fine since it's only called once per
-    /// `Expr::TraitCall` construction, not per compiled call. Sorted by
-    /// path string for determinism (`HashMap` iteration order isn't stable),
-    /// so `compile`'s dispatch chain — and any test asserting on it — sees a
-    /// reproducible candidate order across runs. See `Expr::TraitCall::impls`'s
-    /// doc comment for why this is resolved once here rather than deferred.
-    fn trait_impls(&self, trait_fq: &Path) -> Vec<Path> {
-        fn walk(ns: &Namespace, trait_fq: &Path, out: &mut Vec<Path>) {
-            for def in ns.types.values() {
-                if def.impls.contains(trait_fq) {
-                    out.push(def.name.clone());
-                }
-            }
-            for child in ns.modules.values() {
-                walk(child, trait_fq, out);
-            }
-        }
-        let mut out = Vec::new();
-        walk(&self.reg.root, trait_fq, &mut out);
-        out.sort_by_key(|a| a.to_string());
-        out
     }
 
     /// Check a call to a type-associated function. For an instance method the

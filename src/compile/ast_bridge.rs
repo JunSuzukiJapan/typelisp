@@ -443,7 +443,12 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, direct: &HashSet<String>,
         Expr::Return(value) => translate_return(heap, value, direct, outer_captured, structs),
         Expr::Panic(_) => unsupported(heap, "Panic"),
         Expr::Quote(_) => unsupported(heap, "Quote"),
-        Expr::TraitCall { method, impls, args, .. } => translate_trait_call(heap, method, impls, args, direct, outer_captured, structs),
+        // Diagnostics-only since monomorphization (see `Expr::TraitCall`'s
+        // doc comment): a generic function's erased body is never registered
+        // for execution and can't be `compile`d at all, so this node is
+        // unreachable from any compilable source. The old dispatch-chain
+        // lowering it used to have is gone.
+        Expr::TraitCall { .. } => unsupported(heap, "TraitCall"),
     }
 }
 
@@ -1288,145 +1293,8 @@ fn translate_arms(heap: &mut Heap, arms: &[Arm], direct: &HashSet<String>, outer
     Ok(values)
 }
 
-/// A deterministic (FNV-1a, 64-bit) hash of an ADT's own local (unqualified)
-/// type name, embedded as a plain LLVM constant wherever compiled code needs
-/// to *identify* a general-ADT box's type at runtime — [`translate_construct`]
-/// stamps it into every box it builds, [`translate_trait_call`] embeds the
-/// same hash for each dispatch candidate to compare against. A pure function
-/// of the name string (not a global counter) is what lets two independently
-/// `compile`d functions — e.g. one JIT call that builds a `box-a` value and a
-/// later, separate JIT call whose `compile-trait-call` dispatch needs to
-/// recognize it — agree on the same id with no shared registry or
-/// cross-module coordination at all, mirroring how `type_name`/`method` are
-/// already threaded through as plain strings rather than interned handles
-/// (see [`ast_to_sexpr_scoped`]'s `Expr::Assoc` arm doc comment). Collisions
-/// are possible in principle (two distinct type names hashing equal) but not
-/// a correctness concern this stage guards against — the same accepted risk
-/// class as any other hash-based dispatch table.
-fn type_id_hash(local_name: &str) -> i64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for b in local_name.as_bytes() {
-        hash ^= *b as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash as i64
-}
-
-/// Whether `type_name` can ever be a [`translate_trait_call`] dispatch
-/// candidate: excludes `i64`/`i32` (no boxed runtime representation at
-/// all — `compile-assoc` already special-cases them for inline arithmetic,
-/// never routing through a general method call) and `Sexpr` (deliberately
-/// never given a trait `impl` in this codebase — element-typed traits like
-/// `Iter` don't fit its fixed 8-variant shape, see `docs/TODO.md`'s
-/// `Iter`/`HashTable` entry). Filters [`Expr::TraitCall::impls`] before it
-/// reaches the compiled dispatch chain; harmless to skip either kind here
-/// since the interpreter's own `TraitCall` eval arm never consults `impls`
-/// at all (see that field's doc comment) and no current `impl` targets
-/// either excluded type.
-fn is_compilable_trait_impl(type_name: &Path) -> bool {
-    !matches!(type_name.local(), "i64" | "i32" | "sexpr")
-}
-
-/// `Expr::TraitCall { method, impls, args, .. }` -> `(trait-call method-str
-/// candidates-list arg-form...)`, where `candidates-list` is a plain
-/// (untagged) `Sexpr` list of `(type-id-i64 . type-name-str)` pairs, one per
-/// [`is_compilable_trait_impl`]-surviving entry of `impls` (in that same,
-/// check-time-sorted order — see `Checker::trait_impls`'s doc comment).
-/// `args` is tagged exactly like [`Expr::Assoc`]'s own instance-call argument
-/// list ([`tagged_ast_list_to_sexpr`]) — `args[0]` is always the receiver,
-/// the same convention `Expr::TraitCall`'s own doc comment describes,
-/// `compiler.rs`'s `compile-trait-call` reads the receiver back out of its
-/// own freshly-built argument array (slot `0`) rather than compiling it a
-/// second time, so no special-casing is needed here to single it out.
-///
-/// If every candidate is filtered out (a trait whose only current `impl`s
-/// target `i64`/`i32`/`Sexpr` — none reachable today, but a real
-/// possibility once one exists), this falls back to the ordinary
-/// `unsupported` placeholder rather than emitting a `trait-call` node with
-/// no candidates for `compiler.rs` to dispatch to.
-fn translate_trait_call(heap: &mut Heap, method: &str, impls: &[Path], args: &[Typed], direct: &HashSet<String>, outer_captured: &[(String, Type)], structs: &HashSet<Path>) -> Result<Value, Error> {
-    let candidates: Vec<&Path> = impls.iter().filter(|p| is_compilable_trait_impl(p)).collect();
-    if candidates.is_empty() {
-        return unsupported(heap, "TraitCall");
-    }
-
-    let method_v = heap.alloc_string(method.to_string());
-    heap.push_root(method_v);
-
-    let mut cand_values = Vec::with_capacity(candidates.len());
-    for c in &candidates {
-        let id = Value::Int(type_id_hash(c.local()));
-        let name_v = heap.alloc_string(c.local().to_string());
-        heap.push_root(name_v);
-        let pair = heap.cons(id, name_v);
-        heap.pop_root(); // name_v
-        let pair = match pair {
-            Ok(p) => p,
-            Err(e) => {
-                for _ in 0..cand_values.len() {
-                    heap.pop_root();
-                }
-                heap.pop_root(); // method_v
-                return Err(e);
-            }
-        };
-        heap.push_root(pair);
-        cand_values.push(pair);
-    }
-    let cand_list = match list_of(heap, &cand_values) {
-        Ok(v) => v,
-        Err(e) => {
-            for _ in 0..cand_values.len() {
-                heap.pop_root();
-            }
-            heap.pop_root(); // method_v
-            return Err(e);
-        }
-    };
-    for _ in 0..cand_values.len() {
-        heap.pop_root();
-    }
-    heap.push_root(cand_list);
-
-    let arg_values = match tagged_ast_list_to_sexpr(heap, args, direct, outer_captured, structs) {
-        Ok(v) => v,
-        Err(e) => {
-            heap.pop_root(); // cand_list
-            heap.pop_root(); // method_v
-            return Err(e);
-        }
-    };
-    let mut items = vec![method_v, cand_list];
-    items.extend(arg_values.iter().copied());
-    let result = tagged(heap, "trait-call", &items);
-    for _ in 0..arg_values.len() {
-        heap.pop_root();
-    }
-    heap.pop_root(); // cand_list
-    heap.pop_root(); // method_v
-    result
-}
-
-/// Every distinct `(type_path, method)` pair a body's `Expr::TraitCall`
-/// nodes might dispatch to at runtime — every [`is_compilable_trait_impl`]
-/// candidate of every such node, reachable from `typed`. Walked the same way
-/// [`collect_calls`]'s `Expr::Assoc` arm already collects a *static* method
-/// target; `Interp::compile_function` treats the two identically from here
-/// (forward-declare + wire under [`crate::eval::interp::method_link_name`]),
-/// since a `compile-trait-call` dispatch's *call* site is, once a candidate
-/// is chosen at runtime, just an ordinary `type::method` call like any
-/// `Expr::Assoc` target already is.
-fn collect_trait_call_targets(method: &str, impls: &[Path], targets: &mut CallTargets) {
-    for p in impls.iter().filter(|p| is_compilable_trait_impl(p)) {
-        let key = (p.clone(), method.to_string());
-        if !targets.methods.contains(&key) {
-            targets.methods.push(key);
-        }
-    }
-}
-
 /// `Expr::Construct { variant, args, mutable }` -> `(construct is-sexpr-bool
-/// mutable-bool type-id-i64 type-name-str variant-i64 arg-form...)` (Stage 6
+/// mutable-bool type-name-str variant-i64 arg-form...)` (Stage 6
 /// of the Sexpr-representation plan for the header's first three fields,
 /// extended by Stage 3 of the Sexpr/RtValue unification plan —
 /// `docs/implementation-log.md` — with `mutable`/`type-name-str`). `is-sexpr`
@@ -1473,22 +1341,11 @@ fn collect_trait_call_targets(method: &str, impls: &[Path], targets: &mut CallTa
 /// `compiler.rs`'s `compile-construct-box` doc comment); only the
 /// GC-root gap this tag closes is in scope here.
 ///
-/// `type-id-i64` ([`translate_trait_call`]'s dispatch counterpart, so a box
-/// built by one already-`compile`d function can be recognized by a
-/// `compile-trait-call` chain compiled separately, possibly later, in
-/// another function — [`type_id_hash`]'s doc comment) is only meaningful for
-/// the general-ADT branch (`0` elsewhere); a `mutable` struct's own runtime
-/// type-id is instead recovered *at run time*, by hashing its
-/// `BoxedObj::Struct`-carried `type_name` string
-/// (`typelisp_rt::rt_struct_type_id_hash`, `compiler.rs`'s
-/// `compile-recv-type-id`) — the header's `type-id-i64` would be a
-/// compile-time constant baked into only *this* `Expr::Construct` site,
-/// useless to a `compile-trait-call` chain built in a different,
-/// independently-`compile`d function. `type-name-str` ([`str_literal_form`])
-/// is that struct's own local type name, only ever built for the `mutable`
-/// branch (an empty placeholder, `Value::Empty`, elsewhere); still always
-/// present in the tagged shape for a uniform five-field header regardless of
-/// which branch `compiler.rs`'s `compile-construct` takes.
+/// `type-name-str` ([`str_literal_form`]) is that struct's own local type
+/// name, only ever built for the `mutable` branch (an empty placeholder,
+/// `Value::Empty`, elsewhere); still always present in the tagged shape for a
+/// uniform header regardless of which branch `compiler.rs`'s
+/// `compile-construct` takes.
 fn translate_construct(
     heap: &mut Heap,
     type_name: &Path,
@@ -1501,7 +1358,6 @@ fn translate_construct(
     structs: &HashSet<Path>,
 ) -> Result<Value, Error> {
     let is_sexpr = is_sexpr_type(ty);
-    let type_id = if is_sexpr { 0 } else { type_id_hash(type_name.local()) };
     let type_name_form = if !is_sexpr && mutable { str_literal_form(heap, type_name.local())? } else { Value::Empty };
     heap.push_root(type_name_form);
     let arg_result = if is_sexpr {
@@ -1518,7 +1374,7 @@ fn translate_construct(
             return Err(e);
         }
     };
-    let mut items = vec![Value::Bool(is_sexpr), Value::Bool(mutable), Value::Int(type_id), type_name_form, Value::Int(variant as i64)];
+    let mut items = vec![Value::Bool(is_sexpr), Value::Bool(mutable), type_name_form, Value::Int(variant as i64)];
     items.extend(arg_values.iter().copied());
     let result = tagged(heap, "construct", &items);
     for _ in 0..arg_values.len() {
@@ -1698,15 +1554,6 @@ fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
             if !targets.methods.contains(&key) {
                 targets.methods.push(key);
             }
-            for a in args {
-                collect_calls(a, targets);
-            }
-        }
-        // Every dispatch candidate needs the same forward-declare/wire
-        // treatment as a static `Expr::Assoc` target — see
-        // `collect_trait_call_targets`'s doc comment.
-        Expr::TraitCall { method, impls, args, .. } => {
-            collect_trait_call_targets(method, impls, targets);
             for a in args {
                 collect_calls(a, targets);
             }
@@ -2695,13 +2542,11 @@ mod tests {
     // ---- Stage 6 of the Sexpr-representation plan: Construct/FieldGet/FieldSet --
 
     /// `Expr::Construct` over `Sexpr` itself (`(Int n)`'s own typed shape)
-    /// -> `(construct true false 0 empty variant-i64 arg-form...)` —
+    /// -> `(construct true false empty variant-i64 arg-form...)` —
     /// `is-sexpr` is `true` since the node's own checked type is `Sexpr`,
     /// dispatching `compiler.rs`'s `compile-construct` to
     /// `compile-construct-sexpr` rather than either boxed path; `mutable` is
-    /// always `false` here (no user-`impl`-able `Sexpr` box, see
-    /// `is_compilable_trait_impl`), and `type-id`/`type-name-str` are both
-    /// unused placeholders.
+    /// always `false` here, and `type-name-str` is an unused placeholder.
     #[test]
     fn translates_a_sexpr_construct() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -2716,22 +2561,21 @@ mod tests {
         assert_eq!(tag, "construct");
         assert_eq!(fields[0], Value::Bool(true), "Sexpr's own Construct dispatches to the tagged-i64 path");
         assert_eq!(fields[1], Value::Bool(false), "mutable is always false for a Sexpr construct");
-        assert_eq!(fields[2], Value::Int(0), "type-id is unused (0) for the is-sexpr branch");
-        assert!(fields[3].is_empty(), "type-name-str is an unused placeholder for the is-sexpr branch");
-        assert_eq!(fields[4], Value::Int(1));
-        let (arg_tag, arg_fields) = untag(&heap, fields[5]);
+        assert!(fields[2].is_empty(), "type-name-str is an unused placeholder for the is-sexpr branch");
+        assert_eq!(fields[3], Value::Int(1));
+        let (arg_tag, arg_fields) = untag(&heap, fields[4]);
         assert_eq!(arg_tag, "int");
         assert_eq!(arg_fields, vec![Value::Int(5)]);
     }
 
     /// `Expr::Construct` over a general ADT (`Option<i64>`'s `Some`, an
-    /// `AdtKind::Sum`) -> `(construct false false type-id-i64 empty
-    /// variant-i64 (kind . arg-form)...)` — `is-sexpr` is `false` and
-    /// `mutable` is `false`, dispatching to `compile-construct-box`'s
-    /// `malloc`'d-box path. Multiple args are each translated in order, each
-    /// wrapped in the same `(kind . form)` shape `Expr::Call`'s own argument
-    /// list gets (`tagged_ast_list_to_sexpr`/`binding_kind`) — an `i64` field
-    /// is `KIND_PLAIN`, a `bool` field likewise (see `translate_construct`'s
+    /// `AdtKind::Sum`) -> `(construct false false empty variant-i64
+    /// (kind . arg-form)...)` — `is-sexpr` is `false` and `mutable` is
+    /// `false`, dispatching to `compile-construct-box`'s `malloc`'d-box path.
+    /// Multiple args are each translated in order, each wrapped in the same
+    /// `(kind . form)` shape `Expr::Call`'s own argument list gets
+    /// (`tagged_ast_list_to_sexpr`/`binding_kind`) — an `i64` field is
+    /// `KIND_PLAIN`, a `bool` field likewise (see `translate_construct`'s
     /// doc comment for why this is needed: `compile-construct-box-fields`
     /// reads `kind` to decide which fields need `rt_push_permanent_sexpr_root`).
     #[test]
@@ -2749,15 +2593,14 @@ mod tests {
         assert_eq!(tag, "construct");
         assert_eq!(fields[0], Value::Bool(false), "a non-Sexpr ADT dispatches to a boxed path");
         assert_eq!(fields[1], Value::Bool(false), "an AdtKind::Sum construct is not mutable");
-        assert_eq!(fields[2], Value::Int(type_id_hash("option")), "type-id is the hash of the type's local name");
-        assert!(fields[3].is_empty(), "type-name-str is an unused placeholder for the general-ADT branch");
-        assert_eq!(fields[4], Value::Int(0));
-        let (kind0, arg0_form) = untag_arg(&heap, fields[5]);
+        assert!(fields[2].is_empty(), "type-name-str is an unused placeholder for the general-ADT branch");
+        assert_eq!(fields[3], Value::Int(0));
+        let (kind0, arg0_form) = untag_arg(&heap, fields[4]);
         assert_eq!(kind0, 0, "an i64 field is KIND_PLAIN");
         let (arg0_tag, arg0_fields) = untag(&heap, arg0_form);
         assert_eq!(arg0_tag, "int");
         assert_eq!(arg0_fields, vec![Value::Int(7)]);
-        let (kind1, arg1_form) = untag_arg(&heap, fields[6]);
+        let (kind1, arg1_form) = untag_arg(&heap, fields[5]);
         assert_eq!(kind1, 0, "a bool field is KIND_PLAIN");
         let (arg1_tag, _) = untag(&heap, arg1_form);
         assert_eq!(arg1_tag, "bool");
@@ -2778,12 +2621,12 @@ mod tests {
         let ty = Type::Named(Path::root("holder"), vec![]);
         let v = ast_to_sexpr(&mut heap, &typed(ctor, ty)).unwrap();
         let (_, fields) = untag(&heap, v);
-        let (kind, _) = untag_arg(&heap, fields[5]);
+        let (kind, _) = untag_arg(&heap, fields[4]);
         assert_eq!(kind, 2, "a Sexpr-typed field is KIND_SEXPR");
     }
 
     /// `Expr::Construct` over a `mutable` `defstruct` (`AdtKind::Struct`) ->
-    /// `(construct false true 0 type-name-str variant-i64 (kind . arg-form)...)`
+    /// `(construct false true type-name-str variant-i64 (kind . arg-form)...)`
     /// (Stage 3 of the Sexpr/RtValue unification plan,
     /// `docs/implementation-log.md`) — `mutable` is `true`, dispatching to
     /// `compile-construct-boxed-struct`'s `rt_struct_new` path.
@@ -2807,23 +2650,23 @@ mod tests {
         assert_eq!(tag, "construct");
         assert_eq!(fields[0], Value::Bool(false), "a defstruct is never Sexpr-typed");
         assert_eq!(fields[1], Value::Bool(true), "an AdtKind::Struct construct is mutable");
-        let (name_tag, name_fields) = untag(&heap, fields[3]);
+        let (name_tag, name_fields) = untag(&heap, fields[2]);
         assert_eq!(name_tag, "str", "type-name-str is a (str (int c)...) literal form");
         let (c0_tag, c0_fields) = untag(&heap, name_fields[0]);
         assert_eq!(c0_tag, "int");
         assert_eq!(c0_fields, vec![Value::Int('p' as i64)]);
-        assert_eq!(fields[4], Value::Int(0));
-        let (kind0, arg0_form) = untag_arg(&heap, fields[5]);
+        assert_eq!(fields[3], Value::Int(0));
+        let (kind0, arg0_form) = untag_arg(&heap, fields[4]);
         assert_eq!(kind0, 1, "an i64 field is struct-field-kind Int");
         let (arg0_tag, arg0_fields) = untag(&heap, arg0_form);
         assert_eq!(arg0_tag, "int");
         assert_eq!(arg0_fields, vec![Value::Int(3)]);
-        let (kind1, _) = untag_arg(&heap, fields[6]);
+        let (kind1, _) = untag_arg(&heap, fields[5]);
         assert_eq!(kind1, 4, "a bool field is struct-field-kind Bool");
     }
 
     /// A field-less `Construct` (e.g. `None`) still produces a well-formed
-    /// `(construct false false 0 empty variant-i64)` tag with no trailing
+    /// `(construct false false empty variant-i64)` tag with no trailing
     /// argument forms.
     #[test]
     fn translates_a_field_less_construct() {
@@ -2833,7 +2676,7 @@ mod tests {
         let v = ast_to_sexpr(&mut heap, &typed(ctor, ty)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "construct");
-        assert_eq!(fields.len(), 5, "no field-arguments beyond is-sexpr/mutable/type-id/type-name-str/variant");
+        assert_eq!(fields.len(), 4, "no field-arguments beyond is-sexpr/mutable/type-name-str/variant");
     }
 
     /// `Expr::FieldGet(obj, idx)` -> `(field-get idx-unary-list kind-i64

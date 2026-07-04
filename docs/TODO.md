@@ -10,11 +10,22 @@
 
 ## 残っている作業（影響範囲の大きさで優先順位付け——[[feedback-impl-priority]]）
 
-1. **compile側TraitCall機構の削除**——`ast_bridge`の`translate_trait_call`/`compiler.rs`の
-   `compile-trait-dispatch`は、ジェネリック単型化（2026-07-03）によりソース到達不能になった
-   ——削除待ち。Sexpr/RtValue内部表現統合（下記）の最後の後続クリーンアップ。
+現在、着手待ちの残作業はなし。
 
-直近完了: **Sexpr/RtValue内部表現統合 Stage 0-8 全完了**（2026-07-02起案、2026-07-04完了）——
+直近完了: **compile側TraitCall機構の削除**（2026-07-04）——ジェネリック単型化（2026-07-03）で
+`Expr::TraitCall`がコンパイル可能ソースから到達不能になったため、compile側の実行時ディスパッチ
+機構を全撤去。削除対象: `ast_bridge`の`translate_trait_call`/`collect_trait_call_targets`/
+`is_compilable_trait_impl`/`type_id_hash`、`compiler.rs`の`compile-trait-call`/
+`compile-trait-dispatch`/`compile-recv-type-id`とディスパッチアーム、ランタイムの
+`rt_trait_call_fail`/`rt_struct_type_id_hash`。あわせて一般ADT boxの先頭type-idスロット（trait
+ディスパッチ専用の死んだヘッダ）を撤去し、`construct`ノードとboxレイアウトを
+`[variant, field...]`に簡素化（`compile-field-get`/`compile-field-set`はもともと
+`rt_struct_field_get`経由でこのレイアウトに非依存）。`Expr::TraitCall`ノード自体はチェッカが
+ジェネリック定義時本体で生成しインタプリタが内部エラーとしてトラップする診断専用ノードとして
+存続するが、`trait_name`/`impls`フィールドと`Checker::trait_impls`はcompile専用だったため撤去し
+`{ method, args }`のみに縮小。
+
+その前に完了: **Sexpr/RtValue内部表現統合 Stage 0-8 全完了**（2026-07-02起案、2026-07-04完了）——
 `defstruct`インスタンス（`Vector<T>`/`cons-cell<K,V>`含む）・クロージャ・`HashTable<K,V>`・
 `Scope<V>`（heap-repr `V`のもの）を`Sexpr`側の`Value::Boxed`表現に統合。到達した最終状態:
 `RtValue`に残るのは`Int/Float/Bool/Char/Str/Unit/Data/Sexpr/Builtin/BuiltinMethod`+LLVM系5種+

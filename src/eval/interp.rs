@@ -2106,19 +2106,17 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// declare-into-every-module mechanism every other `rt_*` function here
 /// already uses.
 ///
-/// `rt_struct_new`/`rt_struct_field_get`/`rt_struct_field_set`/
-/// `rt_struct_type_id_hash` (Sexpr/RtValue unification, Stage 3):
-/// `compiler.rs`'s `compile-construct-boxed-struct`/`compile-field-get`/
-/// `compile-field-set`/`compile-recv-type-id` call these to build/read/write
-/// a `BoxedObj::Struct` and (for a `defstruct`/`Vector<T>` trait-call
-/// receiver) recover its runtime type-id — the same `BoxedObj::Struct`
-/// mem/rt-layer plumbing Stage 1 already exercised in isolation, wired to
-/// the compiler for the first time here.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 24] {
+/// `rt_struct_new`/`rt_struct_field_get`/`rt_struct_field_set`
+/// (Sexpr/RtValue unification, Stage 3): `compiler.rs`'s
+/// `compile-construct-boxed-struct`/`compile-field-get`/`compile-field-set`
+/// call these to build/read/write a `BoxedObj::Struct` — the same
+/// `BoxedObj::Struct` mem/rt-layer plumbing Stage 1 already exercised in
+/// isolation, wired to the compiler for the first time here.
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 22] {
     use crate::compile::runtime::{
         rt_car, rt_cdr, rt_cons, rt_float_new, rt_float_value, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root,
         rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_new, rt_str_ref,
-        rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_struct_type_id_hash, rt_trait_call_fail, rt_truncate_sexpr_roots,
+        rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_truncate_sexpr_roots,
     };
     [
         ("rt_car", rt_car as usize),
@@ -2132,7 +2130,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 24] {
         ("rt_push_permanent_sexpr_root", rt_push_permanent_sexpr_root as usize),
         ("rt_root_count", rt_root_count as usize),
         ("rt_set_sexpr_root", rt_set_sexpr_root as usize),
-        ("rt_trait_call_fail", rt_trait_call_fail as usize),
         ("rt_truncate_sexpr_roots", rt_truncate_sexpr_roots as usize),
         ("rt_str_new", rt_str_new as usize),
         ("rt_str_length", rt_str_length as usize),
@@ -2144,7 +2141,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 24] {
         ("rt_struct_new", rt_struct_new as usize),
         ("rt_struct_field_get", rt_struct_field_get as usize),
         ("rt_struct_field_set", rt_struct_field_set as usize),
-        ("rt_struct_type_id_hash", rt_struct_type_id_hash as usize),
     ]
 }
 

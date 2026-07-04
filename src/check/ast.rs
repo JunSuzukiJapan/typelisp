@@ -82,19 +82,13 @@ pub enum Expr {
     /// to an ordinary `Expr::Assoc`. The interpreter's `TraitCall` eval arm
     /// is accordingly an internal-error trap, and the old runtime dispatch
     /// (reading the receiver value's own type tag) is gone. The `compile`
-    /// pipeline's own `TraitCall` lowering (`ast_bridge`/`compiler.rs`'s
-    /// dispatch chain) is likewise unreachable from source — a generic
-    /// function can't be `compile`d — and is kept only pending its own
-    /// removal.
+    /// pipeline never sees it either — a generic function can't be
+    /// `compile`d, so `ast_bridge` maps this node to an `unsupported`
+    /// placeholder. Carries only what that trap and the `check`-time walk
+    /// need (`method`/`args`); no `trait_name`/`impls` are retained, since
+    /// the closed dispatch chain those once fed has been removed.
     TraitCall {
-        trait_name: Path,
         method: String,
-        /// Every concrete type registered (in `Registry`) as `impl`ing
-        /// `trait_name` as of this call site's own check time — resolved
-        /// once, here, purely so `compile`'s `ast_bridge`/`compiler.rs` can
-        /// build a closed dispatch chain without registry access of their
-        /// own. Unreachable from source today (see above).
-        impls: Vec<Path>,
         args: Vec<Typed>,
     },
     /// A data-type constructor application, e.g. `(Some x)` / `(Cons a d)`.

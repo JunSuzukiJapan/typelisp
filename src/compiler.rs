@@ -859,50 +859,6 @@ pub const SOURCE: &str = r#"
                       v
                       (panic "compile-tag-struct-field: field type is not representable in compiled code yet")))))))
 
-;; Reads a `compile-trait-call` receiver's own runtime type-id, regardless
-;; of which of `compile-construct`'s two boxed representations built it
-;; (Stage 3 of the Sexpr/RtValue unification plan,
-;; `docs/implementation-log.md`) — a general-ADT `malloc`'d box
-;; (`compile-construct-box`, its own header slot `0`, a raw untagged
-;; pointer cast to `i64`) or a `mutable` `defstruct`/`Vector<T>`/
-;; `cons-cell<K,V>` instance (`compile-construct-boxed-struct`'s
-;; `TAG_BOXED`-tagged `Value::Boxed`, whose own runtime type-id is instead
-;; recovered by hashing its `BoxedObj::Struct`-carried type name,
-;; `rt_struct_type_id_hash` — the same FNV-1a algorithm
-;; `ast_bridge::type_id_hash` computes at compile time for a general-ADT
-;; box's own header, just computed at run time here since a `BoxedObj::Struct`
-;; carries no compile-time-constant header slot of its own). The two are
-;; told apart by `recv`'s own low 3 tag bits, the same way
-;; `compile-sexpr-tag-test` already inspects a tagged `Sexpr`'s tag: a real
-;; heap/`malloc` pointer is always at least word-aligned (never `0b111` in
-;; its own low bits, `typelisp-rt`'s `TAG_BOXED`), so the two representations
-;; can never collide. A real two-way branch (rather than value-level
-;; `select`) is needed since one arm makes an actual `rt_*` call and the
-;; other doesn't — merged into a shared 1-slot result the same
-;; `alloca-args`/`store-arg`/`load-raw` way `compile-if`'s own 2-way merge
-;; already works.
-(defun compile-recv-type-id ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (recv llvm-value)) llvm-value
-  (let ((tag (build-and builder recv (const-i64 builder 7))))
-    (let ((is-boxed (build-icmp-eq builder tag (const-i64 builder 7))))
-      (let ((boxed-block (append-block cur-fn "recv-type-id-boxed")))
-        (let ((raw-block (append-block cur-fn "recv-type-id-raw")))
-          (let ((merge-block (append-block cur-fn "recv-type-id-merge")))
-            (let ((slot (alloca-args builder 1)))
-              (build-cond-br builder is-boxed boxed-block raw-block)
-              (position-at-end builder boxed-block)
-              (let ((args-ptr (alloca-args builder 1)))
-                (store-arg builder args-ptr 0 recv)
-                (let ((hash (build-call builder (get-function m "rt_struct_type_id_hash") args-ptr 1)))
-                  (store-arg builder slot 0 hash)
-                  (build-br builder merge-block)))
-              (position-at-end builder raw-block)
-              (let ((recv-ptr (build-int-to-ptr builder recv)))
-                (let ((raw-id (load-raw builder recv-ptr 0)))
-                  (store-arg builder slot 0 raw-id)
-                  (build-br builder merge-block)))
-              (position-at-end builder merge-block)
-              (load-raw builder slot 0))))))))
-
 ;; Shared by every atomic pattern test (`pat-lit`'s literal-equality
 ;; check, a Ctor pattern's tag test): appends a fresh "this test passed"
 ;; block, branches on `test`, and leaves `builder` positioned at that new
@@ -970,9 +926,7 @@ pub const SOURCE: &str = r#"
                                                                                                         (compile-field-get builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                         (if (equal s "field-set")
                                                                                                             (compile-field-set builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                            (if (equal s "trait-call")
-                                                                                                                (compile-trait-call builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))
+                                                                                                            (panic (append "compile-value: unsupported tag " s)))))))))))))))))))))))))
                            (_ (panic "compile-value: malformed node, expected a tagged list"))))
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -2308,7 +2262,7 @@ pub const SOURCE: &str = r#"
                                 (let ((fallback (build-call builder (get-function m "rt_match_fail") args-ptr 0)))
                                   (store-arg builder slot 0 fallback)
                                   (build-br builder merge-block))))))
-                       ;; `(construct is-sexpr mutable type-id type-name-str
+                       ;; `(construct is-sexpr mutable type-name-str
                        ;; variant-i64 arg-form...)` (Stage 6 of the
                        ;; Sexpr-representation plan, extended by Stage 3 of
                        ;; the Sexpr/RtValue unification plan —
@@ -2327,15 +2281,14 @@ pub const SOURCE: &str = r#"
                        (compile-construct ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((is-sexpr (sexpr-bool (car (cdr e)))))
                            (let ((mutable (sexpr-bool (car (cdr (cdr e))))))
-                             (let ((type-id (sexpr-int (car (cdr (cdr (cdr e)))))))
-                               (let ((type-name-form (car (cdr (cdr (cdr (cdr e)))))))
-                                 (let ((variant (sexpr-int (car (cdr (cdr (cdr (cdr (cdr e)))))))))
-                                   (let ((arg-forms (cdr (cdr (cdr (cdr (cdr (cdr e))))))))
-                                     (if is-sexpr
-                                         (compile-construct-sexpr builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base variant arg-forms)
-                                         (if mutable
-                                             (compile-construct-boxed-struct builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name-form arg-forms)
-                                             (compile-construct-box builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-id variant arg-forms))))))))))
+                             (let ((type-name-form (car (cdr (cdr (cdr e))))))
+                               (let ((variant (sexpr-int (car (cdr (cdr (cdr (cdr e))))))))
+                                 (let ((arg-forms (cdr (cdr (cdr (cdr (cdr e)))))))
+                                   (if is-sexpr
+                                       (compile-construct-sexpr builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base variant arg-forms)
+                                       (if mutable
+                                           (compile-construct-boxed-struct builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name-form arg-forms)
+                                           (compile-construct-box builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base variant arg-forms)))))))))
                        ;; Builds a `BoxedObj::Struct` (Stage 3 of the
                        ;; Sexpr/RtValue unification plan,
                        ;; `docs/implementation-log.md`) for a `mutable`
@@ -2410,30 +2363,21 @@ pub const SOURCE: &str = r#"
                            (_ ())))
                        ;; Builds a general-ADT box (`Option`/`Result`/a
                        ;; `defstruct`, sum or struct kind alike): a fresh
-                       ;; `build-malloc`'d `[2 + argc]`-slot array, slot `0`
-                       ;; the box's own type-id (`ast_bridge::type_id_hash` of
-                       ;; its type's local name — added for `compile-trait-call`'s
-                       ;; runtime dispatch, see that function's doc comment;
-                       ;; `0` for a box built before that stage would have
-                       ;; been meaningless anyway, since nothing read it),
-                       ;; slot `1` the variant tag, slot `2 + i` the `i`-th
-                       ;; field's already-compiled value — `compile-field-get`/
-                       ;; `compile-field-set` read/write the same `2 + idx`
-                       ;; offset, so the layout only has to agree with
-                       ;; itself. The final `build-ptr-to-int` turns the
-                       ;; fresh pointer into the plain `i64` value every
-                       ;; other compiled value already is (mirroring
+                       ;; `build-malloc`'d `[1 + argc]`-slot array, slot `0`
+                       ;; the variant tag, slot `1 + i` the `i`-th field's
+                       ;; already-compiled value. The final `build-ptr-to-int`
+                       ;; turns the fresh pointer into the plain `i64` value
+                       ;; every other compiled value already is (mirroring
                        ;; `build-make-closure`'s own final `ptrtoint`).
                        ;; Deliberately never freed/refcounted in this stage
                        ;; — see this file's own module doc comment for the
                        ;; same accepted leak this codebase already takes for
                        ;; an unreferenced boxed `labels` sibling.
-                       (compile-construct-box ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (type-id i64) (variant i64) (arg-forms Sexpr)) llvm-value
+                       (compile-construct-box ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (variant i64) (arg-forms Sexpr)) llvm-value
                          (let ((argc (sexpr-list-length arg-forms)))
-                           (let ((ptr (build-malloc builder (+ argc 2))))
-                             (store-arg builder ptr 0 (const-i64 builder type-id))
-                             (store-arg builder ptr 1 (const-i64 builder variant))
-                             (compile-construct-box-fields builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base ptr arg-forms 2)
+                           (let ((ptr (build-malloc builder (+ argc 1))))
+                             (store-arg builder ptr 0 (const-i64 builder variant))
+                             (compile-construct-box-fields builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base ptr arg-forms 1)
                              (build-ptr-to-int builder ptr))))
                        ;; Fills a `compile-construct-box`-allocated array,
                        ;; one compiled field per slot starting at `idx`
@@ -2556,9 +2500,9 @@ pub const SOURCE: &str = r#"
                        ;; recovered from `idx-unary-list`'s own length
                        ;; (`ast_bridge::idx_unary_list`'s doc comment
                        ;; explains why it isn't simply a `Sexpr` `Int`) — no
-                       ;; `+ 2` header offset here, unlike the old general-ADT
-                       ;; box layout: a `BoxedObj::Struct`'s own field vector
-                       ;; has no type-id/variant-tag slots of its own.
+                       ;; header offset here, unlike the general-ADT box
+                       ;; layout's own variant-tag slot: a `BoxedObj::Struct`'s
+                       ;; own field vector has no variant-tag slot of its own.
                        (compile-field-get ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((idx (sexpr-list-length-i64 (car (cdr e)))))
                            (let ((kind (sexpr-int (car (cdr (cdr e))))))
@@ -2591,99 +2535,7 @@ pub const SOURCE: &str = r#"
                                          (store-arg builder args-ptr 1 (const-i64 builder idx))
                                          (store-arg builder args-ptr 2 tagged-v)
                                          (let ((ignored (build-call builder (get-function m "rt_struct_field_set") args-ptr 3)))
-                                           (const-i64 builder 0)))))))))))
-                       ;; `(trait-call method-str candidates-list arg-form...)`
-                       ;; — `Expr::TraitCall`'s compile counterpart:
-                       ;; `candidates-list` is a plain list of
-                       ;; `(type-id-i64 . type-name-str)` pairs
-                       ;; (`ast_bridge::translate_trait_call`, one per
-                       ;; `impl` of the trait known at check time), `args`
-                       ;; tagged exactly like `compile-assoc`'s own
-                       ;; instance-call arguments — `args[0]` is always the
-                       ;; receiver. Computes the argument array once
-                       ;; (`compile-call-args`, same as `compile-assoc`),
-                       ;; then re-reads the receiver straight back out of
-                       ;; slot `0` of that same array (`load-raw`) rather
-                       ;; than compiling it a second time — the call
-                       ;; argument list already holds it, exactly the trick
-                       ;; `compile-field-get` used to use to read a box field
-                       ;; before Stage 3 of the Sexpr/RtValue unification
-                       ;; plan, just applied to the local argument array
-                       ;; instead of a heap box. Reads that receiver's own
-                       ;; runtime type-id via `compile-recv-type-id` — which,
-                       ;; unlike a plain `compile-construct-box`-only
-                       ;; `slot 0` read, also handles a `mutable`
-                       ;; `defstruct`/`Vector<T>`/`cons-cell<K,V>` receiver
-                       ;; (`compile-construct-boxed-struct`'s
-                       ;; `TAG_BOXED`-tagged representation — every
-                       ;; currently-`compile`d trait `impl` target — see that
-                       ;; function's own doc comment) — to drive
-                       ;; `compile-trait-dispatch`'s runtime chain, merged
-                       ;; into one shared 1-slot result the same
-                       ;; `alloca-args`/`store-arg`/`load-raw` way
-                       ;; `compile-if`'s 2-way merge already works, just for
-                       ;; an n-way (one per candidate) set of blocks instead.
-                       ;; `release-pending-args`/`pop-sexpr-roots` run once,
-                       ;; at the merge point — safe (and simpler than
-                       ;; duplicating them into every candidate block) since
-                       ;; only one candidate's call block ever actually runs,
-                       ;; and the merge block post-dominates every one of
-                       ;; them.
-                       (compile-trait-call ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
-                         (let ((method (sexpr-str (car (cdr e)))))
-                           (let ((candidates (car (cdr (cdr e)))))
-                             (let ((arg-forms (cdr (cdr (cdr e)))))
-                               (let ((argc (sexpr-list-length arg-forms)))
-                                 (let ((args-ptr (alloca-args builder argc)))
-                                   (let ((pending-ptr (alloca-args builder argc)))
-                                     (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr pending-ptr arg-forms 0)))
-                                       (let ((recv (load-raw builder args-ptr 0)))
-                                         (let ((type-id (compile-recv-type-id builder m cur-fn recv)))
-                                             (let ((merge-block (append-block cur-fn "trait-call-merge")))
-                                               (let ((slot (alloca-args builder 1)))
-                                                 (compile-trait-dispatch builder cur-fn args-ptr argc method type-id merge-block slot candidates)
-                                                 (position-at-end builder merge-block)
-                                                 (let ((result (load-raw builder slot 0)))
-                                                   (release-pending-args builder m pending-ptr argc 0)
-                                                   (pop-sexpr-roots builder m sexpr-roots)
-                                                   result)))))))))))))
-                       ;; Walks `candidates` (`(type-id-i64 . type-name-str)`
-                       ;; pairs), building one two-way test per entry: if the
-                       ;; runtime `type-id` matches this candidate's, call
-                       ;; its own mangled `type-name::method` (the same
-                       ;; forward-declared/wired name `compile-assoc` already
-                       ;; relies on — `ast_bridge::collect_trait_call_targets`
-                       ;; requires and wires every candidate exactly like a
-                       ;; static `Expr::Assoc` target), store the result into
-                       ;; `slot`, and branch to `merge-block`; otherwise fall
-                       ;; through to the next candidate's own test. Once every
-                       ;; candidate has failed, `Checker::check_instance_method`'s
-                       ;; own call-site check (every argument's concrete type
-                       ;; must actually implement the bound trait) guarantees
-                       ;; this is unreachable for a well-typed program —
-                       ;; `rt_trait_call_fail` (an `abort`, mirroring
-                       ;; `rt_match_fail`'s role for `compile-match-arms`) is
-                       ;; the trap for the case that guarantee was somehow
-                       ;; wrong.
-                       (compile-trait-dispatch ((builder llvm-builder) (cur-fn llvm-function) (args-ptr llvm-value) (argc i32) (method string) (type-id llvm-value) (merge-block llvm-basic-block) (slot llvm-value) (candidates Sexpr)) ()
-                         (match candidates
-                           ((Cons pair rest)
-                            (let ((cand-id (sexpr-int (car pair))))
-                              (let ((cand-name (sexpr-str (cdr pair))))
-                                (let ((call-block (append-block cur-fn "trait-call-call")))
-                                  (let ((next-block (append-block cur-fn "trait-call-next")))
-                                    (build-cond-br builder (build-icmp-eq builder type-id (const-i64 builder cand-id)) call-block next-block)
-                                    (position-at-end builder call-block)
-                                    (let ((mangled (append cand-name (append "::" method))))
-                                      (let ((result (build-call builder (get-function m mangled) args-ptr argc)))
-                                        (store-arg builder slot 0 result)
-                                        (build-br builder merge-block)))
-                                    (position-at-end builder next-block)
-                                    (compile-trait-dispatch builder cur-fn args-ptr argc method type-id merge-block slot rest))))))
-                           (_ (let ((fail-args (alloca-args builder 0)))
-                                (let ((fallback (build-call builder (get-function m "rt_trait_call_fail") fail-args 0)))
-                                  (store-arg builder slot 0 fallback)
-                                  (build-br builder merge-block)))))))
+                                           (const-i64 builder 0))))))))))))
                 (let ((v (compile-value builder env fn-env '() f (Option::none) (Option::none) (Option::none) body)))
                   (let ((protected (bare-returned-own-name body param-names '())))
                     (release-bindings builder m env param-names protected)
