@@ -26,7 +26,7 @@ use inkwell::AddressSpace;
 
 use crate::{BoxId, Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
 
-use super::value::{Capture, ClosureBody, EvalError, RtValue, ScopeFrame, Slot, SlotKind};
+use super::value::{Capture, ClosureBody, EvalError, NativeScope, RtValue, Slot, SlotKind};
 
 /// A registered function or method body with its parameter names.
 struct FnDef {
@@ -1493,13 +1493,7 @@ fn collect_sexpr_roots(v: &RtValue, out: &mut Vec<Value>) {
                 collect_sexpr_roots(f, out);
             }
         }
-        RtValue::Scope(frames) => {
-            for frame in frames.borrow().iter() {
-                for f in frame.borrow().values() {
-                    collect_sexpr_roots(f, out);
-                }
-            }
-        }
+        RtValue::Scope(scope) => scope.for_each_value(|f| collect_sexpr_roots(f, out)),
         _ => {}
     }
 }
@@ -3174,70 +3168,46 @@ fn vector_len(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Int(heap.struct_field_count(id) as i64))
 }
 
-fn expect_scope(v: &RtValue) -> Result<&Rc<RefCell<Vec<ScopeFrame>>>, EvalError> {
+// The native (`RtValue::Scope`) halves of the six scope builtin methods —
+// thin adapters between the `args` slice and [`NativeScope`]'s method
+// surface, which owns the frame-stack semantics (search order, top-frame
+// writes, `clone-frames` sharing — see that struct's doc comments).
+
+fn expect_scope(v: &RtValue) -> Result<&NativeScope, EvalError> {
     match v {
-        RtValue::Scope(frames) => Ok(frames),
+        RtValue::Scope(scope) => Ok(scope),
         other => Err(EvalError::Internal(format!("expected a Scope, got {:?}", other))),
     }
 }
 
-/// `Scope::new`: one fresh empty frame, already pushed — the frame a
-/// function's own parameters/captures bind into (`compiler.rs`'s
-/// `bind-params`/`bind-captures`), matching `HashTable::new`'s "ready to use
-/// immediately" convention.
 fn scope_new() -> RtValue {
-    RtValue::Scope(Rc::new(RefCell::new(vec![Rc::new(RefCell::new(HashMap::new()))])))
+    RtValue::Scope(NativeScope::new())
 }
 
-/// Shares every frame of `args[0]` (by `Rc::clone` — a pointer copy per
-/// frame, never copying a frame's own entries) into a brand new `Scope`
-/// value — see [`RtValue::Scope`]'s doc comment. `compiler.rs`'s
-/// `compile-labels` uses this to give each `labels` def's own new lexical
-/// scope every enclosing scope's frames "for free" before pushing that def's
-/// own fresh parameter frame on top.
 fn scope_clone_frames(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let frames = expect_scope(&args[0])?;
-    Ok(RtValue::Scope(Rc::new(RefCell::new(frames.borrow().clone()))))
+    Ok(RtValue::Scope(expect_scope(&args[0])?.clone_frames()))
 }
 
 fn scope_push_frame(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let frames = expect_scope(&args[0])?;
-    frames.borrow_mut().push(Rc::new(RefCell::new(HashMap::new())));
+    expect_scope(&args[0])?.push_frame();
     Ok(RtValue::Unit)
 }
 
 fn scope_pop_frame(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let frames = expect_scope(&args[0])?;
-    frames.borrow_mut().pop();
+    expect_scope(&args[0])?.pop_frame();
     Ok(RtValue::Unit)
 }
 
-/// Searches from the most-recently-pushed frame outward — see
-/// `compiler.rs`'s module doc comment for why this terminates at the
-/// `Scope`'s own first (function-entry) frame rather than reaching into an
-/// *enclosing* function's `Scope` (a different value entirely; there is
-/// nothing further to search here).
 fn scope_get(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let frames = expect_scope(&args[0])?;
+    let scope = expect_scope(&args[0])?;
     let name = expect_str(&args[1])?;
-    for frame in frames.borrow().iter().rev() {
-        if let Some(v) = frame.borrow().get(name) {
-            return Ok(option_value(Some(v.clone())));
-        }
-    }
-    Ok(option_value(None))
+    Ok(option_value(scope.get(name)))
 }
 
-/// Always writes into the most-recently-pushed frame — never an enclosing
-/// (shared, via `clone-frames`) one, so a `let`/`labels` def's own bindings
-/// never leak into whatever scope it borrowed frames from.
 fn scope_set(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let frames = expect_scope(&args[0])?;
+    let scope = expect_scope(&args[0])?;
     let name = expect_str(&args[1])?;
-    let value = args[2].clone();
-    let frames = frames.borrow();
-    let top = frames.last().ok_or_else(|| EvalError::Internal("Scope::set: no frame to write into".into()))?;
-    top.borrow_mut().insert(name.to_string(), value);
+    scope.set(name, args[2].clone())?;
     Ok(RtValue::Unit)
 }
 

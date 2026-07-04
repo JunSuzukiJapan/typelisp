@@ -219,7 +219,7 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
         RtValue::Sexpr(sv) => format_sexpr(heap, *sv),
         RtValue::Builtin(name) => format!("#<builtin {}>", name),
         RtValue::BuiltinMethod(type_name, method) => format!("#<builtin {}::{}>", type_name, method),
-        RtValue::Scope(frames) => format!("#<scope depth={}>", frames.borrow().len()),
+        RtValue::Scope(scope) => format!("#<scope depth={}>", scope.depth()),
         // Compiler-internal handles; not meant to be printed by user code,
         // so a terse opaque tag is enough.
         RtValue::LlvmModule(_) => "#<llvm-module>".to_string(),

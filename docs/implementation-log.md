@@ -2790,6 +2790,17 @@ FFIハンドルだけを`RtValue`に残す。さらに調査で判明した事�
   全体テスト（`scripts/with-llvm-env.sh cargo test`、32バイナリ）green——必須ゲートの
   `tests/compile_test.rs`/`tests/compile_file_test.rs`（自己ホスティングコンパイラ、
   `Scope<llvm-*>`のnative経路）含む。clippyはHEAD比で新規警告ゼロ。
+  **追補（同日、ユーザー提案）**: native側ペイロードを裸の
+  `Rc<RefCell<Vec<ScopeFrame>>>`から`NativeScope`構造体（`src/eval/value.rs`）に
+  カプセル化。`new`/`clone_frames`/`push_frame`/`pop_frame`/`get`/`set`/`depth`/
+  `for_each_value`をメソッド化し、フレーム共有チェーンの不変条件を型の内側に閉じた——
+  ヒープ側が`Heap::scope_*`メソッド群なのにnative側だけフリー関数が生の入れ子型を
+  剥がして触るという非対称の解消。interp.rsのscope_*フリー関数は`args`スライスとの
+  薄いアダプタに縮退、`collect_sexpr_roots`は`for_each_value`経由、`main.rs`の表示は
+  `depth()`経由。振る舞い変更なし（`PartialEq`の内容比較・空スタックsetのエラー含め
+  従来どおり）。なお同時に検討した「空スタックsetでフレーム自動再作成」案は不採用
+  ——空スタックはpush/pop不均衡バグでしか到達せず、自動修復は関数エントリフレーム
+  破壊を隠蔽して失敗を遠方に移動させるため（fail-fastの原則維持）。
 
 各段階で`RtValue`からバリアントが1つずつ消えていき（`Struct`/`StructData`=Stage 2、
 `HashTable`/`HashKey`=Stage 5、`Closure`=Stage 6b）、Stage 8完了で確定した最終状態では
