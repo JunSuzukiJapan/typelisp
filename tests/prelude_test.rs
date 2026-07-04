@@ -403,12 +403,16 @@ fn int_to_char_panics_past_the_max_scalar_value() {
 
 #[test]
 fn symbol_to_string_extracts_the_name() {
-    assert_eq!(eval_ok("(symbol->string (quote foo))"), RtValue::Str("foo".into()));
+    // `symbol->string : Symbol -> string`. A `Symbol` is produced by
+    // `string->symbol` (or `gensym`), not by a quoted-datum `Sexpr`.
+    assert_eq!(eval_ok(r#"(symbol->string (string->symbol "foo"))"#), RtValue::Str("foo".into()));
 }
 
 #[test]
-fn symbol_to_string_panics_on_a_non_symbol() {
-    assert!(matches!(run("(symbol->string (quote 1))"), Err(EvalError::Panic(_))));
+fn symbol_to_string_rejects_a_non_symbol_at_check_time() {
+    // `(quote 1)` is a `Sexpr` (an int datum), not a `Symbol`, so passing it to
+    // `symbol->string` is now a static type error rather than a runtime panic.
+    type_error("(symbol->string (quote 1))");
 }
 
 #[test]

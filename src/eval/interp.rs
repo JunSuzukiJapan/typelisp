@@ -754,7 +754,11 @@ impl Interp {
             SEXPR_FLOAT => heap.alloc_float(rt_f64(&vs[0])?),
             SEXPR_CHAR => Value::Char(rt_char(&vs[0])?),
             SEXPR_BOOL => Value::Bool(rt_bool(&vs[0])?),
-            SEXPR_SYM => heap.intern_symbol(&rt_str(vs[0].clone())?),
+            // `(Sym x)` where `x : Symbol`. A `Symbol` value is already carried
+            // as `RtValue::Sexpr(Value::Symbol(id))`, so the field value *is*
+            // the resulting `Sexpr::Sym` — extract its `Value::Symbol` directly
+            // (no re-interning through a string).
+            SEXPR_SYM => rt_sexpr(&vs[0])?,
             SEXPR_STR => heap.alloc_string(rt_str(vs[0].clone())?),
             SEXPR_CONS => {
                 let car = rt_sexpr(&vs[0])?;
@@ -1282,6 +1286,19 @@ impl Interp {
                 self.gensym_counter.set(n + 1);
                 Some(Ok(RtValue::Sexpr(heap.intern_symbol(&format!(" gensym-{}", n)))))
             }
+            // `symbol->string`/`string->symbol`: the `Symbol`<->`Str` bridges.
+            // A `Symbol` value shares the `Value::Symbol(id)` carrier of a
+            // `Sexpr::Sym` (`RtValue::Sexpr(Value::Symbol(id))`), so
+            // `symbol->string` reads its interned name and `string->symbol`
+            // interns a fresh one — the same intern table `gensym`/`read` use.
+            "symbol->string" => Some(match rt_sexpr(&args[0]) {
+                Ok(Value::Symbol(id)) => Ok(RtValue::Str(heap.symbol_name(id).into())),
+                _ => Err(EvalError::Panic("symbol->string: not a symbol".into())),
+            }),
+            "string->symbol" => Some(match rt_str(args[0].clone()) {
+                Ok(s) => Ok(RtValue::Sexpr(heap.intern_symbol(&s))),
+                Err(e) => Err(e),
+            }),
             "cons" => match (args.first(), args.get(1)) {
                 (Some(RtValue::Sexpr(a)), Some(RtValue::Sexpr(b))) => {
                     self.sync_roots(heap);
@@ -1864,6 +1881,16 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     if *type_name == Path::root("bool") {
         return match method {
             "eq" | "eql" | "equal" | "equalp" => Some(bool_eq(args)),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("symbol") {
+        // A `Symbol` value shares the `Value::Symbol(id)` carrier of a
+        // `Sexpr::Sym`, so `eq`/`eql` reuse the `Sexpr` comparisons (interned
+        // id identity — same name => same id => `eq`).
+        return match method {
+            "eq" => Some(sexpr_eq(args)),
+            "eql" => Some(sexpr_eql(heap, args)),
             _ => None,
         };
     }
@@ -3488,7 +3515,9 @@ fn match_sexpr_ctor(heap: &Heap, variant: usize, args: &[Pattern], v: Value) -> 
         (SEXPR_CHAR, Value::Char(c)) => match_pattern(heap, &args[0], &RtValue::Char(c)),
         (SEXPR_BOOL, Value::Bool(b)) => match_pattern(heap, &args[0], &RtValue::Bool(b)),
         (SEXPR_SYM, Value::Symbol(id)) => {
-            match_pattern(heap, &args[0], &RtValue::Str(heap.symbol_name(id).into()))
+            // `(Sym v)` binds `v : Symbol` — the symbol value itself, carried as
+            // `RtValue::Sexpr(Value::Symbol(id))`, not its textual name.
+            match_pattern(heap, &args[0], &RtValue::Sexpr(Value::Symbol(id)))
         }
         (SEXPR_STR, Value::Str(id)) => {
             match_pattern(heap, &args[0], &RtValue::Str(heap.string(id).into()))

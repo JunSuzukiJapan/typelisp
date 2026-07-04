@@ -72,16 +72,11 @@ pub const SOURCE: &str = r#"
 (defun atom ((s Sexpr)) bool (not (consp s)))
 
 ;; `symbol->string`/`string->symbol` (`docs/language-design.md` §4.1's
-;; conversion catalog): a `Sexpr::Sym`'s name is already stored as a plain
-;; `string` (`registry::sexpr_def`'s `sym` variant field, `Type::Str`), so
-;; `symbol->string` is just the `Sym` destructuring `match` arm every other
-;; `Sexpr` accessor here uses. `string->symbol` is the bare `Sym` constructor
-;; — interning happens underneath it the same way `gensym` interns a fresh
-;; name (`Interp::eval_builtin`'s `"gensym"` arm), so no Rust builtin is
-;; needed for either direction.
-(defun symbol->string ((s Sexpr)) string
-  (match s ((Sym name) name) (_ (panic "symbol->string: not a symbol"))))
-(defun string->symbol ((s string)) Sexpr (Sym s))
+;; conversion catalog) are now Rust builtins (`Interp::eval_builtin`) rather
+;; than prelude `defun`s: `Sexpr::Sym` wraps the first-class `Symbol` type (not
+;; a `string`), so the old `(match s (Sym name) name)` / `(Sym s)` definitions
+;; no longer type-check. They bridge the interned `Symbol` handle to/from its
+;; textual name directly against the intern table.
 
 ;; `unreachable`/`todo` (cl-equivalence-catalog.md §1.2): placeholders for
 ;; "this branch can't be reached" / "not implemented yet", each a

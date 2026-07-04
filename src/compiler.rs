@@ -288,7 +288,7 @@ pub const SOURCE: &str = r#"
 ;; tag's or a `labels` def's name, both plain `Str`s).
 (defun sexpr-sym-name ((s Sexpr)) string
   (match s
-    ((Sym v) v)
+    ((Sym v) (symbol->string v))
     (_ (panic "expected a Sym Sexpr node"))))
 
 ;; Extracts a host `i64` out of an `(Int n)` Sexpr node — moved up here
@@ -407,7 +407,7 @@ pub const SOURCE: &str = r#"
 (defun bare-returned-own-name ((body Sexpr) (params Sexpr) (captured Sexpr)) Option<string>
   (match (car body)
     ((Sym s)
-     (if (equal s "var")
+     (if (equal (symbol->string s) "var")
          (let ((nm (sexpr-str (car (cdr body)))))
            (if (sexpr-name-list-contains? params nm)
                (Option::some nm)
@@ -437,7 +437,7 @@ pub const SOURCE: &str = r#"
 (defun form-is-borrowed? ((env Scope<llvm-value>) (form Sexpr)) bool
   (match (car form)
     ((Sym s)
-     (if (equal s "var")
+     (if (equal (symbol->string s) "var")
          (name-is-borrowed? env (sexpr-str (car (cdr form))))
          false))
     (_ false)))
@@ -881,7 +881,8 @@ pub const SOURCE: &str = r#"
             (let ((fn-env (new-fn-env)))
               (labels ((compile-value ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (match (car e)
-                           ((Sym s)
+                           ((Sym sym)
+                            (let ((s (symbol->string sym)))
                             (if (equal s "int")
                                 (compile-int builder e)
                                 (if (equal s "bool")
@@ -926,7 +927,7 @@ pub const SOURCE: &str = r#"
                                                                                                         (compile-field-get builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                         (if (equal s "field-set")
                                                                                                             (compile-field-set builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                            (panic (append "compile-value: unsupported tag " s)))))))))))))))))))))))))
+                                                                                                            (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))
                            (_ (panic "compile-value: malformed node, expected a tagged list"))))
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -2104,7 +2105,8 @@ pub const SOURCE: &str = r#"
                        ;; & co.).
                        (compile-pattern-test ((builder llvm-builder) (env Scope<llvm-value>) (cur-fn llvm-function) (v llvm-value) (pat Sexpr) (fail-block llvm-basic-block)) ()
                          (match (car pat)
-                           ((Sym s)
+                           ((Sym sym)
+                            (let ((s (symbol->string sym)))
                             (if (equal s "pat-wild")
                                 ()
                                 (if (equal s "pat-bind")
@@ -2119,7 +2121,7 @@ pub const SOURCE: &str = r#"
                                               (let ((subpats (car (cdr (cdr pat)))))
                                                 (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder v variant) fail-block)
                                                 (compile-ctor-subpatterns builder env cur-fn v variant subpats 0 fail-block)))
-                                            (panic (append "compile-pattern-test: unsupported pattern tag " s)))))))
+                                            (panic (append "compile-pattern-test: unsupported pattern tag " s))))))))
                            (_ (panic "compile-pattern-test: malformed pattern node"))))
                        ;; Tests/extracts each of a `pat-ctor`'s
                        ;; sub-patterns in turn against variant `variant`'s

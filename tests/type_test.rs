@@ -20,6 +20,7 @@ fn primitives() {
     assert_eq!(parse("bool"), Type::Bool);
     assert_eq!(parse("char"), Type::Char);
     assert_eq!(parse("String"), Type::Str); // case-folded to "string"
+    assert_eq!(parse("Symbol"), Type::Symbol); // case-folded to "symbol"
 }
 
 #[test]

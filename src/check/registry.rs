@@ -328,6 +328,7 @@ impl Registry {
                 Type::I64 => int_assoc(Type::I64),
                 Type::F64 => float_assoc(),
                 Type::Bool => bool_assoc(),
+                Type::Symbol => symbol_assoc(),
                 _ => HashMap::new(),
             };
             root.add_type(AdtDef {
@@ -364,7 +365,15 @@ impl Registry {
         // these are collision-*resistant*, not truly unforgeable — typelisp
         // symbols are always interned/permanent, there is no uninterned-symbol
         // concept to give a CL-style absolute guarantee).
-        root.fns.insert("gensym".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: sexpr(), public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("gensym".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::Symbol, public: true, builtin: true, bounds: HashMap::new() });
+        // `symbol->string`/`string->symbol`: the only bridges between the
+        // interned `Symbol` handle and its textual name. They are Rust builtins
+        // (`Interp::eval_builtin`) rather than typelisp because they touch the
+        // symbol intern table directly; `Sexpr::Sym` now wraps `Symbol` (not
+        // `Str`), so the old prelude `(match s (Sym name) name)` /
+        // `(Sym s)` definitions no longer type-check.
+        root.fns.insert("symbol->string".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol], ret: Type::Str, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("string->symbol".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: Type::Symbol, public: true, builtin: true, bounds: HashMap::new() });
         // `exit`: process termination (cl-equivalence-catalog.md §1.2). Unlike
         // `panic`/`unreachable`/`todo` (which unwind through `EvalError::Panic`,
         // a typelisp-level signal), this needs an actual OS call
@@ -485,7 +494,7 @@ fn sexpr_def() -> AdtDef {
             Variant { name: "float".to_string(), fields: vec![Type::F64] },
             Variant { name: "char".to_string(), fields: vec![Type::Char] },
             Variant { name: "bool".to_string(), fields: vec![Type::Bool] },
-            Variant { name: "sym".to_string(), fields: vec![Type::Str] },
+            Variant { name: "sym".to_string(), fields: vec![Type::Symbol] },
             Variant { name: "str".to_string(), fields: vec![Type::Str] },
             Variant { name: "cons".to_string(), fields: vec![sexpr(), sexpr()] },
         ],
@@ -533,6 +542,19 @@ fn bool_assoc() -> HashMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), eq_fn());
     }
+    m
+}
+
+/// `symbol`'s method table: `eq`/`eql` only. Symbols are always interned, so
+/// two `Symbol`s are `eq` iff they are the same interned id (same name) — the
+/// runtime routes both to `sexpr_eq`/`sexpr_eql` since a `Symbol` value shares
+/// the `Value::Symbol(id)` carrier of a `Sexpr::Sym`. `equal`/`equalp` are not
+/// registered (there is no structure to recurse into beyond `eq`'s identity).
+fn symbol_assoc() -> HashMap<String, AssocFn> {
+    let mut m = HashMap::new();
+    let eq_fn = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol, Type::Symbol], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
+    m.insert("eq".to_string(), eq_fn());
+    m.insert("eql".to_string(), eq_fn());
     m
 }
 

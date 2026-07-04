@@ -91,6 +91,13 @@ pub enum Type {
     Char,
     /// The `String` type.
     Str,
+    /// The `Symbol` type: an interned symbol handle, distinct from `Str`.
+    /// Its runtime value is a `Value::Symbol(SymId)` (the same carrier a
+    /// `Sexpr::Sym` holds), but statically it is its own primitive type so
+    /// `gensym`/`string->symbol` can be typed precisely instead of as the
+    /// heterogeneous `Sexpr`. `symbol->string`/`string->symbol` are the only
+    /// bridges to/from `Str`.
+    Symbol,
     /// The unit type `()`.
     Unit,
     /// The never / bottom type `!` (the type of `panic` and other diverging
@@ -136,7 +143,7 @@ pub fn primitive_types() -> Vec<Type> {
     vec![
         Type::I8, Type::I16, Type::I32, Type::I64, Type::Isize,
         Type::U8, Type::U16, Type::U32, Type::U64, Type::Usize,
-        Type::F32, Type::F64, Type::Bool, Type::Char, Type::Str,
+        Type::F32, Type::F64, Type::Bool, Type::Char, Type::Str, Type::Symbol,
     ]
 }
 
@@ -162,6 +169,7 @@ pub fn prim_type_path(ty: &Type) -> Option<Path> {
         Type::Bool => "bool",
         Type::Char => "char",
         Type::Str => "string",
+        Type::Symbol => "symbol",
         Type::Unit | Type::Never | Type::Named(..) | Type::Fn(..) => return None,
     };
     Some(Path::root(name))
@@ -302,6 +310,7 @@ fn named_or_primitive(segs: Vec<String>, args: Vec<Type>) -> Type {
             "bool" => return Type::Bool,
             "char" => return Type::Char,
             "string" => return Type::Str,
+            "symbol" => return Type::Symbol,
             "!" => return Type::Never,
             _ => {}
         }

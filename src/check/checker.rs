@@ -2331,6 +2331,14 @@ impl Checker {
         // expected type.
         if let Some(e) = expected {
             if typed.ty != Type::Never && &typed.ty != e {
+                // A `Symbol` is a valid `Sexpr` datum, so it is wrapped into
+                // `Sexpr::Sym` wherever a `Sexpr` is expected (a `gensym`'d
+                // temp flowing into a `list`/`cons`/quasiquote code position).
+                // The runtime bits are identical, so `construct_sexpr`'s
+                // `SEXPR_SYM` arm is an effective no-op.
+                if *e == sexpr_ty() && typed.ty == Type::Symbol {
+                    return self.wrap_rest_elem(&Type::Symbol, typed);
+                }
                 return Err(Error::TypeError(format!(
                     "type mismatch: expected {:?}, found {:?}",
                     e, typed.ty
@@ -3139,6 +3147,9 @@ impl Checker {
                 if let Value::Cons(_) = cdr {
                     let x = heap.car(cdr)?;
                     if heap.cdr(cdr)?.is_empty() {
+                        // `check`'s reconciliation wraps a `Symbol` (e.g. a
+                        // `gensym`'d temp) into `Sexpr::Sym` here automatically;
+                        // any other non-`Sexpr` value is still rejected.
                         return self.check(heap, interp, env, x, Some(&sexpr_ty));
                     }
                 }
@@ -4003,6 +4014,7 @@ fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
         Type::Char => Some("char"),
         Type::Bool => Some("bool"),
         Type::Str => Some("str"),
+        Type::Symbol => Some("sym"),
         _ => None,
     }
 }
@@ -4065,6 +4077,7 @@ fn mangle_type(t: &Type) -> String {
         Type::Bool => "bool".into(),
         Type::Char => "char".into(),
         Type::Str => "string".into(),
+        Type::Symbol => "symbol".into(),
         Type::Unit => "()".into(),
         Type::Never => "!".into(),
         Type::Named(p, args) if args.is_empty() => p.to_string(),

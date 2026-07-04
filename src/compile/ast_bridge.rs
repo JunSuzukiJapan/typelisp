@@ -224,6 +224,9 @@ fn struct_field_kind(ty: &Type, structs: &HashSet<Path>) -> i64 {
         Type::Char => 3,
         Type::Bool => 4,
         Type::Str => 6,
+        // A `Symbol` value is an already-tagged immediate (an interned
+        // `Value::Symbol`), the same passthrough case as `Str`/`Sexpr`.
+        Type::Symbol => 6,
         _ if is_sexpr_type(ty) => 6,
         Type::Named(p, _) if structs.contains(p) => 6,
         _ => 0,
