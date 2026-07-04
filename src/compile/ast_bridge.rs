@@ -283,7 +283,7 @@ fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], cx: Ctx) -> Result<Vec<Va
 /// [`binding_kind`] rather than re-deriving the same 3-way classification a
 /// third time.
 fn tagged_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], cx: Ctx) -> Result<Vec<Value>, Error> {
-    tagged_ast_list_to_sexpr_with(heap, items, cx, |ty| binding_kind(ty))
+    tagged_ast_list_to_sexpr_with(heap, items, cx, binding_kind)
 }
 
 /// [`translate_construct`]'s `mutable` (`defstruct`/`Vector<T>`/

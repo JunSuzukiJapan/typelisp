@@ -1621,7 +1621,7 @@ fn int_to_char(args: &[RtValue]) -> Result<RtValue, EvalError> {
         Some(RtValue::Int(n)) => {
             let in_u32_range = *n >= 0 && *n <= i64::from(u32::MAX);
             in_u32_range
-                .then(|| *n as u32)
+                .then_some(*n as u32)
                 .and_then(char::from_u32)
                 .map(RtValue::Char)
                 .ok_or_else(|| EvalError::Panic(format!("int->char: {} is not a valid Unicode scalar value", n)))
