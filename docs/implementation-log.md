@@ -2418,7 +2418,7 @@ panicと同じ前例で実行時panic（型システムでは「有効なスカ�
 panicの両方）、`symbol->string`/`string->symbol`（往復、非symbolでのpanic）を追加。全体テスト
 （`./scripts/with-llvm-env.sh cargo test`、workspace全体）green。
 
-## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-6完了・Stage 7-8未着手 ※Stage 6の実装記録は「ジェネリック単型化とSexpr/RtValue統合Stage 6」節）
+## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-7完了・Stage 8未着手 ※Stage 6の実装記録は「ジェネリック単型化とSexpr/RtValue統合Stage 6」節）
 
 `HashTable<K,V>::entries`のペア型を巡る議論の中で、ユーザーから「`Sexpr`と`RtValue`という
 2つの並行した実行時値表現に分かれていること自体がおかしい」という指摘を受けた。実際の
@@ -2707,12 +2707,50 @@ FFIハンドルだけを`RtValue`に残す。さらに調査で判明した事�
   globals全部に影響）。
 - **Stage 6b（未着手）**: `RtValue::Closure`自体を`BoxedObj::Closure{body_token, env}`+
   外側クレートの`ClosureBody`サイドテーブルに移行。
-- **Stage 7（未着手）**: Scope: `StructPayload::Frames`のmem/rt層プラミング。
+- **Stage 7（完了、2026-07-04）**: Scope: `StructPayload::Frame`/`Frames`のmem層プラミング。
+  **表現は計画スケッチ（`Frames(Vec<HashMap<String,Value>>)`、フレームをインライン格納）から
+  意図的に変更した**——現行`RtValue::Scope`の`clone-frames`はフレームを`Rc`で**参照共有**する
+  （クローン後に共有フレームへ書いた束縛は両方のScopeから見える、いわゆるスコープチェーン——
+  「親フレームをmutate/復元も複製もせず参照共有するチェーン構造にする。実在の言語処理系は
+  みな同種設計」というユーザーの明示的な設計指示（2026-06-29、ネストlabelsのfn-env修正時）が
+  根拠）ため、インライン格納ではdeep copyになりこの意味論が壊れる。代わりに**フレーム自体を
+  独立した箱**（`StructPayload::Frame(HashMap<String, Value>)`、type_name `"scope-frame"`。
+  キーは旧`ScopeFrame`の`HashMap<String, RtValue>`と同じ素の`String`所有——`Map`のバケット
+  ストレージと同様ただのRustメモリなのでmarkはトレース不要、interningも不要）とし、Scope本体は
+  `StructPayload::Frames(Vec<BoxId>)`（type_name `"scope"`）がフレーム箱を**インデックスで参照**
+  する2層表現にした。`clone-frames`は`Vec<BoxId>`のコピー（フレームごとにポインタコピー1回、
+  エントリは一切コピーしない——旧`Rc::clone`と同型）、フレーム*スタック*だけがScopeごとに
+  独立なので`push-frame`/`pop-frame`は呼んだScopeにしか影響しない。
+  `Heap` API: `alloc_scope`（`Scope::new`の「空フレーム1枚push済み」規約どおり、scope箱+
+  初期フレーム箱の2箱を確保。box storeは伸長可能なのでGC誘発なし）/`scope_clone_frames`/
+  `scope_push_frame`/`scope_pop_frame`（空スタックではno-op——旧実装の`Vec::pop`挙動を踏襲）/
+  `scope_get`（最新フレームから外側へ検索、`Option<Value>`）/`scope_set`（常に最新フレームへ
+  書く。フレームが1枚もなければ"no frame to write into"でpanic——インタプリタが自層で
+  `EvalError`化すべき呼び出し側不変条件、hashtableの非対応キー型panicと同じ扱い）/
+  `is_scope`（`Frames`ペイロード判定。`is_struct`/`is_hashtable`/`is_float`/`is_cell`/
+  `is_closure`と並ぶ判別述語。フレーム箱には公開述語を設けない——Scopeの内部構成要素であり
+  単独の言語値として渡らないため）。GC mark loop（`push_boxed_nested`）は`Frames`→各フレームを
+  `Value::Boxed`として積む、`Frame`→束縛値を積む、の2アーム追加——共有フレームは
+  「どれか1つのScopeが生きている限り生存」がmark-sweepで自然に成立する。
+  Stage 4（HashTable）と同じくコンパイル対応はスコープ外のため`crates/typelisp-rt`は無変更、
+  **インタプリタも意図的に未結線**（`RtValue::Scope`と並存のみ、結線はStage 8）。
+  テスト: `tests/mem_test.rs`に14件追加——基本動作（初期フレーム、同一フレーム内上書き、
+  push/popでのシャドウイングと復元、setは常に最新フレームのみ）、**参照共有の意味論**
+  （clone後に共有フレームへ書いた束縛が他方から見える／clone後にpushしたフレームは共有されない
+  ——この表現を選んだ理由そのものの固定化テスト）、全フレームpop後のset panic・空スタックpopの
+  no-op・HashTable箱へのscopeアクセサpanic・Scope箱へのhashtableアクセサpanic・`is_scope`判別、
+  GC（未到達Scopeのフレームごと回収／rooted Scope→フレーム→束縛値の2ホップトレース／
+  非rootedクローンだけが死んでも共有フレームとそこへの書き込みは生存）。
+  全体テスト（`scripts/with-llvm-env.sh cargo test`、31クレート）green。
 - **Stage 8（未着手）**: Scope: インタプリタ結線（最後に単独で着地——
   `src/compiler.rs`自体が`Scope<llvm-value>`で自身のenv/fn-envを構築しているため、
   ここのバグは自己ホスティングコンパイラ全体を静かに壊しうる。
   `tests/compile_test.rs`/`tests/compile_file_test.rs`のフルパスを退行チェックの
-  必須ゲートとする）。
+  必須ゲートとする。`RtValue::LlvmValue`等のLLVM系5種は`crate::mem::Value`で表現不可能な
+  ため、`Scope<llvm-value>`/`Scope<llvm-function>`——現状の主用途——をどう扱うかの設計判断が
+  必要: 単型化後は`Scope<V>`の具体型`V`が常に静的に分かるので、6aの`Slot`と同型の
+  「静的型駆動でヒープ表現（`V`のランタイム表現が`Value`のとき）とRust-native表現を振り分ける」
+  方式か、6bの`Capture::Native`相当のサイドテーブル方式が候補）。
 
 各段階で`RtValue`からバリアントが1つずつ消えていき、最終的に`RtValue`には
 `Int/Float/Bool/Char/Str/Unit/Data/Sexpr(Value)/Builtin/BuiltinMethod`とLLVM系5種が残る

@@ -229,12 +229,28 @@ pub(crate) enum MemHashKey {
 /// `HashMap`'s own bucket storage is ordinary Rust memory (like
 /// `str_slots`'s `String` buffers), so the mark phase only needs to trace
 /// the [`Value`]s it holds (both keys — [`MemHashKey::Str`]'s `StrId` — and
-/// values), not the map structure itself. `Frames` (`Scope<V>`) is a planned
-/// addition from a later stage of the unification plan, not implemented yet.
+/// values), not the map structure itself.
+///
+/// `Frames` is a `Scope<V>`: a stack of frames, each an ordinary
+/// name-keyed binding map. The frames are **not stored inline** — each is a
+/// box of its own (a `Frame` payload) that the scope references by
+/// [`BoxId`], because `Scope::clone-frames` shares every existing frame *by
+/// reference* between the original and the clone (a pointer copy per frame,
+/// never a copy of a frame's entries — the scope-chain design real language
+/// implementations use; a write into a shared frame is visible through
+/// every scope that holds it). Only the frame *stack* is per-scope: a
+/// `push-frame` after cloning grows one scope's stack without affecting the
+/// other. `Frame`'s keys are plain owned `String`s (Rust memory, like
+/// `Map`'s buckets — nothing heap-resident to trace), matching the
+/// pre-unification `ScopeFrame`'s `HashMap<String, RtValue>`; a `Frame` box
+/// is an internal constituent of some scope, never handed out as a
+/// standalone language value.
 #[derive(Clone, Debug)]
 pub(crate) enum StructPayload {
     Fields(Vec<Value>),
     Map(HashMap<MemHashKey, Value>),
+    Frame(HashMap<String, Value>),
+    Frames(Vec<BoxId>),
 }
 
 /// A Lisp value — the runtime encoding of `Sexpr`.

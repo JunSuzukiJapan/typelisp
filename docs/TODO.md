@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-07-03 / ブランチ: `feature/compile-sexpr`
+最終更新: 2026-07-04 / ブランチ: `feature/compile-sexpr`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離した）。
@@ -58,33 +58,34 @@
      テーブル側）。sweepがtokenを報告→sync_rootsでドレイン、リークなし。labelsの
      cell↔closure循環はヒープ循環としてmark-sweepが丸ごと回収
      （旧Rc表現の設計上のリークを解消）。
-   - **Stage 7-8（未着手）**: `Scope<V>`を`BoxedObj::Struct`（`StructPayload::Frames`）に統合
-     （自己ホスティングコンパイラ自体がScopeに依存するため最後に単独で着地）。
+   - **Stage 7（完了 2026-07-04）**: Scope: `StructPayload::Frames`のmem層プラミング。
+     フレームは計画スケッチのインライン`Vec<HashMap>`ではなく**独立した箱**
+     （`StructPayload::Frame(HashMap<String,Value>)`）を`Vec<BoxId>`で参照する表現——
+     `clone-frames`のフレーム参照共有（[[feedback-scope-chain-not-mutate-or-clone]]の
+     チェーン構造）をヒープ上でも保持するため。`Heap::alloc_scope`/`scope_clone_frames`/
+     `scope_push_frame`/`scope_pop_frame`/`scope_get`/`scope_set`/`is_scope`。
+     Stage 4（HashTable）と同じくrt層変更なし（compile対応はスコープ外）・インタプリタ未結線。
+   - **Stage 8（未着手）**: Scope: インタプリタ結線（自己ホスティングコンパイラ自体が
+     `Scope<llvm-value>`/`Scope<llvm-function>`に依存するため最後に単独で着地——
+     `RtValue::LlvmValue`等は`crate::mem::Value`で表現不可のため、静的型駆動の表現分岐か
+     6b相当のサイドテーブル方式の設計判断が必要。`tests/compile_test.rs`/
+     `compile_file_test.rs`のフルパスを必須ゲートとする）。
    - **後続クリーンアップ（未着手）**: compile側TraitCall機構（`ast_bridge`の
      `translate_trait_call`/`compiler.rs`の`compile-trait-dispatch`）は単型化により
      ソース到達不能になった——削除待ち。
    計画詳細は`~/.claude/plans/zippy-jingling-popcorn.md`（承認済みプラン）参照。
 
-直近完了: `defvar`/`defconstant`の型注釈必須化（2026-07-03）——`(defvar (name Type) value)`のみ
+直近完了: Sexpr/RtValue統合Stage 7（2026-07-04）——Scope: `StructPayload::Frame`/`Frames`の
+mem層プラミング（上記Stage 7項と[implementation-log.md](implementation-log.md)参照）。
+
+その前に完了: `defvar`/`defconstant`の型注釈必須化（2026-07-03）——`(defvar (name Type) value)`のみ
 許可、型なし形式を削除。その前にジェネリック単型化M1-M4 + Sexpr/RtValue統合Stage 6a/6b
 （2026-07-03、6コミット）。詳細は上記の各項目と[implementation-log.md](implementation-log.md)の
 「ジェネリック単型化とSexpr/RtValue統合Stage 6」節参照。
 
-その前に完了: Sexpr/RtValue内部表現統合Stage 5（2026-07-03）——HashTable: インタプリタ結線。
-`src/eval/value.rs`から`RtValue::HashTable`/`HashKey`を削除し、`eval_builtin_method`の
-`"hashtable"`アームを`Vector<T>`と同じ「type_name駆動の分岐」パターンで再実装
-（`get`/`set`/`remove`/`count`/`clear`/`keys`/`values`/`entries`）。走査用に
-`Heap::hashtable_pairs`をmem層に新設し、`decode_struct_field`の非struct-Boxed判定を
-`is_hashtable`も見る3値判定に修正（放置するとヒープ常駐化した`HashTable`をfloatと誤読して
-panicする潜在バグだった）。実装中に、typelisp自身で書かれた自己ホスティングコンパイラ
-（`src/compiler.rs`）が`compile-let`のスクラッチアキュムレータ`acc`として
-`HashTable<string,llvm-value>`を使い`RtValue::LlvmValue`を格納していたことが発覚
-（`crate::mem::Value`はinkwell型を表現できないため`tests/compile_file_test.rs`の3テストが
-壊れた）——`acc`を（`RtValue`をそのまま保持できる）単一フレームの`Scope<llvm-value>`に
-置き換えて解決。全体テスト（`scripts/with-llvm-env.sh cargo test`、31クレート）green。
-詳細は[implementation-log.md](implementation-log.md)の「Sexpr/RtValue内部表現統合」節参照。
-
 さらにその前に完了（いずれも詳細は[implementation-log.md](implementation-log.md)参照）:
+Sexpr/RtValue内部表現統合Stage 5（HashTableのインタプリタ結線、`compiler.rs`の`acc`が
+`RtValue::LlvmValue`を格納していた発覚と`Scope<llvm-value>`への付け替え込み、2026-07-03）／
 Sexpr/RtValue内部表現統合Stage 4（HashTableのmem層プラミング、2026-07-03）／
 「型が分からない」を誤った理由とする未対応箇所の一掃（2026-07-02）／
 Sexpr/RtValue内部表現統合Stage 3（コンパイラ結線、2026-07-02）／

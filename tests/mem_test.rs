@@ -1009,3 +1009,183 @@ fn a_cell_closure_cycle_is_collected_as_a_unit_and_reported() {
     assert_eq!(h.box_count(), 0, "the whole cycle is reclaimed together");
     assert_eq!(h.take_dead_closure_tokens(), vec![7]);
 }
+
+// ---- boxed scopes (`StructPayload::Frames`, Sexpr/RtValue unification Stage 7) ----
+//
+// `alloc_scope`/`scope_clone_frames`/`scope_push_frame`/`scope_pop_frame`/
+// `scope_get`/`scope_set` are the mem-layer representation `Scope<V>` is
+// meant to share once the interpreter is wired up to it (Stage 8) — see
+// `docs/TODO.md`'s Sexpr/RtValue unification plan. Each frame is a box of
+// its own referenced by `BoxId` (not stored inline in the scope) so that
+// `clone-frames` shares frames *by reference*, exactly like the
+// pre-unification `Rc<ScopeFrame>` representation — these tests pin that
+// sharing semantics down alongside the basic get/set/push/pop behavior.
+
+#[test]
+fn a_fresh_scope_starts_with_one_empty_frame() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_scope());
+    assert_eq!(h.scope_get(id, "x"), None);
+    h.scope_set(id, "x", Value::Int(1));
+    assert_eq!(h.scope_get(id, "x"), Some(Value::Int(1)));
+    assert_eq!(h.box_count(), 2, "the scope box plus its first frame box");
+}
+
+#[test]
+fn scope_set_overwrites_within_the_same_frame() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_scope());
+    h.scope_set(id, "x", Value::Int(1));
+    h.scope_set(id, "x", Value::Int(2));
+    assert_eq!(h.scope_get(id, "x"), Some(Value::Int(2)));
+}
+
+#[test]
+fn scope_get_searches_newest_frame_first_and_pop_unshadows() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_scope());
+    h.scope_set(id, "x", Value::Int(1));
+    h.scope_push_frame(id);
+    h.scope_set(id, "x", Value::Int(2));
+    assert_eq!(h.scope_get(id, "x"), Some(Value::Int(2)), "the newest frame shadows");
+    h.scope_pop_frame(id);
+    assert_eq!(h.scope_get(id, "x"), Some(Value::Int(1)), "popping restores the outer binding");
+}
+
+#[test]
+fn scope_set_writes_only_into_the_newest_frame() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_scope());
+    h.scope_set(id, "x", Value::Int(1));
+    h.scope_push_frame(id);
+    h.scope_set(id, "y", Value::Int(2));
+    h.scope_pop_frame(id);
+    assert_eq!(h.scope_get(id, "y"), None, "the popped frame took its binding with it");
+    assert_eq!(h.scope_get(id, "x"), Some(Value::Int(1)));
+}
+
+/// The semantics the frame-as-its-own-box representation exists for: after
+/// `clone-frames`, a write into a frame both scopes stack (here, the
+/// original's newest frame) is visible through both — a pointer copy per
+/// frame, not a copy of its entries.
+#[test]
+fn clone_frames_shares_existing_frames_by_reference() {
+    let mut h = Heap::with_capacity(8);
+    let a = as_boxed(h.alloc_scope());
+    h.scope_set(a, "x", Value::Int(1));
+    let b = as_boxed(h.scope_clone_frames(a));
+    assert_eq!(h.scope_get(b, "x"), Some(Value::Int(1)), "existing bindings come along");
+    h.scope_set(a, "y", Value::Int(2)); // into a's newest frame — which b shares
+    assert_eq!(h.scope_get(b, "y"), Some(Value::Int(2)), "a later write into the shared frame is visible through the clone");
+}
+
+#[test]
+fn frames_pushed_after_clone_frames_are_not_shared() {
+    let mut h = Heap::with_capacity(8);
+    let a = as_boxed(h.alloc_scope());
+    let b = as_boxed(h.scope_clone_frames(a));
+    h.scope_push_frame(b);
+    h.scope_set(b, "z", Value::Int(3));
+    assert_eq!(h.scope_get(a, "z"), None, "b's own new frame is invisible to a");
+    h.scope_push_frame(a);
+    h.scope_set(a, "w", Value::Int(4));
+    assert_eq!(h.scope_get(b, "w"), None, "and vice versa");
+}
+
+#[test]
+fn scope_pop_frame_on_an_empty_stack_is_a_noop() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_scope());
+    h.scope_pop_frame(id); // pops the initial frame
+    h.scope_pop_frame(id); // stack already empty: no panic, nothing to do
+    assert_eq!(h.scope_get(id, "x"), None);
+}
+
+#[test]
+#[should_panic(expected = "no frame to write into")]
+fn scope_set_with_every_frame_popped_panics() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_scope());
+    h.scope_pop_frame(id);
+    h.scope_set(id, "x", Value::Int(1));
+}
+
+#[test]
+#[should_panic(expected = "does not hold a Scope")]
+fn scope_accessor_on_a_hashtable_panics() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_hashtable());
+    h.scope_get(id, "x");
+}
+
+#[test]
+#[should_panic(expected = "does not hold a HashTable")]
+fn hashtable_accessor_on_a_scope_panics() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_scope());
+    h.hashtable_count(id);
+}
+
+#[test]
+fn is_scope_distinguishes_scopes_from_other_boxes() {
+    let mut h = Heap::with_capacity(8);
+    let scope = as_boxed(h.alloc_scope());
+    let table = as_boxed(h.alloc_hashtable());
+    let strukt = as_boxed(h.alloc_struct("point".to_string(), vec![Value::Int(1)]));
+    let float = as_boxed(h.alloc_float(1.5));
+    assert!(h.is_scope(scope));
+    assert!(!h.is_scope(table));
+    assert!(!h.is_scope(strukt));
+    assert!(!h.is_scope(float));
+    assert!(!h.is_struct(scope));
+    assert!(!h.is_hashtable(scope));
+    assert!(!h.is_float(scope));
+}
+
+#[test]
+fn unreachable_scopes_are_collected_with_their_frames() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_scope());
+    h.scope_push_frame(id);
+    assert_eq!(h.box_count(), 3); // scope + 2 frames
+    h.gc(); // not rooted, not in any cell -> all reclaimed
+    assert_eq!(h.box_count(), 0);
+}
+
+/// A value bound in a scope frame must survive a GC through the scope root
+/// alone — the direct test that the mark phase traces scope -> frame ->
+/// bound values (two hops through `Value::Boxed`), not just marks the
+/// scope's own box slot and stops.
+#[test]
+fn gc_traces_through_a_rooted_scopes_frames_into_bound_values() {
+    let mut h = Heap::with_capacity(64);
+    let inner = list_of(&mut h, &[10, 20, 30]);
+    let scope = h.alloc_scope();
+    let id = as_boxed(scope);
+    h.scope_set(id, "kept", inner);
+    h.push_root(scope);
+    for i in 0..20 {
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap(); // unrelated garbage
+    }
+    h.gc();
+    assert_eq!(to_vec(&h, h.scope_get(id, "kept").unwrap()), vec![10, 20, 30]);
+    assert_accounting(&h);
+}
+
+/// A frame shared via `clone-frames` survives as long as *either* scope
+/// does: collecting the (unrooted) clone must not take the shared frame —
+/// or the bindings the clone wrote into it — down with it.
+#[test]
+fn a_shared_frame_survives_the_death_of_one_of_its_scopes() {
+    let mut h = Heap::with_capacity(8);
+    let a = h.alloc_scope();
+    let aid = as_boxed(a);
+    h.push_root(a);
+    let bid = as_boxed(h.scope_clone_frames(aid));
+    h.scope_set(bid, "via-b", Value::Int(7)); // into the frame b shares with a
+    h.scope_push_frame(bid); // b's own private frame, dies with b
+    assert_eq!(h.box_count(), 4); // a + shared frame + b + b's private frame
+    h.gc(); // b is unrooted
+    assert_eq!(h.box_count(), 2, "b and its private frame go; a and the shared frame stay");
+    assert_eq!(h.scope_get(aid, "via-b"), Some(Value::Int(7)), "the shared frame kept the clone's write");
+}
