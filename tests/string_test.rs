@@ -1,5 +1,5 @@
 //! Tests for the built-in `String`/`char` instance methods
-//! ([cl-equivalence-catalog.md](../docs/cl-equivalence-catalog.md) §2.2 d),
+//! ([cl-equivalence-catalog.md](../docs/dev/cl-equivalence-catalog.md) §2.2 d),
 //! reusing the primitive-type `defmethod` receiver support from step 1
 //! (`check_instance_method`'s `prim_type_path` dispatch) — these are
 //! metadata-only `AssocFn`s (`registry::string_assoc`/`char_assoc`) with no

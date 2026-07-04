@@ -1,5 +1,5 @@
 //! The typelisp prelude: library functions written in typelisp itself
-//! rather than Rust, following [language-design.md](../docs/language-design.md)
+//! rather than Rust, following [language-design.md](../docs/dev/language-design.md)
 //! §4's split — anything expressible purely as a combination of existing
 //! primitives belongs here, not in the checker/interpreter.
 //!

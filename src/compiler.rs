@@ -2,7 +2,7 @@
 //! [`crate::compile::ast_bridge`]) -> LLVM IR, built by calling the
 //! `llvm-*` builtins (`crate::eval::interp`'s `eval_llvm_builtin_method`)
 //! directly — the same "Rust provides the bindings, typelisp drives them"
-//! split [docs/implementation-log.md](../docs/implementation-log.md) calls for. Loaded the same way
+//! split [docs/implementation-log.md](../docs/dev/implementation-log.md) calls for. Loaded the same way
 //! `prelude.rs` loads the standard library: read -> check -> exec each
 //! top-level form once, against the same `Heap`/`Checker`/`Interp` the rest
 //! of the program uses.

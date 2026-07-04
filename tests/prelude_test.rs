@@ -1,5 +1,5 @@
 //! Tests for the typelisp-defined prelude
-//! ([cl-equivalence-catalog.md](../docs/cl-equivalence-catalog.md) §2.1,
+//! ([cl-equivalence-catalog.md](../docs/dev/cl-equivalence-catalog.md) §2.1,
 //! roadmap step 7a): `not`/`consp`/`null`/`atom`/`equal` (`src/prelude.rs`),
 //! plus a Rust-side foundation added alongside them — the `eq` coverage
 //! gaps it closes (`sexpr`/`bool`/`i32`/`i64`/`f64`). `not` itself moved

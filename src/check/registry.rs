@@ -1031,7 +1031,7 @@ fn llvm_value_def() -> AdtDef {
     AdtDef { name: Path::root("llvm-value"), params: vec![], variants: vec![], assoc: HashMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new() }
 }
 
-/// Built-in `String` instance methods ([cl-equivalence-catalog.md](../../../docs/cl-equivalence-catalog.md)
+/// Built-in `String` instance methods ([cl-equivalence-catalog.md](../../../docs/dev/cl-equivalence-catalog.md)
 /// §2.2 d). All char/index arguments and `length` count Unicode scalar values
 /// (`char`s), not bytes. `ref`/`substring` panic on an out-of-range index —
 /// the type system can't express the bound, the same precedent as

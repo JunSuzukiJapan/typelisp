@@ -1,5 +1,5 @@
 //! Tests for the numeric extension
-//! ([cl-equivalence-catalog.md](../docs/cl-equivalence-catalog.md) §2.2 f,
+//! ([cl-equivalence-catalog.md](../docs/dev/cl-equivalence-catalog.md) §2.2 f,
 //! roadmap step 6): `i64`/`f64` arithmetic/comparison instance methods
 //! (`registry::int_assoc`/`float_assoc`), `f64`'s `expt`/`sqrt`/`floor`/
 //! `ceiling`/`round`/`truncate`, and the free function `random`.
