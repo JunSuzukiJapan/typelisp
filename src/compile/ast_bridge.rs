@@ -219,8 +219,8 @@ pub(crate) fn tagged_sym_list(heap: &mut Heap, names: &[(String, Type)]) -> Resu
 /// as a `Sym` field in a `Sexpr` construct.
 fn struct_field_kind(ty: &Type, structs: &HashSet<Path>) -> i64 {
     match ty {
-        Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Isize | Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::Usize => 1,
-        Type::F32 | Type::F64 => 2,
+        _ if ty.is_integer() => 1,
+        _ if ty.is_float() => 2,
         Type::Char => 3,
         Type::Bool => 4,
         Type::Str => 6,

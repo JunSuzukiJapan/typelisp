@@ -109,6 +109,26 @@ pub enum Type {
     Fn(Vec<Type>, Option<Box<Type>>, Box<Type>),
 }
 
+impl Type {
+    /// The ten built-in integer types (`i8`..`isize`, `u8`..`usize`). The one
+    /// authoritative list, so callers that need to single out "an integer
+    /// type" (`Checker::int_lit_ty`/pattern checking, `ast_bridge`'s
+    /// struct-field classifier) share it instead of each re-enumerating all
+    /// ten variants.
+    pub fn is_integer(&self) -> bool {
+        matches!(
+            self,
+            Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Isize | Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::Usize
+        )
+    }
+
+    /// The two built-in floating-point types (`f32`/`f64`) — the float
+    /// counterpart of [`Type::is_integer`].
+    pub fn is_float(&self) -> bool {
+        matches!(self, Type::F32 | Type::F64)
+    }
+}
+
 /// All primitive value types that can be a `defmethod` receiver (every
 /// variant [`prim_type_path`] maps to a `Path`). Used to pre-register each
 /// one's (empty) method table in [`crate::Registry::with_builtins`].

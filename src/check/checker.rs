@@ -3802,7 +3802,7 @@ impl Checker {
                 }
             }
             Value::Int(n) => {
-                if is_integer_type(expected) {
+                if expected.is_integer() {
                     Ok((Pattern::Int(n), Vec::new()))
                 } else {
                     Err(Error::TypeError(format!(
@@ -4007,26 +4007,10 @@ fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
     }
 }
 
-fn is_integer_type(t: &Type) -> bool {
-    matches!(
-        t,
-        Type::I8
-            | Type::I16
-            | Type::I32
-            | Type::I64
-            | Type::Isize
-            | Type::U8
-            | Type::U16
-            | Type::U32
-            | Type::U64
-            | Type::Usize
-    )
-}
-
 /// The type of an integer literal: the expected integer type if any, else `i32`.
 fn int_lit_ty(expected: Option<&Type>) -> Type {
     match expected {
-        Some(t) if is_integer_type(t) => t.clone(),
+        Some(t) if t.is_integer() => t.clone(),
         _ => Type::I32,
     }
 }
@@ -4034,7 +4018,7 @@ fn int_lit_ty(expected: Option<&Type>) -> Type {
 /// The type of a float literal: the expected float type if any, else `f64`.
 fn float_lit_ty(expected: Option<&Type>) -> Type {
     match expected {
-        Some(t @ Type::F32) | Some(t @ Type::F64) => t.clone(),
+        Some(t) if t.is_float() => t.clone(),
         _ => Type::F64,
     }
 }
