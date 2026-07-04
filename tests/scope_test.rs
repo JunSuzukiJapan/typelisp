@@ -2,9 +2,17 @@
 //! the (typelisp-hosted) compiler body's replacement for a bare `HashTable`
 //! as `env`/`fn-env`, see `src/compiler.rs`'s module doc comment for the
 //! "list of scopes" model this implements).
+//!
+//! Two representations back the one method surface (unification Stage 8),
+//! dispatched statically on the element type `V` (`Interp::scope_is_heap`):
+//! the `Scope<i32>` tests below run the Rust-native `RtValue::Scope` path
+//! (the same one `compiler.rs`'s `Scope<llvm-value>`/`Scope<llvm-function>`
+//! use), the `Scope<Sexpr>`/`Scope<Vector<i32>>` tests the GC-heap
+//! `StructPayload::Frames` path. Both families assert the same observable
+//! semantics — that equivalence is the point.
 
 extern crate typelisp;
-use typelisp::{Checker, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
 
 fn run(src: &str) -> Result<RtValue, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -24,6 +32,57 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
 
 fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
+}
+
+/// Check against a separate, generously sized heap with the prelude loaded
+/// (for `dotimes`), execute against a heap of exactly `capacity` cells, and
+/// return that heap alongside the value so `Sexpr` results can be
+/// inspected — the same split (and for the same reasons) as
+/// `hashtable_test.rs`'s helper of the same name.
+fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(RtValue, Heap), EvalError> {
+    let mut check_heap = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut check_interp = Interp::new();
+    load_prelude(&mut check_heap, &mut chk, &mut check_interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut check_heap, src).expect("read failed");
+    let n = vs.len();
+    let mut tls = Vec::with_capacity(n);
+    for (i, v) in vs.into_iter().enumerate() {
+        let tl = chk.check_form(&mut check_heap, &check_interp, v).expect("check failed");
+        if i + 1 < n {
+            check_interp.exec(&mut check_heap, tl.clone()).expect("eval failed");
+        }
+        tls.push(tl);
+    }
+
+    let mut h = Heap::with_capacity(capacity);
+    let mut last = RtValue::Unit;
+    for tl in tls {
+        if let Some(val) = check_interp.exec(&mut h, tl)? {
+            last = val;
+        }
+    }
+    Ok((last, h))
+}
+
+/// Render a list-of-symbols `Sexpr` for assertions (a cut-down
+/// `hashtable_test.rs::sexpr_to_string` — the GC-pressure test's kept value
+/// only ever holds symbols and conses).
+fn sexpr_to_string(heap: &Heap, v: Value) -> String {
+    match v {
+        Value::Symbol(id) => heap.symbol_name(id).to_string(),
+        Value::Cons(_) => {
+            let mut parts = Vec::new();
+            let mut cur = v;
+            while let Value::Cons(_) = cur {
+                parts.push(sexpr_to_string(heap, heap.car(cur).unwrap()));
+                cur = heap.cdr(cur).unwrap();
+            }
+            format!("({})", parts.join(" "))
+        }
+        other => format!("{:?}", other),
+    }
 }
 
 #[test]
@@ -149,4 +208,173 @@ fn pushing_a_frame_on_the_clone_does_not_affect_the_original() {
                    (match (get s \"only-in-clone\") ((Some v) v) ((None) -1))))
                (f)";
     assert_eq!(eval_ok(src), RtValue::Int(-1));
+}
+
+// ---- heap-repr `V` (`Scope<Sexpr>` etc. — `StructPayload::Frames`) ---------
+//
+// The same method surface as above, backed by the GC-heap representation
+// (unification Stage 8). Each test mirrors a native-path sibling; the
+// returned `i32` is extracted from the stored `Sexpr` with a `match` on its
+// `Int` shape, so a corrupted round-trip fails loudly rather than
+// comparing equal by accident.
+
+#[test]
+fn heap_scope_set_then_get_roundtrips() {
+    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+               (defun f () i64
+                 (let ((s (make-s)))
+                   (set s \"x\" (quote 42))
+                   (match (get s \"x\")
+                     ((Some v) (match v ((Int n) n) (_ -2)))
+                     ((None) -1))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Int(42));
+}
+
+#[test]
+fn heap_scope_get_missing_key_returns_none() {
+    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+               (defun f () i32
+                 (let ((s (make-s)))
+                   (match (get s \"missing\") ((Some v) 0) ((None) -1))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Int(-1));
+}
+
+#[test]
+fn heap_scope_push_frame_shadows_and_pop_frame_unshadows() {
+    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+               (defun as-int ((o Option<Sexpr>)) i64
+                 (match o
+                   ((Some v) (match v ((Int n) n) (_ -2)))
+                   ((None) -1)))
+               (defun f () bool
+                 (let ((s (make-s)))
+                   (set s \"x\" (quote 1))
+                   (push-frame s)
+                   (set s \"x\" (quote 2))
+                   (let ((shadowed (as-int (get s \"x\"))))
+                     (pop-frame s)
+                     (let ((unshadowed (as-int (get s \"x\"))))
+                       (if (eq shadowed 2) (eq unshadowed 1) false)))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Bool(true));
+}
+
+#[test]
+fn heap_scope_pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
+    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+               (defun f () i32
+                 (let ((s (make-s)))
+                   (push-frame s)
+                   (set s \"y\" (quote 9))
+                   (pop-frame s)
+                   (match (get s \"y\") ((Some v) 0) ((None) -1))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Int(-1));
+}
+
+#[test]
+fn heap_scope_clone_frames_shares_existing_frames() {
+    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+               (defun f () i64
+                 (let ((s (make-s)))
+                   (set s \"x\" (quote 7))
+                   (let ((s2 (clone-frames s)))
+                     (match (get s2 \"x\")
+                       ((Some v) (match v ((Int n) n) (_ -2)))
+                       ((None) -1)))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Int(7));
+}
+
+#[test]
+fn heap_scope_clone_frames_mutation_through_the_shared_frame_is_visible_in_both() {
+    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+               (defun f () i64
+                 (let ((s (make-s)))
+                   (set s \"x\" (quote 1))
+                   (let ((s2 (clone-frames s)))
+                     (set s2 \"x\" (quote 2))
+                     (match (get s \"x\")
+                       ((Some v) (match v ((Int n) n) (_ -2)))
+                       ((None) -1)))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Int(2));
+}
+
+#[test]
+fn heap_scope_pushing_a_frame_on_the_clone_does_not_affect_the_original() {
+    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+               (defun f () i32
+                 (let ((s (make-s)))
+                   (let ((s2 (clone-frames s)))
+                     (push-frame s2)
+                     (set s2 \"only-in-clone\" (quote 5)))
+                   (match (get s \"only-in-clone\") ((Some v) 0) ((None) -1))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Int(-1));
+}
+
+/// `Heap::scope_set` panics on an empty frame stack (the mem layer's
+/// internal-invariant-trap convention), but every frame is poppable from
+/// typelisp — the interpreter must pre-check and report a catchable
+/// `EvalError` instead, matching the native path's own behavior.
+#[test]
+fn heap_scope_set_with_every_frame_popped_is_a_catchable_error_not_a_panic() {
+    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+               (defun f () ()
+                 (let ((s (make-s)))
+                   (pop-frame s)
+                   (set s \"x\" (quote 1))))
+               (f)";
+    match run(src) {
+        Err(EvalError::Internal(msg)) => assert!(msg.contains("no frame to write into"), "unexpected message: {}", msg),
+        other => panic!("expected an Internal eval error, got {:?}", other),
+    }
+}
+
+/// A boxed-struct element (`Vector<i32>`, heap-repr via `struct_types`)
+/// keeps its reference semantics through the scope: what `get` hands back
+/// is the *same* vector box that `set` stored, so a `push` through the
+/// retrieved handle is visible through the original one.
+#[test]
+fn heap_scope_stores_a_boxed_struct_element_by_reference() {
+    let src = "(defun make-v () Vector<i32> (Vector::new))
+               (defun make-s () Scope<Vector<i32>> (Scope::new))
+               (defun f () i32
+                 (let ((s (make-s)))
+                   (let ((v (make-v)))
+                     (push v 10)
+                     (set s \"v\" v)
+                     (match (get s \"v\")
+                       ((Some w) (push w 20))
+                       ((None) ()))
+                     (len v))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Int(2));
+}
+
+/// The heap-scope GC contract end to end: values stored in a
+/// `Scope<Sexpr>`'s frames are cons-heap pointers that must survive
+/// collections triggered by later allocation churn — rooted through the
+/// binding's `Slot::Heap` cell (`heap_repr_kind`'s `Scope<V>` recursion) ->
+/// the scope box -> `StructPayload::Frames` -> the frame's values, all
+/// traced by the mark phase alone (no interpreter-side re-collection pass).
+/// Mirrors `hashtable_test.rs`'s `sexpr_values_survive_gc_pressure`.
+#[test]
+fn heap_scope_sexpr_values_survive_gc_pressure() {
+    let src = "(defun make-s () Scope<Sexpr> (Scope::new))
+               (defun f () Sexpr
+                 (let ((s (make-s)))
+                   (set s \"keep\" (quote (a b c d e)))
+                   (dotimes (i 500)
+                     (set s \"churn\" (quote (x y z))))
+                   (match (get s \"keep\") ((Some v) v) ((None) (quote boom)))))
+               (f)";
+    let (v, h) = run_with_capacity_and_prelude(src, 96).expect("eval failed");
+    match v {
+        RtValue::Sexpr(sv) => assert_eq!(sexpr_to_string(&h, sv), "(a b c d e)"),
+        other => panic!("expected a Sexpr value, got {:?}", other),
+    }
 }

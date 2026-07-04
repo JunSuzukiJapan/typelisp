@@ -2418,7 +2418,7 @@ panicと同じ前例で実行時panic（型システムでは「有効なスカ�
 panicの両方）、`symbol->string`/`string->symbol`（往復、非symbolでのpanic）を追加。全体テスト
 （`./scripts/with-llvm-env.sh cargo test`、workspace全体）green。
 
-## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-7完了・Stage 8未着手 ※Stage 6の実装記録は「ジェネリック単型化とSexpr/RtValue統合Stage 6」節）
+## Sexpr/RtValue内部表現統合 実装計画（2026-07-02起案、Stage 0-8全完了 2026-07-04 ※Stage 6の実装記録は「ジェネリック単型化とSexpr/RtValue統合Stage 6」節）
 
 `HashTable<K,V>::entries`のペア型を巡る議論の中で、ユーザーから「`Sexpr`と`RtValue`という
 2つの並行した実行時値表現に分かれていること自体がおかしい」という指摘を受けた。実際の
@@ -2742,19 +2742,62 @@ FFIハンドルだけを`RtValue`に残す。さらに調査で判明した事�
   GC（未到達Scopeのフレームごと回収／rooted Scope→フレーム→束縛値の2ホップトレース／
   非rootedクローンだけが死んでも共有フレームとそこへの書き込みは生存）。
   全体テスト（`scripts/with-llvm-env.sh cargo test`、31クレート）green。
-- **Stage 8（未着手）**: Scope: インタプリタ結線（最後に単独で着地——
-  `src/compiler.rs`自体が`Scope<llvm-value>`で自身のenv/fn-envを構築しているため、
-  ここのバグは自己ホスティングコンパイラ全体を静かに壊しうる。
-  `tests/compile_test.rs`/`tests/compile_file_test.rs`のフルパスを退行チェックの
-  必須ゲートとする。`RtValue::LlvmValue`等のLLVM系5種は`crate::mem::Value`で表現不可能な
-  ため、`Scope<llvm-value>`/`Scope<llvm-function>`——現状の主用途——をどう扱うかの設計判断が
-  必要: 単型化後は`Scope<V>`の具体型`V`が常に静的に分かるので、6aの`Slot`と同型の
-  「静的型駆動でヒープ表現（`V`のランタイム表現が`Value`のとき）とRust-native表現を振り分ける」
-  方式か、6bの`Capture::Native`相当のサイドテーブル方式が候補）。
+- **Stage 8（完了、2026-07-04）**: Scope: インタプリタ結線。
+  **設計判断——6a型の静的型駆動表現振り分けを採用**（候補だった6b型サイドテーブル方式との
+  比較検討をユーザーに提示し「6a型でいこう」の決定を受けた）。採用理由: (1) LLVMハンドルの
+  GCヒープ混入が「規約」ではなく型分類のレベルで構造的に不可能（6aの`Slot`と同じ保証）、
+  (2) 失敗様態が決定的（分岐漏れは`EvalError::Internal`即死トラップで最初の実行で確定的に
+  失敗する。サイドテーブルのトークン寿命バグはGCタイミング依存のヒーゼンバグになる——
+  本リポジトリに苦闘の記録が複数ある種類）、(3) 自己ホスティングコンパイラの
+  `Scope<llvm-value>`/`Scope<llvm-function>`（Scopeの主用途）が今日まで動いてきた
+  Rust-native経路をそのまま通り続け、退行の暴露面が最小。6bがサイドテーブルを必要とした
+  「1つの値の中にHeap/Nativeキャプチャが混在する」というクロージャ固有の事情は、
+  要素型が単一の`Scope<V>`には存在しない——単型化により`V`はインスタンス単位で常に具体的で、
+  きれいに二分できる。
+  **統合の最終状態はここで確定**: `RtValue::Scope`は削除せず**native-repr `V`のScope専用**
+  として残す。`Scope<llvm-*>`は中身がFFIハンドルの集合体なので、「LLVM builder等コンパイラ
+  内部専用のFFIハンドルだけを`RtValue`に残す」という統合方針の精神にむしろ合致する
+  （2026-07-03の「LLVM系5種とそれ以外を厳密に区分」指示とも整合）。
+  実装: (1) `Interp::heap_repr_kind`と`Checker::is_heap_repr`の双子に
+  `Scope<V>`→`V`で再帰する対のアームを追加——`Scope<Sexpr>`等の束縛スロットは
+  `Slot::Heap`（cell_registry経由でGCが直接トレース）、`Scope<i32>`/`Scope<llvm-*>`は
+  従来どおり`Slot::Native`。(2) `eval_builtin_method`に`interp: &Interp`（`struct_types`
+  照会用）と`recv_ty: Option<&Type>`（レシーバ引数`args[0]`のchecked型——`Expr::Assoc`は
+  型引数を運ばないため、`Scope<V>`の`V`が静的に手に入る唯一の経路。`Expr::Assoc`/
+  `Expr::Apply`(BuiltinMethod)の両呼び出しサイトから配線）を追加。(3) `"scope"`アームを
+  二経路化: `new`は自ノードの戻り型`Scope<V>`から、インスタンスメソッド5種はレシーバの
+  静的型から、新設`Interp::scope_is_heap`で振り分け（**値形状は一切見ない**。`push-frame`/
+  `pop-frame`/`set`は戻り型がUnitなのでret_tyからはVが復元できず、recv_ty配線が必須だった）。
+  (4) ヒープ側ヘルパー`scope_*_heap` 5種を新設——`V`がheap-reprなら要素のランタイム表現は
+  構造的に`RtValue::Sexpr`のみなので、`get`の出口デコードは無条件の`RtValue::Sexpr`包み
+  （`hashtable_get`のような型付きデコード不要）、`set`の入口の非`Sexpr`値は不変条件即死。
+  `set`はmem層panic（"no frame to write into"）をinterp側の`Heap::scope_frame_count`
+  事前チェック（mem層に新設）で捕捉可能な`EvalError::Internal`に変換——`pop-frame`は
+  typelispから叩けるためユーザー到達可能な条件であり、`expect_hashable_key`と同じ
+  「RustパニックにしないでEvalErrorへ」の契約。(5) `main.rs`の`format_sexpr`に
+  `is_scope`→`#<scope depth=N>`アーム追加（native側`format_value`と同一表示）。
+  (6) `collect_sexpr_roots`は無変更（native Scopeの既存アームは残存必須、ヒープScopeは
+  `RtValue::Sexpr`アームが既にカバー）。`decode_nonsexpr_field`もコード無変更
+  （非float Boxedのcatch-allが`RtValue::Sexpr`を返す規約にヒープScopeも自然に乗る、
+  docコメントのみ更新）。`rtvalue_to_struct_field`はheap-repr Scopeが`RtValue::Sexpr`として
+  自動的にstructフィールド格納可能になり、native Scopeのみ従来どおり`Internal`エラー。
+  テスト: `tests/scope_test.rs`に heap経路10件追加（`Scope<Sexpr>`でnative側9件をミラー、
+  +全フレームpop後のsetが捕捉可能なエラーであること、`Scope<Vector<i32>>`の要素が参照
+  semantics（getで返る箱=setで入れた箱、push が双方から見える）を保つこと、
+  `hashtable_test.rs`と同型の極小ヒープGC圧テスト=束縛セル→Scope箱→Frames→Frame→値の
+  マークだけで生存する実証）。`tests/mem_test.rs`に`scope_frame_count`。
+  既存native側9件（`Scope<i32>`）は無改修で両表現の意味論等価を担保。
+  全体テスト（`scripts/with-llvm-env.sh cargo test`、32バイナリ）green——必須ゲートの
+  `tests/compile_test.rs`/`tests/compile_file_test.rs`（自己ホスティングコンパイラ、
+  `Scope<llvm-*>`のnative経路）含む。clippyはHEAD比で新規警告ゼロ。
 
-各段階で`RtValue`からバリアントが1つずつ消えていき、最終的に`RtValue`には
-`Int/Float/Bool/Char/Str/Unit/Data/Sexpr(Value)/Builtin/BuiltinMethod`とLLVM系5種が残る
-（名前はそのまま維持、リネームは今回のスコープ外）。詳細な実装計画は
+各段階で`RtValue`からバリアントが1つずつ消えていき（`Struct`/`StructData`=Stage 2、
+`HashTable`/`HashKey`=Stage 5、`Closure`=Stage 6b）、Stage 8完了で確定した最終状態では
+`RtValue`に`Int/Float/Bool/Char/Str/Unit/Data/Sexpr(Value)/Builtin/BuiltinMethod`と
+LLVM系5種、および**native-repr `V`専用となった`Scope`**が残る（heap-repr `V`のScopeは
+`Sexpr`側へ移行済み。`Scope<llvm-*>`はFFIハンドルの集合体なので「コンパイラ内部専用の
+FFIハンドルだけを`RtValue`に残す」という本計画の到達点に含まれる——Stage 8の項参照。
+名前のリネームはスコープ外のまま）。詳細な実装計画は
 `/Users/suzukijun/.claude/plans/sexpr-lisp-lisp-s-s-lisp-lisp-sexpr-rtv-eager-garden.md`
 （Plan mode成果物）参照。
 

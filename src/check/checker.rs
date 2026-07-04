@@ -1364,14 +1364,18 @@ impl Checker {
     /// Whether a declared type's *runtime representation* is a heap value
     /// (`RtValue::Sexpr` wrapping a `mem::Value`) — the built-in `Sexpr`
     /// itself, any `AdtKind::Struct` type (`defstruct`/`Vector<T>`/
-    /// `cons-cell<K,V>`), or `HashTable<K,V>` (boxed since the unification's
+    /// `cons-cell<K,V>`), `HashTable<K,V>` (boxed since the unification's
     /// Stage 5, though its `AdtDef` still says `Sum` — a recorded historical
-    /// asymmetry). This is the checker-side twin of the interpreter's
-    /// `Interp::is_heap_repr_ty`, used to bake binding-slot routing into
-    /// `Pattern::Bind` (the one binding site whose type the evaluator can't
-    /// read off its own AST node).
+    /// asymmetry), or a `Scope<V>` whose `V` is itself heap-repr (boxed
+    /// since the unification's Stage 8; a scope of anything else — LLVM
+    /// handles above all — stays Rust-native). This is the checker-side
+    /// twin of the interpreter's `Interp::heap_repr_kind` (which carries
+    /// the matching `Scope<V>` recursion), used to bake binding-slot
+    /// routing into `Pattern::Bind` (the one binding site whose type the
+    /// evaluator can't read off its own AST node).
     fn is_heap_repr(&self, ty: &Type) -> bool {
         match ty {
+            Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => self.is_heap_repr(&args[0]),
             Type::Named(p, _) => {
                 *p == Path::root("sexpr")
                     || *p == Path::root("hashtable")

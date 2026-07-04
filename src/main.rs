@@ -248,6 +248,10 @@ fn format_sexpr(heap: &Heap, v: Value) -> String {
             format!("#<{} {}>", heap.struct_type_name(id), parts.join(" "))
         }
         Value::Boxed(id) if heap.is_hashtable(id) => format!("#<hashtable count={}>", heap.hashtable_count(id)),
+        // A `Scope<V>` with heap-repr `V` is boxed too since Stage 8 —
+        // printed the same way `format_value`'s `RtValue::Scope` arm prints
+        // a native-`V` scope.
+        Value::Boxed(id) if heap.is_scope(id) => format!("#<scope depth={}>", heap.scope_frame_count(id)),
         // A closure is a boxed value too since Stage 6b — printed opaquely,
         // as the old dedicated `RtValue::Closure` arm did.
         Value::Boxed(id) if heap.is_closure(id) => "#<closure>".to_string(),

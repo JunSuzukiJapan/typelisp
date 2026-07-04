@@ -1111,6 +1111,18 @@ fn scope_set_with_every_frame_popped_panics() {
 }
 
 #[test]
+fn scope_frame_count_tracks_push_and_pop() {
+    let mut h = Heap::with_capacity(8);
+    let id = as_boxed(h.alloc_scope());
+    assert_eq!(h.scope_frame_count(id), 1, "a fresh scope has its first frame pushed");
+    h.scope_push_frame(id);
+    assert_eq!(h.scope_frame_count(id), 2);
+    h.scope_pop_frame(id);
+    h.scope_pop_frame(id);
+    assert_eq!(h.scope_frame_count(id), 0, "the interpreter's guard for scope_set's panic");
+}
+
+#[test]
 #[should_panic(expected = "does not hold a Scope")]
 fn scope_accessor_on_a_hashtable_panics() {
     let mut h = Heap::with_capacity(8);

@@ -21,13 +21,15 @@ pub type ScopeFrame = Rc<RefCell<HashMap<String, RtValue>>>;
 ///
 /// * `Heap` — the type's runtime representation is always
 ///   `RtValue::Sexpr(Value)` (the built-in `Sexpr`, `defstruct`/`Vector<T>`/
-///   `cons-cell<K,V>` boxed structs, `HashTable<K,V>`), so the binding lives
+///   `cons-cell<K,V>` boxed structs, `HashTable<K,V>`, and — Stage 8 — a
+///   `Scope<V>` whose `V` is itself in this list), so the binding lives
 ///   in a GC-heap `BoxedObj::Cell` the collector traces directly.
 /// * `Native` — everything else: scalars (whose `mem::Value` encodings would
 ///   be ambiguous to decode — a cell holding `Value::Int(42)` couldn't say
 ///   whether it was an `i32` or a quoted `Sexpr` datum), `Str` (whose
 ///   `Rc::ptr_eq` `eq`-identity a `StrId` round-trip would destroy),
-///   `Data`/`Scope`/function values (not `Value`-representable), and the
+///   `Data`/function values/`Scope<V>` of any *other* `V` (not
+///   `Value`-representable), and the
 ///   five LLVM FFI handle kinds (never `Value`-representable **by design** —
 ///   this split is what keeps the compiler-internal LLVM universe strictly
 ///   out of the GC heap).
@@ -51,7 +53,8 @@ pub enum SlotKind {
 ///   payload itself lives in the heap, not behind this `Rc`.
 /// * `Native` — the classic `Rc<RefCell<RtValue>>`, for every type whose
 ///   values a `mem::Value` can't (or must not) carry — scalars, `Str`,
-///   `Data`, function values, `Scope`, and the five compiler-internal LLVM
+///   `Data`, function values, `Scope<V>` of a native-repr `V`, and the five
+///   compiler-internal LLVM
 ///   handle kinds, which this split keeps out of the GC heap *structurally*:
 ///   a `Slot::Heap` can only ever be created from an `RtValue::Sexpr`.
 /// (`PartialEq`/`Debug` exist only for `Closure`'s own derives: a `Heap`
@@ -189,7 +192,8 @@ pub enum RtValue {
     /// A built-in *instance method* used as a function value (e.g. `+` on
     /// `i32` — see [`Expr::MethodRef`](crate::Expr::MethodRef)).
     BuiltinMethod(Path, String),
-    /// A `Scope<V>`: a stack of frames (each an ordinary `String`-keyed map),
+    /// A `Scope<V>` **of a native-repr `V`**: a stack of frames (each an
+    /// ordinary `String`-keyed map),
     /// used by the (typelisp-hosted) compiler body (`src/compiler.rs`) to
     /// track lexically-nested name resolution (`env`/`fn-env`) the way a
     /// real interpreter's environment chain would — see that module's doc
@@ -198,6 +202,16 @@ pub enum RtValue {
     /// is just a `Vec` of cloned `Rc`s — cheap (pointer copies, no per-entry
     /// work) and exactly what lets a `labels` def's own new scope start from
     /// every enclosing scope's frames without copying their contents.
+    ///
+    /// Since the unification's Stage 8 this variant backs only scopes whose
+    /// element type `V` is *not* itself heap-repr — above all the
+    /// compiler's `Scope<llvm-value>`/`Scope<llvm-function>`, whose LLVM
+    /// handles a `mem::Value` cannot carry. A `Scope<V>` of a heap-repr `V`
+    /// (`Sexpr`/boxed structs/`HashTable`/such a scope itself) is instead an
+    /// `RtValue::Sexpr` boxed `StructPayload::Frames` scope, with the same
+    /// share-frames-by-reference semantics; which family a value belongs to
+    /// is decided statically from `V` (`Interp::scope_is_heap`), never from
+    /// the value's shape.
     Scope(Rc<RefCell<Vec<ScopeFrame>>>),
     /// An in-progress LLVM module being built by the (typelisp-hosted)
     /// compiler. `Rc<RefCell<..>>` because `inkwell::module::Module` owns

@@ -838,6 +838,16 @@ impl Heap {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Frames(_), .. }))
     }
 
+    /// The number of frames currently on a scope's stack — what the
+    /// interpreter's `#<scope depth=N>` display shows, and its guard for
+    /// turning [`scope_set`](Self::scope_set)'s "no frame to write into"
+    /// panic into a catchable evaluation error before calling in (the same
+    /// pre-check split as the hash-table key-shape panics). Panics like
+    /// [`scope_get`](Self::scope_get).
+    pub fn scope_frame_count(&self, id: BoxId) -> usize {
+        self.scope_frames(id).len()
+    }
+
     // ---- allocation -------------------------------------------------------
 
     /// Allocate a cons cell `(car . cdr)`. Runs a GC if the free list is empty;

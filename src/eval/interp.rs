@@ -229,6 +229,14 @@ impl Interp {
     /// `Checker::is_heap_repr` (which bakes the same bit into
     /// `Pattern::Bind`), deciding [`SlotKind`] at binding sites whose AST
     /// carries a `Type` (`let`'s bound `Typed`, parameter lists, `defvar`).
+    ///
+    /// `Scope<V>` recurses on `V` (unification Stage 8): a scope whose
+    /// element representation is a heap `Value` is itself heap-resident
+    /// (`StructPayload::Frames`), while a scope of anything else — LLVM
+    /// handles above all — stays the Rust-native [`RtValue::Scope`], so an
+    /// LLVM handle can no more reach the GC heap through a scope than
+    /// through a binding cell. Both twins must agree, and the checker's
+    /// carries the matching arm.
     fn heap_repr_kind(&self, ty: &Type) -> SlotKind {
         match ty {
             Type::Named(p, _)
@@ -236,7 +244,27 @@ impl Interp {
             {
                 SlotKind::Heap
             }
+            Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => self.heap_repr_kind(&args[0]),
             _ => SlotKind::Native,
+        }
+    }
+
+    /// Whether a `Scope<V>` type's runtime representation is the heap
+    /// (`StructPayload::Frames`) one — true exactly when `V`'s own runtime
+    /// representation is a heap `Value` ([`Interp::heap_repr_kind`], whose
+    /// matching recursive arm routes scope-typed *bindings* to the same
+    /// tier as the scope *values* this classifies). Monomorphization
+    /// guarantees the `V` seen here is concrete; a non-`Scope` type
+    /// reaching this is a checker/interpreter divergence, trapped loudly
+    /// rather than guessed around.
+    fn scope_is_heap(&self, scope_ty: &Type) -> Result<bool, EvalError> {
+        match scope_ty {
+            Type::Named(p, targs) if *p == Path::root("scope") && targs.len() == 1 => {
+                Ok(matches!(self.heap_repr_kind(&targs[0]), SlotKind::Heap))
+            }
+            other => {
+                Err(EvalError::Internal(format!("expected a Scope<V> type at a scope method call, got {:?}", other)))
+            }
         }
     }
 
@@ -521,7 +549,8 @@ impl Interp {
                 if let Some(m) = self.methods.get(&key) {
                     self.apply(heap, m, argv)
                 } else {
-                    match eval_builtin_method(heap, type_name, method, &argv, &t.ty) {
+                    let recv_ty = args.first().map(|a| &a.ty);
+                    match eval_builtin_method(self, heap, type_name, method, recv_ty, &argv, &t.ty) {
                         Some(result) => result,
                         None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
                     }
@@ -619,7 +648,8 @@ impl Interp {
                         None => Err(EvalError::NoSuchFunction(name)),
                     },
                     RtValue::BuiltinMethod(type_name, method) => {
-                        match eval_builtin_method(heap, &type_name, &method, &argv, &t.ty) {
+                        let recv_ty = args.first().map(|a| &a.ty);
+                        match eval_builtin_method(self, heap, &type_name, &method, recv_ty, &argv, &t.ty) {
                             Some(r) => r,
                             None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
                         }
@@ -1689,10 +1719,15 @@ fn eval_random(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// actual value (`Heap::float_value`) to tell it apart from `eq`'s identity
 /// comparison — see `sexpr_eql`'s doc comment.
 /// `ret_ty` is the call site's checked return type (`Expr::Assoc`/
-/// `Expr::TraitCall`/`Expr::Apply`'s own node type) — only [`vector_get`]
-/// consumes it today, to decode a `Vector<Sexpr>` element by its static
-/// type — see [`decode_field_typed`].
-fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[RtValue], ret_ty: &Type) -> Option<Result<RtValue, EvalError>> {
+/// `Expr::TraitCall`/`Expr::Apply`'s own node type) — [`vector_get`]
+/// consumes it to decode a `Vector<Sexpr>` element by its static type (see
+/// [`decode_field_typed`]), and `Scope::new` reads its `V` off it.
+/// `recv_ty` is the receiver argument's checked type (`args[0]`'s
+/// `Typed.ty` at the call site, `None` on a receiver-less static call) —
+/// what `Scope<V>`'s instance methods dispatch their representation on;
+/// see the `"scope"` arm. `interp` carries the `struct_types` that
+/// classification reads ([`Interp::scope_is_heap`]).
+fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, method: &str, recv_ty: Option<&Type>, args: &[RtValue], ret_ty: &Type) -> Option<Result<RtValue, EvalError>> {
     if *type_name == Path::root("hashtable") {
         return match method {
             "new" => Some(Ok(RtValue::Sexpr(heap.alloc_hashtable()))),
@@ -1718,14 +1753,49 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[
         };
     }
     if *type_name == Path::root("scope") {
-        return match method {
-            "new" => Some(Ok(scope_new())),
-            "clone-frames" => Some(scope_clone_frames(args)),
-            "push-frame" => Some(scope_push_frame(args)),
-            "pop-frame" => Some(scope_pop_frame(args)),
-            "get" => Some(scope_get(args)),
-            "set" => Some(scope_set(args)),
-            _ => None,
+        // Two representations, dispatched on the *static* element type `V`
+        // (never the receiver value's shape — [`Interp::scope_is_heap`]):
+        // heap-repr `V` -> the `StructPayload::Frames` heap scope
+        // (unification Stage 8), everything else (LLVM handles above all)
+        // -> the Rust-native `RtValue::Scope`. `new` has no receiver, so it
+        // reads `V` off its own checked return type `Scope<V>` instead.
+        if method == "new" {
+            return Some(
+                interp
+                    .scope_is_heap(ret_ty)
+                    .map(|heap_repr| if heap_repr { RtValue::Sexpr(heap.alloc_scope()) } else { scope_new() }),
+            );
+        }
+        let heap_repr = match recv_ty {
+            Some(ty) => match interp.scope_is_heap(ty) {
+                Ok(h) => h,
+                Err(e) => return Some(Err(e)),
+            },
+            None => {
+                return Some(Err(EvalError::Internal(format!(
+                    "scope::{}: no receiver type at the call site",
+                    method
+                ))))
+            }
+        };
+        return if heap_repr {
+            match method {
+                "clone-frames" => Some(scope_clone_frames_heap(heap, args)),
+                "push-frame" => Some(scope_push_frame_heap(heap, args)),
+                "pop-frame" => Some(scope_pop_frame_heap(heap, args)),
+                "get" => Some(scope_get_heap(heap, args)),
+                "set" => Some(scope_set_heap(heap, args)),
+                _ => None,
+            }
+        } else {
+            match method {
+                "clone-frames" => Some(scope_clone_frames(args)),
+                "push-frame" => Some(scope_push_frame(args)),
+                "pop-frame" => Some(scope_pop_frame(args)),
+                "get" => Some(scope_get(args)),
+                "set" => Some(scope_set(args)),
+                _ => None,
+            }
         };
     }
     if *type_name == Path::root("string") {
@@ -2995,11 +3065,13 @@ fn expect_struct_box(v: &RtValue) -> Result<BoxId, EvalError> {
 /// Stage 5 — a boxed `HashTable` is a `mem::Value::Boxed` like any other
 /// boxed struct. The variants a `defstruct`/`Vector<T>`/`HashTable<K,V>`
 /// field still can't hold — `Data` (`Option`/`Result`/a user sum type) and
-/// `Scope` — aren't representable in `crate::mem::Value` (that crate can't
-/// depend on `RtValue`), so they're a clear internal error here rather than
-/// a silent corruption. Closures stopped being on that list at Stage 6b:
-/// a function value is a `Value::Boxed` closure box riding in
-/// `RtValue::Sexpr`, storable like any other boxed value.
+/// `RtValue::Scope` (a `Scope<V>` of a *native-repr* `V`, LLVM handles
+/// above all) — aren't representable in `crate::mem::Value` (that crate
+/// can't depend on `RtValue`), so they're a clear internal error here
+/// rather than a silent corruption. Closures stopped being on that list at
+/// Stage 6b (a function value is a `Value::Boxed` closure box riding in
+/// `RtValue::Sexpr`, storable like any other boxed value), and heap-repr-`V`
+/// scopes at Stage 8, the same way.
 fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Value, EvalError> {
     match v {
         RtValue::Int(n) => Ok(Value::Int(*n)),
@@ -3036,14 +3108,14 @@ fn decode_field_typed(heap: &Heap, v: Value, ty: &Type) -> RtValue {
 
 /// [`decode_field_typed`]'s non-`Sexpr` half: for every declared type
 /// *other than* `Sexpr`, `rtvalue_to_struct_field`'s encoding is injective —
-/// `Int`/`Bool`/`Char`/`Str` map straight back, a `Boxed` that is neither a
-/// `Fields`-payload struct nor a `Map`-payload `HashTable`
-/// (`Heap::is_struct`/`is_hashtable`) is a boxed float (`RtValue::Float`),
-/// and a `Boxed` struct/`HashTable` (a nested `defstruct`/`Vector<T>`/
-/// `cons-cell<K,V>`/`HashTable<K,V>`, whose declared type is some concrete
-/// named struct type) becomes `RtValue::Sexpr`, the same wrapper a top-level
-/// struct value itself uses — so the stored shape alone determines the
-/// result with no ambiguity. Also reached directly by `match_pattern`'s
+/// `Int`/`Bool`/`Char`/`Str` map straight back, a `Boxed` holding a float
+/// (`Heap::is_float` — the *positive* test, since structs, `HashTable`s,
+/// heap scopes, and closures are boxed too) is `RtValue::Float`, and every
+/// other `Boxed` (a nested `defstruct`/`Vector<T>`/`cons-cell<K,V>`/
+/// `HashTable<K,V>`/heap `Scope<V>`/closure, whose declared type is some
+/// concrete named heap-repr type) becomes `RtValue::Sexpr`, the same
+/// wrapper a top-level struct value itself uses — so the stored shape alone
+/// determines the result with no ambiguity. Also reached directly by `match_pattern`'s
 /// boxed-struct arm, whose per-field `Pattern::Ctor::sexpr_fields` (baked at
 /// check time, exact post-monomorphization) is precisely the
 /// "`Sexpr`-declared or not" bit `decode_field_typed` reads off a `Type`.
@@ -3166,6 +3238,64 @@ fn scope_set(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let frames = frames.borrow();
     let top = frames.last().ok_or_else(|| EvalError::Internal("Scope::set: no frame to write into".into()))?;
     top.borrow_mut().insert(name.to_string(), value);
+    Ok(RtValue::Unit)
+}
+
+// The `Scope<V>`-with-heap-repr-`V` counterparts of the native scope
+// helpers above (unification Stage 8) — same six-method surface, backed by
+// `Heap`'s `StructPayload::Frames` representation instead of `Rc` frames.
+// Which family a call lands in is decided statically, from the receiver's
+// checked `Scope<V>` type ([`Interp::scope_is_heap`]) — never from the
+// receiver value's shape. `V` being heap-repr means every stored/returned
+// element is `RtValue::Sexpr` by construction, so — unlike `hashtable_get`,
+// whose `V` can be anything — no typed decode is needed on the way out and
+// a non-`Sexpr` element on the way in is an internal-invariant trap.
+
+fn scope_clone_frames_heap(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    Ok(RtValue::Sexpr(heap.scope_clone_frames(id)))
+}
+
+fn scope_push_frame_heap(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    heap.scope_push_frame(id);
+    Ok(RtValue::Unit)
+}
+
+fn scope_pop_frame_heap(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    heap.scope_pop_frame(id);
+    Ok(RtValue::Unit)
+}
+
+fn scope_get_heap(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    let name = expect_str(&args[1])?;
+    Ok(option_value(heap.scope_get(id, name).map(RtValue::Sexpr)))
+}
+
+/// `Heap::scope_set` panics on an empty frame stack (the mem layer's
+/// internal-invariant-trap convention); every frame *is* poppable from
+/// typelisp (`pop-frame`), so the guard runs here first and reports the
+/// same `EvalError` the native `scope_set` does — the `expect_hashable_key`
+/// precedent of keeping a user-reachable condition a catchable evaluation
+/// error rather than a Rust panic.
+fn scope_set_heap(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    let name = expect_str(&args[1])?.to_string();
+    let v = match &args[2] {
+        RtValue::Sexpr(v) => *v,
+        other => {
+            return Err(EvalError::Internal(format!(
+                "heap Scope::set: value is not a heap-repr element: {:?}",
+                other
+            )))
+        }
+    };
+    if heap.scope_frame_count(id) == 0 {
+        return Err(EvalError::Internal("Scope::set: no frame to write into".into()));
+    }
+    heap.scope_set(id, &name, v);
     Ok(RtValue::Unit)
 }
 
