@@ -1,8 +1,7 @@
 //! A minimal, Swift-ARC-Optimizer-style peephole pass: eliminates a
 //! `build-closure-retain` instruction group immediately followed — in the
 //! same basic block, with nothing else in between — by a
-//! `build-closure-release` call on the exact same closure value (see
-//! `docs/TODO.md`'s retain/release-対の重複除去 entry). Provably safe:
+//! `build-closure-release` call on the exact same closure value. Provably safe:
 //! `build-closure-retain` is *inlined* (`load rc; add 1; store rc` against
 //! the box's own refcount slot — see
 //! [`crate::eval::interp::llvm_builder_build_closure_retain`]'s doc

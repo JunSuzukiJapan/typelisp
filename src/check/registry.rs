@@ -591,8 +591,7 @@ fn hashtable_def() -> AdtDef {
         "clear".to_string(),
         AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![hashtable_ty()], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
     );
-    // `keys`/`values`/`entries` (TODO.md's `HashTable<K,V>`-traversal item):
-    // a Rust `HashMap` has no stable, resumable cursor the way `Vector<T>`'s
+    // `keys`/`values`/`entries`: a Rust `HashMap` has no stable, resumable cursor the way `Vector<T>`'s
     // own index-based iterator does, so each call snapshots the table's
     // current contents into a fresh `Vector` rather than exposing a live
     // cursor — `eval_builtin_method`'s `"hashtable"` arm builds these

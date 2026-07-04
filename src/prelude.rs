@@ -513,8 +513,8 @@ pub const SOURCE: &str = r#"
         (val (car (cdr binding))))
     `(loop (match ,val (,pattern ,@body) (_ (break))))))
 
-;; `doiter` (TODO.md, [[typelisp-trait-mechanism-and-doiter]]): iterate a
-;; value of any type implementing the `Iter` trait (`Item`/`next`, declared
+;; `doiter`: iterate a value of any type implementing the `Iter` trait
+;; (`Item`/`next`, declared
 ;; further down once `deftrait`/`impl` exist) by repeatedly calling `next`,
 ;; binding `var` to each yielded `Item` until `(none)`. Same hidden-binding
 ;; trick `dotimes`/`dolist` use (`gensym` evaluates `coll-expr` exactly
@@ -605,8 +605,7 @@ pub const SOURCE: &str = r#"
            ,@(map (lambda ((tr Sexpr)) Sexpr (list (quote setf) (car (cdr tr)) (car tr))) temps)))
        ,@result)))
 
-;; `Iter`/`doiter` (TODO.md's `doiter` entry, [[typelisp-todo-md-staleness]]):
-;; the trait `doiter` requires every iterable type to implement — a single
+;; `Iter`: the trait `doiter` requires every iterable type to implement — a single
 ;; `next` method returning the next element, or `(none)` once exhausted.
 ;; `Self` mutates in place across calls (no immutable "next state" returned
 ;; alongside the element — see the trait machinery's design notes): a
@@ -662,7 +661,7 @@ pub const SOURCE: &str = r#"
 ;; would, but without pretending to be a generic trait impl) are the
 ;; correct way to walk a `Sexpr` list.
 
-;; `HashTable<K,V>` iteration (TODO.md's remaining item): `keys`/`values`/
+;; `HashTable<K,V>` iteration: `keys`/`values`/
 ;; `entries` are Rust builtins (`registry::hashtable_def`,
 ;; `eval_builtin_method`'s `"hashtable"` arm) — a `HashMap` has no stable,
 ;; resumable cursor the way `Vector<T>`'s index does, so each call snapshots

@@ -78,9 +78,11 @@ fn calling_an_unimplemented_trait_method_on_a_concrete_type_is_a_type_error() {
 
 #[test]
 fn generic_function_calls_a_trait_method_via_where_bound() {
-    // `it: T`, `(where (Counted T))` — `count` resolves through
-    // `Expr::TraitCall` (no concrete `AdtDef` for `t`), dispatched at
-    // runtime off `b`'s own type tag.
+    // `it: T`, `(where (Counted T))` — `describe`'s own generic body checks
+    // `count` as `Expr::TraitCall` (no concrete `AdtDef` for `t`), but this
+    // call site is `describe(box::new 7)`: monomorphization re-checks the
+    // specialization with `T = box` concrete, so `count` resolves statically
+    // to `Expr::Assoc` there — `TraitCall` itself never executes.
     let src = format!(
         "{} (defun (describe T) ((it T)) i32 (where (Counted T)) (count it))
             (describe (box::new 7))",

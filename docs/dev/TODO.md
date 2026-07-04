@@ -10,7 +10,26 @@
 
 ## 残っている作業（影響範囲の大きさで優先順位付け——[[feedback-impl-priority]]）
 
-現在、着手待ちの残作業はなし。
+`compile`（LLVM JIT/AOT）機能は現状「今のフェーズが実際に使うASTノードだけ本実装、それ以外は
+`ast_bridge`が`(unsupported "<Variant>")`を返しコンパイラ本体が明示的にpanicする」設計
+（`ast_bridge.rs`冒頭のdocコメント参照）。以下はその`unsupported`のうち、ユーザーが普通に
+書けるコードから実際に到達しうる（＝いずれ本実装が要る）ものの一覧——`Expr::TraitCall`は
+単型化後に到達不能な診断専用ノードと確認済みで対象外（`tests/trait_test.rs`参照）。
+
+1. **`Match`: `Sexpr`以外のscrutinee（`Option`/`Result`/`defstruct`）が`unsupported`**
+   （`ast_bridge.rs::translate_match`）。`Option`/`Result`はエラー処理の中核でどの関数にも
+   現れうるため影響範囲が最大。タグ付き`i64`ビットテストで済む`Sexpr`と異なり、一般ADT box
+   の variant スロットに対するタグテストへの一般化が必要（`translate_match`のdocコメントに
+   詳細）。
+2. **`Global`/`SetGlobal`: グローバル変数（`defvar`/`defconstant`）の参照・代入が`unsupported`**
+   （`ast_bridge.rs`の`Expr::Global`/`Expr::SetGlobal`アーム）。グローバル参照はごく普通の
+   コードで頻出するため次点の影響範囲。
+3. **`Panic`: `(panic msg)`が`unsupported`**（同ファイルの`Expr::Panic`アーム）。診断用
+   メッセージの文字列化＋`Never`型としての分岐処理が必要。
+4. **`MethodRef`: メソッドを値として使う式（例: `+`をそのまま渡す）が`unsupported`**
+   （`Expr::MethodRef`アーム）。
+5. **`Quote`: `(quote datum)`が`unsupported`**（`Expr::Quote`アーム）。コンパイル対象の関数
+   本体にクォートされたリテラルが現れるケースは他より稀。
 
 直近完了: **compile側TraitCall機構の削除**（2026-07-04）——ジェネリック単型化（2026-07-03）で
 `Expr::TraitCall`がコンパイル可能ソースから到達不能になったため、compile側の実行時ディスパッチ

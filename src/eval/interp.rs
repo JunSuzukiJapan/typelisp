@@ -148,10 +148,11 @@ impl Interp {
             // (`Checker::check_construct`) — but it never executes a
             // `TopLevel::Defstruct`, the only other place `struct_types`
             // gets populated, so it's seeded here by hand. `hashtable`/
-            // `scope` don't need this: both are still `AdtKind::Sum`
-            // (`registry::hashtable_def`/`scope_def`), a historical
-            // asymmetry `docs/TODO.md`'s Stage 4/5 will eventually close,
-            // not Stage 3's.
+            // `scope` don't need this: both are `AdtKind::Sum`
+            // (`registry::hashtable_def`/`scope_def`) with no `variants`/
+            // `field_names` of their own — user code only ever builds one
+            // through its `::new()` assoc fn, never `Expr::Construct`, so
+            // there is no construct site for `struct_types` to affect.
             struct_types: HashSet::from([Path::root("vector")]),
         }
     }
