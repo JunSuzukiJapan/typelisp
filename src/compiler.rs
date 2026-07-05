@@ -268,40 +268,13 @@
 use crate::{Checker, Heap, Interp, Reader};
 
 pub const SOURCE: &str = r#"
-(defun sexpr-str ((s Sexpr)) string
-  (match s
-    ((Str v) v)
-    (_ (panic "expected a Str Sexpr node"))))
-
-;; Extracts a host `bool` out of a `(Bool b)` Sexpr node — the `is-fn` tag
-;; counterpart of `sexpr-str`, used everywhere a captured/parameter-name
-;; pair or call-argument pair's tag needs reading (automatic `ClosureBox`
-;; retain/release insertion).
-(defun sexpr-bool ((s Sexpr)) bool
-  (match s
-    ((Bool b) b)
-    (_ (panic "expected a Bool Sexpr node"))))
-
-;; Extracts a host `string` out of a `(Sym v)` Sexpr node — the symbol
-;; counterpart of `sexpr-str` (a *param/captured-name* pair's name half is a
-;; `Sym`, via `ast_bridge::tagged_sym_list`/`intern_symbol`, unlike a `var`
-;; tag's or a `labels` def's name, both plain `Str`s).
-(defun sexpr-sym-name ((s Sexpr)) string
-  (match s
-    ((Sym v) (symbol->string v))
-    (_ (panic "expected a Sym Sexpr node"))))
-
-;; Extracts a host `i64` out of an `(Int n)` Sexpr node — moved up here
-;; (ahead of `compute-fn-mask`/`retain-bindings`/`release-bindings`, which
-;; all need it for the `kind` tag `ast_bridge::tagged_sym_list` carries,
-;; Stage 6 of the Sexpr-representation plan) from its original spot
-;; alongside `compile-sexpr-tag-test`/`compile-sexpr-field`, since a
-;; top-level `defun` can only call one already defined *earlier* in this
-;; same source (no forward references — see this module's doc comment).
-(defun sexpr-int ((s Sexpr)) i64
-  (match s
-    ((Int n) n)
-    (_ (panic "expected an Int Sexpr node"))))
+;; `sexpr-str`/`sexpr-bool`/`sexpr-sym-name`/`sexpr-int` — the island's typed
+;; `Sexpr` field extractors — are now Rust builtins (`Interp::eval_builtin`,
+;; registered in `check::registry`), not `match`-based typelisp defuns.
+;; Symbol/Sexpr redesign Phase 2 moved them out of this source so the island
+;; navigates `Sexpr` structure entirely through the `sexpr-*` layer, never the
+;; user-facing `match` (Phase 5 fences `match` to enum scrutinees). Each still
+;; panics on a tag mismatch, exactly as the old `(_ (panic ...))` arms did.
 
 ;; `names` is now a list of `(name . kind)` pairs (`ast_bridge::tagged_sym_list`
 ;; — `kind` generalized from a plain `is-fn` `Bool` to a 3-way `Int` tag in

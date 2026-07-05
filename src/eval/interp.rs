@@ -1379,6 +1379,45 @@ impl Interp {
                 Some(_) => Some(Err(EvalError::Internal("sexpr-atom: expected a Sexpr argument".into()))),
                 None => Some(Err(EvalError::Internal("sexpr-atom: expected one argument".into()))),
             },
+            // Internal `Sexpr` payload extractors (Symbol/Sexpr redesign Phase 2):
+            // the island's own typed field readers, moved out of `compiler.rs`'s
+            // `match`-based typelisp defuns so the island stops depending on the
+            // user-facing `match` (Phase 5 fences `match` to enum-only). Each
+            // reads the runtime `Value` payload directly, mirroring exactly what
+            // `match_sexpr_ctor`'s corresponding arm binds — panicking (not
+            // `None`-matching) on a tag mismatch, the same contract the old
+            // `(_ (panic ...))` catch-all arms had.
+            "sexpr-int" => match args.first() {
+                Some(RtValue::Sexpr(Value::Int(n))) => Some(Ok(RtValue::Int(*n))),
+                Some(RtValue::Sexpr(_)) => Some(Err(EvalError::Panic("sexpr-int: expected an Int Sexpr node".into()))),
+                _ => Some(Err(EvalError::Internal("sexpr-int: expected a Sexpr argument".into()))),
+            },
+            "sexpr-bool" => match args.first() {
+                Some(RtValue::Sexpr(Value::Bool(b))) => Some(Ok(RtValue::Bool(*b))),
+                Some(RtValue::Sexpr(_)) => Some(Err(EvalError::Panic("sexpr-bool: expected a Bool Sexpr node".into()))),
+                _ => Some(Err(EvalError::Internal("sexpr-bool: expected a Sexpr argument".into()))),
+            },
+            "sexpr-str" => match args.first() {
+                Some(RtValue::Sexpr(Value::Str(id))) => Some(Ok(RtValue::Str(heap.string(*id).into()))),
+                Some(RtValue::Sexpr(_)) => Some(Err(EvalError::Panic("sexpr-str: expected a Str Sexpr node".into()))),
+                _ => Some(Err(EvalError::Internal("sexpr-str: expected a Sexpr argument".into()))),
+            },
+            // `(Sym v)` binds `v : Symbol`, then `symbol->string` reads its name;
+            // this fuses the two, matching the old defun `(symbol->string v)`.
+            "sexpr-sym-name" => match args.first() {
+                Some(RtValue::Sexpr(Value::Symbol(id))) => Some(Ok(RtValue::Str(heap.symbol_name(*id).into()))),
+                Some(RtValue::Sexpr(_)) => Some(Err(EvalError::Panic("sexpr-sym-name: expected a Sym Sexpr node".into()))),
+                _ => Some(Err(EvalError::Internal("sexpr-sym-name: expected a Sexpr argument".into()))),
+            },
+            // `sexpr-symp`: the tag predicate a `match (car x) ((Sym s) ...) (_ ...))`
+            // with a *non-panic* fallback rewrites to (`form-is-borrowed?`/
+            // `bare-returned-own-name` in `compiler.rs`) — a peer of
+            // `sexpr-consp`/`sexpr-null`/`sexpr-atom`, reading the tag directly.
+            "sexpr-symp" => match args.first() {
+                Some(RtValue::Sexpr(v)) => Some(Ok(RtValue::Bool(matches!(v, Value::Symbol(_))))),
+                Some(_) => Some(Err(EvalError::Internal("sexpr-symp: expected a Sexpr argument".into()))),
+                None => Some(Err(EvalError::Internal("sexpr-symp: expected one argument".into()))),
+            },
             _ => None,
         }
     }

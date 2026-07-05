@@ -379,6 +379,20 @@ impl Registry {
         root.fns.insert("sexpr-consp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
         root.fns.insert("sexpr-null".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
         root.fns.insert("sexpr-atom".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
+        // Internal `Sexpr` payload extractors (Symbol/Sexpr redesign Phase 2):
+        // typed field readers that used to be `match`-based typelisp defuns in
+        // `compiler.rs` (`(match s ((Int n) n) (_ (panic ...)))`), moved to Rust
+        // builtins (`Interp::eval_builtin`) so the island no longer needs the
+        // user-facing `match` at all. Each panics on a tag mismatch, preserving
+        // the old defuns' `(_ (panic ...))` contract. `sexpr-symp` is the tag
+        // predicate its two non-panic-fallback callers (`form-is-borrowed?`/
+        // `bare-returned-own-name`) need to branch on a `Sym` node — a peer of
+        // `sexpr-consp`/`sexpr-null`/`sexpr-atom`.
+        root.fns.insert("sexpr-int".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::I64, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("sexpr-bool".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("sexpr-str".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Str, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("sexpr-sym-name".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Str, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("sexpr-symp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
         // `gensym`: a fresh `Sexpr::Sym` on every call, for macro hygiene
         // workarounds (see `Interp`'s `gensym_counter` for the caveat that
         // these are collision-*resistant*, not truly unforgeable — typelisp
