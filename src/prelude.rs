@@ -67,6 +67,15 @@ pub const SOURCE: &str = r#"
 ;; all). `and`/`or` (below) still need special-form treatment for short-
 ;; circuiting; `not` never did.
 (defun not ((b bool)) bool (if b false true))
+;; `consp`/`null`/`atom` remain `match`-based: they are *user-facing* `Sexpr`
+;; predicates a user program can itself `compile` (see `compile_test`'s
+;; `compile_dispatches_consp_null_and_atom_...`), so their bodies must stay
+;; compilable — `compile-match` handles the `Sexpr` `match` directly, whereas
+;; delegating to the `sexpr-consp` builtin would need a runtime shim the
+;; compiler doesn't wire (Phase 1's handoff note). They are not island
+;; dependencies (`compiler.rs` never calls them; the `and`/`or` macros call
+;; `sexpr-null` directly). Their `match`-on-`Sexpr` is Phase 4/5's concern,
+;; alongside the rest of the user-facing `Sexpr` list surface.
 (defun consp ((s Sexpr)) bool (match s ((Cons _ _) true) (_ false)))
 (defun null ((s Sexpr)) bool (match s ((Nil) true) (_ false)))
 (defun atom ((s Sexpr)) bool (not (consp s)))
@@ -123,18 +132,24 @@ pub const SOURCE: &str = r#"
 ;; coerce to `Sexpr` the way bare `()` does (`Value::Empty`'s special-cased
 ;; `none`/`nil` lookup), so a raw `false` returned directly from a macro
 ;; body would fail to check against the macro body's `Sexpr`-expected type.
+;; Macro bodies navigate their `Sexpr` argument (`args`) through the
+;; `sexpr-*` layer (`sexpr-null`/`sexpr-car`/`sexpr-cdr`/`sexpr-cons`), not
+;; the user-facing `car`/`cdr`/`cons` (Phase 4 repurposes those to a generic
+;; `cons<T,U>` pair) — Symbol/Sexpr redesign Phase 2. The quasiquote/`list`
+;; templates still emit ordinary `car`/`cdr`/`if` symbols into the *expansion*
+;; (user code), untouched.
 (defmacro and (&rest args)
-  (if (null args)
+  (if (sexpr-null args)
       (quote true)
-      (if (null (cdr args))
-          (car args)
-          (list (quote if) (car args) (cons (quote and) (cdr args)) (quote false)))))
+      (if (sexpr-null (sexpr-cdr args))
+          (sexpr-car args)
+          (list (quote if) (sexpr-car args) (sexpr-cons (quote and) (sexpr-cdr args)) (quote false)))))
 (defmacro or (&rest args)
-  (if (null args)
+  (if (sexpr-null args)
       (quote false)
-      (if (null (cdr args))
-          (car args)
-          (list (quote if) (car args) (quote true) (cons (quote or) (cdr args))))))
+      (if (sexpr-null (sexpr-cdr args))
+          (sexpr-car args)
+          (list (quote if) (sexpr-car args) (quote true) (sexpr-cons (quote or) (sexpr-cdr args))))))
 
 ;; CL's `equal`: `eql` on everything but `Cons`/`Str`, which get structural
 ;; recursion and case-sensitive content comparison respectively (`Str::equal`,
@@ -145,6 +160,14 @@ pub const SOURCE: &str = r#"
 ;; (`Value::Boxed`, see `BoxedObj`) is only `eql` — two separately-built
 ;; equal floats are correctly never `eq` (identity, like `Str`/`Cons`), the
 ;; same reason `eq` alone would be wrong here now.
+;; Stays `match`-based: `equal` is user-facing and user-`compile`able (and
+;; `case` expands to `(equal ..)`), so its body must remain compilable —
+;; `compile-match` handles the `Sexpr` `match`, whereas a `sexpr-*`-navigated
+;; body would need `sexpr-consp`/`sexpr-strp`/... wired into the compiler's
+;; runtime-shim map first (Phase 1's handoff note). The island calls `equal`
+;; only from *interpreted* code (`compiler.rs`), where the `match` is fine;
+;; migrating it (and the rest of the user-facing `Sexpr` list surface) waits
+;; for Phase 4/5 to settle that dual-use question. See `consp`/`null`/`atom`.
 (defun equal ((a Sexpr) (b Sexpr)) bool
   (match a
     ((Cons a1 a2) (match b ((Cons b1 b2) (and (equal a1 b1) (equal a2 b2))) (_ false)))
@@ -170,6 +193,9 @@ pub const SOURCE: &str = r#"
     ((Cons _ d) (+ 1 (length d)))
     (_ (panic "length: not a proper list"))))
 
+;; Stays `match`-based for the same reason as `equal`/`consp` — user-facing
+;; and user-`compile`able, so the body must remain compilable via
+;; `compile-match`. The island calls it only from interpreted code.
 (defun append ((a Sexpr) (b Sexpr)) Sexpr
   (match a
     ((Nil) b)
@@ -196,7 +222,7 @@ pub const SOURCE: &str = r#"
 ;; unwritable-in-source" hidden binding trick with the macro system's own
 ;; (already-proven, see `case`'s `tmp`) hygiene mechanism.
 (defmacro dotimes (spec &rest body)
-  (let ((var (car spec)) (count-expr (car (cdr spec))) (limit (gensym)))
+  (let ((var (sexpr-car spec)) (count-expr (sexpr-car (sexpr-cdr spec))) (limit (gensym)))
     `(let ((,var 0) (,limit ,count-expr))
        (while (< ,var ,limit) ,@body (setf ,var (+ ,var 1))))))
 
@@ -205,7 +231,7 @@ pub const SOURCE: &str = r#"
 ;; counter — what `check_dolist` did with `Pattern::Ctor` `match` arms
 ;; directly, this does with already-existing library functions instead.
 (defmacro dolist (spec &rest body)
-  (let ((var (car spec)) (lst-expr (car (cdr spec))) (lst (gensym)))
+  (let ((var (sexpr-car spec)) (lst-expr (sexpr-car (sexpr-cdr spec))) (lst (gensym)))
     `(let ((,lst ,lst-expr))
        (while (consp ,lst)
          (let ((,var (car ,lst)))
@@ -229,12 +255,12 @@ pub const SOURCE: &str = r#"
 ;; self-recursion shape as `and`/`or` above). `else`-detection mirrors
 ;; `case`'s own `(eq (car c) (quote else))`.
 (defmacro cond (&rest clauses)
-  (if (null clauses)
+  (if (sexpr-null clauses)
       ()
-      (let ((clause (car clauses)))
-        (if (eq (car clause) (quote else))
-            `(progn ,@(cdr clause))
-            `(if ,(car clause) (progn ,@(cdr clause)) (cond ,@(cdr clauses)))))))
+      (let ((clause (sexpr-car clauses)))
+        (if (eq (sexpr-car clause) (quote else))
+            `(progn ,@(sexpr-cdr clause))
+            `(if ,(sexpr-car clause) (progn ,@(sexpr-cdr clause)) (cond ,@(sexpr-cdr clauses)))))))
 
 ;; `if-let`: exactly the two-armed `match` `Checker::check_if_let` used to
 ;; build directly (a constructor-pattern arm plus a wildcard `else` arm) —
@@ -242,7 +268,7 @@ pub const SOURCE: &str = r#"
 ;; condition. Uses no `,@`, so it could have lived next to `and`/`or`
 ;; instead — kept here purely to group the whole reduction set together.
 (defmacro if-let (binding then els)
-  (let ((pattern (car binding)) (val (car (cdr binding))))
+  (let ((pattern (sexpr-car binding)) (val (sexpr-car (sexpr-cdr binding))))
     `(match ,val (,pattern ,then) (_ ,els))))
 
 (defun reverse-onto ((lst Sexpr) (acc Sexpr)) Sexpr
@@ -561,9 +587,9 @@ pub const SOURCE: &str = r#"
   (let ((tmp (gensym)))
     `(let ((,tmp ,expr))
        (cond ,@(map (lambda ((c Sexpr)) Sexpr
-                       (if (eq (car c) (quote else))
+                       (if (eq (sexpr-car c) (quote else))
                            c
-                           (cons (list (quote equal) tmp (car c)) (cdr c))))
+                           (sexpr-cons (list (quote equal) tmp (sexpr-car c)) (sexpr-cdr c))))
                      clauses)))))
 
 ;; `do` (roadmap step 8d, catalog §1.1): `(do ((var1 init1 step1)
