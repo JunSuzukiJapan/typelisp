@@ -3,7 +3,7 @@
 最終更新: 2026-07-04 / ブランチ: `feature/symbol-type`（`feature/compile-sexpr` から分岐）
 
 このドキュメントは複数フェーズにわたる型システム再設計の**進捗と残作業**を記録する。
-Phase 0 は完了・コミット済み。Phase 1 以降が次回作業。
+Phase 0・Phase 1 は完了。Phase 2（島を user-facing car/cdr/match から全面移行）以降が次回作業。
 
 ---
 
@@ -59,15 +59,28 @@ Phase 2 の島書き換えが支配的リスク（週単位）。段階的・テ
 
 ## 次回やること（Phase 1 以降）
 
-### Phase 1 — 内部 Sexpr ナビゲーション層（島の生存キット）
+### Phase 1 — 内部 Sexpr ナビゲーション層（島の生存キット）【✅ 完了】
 島専用の Sexpr 型プリミティブを新設し、島が user-facing `car`/`cdr`/`match` に依存しなくて済む状態を作る（Phase 2 の前提）。
-- 追加: `sexpr-cons`/`sexpr-car`/`sexpr-cdr`/`sexpr-consp`/`sexpr-null`/`sexpr-atom`。
-  既存 `sexpr-int`/`sexpr-bool`/`sexpr-str`/`sexpr-sym-name`（`compiler.rs:270-301` 付近）と同じ島 API 群に揃える。
-  実装は Rust builtin（`registry.rs`＋`interp.rs::eval_builtin`）が素直。現行の自由 `cons`/`car`/`cdr`（`registry.rs:351-353`、
-  `interp.rs::eval_builtin` の `"cons"` アーム）と同じ heap 操作を流用。
-- `match`-on-Sexpr の置換手段: 新特殊形は作らず、**tag 判定述語＋`sexpr-*` アクセサ＋`if`** で分解（`compiler.rs` が既に一部この形）。
-- gating（任意）: 内部専用としてユーザーから遮断（モジュール可視性 [[typelisp-visibility-pub]] またはビルトイン内部フラグ）。
-- 検証: 構築した Sexpr 値に対する新アクセサのユニットテスト。
+
+実装済み内容:
+- `src/check/registry.rs`（`set-cdr` 登録直後、`351` 付近）: `sexpr-cons:(sexpr,sexpr)→sexpr`,
+  `sexpr-car:sexpr→sexpr`, `sexpr-cdr:sexpr→sexpr`, `sexpr-consp/sexpr-null/sexpr-atom:sexpr→bool` を builtin 登録。
+- `src/eval/interp.rs::eval_builtin`（`set-cdr` アーム直後）: 6 アームを追加。`sexpr-cons`/`sexpr-car`/`sexpr-cdr` は
+  `cons`/`car`/`cdr` と同一の heap 操作（`heap.cons`/`car`/`cdr`、`sexpr-cons` は `sync_roots` も同様に呼ぶ）。
+  述語は `Value::is_cons`/`is_empty` でランタイムタグを直接読む（`match` 非依存＝Phase 5 の match フェンスを跨いで生存）。
+- Rust builtin 実装を選択（doc 推奨どおり）。既存 `sexpr-int`/`sexpr-bool`/`sexpr-str`/`sexpr-sym-name` は
+  `compiler.rs` の typelisp defun（`match` 依存）だが、それらは Phase 2 で島が置換する側なので、本層は独立に Rust で置いた。
+- `match`-on-Sexpr の置換手段は方針どおり **tag 判定述語＋`sexpr-*` アクセサ＋`if`**（新特殊形なし）。
+- gating: 未実装（任意項目）。現状 `public: true` で登録＝ユーザーからも見える。Phase 2 の島移行時に必要なら遮断を再検討。
+- テスト: `tests/eval_test.rs` に 3 test 追加（`sexpr_cons_car_cdr_mirror_the_user_facing_ops`／
+  `sexpr_car_and_cdr_of_non_cons_panic`／`sexpr_tag_predicates_read_the_runtime_tag`）。user-facing `cons`/`car` との相互運用も検証。
+
+検証: `scripts/test-serial.sh` 全 green（並列 LLVM SIGSEGV 回避）、clippy ゼロ。
+
+**注（Phase 2 への申し送り）**: 本層は現状インタプリタ（`eval_builtin`）専用。島（`compiler.rs`）が
+`sexpr-car` 等を実際に使い、かつその defun 自体を `compile` する段になったら、`car`/`cdr`/`cons` と同様の
+runtime shim（`is_rt_builtin_name`＝`interp.rs:2132` 付近、`crate::compile::runtime` の `rt_car` 等）への
+写像が必要になる。Phase 1 時点では未対応。
 
 ### Phase 2 — 島を user-facing car/cdr/match から全面移行【最大の山場】
 - `compiler.rs` の `car`(82)/`cdr`(126)/`match`-on-Sexpr(53) を `sexpr-car`/`sexpr-cdr`＋tag述語`if`に書き換え。

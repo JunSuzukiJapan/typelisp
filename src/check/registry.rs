@@ -360,6 +360,25 @@ impl Registry {
         // list operations) build on.
         root.fns.insert("set-car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() });
         root.fns.insert("set-cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() });
+        // Internal `Sexpr` navigation layer (Symbol/Sexpr redesign Phase 1,
+        // `docs/dev/symbol-sexpr-redesign.md`): `sexpr-cons`/`sexpr-car`/
+        // `sexpr-cdr`/`sexpr-consp`/`sexpr-null`/`sexpr-atom`. These are exact
+        // duplicates of the free `cons`/`car`/`cdr` and the prelude
+        // `consp`/`null`/`atom` today, but under a dedicated `sexpr-` island
+        // namespace so the self-hosting compiler (`compiler.rs`) and prelude
+        // macros can navigate `Sexpr` structure *without* going through the
+        // user-facing `car`/`cdr` (Phase 4 repurposes those to a generic
+        // `cons<T,U>` pair) or `match` (Phase 5 fences `match` to enums). The
+        // predicates read the runtime tag directly (`Value::is_cons`/
+        // `is_empty`) rather than pattern-matching, so they survive that
+        // fence. Same heap operations as `cons`/`car`/`cdr` (see
+        // `Interp::eval_builtin`), so no new runtime machinery is needed.
+        root.fns.insert("sexpr-cons".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: sexpr(), public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("sexpr-car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("sexpr-cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("sexpr-consp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("sexpr-null".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("sexpr-atom".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
         // `gensym`: a fresh `Sexpr::Sym` on every call, for macro hygiene
         // workarounds (see `Interp`'s `gensym_counter` for the caveat that
         // these are collision-*resistant*, not truly unforgeable — typelisp

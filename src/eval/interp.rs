@@ -1336,6 +1336,49 @@ impl Interp {
                 ),
                 _ => Some(Err(EvalError::Internal("set-cdr: expected two Sexpr arguments".into()))),
             },
+            // Internal `Sexpr` navigation layer (Symbol/Sexpr redesign Phase 1):
+            // `sexpr-cons`/`sexpr-car`/`sexpr-cdr` are the island's own aliases
+            // for the identical heap operations `cons`/`car`/`cdr` perform, kept
+            // separate so Phase 4 can repurpose the user-facing names to a
+            // generic `cons<T,U>` pair. `sexpr-consp`/`sexpr-null`/`sexpr-atom`
+            // read the runtime tag directly (no `match`), so they survive
+            // Phase 5's `match`-to-enum fence.
+            "sexpr-cons" => match (args.first(), args.get(1)) {
+                (Some(RtValue::Sexpr(a)), Some(RtValue::Sexpr(b))) => {
+                    self.sync_roots(heap);
+                    Some(heap.cons(*a, *b).map(RtValue::Sexpr).map_err(|e| EvalError::Panic(e.to_string())))
+                }
+                _ => Some(Err(EvalError::Internal("sexpr-cons: expected two Sexpr arguments".into()))),
+            },
+            "sexpr-car" => match args.first() {
+                Some(RtValue::Sexpr(v)) => {
+                    Some(heap.car(*v).map(RtValue::Sexpr).map_err(|_| EvalError::Panic("sexpr-car: not a cons".into())))
+                }
+                Some(_) => Some(Err(EvalError::Internal("sexpr-car: expected a Sexpr argument".into()))),
+                None => Some(Err(EvalError::Internal("sexpr-car: expected one argument".into()))),
+            },
+            "sexpr-cdr" => match args.first() {
+                Some(RtValue::Sexpr(v)) => {
+                    Some(heap.cdr(*v).map(RtValue::Sexpr).map_err(|_| EvalError::Panic("sexpr-cdr: not a cons".into())))
+                }
+                Some(_) => Some(Err(EvalError::Internal("sexpr-cdr: expected a Sexpr argument".into()))),
+                None => Some(Err(EvalError::Internal("sexpr-cdr: expected one argument".into()))),
+            },
+            "sexpr-consp" => match args.first() {
+                Some(RtValue::Sexpr(v)) => Some(Ok(RtValue::Bool(v.is_cons()))),
+                Some(_) => Some(Err(EvalError::Internal("sexpr-consp: expected a Sexpr argument".into()))),
+                None => Some(Err(EvalError::Internal("sexpr-consp: expected one argument".into()))),
+            },
+            "sexpr-null" => match args.first() {
+                Some(RtValue::Sexpr(v)) => Some(Ok(RtValue::Bool(v.is_empty()))),
+                Some(_) => Some(Err(EvalError::Internal("sexpr-null: expected a Sexpr argument".into()))),
+                None => Some(Err(EvalError::Internal("sexpr-null: expected one argument".into()))),
+            },
+            "sexpr-atom" => match args.first() {
+                Some(RtValue::Sexpr(v)) => Some(Ok(RtValue::Bool(!v.is_cons()))),
+                Some(_) => Some(Err(EvalError::Internal("sexpr-atom: expected a Sexpr argument".into()))),
+                None => Some(Err(EvalError::Internal("sexpr-atom: expected one argument".into()))),
+            },
             _ => None,
         }
     }

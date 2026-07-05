@@ -459,6 +459,46 @@ fn car_and_cdr_of_non_cons_panic() {
     assert_eq!(run("(cdr (Int 5))"), Err(EvalError::Panic("cdr: not a cons".into())));
 }
 
+// ---- internal Sexpr navigation layer (Symbol/Sexpr redesign Phase 1) --------
+
+#[test]
+fn sexpr_cons_car_cdr_mirror_the_user_facing_ops() {
+    // `sexpr-cons`/`sexpr-car`/`sexpr-cdr` are the island's private aliases for
+    // the identical heap operations `cons`/`car`/`cdr` perform (Phase 1 of the
+    // Symbol/Sexpr redesign), kept under their own name so Phase 4 can free up
+    // the user-facing `car`/`cdr` for a generic `cons<T,U>` pair.
+    assert_sexpr_eq("(sexpr-cons (Int 1) (Nil))", |h| h.cons(Value::Int(1), Value::Empty).unwrap());
+    assert_sexpr_eq("(sexpr-car (sexpr-cons (Int 1) (Nil)))", |_| Value::Int(1));
+    assert_sexpr_eq("(sexpr-cdr (sexpr-cons (Int 1) (Nil)))", |_| Value::Empty);
+    // Cross-checks with the user-facing constructors: the two APIs share a heap
+    // representation, so they interoperate.
+    assert_sexpr_eq("(sexpr-car (cons (Int 7) (Nil)))", |_| Value::Int(7));
+    assert_sexpr_eq("(car (sexpr-cons (Int 9) (Nil)))", |_| Value::Int(9));
+}
+
+#[test]
+fn sexpr_car_and_cdr_of_non_cons_panic() {
+    assert_eq!(run("(sexpr-car (Nil))"), Err(EvalError::Panic("sexpr-car: not a cons".into())));
+    assert_eq!(run("(sexpr-cdr (Int 5))"), Err(EvalError::Panic("sexpr-cdr: not a cons".into())));
+}
+
+#[test]
+fn sexpr_tag_predicates_read_the_runtime_tag() {
+    // The `sexpr-consp`/`sexpr-null`/`sexpr-atom` predicates inspect the runtime
+    // tag directly (no `match`), so they survive Phase 5's `match`-to-enum fence.
+    assert_eq!(eval_ok("(sexpr-consp (cons (Int 1) (Nil)))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(sexpr-consp (Nil))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(sexpr-consp (Int 3))"), RtValue::Bool(false));
+
+    assert_eq!(eval_ok("(sexpr-null (Nil))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(sexpr-null (cons (Int 1) (Nil)))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(sexpr-null (Int 3))"), RtValue::Bool(false));
+
+    assert_eq!(eval_ok("(sexpr-atom (Nil))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(sexpr-atom (Int 3))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(sexpr-atom (cons (Int 1) (Nil)))"), RtValue::Bool(false));
+}
+
 #[test]
 fn list_builds_cons_chain() {
     assert_sexpr_eq("(list (Int 1) (Int 2))", |h| {
