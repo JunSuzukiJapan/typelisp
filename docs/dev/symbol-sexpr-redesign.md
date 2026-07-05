@@ -1,9 +1,9 @@
 # Symbol型導入と Sexpr の裏方化（型システム再設計）— 進行中
 
-最終更新: 2026-07-04 / ブランチ: `feature/symbol-type`（`feature/compile-sexpr` から分岐）
+最終更新: 2026-07-05 / ブランチ: `feature/symbol-type`（`feature/compile-sexpr` から分岐）
 
 このドキュメントは複数フェーズにわたる型システム再設計の**進捗と残作業**を記録する。
-Phase 0・Phase 1 は完了。Phase 2（島を user-facing car/cdr/match から全面移行）以降が次回作業。
+Phase 0・Phase 1・Phase 2 は完了。Phase 3（`Vector<T>` コレクション演算）以降が次回作業。
 
 ---
 
@@ -57,7 +57,7 @@ Phase 2 の島書き換えが支配的リスク（週単位）。段階的・テ
 
 ---
 
-## 次回やること（Phase 1 以降）
+## 次回やること（Phase 3 以降）
 
 ### Phase 1 — 内部 Sexpr ナビゲーション層（島の生存キット）【✅ 完了】
 島専用の Sexpr 型プリミティブを新設し、島が user-facing `car`/`cdr`/`match` に依存しなくて済む状態を作る（Phase 2 の前提）。
@@ -82,14 +82,39 @@ Phase 2 の島書き換えが支配的リスク（週単位）。段階的・テ
 runtime shim（`is_rt_builtin_name`＝`interp.rs:2132` 付近、`crate::compile::runtime` の `rt_car` 等）への
 写像が必要になる。Phase 1 時点では未対応。
 
-### Phase 2 — 島を user-facing car/cdr/match から全面移行【最大の山場】
-- `compiler.rs` の `car`(82)/`cdr`(126)/`match`-on-Sexpr(53) を `sexpr-car`/`sexpr-cdr`＋tag述語`if`に書き換え。
-- prelude マクロ `dolist`/`cond`/`if-let`（`prelude.rs:200-260` 付近）と、島に残す Sexpr list defun を `sexpr-*` に移行。
-- **ユーザー定義マクロへの影響（要ドキュメント化）**: `defmacro` 本体は Sexpr マクロ引数を `car`/`cdr`/`match` で操作。
-  付け替え後はマクロ作者が `sexpr-*` アクセサを使う（島 API をマクロ作者に公開）＝仕様変更。
-- 進め方: クラスタごとに書き換え→逐次テスト。復元点コミット必須。LLVM 並列 SIGSEGV 回避に `scripts/test-serial.sh`
-  （[[typelisp-llvm-link-error-env-shadow]]）。
-- 検証: 全 `cargo test` green、JIT/AOT compile テスト通過、コンパイル済みプログラム1本を end-to-end 実行。
+### Phase 2 — 島を user-facing car/cdr/match から全面移行【✅ 完了 / commit `ea8e879`→`718677b`】
+実装済み内容（4 サブフェーズ、各復元点コミット）:
+
+- **2a（`ea8e879`）— Sexpr payload 抽出を Rust builtin 化**: 島の型付きフィールド読取り
+  `sexpr-str`/`sexpr-bool`/`sexpr-sym-name`/`sexpr-int` を `compiler.rs` の `match` ベース defun から
+  `Interp::eval_builtin` の Rust builtin へ移設（`Value` payload を直接読む。タグ不一致で panic、旧 `(_ (panic ...))` 契約を保持）。
+  加えて非 panic フォールバックのタグ判定用に `sexpr-symp` 述語を新設（`sexpr-consp`/`null`/`atom` の仲間）。
+- **2b（`dacdc33`）— タグ抽出 match の書換**: `compile-value`/`compile-int`/`compile-bool`/`compile-float`/
+  `compile-pattern-test`（panic フォールバック→抽出 builtin）と `form-is-borrowed?`/`bare-returned-own-name`
+  （非 panic フォールバック→`sexpr-symp`＋`if`）。
+- **2c（`dacdc33`）— car/cdr 機械置換**: `compiler.rs` の `(car `210 箇所を `(sexpr-car `/`(sexpr-cdr ` へ。
+  runtime shim 名マップの文字列 `"car"`/`"cdr"`（`compile-call` の `raw-nm`→`rt_car` 変換）は不変。
+- **2d（`dacdc33`）— Cons 走査 match の書換**: 24 箇所を
+  `(if (sexpr-consp x) (let ((a (sexpr-car x)) (rest (sexpr-cdr x))) body) fallback)` へ。
+  `Option`/`Scope` の `match`（`Some`/`None`）は列挙型なので維持（Phase 5 対象外）。
+- **2e（`718677b`）— prelude マクロ本体**: expansion-time に Sexpr マクロ引数を操作するマクロ本体
+  `and`/`or`/`dotimes`/`dolist`/`cond`/`if-let`/`case` を `sexpr-*` へ。マクロは常にインタプリタ実行
+  （コンパイルされない）ため builtin で安全。展開**出力**側の `car`/`cdr`/`consp`（ユーザーコード）は不変。
+
+**据え置いた判断（重要な設計制約）**: `consp`/`null`/`atom`/`equal`/`append` の defun は `match` ベースのまま。
+これらは**ユーザーが `compile` 可能な関数**で、body がコンパイル可能である必要がある（`case` は `(equal ..)` に展開される）。
+`sexpr-*` builtin への委譲は runtime shim 未整備（Phase 1 の申し送り＝`is_rt_builtin_name`/`rt_extern_functions`/
+`compile-call` の名前マップ拡張）のため `compile` で失敗する（`compile_test` の
+`compile_dispatches_consp_null_and_atom_...` が実証）。島はこれらを**インタプリタ経由でのみ**呼ぶため `match` で問題なし。
+これらユーザー面 Sexpr リスト操作の移行は Phase 4/5 の課題（`sexpr-*` の compile 対応 shim を先に整備するか、
+prelude/島コードを Phase 5 の match フェンスから除外するかの判断を含む）。
+
+**マクロ作者への仕様変更（未ドキュメント化・要 §7）**: `defmacro` 本体で Sexpr マクロ引数を操作する場合、
+移行済み標準マクロに倣い `sexpr-car`/`sexpr-cdr`/`sexpr-cons`/`sexpr-consp`/`sexpr-null`/`sexpr-symp` を使う。
+`car`/`cdr` は Phase 4 で `cons<T,U>` に付け替わるため、マクロ本体（＝Sexpr 操作）で使うと型エラーになる。
+現状ユーザー定義マクロは `car`/`cdr` でもまだ動く（Phase 4 未実施）が、Phase 4 完了時に破綻する。
+
+検証: `scripts/test-serial.sh` 全 green（JIT/AOT compile テスト・end-to-end `compile_file_test` 含む）、clippy ゼロ。
 
 ### Phase 3 — `Vector<T>` コレクション演算
 - ジェネリック prelude `defun` を追加: `map`/`filter`/`foldl`/`foldr`/`reverse`/`member`/`find`/`position`/`count`/`length`/`append` 等。
