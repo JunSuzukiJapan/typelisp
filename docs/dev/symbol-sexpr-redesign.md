@@ -116,11 +116,35 @@ prelude/島コードを Phase 5 の match フェンスから除外するかの�
 
 検証: `scripts/test-serial.sh` 全 green（JIT/AOT compile テスト・end-to-end `compile_file_test` 含む）、clippy ゼロ。
 
-### Phase 3 — `Vector<T>` コレクション演算
-- ジェネリック prelude `defun` を追加: `map`/`filter`/`foldl`/`foldr`/`reverse`/`member`/`find`/`position`/`count`/`length`/`append` 等。
-  既存 `new`/`push`/`get`/`len`＋`doiter` の上に純 typelisp で記述（Rust 不要）。
-- 必要なら可変長 `vector` ビルダ（`interp.rs::construct_vector` を N 引数対応に拡張）や vector リテラル。
-- 検証: `(map inc (vector-of 1 2 3))` 等の型付きテスト＋単型化テスト。
+### Phase 3 — `Vector<T>` コレクション演算【✅ 完了】
+実装済み内容（`src/prelude.rs`、`iter`/`vector-iter` 定義直後）:
+- ジェネリック prelude `defun` を 9 個追加、いずれも純 typelisp・Rust 不要:
+  `vector-map`/`vector-filter`/`vector-foldl`/`vector-foldr`/`vector-reverse`/
+  `vector-find`/`vector-position`/`vector-count`/`vector-append`。
+  builtin の `Vector::new`/`push`/`get`/`len` と `Iter` トレイトの `doiter` 上に記述
+  （左→右で足りる走査は `doiter`、逆順が要る `foldr`/`reverse` は明示 index ループ）。
+- **`defmethod` でなく `defun` にした理由**: `vector-map`（`Vector<T>→Vector<U>`）・
+  `vector-foldl`/`vector-foldr`（アキュムレータ型 `A`）は**受け手の `T` 以外の型変数**が要る。
+  `defmethod` は所有型のパラメータ経由でしかジェネリックになれない（`check_assoc_call` は
+  メソッドの型引数を `def.params` からのみ解決＝受け手に無い型変数は推論不能）。
+  `(defun (name T U) ...)` なら両方を明示宣言でき `check_call` が引数から `unify` 推論する。
+- **命名（`vector-` 接頭辞）の理由**: 同型の Sexpr リスト版 `map`/`filter`/`reverse`/… が
+  まだ prelude に残る（Phase 4 で撤去）。メソッドと自由関数は受け手型で分岐でき同名共存できるが、
+  **自由関数どうしは同名共存できない**ため接頭辞で回避。Phase 4 完了後に平の名前が空く。
+- **要素比較が要る演算は述語版**（`vector-find`/`vector-position`/`vector-count`）:
+  `T` に `Eq` 相当の境界が無く任意要素を比較する汎用等値が無いため、要素そのものでなく
+  述語を取る（CL の `-if` 系に相当）。
+- **可変長 `vector-of` ビルダは見送り**: 型付き `&rest (xs T)` は `defun` 本体では `xs` が
+  `Sexpr` に潰れる（要素が `T` でなく `Sexpr`）ため純 typelisp では型付け不能。実装するなら
+  `interp.rs` に N 引数 Rust builtin が要る。doc の「必要なら」に従い今回は不要と判断、
+  テストは既存 vector と同様 `push` で構築。
+- **`setf` は代入値の型を返す**（Unit でない）ため、`(if cond (setf n ...) ())` は
+  `i32` vs `Unit` で不一致になる。`vector-count` はこれを踏んで `when`（`progn`＋末尾 `()`）で
+  ループ本体を Unit 化。
+- テスト: `tests/vector_ops_test.rs`（19 test、`load_prelude` 使用）。`map` の `U≠T`・
+  `foldl` の `A≠T`・空 vector・string 要素・引数型不一致（型エラー）・単型化経路を網羅。
+
+検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
 
 ### Phase 4 — 自由 `cons`/`car`/`cdr`/`set-car`/`set-cdr` を `cons<T,U>` に付け替え
 - `registry.rs:351-361`: `cons-cell<A,B>` の演算を自由名に昇格（`cons:(T,U)→cons<T,U>`, `car:cons<T,U>→T`, `cdr:cons<T,U>→U`）。

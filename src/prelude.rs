@@ -656,6 +656,84 @@ pub const SOURCE: &str = r#"
         (Option::none))))
 (defmethod iter ((self Vector<T>)) vector-iter<T> (vector-iter::new self 0))
 
+;; `Vector<T>` collection operations (redesign Phase 3). Written as generic
+;; free `defun`s — not `defmethod`s — because several of them (`vector-map`,
+;; `vector-foldl`, `vector-foldr`) need a *second* type variable beyond the
+;; receiver's `T` (the mapped element type / the accumulator type), and a
+;; `defmethod` can only be generic through its owner's own parameters
+;; (`Checker::check_assoc_call` resolves method type arguments solely from
+;; `def.params`, so a method signature mentioning a type variable absent from
+;; the receiver has no way to infer it). A `defun (name T U)` declares both
+;; explicitly and `Checker::check_call` unifies each against the actual
+;; arguments the same way `check_construct` does for an ADT's `params`.
+;;
+;; They live under a `vector-` prefix to coexist with the identically-shaped
+;; `Sexpr`-list `map`/`filter`/`reverse`/etc. still defined above — those are
+;; slated for removal in the redesign's Phase 4, at which point the plain
+;; names free up; until then two same-named *free* functions cannot share a
+;; name (unlike a method and a free function, which dispatch by receiver
+;; type). Every operation needing element comparison takes a predicate
+;; (`vector-find`/`vector-position`/`vector-count`) rather than an element to
+;; match: `T` carries no `Eq`-style bound, so there is no generic equality to
+;; compare arbitrary elements with — the predicate form sidesteps that and
+;; mirrors CL's `-if` family.
+;;
+;; Each builds its result on top of the builtin `Vector::new`/`push`/`get`/
+;; `len` primitives, walking the input with `doiter` (the `Iter`-trait loop
+;; above) where a forward left-to-right pass suffices and with an explicit
+;; index where reverse order is needed (`vector-foldr`/`vector-reverse`). A
+;; freshly built result vector is pinned to its element type with `the`, since
+;; a bare `(Vector::new)` in an unannotated `let` binding has nothing to infer
+;; its element type from.
+(defun (vector-map T U) ((v Vector<T>) (f (fn (T) U))) Vector<U>
+  (let ((out (the Vector<U> (Vector::new))))
+    (doiter (x (iter v)) (push out (f x)))
+    out))
+(defun (vector-filter T) ((v Vector<T>) (pred (fn (T) bool))) Vector<T>
+  (let ((out (the Vector<T> (Vector::new))))
+    (doiter (x (iter v)) (if (pred x) (push out x) ()))
+    out))
+(defun (vector-foldl T A) ((v Vector<T>) (f (fn (A T) A)) (init A)) A
+  (let ((acc init))
+    (doiter (x (iter v)) (setf acc (f acc x)))
+    acc))
+(defun (vector-foldr T A) ((v Vector<T>) (f (fn (T A) A)) (init A)) A
+  (let ((acc init) (i (- (len v) 1)))
+    (while (>= i 0)
+      (setf acc (f (get v i) acc))
+      (setf i (- i 1)))
+    acc))
+(defun (vector-reverse T) ((v Vector<T>)) Vector<T>
+  (let ((out (the Vector<T> (Vector::new))) (i (- (len v) 1)))
+    (while (>= i 0)
+      (push out (get v i))
+      (setf i (- i 1)))
+    out))
+(defun (vector-find T) ((v Vector<T>) (pred (fn (T) bool))) Option<T>
+  (let ((result (the Option<T> (Option::none))))
+    (doiter (x (iter v))
+      (if (pred x) (progn (setf result (Option::some x)) (break)) ()))
+    result))
+(defun (vector-position T) ((v Vector<T>) (pred (fn (T) bool))) Option<i32>
+  (let ((i 0) (result (the Option<i32> (Option::none))))
+    (while (< i (len v))
+      (if (pred (get v i)) (progn (setf result (Option::some i)) (break)) ())
+      (setf i (+ i 1)))
+    result))
+(defun (vector-count T) ((v Vector<T>) (pred (fn (T) bool))) i32
+  ;; `when`, not a bare `(if (pred x) (setf n ...) ())`: `setf` evaluates to
+  ;; the value it assigned (here `i32`), so an `if` whose other branch is `()`
+  ;; would fail to unify (`i32` vs `Unit`); `when` wraps the `setf` in a
+  ;; `progn` with a trailing `()`, making the whole loop body `Unit`.
+  (let ((n 0))
+    (doiter (x (iter v)) (when (pred x) (setf n (+ n 1))))
+    n))
+(defun (vector-append T) ((a Vector<T>) (b Vector<T>)) Vector<T>
+  (let ((out (the Vector<T> (Vector::new))))
+    (doiter (x (iter a)) (push out x))
+    (doiter (x (iter b)) (push out x))
+    out))
+
 ;; `cons-cell<A,B>`: a generic 2-field product, needed below purely because
 ;; typelisp has no built-in tuple syntax. Named and shaped after Lisp's own
 ;; convention for storing two values — a cons cell, `car`/`cdr` — rather
