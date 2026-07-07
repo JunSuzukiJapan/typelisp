@@ -282,13 +282,19 @@ impl Registry {
         root.add_type(option_def());
         root.add_type(result_def());
         root.add_type(error_def());
-        // `Sexpr` is the one type whose constructors (`nil`/`cons`/...) stay
-        // reachable as bare names without a `use` — Lisp's list operations
-        // (`car`/`cdr`/`cons`/list literals) would be unworkably verbose
-        // otherwise. `Option`/`Result`/`Error` constructors are `Type::ctor`
-        // (or `use`d) only — see `Checker::check_use`.
+        // `Sexpr` is the one type whose data constructors (`nil`/`int`/`str`/
+        // ...) stay reachable as bare names without a `use` — so `(Int 5)`/
+        // `(Nil)` datum literals stay writable. `Option`/`Result`/`Error`
+        // constructors are `Type::ctor` (or `use`d) only — see
+        // `Checker::check_use`. The one exception is the `cons` variant: its
+        // bare name is removed here so `(cons a b)` resolves to the free
+        // `cons<T,U>` pair function (Symbol/Sexpr redesign Phase 4b), not the
+        // `Sexpr` cons cell. Internal `Sexpr` cons construction (`list`/
+        // quasiquote/`&rest`) goes through `Checker::sexpr_cons_ctor`/
+        // `sexpr-cons` directly instead of this bare name.
         let def = sexpr_def();
         root.register_ctors(&def.name, &def.variants);
+        root.ctors.remove("cons");
         root.add_type(def);
         root.add_type(hashtable_def());
         root.add_type(vector_def());
@@ -345,21 +351,15 @@ impl Registry {
         // `random`: the only numeric builtin with no natural receiver to
         // dispatch on (like `gensym`), so it stays a free function.
         root.fns.insert("random".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::I32, public: true, builtin: true, bounds: HashMap::new() });
-        // `cons`/`car`/`cdr` operate on `Sexpr` (the cons/nil duality at the
-        // type level). `cons` is also reachable as the `Cons` constructor;
-        // registering it as a function too lets it be used as a value
-        // (e.g. passed to a higher-order function).
-        root.fns.insert("cons".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: sexpr(), public: true, builtin: true, bounds: HashMap::new() });
-        root.fns.insert("car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true, builtin: true, bounds: HashMap::new() });
-        root.fns.insert("cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: sexpr(), public: true, builtin: true, bounds: HashMap::new() });
-        // `set-car`/`set-cdr` (CL `rplaca`/`rplacd`): in-place mutation of an
-        // existing cons cell, backed by `mem::Heap::set_car`/`set_cdr` (already
-        // implemented at the heap layer, just not wired up to a language-level
-        // name until now). Panics on a non-`Cons` `Sexpr`, matching `car`/`cdr`.
-        // This is the prerequisite `nconc`/`nreverse` (the prelude's destructive
-        // list operations) build on.
-        root.fns.insert("set-car".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() });
-        root.fns.insert("set-cdr".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() });
+        // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr` builtins:
+        // the Symbol/Sexpr redesign (Phase 4b) repurposes `cons`/`car`/`cdr` to
+        // the generic `cons<T,U>` pair (`prelude.rs`'s free `cons` +
+        // `cons-cell<A,B>`'s `car`/`cdr` field-accessor methods). The `Sexpr`
+        // cons/nil duality is served by the `sexpr-*` island layer below
+        // (`sexpr-cons`/`sexpr-car`/`sexpr-cdr`), and the destructive
+        // `set-car`/`set-cdr` are dropped entirely (their only callers —
+        // `nconc`/`nreverse` — were removed in Phase 5; a `cons<T,U>` field is
+        // mutated with `(setf p::car v)` instead).
         // Internal `Sexpr` navigation layer (Symbol/Sexpr redesign Phase 1,
         // `docs/dev/symbol-sexpr-redesign.md`): `sexpr-cons`/`sexpr-car`/
         // `sexpr-cdr`/`sexpr-consp`/`sexpr-null`/`sexpr-atom`. These are exact

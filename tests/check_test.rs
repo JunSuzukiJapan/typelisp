@@ -125,9 +125,9 @@ fn symbol_string_bridges_are_typed() {
 
 #[test]
 fn symbol_is_accepted_where_sexpr_expected() {
-    // A `Symbol` is a valid `Sexpr` datum, so it flows into a `list`/`cons`
+    // A `Symbol` is a valid `Sexpr` datum, so it flows into a `list`/`sexpr-cons`
     // code position (the checker wraps it into `Sexpr::Sym`).
-    assert_eq!(ty("(cons (gensym) ())"), Type::Named(Path::root("sexpr"), vec![]));
+    assert_eq!(ty("(sexpr-cons (gensym) (Nil))"), Type::Named(Path::root("sexpr"), vec![]));
 }
 
 // ---- if ---------------------------------------------------------------------
@@ -210,10 +210,12 @@ fn construct_some_infers_type_argument() {
 }
 
 #[test]
-fn construct_cons_yields_sexpr() {
-    // (Cons (Int 1) ()) : car and cdr are both Sexpr; `()` adopts `Nil`.
+fn sexpr_cons_yields_sexpr() {
+    // `(sexpr-cons (Int 1) ())`: car and cdr are both Sexpr; `()` adopts `Nil`.
+    // (The free `cons`/`Cons` name is the generic `cons<T,U>` pair now — the
+    // Sexpr cons cell is built through the `sexpr-*` layer — Phase 4b.)
     let sexpr = Type::Named(Path::root("sexpr"), vec![]);
-    assert_eq!(ty("(Cons (Int 1) ())"), sexpr);
+    assert_eq!(ty("(sexpr-cons (Int 1) ())"), sexpr);
 }
 
 #[test]
@@ -226,7 +228,7 @@ fn nil_constructs_sexpr() {
 fn empty_list_as_sexpr_is_nil() {
     // `()` adopts `Sexpr::Nil` when a Sexpr is expected, just like it adopts
     // `Option::None` when an Option<T> is expected.
-    assert_eq!(ty("(Cons () ())"), ty("(Cons (Nil) (Nil))"));
+    assert_eq!(ty("(sexpr-cons () ())"), ty("(sexpr-cons (Nil) (Nil))"));
 }
 
 #[test]
@@ -423,11 +425,11 @@ fn lambda_rest_has_a_variadic_function_type() {
 
 #[test]
 fn rest_param_is_seen_as_a_sexpr_inside_the_body() {
-    // `car` only accepts a `Sexpr` argument — type-checking succeeds,
+    // `sexpr-car` only accepts a `Sexpr` argument — type-checking succeeds,
     // proving `xs` is bound to plain `Sexpr` (an ordinary Lisp list) inside
     // the body, not some homogeneous array type.
     assert!(matches!(
-        form("(defun f ((a i32) &rest (xs i32)) Sexpr (car xs))"),
+        form("(defun f ((a i32) &rest (xs i32)) Sexpr (sexpr-car xs))"),
         Ok(TopLevel::Defun { .. })
     ));
 }
@@ -507,22 +509,22 @@ fn apply_with_a_non_sexpr_rest_argument_is_a_type_error() {
 // ---- cons / car / cdr / list / dolist ----------------------------------------
 
 #[test]
-fn car_and_cdr_yield_sexpr() {
+fn sexpr_car_and_cdr_yield_sexpr() {
     let sexpr = Type::Named(Path::root("sexpr"), vec![]);
-    assert_eq!(ty("(car (Cons (Int 1) (Nil)))"), sexpr.clone());
-    assert_eq!(ty("(cdr (Cons (Int 1) (Nil)))"), sexpr);
+    assert_eq!(ty("(sexpr-car (sexpr-cons (Int 1) (Nil)))"), sexpr.clone());
+    assert_eq!(ty("(sexpr-cdr (sexpr-cons (Int 1) (Nil)))"), sexpr);
 }
 
 #[test]
-fn car_argument_must_be_sexpr() {
-    assert_type_error("(car 1)");
+fn sexpr_car_argument_must_be_sexpr() {
+    assert_type_error("(sexpr-car 1)");
 }
 
 #[test]
-fn cons_usable_as_function_value() {
+fn sexpr_cons_usable_as_function_value() {
     let sexpr = Type::Named(Path::root("sexpr"), vec![]);
     let src = "(defun apply2 ((f (fn (Sexpr Sexpr) Sexpr)) (a Sexpr) (b Sexpr)) Sexpr (f a b)) \
-               (apply2 cons (Int 1) (Nil))";
+               (apply2 sexpr-cons (Int 1) (Nil))";
     assert_eq!(ty_program(src), sexpr);
 }
 

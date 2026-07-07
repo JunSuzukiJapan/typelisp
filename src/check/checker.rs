@@ -669,6 +669,23 @@ impl Checker {
         None
     }
 
+    /// The `Sexpr` `cons` variant's `(type path, variant index)`, read from the
+    /// type definition directly rather than the bare-name `ctors` map — that
+    /// bare `cons` name was removed (Symbol/Sexpr redesign Phase 4b) so `(cons
+    /// a b)` resolves to the free `cons<T,U>` pair function. Internal `Sexpr`
+    /// cons construction (`list` literals, quasiquote) still needs the variant,
+    /// and reaches it through here.
+    fn sexpr_cons_ctor(&self) -> (Path, usize) {
+        let path = Path::root("sexpr");
+        let def = self.reg.type_def(&path).expect("sexpr is built in");
+        let idx = def
+            .variants
+            .iter()
+            .position(|v| v.name == "cons")
+            .expect("sexpr has a cons variant");
+        (path, idx)
+    }
+
     /// Resolve a bare name snapshotted by `(use Type)` (see `Self::check_use`)
     /// to the `(type path, method name)` of the static associated function it
     /// names — the static-method counterpart of [`Self::resolve_ctor`],
@@ -717,7 +734,10 @@ impl Checker {
     /// literal, reusing the same `Expr::Quote(QuotedSexpr::Nil)` shape `()`
     /// itself checks to.
     fn cons_rest_list(&self, elem_ty: &Type, items: Vec<Typed>) -> Result<Typed, Error> {
-        let cons_path = Path::root("cons");
+        // `sexpr-cons`, not the free `cons` (which is the `cons<T,U>` pair
+        // builder now — Symbol/Sexpr redesign Phase 4b): a `&rest` list is a
+        // `Sexpr`, built through the island cons layer.
+        let cons_path = Path::root("sexpr-cons");
         items.into_iter().rev().try_fold(Typed { expr: Expr::Quote(QuotedSexpr::Nil), ty: sexpr_ty() }, |acc, item| {
             let item = self.wrap_rest_elem(elem_ty, item)?;
             Ok(Typed { expr: Expr::Call(cons_path.clone(), vec![item, acc]), ty: sexpr_ty() })
@@ -3181,7 +3201,7 @@ impl Checker {
             }
             let car_t = self.check_qq_template(heap, interp, env, car)?;
             let cdr_t = self.check_qq_template(heap, interp, env, cdr)?;
-            let (adt, cons_idx) = self.resolve_ctor("cons").expect("sexpr::cons is built in");
+            let (adt, cons_idx) = self.sexpr_cons_ctor();
             return Ok(Typed {
                 expr: Expr::Construct { type_name: adt, variant: cons_idx, args: vec![car_t, cdr_t], mutable: false },
                 ty: sexpr_ty,
@@ -3501,7 +3521,7 @@ impl Checker {
         args: &[Value],
     ) -> Result<Typed, Error> {
         let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
-        let (adt, cons_idx) = self.resolve_ctor("cons").expect("sexpr::cons is built in");
+        let (adt, cons_idx) = self.sexpr_cons_ctor();
         let (_, nil_idx) = self.resolve_ctor("nil").expect("sexpr::nil is built in");
         let mut acc = Typed {
             expr: Expr::Construct { type_name: adt.clone(), variant: nil_idx, args: Vec::new(), mutable: false },

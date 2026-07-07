@@ -1376,12 +1376,15 @@ pub const SOURCE: &str = r#"
                        ;; above) before this body was ever reached.
                        (compile-call ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((raw-nm (sexpr-str (sexpr-car (sexpr-cdr e)))))
-                           (let ((nm (if (equal raw-nm "car") "rt_car"
-                                         (if (equal raw-nm "cdr") "rt_cdr"
-                                             (if (equal raw-nm "cons") "rt_cons"
-                                                 (if (equal raw-nm "set-car") "rt_set_car"
-                                                     (if (equal raw-nm "set-cdr") "rt_set_cdr"
-                                                         raw-nm)))))))
+                           ;; The `sexpr-*` island layer maps to its
+                           ;; `crate::compile::runtime` cons-heap shims (Symbol/
+                           ;; Sexpr redesign Phase 4b — the free `car`/`cdr`/
+                           ;; `cons` names are the `cons<T,U>` pair now, compiled
+                           ;; as ordinary methods/`defun`s, not `rt_*` shims).
+                           (let ((nm (if (equal raw-nm "sexpr-car") "rt_car"
+                                         (if (equal raw-nm "sexpr-cdr") "rt_cdr"
+                                             (if (equal raw-nm "sexpr-cons") "rt_cons"
+                                                 raw-nm)))))
                              (let ((arg-forms (sexpr-cdr (sexpr-cdr e))))
                                (let ((argc (sexpr-list-length arg-forms)))
                                  (let ((args-ptr (alloca-args builder argc)))

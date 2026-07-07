@@ -367,8 +367,11 @@ fn macro_expansion_survives_gc_pressure() {
 #[test]
 fn rest_only_macro_collects_args_into_a_list() {
     // No fixed params at all: every call argument is collected into `body`.
+    // A `defmacro` body navigates its `Sexpr` arguments with the `sexpr-*`
+    // layer (`sexpr-cons` here) — the free `cons` is the generic `cons<T,U>`
+    // pair now, not a `Sexpr` cons cell (Symbol/Sexpr redesign Phase 4b).
     let (v, _h) = eval_ok(
-        "(defmacro my-progn (&rest body) (cons (quote progn) body))
+        "(defmacro my-progn (&rest body) (sexpr-cons (quote progn) body))
          (my-progn 1 2 3)",
     );
     assert_eq!(v, RtValue::Int(3));

@@ -31,16 +31,13 @@ fn run(src: &str, policy: RedefPolicy) -> (Vec<String>, Result<(), Error>) {
 
 #[test]
 fn redefining_a_builtin_function_is_always_an_error() {
-    // `car`, not `not`: `not` moved from a Rust builtin to a plain prelude
-    // `defun` in the `loop`/`break`/`return`/`setf` stage (it had no
-    // GC-heap/Rust-only dependency once `loop`/`if` existed to write it
-    // with — see `src/prelude.rs`'s comment on it) — this `run` helper
-    // loads no prelude at all, so it's no longer registered as anything
-    // here, builtin or otherwise, and redefining it wouldn't conflict with
-    // what this test means to check. `car` is a genuine `Registry::with_builtins`
-    // free function (direct cons-cell access — can't be written in
-    // typelisp itself), so it still exercises this rule.
-    let src = "(defun car ((x Sexpr)) Sexpr x)";
+    // `sexpr-car`, not `not`/`car`: `not` and `car` are plain prelude/`defun`
+    // level names now (`car` is the `cons<T,U>` pair accessor — Symbol/Sexpr
+    // redesign Phase 4b), and this `run` helper loads no prelude, so redefining
+    // them wouldn't conflict with what this test checks. `sexpr-car` is a
+    // genuine `Registry::with_builtins` free function (direct cons-heap access —
+    // can't be written in typelisp itself), so it still exercises this rule.
+    let src = "(defun sexpr-car ((x Sexpr)) Sexpr x)";
     for policy in [RedefPolicy::Warn, RedefPolicy::Error, RedefPolicy::Silent] {
         let (_, result) = run(src, policy);
         assert!(result.is_err(), "policy {:?} should still reject redefining a builtin function", policy);

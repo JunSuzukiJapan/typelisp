@@ -430,12 +430,10 @@ fn assert_sexpr_eq(src: &str, expected: impl FnOnce(&mut Heap) -> Value) {
     assert!(sexpr_eq(&h, actual, want), "expected {:?}, got {:?}", want, actual);
 }
 
-#[test]
-fn cons_car_cdr() {
-    assert_sexpr_eq("(cons (Int 1) (Nil))", |h| h.cons(Value::Int(1), Value::Empty).unwrap());
-    assert_sexpr_eq("(car (cons (Int 1) (Nil)))", |_| Value::Int(1));
-    assert_sexpr_eq("(cdr (cons (Int 1) (Nil)))", |_| Value::Empty);
-}
+// Free `cons`/`car`/`cdr` are the generic `cons<T,U>` pair now (Symbol/Sexpr
+// redesign Phase 4b — see the pair tests in `prelude_test.rs`), not `Sexpr`
+// cons operations. `Sexpr` cons/nil is built and walked through the `sexpr-*`
+// layer (`sexpr_cons_car_cdr_mirror...` below).
 
 #[test]
 fn float_sexpr_constructs_and_extracts_through_a_heap_boxed_value() {
@@ -443,7 +441,7 @@ fn float_sexpr_constructs_and_extracts_through_a_heap_boxed_value() {
     // exercises `Heap::alloc_float`/`Interp::construct_sexpr`'s `SEXPR_FLOAT`
     // arm end to end, not just the mem-layer plumbing `mem_test.rs` covers.
     assert_sexpr_eq("(Float 3.5)", |h| h.alloc_float(3.5));
-    assert_sexpr_eq("(cons (Float 1.5) (Nil))", |h| {
+    assert_sexpr_eq("(sexpr-cons (Float 1.5) (Nil))", |h| {
         let f = h.alloc_float(1.5);
         h.cons(f, Value::Empty).unwrap()
     });
@@ -452,27 +450,16 @@ fn float_sexpr_constructs_and_extracts_through_a_heap_boxed_value() {
     // redesign Phase 5.)
 }
 
-#[test]
-fn car_and_cdr_of_non_cons_panic() {
-    assert_eq!(run("(car (Nil))"), Err(EvalError::Panic("car: not a cons".into())));
-    assert_eq!(run("(cdr (Int 5))"), Err(EvalError::Panic("cdr: not a cons".into())));
-}
-
 // ---- internal Sexpr navigation layer (Symbol/Sexpr redesign Phase 1) --------
 
 #[test]
 fn sexpr_cons_car_cdr_mirror_the_user_facing_ops() {
-    // `sexpr-cons`/`sexpr-car`/`sexpr-cdr` are the island's private aliases for
-    // the identical heap operations `cons`/`car`/`cdr` perform (Phase 1 of the
-    // Symbol/Sexpr redesign), kept under their own name so Phase 4 can free up
-    // the user-facing `car`/`cdr` for a generic `cons<T,U>` pair.
+    // `sexpr-cons`/`sexpr-car`/`sexpr-cdr` are the island's `Sexpr` cons/nil
+    // operations — the free `cons`/`car`/`cdr` names are the generic `cons<T,U>`
+    // pair now (Phase 4b), so a `Sexpr` list is built and walked here.
     assert_sexpr_eq("(sexpr-cons (Int 1) (Nil))", |h| h.cons(Value::Int(1), Value::Empty).unwrap());
     assert_sexpr_eq("(sexpr-car (sexpr-cons (Int 1) (Nil)))", |_| Value::Int(1));
     assert_sexpr_eq("(sexpr-cdr (sexpr-cons (Int 1) (Nil)))", |_| Value::Empty);
-    // Cross-checks with the user-facing constructors: the two APIs share a heap
-    // representation, so they interoperate.
-    assert_sexpr_eq("(sexpr-car (cons (Int 7) (Nil)))", |_| Value::Int(7));
-    assert_sexpr_eq("(car (sexpr-cons (Int 9) (Nil)))", |_| Value::Int(9));
 }
 
 #[test]
@@ -485,17 +472,17 @@ fn sexpr_car_and_cdr_of_non_cons_panic() {
 fn sexpr_tag_predicates_read_the_runtime_tag() {
     // The `sexpr-consp`/`sexpr-null`/`sexpr-atom` predicates inspect the runtime
     // tag directly (no `match`), so they survive Phase 5's `match`-to-enum fence.
-    assert_eq!(eval_ok("(sexpr-consp (cons (Int 1) (Nil)))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(sexpr-consp (sexpr-cons (Int 1) (Nil)))"), RtValue::Bool(true));
     assert_eq!(eval_ok("(sexpr-consp (Nil))"), RtValue::Bool(false));
     assert_eq!(eval_ok("(sexpr-consp (Int 3))"), RtValue::Bool(false));
 
     assert_eq!(eval_ok("(sexpr-null (Nil))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(sexpr-null (cons (Int 1) (Nil)))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(sexpr-null (sexpr-cons (Int 1) (Nil)))"), RtValue::Bool(false));
     assert_eq!(eval_ok("(sexpr-null (Int 3))"), RtValue::Bool(false));
 
     assert_eq!(eval_ok("(sexpr-atom (Nil))"), RtValue::Bool(true));
     assert_eq!(eval_ok("(sexpr-atom (Int 3))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(sexpr-atom (cons (Int 1) (Nil)))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(sexpr-atom (sexpr-cons (Int 1) (Nil)))"), RtValue::Bool(false));
 }
 
 #[test]
@@ -511,9 +498,11 @@ fn list_builds_cons_chain() {
 // user-facing `Sexpr` list surface — Symbol/Sexpr redesign Phase 5.
 
 #[test]
-fn cons_as_value() {
+fn sexpr_cons_as_value() {
+    // `sexpr-cons` passed as a higher-order function value (the free `cons` is
+    // the generic `cons<T,U>` pair now — Symbol/Sexpr redesign Phase 4b).
     let src = "(defun apply2 ((f (fn (Sexpr Sexpr) Sexpr)) (a Sexpr) (b Sexpr)) Sexpr (f a b)) \
-               (apply2 cons (Int 1) (Nil))";
+               (apply2 sexpr-cons (Int 1) (Nil))";
     assert_sexpr_eq(src, |h| h.cons(Value::Int(1), Value::Empty).unwrap());
 }
 
@@ -828,17 +817,17 @@ fn a_sexpr_car_bound_sexpr_survives_gc_pressure() {
     // `match` on a `Sexpr` is fenced off (Symbol/Sexpr redesign Phase 5); the
     // extracted `car` is now bound with `sexpr-car` instead, exercising the
     // same "a let-bound `Sexpr` local stays rooted across GC" path.
-    let src = "(let ((s (cons (Int 8) (Nil)))) \
+    let src = "(let ((s (sexpr-cons (Int 8) (Nil)))) \
                  (let ((h (sexpr-car s))) \
-                   (dotimes (i 40) (cons (Int 2) (Nil))) h))";
+                   (dotimes (i 40) (sexpr-cons (Int 2) (Nil))) h))";
     assert_eq!(eval_under_gc_pressure(src, 4), RtValue::Sexpr(Value::Int(8)));
 }
 
 #[test]
 fn a_defvar_sexpr_global_survives_gc_pressure_across_forms() {
-    let src = "(defvar (g Sexpr) (cons (Int 3) (Nil))) \
-               (dotimes (i 40) (cons (Int 2) (Nil))) \
-               (car g)";
+    let src = "(defvar (g Sexpr) (sexpr-cons (Int 3) (Nil))) \
+               (dotimes (i 40) (sexpr-cons (Int 2) (Nil))) \
+               (sexpr-car g)";
     assert_eq!(eval_under_gc_pressure(src, 3), RtValue::Sexpr(Value::Int(3)));
 }
 
@@ -859,9 +848,9 @@ fn an_unnamed_callee_survives_argument_evaluation_under_gc_pressure() {
     // `Expr::Apply`'s own anchor keeps the closure box alive while the
     // argument churns allocations. 6 cells: enough for the loop to run only
     // if garbage is collected, which would sweep an unanchored callee.
-    let src = "(let ((mk (lambda ((s Sexpr)) (fn (i32) Sexpr) (lambda ((n i32)) Sexpr (car s))))) \
-                 (let ((f (mk (cons (Int 4) (Nil))))) \
-                   (dotimes (i 40) (cons (Int 2) (Nil))) \
+    let src = "(let ((mk (lambda ((s Sexpr)) (fn (i32) Sexpr) (lambda ((n i32)) Sexpr (sexpr-car s))))) \
+                 (let ((f (mk (sexpr-cons (Int 4) (Nil))))) \
+                   (dotimes (i 40) (sexpr-cons (Int 2) (Nil))) \
                    (f 0)))";
     assert_eq!(eval_under_gc_pressure(src, 6), RtValue::Sexpr(Value::Int(4)));
 }
@@ -910,7 +899,7 @@ fn the_closure_side_table_shrinks_when_the_gc_sweeps_closure_boxes() {
     // Everything above is out of scope; a collection plus one sync (any
     // allocating evaluation) must drain the dead closures' side entries.
     h.gc();
-    for v in r.read_all(&mut h, "(cons (Int 1) (Nil))").expect("read failed") {
+    for v in r.read_all(&mut h, "(sexpr-cons (Int 1) (Nil))").expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         interp.exec(&mut h, tl).expect("eval failed");
     }

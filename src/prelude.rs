@@ -564,17 +564,27 @@ pub const SOURCE: &str = r#"
 ;; . value)` pairs.
 (defstruct (cons-cell A B) (car A) (cdr B))
 
+;; `cons`/`car`/`cdr`: the generic pair API (Symbol/Sexpr redesign Phase 4b).
+;; `cons` builds a `cons-cell<A,B>`; `car`/`cdr` are `cons-cell`'s own
+;; field-accessor methods (a `defstruct` generates `(car p)`/`(cdr p)` for its
+;; `car`/`cdr` fields — no free `defun` needed, and a receiver-typed method is
+;; what lets `(car p)` project a *statically typed* `A`). `cons` is a free
+;; `defun` (not just the `cons-cell::new` constructor) so it reads like Lisp and
+;; can be passed as a value. The `Sexpr` cons cell — a heterogeneous, dynamically
+;; typed list node — is a different thing entirely, built/walked through the
+;; `sexpr-*` island layer (`sexpr-cons`/`sexpr-car`/`sexpr-cdr`), never this
+;; pair. Mutate a pair field with `(setf p::car v)`.
+(defun (cons A B) ((a A) (b B)) cons-cell<A,B> (cons-cell::new a b))
+
 ;; `Sexpr` deliberately has **no** `Iter` impl: `Iter`'s `Item` must be one
 ;; fixed type per impl (`vector-iter<T>`'s `Item` is `T`, `hashtable-
 ;; iter<K,V>`'s is `cons-cell<K,V>`, both parameters fixed once per
-;; instantiation) — but a `Sexpr` list has no such parameter. Each `cons`
+;; instantiation) — but a `Sexpr` list has no such parameter. Each `Sexpr` cons
 ;; cell's `car` is independently, dynamically typed (`(1 "a" foo)` is a
 ;; perfectly ordinary list), so there is no single, correct `Item` to
 ;; declare; `Item = Sexpr` would type-check but throws away exactly the
-;; static type information `Iter`/`doiter` exist to provide. Plain `Sexpr`
-;; recursion (`car`/`cdr`/`consp`/`null`) or `dolist` (which needs no
-;; `Item` — it just binds each element's type as `Sexpr`, same as this
-;; would, but without pretending to be a generic trait impl) are the
+;; static type information `Iter`/`doiter` exist to provide. `Sexpr` recursion
+;; through the `sexpr-*` layer (`sexpr-consp`/`sexpr-car`/`sexpr-cdr`) is the
 ;; correct way to walk a `Sexpr` list.
 
 ;; `HashTable<K,V>` iteration: `keys`/`values`/

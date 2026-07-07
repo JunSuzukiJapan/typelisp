@@ -1306,43 +1306,12 @@ impl Interp {
                 Ok(s) => Ok(RtValue::Sexpr(heap.intern_symbol(&s))),
                 Err(e) => Err(e),
             }),
-            "cons" => match (args.first(), args.get(1)) {
-                (Some(RtValue::Sexpr(a)), Some(RtValue::Sexpr(b))) => {
-                    self.sync_roots(heap);
-                    Some(heap.cons(*a, *b).map(RtValue::Sexpr).map_err(|e| EvalError::Panic(e.to_string())))
-                }
-                _ => Some(Err(EvalError::Internal("cons: expected two Sexpr arguments".into()))),
-            },
-            "car" => match args.first() {
-                Some(RtValue::Sexpr(v)) => {
-                    Some(heap.car(*v).map(RtValue::Sexpr).map_err(|_| EvalError::Panic("car: not a cons".into())))
-                }
-                Some(_) => Some(Err(EvalError::Internal("car: expected a Sexpr argument".into()))),
-                None => Some(Err(EvalError::Internal("car: expected one argument".into()))),
-            },
-            "cdr" => match args.first() {
-                Some(RtValue::Sexpr(v)) => {
-                    Some(heap.cdr(*v).map(RtValue::Sexpr).map_err(|_| EvalError::Panic("cdr: not a cons".into())))
-                }
-                Some(_) => Some(Err(EvalError::Internal("cdr: expected a Sexpr argument".into()))),
-                None => Some(Err(EvalError::Internal("cdr: expected one argument".into()))),
-            },
-            "set-car" => match (args.first(), args.get(1)) {
-                (Some(RtValue::Sexpr(c)), Some(RtValue::Sexpr(v))) => Some(
-                    heap.set_car(*c, *v)
-                        .map(|_| RtValue::Unit)
-                        .map_err(|_| EvalError::Panic("set-car: not a cons".into())),
-                ),
-                _ => Some(Err(EvalError::Internal("set-car: expected two Sexpr arguments".into()))),
-            },
-            "set-cdr" => match (args.first(), args.get(1)) {
-                (Some(RtValue::Sexpr(c)), Some(RtValue::Sexpr(v))) => Some(
-                    heap.set_cdr(*c, *v)
-                        .map(|_| RtValue::Unit)
-                        .map_err(|_| EvalError::Panic("set-cdr: not a cons".into())),
-                ),
-                _ => Some(Err(EvalError::Internal("set-cdr: expected two Sexpr arguments".into()))),
-            },
+            // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr`
+            // builtins (Symbol/Sexpr redesign Phase 4b): `cons`/`car`/`cdr` are
+            // the `cons<T,U>` pair (a prelude `defun` + `cons-cell` accessor
+            // methods, run as ordinary user code), and `set-car`/`set-cdr` were
+            // dropped. `Sexpr` cons/nil operations live in the `sexpr-*` layer
+            // below.
             // Internal `Sexpr` navigation layer (Symbol/Sexpr redesign Phase 1):
             // `sexpr-cons`/`sexpr-car`/`sexpr-cdr` are the island's own aliases
             // for the identical heap operations `cons`/`car`/`cdr` perform, kept
@@ -2175,16 +2144,18 @@ fn method_link_name(type_name: &Path, method: &str) -> String {
     format!("{}::{}", type_name.local(), method)
 }
 
-/// True for the handful of free functions `compiler.rs`'s `compile-call`
-/// rewrites to a `crate::compile::runtime` shim by name (`car` -> `rt_car`,
-/// etc. — see that function's `raw-nm`/`nm` rename) rather than requiring
-/// `(compile car)` first: these can never be `compile`d themselves (no
-/// typelisp AST body — direct cons-heap access, Rust-only), so
-/// [`Interp::compile_function`] excludes them from its normal "every call
-/// target must already be compiled" check and instead always wires them via
-/// [`rt_extern_functions`].
+/// True for the handful of builtins `compiler.rs`'s `compile-call` rewrites to
+/// a `crate::compile::runtime` shim by name (`sexpr-car` -> `rt_car`, etc. —
+/// see that function's `raw-nm`/`nm` rename) rather than requiring `(compile
+/// ...)` first: these can never be `compile`d themselves (no typelisp AST body
+/// — direct cons-heap access, Rust-only), so [`Interp::compile_function`]
+/// excludes them from its normal "every call target must already be compiled"
+/// check and instead always wires them via [`rt_extern_functions`]. These are
+/// the `sexpr-*` island layer (Symbol/Sexpr redesign Phase 4b): the free
+/// `car`/`cdr`/`cons` names are now the `cons<T,U>` pair (an ordinary
+/// `defstruct` method / `defun`, compiled the normal way), not `rt_*` shims.
 fn is_rt_builtin_name(name: &str) -> bool {
-    matches!(name, "car" | "cdr" | "cons" | "set-car" | "set-cdr")
+    matches!(name, "sexpr-car" | "sexpr-cdr" | "sexpr-cons")
 }
 
 /// The fixed set of `crate::compile::runtime` shims every compiled function

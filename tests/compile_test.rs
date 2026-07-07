@@ -1898,7 +1898,7 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_str_local_rooted_across_
           (let ((s (append "hello" " world")))
             (let ((ignored (loop
                              (if (eq n 0) (break) ())
-                             (Cons (Int 0) (Int 0))
+                             (sexpr-cons (Int 0) (Int 0))
                              (setf n (- n 1)))))
               (length s))))
         (compile str-survives-gc)
@@ -2470,7 +2470,7 @@ fn compile_let_does_not_emit_instructions_after_an_early_return_from_its_body() 
         r#"
         (defun make-thing () i32
           (loop
-            (let ((s (Cons (Int 1) (Int 2))))
+            (let ((s (sexpr-cons (Int 1) (Int 2))))
               (return 42))))
         (compile make-thing)
         (make-thing)
@@ -2522,7 +2522,7 @@ fn compile_return_truncates_a_sexpr_lets_gc_root_on_every_call_not_just_the_firs
         (compile trivial)
         (defun leaky-inner () i32
           (loop
-            (let ((s (Cons (Int 1) (Int 2))))
+            (let ((s (sexpr-cons (Int 1) (Int 2))))
               (return 7))))
         (compile leaky-inner)
         "#;

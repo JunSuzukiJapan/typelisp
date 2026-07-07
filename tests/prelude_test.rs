@@ -382,46 +382,44 @@ fn string_to_symbol_round_trips_symbol_to_string() {
     assert_eq!(eval_ok(r#"(equal (string->symbol "foo") (quote foo))"#), RtValue::Bool(true));
 }
 
-// ---- step 7b: Sexpr-list library ------------------------------------------------
+// `set-car`/`set-cdr` (destructive `Sexpr` cons mutation) were removed with the
+// rest of the `Sexpr` list surface — Symbol/Sexpr redesign Phase 5/4b.
+
+// ---- the generic `cons<T,U>` pair (Symbol/Sexpr redesign Phase 4b) ----------
+//
+// `cons`/`car`/`cdr` are the heterogeneously-typed 2-element pair now
+// (`cons-cell<A,B>`), not `Sexpr` cons operations: `car`/`cdr` project the
+// *statically typed* element out, and the two elements can be different types.
+
+#[test]
+fn cons_builds_a_pair_and_car_cdr_project_it() {
+    assert_eq!(eval_ok("(car (cons 1 2))"), RtValue::Int(1));
+    assert_eq!(eval_ok("(cdr (cons 1 2))"), RtValue::Int(2));
+}
+
+#[test]
+fn cons_pair_elements_can_have_different_types() {
+    // `car` is an `i32`, `cdr` is a `string` — a genuinely heterogeneous pair,
+    // unlike a homogeneous `Vector<T>`.
+    assert_eq!(eval_ok(r#"(car (cons 7 "x"))"#), RtValue::Int(7));
+    assert_eq!(eval_ok(r#"(cdr (cons 7 "x"))"#), RtValue::Str("x".into()));
+}
+
+#[test]
+fn cons_pair_car_is_mutable_via_setf() {
+    let src = "(let ((p (cons 1 2))) (setf p::car 9) (car p))";
+    assert_eq!(eval_ok(src), RtValue::Int(9));
+}
+
+#[test]
+fn car_of_a_non_pair_is_a_type_error() {
+    // `car` is `cons-cell`'s field accessor now, not a `Sexpr` operation, so an
+    // `i32` receiver has no such method.
+    type_error("(car 1)");
+}
 
 fn eval_true(src: &str) {
     assert_eq!(eval_ok(src), RtValue::Bool(true), "expected true: {}", src);
-}
-
-#[test]
-fn set_car_overwrites_in_place() {
-    // Mutating through a second reference (`tail`, an alias to the same cons
-    // cell `lst`'s cdr points at) must be visible through `lst` too — proof
-    // this is a true in-place mutation, not a copy.
-    let src = "(defun f () bool
-                 (let ((lst (quote (a b c))))
-                   (let ((tail (cdr lst)))
-                     (progn
-                       (set-car tail (quote z))
-                       (equal lst (quote (a z c)))))))
-               (f)";
-    eval_true(src);
-}
-
-#[test]
-fn set_cdr_overwrites_in_place() {
-    let src = "(defun f () bool
-                 (let ((lst (quote (a b c))))
-                   (progn
-                     (set-cdr lst (quote (z)))
-                     (equal lst (quote (a z))))))
-               (f)";
-    eval_true(src);
-}
-
-#[test]
-fn set_car_panics_on_a_non_cons() {
-    assert!(matches!(run("(set-car (quote a) (quote z))"), Err(EvalError::Panic(_))));
-}
-
-#[test]
-fn set_cdr_panics_on_a_non_cons() {
-    assert!(matches!(run("(set-cdr (quote a) (quote z))"), Err(EvalError::Panic(_))));
 }
 
 #[test]

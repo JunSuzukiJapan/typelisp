@@ -3,10 +3,11 @@
 最終更新: 2026-07-05 / ブランチ: `feature/symbol-type`（`feature/compile-sexpr` から分岐）
 
 このドキュメントは複数フェーズにわたる型システム再設計の**進捗と残作業**を記録する。
-Phase 0〜3・Phase 4a（コレクションコンビネータの generic `Iter` 化）・**Phase 5（`match` の enum 専用 fence＋
-ユーザー面 Sexpr リスト操作の撤去）**まで完了。次回作業は **Phase 4b**（`cons`/`car`/`cdr` の `cons<T,U>` 付け替え）。
-Phase 4b と Phase 5 は元々一体で扱う計画だったが、リスク分離のため Phase 5 を先行実施した（`car`/`cdr`/`cons` は
-Phase 5 時点ではまだ `Sexpr` builtin のまま＝島の `sexpr-*` 移行済みで未使用、Phase 4b で `cons<T,U>` へ付け替える）。
+Phase 0〜3・Phase 4a（コレクションコンビネータの generic `Iter` 化）・**Phase 4b（`cons`/`car`/`cdr` の
+`cons<T,U>` 付け替え）**・**Phase 5（`match` の enum 専用 fence＋ユーザー面 Sexpr リスト操作の撤去）**まで完了。
+Phase 4b と Phase 5 は元々一体だったが、リスク分離のため Phase 5 を先行実施した（Commit 1＝Phase 5、Commit 2＝Phase 4b）。
+残るは **Phase 6**（`&rest` → `Vector<T>`）・**Phase 7**（ドキュメント整備）と、任意項目（`defenum`、Sexpr/`cons<T,U>`
+走査のユーザー向け traversal API 再設計）。
 
 ---
 
@@ -177,20 +178,31 @@ prelude/島コードを Phase 5 の match フェンスから除外するかの�
 
 検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
 
-### Phase 4b — 自由 `cons`/`car`/`cdr`/`set-car`/`set-cdr` を `cons<T,U>` に付け替え【未着手・要判断】
-**重要な発見（据え置き理由）**: `check_list` の呼び出し解決順は **コンストラクタ優先**
-（`checker.rs:2458` `resolve_ctor` → instance method → 自由関数）。よって `(cons a b)` は
-Sexpr の `Cons` バリアントコンストラクタに解決され、自由関数 `cons` のシグネチャを
-`cons<T,U>` に変えても `(cons a b)` の呼び出し側は変わらない。`cons` を真にペア型へ振り替えるには
-**Sexpr コンストラクタのベア名可視性を島内へ閉じる**必要があり、これは Phase 5 の match フェンス／
-Sexpr 島内化と一体。`car`/`cdr` はコンストラクタ競合がないので自由関数の付け替え自体は容易だが、
-存続させる Sexpr 関数（`append`(,@ が呼ぶ)・`equal`/`length`/`member`/`assoc`/`sort`/`nthcdr`/
-`nth`/…）が `car`/`cdr` を Sexpr 上で使うため、それらを `sexpr-*` へ移行する必要がある
-（＝Phase 2 の「据え置いた判断」の本体）。この付け替えは Phase 5 とまとめて扱うのが妥当。
-- `registry.rs:351-361`: `cons-cell<A,B>` の演算を自由名に昇格（`cons:(T,U)→cons<T,U>` 等）。
-- 存続 Sexpr 関数の body を `car`/`cdr`/`cons` → `sexpr-car`/`sexpr-cdr`/`sexpr-cons` へ。
-- `car`/`cdr`/`cons` on Sexpr を使うテスト側の更新。
-- 検証: `cargo test`。
+### Phase 4b — 自由 `cons`/`car`/`cdr`/`set-car`/`set-cdr` を `cons<T,U>` に付け替え【✅ 完了 / Commit 2】
+Phase 5 で存続 Sexpr 関数を全撤去済み（島は `sexpr-*`＋`string` メソッドのみ使用）だったため、
+Phase 4b は当初懸念（存続関数の `car`/`cdr` 移行）が不要になり、`cons`/`car`/`cdr` の付け替えに集中できた。
+
+実装済み内容:
+- **`cons` はペア構築の自由 `defun`（`prelude.rs`）**: `(defun (cons A B) ((a A) (b B)) cons-cell<A,B>
+  (cons-cell::new a b))`。`car`/`cdr` は `cons-cell` の**フィールドアクセサメソッド**（`defstruct` が
+  `car`/`cdr` フィールドから自動生成、受け手型付きで静的型 `A`/`B` を射影）。`set-car`/`set-cdr` は撤去
+  （唯一の呼び手 `nconc`/`nreverse` は Phase 5 で削除、ペアのフィールド変更は `(setf p::car v)`）。
+- **Sexpr `cons` バリアントのベア名を閉じた（`registry.rs`）**: `register_ctors` 後に `root.ctors.remove("cons")`。
+  これで `(cons a b)`/`(Cons a b)`（大文字は case-fold で同一）が自由ペア関数へ解決。`nil`/`int`/`str`/… の
+  データコンストラクタは据え置き（`(Int 5)`/`(Nil)` は依然書ける）。
+- **内部 Sexpr cons 構築の付け替え（`checker.rs`）**: `resolve_ctor("cons")` に依存していた `list`
+  （`check_list_lit`）・quasiquote（`check_qq_template`）を新ヘルパー `sexpr_cons_ctor()`（`sexpr` 型定義から
+  直接 variant を引く）経由に。`&rest` リスト構築 `cons_rest_list` の `Expr::Call(cons)` を `sexpr-cons` へ。
+- **compile シム（`interp.rs`/`compiler.rs`）**: `is_rt_builtin_name` を `car|cdr|cons|set-car|set-cdr` から
+  `sexpr-car|sexpr-cdr|sexpr-cons` に、`compile-call` の名前マップ（`car→rt_car` 等）を `sexpr-car→rt_car` 等へ。
+  ＝ Phase 1 の申し送り（島 `sexpr-*` の compile 対応）をここで完了。自由 `cons`/`car`/`cdr` は通常の
+  `defun`/メソッドとしてコンパイルされる。`eval_builtin` の旧 `cons`/`car`/`cdr`/`set-car`/`set-cdr` アームは削除。
+- **テスト**: Sexpr を明示構築/走査するテスト（eval/check/compile/macro/redefine/scope の cons/car/cdr）を
+  `sexpr-cons`/`sexpr-car`/`sexpr-cdr` へ書換。`set-car`/`set-cdr` テストは削除。マクロ本体の `(cons ..)` は
+  `(sexpr-cons ..)` へ（マクロ作者向け仕様、§7）。新規に `cons<T,U>` ペアのテスト（`(car (cons 1 2))`=1、
+  異種型ペア `(cons 7 "x")`、`(setf p::car ..)`、非ペア `car` の型エラー）を prelude_test に追加。
+
+検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
 
 ### Phase 5 — `match` の enum 専用 fence + ユーザー面 Sexpr リスト操作の撤去【✅ 完了 / Commit 1】
 ユーザー判断（本セッション）で当初の据え置き（`consp`/`equal`/`append` を compilable な `match` ベースで存続）を上書きし、
