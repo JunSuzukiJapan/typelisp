@@ -3579,6 +3579,40 @@ impl Checker {
             let resolved = subst_apply(elem_ty, &subst);
             typed.push(self.cons_rest_list(&resolved, rest_typed)?);
         }
+        // Associated-type pins participate in *inference*, not just
+        // verification: when a `where` bound pins an associated type to one of
+        // `name`'s own type parameters (e.g. `reverse`'s `(where (Iter I (Item
+        // A)))`, where `A` appears in no ordinary argument and so is otherwise
+        // uninferrable), resolve the concrete type's real binding for that
+        // associated type and unify it into `subst`. Runs before the
+        // "cannot infer" check below so the pinned variable counts as
+        // resolved; the strict validation loop further down then re-checks the
+        // (now-inferred) pin for consistency. A `unify` failure here is
+        // ignored — the validation loop reports pin mismatches with a precise
+        // message.
+        for (tparam, trait_bounds) in &sig.bounds {
+            let Some(concrete) = subst.get(tparam).cloned() else { continue };
+            let type_fq = match &concrete {
+                Type::Named(n, _) if n.is_simple() && self.reg.type_def(n).is_none() => None,
+                Type::Named(n, _) => Some(n.clone()),
+                other => prim_type_path(other),
+            };
+            let Some(type_fq) = type_fq else { continue };
+            let Some(def) = self.reg.type_def(&type_fq) else { continue };
+            let concrete_args: &[Type] = match &concrete {
+                Type::Named(_, args) => args.as_slice(),
+                _ => &[],
+            };
+            for tb in trait_bounds {
+                for (assoc_name, declared_ty) in &tb.assoc {
+                    if let Some(actual) =
+                        resolve_trait_assoc_type(def, &tb.trait_path, assoc_name, concrete_args)
+                    {
+                        let _ = unify(&params, declared_ty, &actual, &mut subst);
+                    }
+                }
+            }
+        }
         for p in &sig.type_params {
             if !subst.contains_key(p) {
                 return Err(Error::TypeError(format!(
@@ -3635,9 +3669,17 @@ impl Checker {
                     _ => &[],
                 };
                 for (assoc_name, declared_ty) in &tb.assoc {
+                    // The pin may itself be one of `name`'s own type parameters
+                    // (e.g. `(Item A)` on a generic `map`), inferred from the
+                    // other arguments into `subst` above — resolve it before
+                    // comparing, so a *polymorphic* pin is verified against the
+                    // concrete type `A` actually unified to, not the bare
+                    // variable. A concrete pin (`(Item i32)`) is unaffected
+                    // (`subst_apply` is a no-op on a type with no variables).
+                    let declared_ty = subst_apply(declared_ty, &subst);
                     let actual = resolve_trait_assoc_type(def, &tb.trait_path, assoc_name, concrete_args);
                     match actual {
-                        Some(actual) if actual == *declared_ty => {}
+                        Some(actual) if actual == declared_ty => {}
                         actual => {
                             return Err(Error::TypeError(format!(
                                 "{}: type {:?}'s associated type `{}` is {:?}, but `where` clause requires {:?}",

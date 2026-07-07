@@ -145,6 +145,38 @@ fn call_site_rejects_a_pinned_item_that_does_not_match_the_real_associated_type(
     assert!(check(src).is_err());
 }
 
+#[test]
+fn a_where_pin_to_a_type_variable_is_inferred_from_the_iterator_alone() {
+    // The Phase-4 combinators' key move: `A` is one of the function's own
+    // type parameters, pinned via `(where (Iter I (Item A)))` and appearing in
+    // *no* ordinary argument — so it can only be inferred by resolving the
+    // concrete iterator's real `Item`. `Checker::check_call`'s pin-inference
+    // pass binds `A = i32` from `vector-iter<i32>`, letting `(the Vector<A> …)`
+    // and the returned element type resolve. `last-of` returns the final
+    // element, exercising exactly this "element type known only through the
+    // iterator" path.
+    let src = "(defun (last-of I A) ((it I)) Option<A> (where (Iter I (Item A)))
+                 (let ((r (the Option<A> (Option::none))))
+                   (doiter (x it) (setf r (Option::some x)))
+                   r))
+               (defun make-v () Vector<i32> (Vector::new))
+               (let ((v (make-v))) (push v 10) (push v 20) (push v 30)
+                 (unwrap-or (last-of (iter v)) -1))";
+    assert_eq!(eval_ok(src), RtValue::Int(30));
+}
+
+#[test]
+fn generic_iter_combinators_work_over_a_hashtable() {
+    // The prelude's generic `count`/`map`/`foldl`/… take an *iterator*, so a
+    // single definition serves any `Iter` type — here `HashTable<K,V>`'s
+    // `hashtable-iter<K,V>` (Item = `cons-cell<K,V>`), not just `Vector<T>`.
+    let src = "(defun make-h () HashTable<i32,i32> (HashTable::new))
+               (let ((h (make-h)))
+                 (set h 1 10) (set h 2 20) (set h 3 30)
+                 (count (iter h) (lambda ((p cons-cell<i32,i32>)) bool (> p::cdr 15))))";
+    assert_eq!(eval_ok(src), RtValue::Int(2));
+}
+
 // `Sexpr` has no `Iter` impl (see `src/prelude.rs`'s comment above
 // `hashtable-iter<K,V>`): each `cons` cell's `car` is independently,
 // dynamically typed, so there is no single, correct `Item` for a generic

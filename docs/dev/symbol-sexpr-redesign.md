@@ -3,7 +3,8 @@
 最終更新: 2026-07-05 / ブランチ: `feature/symbol-type`（`feature/compile-sexpr` から分岐）
 
 このドキュメントは複数フェーズにわたる型システム再設計の**進捗と残作業**を記録する。
-Phase 0・Phase 1・Phase 2 は完了。Phase 3（`Vector<T>` コレクション演算）以降が次回作業。
+Phase 0〜3 と Phase 4a（コレクションコンビネータの generic `Iter` 化）まで完了。
+次回作業は Phase 4b（`cons`/`car`/`cdr` の `cons<T,U>` 付け替え、Phase 5 と一体）以降。
 
 ---
 
@@ -146,10 +147,47 @@ prelude/島コードを Phase 5 の match フェンスから除外するかの�
 
 検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
 
-### Phase 4 — 自由 `cons`/`car`/`cdr`/`set-car`/`set-cdr` を `cons<T,U>` に付け替え
-- `registry.rs:351-361`: `cons-cell<A,B>` の演算を自由名に昇格（`cons:(T,U)→cons<T,U>`, `car:cons<T,U>→T`, `cdr:cons<T,U>→U`）。
-- 旧 Sexpr list defun（`prelude.rs:170-410` 付近）をユーザー面から撤去（Vector 版に置換 or 島内部化）。
-- テスト側 ~50 箇所（`tests/` の car/cdr/cons on Sexpr）を Vector か cons<T,U> か島内部 `sexpr-*` に更新。
+### Phase 4a — コレクションコンビネータを generic `Iter` 化【✅ 完了】
+ユーザー判断で当初計画（Sexpr 版撤去＋`vector-` 版へ一本化）を上書きし、`map`/`filter`/
+`foldl`/`foldr`/`reverse`/`find`/`position`/`count`/`remove-if` を **`Iter` を実装する任意の
+コレクションで使える generic 自由 `defun`** に統一した。
+
+実装済み内容:
+- **型システム拡張（`checker.rs::check_call`）**: `where` 節の関連型ピンが *推論* に参加するように
+  した。(1) ピン検証で `declared_ty` を `subst_apply` してから比較（ピンが型変数でも可）、
+  (2) 引数 unify 後・「cannot infer」判定前に、具体化済みイテレータの実 `Item` を
+  `resolve_trait_assoc_type` で解決して型変数ピンへ `unify`。これにより `reverse` のように
+  要素型 `A` が引数に現れず**イテレータの `Item` からしか決まらない**コンビネータも書ける。
+- **prelude**: Sexpr 版 `map`/`filter`/`foldl`/`foldr`/`reverse`/`find-if`/`position*`/`count*`/
+  `remove*` と Phase 3 の `vector-*` 版を撤去し、`(defun (map I A U) ((it I) (f (fn (A) U)))
+  Vector<U> (where (Iter I (Item A))))` 形の generic 版に置換。イテレータを取り
+  （`(map (iter coll) f)`）、結果コレクションは `Vector` に materialize、`foldr`/`reverse` は
+  前方向 `Iter` を一旦 `Vector` にバッファ。要素比較が要る演算は述語版（`A` に `Eq` 境界なし）。
+- **島内部 `sexpr-map` 新設**: `case`/`do` マクロ本体が展開時に Sexpr を `map` していた箇所を
+  `sexpr-*` ベースの `sexpr-map` に移行（ユーザー面 `map` は generic `Iter` 版になったため）。
+- `every`/`any`/`member`/`assoc`/`sort` は Sexpr 専用のまま存続（`eq` 比較や cons 直操作が要る）。
+- **コレクション直接形は見送り**: `(map coll f)`（イテレータでなく collection を直接）には
+  `IntoIter` 相当のトレイト＋関連型の関連型境界が要り、現行の型システムでは安価に表現不能。
+  イテレータ取り（`(iter coll)` 橋渡し）が `doiter`/`count-iter` 既存慣習とも一致。
+- テスト: `vector_ops_test.rs`（generic 版へ更新、19）、`doiter_test.rs`（ピン推論・HashTable 越し、+2）、
+  `prelude_test.rs`（撤去済み Sexpr コンビネータのテストを削除）、`dispatch_test.rs`（`count` は
+  generic `Iter` 版 vs HashTable メソッドの分岐に更新、`remove` はメソッド専用に）。
+
+検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
+
+### Phase 4b — 自由 `cons`/`car`/`cdr`/`set-car`/`set-cdr` を `cons<T,U>` に付け替え【未着手・要判断】
+**重要な発見（据え置き理由）**: `check_list` の呼び出し解決順は **コンストラクタ優先**
+（`checker.rs:2458` `resolve_ctor` → instance method → 自由関数）。よって `(cons a b)` は
+Sexpr の `Cons` バリアントコンストラクタに解決され、自由関数 `cons` のシグネチャを
+`cons<T,U>` に変えても `(cons a b)` の呼び出し側は変わらない。`cons` を真にペア型へ振り替えるには
+**Sexpr コンストラクタのベア名可視性を島内へ閉じる**必要があり、これは Phase 5 の match フェンス／
+Sexpr 島内化と一体。`car`/`cdr` はコンストラクタ競合がないので自由関数の付け替え自体は容易だが、
+存続させる Sexpr 関数（`append`(,@ が呼ぶ)・`equal`/`length`/`member`/`assoc`/`sort`/`nthcdr`/
+`nth`/…）が `car`/`cdr` を Sexpr 上で使うため、それらを `sexpr-*` へ移行する必要がある
+（＝Phase 2 の「据え置いた判断」の本体）。この付け替えは Phase 5 とまとめて扱うのが妥当。
+- `registry.rs:351-361`: `cons-cell<A,B>` の演算を自由名に昇格（`cons:(T,U)→cons<T,U>` 等）。
+- 存続 Sexpr 関数の body を `car`/`cdr`/`cons` → `sexpr-car`/`sexpr-cdr`/`sexpr-cons` へ。
+- `car`/`cdr`/`cons` on Sexpr を使うテスト側の更新。
 - 検証: `cargo test`。
 
 ### Phase 5 — `match` の enum 専用 fence

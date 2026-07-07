@@ -271,13 +271,6 @@ pub const SOURCE: &str = r#"
   (let ((pattern (sexpr-car binding)) (val (sexpr-car (sexpr-cdr binding))))
     `(match ,val (,pattern ,then) (_ ,els))))
 
-(defun reverse-onto ((lst Sexpr) (acc Sexpr)) Sexpr
-  (match lst
-    ((Nil) acc)
-    ((Cons h t) (reverse-onto t (cons h acc)))
-    (_ (panic "reverse: not a proper list"))))
-(defun reverse ((lst Sexpr)) Sexpr (reverse-onto lst ()))
-
 (defun nthcdr ((n i32) (lst Sexpr)) Sexpr
   (if (<= n 0) lst
     (match lst
@@ -329,12 +322,6 @@ pub const SOURCE: &str = r#"
     ((Cons h t) (if (eq h item) lst (member item t)))
     (_ (panic "member: not a proper list"))))
 
-(defun find-if ((pred (fn (Sexpr) bool)) (lst Sexpr)) Sexpr
-  (match lst
-    ((Nil) ())
-    ((Cons h t) (if (pred h) h (find-if pred t)))
-    (_ (panic "find-if: not a proper list"))))
-
 (defun every ((pred (fn (Sexpr) bool)) (lst Sexpr)) bool
   (match lst
     ((Nil) true)
@@ -354,61 +341,13 @@ pub const SOURCE: &str = r#"
     ((Cons h t) (or (pred h) (any pred t)))
     (_ (panic "any: not a proper list"))))
 
-(defun count-if ((pred (fn (Sexpr) bool)) (lst Sexpr)) i32
-  (match lst
-    ((Nil) 0)
-    ((Cons h t) (if (pred h) (+ 1 (count-if pred t)) (count-if pred t)))
-    (_ (panic "count-if: not a proper list"))))
-
-(defun count ((item Sexpr) (lst Sexpr)) i32
-  (count-if (lambda ((x Sexpr)) bool (eq x item)) lst))
-
-(defun position-if-from ((i i32) (pred (fn (Sexpr) bool)) (lst Sexpr)) Option<i32>
-  (match lst
-    ((Nil) (option::none))
-    ((Cons h t) (if (pred h) (option::some i) (position-if-from (+ i 1) pred t)))
-    (_ (panic "position-if: not a proper list"))))
-(defun position-if ((pred (fn (Sexpr) bool)) (lst Sexpr)) Option<i32>
-  (position-if-from 0 pred lst))
-
-(defun position ((item Sexpr) (lst Sexpr)) Option<i32>
-  (position-if (lambda ((x Sexpr)) bool (eq x item)) lst))
-
-(defun remove-if ((pred (fn (Sexpr) bool)) (lst Sexpr)) Sexpr
-  (match lst
-    ((Nil) ())
-    ((Cons h t) (if (pred h) (remove-if pred t) (cons h (remove-if pred t))))
-    (_ (panic "remove-if: not a proper list"))))
-
-(defun remove-if-not ((pred (fn (Sexpr) bool)) (lst Sexpr)) Sexpr
-  (remove-if (lambda ((x Sexpr)) bool (not (pred x))) lst))
-
-(defun remove ((item Sexpr) (lst Sexpr)) Sexpr
-  (remove-if (lambda ((x Sexpr)) bool (eq x item)) lst))
-
-(defun map ((f (fn (Sexpr) Sexpr)) (lst Sexpr)) Sexpr
-  (match lst
-    ((Nil) ())
-    ((Cons h t) (cons (f h) (map f t)))
-    (_ (panic "map: not a proper list"))))
-
-(defun filter ((pred (fn (Sexpr) bool)) (lst Sexpr)) Sexpr
-  (match lst
-    ((Nil) ())
-    ((Cons h t) (if (pred h) (cons h (filter pred t)) (filter pred t)))
-    (_ (panic "filter: not a proper list"))))
-
-(defun foldl ((f (fn (Sexpr Sexpr) Sexpr)) (init Sexpr) (lst Sexpr)) Sexpr
-  (match lst
-    ((Nil) init)
-    ((Cons h t) (foldl f (f init h) t))
-    (_ (panic "foldl: not a proper list"))))
-
-(defun foldr ((f (fn (Sexpr Sexpr) Sexpr)) (init Sexpr) (lst Sexpr)) Sexpr
-  (match lst
-    ((Nil) init)
-    ((Cons h t) (f h (foldr f init t)))
-    (_ (panic "foldr: not a proper list"))))
+;; The homogeneous-collection combinators `map`/`filter`/`foldl`/`foldr`/
+;; `reverse`/`find`/`position`/`count`/`remove-if` are no longer defined on
+;; `Sexpr` here — they are generic `Iter` combinators further down (see the
+;; comment above `map`), usable on any collection's iterator. `member`/
+;; `assoc`/`sort`/`every`/`any` above stay `Sexpr`-specific: `member`/`assoc`
+;; compare elements with `eq` (an `Iter`'s `Item` carries no `Eq` bound), and
+;; `sort` needs random access it builds from cons cells directly.
 
 ;; Destructive (mutating) list operations, built on `set-car`/`set-cdr`
 ;; (`crate::eval::interp`'s `eval_builtin`, wrapping `mem::Heap::set_car`/
@@ -556,6 +495,19 @@ pub const SOURCE: &str = r#"
     `(let ((,tmp ,coll-expr))
        (while-let ((some ,var) (next ,tmp)) ,@body))))
 
+;; `sexpr-map`: the island's own `Sexpr`→`Sexpr` list map, for macro bodies
+;; (`case`/`do` below) that build their expansion by transforming a clause /
+;; binding list at expansion time. It navigates with the `sexpr-*` layer
+;; (`sexpr-consp`/`sexpr-car`/`sexpr-cdr`/`sexpr-cons`) rather than the
+;; user-facing `car`/`cdr`/`consp`, per the Symbol/Sexpr redesign — the plain
+;; `map` is now the generic `Iter` combinator further down (an iterator, not a
+;; `Sexpr`, so it cannot walk a macro's argument list). Macro authors doing
+;; the same should likewise reach for `sexpr-*` (see the redesign doc §7).
+(defun sexpr-map ((f (fn (Sexpr) Sexpr)) (lst Sexpr)) Sexpr
+  (if (sexpr-consp lst)
+      (sexpr-cons (f (sexpr-car lst)) (sexpr-map f (sexpr-cdr lst)))
+      ()))
+
 ;; `case` (roadmap step 8c, catalog §1.1): `(case expr (key1 body1...)
 ;; (key2 body2...) ... (else default...))` expands to `(cond ((eq tmp key1)
 ;; body1...) ((eq tmp key2) body2...) ... (else default...))`, where `tmp` is
@@ -586,7 +538,7 @@ pub const SOURCE: &str = r#"
 (defmacro case (expr &rest clauses)
   (let ((tmp (gensym)))
     `(let ((,tmp ,expr))
-       (cond ,@(map (lambda ((c Sexpr)) Sexpr
+       (cond ,@(sexpr-map (lambda ((c Sexpr)) Sexpr
                        (if (eq (sexpr-car c) (quote else))
                            c
                            (sexpr-cons (list (quote equal) tmp (sexpr-car c)) (sexpr-cdr c))))
@@ -617,13 +569,13 @@ pub const SOURCE: &str = r#"
 (defmacro do (bindings test-result &rest body)
   (let ((test (car test-result))
         (result (cdr test-result))
-        (temps (map (lambda ((b Sexpr)) Sexpr (list (gensym) (car b) (car (cdr (cdr b)))))
+        (temps (sexpr-map (lambda ((b Sexpr)) Sexpr (list (gensym) (car b) (car (cdr (cdr b)))))
                      bindings)))
-    `(let ,(map (lambda ((b Sexpr)) Sexpr (list (car b) (car (cdr b)))) bindings)
+    `(let ,(sexpr-map (lambda ((b Sexpr)) Sexpr (list (car b) (car (cdr b)))) bindings)
        (while (not ,test)
          ,@body
-         (let ,(map (lambda ((tr Sexpr)) Sexpr (list (car tr) (car (cdr (cdr tr))))) temps)
-           ,@(map (lambda ((tr Sexpr)) Sexpr (list (quote setf) (car (cdr tr)) (car tr))) temps)))
+         (let ,(sexpr-map (lambda ((tr Sexpr)) Sexpr (list (car tr) (car (cdr (cdr tr))))) temps)
+           ,@(sexpr-map (lambda ((tr Sexpr)) Sexpr (list (quote setf) (car (cdr tr)) (car tr))) temps)))
        ,@result)))
 
 ;; `Iter`: the trait `doiter` requires every iterable type to implement — a single
@@ -656,78 +608,92 @@ pub const SOURCE: &str = r#"
         (Option::none))))
 (defmethod iter ((self Vector<T>)) vector-iter<T> (vector-iter::new self 0))
 
-;; `Vector<T>` collection operations (redesign Phase 3). Written as generic
-;; free `defun`s — not `defmethod`s — because several of them (`vector-map`,
-;; `vector-foldl`, `vector-foldr`) need a *second* type variable beyond the
-;; receiver's `T` (the mapped element type / the accumulator type), and a
-;; `defmethod` can only be generic through its owner's own parameters
-;; (`Checker::check_assoc_call` resolves method type arguments solely from
-;; `def.params`, so a method signature mentioning a type variable absent from
-;; the receiver has no way to infer it). A `defun (name T U)` declares both
-;; explicitly and `Checker::check_call` unifies each against the actual
-;; arguments the same way `check_construct` does for an ADT's `params`.
+;; Generic collection combinators (redesign Phase 4). Each takes an
+;; *iterator* — any type implementing the `Iter` trait — rather than one
+;; specific collection, so a single definition serves `Vector<T>`,
+;; `HashTable<K,V>`, and any future `Iter` type. Call as `(map (iter coll)
+;; f)`: `(iter coll)` bridges a collection to its cursor (`Vector<T>`'s
+;; `vector-iter<T>`, `HashTable<K,V>`'s `hashtable-iter<K,V>`), and these walk
+;; that cursor with `doiter`.
 ;;
-;; They live under a `vector-` prefix to coexist with the identically-shaped
-;; `Sexpr`-list `map`/`filter`/`reverse`/etc. still defined above — those are
-;; slated for removal in the redesign's Phase 4, at which point the plain
-;; names free up; until then two same-named *free* functions cannot share a
-;; name (unlike a method and a free function, which dispatch by receiver
-;; type). Every operation needing element comparison takes a predicate
-;; (`vector-find`/`vector-position`/`vector-count`) rather than an element to
-;; match: `T` carries no `Eq`-style bound, so there is no generic equality to
-;; compare arbitrary elements with — the predicate form sidesteps that and
-;; mirrors CL's `-if` family.
+;; The element type `A` is the iterator's associated `Item`, declared via
+;; `(where (Iter I (Item A)))` — a *polymorphic* associated-type pin: `A` is
+;; one of the function's own type parameters, inferred at each call site from
+;; the predicate/mapping function's argument type and verified against the
+;; iterator's real `Item` (`Checker::check_call`'s where-bound validation).
+;; This is why they are generic `defun`s, not `defmethod`s: `map`/`foldl`/
+;; `foldr` need type variables (`U`/`B`, the mapped element / accumulator)
+;; beyond the receiver's, which a method — generic only through its owner's
+;; parameters — cannot introduce.
 ;;
-;; Each builds its result on top of the builtin `Vector::new`/`push`/`get`/
-;; `len` primitives, walking the input with `doiter` (the `Iter`-trait loop
-;; above) where a forward left-to-right pass suffices and with an explicit
-;; index where reverse order is needed (`vector-foldr`/`vector-reverse`). A
-;; freshly built result vector is pinned to its element type with `the`, since
-;; a bare `(Vector::new)` in an unannotated `let` binding has nothing to infer
-;; its element type from.
-(defun (vector-map T U) ((v Vector<T>) (f (fn (T) U))) Vector<U>
+;; Results that are themselves collections materialize into a fresh `Vector`
+;; (there is no generic "rebuild the original container" facility, and no
+;; lazy iterator type); `foldr`/`reverse` first buffer the whole input into a
+;; `Vector` because an `Iter` is forward-only. Every element-comparing
+;; operation (`find`/`position`/`count`/`remove-if`) takes a predicate, not an
+;; element: `A` carries no `Eq`-style bound, so there is no generic equality —
+;; the predicate form mirrors CL's `-if` family. A freshly built result
+;; vector is pinned with `the`, since a bare `(Vector::new)` has nothing to
+;; infer its element type from.
+(defun (map I A U) ((it I) (f (fn (A) U))) Vector<U> (where (Iter I (Item A)))
   (let ((out (the Vector<U> (Vector::new))))
-    (doiter (x (iter v)) (push out (f x)))
+    (doiter (x it) (push out (f x)))
     out))
-(defun (vector-filter T) ((v Vector<T>) (pred (fn (T) bool))) Vector<T>
-  (let ((out (the Vector<T> (Vector::new))))
-    (doiter (x (iter v)) (if (pred x) (push out x) ()))
+(defun (filter I A) ((it I) (pred (fn (A) bool))) Vector<A> (where (Iter I (Item A)))
+  (let ((out (the Vector<A> (Vector::new))))
+    (doiter (x it) (if (pred x) (push out x) ()))
     out))
-(defun (vector-foldl T A) ((v Vector<T>) (f (fn (A T) A)) (init A)) A
+(defun (foldl I A B) ((it I) (f (fn (B A) B)) (init B)) B (where (Iter I (Item A)))
   (let ((acc init))
-    (doiter (x (iter v)) (setf acc (f acc x)))
+    (doiter (x it) (setf acc (f acc x)))
     acc))
-(defun (vector-foldr T A) ((v Vector<T>) (f (fn (T A) A)) (init A)) A
-  (let ((acc init) (i (- (len v) 1)))
-    (while (>= i 0)
-      (setf acc (f (get v i) acc))
-      (setf i (- i 1)))
-    acc))
-(defun (vector-reverse T) ((v Vector<T>)) Vector<T>
-  (let ((out (the Vector<T> (Vector::new))) (i (- (len v) 1)))
-    (while (>= i 0)
-      (push out (get v i))
-      (setf i (- i 1)))
-    out))
-(defun (vector-find T) ((v Vector<T>) (pred (fn (T) bool))) Option<T>
-  (let ((result (the Option<T> (Option::none))))
-    (doiter (x (iter v))
+(defun (foldr I A B) ((it I) (f (fn (A B) B)) (init B)) B (where (Iter I (Item A)))
+  (let ((buf (the Vector<A> (Vector::new))))
+    (doiter (x it) (push buf x))
+    (let ((acc init) (i (- (len buf) 1)))
+      (while (>= i 0)
+        (setf acc (f (get buf i) acc))
+        (setf i (- i 1)))
+      acc)))
+(defun (reverse I A) ((it I)) Vector<A> (where (Iter I (Item A)))
+  (let ((buf (the Vector<A> (Vector::new))))
+    (doiter (x it) (push buf x))
+    (let ((out (the Vector<A> (Vector::new))) (i (- (len buf) 1)))
+      (while (>= i 0)
+        (push out (get buf i))
+        (setf i (- i 1)))
+      out)))
+(defun (find I A) ((it I) (pred (fn (A) bool))) Option<A> (where (Iter I (Item A)))
+  (let ((result (the Option<A> (Option::none))))
+    (doiter (x it)
       (if (pred x) (progn (setf result (Option::some x)) (break)) ()))
     result))
-(defun (vector-position T) ((v Vector<T>) (pred (fn (T) bool))) Option<i32>
+(defun (position I A) ((it I) (pred (fn (A) bool))) Option<i32> (where (Iter I (Item A)))
+  ;; `i` counts only the mismatches seen before the match, so it equals the
+  ;; index of the first match. Both `if` branches are `Unit` (`(break)` is
+  ;; `Never`; the mismatch branch ends in a trailing `()`) so the loop body
+  ;; type-checks.
   (let ((i 0) (result (the Option<i32> (Option::none))))
-    (while (< i (len v))
-      (if (pred (get v i)) (progn (setf result (Option::some i)) (break)) ())
-      (setf i (+ i 1)))
+    (doiter (x it)
+      (if (pred x)
+          (progn (setf result (Option::some i)) (break))
+          (progn (setf i (+ i 1)) ())))
     result))
-(defun (vector-count T) ((v Vector<T>) (pred (fn (T) bool))) i32
+(defun (count I A) ((it I) (pred (fn (A) bool))) i32 (where (Iter I (Item A)))
   ;; `when`, not a bare `(if (pred x) (setf n ...) ())`: `setf` evaluates to
   ;; the value it assigned (here `i32`), so an `if` whose other branch is `()`
   ;; would fail to unify (`i32` vs `Unit`); `when` wraps the `setf` in a
   ;; `progn` with a trailing `()`, making the whole loop body `Unit`.
   (let ((n 0))
-    (doiter (x (iter v)) (when (pred x) (setf n (+ n 1))))
+    (doiter (x it) (when (pred x) (setf n (+ n 1))))
     n))
+(defun (remove-if I A) ((it I) (pred (fn (A) bool))) Vector<A> (where (Iter I (Item A)))
+  (let ((out (the Vector<A> (Vector::new))))
+    (doiter (x it) (if (pred x) () (push out x)))
+    out))
+;; `vector-append` stays `Vector`-specific (two same-`Item` iterators would
+;; need two `Iter` bounds; two-input concatenation is outside the combinator
+;; set repurposed to `Iter` in Phase 4).
 (defun (vector-append T) ((a Vector<T>) (b Vector<T>)) Vector<T>
   (let ((out (the Vector<T> (Vector::new))))
     (doiter (x (iter a)) (push out x))

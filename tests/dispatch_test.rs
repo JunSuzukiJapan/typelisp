@@ -3,10 +3,10 @@
 //! (`HashTable<K,V>`).
 //!
 //! Before this, a free function with the same name as an instance method
-//! (e.g. the prelude's `Sexpr`-list `remove`/`count` vs. `HashTable<K,V>`'s
-//! `remove`/`count`) always won, regardless of the call's actual argument
-//! type — calling `(remove h k)` for a `HashTable<K,V>` `h` failed with a
-//! type mismatch instead of reaching `HashTable`'s method.
+//! (e.g. the generic `Iter` combinator `count` vs. `HashTable<K,V>`'s `count`
+//! method) always won, regardless of the call's actual argument type —
+//! calling `(remove h k)` for a `HashTable<K,V>` `h` failed with a type
+//! mismatch instead of reaching `HashTable`'s method.
 //! `Checker::try_instance_method` now tries a receiver-typed instance method
 //! on the first argument's type *before* the free function, falling back to
 //! the free function only when no type-specific method matches — mirroring
@@ -55,12 +55,6 @@ fn remove_resolves_to_hashtable_instance_method_for_a_hashtable_receiver() {
 }
 
 #[test]
-fn remove_still_resolves_to_the_free_function_for_a_sexpr_receiver() {
-    let src = "(equal (remove (quote 2) (quote (1 2 3 2))) (quote (1 3)))";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
-}
-
-#[test]
 fn count_resolves_to_hashtable_instance_method_for_a_hashtable_receiver() {
     let src = r#"
         (defun make-h () HashTable<i32,i32> (HashTable::new))
@@ -72,8 +66,15 @@ fn count_resolves_to_hashtable_instance_method_for_a_hashtable_receiver() {
 }
 
 #[test]
-fn count_still_resolves_to_the_free_function_for_a_sexpr_receiver() {
-    assert_eq!(eval_ok("(count (quote 1) (quote (1 2 1 3 1)))"), RtValue::Int(3));
+fn count_resolves_to_the_free_generic_combinator_over_an_iterator() {
+    // `count` is both `HashTable<K,V>`'s instance method (above) and the free
+    // generic `Iter` combinator `(count it pred)`. A two-argument call whose
+    // first argument is an iterator (not a `HashTable`) has no matching
+    // instance method, so it falls back to the free generic function.
+    let src = "(defun mkv () Vector<i32> \
+                 (let ((v (the Vector<i32> (Vector::new)))) (push v 1) (push v 2) (push v 1) v)) \
+               (count (iter (mkv)) (lambda ((n i32)) bool (= n 1)))";
+    assert_eq!(eval_ok(src), RtValue::Int(2));
 }
 
 #[test]
