@@ -538,15 +538,8 @@ fn list_elements_must_be_sexpr() {
     assert_type_error("(list 1 2)");
 }
 
-#[test]
-fn dolist_var_is_sexpr_and_result_is_unit() {
-    assert_eq!(ty_with_prelude("(dolist (x (list (Int 1) (Int 2))) x)"), Type::Unit);
-}
-
-#[test]
-fn dolist_list_expr_must_be_sexpr() {
-    assert_type_error_with_prelude("(dolist (x 5) x)");
-}
+// `dolist` (iterating a `Sexpr` list) was removed — Symbol/Sexpr redesign
+// Phase 5.
 
 // ---- loop / break / return ---------------------------------------------------
 

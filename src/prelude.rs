@@ -67,18 +67,16 @@ pub const SOURCE: &str = r#"
 ;; all). `and`/`or` (below) still need special-form treatment for short-
 ;; circuiting; `not` never did.
 (defun not ((b bool)) bool (if b false true))
-;; `consp`/`null`/`atom` remain `match`-based: they are *user-facing* `Sexpr`
-;; predicates a user program can itself `compile` (see `compile_test`'s
-;; `compile_dispatches_consp_null_and_atom_...`), so their bodies must stay
-;; compilable — `compile-match` handles the `Sexpr` `match` directly, whereas
-;; delegating to the `sexpr-consp` builtin would need a runtime shim the
-;; compiler doesn't wire (Phase 1's handoff note). They are not island
-;; dependencies (`compiler.rs` never calls them; the `and`/`or` macros call
-;; `sexpr-null` directly). Their `match`-on-`Sexpr` is Phase 4/5's concern,
-;; alongside the rest of the user-facing `Sexpr` list surface.
-(defun consp ((s Sexpr)) bool (match s ((Cons _ _) true) (_ false)))
-(defun null ((s Sexpr)) bool (match s ((Nil) true) (_ false)))
-(defun atom ((s Sexpr)) bool (not (consp s)))
+;; `consp`/`null`/`atom` and the rest of the user-facing `Sexpr` list surface
+;; (`length`/`append`/`nth`/`member`/`sort`/`assoc`/`dolist`/... ) were removed
+;; in the Symbol/Sexpr redesign (Phase 5, `docs/dev/symbol-sexpr-redesign.md`):
+;; `Sexpr` is now an internal type (read/eval/print/`defmacro`/self-hosting
+;; `compiler.rs`), navigated with the `sexpr-*` accessor layer, not a
+;; user-facing list datum. A homogeneous-collection API is to be redesigned on
+;; top of `Vector<T>` and the generic `cons<T,U>` pair. `,@` (unquote-splicing)
+;; keeps an internal `sexpr-append` (below); `equal`/`equalp` are now Rust
+;; builtins (`registry.rs`). The island navigates `Sexpr` with the `sexpr-*`
+;; layer and uses `string` methods (`append`/`equal`/`length`) for name work.
 
 ;; `symbol->string`/`string->symbol` (`docs/language-design.md` §4.1's
 ;; conversion catalog) are now Rust builtins (`Interp::eval_builtin`) rather
@@ -151,60 +149,30 @@ pub const SOURCE: &str = r#"
           (sexpr-car args)
           (list (quote if) (sexpr-car args) (quote true) (sexpr-cons (quote or) (sexpr-cdr args))))))
 
-;; CL's `equal`: `eql` on everything but `Cons`/`Str`, which get structural
-;; recursion and case-sensitive content comparison respectively (`Str::equal`,
-;; not `Str::eq` — two separately-built `Str`s with equal content are never
-;; `eq`, see `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section).
-;; The catch-all is `eql`, not `eq`: they coincide for every immediate
-;; variant (`Int`/`Char`/`Bool`/`Sym`), but a boxed `Sexpr::Float`
-;; (`Value::Boxed`, see `BoxedObj`) is only `eql` — two separately-built
-;; equal floats are correctly never `eq` (identity, like `Str`/`Cons`), the
-;; same reason `eq` alone would be wrong here now.
-;; Stays `match`-based: `equal` is user-facing and user-`compile`able (and
-;; `case` expands to `(equal ..)`), so its body must remain compilable —
-;; `compile-match` handles the `Sexpr` `match`, whereas a `sexpr-*`-navigated
-;; body would need `sexpr-consp`/`sexpr-strp`/... wired into the compiler's
-;; runtime-shim map first (Phase 1's handoff note). The island calls `equal`
-;; only from *interpreted* code (`compiler.rs`), where the `match` is fine;
-;; migrating it (and the rest of the user-facing `Sexpr` list surface) waits
-;; for Phase 4/5 to settle that dual-use question. See `consp`/`null`/`atom`.
-(defun equal ((a Sexpr) (b Sexpr)) bool
-  (match a
-    ((Cons a1 a2) (match b ((Cons b1 b2) (and (equal a1 b1) (equal a2 b2))) (_ false)))
-    ((Str s1) (match b ((Str s2) (equal s1 s2)) (_ false)))
-    (_ (eql a b))))
+;; `equal`/`equalp` (CL structural equality) are now Rust builtins
+;; (`registry.rs`, `Interp::eval_builtin`'s `sexpr_equal`/`sexpr_equalp`), not
+;; prelude `defun`s: the Symbol/Sexpr redesign fenced `match` off `Sexpr`
+;; (Phase 5), and they are the one piece of the old user-facing `Sexpr` surface
+;; kept (equality, not list manipulation — `case` expands to `(equal ..)`, and
+;; they are the ubiquitous structural-comparison primitive). `length`/`append`
+;; and the rest of the list operations were removed (see the note by the old
+;; `consp` location above); `,@` keeps an internal `sexpr-append` (below), and
+;; `compiler.rs` uses the `sexpr-*` layer plus `string` methods.
 
-;; CL's `equalp`: like `equal`, but `Str`/`Char` fields compare
-;; case-insensitively (`Str::equalp`/`Char::equalp`), and numbers compare by
-;; value across the `Int`/`Float` type boundary (e.g. `(Int 1)` vs `(Float
-;; 1.0)` is true) via `int->float` (`registry::int_assoc`).
-(defun equalp ((a Sexpr) (b Sexpr)) bool
-  (match a
-    ((Cons a1 a2) (match b ((Cons b1 b2) (and (equalp a1 b1) (equalp a2 b2))) (_ false)))
-    ((Str s1) (match b ((Str s2) (equalp s1 s2)) (_ false)))
-    ((Char c1) (match b ((Char c2) (equalp c1 c2)) (_ false)))
-    ((Int a1) (match b ((Float b1) (= (int->float a1) b1)) (_ (eql a b))))
-    ((Float a1) (match b ((Int b1) (= a1 (int->float b1))) (_ (eql a b))))
-    (_ (eql a b))))
-
-(defun length ((lst Sexpr)) i32
-  (match lst
-    ((Nil) 0)
-    ((Cons _ d) (+ 1 (length d)))
-    (_ (panic "length: not a proper list"))))
-
-;; Stays `match`-based for the same reason as `equal`/`consp` — user-facing
-;; and user-`compile`able, so the body must remain compilable via
-;; `compile-match`. The island calls it only from interpreted code.
-(defun append ((a Sexpr) (b Sexpr)) Sexpr
-  (match a
-    ((Nil) b)
-    ((Cons h t) (cons h (append t b)))
-    (_ (panic "append: not a proper list"))))
+;; `sexpr-append`: the island's `Sexpr` list concatenation, for `,@`
+;; (unquote-splicing — `Checker::check_qq_template` desugars each splice to a
+;; `(sexpr-append spliced rest)` call) and `compiler.rs`. Navigates with the
+;; `sexpr-*` layer (no `match`, no user-facing `car`/`cdr`). Placed here, before
+;; the macros below, since every one of them uses `,@` in its expansion, and
+;; that desugaring needs `sexpr-append` already registered.
+(defun sexpr-append ((a Sexpr) (b Sexpr)) Sexpr
+  (if (sexpr-consp a)
+      (sexpr-cons (sexpr-car a) (sexpr-append (sexpr-cdr a) b))
+      b))
 
 ;; The rest of the loop/branch primitive reduction set (see the comment by
-;; `and`/`or` above) — placed here, right after `append`, since every one of
-;; these uses `,@` (unquote-splicing) somewhere in its expansion, and `,@`
+;; `and`/`or` above) — placed here, right after `sexpr-append`, since every one
+;; of these uses `,@` (unquote-splicing) somewhere in its expansion, and `,@`
 ;; always desugars through a call to `append` (`Checker::check_qq_template`).
 
 ;; `while`: the *first* layer of sugar over `loop`. `if` always takes
@@ -226,17 +194,10 @@ pub const SOURCE: &str = r#"
     `(let ((,var 0) (,limit ,count-expr))
        (while (< ,var ,limit) ,@body (setf ,var (+ ,var 1))))))
 
-;; `dolist`: same hidden-binding replacement as `dotimes`, but stepping a
-;; `Sexpr` list with `consp`/`car`/`cdr` instead of comparing an `i32`
-;; counter — what `check_dolist` did with `Pattern::Ctor` `match` arms
-;; directly, this does with already-existing library functions instead.
-(defmacro dolist (spec &rest body)
-  (let ((var (sexpr-car spec)) (lst-expr (sexpr-car (sexpr-cdr spec))) (lst (gensym)))
-    `(let ((,lst ,lst-expr))
-       (while (consp ,lst)
-         (let ((,var (car ,lst)))
-           ,@body
-           (setf ,lst (cdr ,lst)))))))
+;; `dolist` (iterating a `Sexpr` list in user code) was removed with the rest
+;; of the user-facing `Sexpr` list surface (Symbol/Sexpr redesign Phase 5).
+;; `doiter` over `Vector<T>`/any `Iter` is the homogeneous-collection loop; a
+;; `Sexpr`/`cons<T,U>` traversal API is to be redesigned later.
 
 ;; `when`/`unless`: single-armed `if`. The taken side ends in a trailing
 ;; `()` (after `body`, not instead of it) so its value is always `Unit`,
@@ -271,102 +232,12 @@ pub const SOURCE: &str = r#"
   (let ((pattern (sexpr-car binding)) (val (sexpr-car (sexpr-cdr binding))))
     `(match ,val (,pattern ,then) (_ ,els))))
 
-(defun nthcdr ((n i32) (lst Sexpr)) Sexpr
-  (if (<= n 0) lst
-    (match lst
-      ((Nil) ())
-      ((Cons _ d) (nthcdr (- n 1) d))
-      (_ (panic "nthcdr: not a proper list")))))
-
-(defun nth ((n i32) (lst Sexpr)) Sexpr
-  (match (nthcdr n lst)
-    ((Cons h _) h)
-    ((Nil) ())
-    (_ (panic "nth: not a proper list"))))
-
-(defun elt ((lst Sexpr) (n i32)) Sexpr (nth n lst))
-
-(defun last ((lst Sexpr)) Sexpr
-  (match lst
-    ((Cons _ (Nil)) lst)
-    ((Cons _ d) (last d))
-    ((Nil) lst)
-    (_ (panic "last: not a proper list"))))
-
-(defun butlast ((lst Sexpr)) Sexpr
-  (match lst
-    ((Nil) ())
-    ((Cons _ (Nil)) ())
-    ((Cons h t) (cons h (butlast t)))
-    (_ (panic "butlast: not a proper list"))))
-
-(defun take ((n i32) (lst Sexpr)) Sexpr
-  (if (<= n 0) ()
-    (match lst
-      ((Nil) ())
-      ((Cons h t) (cons h (take (- n 1) t)))
-      (_ (panic "take: not a proper list")))))
-
-(defun subseq ((lst Sexpr) (start i32) (end i32)) Sexpr
-  (take (- end start) (nthcdr start lst)))
-
-(defun copy-list ((lst Sexpr)) Sexpr
-  (match lst
-    ((Nil) ())
-    ((Cons h t) (cons h (copy-list t)))
-    (_ (panic "copy-list: not a proper list"))))
-
-(defun member ((item Sexpr) (lst Sexpr)) Sexpr
-  (match lst
-    ((Nil) ())
-    ((Cons h t) (if (eq h item) lst (member item t)))
-    (_ (panic "member: not a proper list"))))
-
-(defun every ((pred (fn (Sexpr) bool)) (lst Sexpr)) bool
-  (match lst
-    ((Nil) true)
-    ((Cons h t) (and (pred h) (every pred t)))
-    (_ (panic "every: not a proper list"))))
-
-;; Named `any`, not CL's `some` — that name collides with `Option`'s
-;; `Some` constructor (symbols are case-folded, so `Some`/`some` are the
-;; same identifier; `resolve_ctor` is tried before a free function of the
-;; same name, so `(some ...)` would always try to build an `Option` value).
-;; `any` (Rust's `Iterator::any`) sidesteps the collision and also avoids a
-;; `?` suffix, which typelisp doesn't use for predicate names (see
-;; language-design.md §7.3).
-(defun any ((pred (fn (Sexpr) bool)) (lst Sexpr)) bool
-  (match lst
-    ((Nil) false)
-    ((Cons h t) (or (pred h) (any pred t)))
-    (_ (panic "any: not a proper list"))))
-
-;; The homogeneous-collection combinators `map`/`filter`/`foldl`/`foldr`/
-;; `reverse`/`find`/`position`/`count`/`remove-if` are no longer defined on
-;; `Sexpr` here — they are generic `Iter` combinators further down (see the
-;; comment above `map`), usable on any collection's iterator. `member`/
-;; `assoc`/`sort`/`every`/`any` above stay `Sexpr`-specific: `member`/`assoc`
-;; compare elements with `eq` (an `Iter`'s `Item` carries no `Eq` bound), and
-;; `sort` needs random access it builds from cons cells directly.
-
-;; Destructive (mutating) list operations, built on `set-car`/`set-cdr`
-;; (`crate::eval::interp`'s `eval_builtin`, wrapping `mem::Heap::set_car`/
-;; `set_cdr` — CL's `rplaca`/`rplacd`). Unlike every function above, these
-;; reuse existing cons cells instead of allocating new ones, so any other
-;; reference to the same cells observes the mutation too (aliasing) —
-;; exactly CL's `nconc`/`nreverse` contract.
-(defun nconc ((a Sexpr) (b Sexpr)) Sexpr
-  (match a
-    ((Nil) b)
-    ((Cons _ _) (progn (set-cdr (last a) b) a))
-    (_ (panic "nconc: not a proper list"))))
-
-(defun nreverse-onto ((lst Sexpr) (prev Sexpr)) Sexpr
-  (match lst
-    ((Nil) prev)
-    ((Cons _ d) (progn (set-cdr lst prev) (nreverse-onto d lst)))
-    (_ (panic "nreverse: not a proper list"))))
-(defun nreverse ((lst Sexpr)) Sexpr (nreverse-onto lst ()))
+;; `nthcdr`/`nth`/`elt`/`last`/`butlast`/`take`/`subseq`/`copy-list`/`member`/
+;; `any` and the destructive `nconc`/`nreverse` were removed with the rest of
+;; the user-facing `Sexpr` list surface (Symbol/Sexpr redesign Phase 5). The
+;; homogeneous-collection combinators (`map`/`filter`/`foldl`/... ) live further
+;; down as generic `Iter` combinators over `Vector<T>`/`HashTable<K,V>`; a
+;; `cons<T,U>`/`Sexpr` list API is to be redesigned later.
 
 ;; Option<T>/Result<T,E> accessors (roadmap step 7c). Written as `defmethod`,
 ;; not `defun`: `unwrap`/`unwrap-or` need the same name on both `Option<T>`
@@ -423,32 +294,12 @@ pub const SOURCE: &str = r#"
   (if (or (= a 0) (= b 0)) 0 (/ (abs (* a b)) (gcd a b))))
 (defun signum ((x i32)) i32 (if (> x 0) 1 (if (< x 0) -1 0)))
 
-;; `sort` (catalog §2.2c): insertion sort over `Sexpr` lists, taking a
-;; comparator `(fn (Sexpr Sexpr) bool)` (CL's default `<`-style predicate).
-;; Non-destructive (builds a new list), unlike `nconc`/`nreverse` above —
-;; there's no existing-cons-cell structure to reuse for a sorted result.
-(defun insert-sorted ((cmp (fn (Sexpr Sexpr) bool)) (item Sexpr) (lst Sexpr)) Sexpr
-  (match lst
-    ((Nil) (cons item ()))
-    ((Cons h t) (if (cmp item h) (cons item lst) (cons h (insert-sorted cmp item t))))
-    (_ (panic "sort: not a proper list"))))
-(defun sort ((cmp (fn (Sexpr Sexpr) bool)) (lst Sexpr)) Sexpr
-  (match lst
-    ((Nil) ())
-    ((Cons h t) (insert-sorted cmp h (sort cmp t)))
-    (_ (panic "sort: not a proper list"))))
-
-;; `assoc` (catalog §4.2's list section): search an alist (a list of
-;; `(key . value)` cons cells) for the first pair whose `car` is `eq` to
-;; `key`. Returns the pair itself (CL semantics) or `()` if absent — `Sexpr`,
-;; not `Option<Sexpr>`, matching `member`'s convention above (`Sexpr` already
-;; has a nil-like absent value, so wrapping it adds nothing — `position`
-;; wraps in `Option<i32>` only because `i32` has no such value).
-(defun assoc ((key Sexpr) (alist Sexpr)) Sexpr
-  (match alist
-    ((Nil) ())
-    ((Cons pair rest) (if (eq key (car pair)) pair (assoc key rest)))
-    (_ (panic "assoc: not a proper list"))))
+;; `sort`/`insert-sorted`/`member`/`assoc`/`every`/`any` (user-facing `Sexpr`
+;; list operations) were removed with the rest of the `Sexpr` list surface
+;; (Symbol/Sexpr redesign Phase 5). The self-hosting compiler (`compiler.rs`)
+;; needs none of them: it navigates its `Sexpr` AST with the `sexpr-*` accessor
+;; layer and concatenates/compares names with the `string` instance methods
+;; (`append`/`equal`/`length` on `string`, `registry::string_assoc`).
 
 ;; `until`/`while-let` (roadmap step 8b, cl-equivalence-catalog.md §1.1):
 ;; pure template expansions using `,@` (unquote-splicing, step 8a) —
@@ -469,8 +320,8 @@ pub const SOURCE: &str = r#"
 ;; usefully narrow `val`'s type — a bare variable would match unconditionally
 ;; (binding the whole scrutinee) and the macro would loop forever.
 (defmacro while-let (binding &rest body)
-  (let ((pattern (car binding))
-        (val (car (cdr binding))))
+  (let ((pattern (sexpr-car binding))
+        (val (sexpr-car (sexpr-cdr binding))))
     `(loop (match ,val (,pattern ,@body) (_ (break))))))
 
 ;; `doiter`: iterate a value of any type implementing the `Iter` trait
@@ -489,8 +340,8 @@ pub const SOURCE: &str = r#"
 ;; instance-method/trait-bound call machinery (`Checker::check_instance_method`),
 ;; concrete or `where`-bounded type variable alike.
 (defmacro doiter (spec &rest body)
-  (let ((var (car spec))
-        (coll-expr (car (cdr spec)))
+  (let ((var (sexpr-car spec))
+        (coll-expr (sexpr-car (sexpr-cdr spec)))
         (tmp (gensym)))
     `(let ((,tmp ,coll-expr))
        (while-let ((some ,var) (next ,tmp)) ,@body))))
@@ -567,15 +418,15 @@ pub const SOURCE: &str = r#"
 ;; up front as `((temp1 var1 step1) (temp2 var2 step2) ...)` and each later
 ;; pass just projects the two fields it needs out of that same triple.
 (defmacro do (bindings test-result &rest body)
-  (let ((test (car test-result))
-        (result (cdr test-result))
-        (temps (sexpr-map (lambda ((b Sexpr)) Sexpr (list (gensym) (car b) (car (cdr (cdr b)))))
+  (let ((test (sexpr-car test-result))
+        (result (sexpr-cdr test-result))
+        (temps (sexpr-map (lambda ((b Sexpr)) Sexpr (list (gensym) (sexpr-car b) (sexpr-car (sexpr-cdr (sexpr-cdr b)))))
                      bindings)))
-    `(let ,(sexpr-map (lambda ((b Sexpr)) Sexpr (list (car b) (car (cdr b)))) bindings)
+    `(let ,(sexpr-map (lambda ((b Sexpr)) Sexpr (list (sexpr-car b) (sexpr-car (sexpr-cdr b)))) bindings)
        (while (not ,test)
          ,@body
-         (let ,(sexpr-map (lambda ((tr Sexpr)) Sexpr (list (car tr) (car (cdr (cdr tr))))) temps)
-           ,@(sexpr-map (lambda ((tr Sexpr)) Sexpr (list (quote setf) (car (cdr tr)) (car tr))) temps)))
+         (let ,(sexpr-map (lambda ((tr Sexpr)) Sexpr (list (sexpr-car tr) (sexpr-car (sexpr-cdr (sexpr-cdr tr))))) temps)
+           ,@(sexpr-map (lambda ((tr Sexpr)) Sexpr (list (quote setf) (sexpr-car (sexpr-cdr tr)) (sexpr-car tr))) temps)))
        ,@result)))
 
 ;; `Iter`: the trait `doiter` requires every iterable type to implement — a single

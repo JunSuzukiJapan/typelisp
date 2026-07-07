@@ -38,10 +38,9 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
-#[test]
-fn length_still_resolves_to_the_free_function_for_a_sexpr_receiver() {
-    assert_eq!(eval_ok("(length (quote (1 2 3)))"), RtValue::Int(3));
-}
+// `length`/`sort` (free `Sexpr` list functions) were removed — Symbol/Sexpr
+// redesign Phase 5 — so the dispatch tests that asserted a `Sexpr` receiver
+// resolves to them are gone. HashTable-receiver dispatch (below) is unaffected.
 
 #[test]
 fn remove_resolves_to_hashtable_instance_method_for_a_hashtable_receiver() {
@@ -120,12 +119,3 @@ fn unbound_variable_in_first_argument_position_still_surfaces_the_real_error() {
     }
 }
 
-#[test]
-fn sort_still_resolves_to_the_free_function_for_a_sexpr_receiver() {
-    let src = r#"
-        (defun sexpr-lt ((a Sexpr) (b Sexpr)) bool
-          (match a ((Int x) (match b ((Int y) (< x y)) (_ false))) (_ false)))
-        (equal (sort sexpr-lt (quote (3 1 2))) (quote (1 2 3)))
-    "#;
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
-}

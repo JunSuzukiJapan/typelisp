@@ -381,9 +381,12 @@ fn sexpr_typed_field_reads_back_as_a_sexpr_not_a_scalar() {
     // Before the static-type-driven decode, `(content h)` returned
     // `RtValue::Int(42)` — which no `Sexpr` constructor pattern matches —
     // so this fell through to the wildcard arm.
+    // `match` on a `Sexpr` is fenced off (Symbol/Sexpr redesign Phase 5); the
+    // stored node is read back with `sexpr-int`, which still panics (rather
+    // than silently succeeding) if `content` decoded to a bare scalar.
     let src = "(defstruct holder (content Sexpr)) \
                (let ((h (holder::new '42))) \
-                 (match (content h) ((Int n) n) (_ -1)))";
+                 (sexpr-int (content h)))";
     assert_eq!(eval_ok(src), RtValue::Int(42));
 }
 
@@ -394,7 +397,7 @@ fn sexpr_typed_field_holding_a_quoted_float_reads_back_as_a_sexpr() {
     // `f64` field stores).
     let src = "(defstruct holder (content Sexpr)) \
                (let ((h (holder::new '2.5))) \
-                 (match (content h) ((Float f) f) (_ -1.0)))";
+                 (sexpr-float (content h)))";
     assert_eq!(eval_ok(src), RtValue::Float(2.5));
 }
 
@@ -403,7 +406,7 @@ fn setf_then_read_of_a_sexpr_typed_field_round_trips() {
     let src = "(defstruct holder (content Sexpr)) \
                (let ((h (holder::new '1))) \
                  (setf h::content '99) \
-                 (match h::content ((Int n) n) (_ -1)))";
+                 (sexpr-int h::content))";
     assert_eq!(eval_ok(src), RtValue::Int(99));
 }
 
@@ -414,6 +417,6 @@ fn match_on_a_struct_binds_a_sexpr_typed_field_as_a_sexpr() {
     // of the accessor path the tests above cover.
     let src = "(defstruct holder (content Sexpr) (k i64)) \
                (match (holder::new '7 3) \
-                 ((new c n) (match c ((Int m) (+ m n)) (_ -1))))";
+                 ((new c n) (+ (sexpr-int c) n)))";
     assert_eq!(eval_ok(src), RtValue::Int(10));
 }

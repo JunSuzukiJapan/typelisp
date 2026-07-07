@@ -3,8 +3,10 @@
 最終更新: 2026-07-05 / ブランチ: `feature/symbol-type`（`feature/compile-sexpr` から分岐）
 
 このドキュメントは複数フェーズにわたる型システム再設計の**進捗と残作業**を記録する。
-Phase 0〜3 と Phase 4a（コレクションコンビネータの generic `Iter` 化）まで完了。
-次回作業は Phase 4b（`cons`/`car`/`cdr` の `cons<T,U>` 付け替え、Phase 5 と一体）以降。
+Phase 0〜3・Phase 4a（コレクションコンビネータの generic `Iter` 化）・**Phase 5（`match` の enum 専用 fence＋
+ユーザー面 Sexpr リスト操作の撤去）**まで完了。次回作業は **Phase 4b**（`cons`/`car`/`cdr` の `cons<T,U>` 付け替え）。
+Phase 4b と Phase 5 は元々一体で扱う計画だったが、リスク分離のため Phase 5 を先行実施した（`car`/`cdr`/`cons` は
+Phase 5 時点ではまだ `Sexpr` builtin のまま＝島の `sexpr-*` 移行済みで未使用、Phase 4b で `cons<T,U>` へ付け替える）。
 
 ---
 
@@ -190,12 +192,36 @@ Sexpr 島内化と一体。`car`/`cdr` はコンストラクタ競合がない�
 - `car`/`cdr`/`cons` on Sexpr を使うテスト側の更新。
 - 検証: `cargo test`。
 
-### Phase 5 — `match` の enum 専用 fence
-- `AdtDef` に `user_matchable: bool` を追加（`sexpr` は false）。`check_match`/`expect_adt`（`checker.rs:3727`/`3903`）で
-  ユーザーコードの `sexpr` scrutinee を拒否。島は match でなく `sexpr-*` を使うので影響なし。
-- option/result/error/defstruct の match は維持。
-- 任意: ユーザー多variant sum 型のための `defenum` 追加（現状 defstruct=単一variant のみ。「match は enum 振り分け」を実効化するなら要検討）。
-- 検証: ユーザーの `(match sexpr値 ...)` がエラーに。option/defstruct の match は green。
+### Phase 5 — `match` の enum 専用 fence + ユーザー面 Sexpr リスト操作の撤去【✅ 完了 / Commit 1】
+ユーザー判断（本セッション）で当初の据え置き（`consp`/`equal`/`append` を compilable な `match` ベースで存続）を上書きし、
+**ユーザー面 Sexpr リスト操作を一括撤去し、`match`-on-`Sexpr` を prelude 含め完全撤廃**した（「あとから `cons<T,U>`/`Vector<T>` 上に再設計」）。
+
+実装済み内容:
+- **match fence（`checker.rs::check_match`）**: `expect_adt` 直後に scrutinee が `sexpr` 型なら拒否。
+  `AdtDef` への `user_matchable: bool` 追加は不要と判明（`sexpr` パス比較で足りる。option/result/error/defstruct は素通り）。
+  島（`compiler.rs`）は既に `match` でなく `sexpr-*` を使うので影響なし（Phase 2 の成果）。
+- **prelude 撤去**: `consp`/`null`/`atom`/`length`/`append`/`nthcdr`/`nth`/`elt`/`last`/`butlast`/`take`/`subseq`/
+  `copy-list`/`member`/`every`/`any`/`nconc`/`nreverse`/`insert-sorted`/`sort`/`assoc` と マクロ `dolist` を削除。
+- **`equal`/`equalp` は存続（Rust builtin 化）**: 等値比較は「リスト操作」でなく `case` 展開先でもある遍在プリミティブなので残すが、
+  `match` ベース defun から `Interp::eval_builtin` の Rust builtin（`sexpr_equal`/`sexpr_equalp`、`registry.rs` に FnSig 登録）へ移設。
+  スカラ型の `equal`/`equalp` *メソッド*（string/char/int/…）は従来どおり別（インスタンスメソッド優先解決）。
+- **島インフラの再配置**: 自己ホストコンパイラ `compiler.rs` は削除関数を一つも使っていなかった（`(append ..)`/`(equal ..)`/
+  `(length ..)` は全て **`string` インスタンスメソッド**、`every`/`assoc` はコメントのみ）。`sexpr-*` 層で `Sexpr` を走査する。
+  `,@`（unquote-splicing）だけが `Sexpr` リスト連結を要するため、内部 `sexpr-append`（prelude defun、`sexpr-*` ベース）を新設し
+  `check_qq_template` をそこへ向けた。
+- **`sexpr-*` 層の拡充**: `match`-on-`Sexpr` 廃止に伴い `Sexpr` payload を読む必要が残る箇所のため `sexpr-float`（`sexpr-int` の
+  f64 版、`registry.rs`+`eval_builtin`）を新設。既存の `sexpr-int`/`sexpr-bool`/`sexpr-str`/`sexpr-sym-name`/`sexpr-consp`/… と揃う。
+- **`while-let`/`doiter`/`do` マクロ**: 展開時に macro 引数（`Sexpr`）を走査する `car`/`cdr` を `sexpr-car`/`sexpr-cdr` へ移行。
+- **テスト**: 撤去関数のテスト（prelude_test 35・dispatch_test 2・check/eval の dolist 5）は削除。`match`-on-`Sexpr` を
+  他機能検証に使っていたテスト（eval &rest/apply/gc、scope_test の `Scope<Sexpr>`、struct_test の Sexpr フィールド、
+  vector_test）は `sexpr-*` アクセサへ書き換え。**コンパイラの Sexpr `match` テスト（Stage 5 の 14 本）は削除**
+  ＝ユーザー面 Sexpr `match` コンパイルという撤去済み能力の検証だったため（GC ルート機構自体は `typelisp-rt` の
+  raw builtin テストで別途担保）。
+- 任意（未実施）: ユーザー多variant sum 型のための `defenum`。
+
+検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
+
+**残: `defenum` は将来課題。Sexpr/`cons<T,U>` 走査のユーザー API は Phase 4b 完了後に再設計。**
 
 ### Phase 6 — `&rest` → `Vector<T>`（defun/lambda）
 - `checker.rs`: `&rest` 束縛型 `sexpr_ty()`→`Vector<T>`（`1042`/`1057`/`1356` 付近）。`wrap_rest_elem`/`cons_rest_list`

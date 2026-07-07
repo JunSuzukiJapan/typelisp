@@ -224,44 +224,6 @@ fn equalp_on_sexpr_float_compares_by_value() {
 // ---- consp / null / atom ----------------------------------------------------
 
 #[test]
-fn consp_is_true_for_a_cons() {
-    assert_eq!(eval_ok("(consp (quote (a b)))"), RtValue::Bool(true));
-}
-
-#[test]
-fn consp_is_false_for_nil() {
-    assert_eq!(eval_ok("(consp (quote ()))"), RtValue::Bool(false));
-}
-
-#[test]
-fn consp_is_false_for_an_atom() {
-    assert_eq!(eval_ok("(consp (quote a))"), RtValue::Bool(false));
-}
-
-#[test]
-fn null_is_true_for_nil() {
-    assert_eq!(eval_ok("(null (quote ()))"), RtValue::Bool(true));
-}
-
-#[test]
-fn null_is_false_for_a_cons() {
-    assert_eq!(eval_ok("(null (quote (a)))"), RtValue::Bool(false));
-}
-
-#[test]
-fn atom_is_true_for_nil_and_scalars() {
-    assert_eq!(eval_ok("(atom (quote ()))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(atom (quote a))"), RtValue::Bool(true));
-}
-
-#[test]
-fn atom_is_false_for_a_cons() {
-    assert_eq!(eval_ok("(atom (quote (a)))"), RtValue::Bool(false));
-}
-
-// ---- equal --------------------------------------------------------------------
-
-#[test]
 fn equal_is_true_for_separately_built_equal_lists() {
     let src = "(equal (quote (a b c)) (quote (a b c)))";
     assert_eq!(eval_ok(src), RtValue::Bool(true));
@@ -427,112 +389,6 @@ fn eval_true(src: &str) {
 }
 
 #[test]
-fn length_of_a_list() {
-    assert_eq!(eval_ok("(length (quote (a b c)))"), RtValue::Int(3));
-}
-
-#[test]
-fn length_of_nil_is_zero() {
-    assert_eq!(eval_ok("(length (quote ()))"), RtValue::Int(0));
-}
-
-#[test]
-fn length_panics_on_a_non_list() {
-    assert!(matches!(run("(length (quote a))"), Err(EvalError::Panic(_))));
-}
-
-#[test]
-fn append_concatenates_two_lists() {
-    eval_true("(equal (append (quote (a b)) (quote (c d))) (quote (a b c d)))");
-}
-
-#[test]
-fn append_with_nil_is_identity() {
-    eval_true("(equal (append (quote ()) (quote (a))) (quote (a)))");
-    eval_true("(equal (append (quote (a)) (quote ())) (quote (a)))");
-}
-
-#[test]
-fn nthcdr_skips_n_elements() {
-    eval_true("(equal (nthcdr 2 (quote (a b c d))) (quote (c d)))");
-}
-
-#[test]
-fn nth_returns_the_element_at_an_index() {
-    eval_true("(equal (nth 1 (quote (a b c))) (quote b))");
-}
-
-#[test]
-fn nth_out_of_range_is_nil() {
-    eval_true("(null (nth 10 (quote (a b c))))");
-}
-
-#[test]
-fn elt_is_nth_with_reversed_argument_order() {
-    eval_true("(equal (elt (quote (a b c)) 2) (quote c))");
-}
-
-#[test]
-fn last_returns_the_final_cons_cell() {
-    eval_true("(equal (last (quote (a b c))) (quote (c)))");
-}
-
-#[test]
-fn butlast_drops_the_final_element() {
-    eval_true("(equal (butlast (quote (a b c))) (quote (a b)))");
-}
-
-#[test]
-fn take_takes_the_first_n_elements() {
-    eval_true("(equal (take 2 (quote (a b c d))) (quote (a b)))");
-}
-
-#[test]
-fn subseq_extracts_a_range() {
-    eval_true("(equal (subseq (quote (a b c d e)) 1 3) (quote (b c)))");
-}
-
-#[test]
-fn copy_list_produces_an_equal_but_separate_list() {
-    eval_true("(equal (copy-list (quote (a b c))) (quote (a b c)))");
-}
-
-#[test]
-fn member_finds_the_sublist_starting_at_the_item() {
-    eval_true("(equal (member (quote b) (quote (a b c))) (quote (b c)))");
-}
-
-#[test]
-fn member_returns_nil_when_not_found() {
-    eval_true("(null (member (quote z) (quote (a b c))))");
-}
-
-#[test]
-fn every_is_true_only_if_all_elements_match() {
-    let src = "(defun truthy ((x Sexpr)) bool true) (every truthy (quote (a b c)))";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
-    let src2 = "(defun is-a ((x Sexpr)) bool (eq x (quote a))) (every is-a (quote (a b c)))";
-    assert_eq!(eval_ok(src2), RtValue::Bool(false));
-}
-
-#[test]
-fn any_is_true_if_any_element_matches() {
-    let src = "(defun is-b ((x Sexpr)) bool (eq x (quote b))) (any is-b (quote (a b c)))";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
-    let src2 = "(defun is-z ((x Sexpr)) bool (eq x (quote z))) (any is-z (quote (a b c)))";
-    assert_eq!(eval_ok(src2), RtValue::Bool(false));
-}
-
-// The homogeneous-collection combinators `map`/`filter`/`foldl`/`foldr`/
-// `reverse`/`find`/`position`/`count`/`remove-if` are no longer `Sexpr`-list
-// functions (Symbol/Sexpr redesign Phase 4): they are generic `Iter`
-// combinators taking an iterator, covered over `Vector<T>`/`HashTable<K,V>`
-// in `vector_ops_test.rs`. `member`/`every`/`any`/`assoc`/`sort` stay
-// `Sexpr`-specific and are tested above/below.
-
-// ---- set-car / set-cdr / nconc / nreverse (destructive operations) -------------
-
-#[test]
 fn set_car_overwrites_in_place() {
     // Mutating through a second reference (`tail`, an alias to the same cons
     // cell `lst`'s cdr points at) must be visible through `lst` too — proof
@@ -567,47 +423,6 @@ fn set_car_panics_on_a_non_cons() {
 fn set_cdr_panics_on_a_non_cons() {
     assert!(matches!(run("(set-cdr (quote a) (quote z))"), Err(EvalError::Panic(_))));
 }
-
-#[test]
-fn nconc_concatenates_and_mutates_the_first_list_in_place() {
-    let src = "(defun f () bool
-                 (let ((a (quote (1 2))))
-                   (let ((result (nconc a (quote (3 4)))))
-                     (and (equal result (quote (1 2 3 4)))
-                          (equal a (quote (1 2 3 4)))))))
-               (f)";
-    eval_true(src);
-}
-
-#[test]
-fn nconc_with_an_empty_first_list_returns_the_second_unchanged() {
-    eval_true("(equal (nconc (quote ()) (quote (1 2))) (quote (1 2)))");
-}
-
-#[test]
-fn nreverse_reverses_a_list() {
-    eval_true("(equal (nreverse (quote (1 2 3))) (quote (3 2 1)))");
-}
-
-#[test]
-fn nreverse_of_nil_is_nil() {
-    eval_true("(null (nreverse (quote ())))");
-}
-
-#[test]
-fn nreverse_of_a_single_element_list_is_unchanged() {
-    eval_true("(equal (nreverse (quote (1))) (quote (1)))");
-}
-
-// ---- Option<T>/Result<T,E> accessors (step 7c) ------------------------------
-//
-// `(none)`/`(ok ..)`/`(err ..)` constructed with no surrounding type context
-// can't infer every type parameter on their own (e.g. `(none)` alone can't
-// learn its `T`) — this is `check_construct`'s ordinary inference limit, not
-// specific to these methods, so every case below goes through a `defun` with
-// an explicit return type to give the constructor an `expected` type to seed
-// from (matching `check_call`'s "non-generic param implies a concrete
-// `expected`" path).
 
 #[test]
 fn unwrap_returns_the_some_payload() {
@@ -757,46 +572,6 @@ fn signum_classifies_positive_negative_and_zero() {
     assert_eq!(eval_ok("(signum -5)"), RtValue::Int(-1));
     assert_eq!(eval_ok("(signum 0)"), RtValue::Int(0));
 }
-
-/// `(< x y)` over `Sexpr` integers, for use as `sort`'s comparator below —
-/// `Sexpr` itself has no `<` (only `eq`), so every test supplies its own.
-const SEXPR_INT_LT: &str = r#"
-    (defun sexpr-lt ((a Sexpr) (b Sexpr)) bool
-      (match a ((Int x) (match b ((Int y) (< x y)) (_ false))) (_ false)))
-"#;
-
-#[test]
-fn sort_orders_a_list_ascending() {
-    let src = format!("{} (equal (sort sexpr-lt (quote (3 1 2))) (quote (1 2 3)))", SEXPR_INT_LT);
-    eval_true(&src);
-}
-
-#[test]
-fn sort_of_an_empty_list_is_empty() {
-    let src = format!("{} (null (sort sexpr-lt (quote ())))", SEXPR_INT_LT);
-    eval_true(&src);
-}
-
-#[test]
-fn sort_keeps_duplicate_elements() {
-    let src = format!(
-        "{} (equal (sort sexpr-lt (quote (3 1 2 1 5 1))) (quote (1 1 1 2 3 5)))",
-        SEXPR_INT_LT
-    );
-    eval_true(&src);
-}
-
-#[test]
-fn assoc_finds_the_matching_pair() {
-    eval_true("(equal (assoc (quote b) (quote ((a . 1) (b . 2)))) (quote (b . 2)))");
-}
-
-#[test]
-fn assoc_returns_nil_when_absent() {
-    eval_true("(null (assoc (quote z) (quote ((a . 1) (b . 2)))))");
-}
-
-// ---- until / while-let (step 8b) --------------------------------------------
 
 #[test]
 fn until_runs_the_body_while_the_test_is_false() {

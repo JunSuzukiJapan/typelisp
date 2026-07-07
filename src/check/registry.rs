@@ -389,10 +389,21 @@ impl Registry {
         // `bare-returned-own-name`) need to branch on a `Sym` node — a peer of
         // `sexpr-consp`/`sexpr-null`/`sexpr-atom`.
         root.fns.insert("sexpr-int".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::I64, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("sexpr-float".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::F64, public: true, builtin: true, bounds: HashMap::new() });
         root.fns.insert("sexpr-bool".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
         root.fns.insert("sexpr-str".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Str, public: true, builtin: true, bounds: HashMap::new() });
         root.fns.insert("sexpr-sym-name".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Str, public: true, builtin: true, bounds: HashMap::new() });
         root.fns.insert("sexpr-symp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
+        // `equal`/`equalp` on `Sexpr`: structural equality (CL `equal`/`equalp`),
+        // Rust builtins (`Interp::eval_builtin`'s `sexpr_equal`/`sexpr_equalp`)
+        // since the Symbol/Sexpr redesign fenced `match` off `Sexpr` (Phase 5).
+        // They used to be prelude `defun`s (`(match a ((Cons ..) ..) ..)`); the
+        // per-scalar `equal`/`equalp` *methods* (string/char/int/...) are
+        // separate (`registry::string_assoc` etc.) and resolved first when the
+        // receiver is one of those types — these free `Sexpr` overloads are the
+        // fallback for actual `Sexpr` data (`case` expands to `(equal ..)`).
+        root.fns.insert("equal".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("equalp".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr(), sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
         // `gensym`: a fresh `Sexpr::Sym` on every call, for macro hygiene
         // workarounds (see `Interp`'s `gensym_counter` for the caveat that
         // these are collision-*resistant*, not truly unforgeable — typelisp

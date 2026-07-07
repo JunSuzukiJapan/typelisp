@@ -214,9 +214,9 @@ fn pushing_a_frame_on_the_clone_does_not_affect_the_original() {
 //
 // The same method surface as above, backed by the GC-heap representation
 // (unification Stage 8). Each test mirrors a native-path sibling; the
-// returned `i32` is extracted from the stored `Sexpr` with a `match` on its
-// `Int` shape, so a corrupted round-trip fails loudly rather than
-// comparing equal by accident.
+// returned `i64` is extracted from the stored `Sexpr` with `sexpr-int` (`match`
+// on a `Sexpr` is fenced off — Symbol/Sexpr redesign Phase 5), so a corrupted
+// round-trip fails loudly rather than comparing equal by accident.
 
 #[test]
 fn heap_scope_set_then_get_roundtrips() {
@@ -225,7 +225,7 @@ fn heap_scope_set_then_get_roundtrips() {
                  (let ((s (make-s)))
                    (set s \"x\" (quote 42))
                    (match (get s \"x\")
-                     ((Some v) (match v ((Int n) n) (_ -2)))
+                     ((Some v) (sexpr-int v))
                      ((None) -1))))
                (f)";
     assert_eq!(eval_ok(src), RtValue::Int(42));
@@ -246,7 +246,7 @@ fn heap_scope_push_frame_shadows_and_pop_frame_unshadows() {
     let src = "(defun make-s () Scope<Sexpr> (Scope::new))
                (defun as-int ((o Option<Sexpr>)) i64
                  (match o
-                   ((Some v) (match v ((Int n) n) (_ -2)))
+                   ((Some v) (sexpr-int v))
                    ((None) -1)))
                (defun f () bool
                  (let ((s (make-s)))
@@ -282,7 +282,7 @@ fn heap_scope_clone_frames_shares_existing_frames() {
                    (set s \"x\" (quote 7))
                    (let ((s2 (clone-frames s)))
                      (match (get s2 \"x\")
-                       ((Some v) (match v ((Int n) n) (_ -2)))
+                       ((Some v) (sexpr-int v))
                        ((None) -1)))))
                (f)";
     assert_eq!(eval_ok(src), RtValue::Int(7));
@@ -297,7 +297,7 @@ fn heap_scope_clone_frames_mutation_through_the_shared_frame_is_visible_in_both(
                    (let ((s2 (clone-frames s)))
                      (set s2 \"x\" (quote 2))
                      (match (get s \"x\")
-                       ((Some v) (match v ((Int n) n) (_ -2)))
+                       ((Some v) (sexpr-int v))
                        ((None) -1)))))
                (f)";
     assert_eq!(eval_ok(src), RtValue::Int(2));

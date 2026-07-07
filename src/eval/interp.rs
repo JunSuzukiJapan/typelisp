@@ -1269,6 +1269,13 @@ impl Interp {
                 )
             }
             "random" => Some(eval_random(args)),
+            // `equal`/`equalp` on `Sexpr`: structural equality builtins (the
+            // free-function `Sexpr` overloads; the per-scalar-type `equal`
+            // *methods* — `string`/`char`/`int`/... — are dispatched separately
+            // in `eval_builtin_method`). Rust builtins since Phase 5 fenced
+            // `match` off `Sexpr`; see `sexpr_equal`/`sexpr_equalp`.
+            "equal" => Some(sexpr_equal(heap, args)),
+            "equalp" => Some(sexpr_equalp(heap, args)),
             // `exit`: terminates the process immediately via the OS, never
             // returning — `rt_i64` truncates to `i32` the same way every
             // other `i32`-typed builtin extracts its argument.
@@ -1396,6 +1403,15 @@ impl Interp {
                 Some(RtValue::Sexpr(Value::Bool(b))) => Some(Ok(RtValue::Bool(*b))),
                 Some(RtValue::Sexpr(_)) => Some(Err(EvalError::Panic("sexpr-bool: expected a Bool Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-bool: expected a Sexpr argument".into()))),
+            },
+            // `sexpr-float`: peer of `sexpr-int` for a `Float` node (heap-boxed,
+            // `Value::Boxed` — see `BoxedObj`). Added with the Phase 5 `match`
+            // fence so a `Sexpr::Float` payload can still be read out without a
+            // `(match s ((Float f) f) ..)`.
+            "sexpr-float" => match args.first() {
+                Some(RtValue::Sexpr(Value::Boxed(id))) if heap.is_float(*id) => Some(Ok(RtValue::Float(heap.float_value(*id)))),
+                Some(RtValue::Sexpr(_)) => Some(Err(EvalError::Panic("sexpr-float: expected a Float Sexpr node".into()))),
+                _ => Some(Err(EvalError::Internal("sexpr-float: expected a Sexpr argument".into()))),
             },
             "sexpr-str" => match args.first() {
                 Some(RtValue::Sexpr(Value::Str(id))) => Some(Ok(RtValue::Str(heap.string(*id).into()))),
@@ -3515,12 +3531,70 @@ fn sexpr_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
 fn sexpr_eql(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let a = rt_sexpr(&args[0])?;
     let b = rt_sexpr(&args[1])?;
+    Ok(RtValue::Bool(eql_val(heap, a, b)))
+}
+
+/// The scalar core of `eql` on two `Sexpr` payloads: `==` (plain `Value`
+/// identity/value equality) except two separately-boxed but equal `Float`s,
+/// which are `eql` by value — see [`sexpr_eql`]. Shared by [`sexpr_equal`]/
+/// [`sexpr_equalp`] as their atom-comparison base case.
+fn eql_val(heap: &Heap, a: Value, b: Value) -> bool {
     if let (Value::Boxed(ia), Value::Boxed(ib)) = (a, b) {
         if heap.is_float(ia) && heap.is_float(ib) {
-            return Ok(RtValue::Bool(heap.float_value(ia) == heap.float_value(ib)));
+            return heap.float_value(ia) == heap.float_value(ib);
         }
     }
-    Ok(RtValue::Bool(a == b))
+    a == b
+}
+
+/// CL's `equal` on `Sexpr`: `eql` on every atom but `Cons` (structural
+/// recursion) and `Str` (case-sensitive content). Was a prelude `defun` until
+/// the Symbol/Sexpr redesign fenced `match` off `Sexpr` (Phase 5,
+/// `docs/dev/symbol-sexpr-redesign.md`); reimplemented here as a Rust builtin
+/// (a peer of [`sexpr_eq`]/[`sexpr_eql`]) rather than a `sexpr-*`-navigated
+/// `defun`, so it needs neither `match` nor the user-facing `car`/`cdr` (which
+/// Phase 4b repurposes to a generic `cons<T,U>` pair). The self-hosting
+/// compiler (`compiler.rs`) still calls it from interpreted code.
+fn sexpr_equal_val(heap: &Heap, a: Value, b: Value) -> bool {
+    match (a, b) {
+        (Value::Cons(_), Value::Cons(_)) => {
+            let (Ok(ca), Ok(cb)) = (heap.car(a), heap.car(b)) else { return false };
+            let (Ok(da), Ok(db)) = (heap.cdr(a), heap.cdr(b)) else { return false };
+            sexpr_equal_val(heap, ca, cb) && sexpr_equal_val(heap, da, db)
+        }
+        (Value::Str(i), Value::Str(j)) => heap.string(i) == heap.string(j),
+        (a, b) => eql_val(heap, a, b),
+    }
+}
+
+fn sexpr_equal(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let a = rt_sexpr(&args[0])?;
+    let b = rt_sexpr(&args[1])?;
+    Ok(RtValue::Bool(sexpr_equal_val(heap, a, b)))
+}
+
+/// CL's `equalp` on `Sexpr`: like [`sexpr_equal`] but `Str`/`Char` compare
+/// case-insensitively and numbers compare across `Int`/`Float`. Same Phase 5
+/// migration from a prelude `match`-based `defun` to a Rust builtin.
+fn sexpr_equalp_val(heap: &Heap, a: Value, b: Value) -> bool {
+    match (a, b) {
+        (Value::Cons(_), Value::Cons(_)) => {
+            let (Ok(ca), Ok(cb)) = (heap.car(a), heap.car(b)) else { return false };
+            let (Ok(da), Ok(db)) = (heap.cdr(a), heap.cdr(b)) else { return false };
+            sexpr_equalp_val(heap, ca, cb) && sexpr_equalp_val(heap, da, db)
+        }
+        (Value::Str(i), Value::Str(j)) => heap.string(i).eq_ignore_ascii_case(heap.string(j)),
+        (Value::Char(c), Value::Char(d)) => c.eq_ignore_ascii_case(&d),
+        (Value::Int(n), Value::Boxed(ib)) if heap.is_float(ib) => (n as f64) == heap.float_value(ib),
+        (Value::Boxed(ia), Value::Int(n)) if heap.is_float(ia) => heap.float_value(ia) == (n as f64),
+        (a, b) => eql_val(heap, a, b),
+    }
+}
+
+fn sexpr_equalp(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let a = rt_sexpr(&args[0])?;
+    let b = rt_sexpr(&args[1])?;
+    Ok(RtValue::Bool(sexpr_equalp_val(heap, a, b)))
 }
 
 /// Try to match a pattern against a value, returning the bindings on success.

@@ -3098,7 +3098,7 @@ impl Checker {
     /// A pure syntax-to-`Expr` desugaring — same idea as `list` building
     /// nested `Expr::Construct{Cons,..}` (`check_list_lit`) — so it needs no
     /// new runtime machinery; `(unquote-splicing x)` (`,@x`) is the one
-    /// exception, desugaring to a call to the prelude's `append` (see
+    /// exception, desugaring to a call to the prelude's `sexpr-append` (see
     /// `check_qq_template`'s doc comment) since the spliced list's length
     /// isn't known until runtime. A quasiquote nested inside another is
     /// treated as ordinary literal data (no depth tracking).
@@ -3126,10 +3126,10 @@ impl Checker {
     /// 3-element `progn`, not a `progn` wrapping one 3-element list). Since
     /// `x`'s length isn't known until runtime, this can't be expressed as a
     /// static `cons` nest like the non-splicing case — it desugars to a call
-    /// to the prelude's `append` (`Checker::resolve_fn`, the same lookup
+    /// to the prelude's `sexpr-append` (`Checker::resolve_fn`, the same lookup
     /// `check_call`'s caller uses), joining `x` with the recursively
     /// desugared rest of the list. This means `,@` requires the prelude to
-    /// be loaded (`append` registered) — acceptable since the macros that
+    /// be loaded (`sexpr-append` registered) — acceptable since the macros that
     /// actually need `,@` (`until`/`while-let`/`case`/`do`, roadmap step 8)
     /// live in the prelude themselves.
     fn check_qq_template(
@@ -3164,9 +3164,9 @@ impl Checker {
                         if heap.cdr(car_cdr)?.is_empty() {
                             let spliced = self.check(heap, interp, env, x, Some(&sexpr_ty))?;
                             let rest = self.check_qq_template(heap, interp, env, cdr)?;
-                            let append_fq = self.resolve_fn("append").ok_or_else(|| {
+                            let append_fq = self.resolve_fn("sexpr-append").ok_or_else(|| {
                                 Error::TypeError(
-                                    "unquote-splicing (,@) requires the prelude's `append` to be loaded"
+                                    "unquote-splicing (,@) requires the prelude's `sexpr-append` to be loaded"
                                         .into(),
                                 )
                             })?;
@@ -3790,6 +3790,21 @@ impl Checker {
         }
         let scrut = self.check(heap, interp, env, args[0], None)?;
         let (adt_name, _) = self.expect_adt(&scrut.ty)?;
+        // `match` is fenced to enum (sum-type) dispatch — `Option`/`Result`/
+        // `error`/user `defstruct`s. `Sexpr` is the internal island
+        // representation (read/eval/print/`defmacro`/self-hosting `compiler.rs`),
+        // no longer a user-matchable datum: its structure is navigated with the
+        // `sexpr-*` accessor layer instead (Symbol/Sexpr redesign Phase 5,
+        // `docs/dev/symbol-sexpr-redesign.md`). The island already uses
+        // `sexpr-consp`/`sexpr-car`/... rather than `match`, so this fence has
+        // no effect on it — it only rejects a user (or leftover prelude)
+        // `(match sexpr-value ...)`.
+        if adt_name == Path::root("sexpr") {
+            return Err(Error::TypeError(
+                "match on a Sexpr value is not supported: Sexpr is an internal type; navigate it with the sexpr-* accessors (sexpr-consp/sexpr-car/sexpr-cdr/...) instead"
+                    .into(),
+            ));
+        }
         let total_variants = self.reg.type_def(&adt_name).expect("adt exists").variants.len();
 
         let mut arms = Vec::new();

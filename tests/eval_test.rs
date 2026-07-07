@@ -447,10 +447,9 @@ fn float_sexpr_constructs_and_extracts_through_a_heap_boxed_value() {
         let f = h.alloc_float(1.5);
         h.cons(f, Value::Empty).unwrap()
     });
-    assert_sexpr_eq(
-        "(match (Float 2.0) ((Float f) (Float f)) (_ (Nil)))",
-        |h| h.alloc_float(2.0),
-    );
+    // (The former `(match (Float 2.0) ((Float f) ...))` extraction assertion
+    // was dropped: `match` on a `Sexpr` value is fenced off — Symbol/Sexpr
+    // redesign Phase 5.)
 }
 
 #[test]
@@ -508,26 +507,8 @@ fn list_builds_cons_chain() {
     assert_sexpr_eq("(list)", |_| Value::Empty);
 }
 
-#[test]
-fn dolist_is_unit() {
-    assert_eq!(eval_ok_with_prelude("(dolist (x (list (Int 1))) x)"), RtValue::Unit);
-}
-
-#[test]
-fn dolist_iterates_over_each_element() {
-    let src = "(let ((count 0)) \
-                 (dolist (x (list (Int 1) (Int 2) (Int 3))) (setf count (+ count 1))) \
-                 count)";
-    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(3));
-}
-
-#[test]
-fn dolist_over_empty_list_does_nothing() {
-    let src = "(let ((count 0)) \
-                 (dolist (x (list)) (setf count (+ count 1))) \
-                 count)";
-    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(0));
-}
+// `dolist` (iterating a `Sexpr` list) was removed with the rest of the
+// user-facing `Sexpr` list surface — Symbol/Sexpr redesign Phase 5.
 
 #[test]
 fn cons_as_value() {
@@ -683,11 +664,12 @@ fn labels_function_can_be_bound_to_a_variable_like_any_other() {
 // never a homogeneous array type), with each element wrapped in its
 // `Sexpr` constructor (`(Int n)` for an `i32`/`i64` element here) — see
 // `Checker::wrap_rest_elem`'s doc comment. These tests use `run`/`eval_ok`
-// (no prelude loaded), so list length/indexing is done directly via
-// `match`/`car`/`cdr` rather than the prelude's `length`/`nth`.
+// (no prelude loaded), so list length/indexing is done directly via the
+// `sexpr-*` accessor layer (`match` on `Sexpr` is fenced off — Symbol/Sexpr
+// redesign Phase 5 — and `car`/`cdr` are repurposed to a `cons<T,U>` pair).
 
 const LEN_HELPER: &str =
-    "(defun len ((s Sexpr)) i32 (match s ((Nil) 0) ((Cons _ d) (+ 1 (len d))) (_ (panic \"len: not a proper list\"))))";
+    "(defun len ((s Sexpr)) i32 (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))";
 
 #[test]
 fn defun_rest_collects_extra_arguments_into_a_list() {
@@ -726,9 +708,9 @@ fn defun_rest_elements_keep_their_order_and_values() {
     // `Sexpr`'s own `Int` constructor always holds an `i64` (regardless of
     // whether the `&rest` element type was declared `i32` or `i64` — both
     // wrap into the same `Sexpr` variant, see `sexpr_ctor_for`), so
-    // extracting one back out via `match` yields `i64`, not `i32`.
+    // extracting one back out via `sexpr-int` yields `i64`, not `i32`.
     let src = "(defun second-extra ((a i32) &rest (xs i32)) i64
-                 (match (car (cdr xs)) ((Int n) n) (_ (panic \"not an Int\"))))
+                 (sexpr-int (sexpr-car (sexpr-cdr xs))))
                (second-extra 1 10 20 30)";
     assert_eq!(eval_ok(src), RtValue::Int(20));
 }
@@ -753,7 +735,7 @@ fn generic_rest_function_works_at_different_element_types() {
 #[test]
 fn apply_calls_a_named_variadic_function_with_a_runtime_list() {
     let src = "(defun first-extra ((a i32) &rest (xs i32)) i64
-                 (match (car xs) ((Int n) n) (_ (panic \"not an Int\"))))
+                 (sexpr-int (sexpr-car xs)))
                (apply first-extra 1 (quote (10 20)))";
     assert_eq!(eval_ok(src), RtValue::Int(10));
 }
@@ -842,11 +824,13 @@ fn setf_on_a_sexpr_binding_survives_gc_and_releases_the_old_value() {
 }
 
 #[test]
-fn a_match_bound_sexpr_survives_gc_pressure() {
+fn a_sexpr_car_bound_sexpr_survives_gc_pressure() {
+    // `match` on a `Sexpr` is fenced off (Symbol/Sexpr redesign Phase 5); the
+    // extracted `car` is now bound with `sexpr-car` instead, exercising the
+    // same "a let-bound `Sexpr` local stays rooted across GC" path.
     let src = "(let ((s (cons (Int 8) (Nil)))) \
-                 (match s \
-                   ((Cons h _) (dotimes (i 40) (cons (Int 2) (Nil))) h) \
-                   (_ (Int 0))))";
+                 (let ((h (sexpr-car s))) \
+                   (dotimes (i 40) (cons (Int 2) (Nil))) h))";
     assert_eq!(eval_under_gc_pressure(src, 4), RtValue::Sexpr(Value::Int(8)));
 }
 

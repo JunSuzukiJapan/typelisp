@@ -126,10 +126,13 @@ fn vector_of_sexpr_gets_elements_back_as_sexprs() {
     // (`Vector<Sexpr>`'s instantiated element type), which must win over
     // `decode_struct_field`'s shape heuristic — a stored quoted `42` is a
     // `Value::Int` in the slot, shape-identical to a `Vector<i64>` element.
+    // Read back with `sexpr-int` (`match` on a `Sexpr` is fenced off —
+    // Symbol/Sexpr redesign Phase 5); it still panics if the element decoded
+    // to a bare scalar rather than a genuine `Sexpr` node.
     let src = "(defun make-v () Vector<Sexpr> (Vector::new))
                (let ((v (make-v)))
                  (push v '41)
                  (push v '42)
-                 (match (get v 1) ((Int n) n) (_ -1)))";
+                 (sexpr-int (get v 1)))";
     assert_eq!(eval_ok(src), RtValue::Int(42));
 }
