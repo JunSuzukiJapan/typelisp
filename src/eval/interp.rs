@@ -840,15 +840,25 @@ impl Interp {
         // exactly the one `Self::is_boxed_sexpr_type` would have derived
         // from its (possibly-generic) static type anyway, so no information
         // is lost by reading it directly off the value instead.
-        // Strings freshly heap-allocated for the crossing (an interp
-        // `RtValue::Str` is an `Rc<str>`, not a heap `Value::Str`) are
-        // rooted for the call's duration — nothing on the interp side holds
-        // them, and the callee may allocate (and so GC) before touching
-        // them. LIFO-popped after the call, per the `sync_roots` invariant.
+        // Every heap-backed argument is rooted for the duration of marshaling
+        // + the call, then LIFO-popped after (per the `sync_roots` invariant).
+        // Two reasons, both because a raw encoded `i64` in `int_args` is
+        // unreachable from any GC root (the interp-side `argv` is not one):
+        // (a) a `Str` arg is freshly heap-allocated here (an interp
+        // `RtValue::Str` is an `Rc<str>`, not a heap `Value::Str`) and nothing
+        // else holds it; (b) an *earlier* `Sexpr` arg, already encoded to a
+        // raw pointer, would otherwise be swept if a *later* `Str` arg's
+        // `alloc_string` triggers a GC mid-marshaling — so `Sexpr` args are
+        // rooted too, before any such allocation can happen. Immediate
+        // `Value`s root harmlessly (the GC marker's `_ => {}` arm skips them).
+        // Explicit loop (not `map().collect()?`) so an error partway through
+        // still pops the roots pushed so far before returning — an early `?`
+        // out of the middle would otherwise leak them past the post-call
+        // pop, corrupting the LIFO root stack for later work on this heap.
         let mut crossing_roots = 0usize;
-        let int_args = argv
-            .iter()
-            .map(|v| match v {
+        let mut int_args: Vec<i64> = Vec::with_capacity(argv.len());
+        for v in argv {
+            let encoded = match v {
                 // An *interpreted* closure box must not silently cross this
                 // boundary: compiled code represents function values as its
                 // own `ClosureBox` (a malloc'd i64 pointer), and a tagged
@@ -859,7 +869,11 @@ impl Interp {
                 RtValue::Sexpr(Value::Boxed(id)) if heap.is_closure(*id) => Err(EvalError::Internal(
                     "compiled call: an interpreted closure cannot be passed to compiled code".into(),
                 )),
-                RtValue::Sexpr(sv) => Ok(crate::compile::runtime::encode(*sv)),
+                RtValue::Sexpr(sv) => {
+                    heap.push_root(*sv);
+                    crossing_roots += 1;
+                    Ok(crate::compile::runtime::encode(*sv))
+                }
                 RtValue::Int(n) => Ok(*n),
                 // The remaining scalar crossings, by the same encodings
                 // compiled code uses internally: `bool` and `char` are raw
@@ -874,8 +888,17 @@ impl Interp {
                     Ok(crate::compile::runtime::encode(sv))
                 }
                 other => Err(EvalError::Internal(format!("compiled call: unsupported argument {:?}", other))),
-            })
-            .collect::<Result<Vec<i64>, EvalError>>()?;
+            };
+            match encoded {
+                Ok(n) => int_args.push(n),
+                Err(e) => {
+                    for _ in 0..crossing_roots {
+                        heap.pop_root();
+                    }
+                    return Err(e);
+                }
+            }
+        }
         // Registers `heap` as this thread's active `Heap` (see
         // `compile::runtime::set_active_heap`'s doc comment) so any
         // `rt-cons`/`rt-car`/... call the compiled code makes — directly or

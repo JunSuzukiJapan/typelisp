@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
-# Runs the whole test suite one binary at a time.
+# Runs the whole test suite one binary at a time, each binary single-threaded.
 #
 # `cargo test` launches the compiled test executables in parallel, and several
-# of them (compile_test, compile_file_test, ...) drive LLVM/JIT compilation.
-# Multiple LLVM-using *processes* running at once can crash with SIGSEGV — a
-# known artifact of concurrent LLVM use, not a real test failure. Each binary
-# on its own is stable (its in-process parallel threads are fine), so this
-# script serializes across binaries to get a reliable green signal.
+# of them (compile_test, compile_file_test, ...) drive LLVM/JIT compilation
+# against the one process-wide `LLVMContext` (`src/compile/mod.rs`). Concurrent
+# LLVM use — whether across *processes* or across *threads within one test
+# binary* — can crash with SIGSEGV: `COMPILE_LOCK` guards each individual LLVM
+# builtin, but IR building and JIT execution still interleave on the shared
+# Context across threads, which LLVM does not support. It's rare and
+# load-dependent (a single binary passes on its own most of the time), but not
+# zero, so this script both serializes across binaries *and* forces
+# `--test-threads=1` within each for a reliable green signal.
 #
 # Usage:
 #   scripts/test-serial.sh                # lib + every integration test
 #   scripts/test-serial.sh compile_test   # only the named integration test(s)
 #
-# Any extra `cargo test` flags after a `--` are forwarded, e.g.
+# Any extra `cargo test` flags after a `--` are forwarded (and win over the
+# default `--test-threads=1`, since libtest takes the last occurrence), e.g.
 #   scripts/test-serial.sh -- --nocapture
 set -uo pipefail
 
@@ -60,10 +65,14 @@ for t in "${targets[@]}"; do
         echo "=== cargo test --test $t ==="
         sel=(--test "$t")
     fi
+    # `--test-threads=1` first so a user-supplied one in `passthrough` (which
+    # comes after) wins — libtest honors the last occurrence. The `if` guard
+    # avoids expanding an empty `passthrough` array under `set -u` (an error on
+    # the bash 3.2 macOS ships).
     if [ "${#passthrough[@]}" -gt 0 ]; then
-        cargo test "${sel[@]}" -- "${passthrough[@]}" || failed+=("$t")
+        cargo test "${sel[@]}" -- --test-threads=1 "${passthrough[@]}" || failed+=("$t")
     else
-        cargo test "${sel[@]}" || failed+=("$t")
+        cargo test "${sel[@]}" -- --test-threads=1 || failed+=("$t")
     fi
 done
 
