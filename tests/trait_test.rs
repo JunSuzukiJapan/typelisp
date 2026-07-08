@@ -166,6 +166,29 @@ fn impl_method_with_a_where_clause_supports_recursive_structural_dispatch() {
 }
 
 #[test]
+fn bounded_method_call_rejects_an_owner_argument_lacking_the_impl() {
+    // Method-side mirror of the free-function call-site validation:
+    // `pr<no-eq,i32>`'s `same` requires `(Eq2 A)`, and `no-eq` has no `Eq2`
+    // impl — the *call* must fail to check with a real trait error, not an
+    // opaque `NoSuchFunction` from inside the specialization drain.
+    let src = "
+        (deftrait Eq2 (same ((self Self) (other Self)) bool))
+        (impl Eq2 i32 (same ((self Self) (other Self)) bool (= self other)))
+        (defstruct no-eq (n i32))
+        (defstruct (pr A B) (a A) (b B))
+        (impl Eq2 pr<A,B>
+          (same ((self Self) (other Self)) bool (where (Eq2 A) (Eq2 B))
+            (if (same self::a other::a) (same self::b other::b) false)))
+        (same (pr::new (no-eq::new 1) 2) (pr::new (no-eq::new 1) 2))";
+    let err = check(src).expect_err("must fail to check");
+    let msg = format!("{:?}", err);
+    assert!(
+        msg.contains("does not implement trait"),
+        "expected a trait-bound error, got: {msg}"
+    );
+}
+
+#[test]
 fn call_site_rejects_a_type_that_does_not_implement_the_required_trait() {
     // `box2` never gets a `Counted` impl, so `(describe (box2::new 5))` must
     // fail to *check* now — previously this type-checked fine (the `where`
