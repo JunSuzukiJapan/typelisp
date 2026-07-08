@@ -6,8 +6,8 @@
 Phase 0〜3・Phase 4a（コレクションコンビネータの generic `Iter` 化）・**Phase 4b（`cons`/`car`/`cdr` の
 `cons<T,U>` 付け替え）**・**Phase 5（`match` の enum 専用 fence＋ユーザー面 Sexpr リスト操作の撤去）**まで完了。
 Phase 4b と Phase 5 は元々一体だったが、リスク分離のため Phase 5 を先行実施した（Commit 1＝Phase 5、Commit 2＝Phase 4b）。
-残るは **Phase 7**（ドキュメント整備）と、任意項目（`defenum`、Sexpr/`cons<T,U>`
-走査のユーザー向け traversal API 再設計）。
+残るは **Phase 6.5**（ユーザー面リスト/ペア走査 API の `cons<T,U>`/`Vector<T>` 上での再設計・未着手）と
+**Phase 7**（ドキュメント整備）。任意項目として `defenum`。
 
 > **Phase 6（`&rest` → `Vector<T>`）は破棄。** 当初は defun/lambda の型付き `&rest` を
 > `Vector<T>` に付け替える計画だったが、可変長パラメータを均質配列型で表すのは不自然という
@@ -239,7 +239,7 @@ Phase 4b は当初懸念（存続関数の `car`/`cdr` 移行）が不要にな�
 
 検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
 
-**残: `defenum` は将来課題。Sexpr/`cons<T,U>` 走査のユーザー API は Phase 4b 完了後に再設計。**
+**残: `defenum` は将来課題。ユーザー面リスト/ペア走査 API の再設計は Phase 6.5（下記）へ。**
 
 ### Phase 6 — 破棄（値レベル `&rest` を削除）
 当初計画（`&rest` → `Vector<T>`）は撤回。代わりに**値レベル `&rest` を言語から削除**した:
@@ -249,6 +249,35 @@ Phase 4b は当初懸念（存続関数の `car`/`cdr` 移行）が不要にな�
   `check_call` の rest 分岐/`FnSig.rest` を除去。
 - `defmacro` の `&rest`（`MacroDef.rest`/`FnDef.rest`/`bind_macro_args`）は無変更で維持。
 - `Expr::Apply`（関数値の直接呼び出し）は残置。可変長でなくなっただけ。
+
+### Phase 6.5 — ユーザー面リスト/ペア走査 API の再設計【計画・未着手】
+Phase 5 で**ユーザー面の `Sexpr` リスト操作を一括撤去**した（`consp`/`null`/`atom`/`length`/`append`/
+`nthcdr`/`nth`/`elt`/`last`/`butlast`/`take`/`subseq`/`copy-list`/`member`/`every`/`any`/`nconc`/
+`nreverse`/`insert-sorted`/`sort`/`assoc`＋マクロ `dolist`）。撤去時の申し送りどおり、これらを
+`cons<T,U>` ペア／`Vector<T>` の上で**型付き API として再構築**する。`car`/`cdr` は Phase 4b で
+`cons<T,U>` のフィールドアクセサに付け替え済みなので、本フェーズは「ペア／シーケンスをユーザーが
+走査・操作する層」の再設計に集中する。
+
+**確定済みの前提（要再確認）:**
+- `List<T>` 独立型は作らない（背景・目的の確定事項）。等質シーケンスは `Vector<T>`＋`Iter` に一本化。
+- `cons<T,U>` は**異種2要素ペア**であって再帰的リスト型ではない。よって「素の cons セルで組んだ
+  単方向リスト」を第一級の型として復活させるかは未決。
+
+**決めるべき設計論点:**
+1. **等質シーケンス操作の窓口**: `length`/`append`/`nth`/`member`/`sort`/`assoc` 等を `Vector<T>`
+   （既存 `vector-*`／generic `Iter` 版）に寄せるか、別途 API を足すか。Phase 3/4a で `map`/`filter`/
+   `fold`/`reverse`/`find`/`position`/`count` は generic `Iter` 化済みなので、それとの整合を取る。
+2. **ペア走査の位置づけ**: `cons<T,U>` は `p::car`/`p::cdr`（または生成メソッド）でアクセスする単純ペア
+   に留めるか、`(cons A (cons B ...))` のネストを走査するユーザー向けヘルパーを別に用意するか。
+3. **連想（`assoc`）の型**: キー/値の対を `cons<K,V>` の `Vector` で表すか、`HashTable<K,V>`（実装済み）へ
+   誘導するか。
+4. **命名**: 旧 CL 名（`length`/`nth`/…）を `Vector` 用に再利用するか、`vector-*` 接頭辞で分けるか
+   （Phase 3 で `vector-*` を採った理由＝同型の Sexpr 版と衝突回避、との整合）。
+
+**成果物イメージ:** 上記論点を確定し、必要な `defun`/`defmethod`（prelude）＋テストを追加。
+`Sexpr` 島には手を入れない（マクロ作者向けの `sexpr-*` アクセサは現状維持）。
+
+> 併記の将来課題: ユーザー多 variant sum 型のための `defenum`（本再設計の対象外、別途）。
 
 ### Phase 7 — ドキュメント＆メモリ更新
 - `docs/functions.md`（§5/§6/§12/§14）・`docs/syntax.md`・`docs/dev/language-design.md`: Symbol、Vector ベースのコレクション、
