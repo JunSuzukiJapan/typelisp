@@ -2685,3 +2685,50 @@ fn compile_of_a_caller_of_an_uncompiled_primitive_method_is_a_clean_error() {
         other => panic!("expected a Panic, got {:?}", other),
     }
 }
+
+/// The `string` counterpart: `string::equals`'s body is `(equal self
+/// other)` (content comparison, `rt_str_eq`) and `string::less`'s is
+/// `(lt self other)` (lexicographic, the new `rt_str_lt` shim) — both now
+/// on `string-native-method?`'s list, so the impl bodies themselves compile
+/// and a compiled caller reaches them through `compile-assoc-user`.
+#[test]
+fn compile_dispatches_string_equals_and_less() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (compile string::equals)
+        (compile string::less)
+        (defun str-cmp ((a string) (b string)) i64
+          (if (equals a b) 0 (if (less a b) -1 1)))
+        (compile str-cmp)
+        (+ (str-cmp (append "ab" "c") "abc")
+           (+ (* (str-cmp "abc" "abd") 10)
+              (* (str-cmp "b" "a") 100)))
+        "#,
+    )
+    .expect("eval failed");
+    // equal content (built separately) -> 0, "abc" < "abd" -> -10, "b" > "a" -> 100
+    assert_eq!(v, RtValue::Int(90));
+}
+
+/// And `char`: a compiled `char` is a raw `i64` code point, so
+/// `char::equals` (body `(equal self other)`) and `char::less` (body
+/// `(lt self other)`) lower to plain integer `icmp`s via the char-native
+/// branch.
+#[test]
+fn compile_dispatches_char_equals_and_less() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (compile char::equals)
+        (compile char::less)
+        (defun char-cmp ((a char) (b char)) i64
+          (if (equals a b) 0 (if (less a b) -1 1)))
+        (compile char-cmp)
+        (+ (char-cmp (ref "xa" 1) (ref "ya" 1))
+           (+ (* (char-cmp (ref "a" 0) (ref "b" 0)) 10)
+              (* (char-cmp (ref "b" 0) (ref "a" 0)) 100)))
+        "#,
+    )
+    .expect("eval failed");
+    // 'a'=='a' -> 0, 'a'<'b' -> -10, 'b'>'a' -> 100
+    assert_eq!(v, RtValue::Int(90));
+}

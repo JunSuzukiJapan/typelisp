@@ -840,6 +840,12 @@ impl Interp {
         // exactly the one `Self::is_boxed_sexpr_type` would have derived
         // from its (possibly-generic) static type anyway, so no information
         // is lost by reading it directly off the value instead.
+        // Strings freshly heap-allocated for the crossing (an interp
+        // `RtValue::Str` is an `Rc<str>`, not a heap `Value::Str`) are
+        // rooted for the call's duration — nothing on the interp side holds
+        // them, and the callee may allocate (and so GC) before touching
+        // them. LIFO-popped after the call, per the `sync_roots` invariant.
+        let mut crossing_roots = 0usize;
         let int_args = argv
             .iter()
             .map(|v| match v {
@@ -855,6 +861,18 @@ impl Interp {
                 )),
                 RtValue::Sexpr(sv) => Ok(crate::compile::runtime::encode(*sv)),
                 RtValue::Int(n) => Ok(*n),
+                // The remaining scalar crossings, by the same encodings
+                // compiled code uses internally: `bool` and `char` are raw
+                // `i64`s (0/1 / code point); a string becomes a tagged heap
+                // `Value::Str` (what `rt_str_*` expect).
+                RtValue::Bool(b) => Ok(i64::from(*b)),
+                RtValue::Char(c) => Ok(*c as i64),
+                RtValue::Str(s) => {
+                    let sv = heap.alloc_string(s.to_string());
+                    heap.push_root(sv);
+                    crossing_roots += 1;
+                    Ok(crate::compile::runtime::encode(sv))
+                }
                 other => Err(EvalError::Internal(format!("compiled call: unsupported argument {:?}", other))),
             })
             .collect::<Result<Vec<i64>, EvalError>>()?;
@@ -867,6 +885,9 @@ impl Interp {
         // callee might transitively touch the heap" ahead of time.
         crate::compile::runtime::set_active_heap(heap as *mut Heap);
         let raw = compiled.call(&int_args);
+        for _ in 0..crossing_roots {
+            heap.pop_root();
+        }
         Ok(if self.is_boxed_sexpr_type(ret_ty) {
             RtValue::Sexpr(crate::compile::runtime::decode(raw))
         } else if matches!(ret_ty, Type::Bool) {
@@ -1109,12 +1130,16 @@ impl Interp {
             .filter(|key| {
                 // A user-registered method is a real call target even on a
                 // primitive receiver (`i32::equals`); only the natively
-                // lowered `i64`/`i32`/`string` builtins (`+`, `<`, `=`,
-                // `length`, ...) are excluded — those become LLVM
+                // lowered `i64`/`i32`/`char`/`string` builtins (`+`, `<`,
+                // `=`, `lt`, `length`, ...) are excluded — those become LLVM
                 // instructions / `rt_str_*` calls in `compile-assoc`, not
-                // function calls.
+                // function calls. (A builtin on these receivers that
+                // `compile-assoc` does *not* lower natively — `equalp`,
+                // `upcase`, ... — is also excluded here and panics inside
+                // `compile-assoc-user`'s `get-function` instead, still at
+                // compile time.)
                 self.methods.contains_key(key)
-                    || !matches!(key.0.local(), "i64" | "i32" | "string")
+                    || !matches!(key.0.local(), "i64" | "i32" | "char" | "string")
             })
             .collect();
         for (type_name, method) in &method_targets {
@@ -2229,10 +2254,10 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// call these to build/read/write a `BoxedObj::Struct` — the same
 /// `BoxedObj::Struct` mem/rt-layer plumbing Stage 1 already exercised in
 /// isolation, wired to the compiler for the first time here.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 22] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 23] {
     use crate::compile::runtime::{
         rt_car, rt_cdr, rt_cons, rt_float_new, rt_float_value, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root,
-        rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_new, rt_str_ref,
+        rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref,
         rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_truncate_sexpr_roots,
     };
     [
@@ -2252,6 +2277,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 22] {
         ("rt_str_length", rt_str_length as usize),
         ("rt_str_ref", rt_str_ref as usize),
         ("rt_str_eq", rt_str_eq as usize),
+        ("rt_str_lt", rt_str_lt as usize),
         ("rt_str_append", rt_str_append as usize),
         ("rt_float_new", rt_float_new as usize),
         ("rt_float_value", rt_float_value as usize),

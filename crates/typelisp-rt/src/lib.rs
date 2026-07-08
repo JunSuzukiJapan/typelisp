@@ -836,6 +836,31 @@ pub unsafe extern "C" fn rt_str_eq(args: *const i64, argc: u32) -> i64 {
     i64::from(heap.string(a) == heap.string(b))
 }
 
+/// `str::lt` for compiled code — lexicographic (code-point order) content
+/// comparison, matching the interpreter's own `string_lt` (Rust `&str`'s
+/// `<`). Returns a bare `0`/`1` like [`rt_str_eq`]. Backs the compiled form
+/// of the prelude's `impl Ord string` (`less` delegates to `lt`).
+///
+/// # Safety
+///
+/// Same as [`rt_str_eq`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_str_lt(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_str_lt: expected 2 arguments");
+    }
+    let a = match decode(*args) {
+        Value::Str(id) => id,
+        _ => fatal("rt_str_lt: first argument is not a Str"),
+    };
+    let b = match decode(*args.add(1)) {
+        Value::Str(id) => id,
+        _ => fatal("rt_str_lt: second argument is not a Str"),
+    };
+    let heap = active_heap();
+    i64::from(heap.string(a) < heap.string(b))
+}
+
 /// `str::append` for compiled code — concatenates the content of
 /// `args[0]`/`args[1]` into a freshly allocated string, matching the
 /// interpreter's own `string_append`. Returns the tagged form, exactly like
@@ -869,7 +894,8 @@ mod tests {
     use super::{
         active_heap, decode, encode, rt_car, rt_cdr, rt_cons, rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root,
         rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append,
-        rt_str_eq, rt_str_length, rt_str_new, rt_str_ref, rt_struct_field_get, rt_struct_field_set, rt_struct_new, set_active_heap,
+        rt_str_eq, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_get, rt_struct_field_set, rt_struct_new,
+        set_active_heap,
     };
 
     #[test]
@@ -1235,6 +1261,19 @@ mod tests {
         let c = make_str("bye");
         assert_eq!(unsafe { rt_str_eq([a, b].as_ptr(), 2) }, 1, "separately allocated, equal content");
         assert_eq!(unsafe { rt_str_eq([a, c].as_ptr(), 2) }, 0);
+    }
+
+    #[test]
+    fn rt_str_lt_orders_lexicographically_by_content() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let a = make_str("abc");
+        let b = make_str("abd");
+        let a2 = make_str("abc");
+        assert_eq!(unsafe { rt_str_lt([a, b].as_ptr(), 2) }, 1);
+        assert_eq!(unsafe { rt_str_lt([b, a].as_ptr(), 2) }, 0);
+        assert_eq!(unsafe { rt_str_lt([a, a2].as_ptr(), 2) }, 0, "equal content is not strictly less");
     }
 
     #[test]
