@@ -338,6 +338,70 @@ fn assoc_works_over_a_hashtable_iterator() {
     assert_eq!(eval_ok(src), RtValue::Int(20));
 }
 
+// ---- cons-cell Eq/Ord (recursive impls with where clauses) -------------------
+
+#[test]
+fn pairs_compare_structurally_with_equals() {
+    let src = "(+ (if (equals (cons 1 2) (cons 1 2)) 1 0)
+                  (if (equals (cons 1 2) (cons 1 3)) 10 0))";
+    assert_eq!(eval_ok(src), RtValue::Int(1));
+}
+
+#[test]
+fn mixed_type_pairs_compare_fieldwise() {
+    let src = "(if (equals (cons \"a\" 1) (cons \"a\" 1))
+                   (if (equals (cons \"a\" 1) (cons \"b\" 1)) 0 1)
+                   0)";
+    assert_eq!(eval_ok(src), RtValue::Int(1));
+}
+
+#[test]
+fn nested_pairs_recurse_through_the_impl() {
+    let src = "(+ (if (equals (cons (cons 1 2) 3) (cons (cons 1 2) 3)) 1 0)
+                  (if (equals (cons (cons 1 2) 3) (cons (cons 1 9) 3)) 10 0))";
+    assert_eq!(eval_ok(src), RtValue::Int(1));
+}
+
+#[test]
+fn pairs_order_lexicographically_with_less() {
+    // car decides first (1 < 2 even though 9 > 0); equal cars fall through
+    // to cdr.
+    let src = "(+ (if (less (cons 1 9) (cons 2 0)) 1 0)
+                  (+ (if (less (cons 1 2) (cons 1 3)) 10 0)
+                     (if (less (cons 1 3) (cons 1 3)) 100 0)))";
+    assert_eq!(eval_ok(src), RtValue::Int(11));
+}
+
+#[test]
+fn member_and_sort_work_over_a_vector_of_pairs() {
+    let src = "(defun make-v () Vector<cons-cell<i32,i32>> (Vector::new))
+               (let ((v (make-v)))
+                 (push v (cons 2 0))
+                 (push v (cons 1 5))
+                 (push v (cons 1 3))
+                 (let ((sorted (sort (iter v))))
+                   (let ((first (get sorted 0)))
+                     (+ (if (member (cons 1 5) (iter v)) 1000 0)
+                        (+ (if (member (cons 9 9) (iter v)) 100 0)
+                           (+ (* first::car 10) first::cdr))))))";
+    // member hit -> 1000, miss -> 0, sorted head (1 . 3) -> 13
+    assert_eq!(eval_ok(src), RtValue::Int(1013));
+}
+
+#[test]
+fn pair_equals_rejects_an_element_type_without_eq() {
+    // `point` has no `Eq` impl, so `cons-cell<point,i32>`'s bounded `equals`
+    // must fail at the call site with a real trait error.
+    let src = "(defstruct point (x i32))
+               (equals (cons (point::new 1) 2) (cons (point::new 1) 2))";
+    let err = check(src).expect_err("must fail to check");
+    let msg = format!("{:?}", err);
+    assert!(
+        msg.contains("does not implement trait"),
+        "expected a trait-bound error, got: {msg}"
+    );
+}
+
 // ---- monomorphization -------------------------------------------------------
 
 #[test]

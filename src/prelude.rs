@@ -639,6 +639,33 @@ pub const SOURCE: &str = r#"
 (impl Ord char   (less ((self Self) (other Self)) bool (lt self other)))
 (impl Ord string (less ((self Self) (other Self)) bool (lt self other)))
 
+;; `cons-cell<A,B>`'s Eq/Ord: recursive (structural) comparison. The field
+;; comparisons go through the methods' own `where` bounds — checked as
+;; diagnostics-only `TraitCall`s while `A`/`B` are open, then resolved to the
+;; field types' real `equals`/`less` when the owner monomorphizes (nesting,
+;; e.g. `cons-cell<cons-cell<i32,i32>,i32>`, just recurses one level per
+;; instantiation). Note the bound names must be the *owner's* declared type
+;; parameters (`A`/`B`, exactly as written on the `defstruct`) — a method's
+;; signature can only be generic through them.
+(impl Eq cons-cell<A,B>
+  (equals ((self Self) (other Self)) bool (where (Eq A) (Eq B))
+    (if (equals self::car other::car)
+        (equals self::cdr other::cdr)
+        false)))
+
+;; Ord: lexicographic, `car` first, then `cdr`. The double-`less` form (car
+;; strictly less → true; car strictly greater → false; otherwise cars are
+;; equivalent, compare cdrs) deliberately avoids requiring `(Eq A)` on top of
+;; `(Ord A)` — ordering alone decides equivalence, so `Ord`-only element
+;; types still qualify.
+(impl Ord cons-cell<A,B>
+  (less ((self Self) (other Self)) bool (where (Ord A) (Ord B))
+    (if (less self::car other::car)
+        true
+        (if (less other::car self::car)
+            false
+            (less self::cdr other::cdr)))))
+
 ;; Sequence operations over `Iter` (redesign Phase 6.5) — the typed rebuild
 ;; of the `Sexpr` list library removed in Phase 5 (`length`/`append`/`nth`/
 ;; `elt`/`take`/`subseq`/`last`/`butlast`/`member`/`every`/`any`/`sort`/
