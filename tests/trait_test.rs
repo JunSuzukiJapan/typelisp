@@ -61,6 +61,22 @@ fn impl_on_a_concrete_type_dispatches_as_an_ordinary_method() {
 }
 
 #[test]
+fn impl_on_a_primitive_type_dispatches_as_an_ordinary_method() {
+    // `check_impl` resolves non-`Named` targets via `prim_type_path`, and
+    // primitives are registered with real `AdtDef`s — so a user trait impl
+    // on `i32` must work exactly like one on a `defstruct` (this is the
+    // path the prelude's scalar `Eq`/`Ord` impls ride on). Also exercises a
+    // second `Self` parameter beyond the receiver.
+    let src = "
+(deftrait Doubling
+  (add-twice ((self Self) (other Self)) Self))
+(impl Doubling i32
+  (add-twice ((self Self) (other Self)) Self (+ self (* other 2))))
+(add-twice 40 1)";
+    assert_eq!(eval_ok(src), RtValue::Int(42));
+}
+
+#[test]
 fn impl_on_an_unknown_type_is_a_type_error() {
     assert!(check("(deftrait Counted (count ((self Self)) i32)) (impl Counted nope (count ((self Self)) i32 0))").is_err());
 }

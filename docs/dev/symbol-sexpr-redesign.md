@@ -6,8 +6,8 @@
 Phase 0〜3・Phase 4a（コレクションコンビネータの generic `Iter` 化）・**Phase 4b（`cons`/`car`/`cdr` の
 `cons<T,U>` 付け替え）**・**Phase 5（`match` の enum 専用 fence＋ユーザー面 Sexpr リスト操作の撤去）**まで完了。
 Phase 4b と Phase 5 は元々一体だったが、リスク分離のため Phase 5 を先行実施した（Commit 1＝Phase 5、Commit 2＝Phase 4b）。
-残るは **Phase 6.5**（ユーザー面リスト/ペア走査 API の `cons<T,U>`/`Vector<T>` 上での再設計・未着手）と
-**Phase 7**（ドキュメント整備）。任意項目として `defenum`。
+**Phase 6.5（ユーザー面リスト/ペア走査 API の `cons<T,U>`/`Vector<T>`/`Iter` 上での再設計）も完了**。
+残るは **Phase 7**（ドキュメント整備）。任意項目として `defenum`。
 
 > **Phase 6（`&rest` → `Vector<T>`）は破棄。** 当初は defun/lambda の型付き `&rest` を
 > `Vector<T>` に付け替える計画だったが、可変長パラメータを均質配列型で表すのは不自然という
@@ -250,34 +250,65 @@ Phase 4b は当初懸念（存続関数の `car`/`cdr` 移行）が不要にな�
 - `defmacro` の `&rest`（`MacroDef.rest`/`FnDef.rest`/`bind_macro_args`）は無変更で維持。
 - `Expr::Apply`（関数値の直接呼び出し）は残置。可変長でなくなっただけ。
 
-### Phase 6.5 — ユーザー面リスト/ペア走査 API の再設計【計画・未着手】
+### Phase 6.5 — ユーザー面リスト/ペア走査 API の再設計【✅ 完了】
 Phase 5 で**ユーザー面の `Sexpr` リスト操作を一括撤去**した（`consp`/`null`/`atom`/`length`/`append`/
 `nthcdr`/`nth`/`elt`/`last`/`butlast`/`take`/`subseq`/`copy-list`/`member`/`every`/`any`/`nconc`/
-`nreverse`/`insert-sorted`/`sort`/`assoc`＋マクロ `dolist`）。撤去時の申し送りどおり、これらを
-`cons<T,U>` ペア／`Vector<T>` の上で**型付き API として再構築**する。`car`/`cdr` は Phase 4b で
-`cons<T,U>` のフィールドアクセサに付け替え済みなので、本フェーズは「ペア／シーケンスをユーザーが
-走査・操作する層」の再設計に集中する。
+`nreverse`/`insert-sorted`/`sort`/`assoc`＋マクロ `dolist`）。本フェーズはこれらを
+`cons<T,U>` ペア／`Vector<T>`／`Iter` トレイトの上で**型付き API として再構築**した。
 
-**確定済みの前提（要再確認）:**
-- `List<T>` 独立型は作らない（背景・目的の確定事項）。等質シーケンスは `Vector<T>`＋`Iter` に一本化。
-- `cons<T,U>` は**異種2要素ペア**であって再帰的リスト型ではない。よって「素の cons セルで組んだ
-  単方向リスト」を第一級の型として復活させるかは未決。
+**確定した設計（ユーザー判断）:**
+- **API 軸**: Phase 4a の `map`/`filter` 等と同型の **generic `Iter` 自由 `defun`**
+  （`(length (iter coll))` 形式、結果コレクションは `Vector<A>` に materialize）。`Vector` 専用にせず、
+  `HashTable<K,V>` にも将来の `Iter` 実装型にも同じ定義が効く。
+- **命名**: プレーン CL 名（`length`/`append`/`nth`/`elt`/`take`/`subseq`/`last`/`butlast`/`member`/
+  `every`/`any`/`sort`/`assoc`）。Phase 5 で名前が空いていたため復活できた。既存 `vector-append`
+  （Phase 3）は撤去し、generic 2-iterator 版 `append` に統合。
+- **等値/順序は新設トレイトで表現**: `deftrait Eq (equals ((self Self)(other Self)) bool)` /
+  `deftrait Ord (less ((self Self)(other Self)) bool)`。`member`/`sort`/`assoc` は
+  `(where (Eq A))`/`(where (Ord A))` 境界で述語なしに書ける（既存 `find`/`position`/`count`/
+  `remove-if` は述語版のまま存続＝両流儀併存）。
+  - メソッド名は `equals`/`less`（`eq`/`eql`/`equal`/`equalp`/`lt` は全 scalar 型の builtin メソッドで
+    再定義不可＝衝突。`?`/`!` サフィックスはプロジェクト規約で禁止）。
+  - impl 対象は **i32/i64/f64/string/char/bool/symbol の7 primitive 型**（`f32`/`i8`/`i16`/`u*` 系は
+    委譲先の `=`/`<` を持たないため対象外）。数値は `=`/`<` へ、`string`/`char`/`bool` は `equal` へ、
+    `symbol` は `eq` へ委譲（`string` の `eq` は `Rc` 同一性なので `member`/`assoc` には不適）。
+  - `cons-cell<A,B>` への再帰的 `Eq` impl は**見送り**: impl メソッドは `where` 節を持てない
+    （`check_defmethod` 経由、bounds 空）ため `(equals self::car other::car)` が型変数 `A` を
+    解決できない。`assoc` はキー型 `K` の `Eq` だけで足りるため実害なし。将来課題。
+- **assoc**: `Item` が `cons-cell<K,V>` の任意イテレータ上に `(assoc k it)` → `Option<cons-cell<K,V>>`。
+  複合の関連型ピン `(where (Iter I (Item cons-cell<K,V>)) (Eq K))` が成立するため、alist
+  （`Vector<cons-cell<K,V>>`）にも `HashTable<K,V>`（`iter` の `Item` がまさに `cons-cell<K,V>`）にも
+  同じ関数が効く。値は `(cdr (unwrap (assoc k it)))` で射影。
+- **再提供しないもの**: 破壊的 `nconc`/`nreverse`（`reverse`＝Phase 4a の非破壊 generic 版で代替）、
+  cons 鎖専用の `nthcdr`/`copy-list`（`Vector` 上では意味を持たない）。
+- **CL からの意図的な乖離**（イテレータ形状に起因）:
+  - `member` は **`bool`** を返す（イテレータに「残り」のコンスが無いため tail を返せない）。
+  - `last` は最後の**要素**（`Option<A>`）を返す（CL の「最後の cons」ではない）。
+  - `nth`/`elt` は範囲外で `nil` でなく **`Option<A>`**（`find`/`position` の慣習に合わせた）。
+    CL の引数順をそのまま踏襲: `(nth n it)` だが `(elt it n)`。
+  - `subseq` は `end` が入力長を超えてもクランプする（CL はエラー）。
+- **generic `defun` 本体は自己完結が必須**: `where` 境界の伝播は未実装（`Checker::check_call` の
+  `cannot infer type parameter` 判定）のため、境界付き generic の本体から別の境界付き generic を
+  呼べない。`elt` が `nth` へ委譲せず同じループを複製しているのはこのため。
+- **`compile`（自己ホストコンパイラ）は未対応（既知ギャップ、非回帰）**: `compile-assoc`
+  （`src/compiler.rs` の `compile-assoc`、`unsupported method` panic 箇所）は固定の演算子/メソッド名
+  リストしか下ろせず、`equals`/`less` を含む新規メソッドは compile 経由では呼べない。ただし
+  Phase 4a の `map`/`filter` 特殊化にも元々 compile テストは無く、本フェーズはそれと同じ立ち位置。
 
-**決めるべき設計論点:**
-1. **等質シーケンス操作の窓口**: `length`/`append`/`nth`/`member`/`sort`/`assoc` 等を `Vector<T>`
-   （既存 `vector-*`／generic `Iter` 版）に寄せるか、別途 API を足すか。Phase 3/4a で `map`/`filter`/
-   `fold`/`reverse`/`find`/`position`/`count` は generic `Iter` 化済みなので、それとの整合を取る。
-2. **ペア走査の位置づけ**: `cons<T,U>` は `p::car`/`p::cdr`（または生成メソッド）でアクセスする単純ペア
-   に留めるか、`(cons A (cons B ...))` のネストを走査するユーザー向けヘルパーを別に用意するか。
-3. **連想（`assoc`）の型**: キー/値の対を `cons<K,V>` の `Vector` で表すか、`HashTable<K,V>`（実装済み）へ
-   誘導するか。
-4. **命名**: 旧 CL 名（`length`/`nth`/…）を `Vector` 用に再利用するか、`vector-*` 接頭辞で分けるか
-   （Phase 3 で `vector-*` を採った理由＝同型の Sexpr 版と衝突回避、との整合）。
+**実装**: `src/prelude.rs`（`Eq`/`Ord` トレイト＋7型分の scalar impl＋13 個の `defun`）。
+`checker.rs`/`registry.rs` は変更不要（primitive への `impl`・`Self` 第2引数・関連型ピンなし境界・
+複合関連型ピンは全て既存機構で成立することを実装前に検証済み）。
+テスト: `tests/trait_test.rs`（primitive 型への trait impl の単体テスト）、
+`tests/vector_ops_test.rs`（`vector-append`→`append` 移行）、
+`tests/seq_ops_test.rs`（新規、31 test：各関数の基本/境界ケース、`Eq`/`Ord` のユーザー型 impl・
+未実装エラー、`HashTable` 越し `assoc`、string の `length`/`append` が builtin メソッド優先解決の
+ままであることの回帰確認、同一プログラム内の複数型特殊化）。
 
-**成果物イメージ:** 上記論点を確定し、必要な `defun`/`defmethod`（prelude）＋テストを追加。
-`Sexpr` 島には手を入れない（マクロ作者向けの `sexpr-*` アクセサは現状維持）。
+検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
 
 > 併記の将来課題: ユーザー多 variant sum 型のための `defenum`（本再設計の対象外、別途）。
+> `cons-cell<A,B>` への再帰的 `Eq`/`Ord` impl（`where` 節を持てる impl メソッドが必要）。
+> `compile`（自己ホスト）側の `equals`/`less` 対応。
 
 ### Phase 7 — ドキュメント＆メモリ更新
 - `docs/functions.md`（§5/§6/§12/§14）・`docs/syntax.md`・`docs/dev/language-design.md`: Symbol、Vector ベースのコレクション、

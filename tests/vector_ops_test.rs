@@ -6,8 +6,10 @@
 //! *iterator* (`(map (iter v) f)`), so a single generic `defun` — bounded
 //! `(where (Iter I (Item A)))` — serves `Vector<T>`, `HashTable<K,V>`, and any
 //! `Iter` type, monomorphized at its call site. Results materialize into a
-//! fresh `Vector`. `vector-append` stays `Vector`-specific (two-input
-//! concatenation, outside the combinator set repurposed to `Iter`).
+//! fresh `Vector`. In Phase 6.5 `vector-append` became the generic two-iterator
+//! `append` (`(append (iter a) (iter b))`, two `Iter` bounds pinned to one
+//! `Item`); the rest of the rebuilt sequence library is covered in
+//! `seq_ops_test.rs`.
 
 extern crate typelisp;
 use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue, TopLevel};
@@ -233,7 +235,7 @@ fn append_concatenates_two_vectors() {
                (let ((a (make-v)) (b (make-v)))
                  (push a 1) (push a 2)
                  (push b 3) (push b 4)
-                 (let ((out (vector-append a b)))
+                 (let ((out (append (iter a) (iter b))))
                    (+ (* (len out) 1000)
                       (+ (+ (get out 0) (get out 1)) (+ (get out 2) (get out 3))))))";
     // len 4 -> 4000, sum 1+2+3+4 = 10 -> 4010
@@ -246,7 +248,7 @@ fn append_does_not_mutate_its_inputs() {
                (let ((a (make-v)) (b (make-v)))
                  (push a 1)
                  (push b 2)
-                 (vector-append a b)
+                 (append (iter a) (iter b))
                  (+ (len a) (len b)))";
     // both inputs still length 1 -> 2
     assert_eq!(eval_ok(src), RtValue::Int(2));

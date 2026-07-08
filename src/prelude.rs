@@ -542,14 +542,6 @@ pub const SOURCE: &str = r#"
   (let ((out (the Vector<A> (Vector::new))))
     (doiter (x it) (if (pred x) () (push out x)))
     out))
-;; `vector-append` stays `Vector`-specific (two same-`Item` iterators would
-;; need two `Iter` bounds; two-input concatenation is outside the combinator
-;; set repurposed to `Iter` in Phase 4).
-(defun (vector-append T) ((a Vector<T>) (b Vector<T>)) Vector<T>
-  (let ((out (the Vector<T> (Vector::new))))
-    (doiter (x (iter a)) (push out x))
-    (doiter (x (iter b)) (push out x))
-    out))
 
 ;; `cons-cell<A,B>`: a generic 2-field product, needed below purely because
 ;; typelisp has no built-in tuple syntax. Named and shaped after Lisp's own
@@ -607,6 +599,157 @@ pub const SOURCE: &str = r#"
           (Option::some e))
         (Option::none))))
 (defmethod iter ((self HashTable<K,V>)) hashtable-iter<K,V> (hashtable-iter::new (entries self) 0))
+
+;; `Eq`/`Ord` (redesign Phase 6.5): user-visible equality/ordering *traits*, so
+;; `member`/`assoc`/`sort` below can require `(where (Eq A))`/`(where (Ord A))`
+;; instead of taking a predicate (the way `find`/`position`/`count`/`remove-if`
+;; do — those keep their predicate form, mirroring CL's `-if` family).
+;;
+;; Method names: `equals`/`less`, *not* `eq`/`eql`/`equal`/`equalp`/`lt` — all
+;; five are builtin per-scalar methods (`registry.rs`'s `int_assoc`/
+;; `string_assoc`/...) and builtins cannot be redefined; the impls below
+;; *delegate* to them instead. (`?`/`!` name suffixes are banned project-wide,
+;; so no `eq?`/`less?`.)
+(deftrait Eq
+  (equals ((self Self) (other Self)) bool))
+(deftrait Ord
+  (less ((self Self) (other Self)) bool))
+
+;; Scalar `Eq` impls. Numbers delegate to `=`; `string`/`char`/`bool` to
+;; `equal` (content comparison — a `string`'s `eq` is `Rc` identity, which
+;; would make `(member "x" ...)` fail on separately built equal-content
+;; strings); `symbol` to `eq` (interned, identity *is* content equality).
+;; Only the seven scalar types with a usable comparison builtin get an impl —
+;; `f32`/`i8`/`i16`/`u*` have empty assoc tables (no `=`/`<` to delegate to),
+;; so they stay outside `Eq`/`Ord` until they grow real arithmetic.
+(impl Eq i32    (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq i64    (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq f64    (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq bool   (equals ((self Self) (other Self)) bool (equal self other)))
+(impl Eq char   (equals ((self Self) (other Self)) bool (equal self other)))
+(impl Eq string (equals ((self Self) (other Self)) bool (equal self other)))
+(impl Eq symbol (equals ((self Self) (other Self)) bool (eq self other)))
+
+;; Scalar `Ord` impls. Numbers delegate to `<`; `string`/`char` to the builtin
+;; `lt` method (lexicographic / code-point order). `bool`/`symbol` carry no
+;; meaningful order, so no `Ord` for them.
+(impl Ord i32    (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord i64    (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord f64    (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord char   (less ((self Self) (other Self)) bool (lt self other)))
+(impl Ord string (less ((self Self) (other Self)) bool (lt self other)))
+
+;; Sequence operations over `Iter` (redesign Phase 6.5) — the typed rebuild
+;; of the `Sexpr` list library removed in Phase 5 (`length`/`append`/`nth`/
+;; `elt`/`take`/`subseq`/`last`/`butlast`/`member`/`every`/`any`/`sort`/
+;; `assoc`). Same shape as the combinators above: generic `defun`s over any
+;; `Iter`, called as `(length (iter coll))`, collection results materialized
+;; into a fresh `Vector`. Not reintroduced: destructive `nconc`/`nreverse`
+;; and the cons-chain-only `nthcdr`/`copy-list` (`reverse` above covers the
+;; non-destructive reversal).
+;;
+;; Deliberate departures from CL, forced by the iterator shape:
+;; - `member` returns `bool`, not the tail (an iterator has no tail cons);
+;; - `last` returns the last *element* (`Option<A>`), not the last cons;
+;; - `nth`/`elt` return `Option<A>` on out-of-range instead of `nil`
+;;   (matching `find`/`position` above), and keep their CL argument orders
+;;   (`(nth n it)` vs `(elt it n)`);
+;; - `subseq` clamps `end` past the input's length instead of erroring.
+;;
+;; Every body is self-contained (no delegating to a sibling bounded generic:
+;; where-bound propagation from one generic's body into another's bounds is
+;; unimplemented — `check_call`'s bound validation would fail with "cannot
+;; infer" — which is why `elt` duplicates `nth`'s loop).
+(defun (length I A) ((it I)) i32 (where (Iter I (Item A)))
+  (let ((n 0))
+    (doiter (x it) (setf n (+ n 1)))
+    n))
+;; `append` is the generic two-iterator concatenation (replacing Phase 3's
+;; `vector-append`): two independent `Iter` bounds pinned to one `Item`.
+(defun (append I J A) ((a I) (b J)) Vector<A>
+  (where (Iter I (Item A)) (Iter J (Item A)))
+  (let ((out (the Vector<A> (Vector::new))))
+    (doiter (x a) (push out x))
+    (doiter (x b) (push out x))
+    out))
+(defun (nth I A) ((n i32) (it I)) Option<A> (where (Iter I (Item A)))
+  (let ((i 0) (result (the Option<A> (Option::none))))
+    (doiter (x it)
+      (if (= i n)
+          (progn (setf result (Option::some x)) (break))
+          (progn (setf i (+ i 1)) ())))
+    result))
+(defun (elt I A) ((it I) (n i32)) Option<A> (where (Iter I (Item A)))
+  (let ((i 0) (result (the Option<A> (Option::none))))
+    (doiter (x it)
+      (if (= i n)
+          (progn (setf result (Option::some x)) (break))
+          (progn (setf i (+ i 1)) ())))
+    result))
+(defun (take I A) ((it I) (n i32)) Vector<A> (where (Iter I (Item A)))
+  (let ((out (the Vector<A> (Vector::new))))
+    (doiter (x it) (if (< (len out) n) (push out x) (break)))
+    out))
+(defun (subseq I A) ((it I) (start i32) (end i32)) Vector<A> (where (Iter I (Item A)))
+  (let ((i 0) (out (the Vector<A> (Vector::new))))
+    (doiter (x it)
+      (if (>= i end)
+          (break)
+          (progn (when (>= i start) (push out x)) (setf i (+ i 1)) ())))
+    out))
+(defun (last I A) ((it I)) Option<A> (where (Iter I (Item A)))
+  (let ((result (the Option<A> (Option::none))))
+    (doiter (x it) (setf result (Option::some x)))
+    result))
+(defun (butlast I A) ((it I)) Vector<A> (where (Iter I (Item A)))
+  (let ((buf (the Vector<A> (Vector::new))))
+    (doiter (x it) (push buf x))
+    (let ((out (the Vector<A> (Vector::new))) (i 0))
+      (while (< i (- (len buf) 1))
+        (push out (get buf i))
+        (setf i (+ i 1)))
+      out)))
+;; `member`/`sort`/`assoc` require `Eq`/`Ord` (defined below with the scalar
+;; impls) instead of taking a predicate — the trait-bounded halves of the
+;; library. Predicate variants of the same searches already exist above
+;; (`find`/`position`/`count`).
+(defun (member I A) ((x A) (it I)) bool (where (Iter I (Item A)) (Eq A))
+  (let ((found false))
+    (doiter (y it)
+      (if (equals y x) (progn (setf found true) (break)) ()))
+    found))
+(defun (every I A) ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
+  (let ((result true))
+    (doiter (x it)
+      (if (pred x) () (progn (setf result false) (break))))
+    result))
+(defun (any I A) ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
+  (let ((result false))
+    (doiter (x it)
+      (if (pred x) (progn (setf result true) (break)) ()))
+    result))
+;; Non-destructive insertion sort, stable: the inner shift uses strict
+;; `less`, so equal elements keep their input order. Ascending.
+(defun (sort I A) ((it I)) Vector<A> (where (Iter I (Item A)) (Ord A))
+  (let ((out (the Vector<A> (Vector::new))))
+    (doiter (x it)
+      (let ((j (len out)))
+        (push out x)
+        (while (if (> j 0) (less x (get out (- j 1))) false)
+          (set out j (get out (- j 1)))
+          (setf j (- j 1)))
+        (set out j x)))
+    out))
+;; `assoc` works over any iterator whose `Item` is a `cons-cell<K,V>` pair —
+;; an alist (`Vector<cons-cell<K,V>>`) and a `HashTable<K,V>` (whose `iter`'s
+;; `Item` is exactly `cons-cell<K,V>`) both qualify. Returns the whole
+;; matching pair, CL-style; project the value with `(cdr p)`.
+(defun (assoc I K V) ((k K) (it I)) Option<cons-cell<K,V>>
+  (where (Iter I (Item cons-cell<K,V>)) (Eq K))
+  (let ((result (the Option<cons-cell<K,V>> (Option::none))))
+    (doiter (p it)
+      (if (equals (car p) k) (progn (setf result (Option::some p)) (break)) ()))
+    result))
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,
