@@ -273,6 +273,15 @@ struct MethodSig {
     type_fq: Path,
     params: Vec<(String, Type)>,
     ret: Type,
+    /// `(where (Trait TypeVar ...))` bounds after the return type — same
+    /// syntax and parse as a free `defun`'s (`Checker::parse_defun_sig`).
+    /// Lets an `impl` method on a generic owner require trait bounds on the
+    /// owner's own type variables (e.g. `cons-cell<A,B>`'s `equals` needing
+    /// `(where (Eq A) (Eq B))` for its recursive field comparisons).
+    bounds: HashMap<String, Vec<TraitBound>>,
+    /// Index of the first body form in the `defmethod` parts: 4 when a
+    /// `where` clause is present, 3 otherwise.
+    body_start: usize,
 }
 
 /// The synthetic `TopLevel::Module` path under which `check_form` bundles
@@ -1226,15 +1235,19 @@ impl Checker {
         parts: &[Value],
         mangled: &str,
     ) -> Result<TopLevel, Error> {
-        let MethodSig { instance, self_name, recv_ty, type_fq, params, ret, .. } =
+        let MethodSig { instance, self_name, recv_ty, type_fq, params, ret, body_start, .. } =
             self.parse_defmethod_sig(heap, parts)?;
         let mut binds: Vec<(String, Type)> = Vec::new();
         if let Some(s) = &self_name {
             binds.push((s.clone(), recv_ty));
         }
         binds.extend(params.clone());
+        // Bounds are deliberately dropped here, mirroring
+        // `specialize_defun_body`: with the owner's type variables concrete,
+        // every bounded method call resolves against the real receiver type
+        // (and was already validated at the call site).
         let env = Env::new().extended(binds);
-        let (body, _) = self.check_seq(heap, interp, &env, &parts[3..], Some(&ret))?;
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], Some(&ret))?;
         Ok(TopLevel::Defmethod {
             type_name: type_fq,
             method: mangled.to_string(),
@@ -1835,7 +1848,7 @@ impl Checker {
         parts: &[Value],
         public: bool,
     ) -> Result<TopLevel, Error> {
-        let MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret } =
+        let MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret, bounds, body_start } =
             self.parse_defmethod_sig(heap, parts)?;
 
         // A method on a *generic* type whose receiver spells the owner's
@@ -1884,7 +1897,7 @@ impl Checker {
             sig_params.push(recv_ty.clone());
         }
         sig_params.extend(params.iter().map(|(_, t)| t.clone()));
-        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public, builtin: false, bounds: HashMap::new() };
+        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public, builtin: false, bounds: bounds.clone() };
         self.check_redef("method", &method, self.reg.type_def(&type_fq).and_then(|d| d.assoc.get(&method)))?;
         if let Some(def) = self.reg.type_def_mut(&type_fq) {
             def.assoc.insert(method.clone(), AssocFn { sig, instance, builtin: false });
@@ -1895,8 +1908,14 @@ impl Checker {
             binds.push((s.clone(), recv_ty.clone()));
         }
         binds.extend(params.clone());
-        let env = Env::new().extended(binds);
-        let (body, _) = self.check_seq(heap, interp, &env, &parts[3..], Some(&ret))?;
+        // `with_bounds` mirrors `check_defun`'s body env: inside the body a
+        // method call on a `where`-bounded type variable (e.g. `(equals
+        // self::car other::car)` with `self::car : A` under `(where (Eq A))`)
+        // resolves through `check_instance_method`'s bounds branch to a
+        // diagnostics-only `Expr::TraitCall`, exactly as in generic `defun`
+        // bodies.
+        let env = Env::new().with_bounds(bounds).extended(binds);
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], Some(&ret))?;
         let type_params = if is_generic_template { written_vars } else { Vec::new() };
         Ok(TopLevel::Defmethod { type_name: type_fq, method, instance, self_name, params, ret, body, type_params })
     }
@@ -1950,7 +1969,17 @@ impl Checker {
         }
         let params = self.parse_param_pairs(heap, &sig_list[1..])?;
         let ret = self.canon(&parse_type(heap, parts[2])?);
-        Ok(MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret })
+        // Optional `(where ...)` clause after the return type — identical
+        // peek to `parse_defun_sig`'s.
+        let mut body_start = 3;
+        let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
+        if let Some(form) = parts.get(3) {
+            if self.is_where_clause(heap, *form)? {
+                bounds = self.parse_where_clause(heap, *form)?;
+                body_start = 4;
+            }
+        }
+        Ok(MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret, bounds, body_start })
     }
 
     /// `(defstruct Name (field Type)...)` — or, generically,

@@ -131,6 +131,41 @@ fn two_types_implementing_the_same_trait_dispatch_independently() {
 }
 
 #[test]
+fn defmethod_on_a_generic_owner_can_carry_a_where_clause() {
+    // A `where` clause directly on a `defmethod` (not via `impl`): the body
+    // calls a trait method on the owner's own type variable. The
+    // once-through diagnostic check resolves `(count self::x)` through the
+    // bounds branch (`Expr::TraitCall`); the call site's specialization
+    // re-checks with `A = box` concrete.
+    let src = format!(
+        "{} (defstruct (pair A) (x A) (y A))
+            (defmethod count-both ((self pair<A>)) i32 (where (Counted A))
+              (+ (count self::x) (count self::y)))
+            (count-both (pair::new (box::new 20) (box::new 22)))",
+        COUNTER_PRELUDE
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(42));
+}
+
+#[test]
+fn impl_method_with_a_where_clause_supports_recursive_structural_dispatch() {
+    // The recursive-impl shape the where clause exists for: `pr<A,B>`'s own
+    // `same` requires `(Eq2 A) (Eq2 B)` and compares fields via the bounded
+    // trait method — with a *nested* `pr` exercising impl-on-impl recursion.
+    let src = "
+        (deftrait Eq2 (same ((self Self) (other Self)) bool))
+        (impl Eq2 i32 (same ((self Self) (other Self)) bool (= self other)))
+        (defstruct (pr A B) (a A) (b B))
+        (impl Eq2 pr<A,B>
+          (same ((self Self) (other Self)) bool (where (Eq2 A) (Eq2 B))
+            (if (same self::a other::a) (same self::b other::b) false)))
+        (if (same (pr::new (pr::new 1 2) 3) (pr::new (pr::new 1 2) 3))
+            (if (same (pr::new (pr::new 1 2) 3) (pr::new (pr::new 1 9) 3)) 0 1)
+            0)";
+    assert_eq!(eval_ok(src), RtValue::Int(1));
+}
+
+#[test]
 fn call_site_rejects_a_type_that_does_not_implement_the_required_trait() {
     // `box2` never gets a `Counted` impl, so `(describe (box2::new 5))` must
     // fail to *check* now — previously this type-checked fine (the `where`
