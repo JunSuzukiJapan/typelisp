@@ -184,7 +184,8 @@ fn bounded_method_call_rejects_an_owner_argument_lacking_the_impl() {
     let msg = format!("{:?}", err);
     assert!(
         msg.contains("does not implement trait"),
-        "expected a trait-bound error, got: {msg}"
+        "expected a trait-bound error, got: {}",
+        msg
     );
 }
 

@@ -6,7 +6,8 @@
 Phase 0〜3・Phase 4a（コレクションコンビネータの generic `Iter` 化）・**Phase 4b（`cons`/`car`/`cdr` の
 `cons<T,U>` 付け替え）**・**Phase 5（`match` の enum 専用 fence＋ユーザー面 Sexpr リスト操作の撤去）**まで完了。
 Phase 4b と Phase 5 は元々一体だったが、リスク分離のため Phase 5 を先行実施した（Commit 1＝Phase 5、Commit 2＝Phase 4b）。
-**Phase 6.5（ユーザー面リスト/ペア走査 API の `cons<T,U>`/`Vector<T>`/`Iter` 上での再設計）も完了**。
+**Phase 6.5（ユーザー面リスト/ペア走査 API の `cons<T,U>`/`Vector<T>`/`Iter` 上での再設計）と
+Phase 6.6（その残ギャップ解消＝impl メソッドの `where` 節＋compile の `equals`/`less` 対応）も完了**。
 残るは **Phase 7**（ドキュメント整備）。任意項目として `defenum`。
 
 > **Phase 6（`&rest` → `Vector<T>`）は破棄。** 当初は defun/lambda の型付き `&rest` を
@@ -272,9 +273,8 @@ Phase 5 で**ユーザー面の `Sexpr` リスト操作を一括撤去**した�
   - impl 対象は **i32/i64/f64/string/char/bool/symbol の7 primitive 型**（`f32`/`i8`/`i16`/`u*` 系は
     委譲先の `=`/`<` を持たないため対象外）。数値は `=`/`<` へ、`string`/`char`/`bool` は `equal` へ、
     `symbol` は `eq` へ委譲（`string` の `eq` は `Rc` 同一性なので `member`/`assoc` には不適）。
-  - `cons-cell<A,B>` への再帰的 `Eq` impl は**見送り**: impl メソッドは `where` 節を持てない
-    （`check_defmethod` 経由、bounds 空）ため `(equals self::car other::car)` が型変数 `A` を
-    解決できない。`assoc` はキー型 `K` の `Eq` だけで足りるため実害なし。将来課題。
+  - `cons-cell<A,B>` への再帰的 `Eq` impl は Phase 6.5 時点では**見送り**（impl メソッドが `where` 節を
+    持てなかったため）→ **Phase 6.6 で解消済み**（下記）。
 - **assoc**: `Item` が `cons-cell<K,V>` の任意イテレータ上に `(assoc k it)` → `Option<cons-cell<K,V>>`。
   複合の関連型ピン `(where (Iter I (Item cons-cell<K,V>)) (Eq K))` が成立するため、alist
   （`Vector<cons-cell<K,V>>`）にも `HashTable<K,V>`（`iter` の `Item` がまさに `cons-cell<K,V>`）にも
@@ -290,10 +290,8 @@ Phase 5 で**ユーザー面の `Sexpr` リスト操作を一括撤去**した�
 - **generic `defun` 本体は自己完結が必須**: `where` 境界の伝播は未実装（`Checker::check_call` の
   `cannot infer type parameter` 判定）のため、境界付き generic の本体から別の境界付き generic を
   呼べない。`elt` が `nth` へ委譲せず同じループを複製しているのはこのため。
-- **`compile`（自己ホストコンパイラ）は未対応（既知ギャップ、非回帰）**: `compile-assoc`
-  （`src/compiler.rs` の `compile-assoc`、`unsupported method` panic 箇所）は固定の演算子/メソッド名
-  リストしか下ろせず、`equals`/`less` を含む新規メソッドは compile 経由では呼べない。ただし
-  Phase 4a の `map`/`filter` 特殊化にも元々 compile テストは無く、本フェーズはそれと同じ立ち位置。
+- **`compile`（自己ホストコンパイラ）は Phase 6.5 時点では未対応**（`compile-assoc` の固定リスト外
+  panic）→ **Phase 6.6 で解消済み**（下記。primitive レシーバのユーザーメソッドが compile 可能に）。
 
 **実装**: `src/prelude.rs`（`Eq`/`Ord` トレイト＋7型分の scalar impl＋13 個の `defun`）。
 `checker.rs`/`registry.rs` は変更不要（primitive への `impl`・`Self` 第2引数・関連型ピンなし境界・
@@ -307,8 +305,59 @@ Phase 5 で**ユーザー面の `Sexpr` リスト操作を一括撤去**した�
 検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
 
 > 併記の将来課題: ユーザー多 variant sum 型のための `defenum`（本再設計の対象外、別途）。
-> `cons-cell<A,B>` への再帰的 `Eq`/`Ord` impl（`where` 節を持てる impl メソッドが必要）。
-> `compile`（自己ホスト）側の `equals`/`less` 対応。
+
+### Phase 6.6 — Phase 6.5 の残ギャップ解消【✅ 完了】
+Phase 6.5 で将来課題とした2件（cons-cell への再帰的 Eq/Ord impl、compile の equals/less 対応）を解消した。
+5 コミット構成（checker where節 → 呼び出しサイト検証 → prelude impl → compile i32/i64 → compile string/char）。
+
+**1. implメソッド/defmethod の `where` 節対応（checker）:**
+- `parse_defmethod_sig`（checker.rs）が ret 直後の `(where ...)` を `parse_defun_sig` と同一の peek で受理
+  （`MethodSig` に `bounds`/`body_start` を追加）。`check_defmethod` は本体 env を `with_bounds` で構築
+  ＝ impl メソッド本体で所有型の型変数へのトレイトメソッド呼び出しが既存の
+  `check_instance_method` bounds ブランチ（`Expr::TraitCall`、診断専用）で型付けされる。
+- 特殊化（`specialize_method_form`）は `specialize_defun_body` と同じ根拠で bounds を **drop**
+  （具体化後は実レシーバの assoc で解決、呼び出しサイトで検証済み）。
+- **呼び出しサイト検証**: `check_call` の境界検証ループを `validate_where_bounds` として抽出し
+  `check_assoc_call`（cannot infer 判定直後）からも呼ぶ。境界不成立のメソッド呼び出しが特殊化 drain 内の
+  不透明な `NoSuchFunction` でなく「does not implement trait」の明確な型エラーになる。
+- `check_impl` は**無変更**で通った（メソッド form の elems[3..] パススルーで where 節が届く）。
+  制約: where 節の型変数名はレシーバに書いた型変数名＝ defstruct 宣言のパラメータ名と同一必須。
+
+**2. prelude: `cons-cell<A,B>` の再帰的 Eq/Ord impl:**
+- `equals`: `(where (Eq A) (Eq B))` でフィールドごとの構造比較。ネスト
+  （`cons-cell<cons-cell<i32,i32>,i32>`）は単型化が一段ずつ再帰して有限収束。
+- `less`: `(where (Ord A) (Ord B))`、car 主キー・cdr 副キーの辞書式。double-less 形
+  （car厳密小→true / car厳密大→false / 同値→cdr比較）で `(Eq A)` を追加要求しない。
+- `member`/`sort` が `Vector<cons-cell<...>>` にそのまま効くようになった。
+
+**3. compile: primitive レシーバのユーザーメソッド（`i32::equals` 等）対応:**
+- **関門A（`Interp::compile_function`）**: assoc ターゲットのフィルタを
+  「`self.methods` にユーザー登録がある組は通常の前方宣言/extern 配線対象、
+  ネイティブに下ろす `i64`/`i32`/`char`/`string` builtin だけ除外」に変更。
+- **関門B（`compile-assoc`、compiler.rs SOURCE）**: ディスパッチを (type-name, method) ペア基準に再構成。
+  `int-native-method?`/`string-native-method?`/`char-native-method?` 述語で**引数コンパイル前に**判定し
+  （IR 二重 emit 回避）、非ネイティブは新設 `compile-assoc-user`（旧 else 分岐の抽出、`m` を閉じ込む
+  labels 兄弟）のマングル名呼び出しへ合流。
+- **string**: `equal`→既存 `rt_str_eq`（内容比較、interp の `equal` と意味一致）、`lt`→新設
+  `rt_str_lt`（typelisp-rt、interp の `string_lt` と同一意味論）。**char**: compiled では raw i64
+  コードポイントなので `eq`/`eql`/`equal`→`icmp-eq`、`lt`→`icmp-lt`（`equalp` は case-insensitive
+  なので非ネイティブのまま）。
+- **`call_compiled` の境界変換を拡張**（既存ギャップが Eq/Ord で顕在化したため）: 戻り値の
+  `Type::Bool` デコード（0/1→`RtValue::Bool`）と、引数の `Bool`/`Char`/`Str`
+  （heap 確保＋call 中 root 保護）変換を追加。
+
+**残る将来課題（Phase 6.6 対象外）:**
+- ジェネリック本体そのもの（`member` 等の `Iter` コンビネータ）の compile: `Expr::TraitCall` が
+  ast_bridge で `unsupported` になる以前に、本体が呼ぶ `Vector<T>::get/len/push` 等の Rust builtin
+  メソッドに compile 実装が無い（equals とは無関係の先行ブロッカー）。
+- 空白入りマングル名の特殊化メソッド（`cons-cell::equals <i32,i32>`）は `(compile ...)` が
+  symbol/path しか受けないためソースから名指しできない（reader が空白で区切る）。
+- `equalp` 系（case-insensitive）の compile、`f64` レシーバのメソッド compile。
+
+テスト: trait_test（defmethod 直書き where・再帰 impl・境界エラー3本）、seq_ops_test（ペアの
+equals/less/member/sort/ネスト/Eq 未実装エラー6本）、compile_test（i32/string/char の equals/less
+compile＋未 compile エラー5本）、typelisp-rt（rt_str_lt 1本）。
+検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
 
 ### Phase 7 — ドキュメント＆メモリ更新
 - `docs/functions.md`（§5/§6/§12/§14）・`docs/syntax.md`・`docs/dev/language-design.md`: Symbol、Vector ベースのコレクション、

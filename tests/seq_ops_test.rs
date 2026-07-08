@@ -398,7 +398,8 @@ fn pair_equals_rejects_an_element_type_without_eq() {
     let msg = format!("{:?}", err);
     assert!(
         msg.contains("does not implement trait"),
-        "expected a trait-bound error, got: {msg}"
+        "expected a trait-bound error, got: {}",
+        msg
     );
 }
 
