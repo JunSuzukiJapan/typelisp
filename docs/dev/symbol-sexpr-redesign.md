@@ -6,8 +6,14 @@
 Phase 0〜3・Phase 4a（コレクションコンビネータの generic `Iter` 化）・**Phase 4b（`cons`/`car`/`cdr` の
 `cons<T,U>` 付け替え）**・**Phase 5（`match` の enum 専用 fence＋ユーザー面 Sexpr リスト操作の撤去）**まで完了。
 Phase 4b と Phase 5 は元々一体だったが、リスク分離のため Phase 5 を先行実施した（Commit 1＝Phase 5、Commit 2＝Phase 4b）。
-残るは **Phase 6**（`&rest` → `Vector<T>`）・**Phase 7**（ドキュメント整備）と、任意項目（`defenum`、Sexpr/`cons<T,U>`
+残るは **Phase 7**（ドキュメント整備）と、任意項目（`defenum`、Sexpr/`cons<T,U>`
 走査のユーザー向け traversal API 再設計）。
+
+> **Phase 6（`&rest` → `Vector<T>`）は破棄。** 当初は defun/lambda の型付き `&rest` を
+> `Vector<T>` に付け替える計画だったが、可変長パラメータを均質配列型で表すのは不自然という
+> 判断で、計画ごと撤回した。あわせて**値レベル `&rest` 構文（defun/lambda/`fn` 型）と
+> それに依存する `apply` 特殊形を言語から削除**した（後述）。`defmacro` の `&rest`（マクロ用の
+> Sexpr ベース、島）はそのまま維持する。
 
 ---
 
@@ -235,11 +241,14 @@ Phase 4b は当初懸念（存続関数の `car`/`cdr` 移行）が不要にな�
 
 **残: `defenum` は将来課題。Sexpr/`cons<T,U>` 走査のユーザー API は Phase 4b 完了後に再設計。**
 
-### Phase 6 — `&rest` → `Vector<T>`（defun/lambda）
-- `checker.rs`: `&rest` 束縛型 `sexpr_ty()`→`Vector<T>`（`1042`/`1057`/`1356` 付近）。`wrap_rest_elem`/`cons_rest_list`
-  （`699-725` 付近）を Vector 構築に置換（`sexpr_ctor_for` の要素型制限が消える＝簡素化）。`apply` の末尾リストが Vector を受ける。
-- `defmacro` の `&rest` は Sexpr のまま（島）。
-- 検証: 可変長 defun／apply のテスト。
+### Phase 6 — 破棄（値レベル `&rest` を削除）
+当初計画（`&rest` → `Vector<T>`）は撤回。代わりに**値レベル `&rest` を言語から削除**した:
+- `types.rs`: `(fn (…) &rest T)` 型構文を廃止し、`Type::Fn` の rest フィールド自体を除去。
+- `checker.rs`: `parse_params_rest` の `&rest` 受理を廃止（defun/lambda 引数リストの `&rest` は型エラー）。
+  `wrap_rest_elem`/`cons_rest_list`/`check_apply` の可変長分岐/`check_apply_form`（`apply` 特殊形）/
+  `check_call` の rest 分岐/`FnSig.rest` を除去。
+- `defmacro` の `&rest`（`MacroDef.rest`/`FnDef.rest`/`bind_macro_args`）は無変更で維持。
+- `Expr::Apply`（関数値の直接呼び出し）は残置。可変長でなくなっただけ。
 
 ### Phase 7 — ドキュメント＆メモリ更新
 - `docs/functions.md`（§5/§6/§12/§14）・`docs/syntax.md`・`docs/dev/language-design.md`: Symbol、Vector ベースのコレクション、

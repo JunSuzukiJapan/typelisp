@@ -47,9 +47,8 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
-/// A `(1 2 3)`-valued `Vector<i32>` builder shared by most cases — Phase 3
-/// intentionally ships no variadic `vector-of` builder (a typed `&rest`
-/// collapses to `Sexpr` in a `defun` body, so it would need a Rust builtin),
+/// A `(1 2 3)`-valued `Vector<i32>` builder shared by most cases — there is
+/// no variadic `vector-of` builder (the language has no value-level `&rest`),
 /// so tests populate a fresh vector with explicit `push`es.
 const V123: &str = "(defun make-v () Vector<i32> (Vector::new))
                     (defvar (v Vector<i32>) (make-v))

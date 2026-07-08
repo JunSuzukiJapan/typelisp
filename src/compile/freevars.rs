@@ -258,7 +258,7 @@ mod tests {
     fn own_params_and_sibling_names_are_excluded_but_a_shared_outer_name_is_collected_once() {
         let f_body = vec![typed(
             Expr::Apply(
-                Box::new(typed(Expr::Var("g".to_string()), Type::Fn(vec![Type::I64], None, Box::new(Type::I64)))),
+                Box::new(typed(Expr::Var("g".to_string()), Type::Fn(vec![Type::I64], Box::new(Type::I64)))),
                 vec![typed(Expr::Var("x".to_string()), Type::I64)],
             ),
             Type::I64,
@@ -286,7 +286,7 @@ mod tests {
         let g_body = vec![typed(Expr::Var("n".to_string()), Type::I64)];
         let f_body = vec![typed(
             Expr::Apply(
-                Box::new(typed(Expr::Var("g".to_string()), Type::Fn(vec![Type::I64], None, Box::new(Type::I64)))),
+                Box::new(typed(Expr::Var("g".to_string()), Type::Fn(vec![Type::I64], Box::new(Type::I64)))),
                 vec![typed(Expr::Var("x".to_string()), Type::I64)],
             ),
             Type::I64,
@@ -327,7 +327,7 @@ mod tests {
     /// for the automatic `ClosureBox` retain/release insertion work.
     #[test]
     fn a_captured_closure_typed_name_carries_its_fn_type() {
-        let fn_ty = Type::Fn(vec![Type::I64], None, Box::new(Type::I64));
+        let fn_ty = Type::Fn(vec![Type::I64], Box::new(Type::I64));
         let body = vec![typed(
             Expr::Apply(Box::new(typed(Expr::Var("f".to_string()), fn_ty.clone())), vec![typed(Expr::Int(1), Type::I64)]),
             Type::I64,

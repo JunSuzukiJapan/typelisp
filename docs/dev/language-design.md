@@ -178,7 +178,7 @@
 | リスト | `list length append reverse nth last map filter foldl foldr member assoc find every any` |
 | Option | `unwrap`(None で panic) `unwrap-or is-some is-none map-option and-then or-else` |
 | Result | `is-ok is-err ok-or unwrap-or-else map-result` |
-| 高階 | `identity const compose flip apply` |
+| 高階 | `identity const compose flip` |
 | 数値補助 | `min max sum product range iota evenp oddp zerop` |
 
 ---
@@ -336,11 +336,10 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   （`deftrait`/`impl`/`where`境界）は2026-06-30実装済み**——§5.1参照。
 - 関数カタログ（§4）の実装本体は eval（step4）以降。
 - `,@`（unquote-splicing、`append` 実装後）、`defmacro` の構造化ラムダリスト（`&rest` のみ実装済み、`&optional`/`&key` は対象外）、マクロの `use`-alias 解決。
-- `defun`/`lambda` の**型付き** `&rest`／`apply` は実装済み（roadmap step10）。
-  本体内では`&rest`は常に`Sexpr`（CLを含む全Lispの`&rest`同様、cons セルの素のリスト——
-  ホモジニアスな配列型は使わない）。呼び出し側で各可変長引数を宣言した要素型と個別に
-  チェックし、`Sexpr`の対応するコンストラクタでラップして`cons`連結する（2026-06-23、
-  [[typelisp-vector-defstruct-revert]]参照）。
+- `defun`/`lambda` の値レベル `&rest`／`apply` 特殊形は**削除済み**（Symbol/Sexpr 再設計で
+  当初の Phase 6「`&rest`→`Vector<T>`」計画ごと撤回。可変長パラメータを均質配列型で表すのは
+  不自然という判断）。値レベルの可変長関数は存在せず、`&rest` は `defmacro` のマクロ用
+  ラムダリスト専用（本体では常に `Sexpr` のリスト）。`fn` 型も固定アリティのみ。
 - **`Vector<T>`/`defstruct`の再設計**（2026-06-23に全面削除、[[typelisp-vector-defstruct-revert]]
   参照）: `Vector<T>`は`RtValue::Vector`という専用enumバリアントを持っていたが「ユーザー定義型と
   同様に扱うべき」という原則に反すると判明し、`defstruct`自体もフィールド読み書き手段の欠如という

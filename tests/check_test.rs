@@ -347,7 +347,7 @@ fn while_condition_must_be_bool_and_is_unit() {
 fn lambda_has_function_type() {
     assert_eq!(
         ty("(lambda ((x i32)) i32 x)"),
-        Type::Fn(vec![Type::I32], None, Box::new(Type::I32))
+        Type::Fn(vec![Type::I32], Box::new(Type::I32))
     );
 }
 
@@ -365,7 +365,7 @@ fn apply_checks_argument_types() {
 fn named_function_has_function_type() {
     assert_eq!(
         ty_program("(defun inc ((x i32)) i32 (+ x 1)) inc"),
-        Type::Fn(vec![Type::I32], None, Box::new(Type::I32))
+        Type::Fn(vec![Type::I32], Box::new(Type::I32))
     );
 }
 
@@ -383,7 +383,7 @@ fn labels_function_has_function_type_in_its_own_body() {
     // `lambda` can't close.
     assert_eq!(
         ty("(labels ((fact ((n i32)) i32 (if (= n 0) 1 (* n (fact (- n 1)))))) fact)"),
-        Type::Fn(vec![Type::I32], None, Box::new(Type::I32))
+        Type::Fn(vec![Type::I32], Box::new(Type::I32))
     );
 }
 
@@ -397,112 +397,43 @@ fn break_does_not_cross_labels_boundary() {
     assert_type_error("(loop (labels ((f () () (break))) (f)))");
 }
 
-// ---- &rest / apply (variadic functions) --------------------------------------
+// ---- &rest removed from defun/lambda -----------------------------------------
+// Value-level variadic functions were removed: `&rest` is only a `defmacro`
+// lambda-list marker now, and is a type error in a `defun`/`lambda` parameter
+// list (and the `apply` special form, which only served variadic functions,
+// no longer exists).
 
 #[test]
-fn defun_rest_has_a_variadic_function_type() {
-    assert_eq!(
-        ty_program("(defun f ((a i32) &rest (xs i32)) i32 a) f"),
-        Type::Fn(vec![Type::I32], Some(Box::new(Type::I32)), Box::new(Type::I32))
-    );
-}
-
-#[test]
-fn defun_rest_with_no_fixed_params_has_a_variadic_function_type() {
-    assert_eq!(
-        ty_program("(defun f (&rest (xs i32)) i32 0) f"),
-        Type::Fn(vec![], Some(Box::new(Type::I32)), Box::new(Type::I32))
-    );
-}
-
-#[test]
-fn lambda_rest_has_a_variadic_function_type() {
-    assert_eq!(
-        ty("(lambda ((a i32) &rest (xs i32)) i32 a)"),
-        Type::Fn(vec![Type::I32], Some(Box::new(Type::I32)), Box::new(Type::I32))
-    );
-}
-
-#[test]
-fn rest_param_is_seen_as_a_sexpr_inside_the_body() {
-    // `sexpr-car` only accepts a `Sexpr` argument — type-checking succeeds,
-    // proving `xs` is bound to plain `Sexpr` (an ordinary Lisp list) inside
-    // the body, not some homogeneous array type.
+fn defun_rest_is_a_type_error() {
     assert!(matches!(
-        form("(defun f ((a i32) &rest (xs i32)) Sexpr (sexpr-car xs))"),
-        Ok(TopLevel::Defun { .. })
-    ));
-}
-
-#[test]
-fn calling_a_rest_function_with_only_the_fixed_arguments_is_fine() {
-    assert!(program("(defun f ((a i32) &rest (xs i32)) i32 a) (f 1)").is_ok());
-}
-
-#[test]
-fn calling_a_rest_function_with_extra_arguments_is_fine() {
-    assert!(program("(defun f ((a i32) &rest (xs i32)) i32 a) (f 1 2 3)").is_ok());
-}
-
-#[test]
-fn calling_a_rest_function_with_too_few_fixed_arguments_is_a_type_error() {
-    assert!(matches!(
-        program("(defun f ((a i32) &rest (xs i32)) i32 a) (f)"),
+        program("(defun f ((a i32) &rest (xs i32)) i32 a)"),
         Err(Error::TypeError(_))
     ));
 }
 
 #[test]
-fn calling_a_rest_function_with_a_wrong_typed_extra_argument_is_a_type_error() {
+fn defun_rest_with_no_fixed_params_is_a_type_error() {
     assert!(matches!(
-        program("(defun f ((a i32) &rest (xs i32)) i32 a) (f 1 true)"),
+        program("(defun f (&rest (xs i32)) i32 0)"),
         Err(Error::TypeError(_))
     ));
 }
 
 #[test]
-fn rest_must_be_followed_by_exactly_one_parameter_in_a_defun() {
+fn lambda_rest_is_a_type_error() {
     assert!(matches!(
-        program("(defun f (&rest (xs i32) (y i32)) i32 0)"),
+        program("(lambda ((a i32) &rest (xs i32)) i32 a)"),
         Err(Error::TypeError(_))
     ));
 }
 
 #[test]
-fn generic_rest_function_infers_the_element_type() {
-    assert_eq!(ty_program("(defun (firstn T) ((a T) &rest (xs T)) T a) (firstn 1 2 3)"), Type::I32);
-}
-
-#[test]
-fn apply_calls_a_variadic_function_with_a_runtime_sexpr_list() {
-    let src = "(defun f ((a i32) &rest (xs i32)) i32 a) \
-               (apply f 1 (quote (2 3)))";
-    assert_eq!(ty_program(src), Type::I32);
-}
-
-#[test]
-fn apply_on_a_non_variadic_function_is_a_type_error() {
+fn apply_is_no_longer_a_special_form() {
+    // `apply` is now just an ordinary (undefined) name, so calling it fails to
+    // resolve rather than acting as the old variadic-application form.
     assert!(matches!(
         program("(apply (lambda ((a i32)) i32 a) 1)"),
-        Err(Error::TypeError(_))
-    ));
-}
-
-#[test]
-fn apply_with_the_wrong_number_of_fixed_arguments_is_a_type_error() {
-    // The lambda needs exactly one fixed argument (`a`) before the rest
-    // list; this supplies zero.
-    assert!(matches!(
-        program("(apply (lambda ((a i32) &rest (xs i32)) i32 a) (quote ()))"),
-        Err(Error::TypeError(_))
-    ));
-}
-
-#[test]
-fn apply_with_a_non_sexpr_rest_argument_is_a_type_error() {
-    assert!(matches!(
-        program("(apply (lambda ((a i32) &rest (xs i32)) i32 a) 1 2)"),
-        Err(Error::TypeError(_))
+        Err(Error::NoSuchFunction(_))
     ));
 }
 
