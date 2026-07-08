@@ -869,6 +869,14 @@ impl Interp {
         let raw = compiled.call(&int_args);
         Ok(if self.is_boxed_sexpr_type(ret_ty) {
             RtValue::Sexpr(crate::compile::runtime::decode(raw))
+        } else if matches!(ret_ty, Type::Bool) {
+            // Compiled code represents a `bool` as a raw 0/1 `i64` (LLVM
+            // `icmp` results, zero-extended); decode it by the declared
+            // return type so an interpreted `if` over a compiled predicate
+            // (`i32::equals`, ...) sees a real `RtValue::Bool`. `char`
+            // (also a raw code point in compiled code) stays out of scope
+            // alongside the rest of compiled-`char` support.
+            RtValue::Bool(raw != 0)
         } else {
             RtValue::Int(raw)
         })
@@ -1064,16 +1072,19 @@ impl Interp {
     /// `(type-name, method)` back into before its own `get-function` lookup
     /// — so the three names (this method's own `internal_name`, this
     /// method's entry in `externals`, and a *caller's* `compile-assoc`
-    /// lookup) can never drift apart. A target whose `type_name` isn't
-    /// registered in `self.methods` at all (`i64`/`i32`'s own built-in
-    /// arithmetic; `string`'s, since Stage 7 of the Sexpr-representation
-    /// plan — `docs/implementation-log.md`; or — still out of scope —
-    /// `f64`/`char`'s) needs none of this: each of `i64`/`i32`/`string`
-    /// compiles natively with no external call (`compile-assoc`'s own
-    /// dispatch, which panics clearly on its own for any one of *their*
-    /// methods it doesn't actually implement, e.g. `string::upcase`), and
-    /// anything else panics clearly right here rather than deep inside
-    /// `compile-assoc`'s own `get-function`.
+    /// lookup) can never drift apart. A primitive-receiver target *not*
+    /// registered in `self.methods` (`i64`/`i32`'s own built-in arithmetic;
+    /// `string`'s, since Stage 7 of the Sexpr-representation plan —
+    /// `docs/implementation-log.md`) needs none of this: those compile
+    /// natively with no external call (`compile-assoc`'s own dispatch, which
+    /// panics clearly on its own for any one of *their* methods it doesn't
+    /// actually implement, e.g. `string::upcase`). But a *user-defined*
+    /// method on a primitive receiver (e.g. the prelude's `impl Eq i32` →
+    /// `i32::equals`) is in `self.methods` like any `defstruct` method and
+    /// takes the normal three steps — `compile-assoc`'s dispatch falls
+    /// through to the same mangled-name call for it. Anything else
+    /// (`f64`/`char` builtins — still out of scope) panics clearly right
+    /// here rather than deep inside `compile-assoc`'s own `get-function`.
     fn compile_function(&self, heap: &mut Heap, name: &str) -> Result<RtValue, EvalError> {
         let path = Path::root(name);
         let method_key = self.method_key(name);
@@ -1095,7 +1106,16 @@ impl Interp {
         let method_targets: Vec<(Path, String)> = crate::compile::ast_bridge::collect_assoc_targets(&body)
             .into_iter()
             .filter(|key| method_key.as_ref() != Some(key))
-            .filter(|(type_name, _)| !matches!(type_name.local(), "i64" | "i32" | "string"))
+            .filter(|key| {
+                // A user-registered method is a real call target even on a
+                // primitive receiver (`i32::equals`); only the natively
+                // lowered `i64`/`i32`/`string` builtins (`+`, `<`, `=`,
+                // `length`, ...) are excluded — those become LLVM
+                // instructions / `rt_str_*` calls in `compile-assoc`, not
+                // function calls.
+                self.methods.contains_key(key)
+                    || !matches!(key.0.local(), "i64" | "i32" | "string")
+            })
             .collect();
         for (type_name, method) in &method_targets {
             let key = (type_name.clone(), method.clone());

@@ -611,6 +611,31 @@ pub const SOURCE: &str = r#"
 ;; `(Scope::new)`.
 (defun new-acc-table () Scope<llvm-value> (Scope::new))
 
+;; `compile-assoc`'s native-method dispatch predicates: is `method` one of
+;; the receiver-type methods that lower to LLVM instructions (i64/i32) or
+;; `rt_str_*` primitive calls (string) rather than a real function call?
+;; Anything *not* on these lists — a user-defined method on a primitive
+;; receiver, e.g. the prelude's `impl Eq i32` → `equals` — falls through to
+;; `compile-assoc-user`'s ordinary mangled-name call. (Chained `if`s: the
+;; prelude's `or` macro isn't loaded under `run_with_compiler`.)
+(defun int-native-method? ((method string)) bool
+  (if (equal method "+") true
+  (if (equal method "-") true
+  (if (equal method "*") true
+  (if (equal method "<") true
+  (if (equal method "<=") true
+  (if (equal method ">") true
+  (if (equal method ">=") true
+  (if (equal method "=") true
+  (if (equal method "eq") true
+  (equal method "/=")))))))))))
+
+(defun string-native-method? ((method string)) bool
+  (if (equal method "length") true
+  (if (equal method "ref") true
+  (if (equal method "eq") true
+  (equal method "append")))))
+
 ;; Counts a plain `Sexpr` list's elements — used to size the `i64*` args
 ;; array a direct call needs (`compile-apply`'s `alloca-args`/`build-call`),
 ;; and (labels/closures Stage 2) the `i64*` env array a captured call needs.
@@ -1136,18 +1161,27 @@ pub const SOURCE: &str = r#"
                                   (compile-escaping-env-args builder env fn-env captured env-ptr rest (+ idx 1))))))
                              ()))
                        ;; `(assoc type-name method instance arg...)` — two
-                       ;; cases. `i64`/`i32` receivers (the same runtime
-                       ;; representation, `RtValue::Int(i64)`, so one code
-                       ;; path covers both) compile straight to the matching
-                       ;; LLVM instruction, exactly as before; this guard
-                       ;; still matters because `f64` defines methods under
-                       ;; the same names (`registry::float_assoc`), so
+                       ;; cases, dispatched *per (type-name, method) pair*,
+                       ;; not per receiver type alone. `i64`/`i32` receivers
+                       ;; (the same runtime representation, `RtValue::Int(i64)`,
+                       ;; so one code path covers both) whose method is on
+                       ;; `int-native-method?`'s list compile straight to the
+                       ;; matching LLVM instruction, exactly as before; this
+                       ;; guard still matters because `f64` defines methods
+                       ;; under the same names (`registry::float_assoc`), so
                        ;; without it `(< 1.0 2.0)` would quietly compile as
-                       ;; an integer comparison. Every other `type-name` is
-                       ;; now treated as a call to a *user-defined* method
-                       ;; (a `defmethod`/`defstruct` accessor or setter) —
-                       ;; the composability gap this arm used to dead-end
-                       ;; into a clear "unsupported receiver type" panic for.
+                       ;; an integer comparison. Everything else — any other
+                       ;; `type-name`, and also a *user-defined* method on a
+                       ;; primitive receiver (the prelude's `impl Eq i32` →
+                       ;; `i32::equals`) — is a call to a user-defined method
+                       ;; (a `defmethod`/`defstruct` accessor or setter),
+                       ;; handled by `compile-assoc-user` below. The
+                       ;; native-method predicates must be consulted *before*
+                       ;; any argument is compiled: the native chains
+                       ;; pre-compile their operands as raw values, so a
+                       ;; fallback placed at the end of a chain would emit
+                       ;; the argument IR twice (double-evaluating any
+                       ;; side effects).
                        ;; `args` is tagged the same `(kind . form)` way
                        ;; `compile-call`'s own argument list is
                        ;; (`ast_bridge`'s `Expr::Assoc` translation switched
@@ -1191,14 +1225,16 @@ pub const SOURCE: &str = r#"
                        ;; same shape the `i64`/`i32` branch below already
                        ;; uses for arithmetic. `upcase`/`downcase`/
                        ;; `substring`/`lt` stay out of scope for this stage
-                       ;; (no compiled-code primitive backs them yet) and
-                       ;; fall through to the same "unsupported method" panic
-                       ;; as any other not-yet-compilable builtin method.
+                       ;; (no compiled-code primitive backs them yet); a
+                       ;; non-native string method falls through to
+                       ;; `compile-assoc-user` like any other user method,
+                       ;; and `get-function` panics clearly there if it was
+                       ;; never compiled.
                        (compile-assoc ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((type-name (sexpr-str (sexpr-car (sexpr-cdr e)))))
                            (let ((method (sexpr-str (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
                              (let ((rest (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
-                               (if (equal type-name "string")
+                               (if (if (equal type-name "string") (string-native-method? method) false)
                                    (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
                                      (if (equal method "length")
                                          (let ((args-ptr (alloca-args builder 1)))
@@ -1221,7 +1257,7 @@ pub const SOURCE: &str = r#"
                                                          (store-arg builder args-ptr 1 b)
                                                          (build-call builder (get-function m "rt_str_append") args-ptr 2))
                                                        (panic (append "compile-assoc: unsupported str method " method))))))))
-                                   (if (if (equal type-name "i64") true (equal type-name "i32"))
+                                   (if (if (if (equal type-name "i64") true (equal type-name "i32")) (int-native-method? method) false)
                                        (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
                                          (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
                                            (if (equal method "+")
@@ -1243,15 +1279,24 @@ pub const SOURCE: &str = r#"
                                                                            (if (equal method "/=")
                                                                                (build-icmp-ne builder a b2)
                                                                                (panic (append "compile-assoc: unsupported method " method)))))))))))))
-                                       (let ((mangled (append type-name (append "::" method))))
-                                         (let ((argc (sexpr-list-length rest)))
-                                           (let ((args-ptr (alloca-args builder argc)))
-                                             (let ((pending-ptr (alloca-args builder argc)))
-                                               (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr pending-ptr rest 0)))
-                                                 (let ((result (build-call builder (get-function m mangled) args-ptr argc)))
-                                                   (release-pending-args builder m pending-ptr argc 0)
-                                                   (pop-sexpr-roots builder m sexpr-roots)
-                                                   result))))))))))))
+                                       (compile-assoc-user builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name method rest)))))))
+                       ;; The user-defined-method leg of `compile-assoc`'s
+                       ;; dispatch (see its doc comment): call the callee
+                       ;; under the mangled name `type-name::method`,
+                       ;; arguments through `compile-call-args` exactly like
+                       ;; an ordinary call's. A `labels` sibling (not a
+                       ;; toplevel `defun`) because it closes over `m` and
+                       ;; mutually recurses with `compile-call-args`.
+                       (compile-assoc-user ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (type-name string) (method string) (rest Sexpr)) llvm-value
+                         (let ((mangled (append type-name (append "::" method))))
+                           (let ((argc (sexpr-list-length rest)))
+                             (let ((args-ptr (alloca-args builder argc)))
+                               (let ((pending-ptr (alloca-args builder argc)))
+                                 (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr pending-ptr rest 0)))
+                                   (let ((result (build-call builder (get-function m mangled) args-ptr argc)))
+                                     (release-pending-args builder m pending-ptr argc 0)
+                                     (pop-sexpr-roots builder m sexpr-roots)
+                                     result)))))))
                        ;; Fills a previously-`alloca-args`'d array, one
                        ;; compiled argument per slot, exactly as before —
                        ;; plus, since each `forms` element is now a

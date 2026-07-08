@@ -2621,3 +2621,67 @@ fn compile_dispatches_a_nested_defstruct_field_setter_to_native_code() {
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(9));
 }
+
+/// A user-defined method on a *primitive* receiver — the prelude's `impl Eq
+/// i32` registers `i32::equals` as an ordinary user method whose body
+/// `(= self other)` lowers natively. Two former gates blocked this path:
+/// `Interp::compile_function` excluded every `i64`/`i32`/`string` assoc
+/// target from forward-declaration wholesale, and `compile-assoc`'s int
+/// branch dead-ended any method outside its fixed operator list into a
+/// panic instead of falling through to the mangled-name user-method call
+/// (`compile-assoc-user`).
+#[test]
+fn compile_dispatches_a_user_method_on_a_primitive_receiver() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (compile i32::equals)
+        (defun both-equal ((a i32) (b i32) (c i32)) bool
+          (if (equals a b) (equals b c) false))
+        (compile both-equal)
+        (if (both-equal 3 3 3) (if (both-equal 3 3 4) false true) false)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Bool(true));
+}
+
+/// The `Ord` counterpart of the previous test: `i32::less` (body
+/// `(< self other)`) compiles natively and a compiled caller reaches it
+/// through `compile-assoc-user`'s mangled-name call.
+#[test]
+fn compile_dispatches_less_on_a_primitive_receiver() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (compile i32::less)
+        (defun strictly-between ((lo i32) (x i32) (hi i32)) bool
+          (if (less lo x) (less x hi) false))
+        (compile strictly-between)
+        (if (strictly-between 1 5 9) (if (strictly-between 1 9 5) false true) false)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Bool(true));
+}
+
+/// `Interp::compile_function`'s up-front "must be `compile`d first" check
+/// now also covers a user method on a primitive receiver (formerly those
+/// targets were filtered out entirely and the caller compiled — only to
+/// panic later, or worse, inside `compile-assoc`): compiling a caller of a
+/// not-yet-compiled `i32::equals` names the exact missing method.
+#[test]
+fn compile_of_a_caller_of_an_uncompiled_primitive_method_is_a_clean_error() {
+    let err = run_with_compiler_and_prelude(
+        r#"
+        (defun eq2 ((a i32) (b i32)) bool (equals a b))
+        (compile eq2)
+        "#,
+    )
+    .expect_err("expected compiling a caller of an uncompiled i32::equals to fail");
+    match err {
+        EvalError::Panic(msg) => {
+            assert!(msg.contains("i32::equals"), "message was: {}", msg);
+            assert!(msg.contains("must be"), "message was: {}", msg);
+        }
+        other => panic!("expected a Panic, got {:?}", other),
+    }
+}
