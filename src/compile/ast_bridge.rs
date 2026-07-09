@@ -1145,13 +1145,14 @@ fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], cx: Ctx) -> Resu
 /// `compile-pattern-test` walks: `(pat-wild)` / `(pat-bind name-str)` /
 /// `(pat-lit n)` (an `Int`/`Bool`/`Char` literal sub-pattern, collapsed to
 /// one shared tag — see the note on `n` below) / `(pat-ctor variant-i64
-/// (sub-pattern...))`. Only ever called once [`translate_match`] has
-/// already confirmed the *scrutinee*'s type is `Sexpr` — every `Ctor`
-/// pattern reachable from there (including a nested one inside a `cons`
-/// pattern's own fields, e.g. `(Cons _ (Nil))` — `prelude.rs`'s `last`/
-/// `butlast`) is therefore necessarily matching against the `sexpr` ADT
-/// too, so this never needs to check (or even know) `Pattern::Ctor`'s own
-/// `type_name` field.
+/// (sub-pattern...) is-box)`. The trailing `is-box` records this
+/// constructor's own type representation (`type_name`): `false` for a `Sexpr`
+/// variant (the tagged-`i64` bit test), `true` for a sum-ADT box
+/// (`Option`/`Result`/a `defenum`). It is per-node — not inherited from the
+/// enclosing match — because a nested sub-pattern can differ from its parent
+/// (e.g. a `Sexpr`-typed field inside a `defenum` box). A struct-kind
+/// (boxed-struct) sub-pattern is `unsupported` (bails the whole `match`),
+/// matching [`translate_match`]'s own top-level restriction.
 ///
 /// `n` for `(pat-lit n)`: precomputed here, in Rust, to whatever raw
 /// `i64` the *compiled* representation of that literal would be —
@@ -1162,7 +1163,7 @@ fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], cx: Ctx) -> Resu
 /// three literal kinds it came from (no `char`/`bool` -> `i64` conversion
 /// primitive exists in the compiled language yet, so doing this
 /// conversion on the Rust side avoids needing one).
-fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern) -> Result<Value, Error> {
+fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern, cx: Ctx) -> Result<Value, Error> {
     match pat {
         Pattern::Wildcard => tagged(heap, "pat-wild", &[]),
         Pattern::Bind(name, _) => {
@@ -1172,8 +1173,24 @@ fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern) -> Result<Value, Error> {
         Pattern::Int(n) => tagged(heap, "pat-lit", &[Value::Int(*n)]),
         Pattern::Bool(b) => tagged(heap, "pat-lit", &[Value::Int(if *b { 1 } else { 0 })]),
         Pattern::Char(c) => tagged(heap, "pat-lit", &[Value::Int(*c as i64)]),
-        Pattern::Ctor { variant, args, .. } => {
-            let sub_values = pattern_list_to_sexpr(heap, args)?;
+        Pattern::Ctor { type_name, variant, args, .. } => {
+            // How *this* constructor's own type is represented, so
+            // `compile-pattern-test` picks the right tag test and field
+            // extraction (a nested sub-pattern can differ from its parent —
+            // e.g. an `Sexpr`-typed field inside a `defenum` box): a `Sexpr`
+            // variant uses the tagged-i64 bit test (`compile-sexpr-tag-test`);
+            // a struct-kind (boxed-struct `defstruct`/`Vector`) scrutinee isn't
+            // supported in compiled `match` yet; every other ADT
+            // (`Option`/`Result`/a `defenum`) is a `compile-construct-box` box
+            // tested by its variant-tag slot (`compile-box-tag-test`).
+            let is_box = if *type_name == Path::root("sexpr") {
+                false
+            } else if cx.structs.contains(type_name) {
+                return unsupported(heap, "Match");
+            } else {
+                true
+            };
+            let sub_values = pattern_list_to_sexpr(heap, args, cx)?;
             let list = match list_of(heap, &sub_values) {
                 Ok(v) => v,
                 Err(e) => {
@@ -1187,7 +1204,9 @@ fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern) -> Result<Value, Error> {
                 heap.pop_root();
             }
             heap.push_root(list);
-            let result = tagged(heap, "pat-ctor", &[Value::Int(*variant as i64), list]);
+            // `is_box` appended last so existing `(pat-ctor variant subpats)`
+            // field indices (and their tests) stay valid.
+            let result = tagged(heap, "pat-ctor", &[Value::Int(*variant as i64), list, Value::Bool(is_box)]);
             heap.pop_root(); // list
             result
         }
@@ -1196,10 +1215,10 @@ fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern) -> Result<Value, Error> {
 
 /// Translates each of `pats` in order, rooting every translated `Value` as
 /// it goes — the pattern-tree counterpart of [`ast_list_to_sexpr`].
-fn pattern_list_to_sexpr(heap: &mut Heap, pats: &[Pattern]) -> Result<Vec<Value>, Error> {
+fn pattern_list_to_sexpr(heap: &mut Heap, pats: &[Pattern], cx: Ctx) -> Result<Vec<Value>, Error> {
     let mut values = Vec::with_capacity(pats.len());
     for p in pats {
-        match pattern_to_sexpr(heap, p) {
+        match pattern_to_sexpr(heap, p, cx) {
             Ok(v) => {
                 heap.push_root(v);
                 values.push(v);
@@ -1216,16 +1235,19 @@ fn pattern_list_to_sexpr(heap: &mut Heap, pats: &[Pattern]) -> Result<Vec<Value>
 }
 
 /// `Expr::Match(scrut, arms)` -> `(match is-fn scrutinee-form
-/// ((pattern-form . body-form)...))` (Stage 5, `docs/implementation-log.md`) — only
-/// when the scrutinee's own type is `Sexpr` ([`is_sexpr_type`]); matching
-/// `Option`/`Result`/a `defstruct` stays `unsupported`. Stage 6 makes those
-/// types constructible (`Expr::Construct`) but doesn't lift this
-/// restriction — generalizing `Match` itself to a general-ADT scrutinee
-/// (tag-test against a box's variant slot instead of the tagged-`i64`
-/// bit-test `compile-sexpr-tag-test` does for `Sexpr`) is a separate,
-/// not-yet-addressed gap, deferred until something actually needs to
-/// pattern-match a constructed `Option`/`Result`/sum-type value in compiled
-/// code. `is_fn` mirrors [`translate_if`]'s own tag of the same name —
+/// ((pattern-form . body-form)...) is-box)` (Stage 5, `docs/implementation-log.md`)
+/// for a `Sexpr` scrutinee ([`is_sexpr_type`], `is-box` = false), and — since
+/// `defenum` (2026-07-09) — for a sum-ADT box scrutinee too
+/// (`Option`/`Result`/a user `defenum`, `is-box` = true): the box a
+/// `compile-construct-box` builds, tested by its variant-tag slot 0
+/// (`compiler.rs`'s `compile-box-tag-test`/`compile-box-field`) instead of the
+/// tagged-`i64` bit-test `compile-sexpr-tag-test` does for `Sexpr`. Only a
+/// struct-kind (boxed-struct `defstruct`/`Vector`) scrutinee stays
+/// `unsupported` — matching a single-variant struct is rare, so its own
+/// tag/field extraction isn't wired up yet. `is-box` is appended last (and
+/// each `pat-ctor` carries its own trailing `is-box`, so a nested sub-pattern
+/// can differ from its parent) so the existing field indices — and their
+/// tests — stay valid. `is_fn` mirrors [`translate_if`]'s own tag of the same name —
 /// `match`, like `if`, introduces no function-activation boundary of its
 /// own, so a borrowed `Fn`-typed arm result needs the same explicit retain
 /// `compiler.rs`'s `compile-if-branch` already provides (reused as-is for
@@ -1234,10 +1256,20 @@ fn pattern_list_to_sexpr(heap: &mut Heap, pats: &[Pattern]) -> Result<Vec<Value>
 /// multi-expression body shape in this module has ([`translate_let`]'s
 /// body, a `labels` def's body, ...).
 fn translate_match(heap: &mut Heap, scrut: &Typed, arms: &[Arm], ty: &Type, cx: Ctx) -> Result<Value, Error> {
-    if !is_sexpr_type(&scrut.ty) {
-        return unsupported(heap, "Match");
-    }
+    // Scrutinee representation: `Sexpr` (tagged-i64 tests), or a sum-ADT box
+    // (`Option`/`Result`/a `defenum`, built by `compile-construct-box` — tag in
+    // the box's slot 0). A struct-kind (boxed-struct) scrutinee isn't supported
+    // in compiled `match` yet.
+    let is_box = if is_sexpr_type(&scrut.ty) {
+        false
+    } else {
+        match &scrut.ty {
+            Type::Named(p, _) if !cx.structs.contains(p) => true,
+            _ => return unsupported(heap, "Match"),
+        }
+    };
     let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
+    let is_box_v = Value::Bool(is_box);
     let scrut_v = ast_to_sexpr_scoped(heap, scrut, cx)?;
     heap.push_root(scrut_v);
     let arm_values = match translate_arms(heap, arms, cx) {
@@ -1261,7 +1293,9 @@ fn translate_match(heap: &mut Heap, scrut: &Typed, arms: &[Arm], ty: &Type, cx: 
         heap.pop_root();
     }
     heap.push_root(arms_list);
-    let result = tagged(heap, "match", &[is_fn, scrut_v, arms_list]);
+    // `is-box` appended last so existing `(match is-fn scrut arms)` field
+    // indices (and their tests) stay valid.
+    let result = tagged(heap, "match", &[is_fn, scrut_v, arms_list, is_box_v]);
     heap.pop_root(); // arms_list
     heap.pop_root(); // scrut_v
     result
@@ -1280,7 +1314,7 @@ fn translate_arms(heap: &mut Heap, arms: &[Arm], cx: Ctx) -> Result<Vec<Value>, 
             }
             return Err(Error::TypeError("compile: match arm has a multi-expression body, not yet supported".into()));
         }
-        let pat_v = match pattern_to_sexpr(heap, &arm.pat) {
+        let pat_v = match pattern_to_sexpr(heap, &arm.pat, cx) {
             Ok(v) => v,
             Err(e) => {
                 for _ in 0..values.len() {
@@ -2520,7 +2554,10 @@ mod tests {
     fn int_bool_and_char_subpatterns_collapse_to_a_shared_pat_lit_tag() {
         let mut heap = Heap::with_capacity(1 << 10);
         let pat_lit_payload = |heap: &mut Heap, pat: &Pattern| -> i64 {
-            let v = pattern_to_sexpr(heap, pat).unwrap();
+            let direct = HashSet::new();
+            let structs = HashSet::new();
+            let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs };
+            let v = pattern_to_sexpr(heap, pat, cx).unwrap();
             let (tag, fields) = untag(heap, v);
             assert_eq!(tag, "pat-lit");
             match fields[0] {

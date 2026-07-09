@@ -100,7 +100,7 @@ fn generic_function_calls_a_trait_method_via_where_bound() {
     // specialization with `T = box` concrete, so `count` resolves statically
     // to `Expr::Assoc` there — `TraitCall` itself never executes.
     let src = format!(
-        "{} (defun (describe T) ((it T)) i32 (where (Counted T)) (count it))
+        "{} (defun describe<T> ((it T)) i32 (where (Counted T)) (count it))
             (describe (box::new 7))",
         COUNTER_PRELUDE
     );
@@ -110,7 +110,7 @@ fn generic_function_calls_a_trait_method_via_where_bound() {
 #[test]
 fn where_bound_function_rejects_a_method_the_trait_does_not_declare() {
     let src = format!(
-        "{} (defun (describe T) ((it T)) i32 (where (Counted T)) (nope it))
+        "{} (defun describe<T> ((it T)) i32 (where (Counted T)) (nope it))
             (describe (box::new 7))",
         COUNTER_PRELUDE
     );
@@ -125,7 +125,7 @@ fn two_types_implementing_the_same_trait_dispatch_independently() {
         (defstruct box-b (n i32))
         (impl Counted box-a (count ((self Self)) i32 self::n))
         (impl Counted box-b (count ((self Self)) i32 (* 2 self::n)))
-        (defun (describe T) ((it T)) i32 (where (Counted T)) (count it))
+        (defun describe<T> ((it T)) i32 (where (Counted T)) (count it))
         (+ (describe (box-a::new 3)) (describe (box-b::new 3)))";
     assert_eq!(eval_ok(src), RtValue::Int(3 + 6));
 }
@@ -138,7 +138,7 @@ fn defmethod_on_a_generic_owner_can_carry_a_where_clause() {
     // bounds branch (`Expr::TraitCall`); the call site's specialization
     // re-checks with `A = box` concrete.
     let src = format!(
-        "{} (defstruct (pair A) (x A) (y A))
+        "{} (defstruct pair<A> (x A) (y A))
             (defmethod count-both ((self pair<A>)) i32 (where (Counted A))
               (+ (count self::x) (count self::y)))
             (count-both (pair::new (box::new 20) (box::new 22)))",
@@ -155,7 +155,7 @@ fn impl_method_with_a_where_clause_supports_recursive_structural_dispatch() {
     let src = "
         (deftrait Eq2 (same ((self Self) (other Self)) bool))
         (impl Eq2 i32 (same ((self Self) (other Self)) bool (= self other)))
-        (defstruct (pr A B) (a A) (b B))
+        (defstruct pr<A,B> (a A) (b B))
         (impl Eq2 pr<A,B>
           (same ((self Self) (other Self)) bool (where (Eq2 A) (Eq2 B))
             (if (same self::a other::a) (same self::b other::b) false)))
@@ -175,7 +175,7 @@ fn bounded_method_call_rejects_an_owner_argument_lacking_the_impl() {
         (deftrait Eq2 (same ((self Self) (other Self)) bool))
         (impl Eq2 i32 (same ((self Self) (other Self)) bool (= self other)))
         (defstruct no-eq (n i32))
-        (defstruct (pr A B) (a A) (b B))
+        (defstruct pr<A,B> (a A) (b B))
         (impl Eq2 pr<A,B>
           (same ((self Self) (other Self)) bool (where (Eq2 A) (Eq2 B))
             (if (same self::a other::a) (same self::b other::b) false)))
@@ -198,7 +198,7 @@ fn call_site_rejects_a_type_that_does_not_implement_the_required_trait() {
     // runtime fallback.
     let src = format!(
         "{} (defstruct box2 (n i32))
-            (defun (describe T) ((it T)) i32 (where (Counted T)) (count it))
+            (defun describe<T> ((it T)) i32 (where (Counted T)) (count it))
             (describe (box2::new 5))",
         COUNTER_PRELUDE
     );

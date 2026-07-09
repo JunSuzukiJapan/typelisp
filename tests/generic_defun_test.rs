@@ -1,4 +1,4 @@
-//! Tests for generic type parameters on `defun`: `(defun (name T1 T2...) ...)`.
+//! Tests for generic type parameters on `defun`: `(defun name<T1,T2...> ...)`.
 //!
 //! The call-site inference reuses the same `unify`/`subst_apply` machinery
 //! `check_construct` uses for an ADT's `params` (see `Checker::check_call`),
@@ -58,11 +58,11 @@ fn assert_type_error(src: &str) {
 #[test]
 fn identity_resolves_per_call_site_type() {
     assert_eq!(
-        eval_ok("(defun (identity T) ((x T)) T x) (identity 42)"),
+        eval_ok("(defun identity<T> ((x T)) T x) (identity 42)"),
         RtValue::Int(42)
     );
     assert_eq!(
-        eval_ok("(defun (identity T) ((x T)) T x) (identity true)"),
+        eval_ok("(defun identity<T> ((x T)) T x) (identity true)"),
         RtValue::Bool(true)
     );
 }
@@ -72,7 +72,7 @@ fn generic_defun_with_two_type_params() {
     // `fst`/`snd`-style: only one of the two type params is actually used,
     // proving each call site can bind them independently.
     let src = r#"
-        (defun (pick-first A B) ((x A) (y B)) A x)
+        (defun pick-first<A,B> ((x A) (y B)) A x)
         (pick-first 7 true)
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(7));
@@ -84,7 +84,7 @@ fn recursive_generic_defun() {
     // the same concrete type (i32 here), exercising that the signature
     // registered before body-checking carries `type_params` through.
     let src = r#"
-        (defun (last-of T) ((n i32) (x T)) T
+        (defun last-of<T> ((n i32) (x T)) T
           (if (= n 0) x (last-of (- n 1) x)))
         (last-of 3 99)
     "#;
@@ -100,7 +100,7 @@ fn unwrap_option_propagates_bound_type_through_match() {
     // confirming `check_ctor_pattern`'s subst chain composes correctly with
     // a defun-level type parameter.
     let src = r#"
-        (defun (unwrap T) ((opt Option<T>)) T
+        (defun unwrap<T> ((opt Option<T>)) T
           (match opt ((some x) x) ((none) (panic "unwrap: None"))))
         (unwrap (option::some 5))
     "#;
@@ -110,7 +110,7 @@ fn unwrap_option_propagates_bound_type_through_match() {
 #[test]
 fn generic_defun_returning_option() {
     let src = r#"
-        (defun (wrap T) ((x T)) Option<T> (option::some x))
+        (defun wrap<T> ((x T)) Option<T> (option::some x))
         (match (wrap 9) ((some x) x) ((none) 0))
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(9));
@@ -123,7 +123,7 @@ fn unused_type_param_is_uninferable() {
     // `T` appears only in the return type, with no argument and no expected
     // type to seed it from — `check_construct` has the same "cannot infer"
     // failure mode for an ADT's unconstrained params.
-    assert_type_error("(defun (make-none T) () Option<T> (option::none)) (make-none)");
+    assert_type_error("(defun make-none<T> () Option<T> (option::none)) (make-none)");
 }
 
 #[test]

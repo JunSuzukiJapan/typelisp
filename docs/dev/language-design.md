@@ -96,7 +96,7 @@
 
 | 分類 | 特殊形 | 備考 |
 |---|---|---|
-| 定義 | `defun` `defvar` `defconstant` `defmethod` `defmacro` `module` `use` `lambda` `deftrait` `impl` | 引数・戻り型・グローバルの型は明示（`defvar`/`defconstant`は`(defvar (name Type) value)`で型必須、2026-07-03に型なし形式を削除。局所束縛`let`のみ推論可。`defmacro` は全パラメータ・戻りが `Sexpr` 固定なので型注釈なし、末尾 `&rest name` で可変長対応）。`defstruct`（ユーザ定義型）は2026-06-23に削除・再設計待ち。`deftrait`/`impl`（trait機構、§5.1）は2026-06-30実装 |
+| 定義 | `defun` `defvar` `defconstant` `defmethod` `defmacro` `defstruct` `defenum` `module` `use` `lambda` `deftrait` `impl` | 引数・戻り型・グローバルの型は明示（`defvar`/`defconstant`は`(defvar (name Type) value)`で型必須、2026-07-03に型なし形式を削除。局所束縛`let`のみ推論可。`defmacro` は全パラメータ・戻りが `Sexpr` 固定なので型注釈なし、末尾 `&rest name` で可変長対応）。ジェネリック定義形（`defun`/`defstruct`/`defenum`）の型パラメータは名前に山括弧で書く（`name<T,U>`）。`defstruct`（ユーザ定義product型）は再設計後に実装済み。`defenum`（ユーザ定義直和型、`match`/`if-let`対応）を追加。`deftrait`/`impl`（trait機構、§5.1）は2026-06-30実装 |
 | 束縛 | `let` `let*` | |
 | 制御 | `if` `when` `unless` `cond` `case` `match` `if-let` `while-let` `and` `or` `progn` `the` | `and`/`or` は短絡のため特殊形。`the` は型注釈 |
 | 反復 | `loop` `while` `until` `dotimes` `dolist` `do` `doiter` | |
@@ -234,7 +234,7 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   ```
   具体型に対する呼び出し（`(next concrete-vec-iter)`）は、register済みの`assoc`テーブルを引く
   既存の`Expr::Assoc`機構がそのまま動く——trait導入前と挙動・コードパスとも変わらない。
-- **ジェネリック関数のtrait境界**: `(defun (name T) (params...) Ret (where (Trait T (Assoc
+- **ジェネリック関数のtrait境界**: `(defun name<T> (params...) Ret (where (Trait T (Assoc
   Concrete)...)...) body...)`。`(Assoc Concrete)...`は省略可能で、trait の関連型を具体型に
   pinする（2026-06-30追加）——例えば`Iter`の関連型`Item`を`i32`に固定したい場合
   `(where (Iter T (Item i32)))`と書く。本体チェック時にのみ「型変数Tはこのtraitのメソッドを
@@ -247,9 +247,9 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   `subst_apply`してから使う——pin無しなら`Option<Item>`のまま（`Item`未解決）、pin有りなら
   `Option<Item>`が`Option<i32>`に解決され、ループ変数への算術演算等が型チェックを通る。
   ```lisp
-  (defun (count-iter T) ((it T)) i32 (where (Iter T))
+  (defun count-iter<T> ((it T)) i32 (where (Iter T))
     (let ((n 0)) (doiter (x it) (setf n (+ n 1))) n))
-  (defun (sum-iter T) ((it T)) i32 (where (Iter T (Item i32)))
+  (defun sum-iter<T> ((it T)) i32 (where (Iter T (Item i32)))
     (let ((n 0)) (doiter (x it) (setf n (+ n x))) n))  ; x: i32（pin済み）
   ```
   `where`節は**呼び出し側シグネチャにも反映される**（2026-06-30追加、`FnSig.bounds`）——

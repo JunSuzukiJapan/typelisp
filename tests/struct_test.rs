@@ -321,7 +321,7 @@ fn match_on_a_struct_binds_fields_by_position() {
 
 #[test]
 fn generic_defstruct_constructs_an_instance() {
-    let src = "(defstruct (pair T U) (first T) (second U)) (pair::new 1 true)";
+    let src = "(defstruct pair<T,U> (first T) (second U)) (pair::new 1 true)";
     let (h, v) = run_with_heap(src).expect("eval failed");
     match v {
         RtValue::Sexpr(Value::Boxed(id)) => {
@@ -335,24 +335,24 @@ fn generic_defstruct_constructs_an_instance() {
 
 #[test]
 fn generic_defstruct_field_accessors_work() {
-    let src = "(defstruct (pair T U) (first T) (second U)) \
+    let src = "(defstruct pair<T,U> (first T) (second U)) \
                (let ((p (pair::new 1 true))) (first p))";
     assert_eq!(eval_ok(src), RtValue::Int(1));
-    let src2 = "(defstruct (pair T U) (first T) (second U)) \
+    let src2 = "(defstruct pair<T,U> (first T) (second U)) \
                 (let ((p (pair::new 1 true))) p::second)";
     assert_eq!(eval_ok(src2), RtValue::Bool(true));
 }
 
 #[test]
 fn generic_defstruct_setf_works() {
-    let src = "(defstruct (pair T U) (first T) (second U)) \
+    let src = "(defstruct pair<T,U> (first T) (second U)) \
                (let ((p (pair::new 1 true))) (setf p::first 99) p::first)";
     assert_eq!(eval_ok(src), RtValue::Int(99));
 }
 
 #[test]
 fn generic_defstruct_different_instantiations_coexist() {
-    let src = "(defstruct (pair T U) (first T) (second U)) \
+    let src = "(defstruct pair<T,U> (first T) (second U)) \
                (+ (first (pair::new 1 true)) (first (pair::new 2 \"x\")))";
     assert_eq!(eval_ok(src), RtValue::Int(3));
 }
@@ -362,7 +362,7 @@ fn generic_defstruct_inconsistent_type_argument_is_a_type_error() {
     // Both fields share the same type parameter `T` — `unify` should reject
     // an `i32` and a `bool` both claiming to be `T`, the same inference
     // discipline `Option<T>`/`HashTable<K,V>` already have.
-    let src = "(defstruct (box T) (a T) (b T)) (box::new 1 true)";
+    let src = "(defstruct box<T> (a T) (b T)) (box::new 1 true)";
     assert!(check(src).is_err());
 }
 

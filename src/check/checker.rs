@@ -9,6 +9,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use crate::{parse_type, prim_type_path, Error, Heap, Path, Type, Value};
+use crate::name_lexer::{NameLexer, NameTok};
 
 use super::ast::{Arm, Expr, Pattern, QuotedSexpr, Typed};
 use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Registry, TraitBound, TraitDef, VarInfo, Variant};
@@ -26,6 +27,82 @@ use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Regi
 /// `check`'s typed AST (`Expr`/`TopLevel`/`Typed`), so a direct `use
 /// crate::eval::Interp` here would make the two modules mutually dependent;
 /// this trait keeps that dependency one-directional.
+/// Every Common Lisp comparison operator whose printed name contains a `<` or
+/// `>`. The `char<`/`char<=`/`string<`/`string<=` family is syntactically
+/// indistinguishable from an `ident<...>` generic header (an identifier
+/// immediately followed by `<`), so it would otherwise be mis-parsed as a
+/// malformed generic; the number family (`<`/`<=`/...) is already safe because
+/// it *starts* with punctuation, but is listed here too for completeness. A
+/// header whose whole name is one of these is always taken verbatim, with no
+/// type parameters. (Reader case-folding means these are the lowercase forms.)
+const CL_COMPARISON_OPERATORS: &[&str] = &[
+    "<", ">", "<=", ">=",
+    "char<", "char>", "char<=", "char>=",
+    "string<", "string>", "string<=", "string>=",
+];
+
+/// Parse a definition header symbol into a name and its type-parameter names.
+/// Accepts `name` (no params) or `name<T1,T2,...>` — the angle-bracket generic
+/// syntax also used in type positions. A symbol that does not begin with an
+/// identifier immediately followed by `<` (an operator name like `<=`, `->`,
+/// or any name whose second token isn't `<`), or that is one of the known
+/// [`CL_COMPARISON_OPERATORS`] (e.g. `char<`, `string<=`), is taken verbatim as
+/// the name with no type parameters, so operator-named `defun`s keep working.
+/// A name that *does* start `ident<` and isn't a known operator must be a
+/// well-formed `ident<Ident,Ident...>`.
+fn parse_generic_name_header(raw: &str) -> Result<(String, Vec<String>), Error> {
+    // A known comparison operator (`char<`, `string<=`, ...) whose `<`/`>`
+    // would otherwise read as the start of a generic-parameter list.
+    if CL_COMPARISON_OPERATORS.contains(&raw) {
+        return Ok((raw.to_string(), Vec::new()));
+    }
+    let mut toks = NameLexer::new(raw).peekable();
+    let name = match toks.peek() {
+        Some(NameTok::Ident(s)) => s.to_string(),
+        // Punctuation-led name (`<=`, `<`, ...): verbatim, no generics.
+        _ => return Ok((raw.to_string(), Vec::new())),
+    };
+    toks.next(); // consume the leading identifier
+    match toks.peek() {
+        None => return Ok((name, Vec::new())), // plain, non-generic name
+        Some(NameTok::Lt) => {
+            toks.next(); // consume '<'
+        }
+        // Second token isn't `<` (e.g. `->`, `foo::bar`, `a>b`): take verbatim.
+        _ => return Ok((raw.to_string(), Vec::new())),
+    }
+    // From here a `<` was seen, so this must be a well-formed generic header.
+    let mut params = Vec::new();
+    loop {
+        match toks.next() {
+            Some(NameTok::Ident(s)) => params.push(s.to_string()),
+            _ => {
+                return Err(Error::TypeError(format!(
+                    "definition name `{}`: type parameter must be a simple identifier",
+                    raw
+                )))
+            }
+        }
+        match toks.next() {
+            Some(NameTok::Comma) => continue,
+            Some(NameTok::Gt) => break,
+            _ => {
+                return Err(Error::TypeError(format!(
+                    "definition name `{}`: malformed `<...>` type parameter list",
+                    raw
+                )))
+            }
+        }
+    }
+    if toks.next().is_some() {
+        return Err(Error::TypeError(format!(
+            "definition name `{}`: unexpected tokens after `>`",
+            raw
+        )));
+    }
+    Ok((name, params))
+}
+
 pub trait MacroExpander {
     fn expand_macro(&self, heap: &mut Heap, path: &Path, raw_args: Vec<Value>) -> Result<Value, String>;
 }
@@ -87,6 +164,14 @@ pub enum TopLevel {
     /// `Interp::exec` treats it as a no-op, the same as `Option`/`Result`
     /// needing no runtime registration of their own.
     Defstruct { name: Path },
+    /// A `defenum`: registers a multi-variant `AdtKind::Sum` type
+    /// (`Checker::check_defenum`). Like `Defstruct`, carries only the name and
+    /// is a runtime no-op — the registry mutation happened at check time, and
+    /// variant construction/`match` are the same `Expr::Construct`/`Expr::Match`
+    /// machinery `Option`/`Result` already use. Unlike `Defstruct`, it is *not*
+    /// added to the interpreter's `struct_types` set: an enum instance is an
+    /// immutable `RtValue::Data`, never a boxed struct.
+    Defenum { name: Path },
     /// A bare top-level expression.
     Expr(Typed),
 }
@@ -467,6 +552,7 @@ impl Checker {
                     "module" => return self.check_module(heap, interp, &elems[1..]),
                     "defmethod" => return self.check_defmethod(heap, interp, &elems[1..], false),
                     "defstruct" => return self.check_defstruct(heap, &elems[1..], false),
+                    "defenum" => return self.check_defenum(heap, &elems[1..], false),
                     "deftrait" => return self.check_deftrait(heap, &elems[1..], false),
                     "impl" => return self.check_impl(heap, interp, &elems[1..], false),
                     "use" => return self.check_use(heap, &elems[1..]),
@@ -499,10 +585,11 @@ impl Checker {
                 "defmacro" => return self.check_defmacro(heap, interp, &parts[1..], true),
                 "defmethod" => return self.check_defmethod(heap, interp, &parts[1..], true),
                 "defstruct" => return self.check_defstruct(heap, &parts[1..], true),
+                "defenum" => return self.check_defenum(heap, &parts[1..], true),
                 _ => {}
             }
         }
-        Err(Error::TypeError("pub: expected defun/defmacro/defmethod/defstruct/defvar/defconstant".into()))
+        Err(Error::TypeError("pub: expected defun/defmacro/defmethod/defstruct/defenum/defvar/defconstant".into()))
     }
 
     // ---- namespace navigation & resolution --------------------------------
@@ -1430,26 +1517,17 @@ impl Checker {
     /// reader case-folding) identifiers; `Checker::check_call` resolves them
     /// against actual argument/expected types with the same `unify`/
     /// `subst_apply` machinery `check_construct` uses for an ADT's `params`.
+    /// Parse a definition header (`defun`/`defstruct`/`defenum` name position)
+    /// into a name and its declared type-parameter names. The surface form is
+    /// `name` (non-generic) or `name<T1,T2...>` — the same angle-bracket
+    /// generic syntax a *type* position uses (`Vector<T>`), so all three
+    /// defining forms read consistently. The old `(name T1 T2...)` list form
+    /// is no longer accepted.
     fn parse_defun_name(&self, heap: &Heap, v: Value) -> Result<(String, Vec<String>), Error> {
         match v {
-            Value::Symbol(id) => Ok((heap.symbol_name(id).to_string(), Vec::new())),
-            Value::Cons(_) => {
-                let elems = heap.list_to_vec(v)?;
-                let name = match elems.first() {
-                    Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
-                    _ => return Err(Error::TypeError("defun: name must be a symbol".into())),
-                };
-                let mut type_params = Vec::new();
-                for tp in &elems[1..] {
-                    match tp {
-                        Value::Symbol(id) => type_params.push(heap.symbol_name(*id).to_string()),
-                        _ => return Err(Error::TypeError("defun: type parameter must be a symbol".into())),
-                    }
-                }
-                Ok((name, type_params))
-            }
+            Value::Symbol(id) => parse_generic_name_header(heap.symbol_name(id)),
             _ => Err(Error::TypeError(
-                "defun: name must be a symbol or (name type-params...)".into(),
+                "definition name must be a symbol (write `name<T>` for type parameters)".into(),
             )),
         }
     }
@@ -1983,8 +2061,8 @@ impl Checker {
     }
 
     /// `(defstruct Name (field Type)...)` — or, generically,
-    /// `(defstruct (Name T1 T2...) (field Type)...)`, the name position
-    /// parsed exactly like `(defun (name T1 T2...) ...)`'s
+    /// `(defstruct Name<T1,T2...> (field Type)...)`, the name position
+    /// parsed exactly like `(defun name<T1,T2...> ...)`'s
     /// (`Checker::parse_defun_name`, reused as-is) — a mutable product type:
     /// a single constructor, deliberately named `"new"` rather than `Name`
     /// itself, so `Type::new` resolves through the existing `Type::ctor`
@@ -2117,6 +2195,80 @@ impl Checker {
         let mut body = vec![TopLevel::Defstruct { name: type_fq.clone() }];
         body.extend(accessors);
         Ok(TopLevel::Module { path: type_fq, body })
+    }
+
+    /// `(defenum Name (Variant Type...)...)` — or generically
+    /// `(defenum Name<T1,T2...> ...)` — a user-defined sum type: a
+    /// multi-variant `AdtKind::Sum` `AdtDef`, structurally identical to the
+    /// built-in `Option`/`Result` (`registry::option_def`/`result_def`). Each
+    /// variant is `(VariantName FieldType...)` (positional fields, no names)
+    /// or a bare `VariantName` for a nullary variant. Constructors are reached
+    /// qualified (`Name::Variant`) or bare after `(use Name)`, exactly like the
+    /// built-ins — `register_ctors` is deliberately *not* called, so no bare
+    /// name is claimed until an explicit `use`. `match`/`if-let`, exhaustiveness
+    /// checking, generic instantiation, and the `RtValue::Data` runtime
+    /// representation are all the shared sum-type machinery, unchanged (that is
+    /// how `Option`/`Result` already work). Unlike `defstruct`, no field
+    /// accessors/setters are synthesized: an enum value is immutable and its
+    /// fields are positional, so there's nothing to run at exec time either —
+    /// hence a bare `TopLevel::Defenum` rather than a `Module` bundle.
+    fn check_defenum(&mut self, heap: &Heap, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
+        if parts.is_empty() {
+            return Err(Error::TypeError("defenum: (defenum Name (Variant Type...)...)".into()));
+        }
+        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
+
+        let mut variants = Vec::new();
+        for item in &parts[1..] {
+            let (vname, field_vals): (String, Vec<Value>) = match *item {
+                // A bare symbol is a nullary variant (e.g. `None`); the
+                // parenthesized `(None)` form is equally accepted below.
+                Value::Symbol(id) => (heap.symbol_name(id).to_string(), Vec::new()),
+                Value::Cons(_) => {
+                    let elems = heap.list_to_vec(*item)?;
+                    let vname = match elems.first() {
+                        Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+                        _ => return Err(Error::TypeError("defenum: variant name must be a symbol".into())),
+                    };
+                    (vname, elems[1..].to_vec())
+                }
+                _ => {
+                    return Err(Error::TypeError(
+                        "defenum: variant must be (Name Type...) or a bare Name".into(),
+                    ))
+                }
+            };
+            let fields = field_vals
+                .iter()
+                .map(|v| Ok(self.canon(&parse_type(heap, *v)?)))
+                .collect::<Result<Vec<Type>, Error>>()?;
+            variants.push(Variant { name: vname, fields });
+        }
+        if variants.is_empty() {
+            return Err(Error::TypeError("defenum: needs at least one variant".into()));
+        }
+        for (i, v) in variants.iter().enumerate() {
+            if variants[..i].iter().any(|w| w.name == v.name) {
+                return Err(Error::TypeError(format!("defenum: duplicate variant `{}`", v.name)));
+            }
+        }
+
+        self.check_redef("type", &name, self.cur_ns().types.get(&name))?;
+        let type_fq = self.fq(&name);
+        let def = AdtDef {
+            name: type_fq.clone(),
+            params: type_params,
+            variants,
+            assoc: HashMap::new(),
+            public,
+            builtin: false,
+            kind: AdtKind::Sum,
+            field_names: Vec::new(),
+            impls: Vec::new(),
+            trait_assoc: HashMap::new(),
+        };
+        self.reg.root.module_mut(&self.ns).add_type(def);
+        Ok(TopLevel::Defenum { name: type_fq })
     }
 
     fn check_use(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
@@ -4111,5 +4263,53 @@ fn unify(
             "type mismatch: expected {:?}, found {:?}",
             tmpl, actual
         ))),
+    }
+}
+
+#[cfg(test)]
+mod header_tests {
+    use super::{parse_generic_name_header, CL_COMPARISON_OPERATORS};
+
+    #[test]
+    fn a_plain_name_has_no_type_parameters() {
+        assert_eq!(parse_generic_name_header("identity").unwrap(), ("identity".to_string(), vec![]));
+        // Hyphens are ordinary name characters, not token boundaries.
+        assert_eq!(parse_generic_name_header("cons-cell").unwrap(), ("cons-cell".to_string(), vec![]));
+    }
+
+    #[test]
+    fn an_angle_bracket_header_splits_into_name_and_params() {
+        assert_eq!(parse_generic_name_header("pair<a,b>").unwrap(), ("pair".to_string(), vec!["a".to_string(), "b".to_string()]));
+        assert_eq!(parse_generic_name_header("identity<t>").unwrap(), ("identity".to_string(), vec!["t".to_string()]));
+    }
+
+    #[test]
+    fn every_cl_comparison_operator_is_a_verbatim_name() {
+        // `char<`/`string<=`/... must not be mistaken for a generic header —
+        // the whole point of the whitelist. `<`/`<=`/... are already safe
+        // (punctuation-led) but round-trip here too.
+        for op in CL_COMPARISON_OPERATORS {
+            assert_eq!(
+                parse_generic_name_header(op).unwrap(),
+                (op.to_string(), vec![]),
+                "operator {:?} should be a verbatim name with no type parameters",
+                op
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_comparison_operator_name_is_still_verbatim() {
+        // Other punctuation-led / arrow-like names stay verbatim too.
+        assert_eq!(parse_generic_name_header("->").unwrap(), ("->".to_string(), vec![]));
+        assert_eq!(parse_generic_name_header("+").unwrap(), ("+".to_string(), vec![]));
+    }
+
+    #[test]
+    fn a_malformed_generic_header_is_rejected() {
+        // Starts `ident<` but isn't a known operator and doesn't close: an error,
+        // not a silent verbatim name (catches genuine typos like `pair<a`).
+        assert!(parse_generic_name_header("pair<a").is_err());
+        assert!(parse_generic_name_header("pair<a,>").is_err());
     }
 }

@@ -57,7 +57,7 @@ fn bundled_specs(tl: &TopLevel) -> Vec<&TopLevel> {
 
 #[test]
 fn an_instantiating_call_comes_back_bundled_with_its_specialization() {
-    let tls = check_all("(defun (identity T) ((x T)) T x) (identity 42)").unwrap();
+    let tls = check_all("(defun identity<T> ((x T)) T x) (identity 42)").unwrap();
     // The generic definition itself needs no specializations.
     assert!(matches!(&tls[0], TopLevel::Defun { type_params, .. } if !type_params.is_empty()));
     // The call comes back as [specialization, call] — one concrete Defun.
@@ -79,7 +79,7 @@ fn an_instantiating_call_comes_back_bundled_with_its_specialization() {
 #[test]
 fn two_calls_at_the_same_type_in_one_form_share_one_specialization() {
     let tls = check_all(
-        "(defun (identity T) ((x T)) T x) \
+        "(defun identity<T> ((x T)) T x) \
          (defun use2 () i32 (+ (identity 1) (identity 2)))",
     )
     .unwrap();
@@ -89,7 +89,7 @@ fn two_calls_at_the_same_type_in_one_form_share_one_specialization() {
 #[test]
 fn calls_at_different_types_get_independent_specializations() {
     let tls = check_all(
-        "(defun (identity T) ((x T)) T x) \
+        "(defun identity<T> ((x T)) T x) \
          (defun use2 () i32 (if (identity true) (identity 1) 0))",
     )
     .unwrap();
@@ -106,14 +106,14 @@ fn a_non_generic_call_is_not_bundled() {
 
 #[test]
 fn a_generic_call_evaluates_through_its_specialization() {
-    assert_eq!(eval_ok("(defun (identity T) ((x T)) T x) (identity 42)"), RtValue::Int(42));
-    assert_eq!(eval_ok("(defun (identity T) ((x T)) T x) (identity true)"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(defun identity<T> ((x T)) T x) (identity 42)"), RtValue::Int(42));
+    assert_eq!(eval_ok("(defun identity<T> ((x T)) T x) (identity true)"), RtValue::Bool(true));
 }
 
 #[test]
 fn self_recursion_reuses_the_same_specialization() {
     let src = r#"
-        (defun (last-of T) ((n i32) (x T)) T
+        (defun last-of<T> ((n i32) (x T)) T
           (if (= n 0) x (last-of (- n 1) x)))
         (last-of 3 99)
     "#;
@@ -130,9 +130,9 @@ fn mutually_recursive_generics_converge_on_the_worklist() {
     // checked at definition time... except forward references still fail
     // there, hence `pong` recursing through itself and `ping` through both.)
     let src = r#"
-        (defun (pong T) ((n i32) (x T)) T
+        (defun pong<T> ((n i32) (x T)) T
           (if (= n 0) x (pong (- n 1) x)))
-        (defun (ping T) ((n i32) (x T)) T
+        (defun ping<T> ((n i32) (x T)) T
           (if (= n 0) x (pong n x)))
         (ping 2 7)
     "#;
@@ -142,8 +142,8 @@ fn mutually_recursive_generics_converge_on_the_worklist() {
 #[test]
 fn generic_body_calling_another_generic_specializes_transitively() {
     let src = r#"
-        (defun (inner T) ((x T)) T x)
-        (defun (outer T) ((x T)) T (inner x))
+        (defun inner<T> ((x T)) T x)
+        (defun outer<T> ((x T)) T (inner x))
         (outer 5)
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(5));
@@ -152,7 +152,7 @@ fn generic_body_calling_another_generic_specializes_transitively() {
 #[test]
 fn a_generic_instantiated_from_a_defvar_initializer_works() {
     let src = r#"
-        (defun (identity T) ((x T)) T x)
+        (defun identity<T> ((x T)) T x)
         (defvar (g i32) (identity 11))
         g
     "#;
@@ -163,7 +163,7 @@ fn a_generic_instantiated_from_a_defvar_initializer_works() {
 fn a_generic_instantiated_inside_a_module_works() {
     let src = r#"
         (module m
-          (pub defun (identity T) ((x T)) T x)
+          (pub defun identity<T> ((x T)) T x)
           (pub defun use-it () i32 (identity 3)))
         (m::use-it)
     "#;
@@ -176,7 +176,7 @@ fn a_generic_instantiated_from_a_macro_body_works() {
     // like any other form here, so the later use of the macro (expanding at
     // check time via MacroExpander) finds the specialization registered.
     let src = r#"
-        (defun (identity T) ((x T)) T x)
+        (defun identity<T> ((x T)) T x)
         (defmacro pass (x) (identity x))
         (pass 42)
     "#;
@@ -186,7 +186,7 @@ fn a_generic_instantiated_from_a_macro_body_works() {
 #[test]
 fn a_generic_multi_arg_function_specializes() {
     let src = r#"
-        (defun (firstof T) ((a T) (b T) (c T)) T a)
+        (defun firstof<T> ((a T) (b T) (c T)) T a)
         (firstof 1 2 3)
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(1));
@@ -199,7 +199,7 @@ fn a_type_parameter_shadows_a_user_type_of_the_same_name() {
     // template's annotations during specialization.
     let src = r#"
         (defstruct t (v i32))
-        (defun (identity T) ((x T)) T x)
+        (defun identity<T> ((x T)) T x)
         (identity 42)
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(42));
@@ -210,7 +210,7 @@ fn a_type_parameter_shadows_a_user_type_of_the_same_name() {
 #[test]
 fn a_method_on_a_generic_type_specializes_at_the_call_site() {
     let tls = check_all(
-        "(defstruct (box T) (v T)) \
+        "(defstruct box<T> (v T)) \
          (defmethod get-v ((self box<T>)) T self::v) \
          (get-v (box::new 42))",
     )
@@ -235,7 +235,7 @@ fn a_method_on_a_generic_type_specializes_at_the_call_site() {
 #[test]
 fn a_generic_method_call_evaluates_through_its_specialization() {
     let src = r#"
-        (defstruct (box T) (v T))
+        (defstruct box<T> (v T))
         (defmethod get-v ((self box<T>)) T self::v)
         (get-v (box::new 42))
     "#;
@@ -255,7 +255,7 @@ fn a_generic_method_with_a_match_body_specializes() {
 #[test]
 fn generic_defstruct_field_read_and_setf_work_through_specialized_accessors() {
     let src = r#"
-        (defstruct (box T) (v T))
+        (defstruct box<T> (v T))
         (defvar (b box<i32>) (box::new 1))
         (setf b::v 5)
         b::v
@@ -266,7 +266,7 @@ fn generic_defstruct_field_read_and_setf_work_through_specialized_accessors() {
 #[test]
 fn one_generic_type_instantiated_at_two_types_gets_independent_methods() {
     let src = r#"
-        (defstruct (box T) (v T))
+        (defstruct box<T> (v T))
         (defmethod get-v ((self box<T>)) T self::v)
         (let ((a (box::new 1)) (b (box::new true)))
           (if (get-v b) (get-v a) 0))
@@ -286,7 +286,7 @@ fn a_sexpr_instantiated_generic_field_returns_the_datum_not_a_misdecoded_scalar(
     // static type. With the accessor monomorphized (`v <sexpr>`, `FieldGet`
     // node type `Sexpr`) the decode is type-directed and exact.
     let src = r#"
-        (defstruct (box T) (v T))
+        (defstruct box<T> (v T))
         (defvar (b box<Sexpr>) (box::new '42))
         b::v
     "#;
@@ -316,7 +316,7 @@ fn a_vector_of_sexpr_element_returns_the_datum() {
 #[test]
 fn a_generic_function_passed_as_an_argument_specializes_from_the_parameter_type() {
     let src = r#"
-        (defun (identity T) ((x T)) T x)
+        (defun identity<T> ((x T)) T x)
         (defun call-it ((f (fn (i32) i32)) (n i32)) i32 (f n))
         (call-it identity 41)
     "#;
@@ -326,7 +326,7 @@ fn a_generic_function_passed_as_an_argument_specializes_from_the_parameter_type(
 #[test]
 fn a_generic_function_annotated_with_the_specializes() {
     let src = r#"
-        (defun (identity T) ((x T)) T x)
+        (defun identity<T> ((x T)) T x)
         (defun apply1 ((f (fn (bool) bool))) bool (f true))
         (apply1 (the (fn (bool) bool) identity))
     "#;
@@ -336,7 +336,7 @@ fn a_generic_function_annotated_with_the_specializes() {
 #[test]
 fn a_generic_method_passed_as_an_argument_specializes() {
     let src = r#"
-        (defstruct (box T) (v T))
+        (defstruct box<T> (v T))
         (defmethod get-v ((self box<T>)) T self::v)
         (defun call-it ((f (fn (box<i32>) i32)) (b box<i32>)) i32 (f b))
         (call-it get-v (box::new 7))
@@ -350,7 +350,7 @@ fn a_generic_function_value_without_type_context_is_a_check_error() {
     // resolve T from — there is no erased generic value to fall back to
     // anymore. (`defvar` can't even express the untyped case: its type
     // annotation is mandatory.)
-    match check_all("(defun (identity T) ((x T)) T x) (let ((f identity)) 0)") {
+    match check_all("(defun identity<T> ((x T)) T x) (let ((f identity)) 0)") {
         Err(Error::TypeError(msg)) => assert!(msg.contains("generic function"), "unexpected: {}", msg),
         other => panic!("expected TypeError, got {:?}", other),
     }
@@ -362,7 +362,7 @@ fn a_generic_function_value_in_a_typed_defvar_specializes() {
     // function value needs: `f`'s declared `(fn (i32) i32)` resolves T=i32
     // and the global ends up holding the specialization.
     let src = r#"
-        (defun (identity T) ((x T)) T x)
+        (defun identity<T> ((x T)) T x)
         (defvar (f (fn (i32) i32)) identity)
         (f 41)
     "#;
@@ -371,7 +371,7 @@ fn a_generic_function_value_in_a_typed_defvar_specializes() {
 
 #[test]
 fn compiling_a_generic_function_is_a_check_error() {
-    match check_all("(defun (identity T) ((x T)) T x) (compile identity)") {
+    match check_all("(defun identity<T> ((x T)) T x) (compile identity)") {
         Err(Error::TypeError(msg)) => assert!(msg.contains("generic"), "unexpected: {}", msg),
         other => panic!("expected TypeError, got {:?}", other),
     }
@@ -388,7 +388,7 @@ fn the_erased_generic_body_is_not_registered_in_the_interpreter() {
     // exec-side guarantee.)
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, "(defun (identity T) ((x T)) T x) (compile identity)").expect("read failed");
+    let vs = r.read_all(&mut h, "(defun identity<T> ((x T)) T x) (compile identity)").expect("read failed");
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     let mut failed = false;
@@ -412,7 +412,7 @@ fn polymorphic_recursion_is_a_type_error_not_a_hang() {
     // `f` calls itself at `Option<T>` — every instantiation requests a new
     // one, so the drain budget must cut it off with a TypeError.
     let src = r#"
-        (defun (f T) ((n i32) (x T)) i32
+        (defun f<T> ((n i32) (x T)) i32
           (if (= n 0) n (f (- n 1) (option::some x))))
         (f 3 1)
     "#;

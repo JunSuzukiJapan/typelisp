@@ -274,11 +274,11 @@ pub const SOURCE: &str = r#"
 ;; none of them is a method "on" a receiver type — they operate purely on
 ;; function values. `compose`/`flip` return a `lambda`, which closes over the
 ;; outer defun's parameters (`f`/`g`) the same way any nested lambda would.
-(defun (identity T) ((x T)) T x)
-(defun (const A B) ((x A) (y B)) A x)
-(defun (compose A B C) ((f (fn (B) C)) (g (fn (A) B))) (fn (A) C)
+(defun identity<T> ((x T)) T x)
+(defun const<A,B> ((x A) (y B)) A x)
+(defun compose<A,B,C> ((f (fn (B) C)) (g (fn (A) B))) (fn (A) C)
   (lambda ((x A)) C (f (g x))))
-(defun (flip A B C) ((f (fn (A B) C))) (fn (B A) C)
+(defun flip<A,B,C> ((f (fn (A B) C))) (fn (B A) C)
   (lambda ((y B) (x A)) C (f x y)))
 
 ;; Remaining numeric helpers (roadmap step 7c, catalog §2.2f): `gcd`/`lcm` via
@@ -448,7 +448,7 @@ pub const SOURCE: &str = r#"
 ;; have to choose between starting over and corrupting external iteration
 ;; state — `vector-iter<T>` is the conventional fix: a separate, independent
 ;; cursor per `(v::iter)` call).
-(defstruct (vector-iter T) (vec Vector<T>) (pos i32))
+(defstruct vector-iter<T> (vec Vector<T>) (pos i32))
 (impl Iter vector-iter<T>
   (type Item T)
   (next ((self Self)) Option<T>
@@ -486,19 +486,19 @@ pub const SOURCE: &str = r#"
 ;; the predicate form mirrors CL's `-if` family. A freshly built result
 ;; vector is pinned with `the`, since a bare `(Vector::new)` has nothing to
 ;; infer its element type from.
-(defun (map I A U) ((it I) (f (fn (A) U))) Vector<U> (where (Iter I (Item A)))
+(defun map<I,A,U> ((it I) (f (fn (A) U))) Vector<U> (where (Iter I (Item A)))
   (let ((out (the Vector<U> (Vector::new))))
     (doiter (x it) (push out (f x)))
     out))
-(defun (filter I A) ((it I) (pred (fn (A) bool))) Vector<A> (where (Iter I (Item A)))
+(defun filter<I,A> ((it I) (pred (fn (A) bool))) Vector<A> (where (Iter I (Item A)))
   (let ((out (the Vector<A> (Vector::new))))
     (doiter (x it) (if (pred x) (push out x) ()))
     out))
-(defun (foldl I A B) ((it I) (f (fn (B A) B)) (init B)) B (where (Iter I (Item A)))
+(defun foldl<I,A,B> ((it I) (f (fn (B A) B)) (init B)) B (where (Iter I (Item A)))
   (let ((acc init))
     (doiter (x it) (setf acc (f acc x)))
     acc))
-(defun (foldr I A B) ((it I) (f (fn (A B) B)) (init B)) B (where (Iter I (Item A)))
+(defun foldr<I,A,B> ((it I) (f (fn (A B) B)) (init B)) B (where (Iter I (Item A)))
   (let ((buf (the Vector<A> (Vector::new))))
     (doiter (x it) (push buf x))
     (let ((acc init) (i (- (len buf) 1)))
@@ -506,7 +506,7 @@ pub const SOURCE: &str = r#"
         (setf acc (f (get buf i) acc))
         (setf i (- i 1)))
       acc)))
-(defun (reverse I A) ((it I)) Vector<A> (where (Iter I (Item A)))
+(defun reverse<I,A> ((it I)) Vector<A> (where (Iter I (Item A)))
   (let ((buf (the Vector<A> (Vector::new))))
     (doiter (x it) (push buf x))
     (let ((out (the Vector<A> (Vector::new))) (i (- (len buf) 1)))
@@ -514,12 +514,12 @@ pub const SOURCE: &str = r#"
         (push out (get buf i))
         (setf i (- i 1)))
       out)))
-(defun (find I A) ((it I) (pred (fn (A) bool))) Option<A> (where (Iter I (Item A)))
+(defun find<I,A> ((it I) (pred (fn (A) bool))) Option<A> (where (Iter I (Item A)))
   (let ((result (the Option<A> (Option::none))))
     (doiter (x it)
       (if (pred x) (progn (setf result (Option::some x)) (break)) ()))
     result))
-(defun (position I A) ((it I) (pred (fn (A) bool))) Option<i32> (where (Iter I (Item A)))
+(defun position<I,A> ((it I) (pred (fn (A) bool))) Option<i32> (where (Iter I (Item A)))
   ;; `i` counts only the mismatches seen before the match, so it equals the
   ;; index of the first match. Both `if` branches are `Unit` (`(break)` is
   ;; `Never`; the mismatch branch ends in a trailing `()`) so the loop body
@@ -530,7 +530,7 @@ pub const SOURCE: &str = r#"
           (progn (setf result (Option::some i)) (break))
           (progn (setf i (+ i 1)) ())))
     result))
-(defun (count I A) ((it I) (pred (fn (A) bool))) i32 (where (Iter I (Item A)))
+(defun count<I,A> ((it I) (pred (fn (A) bool))) i32 (where (Iter I (Item A)))
   ;; `when`, not a bare `(if (pred x) (setf n ...) ())`: `setf` evaluates to
   ;; the value it assigned (here `i32`), so an `if` whose other branch is `()`
   ;; would fail to unify (`i32` vs `Unit`); `when` wraps the `setf` in a
@@ -538,7 +538,7 @@ pub const SOURCE: &str = r#"
   (let ((n 0))
     (doiter (x it) (when (pred x) (setf n (+ n 1))))
     n))
-(defun (remove-if I A) ((it I) (pred (fn (A) bool))) Vector<A> (where (Iter I (Item A)))
+(defun remove-if<I,A> ((it I) (pred (fn (A) bool))) Vector<A> (where (Iter I (Item A)))
   (let ((out (the Vector<A> (Vector::new))))
     (doiter (x it) (if (pred x) () (push out x)))
     out))
@@ -554,7 +554,7 @@ pub const SOURCE: &str = r#"
 ;; `Vector<T>`/`vector-iter<T>` are. `HashTable<K,V>::entries`
 ;; (`registry::hashtable_def`) yields a `Vector<cons-cell<K,V>>` of `(key
 ;; . value)` pairs.
-(defstruct (cons-cell A B) (car A) (cdr B))
+(defstruct cons-cell<A,B> (car A) (cdr B))
 
 ;; `cons`/`car`/`cdr`: the generic pair API (Symbol/Sexpr redesign Phase 4b).
 ;; `cons` builds a `cons-cell<A,B>`; `car`/`cdr` are `cons-cell`'s own
@@ -566,7 +566,7 @@ pub const SOURCE: &str = r#"
 ;; typed list node — is a different thing entirely, built/walked through the
 ;; `sexpr-*` island layer (`sexpr-cons`/`sexpr-car`/`sexpr-cdr`), never this
 ;; pair. Mutate a pair field with `(setf p::car v)`.
-(defun (cons A B) ((a A) (b B)) cons-cell<A,B> (cons-cell::new a b))
+(defun cons<A,B> ((a A) (b B)) cons-cell<A,B> (cons-cell::new a b))
 
 ;; `Sexpr` deliberately has **no** `Iter` impl: `Iter`'s `Item` must be one
 ;; fixed type per impl (`vector-iter<T>`'s `Item` is `T`, `hashtable-
@@ -589,7 +589,7 @@ pub const SOURCE: &str = r#"
 ;; observed, unlike `vector-iter<T>`'s shared reference). `hashtable-iter<K,V>`
 ;; reuses `vector-iter<T>`'s exact cursor logic over that snapshot rather
 ;; than duplicating it.
-(defstruct (hashtable-iter K V) (snapshot Vector<cons-cell<K,V>>) (pos i32))
+(defstruct hashtable-iter<K,V> (snapshot Vector<cons-cell<K,V>>) (pos i32))
 (impl Iter hashtable-iter<K,V>
   (type Item cons-cell<K,V>)
   (next ((self Self)) Option<cons-cell<K,V>>
@@ -687,48 +687,48 @@ pub const SOURCE: &str = r#"
 ;; where-bound propagation from one generic's body into another's bounds is
 ;; unimplemented — `check_call`'s bound validation would fail with "cannot
 ;; infer" — which is why `elt` duplicates `nth`'s loop).
-(defun (length I A) ((it I)) i32 (where (Iter I (Item A)))
+(defun length<I,A> ((it I)) i32 (where (Iter I (Item A)))
   (let ((n 0))
     (doiter (x it) (setf n (+ n 1)))
     n))
 ;; `append` is the generic two-iterator concatenation (replacing Phase 3's
 ;; `vector-append`): two independent `Iter` bounds pinned to one `Item`.
-(defun (append I J A) ((a I) (b J)) Vector<A>
+(defun append<I,J,A> ((a I) (b J)) Vector<A>
   (where (Iter I (Item A)) (Iter J (Item A)))
   (let ((out (the Vector<A> (Vector::new))))
     (doiter (x a) (push out x))
     (doiter (x b) (push out x))
     out))
-(defun (nth I A) ((n i32) (it I)) Option<A> (where (Iter I (Item A)))
+(defun nth<I,A> ((n i32) (it I)) Option<A> (where (Iter I (Item A)))
   (let ((i 0) (result (the Option<A> (Option::none))))
     (doiter (x it)
       (if (= i n)
           (progn (setf result (Option::some x)) (break))
           (progn (setf i (+ i 1)) ())))
     result))
-(defun (elt I A) ((it I) (n i32)) Option<A> (where (Iter I (Item A)))
+(defun elt<I,A> ((it I) (n i32)) Option<A> (where (Iter I (Item A)))
   (let ((i 0) (result (the Option<A> (Option::none))))
     (doiter (x it)
       (if (= i n)
           (progn (setf result (Option::some x)) (break))
           (progn (setf i (+ i 1)) ())))
     result))
-(defun (take I A) ((it I) (n i32)) Vector<A> (where (Iter I (Item A)))
+(defun take<I,A> ((it I) (n i32)) Vector<A> (where (Iter I (Item A)))
   (let ((out (the Vector<A> (Vector::new))))
     (doiter (x it) (if (< (len out) n) (push out x) (break)))
     out))
-(defun (subseq I A) ((it I) (start i32) (end i32)) Vector<A> (where (Iter I (Item A)))
+(defun subseq<I,A> ((it I) (start i32) (end i32)) Vector<A> (where (Iter I (Item A)))
   (let ((i 0) (out (the Vector<A> (Vector::new))))
     (doiter (x it)
       (if (>= i end)
           (break)
           (progn (when (>= i start) (push out x)) (setf i (+ i 1)) ())))
     out))
-(defun (last I A) ((it I)) Option<A> (where (Iter I (Item A)))
+(defun last<I,A> ((it I)) Option<A> (where (Iter I (Item A)))
   (let ((result (the Option<A> (Option::none))))
     (doiter (x it) (setf result (Option::some x)))
     result))
-(defun (butlast I A) ((it I)) Vector<A> (where (Iter I (Item A)))
+(defun butlast<I,A> ((it I)) Vector<A> (where (Iter I (Item A)))
   (let ((buf (the Vector<A> (Vector::new))))
     (doiter (x it) (push buf x))
     (let ((out (the Vector<A> (Vector::new))) (i 0))
@@ -740,24 +740,24 @@ pub const SOURCE: &str = r#"
 ;; impls) instead of taking a predicate — the trait-bounded halves of the
 ;; library. Predicate variants of the same searches already exist above
 ;; (`find`/`position`/`count`).
-(defun (member I A) ((x A) (it I)) bool (where (Iter I (Item A)) (Eq A))
+(defun member<I,A> ((x A) (it I)) bool (where (Iter I (Item A)) (Eq A))
   (let ((found false))
     (doiter (y it)
       (if (equals y x) (progn (setf found true) (break)) ()))
     found))
-(defun (every I A) ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
+(defun every<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
   (let ((result true))
     (doiter (x it)
       (if (pred x) () (progn (setf result false) (break))))
     result))
-(defun (any I A) ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
+(defun any<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
   (let ((result false))
     (doiter (x it)
       (if (pred x) (progn (setf result true) (break)) ()))
     result))
 ;; Non-destructive insertion sort, stable: the inner shift uses strict
 ;; `less`, so equal elements keep their input order. Ascending.
-(defun (sort I A) ((it I)) Vector<A> (where (Iter I (Item A)) (Ord A))
+(defun sort<I,A> ((it I)) Vector<A> (where (Iter I (Item A)) (Ord A))
   (let ((out (the Vector<A> (Vector::new))))
     (doiter (x it)
       (let ((j (len out)))
@@ -771,7 +771,7 @@ pub const SOURCE: &str = r#"
 ;; an alist (`Vector<cons-cell<K,V>>`) and a `HashTable<K,V>` (whose `iter`'s
 ;; `Item` is exactly `cons-cell<K,V>`) both qualify. Returns the whole
 ;; matching pair, CL-style; project the value with `(cdr p)`.
-(defun (assoc I K V) ((k K) (it I)) Option<cons-cell<K,V>>
+(defun assoc<I,K,V> ((k K) (it I)) Option<cons-cell<K,V>>
   (where (Iter I (Item cons-cell<K,V>)) (Eq K))
   (let ((result (the Option<cons-cell<K,V>> (Option::none))))
     (doiter (p it)

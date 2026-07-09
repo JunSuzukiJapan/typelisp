@@ -54,11 +54,12 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 ```
 
 - 引数の型・戻り値の型は必須。
-- ジェネリック関数は名前の位置に型パラメータを書く: `(defun (name T1 T2...) (params) Ret body...)`。
+- ジェネリック関数は名前に山括弧で型パラメータを書く: `(defun name<T1,T2...> (params) Ret body...)`
+  （型位置の `Vector<T>` と同じ山括弧構文。旧来の `(name T1 T2...)` リスト形式は廃止）。
 - `defun`/`lambda` は固定アリティのみ。可変長引数（`&rest`）は `defmacro` 専用で、
   `defun`/`lambda`/`fn` 型では使えない。
 - トレイト境界を要求する場合は本体の直前に `where` 節を書く:
-  `(defun (name T) (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
+  `(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
   （`(AssocName ConcreteType)` による関連型の固定は省略可能）。
 
 ### defvar / defconstant — グローバル変数
@@ -90,8 +91,8 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   (pub field2 Type2)
   ...)
 
-; ジェネリック
-(defstruct (Name T1 T2...)
+; ジェネリック（山括弧で型パラメータ。旧来の (Name T1 T2...) リスト形式は廃止）
+(defstruct Name<T1,T2...>
   (field TypeUsingT1)
   ...)
 ```
@@ -103,6 +104,33 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   - ゲッター `(field-name instance)`、糖衣構文 `instance::field-name`
   - セッター `(set-field-name instance value)`、糖衣構文 `(setf instance::field-name value)`
 - モジュール全体を `pub` にするには `(pub (defstruct ...))` のように先頭に `pub` を付ける。
+
+### defenum — 列挙型（直和型・ユーザ定義タグ付き共用体）
+
+```lisp
+(defenum Name
+  (Variant1 Type1 Type2...)   ; ペイロード付きバリアント（位置フィールド）
+  (Variant2)                  ; ペイロードなしバリアント
+  ...)
+
+; ジェネリック
+(defenum Option<T>
+  (Some T)
+  (None))
+```
+
+- 各バリアントは `(VariantName FieldType...)` の形。フィールドは位置指定のみ（名前は持たない）。
+  バリアントは1つ以上必要で、名前の重複は不可。
+- 値の構築は組み込み `Option`/`Result` と同じく修飾または `use` 経由:
+  `(Name::Variant1 a b)`、または `(use Name)` の後は `(Variant1 a b)`。
+- `match` / `if-let` で分解できる。`match` は網羅性を検査する（全バリアントを尽くすか `_` が必要）:
+  ```lisp
+  (match opt
+    ((Some v) v)
+    ((None) 0))
+  ```
+- メソッド/関連関数は `defstruct` と同様に `defmethod`/`impl` で後付けする。
+- モジュール全体を `pub` にするには `(pub (defenum ...))` と書く。
 
 ### deftrait / impl — トレイト機構
 
@@ -143,9 +171,10 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 (pub (defmacro ...))
 (pub (defmethod ...))
 (pub (defstruct ...))
+(pub (defenum ...))
 ```
 
-`pub` が付けられるのは上記6種類のみ（`module`/`use`/`deftrait`/`impl` には付けられない）。
+`pub` が付けられるのは上記7種類のみ（`module`/`use`/`deftrait`/`impl` には付けられない）。
 
 ### defmacro — マクロ定義
 

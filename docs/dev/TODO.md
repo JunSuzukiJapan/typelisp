@@ -20,11 +20,14 @@
 書けるコードから実際に到達しうる（＝いずれ本実装が要る）ものの一覧——`Expr::TraitCall`は
 単型化後に到達不能な診断専用ノードと確認済みで対象外（`tests/trait_test.rs`参照）。
 
-1. **`Match`: `Sexpr`以外のscrutinee（`Option`/`Result`/`defstruct`）が`unsupported`**
-   （`ast_bridge.rs::translate_match`）。`Option`/`Result`はエラー処理の中核でどの関数にも
-   現れうるため影響範囲が最大。タグ付き`i64`ビットテストで済む`Sexpr`と異なり、一般ADT box
-   の variant スロットに対するタグテストへの一般化が必要（`translate_match`のdocコメントに
-   詳細）。
+1. **`Match`: sum-ADT box scrutinee（`Option`/`Result`/`defenum`）は対応済み。残るは
+   struct-kind（`defstruct`/`Vector`のboxed-struct表現）scrutineeのみ`unsupported`**
+   （`ast_bridge.rs::translate_match`）。2026-07-09に`defenum`実装とあわせて一般ADT boxの
+   variantスロットに対するタグテスト（`compiler.rs`の`compile-box-tag-test`/`compile-box-field`、
+   `translate_match`/`pattern_to_sexpr`の`is-box`フラグ）を追加し、`Option`/`Result`/ユーザー
+   `defenum`のcompile時`match`が可能になった。単一variantの`defstruct`をmatchするのは稀なため
+   boxed-struct scrutineeは当面`unsupported`のまま（必要になれば`compile-box-*`と同様に
+   boxed-struct表現用のタグ/フィールド抽出を足す）。
 2. **`Global`/`SetGlobal`: グローバル変数（`defvar`/`defconstant`）の参照・代入が`unsupported`**
    （`ast_bridge.rs`の`Expr::Global`/`Expr::SetGlobal`アーム）。グローバル参照はごく普通の
    コードで頻出するため次点の影響範囲。

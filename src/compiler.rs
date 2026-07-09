@@ -878,6 +878,24 @@ pub const SOURCE: &str = r#"
     (build-cond-br builder test ok-block fail-block)
     (position-at-end builder ok-block)))
 
+;; The box-scrutinee counterpart of `compile-sexpr-tag-test`: a sum-ADT box
+;; (`Option`/`Result`/a `defenum`, built by `compile-construct-box`) is a
+;; `malloc`'d `[1 + argc]`-slot array whose slot `0` holds the variant tag as a
+;; plain `i64`. `v` is that box as an `i64` (the `build-ptr-to-int`
+;; `compile-construct-box` ends on), so int-to-ptr it back, load slot `0`, and
+;; compare to the pattern's variant index.
+(defun compile-box-tag-test ((builder llvm-builder) (v llvm-value) (variant i64)) llvm-value
+  (build-icmp-eq builder (load-raw builder (build-int-to-ptr builder v) 0) (const-i64 builder variant)))
+
+;; The box-scrutinee counterpart of `compile-sexpr-field`: field `idx` of a
+;; sum-ADT box lives in slot `1 + idx` (slot `0` is the variant tag), holding
+;; the field's already-compiled value verbatim — the same value
+;; `compile-construct-box-fields` stored there, so no decode/untag is needed
+;; (a scalar field is its raw `i64`, a `Sexpr`/`Str` field its tagged
+;; immediate, a nested box field its own `ptrtoint`).
+(defun compile-box-field ((builder llvm-builder) (v llvm-value) (idx i32)) llvm-value
+  (load-raw builder (build-int-to-ptr builder v) (+ idx 1)))
+
 (defun compile-function ((m llvm-module) (name string) (param-names Sexpr) (body Sexpr)) llvm-module
     (let ((f (add-function m name)))
       (let ((b (append-block f "entry")))
@@ -2160,8 +2178,13 @@ pub const SOURCE: &str = r#"
                                         (if (equal s "pat-ctor")
                                             (let ((variant (sexpr-int (sexpr-car (sexpr-cdr pat)))))
                                               (let ((subpats (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))
-                                                (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder v variant) fail-block)
-                                                (compile-ctor-subpatterns builder env cur-fn v variant subpats 0 fail-block)))
+                                                ;; `is-box`: a sum-ADT box tests/extracts by slot,
+                                                ;; a `Sexpr` variant by the tagged-i64 scheme.
+                                                (let ((is-box (sexpr-bool (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))
+                                                  (if is-box
+                                                      (compile-pattern-guard builder cur-fn (compile-box-tag-test builder v variant) fail-block)
+                                                      (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder v variant) fail-block))
+                                                  (compile-ctor-subpatterns builder env cur-fn v is-box variant subpats 0 fail-block))))
                                             (panic (append "compile-pattern-test: unsupported pattern tag " s)))))))
                            )
                        ;; Tests/extracts each of a `pat-ctor`'s
@@ -2172,14 +2195,14 @@ pub const SOURCE: &str = r#"
                        ;; `compile-sexpr-field` -- and for `cons`, no
                        ;; reason to emit an `rt_car`/`rt_cdr` call
                        ;; either).
-                       (compile-ctor-subpatterns ((builder llvm-builder) (env Scope<llvm-value>) (cur-fn llvm-function) (v llvm-value) (variant i64) (subpats Sexpr) (idx i32) (fail-block llvm-basic-block)) ()
+                       (compile-ctor-subpatterns ((builder llvm-builder) (env Scope<llvm-value>) (cur-fn llvm-function) (v llvm-value) (is-box bool) (variant i64) (subpats Sexpr) (idx i32) (fail-block llvm-basic-block)) ()
                          (if (sexpr-consp subpats)
                              (let ((p (sexpr-car subpats)) (rest (sexpr-cdr subpats)))
                               (if (eq (sexpr-sym-name (sexpr-car p)) "pat-wild")
-                                (compile-ctor-subpatterns builder env cur-fn v variant rest (+ idx 1) fail-block)
-                                (let ((field-v (compile-sexpr-field builder m v variant idx)))
+                                (compile-ctor-subpatterns builder env cur-fn v is-box variant rest (+ idx 1) fail-block)
+                                (let ((field-v (if is-box (compile-box-field builder v idx) (compile-sexpr-field builder m v variant idx))))
                                   (compile-pattern-test builder env cur-fn field-v p fail-block)
-                                  (compile-ctor-subpatterns builder env cur-fn v variant rest (+ idx 1) fail-block))))
+                                  (compile-ctor-subpatterns builder env cur-fn v is-box variant rest (+ idx 1) fail-block))))
                              ()))
                        ;; `(match is-fn scrutinee-form ((pattern-form .
                        ;; body-form)...))` -- `Expr::Match` over a
@@ -2240,15 +2263,22 @@ pub const SOURCE: &str = r#"
                          (let ((is-fn (sexpr-bool (sexpr-car (sexpr-cdr e)))))
                            (let ((scrut-form (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
                              (let ((arms (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
+                               ;; `is-box` (appended by `ast_bridge::translate_match`):
+                               ;; the scrutinee is a sum-ADT box rather than a `Sexpr`.
+                               (let ((is-box (sexpr-bool (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
                                (let ((scrut-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base scrut-form)))
-                                 (let ((ignored (push-sexpr-root builder m scrut-v)))
+                                 ;; A sum-ADT box isn't GC-managed (never scanned or
+                                 ;; freed) and its `Sexpr` fields are permanently rooted
+                                 ;; from construction, so a box scrutinee needs no
+                                 ;; sexpr root of its own; a `Sexpr` scrutinee does.
+                                 (let ((ignored (if is-box () (push-sexpr-root builder m scrut-v))))
                                    (let ((merge-block (append-block cur-fn "match-merge")))
                                      (let ((slot (alloca-args builder 1)))
                                        (compile-match-arms builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base is-fn scrut-v slot merge-block arms)
                                        (position-at-end builder merge-block)
                                        (let ((result (load-raw builder slot 0)))
-                                         (let ((ignored2 (pop-sexpr-root builder m)))
-                                           result))))))))))
+                                         (let ((ignored2 (if is-box () (pop-sexpr-root builder m))))
+                                           result)))))))))))
                        ;; Tries each `(pattern-form . body-form)` arm in
                        ;; order: `push-frame env` a fresh frame for any name
                        ;; this arm's pattern might bind, test the pattern

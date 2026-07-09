@@ -366,6 +366,11 @@ impl Interp {
                 self.struct_types.insert(name);
                 Ok(None)
             }
+            // A `defenum` sum type is a pure check-time registration, like
+            // `Option`/`Result`. Unlike `Defstruct` it is *not* recorded in
+            // `struct_types`: an enum instance is an immutable `RtValue::Data`,
+            // never a boxed struct.
+            TopLevel::Defenum { .. } => Ok(None),
             TopLevel::Defvar { name, ty, value, .. } => {
                 let v = self.eval(heap, &value, &Env::new())?;
                 let kind = self.heap_repr_kind(&ty);

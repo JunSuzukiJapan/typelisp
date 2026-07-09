@@ -113,7 +113,7 @@ fn doiter_works_inside_a_where_bounded_generic_function() {
     // *un-pinned* `(where (Iter T))` form as a regression check — see
     // `doiter_sums_inside_a_where_bounded_generic_function_with_a_pinned_item`
     // for the pinned/`sum` sibling.
-    let src = "(defun (count-iter T) ((it T)) i32 (where (Iter T))
+    let src = "(defun count-iter<T> ((it T)) i32 (where (Iter T))
                  (let ((n 0)) (doiter (x it) (setf n (+ n 1))) n))
                (defun make-v () Vector<i32> (Vector::new))
                (let ((v (make-v))) (push v 10) (push v 20) (count-iter (iter v)))";
@@ -126,7 +126,7 @@ fn doiter_sums_inside_a_where_bounded_generic_function_with_a_pinned_item() {
     // pinning `Item` to `i32` via `(where (Iter T (Item i32)))` — `x`'s type
     // resolves to a concrete `i32` (not an opaque type variable), so
     // arithmetic (`+`) on it type-checks and runs.
-    let src = "(defun (sum-iter T) ((it T)) i32 (where (Iter T (Item i32)))
+    let src = "(defun sum-iter<T> ((it T)) i32 (where (Iter T (Item i32)))
                  (let ((n 0)) (doiter (x it) (setf n (+ n x))) n))
                (defun make-v () Vector<i32> (Vector::new))
                (let ((v (make-v))) (push v 10) (push v 20) (sum-iter (iter v)))";
@@ -138,7 +138,7 @@ fn call_site_rejects_a_pinned_item_that_does_not_match_the_real_associated_type(
     // `vector-iter<bool>`'s real `Item` is `bool`, but `sum-iter`'s `where`
     // clause pins `Item` to `i32` — the call site must reject this, not
     // type-check the body's `(+ n x)` against a wrong assumption.
-    let src = "(defun (sum-iter T) ((it T)) i32 (where (Iter T (Item i32)))
+    let src = "(defun sum-iter<T> ((it T)) i32 (where (Iter T (Item i32)))
                  (let ((n 0)) (doiter (x it) (setf n (+ n x))) n))
                (defun make-bv () Vector<bool> (Vector::new))
                (let ((v (make-bv))) (push v true) (sum-iter (iter v)))";
@@ -155,7 +155,7 @@ fn a_where_pin_to_a_type_variable_is_inferred_from_the_iterator_alone() {
     // and the returned element type resolve. `last-of` returns the final
     // element, exercising exactly this "element type known only through the
     // iterator" path.
-    let src = "(defun (last-of I A) ((it I)) Option<A> (where (Iter I (Item A)))
+    let src = "(defun last-of<I,A> ((it I)) Option<A> (where (Iter I (Item A)))
                  (let ((r (the Option<A> (Option::none))))
                    (doiter (x it) (setf r (Option::some x)))
                    r))

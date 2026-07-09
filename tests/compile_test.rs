@@ -2405,7 +2405,7 @@ fn a_where_bounded_generic_specializes_and_dispatches_into_compiled_methods() {
         (deftrait Counted (count ((self Self)) i32))
         (defstruct box-a (n i32))
         (impl Counted box-a (count ((self Self)) i32 self::n))
-        (defun (describe T) ((it T)) i32 (where (Counted T)) (count it))
+        (defun describe<T> ((it T)) i32 (where (Counted T)) (count it))
         (defun make-box-a ((n i32)) box-a (box-a::new n))
         (compile box-a::n)
         (compile box-a::count)
@@ -2431,7 +2431,7 @@ fn a_where_bounded_generic_specializes_per_impl_and_dispatches_into_compiled_met
         (defstruct box-b (n i32))
         (impl Counted box-a (count ((self Self)) i32 self::n))
         (impl Counted box-b (count ((self Self)) i32 (* 2 self::n)))
-        (defun (describe T) ((it T)) i32 (where (Counted T)) (count it))
+        (defun describe<T> ((it T)) i32 (where (Counted T)) (count it))
         (defun make-box-a ((n i32)) box-a (box-a::new n))
         (defun make-box-b ((n i32)) box-b (box-b::new n))
         (compile box-a::n)
@@ -2731,4 +2731,97 @@ fn compile_dispatches_char_equals_and_less() {
     .expect("eval failed");
     // 'a'=='a' -> 0, 'a'<'b' -> -10, 'b'>'a' -> 100
     assert_eq!(v, RtValue::Int(90));
+}
+
+// ---- `defenum` / sum-ADT `match` in compiled code (box scrutinee) ----------
+//
+// Construction already lowered to a `compile-construct-box` box (slot 0 = tag,
+// slot 1+ = fields); these exercise the box-scrutinee `match` path added
+// alongside `defenum` — `ast_bridge::translate_match`'s `is-box` branch plus
+// `compiler.rs`'s `compile-box-tag-test`/`compile-box-field`. Closes the
+// `docs/dev/TODO.md` gap where `Match` on a non-`Sexpr` scrutinee was
+// `unsupported`.
+
+/// A compiled `match` on a payload variant tests the box's tag slot and
+/// extracts the field from slot 1.
+#[test]
+fn compile_matches_a_payload_variant_and_extracts_its_field() {
+    // The payload comes from an i64 parameter so the field type is unambiguous
+    // (a bare literal `7` would default to i32 and clash with the i64 return).
+    let v = eval_ok_with_compiler(
+        r#"
+        (defenum Maybe<T> (Just T) (Nothing))
+        (defun m ((x i64)) i64 (match (Maybe::Just x) ((Just v) v) ((Nothing) x)))
+        (compile m)
+        (m 7)
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(7));
+}
+
+/// A compiled `match` discriminates across three nullary variants by the
+/// box's variant-tag slot, selecting the correct arm.
+#[test]
+fn compile_matches_discriminates_among_nullary_variants() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defenum Sign (Neg) (Zero) (Pos))
+        (defun classify () i64 (match (Sign::Pos) ((Neg) 10) ((Zero) 20) ((Pos) 30)))
+        (compile classify)
+        (classify)
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(30));
+}
+
+/// A runtime-chosen variant (both arms reachable): the `if` merges two boxes,
+/// and the compiled `match` picks the arm by the tag slot — the payload arm
+/// extracts, the nullary arm doesn't.
+#[test]
+fn compile_matches_a_runtime_chosen_variant() {
+    // The payload `Just` branch is the `if`'s `then` so its `T=i64` is inferred
+    // before the payload-less `Nothing` `else` (which can't infer `T` alone —
+    // an inference ordering property, the same in the interpreter).
+    let src = r#"
+        (defenum Maybe<T> (Just T) (Nothing))
+        (defun pick ((n i64)) i64
+          (match (if (eq n 0) (Maybe::Just n) (Maybe::Nothing))
+            ((Just v) v)
+            ((Nothing) 99)))
+        (compile pick)
+        (pick %ARG%)
+    "#;
+    assert_eq!(eval_ok_with_compiler(&src.replace("%ARG%", "0")), RtValue::Int(0));
+    assert_eq!(eval_ok_with_compiler(&src.replace("%ARG%", "5")), RtValue::Int(99));
+}
+
+/// The compiled result must agree with the tree-walking interpreter for the
+/// same `defenum` `match` — the JIT/interp-parity check the plan calls for.
+#[test]
+fn compile_and_interpret_agree_on_a_defenum_match() {
+    let prog = r#"
+        (defenum Maybe<T> (Just T) (Nothing))
+        (defun m ((x i64)) i64 (match (Maybe::Just x) ((Just v) (+ v 1)) ((Nothing) x)))
+    "#;
+    let compiled = eval_ok_with_compiler(&format!("{}\n(compile m)\n(m 41)", prog));
+    let interpreted = eval_ok(&format!("{}\n(m 41)", prog));
+    assert_eq!(compiled, interpreted);
+    assert_eq!(compiled, RtValue::Int(42));
+}
+
+/// Built-in `Option` is itself a sum-ADT box, so a compiled `match` on it now
+/// works too (previously `unsupported`), for free from the same generalization.
+/// The `Option` is constructed *inside* compiled code (passing an already-built
+/// `RtValue::Data` across the interp→compiled boundary is a separate, unrelated
+/// argument-marshalling gap).
+#[test]
+fn compile_matches_a_builtin_option() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun u ((n i64)) i64 (match (option::some n) ((Some v) v) ((None) n)))
+        (compile u)
+        (u 5)
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(5));
 }
