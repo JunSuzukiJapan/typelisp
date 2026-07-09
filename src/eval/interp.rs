@@ -1959,6 +1959,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "substring" => Some(string_substring(args)),
             "append" => Some(string_append(args)),
             "lt" => Some(string_lt(args)),
+            "<" | "<=" | ">" | ">=" => Some(string_compare(method, args)),
             // `eq`/`eql`: true identity (`Rc::ptr_eq` — see `RtValue::Str`'s
             // doc comment). `equal`/`equalp`: content comparison, the
             // (case-sensitive/-insensitive) CL predicates a naive "string
@@ -1976,6 +1977,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "upcase" => Some(expect_char(&args[0]).map(|c| RtValue::Char(c.to_ascii_uppercase()))),
             "downcase" => Some(expect_char(&args[0]).map(|c| RtValue::Char(c.to_ascii_lowercase()))),
             "lt" => Some(char_lt(args)),
+            "<" | "<=" | ">" | ">=" => Some(char_compare(method, args)),
             "alphap" => Some(expect_char(&args[0]).map(|c| RtValue::Bool(c.is_ascii_alphabetic()))),
             "digitp" => Some(expect_char(&args[0]).map(|c| RtValue::Bool(c.is_ascii_digit()))),
             // `eq`/`eql`/`equal` all coincide (immediate scalar, and CL's
@@ -3526,12 +3528,42 @@ fn string_lt(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Bool(expect_str(&args[0])? < expect_str(&args[1])?))
 }
 
+/// The `<`/`<=`/`>`/`>=` comparison operators on `string`, lexicographic (byte
+/// order) — the counterpart of `eval_int_builtin`'s numeric comparisons, kept
+/// in one function for the same reason (one match over the operator symbol).
+fn string_compare(method: &str, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let a = expect_str(&args[0])?;
+    let b = expect_str(&args[1])?;
+    Ok(RtValue::Bool(match method {
+        "<" => a < b,
+        "<=" => a <= b,
+        ">" => a > b,
+        ">=" => a >= b,
+        other => return Err(EvalError::Internal(format!("string_compare: not a comparison operator: {}", other))),
+    }))
+}
+
 fn char_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Bool(expect_char(&args[0])? == expect_char(&args[1])?))
 }
 
 fn char_lt(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Bool(expect_char(&args[0])? < expect_char(&args[1])?))
+}
+
+/// The `<`/`<=`/`>`/`>=` comparison operators on `char`, by Unicode scalar
+/// value (a compiled `char` is a raw `i64` code point, so this matches the
+/// integer `icmp`s `compiler.rs` emits for the same operators).
+fn char_compare(method: &str, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let a = expect_char(&args[0])?;
+    let b = expect_char(&args[1])?;
+    Ok(RtValue::Bool(match method {
+        "<" => a < b,
+        "<=" => a <= b,
+        ">" => a > b,
+        ">=" => a >= b,
+        other => return Err(EvalError::Internal(format!("char_compare: not a comparison operator: {}", other))),
+    }))
 }
 
 /// CL's `equalp` for `char` — case-insensitive (`(equalp #\A #\a)` is true).

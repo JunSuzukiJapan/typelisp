@@ -140,7 +140,8 @@
 | `ref` | `(ref s i)` | `(string,i32)→char` | `i` 番目の文字。範囲外は panic |
 | `substring` | `(substring s start end)` | `(string,i32,i32)→string` | 部分文字列 `[start,end)` |
 | `append` | `(append s1 s2)` | `(string,string)→string` | 連結 |
-| `lt` | `(lt s1 s2)` | `(string,string)→bool` | 辞書順比較 |
+| `<` `<=` `>` `>=` | `(op s1 s2)` | `(string,string)→bool` | 辞書順比較（`i32` 等と同じくレシーバ型で多重定義） |
+| `lt` | `(lt s1 s2)` | `(string,string)→bool` | 辞書順の狭義小なり（`<` の旧 CL カタログ名） |
 | `eq` `eql` | `(op s1 s2)` | `(string,string)→bool` | 同一性比較（内容ではなく参照） |
 | `equal` | `(equal s1 s2)` | `(string,string)→bool` | 内容比較（大文字小文字を区別） |
 | `equalp` | `(equalp s1 s2)` | `(string,string)→bool` | 内容比較（大文字小文字を無視、ASCII のみ） |
@@ -151,7 +152,8 @@
 |---|---|---|---|
 | `upcase` | `(upcase c)` | `char→char` | 大文字化（ASCII のみ） |
 | `downcase` | `(downcase c)` | `char→char` | 小文字化（ASCII のみ） |
-| `lt` | `(lt c1 c2)` | `(char,char)→bool` | 比較 |
+| `<` `<=` `>` `>=` | `(op c1 c2)` | `(char,char)→bool` | コードポイント順比較（レシーバ型で多重定義） |
+| `lt` | `(lt c1 c2)` | `(char,char)→bool` | コードポイント順の狭義小なり（`<` の旧 CL カタログ名） |
 | `alphap` | `(alphap c)` | `char→bool` | ASCII アルファベットか |
 | `digitp` | `(digitp c)` | `char→bool` | ASCII 数字か |
 | `eq` `eql` `equal` | `(op c1 c2)` | `(char,char)→bool` | 値の比較 |
@@ -202,6 +204,26 @@
 `Iter` を実装すれば、そのまま `doiter` で回せる（[syntax.md](syntax.md) 参照）。
 
 `cons-cell<A,B>` は `(car cell)`/`(cdr cell)` を持つ汎用の2要素組（タプル構文の代わり）。
+
+## 12.1 `Eq` / `Ord` トレイト（比較）
+
+Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェネリック関数の `where` 境界で
+要素型の比較を要求するのに使う（`sort`/`member`/`assoc` 等）。
+
+```lisp
+(deftrait Eq   (equals ((self Self) (other Self)) bool)
+               (not-equals ((self Self) (other Self)) bool))
+(deftrait Ord  (less ((self Self) (other Self)) bool)
+               (less-equal ((self Self) (other Self)) bool)
+               (greater ((self Self) (other Self)) bool)
+               (greater-equal ((self Self) (other Self)) bool))
+```
+
+`Eq` 実装済み: `i32` `i64` `f64` `bool` `char` `string` `symbol` および `cons-cell<A,B>`（要素が
+`Eq` なら再帰的に）。`Ord` 実装済み: `i32` `i64` `f64` `char` `string` および `cons-cell<A,B>`
+（辞書順、要素が `Ord` なら）。メソッド名が組み込み演算子（`= /= < <= > >=`）・`eq`/`lt` と重複
+しないのは、組み込みは再定義できず各実装がそれらへ委譲するため。スカラの比較演算子そのものは
+レシーバ型で多重定義された組み込みメソッド（§1・§2・§8・§9）。
 
 ## 13. 高階関数
 

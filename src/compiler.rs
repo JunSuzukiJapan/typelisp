@@ -636,7 +636,11 @@ pub const SOURCE: &str = r#"
   (if (equal method "eq") true
   (if (equal method "equal") true
   (if (equal method "lt") true
-  (equal method "append")))))))
+  (if (equal method "<") true
+  (if (equal method "<=") true
+  (if (equal method ">") true
+  (if (equal method ">=") true
+  (equal method "append")))))))))))
 
 ;; `char`'s natively-compilable methods: a compiled `char` is a raw `i64`
 ;; code point, so the content comparisons lower to the same integer `icmp`s
@@ -646,7 +650,22 @@ pub const SOURCE: &str = r#"
   (if (equal method "eq") true
   (if (equal method "eql") true
   (if (equal method "equal") true
-  (equal method "lt")))))
+  (if (equal method "lt") true
+  (if (equal method "<") true
+  (if (equal method "<=") true
+  (if (equal method ">") true
+  (if (equal method ">=") true
+  false)))))))))
+
+;; Emits `rt_str_lt(x, y)` (strict lexicographic less-than, an `i64` 0/1). The
+;; four string comparison operators all derive from it: `<`=lt(a,b),
+;; `>`=lt(b,a), `<=`=not lt(b,a), `>=`=not lt(a,b) — so no `rt_str_le`/`_gt`/
+;; `_ge` runtime helpers are needed (see `compile-assoc`'s string branch).
+(defun str-lt-call ((builder llvm-builder) (m llvm-module) (x llvm-value) (y llvm-value)) llvm-value
+  (let ((args-ptr (alloca-args builder 2)))
+    (store-arg builder args-ptr 0 x)
+    (store-arg builder args-ptr 1 y)
+    (build-call builder (get-function m "rt_str_lt") args-ptr 2)))
 
 ;; Counts a plain `Sexpr` list's elements — used to size the `i64*` args
 ;; array a direct call needs (`compile-apply`'s `alloca-args`/`build-call`),
@@ -1286,17 +1305,22 @@ pub const SOURCE: &str = r#"
                                                      (store-arg builder args-ptr 0 a)
                                                      (store-arg builder args-ptr 1 b)
                                                      (build-call builder (get-function m "rt_str_eq") args-ptr 2))
-                                                   (if (equal method "lt")
-                                                       (let ((args-ptr (alloca-args builder 2)))
-                                                         (store-arg builder args-ptr 0 a)
-                                                         (store-arg builder args-ptr 1 b)
-                                                         (build-call builder (get-function m "rt_str_lt") args-ptr 2))
-                                                       (if (equal method "append")
-                                                           (let ((args-ptr (alloca-args builder 2)))
-                                                             (store-arg builder args-ptr 0 a)
-                                                             (store-arg builder args-ptr 1 b)
-                                                             (build-call builder (get-function m "rt_str_append") args-ptr 2))
-                                                           (panic (append "compile-assoc: unsupported str method " method)))))))))
+                                                   ;; `<`/`>`/`<=`/`>=` all derive from `rt_str_lt`
+                                                   ;; (`str-lt-call`); `not` is `(icmp-eq v 0)`.
+                                                   (if (if (equal method "lt") true (equal method "<"))
+                                                       (str-lt-call builder m a b)
+                                                       (if (equal method ">")
+                                                           (str-lt-call builder m b a)
+                                                           (if (equal method "<=")
+                                                               (build-icmp-eq builder (str-lt-call builder m b a) (const-i64 builder 0))
+                                                               (if (equal method ">=")
+                                                                   (build-icmp-eq builder (str-lt-call builder m a b) (const-i64 builder 0))
+                                                                   (if (equal method "append")
+                                                                       (let ((args-ptr (alloca-args builder 2)))
+                                                                         (store-arg builder args-ptr 0 a)
+                                                                         (store-arg builder args-ptr 1 b)
+                                                                         (build-call builder (get-function m "rt_str_append") args-ptr 2))
+                                                                       (panic (append "compile-assoc: unsupported str method " method))))))))))))
                                    (if (if (if (equal type-name "i64") true (equal type-name "i32")) (int-native-method? method) false)
                                        (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
                                          (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
@@ -1321,14 +1345,20 @@ pub const SOURCE: &str = r#"
                                                                                (panic (append "compile-assoc: unsupported method " method)))))))))))))
                                        (if (if (equal type-name "char") (char-native-method? method) false)
                                            ;; `char` receivers: raw `i64` code points in
-                                           ;; compiled code, so the content comparisons are
-                                           ;; plain integer `icmp`s (`char-native-method?`
-                                           ;; admits only `eq`/`eql`/`equal` → eq and `lt`).
+                                           ;; compiled code, so the comparisons lower to the
+                                           ;; same integer `icmp`s the int branch uses —
+                                           ;; `lt`/`<`/`<=`/`>`/`>=` and `eq`/`eql`/`equal` → eq.
                                            (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
                                              (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                                               (if (equal method "lt")
+                                               (if (if (equal method "lt") true (equal method "<"))
                                                    (build-icmp-lt builder a b2)
-                                                   (build-icmp-eq builder a b2))))
+                                                   (if (equal method "<=")
+                                                       (build-icmp-le builder a b2)
+                                                       (if (equal method ">")
+                                                           (build-icmp-gt builder a b2)
+                                                           (if (equal method ">=")
+                                                               (build-icmp-ge builder a b2)
+                                                               (build-icmp-eq builder a b2)))))))
                                            (compile-assoc-user builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name method rest))))))))
                        ;; The user-defined-method leg of `compile-assoc`'s
                        ;; dispatch (see its doc comment): call the callee

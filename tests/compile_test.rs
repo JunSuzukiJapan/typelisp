@@ -2733,6 +2733,67 @@ fn compile_dispatches_char_equals_and_less() {
     assert_eq!(v, RtValue::Int(90));
 }
 
+// ---- `< <= > >=` comparison operators on char/string, compiled --------------
+//
+// The operators are overloaded builtin methods on char/string (like the numeric
+// ones): char lowers to integer `icmp`s (raw code point), string derives all
+// four from `rt_str_lt` (`compiler.rs`'s `str-lt-call`). No prelude needed —
+// they're native builtins, reached through `compile-assoc`'s char/string arms.
+
+#[test]
+fn compile_dispatches_char_comparison_operators() {
+    let v = run_with_compiler(
+        r#"
+        (defun ccmp ((a char) (b char)) i64
+          (if (< a b) 1 (if (<= a b) 2 (if (> a b) 3 4))))
+        (compile ccmp)
+        (+ (ccmp (ref "ab" 0) (ref "ab" 1))
+           (+ (* (ccmp (ref "ba" 0) (ref "ba" 1)) 10)
+              (* (ccmp (ref "aa" 0) (ref "aa" 1)) 100)))
+        "#,
+    )
+    .expect("eval failed");
+    // 'a'<'b' -> 1 ; 'b' vs 'a': >  -> 3 -> 30 ; 'a' vs 'a': <= -> 2 -> 200
+    assert_eq!(v, RtValue::Int(231));
+}
+
+#[test]
+fn compile_dispatches_string_comparison_operators() {
+    let v = run_with_compiler(
+        r#"
+        (defun scmp ((a string) (b string)) i64
+          (if (< a b) 1 (if (<= a b) 2 (if (> a b) 3 4))))
+        (compile scmp)
+        (+ (scmp "a" "b")
+           (+ (* (scmp "b" "a") 10)
+              (* (scmp "x" "x") 100)))
+        "#,
+    )
+    .expect("eval failed");
+    // "a"<"b" -> 1 ; "b" vs "a": > -> 3 -> 30 ; "x" vs "x": <= -> 2 -> 200
+    assert_eq!(v, RtValue::Int(231));
+}
+
+#[test]
+fn compile_string_ge_and_le_derive_from_rt_str_lt() {
+    // Exercises `>=`/`<=` specifically (the `not rt_str_lt(...)` derivations).
+    let v = run_with_compiler(
+        r#"
+        (defun sle ((a string) (b string)) i64 (if (<= a b) 1 0))
+        (defun sge ((a string) (b string)) i64 (if (>= a b) 1 0))
+        (compile sle)
+        (compile sge)
+        (+ (sle "a" "a")
+           (+ (* (sle "b" "a") 10)
+              (+ (* (sge "a" "a") 100)
+                 (* (sge "a" "b") 1000))))
+        "#,
+    )
+    .expect("eval failed");
+    // sle("a","a")=1 ; sle("b","a")=0 ; sge("a","a")=1 ->100 ; sge("a","b")=0
+    assert_eq!(v, RtValue::Int(101));
+}
+
 // ---- `defenum` / sum-ADT `match` in compiled code (box scrutinee) ----------
 //
 // Construction already lowered to a `compile-construct-box` box (slot 0 = tag,

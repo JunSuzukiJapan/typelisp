@@ -1117,6 +1117,13 @@ fn string_assoc() -> HashMap<String, AssocFn> {
     m.insert("substring".to_string(), method(vec![Type::Str, Type::I32, Type::I32], Type::Str));
     m.insert("append".to_string(), method(vec![Type::Str, Type::Str], Type::Str));
     m.insert("lt".to_string(), method(vec![Type::Str, Type::Str], Type::Bool));
+    // Lexicographic comparison operators, overloaded on `string` the same way
+    // `int_assoc` overloads them on numbers (dispatched by receiver type — see
+    // the prelude's `impl Ord string`). `lt` is kept as the older CL-catalog
+    // primitive `<` now supersedes.
+    for name in ["<", "<=", ">", ">="] {
+        m.insert(name.to_string(), method(vec![Type::Str, Type::Str], Type::Bool));
+    }
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), method(vec![Type::Str, Type::Str], Type::Bool));
     }
@@ -1140,6 +1147,13 @@ fn char_assoc() -> HashMap<String, AssocFn> {
     m.insert("upcase".to_string(), method(vec![Type::Char], Type::Char));
     m.insert("downcase".to_string(), method(vec![Type::Char], Type::Char));
     m.insert("lt".to_string(), method(vec![Type::Char, Type::Char], Type::Bool));
+    // Code-point comparison operators, overloaded on `char` like the numeric
+    // ones (a compiled `char` is a raw `i64` code point, so these lower to the
+    // same integer `icmp`s — see `compiler.rs`'s `char-native-method?`). `lt`
+    // is kept as the older CL-catalog primitive `<` now supersedes.
+    for name in ["<", "<=", ">", ">="] {
+        m.insert(name.to_string(), method(vec![Type::Char, Type::Char], Type::Bool));
+    }
     m.insert("alphap".to_string(), method(vec![Type::Char], Type::Bool));
     m.insert("digitp".to_string(), method(vec![Type::Char], Type::Bool));
     for name in ["eq", "eql", "equal", "equalp"] {

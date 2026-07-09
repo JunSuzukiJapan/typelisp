@@ -605,39 +605,50 @@ pub const SOURCE: &str = r#"
 ;; instead of taking a predicate (the way `find`/`position`/`count`/`remove-if`
 ;; do — those keep their predicate form, mirroring CL's `-if` family).
 ;;
-;; Method names: `equals`/`less`, *not* `eq`/`eql`/`equal`/`equalp`/`lt` — all
-;; five are builtin per-scalar methods (`registry.rs`'s `int_assoc`/
-;; `string_assoc`/...) and builtins cannot be redefined; the impls below
-;; *delegate* to them instead. (`?`/`!` name suffixes are banned project-wide,
-;; so no `eq?`/`less?`.)
+;; Modelled on Rust's `PartialEq`/`PartialOrd`, kept under the names `Eq`/`Ord`
+;; (renaming would churn every `where (Ord T)`/`(Eq T)` bound below). `Eq` is
+;; Rust's `PartialEq` (`equals`=`==`, `not-equals`=`!=`); `Ord` is Rust's
+;; `PartialOrd` (`less`=`<`, `less-equal`=`<=`, `greater`=`>`, `greater-equal`=
+;; `>=`). typelisp `deftrait` has no default method bodies, so each impl spells
+;; out every method — the scalar impls all delegate uniformly to the builtin
+;; per-type operators (`= /= < <= > >=`, `equal`/`eq`, all overloaded by
+;; receiver type, see `registry.rs`). Method names avoid the builtin operator/
+;; `eq`/`lt` names on purpose: builtins cannot be redefined, and `?`/`!` name
+;; suffixes are banned project-wide (so no `eq?`/`less?`).
 (deftrait Eq
-  (equals ((self Self) (other Self)) bool))
+  (equals ((self Self) (other Self)) bool)
+  (not-equals ((self Self) (other Self)) bool))
 (deftrait Ord
-  (less ((self Self) (other Self)) bool))
+  (less ((self Self) (other Self)) bool)
+  (less-equal ((self Self) (other Self)) bool)
+  (greater ((self Self) (other Self)) bool)
+  (greater-equal ((self Self) (other Self)) bool))
 
-;; Scalar `Eq` impls. Numbers delegate to `=`; `string`/`char`/`bool` to
+;; Scalar `Eq` impls. Numbers delegate to `=`/`/=`; `string`/`char`/`bool` to
 ;; `equal` (content comparison — a `string`'s `eq` is `Rc` identity, which
 ;; would make `(member "x" ...)` fail on separately built equal-content
 ;; strings); `symbol` to `eq` (interned, identity *is* content equality).
-;; Only the seven scalar types with a usable comparison builtin get an impl —
-;; `f32`/`i8`/`i16`/`u*` have empty assoc tables (no `=`/`<` to delegate to),
-;; so they stay outside `Eq`/`Ord` until they grow real arithmetic.
-(impl Eq i32    (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq i64    (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq f64    (equals ((self Self) (other Self)) bool (= self other)))
-(impl Eq bool   (equals ((self Self) (other Self)) bool (equal self other)))
-(impl Eq char   (equals ((self Self) (other Self)) bool (equal self other)))
-(impl Eq string (equals ((self Self) (other Self)) bool (equal self other)))
-(impl Eq symbol (equals ((self Self) (other Self)) bool (eq self other)))
+;; `not-equals` negates whichever equality the type uses. Only the seven scalar
+;; types with a usable comparison builtin get an impl — `f32`/`i8`/`i16`/`u*`
+;; have empty assoc tables (no `=`/`<` to delegate to), so they stay outside
+;; `Eq`/`Ord` until they grow real arithmetic.
+(impl Eq i32    (equals ((self Self) (other Self)) bool (= self other))  (not-equals ((self Self) (other Self)) bool (/= self other)))
+(impl Eq i64    (equals ((self Self) (other Self)) bool (= self other))  (not-equals ((self Self) (other Self)) bool (/= self other)))
+(impl Eq f64    (equals ((self Self) (other Self)) bool (= self other))  (not-equals ((self Self) (other Self)) bool (/= self other)))
+(impl Eq bool   (equals ((self Self) (other Self)) bool (equal self other)) (not-equals ((self Self) (other Self)) bool (not (equal self other))))
+(impl Eq char   (equals ((self Self) (other Self)) bool (equal self other)) (not-equals ((self Self) (other Self)) bool (not (equal self other))))
+(impl Eq string (equals ((self Self) (other Self)) bool (equal self other)) (not-equals ((self Self) (other Self)) bool (not (equal self other))))
+(impl Eq symbol (equals ((self Self) (other Self)) bool (eq self other))    (not-equals ((self Self) (other Self)) bool (not (eq self other))))
 
-;; Scalar `Ord` impls. Numbers delegate to `<`; `string`/`char` to the builtin
-;; `lt` method (lexicographic / code-point order). `bool`/`symbol` carry no
-;; meaningful order, so no `Ord` for them.
-(impl Ord i32    (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord i64    (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord f64    (less ((self Self) (other Self)) bool (< self other)))
-(impl Ord char   (less ((self Self) (other Self)) bool (lt self other)))
-(impl Ord string (less ((self Self) (other Self)) bool (lt self other)))
+;; Scalar `Ord` impls. Every scalar now has the overloaded `< <= > >=` builtins
+;; (numbers always had them; `char`/`string` gained them alongside these
+;; expanded traits — code-point / lexicographic order), so all five delegate
+;; uniformly. `bool`/`symbol` carry no meaningful order, so no `Ord` for them.
+(impl Ord i32    (less ((self Self) (other Self)) bool (< self other)) (less-equal ((self Self) (other Self)) bool (<= self other)) (greater ((self Self) (other Self)) bool (> self other)) (greater-equal ((self Self) (other Self)) bool (>= self other)))
+(impl Ord i64    (less ((self Self) (other Self)) bool (< self other)) (less-equal ((self Self) (other Self)) bool (<= self other)) (greater ((self Self) (other Self)) bool (> self other)) (greater-equal ((self Self) (other Self)) bool (>= self other)))
+(impl Ord f64    (less ((self Self) (other Self)) bool (< self other)) (less-equal ((self Self) (other Self)) bool (<= self other)) (greater ((self Self) (other Self)) bool (> self other)) (greater-equal ((self Self) (other Self)) bool (>= self other)))
+(impl Ord char   (less ((self Self) (other Self)) bool (< self other)) (less-equal ((self Self) (other Self)) bool (<= self other)) (greater ((self Self) (other Self)) bool (> self other)) (greater-equal ((self Self) (other Self)) bool (>= self other)))
+(impl Ord string (less ((self Self) (other Self)) bool (< self other)) (less-equal ((self Self) (other Self)) bool (<= self other)) (greater ((self Self) (other Self)) bool (> self other)) (greater-equal ((self Self) (other Self)) bool (>= self other)))
 
 ;; `cons-cell<A,B>`'s Eq/Ord: recursive (structural) comparison. The field
 ;; comparisons go through the methods' own `where` bounds — checked as
@@ -651,7 +662,10 @@ pub const SOURCE: &str = r#"
   (equals ((self Self) (other Self)) bool (where (Eq A) (Eq B))
     (if (equals self::car other::car)
         (equals self::cdr other::cdr)
-        false)))
+        false))
+  ;; `not-equals` derives from `equals` (Rust's `PartialEq::ne` default).
+  (not-equals ((self Self) (other Self)) bool (where (Eq A) (Eq B))
+    (not (equals self other))))
 
 ;; Ord: lexicographic, `car` first, then `cdr`. The double-`less` form (car
 ;; strictly less → true; car strictly greater → false; otherwise cars are
@@ -664,7 +678,15 @@ pub const SOURCE: &str = r#"
         true
         (if (less other::car self::car)
             false
-            (less self::cdr other::cdr)))))
+            (less self::cdr other::cdr))))
+  ;; `less-equal`/`greater`/`greater-equal` derive from the total-order `less`
+  ;; (Rust's `PartialOrd` defaults): `a>b ⇔ b<a`, `a<=b ⇔ ¬(b<a)`, `a>=b ⇔ ¬(a<b)`.
+  (greater ((self Self) (other Self)) bool (where (Ord A) (Ord B))
+    (less other self))
+  (less-equal ((self Self) (other Self)) bool (where (Ord A) (Ord B))
+    (not (less other self)))
+  (greater-equal ((self Self) (other Self)) bool (where (Ord A) (Ord B))
+    (not (less self other))))
 
 ;; Sequence operations over `Iter` (redesign Phase 6.5) — the typed rebuild
 ;; of the `Sexpr` list library removed in Phase 5 (`length`/`append`/`nth`/
