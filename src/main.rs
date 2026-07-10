@@ -200,6 +200,8 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
     match v {
         RtValue::Int(i) => i.to_string(),
         RtValue::Float(f) => format_float(*f),
+        RtValue::Bignum(n) => n.to_string(),
+        RtValue::Ratio(r) => format!("{}/{}", r.numer(), r.denom()),
         RtValue::Bool(b) => b.to_string(),
         RtValue::Char(c) => format!("#\\{}", c),
         RtValue::Str(s) => format!("{:?}", s),
@@ -256,6 +258,11 @@ fn format_sexpr(heap: &Heap, v: Value) -> String {
         // A closure is a boxed value too since Stage 6b — printed opaquely,
         // as the old dedicated `RtValue::Closure` arm did.
         Value::Boxed(id) if heap.is_closure(id) => "#<closure>".to_string(),
+        Value::Boxed(id) if heap.is_bignum(id) => heap.bignum_value(id).to_string(),
+        Value::Boxed(id) if heap.is_ratio(id) => {
+            let r = heap.ratio_value(id);
+            format!("{}/{}", r.numer(), r.denom())
+        }
         Value::Boxed(id) => format_float(heap.float_value(id)),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),

@@ -23,6 +23,9 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use num_bigint::BigInt;
+use num_rational::BigRational;
+
 /// One cons cell as laid out in the arena.
 ///
 /// `next_free` chains cells on the free list and is meaningful only while the
@@ -168,6 +171,16 @@ impl BoxId {
 #[derive(Clone, Debug)]
 pub(crate) enum BoxedObj {
     Float(f64),
+    /// A `bignum` (arbitrary-precision integer, CL's bignum). Heap-boxed for
+    /// the same reason `Float` is — the value doesn't fit alongside a tag in
+    /// one 64-bit word — with the payload (a `num_bigint::BigInt`) living in
+    /// ordinary Rust memory like a `Str`'s `String` buffer: nothing nested
+    /// for the mark phase to trace.
+    Bignum(BigInt),
+    /// A `ratio` (exact rational, CL's ratio type): a `num_rational::BigRational`,
+    /// always kept in reduced form with a positive denominator (the crate
+    /// normalizes on construction). Same heap-boxing rationale as `Bignum`.
+    Ratio(BigRational),
     Struct { type_name: String, payload: StructPayload },
     /// A shared mutable variable slot — the heap-resident replacement for
     /// the interpreter's `Rc<RefCell<RtValue>>` binding cells, for bindings

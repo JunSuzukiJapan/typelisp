@@ -110,7 +110,7 @@ fn note(name: &str, ty: &Type, bound: &HashSet<String>, siblings: &HashSet<Strin
 
 fn walk(typed: &Typed, bound: &HashSet<String>, siblings: &HashSet<String>, seen: &mut HashSet<String>, order: &mut Vec<(String, Type)>) {
     match &typed.expr {
-        Expr::Int(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_) | Expr::Str(_) | Expr::Unit => {}
+        Expr::Int(_) | Expr::Float(_) | Expr::Bignum(_) | Expr::Ratio(_) | Expr::Bool(_) | Expr::Char(_) | Expr::Str(_) | Expr::Unit => {}
         Expr::Var(name) => note(name, &typed.ty, bound, siblings, seen, order),
         Expr::Global(_) | Expr::FnRef(_) | Expr::MethodRef { .. } => {}
         Expr::If(cond, then, els) => {

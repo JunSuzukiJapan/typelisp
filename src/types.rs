@@ -87,6 +87,16 @@ pub enum Type {
     Usize,
     F32,
     F64,
+    /// The `bignum` type: an arbitrary-precision integer (CL's bignum). A
+    /// separate static type from the fixed-width integers — this language is
+    /// statically typed, so CL's transparent fixnum->bignum overflow
+    /// promotion doesn't apply; conversions are explicit (`int->bignum`/
+    /// `bignum->int`/...).
+    Bignum,
+    /// The `ratio` type: an exact rational (CL's ratio), kept reduced with a
+    /// positive denominator. Like `Bignum`, its own static type with
+    /// explicit conversions (`int->ratio`/`ratio->float`/...).
+    Ratio,
     Bool,
     Char,
     /// The `String` type.
@@ -140,7 +150,8 @@ pub fn primitive_types() -> Vec<Type> {
     vec![
         Type::I8, Type::I16, Type::I32, Type::I64, Type::Isize,
         Type::U8, Type::U16, Type::U32, Type::U64, Type::Usize,
-        Type::F32, Type::F64, Type::Bool, Type::Char, Type::Str, Type::Symbol,
+        Type::F32, Type::F64, Type::Bignum, Type::Ratio,
+        Type::Bool, Type::Char, Type::Str, Type::Symbol,
     ]
 }
 
@@ -163,6 +174,8 @@ pub fn prim_type_path(ty: &Type) -> Option<Path> {
         Type::Usize => "usize",
         Type::F32 => "f32",
         Type::F64 => "f64",
+        Type::Bignum => "bignum",
+        Type::Ratio => "ratio",
         Type::Bool => "bool",
         Type::Char => "char",
         Type::Str => "string",
@@ -290,6 +303,8 @@ fn named_or_primitive(segs: Vec<String>, args: Vec<Type>) -> Type {
             "usize" => return Type::Usize,
             "f32" => return Type::F32,
             "f64" => return Type::F64,
+            "bignum" => return Type::Bignum,
+            "ratio" => return Type::Ratio,
             "bool" => return Type::Bool,
             "char" => return Type::Char,
             "string" => return Type::Str,

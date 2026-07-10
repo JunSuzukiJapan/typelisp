@@ -4,6 +4,9 @@
 //! [`Typed`] tree: every node carries the [`Type`] it was checked at, so the
 //! later interpreter (step 4) can walk this tree without re-deriving types.
 
+use num_bigint::BigInt;
+use num_rational::BigRational;
+
 use crate::{Loc, Path, Type};
 
 /// An expression node annotated with its checked type.
@@ -45,6 +48,15 @@ pub type LabelDef = (String, Vec<(String, Type)>, Vec<Typed>);
 pub enum Expr {
     Int(i64),
     Float(f64),
+    /// A `bignum` literal — extracted from its heap box at check time
+    /// (`Heap::bignum_value`), the same "own the scalar payload, no live
+    /// heap pointer baked into the tree" treatment `Float` already gets (see
+    /// this type's own doc comment on why `f64` there needs no special
+    /// heap-independence handling: a `BigInt` is likewise plain owned Rust
+    /// memory, not a GC-tracked heap reference).
+    Bignum(BigInt),
+    /// A `ratio` literal, same treatment as [`Expr::Bignum`].
+    Ratio(BigRational),
     Bool(bool),
     Char(char),
     Str(String),
@@ -180,6 +192,8 @@ pub enum QuotedSexpr {
     Nil,
     Int(i64),
     Float(f64),
+    Bignum(BigInt),
+    Ratio(BigRational),
     Char(char),
     Bool(bool),
     Sym(String),

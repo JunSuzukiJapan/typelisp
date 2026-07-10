@@ -23,6 +23,9 @@ use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::AddressSpace;
+use num_bigint::BigInt;
+use num_rational::BigRational;
+use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
 use crate::{BoxId, Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
 
@@ -412,6 +415,8 @@ impl Interp {
         match &t.expr {
             Expr::Int(n) => Ok(RtValue::Int(*n)),
             Expr::Float(f) => Ok(RtValue::Float(*f)),
+            Expr::Bignum(n) => Ok(RtValue::Bignum(Rc::new(n.clone()))),
+            Expr::Ratio(r) => Ok(RtValue::Ratio(Rc::new(r.clone()))),
             Expr::Bool(b) => Ok(RtValue::Bool(*b)),
             Expr::Char(c) => Ok(RtValue::Char(*c)),
             Expr::Str(s) => Ok(RtValue::Str(s.as_str().into())),
@@ -792,6 +797,8 @@ impl Interp {
                 self.sync_roots(heap);
                 heap.cons(car, cdr).map_err(|e| EvalError::Panic(e.to_string()))?
             }
+            SEXPR_BIGNUM => heap.alloc_bignum((*rt_bignum(&vs[0])?).clone()),
+            SEXPR_RATIO => heap.alloc_ratio((*rt_ratio(&vs[0])?).clone()),
             _ => return Err(EvalError::Internal("sexpr: unknown variant".into())),
         };
         Ok(RtValue::Sexpr(v))
@@ -1593,6 +1600,8 @@ fn alloc_quoted(heap: &mut Heap, qs: &QuotedSexpr) -> Result<Value, EvalError> {
         QuotedSexpr::Nil => Ok(Value::Empty),
         QuotedSexpr::Int(n) => Ok(Value::Int(*n)),
         QuotedSexpr::Float(f) => Ok(heap.alloc_float(*f)),
+        QuotedSexpr::Bignum(n) => Ok(heap.alloc_bignum(n.clone())),
+        QuotedSexpr::Ratio(r) => Ok(heap.alloc_ratio(r.clone())),
         QuotedSexpr::Char(c) => Ok(Value::Char(*c)),
         QuotedSexpr::Bool(b) => Ok(Value::Bool(*b)),
         QuotedSexpr::Sym(s) => Ok(heap.intern_symbol(s)),
@@ -1710,6 +1719,20 @@ fn rt_str(v: RtValue) -> Result<String, EvalError> {
     }
 }
 
+fn rt_bignum(v: &RtValue) -> Result<Rc<BigInt>, EvalError> {
+    match v {
+        RtValue::Bignum(n) => Ok(n.clone()),
+        _ => Err(EvalError::Internal("sexpr: expected a bignum field".into())),
+    }
+}
+
+fn rt_ratio(v: &RtValue) -> Result<Rc<BigRational>, EvalError> {
+    match v {
+        RtValue::Ratio(r) => Ok(r.clone()),
+        _ => Err(EvalError::Internal("sexpr: expected a ratio field".into())),
+    }
+}
+
 fn rt_sexpr(v: &RtValue) -> Result<Value, EvalError> {
     match v {
         RtValue::Sexpr(val) => Ok(*val),
@@ -1726,6 +1749,8 @@ const SEXPR_BOOL: usize = 4;
 const SEXPR_SYM: usize = 5;
 const SEXPR_STR: usize = 6;
 const SEXPR_CONS: usize = 7;
+const SEXPR_BIGNUM: usize = 8;
+const SEXPR_RATIO: usize = 9;
 
 /// Evaluate a built-in `i32`/`i64` arithmetic/comparison instance method
 /// (`registry::int_assoc`) — shared by both widths since `RtValue::Int`
@@ -1839,6 +1864,179 @@ fn float_unary(args: &[RtValue], f: fn(f64) -> f64) -> Result<RtValue, EvalError
 
 fn float_expt(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Float(expect_float(&args[0])?.powf(expect_float(&args[1])?)))
+}
+
+fn expect_bignum(v: &RtValue) -> Result<Rc<BigInt>, EvalError> {
+    match v {
+        RtValue::Bignum(n) => Ok(n.clone()),
+        other => Err(EvalError::Internal(format!("expected a bignum, got {:?}", other))),
+    }
+}
+
+fn expect_ratio(v: &RtValue) -> Result<Rc<BigRational>, EvalError> {
+    match v {
+        RtValue::Ratio(r) => Ok(r.clone()),
+        other => Err(EvalError::Internal(format!("expected a ratio, got {:?}", other))),
+    }
+}
+
+/// Evaluate a built-in `bignum` arithmetic/comparison instance method
+/// (`registry::bignum_assoc`). Same operation set/panic policy as
+/// [`eval_int_builtin`]: `/`/`mod` truncate toward zero (`BigInt`'s `Div`/
+/// `Rem` impls already do, matching Rust's `i64` semantics) and panic on a
+/// zero divisor — the type system can't express "nonzero", the same
+/// precedent as `car`/`cdr` on a non-`Cons` `Sexpr`.
+fn eval_bignum_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+    let (a, b) = match (args.first(), args.get(1)) {
+        (Some(a), Some(b)) => match (expect_bignum(a), expect_bignum(b)) {
+            (Ok(a), Ok(b)) => (a, b),
+            (Err(e), _) | (_, Err(e)) => return Some(Err(e)),
+        },
+        _ => return Some(Err(EvalError::Internal(format!("{}: expected two bignums", name)))),
+    };
+    let v = match name {
+        "+" => RtValue::Bignum(Rc::new(&*a + &*b)),
+        "-" => RtValue::Bignum(Rc::new(&*a - &*b)),
+        "*" => RtValue::Bignum(Rc::new(&*a * &*b)),
+        "/" => {
+            if b.is_zero() {
+                return Some(Err(EvalError::Panic("divide by zero".into())));
+            }
+            RtValue::Bignum(Rc::new(&*a / &*b))
+        }
+        "mod" => {
+            if b.is_zero() {
+                return Some(Err(EvalError::Panic("mod by zero".into())));
+            }
+            RtValue::Bignum(Rc::new(&*a % &*b))
+        }
+        "<" => RtValue::Bool(*a < *b),
+        "<=" => RtValue::Bool(*a <= *b),
+        ">" => RtValue::Bool(*a > *b),
+        ">=" => RtValue::Bool(*a >= *b),
+        "=" => RtValue::Bool(*a == *b),
+        "/=" => RtValue::Bool(*a != *b),
+        _ => unreachable!(),
+    };
+    Some(Ok(v))
+}
+
+/// Evaluate a built-in `ratio` arithmetic/comparison instance method
+/// (`registry::ratio_assoc`). No `mod` — CL doesn't define a rational
+/// remainder either. `/` panics on a zero divisor, same precedent as every
+/// other numeric type here.
+fn eval_ratio_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+    let (a, b) = match (args.first(), args.get(1)) {
+        (Some(a), Some(b)) => match (expect_ratio(a), expect_ratio(b)) {
+            (Ok(a), Ok(b)) => (a, b),
+            (Err(e), _) | (_, Err(e)) => return Some(Err(e)),
+        },
+        _ => return Some(Err(EvalError::Internal(format!("{}: expected two ratios", name)))),
+    };
+    let v = match name {
+        "+" => RtValue::Ratio(Rc::new(&*a + &*b)),
+        "-" => RtValue::Ratio(Rc::new(&*a - &*b)),
+        "*" => RtValue::Ratio(Rc::new(&*a * &*b)),
+        "/" => {
+            if b.is_zero() {
+                return Some(Err(EvalError::Panic("divide by zero".into())));
+            }
+            RtValue::Ratio(Rc::new(&*a / &*b))
+        }
+        "<" => RtValue::Bool(*a < *b),
+        "<=" => RtValue::Bool(*a <= *b),
+        ">" => RtValue::Bool(*a > *b),
+        ">=" => RtValue::Bool(*a >= *b),
+        "=" => RtValue::Bool(*a == *b),
+        "/=" => RtValue::Bool(*a != *b),
+        _ => unreachable!(),
+    };
+    Some(Ok(v))
+}
+
+/// `int->bignum` (`registry::int_assoc`): always-exact widening.
+fn int_to_bignum(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bignum(Rc::new(BigInt::from(rt_i64(&args[0])?))))
+}
+
+/// `int->ratio` (`registry::int_assoc`): always-exact widening.
+fn int_to_ratio(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Ratio(Rc::new(BigRational::from_integer(BigInt::from(rt_i64(&args[0])?)))))
+}
+
+/// `bignum->int` (`registry::bignum_assoc`): narrowing, panics if the value
+/// doesn't fit in an `i64` — the type system can't express "in range", same
+/// precedent as `int->char`'s Unicode-scalar-value check.
+fn bignum_to_int(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let n = expect_bignum(&args[0])?;
+    n.to_i64()
+        .map(RtValue::Int)
+        .ok_or_else(|| EvalError::Panic(format!("bignum->int: {} does not fit in an i64", n)))
+}
+
+/// `bignum->float` (`registry::bignum_assoc`): widening, possibly lossy for
+/// a magnitude beyond `f64`'s 53-bit mantissa (IEEE-754 rounds to the
+/// nearest representable value, same as any other narrowing-precision
+/// numeric conversion).
+fn bignum_to_float(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let n = expect_bignum(&args[0])?;
+    Ok(RtValue::Float(n.to_f64().unwrap_or(f64::INFINITY.copysign(if n.sign() == num_bigint::Sign::Minus { -1.0 } else { 1.0 }))))
+}
+
+/// `bignum->ratio` (`registry::bignum_assoc`): always-exact widening.
+fn bignum_to_ratio(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let n = expect_bignum(&args[0])?;
+    Ok(RtValue::Ratio(Rc::new(BigRational::from_integer((*n).clone()))))
+}
+
+/// `float->bignum` (`registry::float_assoc`): narrowing, truncating toward
+/// zero (`f64 as i64`'s multi-precision analogue). Panics on a non-finite
+/// float (`NaN`/`inf`) — there is no bignum value to truncate to, the same
+/// "value outside the representable range" panic precedent as
+/// `int->char`/`bignum->int`.
+fn float_to_bignum(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let f = expect_float(&args[0])?;
+    if !f.is_finite() {
+        return Err(EvalError::Panic(format!("float->bignum: {} is not finite", f)));
+    }
+    Ok(RtValue::Bignum(Rc::new(BigInt::from_f64(f.trunc()).expect("a finite float truncates to a representable BigInt"))))
+}
+
+/// `float->ratio` (`registry::float_assoc`): widening and *exact* — every
+/// finite `f64` is itself an exact dyadic rational (CL's `rational`, not the
+/// lossy-round-trip-through-decimal `rationalize`). Panics on a non-finite
+/// float, same precedent as [`float_to_bignum`].
+fn float_to_ratio(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let f = expect_float(&args[0])?;
+    BigRational::from_float(f)
+        .map(|r| RtValue::Ratio(Rc::new(r)))
+        .ok_or_else(|| EvalError::Panic(format!("float->ratio: {} is not finite", f)))
+}
+
+/// `ratio->bignum` (`registry::ratio_assoc`): narrowing, truncating toward
+/// zero (CL's `truncate`) — `Ratio::to_integer` already does exactly this.
+fn ratio_to_bignum(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let r = expect_ratio(&args[0])?;
+    Ok(RtValue::Bignum(Rc::new(r.to_integer())))
+}
+
+/// `ratio->float` (`registry::ratio_assoc`): widening, possibly lossy
+/// (IEEE-754 rounds to the nearest representable `f64`).
+fn ratio_to_float(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let r = expect_ratio(&args[0])?;
+    Ok(RtValue::Float(r.to_f64().unwrap_or(f64::NAN)))
+}
+
+/// `numerator`/`denominator` (`registry::ratio_assoc`): the reduced
+/// components of a `ratio` — CL's own accessors of the same names — as
+/// `bignum`. The denominator of a normalized `ratio` is always positive (see
+/// `BoxedObj::Ratio`'s doc comment), matching CL's guarantee.
+fn ratio_numerator(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bignum(Rc::new(expect_ratio(&args[0])?.numer().clone())))
+}
+
+fn ratio_denominator(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bignum(Rc::new(expect_ratio(&args[0])?.denom().clone())))
 }
 
 /// A small global xorshift64* generator backing `random`. Not
@@ -2020,6 +2218,8 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "eq" | "eql" | "equal" | "equalp" => eval_int_builtin("=", args),
             "int->float" => Some(int_to_float(args)),
             "int->char" => Some(int_to_char(args)),
+            "int->bignum" => Some(int_to_bignum(args)),
+            "int->ratio" => Some(int_to_ratio(args)),
             _ => None,
         };
     }
@@ -2036,6 +2236,33 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "round" => Some(float_unary(args, f64::round)),
             "truncate" => Some(float_unary(args, f64::trunc)),
             "float->int" => Some(float_to_int(args)),
+            "float->bignum" => Some(float_to_bignum(args)),
+            "float->ratio" => Some(float_to_ratio(args)),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("bignum") {
+        return match method {
+            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+                eval_bignum_builtin(method, args)
+            }
+            "eq" | "eql" | "equal" | "equalp" => eval_bignum_builtin("=", args),
+            "bignum->int" => Some(bignum_to_int(args)),
+            "bignum->float" => Some(bignum_to_float(args)),
+            "bignum->ratio" => Some(bignum_to_ratio(args)),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("ratio") {
+        return match method {
+            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+                eval_ratio_builtin(method, args)
+            }
+            "eq" | "eql" | "equal" | "equalp" => eval_ratio_builtin("=", args),
+            "ratio->bignum" => Some(ratio_to_bignum(args)),
+            "ratio->float" => Some(ratio_to_float(args)),
+            "numerator" => Some(ratio_numerator(args)),
+            "denominator" => Some(ratio_denominator(args)),
             _ => None,
         };
     }
@@ -3261,6 +3488,8 @@ fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Value, EvalEr
         RtValue::Char(c) => Ok(Value::Char(*c)),
         RtValue::Str(s) => Ok(heap.alloc_string(s.to_string())),
         RtValue::Float(f) => Ok(heap.alloc_float(*f)),
+        RtValue::Bignum(n) => Ok(heap.alloc_bignum((**n).clone())),
+        RtValue::Ratio(r) => Ok(heap.alloc_ratio((**r).clone())),
         RtValue::Sexpr(v) => Ok(*v),
         other => Err(EvalError::Internal(format!(
             "struct field: {:?} is not yet representable in the boxed struct representation",
@@ -3308,6 +3537,8 @@ fn decode_nonsexpr_field(heap: &Heap, v: Value) -> RtValue {
         Value::Char(c) => RtValue::Char(c),
         Value::Str(id) => RtValue::Str(heap.string(id).into()),
         Value::Boxed(id) if heap.is_float(id) => RtValue::Float(heap.float_value(id)),
+        Value::Boxed(id) if heap.is_bignum(id) => RtValue::Bignum(Rc::new(heap.bignum_value(id).clone())),
+        Value::Boxed(id) if heap.is_ratio(id) => RtValue::Ratio(Rc::new(heap.ratio_value(id).clone())),
         other => RtValue::Sexpr(other),
     }
 }
@@ -3639,6 +3870,14 @@ fn eql_val(heap: &Heap, a: Value, b: Value) -> bool {
         if heap.is_float(ia) && heap.is_float(ib) {
             return heap.float_value(ia) == heap.float_value(ib);
         }
+        // Same rationale as `Float` above: two separately-allocated but
+        // equal-valued `bignum`/`ratio` boxes must still be `eql`.
+        if heap.is_bignum(ia) && heap.is_bignum(ib) {
+            return heap.bignum_value(ia) == heap.bignum_value(ib);
+        }
+        if heap.is_ratio(ia) && heap.is_ratio(ib) {
+            return heap.ratio_value(ia) == heap.ratio_value(ib);
+        }
     }
     a == b
 }
@@ -3669,10 +3908,33 @@ fn sexpr_equal(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Bool(sexpr_equal_val(heap, a, b)))
 }
 
+/// Converts any of the four numeric `Sexpr` shapes (`Int`, boxed `Float`,
+/// boxed `bignum`, boxed `ratio`) into an exact `BigRational`, or `None` for
+/// a non-numeric value *or* a non-finite `Float` (`NaN`/`inf` have no exact
+/// rational value) — the common representation [`sexpr_equalp_val`]'s
+/// cross-type numeric comparison needs, since every finite `f64` is itself
+/// an exact dyadic rational (`BigRational::from_float`, same conversion
+/// `float_assoc`'s `float->ratio` uses).
+fn numeric_as_ratio(heap: &Heap, v: Value) -> Option<BigRational> {
+    match v {
+        Value::Int(n) => Some(BigRational::from_integer(BigInt::from(n))),
+        Value::Boxed(id) if heap.is_float(id) => BigRational::from_float(heap.float_value(id)),
+        Value::Boxed(id) if heap.is_bignum(id) => Some(BigRational::from_integer(heap.bignum_value(id).clone())),
+        Value::Boxed(id) if heap.is_ratio(id) => Some(heap.ratio_value(id).clone()),
+        _ => None,
+    }
+}
+
 /// CL's `equalp` on `Sexpr`: like [`sexpr_equal`] but `Str`/`Char` compare
-/// case-insensitively and numbers compare across `Int`/`Float`. Same Phase 5
-/// migration from a prelude `match`-based `defun` to a Rust builtin.
+/// case-insensitively and numbers compare across type (`Int`/`Float`/
+/// `bignum`/`ratio`) via [`numeric_as_ratio`] — CL's `equalp` defines two
+/// numbers as equal by `=`, regardless of type, unlike `eql`/`equal`'s
+/// same-type requirement. Same Phase 5 migration from a prelude
+/// `match`-based `defun` to a Rust builtin.
 fn sexpr_equalp_val(heap: &Heap, a: Value, b: Value) -> bool {
+    if let (Some(x), Some(y)) = (numeric_as_ratio(heap, a), numeric_as_ratio(heap, b)) {
+        return x == y;
+    }
     match (a, b) {
         (Value::Cons(_), Value::Cons(_)) => {
             let (Ok(ca), Ok(cb)) = (heap.car(a), heap.car(b)) else { return false };
@@ -3681,8 +3943,6 @@ fn sexpr_equalp_val(heap: &Heap, a: Value, b: Value) -> bool {
         }
         (Value::Str(i), Value::Str(j)) => heap.string(i).eq_ignore_ascii_case(heap.string(j)),
         (Value::Char(c), Value::Char(d)) => c.eq_ignore_ascii_case(&d),
-        (Value::Int(n), Value::Boxed(ib)) if heap.is_float(ib) => (n as f64) == heap.float_value(ib),
-        (Value::Boxed(ia), Value::Int(n)) if heap.is_float(ia) => heap.float_value(ia) == (n as f64),
         (a, b) => eql_val(heap, a, b),
     }
 }
@@ -3763,6 +4023,12 @@ fn match_sexpr_ctor(heap: &Heap, variant: usize, args: &[Pattern], v: Value) -> 
         (SEXPR_INT, Value::Int(n)) => match_pattern(heap, &args[0], &RtValue::Int(n)),
         (SEXPR_FLOAT, Value::Boxed(id)) if heap.is_float(id) => {
             match_pattern(heap, &args[0], &RtValue::Float(heap.float_value(id)))
+        }
+        (SEXPR_BIGNUM, Value::Boxed(id)) if heap.is_bignum(id) => {
+            match_pattern(heap, &args[0], &RtValue::Bignum(Rc::new(heap.bignum_value(id).clone())))
+        }
+        (SEXPR_RATIO, Value::Boxed(id)) if heap.is_ratio(id) => {
+            match_pattern(heap, &args[0], &RtValue::Ratio(Rc::new(heap.ratio_value(id).clone())))
         }
         (SEXPR_CHAR, Value::Char(c)) => match_pattern(heap, &args[0], &RtValue::Char(c)),
         (SEXPR_BOOL, Value::Bool(b)) => match_pattern(heap, &args[0], &RtValue::Bool(b)),

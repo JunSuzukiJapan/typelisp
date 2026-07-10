@@ -9,13 +9,19 @@
 //! the heap's root stack until it is linked into its parent, so the collector
 //! never reclaims a structure that is still being read.
 //!
-//! Supported v1 syntax: integers (decimal, `0x` hex, signed), floats, booleans
+//! Supported v1 syntax: integers (decimal, `0x` hex, signed; past `i64`'s
+//! range they read as `bignum`s), ratios (`1/3`, normalized like CL — `4/2`
+//! reads as the integer `2`), floats, booleans
 //! `true`/`false`, strings with escapes, characters `#\a` / `#\Space`, symbols
 //! (operators, `::` paths, `Vec<T>`-style tokens), lists, dotted pairs `(a . b)`,
 //! quote `'`, quasiquote `` ` ``, unquote `,`, unquote-splicing `,@`, and
 //! comments (`;` line, `#| ... |#` nested block).
 
+use std::convert::TryFrom;
 use std::rc::Rc;
+
+use num_bigint::BigInt;
+use num_rational::BigRational;
 
 use crate::name_lexer::{NameLexer, NameTok};
 use crate::{Error, Heap, Loc, SymId, Value};
@@ -445,7 +451,7 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
         cur.next();
     }
     // tok is non-empty: read_datum only dispatches here on a non-delimiter.
-    if let Some(v) = parse_number(heap, &tok) {
+    if let Some(v) = parse_number(heap, &tok)? {
         return Ok(v);
     }
     match tok.to_lowercase().as_str() {
@@ -502,11 +508,14 @@ fn split_path_top_level(tok: &str) -> Option<Vec<&str>> {
     Some(parts)
 }
 
-/// Interpret a token as a number, or `None` if it is a symbol. Takes `heap`
-/// (unlike an otherwise-pure parser) because a float literal must be
-/// heap-boxed (`Heap::alloc_float`, see `BoxedObj`'s doc comment) — an `f64`
-/// doesn't fit alongside `Value`'s tag the way an int/char does.
-fn parse_number(heap: &mut Heap, tok: &str) -> Option<Value> {
+/// Interpret a token as a number, or `Ok(None)` if it is a symbol. Takes
+/// `heap` (unlike an otherwise-pure parser) because a float/bignum/ratio
+/// literal must be heap-boxed (`Heap::alloc_float`/`alloc_bignum`/
+/// `alloc_ratio`, see `BoxedObj`'s doc comment) — those payloads don't fit
+/// alongside `Value`'s tag the way an int/char does. The only `Err` is a
+/// ratio literal with a zero denominator (`1/0`), which CL's reader also
+/// rejects — silently reading it as a *symbol* would hide the mistake.
+fn parse_number(heap: &mut Heap, tok: &str) -> Result<Option<Value>, Error> {
     let (neg, body) = if let Some(r) = tok.strip_prefix('-') {
         (true, r)
     } else if let Some(r) = tok.strip_prefix('+') {
@@ -515,32 +524,65 @@ fn parse_number(heap: &mut Heap, tok: &str) -> Option<Value> {
         (false, tok)
     };
 
-    // hexadecimal integer: 0x...
+    // hexadecimal integer: 0x... An integer past `i64`'s range reads as a
+    // `bignum` (CL: fixnum vs bignum is a value-range distinction the reader
+    // makes, not separate syntax).
     if let Some(hex) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
         if !hex.is_empty() && hex.chars().all(|c| c.is_ascii_hexdigit()) {
             if let Ok(n) = i64::from_str_radix(hex, 16) {
-                return Some(Value::Int(if neg { -n } else { n }));
+                return Ok(Some(Value::Int(if neg { -n } else { n })));
             }
+            let n = BigInt::parse_bytes(hex.as_bytes(), 16).expect("all-hex-digit token parses as BigInt");
+            return Ok(Some(heap.alloc_bignum(if neg { -n } else { n })));
         }
-        return None;
+        return Ok(None);
     }
 
-    // decimal integer
+    // decimal integer — same fixnum-or-bignum split as hex above.
     if !body.is_empty() && body.chars().all(|c| c.is_ascii_digit()) {
         if let Ok(n) = body.parse::<i64>() {
-            return Some(Value::Int(if neg { -n } else { n }));
+            return Ok(Some(Value::Int(if neg { -n } else { n })));
         }
-        return None;
+        let n = BigInt::parse_bytes(body.as_bytes(), 10).expect("all-digit token parses as BigInt");
+        return Ok(Some(heap.alloc_bignum(if neg { -n } else { n })));
+    }
+
+    // ratio: `numer/denom`, both all-digit (CL ratio syntax, decimal only).
+    // Normalized on read exactly as CL specifies: `4/2` *is* the integer `2`
+    // (and `2/4` is `1/2`) — an integer-valued ratio literal reads as an
+    // `Int`/`bignum`, never a denominator-1 `ratio` value.
+    if let Some((numer, denom)) = body.split_once('/') {
+        if !numer.is_empty()
+            && !denom.is_empty()
+            && numer.chars().all(|c| c.is_ascii_digit())
+            && denom.chars().all(|c| c.is_ascii_digit())
+        {
+            let n = BigInt::parse_bytes(numer.as_bytes(), 10).expect("all-digit numerator parses as BigInt");
+            let d = BigInt::parse_bytes(denom.as_bytes(), 10).expect("all-digit denominator parses as BigInt");
+            if d == BigInt::from(0) {
+                return Err(Error::ReadError(format!("ratio literal with zero denominator: {}", tok)));
+            }
+            let r = BigRational::new(if neg { -n } else { n }, d);
+            if r.is_integer() {
+                let i = r.to_integer();
+                return Ok(Some(match i64::try_from(&i) {
+                    Ok(n) => Value::Int(n),
+                    Err(_) => heap.alloc_bignum(i),
+                }));
+            }
+            return Ok(Some(heap.alloc_ratio(r)));
+        }
+        return Ok(None);
     }
 
     // float: starts with a digit or '.', and has a '.' or exponent marker
-    let first = body.chars().next()?;
+    let Some(first) = body.chars().next() else { return Ok(None) };
     if (first.is_ascii_digit() || first == '.')
         && (body.contains('.') || body.contains('e') || body.contains('E'))
     {
         if let Ok(f) = body.parse::<f64>() {
-            return Some(heap.alloc_float(if neg { -f } else { f }));
+            return Ok(Some(heap.alloc_float(if neg { -f } else { f })));
         }
     }
-    None
+    Ok(None)
 }

@@ -326,6 +326,8 @@ impl Registry {
                 Type::I32 => int_assoc(Type::I32),
                 Type::I64 => int_assoc(Type::I64),
                 Type::F64 => float_assoc(),
+                Type::Bignum => bignum_assoc(),
+                Type::Ratio => ratio_assoc(),
                 Type::Bool => bool_assoc(),
                 Type::Symbol => symbol_assoc(),
                 _ => HashMap::new(),
@@ -534,6 +536,11 @@ fn sexpr_def() -> AdtDef {
             Variant { name: "sym".to_string(), fields: vec![Type::Symbol] },
             Variant { name: "str".to_string(), fields: vec![Type::Str] },
             Variant { name: "cons".to_string(), fields: vec![sexpr(), sexpr()] },
+            // Appended after `cons` (not inserted alongside `int`/`float`)
+            // so the existing `SEXPR_*` variant-index constants
+            // (`crate::eval::interp`) stay valid.
+            Variant { name: "bignum".to_string(), fields: vec![Type::Bignum] },
+            Variant { name: "ratio".to_string(), fields: vec![Type::Ratio] },
         ],
         assoc: sexpr_assoc(),
         public: true,
@@ -1209,6 +1216,12 @@ fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
     // express "valid scalar value", same precedent as `car`/`cdr` on a
     // non-`Cons` `Sexpr` or division by zero.
     m.insert("int->char".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![ty.clone()], ret: Type::Char, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    // `int->bignum`/`int->ratio`: widening conversions into the two
+    // arbitrary-precision types (`docs/cl-equivalence-catalog.md`'s planned
+    // conversion catalog, extended for `bignum`/`ratio`) — always exact,
+    // unlike `bignum->int`/`ratio->int`'s narrowing counterparts.
+    m.insert("int->bignum".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![ty.clone()], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("int->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![ty], ret: Type::Ratio, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m
 }
 
@@ -1245,6 +1258,70 @@ fn float_assoc() -> HashMap<String, AssocFn> {
     // runtime value is a uniform `RtValue::Int(i64)` either way (see
     // `eval_int_builtin`'s doc comment).
     m.insert("float->int".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::F64], ret: Type::I32, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    // `float->bignum`: narrowing, truncating toward zero (`f64 as i64`'s
+    // multi-precision analogue — see `crate::eval::interp::float_to_bignum`).
+    // `float->ratio`: widening and *exact* — every finite `f64` is itself an
+    // exact dyadic rational (CL's `rational`, not the lossy-round-trip
+    // `rationalize`), via `num_rational::BigRational::from_float`.
+    m.insert("float->bignum".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::F64], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("float->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::F64], ret: Type::Ratio, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m
+}
+
+/// Built-in arithmetic/comparison instance methods for `bignum` (CL's
+/// bignum: an arbitrary-precision integer). Same operation set as
+/// [`int_assoc`] (`/`/`mod` truncate toward zero and panic on a zero
+/// divisor — CL's `truncate`/`rem`, not `floor`/`mod`), plus conversions
+/// to/from `i32`/`i64` (narrowing; panics if the value doesn't fit — same
+/// precedent as `int_assoc`'s `int->char`), `f64` (both directions), and
+/// `ratio` (widening, exact).
+fn bignum_assoc() -> HashMap<String, AssocFn> {
+    let binop = || AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Bignum, Type::Bignum], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
+    let cmp = || AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Bignum, Type::Bignum], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
+    let mut m = HashMap::new();
+    for op in ["+", "-", "*", "/", "mod"] {
+        m.insert(op.to_string(), binop());
+    }
+    for op in ["<", "<=", ">", ">=", "=", "/="] {
+        m.insert(op.to_string(), cmp());
+    }
+    // See `int_assoc`'s eq/eql/equal/equalp comment — same alias-for-`=`
+    // rationale (both operands are always `bignum` here, so `equalp`'s
+    // cross-type case can't be reached through this table; it's handled at
+    // the `Sexpr`/dynamic layer instead — see `docs/cl-equivalence-catalog.md`).
+    for name in ["eq", "eql", "equal", "equalp"] {
+        m.insert(name.to_string(), cmp());
+    }
+    m.insert("bignum->int".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Bignum], ret: Type::I32, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("bignum->float".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Bignum], ret: Type::F64, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("bignum->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Bignum], ret: Type::Ratio, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m
+}
+
+/// Built-in arithmetic/comparison instance methods for `ratio` (CL's ratio:
+/// an exact rational, always kept reduced with a positive denominator).
+/// `/` panics on a zero divisor like every other numeric type here; there is
+/// no `mod` (CL doesn't define a rational remainder either — `mod`/`rem`
+/// only apply to integers). `numerator`/`denominator` expose the reduced
+/// components as `bignum` (CL's own accessors of the same names), the only
+/// way to inspect a `ratio`'s value beyond comparison/conversion.
+fn ratio_assoc() -> HashMap<String, AssocFn> {
+    let binop = || AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Ratio, Type::Ratio], ret: Type::Ratio, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
+    let cmp = || AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Ratio, Type::Ratio], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
+    let mut m = HashMap::new();
+    for op in ["+", "-", "*", "/"] {
+        m.insert(op.to_string(), binop());
+    }
+    for op in ["<", "<=", ">", ">=", "=", "/="] {
+        m.insert(op.to_string(), cmp());
+    }
+    for name in ["eq", "eql", "equal", "equalp"] {
+        m.insert(name.to_string(), cmp());
+    }
+    m.insert("ratio->bignum".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Ratio], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("ratio->float".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Ratio], ret: Type::F64, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("numerator".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Ratio], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("denominator".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Ratio], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m
 }
 

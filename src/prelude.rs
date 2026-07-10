@@ -635,6 +635,8 @@ pub const SOURCE: &str = r#"
 (impl Eq i32    (equals ((self Self) (other Self)) bool (= self other))  (not-equals ((self Self) (other Self)) bool (/= self other)))
 (impl Eq i64    (equals ((self Self) (other Self)) bool (= self other))  (not-equals ((self Self) (other Self)) bool (/= self other)))
 (impl Eq f64    (equals ((self Self) (other Self)) bool (= self other))  (not-equals ((self Self) (other Self)) bool (/= self other)))
+(impl Eq bignum (equals ((self Self) (other Self)) bool (= self other))  (not-equals ((self Self) (other Self)) bool (/= self other)))
+(impl Eq ratio  (equals ((self Self) (other Self)) bool (= self other))  (not-equals ((self Self) (other Self)) bool (/= self other)))
 (impl Eq bool   (equals ((self Self) (other Self)) bool (equal self other)) (not-equals ((self Self) (other Self)) bool (not (equal self other))))
 (impl Eq char   (equals ((self Self) (other Self)) bool (equal self other)) (not-equals ((self Self) (other Self)) bool (not (equal self other))))
 (impl Eq string (equals ((self Self) (other Self)) bool (equal self other)) (not-equals ((self Self) (other Self)) bool (not (equal self other))))
@@ -647,6 +649,8 @@ pub const SOURCE: &str = r#"
 (impl Ord i32    (less ((self Self) (other Self)) bool (< self other)) (less-equal ((self Self) (other Self)) bool (<= self other)) (greater ((self Self) (other Self)) bool (> self other)) (greater-equal ((self Self) (other Self)) bool (>= self other)))
 (impl Ord i64    (less ((self Self) (other Self)) bool (< self other)) (less-equal ((self Self) (other Self)) bool (<= self other)) (greater ((self Self) (other Self)) bool (> self other)) (greater-equal ((self Self) (other Self)) bool (>= self other)))
 (impl Ord f64    (less ((self Self) (other Self)) bool (< self other)) (less-equal ((self Self) (other Self)) bool (<= self other)) (greater ((self Self) (other Self)) bool (> self other)) (greater-equal ((self Self) (other Self)) bool (>= self other)))
+(impl Ord bignum (less ((self Self) (other Self)) bool (< self other)) (less-equal ((self Self) (other Self)) bool (<= self other)) (greater ((self Self) (other Self)) bool (> self other)) (greater-equal ((self Self) (other Self)) bool (>= self other)))
+(impl Ord ratio  (less ((self Self) (other Self)) bool (< self other)) (less-equal ((self Self) (other Self)) bool (<= self other)) (greater ((self Self) (other Self)) bool (> self other)) (greater-equal ((self Self) (other Self)) bool (>= self other)))
 (impl Ord char   (less ((self Self) (other Self)) bool (< self other)) (less-equal ((self Self) (other Self)) bool (<= self other)) (greater ((self Self) (other Self)) bool (> self other)) (greater-equal ((self Self) (other Self)) bool (>= self other)))
 (impl Ord string (less ((self Self) (other Self)) bool (< self other)) (less-equal ((self Self) (other Self)) bool (<= self other)) (greater ((self Self) (other Self)) bool (> self other)) (greater-equal ((self Self) (other Self)) bool (>= self other)))
 

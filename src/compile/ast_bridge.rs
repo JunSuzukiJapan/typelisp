@@ -370,6 +370,12 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // time, via a fresh `rt_float_new` call in the compiled function
         // itself — mirroring `compile-str`'s own `rt_str_new` call.
         Expr::Float(f) => tagged(heap, "float", &[Value::Int(f.to_bits() as i64)]),
+        // `bignum`/`ratio` have no compiled-code representation yet (no
+        // `rt_bignum_*`/`rt_ratio_*` runtime support in `typelisp-rt`) — an
+        // explicit `unsupported` tag, the same treatment as `Panic`/`Quote`/
+        // `TraitCall` below, rather than silently miscompiling.
+        Expr::Bignum(_) => unsupported(heap, "Bignum"),
+        Expr::Ratio(_) => unsupported(heap, "Ratio"),
         Expr::Bool(b) => tagged(heap, "bool", &[Value::Bool(*b)]),
         Expr::Char(c) => tagged(heap, "char", &[Value::Char(*c)]),
         // `(str (int c0) (int c1) ...)` — Stage 7 of the Sexpr-representation

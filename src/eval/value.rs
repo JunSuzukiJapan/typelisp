@@ -9,6 +9,8 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::module::Module;
 use inkwell::values::{BasicValueEnum, FunctionValue};
+use num_bigint::BigInt;
+use num_rational::BigRational;
 
 use crate::{BoxId, Heap, Loc, Path, Typed, Value};
 
@@ -245,6 +247,14 @@ pub struct ClosureBody {
 pub enum RtValue {
     Int(i64),
     Float(f64),
+    /// A `bignum` value (arbitrary-precision integer, CL's bignum). `Rc`-wrapped
+    /// for the same reason `Str` is (see that variant's doc comment): a
+    /// binding read/clone should be a cheap pointer/refcount bump, not a deep
+    /// copy of however many limbs the integer holds.
+    Bignum(Rc<BigInt>),
+    /// A `ratio` value (exact rational, CL's ratio), same `Rc`-wrapping
+    /// rationale as [`RtValue::Bignum`].
+    Ratio(Rc<BigRational>),
     Bool(bool),
     Char(char),
     /// `Rc<str>`, not a plain owned `String` — this language's `string`
@@ -336,6 +346,8 @@ impl PartialEq for RtValue {
         match (self, other) {
             (RtValue::Int(a), RtValue::Int(b)) => a == b,
             (RtValue::Float(a), RtValue::Float(b)) => a == b,
+            (RtValue::Bignum(a), RtValue::Bignum(b)) => a == b,
+            (RtValue::Ratio(a), RtValue::Ratio(b)) => a == b,
             (RtValue::Bool(a), RtValue::Bool(b)) => a == b,
             (RtValue::Char(a), RtValue::Char(b)) => a == b,
             (RtValue::Str(a), RtValue::Str(b)) => a == b,

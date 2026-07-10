@@ -19,6 +19,8 @@ default-members = [".", "crates/typelisp-mem", "crates/typelisp-rt"]
 [dependencies]
 once_cell = "1.8.0"
 num-bigint = "0.4"
+num-rational = "0.4"
+num-traits = "0.2"
 rustyline = "18"
 inkwell = { version = "0.9", features = ["llvm17-0"] }
 typelisp-mem = { path = "crates/typelisp-mem" }

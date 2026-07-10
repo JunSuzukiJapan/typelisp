@@ -405,6 +405,53 @@ impl Heap {
         }
     }
 
+    /// Store a `bignum` (arbitrary-precision integer), returning its
+    /// `Value::Boxed` — heap-boxed like [`alloc_float`](Self::alloc_float),
+    /// and for the same reason (the payload can't ride alongside a tag in
+    /// one 64-bit word).
+    pub fn alloc_bignum(&mut self, n: num_bigint::BigInt) -> Value {
+        self.alloc_boxed(BoxedObj::Bignum(n))
+    }
+
+    /// The `BigInt` behind a boxed bignum. Panics if `id` doesn't hold a
+    /// `BoxedObj::Bignum` — same internal-invariant-trap convention as
+    /// [`float_value`](Self::float_value).
+    pub fn bignum_value(&self, id: BoxId) -> &num_bigint::BigInt {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Bignum(n)) => n,
+            _ => panic!("BoxId does not hold a Bignum"),
+        }
+    }
+
+    /// True if `id` holds a `BoxedObj::Bignum` — the peer of
+    /// [`is_float`](Self::is_float) for callers decoding an unknown
+    /// `Value::Boxed`.
+    pub fn is_bignum(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Bignum(_)))
+    }
+
+    /// Store a `ratio` (exact rational), returning its `Value::Boxed` — the
+    /// `ratio` counterpart of [`alloc_bignum`](Self::alloc_bignum). The
+    /// caller passes any `BigRational`; the crate keeps it reduced with a
+    /// positive denominator.
+    pub fn alloc_ratio(&mut self, r: num_rational::BigRational) -> Value {
+        self.alloc_boxed(BoxedObj::Ratio(r))
+    }
+
+    /// The `BigRational` behind a boxed ratio. Panics if `id` doesn't hold a
+    /// `BoxedObj::Ratio` — same convention as [`bignum_value`](Self::bignum_value).
+    pub fn ratio_value(&self, id: BoxId) -> &num_rational::BigRational {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Ratio(r)) => r,
+            _ => panic!("BoxId does not hold a Ratio"),
+        }
+    }
+
+    /// True if `id` holds a `BoxedObj::Ratio`.
+    pub fn is_ratio(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Ratio(_)))
+    }
+
     /// Store a struct-shaped [`BoxedObj`] with fixed- or variable-length
     /// `fields`, returning its `Value::Boxed` — the runtime representation a
     /// `defstruct` instance, `Vector<T>`, and `cons-cell<K,V>` all share
@@ -983,7 +1030,9 @@ impl Heap {
     /// fan-out.
     fn push_boxed_nested(obj: &BoxedObj, stack: &mut Vec<Value>) {
         match obj {
-            BoxedObj::Float(_) => {}
+            // `Bignum`/`Ratio` payloads live in ordinary Rust memory (like a
+            // `Str`'s buffer) and hold no nested `Value` — nothing to trace.
+            BoxedObj::Float(_) | BoxedObj::Bignum(_) | BoxedObj::Ratio(_) => {}
             BoxedObj::Struct { payload: StructPayload::Fields(fields), .. } => {
                 for &v in fields {
                     stack.push(v);
