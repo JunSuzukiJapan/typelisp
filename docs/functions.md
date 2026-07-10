@@ -69,49 +69,70 @@
 | `set-cdr` | `(set-cdr s v)` | `(Sexpr,Sexpr)→Unit` | 破壊的更新（`Cons` でなければ panic） |
 | `eq` `eql` | `(op a b)` | `(Sexpr,Sexpr)→bool` | 同一性比較（`Cons`/`Str` はポインタ、それ以外は値） |
 
-## 6. リスト操作（`Sexpr` 上のライブラリ関数）
+## 6. シーケンス操作（`Iter` 上のライブラリ関数）
+
+Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`Iter` トレイト上のジェネリック
+関数**へ作り直された。呼び出しはコレクションから `(iter coll)` でカーソルを得て渡す
+（`Vector<T>` / `HashTable<K,V>` が `Iter` を実装。`Sexpr` のリストは `Iter` を実装しない
+ので、これらの関数の対象にはならない）。旧 API との主な違いは、**コレクション/イテレータを
+第一引数に取る**点と、**結果のコレクションは新しい `Vector` として返る**点。表中の `Iter<A>` は
+「`Item` が `A` の任意の `Iter` 実装型」を表す。
+
+`symbol->string` / `string->symbol` は `Sexpr::Sym` と `string` の橋渡し（`Sym` は内部の
+`Symbol` 型を包む）:
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `consp` | `(consp s)` | `Sexpr→bool` | `Cons` か |
-| `null` | `(null s)` | `Sexpr→bool` | `Nil` か |
-| `atom` | `(atom s)` | `Sexpr→bool` | `Cons` でないか |
 | `symbol->string` | `(symbol->string s)` | `Sexpr→string` | `Sym` の名前を取り出す |
 | `string->symbol` | `(string->symbol s)` | `string→Sexpr` | 文字列から `Sym` を作る |
 | `equal` | `(equal a b)` | `(Sexpr,Sexpr)→bool` | 構造的等価（`Cons` は再帰、`Str` は内容比較） |
 | `equalp` | `(equalp a b)` | `(Sexpr,Sexpr)→bool` | `equal` に加え大文字小文字無視・数値の型跨ぎ比較 |
-| `length` | `(length lst)` | `Sexpr→i32` | 長さ（不正なリストは panic） |
-| `append` | `(append a b)` | `(Sexpr,Sexpr)→Sexpr` | 非破壊的連結 |
-| `reverse` | `(reverse lst)` | `Sexpr→Sexpr` | 非破壊的反転 |
-| `nthcdr` | `(nthcdr n lst)` | `(i32,Sexpr)→Sexpr` | 先頭 `n` 個を落とした残り |
-| `nth` | `(nth n lst)` | `(i32,Sexpr)→Sexpr` | `n` 番目の要素 |
-| `elt` | `(elt lst n)` | `(Sexpr,i32)→Sexpr` | `nth` の引数順違い版 |
-| `last` | `(last lst)` | `Sexpr→Sexpr` | 最後のセル |
-| `butlast` | `(butlast lst)` | `Sexpr→Sexpr` | 最後を除いた要素 |
-| `take` | `(take n lst)` | `(i32,Sexpr)→Sexpr` | 先頭 `n` 個 |
-| `subseq` | `(subseq lst start end)` | `(Sexpr,i32,i32)→Sexpr` | `[start,end)` の部分リスト |
-| `copy-list` | `(copy-list lst)` | `Sexpr→Sexpr` | 浅いコピー |
-| `member` | `(member item lst)` | `(Sexpr,Sexpr)→Sexpr` | `eq` で一致する最初の要素からの残り、なければ `()` |
-| `find-if` | `(find-if pred lst)` | `((fn (Sexpr) bool),Sexpr)→Sexpr` | 条件を満たす最初の要素、なければ `()` |
-| `every` | `(every pred lst)` | `((fn (Sexpr) bool),Sexpr)→bool` | 全要素が条件を満たすか |
-| `any` | `(any pred lst)` | `((fn (Sexpr) bool),Sexpr)→bool` | いずれかが条件を満たすか（CL の `some` 相当。`Some` 構成子との名前衝突を避けた名前） |
-| `count-if` | `(count-if pred lst)` | `((fn (Sexpr) bool),Sexpr)→i32` | 条件を満たす個数 |
-| `count` | `(count item lst)` | `(Sexpr,Sexpr)→i32` | `eq` で一致する個数 |
-| `position-if` | `(position-if pred lst)` | `((fn (Sexpr) bool),Sexpr)→Option<i32>` | 条件を満たす最初の位置 |
-| `position` | `(position item lst)` | `(Sexpr,Sexpr)→Option<i32>` | `eq` で一致する最初の位置 |
-| `remove-if` | `(remove-if pred lst)` | `((fn (Sexpr) bool),Sexpr)→Sexpr` | 条件を満たす要素を除く |
-| `remove-if-not` | `(remove-if-not pred lst)` | `((fn (Sexpr) bool),Sexpr)→Sexpr` | 条件を満たす要素のみ残す（filter と同じ） |
-| `remove` | `(remove item lst)` | `(Sexpr,Sexpr)→Sexpr` | `eq` で一致する要素を除く |
-| `map` | `(map f lst)` | `((fn (Sexpr) Sexpr),Sexpr)→Sexpr` | 写像 |
-| `filter` | `(filter pred lst)` | `((fn (Sexpr) bool),Sexpr)→Sexpr` | 条件を満たす要素のみ |
-| `foldl` | `(foldl f init lst)` | `((fn (Sexpr Sexpr) Sexpr),Sexpr,Sexpr)→Sexpr` | 左畳み込み |
-| `foldr` | `(foldr f init lst)` | `((fn (Sexpr Sexpr) Sexpr),Sexpr,Sexpr)→Sexpr` | 右畳み込み |
-| `nconc` | `(nconc a b)` | `(Sexpr,Sexpr)→Sexpr` | 破壊的連結（`a` の最後のセルを書き換える） |
-| `nreverse` | `(nreverse lst)` | `Sexpr→Sexpr` | 破壊的反転 |
-| `sort` | `(sort cmp lst)` | `((fn (Sexpr Sexpr) bool),Sexpr)→Sexpr` | 挿入ソート（非破壊的） |
-| `assoc` | `(assoc key alist)` | `(Sexpr,Sexpr)→Sexpr` | 連想リストから `car` が `key` と `eq` なペアを探す |
+
+述語を取る関数（CL の `-if` 系に対応。すべて `where (Iter I (Item A))`）:
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `map` | `(map it f)` | `(Iter<A>,(fn (A) U))→Vector<U>` | 写像 |
+| `filter` | `(filter it pred)` | `(Iter<A>,(fn (A) bool))→Vector<A>` | 条件を満たす要素のみ |
+| `remove-if` | `(remove-if it pred)` | `(Iter<A>,(fn (A) bool))→Vector<A>` | 条件を満たす要素を除く |
+| `find` | `(find it pred)` | `(Iter<A>,(fn (A) bool))→Option<A>` | 条件を満たす最初の要素 |
+| `position` | `(position it pred)` | `(Iter<A>,(fn (A) bool))→Option<i32>` | 条件を満たす最初の位置 |
+| `count` | `(count it pred)` | `(Iter<A>,(fn (A) bool))→i32` | 条件を満たす個数 |
+| `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 全要素が条件を満たすか |
+| `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | いずれかが条件を満たすか（CL の `some` 相当、`Some` 構成子との衝突回避名） |
+| `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | 左畳み込み |
+| `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | 右畳み込み |
+
+添字・長さ・スライス（すべて `where (Iter I (Item A))`）:
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `length` | `(length it)` | `Iter<A>→i32` | 要素数 |
+| `append` | `(append a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | 2つのイテレータを連結 |
+| `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | 反転（非破壊） |
+| `nth` | `(nth n it)` | `(i32,Iter<A>)→Option<A>` | `n` 番目の要素（範囲外は `None`） |
+| `elt` | `(elt it n)` | `(Iter<A>,i32)→Option<A>` | `nth` の引数順違い版 |
+| `take` | `(take it n)` | `(Iter<A>,i32)→Vector<A>` | 先頭 `n` 個 |
+| `subseq` | `(subseq it start end)` | `(Iter<A>,i32,i32)→Vector<A>` | `[start,end)`（`end` は長さでクランプ） |
+| `last` | `(last it)` | `Iter<A>→Option<A>` | 最後の**要素**（CL の「最後のセル」ではない） |
+| `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | 最後の要素を除く |
+
+`Eq` / `Ord` 境界を要求する関数（述語の代わりにトレイトで比較。§12.1 参照）:
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | `x` と等しい要素があるか（CL と違い残りリストではなく `bool`） |
+| `sort` | `(sort it)` | `Iter<A>→Vector<A>` where `Ord A` | 昇順の挿入ソート（安定・非破壊） |
+| `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | `car` が `k` と等しい最初のペア。値は `(cdr p)` で取り出す |
 
 `(list e1 e2 ... en)` は特殊形（`(cons e1 (cons e2 (... (Nil))))` へ展開、[syntax.md](syntax.md) 参照）。
+`map` / `filter` 等が返す `Vector<T>` を再び回すには `(iter result)` を渡す。
+
+> **旧 API から削除された関数**（`docs/dev/symbol-sexpr-redesign.md` Phase 5 / 6.5）:
+> `consp` `null` `atom`（`Sexpr` 述語）、`nthcdr` `copy-list`（cons チェーン専用）、
+> `nconc` `nreverse`（破壊的操作）、`find-if` `count-if` `position-if` `remove-if-not`
+> （`find` / `count` / `position` / `filter` で代替）。`remove`（要素削除）は現在
+> `HashTable<K,V>` のメソッドとしてのみ存在（§11）。
 
 ## 7. `Option<T>` / `Result<T,E>`
 

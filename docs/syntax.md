@@ -233,7 +233,6 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 (while test body...)                ; test が真の間ループ。defmacro
 (until test body...)                ; test が偽の間ループ（while の否定版）。defmacro
 (dotimes (var count-expr) body...)  ; count-expr を一度評価し、var を 0..count-1 で回す。defmacro
-(dolist (var list-expr) body...)    ; Sexpr のリストを辿って var に束縛。defmacro
 (do ((var init step) ...)
     (test result...)
   body...)                          ; CL 流の並行ステップ反復。defmacro
