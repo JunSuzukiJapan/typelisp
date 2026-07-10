@@ -1216,6 +1216,13 @@ fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
     // express "valid scalar value", same precedent as `car`/`cdr` on a
     // non-`Cons` `Sexpr` or division by zero.
     m.insert("int->char".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![ty.clone()], ret: Type::Char, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    // `try-int->char`: the `Option`-returning counterpart of `int->char`,
+    // for `(try-as char n)` (`Checker::check_as`) — same Unicode-scalar-
+    // value validity check, `None` instead of a panic on failure.
+    m.insert(
+        "try-int->char".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], params: vec![ty.clone()], ret: option_of(Type::Char), public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
+    );
     // `int->bignum`/`int->ratio`: widening conversions into the two
     // arbitrary-precision types (`docs/cl-equivalence-catalog.md`'s planned
     // conversion catalog, extended for `bignum`/`ratio`) — always exact,
@@ -1293,6 +1300,13 @@ fn bignum_assoc() -> HashMap<String, AssocFn> {
         m.insert(name.to_string(), cmp());
     }
     m.insert("bignum->int".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Bignum], ret: Type::I32, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    // `try-bignum->int`: the `Option`-returning counterpart of `bignum->int`,
+    // for `(try-as i32 n)`/`(try-as i64 n)` (`Checker::check_as`) — same
+    // "fits in an `i64`" check, `None` instead of a panic on overflow.
+    m.insert(
+        "try-bignum->int".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Bignum], ret: option_of(Type::I32), public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
+    );
     m.insert("bignum->float".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Bignum], ret: Type::F64, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m.insert("bignum->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], params: vec![Type::Bignum], ret: Type::Ratio, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m

@@ -2557,6 +2557,8 @@ impl Checker {
             "match" => return self.check_match(heap, interp, env, args, expected),
             "panic" => return self.check_panic(heap, interp, env, args),
             "the" => return self.check_the(heap, interp, env, args),
+            "as" => return self.check_as(heap, interp, env, args, false),
+            "try-as" => return self.check_as(heap, interp, env, args, true),
             "compile" => return self.check_compile(heap, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
@@ -3104,6 +3106,88 @@ impl Checker {
         }
         let ty = self.canon(&parse_type(heap, args[0])?);
         self.check(heap, interp, env, args[1], Some(&ty))
+    }
+
+    /// `(as Type expr)` / `(try-as Type expr)`: a Rust-`as`-flavored
+    /// primitive cast between the numeric/`char` types — unrelated to
+    /// `Sexpr` (that's `match`'s job — see the "Phase 5 方針転換" note in
+    /// `docs/dev/symbol-sexpr-redesign.md`). `as` panics on a partial
+    /// conversion's failure; `try-as` returns `Option<Type>` instead,
+    /// `None` on failure. Deliberately closed over the pairs in
+    /// [`as_conversion`] — not a general coercion mechanism.
+    ///
+    /// Every conversion here already exists as a `registry.rs` instance
+    /// method (`int_assoc`/`float_assoc`/`bignum_assoc`/`ratio_assoc`/
+    /// `char_assoc`); `as`/`try-as` desugar straight into a call on it via
+    /// [`Self::check_assoc_call`] with the already-checked `expr` as the
+    /// receiver — no new `Expr` variant, no new interp logic beyond the two
+    /// `Option`-returning counterparts `as_conversion` names for the two
+    /// partial pairs (`try-int->char`/`try-bignum->int`, `registry.rs`).
+    fn check_as(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        try_variant: bool,
+    ) -> Result<Typed, Error> {
+        let form_name = if try_variant { "try-as" } else { "as" };
+        if args.len() != 2 {
+            return Err(Error::TypeError(format!("{}: ({} Type expr)", form_name, form_name)));
+        }
+        let target = self.canon(&parse_type(heap, args[0])?);
+        let src = self.check(heap, interp, env, args[1], None)?;
+
+        // Identity: same type, a no-op cast.
+        if src.ty == target {
+            return Ok(if try_variant { wrap_some(src, target) } else { src });
+        }
+        // `i32`<->`i64`: a pure relabel, no runtime effect. `RtValue::Int` is
+        // uniformly `i64` regardless of which static width labels it (see
+        // `registry::int_assoc`'s `int->float` doc comment) — there is no
+        // real 32-bit-truncating representation anywhere in this codebase
+        // for `as`/`try-as` to imitate, so crossing widths is total in both
+        // directions.
+        if matches!((&src.ty, &target), (Type::I32, Type::I64) | (Type::I64, Type::I32)) {
+            let relabeled = Typed { ty: target.clone(), ..src };
+            return Ok(if try_variant { wrap_some(relabeled, target) } else { relabeled });
+        }
+
+        let (panic_method, try_method) = as_conversion(&src.ty, &target).ok_or_else(|| {
+            Error::TypeError(format!(
+                "{}: no conversion from {:?} to {:?} (as/try-as cover only the numeric/char catalog: int/f64/bignum/ratio/char)",
+                form_name, src.ty, target
+            ))
+        })?;
+        let owner = prim_type_path(&src.ty).expect("as_conversion only matches primitive source types");
+        let method = if try_variant { try_method.unwrap_or(panic_method) } else { panic_method };
+        let called = self.check_assoc_call(
+            heap,
+            interp,
+            env,
+            AssocCall { type_fq: &owner, method, receiver: Some(src), expected: None },
+            &[],
+        )?;
+
+        // `float->int`/`bignum->int`/`char->int` are always registered with
+        // an `I32` return even when the caller asked for `i64` — see
+        // `as_conversion`'s doc comment. Whenever this branch is reached
+        // with `target == I64`, `called`'s (unwrapped, for a try_method
+        // result) type is always exactly `I32` by construction of
+        // `as_conversion`'s table.
+        if try_variant {
+            match try_method {
+                Some(_) => Ok(if target == Type::I64 { retype_option(called, target) } else { called }),
+                None => {
+                    let called = if target == Type::I64 { Typed { ty: Type::I64, ..called } } else { called };
+                    Ok(wrap_some(called, target))
+                }
+            }
+        } else if target == Type::I64 {
+            Ok(Typed { ty: Type::I64, ..called })
+        } else {
+            Ok(called)
+        }
     }
 
     /// `(compile name)` / `(compile type::method)`: the name being compiled
@@ -3870,21 +3954,18 @@ impl Checker {
         }
         let scrut = self.check(heap, interp, env, args[0], None)?;
         let (adt_name, _) = self.expect_adt(&scrut.ty)?;
-        // `match` is fenced to enum (sum-type) dispatch — `Option`/`Result`/
-        // `error`/user `defstruct`s. `Sexpr` is the internal island
-        // representation (read/eval/print/`defmacro`/self-hosting `compiler.rs`),
-        // no longer a user-matchable datum: its structure is navigated with the
-        // `sexpr-*` accessor layer instead (Symbol/Sexpr redesign Phase 5,
-        // `docs/dev/symbol-sexpr-redesign.md`). The island already uses
-        // `sexpr-consp`/`sexpr-car`/... rather than `match`, so this fence has
-        // no effect on it — it only rejects a user (or leftover prelude)
-        // `(match sexpr-value ...)`.
-        if adt_name == Path::root("sexpr") {
-            return Err(Error::TypeError(
-                "match on a Sexpr value is not supported: Sexpr is an internal type; navigate it with the sexpr-* accessors (sexpr-consp/sexpr-car/sexpr-cdr/...) instead"
-                    .into(),
-            ));
-        }
+        // `match` covers every sum type, `Sexpr` included. Symbol/Sexpr
+        // redesign Phase 5 fenced `Sexpr` off here (its structure was to be
+        // navigated only through the `sexpr-*` accessor island), but that
+        // stance was reversed in preparation for a user-facing `(read)`:
+        // read data's type is only known at runtime, and `match` — with type
+        // refinement and exhaustiveness over the ten `Sexpr` variants — is
+        // the language's natural eliminator for it. The runtime machinery
+        // (`match_sexpr_ctor` in the interpreter, `compile-sexpr-tag-test`/
+        // `compile-sexpr-field` in `compiler.rs`) predates the fence and
+        // serves both eras unchanged. Note `Value::Path` (an `a::b` token)
+        // has no `Sexpr` variant: a path scrutinee only ever falls through
+        // to a wildcard arm.
         let total_variants = self.reg.type_def(&adt_name).expect("adt exists").variants.len();
 
         let mut arms = Vec::new();
@@ -4101,6 +4182,56 @@ fn value_to_quoted(heap: &Heap, v: Value) -> Result<QuotedSexpr, Error> {
 /// Whether `v` is the symbol named `name`.
 fn is_symbol(heap: &Heap, v: Value, name: &str) -> bool {
     matches!(v, Value::Symbol(id) if heap.symbol_name(id) == name)
+}
+
+/// `Checker::check_as`'s conversion table: `(from, to)` -> `(panic_method,
+/// try_method)`, where `panic_method` is the existing `registry.rs` instance
+/// method `as` always calls, and `try_method` — `Some` only for the two
+/// *partial* pairs — is the `Option`-returning counterpart `try-as` calls
+/// instead (`None` here means the pair is total: `try-as` calls
+/// `panic_method` too and wraps the result in `Some`).
+///
+/// Every `to`-is-`i64` request is looked up as if `to` were `i32` instead:
+/// `float->int`/`bignum->int`/`char->int` (`registry.rs`) are always
+/// registered with a hardcoded `I32` return even though the underlying
+/// computation already produces a full `i64` (`RtValue::Int` is uniformly
+/// `i64` regardless of which static width labels it) — `check_as` relabels
+/// the result to `I64` afterward on that branch, so this table only ever
+/// needs to name the `i32` method once. An `i32`<->`i64` source/target pair
+/// itself never reaches this table — `check_as` relabels that directly,
+/// before the lookup.
+fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'static str>)> {
+    use Type::*;
+    let to_key = if *to == I64 { I32 } else { to.clone() };
+    match (from, &to_key) {
+        (I32, F64) | (I64, F64) => Some(("int->float", None)),
+        (I32, Bignum) | (I64, Bignum) => Some(("int->bignum", None)),
+        (I32, Ratio) | (I64, Ratio) => Some(("int->ratio", None)),
+        (I32, Char) | (I64, Char) => Some(("int->char", Some("try-int->char"))),
+        (F64, I32) => Some(("float->int", None)),
+        (Char, I32) => Some(("char->int", None)),
+        (Bignum, Ratio) => Some(("bignum->ratio", None)),
+        (Bignum, F64) => Some(("bignum->float", None)),
+        (Bignum, I32) => Some(("bignum->int", Some("try-bignum->int"))),
+        (Ratio, F64) => Some(("ratio->float", None)),
+        _ => None,
+    }
+}
+
+/// `Some(inner)` as a `Typed` — `Checker::check_as`'s `try-as` wrapper for a
+/// total conversion's already-computed result.
+fn wrap_some(inner: Typed, target: Type) -> Typed {
+    let ty = Type::Named(Path::root("option"), vec![target]);
+    Typed { loc: None, expr: Expr::Construct { type_name: Path::root("option"), variant: 0, args: vec![inner], mutable: false }, ty }
+}
+
+/// Relabels an already-computed `Option<I32>` `Typed` (an `as_conversion`
+/// `try_method` call's result) to `Option<inner_target>` — `Checker::check_as`'s
+/// `i64`-target counterpart of the plain relabel it does for a total
+/// conversion; see [`as_conversion`]'s doc comment for why the underlying
+/// `Option`'s runtime payload doesn't actually change.
+fn retype_option(opt: Typed, inner_target: Type) -> Typed {
+    Typed { ty: Type::Named(Path::root("option"), vec![inner_target]), ..opt }
 }
 
 /// `Some(t)` unless `t` is `Never` (which never constrains an expectation).

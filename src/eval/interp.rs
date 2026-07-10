@@ -1832,6 +1832,20 @@ fn int_to_char(args: &[RtValue]) -> Result<RtValue, EvalError> {
     }
 }
 
+/// `try-int->char` (`registry::int_assoc`): the `Option`-returning
+/// counterpart of [`int_to_char`], for `Checker::check_as`'s `try-as` —
+/// same Unicode-scalar-value validity check, `None` instead of a panic.
+fn try_int_to_char(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    match args.first() {
+        Some(RtValue::Int(n)) => {
+            let in_u32_range = *n >= 0 && *n <= i64::from(u32::MAX);
+            let c = in_u32_range.then_some(*n as u32).and_then(char::from_u32);
+            Ok(option_value(c.map(RtValue::Char)))
+        }
+        other => Err(EvalError::Internal(format!("try-int->char: expected an integer, got {:?}", other))),
+    }
+}
+
 /// Evaluate a built-in `f64` arithmetic/comparison instance method
 /// (`registry::float_assoc`). Unlike [`eval_int_builtin`], `/`/`mod` never
 /// panic on a zero divisor — IEEE-754 division yields `inf`/`NaN` instead,
@@ -1972,6 +1986,14 @@ fn bignum_to_int(args: &[RtValue]) -> Result<RtValue, EvalError> {
     n.to_i64()
         .map(RtValue::Int)
         .ok_or_else(|| EvalError::Panic(format!("bignum->int: {} does not fit in an i64", n)))
+}
+
+/// `try-bignum->int` (`registry::bignum_assoc`): the `Option`-returning
+/// counterpart of [`bignum_to_int`], for `Checker::check_as`'s `try-as` —
+/// same "fits in an `i64`" check, `None` instead of a panic on overflow.
+fn try_bignum_to_int(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let n = expect_bignum(&args[0])?;
+    Ok(option_value(n.to_i64().map(RtValue::Int)))
 }
 
 /// `bignum->float` (`registry::bignum_assoc`): widening, possibly lossy for
@@ -2218,6 +2240,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "eq" | "eql" | "equal" | "equalp" => eval_int_builtin("=", args),
             "int->float" => Some(int_to_float(args)),
             "int->char" => Some(int_to_char(args)),
+            "try-int->char" => Some(try_int_to_char(args)),
             "int->bignum" => Some(int_to_bignum(args)),
             "int->ratio" => Some(int_to_ratio(args)),
             _ => None,
@@ -2248,6 +2271,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             }
             "eq" | "eql" | "equal" | "equalp" => eval_bignum_builtin("=", args),
             "bignum->int" => Some(bignum_to_int(args)),
+            "try-bignum->int" => Some(try_bignum_to_int(args)),
             "bignum->float" => Some(bignum_to_float(args)),
             "bignum->ratio" => Some(bignum_to_ratio(args)),
             _ => None,
@@ -2530,11 +2554,11 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// call these to build/read/write a `BoxedObj::Struct` — the same
 /// `BoxedObj::Struct` mem/rt-layer plumbing Stage 1 already exercised in
 /// isolation, wired to the compiler for the first time here.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 23] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 24] {
     use crate::compile::runtime::{
-        rt_car, rt_cdr, rt_cons, rt_float_new, rt_float_value, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root,
-        rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref,
-        rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_truncate_sexpr_roots,
+        rt_box_kind, rt_car, rt_cdr, rt_cons, rt_float_new, rt_float_value, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
+        rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_lt,
+        rt_str_new, rt_str_ref, rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_truncate_sexpr_roots,
     };
     [
         ("rt_car", rt_car as usize),
@@ -2557,6 +2581,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 23] {
         ("rt_str_append", rt_str_append as usize),
         ("rt_float_new", rt_float_new as usize),
         ("rt_float_value", rt_float_value as usize),
+        ("rt_box_kind", rt_box_kind as usize),
         ("rt_struct_new", rt_struct_new as usize),
         ("rt_struct_field_get", rt_struct_field_get as usize),
         ("rt_struct_field_set", rt_struct_field_set as usize),

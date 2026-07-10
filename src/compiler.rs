@@ -360,7 +360,7 @@ pub const SOURCE: &str = r#"
 (defun sexpr-name-list-contains? ((names Sexpr) (nm string)) bool
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
-        (if (eq (sexpr-sym-name (sexpr-car name-pair)) nm)
+        (if (equal (sexpr-sym-name (sexpr-car name-pair)) nm)
             true
             (sexpr-name-list-contains? rest nm)))
       false))
@@ -781,24 +781,33 @@ pub const SOURCE: &str = r#"
 
 ;; Tests whether tagged Sexpr value `v` is Sexpr variant `variant`
 ;; (`registry::sexpr_def`'s variant order: 0=nil 1=int 2=float 3=char
-;; 4=bool 5=sym 6=str 7=cons) -- `nil`/`bool` both compile to the same
-;; 3-bit tag (`typelisp-rt`'s `TAG_IMMEDIATE`, 6) and are told apart by
-;; `v`'s payload bits instead (`0` vs non-zero, see that crate's
-;; `encode`/`decode`); every other variant has its own dedicated tag.
-(defun compile-sexpr-tag-test ((builder llvm-builder) (v llvm-value) (variant i64)) llvm-value
-  (let ((tag (build-and builder v (const-i64 builder 7))))
-    (if (eq variant 0)
-        (build-and builder
-                    (build-icmp-eq builder tag (const-i64 builder 6))
-                    (build-icmp-eq builder (build-lshr builder v (const-i64 builder 3)) (const-i64 builder 0)))
-        (if (eq variant 4)
+;; 4=bool 5=sym 6=str 7=cons 8=bignum 9=ratio) -- `nil`/`bool` both compile
+;; to the same 3-bit tag (`typelisp-rt`'s `TAG_IMMEDIATE`, 6) and are told
+;; apart by `v`'s payload bits instead (`0` vs non-zero, see that crate's
+;; `encode`/`decode`). `float`/`bignum`/`ratio` all share `TAG_BOXED` (7)
+;; with every other heap-boxed object, so the tag alone can't tell them
+;; apart -- they go through `rt_box_kind` (`1`/`2`/`3`; a match already
+;; implies the tag is `TAG_BOXED`, so no separate tag check is emitted).
+;; Every remaining variant has its own dedicated tag.
+(defun compile-sexpr-tag-test ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant i64)) llvm-value
+  (if (if (eq variant 2) true (if (eq variant 8) true (eq variant 9)))
+      (let ((args-ptr (alloca-args builder 1)))
+        (store-arg builder args-ptr 0 v)
+        (build-icmp-eq builder
+                        (build-call builder (get-function m "rt_box_kind") args-ptr 1)
+                        (const-i64 builder (if (eq variant 2) 1 (if (eq variant 8) 2 3)))))
+      (let ((tag (build-and builder v (const-i64 builder 7))))
+        (if (eq variant 0)
             (build-and builder
                         (build-icmp-eq builder tag (const-i64 builder 6))
-                        (build-icmp-ne builder (build-lshr builder v (const-i64 builder 3)) (const-i64 builder 0)))
-            (build-icmp-eq builder tag
-                            (const-i64 builder
-                                       (if (eq variant 1) 0
-                                           (if (eq variant 2) 7
+                        (build-icmp-eq builder (build-lshr builder v (const-i64 builder 3)) (const-i64 builder 0)))
+            (if (eq variant 4)
+                (build-and builder
+                            (build-icmp-eq builder tag (const-i64 builder 6))
+                            (build-icmp-ne builder (build-lshr builder v (const-i64 builder 3)) (const-i64 builder 0)))
+                (build-icmp-eq builder tag
+                                (const-i64 builder
+                                           (if (eq variant 1) 0
                                                (if (eq variant 3) 4
                                                    (if (eq variant 5) 2
                                                        (if (eq variant 6) 3
@@ -826,13 +835,17 @@ pub const SOURCE: &str = r#"
 ;; `f64` field (Sexpr/RtValue unification, Stage 0) goes through
 ;; `rt_float_value` -- a real heap read, like `cons`, since a float is now
 ;; boxed rather than an immediate bit pattern (see `typelisp-rt`'s
-;; `TAG_BOXED`). `sym`'s `Str` field still isn't representable in compiled
-;; code (a `Sym`'s tagged payload is a `SymId`, not a `StrId` -- extracting
-;; its *name* as a string needs its own interning primitive, a separate gap
-;; from `str`'s own), so a `Bind` pattern trying to extract it still panics
-;; clearly here rather than producing garbage -- never reached for a
-;; `Wildcard` sub-pattern (`compile-ctor-subpatterns` skips the call
-;; entirely then).
+;; `TAG_BOXED`). `sym`'s `Symbol` field still isn't representable in
+;; compiled code (a `Sym`'s tagged payload is a `SymId`; `Type::Symbol` has
+;; no compiled representation, and `Interp::call_compiled`'s return-value
+;; decode would degrade one to a plain `Int` at the JIT boundary), and
+;; neither are `bignum`/`ratio`'s payloads (`Type::Bignum`/`Type::Ratio`
+;; are heap objects with no `rt_bignum_*`/`rt_ratio_*` support yet — see
+;; `ast_bridge`'s `Expr::Bignum` note), so a `Bind` pattern trying to
+;; extract any of these panics clearly here rather than producing garbage --
+;; never reached for a `Wildcard` sub-pattern (`compile-ctor-subpatterns`
+;; skips the call entirely then), so tag-only dispatch on `(sym _)`/
+;; `(bignum _)`/`(ratio _)` arms still compiles fine.
 (defun compile-sexpr-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant i64) (idx i32)) llvm-value
   (if (eq variant 1)
       (build-ashr builder v (const-i64 builder 3))
@@ -852,7 +865,11 @@ pub const SOURCE: &str = r#"
                         (build-call builder (get-function m "rt_cdr") args-ptr 1)))
                   (if (eq variant 6)
                       v
-                      (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))))))
+                      (if (eq variant 5)
+                          (panic "compile-sexpr-field: a sym's Symbol payload is not representable in compiled code yet; match it with (sym _) instead of binding it")
+                          (if (if (eq variant 8) true (eq variant 9))
+                              (panic "compile-sexpr-field: bignum/ratio payloads are not representable in compiled code yet; match them with (bignum _)/(ratio _) instead of binding them")
+                              (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))))))))
 
 ;; The encode-side mirror of `compile-sexpr-field`'s decode, over the exact
 ;; same `ast_bridge::struct_field_kind`/`Sexpr`-variant numbering (`1`=int
@@ -2213,7 +2230,7 @@ pub const SOURCE: &str = r#"
                                                 (let ((is-box (sexpr-bool (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))
                                                   (if is-box
                                                       (compile-pattern-guard builder cur-fn (compile-box-tag-test builder v variant) fail-block)
-                                                      (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder v variant) fail-block))
+                                                      (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v variant) fail-block))
                                                   (compile-ctor-subpatterns builder env cur-fn v is-box variant subpats 0 fail-block))))
                                             (panic (append "compile-pattern-test: unsupported pattern tag " s)))))))
                            )
@@ -2228,7 +2245,7 @@ pub const SOURCE: &str = r#"
                        (compile-ctor-subpatterns ((builder llvm-builder) (env Scope<llvm-value>) (cur-fn llvm-function) (v llvm-value) (is-box bool) (variant i64) (subpats Sexpr) (idx i32) (fail-block llvm-basic-block)) ()
                          (if (sexpr-consp subpats)
                              (let ((p (sexpr-car subpats)) (rest (sexpr-cdr subpats)))
-                              (if (eq (sexpr-sym-name (sexpr-car p)) "pat-wild")
+                              (if (equal (sexpr-sym-name (sexpr-car p)) "pat-wild")
                                 (compile-ctor-subpatterns builder env cur-fn v is-box variant rest (+ idx 1) fail-block)
                                 (let ((field-v (if is-box (compile-box-field builder v idx) (compile-sexpr-field builder m v variant idx))))
                                   (compile-pattern-test builder env cur-fn field-v p fail-block)

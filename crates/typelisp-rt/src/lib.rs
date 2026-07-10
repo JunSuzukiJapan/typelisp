@@ -407,6 +407,38 @@ pub unsafe extern "C" fn rt_float_value(args: *const i64, argc: u32) -> i64 {
     }
 }
 
+/// Discriminates the numeric boxed `Sexpr` kinds that share `TAG_BOXED`'s
+/// one tag: `1` for a boxed float, `2` for a bignum, `3` for a ratio, `0`
+/// for everything else — *including* non-boxed values, so it's total over
+/// every tagged word and `compile-sexpr-tag-test` can call it without a
+/// prior tag check (a `kind == 1` result already implies `TAG_BOXED`).
+/// `args[0]` is a tagged `Sexpr` value, like [`rt_float_value`]'s.
+///
+/// # Safety
+///
+/// Same as [`rt_float_new`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_box_kind(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_box_kind: expected 1 argument");
+    }
+    match decode(*args) {
+        Value::Boxed(id) => {
+            let heap = active_heap();
+            if heap.is_float(id) {
+                1
+            } else if heap.is_bignum(id) {
+                2
+            } else if heap.is_ratio(id) {
+                3
+            } else {
+                0
+            }
+        }
+        _ => 0,
+    }
+}
+
 // ---- Sexpr/RtValue unification, Stage 1: boxed objects (Struct) --------
 //
 // `BoxedObj::Struct` (`typelisp-mem`) is the shared runtime shape behind a

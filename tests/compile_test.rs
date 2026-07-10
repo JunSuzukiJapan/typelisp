@@ -1864,8 +1864,9 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
 /// compile-time character embedding could produce) and `length`s the result,
 /// exercising `rt_str_append`'s own fresh allocation. (The former
 /// `(match (Str "hi") ((Str content) (eq content "hi")))` string-content-eq
-/// sub-cases were dropped: `match` on a `Sexpr` is fenced off — Symbol/Sexpr
-/// redesign Phase 5.)
+/// sub-cases were dropped when Symbol/Sexpr redesign Phase 5 fenced `match`
+/// off `Sexpr`; the fence has since been lifted — see the "compiled `match`
+/// on a `Sexpr` scrutinee" section at the end of this file.)
 #[test]
 fn compile_dispatches_a_function_that_appends_strings_to_native_code() {
     let v = run_with_compiler_and_prelude(
@@ -2887,4 +2888,94 @@ fn compile_matches_a_builtin_option() {
         "#,
     );
     assert_eq!(v, RtValue::Int(5));
+}
+
+// ---- compiled `match` on a `Sexpr` scrutinee ---------------------------------
+//
+// Re-enabled after Symbol/Sexpr redesign Phase 5's checker fence was lifted
+// (in preparation for a user-facing `(read)` — see `tests/match_sexpr_test.rs`'s
+// module doc for the interp side). The Sexpr-scrutinee machinery below
+// (`compile-sexpr-tag-test`/`compile-sexpr-field`) predates the fence; what's
+// new on this side is `rt_box_kind`: `float`/`bignum`/`ratio` all share
+// `TAG_BOXED`, so their tag tests can't tell them apart by the 3-bit tag alone.
+
+/// A compiled `match` over a `Sexpr` scrutinee dispatches on the tagged-i64
+/// representation and extracts `int`/`cons` payloads, nested pattern included.
+#[test]
+fn compile_matches_a_sexpr_scrutinee_and_extracts_payloads() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun f ((s Sexpr)) i64
+          (match s
+            ((int n) n)
+            ((cons (int a) _) a)
+            (_ 0)))
+        (compile f)
+        (+ (f (Int 40)) (f (sexpr-cons (Int 2) (Str "tail"))))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(42));
+}
+
+/// The three numeric boxed variants share `TAG_BOXED`, so their arms dispatch
+/// through `rt_box_kind` — a bignum/ratio scrutinee must *not* take a
+/// preceding `(float _)` arm even though it carries the same 3-bit tag.
+#[test]
+fn compile_match_distinguishes_float_bignum_and_ratio_boxes() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun which ((s Sexpr)) i64
+          (match s
+            ((float _) 1)
+            ((bignum _) 2)
+            ((ratio _) 3)
+            (_ 0)))
+        (compile which)
+        (+ (+ (which (Float 1.5))
+              (* (the i64 10) (which (Bignum 99999999999999999999999999))))
+           (* (the i64 100) (which (Ratio 2/3))))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(321));
+}
+
+/// Tag-only dispatch covers every variant, including `sym`, whose *payload*
+/// still has no compiled representation (binding it is a clear
+/// `compile-sexpr-field` panic; `(sym _)` never extracts, so it compiles).
+#[test]
+fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun tag ((s Sexpr)) i64
+          (match s
+            ((nil) 1) ((sym _) 2) ((str _) 3) ((bool _) 4)
+            (_ 0)))
+        (compile tag)
+        (+ (+ (tag (Nil)) (* (the i64 10) (tag (quote foo))))
+           (+ (* (the i64 100) (tag (Str "s"))) (* (the i64 1000) (tag (Bool false)))))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(4321));
+}
+
+/// Compiled and interpreted `match` agree over the same Sexpr inputs.
+#[test]
+fn compile_and_interpret_agree_on_a_sexpr_match() {
+    let src = |call: &str| {
+        format!(
+            r#"
+            (defun sum ((s Sexpr)) i64
+              (match s
+                ((cons (int n) rest) (+ n (sum rest)))
+                (_ 0)))
+            {}
+            (sum (quote (1 2 3 4)))
+            "#,
+            call
+        )
+    };
+    let interp_v = eval_ok_with_compiler(&src(""));
+    let compiled_v = eval_ok_with_compiler(&src("(compile sum)"));
+    assert_eq!(interp_v, RtValue::Int(10));
+    assert_eq!(compiled_v, interp_v);
 }

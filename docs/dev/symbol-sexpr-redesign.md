@@ -1,6 +1,10 @@
 # Symbol型導入と Sexpr の裏方化（型システム再設計）— 進行中
 
-最終更新: 2026-07-05 / ブランチ: `feature/symbol-type`（`feature/compile-sexpr` から分岐）
+最終更新: 2026-07-10 / ブランチ: `feature/symbol-type`（`feature/compile-sexpr` から分岐）
+
+> **2026-07-10 追記**: Phase 5 の `match`-on-`Sexpr` fence は、`(read)` ビルトイン導入準備のため
+> 再解禁された（詳細は Phase 5 節末尾の「Phase 5 方針転換」を参照）。Sexpr は user-facing の
+> `match` 対象として復帰したが、`sexpr-*` アクセサ層自体は撤去していない。
 
 このドキュメントは複数フェーズにわたる型システム再設計の**進捗と残作業**を記録する。
 Phase 0〜3・Phase 4a（コレクションコンビネータの generic `Iter` 化）・**Phase 4b（`cons`/`car`/`cdr` の
@@ -241,6 +245,39 @@ Phase 4b は当初懸念（存続関数の `car`/`cdr` 移行）が不要にな�
 検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
 
 **残: `defenum` は将来課題。ユーザー面リスト/ペア走査 API の再設計は Phase 6.5（下記）へ。**
+
+#### Phase 5 方針転換 — `match`-on-`Sexpr` を再解禁【✅ 完了 / 2026-07-10】
+
+上記 match fence（`checker.rs::check_match` の `sexpr` パス拒否）を撤回し、`match` を再び `Sexpr` の
+eliminator として使えるようにした。ユーザー向けに実行時にしか型の分からない値を持ち込む
+`(read)` ビルトインを導入する準備であり、read データの構造は型精緻化・網羅性チェック付きで
+分解できる必要があるため、Phase 5 時点の「Sexpr は内部型・`sexpr-*` アクセサのみ」判断を上書きした。
+
+実装済み内容:
+- **fence 除去**: `checker.rs::check_match` の `adt_name == Path::root("sexpr")` 早期リターンを削除。
+  網羅性チェック（`total_variants`）・`check_ctor_pattern` は元々 ADT 種別に依存しない汎用機構なので、
+  追加実装なしで `sexpr` の全 10 variant（`nil`/`int`/`float`/`char`/`bool`/`sym`/`str`/`cons`/`bignum`/`ratio`）
+  に対して働く。`if-let`/`while-let`（prelude マクロ、両者とも二腕 `match` へ展開）も自動的に追従。
+- **interp 側**: `match_sexpr_ctor`（`eval/interp.rs`）は Phase 5 当時から生存していたため無改修。
+- **compile 側の穴埋め**: `float`/`bignum`/`ratio` は `TAG_BOXED` を共有し 3bit タグだけでは区別できないため、
+  `typelisp-rt` に `rt_box_kind`（0=非該当・1=float・2=bignum・3=ratio）を新設し、
+  `compiler.rs::compile-sexpr-tag-test` の該当 3 variant をタグ判定から `rt_box_kind` 呼び出しへ変更。
+  `bignum`/`ratio` の**ペイロード**（`compile-sexpr-field`）は `rt_bignum_*`/`rt_ratio_*` 未実装のため
+  引き続き明示 panic（`(bignum _)`/`(ratio _)` のワイルドカードでの tag-only 分岐は compile 可能）。
+  同様に `sym` のペイロード抽出（`Symbol` 型は compile 表現なし）も明示 panic のまま。
+- **潜在バグの発見と修正**: `compile-ctor-subpatterns` の「サブパターンが `pat-wild` か」判定が
+  `(eq (sexpr-sym-name ...) "pat-wild")` という**識別子比較**で書かれており、文字列内容比較のつもりが
+  常に false になっていた（`eq` は CL 同様ポインタ同一性、内容比較は `equal`）。このため `(sym _)`/
+  `(bignum _)`/`(ratio _)` のようなワイルドカード付き ctor パターンでも無条件に `compile-sexpr-field` を
+  呼んでいた。`eq`→`equal` に修正（`compiler.rs` 2 箇所）。Sexpr match 解禁でこの経路が初めて実際に
+  踏まれるようになるまで顕在化していなかった。
+- **注記（未対応のまま）**: 実行時 `Value::Path`（`a::b` トークン）に対応する `Sexpr` variant は存在しない。
+  path な `Sexpr` 値は `match` では `_` にしか落ちない。`(read)` 導入時に扱いを決める。
+- **テスト**: `tests/match_sexpr_test.rs` 新設（interp 側、全 variant・ネストパターン・網羅性エラー・
+  `if-let`/`while-let`）。`tests/compile_test.rs` 末尾に compile 側 4 本追加
+  （payload 抽出、float/bignum/ratio 判別、nil/sym/str/bool のタグのみ分岐、interp/compile 一致）。
+
+検証: `cargo test` 全 suite green、`scripts/test-serial.sh` green。
 
 ### Phase 6 — 破棄（値レベル `&rest` を削除）
 当初計画（`&rest` → `Vector<T>`）は撤回。代わりに**値レベル `&rest` を言語から削除**した:
