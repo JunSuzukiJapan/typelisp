@@ -110,7 +110,7 @@ fn try_run_pending(
     pending: &mut String,
 ) {
     let mark = heap.root_count();
-    let forms = match reader.read_all(heap, pending) {
+    let forms = match reader.read_all_in(heap, "<stdin>", pending) {
         Ok(forms) => forms,
         Err(e) => {
             while heap.root_count() > mark {
@@ -187,8 +187,9 @@ fn needs_immediate_exec(tl: &TopLevel) -> bool {
 /// True if `e` signals "ran out of input mid-form" (need another line)
 /// rather than a real syntax error.
 fn is_incomplete(e: &Error) -> bool {
+    // `e` may be wrapped in `Error::At(loc, ..)`; match on the underlying kind.
     matches!(
-        e,
+        e.kind(),
         Error::IllegalEndWhileReadingList | Error::IllegalEndOfString | Error::IllegalEndOfEscapeSequence
     )
 }

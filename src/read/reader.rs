@@ -15,8 +15,10 @@
 //! quote `'`, quasiquote `` ` ``, unquote `,`, unquote-splicing `,@`, and
 //! comments (`;` line, `#| ... |#` nested block).
 
+use std::rc::Rc;
+
 use crate::name_lexer::{NameLexer, NameTok};
-use crate::{Error, Heap, SymId, Value};
+use crate::{Error, Heap, Loc, SymId, Value};
 
 pub struct Reader;
 
@@ -32,24 +34,47 @@ impl Reader {
     }
 
     /// Read a single datum from `src`. Trailing input is ignored.
+    ///
+    /// Uses the placeholder file name `<input>` in any error's location; call
+    /// [`Reader::read_in`] to supply the real source file name.
     pub fn read(&self, heap: &mut Heap, src: &str) -> Result<Value, Error> {
-        let mut cur = Cursor::new(src);
-        read_datum(&mut cur, heap)
+        self.read_in(heap, "<input>", src)
+    }
+
+    /// Like [`Reader::read`], but `file` names the source (used in the location
+    /// prefix of any error message).
+    pub fn read_in(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Value, Error> {
+        heap.clear_cons_locs();
+        let mut cur = Cursor::new(file, src);
+        read_datum(&mut cur, heap).map_err(|e| e.at(cur.loc()))
     }
 
     /// Read every top-level datum from `src`.
     ///
     /// Each returned value is registered as a GC root (so later reads cannot
     /// collect earlier results); the caller pops them when done.
+    ///
+    /// Uses the placeholder file name `<input>` in any error's location; call
+    /// [`Reader::read_all_in`] to supply the real source file name.
     pub fn read_all(&self, heap: &mut Heap, src: &str) -> Result<Vec<Value>, Error> {
-        let mut cur = Cursor::new(src);
+        self.read_all_in(heap, "<input>", src)
+    }
+
+    /// Like [`Reader::read_all`], but `file` names the source (used in the
+    /// location prefix of any error message).
+    pub fn read_all_in(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Vec<Value>, Error> {
+        heap.clear_cons_locs();
+        let mut cur = Cursor::new(file, src);
         let mut out = Vec::new();
         loop {
             skip_ws_comments(&mut cur);
             if cur.at_end() {
                 break;
             }
-            let v = read_datum(&mut cur, heap)?;
+            let v = match read_datum(&mut cur, heap) {
+                Ok(v) => v,
+                Err(e) => return Err(e.at(cur.loc())),
+            };
             heap.push_root(v);
             out.push(v);
         }
@@ -64,11 +89,17 @@ impl Reader {
 struct Cursor {
     chars: Vec<char>,
     pos: usize,
+    /// 1-based line and column of the character at `pos` (the next one to be
+    /// consumed), tracked incrementally in [`Cursor::next`]. Used to build a
+    /// [`Loc`] for any read error via [`Cursor::loc`].
+    file: Rc<str>,
+    line: u32,
+    col: u32,
 }
 
 impl Cursor {
-    fn new(s: &str) -> Cursor {
-        Cursor { chars: s.chars().collect(), pos: 0 }
+    fn new(file: &str, s: &str) -> Cursor {
+        Cursor { chars: s.chars().collect(), pos: 0, file: Rc::from(file), line: 1, col: 1 }
     }
     fn peek(&self) -> Option<char> {
         self.chars.get(self.pos).copied()
@@ -78,13 +109,26 @@ impl Cursor {
     }
     fn next(&mut self) -> Option<char> {
         let c = self.peek();
-        if c.is_some() {
+        if let Some(ch) = c {
             self.pos += 1;
+            // Advance line/column: a consumed newline moves to column 1 of the
+            // next line; any other character advances the column by one.
+            if ch == '\n' {
+                self.line += 1;
+                self.col = 1;
+            } else {
+                self.col += 1;
+            }
         }
         c
     }
     fn at_end(&self) -> bool {
         self.pos >= self.chars.len()
+    }
+    /// The current source position (where the next character would be read),
+    /// which is where a read error is reported.
+    fn loc(&self) -> Loc {
+        Loc::new(Rc::clone(&self.file), self.line, self.col)
     }
 }
 
@@ -224,6 +268,7 @@ fn read_wrapped_body(cur: &mut Cursor, heap: &mut Heap, head: &str) -> Result<Va
 // ----------------------------------------------------------------------
 
 fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
+    let open_loc = cur.loc(); // position of the '(' — the list form's location
     cur.next(); // '('
     let mark = heap.root_count();
     let mut elems: Vec<Value> = Vec::new();
@@ -298,6 +343,13 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
     }
 
     restore_roots(heap, mark);
+    // Record where this list form began, so the checker/interpreter can point
+    // an error at it. Only the head cell is tagged; each nested list records
+    // its own head via its own `read_list` call. An empty list `()` reads as
+    // `Value::Empty` (no cell), so there is nothing to tag then.
+    if let Value::Cons(cr) = acc {
+        heap.set_cons_loc(cr, open_loc);
+    }
     Ok(acc)
 }
 

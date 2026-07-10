@@ -85,6 +85,17 @@ pub struct Heap {
     // collections run *implicitly* inside `cons()`, where a return value
     // has no consumer.
     dead_closure_tokens: Vec<u32>,
+
+    // Source locations of cons cells produced by the reader, keyed by the
+    // cell's raw address (`ConsRef::addr`), so an error about a form can be
+    // reported with the `file:line:col` it was read from. This is a pure
+    // side table: it never keeps a cell alive (the mark phase ignores it) and
+    // a stale entry (a freed cell's address later reused) is harmless because
+    // the reader overwrites it on every fresh allocation and
+    // `clear_cons_locs` wipes it at the start of each read batch. Cleared —
+    // not GC-swept — because the forms it describes stay rooted for the whole
+    // read→check cycle that consults it.
+    cons_locs: HashMap<usize, crate::errors::Loc>,
 }
 
 impl Heap {
@@ -124,7 +135,33 @@ impl Heap {
             box_marks: Vec::new(),
             cell_registry: Vec::new(),
             dead_closure_tokens: Vec::new(),
+            cons_locs: HashMap::new(),
         }
+    }
+
+    // -- Reader source-location side table (see the `cons_locs` field) -------
+
+    /// Record the source location a cons cell was read from. The reader calls
+    /// this for each list form's head cell; the checker/interpreter later
+    /// look it up via [`Heap::cons_loc`] to place an error message.
+    pub fn set_cons_loc(&mut self, cr: ConsRef, loc: crate::errors::Loc) {
+        self.cons_locs.insert(cr.addr(), loc);
+    }
+
+    /// The source location recorded for `v` when it is a cons cell, if any.
+    /// Non-cons values (atoms, symbols, ...) never carry their own location.
+    pub fn cons_loc(&self, v: Value) -> Option<crate::errors::Loc> {
+        match v {
+            Value::Cons(cr) => self.cons_locs.get(&cr.addr()).cloned(),
+            _ => None,
+        }
+    }
+
+    /// Drop every recorded source location. The reader calls this at the start
+    /// of each read batch so stale entries from an earlier batch can never
+    /// mislabel a newly read form (see the `cons_locs` field doc comment).
+    pub fn clear_cons_locs(&mut self) {
+        self.cons_locs.clear();
     }
 
     // ---- statistics -------------------------------------------------------

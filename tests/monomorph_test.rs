@@ -20,7 +20,7 @@ fn run(src: &str) -> Result<RtValue, Error> {
     let mut interp = Interp::new();
     let mut last = RtValue::Unit;
     for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v)?;
+        let tl = chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;
         }
@@ -39,7 +39,7 @@ fn check_all(src: &str) -> Result<Vec<TopLevel>, Error> {
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    vs.into_iter().map(|v| chk.check_form(&mut h, &interp, v)).collect()
+    vs.into_iter().map(|v| chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)).collect()
 }
 
 /// The specialization `Defun`s bundled with `tl` (empty if `tl` isn't a

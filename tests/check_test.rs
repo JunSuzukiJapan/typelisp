@@ -27,7 +27,8 @@ fn form(src: &str) -> Result<TopLevel, Error> {
     let v = r.read(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    chk.check_form(&mut h, &interp, v)
+    // Strip any source-location wrapper so kind-based assertions still match.
+    chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)
 }
 
 /// Check a sequence of forms (e.g. a defun followed by a use of it), returning
@@ -40,7 +41,7 @@ fn program(src: &str) -> Result<TopLevel, Error> {
     let interp = Interp::new();
     let mut last = None;
     for v in vs {
-        last = Some(chk.check_form(&mut h, &interp, v)?);
+        last = Some(chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?);
     }
     Ok(last.expect("no forms"))
 }
@@ -58,7 +59,7 @@ fn program_with_prelude(src: &str) -> Result<TopLevel, Error> {
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = None;
     for v in vs {
-        last = Some(chk.check_form(&mut h, &interp, v)?);
+        last = Some(chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?);
     }
     Ok(last.expect("no forms"))
 }
@@ -329,7 +330,7 @@ fn cannot_assign_to_constant() {
     let mut result = Ok(());
     for v in vs {
         if let Err(e) = chk.check_form(&mut h, &interp, v) {
-            result = Err(e);
+            result = Err(e.into_kind());
         }
     }
     assert!(matches!(result, Err(Error::TypeError(_))));
@@ -536,7 +537,7 @@ fn nested_loop_break_targets_innermost() {
 #[test]
 fn typed_ast_records_expr_and_type() {
     match form("(if true 1 2)").unwrap() {
-        TopLevel::Expr(Typed { expr: Expr::If(_, _, _), ty }) => assert_eq!(ty, Type::I32),
+        TopLevel::Expr(Typed { expr: Expr::If(_, _, _), ty, .. }) => assert_eq!(ty, Type::I32),
         other => panic!("unexpected: {:?}", other),
     }
 }
@@ -554,7 +555,7 @@ fn the_produces_the_same_expr_as_its_inner_form() {
     // `the` contributes no AST node of its own — checking `(the i32 5)`
     // yields exactly the same `Expr::Int` the bare literal would.
     match form("(the i32 5)").unwrap() {
-        TopLevel::Expr(Typed { expr: Expr::Int(5), ty: Type::I32 }) => {}
+        TopLevel::Expr(Typed { expr: Expr::Int(5), ty: Type::I32, .. }) => {}
         other => panic!("unexpected: {:?}", other),
     }
 }
@@ -609,4 +610,32 @@ fn unreachable_and_todo_type_check_as_never() {
         TopLevel::Defun { ret, .. } => assert_eq!(ret, Type::I32),
         other => panic!("unexpected: {:?}", other),
     }
+}
+
+/// A type error carries the source location of the offending sub-form (down to
+/// the innermost list form that failed), so messages read `file:line:col: ...`.
+#[test]
+fn type_error_carries_source_location() {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::new();
+    // The `(+ x "oops")` form is on line 2; the whole thing is checked with a
+    // filename so the location names it.
+    let vs = r
+        .read_all_in(&mut h, "prog.typl", "(defun f ((x i32)) i32\n  (+ x \"oops\"))")
+        .expect("read failed");
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    let mut err = None;
+    for v in vs {
+        if let Err(e) = chk.check_form(&mut h, &interp, v) {
+            err = Some(e);
+            break;
+        }
+    }
+    let err = err.expect("expected a type error");
+    let loc = err.loc().expect("type error should carry a location");
+    assert_eq!(&*loc.file, "prog.typl");
+    assert_eq!(loc.line, 2, "should point at the `(+ ...)` form on line 2");
+    // Underlying kind is still a TypeError.
+    assert!(matches!(err.kind(), Error::TypeError(_)));
 }

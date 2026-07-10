@@ -18,7 +18,7 @@ fn run(src: &str) -> Result<(RtValue, Heap), Error> {
     let mut interp = Interp::new();
     let mut last = RtValue::Unit;
     for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v)?;
+        let tl = chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;
         }
@@ -41,7 +41,7 @@ fn check_program(src: &str) -> Result<TopLevel, Error> {
     let interp = Interp::new();
     let mut last = None;
     for v in vs {
-        last = Some(chk.check_form(&mut h, &interp, v)?);
+        last = Some(chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?);
     }
     Ok(last.expect("no forms"))
 }

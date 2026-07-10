@@ -518,12 +518,17 @@ impl Checker {
             self.spec_pending.borrow().is_empty(),
             "specialization requests must never leak across check_form calls"
         );
+        // Location of this top-level form, attached to any error that lacks a
+        // more specific one (a body-expression error already carries the
+        // deeper location from `check`, and `Error::at` keeps that innermost
+        // one — see its doc comment).
+        let loc = heap.cons_loc(v);
         let primary = self.check_form_dispatch(heap, interp, v);
         let bundled = primary.and_then(|tl| Ok((self.drain_specializations(heap, interp)?, tl)));
         // Both maps reset per form regardless of outcome — see `spec_memo`'s
         // doc comment for why the memo must not outlive the form.
         self.spec_memo.borrow_mut().clear();
-        match bundled {
+        let result = match bundled {
             Ok((specs, tl)) if specs.is_empty() => Ok(tl),
             Ok((mut specs, tl)) => {
                 specs.push(tl);
@@ -533,6 +538,10 @@ impl Checker {
                 self.spec_pending.borrow_mut().clear();
                 Err(e)
             }
+        };
+        match loc {
+            Some(loc) => result.map_err(|e| e.at(loc)),
+            None => result,
         }
     }
 
@@ -896,7 +905,7 @@ impl Checker {
         let sig = self.reg.fn_sig(&fq).expect("resolved fn exists").clone();
         let tmpl_ty = Type::Fn(sig.params.clone(), Box::new(sig.ret.clone()));
         if sig.type_params.is_empty() {
-            return Ok(Typed { expr: Expr::FnRef(fq), ty: tmpl_ty });
+            return Ok(Typed { loc: None, expr: Expr::FnRef(fq), ty: tmpl_ty });
         }
         if let Some(exp) = expected {
             let params: HashSet<String> = sig.type_params.iter().cloned().collect();
@@ -908,17 +917,17 @@ impl Checker {
                 let resolved_ty = subst_apply(&tmpl_ty, &subst);
                 if !targs.iter().any(|t| self.type_is_open(t)) && self.generic_fn_templates.contains_key(&fq) {
                     let mangled = self.request_fn_specialization(&fq, targs);
-                    return Ok(Typed { expr: Expr::FnRef(mangled), ty: resolved_ty });
+                    return Ok(Typed { loc: None, expr: Expr::FnRef(mangled), ty: resolved_ty });
                 }
                 // Open type arguments: we're inside another generic
                 // function's diagnostics-only body check — the node is never
                 // executed, and that function's own specialization will
                 // re-check this reference with the types concrete.
-                return Ok(Typed { expr: Expr::FnRef(fq), ty: resolved_ty });
+                return Ok(Typed { loc: None, expr: Expr::FnRef(fq), ty: resolved_ty });
             }
             // Shape mismatch: hand back the generic node so `check`'s
             // ordinary expected-vs-actual reconciliation reports it.
-            return Ok(Typed { expr: Expr::FnRef(fq), ty: tmpl_ty });
+            return Ok(Typed { loc: None, expr: Expr::FnRef(fq), ty: tmpl_ty });
         }
         Err(Error::TypeError(format!(
             "generic function `{}` used as a value needs a concrete function-type context \
@@ -963,7 +972,7 @@ impl Checker {
                     && self.generic_method_templates.contains_key(&(type_fq.clone(), name.to_string()))
                 {
                     let mangled = self.request_method_specialization(&type_fq, name, targs);
-                    return Some(Typed {
+                    return Some(Typed { loc: None,
                         expr: Expr::MethodRef { type_name: type_fq, method: mangled },
                         ty: subst_apply(&ty, &subst),
                     });
@@ -974,7 +983,7 @@ impl Checker {
         if &ty != expected.unwrap() {
             return None;
         }
-        Some(Typed { expr: Expr::MethodRef { type_name: type_fq, method: name.to_string() }, ty })
+        Some(Typed { loc: None, expr: Expr::MethodRef { type_name: type_fq, method: name.to_string() }, ty })
     }
 
     /// `var::field`: if `segs` is `[recv, method]` and `recv` names a bound
@@ -1003,10 +1012,10 @@ impl Checker {
     ) -> Option<Result<Typed, Error>> {
         let [recv_name, method] = segs else { return None };
         let recv = if let Some(t) = env.get(recv_name) {
-            Typed { expr: Expr::Var(recv_name.clone()), ty: t.clone() }
+            Typed { loc: None, expr: Expr::Var(recv_name.clone()), ty: t.clone() }
         } else {
             let (path, vi) = self.resolve_global(recv_name)?;
-            Typed { expr: Expr::Global(path), ty: vi.ty }
+            Typed { loc: None, expr: Expr::Global(path), ty: vi.ty }
         };
         let Type::Named(type_fq, _) = &recv.ty else { return None };
         let af = self.reg.type_def(type_fq)?.assoc.get(method)?;
@@ -1364,7 +1373,7 @@ impl Checker {
             def.params.iter().cloned().zip(args.iter().cloned()).collect();
         let field_ty = subst_apply(&def.variants[0].fields[index], &subst);
         let recv_ty = Type::Named(type_fq.clone(), args.to_vec());
-        let self_var = Typed { expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
+        let self_var = Typed { loc: None, expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
         if getter {
             TopLevel::Defmethod {
                 type_name: type_fq.clone(),
@@ -1373,11 +1382,11 @@ impl Checker {
                 self_name: Some("self".to_string()),
                 params: Vec::new(),
                 ret: field_ty.clone(),
-                body: vec![Typed { expr: Expr::FieldGet(Box::new(self_var), index), ty: field_ty }],
+                body: vec![Typed { loc: None, expr: Expr::FieldGet(Box::new(self_var), index), ty: field_ty }],
                 type_params: Vec::new(),
             }
         } else {
-            let value_var = Typed { expr: Expr::Var("value".to_string()), ty: field_ty.clone() };
+            let value_var = Typed { loc: None, expr: Expr::Var("value".to_string()), ty: field_ty.clone() };
             TopLevel::Defmethod {
                 type_name: type_fq.clone(),
                 method: mangled.to_string(),
@@ -1385,7 +1394,7 @@ impl Checker {
                 self_name: Some("self".to_string()),
                 params: vec![("value".to_string(), field_ty)],
                 ret: Type::Unit,
-                body: vec![Typed {
+                body: vec![Typed { loc: None,
                     expr: Expr::FieldSet(Box::new(self_var), index, Box::new(value_var)),
                     ty: Type::Unit,
                 }],
@@ -2122,7 +2131,7 @@ impl Checker {
                 bounds: HashMap::new(),
             };
             assoc.insert(field_name.clone(), AssocFn { sig: getter_sig, instance: true, builtin: false });
-            let self_var = Typed { expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
+            let self_var = Typed { loc: None, expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
             accessors.push(TopLevel::Defmethod {
                 type_name: type_fq.clone(),
                 method: field_name.clone(),
@@ -2130,7 +2139,7 @@ impl Checker {
                 self_name: Some("self".to_string()),
                 params: Vec::new(),
                 ret: field_ty.clone(),
-                body: vec![Typed { expr: Expr::FieldGet(Box::new(self_var), i), ty: field_ty.clone() }],
+                body: vec![Typed { loc: None, expr: Expr::FieldGet(Box::new(self_var), i), ty: field_ty.clone() }],
                 type_params: type_params.clone(),
             });
 
@@ -2146,8 +2155,8 @@ impl Checker {
                 bounds: HashMap::new(),
             };
             assoc.insert(setter_name.clone(), AssocFn { sig: setter_sig, instance: true, builtin: false });
-            let self_var = Typed { expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
-            let value_var = Typed { expr: Expr::Var("value".to_string()), ty: field_ty.clone() };
+            let self_var = Typed { loc: None, expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
+            let value_var = Typed { loc: None, expr: Expr::Var("value".to_string()), ty: field_ty.clone() };
             accessors.push(TopLevel::Defmethod {
                 type_name: type_fq.clone(),
                 method: setter_name.clone(),
@@ -2155,7 +2164,7 @@ impl Checker {
                 self_name: Some("self".to_string()),
                 params: vec![("value".to_string(), field_ty.clone())],
                 ret: Type::Unit,
-                body: vec![Typed {
+                body: vec![Typed { loc: None,
                     expr: Expr::FieldSet(Box::new(self_var), i, Box::new(value_var)),
                     ty: Type::Unit,
                 }],
@@ -2341,6 +2350,13 @@ impl Checker {
     // ---- expressions ------------------------------------------------------
 
     /// Check `v` as an expression, optionally against an `expected` type.
+    ///
+    /// Thin wrapper over [`Self::check_inner`] that tags any error with `v`'s
+    /// source location. Because `check` recurses (through `check_inner`) into
+    /// sub-expressions, the *deepest* failing sub-expression tags first and,
+    /// since [`Error::at`] keeps the innermost location, that precise spot is
+    /// what the message reports. Only list forms carry a recorded location, so
+    /// an error on a bare atom falls back to its enclosing form's location.
     fn check(
         &self,
         heap: &mut Heap,
@@ -2349,14 +2365,40 @@ impl Checker {
         v: Value,
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
+        let loc = heap.cons_loc(v);
+        match self.check_inner(heap, interp, env, v, expected) {
+            // Record `v`'s location on the checked node so the interpreter can
+            // report a *runtime* error there too. A recursive `check` on a
+            // sub-form already tagged its own node, so only fill an empty slot.
+            Ok(mut typed) => {
+                if typed.loc.is_none() {
+                    typed.loc = loc;
+                }
+                Ok(typed)
+            }
+            Err(e) => match loc {
+                Some(loc) => Err(e.at(loc)),
+                None => Err(e),
+            },
+        }
+    }
+
+    fn check_inner(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        v: Value,
+        expected: Option<&Type>,
+    ) -> Result<Typed, Error> {
         let typed = match v {
-            Value::Int(n) => Typed { expr: Expr::Int(n), ty: int_lit_ty(expected) },
+            Value::Int(n) => Typed { loc: None, expr: Expr::Int(n), ty: int_lit_ty(expected) },
             // `Sexpr::Float` is heap-boxed (`Value::Boxed`, see `BoxedObj`)
             // — today the only thing a `Value::Boxed` read-literal can be.
-            Value::Boxed(id) => Typed { expr: Expr::Float(heap.float_value(id)), ty: float_lit_ty(expected) },
-            Value::Bool(b) => Typed { expr: Expr::Bool(b), ty: Type::Bool },
-            Value::Char(c) => Typed { expr: Expr::Char(c), ty: Type::Char },
-            Value::Str(s) => Typed { expr: Expr::Str(heap.string(s).to_string()), ty: Type::Str },
+            Value::Boxed(id) => Typed { loc: None, expr: Expr::Float(heap.float_value(id)), ty: float_lit_ty(expected) },
+            Value::Bool(b) => Typed { loc: None, expr: Expr::Bool(b), ty: Type::Bool },
+            Value::Char(c) => Typed { loc: None, expr: Expr::Char(c), ty: Type::Char },
+            Value::Str(s) => Typed { loc: None, expr: Expr::Str(heap.string(s).to_string()), ty: Type::Str },
             Value::Empty => {
                 // The empty list `()` is the `None` value of `Option<T>` when an
                 // option type is expected, the `Nil` value of `Sexpr` when a
@@ -2381,14 +2423,14 @@ impl Checker {
                         }
                     }
                 }
-                Typed { expr: Expr::Unit, ty: Type::Unit }
+                Typed { loc: None, expr: Expr::Unit, ty: Type::Unit }
             }
             Value::Symbol(id) => {
                 let name = heap.symbol_name(id);
                 if let Some(t) = env.get(name) {
-                    Typed { expr: Expr::Var(name.to_string()), ty: t.clone() }
+                    Typed { loc: None, expr: Expr::Var(name.to_string()), ty: t.clone() }
                 } else if let Some((path, vi)) = self.resolve_global(name) {
-                    Typed { expr: Expr::Global(path), ty: vi.ty }
+                    Typed { loc: None, expr: Expr::Global(path), ty: vi.ty }
                 } else if let Some(t) = self.fn_value(name, expected) {
                     t?
                 } else if let Some(t) = self.method_value(name, expected) {
@@ -2415,7 +2457,7 @@ impl Checker {
                 if let Some(result) = self.try_field_access(heap, interp, env, &segs) {
                     result?
                 } else if let Some((path, vi)) = self.resolve_global_path(&segs) {
-                    Typed { expr: Expr::Global(path), ty: vi.ty }
+                    Typed { loc: None, expr: Expr::Global(path), ty: vi.ty }
                 } else if let Some(t) = self.fn_path_value(&segs, expected) {
                     t?
                 } else {
@@ -2438,7 +2480,7 @@ impl Checker {
                     let ctor = sexpr_ctor_for(&Type::Symbol).expect("Symbol has a Sexpr encoding");
                     let (type_name, variant) =
                         self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
-                    return Ok(Typed {
+                    return Ok(Typed { loc: None,
                         expr: Expr::Construct { type_name, variant, args: vec![typed], mutable: false },
                         ty: sexpr_ty(),
                     });
@@ -2491,7 +2533,7 @@ impl Checker {
             "progn" => {
                 let (body, ty) = self.check_seq(heap, interp, env, args, expected)?;
                 // Represent progn as a let with no bindings.
-                return Ok(Typed { expr: Expr::Let(Vec::new(), body), ty });
+                return Ok(Typed { loc: None, expr: Expr::Let(Vec::new(), body), ty });
             }
             "setf" => return self.check_setf(heap, interp, env, args),
             "loop" => return self.check_loop(heap, interp, env, args),
@@ -2511,7 +2553,7 @@ impl Checker {
         // A local variable holding a function value is applied directly (locals
         // shadow free functions).
         if let Some(t) = env.get(&head) {
-            let callee = Typed { expr: Expr::Var(head.clone()), ty: t.clone() };
+            let callee = Typed { loc: None, expr: Expr::Var(head.clone()), ty: t.clone() };
             return self.check_apply(heap, interp, env, callee, args);
         }
         // A macro call: expand (against the *unevaluated* argument forms,
@@ -2573,7 +2615,7 @@ impl Checker {
         } else if let Some(fq) = self.resolve_fn(&head) {
             self.check_call(heap, interp, env, &fq, args)
         } else if let Some((path, vi)) = self.resolve_global(&head) {
-            let callee = Typed { expr: Expr::Global(path), ty: vi.ty };
+            let callee = Typed { loc: None, expr: Expr::Global(path), ty: vi.ty };
             self.check_apply(heap, interp, env, callee, args)
         } else {
             self.check_instance_method(heap, interp, env, &head, args)
@@ -2606,7 +2648,7 @@ impl Checker {
         let result = self.check_seq(heap, interp, &child, &args[2..], Some(&ret));
         self.loop_stack.replace(saved);
         let (body, _) = result?;
-        Ok(Typed { expr: Expr::Lambda { params, body }, ty: fn_ty })
+        Ok(Typed { loc: None, expr: Expr::Lambda { params, body }, ty: fn_ty })
     }
 
     /// `(labels ((name (params) ret body...)...) body...)`: like several
@@ -2675,7 +2717,7 @@ impl Checker {
             defs.push((name, params, body));
         }
         let (body, ty) = self.check_seq(heap, interp, &labels_env, &args[1..], expected)?;
-        Ok(Typed { expr: Expr::Labels { defs, body }, ty })
+        Ok(Typed { loc: None, expr: Expr::Labels { defs, body }, ty })
     }
 
     /// Type-check applying a function *value* `callee` to `args`. Functions
@@ -2704,7 +2746,7 @@ impl Checker {
         for (arg, pty) in args.iter().zip(params.iter()) {
             typed.push(self.check(heap, interp, env, *arg, Some(pty))?);
         }
-        Ok(Typed { expr: Expr::Apply(Box::new(callee), typed), ty: ret })
+        Ok(Typed { loc: None, expr: Expr::Apply(Box::new(callee), typed), ty: ret })
     }
 
     /// A `::`-qualified call: a module-qualified free function, or a
@@ -2873,7 +2915,7 @@ impl Checker {
                         // `tb.assoc` is empty, exactly matching pre-pin
                         // behavior.
                         let ret_ty = subst_apply(&sig.ret, &tb.assoc);
-                        return Ok(Typed {
+                        return Ok(Typed { loc: None,
                             expr: Expr::TraitCall { method: method.to_string(), args: typed_args },
                             ty: ret_ty,
                         });
@@ -2985,7 +3027,7 @@ impl Checker {
                 method_name = self.request_method_specialization(type_fq, method, targs);
             }
         }
-        Ok(Typed {
+        Ok(Typed { loc: None,
             expr: Expr::Assoc {
                 type_name: type_fq.clone(),
                 method: method_name,
@@ -3013,7 +3055,7 @@ impl Checker {
         let else_expected = non_never(&then.ty).or(expected);
         let els = self.check(heap, interp, env, args[2], else_expected)?;
         let ty = join_types(&then.ty, &els.ty)?;
-        Ok(Typed { expr: Expr::If(Box::new(cond), Box::new(then), Box::new(els)), ty })
+        Ok(Typed { loc: None, expr: Expr::If(Box::new(cond), Box::new(then), Box::new(els)), ty })
     }
 
     fn check_panic(
@@ -3027,7 +3069,7 @@ impl Checker {
             return Err(Error::TypeError("panic: (panic message)".into()));
         }
         let msg = self.check(heap, interp, env, args[0], Some(&Type::Str))?;
-        Ok(Typed { expr: Expr::Panic(Box::new(msg)), ty: Type::Never })
+        Ok(Typed { loc: None, expr: Expr::Panic(Box::new(msg)), ty: Type::Never })
     }
 
     /// `(the Type expr)`: a type annotation, e.g. `(the i64 5)` to make an
@@ -3105,8 +3147,8 @@ impl Checker {
             )));
         }
         let sig = self.reg.fn_sig(&Path::root("compile")).expect("compile is always registered");
-        Ok(Typed {
-            expr: Expr::Call(Path::root("compile"), vec![Typed { expr: Expr::Str(name), ty: Type::Str }]),
+        Ok(Typed { loc: None,
+            expr: Expr::Call(Path::root("compile"), vec![Typed { loc: None, expr: Expr::Str(name), ty: Type::Str }]),
             ty: sig.ret.clone(),
         })
     }
@@ -3119,7 +3161,7 @@ impl Checker {
             return Err(Error::TypeError("quote: (quote datum)".into()));
         }
         let qs = value_to_quoted(heap, args[0])?;
-        Ok(Typed { expr: Expr::Quote(qs), ty: Type::Named(Path::root("sexpr"), vec![]) })
+        Ok(Typed { loc: None, expr: Expr::Quote(qs), ty: Type::Named(Path::root("sexpr"), vec![]) })
     }
 
     /// `(quasiquote template)`: like `quote`, but `(unquote x)` sub-forms are
@@ -3206,7 +3248,7 @@ impl Checker {
                                         .into(),
                                 )
                             })?;
-                            return Ok(Typed {
+                            return Ok(Typed { loc: None,
                                 expr: Expr::Call(append_fq, vec![spliced, rest]),
                                 ty: sexpr_ty,
                             });
@@ -3218,13 +3260,13 @@ impl Checker {
             let car_t = self.check_qq_template(heap, interp, env, car)?;
             let cdr_t = self.check_qq_template(heap, interp, env, cdr)?;
             let (adt, cons_idx) = self.sexpr_cons_ctor();
-            return Ok(Typed {
+            return Ok(Typed { loc: None,
                 expr: Expr::Construct { type_name: adt, variant: cons_idx, args: vec![car_t, cdr_t], mutable: false },
                 ty: sexpr_ty,
             });
         }
         let qs = value_to_quoted(heap, v)?;
-        Ok(Typed { expr: Expr::Quote(qs), ty: sexpr_ty })
+        Ok(Typed { loc: None, expr: Expr::Quote(qs), ty: sexpr_ty })
     }
 
     fn check_let(
@@ -3254,7 +3296,7 @@ impl Checker {
         }
         let child = env.extended(binds.iter().map(|(n, t)| (n.clone(), t.ty.clone())).collect());
         let (body, ty) = self.check_seq(heap, interp, &child, &args[1..], expected)?;
-        Ok(Typed { expr: Expr::Let(binds, body), ty })
+        Ok(Typed { loc: None, expr: Expr::Let(binds, body), ty })
     }
 
     /// `let*`: like `let` but each binding sees the earlier ones. Desugars to
@@ -3285,7 +3327,7 @@ impl Checker {
     ) -> Result<Typed, Error> {
         if binds.is_empty() {
             let (body, ty) = self.check_seq(heap, interp, env, body, expected)?;
-            return Ok(Typed { expr: Expr::Let(Vec::new(), body), ty });
+            return Ok(Typed { loc: None, expr: Expr::Let(Vec::new(), body), ty });
         }
         let pair = heap.list_to_vec(binds[0])?;
         if pair.len() != 2 {
@@ -3299,7 +3341,7 @@ impl Checker {
         let child = env.extended(vec![(name.clone(), val.ty.clone())]);
         let inner = self.let_star_rec(heap, interp, &child, &binds[1..], body, expected)?;
         let ty = inner.ty.clone();
-        Ok(Typed { expr: Expr::Let(vec![(name, val)], vec![inner]), ty })
+        Ok(Typed { loc: None, expr: Expr::Let(vec![(name, val)], vec![inner]), ty })
     }
 
     /// `(setf var value)`: assign to a bound variable. The value must match the
@@ -3328,14 +3370,14 @@ impl Checker {
         };
         if let Some(ty) = env.get(&name).cloned() {
             let value = self.check(heap, interp, env, args[1], Some(&ty))?;
-            return Ok(Typed { expr: Expr::Set(name, Box::new(value)), ty });
+            return Ok(Typed { loc: None, expr: Expr::Set(name, Box::new(value)), ty });
         }
         if let Some((path, vi)) = self.resolve_global(&name) {
             if !vi.mutable {
                 return Err(Error::TypeError(format!("setf: cannot assign to constant `{}`", name)));
             }
             let value = self.check(heap, interp, env, args[1], Some(&vi.ty))?;
-            return Ok(Typed { expr: Expr::SetGlobal(path, Box::new(value)), ty: vi.ty });
+            return Ok(Typed { loc: None, expr: Expr::SetGlobal(path, Box::new(value)), ty: vi.ty });
         }
         Err(Error::TypeError(format!("setf: unbound variable: {}", name)))
     }
@@ -3360,9 +3402,9 @@ impl Checker {
             return Err(Error::TypeError(format!("setf: unresolved path: {}", segs.join("::"))));
         };
         let recv = if let Some(t) = env.get(recv_name) {
-            Typed { expr: Expr::Var(recv_name.clone()), ty: t.clone() }
+            Typed { loc: None, expr: Expr::Var(recv_name.clone()), ty: t.clone() }
         } else if let Some((path, vi)) = self.resolve_global(recv_name) {
-            Typed { expr: Expr::Global(path), ty: vi.ty }
+            Typed { loc: None, expr: Expr::Global(path), ty: vi.ty }
         } else {
             return Err(Error::TypeError(format!("setf: unbound variable: {}", recv_name)));
         };
@@ -3453,7 +3495,7 @@ impl Checker {
         args: &[Value],
     ) -> Result<Typed, Error> {
         let (body, ty) = self.check_loop_body(heap, interp, env, args, Type::Never)?;
-        Ok(Typed { expr: Expr::Loop(body), ty })
+        Ok(Typed { loc: None, expr: Expr::Loop(body), ty })
     }
 
     /// Check a loop body sequence with a fresh loop-stack frame seeded at
@@ -3483,7 +3525,7 @@ impl Checker {
             return Err(Error::TypeError("break: (break), takes no arguments".into()));
         }
         self.contribute_loop_exit(Type::Unit)?;
-        Ok(Typed { expr: Expr::Break, ty: Type::Never })
+        Ok(Typed { loc: None, expr: Expr::Break, ty: Type::Never })
     }
 
     /// `(return)` / `(return value)`: exit the nearest enclosing loop,
@@ -3511,7 +3553,7 @@ impl Checker {
         };
         let ty = value.as_ref().map(|t| t.ty.clone()).unwrap_or(Type::Unit);
         self.contribute_loop_exit(ty)?;
-        Ok(Typed { expr: Expr::Return(value.map(Box::new)), ty: Type::Never })
+        Ok(Typed { loc: None, expr: Expr::Return(value.map(Box::new)), ty: Type::Never })
     }
 
     /// Unify a `break`/`return` value's type into the nearest enclosing loop's
@@ -3539,13 +3581,13 @@ impl Checker {
         let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
         let (adt, cons_idx) = self.sexpr_cons_ctor();
         let (_, nil_idx) = self.resolve_ctor("nil").expect("sexpr::nil is built in");
-        let mut acc = Typed {
+        let mut acc = Typed { loc: None,
             expr: Expr::Construct { type_name: adt.clone(), variant: nil_idx, args: Vec::new(), mutable: false },
             ty: sexpr_ty.clone(),
         };
         for &elem in args.iter().rev() {
             let e = self.check(heap, interp, env, elem, Some(&sexpr_ty))?;
-            acc = Typed {
+            acc = Typed { loc: None,
                 expr: Expr::Construct { type_name: adt.clone(), variant: cons_idx, args: vec![e, acc], mutable: false },
                 ty: sexpr_ty.clone(),
             };
@@ -3667,7 +3709,7 @@ impl Checker {
                 call_path = self.request_fn_specialization(name, targs);
             }
         }
-        Ok(Typed { expr: Expr::Call(call_path, typed), ty: subst_apply(&sig.ret, &subst) })
+        Ok(Typed { loc: None, expr: Expr::Call(call_path, typed), ty: subst_apply(&sig.ret, &subst) })
     }
 
     /// Call-site `where`-bound validation shared by [`Self::check_call`]
@@ -3790,7 +3832,7 @@ impl Checker {
                 }
             }
         }
-        Ok(Typed {
+        Ok(Typed { loc: None,
             expr: Expr::Construct {
                 type_name: adt_name.clone(),
                 variant,
@@ -3872,7 +3914,7 @@ impl Checker {
             )));
         }
         let ty = result_ty.ok_or_else(|| Error::TypeError("match: no arms".into()))?;
-        Ok(Typed { expr: Expr::Match(Box::new(scrut), arms), ty })
+        Ok(Typed { loc: None, expr: Expr::Match(Box::new(scrut), arms), ty })
     }
 
     /// Check a pattern against the type of the value it matches, returning the

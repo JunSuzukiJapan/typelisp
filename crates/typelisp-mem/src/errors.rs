@@ -1,4 +1,31 @@
 use std::{fmt, error};
+use std::rc::Rc;
+
+/// A source location: which file, and the 1-based line and column within it.
+///
+/// Attached to an [`Error`] via [`Error::at`] / [`Error::At`] so every message
+/// can point at the exact spot in the user's `.typl` source where the problem
+/// occurred. `file` is shared (`Rc<str>`) because a single source string
+/// produces many data (and thus potentially many located errors), all naming
+/// the same file.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Loc {
+    pub file: Rc<str>,
+    pub line: u32,
+    pub col: u32,
+}
+
+impl Loc {
+    pub fn new(file: Rc<str>, line: u32, col: u32) -> Loc {
+        Loc { file, line, col }
+    }
+}
+
+impl fmt::Display for Loc {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}:{}:{}", self.file, self.line, self.col)
+    }
+}
 
 #[derive(Debug)]
 pub enum Error {
@@ -22,11 +49,56 @@ pub enum Error {
     ImproperList,
     /// A malformed type expression or a type error during checking.
     TypeError(String),
+    /// An error carrying the source location where it occurred. Wraps the
+    /// underlying error unchanged; [`fmt::Display`] prefixes it with
+    /// `file:line:col: `. Constructed via [`Error::at`], which never
+    /// double-wraps (an already-located error keeps its original, innermost
+    /// location).
+    At(Loc, Box<Error>),
 }
 
 impl Error {
     pub fn read_error(s: String) -> Error {
         Error::ReadError(s)
+    }
+
+    /// Attach a source location to this error. If the error already carries a
+    /// location, it is returned unchanged — the first (innermost, most
+    /// specific) location attached wins.
+    pub fn at(self, loc: Loc) -> Error {
+        match self {
+            Error::At(..) => self,
+            other => Error::At(loc, Box::new(other)),
+        }
+    }
+
+    /// The underlying error with any location wrapper(s) stripped — for code
+    /// that needs to match on the error *kind* (e.g. deciding whether a read
+    /// error means "need more input") regardless of location.
+    pub fn kind(&self) -> &Error {
+        match self {
+            Error::At(_, inner) => inner.kind(),
+            other => other,
+        }
+    }
+
+    /// The source location attached to this error, if any.
+    pub fn loc(&self) -> Option<&Loc> {
+        match self {
+            Error::At(loc, _) => Some(loc),
+            _ => None,
+        }
+    }
+
+    /// Consume this error and return its underlying kind with any location
+    /// wrapper(s) stripped — the owned counterpart of [`Error::kind`], for
+    /// code (mainly tests) that wants to pattern-match the error by value
+    /// without caring about location.
+    pub fn into_kind(self) -> Error {
+        match self {
+            Error::At(_, inner) => inner.into_kind(),
+            other => other,
+        }
     }
 }
 
@@ -53,6 +125,7 @@ impl fmt::Display for Error {
             Error::NotACons => write!(f, "value is not a cons"),
             Error::ImproperList => write!(f, "improper list where a proper list was required"),
             Error::TypeError(s) => write!(f, "type error: {}", s),
+            Error::At(loc, inner) => write!(f, "{}: {}", loc, inner),
         }
     }
 }

@@ -13,6 +13,6 @@ pub mod errors;
 pub mod heap;
 pub mod value;
 
-pub use errors::Error;
+pub use errors::{Error, Loc};
 pub use heap::Heap;
 pub use value::{BoxId, ConsRef, PathId, StrId, SymId, Value};

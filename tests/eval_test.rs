@@ -13,7 +13,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl)? {
+        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
             last = val;
         }
     }
@@ -38,7 +38,7 @@ fn run_with_prelude(src: &str) -> Result<RtValue, EvalError> {
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl)? {
+        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
             last = val;
         }
     }
@@ -805,4 +805,32 @@ fn the_closure_side_table_shrinks_when_the_gc_sweeps_closure_boxes() {
         before,
         after
     );
+}
+
+/// A runtime error (here a `panic`) carries the source location of the form it
+/// came from, so messages read `file:line:col: ...` — down to the innermost
+/// list form that raised it, even when raised deep inside a called function.
+#[test]
+fn runtime_error_carries_source_location() {
+    let mut h = Heap::with_capacity(8192);
+    let r = Reader::new();
+    // The `(panic ...)` is on line 2; calling `risky` on line 3 must still
+    // report line 2 (where the error actually arose), not the call site.
+    let src = "(defun risky ((n i32)) i32\n  (panic \"boom\"))\n(risky 5)";
+    let vs = r.read_all_in(&mut h, "prog.typl", src).expect("read failed");
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    let mut err = None;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Err(e) = interp.exec(&mut h, tl) {
+            err = Some(e);
+            break;
+        }
+    }
+    let err = err.expect("expected a runtime panic");
+    let loc = err.loc().expect("runtime error should carry a location");
+    assert_eq!(&*loc.file, "prog.typl");
+    assert_eq!(loc.line, 2, "should point at the `(panic ...)` form on line 2");
+    assert!(matches!(err.kind(), EvalError::Panic(_)));
 }

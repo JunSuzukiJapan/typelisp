@@ -69,7 +69,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     crate::load_compiler(&mut heap, &mut chk, &mut interp);
 
     let reader = Reader::new();
-    let forms = reader.read_all(&mut heap, &source).map_err(|e| e.to_string())?;
+    let forms = reader.read_all_in(&mut heap, source_path, &source).map_err(|e| e.to_string())?;
 
     // Every top-level form in an AOT source file must be a `defun` (see the
     // module doc comment's scope note) — collected in declaration order so

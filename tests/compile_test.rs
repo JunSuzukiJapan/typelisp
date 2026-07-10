@@ -20,7 +20,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl)? {
+        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
             last = val;
         }
     }
@@ -50,7 +50,7 @@ fn run_with_compiler_and_capacity(src: &str, capacity: usize) -> Result<RtValue,
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl)? {
+        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
             last = val;
         }
     }
@@ -86,7 +86,7 @@ fn run_with_compiler_and_prelude_and_capacity(src: &str, capacity: usize) -> Res
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl)? {
+        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
             last = val;
         }
     }
@@ -2213,7 +2213,9 @@ fn compile_of_a_string_literal_is_a_type_error() {
         let vs = r.read_all(&mut h, src).expect("read failed");
         let mut chk = Checker::new();
         let interp = Interp::new();
-        let result = vs.into_iter().try_for_each(|v| chk.check_form(&mut h, &interp, v).map(|_| ()));
+        let result = vs
+            .into_iter()
+            .try_for_each(|v| chk.check_form(&mut h, &interp, v).map_err(Error::into_kind).map(|_| ()));
         match result {
             Err(Error::TypeError(_)) => {}
             other => panic!("expected a TypeError for {:?}, got {:?}", src, other),

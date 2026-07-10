@@ -23,7 +23,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl)? {
+        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
             last = val;
         }
     }
@@ -59,7 +59,7 @@ fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(RtValue,
     let mut h = Heap::with_capacity(capacity);
     let mut last = RtValue::Unit;
     for tl in tls {
-        if let Some(val) = check_interp.exec(&mut h, tl)? {
+        if let Some(val) = check_interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
             last = val;
         }
     }

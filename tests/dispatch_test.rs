@@ -95,7 +95,7 @@ fn an_undefined_name_with_no_method_or_free_function_is_still_a_clean_error() {
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let v = r.read(&mut h, "(totally-undefined-name 1 2)").expect("read failed");
-    match chk.check_form(&mut h, &interp, v) {
+    match chk.check_form(&mut h, &interp, v).map_err(Error::into_kind) {
         Err(Error::NoSuchFunction(name)) => assert_eq!(name, "totally-undefined-name"),
         other => panic!("expected NoSuchFunction, got {:?}", other),
     }
@@ -113,7 +113,7 @@ fn unbound_variable_in_first_argument_position_still_surfaces_the_real_error() {
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let v = r.read(&mut h, "(length some-unbound-variable)").expect("read failed");
-    match chk.check_form(&mut h, &interp, v) {
+    match chk.check_form(&mut h, &interp, v).map_err(Error::into_kind) {
         Err(Error::TypeError(msg)) => assert!(msg.contains("unbound"), "unexpected message: {}", msg),
         other => panic!("expected an unbound-variable TypeError, got {:?}", other),
     }

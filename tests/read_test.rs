@@ -284,3 +284,27 @@ fn moderately_nested_reads_correctly() {
     h.gc();
     assert_eq!(h.live_count(), depth - 1);
 }
+
+// ---- error source locations ---------------------------------------------
+
+#[test]
+fn read_error_carries_location() {
+    let mut h = Heap::with_capacity(64);
+    let r = Reader::new();
+    // Unmatched `)` on the second line, third column.
+    let err = r.read_all_in(&mut h, "foo.typl", "(+ 1 2)\n  )\n").unwrap_err();
+    let loc = err.loc().expect("error should carry a location");
+    assert_eq!(&*loc.file, "foo.typl");
+    assert_eq!(loc.line, 2);
+    // The message is prefixed with `file:line:col: `.
+    let msg = err.to_string();
+    assert!(msg.starts_with("foo.typl:2:"), "unexpected message: {}", msg);
+}
+
+#[test]
+fn default_file_name_is_input_placeholder() {
+    let mut h = Heap::with_capacity(64);
+    let r = Reader::new();
+    let err = r.read(&mut h, ")").unwrap_err();
+    assert_eq!(&*err.loc().expect("location").file, "<input>");
+}

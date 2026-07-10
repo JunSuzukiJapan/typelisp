@@ -10,7 +10,7 @@ use inkwell::builder::Builder;
 use inkwell::module::Module;
 use inkwell::values::{BasicValueEnum, FunctionValue};
 
-use crate::{BoxId, Heap, Path, Typed, Value};
+use crate::{BoxId, Heap, Loc, Path, Typed, Value};
 
 /// One `Scope<V>` frame — see [`RtValue::Scope`]'s doc comment.
 pub type ScopeFrame = Rc<RefCell<HashMap<String, RtValue>>>;
@@ -382,6 +382,51 @@ pub enum EvalError {
     Break,
     /// `return value`: unwinding to the nearest enclosing loop with `value`.
     Return(Box<RtValue>),
+    /// A runtime error carrying the source location where it occurred. Wraps
+    /// the underlying error; [`fmt::Display`] prefixes it with `file:line:col`.
+    /// Built only via [`EvalError::at`], which never wraps the `Break`/`Return`
+    /// control-flow signals (they must stay pattern-matchable by the loop that
+    /// catches them) nor double-wraps an already-located error.
+    At(Loc, Box<EvalError>),
+}
+
+impl EvalError {
+    /// Attach a source location to this error. The `Break`/`Return` non-local-
+    /// exit signals are returned unchanged — they are control flow, not errors,
+    /// and the loop that catches them matches on the bare variant. An
+    /// already-located error also keeps its original (innermost) location.
+    pub fn at(self, loc: Loc) -> EvalError {
+        match self {
+            EvalError::Break | EvalError::Return(_) | EvalError::At(..) => self,
+            other => EvalError::At(loc, Box::new(other)),
+        }
+    }
+
+    /// The underlying error with any location wrapper(s) stripped.
+    pub fn kind(&self) -> &EvalError {
+        match self {
+            EvalError::At(_, inner) => inner.kind(),
+            other => other,
+        }
+    }
+
+    /// Consume this error and return its underlying kind with any location
+    /// wrapper(s) stripped — the owned counterpart of [`EvalError::kind`], for
+    /// code (mainly tests) that pattern-matches the error by value.
+    pub fn into_kind(self) -> EvalError {
+        match self {
+            EvalError::At(_, inner) => inner.into_kind(),
+            other => other,
+        }
+    }
+
+    /// The source location attached to this error, if any.
+    pub fn loc(&self) -> Option<&Loc> {
+        match self {
+            EvalError::At(loc, _) => Some(loc),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for EvalError {
@@ -393,6 +438,7 @@ impl fmt::Display for EvalError {
             EvalError::Internal(m) => write!(f, "internal error: {}", m),
             EvalError::Break => write!(f, "internal error: break escaped its loop"),
             EvalError::Return(_) => write!(f, "internal error: return escaped its loop"),
+            EvalError::At(loc, inner) => write!(f, "{}: {}", loc, inner),
         }
     }
 }

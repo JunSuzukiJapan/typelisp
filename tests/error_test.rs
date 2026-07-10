@@ -12,7 +12,9 @@ fn program(src: &str) -> Result<TopLevel, Error> {
     let interp = Interp::new();
     let mut last = None;
     for v in vs {
-        last = Some(chk.check_form(&mut h, &interp, v)?);
+        // Strip any source-location wrapper so kind-based assertions
+        // (`Err(Error::TypeError(_))`) still match.
+        last = Some(chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?);
     }
     Ok(last.expect("no forms"))
 }

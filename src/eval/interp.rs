@@ -389,7 +389,26 @@ impl Interp {
         }
     }
 
+    /// Evaluate `t`, tagging any real error with `t`'s source location.
+    ///
+    /// Thin wrapper over [`Self::eval_inner`]. Like the checker's `check`,
+    /// evaluation recurses into sub-expressions through here, so the *deepest*
+    /// failing node tags first and — since [`EvalError::at`] keeps the
+    /// innermost location — that precise spot is what the message reports. The
+    /// `Break`/`Return` control-flow signals pass through untagged (see
+    /// `EvalError::at`), so the loop that catches them still matches the bare
+    /// variant.
     fn eval(&self, heap: &mut Heap, t: &Typed, env: &Env) -> Result<RtValue, EvalError> {
+        match self.eval_inner(heap, t, env) {
+            Ok(v) => Ok(v),
+            Err(e) => match &t.loc {
+                Some(loc) => Err(e.at(loc.clone())),
+                None => Err(e),
+            },
+        }
+    }
+
+    fn eval_inner(&self, heap: &mut Heap, t: &Typed, env: &Env) -> Result<RtValue, EvalError> {
         match &t.expr {
             Expr::Int(n) => Ok(RtValue::Int(*n)),
             Expr::Float(f) => Ok(RtValue::Float(*f)),

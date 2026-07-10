@@ -915,8 +915,8 @@ fn translate_immediate_lambda_call(
     let name = fresh_lambda_name("__lambda");
     let dummy_ty = Type::Unit;
     let def: LabelDef = (name.clone(), params.to_vec(), lambda_body.to_vec());
-    let call = Typed {
-        expr: Expr::Apply(Box::new(Typed { expr: Expr::Var(name), ty: dummy_ty.clone() }), args.to_vec()),
+    let call = Typed { loc: None,
+        expr: Expr::Apply(Box::new(Typed { loc: None, expr: Expr::Var(name), ty: dummy_ty.clone() }), args.to_vec()),
         ty: dummy_ty,
     };
     translate_labels(heap, &[def], std::slice::from_ref(&call), cx)
@@ -1711,7 +1711,7 @@ mod tests {
     use crate::Type;
 
     fn typed(expr: Expr, ty: Type) -> Typed {
-        Typed { expr, ty }
+        Typed { loc: None, expr, ty }
     }
 
     /// Shadows `super::ast_to_sexpr` with an empty `structs` set — the

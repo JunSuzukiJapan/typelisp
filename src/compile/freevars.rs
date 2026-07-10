@@ -229,7 +229,7 @@ mod tests {
     use super::*;
 
     fn typed(expr: Expr, ty: Type) -> Typed {
-        Typed { expr, ty }
+        Typed { loc: None, expr, ty }
     }
 
     /// `go`'s body references `offset` — neither its own parameter `k` nor

@@ -28,7 +28,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(v) = interp.exec(&mut h, tl)? {
+        if let Some(v) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
             last = v;
         }
     }

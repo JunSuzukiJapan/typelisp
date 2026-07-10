@@ -4,13 +4,36 @@
 //! [`Typed`] tree: every node carries the [`Type`] it was checked at, so the
 //! later interpreter (step 4) can walk this tree without re-deriving types.
 
-use crate::{Path, Type};
+use crate::{Loc, Path, Type};
 
 /// An expression node annotated with its checked type.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// `loc` is the source location the node was read from (when known — only
+/// list forms carry one), set by [`Checker::check`](crate::Checker) so the
+/// interpreter can report a runtime error with its `file:line:col`. It is
+/// deliberately excluded from equality (see the manual [`PartialEq`] impl):
+/// two structurally identical trees read from different places are still
+/// equal, which keeps the checker's AST-shape tests location-independent.
+#[derive(Clone, Debug)]
 pub struct Typed {
     pub expr: Expr,
     pub ty: Type,
+    pub loc: Option<Loc>,
+}
+
+impl Typed {
+    /// A `Typed` with no source location — the default for nodes the checker
+    /// synthesizes or that were read from a non-list form. [`Checker::check`]
+    /// fills in `loc` afterwards for nodes that have one.
+    pub fn new(expr: Expr, ty: Type) -> Typed {
+        Typed { expr, ty, loc: None }
+    }
+}
+
+impl PartialEq for Typed {
+    fn eq(&self, other: &Self) -> bool {
+        self.expr == other.expr && self.ty == other.ty
+    }
 }
 
 /// One function definition inside `Expr::Labels`: its name, typed
