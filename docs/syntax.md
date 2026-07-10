@@ -103,7 +103,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   - コンストラクタ `Name::new`（フィールド順に引数を渡す）
   - ゲッター `(field-name instance)`、糖衣構文 `instance::field-name`
   - セッター `(set-field-name instance value)`、糖衣構文 `(setf instance::field-name value)`
-- モジュール全体を `pub` にするには `(pub (defstruct ...))` のように先頭に `pub` を付ける。
+- 構造体自体を `pub` にするには `(pub defstruct ...)` のように先頭に `pub` を付ける。
 
 ### defenum — 列挙型（直和型・ユーザ定義タグ付き共用体）
 
@@ -130,7 +130,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
     ((None) 0))
   ```
 - メソッド/関連関数は `defstruct` と同様に `defmethod`/`impl` で後付けする。
-- モジュール全体を `pub` にするには `(pub (defenum ...))` と書く。
+- 列挙型自体を `pub` にするには `(pub defenum ...)` と書く。
 
 ### deftrait / impl — トレイト機構
 
@@ -165,16 +165,18 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 ### pub — 公開指定
 
 ```lisp
-(pub (defun ...))
-(pub (defvar ...))
-(pub (defconstant ...))
-(pub (defmacro ...))
-(pub (defmethod ...))
-(pub (defstruct ...))
-(pub (defenum ...))
+(pub defun ...)
+(pub defvar ...)
+(pub defconstant ...)
+(pub defmacro ...)
+(pub defmethod ...)
+(pub defstruct ...)
+(pub defenum ...)
 ```
 
 `pub` が付けられるのは上記7種類のみ（`module`/`use`/`deftrait`/`impl` には付けられない）。
+定義形を括弧で包む `(pub (defun ...))` 形式ではなく、`pub` の直後に定義キーワードを続ける。
+1つの `pub` が公開指定できる定義は1つだけ（複数の定義の一括指定はできない）。
 
 ### defmacro — マクロ定義
 
