@@ -25,20 +25,49 @@
   大きなプロジェクトでキー入力毎の再読込コストが問題になったら着手）。
 - **`use`はソースルート相対のみ**: 兄弟ファイル相対の解決は未対応（MVP判断）。
 
-#### hover / goto-definition / 補完（未着手、要新規基盤）
+#### hover / goto-definition（共通基盤・両機能とも実装済み、2026-07-11） / 補完（未着手）
+
+**実装済み**: 当初計画（下記「元の設計メモ」）の想定より軽い基盤で済んだ。`Typed.loc`は
+既に存在しリスト形式ノードの開き括弧位置を記録していた（`Checker::check`が
+`heap.cons_loc(v)`で埋める）ため、終了位置（span）を新設せずとも
+「カーソル位置以下で最大の開始位置を持つノードを深さ優先で探す」ことで正しい最小包含ノードが
+求まる（兄弟フォームはソース順に重ならないため）——reader/heap側の変更は不要だった。
+- `src/check/registry.rs`: `DefLocs`（`Registry.def_locs`）を新設。`FnSig`/`AssocFn`自体には
+  フィールドを足さず（`with_builtins()`だけでリテラルが計130件超あり、ビルトインには
+  参照すべき位置がそもそも無いため）、サイドテーブル方式でチェッカーの7つの登録箇所
+  （`check_defun`/`check_defmethod`/`check_defstruct`/`check_defenum`/`check_defvar`/
+  `check_deftrait`/`check_defmacro`）でだけ書き込む。
+- `src/check/locate.rs`（新規）: `locate_node`（カーソル→最小包含ノード）/
+  `definition_target`（ノード→`DefLocs`引き、Global/Call/FnRef/Assoc/MethodRef/Constructの
+  みが対象）/ `hover_text`（`Typed.ty`を`{:?}`でフォーマット、`Type`に`Display`実装が無いため
+  既存のエラーメッセージと同じ流儀）。
+- `src/bin/lsp.rs`: `hover_provider`/`definition_provider`を有効化。doc毎に直近成功した
+  `Analysis { body: Vec<TopLevel>, def_locs: DefLocs }`をキャッシュ（型エラーがある間は
+  直近成功時点のものを保持）し、`textDocument/hover`/`textDocument/definition`を処理。
+- 単体テスト: `tests/lsp_locate_test.rs`（LSPのstdioトランスポートは介さず、
+  `Checker::check_form`を直接駆動してコアロジックのみ検証）。
+
+**既知の制限（意図的なMVPスコープ）**:
+- ローカル変数（`Expr::Var`、`let`/`lambda`束縛）への goto-definition は非対応
+  （束縛側の位置も追跡していない）——カーソルがローカル変数参照上にある場合は
+  「最小包含ノード」まで遡って解決を試みるが、そのノードが解決可能な参照でなければ
+  何も返らない。
+- アトム単体（裸のシンボル・リテラル）は自身の位置を持てない
+  （`Value::Symbol`はヒープ上で一意な参照ではなく使い回されるため、`cons_locs`と同じ
+  仕組みでは追跡不可能）。真のspan対応（reader全体の作り替えが必要）をすればより高精度な
+  hover/goto-defになるが、現状のMVPでは「S式は兄弟フォームがソース順に重ならない」性質だけで
+  実用上十分な精度が出ているため見送った。
+
+**補完は未着手**。エラー耐性パーサ（壊れた/書きかけの入力でも最善のASTを作れる）が前提で、
+typelispの`Reader`は最初の構文エラーで即失敗する設計のため別ラインの作業になる——下記
+「元の設計メモ」参照。
+
+<details>
+<summary>元の設計メモ（2026-07-11、実装着手前の調査結果）</summary>
 
 2026-07-11に他言語のLSP実装（rust-analyzer/tsserver/clangd等）を調査した上での設計メモ。
-3機能とも「共通基盤」と「機能固有部分」に分かれ、共通基盤を先に作ればhoverとgoto-defは
-ほぼ相乗りできる。
 
-**現状の欠落（確認済み）**:
-- `Typed`/`Expr`（`src/check/ast.rs`）は**範囲(span)を持たない**。`Loc`（`crates/typelisp-mem/
-  src/errors.rs`）はline/colの**点**であり、しかも一部のcons cellにしか記録されない
-  （`Heap.cons_locs`、`heap.cons_loc(v)`で引ける）。
-- `FnSig`/`VarInfo`（`src/check/registry.rs`）は**定義位置を持たない**——名前解決はできても
-  「どこで定義されたか」を引く手段がない。
-
-**他言語がどう解決しているか**（一般知識・2026-07-11調査):
+**他言語がどう解決しているか**（一般知識）:
 - rust-analyzer/tsserverはASTノードが最初から範囲（start~end）を持ち、hoverは
   「カーソル位置を含む最小のノードを探す」木の走査だけで済む。見つけたノードの型は
   チェック時に計算済みの型テーブルから引く。
@@ -51,17 +80,10 @@
   補ってから読む」前処理層の方が、汎用エラー回復パーサを一から作るより現実的
   （Common Lisp/Racket系LSP実装でよく使われる手法）。
 
-**推奨する実装順序**:
-1. **共通基盤**: `Typed`/`Expr`各ノードに範囲（開始~終了の`Loc`または行/列ペア）を追加。
-   `FnSig`/`VarInfo`/`AdtDef`等に定義位置`Loc`フィールドを追加し、`checker.rs`の
-   `check_defun`/`check_defmethod`/`check_defstruct`/`check_defenum`/`check_defvar`等の
-   登録箇所で埋める。
-2. **hover**: 「カーソル位置を含む最小ノードを探す」木の走査（新規）＋そのノードの型を
-   `Typed`から読んで文字列化。`ServerCapabilities.hover_provider`を有効化。
-3. **goto-definition**: hoverの「ノード特定」を再利用し、参照しているシンボルを
-   Registryで引いて定義側の`Loc`を返す。`definition_provider`を有効化。
-4. **補完**: 上記2つとは別ライン。まずカーソル位置までの入力を閉じ括弧補完で読めるように
-   してから、可視スコープ内の名前を`Registry`/`Scope`チェーンから列挙する。
+補完実装時はこの前処理層＋可視スコープ内の名前を`Registry`/`Scope`チェーンから列挙する
+方式を検討する。
+
+</details>
 
 `compile`（LLVM JIT/AOT）機能は現状「今のフェーズが実際に使うASTノードだけ本実装、それ以外は
 `ast_bridge`が`(unsupported "<Variant>")`を返しコンパイラ本体が明示的にpanicする」設計

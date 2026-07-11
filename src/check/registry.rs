@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::{Path, Type};
+use crate::{Loc, Path, Type};
 
 /// One constructor of a data type: a name and its field types. Field types may
 /// reference the enclosing type's parameters as `Type::Named(param, [])`.
@@ -262,9 +262,33 @@ impl Namespace {
     }
 }
 
+/// Definition-site source locations, keyed by the same fully-qualified
+/// identity each table's `Registry`/`Namespace` lookup uses. Kept separate
+/// from `FnSig`/`AssocFn`/`AdtDef`/`VarInfo`/`TraitDef`/`MacroDef` themselves
+/// rather than adding a field to each — those are constructed at ~150 call
+/// sites in [`Registry::with_builtins`] alone, none of which have (or need) a
+/// source location to record, so a field there would mean touching every one
+/// of them for no benefit. Instead, only the checker's user-facing
+/// registration points (`Checker::check_defun`/`check_defmethod`/
+/// `check_defstruct`/`check_defenum`/`check_defvar`/`check_deftrait`/
+/// `check_defmacro`) insert an entry here. Consulted by the LSP's
+/// goto-definition (`check::locate::definition_target`) — a lookup miss
+/// (a builtin, or anything not yet registered) is not an error, just "no
+/// definition to jump to".
+#[derive(Clone, Default)]
+pub struct DefLocs {
+    pub fns: HashMap<Path, Loc>,
+    pub methods: HashMap<(Path, String), Loc>,
+    pub types: HashMap<Path, Loc>,
+    pub vars: HashMap<Path, Loc>,
+    pub traits: HashMap<Path, Loc>,
+    pub macros: HashMap<Path, Loc>,
+}
+
 /// The checker's symbol table: a tree of namespaces rooted at [`Registry::root`].
 pub struct Registry {
     pub root: Namespace,
+    pub def_locs: DefLocs,
 }
 
 impl Registry {
@@ -438,7 +462,7 @@ impl Registry {
             "compile-file".to_string(),
             FnSig { type_params: vec![], params: vec![Type::Str, Type::Str], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() },
         );
-        Registry { root }
+        Registry { root, def_locs: DefLocs::default() }
     }
 
     /// Look up a type by its fully-qualified [`Path`] (e.g. `geo::point`).

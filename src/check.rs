@@ -7,7 +7,9 @@
 pub mod ast;
 pub mod registry;
 pub mod checker;
+pub mod locate;
 
 pub use ast::{Arm, Expr, LabelDef, Pattern, QuotedSexpr, Typed};
-pub use registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};
+pub use registry::{AdtDef, AdtKind, AssocFn, DefLocs, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};
 pub use checker::{Checker, MacroExpander, RedefPolicy, TopLevel, MONO_BUNDLE_MODULE};
+pub use locate::{definition_target, hover_text, locate_node};

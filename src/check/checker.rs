@@ -8,7 +8,7 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
-use crate::{parse_type, prim_type_path, Error, Heap, Path, Type, Value};
+use crate::{parse_type, prim_type_path, Error, Heap, Loc, Path, Type, Value};
 use crate::name_lexer::{NameLexer, NameTok};
 
 use super::ast::{Arm, Expr, Pattern, QuotedSexpr, Typed};
@@ -523,7 +523,7 @@ impl Checker {
         // deeper location from `check`, and `Error::at` keeps that innermost
         // one — see its doc comment).
         let loc = heap.cons_loc(v);
-        let primary = self.check_form_dispatch(heap, interp, v);
+        let primary = self.check_form_dispatch(heap, interp, v, loc.clone());
         let bundled = primary.and_then(|tl| Ok((self.drain_specializations(heap, interp)?, tl)));
         // Both maps reset per form regardless of outcome — see `spec_memo`'s
         // doc comment for why the memo must not outlive the form.
@@ -547,22 +547,26 @@ impl Checker {
 
     /// [`Self::check_form`]'s dispatch body (the pre-monomorphization
     /// `check_form`, unchanged) — split out so the public entry point can
-    /// wrap it with specialization draining.
-    fn check_form_dispatch(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value) -> Result<TopLevel, Error> {
+    /// wrap it with specialization draining. `def_loc` is `v`'s own source
+    /// location (already computed by the caller via `heap.cons_loc(v)`),
+    /// threaded down into whichever `check_def*` this form dispatches to so
+    /// it can record where the name it registers was defined (`Registry::
+    /// def_locs`, consulted by the LSP's goto-definition).
+    fn check_form_dispatch(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value, def_loc: Option<Loc>) -> Result<TopLevel, Error> {
         if let Value::Cons(_) = v {
             let elems = heap.list_to_vec(v)?;
             if let Some(Value::Symbol(id)) = elems.first() {
                 match heap.symbol_name(*id) {
-                    "pub" => return self.check_pub(heap, interp, &elems[1..]),
-                    "defun" => return self.check_defun(heap, interp, &elems[1..], false),
-                    "defvar" => return self.check_defvar(heap, interp, &elems[1..], true, false),
-                    "defconstant" => return self.check_defvar(heap, interp, &elems[1..], false, false),
-                    "defmacro" => return self.check_defmacro(heap, interp, &elems[1..], false),
+                    "pub" => return self.check_pub(heap, interp, &elems[1..], def_loc),
+                    "defun" => return self.check_defun(heap, interp, &elems[1..], false, def_loc),
+                    "defvar" => return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc),
+                    "defconstant" => return self.check_defvar(heap, interp, &elems[1..], false, false, def_loc),
+                    "defmacro" => return self.check_defmacro(heap, interp, &elems[1..], false, def_loc),
                     "module" => return self.check_module(heap, interp, &elems[1..]),
-                    "defmethod" => return self.check_defmethod(heap, interp, &elems[1..], false),
-                    "defstruct" => return self.check_defstruct(heap, &elems[1..], false),
-                    "defenum" => return self.check_defenum(heap, &elems[1..], false),
-                    "deftrait" => return self.check_deftrait(heap, &elems[1..], false),
+                    "defmethod" => return self.check_defmethod(heap, interp, &elems[1..], false, def_loc),
+                    "defstruct" => return self.check_defstruct(heap, &elems[1..], false, def_loc),
+                    "defenum" => return self.check_defenum(heap, &elems[1..], false, def_loc),
+                    "deftrait" => return self.check_deftrait(heap, &elems[1..], false, def_loc),
                     "impl" => return self.check_impl(heap, interp, &elems[1..], false),
                     "use" => return self.check_use(heap, &elems[1..]),
                     _ => {}
@@ -582,19 +586,19 @@ impl Checker {
     }
 
     /// `(pub defun ...)` / `(pub defmethod ...)` etc. — mark the next definition public.
-    fn check_pub(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value]) -> Result<TopLevel, Error> {
+    fn check_pub(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], def_loc: Option<Loc>) -> Result<TopLevel, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("pub: expected a definition form".into()));
         }
         if let Value::Symbol(id) = parts[0] {
             match heap.symbol_name(id) {
-                "defun" => return self.check_defun(heap, interp, &parts[1..], true),
-                "defvar" => return self.check_defvar(heap, interp, &parts[1..], true, true),
-                "defconstant" => return self.check_defvar(heap, interp, &parts[1..], false, true),
-                "defmacro" => return self.check_defmacro(heap, interp, &parts[1..], true),
-                "defmethod" => return self.check_defmethod(heap, interp, &parts[1..], true),
-                "defstruct" => return self.check_defstruct(heap, &parts[1..], true),
-                "defenum" => return self.check_defenum(heap, &parts[1..], true),
+                "defun" => return self.check_defun(heap, interp, &parts[1..], true, def_loc),
+                "defvar" => return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc),
+                "defconstant" => return self.check_defvar(heap, interp, &parts[1..], false, true, def_loc),
+                "defmacro" => return self.check_defmacro(heap, interp, &parts[1..], true, def_loc),
+                "defmethod" => return self.check_defmethod(heap, interp, &parts[1..], true, def_loc),
+                "defstruct" => return self.check_defstruct(heap, &parts[1..], true, def_loc),
+                "defenum" => return self.check_defenum(heap, &parts[1..], true, def_loc),
                 _ => {}
             }
         }
@@ -1083,6 +1087,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         parts: &[Value],
         public: bool,
+        def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
         let (params, ret, bounds, body_start) = self.parse_defun_sig(heap, parts)?;
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
@@ -1117,6 +1122,9 @@ impl Checker {
             bounds: bounds.clone(),
         };
         self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
+        if let Some(loc) = def_loc {
+            self.reg.def_locs.fns.insert(fq_name.clone(), loc);
+        }
 
         let env = Env::new().with_bounds(bounds).extended(params.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], Some(&ret))?;
@@ -1556,6 +1564,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         parts: &[Value],
         public: bool,
+        def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
         if parts.len() < 2 {
             return Err(Error::TypeError("defmacro: (defmacro name (params) body...)".into()));
@@ -1596,6 +1605,9 @@ impl Checker {
             .module_mut(&self.ns)
             .macros
             .insert(name, MacroDef { arity, rest, public, builtin: false });
+        if let Some(loc) = def_loc {
+            self.reg.def_locs.macros.insert(fq_name.clone(), loc);
+        }
 
         let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
         let env = Env::new().extended(params.iter().map(|p| (p.clone(), sexpr_ty.clone())).collect());
@@ -1674,7 +1686,7 @@ impl Checker {
     /// for some concrete implementing type. No type-checking happens here
     /// beyond parsing — a signature template's `Self`/associated-type
     /// variables aren't real types, so there's nothing to check yet.
-    fn check_deftrait(&mut self, heap: &Heap, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
+    fn check_deftrait(&mut self, heap: &Heap, parts: &[Value], public: bool, def_loc: Option<Loc>) -> Result<TopLevel, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError(
                 "deftrait: (deftrait Name (type AssocName)... (method (params...) ret)...)".into(),
@@ -1725,6 +1737,9 @@ impl Checker {
             .module_mut(&self.ns)
             .traits
             .insert(name, TraitDef { name: fq_name.clone(), assoc_types, methods, public, builtin: false });
+        if let Some(loc) = def_loc {
+            self.reg.def_locs.traits.insert(fq_name.clone(), loc);
+        }
         Ok(TopLevel::Module { path: fq_name, body: vec![] })
     }
 
@@ -1816,6 +1831,7 @@ impl Checker {
             // it's executable code, not type syntax, so any `Self`/`Item`
             // appearing there is an ordinary (if confusingly named)
             // variable/function reference, not something to substitute.
+            let method_loc = heap.cons_loc(*m);
             let elems = heap.list_to_vec(*m)?;
             if elems.len() < 3 {
                 return Err(Error::TypeError("impl: method must be (name (recv params...) ret body...)".into()));
@@ -1834,7 +1850,7 @@ impl Checker {
             let new_ret = Self::subst_value(heap, elems[2], &subst)?;
             let mut new_elems = vec![elems[0], new_recv_list, new_ret];
             new_elems.extend_from_slice(&elems[3..]);
-            let tl = self.check_defmethod(heap, interp, &new_elems, public)?;
+            let tl = self.check_defmethod(heap, interp, &new_elems, public, method_loc)?;
             body.push(tl);
         }
         if let Some(def) = self.reg.type_def_mut(&target_fq) {
@@ -1951,6 +1967,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         parts: &[Value],
         public: bool,
+        def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
         let MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret, bounds, body_start } =
             self.parse_defmethod_sig(heap, parts)?;
@@ -2005,6 +2022,9 @@ impl Checker {
         self.check_redef("method", &method, self.reg.type_def(&type_fq).and_then(|d| d.assoc.get(&method)))?;
         if let Some(def) = self.reg.type_def_mut(&type_fq) {
             def.assoc.insert(method.clone(), AssocFn { sig, instance, builtin: false });
+        }
+        if let Some(loc) = def_loc {
+            self.reg.def_locs.methods.insert((type_fq.clone(), method.clone()), loc);
         }
 
         let mut binds: Vec<(String, Type)> = Vec::new();
@@ -2113,7 +2133,7 @@ impl Checker {
     /// one `TopLevel::Module` — purely as a grouping device: `Interp::exec`'s
     /// `Module` arm just runs `body` in order and never reads `path`, so this
     /// carries none of an actual `(module ...)`'s namespace-nesting semantics.
-    fn check_defstruct(&mut self, heap: &Heap, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
+    fn check_defstruct(&mut self, heap: &Heap, parts: &[Value], public: bool, def_loc: Option<Loc>) -> Result<TopLevel, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("defstruct: (defstruct name (field type)...)".into()));
         }
@@ -2217,6 +2237,9 @@ impl Checker {
             trait_assoc: HashMap::new(),
         };
         self.reg.root.module_mut(&self.ns).add_type(def);
+        if let Some(loc) = def_loc {
+            self.reg.def_locs.types.insert(type_fq.clone(), loc);
+        }
 
         let mut body = vec![TopLevel::Defstruct { name: type_fq.clone() }];
         body.extend(accessors);
@@ -2238,7 +2261,7 @@ impl Checker {
     /// accessors/setters are synthesized: an enum value is immutable and its
     /// fields are positional, so there's nothing to run at exec time either —
     /// hence a bare `TopLevel::Defenum` rather than a `Module` bundle.
-    fn check_defenum(&mut self, heap: &Heap, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
+    fn check_defenum(&mut self, heap: &Heap, parts: &[Value], public: bool, def_loc: Option<Loc>) -> Result<TopLevel, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("defenum: (defenum Name (Variant Type...)...)".into()));
         }
@@ -2294,6 +2317,9 @@ impl Checker {
             trait_assoc: HashMap::new(),
         };
         self.reg.root.module_mut(&self.ns).add_type(def);
+        if let Some(loc) = def_loc {
+            self.reg.def_locs.types.insert(type_fq.clone(), loc);
+        }
         Ok(TopLevel::Defenum { name: type_fq })
     }
 
@@ -3566,6 +3592,7 @@ impl Checker {
         parts: &[Value],
         mutable: bool,
         public: bool,
+        def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
         if parts.len() != 2 {
             return Err(Error::TypeError("defvar/defconstant: (defvar (name Type) value)".into()));
@@ -3600,7 +3627,11 @@ impl Checker {
             .module_mut(&self.ns)
             .vars
             .insert(name.clone(), VarInfo { ty: ty.clone(), mutable, public, builtin: false });
-        Ok(TopLevel::Defvar { name: self.fq(&name), ty, value, mutable })
+        let fq_name = self.fq(&name);
+        if let Some(loc) = def_loc {
+            self.reg.def_locs.vars.insert(fq_name.clone(), loc);
+        }
+        Ok(TopLevel::Defvar { name: fq_name, ty, value, mutable })
     }
 
     /// `(loop body...)`: an infinite loop, exited via `break`/`return`. Its
