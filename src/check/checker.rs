@@ -1902,13 +1902,7 @@ impl Checker {
             return Err(Error::TypeError("module: (module path body...)".into()));
         }
         let segs = self.path_to_segs(heap, parts[0])?;
-        let depth = segs.len();
-        for s in &segs {
-            self.ns.push(s.clone());
-        }
-        let path = Path::from_segments(self.ns.clone());
-        // Ensure the (possibly empty) module namespace exists.
-        self.reg.root.module_mut(&self.ns);
+        let path = self.enter_module(&segs);
 
         let mut body = Vec::new();
         let mut result = Ok(());
@@ -1921,11 +1915,34 @@ impl Checker {
                 }
             }
         }
+        self.exit_module(segs.len());
+        result?;
+        Ok(TopLevel::Module { path, body })
+    }
+
+    /// Push `segs` onto the current namespace path and ensure the (possibly
+    /// empty) module namespace exists, returning the resulting absolute
+    /// [`Path`]. Public so a filesystem-aware driver (`crate::project`) can
+    /// check a file's forms inside the module its path derives to — the
+    /// file's whole content is implicitly wrapped in that module without
+    /// synthesizing a `(module ...)` form around the read values. Every
+    /// `enter_module` must be paired with an [`Self::exit_module`] of the
+    /// same segment count, even on a check error in between (mirroring
+    /// [`Self::check_module`], which pops before propagating its body's
+    /// first error).
+    pub fn enter_module(&mut self, segs: &[String]) -> Path {
+        for s in segs {
+            self.ns.push(s.clone());
+        }
+        self.reg.root.module_mut(&self.ns);
+        Path::from_segments(self.ns.clone())
+    }
+
+    /// Pop `depth` segments pushed by [`Self::enter_module`].
+    pub fn exit_module(&mut self, depth: usize) {
         for _ in 0..depth {
             self.ns.pop();
         }
-        result?;
-        Ok(TopLevel::Module { path, body })
     }
 
     fn check_defmethod(
@@ -2344,7 +2361,13 @@ impl Checker {
             self.reg.root.module_mut(&self.ns).mod_aliases.insert(bare.clone(), abs);
             return Ok(TopLevel::Use { alias: self.fq(&bare), target: target_path });
         }
-        Err(Error::TypeError(format!("use: unresolved `{}`", segs.join("::"))))
+        // Not a known function, type, or module. The path may name a module
+        // in a source file that simply hasn't been loaded yet — surface a
+        // structured error so a filesystem-aware driver (`crate::project`)
+        // can map the segments to a `.typl` file, load it into this same
+        // checker, and retry. Displays as "use: unresolved `...`" when no
+        // driver handles it.
+        Err(Error::ModuleNotLoaded(segs))
     }
 
     // ---- expressions ------------------------------------------------------

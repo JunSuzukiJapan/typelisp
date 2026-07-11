@@ -63,8 +63,10 @@ cargo build --release --bin typl-lsp
 (add-hook 'typelisp-mode-hook #'lsp)
 ```
 
-診断のみで、hover・補完・定義ジャンプは未対応（開いている1ファイル単体のチェックで、
-`module`/`use`をまたぐ解決も未対応）。
+診断のみで、hover・補完・定義ジャンプは未対応。`use` によるファイルをまたぐ参照は解決される
+（プロジェクトルートの `typelisp.toml` を上方探索、詳細は `docs/syntax.md` の
+「ファイル↔モジュール対応」節）。依存ファイルはディスク上の内容で読まれるため、
+未保存の編集は診断に反映されない。
 
 ## 備考
 

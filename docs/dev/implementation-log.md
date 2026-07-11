@@ -3001,3 +3001,34 @@ Scope` + LLVM系5種。テスト: monomorph_test 27本新設、mem/evalにGC実�
 - 未実装（次の一手）: 複数ファイル/`module`・`use`をまたぐ解決なし（開いている1
   ファイル単独でチェック）、hover/補完/goto-definitionなし、読み取りエラーは
   最初の1件で停止（S式リーダーの性質上、不整合な括弧を越えて再同期するのは困難）。
+
+## ファイル↔モジュール対応（マルチファイル対応）実装 (2026-07-11)
+
+複数`.typl`ファイルでプログラムを構成する仕組みを新設（設計判断はユーザーとの対話で確定、
+仕様の詳細は[language-design.md](language-design.md) §2.3）。核となる規約は
+**「ファイルパス＝モジュールPath」**——ソースルート相対パスがそのままセグメント列になり
+（`geo/point.typl`→`geo::point`）、ファイル内容は暗黙にそのモジュールへ包まれ、明示
+`(module ...)`はその内側にネストする。ルートは`typelisp.toml`マニフェスト（上方探索、
+任意キー`src = "dir"`のみ手書きパース）、無ければエントリのディレクトリ。
+
+- **`src/project.rs`新設**: `find_src_root`/`module_segs_for`/`Loader`。`use`依存は
+  チェック**前に**フォームを走査してオンデマンドで再帰ロード（走査先行なので同一フォームの
+  再チェックが発生せず、偽の再定義警告が出ない）。循環は`loading`スタックで検出し
+  `circular module dependency: a -> b -> a`の連鎖付きエラー。`needs_immediate_exec`は
+  main.rs/lsp.rsの重複コピーをここへ集約。
+- **`Error::ModuleNotLoaded(Vec<String>)`**（typelisp-mem）: `check_use`の3解決全滅時の
+  構造化エラー。ローダ無しドライバでは従来と同じ「use: unresolved」表示。
+- **`Checker::enter_module`/`exit_module`**: `check_module`のns push/pop部を公開APIに切り出し、
+  ドライバが`(module ...)`のValueを合成せずにファイルを暗黙モジュール内でチェックできる。
+- **GCルート規律**: 各ファイルのreadルートはそのファイルのチェック完了時にpop（ネストは
+  LIFO）。チェック済み`TopLevel`はキューに積み、全ルートpop後に依存順で一括exec
+  （`Defvar`初期化子等のヒープを触るexecを`sync_roots`不変条件と両立させる）。
+  `defmacro`のみ即時exec（rootスタック非接触の純登録）。
+- **`Reader::read_all_in_keep_locs`新設**: 依存ファイルの読み込みが外側ファイルの
+  cons位置テーブルを`clear_cons_locs`で消してエラー位置が失われるバグをE2Eで発見、
+  「クリアはセッション開始時に一度だけ」に修正。
+- **`typl <file.typl>`実行モード**（main.rs、従来はREPL専用）とREPLの`use`結線、
+  **LSPのクロスファイル診断**（lsp.rs、依存側エラーはfile:line:col付き全文で文書先頭に
+  アンカー、開いている文書内のエラーは正確な位置）。
+- テスト: `tests/module_file_test.rs`（9件——基本/ネストdir/module入れ子/アイテムuse/
+  循環/未解決/defvar遅延exec/srcキー/無マニフェスト）。全36ターゲットgreen。

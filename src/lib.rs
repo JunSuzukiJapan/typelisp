@@ -8,6 +8,7 @@ pub mod types;
 pub mod check;
 pub mod eval;
 pub mod prelude;
+pub mod project;
 
 pub use errors::*;
 pub use read::*;

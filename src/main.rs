@@ -1,25 +1,78 @@
-//! The `typl` REPL: a read-eval-print loop over the `Reader` -> `Checker` ->
+//! The `typl` CLI: with a file argument, loads and runs it (and its `use`
+//! dependencies — see `typelisp::project` for the file-to-module mapping);
+//! with no argument, a read-eval-print loop over the `Reader` -> `Checker` ->
 //! `Interp` pipeline, using `rustyline` for Emacs-style line editing/history
 //! (Ctrl+P/Ctrl+N to move through history, Ctrl+R to search it, etc. — all
 //! `rustyline`'s default `EditMode::Emacs` bindings, matching bash/readline).
 
-use std::path::PathBuf;
+use std::path::{Path as FsPath, PathBuf};
 
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
+use typelisp::project::{find_src_root, needs_immediate_exec, Loader};
 use typelisp::*;
 
 const PROMPT_PRIMARY: &str = "typl> ";
 const PROMPT_CONTINUE: &str = "...   ";
 
 fn main() -> rustyline::Result<()> {
+    // The first non-flag argument names a source file to run instead of
+    // starting the REPL.
+    if let Some(file) = std::env::args().skip(1).find(|a| !a.starts_with("--")) {
+        std::process::exit(run_file(&file));
+    }
+    repl()
+}
+
+/// Load and execute `file` (and, transitively, whatever its `use`s pull in).
+/// Returns the process exit code. Top-level expression results are not
+/// printed — printing is the REPL's affordance; a script prints via `print`.
+fn run_file(file: &str) -> i32 {
     let mut heap = Heap::with_capacity(1 << 16);
     let reader = Reader::new();
     let mut checker = Checker::new();
     checker.set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut checker, &mut interp);
+
+    let file = PathBuf::from(file);
+    let dir = file.parent().filter(|p| !p.as_os_str().is_empty()).map(FsPath::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+    let src_root = find_src_root(&dir).unwrap_or(dir);
+    let mut loader = Loader::new(src_root);
+
+    let result = loader.load_entry(&mut heap, &reader, &mut checker, &mut interp, &file);
+    for w in checker.take_warnings() {
+        eprintln!("{}", w);
+    }
+    if let Err(e) = result {
+        eprintln!("error: {}", e);
+        return 1;
+    }
+    // All read roots are popped by now (the loader's per-file discipline), so
+    // executing the queued forms — including heap-touching `defvar`
+    // initializers and top-level expressions — is safe.
+    for tl in loader.take_pending() {
+        if let Err(e) = interp.exec(&mut heap, tl) {
+            eprintln!("error: {}", e);
+            return 1;
+        }
+    }
+    0
+}
+
+fn repl() -> rustyline::Result<()> {
+    let mut heap = Heap::with_capacity(1 << 16);
+    let reader = Reader::new();
+    let mut checker = Checker::new();
+    checker.set_redef_policy(parse_redef_policy());
+    let mut interp = Interp::new();
+    load_prelude(&mut heap, &mut checker, &mut interp);
+    // `use` in the REPL resolves files against the current directory (or the
+    // project root if a manifest is found above it).
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let src_root = find_src_root(&cwd).unwrap_or(cwd);
+    let mut loader = Loader::new(src_root);
     let mut rl = DefaultEditor::new()?;
     let hist_path = history_path();
     let _ = rl.load_history(&hist_path);
@@ -36,7 +89,7 @@ fn main() -> rustyline::Result<()> {
                 let _ = rl.add_history_entry(line.as_str());
                 pending.push_str(&line);
                 pending.push('\n');
-                try_run_pending(&mut heap, &reader, &mut checker, &mut interp, &mut pending);
+                try_run_pending(&mut heap, &reader, &mut checker, &mut interp, &mut loader, &mut pending);
             }
             Err(ReadlineError::Interrupted) => {
                 pending.clear();
@@ -107,6 +160,7 @@ fn try_run_pending(
     reader: &Reader,
     checker: &mut Checker,
     interp: &mut Interp,
+    loader: &mut Loader,
     pending: &mut String,
 ) {
     let mark = heap.root_count();
@@ -124,6 +178,22 @@ fn try_run_pending(
             return;
         }
     };
+
+    // Load any `use` dependencies before checking, so `check_use` finds them
+    // in the registry (see `typelisp::project`). A nested load pushes and
+    // pops its own read roots strictly above this batch's, so the root-stack
+    // discipline below is undisturbed.
+    if let Err(e) = loader.load_uses_in(heap, reader, checker, interp, &forms) {
+        while heap.root_count() > mark {
+            heap.pop_root();
+        }
+        for w in checker.take_warnings() {
+            eprintln!("{}", w);
+        }
+        eprintln!("error: {}", e);
+        pending.clear();
+        return;
+    }
 
     let mut checked = Vec::with_capacity(forms.len());
     let mut check_err = None;
@@ -153,6 +223,16 @@ fn try_run_pending(
         return;
     }
 
+    // Loaded modules' forms run before the batch that `use`d them (their
+    // definitions and `defvar` initializers must exist by the time the
+    // batch's own forms execute).
+    for tl in loader.take_pending() {
+        if let Err(e) = interp.exec(heap, tl) {
+            eprintln!("error: {}", e);
+            return;
+        }
+    }
+
     for tl in checked {
         match interp.exec(heap, tl) {
             Ok(Some(v)) => println!("{}", format_value(heap, checker.registry(), &v)),
@@ -162,25 +242,6 @@ fn try_run_pending(
                 break;
             }
         }
-    }
-}
-
-/// True for a `Defmacro` — or a checker-synthesized monomorphization bundle
-/// (see [`MONO_BUNDLE_MODULE`]) containing one: a macro whose body calls a
-/// generic function comes back wrapped in a `Module` alongside the
-/// specializations that call needs. Either way, everything inside is a pure
-/// registration (`Defun`/`Defmacro` — the bundle's primary form *is* the
-/// macro), so executing it early keeps the "exec never touches the root
-/// stack here" invariant `try_run_pending` relies on. A user-written
-/// `module` is deliberately *not* matched — executing one early would run
-/// arbitrary body expressions out of order.
-fn needs_immediate_exec(tl: &TopLevel) -> bool {
-    match tl {
-        TopLevel::Defmacro { .. } => true,
-        TopLevel::Module { path, body } if *path == Path::root(MONO_BUNDLE_MODULE) => {
-            body.iter().any(needs_immediate_exec)
-        }
-        _ => false,
     }
 }
 

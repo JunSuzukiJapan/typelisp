@@ -70,6 +70,17 @@ impl Reader {
     /// location prefix of any error message).
     pub fn read_all_in(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Vec<Value>, Error> {
         heap.clear_cons_locs();
+        self.read_all_in_keep_locs(heap, file, src)
+    }
+
+    /// Like [`Reader::read_all_in`], but *without* wiping the heap's
+    /// cons-location table first. For reading a dependency file mid-load
+    /// (`crate::project::Loader`): the outer file's forms are read but not
+    /// yet checked, and clearing here would erase their recorded locations —
+    /// every error in the outer file would then lose its `file:line:col`.
+    /// Only the driver that begins a fresh read session (the REPL batch, the
+    /// loader's entry file) clears.
+    pub fn read_all_in_keep_locs(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Vec<Value>, Error> {
         let mut cur = Cursor::new(file, src);
         let mut out = Vec::new();
         loop {

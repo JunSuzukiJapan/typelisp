@@ -11,17 +11,22 @@
 //! running the user's program (side effects, `panic`, non-termination) just
 //! to show a squiggly line. The one exception is `defmacro` forms, which
 //! `Checker::check_form` needs registered in `Interp` *before* a later macro
-//! use in the same document can be checked — mirroring
-//! `main.rs::needs_immediate_exec` exactly, `Defmacro` registration is a pure
-//! `HashMap` insert with no user-visible side effect.
+//! use in the same document can be checked — `typelisp::project`'s loader
+//! handles that exception itself (`Defmacro` registration is a pure
+//! `HashMap` insert with no user-visible side effect); everything else the
+//! loader queues for execution is simply discarded here.
 //!
-//! Each diagnostics pass builds a fresh `Heap`/`Checker`/`Interp` and only
-//! ever looks at the one document being edited — there is no cross-file
-//! `module`/`use` resolution yet. That is the main gap between this and a
-//! "real" language server; see the `TODO` list in `docs/dev/` if picking
+//! Each diagnostics pass builds a fresh `Heap`/`Checker`/`Interp` and runs
+//! the document through `typelisp::project::Loader`, so `use` dependencies
+//! are loaded from disk (rooted at the nearest `typelisp.toml`) and
+//! cross-file references resolve. Dependencies are re-read from disk on
+//! every pass — no cross-pass cache yet. Hover/completion/goto-definition
+//! are still unimplemented; see the `TODO` list in `docs/dev/` if picking
 //! this back up.
 
 use std::collections::HashMap;
+
+use std::path::{Path as FsPath, PathBuf};
 
 use lsp_server::{Connection, Message, Response, ResponseError};
 use lsp_types::{
@@ -33,6 +38,7 @@ use lsp_types::{
     ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
 
+use typelisp::project::{find_src_root, Loader};
 use typelisp::*;
 
 fn main() {
@@ -130,14 +136,22 @@ fn run(connection: Connection) {
 }
 
 fn publish(connection: &Connection, uri: &Uri, text: &str) {
-    let diagnostics = diagnostics_for(uri.as_str(), text);
+    // The URI's path component as a filesystem path (`file:///tmp/a.typl` ->
+    // `/tmp/a.typl`). Percent-encoded characters are not decoded — good
+    // enough for the ordinary-ASCII paths this MVP targets.
+    let diagnostics = diagnostics_for(uri.path().as_str(), text);
     let params = PublishDiagnosticsParams { uri: uri.clone(), diagnostics, version: None };
     let n = lsp_server::Notification::new(PublishDiagnostics::METHOD.into(), params);
     let _ = connection.sender.send(Message::Notification(n));
 }
 
-/// Re-reads and re-checks `text` from scratch (as though it named `file` on
-/// disk) and turns whatever the pipeline reports into LSP diagnostics.
+/// Re-checks `text` from scratch as the content of `file` and turns whatever
+/// the pipeline reports into LSP diagnostics. Runs through
+/// `typelisp::project::Loader`, so the document's `use` dependencies are
+/// loaded from disk (rooted at the nearest `typelisp.toml`, falling back to
+/// the file's own directory) and cross-file references resolve. Only checks
+/// — nothing is executed beyond `defmacro` registration (the loader's
+/// built-in exception); the queued forms are discarded.
 ///
 /// Unlike the REPL's `try_run_pending`, a read error here is never "need
 /// more input to keep going" — the whole document is already in hand — so
@@ -151,62 +165,34 @@ fn diagnostics_for(file: &str, text: &str) -> Vec<Diagnostic> {
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut checker, &mut interp);
 
+    let fs_file = FsPath::new(file);
+    let dir = fs_file.parent().filter(|p| !p.as_os_str().is_empty()).map(FsPath::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+    let src_root = find_src_root(&dir).unwrap_or(dir);
+    let mut loader = Loader::new(src_root);
+
     let mut diagnostics = Vec::new();
-
-    let forms = match reader.read_all_in(&mut heap, file, text) {
-        Ok(forms) => forms,
-        Err(e) => {
-            diagnostics.push(error_diagnostic(&e));
-            return diagnostics;
-        }
-    };
-
-    for v in forms {
-        let result = checker.check_form(&mut heap, &interp, v);
-        for w in checker.take_warnings() {
-            diagnostics.push(warning_diagnostic(w));
-        }
-        match result {
-            Ok(tl) => {
-                if needs_immediate_exec(&tl) {
-                    if let Err(e) = interp.exec(&mut heap, tl) {
-                        diagnostics.push(eval_error_diagnostic(&e));
-                    }
-                }
-            }
-            Err(e) => {
-                diagnostics.push(error_diagnostic(&e));
-                break;
-            }
-        }
+    let result = loader.load_entry_src(&mut heap, &reader, &mut checker, &mut interp, fs_file, text);
+    for w in checker.take_warnings() {
+        diagnostics.push(warning_diagnostic(w));
     }
-
+    if let Err(e) = result {
+        diagnostics.push(error_diagnostic(&e, file));
+    }
     diagnostics
 }
 
-/// True for a `Defmacro` (or a checker-synthesized monomorphization bundle
-/// containing one) — see `main.rs::needs_immediate_exec`, which this mirrors
-/// exactly: it's copied rather than shared because it's ten lines and pulling
-/// it out into the library for one non-REPL caller isn't worth the added
-/// public surface.
-fn needs_immediate_exec(tl: &TopLevel) -> bool {
-    match tl {
-        TopLevel::Defmacro { .. } => true,
-        TopLevel::Module { path, body } if *path == Path::root(MONO_BUNDLE_MODULE) => {
-            body.iter().any(needs_immediate_exec)
+/// An error's diagnostic, anchored at its source location when that location
+/// is in the document being checked. An error from a *dependency* file (its
+/// `Loc` names another path) can't be underlined in this document, so it's
+/// anchored at the top with the full `file:line:col:`-prefixed message.
+fn error_diagnostic(e: &Error, current_file: &str) -> Diagnostic {
+    match e.loc() {
+        Some(l) if &*l.file == current_file => {
+            diagnostic(format!("{}", e.kind()), loc_to_range(l), DiagnosticSeverity::ERROR)
         }
-        _ => false,
+        Some(_) => diagnostic(format!("{}", e), doc_start_range(), DiagnosticSeverity::ERROR),
+        None => diagnostic(format!("{}", e.kind()), doc_start_range(), DiagnosticSeverity::ERROR),
     }
-}
-
-fn error_diagnostic(e: &Error) -> Diagnostic {
-    let range = e.loc().map(loc_to_range).unwrap_or_else(doc_start_range);
-    diagnostic(format!("{}", e.kind()), range, DiagnosticSeverity::ERROR)
-}
-
-fn eval_error_diagnostic(e: &EvalError) -> Diagnostic {
-    let range = e.loc().map(loc_to_range).unwrap_or_else(doc_start_range);
-    diagnostic(format!("{}", e.kind()), range, DiagnosticSeverity::ERROR)
 }
 
 /// Checker warnings (e.g. "redefining function `foo`") carry no source

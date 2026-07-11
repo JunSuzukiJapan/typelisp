@@ -49,6 +49,13 @@ pub enum Error {
     ImproperList,
     /// A malformed type expression or a type error during checking.
     TypeError(String),
+    /// A `use` named a module that is not in the registry and might live in a
+    /// not-yet-loaded source file. Carries the path's segments so a driver
+    /// that knows about the filesystem (`src/project.rs`'s loader) can map
+    /// them to a `.typl` file, load it, and retry the `use` — the checker
+    /// itself never touches the filesystem. A driver with no loader (or one
+    /// whose load attempt finds no file) reports this as "unresolved".
+    ModuleNotLoaded(Vec<String>),
     /// An error carrying the source location where it occurred. Wraps the
     /// underlying error unchanged; [`fmt::Display`] prefixes it with
     /// `file:line:col: `. Constructed via [`Error::at`], which never
@@ -125,6 +132,7 @@ impl fmt::Display for Error {
             Error::NotACons => write!(f, "value is not a cons"),
             Error::ImproperList => write!(f, "improper list where a proper list was required"),
             Error::TypeError(s) => write!(f, "type error: {}", s),
+            Error::ModuleNotLoaded(segs) => write!(f, "use: unresolved `{}`", segs.join("::")),
             Error::At(loc, inner) => write!(f, "{}: {}", loc, inner),
         }
     }
