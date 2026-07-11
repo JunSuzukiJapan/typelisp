@@ -3032,3 +3032,16 @@ Scope` + LLVM系5種。テスト: monomorph_test 27本新設、mem/evalにGC実�
   アンカー、開いている文書内のエラーは正確な位置）。
 - テスト: `tests/module_file_test.rs`（9件——基本/ネストdir/module入れ子/アイテムuse/
   循環/未解決/defvar遅延exec/srcキー/無マニフェスト）。全36ターゲットgreen。
+
+## LSPの依存ファイルにエディタバッファのオーバーレイを適用 (2026-07-11)
+
+`typl-lsp`が依存ファイル([[typelisp-file-module-mapping]]の`use`ロード)を常にディスクから
+読んでいたため、開いている依存ファイルの未保存編集が診断に反映されない問題を修正。
+`project::Loader`に`overlay: HashMap<PathBuf, String>`フィールドと`set_overlay`を追加し、
+`read_source`をメソッド化してoverlay優先→ディスクフォールバックの順にした。`lsp.rs`の
+`publish`は自分以外の開いている全文書をoverlayとして`diagnostics_for`へ渡す（エントリ
+文書自身は従来どおり直接テキストを渡すので対象外）。E2Eで「依存ファイルを保存前に編集
+→即座に依存元の型エラーが解消する」ことを確認。
+
+残課題（`docs/dev/TODO.md`）: 依存ファイルを編集しても依存元の診断は自動再発行されない
+（依存元自身に変更イベントが来るまで反映されない、逆依存グラフ追跡が必要）。

@@ -32,6 +32,10 @@
 //! so silently skipping an in-progress module would just surface later as a
 //! baffling "no such function" on some unloaded item.
 //!
+//! A caller with in-editor buffers open (the LSP) can register them via
+//! [`Loader::set_overlay`] so a dependency load sees an unsaved edit
+//! immediately rather than the stale file on disk.
+//!
 //! GC-root discipline (the `main.rs::try_run_pending` invariant): each file's
 //! `read_all_in` roots are popped as soon as that file's forms are checked —
 //! nested loads are strictly LIFO above the outer file's roots, so stack
@@ -41,7 +45,7 @@
 //! is `defmacro` registration, which must precede later macro *uses* in the
 //! same load and is safe mid-load because it never touches the root stack.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path as FsPath, PathBuf};
 
@@ -121,11 +125,23 @@ pub struct Loader {
     loading: Vec<String>,
     loaded: HashSet<Vec<String>>,
     pending: Vec<TopLevel>,
+    /// In-editor buffer contents, keyed by filesystem path, consulted before
+    /// disk for every dependency load — an unsaved edit to a file another
+    /// file `use`s should be visible immediately, not only after a save.
+    /// Empty (the default from [`Loader::new`]) for drivers with no editor
+    /// buffers (`typl`'s file/REPL modes), which always read disk.
+    overlay: HashMap<PathBuf, String>,
 }
 
 impl Loader {
     pub fn new(src_root: PathBuf) -> Loader {
-        Loader { src_root, loading: Vec::new(), loaded: HashSet::new(), pending: Vec::new() }
+        Loader { src_root, loading: Vec::new(), loaded: HashSet::new(), pending: Vec::new(), overlay: HashMap::new() }
+    }
+
+    /// Supply in-editor buffer contents to consult before disk. See the
+    /// `overlay` field's doc comment.
+    pub fn set_overlay(&mut self, overlay: HashMap<PathBuf, String>) {
+        self.overlay = overlay;
     }
 
     /// The checked-but-unexecuted top-level forms accumulated by loads so
@@ -146,7 +162,7 @@ impl Loader {
         interp: &mut Interp,
         file: &FsPath,
     ) -> Result<(), Error> {
-        let src = read_source(file)?;
+        let src = self.read_source(file)?;
         self.load_entry_src(heap, reader, checker, interp, file, &src)
     }
 
@@ -347,16 +363,20 @@ impl Loader {
                     chain.join(" -> ")
                 )));
             }
-            let src = read_source(&file)?;
+            let src = self.read_source(&file)?;
             return self.load_source(heap, reader, checker, interp, &file, &src, module_segs);
         }
         Ok(()) // no file — leave resolution (or its failure) to `check_use`
     }
-}
 
-fn read_source(file: &FsPath) -> Result<String, Error> {
-    fs::read_to_string(file)
-        .map_err(|e| Error::TypeError(format!("cannot read `{}`: {}", file.display(), e)))
+    /// `file`'s content: the overlay's copy if one exists (an open, possibly
+    /// unsaved editor buffer), otherwise disk.
+    fn read_source(&self, file: &FsPath) -> Result<String, Error> {
+        if let Some(src) = self.overlay.get(file) {
+            return Ok(src.clone());
+        }
+        fs::read_to_string(file).map_err(|e| Error::TypeError(format!("cannot read `{}`: {}", file.display(), e)))
+    }
 }
 
 fn pop_roots_to(heap: &mut Heap, mark: usize) {

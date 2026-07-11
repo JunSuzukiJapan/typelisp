@@ -18,11 +18,13 @@
 //!
 //! Each diagnostics pass builds a fresh `Heap`/`Checker`/`Interp` and runs
 //! the document through `typelisp::project::Loader`, so `use` dependencies
-//! are loaded from disk (rooted at the nearest `typelisp.toml`) and
-//! cross-file references resolve. Dependencies are re-read from disk on
-//! every pass — no cross-pass cache yet. Hover/completion/goto-definition
-//! are still unimplemented; see the `TODO` list in `docs/dev/` if picking
-//! this back up.
+//! are loaded (rooted at the nearest `typelisp.toml`) and cross-file
+//! references resolve. A dependency that is itself open in the editor is
+//! read from its in-memory buffer (`Loader::set_overlay`, fed from this
+//! file's `docs` map) rather than disk, so an unsaved edit to it is visible
+//! immediately; a dependency that isn't open is read from disk, still
+//! without a cross-pass cache. Hover/completion/goto-definition are still
+//! unimplemented; see the `TODO` list in `docs/dev/` if picking this back up.
 
 use std::collections::HashMap;
 
@@ -94,7 +96,7 @@ fn run(connection: Connection) {
                     if let Ok(p) = serde_json::from_value::<lsp_types::DidOpenTextDocumentParams>(not.params) {
                         let uri = p.text_document.uri;
                         docs.insert(uri.clone(), p.text_document.text);
-                        publish(&connection, &uri, docs.get(&uri).unwrap());
+                        publish(&connection, &uri, &docs);
                     }
                 }
                 m if m == DidChangeTextDocument::METHOD => {
@@ -105,15 +107,15 @@ fn run(connection: Connection) {
                         if let Some(change) = p.content_changes.pop() {
                             let uri = p.text_document.uri;
                             docs.insert(uri.clone(), change.text);
-                            publish(&connection, &uri, docs.get(&uri).unwrap());
+                            publish(&connection, &uri, &docs);
                         }
                     }
                 }
                 m if m == DidSaveTextDocument::METHOD => {
                     if let Ok(p) = serde_json::from_value::<lsp_types::DidSaveTextDocumentParams>(not.params) {
                         let uri = p.text_document.uri;
-                        if let Some(text) = docs.get(&uri) {
-                            publish(&connection, &uri, text);
+                        if docs.contains_key(&uri) {
+                            publish(&connection, &uri, &docs);
                         }
                     }
                 }
@@ -135,11 +137,22 @@ fn run(connection: Connection) {
     }
 }
 
-fn publish(connection: &Connection, uri: &Uri, text: &str) {
+fn publish(connection: &Connection, uri: &Uri, docs: &HashMap<Uri, String>) {
+    // Every *other* open document becomes an overlay entry so a dependency
+    // that's open in the editor is read from its buffer, not disk — see
+    // `Loader::set_overlay`. `uri` itself is excluded: its text is passed to
+    // `diagnostics_for` directly as the entry source, and the loader never
+    // re-reads the entry file by path.
+    let overlay: HashMap<PathBuf, String> = docs
+        .iter()
+        .filter(|(u, _)| *u != uri)
+        .map(|(u, text)| (PathBuf::from(u.path().as_str()), text.clone()))
+        .collect();
+    let text = &docs[uri];
     // The URI's path component as a filesystem path (`file:///tmp/a.typl` ->
     // `/tmp/a.typl`). Percent-encoded characters are not decoded — good
     // enough for the ordinary-ASCII paths this MVP targets.
-    let diagnostics = diagnostics_for(uri.path().as_str(), text);
+    let diagnostics = diagnostics_for(uri.path().as_str(), text, overlay);
     let params = PublishDiagnosticsParams { uri: uri.clone(), diagnostics, version: None };
     let n = lsp_server::Notification::new(PublishDiagnostics::METHOD.into(), params);
     let _ = connection.sender.send(Message::Notification(n));
@@ -158,7 +171,7 @@ fn publish(connection: &Connection, uri: &Uri, text: &str) {
 /// every `Reader` error becomes a diagnostic directly, and reading stops at
 /// the first one (an s-expression reader can't meaningfully resync past an
 /// unmatched paren).
-fn diagnostics_for(file: &str, text: &str) -> Vec<Diagnostic> {
+fn diagnostics_for(file: &str, text: &str, overlay: HashMap<PathBuf, String>) -> Vec<Diagnostic> {
     let mut heap = Heap::with_capacity(1 << 16);
     let reader = Reader::new();
     let mut checker = Checker::new();
@@ -169,6 +182,7 @@ fn diagnostics_for(file: &str, text: &str) -> Vec<Diagnostic> {
     let dir = fs_file.parent().filter(|p| !p.as_os_str().is_empty()).map(FsPath::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     let src_root = find_src_root(&dir).unwrap_or(dir);
     let mut loader = Loader::new(src_root);
+    loader.set_overlay(overlay);
 
     let mut diagnostics = Vec::new();
     let result = loader.load_entry_src(&mut heap, &reader, &mut checker, &mut interp, fs_file, text);
