@@ -2998,9 +2998,12 @@ Scope` + LLVM系5種。テスト: monomorph_test 27本新設、mem/evalにGC実�
   warningsは位置情報を持たないため文書先頭に仮置き。
 - `Connection`を`run()`に値渡しして関数末尾でdropしてから`io_threads.join()`する
   必要がある（`sender`が生きたままjoinすると書き込みスレッドが終了せずデッドロック）。
-- 未実装（次の一手）: 複数ファイル/`module`・`use`をまたぐ解決なし（開いている1
+- 当初の未実装（次の一手）: 複数ファイル/`module`・`use`をまたぐ解決なし（開いている1
   ファイル単独でチェック）、hover/補完/goto-definitionなし、読み取りエラーは
-  最初の1件で停止（S式リーダーの性質上、不整合な括弧を越えて再同期するのは困難）。
+  最初の1件で停止（S式リーダーの性質上、不整合な括弧を越えて再同期するのは困難、これは
+  今も変わらない）。マルチファイル解決は直後の「ファイル↔モジュール対応」以降の節、
+  hover/goto-definitionは「LSP: hover/goto-definition基盤実装」節（同日）で対応——
+  補完は本節時点も含めて引き続き未着手。
 
 ## ファイル↔モジュール対応（マルチファイル対応）実装 (2026-07-11)
 
@@ -3064,3 +3067,100 @@ overlay対応(直前のログ)だけでは、依存ファイル自身を開い�
 E2Eで「依存ファイル(point.typl)のみを未保存で編集し、依存元(main.typl)には触れない」
 操作を行い、point.typl向けとmain.typl向けの2件のpublishDiagnosticsが自動で届き、
 main.typlの型エラーが消えることを確認。全36ターゲットgreen。
+
+## LSP: hover/goto-definition基盤実装 (2026-07-11)
+
+TODO.mdが調査時点で想定していた「`Typed`/`Expr`にspan（開始~終了）を追加する」大改修は
+不要と判明。`Typed.loc: Option<Loc>`は既にリスト形式ノードの開き括弧位置
+（`Checker::check`が`heap.cons_loc(v)`で埋める、点情報のみ）を持っており、「カーソル位置
+以下で最大の開始位置を持つノードを深さ優先で探す」だけで正しい最小包含ノードが求まる
+（S式の兄弟フォームはソース順に重ならないため）。この発見によりreader/heap側の変更なしで
+実装できた。
+
+- `src/check/registry.rs`: `DefLocs`（`Registry.def_locs`）をサイドテーブルとして新設。
+  `FnSig`/`AssocFn`自体にはフィールドを足さない——`with_builtins()`だけで両者のリテラルが
+  計130件超あり、ビルトインには参照すべき位置がそもそも無いため、既存構造体への必須
+  フィールド追加は無意味に大きな差分になる。チェッカーの7つの登録箇所（`check_defun`/
+  `check_defmethod`/`check_defstruct`/`check_defenum`/`check_defvar`/`check_deftrait`/
+  `check_defmacro`）でだけ書き込む。
+- `src/check/locate.rs`（新規）: `locate_node`（カーソル→最小包含ノード、全木探索）/
+  `definition_target`（ノード→`DefLocs`引き、`Global`/`Call`/`FnRef`/`Assoc`/`MethodRef`/
+  `Construct`のみ対象——いずれも解決済みの`Path`を既に持つので新たな名前解決は不要）/
+  `hover_text`（`Typed.ty`を`{:?}`でフォーマット、`Type`に`Display`実装が無いため既存の
+  エラーメッセージと同じ流儀に合わせた）。
+- `src/bin/lsp.rs`: `hover_provider`/`definition_provider`を有効化。doc毎に直近成功した
+  `Analysis { body: Vec<TopLevel>, def_locs: DefLocs }`をキャッシュし、型エラーがある間は
+  直近成功時点のものを保持し続ける（現状の「毎回ゼロから読み直す」設計とは別軸）。
+
+既知の制限（意図的なMVPスコープ）: ローカル変数（`Expr::Var`、`let`/`lambda`束縛）への
+goto-definitionは非対応（束縛側にも位置情報を持たせていない）。アトム単体（裸のシンボル・
+リテラル）は自身の位置を持てない（`Value::Symbol`はヒープ上で一意な参照ではなく使い回される
+ため、`cons_locs`と同じ仕組みでは追跡不可能）——真のspan対応にはreader全体の作り替えが
+必要だが、現状のMVPは「S式の兄弟フォームが重ならない」性質だけで実用上十分な精度が出ている
+ため見送った。詳細な調査結果と補完（未着手）の設計メモはdocs/dev/TODO.mdの
+「hover / goto-definition / 補完」節（折りたたみ内）に残している。
+
+単体テストは`tests/lsp_locate_test.rs`（LSPのstdioトランスポートは介さず`Checker::check_form`
+を直接駆動してコアロジックのみ検証）。全体テスト無回帰を確認。
+
+## compile機能: グローバル変数（Global/SetGlobal）対応、JIT/AOT両方 (2026-07-11)
+
+`defvar`/`defconstant`をcompile対象の関数から参照・代入できるようにした。コンパイル済み
+（ネイティブ）コードはインタプリタの`Interp.globals: HashMap<Path, Slot>`に一切アクセス
+できないため、JIT/AOTどちらもグローバル変数用のストレージを新設する必要があった。
+
+**採用した設計**: コンパイル済みコードから参照されたグローバルだけを、GCの
+**permanent root**（`crates/typelisp-mem`の`Heap.permanent_roots`——LIFOでpopされる通常の
+`roots`とは別の「積んだら二度と外さない」Vec、既に`rt_push_permanent_sexpr_root`が構造体
+フィールドの保護に使っている実績ある機構）に「昇格」させる。一度もコンパイルされない
+グローバルは今まで通り`Slot`ベースのまま——RtValue→`mem::Value`変換に使う既存ヘルパー
+`rtvalue_to_struct_field`が`RtValue::Data`（`Option`/`Result`/ユーザー`defenum`）を変換
+できないため、全グローバルを一律移行すると同型の`defvar`が今日動いているのに壊れる。
+
+- `crates/typelisp-mem/src/heap.rs`: `Heap::permanent_root`/`set_permanent_root`
+  （インデックス指定の読み書き。GCのmark走査は`permanent_roots`を毎回インデックスで
+  再読みするだけなので、値を上書きしても既存ロジックは無改造で安全）。
+- `crates/typelisp-rt/src/lib.rs`: `rt_global_new`/`rt_global_get`/`rt_global_set`。
+  「コンパイル時に割り振った小さい連番id」→「実際のpermanent_root位置」を仲介する
+  `GLOBAL_INDEX`スレッドローカルを新設（構造体フィールド構築等、無関係なコードも
+  `rt_push_permanent_sexpr_root`を呼ぶため、idと生のpermanent_root位置は同一視できない）。
+  `reset_global_table()`（`Interp::new()`から呼ぶ——`cargo test`のスレッドプールで別
+  `Heap`インスタンスが同じOSスレッドを再利用するケースの対策）。
+- **JIT/AOTのid採番の非対称性**: JIT（`Interp::compile_function`経由の`promote_global`）は
+  参照時に遅延昇格——コンパイルと実行が同一プロセス・同一`Heap`なので単一タイムラインで
+  安全。AOT（`compile::aot::compile_file`）はコンパイル用のHeapと生成される実行ファイル
+  自身が起動時に作る別のHeapという2つのタイムラインの数値を一致させる必要があるため、
+  全`defvar`をファイル宣言順に**即座に**昇格し（`Interp::promote_global`を`pub(crate)`化）、
+  `Interp::add_compiled_global_init`が生成する初期化関数群（`$global_init$N`）を
+  `build_main_wrapper`が`rt_heap_init`と`tl_main`の間に同じ順序で挿入する。ファイル宣言順を
+  使う理由: checkerの後方参照禁止制約により、あるdefvarの初期化式が参照できるのは常に
+  「宣言順で前」のdefvarのみなので、宣言順での昇格・初期化は依存関係を自動的に満たす。
+- 昇格済みグローバルは、インタプリタ自身の`Expr::Global`/`Expr::SetGlobal`評価も
+  permanent-root経由に切り替えた——実装中に「コンパイル側の書き込みがインタプリタ側の
+  読み取りに反映されない」乖離バグをテストで検出し、修正。
+- `src/compile/ast_bridge.rs`/`src/compiler.rs`: 当初`binding_kind`（GCルート要否の3値
+  分類）でタグ付け要否を判断しようとしたが誤り——コンパイル済み値が「タグ付きi64か生の
+  i64か」を決めるのは`ast_bridge::struct_field_kind`（defstructフィールド用の7値分類、
+  `compile-sexpr-field`/`compile-tag-struct-field`という既存のエンコード/デコード機構）
+  だった。テストで「読んだ値が8倍（タグ付きのまま）」というバグとして発覚し、正しい方の
+  機構に差し替えて解決。
+
+新設: `collect_global_targets`/`translate_global`/`translate_set_global`/
+`ast_to_sexpr_for_global_init`（`ast_bridge.rs`）、`compile-global`/`compile-set-global`/
+`compile-global-init`（`compiler.rs`、3つ目はAOT専用）、`Interp.compiled_globals`/
+`promote_global`/`add_compiled_global_init`（`interp.rs`）。
+
+Option/Result/ユーザーenum型のグローバルはcompile対象から参照できないまま（既知の制限、
+`promote_global`が明示的な`Panic`で報告）。
+
+段階分け（Stage A: 新規基盤 → Stage B: JIT対応 → Stage C: AOT対応）で実装し、各段階後に
+`cargo test`全体＋`typelisp-rt`への`miri`を実行——このコンパイラは過去に1行変更が無関係な
+既存テストを非決定的に壊した前例（`compile機能のmatch分岐ヒーゼンバグ`節参照）があるため。
+`compiler.rs`の`compile-value`ディスパッチは20段超ネストした`(if (equal s ...) ...)`鎖で、
+新tag追加時の閉じ括弧の手動カウントは事故りやすく実際に複数回ミスした——文字列リテラル/
+コメント対応の括弧深度トレーサーをPythonで書いて`SOURCE`定数全体の均衡を検証してから
+テストを回す方法が有効だった（`cargo build`はこの文字列の中身を検査しないため、構文
+エラーはコンパイラ自身をtypelispとして読み込む実行時にしか発覚しない）。
+
+新規テスト: `tests/compile_test.rs`（JIT読み書き+Option型エラー、3件）、
+`tests/compile_file_test.rs`（AOT読み書き+JIT/AOT一致性、3件）。既存500件超は無回帰。
