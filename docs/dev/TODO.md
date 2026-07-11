@@ -20,11 +20,48 @@
   （`src/project.rs`の`scan_form`）で行うため、`defmacro`の展開結果として現れる`use`は
   走査に映らず「unresolved」になる（既知の制限、`project.rs`のdocコメント参照）。
 - **LSPの依存キャッシュなし**: 診断パスごとに依存ファイルを再読込（`Loader::set_overlay`で
-  開いている文書の未保存内容は優先されるようになった——2026-07-11実装——が、ディスク/
-  overlayいずれにせよパス間キャッシュは無く、毎回ゼロから読み直す）。
-- **hover/goto-definition/補完**: 位置→ASTノード逆引きと`FnSig`/`VarInfo`への定義位置
-  (`Loc`)記録が共通基盤として必要（LSP実装時の調査メモはimplementation-log.md参照）。
+  開いている文書の未保存内容は優先、`deps`の逆依存追跡で依存元も連鎖再診断——2026-07-11
+  実装——だが、ディスク/overlayいずれにせよパス間キャッシュは無く、毎回ゼロから読み直す。
+  大きなプロジェクトでキー入力毎の再読込コストが問題になったら着手）。
 - **`use`はソースルート相対のみ**: 兄弟ファイル相対の解決は未対応（MVP判断）。
+
+#### hover / goto-definition / 補完（未着手、要新規基盤）
+
+2026-07-11に他言語のLSP実装（rust-analyzer/tsserver/clangd等）を調査した上での設計メモ。
+3機能とも「共通基盤」と「機能固有部分」に分かれ、共通基盤を先に作ればhoverとgoto-defは
+ほぼ相乗りできる。
+
+**現状の欠落（確認済み）**:
+- `Typed`/`Expr`（`src/check/ast.rs`）は**範囲(span)を持たない**。`Loc`（`crates/typelisp-mem/
+  src/errors.rs`）はline/colの**点**であり、しかも一部のcons cellにしか記録されない
+  （`Heap.cons_locs`、`heap.cons_loc(v)`で引ける）。
+- `FnSig`/`VarInfo`（`src/check/registry.rs`）は**定義位置を持たない**——名前解決はできても
+  「どこで定義されたか」を引く手段がない。
+
+**他言語がどう解決しているか**（一般知識・2026-07-11調査):
+- rust-analyzer/tsserverはASTノードが最初から範囲（start~end）を持ち、hoverは
+  「カーソル位置を含む最小のノードを探す」木の走査だけで済む。見つけたノードの型は
+  チェック時に計算済みの型テーブルから引く。
+- goto-definitionも同じ「ノード特定」までは共通で、シンボルIDを使って**定義側の位置
+  テーブル**（rust-analyzerの`DefMap`等）を引く——定義側は名前解決だけでなく定義位置も
+  記録している。
+- 補完は**エラー耐性パーサ**が前提（壊れた/書きかけの入力でも最善のASTを作れる）。
+  typelispの`Reader`は最初の構文エラーで即失敗する設計で性質が異なる。ただしS式は
+  閉じ括弧の対応が単純なので、「カーソルまでの入力に足りない`)`をヒューリスティックに
+  補ってから読む」前処理層の方が、汎用エラー回復パーサを一から作るより現実的
+  （Common Lisp/Racket系LSP実装でよく使われる手法）。
+
+**推奨する実装順序**:
+1. **共通基盤**: `Typed`/`Expr`各ノードに範囲（開始~終了の`Loc`または行/列ペア）を追加。
+   `FnSig`/`VarInfo`/`AdtDef`等に定義位置`Loc`フィールドを追加し、`checker.rs`の
+   `check_defun`/`check_defmethod`/`check_defstruct`/`check_defenum`/`check_defvar`等の
+   登録箇所で埋める。
+2. **hover**: 「カーソル位置を含む最小ノードを探す」木の走査（新規）＋そのノードの型を
+   `Typed`から読んで文字列化。`ServerCapabilities.hover_provider`を有効化。
+3. **goto-definition**: hoverの「ノード特定」を再利用し、参照しているシンボルを
+   Registryで引いて定義側の`Loc`を返す。`definition_provider`を有効化。
+4. **補完**: 上記2つとは別ライン。まずカーソル位置までの入力を閉じ括弧補完で読めるように
+   してから、可視スコープ内の名前を`Registry`/`Scope`チェーンから列挙する。
 
 `compile`（LLVM JIT/AOT）機能は現状「今のフェーズが実際に使うASTノードだけ本実装、それ以外は
 `ast_bridge`が`(unsupported "<Variant>")`を返しコンパイラ本体が明示的にpanicする」設計
