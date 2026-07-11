@@ -3045,3 +3045,22 @@ Scope` + LLVM系5種。テスト: monomorph_test 27本新設、mem/evalにGC実�
 
 残課題（`docs/dev/TODO.md`）: 依存ファイルを編集しても依存元の診断は自動再発行されない
 （依存元自身に変更イベントが来るまで反映されない、逆依存グラフ追跡が必要）。
+
+## LSPの逆依存追跡: 依存ファイル編集で依存元の診断を自動更新 (2026-07-11)
+
+overlay対応(直前のログ)だけでは、依存ファイル自身を開いて編集しないと依存元の診断が
+更新されなかった（依存元に変更イベントが来るまで再チェックされない）ため、逆依存追跡を追加。
+
+`project::Loader`に`loaded_files: HashSet<PathBuf>`を追加（`ensure_loaded`で依存ファイルの
+パスを記録、entry自身は含まない）、公開アクセサ`loaded_files()`を新設。`lsp.rs`の`publish`は
+`deps: HashMap<Uri, HashSet<PathBuf>>`（各文書が最後に依存したファイル集合）を維持し、
+変更された文書を起点にBFSで「その文書に依存している他の開いている文書」を辿って
+`publish_one`（実際の診断計算+deps更新）を再帰的に呼ぶ。visited集合で無限ループを防止。
+
+副次的な修正: `ensure_loaded`のファイル存在チェックが`file.is_file()`（ディスクのみ）
+だったため、まだ保存していない新規ファイルがoverlayにしか無い場合に発見できなかった
+バグも同じ箇所で修正（overlayも確認するよう変更）。
+
+E2Eで「依存ファイル(point.typl)のみを未保存で編集し、依存元(main.typl)には触れない」
+操作を行い、point.typl向けとmain.typl向けの2件のpublishDiagnosticsが自動で届き、
+main.typlの型エラーが消えることを確認。全36ターゲットgreen。

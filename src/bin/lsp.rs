@@ -23,10 +23,18 @@
 //! read from its in-memory buffer (`Loader::set_overlay`, fed from this
 //! file's `docs` map) rather than disk, so an unsaved edit to it is visible
 //! immediately; a dependency that isn't open is read from disk, still
-//! without a cross-pass cache. Hover/completion/goto-definition are still
-//! unimplemented; see the `TODO` list in `docs/dev/` if picking this back up.
+//! without a cross-pass cache.
+//!
+//! Editing a dependency also refreshes whoever depends on it: `publish`
+//! records each document's `Loader::loaded_files` in `deps` and, after
+//! diagnosing the document that actually changed, transitively re-diagnoses
+//! every other open document whose last-recorded dependencies include it —
+//! no waiting for the dependent's own `didChange`.
+//!
+//! Hover/completion/goto-definition are still unimplemented; see the `TODO`
+//! list in `docs/dev/` if picking this back up.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use std::path::{Path as FsPath, PathBuf};
 
@@ -68,6 +76,11 @@ fn run(connection: Connection) {
         serde_json::from_value(init_params).unwrap_or_else(|_| InitializeParams::default());
 
     let mut docs: HashMap<Uri, String> = HashMap::new();
+    // The filesystem paths each open document's last diagnostics pass
+    // actually depended on (`Loader::loaded_files`) — lets `publish` find
+    // and re-diagnose open documents that `use` whatever file just changed,
+    // without waiting for their own change event.
+    let mut deps: HashMap<Uri, HashSet<PathBuf>> = HashMap::new();
 
     for msg in &connection.receiver {
         match msg {
@@ -96,7 +109,7 @@ fn run(connection: Connection) {
                     if let Ok(p) = serde_json::from_value::<lsp_types::DidOpenTextDocumentParams>(not.params) {
                         let uri = p.text_document.uri;
                         docs.insert(uri.clone(), p.text_document.text);
-                        publish(&connection, &uri, &docs);
+                        publish(&connection, &uri, &docs, &mut deps);
                     }
                 }
                 m if m == DidChangeTextDocument::METHOD => {
@@ -107,7 +120,7 @@ fn run(connection: Connection) {
                         if let Some(change) = p.content_changes.pop() {
                             let uri = p.text_document.uri;
                             docs.insert(uri.clone(), change.text);
-                            publish(&connection, &uri, &docs);
+                            publish(&connection, &uri, &docs, &mut deps);
                         }
                     }
                 }
@@ -115,7 +128,7 @@ fn run(connection: Connection) {
                     if let Ok(p) = serde_json::from_value::<lsp_types::DidSaveTextDocumentParams>(not.params) {
                         let uri = p.text_document.uri;
                         if docs.contains_key(&uri) {
-                            publish(&connection, &uri, &docs);
+                            publish(&connection, &uri, &docs, &mut deps);
                         }
                     }
                 }
@@ -123,6 +136,7 @@ fn run(connection: Connection) {
                     if let Ok(p) = serde_json::from_value::<lsp_types::DidCloseTextDocumentParams>(not.params) {
                         let uri = p.text_document.uri;
                         docs.remove(&uri);
+                        deps.remove(&uri);
                         // Clear diagnostics for a closed document.
                         let params = PublishDiagnosticsParams { uri, diagnostics: Vec::new(), version: None };
                         let n = lsp_server::Notification::new(PublishDiagnostics::METHOD.into(), params);
@@ -137,7 +151,36 @@ fn run(connection: Connection) {
     }
 }
 
-fn publish(connection: &Connection, uri: &Uri, docs: &HashMap<Uri, String>) {
+/// Publish `uri`'s diagnostics, then transitively re-publish any other open
+/// document whose last pass depended on `uri` (or on one of those, and so
+/// on) — editing a dependency updates whoever `use`s it immediately, rather
+/// than waiting for their own `didChange`. `deps` is both read (to find
+/// dependents) and written (each republish refreshes its own entry), so a
+/// stale dependency edge from a document that has since dropped the `use`
+/// is corrected within the same pass that discovers it's stale.
+fn publish(connection: &Connection, uri: &Uri, docs: &HashMap<Uri, String>, deps: &mut HashMap<Uri, HashSet<PathBuf>>) {
+    let mut visited: HashSet<Uri> = HashSet::new();
+    let mut queue: VecDeque<Uri> = VecDeque::new();
+    visited.insert(uri.clone());
+    queue.push_back(uri.clone());
+    while let Some(cur) = queue.pop_front() {
+        publish_one(connection, &cur, docs, deps);
+        let cur_path = PathBuf::from(cur.path().as_str());
+        for other in docs.keys() {
+            if visited.contains(other) {
+                continue;
+            }
+            if deps.get(other).is_some_and(|d| d.contains(&cur_path)) {
+                visited.insert(other.clone());
+                queue.push_back(other.clone());
+            }
+        }
+    }
+}
+
+/// Diagnose `uri` alone and send its `publishDiagnostics`, recording what it
+/// depended on this time in `deps` (see [`publish`]).
+fn publish_one(connection: &Connection, uri: &Uri, docs: &HashMap<Uri, String>, deps: &mut HashMap<Uri, HashSet<PathBuf>>) {
     // Every *other* open document becomes an overlay entry so a dependency
     // that's open in the editor is read from its buffer, not disk — see
     // `Loader::set_overlay`. `uri` itself is excluded: its text is passed to
@@ -152,7 +195,8 @@ fn publish(connection: &Connection, uri: &Uri, docs: &HashMap<Uri, String>) {
     // The URI's path component as a filesystem path (`file:///tmp/a.typl` ->
     // `/tmp/a.typl`). Percent-encoded characters are not decoded — good
     // enough for the ordinary-ASCII paths this MVP targets.
-    let diagnostics = diagnostics_for(uri.path().as_str(), text, overlay);
+    let (diagnostics, loaded) = diagnostics_for(uri.path().as_str(), text, overlay);
+    deps.insert(uri.clone(), loaded);
     let params = PublishDiagnosticsParams { uri: uri.clone(), diagnostics, version: None };
     let n = lsp_server::Notification::new(PublishDiagnostics::METHOD.into(), params);
     let _ = connection.sender.send(Message::Notification(n));
@@ -171,7 +215,11 @@ fn publish(connection: &Connection, uri: &Uri, docs: &HashMap<Uri, String>) {
 /// every `Reader` error becomes a diagnostic directly, and reading stops at
 /// the first one (an s-expression reader can't meaningfully resync past an
 /// unmatched paren).
-fn diagnostics_for(file: &str, text: &str, overlay: HashMap<PathBuf, String>) -> Vec<Diagnostic> {
+///
+/// Also returns the filesystem paths of every dependency file the loader
+/// actually pulled in, so [`publish`] can tell which other open documents
+/// this one's diagnostics depend on.
+fn diagnostics_for(file: &str, text: &str, overlay: HashMap<PathBuf, String>) -> (Vec<Diagnostic>, HashSet<PathBuf>) {
     let mut heap = Heap::with_capacity(1 << 16);
     let reader = Reader::new();
     let mut checker = Checker::new();
@@ -192,7 +240,7 @@ fn diagnostics_for(file: &str, text: &str, overlay: HashMap<PathBuf, String>) ->
     if let Err(e) = result {
         diagnostics.push(error_diagnostic(&e, file));
     }
-    diagnostics
+    (diagnostics, loader.loaded_files().clone())
 }
 
 /// An error's diagnostic, anchored at its source location when that location

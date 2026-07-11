@@ -124,6 +124,12 @@ pub struct Loader {
     /// Modules currently being loaded, outermost first — the cycle-report chain.
     loading: Vec<String>,
     loaded: HashSet<Vec<String>>,
+    /// Filesystem paths of every file successfully loaded as a dependency
+    /// (not the entry file itself — see [`Loader::loaded_files`]). Lets a
+    /// caller with several files open (the LSP) know which other open
+    /// documents an entry's diagnostics actually depend on, so editing one
+    /// of them can trigger re-diagnosing the ones that loaded it.
+    loaded_files: HashSet<PathBuf>,
     pending: Vec<TopLevel>,
     /// In-editor buffer contents, keyed by filesystem path, consulted before
     /// disk for every dependency load — an unsaved edit to a file another
@@ -135,13 +141,27 @@ pub struct Loader {
 
 impl Loader {
     pub fn new(src_root: PathBuf) -> Loader {
-        Loader { src_root, loading: Vec::new(), loaded: HashSet::new(), pending: Vec::new(), overlay: HashMap::new() }
+        Loader {
+            src_root,
+            loading: Vec::new(),
+            loaded: HashSet::new(),
+            loaded_files: HashSet::new(),
+            pending: Vec::new(),
+            overlay: HashMap::new(),
+        }
     }
 
     /// Supply in-editor buffer contents to consult before disk. See the
     /// `overlay` field's doc comment.
     pub fn set_overlay(&mut self, overlay: HashMap<PathBuf, String>) {
         self.overlay = overlay;
+    }
+
+    /// The filesystem paths of every dependency file this load pulled in
+    /// (excludes the entry file itself, which the caller already knows the
+    /// path of). See the `loaded_files` field's doc comment.
+    pub fn loaded_files(&self) -> &HashSet<PathBuf> {
+        &self.loaded_files
     }
 
     /// The checked-but-unexecuted top-level forms accumulated by loads so
@@ -348,7 +368,10 @@ impl Loader {
                 file.push(s);
             }
             file.set_extension("typl");
-            if !file.is_file() {
+            // An overlay-only file (open in the editor, not yet saved) is a
+            // valid dependency too — checking the overlay alongside disk
+            // keeps a brand-new not-yet-saved file discoverable.
+            if !file.is_file() && !self.overlay.contains_key(&file) {
                 continue;
             }
             if self.loaded.contains(&module_segs) {
@@ -364,6 +387,7 @@ impl Loader {
                 )));
             }
             let src = self.read_source(&file)?;
+            self.loaded_files.insert(file.clone());
             return self.load_source(heap, reader, checker, interp, &file, &src, module_segs);
         }
         Ok(()) // no file — leave resolution (or its failure) to `check_use`
