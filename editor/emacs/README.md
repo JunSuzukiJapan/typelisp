@@ -33,6 +33,39 @@ typelisp ソース（`.typl`）を編集するための Emacs メジャーモー
   :mode "\\.typl\\'")
 ```
 
+## Language Server (`typl-lsp`)
+
+`typl-lsp`（診断のみ: 構文/型エラーと再定義warningを `textDocument/publishDiagnostics`
+で通知）をビルドすれば `eglot`（Emacs 29+ 標準）や `lsp-mode` から利用できる。
+
+```sh
+cargo build --release --bin typl-lsp
+```
+
+`eglot` の場合:
+
+```elisp
+(with-eval-after-load 'eglot
+  (add-to-list 'eglot-server-programs
+               '(typelisp-mode . ("/path/to/typelisp/target/release/typl-lsp"))))
+(add-hook 'typelisp-mode-hook #'eglot-ensure)
+```
+
+`lsp-mode` の場合:
+
+```elisp
+(with-eval-after-load 'lsp-mode
+  (lsp-register-client
+   (make-lsp-client
+    :new-connection (lsp-stdio-connection "/path/to/typelisp/target/release/typl-lsp")
+    :major-modes '(typelisp-mode)
+    :server-id 'typl-lsp)))
+(add-hook 'typelisp-mode-hook #'lsp)
+```
+
+診断のみで、hover・補完・定義ジャンプは未対応（開いている1ファイル単体のチェックで、
+`module`/`use`をまたぐ解決も未対応）。
+
 ## 備考
 
 - typelisp はシンボルを読み取り時に小文字化するが、ハイライトは大文字始まりの型名を

@@ -25,7 +25,14 @@ rustyline = "18"
 inkwell = { version = "0.9", features = ["llvm17-0"] }
 typelisp-mem = { path = "crates/typelisp-mem" }
 typelisp-rt = { path = "crates/typelisp-rt" }
+lsp-server = "0.8"
+lsp-types = "0.97"
+serde_json = "1"
 
 [[bin]]
 name = "typl"
 path = "src/main.rs"
+
+[[bin]]
+name = "typl-lsp"
+path = "src/bin/lsp.rs"

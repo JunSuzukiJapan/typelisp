@@ -2981,3 +2981,23 @@ Scope` + LLVM系5種。テスト: monomorph_test 27本新設、mem/evalにGC実�
 （型なし時代は原理的に不可能だったのに対し）正しく特殊化されて動く——monomorph_testに
 正のテストを追加し、「文脈なしのジェネリック値化はエラー」のテストはlet束縛経由に変更。
 既存テスト17箇所を型付き形式へ更新、language-design.mdの仕様記述を更新。
+
+## Language Server (`typl-lsp`) 追加 (2026-07-11)
+
+`src/bin/lsp.rs`に診断（diagnostics）専用のLSPサーバーを追加。`lsp-server`/
+`lsp-types`（stdio上のJSON-RPC、非同期ランタイム不要）を新規依存として追加し、
+既存の`typl`バイナリと同じ`Reader`→`Checker`パイプラインを`didOpen`/`didChange`/
+`didSave`ごとに文書全体で再実行、read/type errorとcheckerのwarningsを
+`textDocument/publishDiagnostics`として送出する。
+
+- 意図的にコード実行はしない: 診断はキー入力のたびに走るため、任意のユーザーコードを
+  評価するのは危険（副作用・panic・無限ループ）。唯一の例外は`defmacro`
+  （後続フォームのマクロ展開に必要、`Interp`への登録は純粋なHashMap insertで副作用なし）
+  ——`main.rs`の`needs_immediate_exec`をそのまま複製。
+- `Loc`（1-based line/col、単一文字位置）をLSPの0-based `Position`へ変換。checker
+  warningsは位置情報を持たないため文書先頭に仮置き。
+- `Connection`を`run()`に値渡しして関数末尾でdropしてから`io_threads.join()`する
+  必要がある（`sender`が生きたままjoinすると書き込みスレッドが終了せずデッドロック）。
+- 未実装（次の一手）: 複数ファイル/`module`・`use`をまたぐ解決なし（開いている1
+  ファイル単独でチェック）、hover/補完/goto-definitionなし、読み取りエラーは
+  最初の1件で停止（S式リーダーの性質上、不整合な括弧を越えて再同期するのは困難）。
