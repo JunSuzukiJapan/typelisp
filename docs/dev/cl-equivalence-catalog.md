@@ -1,6 +1,12 @@
 # typelisp: CL同等の表現力のための関数・特殊形カタログ
 
-最終更新: 2026-06-18
+最終更新: 2026-06-18（本文は提案時点のまま。2026-07-11 に完了状況の注記を追加）
+
+> **完了状況（2026-07-11時点）**: 本書で提案された項目はほぼすべて実装済み——`case`/`until`/
+> `while-let`/`do`（§1.1、2026-06-19）、プリミティブ型への`defmethod`拡張（§0.1、`char`/`string`等の
+> `Eq`/`Ord`実装として実現）、`HashTable<K,V>`（§2.2 a）、`Vector<T>`（§2.2 b）はいずれも
+> [implementation-log.md](implementation-log.md)に実装記録がある。本文はあくまで**提案時点の
+> 原文**として残し、個々の項目に完了注記を追記する形で更新している。
 
 このドキュメントは [language-design.md](language-design.md) §3（特殊形カタログ）・§4（関数カタログ）を
 「CLと同等のコードが書けるか」という観点で再点検し、欠けている項目を追加した上で、各項目を
@@ -22,9 +28,13 @@
   の方針（`Result`+`panic` のみ、`?`/try 無し、trait/CLOS 無し）と衝突するため、**対象外と
   明記するだけ**とし、本書では候補として扱わない。
 
-### 0.1 前提となるRust拡張: プリミティブ型への `defmethod` 対応
+### 0.1 前提となるRust拡張: プリミティブ型への `defmethod` 対応【実装済み】
 
-現状 `defmethod` の受け手型は `Type::Named`（`Option`/`Result`/`Sexpr`/ユーザ `defstruct`）限定。
+以下は提案当時（2026-06-18）の現状分析。`check_defmethod`/`check_instance_method`は`prim_type_path`
+経由でプリミティブ型をレジストリパスへマップするよう拡張済みで、`i32`/`char`/`string`等への
+`defmethod`（`Eq`/`Ord`トレイト実装等）は実際に使われている——以下の記述は提案当時の制約説明として残す。
+
+提案当時の現状: `defmethod` の受け手型は `Type::Named`（`Option`/`Result`/`Sexpr`/ユーザ `defstruct`）限定。
 `i32`/`i64`/`f64`/`char`/`bool`/`Str` は `Type` のプリミティブ variant であり、`Type::Named` を
 経由しないため、以下2箇所の型分岐をどちらも素通りして `defmethod` を使えない:
 
@@ -76,10 +86,10 @@ Path::root("char")`、`Type::Str → Path::root("str")`、`Type::I32 → Path::r
 
 | 特殊形 | 旧分類（想定） | 新分類 | 理由 |
 |---|---|---|---|
-| `case` | Rust（checker特殊形） | **TypeLisp**（`defmacro`） | `(cond ((eq x v1) ...) ...)` への構文展開のみで実現可能。**trait導入は不要** — `eq` を対象型ごとに `defmethod` で定義しておけば（§0.1 の拡張後は i32/char/Str 等にも可能）、マクロは型を意識せず `(eq scrutinee key)` を生成するだけでよく、型ごとのディスパッチは展開後に checker の既存インスタンスメソッド解決が行う。シンボルキーの quote 要否などの細部は実装時に設計確定が必要 |
-| `until` | Rust | **TypeLisp**（`defmacro`） | `(while (not cond) body...)` への展開のみ |
-| `while-let` | Rust | **TypeLisp**（`defmacro`） | `if-let` と同様、`(loop (match expr (pat body...) (_ (break))))` 相当に展開可能 |
-| `do` | Rust | **TypeLisp**（`defmacro`） | `dotimes`/`dolist` と同型の `let`+`while`+`setf` 展開で複数変数・ステップ式も表現可能 |
+| `case` | Rust（checker特殊形） | **TypeLisp**（`defmacro`、実装済み2026-06-19） | `(cond ((eq x v1) ...) ...)` への構文展開のみで実現可能。**trait導入は不要** — `eq` を対象型ごとに `defmethod` で定義しておけば（§0.1 の拡張後は i32/char/Str 等にも可能）、マクロは型を意識せず `(eq scrutinee key)` を生成するだけでよく、型ごとのディスパッチは展開後に checker の既存インスタンスメソッド解決が行う。シンボルキーの quote 要否などの細部は実装時に設計確定が必要 |
+| `until` | Rust | **TypeLisp**（`defmacro`、実装済み2026-06-19） | `(while (not cond) body...)` への展開のみ |
+| `while-let` | Rust | **TypeLisp**（`defmacro`、実装済み2026-06-19） | `if-let` と同様、`(loop (match expr (pat body...) (_ (break))))` 相当に展開可能 |
+| `do` | Rust | **TypeLisp**（`defmacro`、実装済み2026-06-19） | `dotimes`/`dolist` と同型の `let`+`while`+`setf` 展開で複数変数・ステップ式も表現可能 |
 | `doiter` | 仕様未確定 | **TypeLisp**（`defmacro`、実装済み2026-06-30） | イテレータ抽象（`Iter`トレイト、`next: Self -> Option<Item>`）として実装。`dotimes`/`dolist`と同じ「`gensym`で`coll`を一度だけ評価する隠しbinding」+`while-let`呼び出しだけの薄いマクロ——`var`の型はマクロ展開時には分からないが、展開後の`(some var)`という構成子パターンの型を`Checker::check_ctor_pattern`がscrutinee（`next`の戻り値`Option<Item>`）から自動推論するため、checker特殊形は不要（`case`/`do`/`while-let`と同列）。`Sexpr`は要素型固定なし（ジェネリックな`Iter<Item>`を実装すべきでない、というユーザー判断）のため対象外、`Vector<T>`（新規導入）の`vector-iter<T>`が動作確認の実装例 |
 | `the` | Rust | **Rust**（変更なし） | 型注釈の検査自体が目的のため、構文展開だけのマクロでは実現不能（checker拡張が必須） |
 
@@ -106,7 +116,7 @@ IO系（`print`/`println`/`princ`/`format`/`read`/`read-line`）・型変換・i
 
 ### 2.2 新規カテゴリ（CL同等のために追加が必要）
 
-#### a. ハッシュテーブル（既存ドキュメントに記載なし・完全に新規のカテゴリ）
+#### a. ハッシュテーブル（提案当時は既存ドキュメントに記載なしだったが【実装済み】、`src/check/registry.rs`の`hashtable_def`）
 
 `HashTable<K,V>` を `Option`/`Result`/`Sexpr` と同じ仕組みの組み込み **nominal型** として登録する
 （[src/check/registry.rs](../src/check/registry.rs) の `option_def`/`result_def` と同型のパターン。
@@ -124,9 +134,11 @@ IO系（`print`/`println`/`princ`/`format`/`read`/`read-line`）・型変換・i
 | 一覧化 | `(to-list h)` | **Rust** | `(K . V)` の cons リスト（`Sexpr`）を返す最小限プリミティブ |
 | キー/値一覧 | `(keys h)` / `(values h)` | **TypeLisp**（`defmethod`） | `(to-list h)` の結果に `map` を適用するだけで書ける |
 
-#### b. ベクタ操作拡張
+#### b. ベクタ操作拡張【実装済み、`src/check/registry.rs`の`vector_def`】
 
-`Vector<T>` も同様に組み込み nominal型として登録し、メソッドAPIとする。
+`Vector<T>` も同様に組み込み nominal型として登録し、メソッドAPIとする。実装は`RtValue::Vector`
+という専用バリアントではなく`RtValue::Struct`（`StructData.fields`を可変長コレクションとして
+扱う）で行われた——詳細は[language-design.md](language-design.md) §8参照。
 
 | 項目 | 呼び出し形 | 分類 | 備考 |
 |---|---|---|---|

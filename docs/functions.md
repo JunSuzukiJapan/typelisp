@@ -55,18 +55,34 @@
 
 `min`/`max`/`evenp`/`oddp`/`zerop` などは未実装。
 
-## 5. `Sexpr` / cons セル
+## 5. `cons`/`car`/`cdr`（ジェネリックなペア）と `Sexpr`
 
-`read` が返すデータ型 `Sexpr`（`Nil | Int | Float | Char | Bool | Sym | Str | Cons(Sexpr,Sexpr)`）
-を直接操作する組み込み自由関数。
+Symbol/Sexpr 再設計 Phase 4b 以降、`cons`/`car`/`cdr` は `Sexpr` 専用ではなく**ジェネリックな
+ペア型 `cons-cell<A,B>`**（`defstruct`、`prelude.rs`）のコンストラクタ/フィールドアクセサに
+付け替えられている。フィールドは `変数::car`/`変数::cdr`（[syntax.md](syntax.md) の `defstruct`
+アクセサ構文）でも `(car 変数)`/`(cdr 変数)`（インスタンスメソッド呼び出し）でも読める。
+**`set-car`/`set-cdr`（破壊的更新）は完全に撤去済み**——`cons-cell` のフィールドを書き換えるには
+`(setf 変数::car v)`/`(setf 変数::cdr v)` を使う。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `cons` | `(cons a b)` | `(Sexpr,Sexpr)→Sexpr` | セルを作る |
-| `car` | `(car s)` | `Sexpr→Sexpr` | 先頭。`Cons` でなければ panic |
-| `cdr` | `(cdr s)` | `Sexpr→Sexpr` | 残り。`Cons` でなければ panic |
-| `set-car` | `(set-car s v)` | `(Sexpr,Sexpr)→Unit` | 破壊的更新（`Cons` でなければ panic） |
-| `set-cdr` | `(set-cdr s v)` | `(Sexpr,Sexpr)→Unit` | 破壊的更新（`Cons` でなければ panic） |
+| `cons` | `(cons a b)` | `(A,B)→cons-cell<A,B>` | ペアを作る（自由関数、`prelude.rs`） |
+| `car` | `(car p)` | `cons-cell<A,B>→A` | 先頭（`defstruct` フィールドアクセサ、インスタンスメソッドとして呼べる） |
+| `cdr` | `(cdr p)` | `cons-cell<A,B>→B` | 残り（同上） |
+
+`read` が返すデータ型 `Sexpr`（`Nil | Int | Float | Char | Bool | Sym | Str | Cons(Sexpr,Sexpr)`）
+自体のセル操作は、上記の汎用 `cons`/`car`/`cdr` とは別の内部 island 層 `sexpr-*` が担う
+（`read`/`eval`/`print`/`defmacro`/自己ホストコンパイラ `compiler.rs` の内部でのみ使われ、
+ユーザー向けライブラリ関数からは `sexpr-*` を直接呼ぶ場面はほぼ無い）。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `sexpr-cons` | `(sexpr-cons a b)` | `(Sexpr,Sexpr)→Sexpr` | `Sexpr` セルを作る |
+| `sexpr-car` | `(sexpr-car s)` | `Sexpr→Sexpr` | 先頭。`Cons` でなければ panic |
+| `sexpr-cdr` | `(sexpr-cdr s)` | `Sexpr→Sexpr` | 残り。`Cons` でなければ panic |
+| `sexpr-consp` | `(sexpr-consp s)` | `Sexpr→bool` | `Cons` かどうか |
+| `sexpr-null` | `(sexpr-null s)` | `Sexpr→bool` | `Nil` かどうか |
+| `sexpr-atom` | `(sexpr-atom s)` | `Sexpr→bool` | `Cons` でないか |
 | `eq` `eql` | `(op a b)` | `(Sexpr,Sexpr)→bool` | 同一性比較（`Cons`/`Str` はポインタ、それ以外は値） |
 
 ## 6. シーケンス操作（`Iter` 上のライブラリ関数）
@@ -78,13 +94,14 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 第一引数に取る**点と、**結果のコレクションは新しい `Vector` として返る**点。表中の `Iter<A>` は
 「`Item` が `A` の任意の `Iter` 実装型」を表す。
 
-`symbol->string` / `string->symbol` は `Sexpr::Sym` と `string` の橋渡し（`Sym` は内部の
-`Symbol` 型を包む）:
+`symbol->string` / `string->symbol` は独立したプリミティブ型 `Symbol`（`Sexpr` の `Sym` 構成子
+とは別物——`Sexpr` が要求される文脈へは暗黙変換されるが逆方向の自動変換はない）と `string` の
+橋渡し:
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `Sexpr→string` | `Sym` の名前を取り出す |
-| `string->symbol` | `(string->symbol s)` | `string→Sexpr` | 文字列から `Sym` を作る |
+| `symbol->string` | `(symbol->string s)` | `Symbol→string` | シンボル名を取り出す |
+| `string->symbol` | `(string->symbol s)` | `string→Symbol` | 文字列からシンボルを作る（intern） |
 | `equal` | `(equal a b)` | `(Sexpr,Sexpr)→bool` | 構造的等価（`Cons` は再帰、`Str` は内容比較） |
 | `equalp` | `(equalp a b)` | `(Sexpr,Sexpr)→bool` | `equal` に加え大文字小文字無視・数値の型跨ぎ比較 |
 
@@ -259,7 +276,7 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `gensym` | `(gensym)` | `()→Sexpr` | 衝突耐性のある新しいシンボルを返す（マクロ用） |
+| `gensym` | `(gensym)` | `()→Symbol` | 衝突耐性のある新しいシンボルを返す（マクロ用） |
 | `exit` | `(exit code)` | `i32→!` | プロセスを終了する |
 
 `compile`/`compile-file` は [syntax.md](syntax.md) の「コンパイル」節を参照。

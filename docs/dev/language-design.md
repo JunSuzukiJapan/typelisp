@@ -1,6 +1,6 @@
 # typelisp 言語設計（確定仕様）
 
-最終更新: 2026-06-30 / ブランチ: `feature/compile-sexpr`
+最終更新: 2026-07-11 / ブランチ: `main`
 
 このドキュメントは、設計で**確定した言語仕様**を後から見返せるよう記録するもの。
 現在の残作業は [TODO.md](TODO.md)、完了した実装の経緯は [implementation-log.md](implementation-log.md) を参照。
@@ -12,26 +12,39 @@
 - **静的型付け**: すべての式が静的型を持つ。動的タグ付き Lisp（旧 3ab5599 の `Object`）ではない。
 - **文法は macro-lisp 準拠**: `/Users/suzukijun/Program/Rust/macro-lisp` の**構文**に従う（実装は参考にしない）。
   `defun`/`defvar`/`defconstant`/`let`/`if`/`when`/`unless`/`cond`/`match`/`loop`/`while`/`dotimes`/`do`/`doiter`/`while-let`/`if-let`/`lambda`/`progn`/`module` 等。関数の引数・戻り型とグローバル（`defvar`/`defconstant`）の型は必須、局所束縛（`let`）のみ型推論可。
-  （`defstruct` はユーザ定義型機構として実装されたが、フィールドの読み書き手段が無い不完全な
-  設計と判明し2026-06-23に削除・再設計待ち——[[typelisp-vector-defstruct-revert]]参照。
-  ユーザ定義型は当面言語に存在しない。）
+  （`defstruct`（ユーザ定義product型）は初回実装がフィールドの読み書き手段を欠く不完全な設計と
+  判明し2026-06-23に一度全面削除、2026-06-24にフィールドアクセサ（`変数::フィールド名`/
+  `(setf 変数::フィールド名 v)`）付きで再設計・再実装済み。`defenum`（ユーザ定義直和型）も
+  2026-07-09に追加済み——詳細は §6。）
 - **真偽値は `true`/`false`**。`nil`/`t` は言語に存在しない。
 - **`nil` の代替は `Option<T>`**（組み込みの直和型——`Some(value T)`/`None` の2構成子）。
 - **`read` の戻り値は組み込み直和型 `Sexpr`**。
   `Sexpr = Nil|Int|Float|Char|Bool|Sym|Str|Cons(Sexpr, Sexpr)`。
   空リスト `()` は `Sexpr` の値としての `Nil`（cons と並ぶ第一級の構成子）。car/cdr はどちらも `Sexpr`
-  （`Option` で包まない）。`cons`/`car`/`cdr`/`list`/`dolist` は cons と nil の双対のまま自然に書ける。
+  （`Option` で包まない）。`Sexpr` 専用の cons 操作は `sexpr-cons`/`sexpr-car`/`sexpr-cdr`/
+  `sexpr-consp`/`sexpr-null`/`sexpr-atom`（内部 island 層、§4.1）。裸の `cons`/`car`/`cdr` は
+  Symbol/Sexpr 再設計 Phase 4b で汎用 `cons-cell<A,B>`（`defstruct`）のフィールドアクセサへ
+  付け替えられており、`Sexpr` 専用ではない。`list` は `Sexpr` の `Cons`/`Nil` へ脱糖する。
+  `dolist` は `doiter`（§3、Iter トレイト経由の反復）へ統合され削除済み。
   `()` は期待型が `Sexpr` のとき `Nil` に、`Option<T>` のとき `None` になる（`Unit` はその他の文脈）。
   実行時は `Nil` を `Value::Empty` で符号化（`Cons` と対等な variant、`Option` ラッパーではない）。
   これは言語レベルで禁止した「真偽値としての `nil`」とは別物（あくまで read データ内の空リスト表現）。
+- **`Symbol` は `Sexpr` とは別の独立したプリミティブ型**（`Sexpr` の `Sym` 構成子とは別物）。
+  `Sexpr` が要求される文脈へは暗黙変換されるが、逆方向（`Sexpr`→`Symbol`）の自動変換はない。
+  `gensym`/`symbol->string`/`string->symbol`（§4.1）はこの `Symbol` 型を使う。
 - **大文字小文字は区別しない**（シンボルは小文字に正規化してインターン）。
 - **Rust 相互運用はしない**（`&args[1]`, `env::args().collect()` 等は対象外）。
 - **構成子パターンは S 式形** `(Some v)` / `(Cons a d)`。
-- **実行モデル**: インタプリタ（eval）のみ。**ネイティブコンパイル（明示的 `compile`/`compile-file`、CL 準拠、
-  LLVM ベース）は Phase 6a まで実装されたが、2026-06-23 に `Vector<T>`/`defstruct` の全面リバートに
-  伴って削除済み**——再設計完了後に再着手する将来課題（§8、[[typelisp-vector-defstruct-revert]]参照）。
-- **ファイル拡張子**: ソースファイルは `.typl`。`.typlc`（CL の `.fasl` 相当、コンパイル済みファイル用）は
-  `compile`/`compile-file` 削除に伴い当面未使用。
+- **実行モデル**: インタプリタ（eval）が基本。加えて明示的なネイティブコンパイル（`compile`/
+  `compile-file`、LLVM ベース、`src/compile/`）も実装済み——`compile` は JIT（呼び出し前に
+  呼び出し先も `compile` 済みである必要がある）、`compile-file` は独立した AOT 実行（専用の
+  新規 `Heap`/`Checker`/`Interp` で 1 ファイルを読み、`cc` を介してネイティブ実行ファイルへ
+  リンクする）。旧実装は 2026-06-23 に `Vector<T>`/`defstruct` の全面リバートに伴って一度
+  削除されたが、2026-06-25 以降 Vector/defstruct 再設計後の前提の上で再実装されている
+  （対応構文の範囲は都度拡張中——詳細は `src/compile/`、[implementation-log.md](implementation-log.md) 参照）。
+- **ファイル拡張子**: ソースファイルは `.typl`。CL の `.fasl` に相当する「コンパイル済みファイル」
+  形式は無い——`compile-file` はコンパイル済み中間ファイルではなく、`cc` でリンクしたネイティブ
+  実行ファイルを直接出力する。`.typlc` という拡張子は実装上使用されていない。
 - **命名規則 `!`/`?`**: 関数名の末尾に `!`（破壊的操作）や `?`（述語）を接尾辞として使わない（詳細・理由は §7.3）。
 
 ---
@@ -44,8 +57,10 @@
 - **生ポインタは `ConsRef` に隠蔽、公開 API は安全**。
 - シンボルはインターン（小文字正規化・永続）。文字列は GC 管理（到達可能のみ生存）。
 - **実行時 `Sexpr` 値も同じヒープ**（`RtValue::Sexpr`）: read 時のデータと eval 中にプログラムが `cons`/`list`/構成子で
-  作るデータは同一の cons アリーナ・GC を共有する（`Sexpr`/`Option`/`defstruct` 等それ以外のADTは `RtValue::Data` の
-  まま Rust ヒープ上＝GC 対象外。GC の対象は cons セル/シンボル/文字列のみという方針通り）。
+  作るデータは同一の cons アリーナ・GC を共有する。Symbol/Sexpr 再設計以降、`defstruct` インスタンス/
+  `Vector<T>`/`cons-cell<K,V>`/クロージャも同じ `RtValue::Sexpr` 経由（`Value::Boxed` の各 `BoxedObj`
+  variant）でこの GC ヒープに乗る（専用の `RtValue::Struct`/`RtValue::Closure` は無い）。`Option<T>`/
+  `Result<T,E>` のような小さな組み込み直和型のみ `RtValue::Data` として Rust ヒープ上＝GC 対象外のまま。
   インタプリタ側のルート管理: 生成した可変スロット（`let`/引数/クロージャ捕捉/`match` 束縛）をすべて弱参照で
   `Interp.slots` に登録し、`heap.cons` 呼び出し直前に `sync_roots` で「今生きているスロットが持つ `Sexpr` 値」を
   再収集してヒープのルート集合を差し替える。スロットの生存は通常の `Rc` 所有権（env フレーム/`globals`/クロージャの
@@ -66,7 +81,8 @@
         | Cons(Sexpr, Sexpr)
         | Path([Sym, ...])          ; 例 'std::process::exit
   ```
-  （`Nil`/`Cons(Sexpr, Sexpr)` は確定済み。`Path` 追加は未実装。）
+  （`Nil`/`Cons(Sexpr, Sexpr)`/`Path` いずれも実装済み——`Value::Path`は`crates/typelisp-mem/src/heap.rs`
+  の`PathId`でインターンされる。）
 - セグメントは小文字化される（シンボルと同じ正規化）。空セグメント（`foo::`, `::bar`, `a::::b`）は読み取りエラー。
 - 総称は最終セグメントに付く（`a::Vec<T>` → セグメント `[a, vec<t>]`、型は最終セグメントの `<>` を解釈）。
 
@@ -99,8 +115,8 @@
 | 定義 | `defun` `defvar` `defconstant` `defmethod` `defmacro` `defstruct` `defenum` `module` `use` `lambda` `deftrait` `impl` | 引数・戻り型・グローバルの型は明示（`defvar`/`defconstant`は`(defvar (name Type) value)`で型必須、2026-07-03に型なし形式を削除。局所束縛`let`のみ推論可。`defmacro` は全パラメータ・戻りが `Sexpr` 固定なので型注釈なし、末尾 `&rest name` で可変長対応）。ジェネリック定義形（`defun`/`defstruct`/`defenum`）の型パラメータは名前に山括弧で書く（`name<T,U>`）。`defstruct`（ユーザ定義product型）は再設計後に実装済み。`defenum`（ユーザ定義直和型、`match`/`if-let`対応）を追加。`deftrait`/`impl`（trait機構、§5.1）は2026-06-30実装 |
 | 束縛 | `let` `let*` | |
 | 制御 | `if` `when` `unless` `cond` `case` `match` `if-let` `while-let` `and` `or` `progn` `the` | `and`/`or` は短絡のため特殊形。`the` は型注釈 |
-| 反復 | `loop` `while` `until` `dotimes` `dolist` `do` `doiter` | |
-| マクロ/引用 | `quote` `quasiquote` (`` ` ``) `unquote` (`,`) | `quote`/`quasiquote` の戻り型は常に `Sexpr`。`,@`（unquote-splicing）は未実装 |
+| 反復 | `loop` `while` `until` `dotimes` `do` `doiter` | `dolist` は `doiter` へ統合され削除済み |
+| マクロ/引用 | `quote` `quasiquote` (`` ` ``) `unquote` (`,`) `,@` | `quote`/`quasiquote` の戻り型は常に `Sexpr`。`,@`（unquote-splicing）は2026-06-19実装済み |
 | その他 | `setf` `break` `return` `panic` `unreachable` `todo` | `break`/`return`/`panic`/`unreachable`/`todo` は戻り型 `!`（§7） |
 
 脱糖の例: `when`→`if`+`progn`、`unless`→`if`、`if-let (pat val) then else`→2 腕 `match`（包括アームで網羅）、
@@ -108,7 +124,7 @@
 
 実装状況: `if` `let` `let*` `progn` `when` `unless` `and` `or` `cond` `case` `setf` `while` `until` `loop` `break`
 `return` `lambda` `match` `if-let` `while-let` `do` `doiter` `the` `panic` `defvar` `defconstant` `module` `use`
-`defmethod` `deftrait` `impl` `quote` `quasiquote` `defmacro`
+`defmethod` `deftrait` `impl` `quote` `quasiquote` `defmacro` `defstruct` `defenum`
 は実装済（[src/check/checker.rs](../src/check/checker.rs)。`the`のみchecker特殊形、
 `case`/`until`/`while-let`/`do`/`doiter`は`prelude.rs`の`defmacro`）。`unreachable`/`todo`/`exit`（§4.1/§7）も実装済
 （前2つは`panic`を呼ぶ`defmacro`、`exit`は`std::process::exit`を呼ぶRust組み込み自由関数）。
@@ -116,7 +132,7 @@
 展開先の`(some var)`のような構成子パターンの型を`Checker::check_ctor_pattern`がscrutinee（`next`の
 戻り値`Option<Item>`）から自動推論するため、checker特殊形にする必要はない。`while-let`を呼ぶだけの
 薄い`defmacro`、§5.1のtrait機構参照）。`defmacro` は CL 流（非衛生的）— 詳細は
-[implementation-log.md](implementation-log.md) のステップ 4k を参照。`defstruct` は実装後2026-06-23に削除・再設計待ち。
+[implementation-log.md](implementation-log.md) のステップ 4k を参照。`defstruct`/`defenum`は§6参照。
 `when`/`unless`/`and`/`or`/`cond`/`let*` は `if`/`let` への脱糖。`setf`（可変ローカル/グローバル変数）/`while` は専用 AST
 ノード（eval 環境は `Rc<RefCell>` の可変スロット）。`defvar`（可変）/`defconstant`（不変）はグローバル変数を現在の
 名前空間に登録する。型注釈は**必須**——`(defvar (name Type) value)`（グローバルの型はプログラムの
@@ -128,11 +144,12 @@
 （例 `((lambda ...) x)`）のとき `Expr::Apply` に。**名前付き関数も値化可能**（`id` 等を高階関数へ渡せる。`Expr::FnRef`、
 組み込みは `RtValue::Builtin`）。**`dotimes`** `(dotimes (var count) body...)` は `let`+`while`+`setf` への脱糖。
 **`list`** `(list e1 ... en)` は `(Cons e1 (Cons e2 (... (Nil))))` への脱糖（`(list)` は `(Nil)`）。**`dolist`**
-`(dolist (var list-expr) body...)` は `let`+`while`+`match` への脱糖（`Sexpr` の `Cons`/`Nil` を辿る、結果は `Unit`）。
+（`let`+`while`+`match` で `Sexpr` の `Cons`/`Nil` を辿る特殊形だった）は削除済み——`Iter` トレイト
+経由で任意のコレクションを辿れる `doiter`（本節末尾）に統合された。
 **`loop`** `(loop body...)` は無限ループ。**`break`/`return`** は CL 流：どちらも**直近のループのみ**を脱出する
 （関数の早期 return ではない。`lambda` 境界は越えられない＝クロージャの中から外側のループへ break/return できない）。
 `break` は値を取らず（常に `Unit` で脱出）、`return` は `(return)`／`(return value)` で値任意。`while`/`dotimes`/
-`dolist`/`loop` いずれの内側でも使え、`loop` の型は内側で見つかった `break`/`return` の値型の join（`match`/`cond` の
+`doiter`/`loop` いずれの内側でも使え、`loop` の型は内側で見つかった `break`/`return` の値型の join（`match`/`cond` の
 腕と同様に一致が必要）。一度も脱出しない `loop` は型 `!`（Rust の `loop {}` と同じ）。`while` 系はもともと型が `Unit`
 固定なので、その内側の `return` の値も `Unit` でなければ型エラー。
 **`doiter`** `(doiter (var coll) body...)` は `Iter` トレイト（§5.1）を実装した値を反復する——
@@ -152,10 +169,11 @@
 **分離原則**: ヒープ/ランタイム/IO/プリミティブ演算/ネイティブ codegen を要するものは **Rust 実装**。
 それらの組合せで書けるものは **typelisp 自身で実装**（ライブラリ）。すべて型付き（引数/戻り型を明示）。
 
-> 実装状況: eval（step4）でツリーウォーク評価を実装済み。組み込み関数は**i32 の算術/比較**
-> （`+ - * / mod < <= > >= = /=`、`/`/`mod` のゼロ除算は panic）と **`Sexpr` 上の `cons`/`car`/`cdr`**
-> （`car`/`cdr` は非 `Cons`＝`Nil` 含むで panic）を実装済み。他のカタログ項目は今後 eval 拡充で追加。
-> `Sexpr` の実行時値は §1 のとおり cons ヒープ（GC 管理）に統合済み。
+> 実装状況: 本節（§4）のカタログはほぼ全項目が実装済み——i8/i16/i32/i64/f32/f64/bignum/ratio の
+> 算術・比較、`Sexpr`/`Symbol`/`char`/`string` 操作、`Option`/`Result` ヘルパー、`HashTable<K,V>`/
+> `Vector<T>` の関連メソッド、`compile`/`compile-file` まで含む。個別の未実装項目は
+> [functions.md](../functions.md) の該当箇所に明記。`Sexpr` の実行時値は §1 のとおり cons ヒープ
+> （GC 管理）に統合済み。
 
 ### 4.1 Rust 組み込み（primitive）
 | 種別 | 関数 | 備考 / 例 |
@@ -163,14 +181,14 @@
 | 算術 | `+ - * / mod rem neg abs` | 型ごと。例 `+ : (fn (i32 i32) i32)`。`/` のゼロ除算は `Result` |
 | 比較 | `= /= < <= > >=` | |
 | 論理 | `not` | `and`/`or` は短絡で特殊形 |
-| cons | `cons car cdr set-car set-cdr consp atom eq` | |
-| 変換 | `int->float float->int char->int int->char symbol->string string->symbol` | |
+| cons | `cons car cdr consp atom eq` | Symbol/Sexpr 再設計 Phase 4b で汎用 `cons-cell<A,B>`（`defstruct`）用に付け替え済み、`Sexpr` 専用ではない。`set-car`/`set-cdr` は完全撤去済み。`Sexpr` 専用操作は `sexpr-cons`/`sexpr-car`/`sexpr-cdr`/`sexpr-consp`/`sexpr-null`/`sexpr-atom`（内部 island 層） |
+| 変換 | `int->float float->int char->int int->char symbol->string string->symbol` | `symbol->string`/`string->symbol` は §0 の `Symbol` 型を扱う（`Sexpr` ではない） |
 | 文字列 | `string-length string-append string-ref substring string=` | |
 | 解析 | `parse-int parse-float` | `Result<_, Error>` |
 | IO | `print println princ format read read-line` | `read : (fn (String) Result<Sexpr, Error>)` |
 | 発散 | `panic unreachable todo exit` | 戻り型 `!`（§7） |
-| システム | `eval gc` | `compile`/`compile-file` は実装後2026-06-23に削除・再設計待ち（§0、§8） |
-| マクロ | `gensym` | 引数なし、フレッシュな `Sexpr::Sym` を返す。symbol は常に intern される仕様のため衝突耐性のみ（CL の unforgeable な未intern symbol ではない） |
+| システム | `eval gc compile compile-file` | `compile`/`compile-file` は実装済み（§0、[src/compile/](../src/compile/)） |
+| マクロ | `gensym` | 引数なし、フレッシュな `Symbol` を返す。symbol は常に intern される仕様のため衝突耐性のみ（CL の unforgeable な未intern symbol ではない） |
 
 ### 4.2 typelisp ライブラリ（derived）
 | 種別 | 関数 |
@@ -203,8 +221,8 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   ジェネリック関数本体の型変数レシーバ呼び出しのみ実行時に値自身の型タグを読む（§5.1参照、vtable的な
   間接呼び出しテーブルではない）。
 
-例（`i32` という既存の組み込み型に対する static / instance メソッド。ユーザ定義型
-`defstruct` は2026-06-23に削除・再設計待ちのため、組み込み型を例に挙げる）:
+例（`i32` という組み込み型に対する static / instance メソッド。`defstruct` で定義したユーザ定義型
+にも同じ構文で `defmethod` を書ける、§6 参照）:
 ```lisp
 (defmethod zero (i32) i32 0)                  ; static → (i32::zero)
 (defmethod double ((self i32)) i32 (+ self self))  ; instance → (double 3)
@@ -267,14 +285,21 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 
 ---
 
-## 6. ユーザ定義型（当面範囲外）
+## 6. ユーザ定義型（defstruct / defenum）
 
-`defstruct`（ユーザ定義の直和型）は実装されたが、フィールドの読み書き手段が無い不完全な設計
-（`match` によるパターン分解以外にフィールドへアクセスする方法が無く、書き込み手段は一切無い）
-と判明し、2026-06-23に全面削除した。再設計は[[typelisp-vector-defstruct-revert]]参照、§8。
+`defstruct`（ユーザ定義 product 型）と `defenum`（ユーザ定義 sum 型）は実装済み。
 
-組み込み直和型 `Option<T>` / `Sexpr` / `Result<T,E>` / `HashTable<K,V>` は `defstruct` の削除に
-関わらず引き続き存在する（Rust側の`registry.rs`に直接登録、ユーザ定義の構文経路とは独立）。
+- **`defstruct`**: 初回実装（フィールドの読み書き手段が無く `match` によるパターン分解以外に
+  フィールドへアクセスする方法が無い不完全な設計）を2026-06-23に一度全面削除し、2026-06-24に
+  フィールドアクセサ（`変数::フィールド名`／`(setf 変数::フィールド名 v)`）付きで再設計・
+  再実装した（`RtValue::Struct` ベース）。ジェネリック定義（`(defstruct name<T> ...)`）にも対応。
+- **`defenum`**: ユーザ定義の直和型で、既存の組み込み sum-ADT 機構（`Option<T>`/`Result<T,E>` と
+  同じ内部表現）の薄いラッパとして2026-07-09に追加。`match`/`if-let` でパターン分解できる。
+  ジェネリックヘッダの書き方は `defstruct` と統一されており、どちらも `name<T,U>` の形。
+- `defstruct`/`defenum` いずれも `defmethod`（§5）でインスタンス/静的メソッドを持てる。
+
+組み込み直和型 `Option<T>` / `Sexpr` / `Result<T,E>` / `HashTable<K,V>` / `Vector<T>` は `defstruct`/
+`defenum` とは独立に、Rust側の`registry.rs`へ直接登録されている（ユーザ定義の構文経路を通らない）。
 
 ---
 
@@ -312,7 +337,8 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 
 ### 7.4 エラー型 E
 - 当面は**組み込み汎用 `Error`**（メッセージ等を保持）。既定は `Result<T, Error>`。
-- 将来 trait を導入した際に、ユーザ定義エラー型も扱えるよう拡張する。
+- trait機構（`deftrait`/`impl`、§5.1）は実装済みだが、ユーザ定義エラー型をこの機構で扱えるように
+  拡張する作業自体はまだ行っていない（§8）。
 
 ### 7.5 部分関数の失敗方針（Rust 流の混在）
 | 操作 | 方針 |
@@ -330,12 +356,16 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 
 ## 8. 当面の範囲外（将来課題）
 
-- `use a::b`（モジュール名を現NSに alias として導入。個別 `use a::b::name` は対応）、ジェネリック構造体/受け手、ネスト総称の修飾型。
-- 可視性（pub/private）、絶対パス `::foo`。
+- **`use a::b`（モジュール名を現NSに alias として導入）、可視性（pub/private）、絶対パス `::foo`は
+  2026-06-16実装済み**（commit `1a5d9f3`、checker.rsの`check_use`/`check_pub`/`split_abs`）。
+  ジェネリック構造体/受け手は`defstruct<T>`/`defenum<T>`として実装済み（§6）。ネスト総称の
+  修飾型（型変数を含む具体型を跨いだ多段の`::`解決）の網羅的な検証は未確認、残課題として扱う。
 - 動的ディスパッチ（vtable/`dyn Trait`相当）、ユーザ定義エラー型。**静的trait機構
   （`deftrait`/`impl`/`where`境界）は2026-06-30実装済み**——§5.1参照。
-- 関数カタログ（§4）の実装本体は eval（step4）以降。
-- `,@`（unquote-splicing、`append` 実装後）、`defmacro` の構造化ラムダリスト（`&rest` のみ実装済み、`&optional`/`&key` は対象外）、マクロの `use`-alias 解決。
+- 関数カタログ（§4）の実装本体は eval（step4）以降。**§4の実装状況は現時点でほぼ完了**——残る
+  未実装項目は[functions.md](../functions.md)参照。
+- `defmacro` の構造化ラムダリスト（`&rest` のみ実装済み、`&optional`/`&key` は対象外）、マクロの
+  `use`-alias 解決。**`,@`（unquote-splicing）は2026-06-19実装済み**（commit `853bbdb`）。
 - `defun`/`lambda` の値レベル `&rest`／`apply` 特殊形は**削除済み**（Symbol/Sexpr 再設計で
   当初の Phase 6「`&rest`→`Vector<T>`」計画ごと撤回。可変長パラメータを均質配列型で表すのは
   不自然という判断）。値レベルの可変長関数は存在せず、`&rest` は `defmacro` のマクロ用
@@ -350,6 +380,8 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   コレクションとして扱う）、push/get/set/lenをRust組み込みの`assoc`メソッドとして実装
   （`src/check/registry.rs`の`vector_def`、`src/eval/interp.rs`の`eval_builtin_method`の
   `"vector"`アーム）。
-- **`compile`/`compile-file`の再実装**（同上の理由で2026-06-23に全面削除）: コンパイラ本体
-  （typelisp自身で書く、`compiler_source.rs`）が内部データ構造に何を使うかは再検討の余地が
-  あるが、Vector/defstructとも再設計完了済みなので前提は満たされている。
+- **`compile`/`compile-file`の再実装**（2026-06-23に全面削除、2026-06-24以降`feature/compiler`
+  ブランチで再構築・main へマージ済み）: self-hosting方針（コンパイラ本体は`src/compiler.rs`に
+  typelisp自身で書き、Rustは inkwell バインディング・AST ブリッジ（`src/compile/ast_bridge.rs`）・
+  ランタイムシムのみを担う）で JIT（`compile`）/AOT（`compile-file`）とも実装済み。対応構文の
+  範囲は段階的に拡張中——詳細な進捗は[implementation-log.md](implementation-log.md)参照。

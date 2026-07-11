@@ -1,14 +1,14 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-07-04 / ブランチ: `feature/compile-sexpr`
+最終更新: 2026-07-11 / ブランチ: `main`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離した）。
 **言語仕様の確定事項は [language-design.md](language-design.md) を参照。**
 
-> **進行中の大規模再設計**: 「Symbol型導入と Sexpr の裏方化」を
-> [symbol-sexpr-redesign.md](symbol-sexpr-redesign.md) で管理中（ブランチ `feature/symbol-type`）。
-> Phase 0（Symbol 第一級型）完了・commit `ae9dd00`。次回は **Phase 1（内部 `sexpr-*` アクセサ層）** から。
+> **大規模再設計はほぼ完了**: 「Symbol型導入と Sexpr の裏方化」を
+> [symbol-sexpr-redesign.md](symbol-sexpr-redesign.md) で管理（作業ブランチ `feature/symbol-type` は
+> main へマージ済み）。Phase 0〜6.6まで完了、残るは **Phase 7（ドキュメント整備）** のみ。
 
 ---
 

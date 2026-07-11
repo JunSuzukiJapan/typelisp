@@ -59,8 +59,9 @@
     "round" "truncate" "mod" "not"
     "int->float" "int->char" "float->int" "char->int"
     "symbol->string" "string->symbol"
-    ;; Sexpr / cons cells
-    "cons" "car" "cdr" "set-car" "set-cdr"
+    ;; generic pair (cons-cell<A,B>); set-car/set-cdr were removed, mutate
+    ;; via (setf p::car v)/(setf p::cdr v) instead
+    "cons" "car" "cdr"
     ;; equality
     "eq" "eql" "equal" "equalp"
     ;; Iter-based sequence library (§6)

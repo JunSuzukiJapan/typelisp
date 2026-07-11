@@ -1,6 +1,6 @@
 # Symbol型導入と Sexpr の裏方化（型システム再設計）— 進行中
 
-最終更新: 2026-07-10 / ブランチ: `feature/symbol-type`（`feature/compile-sexpr` から分岐）
+最終更新: 2026-07-11 / ブランチ: `main`（作業ブランチ `feature/symbol-type` は main へマージ済み）
 
 > **2026-07-10 追記**: Phase 5 の `match`-on-`Sexpr` fence は、`(read)` ビルトイン導入準備のため
 > 再解禁された（詳細は Phase 5 節末尾の「Phase 5 方針転換」を参照）。Sexpr は user-facing の
@@ -12,7 +12,8 @@ Phase 0〜3・Phase 4a（コレクションコンビネータの generic `Iter` 
 Phase 4b と Phase 5 は元々一体だったが、リスク分離のため Phase 5 を先行実施した（Commit 1＝Phase 5、Commit 2＝Phase 4b）。
 **Phase 6.5（ユーザー面リスト/ペア走査 API の `cons<T,U>`/`Vector<T>`/`Iter` 上での再設計）と
 Phase 6.6（その残ギャップ解消＝impl メソッドの `where` 節＋compile の `equals`/`less` 対応）も完了**。
-残るは **Phase 7**（ドキュメント整備）。任意項目として `defenum`。
+残るは **Phase 7**（ドキュメント整備）。`defenum`（ユーザー多variant sum型）は本再設計とは別に
+2026-07-09実装済み（[implementation-log.md](implementation-log.md)参照）。
 
 > **Phase 6（`&rest` → `Vector<T>`）は破棄。** 当初は defun/lambda の型付き `&rest` を
 > `Vector<T>` に付け替える計画だったが、可変長パラメータを均質配列型で表すのは不自然という
@@ -240,11 +241,11 @@ Phase 4b は当初懸念（存続関数の `car`/`cdr` 移行）が不要にな�
   vector_test）は `sexpr-*` アクセサへ書き換え。**コンパイラの Sexpr `match` テスト（Stage 5 の 14 本）は削除**
   ＝ユーザー面 Sexpr `match` コンパイルという撤去済み能力の検証だったため（GC ルート機構自体は `typelisp-rt` の
   raw builtin テストで別途担保）。
-- 任意（未実施）: ユーザー多variant sum 型のための `defenum`。
+- ユーザー多variant sum型のための `defenum` は本Phase範囲外——2026-07-09に別途実装済み。
 
 検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
 
-**残: `defenum` は将来課題。ユーザー面リスト/ペア走査 API の再設計は Phase 6.5（下記）へ。**
+**残: ユーザー面リスト/ペア走査 API の再設計は Phase 6.5（下記）へ。**
 
 #### Phase 5 方針転換 — `match`-on-`Sexpr` を再解禁【✅ 完了 / 2026-07-10】
 
@@ -341,7 +342,7 @@ Phase 5 で**ユーザー面の `Sexpr` リスト操作を一括撤去**した�
 
 検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
 
-> 併記の将来課題: ユーザー多 variant sum 型のための `defenum`（本再設計の対象外、別途）。
+> 併記: ユーザー多 variant sum 型のための `defenum`（本再設計の対象外）は2026-07-09に別途実装済み。
 
 ### Phase 6.6 — Phase 6.5 の残ギャップ解消【✅ 完了】
 Phase 6.5 で将来課題とした2件（cons-cell への再帰的 Eq/Ord impl、compile の equals/less 対応）を解消した。
