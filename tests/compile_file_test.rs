@@ -475,3 +475,72 @@ fn jit_and_aot_agree_on_a_loop_based_function() {
 
     assert_eq!(jit_value, aot_exit_code);
 }
+
+/// A top-level `defvar` is accepted (no longer `errors_on_a_non_defun_top_level_form`'s
+/// case) and `main` can read it — `compile::aot::compile_file`'s eager,
+/// file-order `Interp::promote_global` + the generated `$global_init$0`
+/// step `build_main_wrapper` calls before `tl_main`.
+#[test]
+fn compiles_and_runs_main_that_reads_a_global() {
+    let src = r#"
+        (defvar (answer i64) 42)
+        (defun main () i64 answer)
+    "#;
+    assert_eq!(compile_and_run("global_read", src), 42);
+}
+
+/// `main` can also assign a `defvar` (`Expr::SetGlobal`,
+/// `compiler.rs`'s `compile-set-global`) — and a *second* read afterward
+/// sees the write, proving the standalone executable's own `rt_global_set`/
+/// `rt_global_get` calls agree on the same slot (not just that each
+/// compiles individually).
+#[test]
+fn compiles_and_runs_main_that_writes_a_global() {
+    let src = r#"
+        (defvar (counter i64) 0)
+        (defun bump () i64 (setf counter (+ counter 1)))
+        (defun main () i64 (let ((ignored (bump))) (bump)))
+    "#;
+    assert_eq!(compile_and_run("global_write", src), 2);
+}
+
+/// Same claim as `jit_and_aot_agree_on_the_same_source`, but for a `main`
+/// that reads and assigns a `defvar` — proves JIT's lazy, reference-driven
+/// global promotion (`Interp::compile_function`) and AOT's eager,
+/// file-declaration-order promotion (`compile::aot::compile_file`) agree on
+/// the same result despite assigning compile-time ids in different orders
+/// (see `Interp::promote_global`'s doc comment).
+#[test]
+fn jit_and_aot_agree_on_a_global_read_and_write() {
+    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+
+    let src = r#"
+        (defvar (counter i64) 0)
+        (defun bump () i64 (setf counter (+ counter 1)))
+        (defun main () i64 (let ((ignored (bump))) (bump)))
+    "#;
+
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    typelisp::load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r
+        .read_all(&mut h, &format!("{}\n(compile bump)\n(compile main)\n(main)", src))
+        .expect("read failed");
+    let mut jit_result = None;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("exec failed") {
+            jit_result = Some(val);
+        }
+    }
+    let jit_value = match jit_result {
+        Some(RtValue::Int(n)) => n,
+        other => panic!("expected an Int from the JIT path, got {:?}", other),
+    };
+
+    let aot_exit_code = compile_and_run("jit_aot_global_pair", src) as i64;
+
+    assert_eq!(jit_value, aot_exit_code);
+}

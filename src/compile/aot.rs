@@ -52,7 +52,7 @@ use inkwell::values::CallSiteValue;
 use inkwell::AddressSpace;
 use inkwell::OptimizationLevel;
 
-use crate::{Checker, Heap, Interp, Reader, TopLevel};
+use crate::{Checker, Heap, Interp, Path, Reader, TopLevel, Typed};
 
 const ENTRY_POINT_NAME: &str = "main";
 const ENTRY_POINT_INTERNAL_NAME: &str = "tl_main";
@@ -71,12 +71,20 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     let reader = Reader::new();
     let forms = reader.read_all_in(&mut heap, source_path, &source).map_err(|e| e.to_string())?;
 
-    // Every top-level form in an AOT source file must be a `defun` (see the
-    // module doc comment's scope note) — collected in declaration order so
-    // later steps know exactly which `interp.fns` entries are this file's,
-    // as opposed to `load_compiler`'s own helper `defun`s sharing the same
-    // table.
+    // Every top-level form in an AOT source file must be a `defun` or a
+    // `defvar`/`defconstant` (see the module doc comment's scope note) —
+    // both collected in declaration order: `fn_names` so later steps know
+    // exactly which `interp.fns` entries are this file's (as opposed to
+    // `load_compiler`'s own helper `defun`s sharing the same table), and
+    // `defvar_inits` (path, initializer expression) so the standalone
+    // executable can re-establish each global's storage at its own startup
+    // (see the loop below that generates one `add_compiled_global_init`
+    // step per entry, and `Interp::promote_global`'s doc comment for why
+    // this must promote eagerly, in this same file-declaration order,
+    // rather than waiting for some `defun` body to reference a global the
+    // way JIT does).
     let mut fn_names: Vec<String> = Vec::new();
+    let mut defvar_inits: Vec<(Path, Typed)> = Vec::new();
     for v in forms {
         let tl = chk.check_form(&mut heap, &interp, v).map_err(|e| e.to_string())?;
         // A defun that instantiates a generic function comes back bundled
@@ -84,16 +92,32 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         // it needs — flatten the synthetic module and treat each entry as a
         // top-level defun of this file.
         let items = match tl {
-            TopLevel::Module { path, body } if path == crate::Path::root(crate::MONO_BUNDLE_MODULE) => body,
+            TopLevel::Module { path, body } if path == Path::root(crate::MONO_BUNDLE_MODULE) => body,
             other => vec![other],
         };
         for tl in items {
-            let name = match &tl {
-                TopLevel::Defun { name, .. } => name.local().to_string(),
-                other => return Err(format!("compile-file only supports top-level `defun`, found {:?}", other)),
+            let defvar_meta = match &tl {
+                TopLevel::Defun { name, .. } => {
+                    fn_names.push(name.local().to_string());
+                    None
+                }
+                TopLevel::Defvar { name, value, .. } => Some((name.clone(), value.clone())),
+                other => {
+                    return Err(format!(
+                        "compile-file only supports top-level `defun`/`defvar`/`defconstant`, found {:?}",
+                        other
+                    ))
+                }
             };
+            // `exec` runs the `defvar`'s initializer through the ordinary
+            // interpreter (unchanged — `promote_global` below reads back
+            // whatever value it produced), same as it already does for
+            // every `defun`.
             interp.exec(&mut heap, tl).map_err(|e| e.to_string())?;
-            fn_names.push(name);
+            if let Some((name, value)) = defvar_meta {
+                interp.promote_global(&mut heap, &name).map_err(|e| e.to_string())?;
+                defvar_inits.push((name, value));
+            }
         }
     }
 
@@ -139,6 +163,19 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         interp.add_compiled_function(&mut heap, module.clone(), name, internal_name).map_err(|e| e.to_string())?;
     }
 
+    // One `add_compiled_global_init` per `defvar`, in the same file-
+    // declaration order `promote_global` assigned their compile-time ids
+    // in above — `build_main_wrapper` below emits a call to each, in this
+    // same order, from the generated `main`, so the standalone executable
+    // reproduces that exact numbering at its own runtime (see
+    // `Interp::promote_global`'s doc comment).
+    let mut global_init_names: Vec<String> = Vec::with_capacity(defvar_inits.len());
+    for (i, (_, value)) in defvar_inits.iter().enumerate() {
+        let internal_name = format!("$global_init${}", i);
+        interp.add_compiled_global_init(&mut heap, module.clone(), &internal_name, value).map_err(|e| e.to_string())?;
+        global_init_names.push(internal_name);
+    }
+
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let module = module.borrow();
     // See `arc_opt`'s own doc comment for why this is currently a no-op on
@@ -148,7 +185,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // unconditionally regardless, before `verify`, the same way the JIT
     // path (`Interp::compile_function`) does.
     crate::compile::arc_opt::eliminate_redundant_retain_release_pairs(&module);
-    build_main_wrapper(ctx, &module)?;
+    build_main_wrapper(ctx, &module, &global_init_names)?;
     module.verify().map_err(|e| format!("module failed verification: {}", e))?;
     write_executable(&module, output_path)
 }
@@ -158,7 +195,16 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
 /// arguments and returns its `i64` result truncated to an `i32` exit code.
 /// See the module doc comment for why this can't just compile the file's
 /// `main` defun under that name directly.
-fn build_main_wrapper(ctx: &'static Context, module: &Module<'static>) -> Result<(), String> {
+///
+/// `global_init_names` (one `add_compiled_global_init`-produced zero-arg
+/// function per `defvar`, in file-declaration order — see
+/// `compile_file`'s own doc comments at its two call sites) are each
+/// called, in that same order, between `rt_heap_init` and `tl_main`: the
+/// heap needs to exist first (`rt_global_new`, which every one of these
+/// eventually calls, roots into it), and every one of them needs to run
+/// before `tl_main`'s own body — or anything it calls — could read a
+/// global that doesn't have a slot yet.
+fn build_main_wrapper(ctx: &'static Context, module: &Module<'static>, global_init_names: &[String]) -> Result<(), String> {
     let tl_main = module
         .get_function(ENTRY_POINT_INTERNAL_NAME)
         .ok_or_else(|| "internal error: compiled entry point not found in module".to_string())?;
@@ -184,6 +230,14 @@ fn build_main_wrapper(ctx: &'static Context, module: &Module<'static>) -> Result
     builder
         .build_call(rt_heap_init, &[null_args.into(), argc_zero.into()], "heap_init_result")
         .map_err(|e| format!("failed to build rt_heap_init call: {}", e))?;
+    for name in global_init_names {
+        let f = module
+            .get_function(name)
+            .ok_or_else(|| format!("internal error: global-init function \"{}\" not found in module", name))?;
+        builder
+            .build_call(f, &[null_args.into(), argc_zero.into()], "global_init_result")
+            .map_err(|e| format!("failed to build global-init call: {}", e))?;
+    }
     let call: CallSiteValue = builder
         .build_call(tl_main, &[null_args.into(), argc_zero.into()], "tl_main_result")
         .map_err(|e| format!("failed to build entry-point call: {}", e))?;
@@ -320,7 +374,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[]).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -359,7 +413,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[]).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

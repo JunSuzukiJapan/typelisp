@@ -987,7 +987,13 @@ pub const SOURCE: &str = r#"
                                                                                                         (compile-field-get builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                         (if (equal s "field-set")
                                                                                                             (compile-field-set builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                            (panic (append "compile-value: unsupported tag " s)))))))))))))))))))))))))
+                                                                                                            (if (equal s "global")
+                                                                                                                (compile-global builder e)
+                                                                                                                (if (equal s "set-global")
+                                                                                                                    (compile-set-global builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
+                                                                                                                    (if (equal s "global-init")
+                                                                                                                        (compile-global-init builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
+                                                                                                                        (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))))
                            )
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -2655,7 +2661,79 @@ pub const SOURCE: &str = r#"
                                          (store-arg builder args-ptr 1 (const-i64 builder idx))
                                          (store-arg builder args-ptr 2 tagged-v)
                                          (let ((ignored (build-call builder (get-function m "rt_struct_field_set") args-ptr 3)))
-                                           (const-i64 builder 0))))))))))))
+                                           (const-i64 builder 0)))))))))))
+                       ;; `(global id kind)` — `id` is `path`'s already-
+                       ;; promoted compiled-global slot
+                       ;; (`Interp::add_compiled_function`'s
+                       ;; `collect_global_targets`/`promote_global` step,
+                       ;; `typelisp_rt::global_new`) — a permanent GC root, so
+                       ;; unlike `compile-var`'s locally-bound name this needs
+                       ;; no `env`/`fn-env` lookup at all, just a direct
+                       ;; `rt_global_get` call by id. The permanent root
+                       ;; always holds a properly *tagged* `Sexpr` (whatever
+                       ;; `Interp::promote_global` produced), so a `kind`
+                       ;; other than the passthrough `6` (`ast_bridge::
+                       ;; struct_field_kind`'s numbering — the same one
+                       ;; `compile-field-get` already uses) needs untagging
+                       ;; back to the global's own declared representation —
+                       ;; `compile-sexpr-field` (this function's own decode
+                       ;; step, shared with `compile-field-get`) does that.
+                       (compile-global ((builder llvm-builder) (e Sexpr)) llvm-value
+                         (let ((id (sexpr-int (sexpr-car (sexpr-cdr e)))))
+                           (let ((kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+                             (let ((args-ptr (alloca-args builder 1)))
+                               (store-arg builder args-ptr 0 (const-i64 builder id))
+                               (let ((raw (build-call builder (get-function m "rt_global_get") args-ptr 1)))
+                                 (compile-sexpr-field builder m raw kind 0))))))
+                       ;; `(set-global id kind value-form)` — `rt_global_set`
+                       ;; overwrites the global's permanent root in place, so
+                       ;; (unlike `compile-set`'s local-binding case) there is
+                       ;; no separate GC root to keep in sync. `kind` (see
+                       ;; `compile-global`'s doc comment) tags `value-form`'s
+                       ;; own compiled result via `compile-tag-struct-field`
+                       ;; (`compile-sexpr-field`'s encode-side mirror, shared
+                       ;; with `compile-field-set`) before it's stored — a
+                       ;; `Fn`-typed `value-form` isn't representable this
+                       ;; way yet (`compile-tag-struct-field`'s own `kind = 0`
+                       ;; case), so it panics clearly here rather than
+                       ;; storing something `compile-global`'s own decode
+                       ;; couldn't read back correctly. Evaluates to `v`
+                       ;; itself (the newly stored value in its own,
+                       ;; already-untagged compiled representation),
+                       ;; matching `Expr::SetGlobal`'s own checked type.
+                       (compile-set-global ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((id (sexpr-int (sexpr-car (sexpr-cdr e)))))
+                           (let ((kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+                             (let ((value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
+                               (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base value-form)))
+                                 (let ((tagged-v (compile-tag-struct-field builder m v kind)))
+                                   (let ((args-ptr (alloca-args builder 2)))
+                                     (store-arg builder args-ptr 0 (const-i64 builder id))
+                                     (store-arg builder args-ptr 1 tagged-v)
+                                     (let ((ignored (build-call builder (get-function m "rt_global_set") args-ptr 2)))
+                                       v))))))))
+                       ;; `(global-init kind value-form)` — AOT's synthesized
+                       ;; startup sequence's own step, one per promoted global
+                       ;; (`Interp::add_compiled_global_init`,
+                       ;; `compile::aot`): unlike `compile-set-global`, there
+                       ;; is no existing slot to overwrite yet, so this calls
+                       ;; `rt_global_new` (one argument, no `id`) instead of
+                       ;; `rt_global_set` — the id it allocates is implicit in
+                       ;; call order (see `typelisp_rt::rt_global_new`'s doc
+                       ;; comment), which is exactly why `compile::aot` must
+                       ;; emit these calls, from the generated `main`, in the
+                       ;; same order `Interp::promote_global` assigned
+                       ;; compile-time ids in. The allocated id itself is
+                       ;; discarded here (nothing at this call site needs it);
+                       ;; this tag exists purely for its side effect.
+                       (compile-global-init ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((kind (sexpr-int (sexpr-car (sexpr-cdr e)))))
+                           (let ((value-form (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
+                             (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base value-form)))
+                               (let ((tagged-v (compile-tag-struct-field builder m v kind)))
+                                 (let ((args-ptr (alloca-args builder 1)))
+                                   (store-arg builder args-ptr 0 tagged-v)
+                                   (build-call builder (get-function m "rt_global_new") args-ptr 1))))))))
                 (let ((v (compile-value builder env fn-env '() f (Option::none) (Option::none) (Option::none) body)))
                   (let ((protected (bare-returned-own-name body param-names '())))
                     (release-bindings builder m env param-names protected)

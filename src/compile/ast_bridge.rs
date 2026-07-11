@@ -10,15 +10,15 @@
 //! bridge silently doing the wrong thing — add a real translation here only
 //! once a phase needs to compile that node.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::freevars::{labels_free_vars, lambda_free_vars};
 use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, Type, Typed, Value};
 
-/// The three read-only inputs every scoped `translate_*` threads through
+/// The four read-only inputs every scoped `translate_*` threads through
 /// unchanged, bundled so a call passes one `cx` instead of re-listing all
-/// three, and a new scope re-binds only the field that actually changed
+/// four, and a new scope re-binds only the field that actually changed
 /// (`Ctx { direct: &siblings, ..cx }`) rather than restating the rest:
 /// - `direct`: names resolving to a direct call — in-scope `labels`
 ///   siblings/self (see [`ast_to_sexpr_scoped`]/[`translate_apply`]). Empty at
@@ -27,13 +27,21 @@ use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, Type, Typed, Value}
 ///   nested block can forward those values along (see [`translate_labels`]).
 /// - `structs`: the type paths the checker resolved to `AdtKind::Struct` (see
 ///   [`struct_field_kind`]); fixed for a whole translation, never re-bound.
+/// - `globals`: every `Expr::Global`/`Expr::SetGlobal` path this translation
+///   may reference, mapped to its already-promoted compiled-global id
+///   (`typelisp_rt::global_new`'s return value) — populated by
+///   `Interp::add_compiled_function` *before* translation starts (via
+///   [`collect_global_targets`]), so every reference this walk reaches is
+///   guaranteed present; see [`translate_global`]. Fixed for a whole
+///   translation, exactly like `structs`.
 ///
-/// `Copy` so it passes by value freely — it's three shared references.
+/// `Copy` so it passes by value freely — it's four shared references.
 #[derive(Clone, Copy)]
 struct Ctx<'a> {
     direct: &'a HashSet<String>,
     outer_captured: &'a [(String, Type)],
     structs: &'a HashSet<Path>,
+    globals: &'a HashMap<Path, usize>,
 }
 
 /// A process-wide counter for synthesizing unique LLVM symbol names for
@@ -344,11 +352,43 @@ fn tagged_ast_list_to_sexpr_with(
 /// shape and which variants are real vs. `unsupported` placeholders today.
 /// `structs` is the set of type paths the checker resolved to
 /// `AdtKind::Struct` (`Interp::struct_types` at the only real call site) —
-/// see [`struct_field_kind`] for the one classification it drives.
-pub fn ast_to_sexpr(heap: &mut Heap, typed: &Typed, structs: &HashSet<Path>) -> Result<Value, Error> {
+/// see [`struct_field_kind`] for the one classification it drives. `globals`
+/// is every global variable this translation may reference, already
+/// promoted to a compiled-global id — see [`Ctx`]'s doc comment and
+/// [`collect_global_targets`].
+pub fn ast_to_sexpr(heap: &mut Heap, typed: &Typed, structs: &HashSet<Path>, globals: &HashMap<Path, usize>) -> Result<Value, Error> {
     let direct = HashSet::new();
-    let cx = Ctx { direct: &direct, outer_captured: &[], structs };
+    let cx = Ctx { direct: &direct, outer_captured: &[], structs, globals };
     ast_to_sexpr_scoped(heap, typed, cx)
+}
+
+/// Translates a `defvar`'s initializer expression `value` for AOT's
+/// synthesized global-init sequence (`Interp::add_compiled_global_init`,
+/// `compile::aot`): `(global-init kind value-form)`, `compiler.rs`'s
+/// `compile-global-init` tag. `kind` is [`struct_field_kind`]'s
+/// classification of the global's own declared type (`value.ty`) — the
+/// same tagging step [`translate_set_global`] uses, since both end up
+/// calling a `rt_global_*` function that expects a properly tagged
+/// `Sexpr` payload (`rt_global_new` here, vs. `rt_global_set` there).
+/// Unlike an ordinary function body, there is no separate `id` to look up
+/// in `globals`/[`Ctx::globals`] for *this* node itself — `rt_global_new`
+/// assigns the id at the call site, by call order (see that function's
+/// doc comment) — though `value` may itself reference *other* globals,
+/// which is exactly what `globals` is still for.
+pub fn ast_to_sexpr_for_global_init(
+    heap: &mut Heap,
+    value: &Typed,
+    structs: &HashSet<Path>,
+    globals: &HashMap<Path, usize>,
+) -> Result<Value, Error> {
+    let direct = HashSet::new();
+    let cx = Ctx { direct: &direct, outer_captured: &[], structs, globals };
+    let kind = Value::Int(struct_field_kind(&value.ty, structs));
+    let form = ast_to_sexpr_scoped(heap, value, cx)?;
+    heap.push_root(form);
+    let result = tagged(heap, "global-init", &[kind, form]);
+    heap.pop_root(); // form
+    result
 }
 
 /// `direct` is the set of names that resolve to a direct call rather than
@@ -453,13 +493,13 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // deliberately deferred to the phase that first needs them, rather
         // than building out unrooted multi-child plumbing nothing exercises
         // yet — see the module doc comment.
-        Expr::Global(_) => unsupported(heap, "Global"),
+        Expr::Global(path) => translate_global(heap, path, &typed.ty, cx),
         Expr::FnRef(path) => translate_fnref(heap, path, &typed.ty),
         Expr::MethodRef { .. } => unsupported(heap, "MethodRef"),
         Expr::If(cond, then, els) => translate_if(heap, cond, then, els, &typed.ty, cx),
         Expr::Let(binds, body) => translate_let(heap, binds, body, cx),
         Expr::Call(path, args) => translate_call(heap, path, args, cx),
-        Expr::Lambda { params, body } => translate_lambda(heap, params, body, cx.structs),
+        Expr::Lambda { params, body } => translate_lambda(heap, params, body, cx.structs, cx.globals),
         Expr::Labels { defs, body } => translate_labels(heap, defs, body, cx),
         Expr::Apply(callee, args) => translate_apply(heap, callee, args, cx),
         Expr::Construct { type_name, variant, args, mutable } => translate_construct(heap, type_name, &typed.ty, *variant, args, *mutable, cx),
@@ -467,7 +507,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         Expr::FieldSet(obj, idx, value) => translate_field_set(heap, obj, *idx, value, cx),
         Expr::Match(scrut, arms) => translate_match(heap, scrut, arms, &typed.ty, cx),
         Expr::Set(name, value) => translate_set(heap, name, value, &typed.ty, cx),
-        Expr::SetGlobal(..) => unsupported(heap, "SetGlobal"),
+        Expr::SetGlobal(path, value) => translate_set_global(heap, path, value, cx),
         Expr::Loop(body) => translate_loop(heap, body, cx),
         Expr::Break => tagged(heap, "break", &[]),
         Expr::Return(value) => translate_return(heap, value, cx),
@@ -664,6 +704,65 @@ fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, cx: Ctx)
     result
 }
 
+/// `Expr::Global(path)` -> `(global id kind)` — `id` is `path`'s already-
+/// promoted compiled-global id ([`Ctx::globals`], populated by
+/// `Interp::add_compiled_function` via [`collect_global_targets`] before
+/// translation starts). `kind` is [`struct_field_kind`]'s classification of
+/// the global's own declared type — a global's permanent-root storage
+/// always holds a properly tagged `Sexpr` (whatever `rt_global_new`/
+/// `rtvalue_to_struct_field` produced at promotion time — see
+/// `Interp::promote_global`'s doc comment), but a *plain*-typed reference
+/// (e.g. `i64`) needs untagging back to its own bare compiled
+/// representation before this expression's result can be used like any
+/// other `i64` value — `compiler.rs`'s `compile-global` does that with
+/// [`struct_field_kind`]'s existing `compile-sexpr-field` decoder, the same
+/// one a `defstruct` field read already uses (`translate_field_get`). No
+/// `Ctx::direct`/`kind`-based GC-root bookkeeping is needed here the way
+/// [`translate_set`]'s local-variable case needs, though: the global's
+/// storage *is* a permanent GC root already, so there is no separate root
+/// to keep in sync with, only the one slot itself.
+fn translate_global(heap: &mut Heap, path: &Path, ty: &Type, cx: Ctx) -> Result<Value, Error> {
+    let id = global_id(path, cx)?;
+    let kind = Value::Int(struct_field_kind(ty, cx.structs));
+    tagged(heap, "global", &[Value::Int(id as i64), kind])
+}
+
+/// `Expr::SetGlobal(path, value)` -> `(set-global id kind value-form)` —
+/// `kind` (see [`translate_global`]) tells `compiler.rs`'s
+/// `compile-set-global` how to *tag* `value-form`'s own compiled result
+/// (`compile-tag-struct-field`, the encode-side mirror of
+/// `compile-sexpr-field`) before `rt_global_set` overwrites the permanent
+/// root with it — the same encode step a `defstruct` field write already
+/// does (`translate_field_set`). No local-binding-style GC-root
+/// bookkeeping is needed here either, for the same reason
+/// [`translate_global`]'s doc comment gives.
+fn translate_set_global(heap: &mut Heap, path: &Path, value: &Typed, cx: Ctx) -> Result<Value, Error> {
+    let id = global_id(path, cx)?;
+    let kind = Value::Int(struct_field_kind(&value.ty, cx.structs));
+    let form = ast_to_sexpr_scoped(heap, value, cx)?;
+    heap.push_root(form);
+    let result = tagged(heap, "set-global", &[Value::Int(id as i64), kind, form]);
+    heap.pop_root(); // form
+    result
+}
+
+/// Looks `path` up in [`Ctx::globals`] — always present by construction:
+/// `Interp::add_compiled_function` promotes every path
+/// [`collect_global_targets`] finds in this same body *before* translation
+/// starts, and that walker follows the exact same node shapes this module's
+/// `translate_*` functions do (both are driven off [`Expr`]'s variants), so
+/// a miss here means the two have desynced — an internal bridge bug, not a
+/// user-facing one, hence the loud `TypeError` rather than a silent
+/// fallback.
+fn global_id(path: &Path, cx: Ctx) -> Result<usize, Error> {
+    cx.globals.get(path).copied().ok_or_else(|| {
+        Error::TypeError(format!(
+            "compile: global \"{}\" was not promoted before translation (internal error)",
+            path
+        ))
+    })
+}
+
 /// `Expr::Loop(body)` -> `(loop body-form...)` (`loop`/`break`/`return`):
 /// each body statement translated in order, untagged (unlike a call
 /// argument list — these are executed for effect/control, not consumed as
@@ -750,7 +849,7 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], cx: Ctx)
     // The scope each def's body / the trailing body sees: siblings become
     // directly callable, and this block's captured list becomes the enclosing
     // one for any nested block. `structs` is invariant.
-    let inner = Ctx { direct: &siblings, outer_captured: &captured_names, structs: cx.structs };
+    let inner = Ctx { direct: &siblings, outer_captured: &captured_names, structs: cx.structs, globals: cx.globals };
     let captured_list = tagged_sym_list(heap, &captured_names)?;
     heap.push_root(captured_list);
 
@@ -1014,7 +1113,7 @@ fn build_lambda_tag(heap: &mut Heap, name: &str, captured: &[(String, Type)], pa
 /// `compile-env-args`/`resolve-value` box the sibling there, and the boxed
 /// value flows into this lambda's own `env` via the ordinary `bind-captures`
 /// path — no special-casing needed inside the lambda's own body at all.
-fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed], structs: &HashSet<Path>) -> Result<Value, Error> {
+fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed], structs: &HashSet<Path>, globals: &HashMap<Path, usize>) -> Result<Value, Error> {
     if body.len() != 1 {
         return Err(Error::TypeError("compile: lambda has a multi-expression body, not yet supported".into()));
     }
@@ -1026,7 +1125,7 @@ fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed], 
     // inside *this* body has no enclosing block's captured-list to prefix
     // its own with, regardless of what scope the `lambda` itself sits in.
     let direct = HashSet::new();
-    let cx = Ctx { direct: &direct, outer_captured: &[], structs };
+    let cx = Ctx { direct: &direct, outer_captured: &[], structs, globals };
     let body_v = ast_to_sexpr_scoped(heap, &body[0], cx)?;
     heap.push_root(body_v);
     let result = build_lambda_tag(heap, &fresh_lambda_name("lambda"), &captured_names, params, body_v);
@@ -1554,6 +1653,7 @@ fn translate_field_set(heap: &mut Heap, obj: &Typed, idx: usize, value: &Typed, 
 struct CallTargets {
     calls: Vec<Path>,
     methods: Vec<(Path, String)>,
+    globals: Vec<Path>,
 }
 
 /// Collects every distinct top-level [`Path`] an `Expr::Call`/`Expr::FnRef`
@@ -1593,6 +1693,19 @@ pub fn collect_assoc_targets(typed: &Typed) -> Vec<(Path, String)> {
     let mut targets = CallTargets::default();
     collect_calls(typed, &mut targets);
     targets.methods
+}
+
+/// The `Expr::Global`/`Expr::SetGlobal` counterpart of
+/// [`collect_call_targets`]: every distinct global variable this body reads
+/// or assigns, in first-encounter order. `Interp::compile_function` uses
+/// this to promote each one to a compiled-global slot (a permanent GC root
+/// — see `typelisp_rt::rt_global_new`) before generating IR, the same
+/// "resolve every external dependency up front" shape it already applies to
+/// `collect_call_targets`/`collect_assoc_targets`.
+pub fn collect_global_targets(typed: &Typed) -> Vec<Path> {
+    let mut targets = CallTargets::default();
+    collect_calls(typed, &mut targets);
+    targets.globals
 }
 
 fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
@@ -1707,6 +1820,17 @@ fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
             collect_calls(obj, targets);
             collect_calls(value, targets);
         }
+        Expr::Global(path) => {
+            if !targets.globals.contains(path) {
+                targets.globals.push(path.clone());
+            }
+        }
+        Expr::SetGlobal(path, value) => {
+            if !targets.globals.contains(path) {
+                targets.globals.push(path.clone());
+            }
+            collect_calls(value, targets);
+        }
         _ => {}
     }
 }
@@ -1720,13 +1844,14 @@ mod tests {
         Typed { loc: None, expr, ty }
     }
 
-    /// Shadows `super::ast_to_sexpr` with an empty `structs` set — the
-    /// pre-existing tests here never involve a struct-typed field, so
-    /// threading the set through each call adds nothing. A test that *does*
-    /// care (nested-struct field classification) calls `super::ast_to_sexpr`
-    /// with a real set instead.
+    /// Shadows `super::ast_to_sexpr` with an empty `structs` set and no
+    /// promoted globals — the pre-existing tests here never involve a
+    /// struct-typed field or a global reference, so threading either
+    /// through each call adds nothing. A test that *does* care (nested-
+    /// struct field classification, `Global`/`SetGlobal`) calls
+    /// `super::ast_to_sexpr` with real ones instead.
     fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
-        super::ast_to_sexpr(heap, typed, &HashSet::new())
+        super::ast_to_sexpr(heap, typed, &HashSet::new(), &HashMap::new())
     }
 
     /// Unpacks a tagged-list `Value` into (tag name, field values), asserting
@@ -2562,7 +2687,8 @@ mod tests {
         let pat_lit_payload = |heap: &mut Heap, pat: &Pattern| -> i64 {
             let direct = HashSet::new();
             let structs = HashSet::new();
-            let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs };
+            let globals = HashMap::new();
+            let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, globals: &globals };
             let v = pattern_to_sexpr(heap, pat, cx).unwrap();
             let (tag, fields) = untag(heap, v);
             assert_eq!(tag, "pat-lit");

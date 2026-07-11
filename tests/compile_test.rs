@@ -2979,3 +2979,60 @@ fn compile_and_interpret_agree_on_a_sexpr_match() {
     assert_eq!(interp_v, RtValue::Int(10));
     assert_eq!(compiled_v, interp_v);
 }
+
+/// A `compile`d function can read a `defvar` global — `Expr::Global`'s
+/// real `ast_bridge` translation (`(global id)`) and `compiler.rs`'s
+/// `compile-global`.
+#[test]
+fn compile_dispatches_a_function_that_reads_a_global_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defvar (counter i64) 41)
+        (defun read-counter () i64 counter)
+        (compile read-counter)
+        (read-counter)
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(41));
+}
+
+/// A `compile`d function can assign a `defvar` global (`Expr::SetGlobal`'s
+/// real translation, `(set-global id is-fn value-form)` /
+/// `compiler.rs`'s `compile-set-global`) — and an *interpreted* read of the
+/// same global afterward sees the compiled write, not a stale value: once a
+/// global is promoted to a compiled-global slot (a permanent GC root),
+/// `Interp`'s own `Expr::Global`/`Expr::SetGlobal` evaluation reads/writes
+/// that same slot too (see `Interp::promote_global`'s doc comment) rather
+/// than the plain `Slot` it used before promotion.
+#[test]
+fn compile_dispatches_a_function_that_writes_a_global_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defvar (counter i64) 0)
+        (defun bump-counter () i64 (setf counter (+ counter 1)))
+        (compile bump-counter)
+        (bump-counter)
+        (bump-counter)
+        counter
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(2));
+}
+
+/// A global whose declared type can't cross into compiled code
+/// (`Option<T>`/`Result<T,E>`/a user `defenum` — `RtValue::Data`,
+/// `rtvalue_to_struct_field`'s own documented gap) surfaces as a clean
+/// compile-time error rather than a panic deep inside the compiler body —
+/// see `Interp::promote_global`'s doc comment.
+#[test]
+fn compile_of_a_function_referencing_an_option_typed_global_is_a_clean_error() {
+    let err = run_with_compiler(
+        r#"
+        (defvar (maybe Option<i64>) (Option::none))
+        (defun read-maybe () Option<i64> maybe)
+        (compile read-maybe)
+        "#,
+    )
+    .unwrap_err();
+    assert!(matches!(err, EvalError::Panic(_)), "expected a Panic, got {:?}", err);
+}

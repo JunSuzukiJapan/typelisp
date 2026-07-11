@@ -99,17 +99,36 @@ typelispの`Reader`は最初の構文エラーで即失敗する設計のため�
    `defenum`のcompile時`match`が可能になった。単一variantの`defstruct`をmatchするのは稀なため
    boxed-struct scrutineeは当面`unsupported`のまま（必要になれば`compile-box-*`と同様に
    boxed-struct表現用のタグ/フィールド抽出を足す）。
-2. **`Global`/`SetGlobal`: グローバル変数（`defvar`/`defconstant`）の参照・代入が`unsupported`**
-   （`ast_bridge.rs`の`Expr::Global`/`Expr::SetGlobal`アーム）。グローバル参照はごく普通の
-   コードで頻出するため次点の影響範囲。
-3. **`Panic`: `(panic msg)`が`unsupported`**（同ファイルの`Expr::Panic`アーム）。診断用
+2. **`Panic`: `(panic msg)`が`unsupported`**（`ast_bridge.rs`の`Expr::Panic`アーム）。診断用
    メッセージの文字列化＋`Never`型としての分岐処理が必要。
-4. **`MethodRef`: メソッドを値として使う式（例: `+`をそのまま渡す）が`unsupported`**
+3. **`MethodRef`: メソッドを値として使う式（例: `+`をそのまま渡す）が`unsupported`**
    （`Expr::MethodRef`アーム）。
-5. **`Quote`: `(quote datum)`が`unsupported`**（`Expr::Quote`アーム）。コンパイル対象の関数
+4. **`Quote`: `(quote datum)`が`unsupported`**（`Expr::Quote`アーム）。コンパイル対象の関数
    本体にクォートされたリテラルが現れるケースは他より稀。
 
-直近完了: **compile側TraitCall機構の削除**（2026-07-04）——ジェネリック単型化（2026-07-03）で
+直近完了: **`Global`/`SetGlobal`（グローバル変数のcompile対応、JIT/AOT両方）**
+（2026-07-11）——`defvar`/`defconstant`をcompile対象の関数から参照・代入できるようになった。
+コンパイル済みコードから参照されたグローバルだけをGCの**permanent root**
+（`crates/typelisp-mem`の`Heap.permanent_roots`、`rt_push_permanent_sexpr_root`が構造体
+フィールド保護に使う既存機構を再利用）に「昇格」させる設計。一度もコンパイルされない
+グローバルは今まで通りインタプリタの`Slot`ベース経路のまま（`rtvalue_to_struct_field`が
+`RtValue::Data`＝`Option`/`Result`/ユーザー`defenum`を変換できないため、そうした型の
+グローバルはcompile対象から参照できない——既知の制限）。JITは参照時に遅延昇格
+（`Interp::promote_global`）、AOTは`compile-file`が全`defvar`をファイル宣言順に即座昇格
+（`Interp::promote_global`のdocコメント参照——2つのタイムライン（コンパイル時のRustプロセスと
+実行ファイル自身のランタイム）でid採番を一致させるため）し、`Interp::add_compiled_global_init`が
+生成する初期化関数群を`build_main_wrapper`が`rt_heap_init`と`tl_main`の間に挿入。
+昇格済みグローバルは、一度もコンパイルされていなくても、インタプリタ自身の
+`Expr::Global`/`Expr::SetGlobal`評価も同じpermanent-root経由に切り替わる（コンパイル側の
+書き込みをインタプリタ側の読み取りが取り残さないように）。新設: `crates/typelisp-mem`の
+`Heap::permanent_root`/`set_permanent_root`（インデックス指定アクセサ）、`crates/typelisp-rt`の
+`rt_global_new`/`rt_global_get`/`rt_global_set`/`reset_global_table`、`ast_bridge.rs`の
+`collect_global_targets`/`translate_global`/`translate_set_global`/
+`ast_to_sexpr_for_global_init`、`compiler.rs`の`compile-global`/`compile-set-global`/
+`compile-global-init`（`ast_bridge::struct_field_kind`/`compile-sexpr-field`/
+`compile-tag-struct-field`という既存のdefstructフィールドエンコード/デコード機構を再利用）。
+
+その前に完了: **compile側TraitCall機構の削除**（2026-07-04）——ジェネリック単型化（2026-07-03）で
 `Expr::TraitCall`がコンパイル可能ソースから到達不能になったため、compile側の実行時ディスパッチ
 機構を全撤去。削除対象: `ast_bridge`の`translate_trait_call`/`collect_trait_call_targets`/
 `is_compilable_trait_impl`/`type_id_hash`、`compiler.rs`の`compile-trait-call`/

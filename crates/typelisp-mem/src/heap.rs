@@ -269,6 +269,21 @@ impl Heap {
         self.permanent_roots.len()
     }
 
+    /// Read permanent root `idx`'s current value (a global variable's
+    /// storage — `typelisp-rt`'s `rt_global_get`) — the mark phase already
+    /// re-reads `permanent_roots[i]` by index every cycle
+    /// ([`Self::gc`](Heap::gc)'s root walk), so an entry can be overwritten
+    /// in place ([`Self::set_permanent_root`]) with no change to that logic.
+    pub fn permanent_root(&self, idx: usize) -> Value {
+        self.permanent_roots[idx]
+    }
+
+    /// Overwrite permanent root `idx`'s value in place — `rt_global_set`'s
+    /// storage half. See [`Self::permanent_root`].
+    pub fn set_permanent_root(&mut self, idx: usize, v: Value) {
+        self.permanent_roots[idx] = v;
+    }
+
     // ---- symbols ----------------------------------------------------------
 
     /// Intern a symbol by name, returning its `Value::Symbol`.

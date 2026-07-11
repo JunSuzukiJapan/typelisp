@@ -48,7 +48,7 @@ pub unsafe extern "C" fn rt_ping(args: *const i64, argc: u32) -> i64 {
 
 // ---- Stage 1: the active `Heap` ---------------------------------------
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use typelisp_mem::Heap;
 
@@ -919,15 +919,138 @@ pub unsafe extern "C" fn rt_str_append(args: *const i64, argc: u32) -> i64 {
     encode(heap.alloc_string(s))
 }
 
+// ---- Global variables (compile `Global`/`SetGlobal` support) ------------
+//
+// A `defvar`/`defconstant` a compiled function references needs storage
+// compiled code can reach — the interpreter's own `Interp.globals` is a
+// plain Rust `HashMap` on the other side of the JIT/AOT boundary, invisible
+// here. Each such global is instead backed by a permanent GC root
+// (`Heap::push_permanent_root`, the same mechanism `rt_push_permanent_sexpr_root`
+// already uses for boxed-struct fields — "lives for the process, no matching
+// pop" is exactly a global's actual lifetime). `rt_global_new`/`rt_global_get`/
+// `rt_global_set` are the read/write surface; see `rt_global_new`'s doc
+// comment for why a global's *id* (what `compiler.rs`'s generated code
+// addresses it by) and its raw permanent-root position aren't the same
+// number in general.
+
+thread_local! {
+    /// Global id -> the `Heap::permanent_root` position it landed at, in
+    /// `rt_global_new` call order — see that function's doc comment.
+    /// `thread_local!` for the same cross-test-isolation reason
+    /// `ACTIVE_HEAP` is (module doc comment); unlike `ACTIVE_HEAP`, nothing
+    /// re-points this automatically on every call, so [`reset_global_table`]
+    /// must be called whenever a fresh `Heap` begins its lifetime.
+    static GLOBAL_INDEX: RefCell<Vec<usize>> = RefCell::new(Vec::new());
+}
+
+/// Clears this thread's global-id table. Must be called whenever a fresh
+/// `Heap`/`Interp` pair begins its lifetime (`typelisp::eval::Interp::new`)
+/// — otherwise a stale entry left over from an earlier `Heap` on a reused
+/// `cargo test` worker thread would resolve to a permanent-root position
+/// that has nothing to do with the *current* `Heap`'s (empty, freshly
+/// created) `permanent_roots`. AOT's standalone executable never needs to
+/// call this itself: [`rt_heap_init`] runs exactly once, before any
+/// `rt_global_new` call, in a process that only ever has the one `Heap`.
+pub fn reset_global_table() {
+    GLOBAL_INDEX.with(|t| t.borrow_mut().clear());
+}
+
+/// Allocates a new global-variable slot holding `v` and returns its id — a
+/// small, sequential index that later [`rt_global_get`]/[`rt_global_set`]
+/// calls address it by. The Rust-side (non-FFI) counterpart of
+/// [`rt_global_new`], for the interpreter itself to promote an
+/// already-`defvar`d global to a compiled-global slot before generating IR
+/// (`typelisp::eval::Interp::add_compiled_function`) — avoids that caller
+/// round-tripping through the `extern "C"` tagged-`i64` ABI just to reach
+/// this same bookkeeping, the same reason [`encode`]/[`decode`] are already
+/// plain `pub fn`s rather than FFI-only.
+///
+/// The id is *not* the slot's `Heap::permanent_root` position: unrelated
+/// code ([`rt_push_permanent_sexpr_root`], called by `compiler.rs`'s
+/// `compile-construct-box-fields` for an ordinary boxed-struct field) also
+/// pushes permanent roots, so a global's raw heap-root position isn't
+/// predictable at the point `compiler.rs` generates a reference to it. What
+/// *is* predictable: only this function ever appends to `GLOBAL_INDEX`, and
+/// its callers (this crate's [`rt_global_new`], and `add_compiled_function`)
+/// control the order those calls happen in — so `GLOBAL_INDEX`'s own length
+/// at the moment of a given call is exactly the id the compiler already
+/// expects for it.
+pub fn global_new(heap: &mut Heap, v: Value) -> usize {
+    let perm_idx = heap.permanent_root_count();
+    heap.push_permanent_root(v);
+    GLOBAL_INDEX.with(|t| {
+        let mut t = t.borrow_mut();
+        t.push(perm_idx);
+        t.len() - 1
+    })
+}
+
+/// `args[0]` (its initial tagged value) — see [`global_new`] for the id this
+/// assigns.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`; a
+/// `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_global_new(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_global_new: expected 1 argument");
+    }
+    let v = decode(*args);
+    global_new(active_heap(), v) as i64
+}
+
+/// Reads global `id`'s (an [`rt_global_new`] return value) current value.
+///
+/// # Safety
+///
+/// A `Heap` must already be registered on this thread; `args` must point to
+/// at least 1 valid `i64`; `id` must be a value `rt_global_new` actually
+/// returned on this thread since the last [`reset_global_table`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_global_get(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_global_get: expected 1 argument (the global id)");
+    }
+    let id = *args as usize;
+    let perm_idx = GLOBAL_INDEX
+        .with(|t| t.borrow().get(id).copied())
+        .unwrap_or_else(|| fatal("rt_global_get: unknown global id"));
+    encode(active_heap().permanent_root(perm_idx))
+}
+
+/// Overwrites global `id`'s value (`args[1]`, tagged) in place
+/// (`Heap::set_permanent_root`); returns the new value unchanged, like
+/// [`rt_push_sexpr_root`].
+///
+/// # Safety
+///
+/// Same as [`rt_global_get`], plus `args` must point to at least 2 valid
+/// `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_global_set(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_global_set: expected 2 arguments (the global id and its new value)");
+    }
+    let id = *args as usize;
+    let tagged = *args.add(1);
+    let perm_idx = GLOBAL_INDEX
+        .with(|t| t.borrow().get(id).copied())
+        .unwrap_or_else(|| fatal("rt_global_set: unknown global id"));
+    active_heap().set_permanent_root(perm_idx, decode(tagged));
+    tagged
+}
+
 #[cfg(test)]
 mod tests {
     use typelisp_mem::{Heap, PathId, StrId, SymId, Value};
 
     use super::{
-        active_heap, decode, encode, rt_car, rt_cdr, rt_cons, rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root,
-        rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append,
-        rt_str_eq, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_get, rt_struct_field_set, rt_struct_new,
-        set_active_heap,
+        active_heap, decode, encode, reset_global_table, rt_car, rt_cdr, rt_cons, rt_global_get, rt_global_new, rt_global_set,
+        rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count,
+        rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref,
+        rt_struct_field_get, rt_struct_field_set, rt_struct_new, set_active_heap,
     };
 
     #[test]
@@ -1441,5 +1564,96 @@ mod tests {
         // field's cons cell (already exercised as garbage by the unrelated
         // allocations, but this pins down the box side specifically).
         assert_eq!(unsafe { active_heap() }.box_count(), 0, "the unrooted struct was reclaimed");
+    }
+
+    /// Round-trips a global variable through `rt_global_new`/`rt_global_get`
+    /// — the id `rt_global_new` returns is what later `rt_global_get`/
+    /// `rt_global_set` calls address it by.
+    #[test]
+    fn rt_global_new_and_rt_global_get_round_trip() {
+        reset_global_table();
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let initial = [encode(Value::Int(42))];
+        let id = unsafe { rt_global_new(initial.as_ptr(), 1) };
+        assert_eq!(id, 0, "the first global on a freshly reset table gets id 0");
+
+        let id_args = [id];
+        assert_eq!(decode(unsafe { rt_global_get(id_args.as_ptr(), 1) }), Value::Int(42));
+    }
+
+    /// `rt_global_set` overwrites a global's value in place; a later
+    /// `rt_global_get` sees the new value.
+    #[test]
+    fn rt_global_set_overwrites_in_place() {
+        reset_global_table();
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let initial = [encode(Value::Int(1))];
+        let id = unsafe { rt_global_new(initial.as_ptr(), 1) };
+
+        let set_args = [id, encode(Value::Int(99))];
+        let returned = unsafe { rt_global_set(set_args.as_ptr(), 2) };
+        assert_eq!(decode(returned), Value::Int(99), "rt_global_set returns its new value unchanged");
+
+        let id_args = [id];
+        assert_eq!(decode(unsafe { rt_global_get(id_args.as_ptr(), 1) }), Value::Int(99));
+    }
+
+    /// A global's id (`rt_global_new`'s return value) is a small sequential
+    /// counter driven purely by `rt_global_new` call order — an unrelated
+    /// permanent-root push (`rt_push_permanent_sexpr_root`, what ordinary
+    /// boxed-struct field construction uses) interleaved between two
+    /// globals must not perturb that numbering, even though both features
+    /// share the same underlying `Heap::permanent_roots` storage.
+    #[test]
+    fn rt_global_ids_are_sequential_regardless_of_interleaved_permanent_roots() {
+        reset_global_table();
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let first = [encode(Value::Int(10))];
+        let first_id = unsafe { rt_global_new(first.as_ptr(), 1) };
+
+        let unrelated = [encode(Value::Int(-1))];
+        unsafe { rt_push_permanent_sexpr_root(unrelated.as_ptr(), 1) };
+
+        let second = [encode(Value::Int(20))];
+        let second_id = unsafe { rt_global_new(second.as_ptr(), 1) };
+
+        assert_eq!((first_id, second_id), (0, 1));
+        let first_args = [first_id];
+        let second_args = [second_id];
+        assert_eq!(decode(unsafe { rt_global_get(first_args.as_ptr(), 1) }), Value::Int(10));
+        assert_eq!(decode(unsafe { rt_global_get(second_args.as_ptr(), 1) }), Value::Int(20));
+    }
+
+    /// A global survives a forced `gc()` triggered by unrelated allocations
+    /// with no matching pop at all — the same permanent-root protection
+    /// [`rt_push_permanent_sexpr_root_protects_a_value_across_a_gc_with_no_matching_pop`]
+    /// proves for its own direct use of `Heap::push_permanent_root`.
+    #[test]
+    fn rt_global_protects_its_value_across_a_gc_triggered_by_other_allocations() {
+        reset_global_table();
+        let mut heap = Heap::with_capacity(4);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let precious_args = [encode(Value::Int(111)), encode(Value::Int(222))];
+        let precious = unsafe { rt_cons(precious_args.as_ptr(), 2) };
+        let initial = [precious];
+        let id = unsafe { rt_global_new(initial.as_ptr(), 1) };
+
+        for i in 0..20 {
+            let args = [encode(Value::Int(i)), encode(Value::Int(i))];
+            unsafe { rt_cons(args.as_ptr(), 2) };
+        }
+
+        let id_args = [id];
+        let surviving = unsafe { rt_global_get(id_args.as_ptr(), 1) };
+        let one_arg = [surviving];
+        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(111));
+        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Int(222));
     }
 }

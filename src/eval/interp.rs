@@ -130,10 +130,31 @@ pub struct Interp {
     /// (deliberately `Registry`-free, see that module's `is_sexpr_type` doc
     /// comment), so `Interp` tracks it independently.
     struct_types: HashSet<Path>,
+    /// Every `defvar`/`defconstant` global some compiled function has
+    /// referenced, promoted to a compiled-global slot (a permanent GC root
+    /// — `typelisp_rt::global_new`) and mapped to the id that slot got.
+    /// Populated lazily by [`Self::add_compiled_function`], the single
+    /// choke point both the JIT (`Self::compile_function`) and AOT
+    /// (`crate::compile::aot::compile_file`) paths compile a `defun`
+    /// through — so this table, and the promotion it drives, is shared by
+    /// both with no separate AOT-specific logic. A global *never*
+    /// referenced from compiled code has no entry here and keeps using its
+    /// ordinary [`Slot`] in [`Self::globals`] untouched — see that
+    /// method's doc comment for why only a promoted global's storage moves.
+    compiled_globals: RefCell<HashMap<Path, usize>>,
 }
 
 impl Interp {
     pub fn new() -> Interp {
+        // A fresh `Interp` always pairs with a fresh `Heap` (every caller in
+        // this codebase constructs them together) — clear the global-id
+        // table typelisp-rt keeps for compiled global-variable access
+        // (`compiled_globals`'s eventual runtime counterpart) so a stale
+        // entry from an earlier `Interp`/`Heap` pair that happened to share
+        // this OS thread (`cargo test`'s worker pool) can't resolve to a
+        // permanent-root position in a `Heap` that no longer exists. See
+        // `typelisp_rt::reset_global_table`'s doc comment.
+        crate::compile::runtime::reset_global_table();
         Interp {
             fns: HashMap::new(),
             methods: HashMap::new(),
@@ -157,6 +178,7 @@ impl Interp {
             // through its `::new()` assoc fn, never `Expr::Construct`, so
             // there is no construct site for `struct_types` to affect.
             struct_types: HashSet::from([Path::root("vector")]),
+            compiled_globals: RefCell::new(HashMap::new()),
         }
     }
 
@@ -424,11 +446,23 @@ impl Interp {
             Expr::Var(n) => env_get(env, n)
                 .map(|s| s.get(heap))
                 .ok_or_else(|| EvalError::Unbound(n.clone())),
-            Expr::Global(path) => self
-                .globals
-                .get(path)
-                .map(|s| s.get(heap))
-                .ok_or_else(|| EvalError::Unbound(path.to_string())),
+            // A promoted global (`Self::compiled_globals` — some `compile`d
+            // function reads/writes it via a permanent GC root, see
+            // `Self::promote_global`) must be read from that same storage
+            // here too, not the plain `Slot` below — otherwise an
+            // interpreted read could see a stale value a compiled write
+            // already updated, even though both sides name the same
+            // `defvar`.
+            Expr::Global(path) => {
+                if let Some(&id) = self.compiled_globals.borrow().get(path) {
+                    Ok(decode_field_typed(heap, heap.permanent_root(id), &t.ty))
+                } else {
+                    self.globals
+                        .get(path)
+                        .map(|s| s.get(heap))
+                        .ok_or_else(|| EvalError::Unbound(path.to_string()))
+                }
+            }
             Expr::FnRef(path) => Ok(match self.fns.get(path) {
                 // Reify a user function as a closure with no captured environment.
                 Some(f) => {
@@ -728,15 +762,24 @@ impl Interp {
                 cell.set(heap, v.clone())?;
                 Ok(v)
             }
+            // See `Expr::Global`'s arm above for why a promoted global must
+            // be written through the same permanent-root storage a
+            // compiled write would use, not the plain `Slot` below.
             Expr::SetGlobal(path, value) => {
                 let v = self.eval(heap, value, env)?;
-                let cell = self
-                    .globals
-                    .get(path)
-                    .ok_or_else(|| EvalError::Unbound(path.to_string()))?
-                    .clone();
-                cell.set(heap, v.clone())?;
-                Ok(v)
+                if let Some(&id) = self.compiled_globals.borrow().get(path) {
+                    let mv = rtvalue_to_struct_field(heap, &v)?;
+                    heap.set_permanent_root(id, mv);
+                    Ok(v)
+                } else {
+                    let cell = self
+                        .globals
+                        .get(path)
+                        .ok_or_else(|| EvalError::Unbound(path.to_string()))?
+                        .clone();
+                    cell.set(heap, v.clone())?;
+                    Ok(v)
+                }
             }
             Expr::Loop(body) => loop {
                 if let Some(v) = self.eval_loop_body(heap, body, env)? {
@@ -1032,6 +1075,63 @@ impl Interp {
         Ok((params, f.body[0].clone()))
     }
 
+    /// Ensures `path` (a global some compiled function's body references)
+    /// has a compiled-global slot, promoting it from its ordinary
+    /// interpreter [`Slot`] on first reference; returns the slot's id
+    /// either way. See [`Self::compiled_globals`]'s doc comment for why
+    /// promotion — not moving every global's storage — is the shape this
+    /// takes: reads the global's *current* value (whatever the interpreter
+    /// last set it to) via the existing `Slot`, converts it with
+    /// `rtvalue_to_struct_field` (the same `RtValue` -> `mem::Value`
+    /// boundary crossing a boxed-struct field write already uses — a
+    /// global's storage is exactly that shape, a single always-live cell),
+    /// and hands the result to `typelisp_rt::global_new`, which roots it
+    /// permanently and returns its id. A `RtValue::Data` global
+    /// (`Option`/`Result`/a user `defenum`) can't cross that boundary
+    /// (`rtvalue_to_struct_field`'s own documented gap) and surfaces as a
+    /// clear `Panic` here — the same "unsupported, not silently wrong"
+    /// contract `crate::compile::ast_bridge`'s `unsupported` tag keeps
+    /// elsewhere in this pipeline.
+    ///
+    /// `pub(crate)`: `compile::aot::compile_file` calls this directly too,
+    /// once per `defvar`, *before* compiling any `defun` — eagerly, in file
+    /// declaration order, rather than waiting for some `defun` body to
+    /// reference it. That ordering matters only for AOT: the ids this
+    /// assigns are baked into compiled IR at this (the *compiling*)
+    /// process's `Heap`, but AOT's actual runtime storage is established by
+    /// a *different* `Heap` — the standalone executable's own, via a
+    /// generated startup sequence (`Self::add_compiled_global_init`) that
+    /// must call `rt_global_new` in this exact same order for the two
+    /// numberings to agree. Running that sequence in file-declaration order
+    /// is what keeps it correct even when one `defvar`'s initializer
+    /// references an earlier one — the checker's forward-reference
+    /// restriction guarantees "earlier in the file" for any such reference,
+    /// so eager, in-order promotion here guarantees "already promoted,
+    /// lower id" for it too. The JIT path (`Self::add_compiled_function`)
+    /// has no such concern — compiling and running happen in the same
+    /// `Heap` there, so lazy, reference-driven promotion (its own call
+    /// here) is simpler and just as correct.
+    pub(crate) fn promote_global(&self, heap: &mut Heap, path: &Path) -> Result<usize, EvalError> {
+        if let Some(&id) = self.compiled_globals.borrow().get(path) {
+            return Ok(id);
+        }
+        let slot = self
+            .globals
+            .get(path)
+            .ok_or_else(|| EvalError::Internal(format!("compile: global \"{}\" is not defined", path)))?;
+        let v = slot.get(heap);
+        let value = rtvalue_to_struct_field(heap, &v).map_err(|_| {
+            EvalError::Panic(format!(
+                "compile: global \"{}\" has a type not yet supported for compiled access \
+                 (Option/Result/a user enum can't cross into compiled code yet)",
+                path
+            ))
+        })?;
+        let id = crate::compile::runtime::global_new(heap, value);
+        self.compiled_globals.borrow_mut().insert(path.clone(), id);
+        Ok(id)
+    }
+
     /// Compiles the `defun` named `name` (looked up in `self.fns`) into one
     /// LLVM function — named `internal_name` — added to `module`. Shared by
     /// [`Self::compile_function`] (JIT, Phase 1) — which always passes a
@@ -1064,6 +1164,16 @@ impl Interp {
     ) -> Result<(), EvalError> {
         let (params, body) = self.compiled_fn_body(name)?;
 
+        // Every global this body reads/assigns must have a compiled-global
+        // slot before translation starts — `ast_to_sexpr` looks each one up
+        // by id, not by name (see `Ctx::globals`'s doc comment), so there is
+        // nothing to resolve lazily mid-translation the way `compile-call`'s
+        // `get-function` can for an ordinary function name.
+        for target in crate::compile::ast_bridge::collect_global_targets(&body) {
+            self.promote_global(heap, &target)?;
+        }
+        let compiled_globals = self.compiled_globals.borrow();
+
         // Builds `((a . kind) (b . kind) ...)`, the `Sexpr` list of typed
         // name pairs `compiler.rs`'s `bind-params` walks to know which
         // logical argument-array slot binds to which name — and, for the
@@ -1079,13 +1189,77 @@ impl Interp {
             Err(e) => return Err(EvalError::Panic(e.to_string())),
         };
         heap.push_root(param_list);
-        let body_sexpr = match crate::compile::ast_bridge::ast_to_sexpr(heap, &body, &self.struct_types) {
+        let body_sexpr = match crate::compile::ast_bridge::ast_to_sexpr(heap, &body, &self.struct_types, &compiled_globals) {
             Ok(v) => v,
             Err(e) => {
                 heap.pop_root(); // param_list
                 return Err(EvalError::Panic(e.to_string()));
             }
         };
+        heap.pop_root(); // param_list
+
+        let compiler_path = Path::root("compile-function");
+        let compiler_def = self.fns.get(&compiler_path).ok_or_else(|| {
+            EvalError::Internal("compile: compiler body not loaded — call load_compiler first".into())
+        })?;
+        self.apply(
+            heap,
+            compiler_def,
+            vec![
+                RtValue::LlvmModule(module),
+                RtValue::Str(internal_name.into()),
+                RtValue::Sexpr(param_list),
+                RtValue::Sexpr(body_sexpr),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// AOT-only counterpart of [`Self::add_compiled_function`]: compiles a
+    /// `defvar`'s initializer expression `value` into a zero-argument LLVM
+    /// function `internal_name` in `module` that, when called, evaluates it
+    /// and calls `rt_global_new` to establish that global's *runtime*
+    /// storage — one entry in the startup sequence `compile::aot::
+    /// compile_file` generates and wires into `main` (via
+    /// `compile::aot::build_main_wrapper`) so a standalone executable
+    /// allocates each of its own promoted globals before `tl_main` (the
+    /// file's own `main` defun) ever runs. See [`Self::promote_global`]'s
+    /// doc comment for why `compile::aot::compile_file` must call these, in
+    /// the same order it called `Self::promote_global` for each `defvar`.
+    ///
+    /// Mirrors `add_compiled_function`'s own translate-then-`compile-
+    /// function` shape almost exactly, just with no parameters and a body
+    /// wrapped as `(global-init kind value-form)`
+    /// ([`crate::compile::ast_bridge::ast_to_sexpr_for_global_init`],
+    /// `compiler.rs`'s `compile-global-init`) instead of an ordinary
+    /// translated function body — `value` may itself reference other
+    /// globals (an earlier `defvar`'s value), so the same promotion pass
+    /// applies here too.
+    pub(crate) fn add_compiled_global_init(
+        &self,
+        heap: &mut Heap,
+        module: Rc<RefCell<Module<'static>>>,
+        internal_name: &str,
+        value: &Typed,
+    ) -> Result<(), EvalError> {
+        for target in crate::compile::ast_bridge::collect_global_targets(value) {
+            self.promote_global(heap, &target)?;
+        }
+        let compiled_globals = self.compiled_globals.borrow();
+
+        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, &[]) {
+            Ok(v) => v,
+            Err(e) => return Err(EvalError::Panic(e.to_string())),
+        };
+        heap.push_root(param_list);
+        let body_sexpr =
+            match crate::compile::ast_bridge::ast_to_sexpr_for_global_init(heap, value, &self.struct_types, &compiled_globals) {
+                Ok(v) => v,
+                Err(e) => {
+                    heap.pop_root(); // param_list
+                    return Err(EvalError::Panic(e.to_string()));
+                }
+            };
         heap.pop_root(); // param_list
 
         let compiler_path = Path::root("compile-function");
@@ -2554,11 +2728,12 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// call these to build/read/write a `BoxedObj::Struct` — the same
 /// `BoxedObj::Struct` mem/rt-layer plumbing Stage 1 already exercised in
 /// isolation, wired to the compiler for the first time here.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 24] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 27] {
     use crate::compile::runtime::{
-        rt_box_kind, rt_car, rt_cdr, rt_cons, rt_float_new, rt_float_value, rt_match_fail, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
-        rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_lt,
-        rt_str_new, rt_str_ref, rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_truncate_sexpr_roots,
+        rt_box_kind, rt_car, rt_cdr, rt_cons, rt_float_new, rt_float_value, rt_global_get, rt_global_new, rt_global_set, rt_match_fail,
+        rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root,
+        rt_str_append, rt_str_eq, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_get, rt_struct_field_set,
+        rt_struct_new, rt_truncate_sexpr_roots,
     };
     [
         ("rt_car", rt_car as usize),
@@ -2585,6 +2760,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 24] {
         ("rt_struct_new", rt_struct_new as usize),
         ("rt_struct_field_get", rt_struct_field_get as usize),
         ("rt_struct_field_set", rt_struct_field_set as usize),
+        ("rt_global_new", rt_global_new as usize),
+        ("rt_global_get", rt_global_get as usize),
+        ("rt_global_set", rt_global_set as usize),
     ]
 }
 
