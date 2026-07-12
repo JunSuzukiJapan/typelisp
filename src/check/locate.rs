@@ -17,7 +17,7 @@
 //! a wrapper node sharing its first child's exact position — broken toward
 //! the deeper node). [`locate_node`] is that search.
 
-use crate::{DefLocs, Expr, Loc, TopLevel, Typed};
+use crate::{DefLocs, Expr, Loc, Registry, TopLevel, Typed};
 
 /// Find the smallest node in `body` whose recorded location is at or before
 /// `(line, col)` in `file` — see the module doc comment for why "greatest
@@ -150,4 +150,109 @@ pub fn definition_target(node: &Typed, def_locs: &DefLocs) -> Option<Loc> {
 /// introducing a pretty-printer.
 pub fn hover_text(node: &Typed) -> String {
     format!("{:?}", node.ty)
+}
+
+/// What a [`CompletionCandidate`] names — mirrors the tables a
+/// [`crate::Namespace`] keeps, plus `Module` for a child module name (useful
+/// for completing a `module::` prefix).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompletionKind {
+    Function,
+    Method,
+    Type,
+    Variable,
+    Macro,
+    Trait,
+    Module,
+}
+
+/// One name reachable for completion, with enough to render an LSP
+/// `CompletionItem` (`src/bin/lsp.rs::handle_completion`): its bare name
+/// (already lowercase — the reader case-folds every symbol), what kind of
+/// thing it is, and a short human-readable detail string.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompletionCandidate {
+    pub name: String,
+    pub kind: CompletionKind,
+    pub detail: String,
+}
+
+/// Every bare name visible for completion while checking module
+/// `module_path`: that module's own definitions, plus the root namespace's
+/// *public* ones (root's own, if `module_path` is already empty) — the same
+/// two-namespace search order `Checker::resolve_fn`/`resolve_global`/etc. use
+/// at name-resolution time, just enumerated instead of looked up by one name.
+/// Best-effort like the rest of this module: a `use`-imported bare name
+/// (`Namespace::aliases`/`mod_aliases`/`static_uses`) is only offered when
+/// `module_path` is the name's own module — a root-level `use` alias isn't
+/// re-checked for visibility here the way `resolve_ctor` checks the owning
+/// type's `public` flag, so it's simply left out of the cross-module case
+/// rather than risking a false positive.
+pub fn completion_candidates(reg: &Registry, module_path: &[String]) -> Vec<CompletionCandidate> {
+    let mut out = Vec::new();
+    if let Some(ns) = reg.root.module(module_path) {
+        push_namespace(ns, &mut out, false);
+    }
+    if !module_path.is_empty() {
+        push_namespace(&reg.root, &mut out, true);
+    }
+    out
+}
+
+/// Push every name in `ns` into `out`. `public_only` gates the four tables
+/// that carry a `public` flag (fns/macros/types/vars/traits); constructor and
+/// `use`-alias tables are only ever pushed when `public_only` is false (see
+/// [`completion_candidates`]'s doc comment), and child module names are
+/// always offered regardless (a module itself has no visibility flag today).
+fn push_namespace(ns: &crate::Namespace, out: &mut Vec<CompletionCandidate>, public_only: bool) {
+    for (name, sig) in &ns.fns {
+        if !public_only || sig.public {
+            out.push(CompletionCandidate {
+                name: name.clone(),
+                kind: CompletionKind::Function,
+                detail: format!("({:?}) -> {:?}", sig.params, sig.ret),
+            });
+        }
+    }
+    for (name, def) in &ns.macros {
+        if !public_only || def.public {
+            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Macro, detail: "macro".to_string() });
+        }
+    }
+    for (name, def) in &ns.types {
+        if !public_only || def.public {
+            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Type, detail: "type".to_string() });
+        }
+    }
+    for (name, vi) in &ns.vars {
+        if !public_only || vi.public {
+            out.push(CompletionCandidate {
+                name: name.clone(),
+                kind: CompletionKind::Variable,
+                detail: format!("{:?}", vi.ty),
+            });
+        }
+    }
+    for (name, def) in &ns.traits {
+        if !public_only || def.public {
+            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Trait, detail: "trait".to_string() });
+        }
+    }
+    for name in ns.modules.keys() {
+        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Module, detail: "module".to_string() });
+    }
+    if !public_only {
+        for name in ns.ctors.keys() {
+            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Function, detail: "constructor".to_string() });
+        }
+        for name in ns.aliases.keys() {
+            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Function, detail: "use".to_string() });
+        }
+        for name in ns.mod_aliases.keys() {
+            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Module, detail: "use".to_string() });
+        }
+        for name in ns.static_uses.keys() {
+            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Method, detail: "use".to_string() });
+        }
+    }
 }

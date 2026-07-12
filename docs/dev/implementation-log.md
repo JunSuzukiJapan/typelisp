@@ -3164,3 +3164,53 @@ Option/Result/ユーザーenum型のグローバルはcompile対象から参照�
 
 新規テスト: `tests/compile_test.rs`（JIT読み書き+Option型エラー、3件）、
 `tests/compile_file_test.rs`（AOT読み書き+JIT/AOT一致性、3件）。既存500件超は無回帰。
+
+## LSP: 補完（textDocument/completion）実装（2026-07-12）
+
+hover/goto-definitionに続き、TODO.mdで「未着手」としていた補完を実装。設計メモ
+（TODO.md「元の設計メモ」節）どおり、エラー耐性が無いtypelispの`Reader`を騙すための
+前処理層＋可視スコープ内の名前を`Registry`から列挙する方式を採用。
+
+**前処理層**（`src/bin/lsp.rs`、LSPトランスポート固有なのでlib側には置いていない）:
+- カーソル位置から後方に「区切り文字（`read/reader.rs`の`is_delimiter`と同じ集合:
+  空白/`(`/`)`/`"`/`'`/`` ` ``/`;`）でない文字」が続く範囲を「入力中の識別子」として
+  切り出し、それより前のテキストだけを再チェック対象にする——入力中の識別子自体を
+  含めてしまうと「未解決の参照」としてチェック全体が失敗するため、丸ごと除外するのが
+  一番簡単で確実だった。
+- 残ったテキストはほぼ必ず閉じ括弧が足りていないので、`heuristically_close`が
+  `read/reader.rs`のトークナイザを必要な範囲だけ模倣した独自スキャナで括弧の深さを数え、
+  不足分の`)`を機械的に補ってから`Reader`に渡す。行コメント（`;`〜EOL）・ブロックコメント
+  （`#| ... |#`、ネスト対応）・文字列リテラル（バックスラッシュエスケープ対応）・文字
+  リテラル（`#\(`のような「1文字なのに括弧に見える」トークン）は括弧カウントの対象外に
+  スキップする必要があり、これを外すと`#\(`のようなコードで簡単に深さがずれた。
+- `char_offset`/`prefix_start`は`Position`(LSPの0始まり行/文字)からのオフセット計算・
+  識別子境界探索。`read/reader.rs::Cursor`が`chars: Vec<char>`（バイトではなく文字単位）で
+  行/列を管理しているのに合わせ、こちらも`Vec<char>`で統一（hover/goto-defが既に
+  `pos.character + 1`をそのまま`Loc`の列として使っている簡略化を踏襲——UTF-16コード
+  ユニット厳密対応はしていない、MVPスコープ）。
+
+**列挙ロジック**（`src/check/locate.rs::completion_candidates`、lib側——`Checker`と
+`Registry`にしか依存しないのでコアパイプラインのテスト（`tests/lsp_completion_test.rs`）は
+`Checker::check_form`を直接駆動でき、LSPのstdioトランスポートを介さない）:
+- `Checker::resolve_fn`/`resolve_global`等が使っている「同一モジュール（`cur_ns()`）→
+  ルート（`public`なら可視）」という既存の2段探索順序を、名前引きではなく列挙という形で
+  そのままなぞった（`Namespace::fns`/`macros`/`types`/`vars`/`traits`/`modules`/`ctors`/
+  `aliases`/`mod_aliases`/`static_uses`の9テーブル）。
+- 補完はチェック完了後の状態を見るため、`Checker`自身の`self.ns`（チェック中の一時的な
+  モジュールパス、`check_module`がpush/popして最終的に空へ戻る）は使えない——代わりに
+  `project::module_segs_for(file, src_root)`でファイルパスから独立に導出したモジュール
+  パスを引数で渡す設計にした（`completion_candidates(reg: &Registry, module_path: &[String])`
+  という自由関数、`Checker`のメソッドにしなかった理由もこれ）。
+- チェッカーは単一パスでフォームを処理しながらレジストリを直接書き換えていくため、
+  パッチ済みテキストが（別の理由で）チェック失敗しても、失敗地点より前に登録済みの定義は
+  そのまま`Registry`に残っている——`candidates_for`は`load_entry_src`の`Result`を捨てて
+  常に`checker.registry()`を読む設計にし、これを利用してわざと緩くした。
+
+**既知の制限**（TODO.mdのhover/goto-defと同じ理由）: ローカル変数（`let`/lambda束縛）は
+補完候補に出ない——`Registry`/`Namespace`ツリーにしか無い名前しか列挙できないため。
+
+新規テスト: `src/bin/lsp.rs`内`#[cfg(test)] mod completion_helper_tests`（`heuristically_close`/
+`char_offset`/`prefix_start`の単体テスト9件、文字列・文字リテラル・行コメート内の括弧を
+誤カウントしないことを含む）、`tests/lsp_completion_test.rs`（`completion_candidates`の
+モジュール可視性込み5件）。stdio経由の手動スモークテスト（`initialize`→`didOpen`→
+`textDocument/completion`）でも、閉じ括弧が足りない未確定入力に対して補完が返ることを確認。
