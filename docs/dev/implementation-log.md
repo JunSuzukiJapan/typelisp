@@ -3214,3 +3214,125 @@ hover/goto-definitionに続き、TODO.mdで「未着手」としていた補完�
 誤カウントしないことを含む）、`tests/lsp_completion_test.rs`（`completion_candidates`の
 モジュール可視性込み5件）。stdio経由の手動スモークテスト（`initialize`→`didOpen`→
 `textDocument/completion`）でも、閉じ括弧が足りない未確定入力に対して補完が返ることを確認。
+
+## LSP: ローカル変数の hover / goto-definition / 補完 対応（2026-07-12、3コミット）
+
+上記の補完実装（コミット`3e6272d`）で hover/goto-definition/補完の3機能が揃ったが、
+すべてに共通する既知の制限として「ローカル変数（`let`/`let*`/`lambda`/`labels`束縛・関数
+パラメータ）が対象外」が残っていた。ユーザーがこの制限の「完全対応」を選択したため、
+Plan modeで設計を固めた上でPart A→B→Cの3段階（各段階でcargo test全体緑を確認してから
+個別コミット）で実装。
+
+**根本原因（2つ）**: (1) 位置テーブル`Heap.cons_locs`はリスト形式の頭セルにしか記録されず、
+`Value::Symbol`はインターンされ出現ごとの識別子が無いため裸の変数参照に位置を紐付けられ
+なかった。(2) 束縛サイト（`let`の束縛名・関数パラメータ名等）の位置もどこにも記録されて
+いなかった。
+
+**設計方針**: `Expr`/`TopLevel`の束縛構造（`Expr::Let`のタプル・`Lambda.params`・`Labels`
+defs・`Defun.params`）は変更しない——拡張するとインタプリタ（`eval/interp.rs`）とcompile
+パイプライン（`compile/ast_bridge.rs`等、過去にヒーゼンバグの前例あり——
+[[typelisp-compile-match-arm-heisenbug]]）に波及するため。位置情報は**チェッカ内部の`Env`
+と`DefLocs`側テーブルに閉じ込め、interp/compileのコードには一切触れない**方針とした。
+
+### Part A（commit `78a3602`）: 裸アトムへのソース位置付与
+
+- `crates/typelisp-mem/src/heap.rs`: `cons_locs`と同型の新テーブル`elem_locs`
+  （スパインセルaddr→そのcarの位置）を新設。`set_elem_loc`/`list_to_vec_locs`
+  （`Vec<(Value, Option<Loc>)>`を返す`list_to_vec`の対）を追加、`clear_cons_locs`で
+  併せてクリア。
+- `src/read/reader.rs`: `read_list`の読み取りループで各要素の直前に`cur.loc()`を捕捉し
+  （`elem_locs: Vec<Loc>`、`elems`と並行）、build ループ（スパインセルを後ろから組み立てる
+  既存ループ）で各セルに`set_elem_loc`する。
+- `src/check/checker.rs`: `check`を`check_at(..., loc_hint: Option<Loc>)`の薄いラッパに
+  分割——`check_at`は「cons なら`cons_loc`、atomなら`loc_hint`」で`Typed.loc`を埋める。
+  `args: &[Value]`を引数式としてcheckする約15のヘルパ（`check_call`/`check_if`/`check_let`/
+  `check_seq`/`check_lambda`/`check_labels`/`check_apply`/`check_assoc_call`/
+  `check_construct`/`check_match`/`check_setf`/`check_return`/`check_panic`/`check_the`/
+  `check_as`/`check_list_lit`/`check_path_call`/`try_instance_method`/`check_instance_method`
+  等）に並行スライス`arg_locs: &[Option<Loc>]`を追加し、`check_list`が`list_to_vec_locs`で
+  `args`/`arg_locs`を対で生成して fan-out する。`nth_loc`ヘルパ（`arg_locs.get(i).cloned()
+  .flatten()`）で個々のインデックス参照を簡潔にした。
+
+これ単独で**ローカル変数へのhover**が動くようになった（`locate_node`が`Var`ノードを正確に
+特定でき、`hover_text`は既存の`node.ty`をそのまま使うため無改造）。副産物として全アトム
+（`Global`/`FnRef`/`MethodRef`/リテラル）のhover/goto-def精度も向上した。
+
+新規テスト: `tests/lsp_locate_test.rs`にローカル変数/let束縛へのhoverが正しい型を返す
+（周囲のノードの型とは異なる型を選ぶことで誤ってenclosingノードを掴んでいないか検証）
+新規テスト2件。既存500件超は無回帰（miri `read_test`/`mem_test`も実施）。
+
+### Part B（commit `1147dc7`）: ローカルのgoto-definition
+
+- `src/check/registry.rs`: `DefLocs`に`local_refs: HashMap<(u32,u32), Loc>`（参照位置
+  (line,col)→束縛サイトLoc）を新設。グローバル定義と異なり`Path`で一意識別できないため
+  参照位置自体をキーにする——**クエリ時にスコープ探索をしない**設計（チェック時に一度だけ
+  解決して焼き込む、[[feedback-static-types-are-always-known]]の方針）。
+- `src/check/checker.rs`: `Env.vars`を`Vec<(String, Type)>`→`Vec<(String, Type,
+  Option<Loc>)>`に拡張（3-tuple化、checker内部構造でありASTではないため影響範囲は
+  checker.rs内に閉じる）。`Env::get_loc`/`Env::extended_with_locs`を新設（既存の
+  `Env::extended`は「位置を追跡しない」呼び出し元向けに維持——match束縛や
+  monomorphization再チェック等）。`Checker`に`local_refs: RefCell<HashMap<(u32,u32),
+  Loc>>`スクラッチフィールドを新設（`loop_stack`/`warnings`と同じ「`&self`の再帰中に書く」
+  interior mutabilityパターン）、`check_at`で`Expr::Var`が`env.get_loc`にヒットしたら
+  参照位置→束縛位置を記録し、`check_form`（`&mut self`の外側境界）の終端で
+  `self.reg.def_locs.local_refs`へ`drain`して反映。
+  `parse_params`/`parse_param_pairs`/`parse_defmethod_sig`（`MethodSig`に
+  `self_name_loc`/`param_locs`追加）を各束縛名の位置も返すよう拡張し、
+  `check_let`/`let_star_rec`/`check_lambda`/`check_labels`/`check_defun`/`check_defmethod`
+  が`extended_with_locs`を使うよう更新。
+- 副産物のバグ修正: `check_list`の「ローカル変数を関数値として呼ぶ」分岐
+  （`labels`で定義した関数を`(g 1)`のように呼ぶケース）が`check_at`を介さず手組みの
+  `Typed{ loc: None, ... }`を作っていたため、コールバック自身の位置が付かず`labels`関数名の
+  goto-defが解決できなかった——`check_at`経由に修正（非symbol-headの callee 分岐と対称に
+  なった）。
+- `src/check/locate.rs`: `definition_target`に`Expr::Var`アームを追加、
+  `def_locs.local_refs.get(&(node.loc.line, node.loc.col))`を引くだけ（スコープ探索なし）。
+
+match束縛は意図的にスコープ外のまま（既存`Env::extended`を維持、`Pattern::Bind`に位置
+追跡機構が無い）。`Expr`/`TopLevel`の束縛構造・interp/compileパイプラインは無変更。
+
+新規テスト: `tests/lsp_locate_test.rs`にgoto-def成功系4件（param/let/lambda/labels、
+labelsは関数名自体と内部パラメータの両方を検証）+ match束縛は従来通り`None`の確認1件。
+既存無回帰。
+
+### Part C（commit `8ac9dd9`）: 補完へのローカル名列挙
+
+- `src/check/locate.rs`: `completion_locals(body, file, line, col) -> Vec<String>`を新設。
+  `locate_node`でカーソル位置の最小ノード（target）を特定した後、`body`の先頭から
+  スコープスタックを持って**同じ木を再走査**し、`Let`/`Lambda`/`Labels`ノードに入る際に
+  束縛名をpushしてから子へ降り、`std::ptr::eq(node, target)`でtargetに到達したらそこで
+  蓄積済みスコープを返す（`scope_top_level`/`scope_typed`の相互再帰）。`let`の束縛値は
+  outer scopeでチェックされる（CL `let`セマンティクス、`check_let`と同じ順序）ため、
+  束縛値の探索は該当名をpushする**前**に行う。
+  - 実装中に見つけたバグ: 当初`ptr::eq`チェックを各関数の**先頭**（match分岐に入る前）に
+    置いていたため、target が「スコープ導入ノード自身」（例：`let`の束縛リストを閉じた
+    直後、本体にまだ何も無い状態でカーソルが位置するケース）に一致した場合、
+    その束縛名を一度もpushしないまま早期returnしてしまっていた。`Let`/`Lambda`/`Labels`
+    の各分岐内で「束縛をpushした**後**」に`ptr::eq`判定するよう再構成して解消
+    （stdio経由の手動スモークテストで発覚——ユニットテストは束縛リスト閉じ直後ではなく
+    実在の本体文の位置を使っていたため検出できなかった）。
+- `src/bin/lsp.rs`: `candidates_for`がチェック成功時のみ`completion_locals`もマージ
+  （Registry候補は従来通りチェック失敗時もbest-effort、`completion_locals`は完全な
+  `Typed`木が要るため成功時限定）。副産物として`needs_completion_placeholder`を新設：
+  補完リクエストは「入力中の識別子を除去→閉じ括弧を補う」設計のため、識別子がbody/
+  引数位置の**最後の要素**だった場合に「bodyが空になる」「呼び出しの引数が足りない」
+  という、識別子そのものとは無関係な理由でチェック全体が失敗し、ローカル補完が
+  丸ごと無効化される問題が判明（デバッグ用の直接実行スクリプトで検証）。
+  識別子の直前（末尾空白除去後）が`(`でなければ（＝そのリストの先頭要素として新規に
+  タイプ中ではなく、既存の兄弟要素の後ろに続く位置だと分かれば）、閉じ括弧の前に
+  `(panic "")`（`Type::Never`型、`(defun f () bool 0)`は型不一致エラーだが
+  `(defun f () bool (panic ""))`は成功することを実測確認済み——「あらゆる期待型を満たす」
+  性質を利用）を挿入する。`(`直後（新規呼び出しのcallee名がタイプ中）の場合は挿入しない
+  ——空リスト`()`は`Unit`として素直に読めるが、`(panic "")`を挿入すると
+  `((panic ""))`となり Never 値が「呼び出し可能な値として apply される」形になって
+  `value is not callable`エラーを起こす回帰になるため。
+
+既知の残存ギャップ: `completion_locals`のdocコメント参照——`Typed.loc`が範囲でなく開始点
+のみのため、スコープ境界直後（束縛リストを閉じた直後で本体に何も無い状態）でのみ稀に
+局所名を取りこぼす（本体に既存の文が1つでもあれば発生しない）。
+
+新規テスト: `tests/lsp_completion_test.rs`に`completion_locals`単体3件（param+let束縛の
+基本ケース、兄弟let間でスコープが漏れないこと、matchパターン束縛が対象外であること）、
+`src/bin/lsp.rs`に`needs_completion_placeholder`単体3件。stdio経由の手動スモークテストで
+ローカルパラメータ+let束縛の両方が実際に補完候補に出ることを確認、既存の完了パス
+（"add"がregistry経由で見つかる元のスモークテスト）も無回帰。cargo test全体green。

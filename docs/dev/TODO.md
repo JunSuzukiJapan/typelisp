@@ -25,44 +25,31 @@
   大きなプロジェクトでキー入力毎の再読込コストが問題になったら着手）。
 - **`use`はソースルート相対のみ**: 兄弟ファイル相対の解決は未対応（MVP判断）。
 
-#### hover / goto-definition / 補完（すべて実装済み、2026-07-11〜2026-07-12）
+#### hover / goto-definition / 補完（すべて実装済み、ローカル変数含む——2026-07-11〜2026-07-12）
 
-**実装済み**: 当初計画（下記「元の設計メモ」）の想定より軽い基盤で済んだ。`Typed.loc`は
-既に存在しリスト形式ノードの開き括弧位置を記録していた（`Checker::check`が
-`heap.cons_loc(v)`で埋める）ため、終了位置（span）を新設せずとも
-「カーソル位置以下で最大の開始位置を持つノードを深さ優先で探す」ことで正しい最小包含ノードが
-求まる（兄弟フォームはソース順に重ならないため）——reader/heap側の変更は不要だった。
-- `src/check/registry.rs`: `DefLocs`（`Registry.def_locs`）を新設。`FnSig`/`AssocFn`自体には
-  フィールドを足さず（`with_builtins()`だけでリテラルが計130件超あり、ビルトインには
-  参照すべき位置がそもそも無いため）、サイドテーブル方式でチェッカーの7つの登録箇所
-  （`check_defun`/`check_defmethod`/`check_defstruct`/`check_defenum`/`check_defvar`/
-  `check_deftrait`/`check_defmacro`）でだけ書き込む。
-- `src/check/locate.rs`（新規）: `locate_node`（カーソル→最小包含ノード）/
-  `definition_target`（ノード→`DefLocs`引き、Global/Call/FnRef/Assoc/MethodRef/Constructの
-  みが対象）/ `hover_text`（`Typed.ty`を`{:?}`でフォーマット、`Type`に`Display`実装が無いため
-  既存のエラーメッセージと同じ流儀）。
-- `src/bin/lsp.rs`: `hover_provider`/`definition_provider`を有効化。doc毎に直近成功した
-  `Analysis { body: Vec<TopLevel>, def_locs: DefLocs }`をキャッシュ（型エラーがある間は
-  直近成功時点のものを保持）し、`textDocument/hover`/`textDocument/definition`を処理。
-- 単体テスト: `tests/lsp_locate_test.rs`（LSPのstdioトランスポートは介さず、
-  `Checker::check_form`を直接駆動してコアロジックのみ検証）。
+`src/check/registry.rs`の`DefLocs`（`Registry.def_locs`）・`src/check/locate.rs`
+（`locate_node`/`definition_target`/`hover_text`/`completion_candidates`/`completion_locals`）・
+`src/bin/lsp.rs`の`hover_provider`/`definition_provider`/`completion_provider`で実装。
+グローバル定義（`defun`/`defmethod`/`defstruct`/`defenum`/`defvar`/`deftrait`/`defmacro`）と
+ローカル束縛（`let`/`let*`/`lambda`/`labels`束縛・関数パラメータ）の両方をカバーする
+（当初は後者を「既知の制限」としていたが2026-07-12に解消——`Heap::elem_locs`でリスト要素
+（裸アトム含む）に位置を付与し、`DefLocs::local_refs`で参照位置→束縛位置を解決）。
+詳細な設計・段階分けは[implementation-log.md](implementation-log.md)の
+「LSP: ローカル変数の hover / goto-definition / 補完 対応」節を参照。
+単体テスト: `tests/lsp_locate_test.rs`/`tests/lsp_completion_test.rs`（LSPのstdioトランスポートは
+介さず`Checker::check_form`を直接駆動してコアロジックのみ検証）。
 
-**既知の制限（意図的なMVPスコープ）**:
-- ローカル変数（`Expr::Var`、`let`/`lambda`束縛）への goto-definition は非対応
-  （束縛側の位置も追跡していない）——カーソルがローカル変数参照上にある場合は
-  「最小包含ノード」まで遡って解決を試みるが、そのノードが解決可能な参照でなければ
-  何も返らない。
-- アトム単体（裸のシンボル・リテラル）は自身の位置を持てない
-  （`Value::Symbol`はヒープ上で一意な参照ではなく使い回されるため、`cons_locs`と同じ
-  仕組みでは追跡不可能）。真のspan対応（reader全体の作り替えが必要）をすればより高精度な
-  hover/goto-defになるが、現状のMVPでは「S式は兄弟フォームがソース順に重ならない」性質だけで
-  実用上十分な精度が出ているため見送った。
-
-**補完も実装済み（2026-07-12）**: 上記設計メモどおり、「入力中の識別子を除いたテキストの
-閉じ括弧をヒューリスティックに補ってから読む」前処理層＋可視スコープ内の名前を`Registry`
-から列挙する方式で実装。詳細は
-[implementation-log.md](implementation-log.md)の「LSP: 補完（textDocument/completion）実装」
-節を参照。既知の制限はhover/goto-defと同じくローカル変数（`let`/lambda束縛）が対象外。
+**既知の制限（意図的なMVPスコープ、解消せず残す）**:
+- `match`パターン束縛（`(match x ((Some y) ...))`の`y`）へのgoto-definition・補完は非対応
+  （`Expr::Match`の`Arm`が束縛位置を追跡していない——グローバル/`let`系と異なり優先度が低いと
+  判断）。hoverは通常通り機能する（`Var`参照として位置は持つため）。
+- 補完のローカル名列挙（`completion_locals`）は`Typed.loc`が範囲でなく開始点のみのため、
+  スコープ境界直後（束縛リストを閉じた直後で本体にまだ何も無い状態）でのみ稀に取りこぼす
+  場合がある——本体に既存の文が1つでもあれば発生しない、詳細は`completion_locals`のdocコメント
+  参照。
+- アトム単体でも**リスト要素として現れる場合は**位置を持つ（2026-07-12対応）が、
+  リストに一切現れない裸アトム（実質発生しない）は依然として位置を持てない。真のspan対応
+  （reader全体の作り替えが必要）は引き続き見送り。
 
 `compile`（LLVM JIT/AOT）機能は現状「今のフェーズが実際に使うASTノードだけ本実装、それ以外は
 `ast_bridge`が`(unsupported "<Variant>")`を返しコンパイラ本体が明示的にpanicする」設計
