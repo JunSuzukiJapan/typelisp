@@ -247,5 +247,16 @@ pub enum Pattern {
         /// `RtValue::Data`'s fields are already `RtValue`s and a `Sexpr`
         /// scrutinee's destructuring (`match_sexpr_ctor`) is variant-driven.
         sexpr_fields: Vec<bool>,
+        /// Per-field: the same fully-instantiated `Type`
+        /// `Checker::check_ctor_pattern` computes `sexpr_fields` from, kept
+        /// in full rather than reduced to a single bool. The interpreter
+        /// doesn't need this (its boxed-struct destructuring arm decodes by
+        /// runtime shape, `interp.rs`'s `decode_nonsexpr_field`), but
+        /// compiled code can't — a boxed-struct scrutinee's compiled
+        /// `match` (`ast_bridge::pattern_to_sexpr`'s struct-kind branch)
+        /// needs each field's own `ast_bridge::struct_field_kind`
+        /// (int/float/char/bool/passthrough), which `sexpr_fields`'s single
+        /// bit can't express.
+        field_types: Vec<Type>,
     },
 }

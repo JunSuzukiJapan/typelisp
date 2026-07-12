@@ -742,6 +742,34 @@ pub unsafe extern "C" fn rt_match_fail(_args: *const i64, _argc: u32) -> i64 {
     fatal("match: no pattern arm matched (the checker should have guaranteed exhaustiveness)")
 }
 
+/// `(panic msg)` for compiled code (`ast_bridge::translate_panic`/
+/// `compiler.rs`'s `compile-panic`): prints `"panic: {msg}"` — the same
+/// wording `EvalError::Panic`'s `Display` impl uses for an *interpreted*
+/// `(panic ...)` — and aborts the process. Unlike the interpreted path
+/// (where a user `panic` unwinds as an ordinary, recoverable `Result::Err`
+/// the caller can propagate), compiled code has no landing pads to unwind
+/// through across the JIT/AOT native-code boundary, so aborting is the only
+/// safe option here — the same rule every other unrecoverable compiled-code
+/// failure path (e.g. [`rt_match_fail`]) already follows. A deliberate
+/// behavioral divergence from the interpreter, not an oversight.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1`, `args[0]` must decode to a `Value::Str`; a `Heap`
+/// must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_panic(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_panic: expected 1 argument");
+    }
+    let msg = match decode(*args) {
+        Value::Str(id) => active_heap().string(id).to_string(),
+        _ => fatal("rt_panic: argument is not a Str"),
+    };
+    eprintln!("panic: {}", msg);
+    std::process::abort();
+}
+
 // ---- Stage 7: Str --------------------------------------------------------
 
 /// `(str c0 c1 ... cN-1)` for compiled code — builds a fresh, heap-allocated

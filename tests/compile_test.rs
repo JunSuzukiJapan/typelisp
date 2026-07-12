@@ -2890,6 +2890,62 @@ fn compile_matches_a_builtin_option() {
     assert_eq!(v, RtValue::Int(5));
 }
 
+// ---- boxed-struct (`defstruct`) `match` in compiled code -------------------
+//
+// A `defstruct`/`Vector` scrutinee is a properly tagged `Sexpr`
+// (`BoxedObj::Struct`) like the plain-`Sexpr` case, but has exactly one
+// variant (its own `new` constructor), so no tag test is ever emitted for it
+// — only per-field extraction via `rt_struct_field_get`/`compile-sexpr-field`
+// (`ast_bridge::pattern_to_sexpr`'s `MATCH_KIND_STRUCT` branch,
+// `compiler.rs`'s `compile-struct-field`). Closes the last remaining
+// `docs/dev/TODO.md` gap for compiled `Match`.
+
+/// A compiled `match` destructures a `defstruct` instance's fields by
+/// position, the same as the interpreter's own
+/// `match_destructures_a_struct_instance` (`tests/struct_test.rs`).
+#[test]
+fn compile_matches_and_destructures_a_defstruct_instance() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defstruct point (x i64) (y i64))
+        (defun sum ((p point)) i64 (match p ((new a b) (+ a b))))
+        (compile sum)
+        (sum (point::new 3 4))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(7));
+}
+
+/// A wildcard sub-pattern skips field extraction entirely, and binding order
+/// follows field declaration order, not name — mirrors the interpreter's own
+/// `match_on_a_struct_binds_fields_by_position`.
+#[test]
+fn compile_match_on_a_defstruct_binds_fields_by_position_and_skips_wildcards() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defstruct point (x i64) (y i64) (z i64))
+        (defun diff ((p point)) i64 (match p ((new a _ c) (- a c))))
+        (compile diff)
+        (diff (point::new 9 100 3))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(6));
+}
+
+/// Compiled and interpreted `match` agree over the same `defstruct` instance
+/// (the JIT/interp-parity check every other scrutinee kind above has).
+#[test]
+fn compile_and_interpret_agree_on_a_defstruct_match() {
+    let prog = r#"
+        (defstruct point (x i64) (y i64))
+        (defun sum ((p point)) i64 (match p ((new a b) (+ a b))))
+    "#;
+    let compiled = eval_ok_with_compiler(&format!("{}\n(compile sum)\n(sum (point::new 5 6))", prog));
+    let interpreted = eval_ok(&format!("{}\n(sum (point::new 5 6))", prog));
+    assert_eq!(compiled, interpreted);
+    assert_eq!(compiled, RtValue::Int(11));
+}
+
 // ---- compiled `match` on a `Sexpr` scrutinee ---------------------------------
 //
 // Re-enabled after Symbol/Sexpr redesign Phase 5's checker fence was lifted
@@ -3031,6 +3087,143 @@ fn compile_of_a_function_referencing_an_option_typed_global_is_a_clean_error() {
         (defvar (maybe Option<i64>) (Option::none))
         (defun read-maybe () Option<i64> maybe)
         (compile read-maybe)
+        "#,
+    )
+    .unwrap_err();
+    assert!(matches!(err, EvalError::Panic(_)), "expected a Panic, got {:?}", err);
+}
+
+// ---- `Expr::Panic`/`Expr::MethodRef`/`Expr::Quote` in compiled code --------
+//
+// Closes the three remaining `docs/dev/TODO.md` `unsupported` gaps.
+
+/// A `(panic msg)` branch compiles cleanly (`ast_bridge::translate_panic`/
+/// `compiler.rs`'s `compile-panic`), and the *non*-panicking path through the
+/// same function still runs correctly — actually triggering the panic would
+/// abort the whole test process (`rt_panic`'s documented "abort, don't
+/// unwind" contract), so this only exercises the branch never taken.
+#[test]
+fn compile_dispatches_a_function_with_an_untaken_panic_branch_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun safe-add ((a i64) (b i64)) i64 (if (eq b 0) (panic "b is zero") (+ a b)))
+        (compile safe-add)
+        (safe-add 10 2)
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(12));
+}
+
+/// A bare `char` literal now has a real compiled representation
+/// (`compile-char`/`sexpr-char`) — an oversight discovered while
+/// implementing `Expr::Quote`'s `Char` leaf (a real `Sexpr::Char`
+/// construction, e.g. `(Char c)`, already routed through `compile-value` on
+/// its own literal-`char` argument form, which previously had no dispatch
+/// tag at all). Returning a bare `char` across the JIT-call boundary stays
+/// out of scope (`Interp::call_compiled`'s own doc comment), so this keeps
+/// the literal entirely inside the compiled function, comparing it via the
+/// native `char` `equal` (`compile-assoc`'s char-native branch, already
+/// proven correct elsewhere in this file) — only the `Bool` result crosses
+/// the boundary.
+#[test]
+fn compile_dispatches_a_function_containing_a_bare_char_literal_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun is-a ((c char)) bool (equal c #\A))
+        (compile is-a)
+        (if (is-a #\A) 1 (if (is-a #\B) 2 0))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(1));
+}
+
+/// `+` reified as a value (`Expr::MethodRef`, `Checker::method_value`) and
+/// passed through a `Fn`-typed parameter — `translate_methodref`'s
+/// forwarding-`lambda`-to-`(assoc ...)` wrapper reaches the exact same
+/// `compile-assoc` native-arithmetic dispatch an ordinary `(+ a b)` call site
+/// already goes through. Both the receiver function (`apply2`) and the
+/// caller that reifies `+` (`use-plus`) are compiled.
+#[test]
+fn compile_dispatches_a_builtin_operator_reified_as_a_value_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun apply2 ((f (fn (i64 i64) i64)) (a i64) (b i64)) i64 (f a b))
+        (compile apply2)
+        (defun use-plus ((a i64) (b i64)) i64 (apply2 + a b))
+        (compile use-plus)
+        (use-plus 3 4)
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(7));
+}
+
+/// A user-defined instance method (not a native-arithmetic builtin) reified
+/// as a value dispatches through `compile-assoc-user` instead — the other
+/// half of `compile-assoc`'s two-way split, reached the same way an ordinary
+/// `p::double` call site would.
+#[test]
+fn compile_dispatches_a_user_defined_method_reified_as_a_value_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defstruct point (x i64))
+        (defmethod double ((self point)) i64 (* self::x 2))
+        (compile point::x)
+        (compile point::double)
+        (defun apply1 ((f (fn (point) i64)) (p point)) i64 (f p))
+        (compile apply1)
+        (defun use-double ((p point)) i64 (apply1 double p))
+        (compile use-double)
+        (use-double (point::new 21))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(42));
+}
+
+/// `(quote (1 2 3))` compiles to the same `compile-construct-sexpr`
+/// machinery an ordinary `(Cons (Int 1) ...)` construction already uses
+/// (`ast_bridge::translate_quote`) — a compiled function can build a quoted
+/// literal, and an ordinary compiled `match`-based `sum` (already proven
+/// correct against `Sexpr` scrutinees elsewhere in this file) can consume it.
+#[test]
+fn compile_dispatches_a_function_that_constructs_a_quoted_list_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun make-quoted () Sexpr (quote (1 2 3)))
+        (defun sum ((s Sexpr)) i64 (match s ((cons (int n) rest) (+ n (sum rest))) (_ 0)))
+        (compile make-quoted)
+        (compile sum)
+        (sum (make-quoted))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(6));
+}
+
+/// Compiled and interpreted agree on the same quoted literal — the
+/// JIT/interp-parity check every other construct in this file gets.
+#[test]
+fn compile_and_interpret_agree_on_a_quoted_list() {
+    let prog = r#"
+        (defun make-quoted () Sexpr (quote (1 2 3)))
+        (defun sum ((s Sexpr)) i64 (match s ((cons (int n) rest) (+ n (sum rest))) (_ 0)))
+    "#;
+    let compiled = eval_ok_with_compiler(&format!("{}\n(compile make-quoted)\n(compile sum)\n(sum (make-quoted))", prog));
+    let interpreted = eval_ok(&format!("{}\n(sum (make-quoted))", prog));
+    assert_eq!(compiled, interpreted);
+    assert_eq!(compiled, RtValue::Int(6));
+}
+
+/// A quoted symbol has no compiled representation (a `Sym`'s payload is a
+/// `SymId`, same gap `compile-sexpr-field`'s own doc comment already
+/// documents) — `translate_quote` bails out to a clean bridge-level
+/// `unsupported`, even though the *surrounding* function is otherwise
+/// perfectly compilable, rather than reaching a confusing low-level panic
+/// deep inside the interpreted compiler body.
+#[test]
+fn compile_of_a_function_quoting_a_symbol_is_a_clean_error() {
+    let err = run_with_compiler(
+        r#"
+        (defun q () Sexpr (quote foo))
+        (compile q)
         "#,
     )
     .unwrap_err();

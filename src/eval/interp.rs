@@ -1646,6 +1646,17 @@ impl Interp {
                 Some(RtValue::Sexpr(_)) => Some(Err(EvalError::Panic("sexpr-bool: expected a Bool Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-bool: expected a Sexpr argument".into()))),
             },
+            // `sexpr-char`: peer of `sexpr-int`/`sexpr-bool` for a `Char` node
+            // (`Value::Char`, an ordinary immediate, unlike `Float`'s boxed
+            // payload) — added alongside `compile-char`/the `char` dispatch tag
+            // (compiled code previously had no way to build/read a bare `char`
+            // literal at all, an oversight discovered while implementing
+            // `Expr::Quote`, whose `Char` leaf needs exactly this).
+            "sexpr-char" => match args.first() {
+                Some(RtValue::Sexpr(Value::Char(c))) => Some(Ok(RtValue::Char(*c))),
+                Some(RtValue::Sexpr(_)) => Some(Err(EvalError::Panic("sexpr-char: expected a Char Sexpr node".into()))),
+                _ => Some(Err(EvalError::Internal("sexpr-char: expected a Sexpr argument".into()))),
+            },
             // `sexpr-float`: peer of `sexpr-int` for a `Float` node (heap-boxed,
             // `Value::Boxed` — see `BoxedObj`). Added with the Phase 5 `match`
             // fence so a `Sexpr::Float` payload can still be read out without a
@@ -2728,12 +2739,12 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// call these to build/read/write a `BoxedObj::Struct` — the same
 /// `BoxedObj::Struct` mem/rt-layer plumbing Stage 1 already exercised in
 /// isolation, wired to the compiler for the first time here.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 27] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 28] {
     use crate::compile::runtime::{
         rt_box_kind, rt_car, rt_cdr, rt_cons, rt_float_new, rt_float_value, rt_global_get, rt_global_new, rt_global_set, rt_match_fail,
-        rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root,
-        rt_str_append, rt_str_eq, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_get, rt_struct_field_set,
-        rt_struct_new, rt_truncate_sexpr_roots,
+        rt_panic, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr,
+        rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_get,
+        rt_struct_field_set, rt_struct_new, rt_truncate_sexpr_roots,
     };
     [
         ("rt_car", rt_car as usize),
@@ -2742,6 +2753,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 27] {
         ("rt_set_car", rt_set_car as usize),
         ("rt_set_cdr", rt_set_cdr as usize),
         ("rt_match_fail", rt_match_fail as usize),
+        ("rt_panic", rt_panic as usize),
         ("rt_push_sexpr_root", rt_push_sexpr_root as usize),
         ("rt_pop_sexpr_root", rt_pop_sexpr_root as usize),
         ("rt_push_permanent_sexpr_root", rt_push_permanent_sexpr_root as usize),

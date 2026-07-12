@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::freevars::{labels_free_vars, lambda_free_vars};
-use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, Type, Typed, Value};
+use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, QuotedSexpr, Type, Typed, Value};
 
 /// The four read-only inputs every scoped `translate_*` threads through
 /// unchanged, bundled so a call passes one `cx` instead of re-listing all
@@ -124,14 +124,54 @@ const KIND_FN: i64 = 1;
 const KIND_SEXPR: i64 = 2;
 
 /// Whether `ty` is the built-in `Sexpr` type — shared by every place that
-/// needs to single it out specifically: [`translate_match`] (only a `Sexpr`
-/// scrutinee gets a real translation; `Option`/`Result`/a `defstruct` stay
-/// `unsupported`), [`translate_construct`] (`Sexpr`'s own variants compile to
-/// the tagged-`i64`/`rt_cons` representation Stage 2/3/4/5 already built,
-/// every *other* ADT compiles to a freshly `malloc`'d box instead — Stage 6
-/// of the Sexpr-representation plan, `docs/implementation-log.md`), and [`binding_kind`].
+/// needs to single it out specifically: [`translate_match`] (a `Sexpr`
+/// scrutinee is [`MATCH_KIND_SEXPR`]), [`translate_construct`] (`Sexpr`'s own
+/// variants compile to the tagged-`i64`/`rt_cons` representation Stage
+/// 2/3/4/5 already built, every *other* ADT compiles to a freshly
+/// `malloc`'d box instead — Stage 6 of the Sexpr-representation plan,
+/// `docs/implementation-log.md`), and [`binding_kind`].
 fn is_sexpr_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(p, _) if *p == Path::root("sexpr"))
+}
+
+/// [`translate_match`]/[`pattern_to_sexpr`]'s scrutinee-representation tags
+/// (`compiler.rs`'s `compile-match`/`compile-pattern-test` read the same
+/// numbering back): a tagged `Sexpr` (the tagged-`i64` bit tests
+/// `compile-sexpr-tag-test`/`compile-sexpr-field` do — needs a GC root of
+/// its own, since it's an ordinary heap-managed value); a sum-ADT box
+/// (`Option`/`Result`/a `defenum`, `compile-construct-box`'s raw `malloc`'d
+/// array tested by `compile-box-tag-test`/`compile-box-field` — never
+/// GC-managed, so needs no root); a boxed struct (`defstruct`/`Vector`,
+/// properly tagged like a `Sexpr` — needs the same root — but single-variant,
+/// so no tag test is ever emitted, only per-field extraction via
+/// `compile-struct-field`).
+const MATCH_KIND_SEXPR: i64 = 0;
+const MATCH_KIND_BOX: i64 = 1;
+const MATCH_KIND_STRUCT: i64 = 2;
+
+/// [`MATCH_KIND_SEXPR`]/[`MATCH_KIND_BOX`]/[`MATCH_KIND_STRUCT`] for a
+/// constructor pattern's/scrutinee's own type path — shared by
+/// [`translate_match`] (via [`match_scrut_kind`]) and [`pattern_to_sexpr`]'s
+/// `Pattern::Ctor` arm, so a nested sub-pattern's own type gets the same
+/// classification as a top-level scrutinee of that same type.
+fn match_kind_for_path(p: &Path, cx: Ctx) -> i64 {
+    if *p == Path::root("sexpr") {
+        MATCH_KIND_SEXPR
+    } else if cx.structs.contains(p) {
+        MATCH_KIND_STRUCT
+    } else {
+        MATCH_KIND_BOX
+    }
+}
+
+/// [`match_kind_for_path`] over a scrutinee's full static `Type` — `None`
+/// for a type that's never a `match` scrutinee in practice (anything but
+/// `Type::Named`), which [`translate_match`] turns into `unsupported`.
+fn match_scrut_kind(ty: &Type, cx: Ctx) -> Option<i64> {
+    match ty {
+        Type::Named(p, _) => Some(match_kind_for_path(p, cx)),
+        _ => None,
+    }
 }
 
 /// Classifies a bound name's (or `let` binding's) static type for the
@@ -412,8 +452,8 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         Expr::Float(f) => tagged(heap, "float", &[Value::Int(f.to_bits() as i64)]),
         // `bignum`/`ratio` have no compiled-code representation yet (no
         // `rt_bignum_*`/`rt_ratio_*` runtime support in `typelisp-rt`) — an
-        // explicit `unsupported` tag, the same treatment as `Panic`/`Quote`/
-        // `TraitCall` below, rather than silently miscompiling.
+        // explicit `unsupported` tag (the same treatment `TraitCall` below
+        // gets) rather than silently miscompiling.
         Expr::Bignum(_) => unsupported(heap, "Bignum"),
         Expr::Ratio(_) => unsupported(heap, "Ratio"),
         Expr::Bool(b) => tagged(heap, "bool", &[Value::Bool(*b)]),
@@ -495,7 +535,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // yet — see the module doc comment.
         Expr::Global(path) => translate_global(heap, path, &typed.ty, cx),
         Expr::FnRef(path) => translate_fnref(heap, path, &typed.ty),
-        Expr::MethodRef { .. } => unsupported(heap, "MethodRef"),
+        Expr::MethodRef { type_name, method } => translate_methodref(heap, type_name, method, &typed.ty),
         Expr::If(cond, then, els) => translate_if(heap, cond, then, els, &typed.ty, cx),
         Expr::Let(binds, body) => translate_let(heap, binds, body, cx),
         Expr::Call(path, args) => translate_call(heap, path, args, cx),
@@ -511,8 +551,8 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         Expr::Loop(body) => translate_loop(heap, body, cx),
         Expr::Break => tagged(heap, "break", &[]),
         Expr::Return(value) => translate_return(heap, value, cx),
-        Expr::Panic(_) => unsupported(heap, "Panic"),
-        Expr::Quote(_) => unsupported(heap, "Quote"),
+        Expr::Panic(msg) => translate_panic(heap, msg, cx),
+        Expr::Quote(datum) => translate_quote(heap, datum),
         // Diagnostics-only since monomorphization (see `Expr::TraitCall`'s
         // doc comment): a generic function's erased body is never registered
         // for execution and can't be `compile`d at all, so this node is
@@ -807,6 +847,210 @@ fn translate_return(heap: &mut Heap, value: &Option<Box<Typed>>, cx: Ctx) -> Res
             result
         }
     }
+}
+
+/// `Expr::Panic(msg)` -> `(panic msg-form)`. `msg` is always `Str`-typed
+/// (`Checker::check_panic` requires it), so — unlike [`translate_match`]/
+/// [`translate_field_get`] — no `kind`/scrutinee-shape dispatch is needed
+/// here at all: `compiler.rs`'s `compile-panic` just compiles `msg-form`
+/// (already the properly tagged `Sexpr::Str` representation [`Expr::Str`]'s
+/// own translation produces) and hands it to `rt_panic`, which prints it and
+/// aborts the process — the only safe way to fail out of compiled code (no
+/// landing pads to unwind through across the JIT/AOT native-code boundary).
+/// `Expr::Panic`'s own checked type is `Never`, so nothing downstream ever
+/// reads this node's value for real.
+fn translate_panic(heap: &mut Heap, msg: &Typed, cx: Ctx) -> Result<Value, Error> {
+    let msg_v = ast_to_sexpr_scoped(heap, msg, cx)?;
+    heap.push_root(msg_v);
+    let result = tagged(heap, "panic", &[msg_v]);
+    heap.pop_root();
+    result
+}
+
+/// `Expr::MethodRef { type_name, method }` -> a non-capturing `lambda` tag
+/// that forwards every argument straight through to an `(assoc type-name
+/// method true arg...)` call on the reified instance method — the
+/// [`translate_fnref`] forwarding-wrapper trick (labels/closures Stage 4),
+/// generalized from a free `defun` to an instance method: reaches the exact
+/// same `compile-assoc`/`compile-assoc-user` dispatch an ordinary
+/// `recv::method` call site already goes through (native `i32`/`i64`/`f64`/
+/// `char`/`string` arithmetic, or a `compile-assoc-user` mangled-name call
+/// for anything else — a user-defined method, or one on a primitive
+/// receiver), so no separate runtime representation for "instance method
+/// used as a value" is needed, the same reasoning [`translate_fnref`]'s own
+/// doc comment gives for a bare top-level function. Param names are
+/// synthesized positionally from `ty`'s arity, exactly like
+/// [`translate_fnref`] — `params[0]` is the receiver
+/// (`Checker::method_value`'s own `Type::Fn(af.sig.params, ..)` keeps the
+/// method's own registered signature unchanged, receiver included), matching
+/// `Expr::Assoc`'s own convention that the receiver is simply `args[0]`, so
+/// no special-casing is needed here.
+fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Type) -> Result<Value, Error> {
+    let params: Vec<(String, Type)> = match ty {
+        Type::Fn(params, ..) => params.iter().enumerate().map(|(i, t)| (format!("arg{}", i), t.clone())).collect(),
+        _ => return unsupported(heap, "MethodRef"),
+    };
+
+    let type_name_v = heap.alloc_string(type_name.local().to_string());
+    heap.push_root(type_name_v);
+    let method_v = heap.alloc_string(method.to_string());
+    heap.push_root(method_v);
+    let mut var_values = Vec::with_capacity(params.len());
+    for (n, t) in &params {
+        let is_fn = matches!(t, Type::Fn(..));
+        let s = heap.alloc_string(n.clone());
+        heap.push_root(s);
+        let v = match tagged(heap, "var", &[s, Value::Bool(is_fn)]) {
+            Ok(v) => v,
+            Err(e) => {
+                heap.pop_root(); // s
+                for _ in 0..var_values.len() {
+                    heap.pop_root();
+                }
+                heap.pop_root(); // method_v
+                heap.pop_root(); // type_name_v
+                return Err(e);
+            }
+        };
+        heap.pop_root(); // s
+        heap.push_root(v);
+        let pair = heap.cons(Value::Int(binding_kind(t)), v);
+        heap.pop_root(); // v
+        let pair = match pair {
+            Ok(p) => p,
+            Err(e) => {
+                for _ in 0..var_values.len() {
+                    heap.pop_root();
+                }
+                heap.pop_root(); // method_v
+                heap.pop_root(); // type_name_v
+                return Err(e);
+            }
+        };
+        heap.push_root(pair);
+        var_values.push(pair);
+    }
+    let mut assoc_items = vec![type_name_v, method_v, Value::Bool(true)];
+    assoc_items.extend(var_values.iter().copied());
+    let call_body = match tagged(heap, "assoc", &assoc_items) {
+        Ok(v) => v,
+        Err(e) => {
+            for _ in 0..var_values.len() {
+                heap.pop_root();
+            }
+            heap.pop_root(); // method_v
+            heap.pop_root(); // type_name_v
+            return Err(e);
+        }
+    };
+    for _ in 0..var_values.len() {
+        heap.pop_root();
+    }
+    heap.pop_root(); // method_v
+    heap.pop_root(); // type_name_v
+    heap.push_root(call_body);
+    let result = build_lambda_tag(heap, &fresh_lambda_name("methodref"), &[], &params, call_body);
+    heap.pop_root(); // call_body
+    result
+}
+
+/// `Expr::Quote(datum)` -> a synthesized `(construct true false empty
+/// variant arg-form...)` node — the exact wire shape [`translate_construct`]
+/// already produces for a *written* `Sexpr` constructor call (e.g. `(Int
+/// 5)`/`(Cons a b)`) — built directly from the literal `datum` rather than
+/// from any real `Typed` sub-expression (there is none; `datum` is already
+/// fully known at check time, `Checker`'s own `QuotedSexpr`). Reusing
+/// `compile-construct-sexpr`'s existing per-variant dispatch this way needs
+/// no new machinery in `compiler.rs`: `Nil`/`Int`/`Float`/`Bool`/`Char`/`Str`/
+/// `Cons` already have a real compiled representation (used today by an
+/// ordinary `Sexpr` constructor call), so a quoted literal made only of
+/// those reuses it verbatim, recursively for a `Cons`'s two fields.
+/// `Sym`/`Bignum`/`Ratio` don't (a `Sym`'s payload is a `SymId` with no
+/// compiled form; `Bignum`/`Ratio` are heap objects with no `rt_bignum_*`/
+/// `rt_ratio_*` compiled support yet — see [`struct_field_kind`]'s doc
+/// comment for the same gap on the `defstruct`-field side), so a quoted
+/// literal containing one anywhere (even nested inside a `Cons`) stays
+/// `unsupported` here rather than reaching a confusing low-level panic deep
+/// inside the interpreted compiler body.
+fn translate_quote(heap: &mut Heap, datum: &QuotedSexpr) -> Result<Value, Error> {
+    match datum {
+        QuotedSexpr::Nil => tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(0)]),
+        QuotedSexpr::Sym(_) | QuotedSexpr::Bignum(_) | QuotedSexpr::Ratio(_) => unsupported(heap, "Quote"),
+        QuotedSexpr::Int(n) => {
+            let leaf = tagged(heap, "int", &[Value::Int(*n)])?;
+            heap.push_root(leaf);
+            let result = tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(1), leaf]);
+            heap.pop_root();
+            result
+        }
+        QuotedSexpr::Float(f) => {
+            let leaf = tagged(heap, "float", &[Value::Int(f.to_bits() as i64)])?;
+            heap.push_root(leaf);
+            let result = tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(2), leaf]);
+            heap.pop_root();
+            result
+        }
+        QuotedSexpr::Char(c) => {
+            let leaf = tagged(heap, "char", &[Value::Char(*c)])?;
+            heap.push_root(leaf);
+            let result = tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(3), leaf]);
+            heap.pop_root();
+            result
+        }
+        QuotedSexpr::Bool(b) => {
+            let leaf = tagged(heap, "bool", &[Value::Bool(*b)])?;
+            heap.push_root(leaf);
+            let result = tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(4), leaf]);
+            heap.pop_root();
+            result
+        }
+        QuotedSexpr::Str(s) => {
+            let leaf = str_literal_form(heap, s)?;
+            heap.push_root(leaf);
+            let result = tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(6), leaf]);
+            heap.pop_root();
+            result
+        }
+        QuotedSexpr::Cons(car, cdr) => {
+            // A nested `Sym`/`Bignum`/`Ratio` leaf translates to a valid
+            // `(unsupported "Quote")` node, not an `Err` (`unsupported`'s own
+            // signature) — propagate it as this whole `Cons`'s result instead
+            // of embedding it as an ordinary field value, so the caller sees
+            // the same clean `unsupported` outcome regardless of nesting
+            // depth.
+            let car_form = translate_quote(heap, car)?;
+            if is_unsupported_tag(heap, car_form) {
+                return Ok(car_form);
+            }
+            heap.push_root(car_form);
+            let cdr_form = match translate_quote(heap, cdr) {
+                Ok(v) => v,
+                Err(e) => {
+                    heap.pop_root(); // car_form
+                    return Err(e);
+                }
+            };
+            if is_unsupported_tag(heap, cdr_form) {
+                heap.pop_root(); // car_form
+                return Ok(cdr_form);
+            }
+            heap.push_root(cdr_form);
+            let result =
+                tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(7), car_form, cdr_form]);
+            heap.pop_root(); // cdr_form
+            heap.pop_root(); // car_form
+            result
+        }
+    }
+}
+
+/// Whether `v` is a `(unsupported "<Variant>")` node — see [`unsupported`].
+/// [`translate_quote`]'s `Cons` case needs this: `unsupported` returns `Ok`,
+/// not `Err` (it's valid `Sexpr` data, just data `compiler.rs` would panic
+/// on), so a recursive sub-translation going `unsupported` doesn't `?`-
+/// propagate on its own the way a real error would.
+fn is_unsupported_tag(heap: &Heap, v: Value) -> bool {
+    matches!(heap.car(v), Ok(Value::Symbol(id)) if heap.symbol_name(id) == "unsupported")
 }
 
 /// `Expr::Labels { defs, body }` -> `(labels (captured-sym...) ((name
@@ -1250,14 +1494,17 @@ fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], cx: Ctx) -> Resu
 /// `compile-pattern-test` walks: `(pat-wild)` / `(pat-bind name-str)` /
 /// `(pat-lit n)` (an `Int`/`Bool`/`Char` literal sub-pattern, collapsed to
 /// one shared tag — see the note on `n` below) / `(pat-ctor variant-i64
-/// (sub-pattern...) is-box)`. The trailing `is-box` records this
-/// constructor's own type representation (`type_name`): `false` for a `Sexpr`
-/// variant (the tagged-`i64` bit test), `true` for a sum-ADT box
-/// (`Option`/`Result`/a `defenum`). It is per-node — not inherited from the
+/// (sub-pattern...) scrut-kind field-kinds)`. The trailing `scrut-kind`
+/// ([`MATCH_KIND_SEXPR`]/[`MATCH_KIND_BOX`]/[`MATCH_KIND_STRUCT`], via
+/// [`match_kind_for_path`]) records this constructor's own type
+/// representation (`type_name`). It is per-node — not inherited from the
 /// enclosing match — because a nested sub-pattern can differ from its parent
-/// (e.g. a `Sexpr`-typed field inside a `defenum` box). A struct-kind
-/// (boxed-struct) sub-pattern is `unsupported` (bails the whole `match`),
-/// matching [`translate_match`]'s own top-level restriction.
+/// (e.g. a `Sexpr`-typed field inside a `defenum` box). `field-kinds` is a
+/// list of each subpattern's own [`struct_field_kind`], meaningful only for
+/// `scrut-kind = MATCH_KIND_STRUCT` (`compiler.rs`'s `compile-ctor-subpatterns`
+/// needs a boxed struct's own per-field decode — `int`/`float`/`char`/`bool`/
+/// passthrough — where a sum-ADT box or `Sexpr` scrutinee's field extraction
+/// is driven by the shared `variant` instead); the empty list otherwise.
 ///
 /// `n` for `(pat-lit n)`: precomputed here, in Rust, to whatever raw
 /// `i64` the *compiled* representation of that literal would be —
@@ -1278,23 +1525,14 @@ fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern, cx: Ctx) -> Result<Value, Er
         Pattern::Int(n) => tagged(heap, "pat-lit", &[Value::Int(*n)]),
         Pattern::Bool(b) => tagged(heap, "pat-lit", &[Value::Int(if *b { 1 } else { 0 })]),
         Pattern::Char(c) => tagged(heap, "pat-lit", &[Value::Int(*c as i64)]),
-        Pattern::Ctor { type_name, variant, args, .. } => {
+        Pattern::Ctor { type_name, variant, args, field_types, .. } => {
             // How *this* constructor's own type is represented, so
-            // `compile-pattern-test` picks the right tag test and field
-            // extraction (a nested sub-pattern can differ from its parent —
-            // e.g. an `Sexpr`-typed field inside a `defenum` box): a `Sexpr`
-            // variant uses the tagged-i64 bit test (`compile-sexpr-tag-test`);
-            // a struct-kind (boxed-struct `defstruct`/`Vector`) scrutinee isn't
-            // supported in compiled `match` yet; every other ADT
-            // (`Option`/`Result`/a `defenum`) is a `compile-construct-box` box
-            // tested by its variant-tag slot (`compile-box-tag-test`).
-            let is_box = if *type_name == Path::root("sexpr") {
-                false
-            } else if cx.structs.contains(type_name) {
-                return unsupported(heap, "Match");
-            } else {
-                true
-            };
+            // `compile-pattern-test` picks the right tag test (or, for a
+            // boxed struct, no test at all — a `defstruct` always has
+            // exactly one variant) and field extraction (a nested
+            // sub-pattern can differ from its parent — e.g. a `Sexpr`-typed
+            // field inside a `defenum` box).
+            let kind = match_kind_for_path(type_name, cx);
             let sub_values = pattern_list_to_sexpr(heap, args, cx)?;
             let list = match list_of(heap, &sub_values) {
                 Ok(v) => v,
@@ -1309,9 +1547,24 @@ fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern, cx: Ctx) -> Result<Value, Er
                 heap.pop_root();
             }
             heap.push_root(list);
-            // `is_box` appended last so existing `(pat-ctor variant subpats)`
-            // field indices (and their tests) stay valid.
-            let result = tagged(heap, "pat-ctor", &[Value::Int(*variant as i64), list, Value::Bool(is_box)]);
+            let kind_values: Vec<Value> = if kind == MATCH_KIND_STRUCT {
+                field_types.iter().map(|t| Value::Int(struct_field_kind(t, cx.structs))).collect()
+            } else {
+                Vec::new()
+            };
+            let kinds_list = match list_of(heap, &kind_values) {
+                Ok(v) => v,
+                Err(e) => {
+                    heap.pop_root(); // list
+                    return Err(e);
+                }
+            };
+            heap.push_root(kinds_list);
+            // `scrut-kind`/`field-kinds` appended last so existing
+            // `(pat-ctor variant subpats)` field indices (and their tests)
+            // stay valid.
+            let result = tagged(heap, "pat-ctor", &[Value::Int(*variant as i64), list, Value::Int(kind), kinds_list]);
+            heap.pop_root(); // kinds_list
             heap.pop_root(); // list
             result
         }
@@ -1340,41 +1593,35 @@ fn pattern_list_to_sexpr(heap: &mut Heap, pats: &[Pattern], cx: Ctx) -> Result<V
 }
 
 /// `Expr::Match(scrut, arms)` -> `(match is-fn scrutinee-form
-/// ((pattern-form . body-form)...) is-box)` (Stage 5, `docs/implementation-log.md`)
-/// for a `Sexpr` scrutinee ([`is_sexpr_type`], `is-box` = false), and — since
-/// `defenum` (2026-07-09) — for a sum-ADT box scrutinee too
-/// (`Option`/`Result`/a user `defenum`, `is-box` = true): the box a
+/// ((pattern-form . body-form)...) scrut-kind)` (Stage 5,
+/// `docs/implementation-log.md`) for a `Sexpr` scrutinee
+/// ([`MATCH_KIND_SEXPR`]), a sum-ADT box scrutinee (`Option`/`Result`/a user
+/// `defenum`, since 2026-07-09, [`MATCH_KIND_BOX`]): the box a
 /// `compile-construct-box` builds, tested by its variant-tag slot 0
 /// (`compiler.rs`'s `compile-box-tag-test`/`compile-box-field`) instead of the
-/// tagged-`i64` bit-test `compile-sexpr-tag-test` does for `Sexpr`. Only a
-/// struct-kind (boxed-struct `defstruct`/`Vector`) scrutinee stays
-/// `unsupported` — matching a single-variant struct is rare, so its own
-/// tag/field extraction isn't wired up yet. `is-box` is appended last (and
-/// each `pat-ctor` carries its own trailing `is-box`, so a nested sub-pattern
-/// can differ from its parent) so the existing field indices — and their
-/// tests — stay valid. `is_fn` mirrors [`translate_if`]'s own tag of the same name —
-/// `match`, like `if`, introduces no function-activation boundary of its
-/// own, so a borrowed `Fn`-typed arm result needs the same explicit retain
-/// `compiler.rs`'s `compile-if-branch` already provides (reused as-is for
-/// each arm's body — see `compile-match-arms`'s doc comment). Each arm's
-/// body is restricted to a single expression, the same limit every other
-/// multi-expression body shape in this module has ([`translate_let`]'s
-/// body, a `labels` def's body, ...).
+/// tagged-`i64` bit-test `compile-sexpr-tag-test` does for `Sexpr`, and — since
+/// this struct-kind extension — a boxed-struct scrutinee (`defstruct`/
+/// `Vector`, [`MATCH_KIND_STRUCT`]): a properly tagged `Sexpr` like the plain
+/// `Sexpr` case, but single-variant, so `compiler.rs`'s `compile-pattern-test`
+/// emits no tag test at all for it, only per-field extraction
+/// (`compile-struct-field`). `scrut-kind` is appended last (and each
+/// `pat-ctor` carries its own trailing `scrut-kind`/`field-kinds`, so a nested
+/// sub-pattern can differ from its parent) so the existing field indices —
+/// and their tests — stay valid. `is_fn` mirrors [`translate_if`]'s own tag of
+/// the same name — `match`, like `if`, introduces no function-activation
+/// boundary of its own, so a borrowed `Fn`-typed arm result needs the same
+/// explicit retain `compiler.rs`'s `compile-if-branch` already provides
+/// (reused as-is for each arm's body — see `compile-match-arms`'s doc
+/// comment). Each arm's body is restricted to a single expression, the same
+/// limit every other multi-expression body shape in this module has
+/// ([`translate_let`]'s body, a `labels` def's body, ...).
 fn translate_match(heap: &mut Heap, scrut: &Typed, arms: &[Arm], ty: &Type, cx: Ctx) -> Result<Value, Error> {
-    // Scrutinee representation: `Sexpr` (tagged-i64 tests), or a sum-ADT box
-    // (`Option`/`Result`/a `defenum`, built by `compile-construct-box` — tag in
-    // the box's slot 0). A struct-kind (boxed-struct) scrutinee isn't supported
-    // in compiled `match` yet.
-    let is_box = if is_sexpr_type(&scrut.ty) {
-        false
-    } else {
-        match &scrut.ty {
-            Type::Named(p, _) if !cx.structs.contains(p) => true,
-            _ => return unsupported(heap, "Match"),
-        }
+    let kind = match match_scrut_kind(&scrut.ty, cx) {
+        Some(k) => k,
+        None => return unsupported(heap, "Match"),
     };
     let is_fn = Value::Bool(matches!(ty, Type::Fn(..)));
-    let is_box_v = Value::Bool(is_box);
+    let kind_v = Value::Int(kind);
     let scrut_v = ast_to_sexpr_scoped(heap, scrut, cx)?;
     heap.push_root(scrut_v);
     let arm_values = match translate_arms(heap, arms, cx) {
@@ -1398,9 +1645,9 @@ fn translate_match(heap: &mut Heap, scrut: &Typed, arms: &[Arm], ty: &Type, cx: 
         heap.pop_root();
     }
     heap.push_root(arms_list);
-    // `is-box` appended last so existing `(match is-fn scrut arms)` field
+    // `scrut-kind` appended last so existing `(match is-fn scrut arms)` field
     // indices (and their tests) stay valid.
-    let result = tagged(heap, "match", &[is_fn, scrut_v, arms_list, is_box_v]);
+    let result = tagged(heap, "match", &[is_fn, scrut_v, arms_list, kind_v]);
     heap.pop_root(); // arms_list
     heap.pop_root(); // scrut_v
     result
@@ -1831,6 +2078,19 @@ fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
             }
             collect_calls(value, targets);
         }
+        // `translate_methodref` turns this into a forwarding `(assoc
+        // type-name method true ...)` wrapper (mirroring `Expr::FnRef`'s own
+        // forwarding-`call`-wrapper treatment above), so `(type_name,
+        // method)` needs the exact same pre-declaration treatment a direct
+        // `Expr::Assoc` call already gets.
+        Expr::MethodRef { type_name, method } => {
+            let key = (type_name.clone(), method.clone());
+            if !targets.methods.contains(&key) {
+                targets.methods.push(key);
+            }
+        }
+        // A `Call` can sit inside `panic`'s own message expression.
+        Expr::Panic(msg) => collect_calls(msg, targets),
         _ => {}
     }
 }
@@ -2329,6 +2589,101 @@ mod tests {
         }
     }
 
+    /// `Expr::Panic(msg)` -> `(panic msg-form)`.
+    #[test]
+    fn translates_a_panic() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let msg = typed(Expr::Str("boom".to_string()), Type::Str);
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Panic(Box::new(msg)), Type::Never)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "panic");
+        assert_eq!(fields.len(), 1);
+        let (msg_tag, _) = untag(&heap, fields[0]);
+        assert_eq!(msg_tag, "str");
+    }
+
+    /// `Expr::MethodRef { type_name, method }` becomes a non-capturing
+    /// `lambda` that forwards positionally-synthesized arguments straight
+    /// through to an `(assoc type-name method true ...)` call — the
+    /// `Expr::FnRef` forwarding-wrapper trick, generalized to an instance
+    /// method (`arg0` is the receiver, matching `Expr::Assoc`'s own
+    /// convention).
+    #[test]
+    fn translates_a_methodref_as_a_forwarding_lambda() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let ty = Type::Fn(vec![Type::I64, Type::I64], Box::new(Type::I64));
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::MethodRef { type_name: Path::root("i64"), method: "+".to_string() }, ty)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "lambda");
+        assert!(fields[1].is_empty(), "expected an empty captured list, got {:?}", fields[1]);
+        let params = list_elems(&heap, fields[2]);
+        assert_eq!(params.len(), 2);
+        let (body_tag, body_fields) = untag(&heap, fields[3]);
+        assert_eq!(body_tag, "assoc");
+        assert_eq!(expect_str(&heap, body_fields[0]), "i64");
+        assert_eq!(expect_str(&heap, body_fields[1]), "+");
+        assert_eq!(body_fields[2], Value::Bool(true), "the receiver is an instance method call");
+        assert_eq!(body_fields.len() - 3, 2, "expected one forwarded arg per parameter");
+        for (i, param) in params.iter().enumerate() {
+            let (param_name, _) = untag_name(&heap, *param);
+            let (_, arg_form) = untag_arg(&heap, body_fields[3 + i]);
+            let (arg_tag, arg_fields) = untag(&heap, arg_form);
+            assert_eq!(arg_tag, "var");
+            assert_eq!(expect_str(&heap, arg_fields[0]), param_name);
+        }
+    }
+
+    /// `Expr::Quote(datum)` reuses `translate_construct`'s own wire shape:
+    /// `(construct true false empty variant arg-form...)`, built directly
+    /// from the literal `QuotedSexpr` — an `Int` leaf here.
+    #[test]
+    fn translates_a_quoted_int() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Quote(QuotedSexpr::Int(5)), sexpr_ty())).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "construct");
+        assert_eq!(fields[0], Value::Bool(true), "a quoted literal is always Sexpr");
+        assert_eq!(fields[1], Value::Bool(false));
+        assert!(fields[2].is_empty(), "type-name-str is an unused placeholder for the is-sexpr branch");
+        assert_eq!(fields[3], Value::Int(1), "Int is Sexpr variant 1");
+        let (leaf_tag, leaf_fields) = untag(&heap, fields[4]);
+        assert_eq!(leaf_tag, "int");
+        assert_eq!(leaf_fields, vec![Value::Int(5)]);
+    }
+
+    /// A quoted list (`Cons` of `Cons`es, terminated by `Nil`) translates
+    /// recursively — each `Cons` becomes its own nested `construct` node,
+    /// matching `compile-construct-sexpr`'s own variant-7 (`Cons`) arm, which
+    /// expects each field to itself be a `compile-value`-dispatchable form.
+    #[test]
+    fn translates_a_quoted_list_recursively() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let datum = QuotedSexpr::Cons(Box::new(QuotedSexpr::Int(1)), Box::new(QuotedSexpr::Nil));
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Quote(datum), sexpr_ty())).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "construct");
+        assert_eq!(fields[3], Value::Int(7), "Cons is Sexpr variant 7");
+        let (car_tag, car_fields) = untag(&heap, fields[4]);
+        assert_eq!(car_tag, "construct");
+        assert_eq!(car_fields[3], Value::Int(1));
+        let (cdr_tag, cdr_fields) = untag(&heap, fields[5]);
+        assert_eq!(cdr_tag, "construct");
+        assert_eq!(cdr_fields[3], Value::Int(0), "Nil is Sexpr variant 0");
+    }
+
+    /// A quoted symbol has no compiled representation (a `Sym`'s payload is
+    /// a `SymId`) — `translate_quote` bails to a clean `unsupported`, even
+    /// nested inside an otherwise-representable `Cons`.
+    #[test]
+    fn a_quoted_symbol_nested_in_a_cons_is_unsupported() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let datum = QuotedSexpr::Cons(Box::new(QuotedSexpr::Sym("foo".to_string())), Box::new(QuotedSexpr::Nil));
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Quote(datum), sexpr_ty())).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "unsupported");
+        assert_eq!(expect_str(&heap, fields[0]), "Quote");
+    }
+
     /// if/let/comparisons, labels/closures Stage 5: `Expr::If` -> `(if is-fn
     /// cond-form then-form else-form)`. An `I64`-typed `if` carries `is-fn =
     /// false` — see `translate_if`'s doc comment for why this tag exists at
@@ -2582,7 +2937,7 @@ mod tests {
         let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
         let arms = vec![
             Arm {
-                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, Pattern::Wildcard], sexpr_fields: vec![true, true] },
+                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, Pattern::Wildcard], sexpr_fields: vec![true, true], field_types: vec![] },
                 body: vec![typed(Expr::Bool(true), Type::Bool)],
             },
             Arm { pat: Pattern::Wildcard, body: vec![typed(Expr::Bool(false), Type::Bool)] },
@@ -2614,11 +2969,12 @@ mod tests {
         assert_eq!(untag(&heap, pat1).0, "pat-wild");
     }
 
-    /// `translate_match` only translates a `Sexpr` scrutinee — matching
-    /// `Option`/`Result`/a `defstruct` stays `unsupported`, deferred to
-    /// the `Construct`/`FieldGet`/`FieldSet` stage (Stage 6).
+    /// `translate_match` only translates a scrutinee whose static type is
+    /// `Type::Named` (`Sexpr`, a sum-ADT box, or a boxed struct — see
+    /// [`match_scrut_kind`]); anything else (no real `match` scrutinee type
+    /// in practice) stays `unsupported`.
     #[test]
-    fn match_over_a_non_sexpr_scrutinee_is_unsupported() {
+    fn match_over_a_non_named_scrutinee_type_is_unsupported() {
         let mut heap = Heap::with_capacity(1 << 10);
         let scrut = typed(Expr::Int(0), Type::I64);
         let arms = vec![Arm { pat: Pattern::Wildcard, body: vec![typed(Expr::Bool(true), Type::Bool)] }];
@@ -2628,13 +2984,53 @@ mod tests {
         assert_eq!(expect_str(&heap, fields[0]), "Match");
     }
 
+    /// A boxed-struct (`defstruct`) scrutinee now translates for real
+    /// (`MATCH_KIND_STRUCT`): the `pat-ctor`'s `scrut-kind` field is `2`, and
+    /// `field-kinds` carries each field's own `struct_field_kind` — `1` (int)
+    /// for the first `i64` field here.
+    #[test]
+    fn translates_a_match_over_a_struct_scrutinee() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let point = Path::root("point");
+        let mut structs = HashSet::new();
+        structs.insert(point.clone());
+        let globals = HashMap::new();
+        let direct = HashSet::new();
+        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, globals: &globals };
+
+        let point_ty = Type::Named(point.clone(), vec![]);
+        let scrut = typed(Expr::Var("p".to_string()), point_ty.clone());
+        let arms = vec![Arm {
+            pat: Pattern::Ctor {
+                type_name: point,
+                variant: 0,
+                args: vec![Pattern::Bind("a".to_string(), false), Pattern::Bind("b".to_string(), false)],
+                sexpr_fields: vec![false, false],
+                field_types: vec![Type::I64, Type::I64],
+            },
+            body: vec![typed(Expr::Var("a".to_string()), Type::I64)],
+        }];
+        let v = translate_match(&mut heap, &scrut, &arms, &Type::I64, cx).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "match");
+        assert_eq!(fields[3], Value::Int(MATCH_KIND_STRUCT), "a defstruct scrutinee is MATCH_KIND_STRUCT");
+
+        let arm_pairs = list_elems(&heap, fields[2]);
+        let pat0 = heap.car(arm_pairs[0]).unwrap();
+        let (pat0_tag, pat0_fields) = untag(&heap, pat0);
+        assert_eq!(pat0_tag, "pat-ctor");
+        assert_eq!(pat0_fields[2], Value::Int(MATCH_KIND_STRUCT));
+        let field_kinds = list_elems(&heap, pat0_fields[3]);
+        assert_eq!(field_kinds, vec![Value::Int(1), Value::Int(1)], "both fields are i64 (struct_field_kind 1)");
+    }
+
     /// A `Bind` sub-pattern (e.g. `(Cons h _)`) -> `(pat-bind name-str)`.
     #[test]
     fn translates_a_bind_subpattern_inside_a_ctor_pattern() {
         let mut heap = Heap::with_capacity(1 << 10);
         let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
         let arms = vec![Arm {
-            pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Bind("h".to_string(), true), Pattern::Wildcard], sexpr_fields: vec![true, true] },
+            pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Bind("h".to_string(), true), Pattern::Wildcard], sexpr_fields: vec![true, true], field_types: vec![] },
             body: vec![typed(Expr::Var("h".to_string()), sexpr_ty())],
         }];
         let v = ast_to_sexpr(&mut heap, &typed(Expr::Match(Box::new(scrut), arms), sexpr_ty())).unwrap();
@@ -2655,10 +3051,10 @@ mod tests {
     fn translates_a_nested_ctor_subpattern() {
         let mut heap = Heap::with_capacity(1 << 10);
         let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
-        let inner_nil = Pattern::Ctor { type_name: Path::root("sexpr"), variant: 0, args: vec![], sexpr_fields: vec![] };
+        let inner_nil = Pattern::Ctor { type_name: Path::root("sexpr"), variant: 0, args: vec![], sexpr_fields: vec![], field_types: vec![] };
         let arms = vec![
             Arm {
-                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, inner_nil], sexpr_fields: vec![true, true] },
+                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, inner_nil], sexpr_fields: vec![true, true], field_types: vec![] },
                 body: vec![typed(Expr::Bool(true), Type::Bool)],
             },
             Arm { pat: Pattern::Wildcard, body: vec![typed(Expr::Bool(false), Type::Bool)] },

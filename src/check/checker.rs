@@ -4134,6 +4134,7 @@ impl Checker {
         let mut sub_pats = Vec::new();
         let mut binds = Vec::new();
         let mut sexpr_fields = Vec::new();
+        let mut field_types = Vec::new();
         for (sub, field) in parts[1..].iter().zip(fields.iter()) {
             let field_ty = subst_apply(field, &subst);
             // Baked into the pattern here (where the instantiated field
@@ -4141,11 +4142,15 @@ impl Checker {
             // boxed struct's `Sexpr`-declared field faithfully — see
             // `Pattern::Ctor::sexpr_fields`'s doc comment.
             sexpr_fields.push(matches!(&field_ty, Type::Named(p, _) if *p == Path::root("sexpr")));
+            // Kept in full alongside `sexpr_fields` for compiled code's own
+            // per-field decode — see `Pattern::Ctor::field_types`'s doc
+            // comment.
+            field_types.push(field_ty.clone());
             let (p, b) = self.check_pattern(heap, &field_ty, *sub)?;
             sub_pats.push(p);
             binds.extend(b);
         }
-        Ok((Pattern::Ctor { type_name: adt_name, variant, args: sub_pats, sexpr_fields }, binds))
+        Ok((Pattern::Ctor { type_name: adt_name, variant, args: sub_pats, sexpr_fields, field_types }, binds))
     }
 
     // ---- helpers ----------------------------------------------------------

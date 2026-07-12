@@ -410,6 +410,7 @@ impl Registry {
         root.fns.insert("sexpr-int".to_string(), FnSig { type_params: vec![], params: vec![sexpr()], ret: Type::I64, public: true, builtin: true, bounds: HashMap::new() });
         root.fns.insert("sexpr-float".to_string(), FnSig { type_params: vec![], params: vec![sexpr()], ret: Type::F64, public: true, builtin: true, bounds: HashMap::new() });
         root.fns.insert("sexpr-bool".to_string(), FnSig { type_params: vec![], params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("sexpr-char".to_string(), FnSig { type_params: vec![], params: vec![sexpr()], ret: Type::Char, public: true, builtin: true, bounds: HashMap::new() });
         root.fns.insert("sexpr-str".to_string(), FnSig { type_params: vec![], params: vec![sexpr()], ret: Type::Str, public: true, builtin: true, bounds: HashMap::new() });
         root.fns.insert("sexpr-sym-name".to_string(), FnSig { type_params: vec![], params: vec![sexpr()], ret: Type::Str, public: true, builtin: true, bounds: HashMap::new() });
         root.fns.insert("sexpr-symp".to_string(), FnSig { type_params: vec![], params: vec![sexpr()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });

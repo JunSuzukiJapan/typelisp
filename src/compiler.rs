@@ -932,6 +932,22 @@ pub const SOURCE: &str = r#"
 (defun compile-box-field ((builder llvm-builder) (v llvm-value) (idx i32)) llvm-value
   (load-raw builder (build-int-to-ptr builder v) (+ idx 1)))
 
+;; The struct-scrutinee counterpart of `compile-sexpr-field`/
+;; `compile-box-field`: field `idx` of a boxed struct `v` (already a properly
+;; tagged `Sexpr`, unlike a sum-ADT box's untagged raw pointer -- there is no
+;; `build-int-to-ptr` here) is fetched via `rt_struct_field_get` -- the exact
+;; same call `compile-field-get` makes -- then decoded through
+;; `compile-sexpr-field` per this field's own `kind`
+;; (`ast_bridge::struct_field_kind`'s numbering, reused verbatim; a scalar/
+;; passthrough kind's own `idx` parameter is unused, so `0` is passed, the
+;; same convention `compile-field-get` follows).
+(defun compile-struct-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (kind i64) (idx i32)) llvm-value
+  (let ((args-ptr (alloca-args builder 2)))
+    (store-arg builder args-ptr 0 v)
+    (store-arg builder args-ptr 1 (const-i64 builder (as i64 idx)))
+    (let ((raw (build-call builder (get-function m "rt_struct_field_get") args-ptr 2)))
+      (compile-sexpr-field builder m raw kind 0))))
+
 (defun compile-function ((m llvm-module) (name string) (param-names Sexpr) (body Sexpr)) llvm-module
     (let ((f (add-function m name)))
       (let ((b (append-block f "entry")))
@@ -945,6 +961,8 @@ pub const SOURCE: &str = r#"
                          (let ((s (sexpr-sym-name (sexpr-car e))))
                             (if (equal s "int")
                                 (compile-int builder e)
+                                (if (equal s "char")
+                                    (compile-char builder e)
                                 (if (equal s "bool")
                                     (compile-bool builder e)
                                     (if (equal s "float")
@@ -993,7 +1011,9 @@ pub const SOURCE: &str = r#"
                                                                                                                     (compile-set-global builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                                     (if (equal s "global-init")
                                                                                                                         (compile-global-init builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                        (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))))
+                                                                                                                        (if (equal s "panic")
+                                                                                                                            (compile-panic builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
+                                                                                                                            (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))))))
                            )
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -1007,6 +1027,21 @@ pub const SOURCE: &str = r#"
                          (const-i64 builder 0))
                        (compile-int ((builder llvm-builder) (e Sexpr)) llvm-value
                          (const-i64 builder (sexpr-int (sexpr-car (sexpr-cdr e)))))
+                       ;; `(char c)` -- a bare `char` literal. Compiled the same
+                       ;; way `compile-int` is (a plain, untagged `i64` scalar --
+                       ;; `char->int`'s own Unicode-scalar-value payload, widened
+                       ;; from its `i32` result via the zero-cost `i32`<->`i64`
+                       ;; `as` relabel `Checker::check_as` already allows), never
+                       ;; a tagged `Sexpr::Char` (that's `compile-construct-
+                       ;; sexpr`'s own variant-3 arm, which calls this exactly
+                       ;; like `compile-int`'s own variant-1 arm calls
+                       ;; `compile-int`). Added alongside `sexpr-char`
+                       ;; (`registry.rs`/`Interp::eval_builtin`) -- a bare
+                       ;; `char` literal previously had no dispatch tag at all
+                       ;; (an oversight discovered while implementing
+                       ;; `Expr::Quote`, whose `Char` leaf needs exactly this).
+                       (compile-char ((builder llvm-builder) (e Sexpr)) llvm-value
+                         (const-i64 builder (as i64 (char->int (sexpr-char (sexpr-car (sexpr-cdr e)))))))
                        ;; `(bool b)` (if/let/comparisons, labels/closures
                        ;; Stage 5) — every compiled value is a plain `i64`
                        ;; (see `registry::llvm_module_def`'s doc comment), so
@@ -2231,38 +2266,50 @@ pub const SOURCE: &str = r#"
                                         (if (equal s "pat-ctor")
                                             (let ((variant (sexpr-int (sexpr-car (sexpr-cdr pat)))))
                                               (let ((subpats (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))
-                                                ;; `is-box`: a sum-ADT box tests/extracts by slot,
-                                                ;; a `Sexpr` variant by the tagged-i64 scheme.
-                                                (let ((is-box (sexpr-bool (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))
-                                                  (if is-box
-                                                      (compile-pattern-guard builder cur-fn (compile-box-tag-test builder v variant) fail-block)
-                                                      (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v variant) fail-block))
-                                                  (compile-ctor-subpatterns builder env cur-fn v is-box variant subpats 0 fail-block))))
+                                                ;; `scrut-kind`: 0 = `Sexpr` (tagged-i64
+                                                ;; tests), 1 = sum-ADT box (tests/extracts by
+                                                ;; slot), 2 = boxed struct (`defstruct`/`Vector`
+                                                ;; -- single variant, so no tag test at all,
+                                                ;; only field extraction via `field-kinds`).
+                                                (let ((scrut-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))
+                                                  (let ((field-kinds (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))
+                                                    (if (eq scrut-kind 2)
+                                                        ()
+                                                        (if (eq scrut-kind 1)
+                                                            (compile-pattern-guard builder cur-fn (compile-box-tag-test builder v variant) fail-block)
+                                                            (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v variant) fail-block)))
+                                                    (compile-ctor-subpatterns builder env cur-fn v scrut-kind variant field-kinds subpats 0 fail-block)))))
                                             (panic (append "compile-pattern-test: unsupported pattern tag " s)))))))
                            )
                        ;; Tests/extracts each of a `pat-ctor`'s
                        ;; sub-patterns in turn against variant `variant`'s
-                       ;; fields, skipping the extraction call entirely
-                       ;; for a `pat-wild` sub-pattern (no value to test
-                       ;; or bind, so no reason to call
-                       ;; `compile-sexpr-field` -- and for `cons`, no
-                       ;; reason to emit an `rt_car`/`rt_cdr` call
-                       ;; either).
-                       (compile-ctor-subpatterns ((builder llvm-builder) (env Scope<llvm-value>) (cur-fn llvm-function) (v llvm-value) (is-box bool) (variant i64) (subpats Sexpr) (idx i32) (fail-block llvm-basic-block)) ()
+                       ;; fields (a boxed struct's `field-kinds` list --
+                       ;; meaningful only for `scrut-kind = 2` -- advances in
+                       ;; lockstep with `subpats`/`idx`), skipping the
+                       ;; extraction call entirely for a `pat-wild`
+                       ;; sub-pattern (no value to test or bind, so no
+                       ;; reason to call `compile-sexpr-field`/
+                       ;; `compile-struct-field` -- and for `cons`, no
+                       ;; reason to emit an `rt_car`/`rt_cdr` call either).
+                       (compile-ctor-subpatterns ((builder llvm-builder) (env Scope<llvm-value>) (cur-fn llvm-function) (v llvm-value) (scrut-kind i64) (variant i64) (field-kinds Sexpr) (subpats Sexpr) (idx i32) (fail-block llvm-basic-block)) ()
                          (if (sexpr-consp subpats)
                              (let ((p (sexpr-car subpats)) (rest (sexpr-cdr subpats)))
-                              (if (equal (sexpr-sym-name (sexpr-car p)) "pat-wild")
-                                (compile-ctor-subpatterns builder env cur-fn v is-box variant rest (+ idx 1) fail-block)
-                                (let ((field-v (if is-box (compile-box-field builder v idx) (compile-sexpr-field builder m v variant idx))))
+                              (let ((rest-kinds (if (eq scrut-kind 2) (sexpr-cdr field-kinds) field-kinds)))
+                               (if (equal (sexpr-sym-name (sexpr-car p)) "pat-wild")
+                                (compile-ctor-subpatterns builder env cur-fn v scrut-kind variant rest-kinds rest (+ idx 1) fail-block)
+                                (let ((field-v (if (eq scrut-kind 2)
+                                                    (compile-struct-field builder m v (sexpr-int (sexpr-car field-kinds)) idx)
+                                                    (if (eq scrut-kind 1)
+                                                        (compile-box-field builder v idx)
+                                                        (compile-sexpr-field builder m v variant idx)))))
                                   (compile-pattern-test builder env cur-fn field-v p fail-block)
-                                  (compile-ctor-subpatterns builder env cur-fn v is-box variant rest (+ idx 1) fail-block))))
+                                  (compile-ctor-subpatterns builder env cur-fn v scrut-kind variant rest-kinds rest (+ idx 1) fail-block)))))
                              ()))
                        ;; `(match is-fn scrutinee-form ((pattern-form .
-                       ;; body-form)...))` -- `Expr::Match` over a
-                       ;; `Sexpr` scrutinee (`ast_bridge::translate_match`
-                       ;; -- any other scrutinee type stays
-                       ;; `unsupported`, deferred to Construct/FieldGet/
-                       ;; FieldSet's own stage). Compiles the scrutinee
+                       ;; body-form)...) scrut-kind)` -- `Expr::Match`
+                       ;; (`ast_bridge::translate_match`; any scrutinee type
+                       ;; that isn't `Sexpr`/a sum-ADT box/a boxed struct
+                       ;; stays `unsupported`). Compiles the scrutinee
                        ;; once, then tries each arm in textual order
                        ;; (`compile-match-arms`) into a single shared
                        ;; 1-slot merge -- the same `alloca-args`/
@@ -2278,23 +2325,26 @@ pub const SOURCE: &str = r#"
                        ;; `merge-block` is reached — a gap
                        ;; `tests/compile_test.rs`'s
                        ;; `compile_match_keeps_a_fresh_scrutinee_and_its_pattern_extracted_fields_rooted_across_an_arms_own_allocations`
-                       ;; demonstrates directly: `scrut-v` is always
-                       ;; `Sexpr`-typed here (`translate_match` only ever
-                       ;; translates a `Sexpr` scrutinee for real), but
-                       ;; unlike a `let` binding or call argument, nothing
-                       ;; else ever rooted it — a *fresh* scrutinee (e.g. the
-                       ;; direct result of a call, never bound to a name)
-                       ;; had no owner at all, so a `pat-bind` field
-                       ;; extracted from it (`compile-pattern-test`'s own
-                       ;; `bslot`, itself never rooted either) was only ever
-                       ;; safe by the GC transitively marking it *through*
-                       ;; `scrut-v` — which nothing protected an allocation
-                       ;; during a later arm statement (e.g. a sibling `let`
-                       ;; binding's own value) from reclaiming outright.
-                       ;; Rooting `scrut-v` for the match's own duration
-                       ;; keeps that transitive reachability valid the whole
-                       ;; time, which is enough: nothing here needs to root
-                       ;; each individual `pat-bind` separately. Popped only
+                       ;; demonstrates directly: for a `Sexpr` or boxed-struct
+                       ;; scrutinee (`scrut-kind` 0/2 — both ordinary
+                       ;; GC-managed heap values), unlike a `let` binding or
+                       ;; call argument, nothing else ever rooted it — a
+                       ;; *fresh* scrutinee (e.g. the direct result of a call,
+                       ;; never bound to a name) had no owner at all, so a
+                       ;; `pat-bind` field extracted from it
+                       ;; (`compile-pattern-test`'s own `bslot`, itself never
+                       ;; rooted either) was only ever safe by the GC
+                       ;; transitively marking it *through* `scrut-v` — which
+                       ;; nothing protected an allocation during a later arm
+                       ;; statement (e.g. a sibling `let` binding's own value)
+                       ;; from reclaiming outright. Rooting `scrut-v` for the
+                       ;; match's own duration keeps that transitive
+                       ;; reachability valid the whole time, which is enough:
+                       ;; nothing here needs to root each individual
+                       ;; `pat-bind` separately. A sum-ADT box (`scrut-kind`
+                       ;; 1) needs none of this — it isn't GC-managed (never
+                       ;; scanned or freed) and its `Sexpr` fields are
+                       ;; permanently rooted from construction. Popped only
                        ;; on the normal `merge-block` path (that block is
                        ;; always freshly appended, never `block-terminated?`
                        ;; itself, so this is safe to emit unconditionally
@@ -2316,21 +2366,23 @@ pub const SOURCE: &str = r#"
                          (let ((is-fn (sexpr-bool (sexpr-car (sexpr-cdr e)))))
                            (let ((scrut-form (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
                              (let ((arms (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
-                               ;; `is-box` (appended by `ast_bridge::translate_match`):
-                               ;; the scrutinee is a sum-ADT box rather than a `Sexpr`.
-                               (let ((is-box (sexpr-bool (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
+                               ;; `scrut-kind` (appended by
+                               ;; `ast_bridge::translate_match`): 0 = `Sexpr`,
+                               ;; 1 = sum-ADT box, 2 = boxed struct.
+                               (let ((scrut-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
                                (let ((scrut-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base scrut-form)))
                                  ;; A sum-ADT box isn't GC-managed (never scanned or
                                  ;; freed) and its `Sexpr` fields are permanently rooted
                                  ;; from construction, so a box scrutinee needs no
-                                 ;; sexpr root of its own; a `Sexpr` scrutinee does.
-                                 (let ((ignored (if is-box () (push-sexpr-root builder m scrut-v))))
+                                 ;; sexpr root of its own; a `Sexpr`/boxed-struct
+                                 ;; scrutinee does.
+                                 (let ((ignored (if (eq scrut-kind 1) () (push-sexpr-root builder m scrut-v))))
                                    (let ((merge-block (append-block cur-fn "match-merge")))
                                      (let ((slot (alloca-args builder 1)))
                                        (compile-match-arms builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base is-fn scrut-v slot merge-block arms)
                                        (position-at-end builder merge-block)
                                        (let ((result (load-raw builder slot 0)))
-                                         (let ((ignored2 (if is-box () (pop-sexpr-root builder m))))
+                                         (let ((ignored2 (if (eq scrut-kind 1) () (pop-sexpr-root builder m))))
                                            result)))))))))))
                        ;; Tries each `(pattern-form . body-form)` arm in
                        ;; order: `push-frame env` a fresh frame for any name
@@ -2733,7 +2785,28 @@ pub const SOURCE: &str = r#"
                                (let ((tagged-v (compile-tag-struct-field builder m v kind)))
                                  (let ((args-ptr (alloca-args builder 1)))
                                    (store-arg builder args-ptr 0 tagged-v)
-                                   (build-call builder (get-function m "rt_global_new") args-ptr 1))))))))
+                                   (build-call builder (get-function m "rt_global_new") args-ptr 1)))))))
+                       ;; `(panic msg-form)` — `Expr::Panic`, always
+                       ;; `Str`-typed (`Checker::check_panic` requires it), so
+                       ;; no `kind`/scrutinee-shape dispatch is needed the way
+                       ;; `Match`/`FieldGet` need — `msg-form` compiles down to
+                       ;; the exact tagged `Sexpr::Str` representation
+                       ;; `compile-str` already produces, handed straight to
+                       ;; `rt_panic`, which prints it (`"panic: {msg}"`,
+                       ;; matching `EvalError::Panic`'s own interpreted-path
+                       ;; wording) and aborts the process — the only safe way
+                       ;; to fail out of compiled code (no landing pads to
+                       ;; unwind through across the JIT/AOT native-code
+                       ;; boundary; the same rule `rt_match_fail` already
+                       ;; follows). `Expr::Panic`'s own checked type is
+                       ;; `Never`, so nothing downstream ever reads this call's
+                       ;; return value for real.
+                       (compile-panic ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((msg-form (sexpr-car (sexpr-cdr e))))
+                           (let ((msg-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base msg-form)))
+                             (let ((args-ptr (alloca-args builder 1)))
+                               (store-arg builder args-ptr 0 msg-v)
+                               (build-call builder (get-function m "rt_panic") args-ptr 1))))))
                 (let ((v (compile-value builder env fn-env '() f (Option::none) (Option::none) (Option::none) body)))
                   (let ((protected (bare-returned-own-name body param-names '())))
                     (release-bindings builder m env param-names protected)

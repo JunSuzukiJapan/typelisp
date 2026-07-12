@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-07-11 / ブランチ: `main`
+最終更新: 2026-07-12 / ブランチ: `main`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離した）。
@@ -87,26 +87,59 @@ typelispの`Reader`は最初の構文エラーで即失敗する設計のため�
 
 `compile`（LLVM JIT/AOT）機能は現状「今のフェーズが実際に使うASTノードだけ本実装、それ以外は
 `ast_bridge`が`(unsupported "<Variant>")`を返しコンパイラ本体が明示的にpanicする」設計
-（`ast_bridge.rs`冒頭のdocコメント参照）。以下はその`unsupported`のうち、ユーザーが普通に
-書けるコードから実際に到達しうる（＝いずれ本実装が要る）ものの一覧——`Expr::TraitCall`は
-単型化後に到達不能な診断専用ノードと確認済みで対象外（`tests/trait_test.rs`参照）。
+（`ast_bridge.rs`冒頭のdocコメント参照）。ユーザーが普通に書けるコードから実際に到達しうる
+`unsupported`は2026-07-12時点で**解消済み**——残る`Expr::TraitCall`は単型化後に到達不能な
+診断専用ノードと確認済みで対象外（`tests/trait_test.rs`参照）。以下、直近の完了分。
 
-1. **`Match`: sum-ADT box scrutinee（`Option`/`Result`/`defenum`）は対応済み。残るは
-   struct-kind（`defstruct`/`Vector`のboxed-struct表現）scrutineeのみ`unsupported`**
-   （`ast_bridge.rs::translate_match`）。2026-07-09に`defenum`実装とあわせて一般ADT boxの
-   variantスロットに対するタグテスト（`compiler.rs`の`compile-box-tag-test`/`compile-box-field`、
-   `translate_match`/`pattern_to_sexpr`の`is-box`フラグ）を追加し、`Option`/`Result`/ユーザー
-   `defenum`のcompile時`match`が可能になった。単一variantの`defstruct`をmatchするのは稀なため
-   boxed-struct scrutineeは当面`unsupported`のまま（必要になれば`compile-box-*`と同様に
-   boxed-struct表現用のタグ/フィールド抽出を足す）。
-2. **`Panic`: `(panic msg)`が`unsupported`**（`ast_bridge.rs`の`Expr::Panic`アーム）。診断用
-   メッセージの文字列化＋`Never`型としての分岐処理が必要。
-3. **`MethodRef`: メソッドを値として使う式（例: `+`をそのまま渡す）が`unsupported`**
-   （`Expr::MethodRef`アーム）。
-4. **`Quote`: `(quote datum)`が`unsupported`**（`Expr::Quote`アーム）。コンパイル対象の関数
-   本体にクォートされたリテラルが現れるケースは他より稀。
+直近完了: **`Panic`/`MethodRef`/`Quote`の compile 対応（残っていた`unsupported`3件を解消）**
+（2026-07-12）——`ast_bridge.rs`の`Expr::Panic`/`Expr::MethodRef`/`Expr::Quote`アームを実装。
+- **`Panic`**: `(panic msg)` -> `(panic msg-form)`。`msg`は常に`Str`型なので`kind`分岐は不要、
+  `compiler.rs`の新設`compile-panic`が`msg-form`を`compile-str`同様にタグ付き`Sexpr::Str`へ
+  コンパイルし新設`rt_panic`（`typelisp-rt`）へ渡す。`rt_panic`はインタプリタ経路の
+  `EvalError::Panic`と同じ`"panic: {msg}"`書式を出力して`abort()`——コンパイル済みコードは
+  JIT/AOTネイティブ境界を安全にunwindできないため、`rt_match_fail`と同じ「abortのみ許容」規約
+  に従う意図的な仕様差（インタプリタ側は`Result`として回収可能だが、コンパイル済みコードでは
+  プロセスごと落ちる）。
+- **`MethodRef`**: `+`等のメソッドを値として使う式（`Checker::method_value`）->
+  引数を`(assoc type-name method true ...)`呼び出しへそのまま転送する非キャプチャ`lambda`
+  （`translate_fnref`の転送ラッパー手法をinstanceメソッドへ一般化、受け手は`compile-assoc`/
+  `compile-assoc-user`——ネイティブ演算もユーザー定義メソッドも既存の`recv::method`呼び出し経路を
+  再利用するため`compiler.rs`側の変更ゼロ）。ただし転送先の`(type_name, method)`を
+  `ast_bridge::collect_calls`（前方宣言収集）が`Expr::Assoc`と同様に辿るよう追加が必要だった
+  ——`Expr::FnRef`が転送`call`ラッパーに対して同じ扱いを受けているのと対称。
+- **`Quote`**: `(quote datum)` -> `translate_construct`と全く同じ`(construct true false empty
+  variant arg-form...)`ワイヤ形状を`QuotedSexpr`から直接合成（`Cons`は再帰）。
+  `Nil`/`Int`/`Float`/`Bool`/`Char`/`Str`/`Cons`は既存の`compile-construct-sexpr`がそのまま
+  対応、`Sym`/`Bignum`/`Ratio`（コンパイル表現なし）は入れ子内のどこにあっても`unsupported`へ
+  伝播（`unsupported`は`Ok`を返す設計のため、再帰呼び出し結果のタグを見て伝播させる必要があった
+  ——素朴に`?`へ任せると`(unsupported ...)`タグがデータとして埋め込まれてしまう落とし穴）。
+- 副産物として発覚した既存の欠落も同時解消: `char`リテラルが単体で`compile-value`の
+  ディスパッチタグに存在しなかった（`(defun f () char #\A)`が常に失敗していた）ため、
+  新設`compile-char`/`sexpr-char`（`registry.rs`/`Interp::eval_builtin`）で対応
+  （`char->int`のi32結果を`(as i64 ...)`の無償変換でi64化）。JIT呼び出し境界での`char`戻り値
+  デコードは既存のまま範囲外（`Interp::call_compiled`のdocコメント参照、テストはboolを介して
+  内部だけで完結させている）。
+- テスト: `tests/compile_test.rs`に6件（panic branch/char literal/builtin・ユーザー定義method
+  reified/quoted list構築/JIT-interp一致/quoted symbolのclean error）、`ast_bridge.rs`単体
+  テストに5件。
 
-直近完了: **`Global`/`SetGlobal`（グローバル変数のcompile対応、JIT/AOT両方）**
+その前に完了: **`Match`のstruct-kind（`defstruct`/`Vector`のboxed-struct表現）scrutinee対応**
+（2026-07-12）——これで`Match`の`unsupported`分岐は解消（sum-ADT box/struct-kind/`Sexpr`の3種
+すべてcompile時`match`が可能に）。`translate_match`/`pattern_to_sexpr`の`is-box: bool`を
+`scrut-kind: i64`（0=`Sexpr`、1=sum-ADT box、2=boxed struct、`ast_bridge::MATCH_KIND_*`）に
+一般化し、`pat-ctor`に`field-kinds`（各フィールドの`struct_field_kind`のリスト、struct-kind時のみ
+意味を持つ）を追加。boxed structは単一variant（`new`）なのでタグテストは一切発行せず
+（`compiler.rs::compile-pattern-test`の`scrut-kind = 2`分岐）、フィールド抽出だけを行う新設
+`compile-struct-field`（`rt_struct_field_get`→`compile-sexpr-field`、`compile-field-get`と
+同じ経路の再利用）で対応。sum-ADT boxと異なりboxed structは通常のGC管理ヒープ値なので
+`compile-match`のGCルート要否判定（`push-sexpr-root`/`pop-sexpr-root`）も`Sexpr`側と同様に
+必要（boxのみ不要）——ここは`scrut-kind`を素朴に真偽反転しただけでは見落としがちな罠だった。
+フィールドごとの型情報が必要になったのは今回が初めてで（sum-ADT boxは自身の`variant`だけで
+全フィールド共通のデコードができたが、boxed structはフィールドごとに
+int/float/char/bool/passthroughが異なる）、`Pattern::Ctor`に`field_types: Vec<Type>`を新設
+（`Checker::check_ctor_pattern`が`sexpr_fields`と並べて計算、インタプリタ側は変更なし）。
+
+その前に完了: **`Global`/`SetGlobal`（グローバル変数のcompile対応、JIT/AOT両方）**
 （2026-07-11）——`defvar`/`defconstant`をcompile対象の関数から参照・代入できるようになった。
 コンパイル済みコードから参照されたグローバルだけをGCの**permanent root**
 （`crates/typelisp-mem`の`Heap.permanent_roots`、`rt_push_permanent_sexpr_root`が構造体
