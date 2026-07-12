@@ -384,10 +384,6 @@ fn handle_goto_definition(id: RequestId, params: serde_json::Value, analyses: &H
 /// if the patched text still fails to check for some other reason, whatever
 /// got registered before that failure point is still usable — this is
 /// deliberately lenient rather than requiring a clean check.
-///
-/// Known limitation: a `match`-pattern-bound variable is never offered — see
-/// `check::locate::completion_locals`'s doc comment for why (mirrors
-/// goto-definition's own residual, `DefLocs::local_refs`).
 fn handle_completion(id: RequestId, params: serde_json::Value, docs: &HashMap<Uri, String>) -> Response {
     let result = (|| {
         let p: CompletionParams = serde_json::from_value(params).ok()?;
@@ -406,7 +402,19 @@ fn handle_completion(id: RequestId, params: serde_json::Value, docs: &HashMap<Ur
         // to search.
         let (line, col) = line_col_at(&chars, prefix_start);
         if needs_completion_placeholder(&truncated) {
-            truncated.push_str(" (panic \"\")");
+            // No separator before the placeholder: `truncated` ends exactly
+            // where the in-progress identifier began (its last char is
+            // already a delimiter — that's how `prefix_start` stopped), so
+            // appending directly puts the `(panic "")`'s own recorded
+            // position at precisely `(line, col)`. That alignment is what
+            // lets `locate_node` (greatest position `<= cursor`) pick the
+            // placeholder itself as the cursor's node, so
+            // `completion_locals` resolves scope *inside* the body/argument
+            // slot being completed — a leading space used to shift it one
+            // column past the cursor, silently excluding it and losing the
+            // enclosing `let`/`lambda`/`labels` names whenever the slot was
+            // the new scope's first form.
+            truncated.push_str("(panic \"\")");
         }
         let patched = heuristically_close(&truncated);
         let overlay = build_overlay(docs, &uri);

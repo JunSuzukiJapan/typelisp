@@ -181,11 +181,12 @@ pub enum TopLevel {
 struct Env {
     /// Each binding's name, type, and — where known — the source position of
     /// the name in its binding form (a `let`/`let*` binding, a `lambda`/
-    /// `labels`/`defun`/`defmethod` parameter or receiver name, or a `labels`
-    /// function name). `None` for a binding this checker doesn't bother
-    /// tracking a position for (match-pattern bindings, monomorphization's
-    /// synthesized re-checks) — consulted by `Checker::check_at` to populate
-    /// `DefLocs::local_refs` when a `Var` reference resolves here.
+    /// `labels`/`defun`/`defmethod` parameter or receiver name, a `labels`
+    /// function name, or a `match`-pattern binding). `None` for a binding
+    /// this checker doesn't bother tracking a position for
+    /// (monomorphization's synthesized re-checks) — consulted by
+    /// `Checker::check_at` to populate `DefLocs::local_refs` when a `Var`
+    /// reference resolves here.
     vars: Vec<(String, Type, Option<Loc>)>,
     /// Trait bounds on this function's own generic type parameters, declared
     /// by a `(where (Trait T (Assoc Concrete)...)...)` clause
@@ -221,9 +222,9 @@ impl Env {
 
     /// A child environment with `binds` added (later bindings shadow earlier),
     /// with no recorded position for any of them — used by callers that don't
-    /// track individual binding positions (e.g. match-pattern bindings,
-    /// monomorphization's synthesized re-checks). See [`Self::extended_with_locs`]
-    /// for the counterpart that does.
+    /// track individual binding positions (monomorphization's synthesized
+    /// re-checks). See [`Self::extended_with_locs`] for the counterpart that
+    /// does.
     fn extended(&self, binds: Vec<(String, Type)>) -> Env {
         self.extended_with_locs(binds.into_iter().map(|(n, t)| (n, t, None)).collect())
     }
@@ -4232,7 +4233,7 @@ impl Checker {
             if parts.is_empty() {
                 return Err(Error::TypeError("match: arm must be (pattern body...)".into()));
             }
-            let (pat, binds) = self.check_pattern(heap, &scrut.ty, parts[0])?;
+            let (pat, binds) = self.check_pattern(heap, &scrut.ty, parts[0], parts_locs[0].1.clone())?;
             match &pat {
                 Pattern::Ctor { variant, .. } => {
                     covered.insert(*variant);
@@ -4240,7 +4241,7 @@ impl Checker {
                 Pattern::Wildcard | Pattern::Bind(..) => catchall = true,
                 _ => {}
             }
-            let arm_env = env.extended(binds);
+            let arm_env = env.extended_with_locs(binds);
             // Diverging arms don't constrain the result type; concrete arms must
             // all agree (Never joins with anything).
             let arm_expected = result_ty.as_ref().and_then(non_never);
@@ -4266,13 +4267,20 @@ impl Checker {
     }
 
     /// Check a pattern against the type of the value it matches, returning the
-    /// pattern and the variable bindings it introduces.
+    /// pattern and the variable bindings it introduces — each with the source
+    /// position of its name in the pattern (`loc`: where `v` itself sits, the
+    /// element position its enclosing list recorded — the arm's own for a
+    /// whole-arm variable pattern, the constructor list's for a field
+    /// sub-pattern), so a later reference in the arm body can resolve
+    /// goto-definition back to it (`Env::extended_with_locs`,
+    /// `DefLocs::local_refs`).
     fn check_pattern(
         &self,
         heap: &Heap,
         expected: &Type,
         v: Value,
-    ) -> Result<(Pattern, Vec<(String, Type)>), Error> {
+        loc: Option<Loc>,
+    ) -> Result<(Pattern, Vec<(String, Type, Option<Loc>)>), Error> {
         match v {
             Value::Symbol(id) => {
                 let name = heap.symbol_name(id);
@@ -4281,7 +4289,7 @@ impl Checker {
                 } else {
                     Ok((
                         Pattern::Bind(name.to_string(), self.is_heap_repr(expected)),
-                        vec![(name.to_string(), expected.clone())],
+                        vec![(name.to_string(), expected.clone(), loc)],
                     ))
                 }
             }
@@ -4307,8 +4315,12 @@ impl Checker {
         heap: &Heap,
         expected: &Type,
         v: Value,
-    ) -> Result<(Pattern, Vec<(String, Type)>), Error> {
-        let parts = heap.list_to_vec(v)?;
+    ) -> Result<(Pattern, Vec<(String, Type, Option<Loc>)>), Error> {
+        // `list_to_vec_locs` so each field sub-pattern keeps its own recorded
+        // position — a bound name's `Loc` is what goto-definition on a later
+        // reference resolves to (see `check_pattern`'s doc comment).
+        let parts_locs = heap.list_to_vec_locs(v)?;
+        let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
         let ctor = match parts[0] {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("pattern: constructor must be a symbol".into())),
@@ -4336,7 +4348,7 @@ impl Checker {
         let mut binds = Vec::new();
         let mut sexpr_fields = Vec::new();
         let mut field_types = Vec::new();
-        for (sub, field) in parts[1..].iter().zip(fields.iter()) {
+        for ((sub, sub_loc), field) in parts_locs[1..].iter().zip(fields.iter()) {
             let field_ty = subst_apply(field, &subst);
             // Baked into the pattern here (where the instantiated field
             // type is in hand) so the type-erased interpreter can decode a
@@ -4347,7 +4359,7 @@ impl Checker {
             // per-field decode — see `Pattern::Ctor::field_types`'s doc
             // comment.
             field_types.push(field_ty.clone());
-            let (p, b) = self.check_pattern(heap, &field_ty, *sub)?;
+            let (p, b) = self.check_pattern(heap, &field_ty, *sub, sub_loc.clone())?;
             sub_pats.push(p);
             binds.extend(b);
         }

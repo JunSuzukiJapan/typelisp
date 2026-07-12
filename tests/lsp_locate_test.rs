@@ -110,18 +110,29 @@ fn goto_definition_on_a_labels_function_and_parameter_resolves_to_their_bindings
 }
 
 #[test]
-fn no_definition_for_a_match_bound_variable() {
-    // Match-pattern bindings are a deliberately out-of-scope residual (see
-    // `Env::extended`'s doc comment) — a pattern-bound name still resolves
-    // via `env.get`/hover (its `Var` node gets a `Loc` from `check_at` like
-    // any other bare-atom reference), but has no recorded binding-site
-    // position, so goto-definition on it stays `None`.
+fn goto_definition_on_a_match_pattern_bound_reference_resolves_to_the_pattern() {
     let src = "(defun f ((o Option<i32>)) i32 (match o ((Some x) x) (_ 0)))\n";
     let (body, def_locs) = program(src);
-    // Column 51 is the arm body's `x` reference (after `(Some x)`'s own,
-    // pattern-bound `x` at column 48).
+    // Column 51 is the arm body's `x` reference; its pattern binding — the
+    // `x` inside `(Some x)` — is at column 48 (`check_ctor_pattern`'s
+    // per-field element positions).
     let node = locate_node(&body, FILE, 1, 51).expect("expected a located node");
-    assert_eq!(definition_target(node, &def_locs), None);
+    let target = definition_target(node, &def_locs).expect("expected a resolvable reference");
+    assert_eq!(&*target.file, FILE);
+    assert_eq!(target.line, 1);
+    assert_eq!(target.col, 48);
+}
+
+#[test]
+fn goto_definition_on_a_whole_arm_bind_pattern_reference_resolves_to_the_pattern() {
+    let src = "(defun g ((o Option<i32>)) Option<i32> (match o (v v)))\n";
+    let (body, def_locs) = program(src);
+    // Column 52 is the arm body's `v` reference; the whole-arm variable
+    // pattern `v` (the arm's own first element) is at column 50.
+    let node = locate_node(&body, FILE, 1, 52).expect("expected a located node");
+    let target = definition_target(node, &def_locs).expect("expected a resolvable reference");
+    assert_eq!(target.line, 1);
+    assert_eq!(target.col, 50);
 }
 
 #[test]

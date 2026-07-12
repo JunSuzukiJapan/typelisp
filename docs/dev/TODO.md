@@ -31,22 +31,23 @@
 （`locate_node`/`definition_target`/`hover_text`/`completion_candidates`/`completion_locals`）・
 `src/bin/lsp.rs`の`hover_provider`/`definition_provider`/`completion_provider`で実装。
 グローバル定義（`defun`/`defmethod`/`defstruct`/`defenum`/`defvar`/`deftrait`/`defmacro`）と
-ローカル束縛（`let`/`let*`/`lambda`/`labels`束縛・関数パラメータ）の両方をカバーする
-（当初は後者を「既知の制限」としていたが2026-07-12に解消——`Heap::elem_locs`でリスト要素
-（裸アトム含む）に位置を付与し、`DefLocs::local_refs`で参照位置→束縛位置を解決）。
+ローカル束縛（`let`/`let*`/`lambda`/`labels`束縛・関数パラメータ・`match`パターン束縛）の
+両方をカバーする（当初「既知の制限」だったローカル束縛は2026-07-12に解消——`Heap::elem_locs`で
+リスト要素（裸アトム含む）に位置を付与し、`DefLocs::local_refs`で参照位置→束縛位置を解決。
+`match`パターン束縛と「スコープ境界直後の補完取りこぼし」も同日解消——`check_pattern`が
+束縛位置を返して`extended_with_locs`へ、`scope_typed`に`Match`アーム追加、補完プレースホルダ
+`(panic "")`をカーソル位置ちょうどに挿入するよう先頭空白を除去）。
 詳細な設計・段階分けは[implementation-log.md](implementation-log.md)の
 「LSP: ローカル変数の hover / goto-definition / 補完 対応」節を参照。
 単体テスト: `tests/lsp_locate_test.rs`/`tests/lsp_completion_test.rs`（LSPのstdioトランスポートは
 介さず`Checker::check_form`を直接駆動してコアロジックのみ検証）。
 
 **既知の制限（意図的なMVPスコープ、解消せず残す）**:
-- `match`パターン束縛（`(match x ((Some y) ...))`の`y`）へのgoto-definition・補完は非対応
-  （`Expr::Match`の`Arm`が束縛位置を追跡していない——グローバル/`let`系と異なり優先度が低いと
-  判断）。hoverは通常通り機能する（`Var`参照として位置は持つため）。
-- 補完のローカル名列挙（`completion_locals`）は`Typed.loc`が範囲でなく開始点のみのため、
-  スコープ境界直後（束縛リストを閉じた直後で本体にまだ何も無い状態）でのみ稀に取りこぼす
-  場合がある——本体に既存の文が1つでもあれば発生しない、詳細は`completion_locals`のdocコメント
-  参照。
+- 補完は「カーソル以降を切り捨ててチェックし直す」設計のため、**catchallでない`match`アームの
+  本体内**で補完すると後続アーム（`(_ ...)`等）ごと切り捨てられて非網羅エラーになり、
+  ローカル束縛の候補が出ない（Registry由来の候補は従来通り出る）。stdio実測で確認済み。
+  カーソル以降の温存はtruncate設計の作り替えが必要で見送り
+  （`needs_completion_placeholder`のdocコメントにある「複数引数の切り捨て」と同族の制約）。
 - アトム単体でも**リスト要素として現れる場合は**位置を持つ（2026-07-12対応）が、
   リストに一切現れない裸アトム（実質発生しない）は依然として位置を持てない。真のspan対応
   （reader全体の作り替えが必要）は引き続き見送り。

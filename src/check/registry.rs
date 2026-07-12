@@ -286,7 +286,8 @@ pub struct DefLocs {
     /// A local variable reference's own source position (`line`, `col`) ->
     /// the `Loc` of the binding site it resolves to (a `let`/`let*` binding
     /// name, a `lambda`/`labels`/`defun`/`defmethod` parameter or receiver
-    /// name, or a `labels` function name). Unlike the other tables above
+    /// name, a `labels` function name, or a `match`-pattern binding).
+    /// Unlike the other tables above
     /// (keyed by a fully-qualified [`Path`], since a global definition has
     /// exactly one), a local binding has no such stable identity — the same
     /// name can be bound many times in one file — so this is keyed by the

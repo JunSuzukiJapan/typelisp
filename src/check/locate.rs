@@ -20,7 +20,7 @@
 //! a wrapper node sharing its first child's exact position — broken toward
 //! the deeper node). [`locate_node`] is that search.
 
-use crate::{DefLocs, Expr, Loc, Registry, TopLevel, Typed};
+use crate::{DefLocs, Expr, Loc, Pattern, Registry, TopLevel, Typed};
 
 /// Find the smallest node in `body` whose recorded location is at or before
 /// `(line, col)` in `file` — see the module doc comment for why "greatest
@@ -177,27 +177,26 @@ pub fn hover_text(node: &Typed) -> String {
 /// point. A binding is only pushed once its own scope is entered — a `let`
 /// binding's *value* expression, for instance, is checked in the *outer*
 /// environment (CL `let`, not `let*`) and correctly does not see the name
-/// being bound, matching `Checker::check_let`'s own order. Match-pattern
-/// bindings are a deliberate residual: `Expr::Match`'s `Arm`s carry no
-/// binding-position tracking (see `check::registry::DefLocs::local_refs`'s
-/// doc comment for the same choice on the goto-definition side), so they
-/// never get pushed here either — walked like any other non-scope-
-/// introducing node, via [`expr_children`].
+/// being bound, matching `Checker::check_let`'s own order. A `match` arm's
+/// pattern-bound names ([`pattern_bind_names`]) are pushed only for that
+/// arm's own body — the scrutinee and sibling arms never see them,
+/// matching `Checker::check_match`'s per-arm `extended_with_locs`.
 ///
-/// Known gap (a consequence of `Typed::loc` being a start *point*, not a
-/// span — see this module's own doc comment): the cursor position handed in
-/// is matched against the *closest preceding* node's start, with no way to
-/// tell "inside that node's own span" from "already past it, nothing
-/// positioned here yet". This only matters right at a `let`/`lambda`/
-/// `labels`'s scope boundary with nothing already typed in the new scope —
-/// e.g. completing the very first character of a `let`'s body, with no
-/// prior body statement — where the closest preceding node can still be
-/// (part of) the bindings list itself, one search phase *before* this
-/// binding's own name would have been pushed. As soon as there is *any*
-/// already-complete statement in the new scope (the ordinary case — a
-/// second statement being added after a first one, an argument after
-/// another), the closest preceding node is inside that scope and this does
-/// not arise (see `lsp_completion_test.rs`'s passing cases).
+/// Residual caveat (a consequence of `Typed::loc` being a start *point*,
+/// not a span — see this module's own doc comment): the cursor position
+/// handed in is matched against the *closest preceding* node's start, with
+/// no way to tell "inside that node's own span" from "already past it,
+/// nothing positioned here yet". A cursor sitting right at a `let`/
+/// `lambda`/`labels` scope boundary with *nothing at all* positioned in the
+/// new scope can therefore resolve to a node one scope out (e.g. a binding
+/// value), missing the boundary's own names. The LSP never hands in such a
+/// position anymore: `handle_completion` (`src/bin/lsp.rs`) splices its
+/// `(panic "")` placeholder at *exactly* the in-progress identifier's
+/// position (and a fresh `(` truncates to `()`, whose `Unit` node keeps the
+/// `(`'s own recorded element position), so the checked tree always has a
+/// node at — and thus a target in — the scope being completed in. Only a
+/// direct caller passing a position in a genuinely empty scope still sees
+/// the caveat.
 pub fn completion_locals(body: &[TopLevel], file: &str, line: u32, col: u32) -> Vec<String> {
     let Some(target) = locate_node(body, file, line, col) else {
         return Vec::new();
@@ -266,6 +265,23 @@ fn scope_top_level(tl: &TopLevel, target: *const Typed, scope: &mut Vec<String>)
 /// scope.
 fn scope_typed(node: &Typed, target: *const Typed, scope: &mut Vec<String>) -> bool {
     match &node.expr {
+        Expr::Match(scrutinee, arms) => {
+            // The scrutinee is checked in the outer scope; each arm's
+            // pattern-bound names are visible only in that arm's own body
+            // (`Checker::check_match`'s per-arm `extended_with_locs`).
+            if scope_typed(scrutinee, target, scope) || std::ptr::eq(node, target) {
+                return true;
+            }
+            for arm in arms {
+                let mark = scope.len();
+                pattern_bind_names(&arm.pat, scope);
+                if arm.body.iter().any(|t| scope_typed(t, target, scope)) {
+                    return true;
+                }
+                scope.truncate(mark);
+            }
+            false
+        }
         Expr::Let(binds, body) => {
             // Each binding's value is checked in the *outer* scope (CL
             // `let`) — see `Checker::check_let` — so this must not see the
@@ -314,6 +330,22 @@ fn scope_typed(node: &Typed, target: *const Typed, scope: &mut Vec<String>) -> b
             found
         }
         _ => std::ptr::eq(node, target) || expr_children(&node.expr).into_iter().any(|c| scope_typed(c, target, scope)),
+    }
+}
+
+/// Every name a match pattern binds, appended to `scope` in source order —
+/// [`scope_typed`]'s `Match` arm pushes these for the arm body's walk.
+/// `Wildcard` and literal patterns bind nothing; a `Ctor`'s field
+/// sub-patterns can each bind (nested `Ctor`s included).
+fn pattern_bind_names(pat: &Pattern, scope: &mut Vec<String>) {
+    match pat {
+        Pattern::Bind(name, _) => scope.push(name.clone()),
+        Pattern::Ctor { args, .. } => {
+            for sub in args {
+                pattern_bind_names(sub, scope);
+            }
+        }
+        Pattern::Wildcard | Pattern::Int(_) | Pattern::Bool(_) | Pattern::Char(_) => {}
     }
 }
 

@@ -111,12 +111,48 @@ fn completion_locals_does_not_leak_a_sibling_lets_binding() {
 }
 
 #[test]
-fn completion_locals_excludes_a_match_bound_variable() {
+fn completion_locals_offers_a_match_pattern_binding_in_its_own_arm() {
     let body = program("(defun f ((o Option<i32>)) i32 (match o ((Some x) x) (_ 0)))\n");
-    // Column 51 is the arm body's `x` reference — see
-    // `lsp_locate_test.rs::no_definition_for_a_match_bound_variable` for the
-    // same position on the goto-definition side.
+    // Column 51 is the `(Some x)` arm's body (`x` reference) — see
+    // `lsp_locate_test.rs`'s goto-definition test at the same position.
     let locals = completion_locals(&body, FILE, 1, 51);
     assert!(locals.contains(&"o".to_string()));
+    assert!(locals.contains(&"x".to_string()));
+}
+
+#[test]
+fn completion_locals_does_not_leak_a_match_pattern_binding_into_a_sibling_arm() {
+    let body = program("(defun f ((o Option<i32>)) i32 (match o ((Some x) x) (_ 0)))\n");
+    // Column 57 is the `_` arm's body (the literal `0`) — `x` belongs to the
+    // sibling `(Some x)` arm only (`scope_typed`'s per-arm truncate).
+    let locals = completion_locals(&body, FILE, 1, 57);
+    assert!(locals.contains(&"o".to_string()));
     assert!(!locals.contains(&"x".to_string()));
+}
+
+#[test]
+fn completion_locals_sees_a_let_binding_from_the_placeholder_as_the_first_body_form() {
+    // The shape `handle_completion` produces when the very first form of a
+    // `let` body is being typed: the in-progress identifier is replaced by
+    // `(panic "")` at exactly the cursor's position (column 37, the `(`).
+    // The placeholder node itself is the cursor's located node, inside the
+    // `let`'s scope — so `n` (and the parameter `x`) must be offered.
+    let body = program("(defun f ((x i32)) i32 (let ((n 1)) (panic \"\")))\n");
+    let locals = completion_locals(&body, FILE, 1, 37);
+    assert!(locals.contains(&"x".to_string()));
+    assert!(locals.contains(&"n".to_string()));
+}
+
+#[test]
+fn completion_locals_sees_a_let_binding_from_an_empty_list_as_the_first_body_form() {
+    // The no-placeholder shape (`needs_completion_placeholder` declines when
+    // the identifier follows a fresh `(`): truncation leaves `()` as the
+    // `let`'s whole body. The `Unit` node keeps the `(`'s recorded element
+    // position (column 36), so the cursor one column later — where the
+    // in-progress callee identifier starts in the real flow — still
+    // resolves inside the `let`'s scope.
+    let body = program("(defun f ((x i32)) () (let ((n 1)) ()))\n");
+    let locals = completion_locals(&body, FILE, 1, 37);
+    assert!(locals.contains(&"x".to_string()));
+    assert!(locals.contains(&"n".to_string()));
 }

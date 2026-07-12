@@ -3336,3 +3336,42 @@ labelsは関数名自体と内部パラメータの両方を検証）+ match束�
 `src/bin/lsp.rs`に`needs_completion_placeholder`単体3件。stdio経由の手動スモークテストで
 ローカルパラメータ+let束縛の両方が実際に補完候補に出ることを確認、既存の完了パス
 （"add"がregistry経由で見つかる元のスモークテスト）も無回帰。cargo test全体green。
+
+## LSP: matchパターン束縛のgoto-def/補完 + スコープ境界直後の補完取りこぼし解消（2026-07-12）
+
+前節の既知の残存ギャップ2件を解消。
+
+**matchパターン束縛（`(match x ((Some y) ...))`の`y`）**:
+- `src/check/checker.rs`: `check_pattern`/`check_ctor_pattern`の戻り値の束縛リストを
+  `Vec<(String, Type, Option<Loc>)>`に拡張。位置の出どころは、アーム全体の変数パターンなら
+  アームの`list_to_vec_locs`が返す先頭要素位置、コンストラクタパターンのフィールドなら
+  `check_ctor_pattern`を`list_to_vec`→`list_to_vec_locs`に切り替えて得る各要素位置
+  （ネストした`Ctor`にも再帰で伝播）。`check_match`は`env.extended(binds)`→
+  `env.extended_with_locs(binds)`に変更するだけで、既存の`check_at`の
+  「`Var`参照解決時に`env.get_loc`→`DefLocs::local_refs`へ記録」経路にそのまま乗り、
+  goto-definitionが機能する。
+- `src/check/locate.rs`: `scope_typed`に`Expr::Match`アームを新設——scrutineeは外側スコープで
+  走査し、各アームは`pattern_bind_names`（`Bind`名+`Ctor`のサブパターン再帰）をpushしてから
+  本体を走査、見つからなければtruncate。兄弟アームへの束縛リークなし。
+
+**補完のスコープ境界直後の取りこぼし**:
+- 真因はプレースホルダの挿入位置。`handle_completion`は`truncated.push_str(" (panic \"\")")`と
+  **先頭スペース付き**で挿入していたため、`(panic "")`の記録位置がカーソル（＝入力中識別子の
+  開始位置、`completion_locals`へ渡す`(line, col)`）の1桁**後ろ**になり、`locate_node`の
+  「開始位置がカーソル**以前**で最大のノード」検索から漏れて、直前の束縛値ノード等が
+  targetになりスコープ導入前で探索が終わっていた。`truncated`は識別子開始位置ちょうどで
+  切られており直前は必ず区切り文字なので、スペースなしで直結すれば位置が完全一致し、
+  プレースホルダ自身がカーソルのノードになる。1文字の修正+doc追記。
+- プレースホルダを挿入しない「`(`直後のcallee入力中」ケースは、切り詰めで残る`()`（Unit）が
+  reader の要素位置（`Heap::elem_locs`は`Value::Empty`要素にも記録する）を保持しているため
+  元々スコープ内に解決される——テストで固定化した。
+
+検証: `tests/lsp_locate_test.rs`にctorフィールド束縛/アーム全体束縛のgoto-def 2件、
+`tests/lsp_completion_test.rs`にmatch束縛の提供/兄弟アーム非リーク/境界2形状（`(panic "")`型・
+`()`型）の計4件（従来の「match束縛が対象外」テストは反転）。cargo test全38バイナリgreen。
+stdio実測（initialize→didOpen→completion/definition）でgoto-def・アーム内補完・let本体
+先頭フォーム入力中の補完がすべて機能することを確認。
+
+副産物の発見（TODO.mdに既知の制限として記録）: catchallでないアーム本体内の補完は、
+カーソル以降の切り捨てで後続アームが消え非網羅エラーになるため、ローカル候補が出ない
+（truncate設計固有の制約、複数引数切り捨てと同族）。
