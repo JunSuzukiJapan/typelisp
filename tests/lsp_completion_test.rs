@@ -13,7 +13,7 @@
 //! alongside user code.
 
 extern crate typelisp;
-use typelisp::{completion_candidates, Checker, CompletionCandidate, CompletionKind, Heap, Interp, Reader};
+use typelisp::{completion_candidates, completion_locals, Checker, CompletionCandidate, CompletionKind, Heap, Interp, Reader, TopLevel};
 
 const FILE: &str = "test.typl";
 
@@ -30,6 +30,17 @@ fn check(src: &str) -> Checker {
         chk.check_form(&mut h, &interp, v).expect("check failed");
     }
     chk
+}
+
+/// Like `check`, but returns the checked top-level forms (what
+/// `completion_locals` searches) instead of the `Checker`.
+fn program(src: &str) -> Vec<TopLevel> {
+    let mut h = Heap::with_capacity(1 << 16);
+    let r = Reader::new();
+    let vs = r.read_all_in(&mut h, FILE, src).expect("read failed");
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    vs.into_iter().map(|v| chk.check_form(&mut h, &interp, v).expect("check failed")).collect()
 }
 
 fn has(kind: CompletionKind, candidates: &[CompletionCandidate], name: &str) -> bool {
@@ -74,4 +85,38 @@ fn a_private_root_function_is_not_visible_from_inside_a_submodule() {
     let inside = completion_candidates(chk.registry(), &["m".to_string()]);
     assert!(!has(CompletionKind::Function, &inside, "helper"));
     assert!(has(CompletionKind::Function, &inside, "main"));
+}
+
+#[test]
+fn completion_locals_offers_a_defun_parameter_and_a_let_binding() {
+    let body = program("(defun f ((x i32)) i32 (let ((n 1)) n))\n");
+    // Column 37 is `n`'s reference inside the `let` body.
+    let locals = completion_locals(&body, FILE, 1, 37);
+    assert!(locals.contains(&"x".to_string()));
+    assert!(locals.contains(&"n".to_string()));
+}
+
+#[test]
+fn completion_locals_does_not_leak_a_sibling_lets_binding() {
+    let body = program("(defun f () i32 (progn (let ((a 1)) a) (let ((b 2)) b)))\n");
+    // Column 37 is `a`'s reference inside the first `let`; column 53 is `b`'s
+    // inside the second — each must see only its own binding, not the
+    // sibling's (`scope_typed`'s truncate-on-scope-exit).
+    let inside_first = completion_locals(&body, FILE, 1, 37);
+    assert!(inside_first.contains(&"a".to_string()));
+    assert!(!inside_first.contains(&"b".to_string()));
+    let inside_second = completion_locals(&body, FILE, 1, 53);
+    assert!(inside_second.contains(&"b".to_string()));
+    assert!(!inside_second.contains(&"a".to_string()));
+}
+
+#[test]
+fn completion_locals_excludes_a_match_bound_variable() {
+    let body = program("(defun f ((o Option<i32>)) i32 (match o ((Some x) x) (_ 0)))\n");
+    // Column 51 is the arm body's `x` reference — see
+    // `lsp_locate_test.rs::no_definition_for_a_match_bound_variable` for the
+    // same position on the goto-definition side.
+    let locals = completion_locals(&body, FILE, 1, 51);
+    assert!(locals.contains(&"o".to_string()));
+    assert!(!locals.contains(&"x".to_string()));
 }

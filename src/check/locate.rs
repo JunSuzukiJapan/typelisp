@@ -164,6 +164,159 @@ pub fn hover_text(node: &Typed) -> String {
     format!("{:?}", node.ty)
 }
 
+/// Every local (`let`/`let*`/`lambda`/`labels` binding, or a `defun`/
+/// `defmethod`/`defmacro`'s own parameter/receiver) in lexical scope at
+/// `(line, col)` in `file` — for the LSP's completion (`src/bin/lsp.rs`) to
+/// offer alongside [`completion_candidates`]'s `Registry`-derived names.
+///
+/// First finds the cursor's smallest enclosing node with [`locate_node`],
+/// then re-walks `body` from the top, pushing each binding name it
+/// encounters as it descends into that binding's scope — stopping (by
+/// pointer identity, `body` being the same tree `locate_node` searched) at
+/// the target node and returning whatever names are on the stack at that
+/// point. A binding is only pushed once its own scope is entered — a `let`
+/// binding's *value* expression, for instance, is checked in the *outer*
+/// environment (CL `let`, not `let*`) and correctly does not see the name
+/// being bound, matching `Checker::check_let`'s own order. Match-pattern
+/// bindings are a deliberate residual: `Expr::Match`'s `Arm`s carry no
+/// binding-position tracking (see `check::registry::DefLocs::local_refs`'s
+/// doc comment for the same choice on the goto-definition side), so they
+/// never get pushed here either — walked like any other non-scope-
+/// introducing node, via [`expr_children`].
+///
+/// Known gap (a consequence of `Typed::loc` being a start *point*, not a
+/// span — see this module's own doc comment): the cursor position handed in
+/// is matched against the *closest preceding* node's start, with no way to
+/// tell "inside that node's own span" from "already past it, nothing
+/// positioned here yet". This only matters right at a `let`/`lambda`/
+/// `labels`'s scope boundary with nothing already typed in the new scope —
+/// e.g. completing the very first character of a `let`'s body, with no
+/// prior body statement — where the closest preceding node can still be
+/// (part of) the bindings list itself, one search phase *before* this
+/// binding's own name would have been pushed. As soon as there is *any*
+/// already-complete statement in the new scope (the ordinary case — a
+/// second statement being added after a first one, an argument after
+/// another), the closest preceding node is inside that scope and this does
+/// not arise (see `lsp_completion_test.rs`'s passing cases).
+pub fn completion_locals(body: &[TopLevel], file: &str, line: u32, col: u32) -> Vec<String> {
+    let Some(target) = locate_node(body, file, line, col) else {
+        return Vec::new();
+    };
+    let target: *const Typed = target;
+    let mut scope: Vec<String> = Vec::new();
+    for tl in body {
+        if scope_top_level(tl, target, &mut scope) {
+            return scope;
+        }
+    }
+    Vec::new()
+}
+
+/// [`completion_locals`]'s top-level-form half: seeds `scope` with a
+/// `defun`/`defmethod`/`defmacro`'s own parameters (and receiver, for a
+/// method) before descending into its body via [`scope_typed`]. Returns
+/// `true` once `target` is found — `scope` is left holding the accumulated
+/// names at that point (truncated back on a `false` return, so a sibling
+/// top-level form's search starts clean).
+fn scope_top_level(tl: &TopLevel, target: *const Typed, scope: &mut Vec<String>) -> bool {
+    let mark = scope.len();
+    let found = match tl {
+        TopLevel::Defun { params, body, .. } => {
+            scope.extend(params.iter().map(|(n, _)| n.clone()));
+            body.iter().any(|t| scope_typed(t, target, scope))
+        }
+        TopLevel::Defmethod { self_name, params, body, .. } => {
+            scope.extend(self_name.iter().cloned());
+            scope.extend(params.iter().map(|(n, _)| n.clone()));
+            body.iter().any(|t| scope_typed(t, target, scope))
+        }
+        TopLevel::Defmacro { params, body, .. } => {
+            scope.extend(params.iter().cloned());
+            body.iter().any(|t| scope_typed(t, target, scope))
+        }
+        TopLevel::Defvar { value, .. } => scope_typed(value, target, scope),
+        TopLevel::Module { body, .. } => body.iter().any(|tl| scope_top_level(tl, target, scope)),
+        TopLevel::Expr(t) => scope_typed(t, target, scope),
+        TopLevel::Use { .. } | TopLevel::Defstruct { .. } | TopLevel::Defenum { .. } => false,
+    };
+    if !found {
+        scope.truncate(mark);
+    }
+    found
+}
+
+/// [`completion_locals`]'s expression half: `Let`/`Lambda`/`Labels` push
+/// their bound names before recursing into the scope those names are
+/// visible in; every other node just recurses into its children
+/// ([`expr_children`]) with no scope change. Returns `true` once `target`
+/// (compared by pointer identity — `node` is a descendant of the same tree
+/// [`completion_locals`] called [`locate_node`] on) is found.
+///
+/// The pointer-identity check happens *inside* each scope-introducing arm,
+/// after its names are pushed — not once, up front, before the `match` —
+/// because `target` can legitimately resolve to the scope-introducing node
+/// itself, not something inside it: `locate_node` returns the *smallest*
+/// node with a recorded position at or before the cursor, and when the
+/// cursor sits right after a `let`'s bindings list with nothing positioned
+/// between there and the next real token (e.g. completing the very first
+/// character of what will become the body — before that token exists to
+/// have a position of its own), the `Let` node itself is the closest match.
+/// An early, unconditional check here would return `true` before this arm's
+/// own names were ever pushed, silently dropping them from the offered
+/// scope.
+fn scope_typed(node: &Typed, target: *const Typed, scope: &mut Vec<String>) -> bool {
+    match &node.expr {
+        Expr::Let(binds, body) => {
+            // Each binding's value is checked in the *outer* scope (CL
+            // `let`) — see `Checker::check_let` — so this must not see the
+            // name(s) being bound here.
+            if binds.iter().any(|(_, val)| scope_typed(val, target, scope)) {
+                return true;
+            }
+            let mark = scope.len();
+            scope.extend(binds.iter().map(|(n, _)| n.clone()));
+            let found = std::ptr::eq(node, target) || body.iter().any(|t| scope_typed(t, target, scope));
+            if !found {
+                scope.truncate(mark);
+            }
+            found
+        }
+        Expr::Lambda { params, body } => {
+            let mark = scope.len();
+            scope.extend(params.iter().map(|(n, _)| n.clone()));
+            let found = std::ptr::eq(node, target) || body.iter().any(|t| scope_typed(t, target, scope));
+            if !found {
+                scope.truncate(mark);
+            }
+            found
+        }
+        Expr::Labels { defs, body } => {
+            let mark = scope.len();
+            // Every function's name is visible to every body (including its
+            // own) and to the trailing `body` — see `Checker::check_labels`.
+            scope.extend(defs.iter().map(|(name, _, _)| name.clone()));
+            if std::ptr::eq(node, target) {
+                return true;
+            }
+            for (_, params, def_body) in defs {
+                let pmark = scope.len();
+                scope.extend(params.iter().map(|(n, _)| n.clone()));
+                let found = def_body.iter().any(|t| scope_typed(t, target, scope));
+                scope.truncate(pmark);
+                if found {
+                    return true;
+                }
+            }
+            let found = body.iter().any(|t| scope_typed(t, target, scope));
+            if !found {
+                scope.truncate(mark);
+            }
+            found
+        }
+        _ => std::ptr::eq(node, target) || expr_children(&node.expr).into_iter().any(|c| scope_typed(c, target, scope)),
+    }
+}
+
 /// What a [`CompletionCandidate`] names — mirrors the tables a
 /// [`crate::Namespace`] keeps, plus `Module` for a child module name (useful
 /// for completing a `module::` prefix).

@@ -385,10 +385,9 @@ fn handle_goto_definition(id: RequestId, params: serde_json::Value, analyses: &H
 /// got registered before that failure point is still usable — this is
 /// deliberately lenient rather than requiring a clean check.
 ///
-/// Known limitation (see `docs/dev/TODO.md`): a local variable (`let`/lambda
-/// binding) is never offered — only names reachable through the module/
-/// [`Registry`] tree (`check::locate::completion_candidates`), the same scope
-/// hover/goto-definition already limit themselves to.
+/// Known limitation: a `match`-pattern-bound variable is never offered — see
+/// `check::locate::completion_locals`'s doc comment for why (mirrors
+/// goto-definition's own residual, `DefLocs::local_refs`).
 fn handle_completion(id: RequestId, params: serde_json::Value, docs: &HashMap<Uri, String>) -> Response {
     let result = (|| {
         let p: CompletionParams = serde_json::from_value(params).ok()?;
@@ -399,10 +398,19 @@ fn handle_completion(id: RequestId, params: serde_json::Value, docs: &HashMap<Ur
         let offset = char_offset(&chars, pos);
         let prefix_start = prefix_start(&chars, offset);
         let prefix: String = chars[prefix_start..offset].iter().collect::<String>().to_lowercase();
-        let truncated: String = chars[..prefix_start].iter().collect();
+        let mut truncated: String = chars[..prefix_start].iter().collect();
+        // The cursor's own (1-based) position within `text` — computed
+        // *before* `truncated` gains the placeholder below, so it names the
+        // exact point the in-progress identifier starts at (unaffected by
+        // anything appended after it) — the scope `completion_locals` needs
+        // to search.
+        let (line, col) = line_col_at(&chars, prefix_start);
+        if needs_completion_placeholder(&truncated) {
+            truncated.push_str(" (panic \"\")");
+        }
         let patched = heuristically_close(&truncated);
         let overlay = build_overlay(docs, &uri);
-        let candidates = candidates_for(uri.path().as_str(), &patched, overlay);
+        let candidates = candidates_for(uri.path().as_str(), &patched, overlay, line, col);
         let items: Vec<CompletionItem> = candidates
             .into_iter()
             .filter(|c| prefix.is_empty() || c.name.starts_with(&prefix))
@@ -419,10 +427,19 @@ fn handle_completion(id: RequestId, params: serde_json::Value, docs: &HashMap<Ur
 }
 
 /// Re-checks `patched_text` as the content of `file` (see [`handle_completion`])
-/// and returns every name [`completion_candidates`] finds reachable from the
-/// file's own module — ignoring whether the check itself succeeded, since a
-/// completion request's text is expected to be a document mid-edit.
-fn candidates_for(file: &str, patched_text: &str, overlay: HashMap<PathBuf, String>) -> Vec<CompletionCandidate> {
+/// and returns every name reachable at `(line, col)`: [`completion_candidates`]
+/// (module/`Registry`-level names) plus, when the check succeeds cleanly,
+/// [`completion_locals`] (`let`/`lambda`/`labels`/parameter names in lexical
+/// scope there) — offered as [`CompletionKind::Variable`], matching how a
+/// `Registry` variable is rendered. Ignores whether the check itself
+/// succeeded for the `Registry` half, since a completion request's text is
+/// expected to be a document mid-edit — but `completion_locals` needs a
+/// complete, correctly-typed `Typed` tree to search (there is no
+/// "best-effort" partial tree the way there is a partially-populated
+/// `Registry`), so it's skipped on a failed check, same as hover/goto-
+/// definition's `Analysis` caching (`publish_one`'s doc comment) keeps
+/// serving the last-good data rather than going blank.
+fn candidates_for(file: &str, patched_text: &str, overlay: HashMap<PathBuf, String>, line: u32, col: u32) -> Vec<CompletionCandidate> {
     let mut heap = Heap::with_capacity(1 << 16);
     let reader = Reader::new();
     let mut checker = Checker::new();
@@ -434,10 +451,41 @@ fn candidates_for(file: &str, patched_text: &str, overlay: HashMap<PathBuf, Stri
     let src_root = find_src_root(&dir).unwrap_or_else(|| dir.clone());
     let mut loader = Loader::new(src_root.clone());
     loader.set_overlay(overlay);
-    let _ = loader.load_entry_src(&mut heap, &reader, &mut checker, &mut interp, fs_file, patched_text);
+    let result = loader.load_entry_src(&mut heap, &reader, &mut checker, &mut interp, fs_file, patched_text);
 
     let module_path = module_segs_for(fs_file, &src_root).unwrap_or_default();
-    completion_candidates(checker.registry(), &module_path)
+    let mut candidates = completion_candidates(checker.registry(), &module_path);
+    if result.is_ok() {
+        // Same extraction `diagnostics_for` uses for `Analysis.body` — the
+        // entry file's own `TopLevel::Module` is always the last one pushed.
+        let body = match loader.take_pending().pop() {
+            Some(TopLevel::Module { body, .. }) => body,
+            Some(other) => vec![other],
+            None => Vec::new(),
+        };
+        for name in completion_locals(&body, file, line, col) {
+            candidates.push(CompletionCandidate { name, kind: CompletionKind::Variable, detail: "local".to_string() });
+        }
+    }
+    candidates
+}
+
+/// The 1-based `(line, col)` — matching [`Loc`]'s convention — of the char at
+/// index `offset` in `chars`. Mirrors `read::reader::Cursor`'s own line/col
+/// tracking (line starts at 1, column resets to 1 after each `\n`) so a
+/// position computed here lines up with one recorded by the reader.
+fn line_col_at(chars: &[char], offset: usize) -> (u32, u32) {
+    let mut line = 1u32;
+    let mut col = 1u32;
+    for &c in &chars[..offset.min(chars.len())] {
+        if c == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    (line, col)
 }
 
 fn completion_item_kind(kind: CompletionKind) -> CompletionItemKind {
@@ -494,6 +542,43 @@ fn prefix_start(chars: &[char], offset: usize) -> usize {
         i -= 1;
     }
     i
+}
+
+/// Whether [`handle_completion`] should splice a placeholder expression onto
+/// `truncated` before closing its parens — a further refinement on top of
+/// [`heuristically_close`]'s pure paren-balancing, needed because truncating
+/// right before the in-progress identifier can leave more than an unclosed
+/// paren behind: it can leave a `let`/`lambda`/`labels`/`defun`/`defmethod`
+/// body with *zero* forms, or a fixed-arity call with too *few* arguments —
+/// either of which fails the check for a reason that has nothing to do with
+/// the identifier being typed, and (before this existed) silently suppressed
+/// `completion_locals`'s local-scope names for one of the single most common
+/// completion moments: finishing the last statement of a function/`let`
+/// body, or the last argument of a call.
+///
+/// The fix: splice in `(panic "")` — a [`crate::Type::Never`]-typed
+/// expression, which (like a `break`/`return`) satisfies *any* expected type
+/// or argument slot — right where the identifier was about to go. This is
+/// only correct when that position is *already* known to be "some
+/// expression is expected here": if the in-progress identifier is instead
+/// the very *first* token inside a freshly-opened list (`(my⏐` — most often a
+/// function/macro name being typed as a new call's head), the placeholder
+/// would itself become that list's *callee* (`((panic ""))`), which fails
+/// with "value is not callable" — a regression `heuristically_close` alone
+/// never had, since an empty list (`()`) simply reads as `Unit`. So: only
+/// when `truncated`'s last non-whitespace character is *not* `(` (meaning at
+/// least one sibling token already precedes this position, so it's an
+/// argument/body-statement slot, not a list head) does splicing the
+/// placeholder in make things strictly more often correct rather than
+/// introducing a new failure mode.
+///
+/// Even with this, multi-argument truncation (typing argument *K* of *N*
+/// when *N* - *K* further arguments existed after the cursor and got
+/// discarded along with everything past it) is still an accepted gap — this
+/// only accounts for the one in-progress slot, not every argument that would
+/// have followed it.
+fn needs_completion_placeholder(truncated: &str) -> bool {
+    !matches!(truncated.trim_end().chars().last(), None | Some('('))
 }
 
 /// Best-effort: appends whatever `)` are needed to close every `(` left open
@@ -666,5 +751,41 @@ mod completion_helper_tests {
     fn char_offset_finds_a_position_on_the_first_line() {
         let chars: Vec<char> = "(add 1 2)".chars().collect();
         assert_eq!(char_offset(&chars, Position::new(0, 4)), 4);
+    }
+
+    #[test]
+    fn line_col_at_finds_a_position_on_the_first_line() {
+        let chars: Vec<char> = "(add 1 2)".chars().collect();
+        // Offset 4 is the space right after "add" — 1-based column 5.
+        assert_eq!(line_col_at(&chars, 4), (1, 5));
+    }
+
+    #[test]
+    fn line_col_at_finds_a_position_on_a_later_line() {
+        let chars: Vec<char> = "(a)\n(b c)".chars().collect();
+        // Offset 7 is `c` on the second (1-based line 2) line.
+        assert_eq!(line_col_at(&chars, 7), (2, 4));
+    }
+
+    #[test]
+    fn needs_completion_placeholder_is_false_right_after_a_fresh_open_paren() {
+        // `my` about to be typed as a new call's head/first token — must not
+        // get a placeholder (it would become that list's unresolvable callee).
+        assert!(!needs_completion_placeholder("(defun f () i32 ("));
+    }
+
+    #[test]
+    fn needs_completion_placeholder_is_true_after_a_prior_sibling() {
+        // A `let` body with one binding already closed — the identifier
+        // about to be typed is a body statement, not a list head.
+        assert!(needs_completion_placeholder("(defun f () i32 (let ((n 1)) "));
+        // A call with one argument already present.
+        assert!(needs_completion_placeholder("(+ mylocal "));
+    }
+
+    #[test]
+    fn needs_completion_placeholder_is_false_at_the_very_start_of_the_document() {
+        assert!(!needs_completion_placeholder(""));
+        assert!(!needs_completion_placeholder("   "));
     }
 }
