@@ -51,16 +51,76 @@ fn goto_definition_resolves_a_call_to_its_defun() {
 }
 
 #[test]
-fn no_definition_for_a_local_variable_reference() {
-    // `x` is now locatable in its own right (see
-    // `hover_on_a_local_variable_reference_finds_the_variable_not_its_enclosing_call`
-    // below), but `definition_target` doesn't resolve `Expr::Var` to a
-    // binding-site location yet (see its doc comment) — so goto-definition
-    // on it still returns `None`, same as any other node this pass doesn't
-    // recognize as a resolvable reference.
+fn goto_definition_on_a_parameter_reference_resolves_to_the_parameter() {
+    // `x` at column 37 is the reference inside `(+ x y)`; its parameter
+    // declaration `(x i32)` is at column 14 on the same line (the `defun`'s
+    // parameter list). `DefLocs::local_refs` resolves the former to the
+    // latter without any scope search at query time — see `check_at`'s doc
+    // comment on where that resolution actually happens (once, at check
+    // time).
     let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n";
     let (body, def_locs) = program(src);
     let node = locate_node(&body, FILE, 1, 37).expect("expected a located node");
+    let target = definition_target(node, &def_locs).expect("expected a resolvable reference");
+    assert_eq!(&*target.file, FILE);
+    assert_eq!(target.line, 1);
+    assert_eq!(target.col, 14);
+}
+
+#[test]
+fn goto_definition_on_a_let_bound_reference_resolves_to_the_binding() {
+    let src = "(defun f () i32 (let ((n 1)) n))\n";
+    let (body, def_locs) = program(src);
+    // `(let ((n 1)) n))` — `n`'s binding name is at column 24, its trailing
+    // reference (the `let`'s body) at column 30.
+    let node = locate_node(&body, FILE, 1, 30).expect("expected a located node");
+    let target = definition_target(node, &def_locs).expect("expected a resolvable reference");
+    assert_eq!(target.line, 1);
+    assert_eq!(target.col, 24);
+}
+
+#[test]
+fn goto_definition_on_a_lambda_parameter_reference_resolves_to_the_parameter() {
+    let src = "(defun f () i32 ((lambda ((y i32)) i32 y) 1))\n";
+    let (body, def_locs) = program(src);
+    // Column 40 is `y`'s reference in the lambda body; its parameter
+    // declaration `(y i32)` is at column 28.
+    let node = locate_node(&body, FILE, 1, 40).expect("expected a located node");
+    let target = definition_target(node, &def_locs).expect("expected a resolvable reference");
+    assert_eq!(target.line, 1);
+    assert_eq!(target.col, 28);
+}
+
+#[test]
+fn goto_definition_on_a_labels_function_and_parameter_resolves_to_their_bindings() {
+    let src = "(defun f () i32 (labels ((g ((z i32)) i32 z)) (g 1)))\n";
+    let (body, def_locs) = program(src);
+    // `z`'s reference inside `g`'s own body (column 43) resolves to its
+    // parameter declaration (column 31).
+    let z_ref = locate_node(&body, FILE, 1, 43).expect("expected a located node");
+    let z_target = definition_target(z_ref, &def_locs).expect("expected a resolvable reference");
+    assert_eq!(z_target.col, 31);
+    // `g`'s call in the trailing `(g 1)` (column 48) — a local function value
+    // applied directly (`check_list`'s "local variable holding a function
+    // value" branch builds an `Expr::Var`, not `Expr::Call`) — resolves to
+    // its own `labels` binding (column 27).
+    let g_ref = locate_node(&body, FILE, 1, 48).expect("expected a located node");
+    let g_target = definition_target(g_ref, &def_locs).expect("expected a resolvable reference");
+    assert_eq!(g_target.col, 27);
+}
+
+#[test]
+fn no_definition_for_a_match_bound_variable() {
+    // Match-pattern bindings are a deliberately out-of-scope residual (see
+    // `Env::extended`'s doc comment) — a pattern-bound name still resolves
+    // via `env.get`/hover (its `Var` node gets a `Loc` from `check_at` like
+    // any other bare-atom reference), but has no recorded binding-site
+    // position, so goto-definition on it stays `None`.
+    let src = "(defun f ((o Option<i32>)) i32 (match o ((Some x) x) (_ 0)))\n";
+    let (body, def_locs) = program(src);
+    // Column 51 is the arm body's `x` reference (after `(Some x)`'s own,
+    // pattern-bound `x` at column 48).
+    let node = locate_node(&body, FILE, 1, 51).expect("expected a located node");
     assert_eq!(definition_target(node, &def_locs), None);
 }
 

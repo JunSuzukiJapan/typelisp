@@ -283,6 +283,19 @@ pub struct DefLocs {
     pub vars: HashMap<Path, Loc>,
     pub traits: HashMap<Path, Loc>,
     pub macros: HashMap<Path, Loc>,
+    /// A local variable reference's own source position (`line`, `col`) ->
+    /// the `Loc` of the binding site it resolves to (a `let`/`let*` binding
+    /// name, a `lambda`/`labels`/`defun`/`defmethod` parameter or receiver
+    /// name, or a `labels` function name). Unlike the other tables above
+    /// (keyed by a fully-qualified [`Path`], since a global definition has
+    /// exactly one), a local binding has no such stable identity — the same
+    /// name can be bound many times in one file — so this is keyed by the
+    /// *reference's* own position instead, resolved once at check time
+    /// (`Checker::check_at`, where both the reference's position and its
+    /// binding's recorded position — `Env`'s third tuple element — are
+    /// available together) rather than searched at query time. Consulted by
+    /// `check::locate::definition_target`'s `Expr::Var` arm.
+    pub local_refs: HashMap<(u32, u32), Loc>,
 }
 
 /// The checker's symbol table: a tree of namespaces rooted at [`Registry::root`].

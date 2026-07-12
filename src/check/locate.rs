@@ -130,10 +130,15 @@ fn expr_children(e: &Expr) -> Vec<&Typed> {
 /// `Global`/`Call`/`FnRef`/`Assoc`/`MethodRef`/`Construct` all already carry
 /// a fully-qualified [`crate::Path`] (resolved at check time), so this is a
 /// plain [`DefLocs`] lookup — no name resolution needed. A local variable
-/// reference (`Expr::Var`) has no binding-site location to resolve to (its
-/// binding form, e.g. a `let`, isn't tracked in `DefLocs` — see the module
-/// doc comment) and returns `None`, same as any node this pass doesn't
-/// recognize as a reference.
+/// reference (`Expr::Var`) resolves through `DefLocs::local_refs` instead,
+/// keyed by the reference's own position (`node.loc`, populated by
+/// `Checker::check_at` for any atom checked as a list element — see
+/// `check::locate`'s module doc comment) — that resolution already happened
+/// once at check time (`Checker::check_at`'s `Env::get_loc` lookup), so this
+/// is a lookup too, not a fresh scope search. A `Var` with no recorded
+/// position of its own (rare — only an atom with no enclosing list at all)
+/// falls through to `None`, same as any node this pass doesn't recognize as
+/// a resolvable reference.
 pub fn definition_target(node: &Typed, def_locs: &DefLocs) -> Option<Loc> {
     match &node.expr {
         Expr::Global(p) | Expr::SetGlobal(p, _) => def_locs.vars.get(p).cloned(),
@@ -142,6 +147,10 @@ pub fn definition_target(node: &Typed, def_locs: &DefLocs) -> Option<Loc> {
             def_locs.methods.get(&(type_name.clone(), method.clone())).cloned()
         }
         Expr::Construct { type_name, .. } => def_locs.types.get(type_name).cloned(),
+        Expr::Var(_) => {
+            let l = node.loc.as_ref()?;
+            def_locs.local_refs.get(&(l.line, l.col)).cloned()
+        }
         _ => None,
     }
 }

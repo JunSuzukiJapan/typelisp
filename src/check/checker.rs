@@ -179,7 +179,14 @@ pub enum TopLevel {
 /// A lexical environment mapping variable names to their types.
 #[derive(Clone)]
 struct Env {
-    vars: Vec<(String, Type)>,
+    /// Each binding's name, type, and — where known — the source position of
+    /// the name in its binding form (a `let`/`let*` binding, a `lambda`/
+    /// `labels`/`defun`/`defmethod` parameter or receiver name, or a `labels`
+    /// function name). `None` for a binding this checker doesn't bother
+    /// tracking a position for (match-pattern bindings, monomorphization's
+    /// synthesized re-checks) — consulted by `Checker::check_at` to populate
+    /// `DefLocs::local_refs` when a `Var` reference resolves here.
+    vars: Vec<(String, Type, Option<Loc>)>,
     /// Trait bounds on this function's own generic type parameters, declared
     /// by a `(where (Trait T (Assoc Concrete)...)...)` clause
     /// (`Checker::check_defun`) — e.g. `{"t": [TraitBound { trait_path:
@@ -202,11 +209,31 @@ impl Env {
     }
 
     fn get(&self, name: &str) -> Option<&Type> {
-        self.vars.iter().rev().find(|(n, _)| n == name).map(|(_, t)| t)
+        self.vars.iter().rev().find(|(n, _, _)| n == name).map(|(_, t, _)| t)
     }
 
-    /// A child environment with `binds` added (later bindings shadow earlier).
+    /// The nearest binding of `name`'s own recorded source position, if any —
+    /// see [`Self::vars`]'s doc comment. Consulted by `Checker::check_at`
+    /// alongside [`Self::get`] when a `Var` reference resolves to a local.
+    fn get_loc(&self, name: &str) -> Option<Loc> {
+        self.vars.iter().rev().find(|(n, _, _)| n == name).and_then(|(_, _, l)| l.clone())
+    }
+
+    /// A child environment with `binds` added (later bindings shadow earlier),
+    /// with no recorded position for any of them — used by callers that don't
+    /// track individual binding positions (e.g. match-pattern bindings,
+    /// monomorphization's synthesized re-checks). See [`Self::extended_with_locs`]
+    /// for the counterpart that does.
     fn extended(&self, binds: Vec<(String, Type)>) -> Env {
+        self.extended_with_locs(binds.into_iter().map(|(n, t)| (n, t, None)).collect())
+    }
+
+    /// Like [`Self::extended`], but each binding also carries the source
+    /// position of its name in the binding form — used by `let`/`let*`,
+    /// `lambda`/`labels` parameters, and `defun`/`defmethod` parameters and
+    /// receivers, so a later reference to the bound name can resolve back to
+    /// where it was bound (`Checker::check_at`, `DefLocs::local_refs`).
+    fn extended_with_locs(&self, binds: Vec<(String, Type, Option<Loc>)>) -> Env {
         let mut vars = self.vars.clone();
         vars.extend(binds);
         Env { vars, bounds: self.bounds.clone() }
@@ -354,9 +381,16 @@ struct MethodSig {
     method: String,
     instance: bool,
     self_name: Option<String>,
+    /// The receiver name's own source position (`(self Type)`'s `self`), for
+    /// the checked body's `Env` binding — see `Checker::check_defmethod`'s
+    /// use of `Env::extended_with_locs`.
+    self_name_loc: Option<Loc>,
     recv_ty: Type,
     type_fq: Path,
     params: Vec<(String, Type)>,
+    /// Each of `params`'s name's own source position, parallel to `params` —
+    /// see `Checker::parse_param_pairs`.
+    param_locs: Vec<Option<Loc>>,
     ret: Type,
     /// `(where (Trait TypeVar ...))` bounds after the return type — same
     /// syntax and parse as a free `defun`'s (`Checker::parse_defun_sig`).
@@ -404,6 +438,15 @@ pub struct Checker {
     /// Non-fatal diagnostics accumulated by [`Self::check_redef`] (currently
     /// just `RedefPolicy::Warn` redefinitions); drained by [`Self::take_warnings`].
     warnings: RefCell<Vec<String>>,
+    /// Scratch accumulator for `DefLocs::local_refs`, written by
+    /// [`Self::check_at`] whenever a `Var` reference resolves against an
+    /// `Env` binding with a recorded position. A `RefCell` for the same
+    /// reason as `loop_stack`/`warnings`: `check_at`/`check_inner` recurse
+    /// through `&self`, not `&mut self`. Flushed into `self.reg.def_locs.
+    /// local_refs` at the end of every [`Self::check_form`] (a `&mut self`
+    /// boundary), so the registry's copy — the one the LSP snapshots — stays
+    /// current without every recursive `check_*` helper needing `&mut self`.
+    local_refs: RefCell<HashMap<(u32, u32), Loc>>,
     /// Every generic `defun`'s retained source form, keyed by its
     /// fully-qualified path — see [`FnTemplate`].
     generic_fn_templates: HashMap<Path, FnTemplate>,
@@ -446,6 +489,7 @@ impl Checker {
             loop_stack: RefCell::new(Vec::new()),
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
+            local_refs: RefCell::new(HashMap::new()),
             generic_fn_templates: HashMap::new(),
             generic_method_templates: HashMap::new(),
             spec_memo: RefCell::new(HashSet::new()),
@@ -528,6 +572,13 @@ impl Checker {
         // Both maps reset per form regardless of outcome — see `spec_memo`'s
         // doc comment for why the memo must not outlive the form.
         self.spec_memo.borrow_mut().clear();
+        // Publish this form's local-variable reference resolutions (see
+        // `local_refs`'s doc comment) into the registry's copy — even on a
+        // form that ultimately errors, whatever resolved before the failure
+        // point is still valid and worth keeping (mirrors how a partially-
+        // checked form's earlier registry mutations, e.g. `def_locs.fns`,
+        // aren't rolled back either).
+        self.reg.def_locs.local_refs.extend(self.local_refs.borrow_mut().drain());
         let result = match bundled {
             Ok((specs, tl)) if specs.is_empty() => Ok(tl),
             Ok((mut specs, tl)) => {
@@ -1098,7 +1149,7 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
-        let (params, ret, bounds, body_start) = self.parse_defun_sig(heap, parts)?;
+        let (params, param_locs, ret, bounds, body_start) = self.parse_defun_sig(heap, parts)?;
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
         let fq_name = self.fq(&name);
 
@@ -1135,7 +1186,13 @@ impl Checker {
             self.reg.def_locs.fns.insert(fq_name.clone(), loc);
         }
 
-        let env = Env::new().with_bounds(bounds).extended(params.clone());
+        let binds: Vec<(String, Type, Option<Loc>)> = params
+            .iter()
+            .cloned()
+            .zip(param_locs)
+            .map(|((n, t), l)| (n, t, l))
+            .collect();
+        let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
         Ok(TopLevel::Defun { name: fq_name, type_params, params, ret, body })
@@ -1157,12 +1214,12 @@ impl Checker {
         &self,
         heap: &Heap,
         parts: &[Value],
-    ) -> Result<(Vec<(String, Type)>, Type, HashMap<String, Vec<TraitBound>>, usize), Error>
+    ) -> Result<(Vec<(String, Type)>, Vec<Option<Loc>>, Type, HashMap<String, Vec<TraitBound>>, usize), Error>
     {
         if parts.len() < 3 {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
-        let params = self.parse_params(heap, parts[1])?;
+        let (params, param_locs) = self.parse_params(heap, parts[1])?;
         let ret = self.canon(&parse_type(heap, parts[2])?);
         let mut body_start = 3;
         let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
@@ -1172,7 +1229,7 @@ impl Checker {
                 body_start = 4;
             }
         }
-        Ok((params, ret, bounds, body_start))
+        Ok((params, param_locs, ret, bounds, body_start))
     }
 
     // ---- monomorphization ---------------------------------------------------
@@ -1434,7 +1491,7 @@ impl Checker {
         // the bounds branch), and the bounds' own validity was already
         // verified at the call site that requested this instantiation
         // (`check_call`'s where-clause validation).
-        let (params, ret, _bounds, body_start) = self.parse_defun_sig(heap, &tmpl.parts)?;
+        let (params, _param_locs, ret, _bounds, body_start) = self.parse_defun_sig(heap, &tmpl.parts)?;
         let env = Env::new().extended(params.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &tmpl.parts[body_start..], &[], Some(&ret))?;
         Ok(TopLevel::Defun { name: mangled.clone(), type_params: Vec::new(), params, ret, body })
@@ -1630,8 +1687,11 @@ impl Checker {
     /// Parse a `((name type)...)` parameter list (types canonicalized to FQ)
     /// for `defun`/`lambda`/`labels`. These are always fixed-arity: `&rest` is
     /// rejected here (only `defmacro` has a `&rest` lambda-list marker — see
-    /// `Self::check_defmacro`).
-    fn parse_params(&self, heap: &Heap, v: Value) -> Result<Vec<(String, Type)>, Error> {
+    /// `Self::check_defmacro`). Also returns each parameter name's own source
+    /// position (parallel to the returned params), for the checked body's
+    /// `Env` binding (`Env::extended_with_locs`) — see `Self::parse_param_pairs`.
+    #[allow(clippy::type_complexity)]
+    fn parse_params(&self, heap: &Heap, v: Value) -> Result<(Vec<(String, Type)>, Vec<Option<Loc>>), Error> {
         let elems = heap.list_to_vec(v)?;
         if elems.iter().any(|p| matches!(p, Value::Symbol(id) if heap.symbol_name(*id) == "&rest")) {
             return Err(Error::TypeError(
@@ -1641,11 +1701,17 @@ impl Checker {
         self.parse_param_pairs(heap, &elems)
     }
 
-    /// Parse a slice of `(name type)` binding forms.
-    fn parse_param_pairs(&self, heap: &Heap, pairs: &[Value]) -> Result<Vec<(String, Type)>, Error> {
+    /// Parse a slice of `(name type)` binding forms, alongside each binding's
+    /// name's own source position (`heap.list_to_vec_locs`'s first element for
+    /// that binding — independent of where `pairs` itself came from, so this
+    /// needs no location input from the caller).
+    #[allow(clippy::type_complexity)]
+    fn parse_param_pairs(&self, heap: &Heap, pairs: &[Value]) -> Result<(Vec<(String, Type)>, Vec<Option<Loc>>), Error> {
         let mut out = Vec::new();
+        let mut locs = Vec::new();
         for binding in pairs {
-            let pair = heap.list_to_vec(*binding)?;
+            let pair_locs = heap.list_to_vec_locs(*binding)?;
+            let pair: Vec<Value> = pair_locs.iter().map(|(v, _)| *v).collect();
             if pair.len() != 2 {
                 return Err(Error::TypeError("parameter must be (name type)".into()));
             }
@@ -1654,8 +1720,9 @@ impl Checker {
                 _ => return Err(Error::TypeError("parameter name must be a symbol".into())),
             };
             out.push((name, self.canon(&parse_type(heap, pair[1])?)));
+            locs.push(pair_locs.first().and_then(|(_, l)| l.clone()));
         }
-        Ok(out)
+        Ok((out, locs))
     }
 
     /// Parse `defstruct` field bindings: `(name type)` or `(pub name type)`.
@@ -1730,7 +1797,7 @@ impl Checker {
             if elems.len() != 3 {
                 return Err(Error::TypeError("deftrait: method signature must be (name (params...) ret)".into()));
             }
-            let params = self.parse_param_pairs(heap, &heap.list_to_vec(elems[1])?)?;
+            let (params, _param_locs) = self.parse_param_pairs(heap, &heap.list_to_vec(elems[1])?)?;
             let ret = self.canon(&parse_type(heap, elems[2])?);
             let sig = FnSig {
                 type_params: vec![],
@@ -1989,7 +2056,7 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
-        let MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret, bounds, body_start } =
+        let MethodSig { method, instance, self_name, self_name_loc, recv_ty, type_fq, params, param_locs, ret, bounds, body_start } =
             self.parse_defmethod_sig(heap, parts)?;
 
         // A method on a *generic* type whose receiver spells the owner's
@@ -2047,18 +2114,18 @@ impl Checker {
             self.reg.def_locs.methods.insert((type_fq.clone(), method.clone()), loc);
         }
 
-        let mut binds: Vec<(String, Type)> = Vec::new();
+        let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
         if let Some(s) = &self_name {
-            binds.push((s.clone(), recv_ty.clone()));
+            binds.push((s.clone(), recv_ty.clone(), self_name_loc));
         }
-        binds.extend(params.clone());
+        binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
         // `with_bounds` mirrors `check_defun`'s body env: inside the body a
         // method call on a `where`-bounded type variable (e.g. `(equals
         // self::car other::car)` with `self::car : A` under `(where (Eq A))`)
         // resolves through `check_instance_method`'s bounds branch to a
         // diagnostics-only `Expr::TraitCall`, exactly as in generic `defun`
         // bodies.
-        let env = Env::new().with_bounds(bounds).extended(binds);
+        let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
         let type_params = if is_generic_template { written_vars } else { Vec::new() };
@@ -2086,9 +2153,10 @@ impl Checker {
             return Err(Error::TypeError("defmethod: needs a receiver".into()));
         }
         // `(self T)` -> instance method; a bare type name -> static method.
-        let (instance, self_name, type_expr) = match sig_list[0] {
+        let (instance, self_name, self_name_loc, type_expr) = match sig_list[0] {
             Value::Cons(_) => {
-                let recv = heap.list_to_vec(sig_list[0])?;
+                let recv_locs = heap.list_to_vec_locs(sig_list[0])?;
+                let recv: Vec<Value> = recv_locs.iter().map(|(v, _)| *v).collect();
                 if recv.len() != 2 {
                     return Err(Error::TypeError("defmethod: receiver must be (self Type)".into()));
                 }
@@ -2096,9 +2164,10 @@ impl Checker {
                     Value::Symbol(id) => heap.symbol_name(id).to_string(),
                     _ => return Err(Error::TypeError("defmethod: receiver name must be a symbol".into())),
                 };
-                (true, Some(sname), recv[1])
+                let sname_loc = recv_locs.first().and_then(|(_, l)| l.clone());
+                (true, Some(sname), sname_loc, recv[1])
             }
-            Value::Symbol(_) | Value::Path(_) => (false, None, sig_list[0]),
+            Value::Symbol(_) | Value::Path(_) => (false, None, None, sig_list[0]),
             _ => return Err(Error::TypeError("defmethod: receiver must be (self Type) or a type name".into())),
         };
         let recv_ty = self.canon(&parse_type(heap, type_expr)?);
@@ -2112,7 +2181,7 @@ impl Checker {
         if self.reg.type_def(&type_fq).is_none() {
             return Err(Error::TypeError(format!("defmethod: unknown type `{}`", type_fq)));
         }
-        let params = self.parse_param_pairs(heap, &sig_list[1..])?;
+        let (params, param_locs) = self.parse_param_pairs(heap, &sig_list[1..])?;
         let ret = self.canon(&parse_type(heap, parts[2])?);
         // Optional `(where ...)` clause after the return type — identical
         // peek to `parse_defun_sig`'s.
@@ -2124,7 +2193,7 @@ impl Checker {
                 body_start = 4;
             }
         }
-        Ok(MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret, bounds, body_start })
+        Ok(MethodSig { method, instance, self_name, self_name_loc, recv_ty, type_fq, params, param_locs, ret, bounds, body_start })
     }
 
     /// `(defstruct Name (field Type)...)` — or, generically,
@@ -2467,6 +2536,19 @@ impl Checker {
                 if typed.loc.is_none() {
                     typed.loc = loc;
                 }
+                // A local-variable reference that resolved against an `Env`
+                // binding with a recorded position: record the reference's own
+                // position -> the binding's position in `local_refs`, for
+                // `check::locate::definition_target`'s `Expr::Var` arm. Both
+                // positions are only available together right here — the
+                // reference's (`typed.loc`, just filled above) and the
+                // binding's (`env.get_loc`) — so this is resolved once now
+                // rather than searched again at query time.
+                if let (Expr::Var(name), Some(ref_loc)) = (&typed.expr, &typed.loc) {
+                    if let Some(bind_loc) = env.get_loc(name) {
+                        self.local_refs.borrow_mut().insert((ref_loc.line, ref_loc.col), bind_loc);
+                    }
+                }
                 Ok(typed)
             }
             Err(e) => match loc {
@@ -2664,9 +2746,13 @@ impl Checker {
             _ => {}
         }
         // A local variable holding a function value is applied directly (locals
-        // shadow free functions).
-        if let Some(t) = env.get(&head) {
-            let callee = Typed { loc: None, expr: Expr::Var(head.clone()), ty: t.clone() };
+        // shadow free functions). Goes through `check_at` (not a hand-built
+        // `Typed`) so this callee reference gets its own position — the same
+        // treatment the non-symbol-head branch above already gives its
+        // callee — which is what lets e.g. a `labels`-bound function called
+        // by name resolve goto-definition back to its own binding.
+        if env.get(&head).is_some() {
+            let callee = self.check_at(heap, interp, env, elems[0], None, nth_loc(&elem_locs, 0))?;
             return self.check_apply(heap, interp, env, callee, args, arg_locs);
         }
         // A macro call: expand (against the *unevaluated* argument forms,
@@ -2749,13 +2835,15 @@ impl Checker {
         if args.len() < 2 {
             return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
         }
-        let params = self.parse_params(heap, args[0])?;
+        let (params, param_locs) = self.parse_params(heap, args[0])?;
         let ret = self.canon(&parse_type(heap, args[1])?);
         let fn_ty = Type::Fn(
             params.iter().map(|(_, t)| t.clone()).collect(),
             Box::new(ret.clone()),
         );
-        let child = env.extended(params.clone());
+        let binds: Vec<(String, Type, Option<Loc>)> =
+            params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
+        let child = env.extended_with_locs(binds);
         // A lambda is a new function boundary: `break`/`return` cannot reach an
         // outer loop through it, so it checks its body against an empty loop
         // stack (restored afterwards, even on error).
@@ -2794,6 +2882,7 @@ impl Checker {
         struct Spec {
             name: String,
             params: Vec<(String, Type)>,
+            param_locs: Vec<Option<Loc>>,
             ret: Type,
             raw_body: Vec<Value>,
             /// Source locations of `raw_body`'s forms (parallel), so each
@@ -2801,10 +2890,12 @@ impl Checker {
             body_locs: Vec<Option<Loc>>,
         }
         let mut parsed = Vec::new();
-        let mut sigs: Vec<(String, Type)> = Vec::new();
+        let mut sigs: Vec<(String, Type, Option<Loc>)> = Vec::new();
         for spec in specs {
             // `list_to_vec_locs` so a bare-atom body form (e.g. a local
-            // variable reference in the function's body) keeps its position.
+            // variable reference in the function's body) keeps its position,
+            // and so the function name's own position (`parts_locs[0]`) is
+            // available for its `Env` binding below.
             let parts_locs = heap.list_to_vec_locs(spec)?;
             let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
             if parts.len() < 3 {
@@ -2816,21 +2907,24 @@ impl Checker {
                 Value::Symbol(id) => heap.symbol_name(id).to_string(),
                 _ => return Err(Error::TypeError("labels: name must be a symbol".into())),
             };
-            let params = self.parse_params(heap, parts[1])?;
+            let name_loc = parts_locs.first().and_then(|(_, l)| l.clone());
+            let (params, param_locs) = self.parse_params(heap, parts[1])?;
             let ret = self.canon(&parse_type(heap, parts[2])?);
             let fn_ty = Type::Fn(params.iter().map(|(_, t)| t.clone()).collect(), Box::new(ret.clone()));
-            sigs.push((name.clone(), fn_ty));
+            sigs.push((name.clone(), fn_ty, name_loc));
             let body_locs = parts_locs[3..].iter().map(|(_, l)| l.clone()).collect();
-            parsed.push(Spec { name, params, ret, raw_body: parts[3..].to_vec(), body_locs });
+            parsed.push(Spec { name, params, param_locs, ret, raw_body: parts[3..].to_vec(), body_locs });
         }
         // Every function's name is visible to every body (including its
         // own) and to the trailing `body` — registered up front, like
         // `check_defun`'s pre-body signature insert.
-        let labels_env = env.extended(sigs);
+        let labels_env = env.extended_with_locs(sigs);
 
         let mut defs = Vec::new();
-        for Spec { name, params, ret, raw_body, body_locs } in parsed {
-            let fn_env = labels_env.extended(params.clone());
+        for Spec { name, params, param_locs, ret, raw_body, body_locs } in parsed {
+            let binds: Vec<(String, Type, Option<Loc>)> =
+                params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
+            let fn_env = labels_env.extended_with_locs(binds);
             // A new function boundary, same as `lambda`: `break`/`return`
             // can't reach an outer loop through it.
             let saved = self.loop_stack.replace(Vec::new());
@@ -3500,9 +3594,12 @@ impl Checker {
             return Err(Error::TypeError("let: (let ((name val)...) body...)".into()));
         }
         let mut binds = Vec::new();
+        let mut name_locs: Vec<Option<Loc>> = Vec::new();
         for binding in heap.list_to_vec(args[0])? {
             // `list_to_vec_locs` so the binding value's own position reaches
-            // `check_at` (a bare-atom value keeps its `Loc` for hover).
+            // `check_at` (a bare-atom value keeps its `Loc` for hover), and so
+            // the binding name's own position is available for the child
+            // `Env` (a later reference resolves goto-definition to here).
             let pair_locs = heap.list_to_vec_locs(binding)?;
             let pair: Vec<Value> = pair_locs.iter().map(|(v, _)| *v).collect();
             if pair.len() != 2 {
@@ -3512,12 +3609,18 @@ impl Checker {
                 Value::Symbol(id) => heap.symbol_name(id).to_string(),
                 _ => return Err(Error::TypeError("let: binding name must be a symbol".into())),
             };
+            name_locs.push(pair_locs.first().and_then(|(_, l)| l.clone()));
             // Binding values are checked in the *outer* environment (CL `let`).
             let val_loc = pair_locs.get(1).and_then(|(_, l)| l.clone());
             let val = self.check_at(heap, interp, env, pair[1], None, val_loc)?;
             binds.push((name, val));
         }
-        let child = env.extended(binds.iter().map(|(n, t)| (n.clone(), t.ty.clone())).collect());
+        let env_binds: Vec<(String, Type, Option<Loc>)> = binds
+            .iter()
+            .zip(name_locs)
+            .map(|((n, t), l)| (n.clone(), t.ty.clone(), l))
+            .collect();
+        let child = env.extended_with_locs(env_binds);
         let (body, ty) = self.check_seq(heap, interp, &child, &args[1..], &arg_locs[1..], expected)?;
         Ok(Typed { loc: None, expr: Expr::Let(binds, body), ty })
     }
@@ -3563,9 +3666,10 @@ impl Checker {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("let*: binding name must be a symbol".into())),
         };
+        let name_loc = pair_locs.first().and_then(|(_, l)| l.clone());
         let val_loc = pair_locs.get(1).and_then(|(_, l)| l.clone());
         let val = self.check_at(heap, interp, env, pair[1], None, val_loc)?;
-        let child = env.extended(vec![(name.clone(), val.ty.clone())]);
+        let child = env.extended_with_locs(vec![(name.clone(), val.ty.clone(), name_loc)]);
         let inner = self.let_star_rec(heap, interp, &child, &binds[1..], body, body_locs, expected)?;
         let ty = inner.ty.clone();
         Ok(Typed { loc: None, expr: Expr::Let(vec![(name, val)], vec![inner]), ty })
