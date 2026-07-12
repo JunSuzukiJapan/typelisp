@@ -1,14 +1,17 @@
 //! Cursor-position lookups over a checked document, for the LSP's hover and
 //! goto-definition (`src/bin/lsp.rs`).
 //!
-//! `Typed::loc` (`ast.rs`) is a *point* — the position of the opening
-//! parenthesis of the list form a node was read from — not a span, and only
-//! list-form nodes have one at all (a bare atom, e.g. a lone `Var`
-//! reference, has none: `Value::Symbol`s are interned and reused everywhere,
-//! so there is no per-occurrence heap address to hang a location off, unlike
-//! `Value::Cons`'s `cons_locs` side table — see `Heap::cons_loc`'s doc
-//! comment). A full span (and per-atom positions) would need the reader
-//! rebuilt to track every token, not just list heads — out of scope here.
+//! `Typed::loc` (`ast.rs`) is a *point*, not a span: for a list-form node it's
+//! the position of the opening parenthesis (`Heap::cons_loc`); for a bare atom
+//! checked as an *element of some enclosing list* (e.g. an argument, a `let`
+//! binding value, a function body form) it's the position the reader recorded
+//! for that specific occurrence (`Heap::elem_locs`, threaded through the
+//! checker as `arg_locs`/`Checker::check_at`) — this is what lets a `Var`
+//! (local variable) reference be found in its own right. An atom with *no*
+//! enclosing list at all (vanishingly rare — the entry point only ever checks
+//! whole top-level forms) still has no location. A full span (as opposed to
+//! just a start point) would need the reader rebuilt to track every token's
+//! end, not just its start — out of scope here.
 //!
 //! Even with only start points, the smallest node containing the cursor can
 //! still be found exactly: sibling forms never overlap in source order, so

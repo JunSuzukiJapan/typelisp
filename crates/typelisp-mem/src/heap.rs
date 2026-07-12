@@ -96,6 +96,18 @@ pub struct Heap {
     // not GC-swept — because the forms it describes stay rooted for the whole
     // read→check cycle that consults it.
     cons_locs: HashMap<usize, crate::errors::Loc>,
+
+    // Source locations of *each list element*, keyed by the spine cons cell
+    // whose `car` holds that element (`ConsRef::addr`). Where `cons_locs`
+    // records only a list form's opening `(` (its head cell), this records
+    // where every element — including a bare atom, which has no per-occurrence
+    // identity of its own (interned symbols are shared) — begins. Same pure
+    // side-table discipline as `cons_locs`: never keeps a cell alive, cleared
+    // by `clear_cons_locs`, harmless if a freed cell's address is later reused
+    // (the reader overwrites on every fresh allocation). Consumed by the
+    // checker (`list_to_vec_locs`) so an atom node can carry its own `Loc`,
+    // which the LSP's hover/goto-definition need (`src/check/locate.rs`).
+    elem_locs: HashMap<usize, crate::errors::Loc>,
 }
 
 impl Heap {
@@ -136,6 +148,7 @@ impl Heap {
             cell_registry: Vec::new(),
             dead_closure_tokens: Vec::new(),
             cons_locs: HashMap::new(),
+            elem_locs: HashMap::new(),
         }
     }
 
@@ -157,11 +170,21 @@ impl Heap {
         }
     }
 
-    /// Drop every recorded source location. The reader calls this at the start
-    /// of each read batch so stale entries from an earlier batch can never
-    /// mislabel a newly read form (see the `cons_locs` field doc comment).
+    /// Record where a list *element* began, keyed by the spine cell `cr` whose
+    /// `car` holds it — see the `elem_locs` field doc comment. The reader calls
+    /// this for every element as it builds a list; the checker later reads it
+    /// back via [`Heap::list_to_vec_locs`].
+    pub fn set_elem_loc(&mut self, cr: ConsRef, loc: crate::errors::Loc) {
+        self.elem_locs.insert(cr.addr(), loc);
+    }
+
+    /// Drop every recorded source location (both the list-form `cons_locs` and
+    /// the per-element `elem_locs`). The reader calls this at the start of each
+    /// read batch so stale entries from an earlier batch can never mislabel a
+    /// newly read form (see the `cons_locs` field doc comment).
     pub fn clear_cons_locs(&mut self) {
         self.cons_locs.clear();
+        self.elem_locs.clear();
     }
 
     // ---- statistics -------------------------------------------------------
@@ -1020,6 +1043,28 @@ impl Heap {
                 Value::Empty => return Ok(out),
                 Value::Cons(c) => {
                     out.push(unsafe { (*c.0).car });
+                    cur = unsafe { (*c.0).cdr };
+                }
+                _ => return Err(Error::ImproperList),
+            }
+        }
+    }
+
+    /// Like [`Heap::list_to_vec`], but pairs each element with the source
+    /// location the reader recorded for it (`elem_locs`, keyed by the spine
+    /// cell that holds it) — `None` for an element read from a source with no
+    /// location (e.g. a macro-expanded or otherwise synthesized list). The
+    /// checker uses this so a bare atom in argument position can carry its own
+    /// `Loc`, which the LSP's hover/goto-definition need.
+    pub fn list_to_vec_locs(&self, v: Value) -> Result<Vec<(Value, Option<crate::errors::Loc>)>, Error> {
+        let mut out = Vec::new();
+        let mut cur = v;
+        loop {
+            match cur {
+                Value::Empty => return Ok(out),
+                Value::Cons(c) => {
+                    let loc = self.elem_locs.get(&c.addr()).cloned();
+                    out.push((unsafe { (*c.0).car }, loc));
                     cur = unsafe { (*c.0).cdr };
                 }
                 _ => return Err(Error::ImproperList),

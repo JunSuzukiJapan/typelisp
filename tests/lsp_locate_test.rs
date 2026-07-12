@@ -52,13 +52,43 @@ fn goto_definition_resolves_a_call_to_its_defun() {
 
 #[test]
 fn no_definition_for_a_local_variable_reference() {
-    // `x` inside `add`'s body has no binding-site location tracked — see
-    // `check::locate::definition_target`'s doc comment — so a cursor there
-    // resolves to the smallest node that *does* have one (the `(+ x y)`
-    // call) rather than to `x` itself, and that call has no `DefLocs` entry
-    // (`+` is a builtin instance method, not a registered free function).
+    // `x` is now locatable in its own right (see
+    // `hover_on_a_local_variable_reference_finds_the_variable_not_its_enclosing_call`
+    // below), but `definition_target` doesn't resolve `Expr::Var` to a
+    // binding-site location yet (see its doc comment) — so goto-definition
+    // on it still returns `None`, same as any other node this pass doesn't
+    // recognize as a resolvable reference.
     let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n";
     let (body, def_locs) = program(src);
-    let node = locate_node(&body, FILE, 1, 36).expect("expected a located node");
+    let node = locate_node(&body, FILE, 1, 37).expect("expected a located node");
     assert_eq!(definition_target(node, &def_locs), None);
+}
+
+#[test]
+fn hover_on_a_local_variable_reference_finds_the_variable_not_its_enclosing_call() {
+    // `x` (a `bool` parameter) sits inside the `if`'s condition position;
+    // the enclosing `if` expression's own type is `i32` (its branches), a
+    // different type from `x`'s own (`bool`) — so if hover resolved to the
+    // wrong (enclosing) node, this assertion would catch it. Before atom
+    // source locations were tracked (`Heap::elem_locs`), a bare `Var`
+    // reference had no `Loc` of its own and a cursor here would have
+    // resolved to the smallest node that *did* have one instead (the whole
+    // `if` form).
+    let src = "(defun f ((x bool)) i32 (if x 1 2))\n";
+    let (body, _) = program(src);
+    // Column 29 is `x` itself in `(if x 1 2)`.
+    let node = locate_node(&body, FILE, 1, 29).expect("expected a located node");
+    assert_eq!(hover_text(node), format!("{:?}", Type::Bool));
+}
+
+#[test]
+fn hover_on_a_let_bound_local_finds_its_own_type() {
+    // `n` is bound to a `bool` value; the `let`'s own body/result type is
+    // `i32` (the trailing `1`) — a mismatch that would surface if hover
+    // resolved to the enclosing `let` instead of the `n` reference itself.
+    let src = "(defun f () i32 (let ((n true)) (if n 1 1)))\n";
+    let (body, _) = program(src);
+    // `(let ((n true)) (if n 1 1))` — `n` inside the `if` condition.
+    let node = locate_node(&body, FILE, 1, 38).expect("expected a located node");
+    assert_eq!(hover_text(node), format!("{:?}", Type::Bool));
 }

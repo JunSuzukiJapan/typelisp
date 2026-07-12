@@ -555,15 +555,21 @@ impl Checker {
     fn check_form_dispatch(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value, def_loc: Option<Loc>) -> Result<TopLevel, Error> {
         if let Value::Cons(_) = v {
             let elems = heap.list_to_vec(v)?;
+            // Per-element locations parallel to `elems`, so a `def*` body form
+            // that is a bare atom (e.g. `(defun id ((x i32)) i32 x)`, whose
+            // body is a lone parameter reference) keeps its own `Loc` for
+            // hover — threaded to the body-checking helpers as `parts_locs`.
+            let elem_locs: Vec<Option<Loc>> = heap.list_to_vec_locs(v)?.into_iter().map(|(_, l)| l).collect();
+            let parts_locs = &elem_locs[1..];
             if let Some(Value::Symbol(id)) = elems.first() {
                 match heap.symbol_name(*id) {
-                    "pub" => return self.check_pub(heap, interp, &elems[1..], def_loc),
-                    "defun" => return self.check_defun(heap, interp, &elems[1..], false, def_loc),
+                    "pub" => return self.check_pub(heap, interp, &elems[1..], parts_locs, def_loc),
+                    "defun" => return self.check_defun(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     "defvar" => return self.check_defvar(heap, interp, &elems[1..], true, false, def_loc),
                     "defconstant" => return self.check_defvar(heap, interp, &elems[1..], false, false, def_loc),
-                    "defmacro" => return self.check_defmacro(heap, interp, &elems[1..], false, def_loc),
+                    "defmacro" => return self.check_defmacro(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     "module" => return self.check_module(heap, interp, &elems[1..]),
-                    "defmethod" => return self.check_defmethod(heap, interp, &elems[1..], false, def_loc),
+                    "defmethod" => return self.check_defmethod(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     "defstruct" => return self.check_defstruct(heap, &elems[1..], false, def_loc),
                     "defenum" => return self.check_defenum(heap, &elems[1..], false, def_loc),
                     "deftrait" => return self.check_deftrait(heap, &elems[1..], false, def_loc),
@@ -586,17 +592,18 @@ impl Checker {
     }
 
     /// `(pub defun ...)` / `(pub defmethod ...)` etc. — mark the next definition public.
-    fn check_pub(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], def_loc: Option<Loc>) -> Result<TopLevel, Error> {
+    fn check_pub(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>], def_loc: Option<Loc>) -> Result<TopLevel, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("pub: expected a definition form".into()));
         }
+        let inner_locs: &[Option<Loc>] = if parts_locs.len() > 1 { &parts_locs[1..] } else { &[] };
         if let Value::Symbol(id) = parts[0] {
             match heap.symbol_name(id) {
-                "defun" => return self.check_defun(heap, interp, &parts[1..], true, def_loc),
+                "defun" => return self.check_defun(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 "defvar" => return self.check_defvar(heap, interp, &parts[1..], true, true, def_loc),
                 "defconstant" => return self.check_defvar(heap, interp, &parts[1..], false, true, def_loc),
-                "defmacro" => return self.check_defmacro(heap, interp, &parts[1..], true, def_loc),
-                "defmethod" => return self.check_defmethod(heap, interp, &parts[1..], true, def_loc),
+                "defmacro" => return self.check_defmacro(heap, interp, &parts[1..], inner_locs, true, def_loc),
+                "defmethod" => return self.check_defmethod(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 "defstruct" => return self.check_defstruct(heap, &parts[1..], true, def_loc),
                 "defenum" => return self.check_defenum(heap, &parts[1..], true, def_loc),
                 _ => {}
@@ -1033,6 +1040,7 @@ impl Checker {
             env,
             AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None },
             &[],
+            &[],
         ))
     }
 
@@ -1086,6 +1094,7 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         parts: &[Value],
+        parts_locs: &[Option<Loc>],
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
@@ -1127,7 +1136,8 @@ impl Checker {
         }
 
         let env = Env::new().with_bounds(bounds).extended(params.clone());
-        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], Some(&ret))?;
+        let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
         Ok(TopLevel::Defun { name: fq_name, type_params, params, ret, body })
     }
 
@@ -1351,7 +1361,7 @@ impl Checker {
         // every bounded method call resolves against the real receiver type
         // (and was already validated at the call site).
         let env = Env::new().extended(binds);
-        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], Some(&ret))?;
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], &[], Some(&ret))?;
         Ok(TopLevel::Defmethod {
             type_name: type_fq,
             method: mangled.to_string(),
@@ -1426,7 +1436,7 @@ impl Checker {
         // (`check_call`'s where-clause validation).
         let (params, ret, _bounds, body_start) = self.parse_defun_sig(heap, &tmpl.parts)?;
         let env = Env::new().extended(params.clone());
-        let (body, _) = self.check_seq(heap, interp, &env, &tmpl.parts[body_start..], Some(&ret))?;
+        let (body, _) = self.check_seq(heap, interp, &env, &tmpl.parts[body_start..], &[], Some(&ret))?;
         Ok(TopLevel::Defun { name: mangled.clone(), type_params: Vec::new(), params, ret, body })
     }
 
@@ -1563,6 +1573,7 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         parts: &[Value],
+        parts_locs: &[Option<Loc>],
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
@@ -1611,7 +1622,8 @@ impl Checker {
 
         let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
         let env = Env::new().extended(params.iter().map(|p| (p.clone(), sexpr_ty.clone())).collect());
-        let (body, _) = self.check_seq(heap, interp, &env, &parts[2..], Some(&sexpr_ty))?;
+        let body_locs = parts_locs.get(2..).unwrap_or(&[]);
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[2..], body_locs, Some(&sexpr_ty))?;
         Ok(TopLevel::Defmacro { name: fq_name, params, body, rest })
     }
 
@@ -1832,7 +1844,12 @@ impl Checker {
             // appearing there is an ordinary (if confusingly named)
             // variable/function reference, not something to substitute.
             let method_loc = heap.cons_loc(*m);
-            let elems = heap.list_to_vec(*m)?;
+            // `list_to_vec_locs` so the body forms (`elems[3..]`, left
+            // untouched below — see this loop's doc comment) keep their
+            // original source position; the rebuilt name/receiver/return
+            // slots (`new_elems[0..3]`) have no natural location of their own.
+            let elems_locs = heap.list_to_vec_locs(*m)?;
+            let elems: Vec<Value> = elems_locs.iter().map(|(v, _)| *v).collect();
             if elems.len() < 3 {
                 return Err(Error::TypeError("impl: method must be (name (recv params...) ret body...)".into()));
             }
@@ -1850,7 +1867,9 @@ impl Checker {
             let new_ret = Self::subst_value(heap, elems[2], &subst)?;
             let mut new_elems = vec![elems[0], new_recv_list, new_ret];
             new_elems.extend_from_slice(&elems[3..]);
-            let tl = self.check_defmethod(heap, interp, &new_elems, public, method_loc)?;
+            let mut new_elems_locs: Vec<Option<Loc>> = vec![None, None, None];
+            new_elems_locs.extend(elems_locs[3..].iter().map(|(_, l)| l.clone()));
+            let tl = self.check_defmethod(heap, interp, &new_elems, &new_elems_locs, public, method_loc)?;
             body.push(tl);
         }
         if let Some(def) = self.reg.type_def_mut(&target_fq) {
@@ -1966,6 +1985,7 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         parts: &[Value],
+        parts_locs: &[Option<Loc>],
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
@@ -2039,7 +2059,8 @@ impl Checker {
         // diagnostics-only `Expr::TraitCall`, exactly as in generic `defun`
         // bodies.
         let env = Env::new().with_bounds(bounds).extended(binds);
-        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], Some(&ret))?;
+        let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
         let type_params = if is_generic_template { written_vars } else { Vec::new() };
         Ok(TopLevel::Defmethod { type_name: type_fq, method, instance, self_name, params, ret, body, type_params })
     }
@@ -2399,13 +2420,10 @@ impl Checker {
     // ---- expressions ------------------------------------------------------
 
     /// Check `v` as an expression, optionally against an `expected` type.
-    ///
-    /// Thin wrapper over [`Self::check_inner`] that tags any error with `v`'s
-    /// source location. Because `check` recurses (through `check_inner`) into
-    /// sub-expressions, the *deepest* failing sub-expression tags first and,
-    /// since [`Error::at`] keeps the innermost location, that precise spot is
-    /// what the message reports. Only list forms carry a recorded location, so
-    /// an error on a bare atom falls back to its enclosing form's location.
+    /// Thin wrapper over [`Self::check_at`] with no caller-supplied location
+    /// hint — for a `v` that is a list form, its own recorded location
+    /// (`heap.cons_loc`) is used; for a bare atom checked through here, no
+    /// location is available (see [`Self::check_at`] for when one is).
     fn check(
         &self,
         heap: &mut Heap,
@@ -2414,7 +2432,33 @@ impl Checker {
         v: Value,
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
-        let loc = heap.cons_loc(v);
+        self.check_at(heap, interp, env, v, expected, None)
+    }
+
+    /// Check `v` as an expression, tagging the resulting node (and any error)
+    /// with `v`'s source location.
+    ///
+    /// A list form carries its own recorded location (`heap.cons_loc`, the
+    /// opening paren); a bare atom has none of its own (interned symbols are
+    /// shared — see `check::locate`'s module doc comment), so `loc_hint` — the
+    /// location the reader recorded for this element in its enclosing list
+    /// (`heap.list_to_vec_locs`) — fills that gap. This is what lets a `Var`
+    /// (local variable) reference carry the position the LSP's hover/goto-
+    /// definition need. `cons_loc` takes precedence when both are present.
+    ///
+    /// Because checking recurses into sub-expressions, the *deepest* failing
+    /// sub-expression tags its error first and, since [`Error::at`] keeps the
+    /// innermost location, that precise spot is what the message reports.
+    fn check_at(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        v: Value,
+        expected: Option<&Type>,
+        loc_hint: Option<Loc>,
+    ) -> Result<Typed, Error> {
+        let loc = heap.cons_loc(v).or(loc_hint);
         match self.check_inner(heap, interp, env, v, expected) {
             // Record `v`'s location on the checked node so the interpreter can
             // report a *runtime* error there too. A recursive `check` on a
@@ -2473,14 +2517,14 @@ impl Checker {
                         // regardless of `use` status, so this bypasses
                         // `resolve_ctor` and goes straight to the known
                         // builtin path/variant index.
-                        return self.check_construct(heap, interp, env, (&Path::root("option"), 1), &[], expected);
+                        return self.check_construct(heap, interp, env, (&Path::root("option"), 1), &[], &[], expected);
                     }
                     // `nil` stays a bare-resolvable name (`Sexpr` is exempt
                     // from the use-gated constructor visibility rule), so
                     // this one keeps going through `resolve_ctor` unchanged.
                     if let Some((adt, idx)) = self.resolve_ctor("nil") {
                         if *n == adt {
-                            return self.check_construct(heap, interp, env, (&adt, idx), &[], expected);
+                            return self.check_construct(heap, interp, env, (&adt, idx), &[], &[], expected);
                         }
                     }
                 }
@@ -2565,7 +2609,13 @@ impl Checker {
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
         let elems = heap.list_to_vec(v)?;
+        // Per-element source locations parallel to `elems` (see
+        // `Heap::list_to_vec_locs`), so each argument checked below can carry
+        // its own `Loc` — the position a bare-atom argument (e.g. a local
+        // variable reference) needs for the LSP's hover/goto-definition.
+        let elem_locs: Vec<Option<Loc>> = heap.list_to_vec_locs(v)?.into_iter().map(|(_, l)| l).collect();
         let args = &elems[1..];
+        let arg_locs: &[Option<Loc>] = &elem_locs[1..];
 
         // A `::`-path head is a module-qualified function or a `Type::method`
         // static associated function.
@@ -2575,7 +2625,7 @@ impl Checker {
                 .iter()
                 .map(|s| heap.symbol_name(*s).to_string())
                 .collect();
-            return self.check_path_call(heap, interp, env, &segs, args, expected);
+            return self.check_path_call(heap, interp, env, &segs, args, arg_locs, expected);
         }
 
         // A non-symbol head (e.g. a `lambda` literal or any expression) is
@@ -2583,31 +2633,31 @@ impl Checker {
         let head = match elems[0] {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => {
-                let callee = self.check(heap, interp, env, elems[0], None)?;
-                return self.check_apply(heap, interp, env, callee, args);
+                let callee = self.check_at(heap, interp, env, elems[0], None, nth_loc(&elem_locs, 0))?;
+                return self.check_apply(heap, interp, env, callee, args, arg_locs);
             }
         };
         match head.as_str() {
-            "if" => return self.check_if(heap, interp, env, args, expected),
-            "let" => return self.check_let(heap, interp, env, args, expected),
-            "let*" => return self.check_let_star(heap, interp, env, args, expected),
+            "if" => return self.check_if(heap, interp, env, args, arg_locs, expected),
+            "let" => return self.check_let(heap, interp, env, args, arg_locs, expected),
+            "let*" => return self.check_let_star(heap, interp, env, args, arg_locs, expected),
             "progn" => {
-                let (body, ty) = self.check_seq(heap, interp, env, args, expected)?;
+                let (body, ty) = self.check_seq(heap, interp, env, args, arg_locs, expected)?;
                 // Represent progn as a let with no bindings.
                 return Ok(Typed { loc: None, expr: Expr::Let(Vec::new(), body), ty });
             }
-            "setf" => return self.check_setf(heap, interp, env, args),
-            "loop" => return self.check_loop(heap, interp, env, args),
+            "setf" => return self.check_setf(heap, interp, env, args, arg_locs),
+            "loop" => return self.check_loop(heap, interp, env, args, arg_locs),
             "break" => return self.check_break(args),
-            "return" => return self.check_return(heap, interp, env, args),
-            "list" => return self.check_list_lit(heap, interp, env, args),
-            "lambda" => return self.check_lambda(heap, interp, env, args),
-            "labels" => return self.check_labels(heap, interp, env, args, expected),
-            "match" => return self.check_match(heap, interp, env, args, expected),
-            "panic" => return self.check_panic(heap, interp, env, args),
-            "the" => return self.check_the(heap, interp, env, args),
-            "as" => return self.check_as(heap, interp, env, args, false),
-            "try-as" => return self.check_as(heap, interp, env, args, true),
+            "return" => return self.check_return(heap, interp, env, args, arg_locs),
+            "list" => return self.check_list_lit(heap, interp, env, args, arg_locs),
+            "lambda" => return self.check_lambda(heap, interp, env, args, arg_locs),
+            "labels" => return self.check_labels(heap, interp, env, args, arg_locs, expected),
+            "match" => return self.check_match(heap, interp, env, args, arg_locs, expected),
+            "panic" => return self.check_panic(heap, interp, env, args, arg_locs),
+            "the" => return self.check_the(heap, interp, env, args, arg_locs),
+            "as" => return self.check_as(heap, interp, env, args, arg_locs, false),
+            "try-as" => return self.check_as(heap, interp, env, args, arg_locs, true),
             "compile" => return self.check_compile(heap, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
@@ -2617,7 +2667,7 @@ impl Checker {
         // shadow free functions).
         if let Some(t) = env.get(&head) {
             let callee = Typed { loc: None, expr: Expr::Var(head.clone()), ty: t.clone() };
-            return self.check_apply(heap, interp, env, callee, args);
+            return self.check_apply(heap, interp, env, callee, args, arg_locs);
         }
         // A macro call: expand (against the *unevaluated* argument forms,
         // exactly as written — see `MacroExpander`) and recursively check the
@@ -2664,7 +2714,7 @@ impl Checker {
         // the `Sexpr`-list prelude's free-function `remove`/`count` share a
         // name without either having to be renamed.
         if let Some((adt, idx)) = self.resolve_ctor(&head) {
-            self.check_construct(heap, interp, env, (&adt, idx), args, expected)
+            self.check_construct(heap, interp, env, (&adt, idx), args, arg_locs, expected)
         } else if let Some((type_fq, method)) = self.resolve_static_use(&head) {
             self.check_assoc_call(
                 heap,
@@ -2672,16 +2722,17 @@ impl Checker {
                 env,
                 AssocCall { type_fq: &type_fq, method: &method, receiver: None, expected },
                 args,
+                arg_locs,
             )
-        } else if let Some(result) = self.try_instance_method(heap, interp, env, &head, args) {
+        } else if let Some(result) = self.try_instance_method(heap, interp, env, &head, args, arg_locs) {
             result
         } else if let Some(fq) = self.resolve_fn(&head) {
-            self.check_call(heap, interp, env, &fq, args)
+            self.check_call(heap, interp, env, &fq, args, arg_locs)
         } else if let Some((path, vi)) = self.resolve_global(&head) {
             let callee = Typed { loc: None, expr: Expr::Global(path), ty: vi.ty };
-            self.check_apply(heap, interp, env, callee, args)
+            self.check_apply(heap, interp, env, callee, args, arg_locs)
         } else {
-            self.check_instance_method(heap, interp, env, &head, args)
+            self.check_instance_method(heap, interp, env, &head, args, arg_locs)
         }
     }
 
@@ -2693,6 +2744,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
         if args.len() < 2 {
             return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
@@ -2708,7 +2760,7 @@ impl Checker {
         // outer loop through it, so it checks its body against an empty loop
         // stack (restored afterwards, even on error).
         let saved = self.loop_stack.replace(Vec::new());
-        let result = self.check_seq(heap, interp, &child, &args[2..], Some(&ret));
+        let result = self.check_seq(heap, interp, &child, &args[2..], &arg_locs[2..], Some(&ret));
         self.loop_stack.replace(saved);
         let (body, _) = result?;
         Ok(Typed { loc: None, expr: Expr::Lambda { params, body }, ty: fn_ty })
@@ -2730,6 +2782,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
         if args.is_empty() {
@@ -2743,11 +2796,17 @@ impl Checker {
             params: Vec<(String, Type)>,
             ret: Type,
             raw_body: Vec<Value>,
+            /// Source locations of `raw_body`'s forms (parallel), so each
+            /// body form checked below carries its own `Loc`.
+            body_locs: Vec<Option<Loc>>,
         }
         let mut parsed = Vec::new();
         let mut sigs: Vec<(String, Type)> = Vec::new();
         for spec in specs {
-            let parts = heap.list_to_vec(spec)?;
+            // `list_to_vec_locs` so a bare-atom body form (e.g. a local
+            // variable reference in the function's body) keeps its position.
+            let parts_locs = heap.list_to_vec_locs(spec)?;
+            let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
             if parts.len() < 3 {
                 return Err(Error::TypeError(
                     "labels: binding must be (name (params) ret body...)".into(),
@@ -2761,7 +2820,8 @@ impl Checker {
             let ret = self.canon(&parse_type(heap, parts[2])?);
             let fn_ty = Type::Fn(params.iter().map(|(_, t)| t.clone()).collect(), Box::new(ret.clone()));
             sigs.push((name.clone(), fn_ty));
-            parsed.push(Spec { name, params, ret, raw_body: parts[3..].to_vec() });
+            let body_locs = parts_locs[3..].iter().map(|(_, l)| l.clone()).collect();
+            parsed.push(Spec { name, params, ret, raw_body: parts[3..].to_vec(), body_locs });
         }
         // Every function's name is visible to every body (including its
         // own) and to the trailing `body` — registered up front, like
@@ -2769,17 +2829,17 @@ impl Checker {
         let labels_env = env.extended(sigs);
 
         let mut defs = Vec::new();
-        for Spec { name, params, ret, raw_body } in parsed {
+        for Spec { name, params, ret, raw_body, body_locs } in parsed {
             let fn_env = labels_env.extended(params.clone());
             // A new function boundary, same as `lambda`: `break`/`return`
             // can't reach an outer loop through it.
             let saved = self.loop_stack.replace(Vec::new());
-            let result = self.check_seq(heap, interp, &fn_env, &raw_body, Some(&ret));
+            let result = self.check_seq(heap, interp, &fn_env, &raw_body, &body_locs, Some(&ret));
             self.loop_stack.replace(saved);
             let (body, _) = result?;
             defs.push((name, params, body));
         }
-        let (body, ty) = self.check_seq(heap, interp, &labels_env, &args[1..], expected)?;
+        let (body, ty) = self.check_seq(heap, interp, &labels_env, &args[1..], &arg_locs[1..], expected)?;
         Ok(Typed { loc: None, expr: Expr::Labels { defs, body }, ty })
     }
 
@@ -2793,6 +2853,7 @@ impl Checker {
         env: &Env,
         callee: Typed,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
         let (params, ret) = match &callee.ty {
             Type::Fn(p, ret) => (p.clone(), (**ret).clone()),
@@ -2806,8 +2867,8 @@ impl Checker {
             )));
         }
         let mut typed = Vec::new();
-        for (arg, pty) in args.iter().zip(params.iter()) {
-            typed.push(self.check(heap, interp, env, *arg, Some(pty))?);
+        for (i, (arg, pty)) in args.iter().zip(params.iter()).enumerate() {
+            typed.push(self.check_at(heap, interp, env, *arg, Some(pty), nth_loc(arg_locs, i))?);
         }
         Ok(Typed { loc: None, expr: Expr::Apply(Box::new(callee), typed), ty: ret })
     }
@@ -2821,11 +2882,12 @@ impl Checker {
         env: &Env,
         segs: &[String],
         args: &[Value],
+        arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
         // A module-qualified free function, e.g. `math::id`.
         if let Some(fq) = self.resolve_fn_path(segs) {
-            return self.check_call(heap, interp, env, &fq, args);
+            return self.check_call(heap, interp, env, &fq, args, arg_locs);
         }
         // Otherwise `Type::member`: split the last segment as the member and
         // resolve the prefix as a type. The member is a constructor or a static
@@ -2836,7 +2898,7 @@ impl Checker {
             if let Some(type_fq) = self.resolve_type_path(type_segs) {
                 let def = self.reg.type_def(&type_fq).expect("resolved type exists");
                 if let Some(variant) = def.variants.iter().position(|v| &v.name == member) {
-                    return self.check_construct(heap, interp, env, (&type_fq, variant), args, expected);
+                    return self.check_construct(heap, interp, env, (&type_fq, variant), args, arg_locs, expected);
                 }
                 if let Some(af) = def.assoc.get(member) {
                     if self.assoc_visible(&type_fq, af) {
@@ -2852,6 +2914,7 @@ impl Checker {
                             env,
                             AssocCall { type_fq: &type_fq, method: member.as_str(), receiver: None, expected },
                             args,
+                            arg_locs,
                         );
                     }
                 }
@@ -2889,8 +2952,9 @@ impl Checker {
         env: &Env,
         method: &str,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
     ) -> Option<Result<Typed, Error>> {
-        let recv = self.check(heap, interp, env, *args.first()?, None).ok()?;
+        let recv = self.check_at(heap, interp, env, *args.first()?, None, nth_loc(arg_locs, 0)).ok()?;
         let type_fq = match &recv.ty {
             Type::Named(n, _) => Some(n.clone()),
             other => prim_type_path(other),
@@ -2906,6 +2970,7 @@ impl Checker {
             env,
             AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None },
             &args[1..],
+            &arg_locs[1..],
         ))
     }
 
@@ -2922,9 +2987,10 @@ impl Checker {
         env: &Env,
         method: &str,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
         if !args.is_empty() {
-            let recv = self.check(heap, interp, env, args[0], None)?;
+            let recv = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
             let type_fq = match &recv.ty {
                 Type::Named(n, _) => Some(n.clone()),
                 other => prim_type_path(other),
@@ -2942,6 +3008,7 @@ impl Checker {
                             env,
                             AssocCall { type_fq, method, receiver: Some(recv), expected: None },
                             &args[1..],
+                            &arg_locs[1..],
                         );
                     }
                 }
@@ -2967,8 +3034,8 @@ impl Checker {
                             )));
                         }
                         let mut typed_args = vec![recv];
-                        for a in &args[1..] {
-                            typed_args.push(self.check(heap, interp, env, *a, None)?);
+                        for (i, a) in args[1..].iter().enumerate() {
+                            typed_args.push(self.check_at(heap, interp, env, *a, None, nth_loc(&arg_locs[1..], i))?);
                         }
                         // This bound's `where`-clause associated-type pins
                         // (e.g. `(Item i32)`) resolve the trait method
@@ -3013,6 +3080,7 @@ impl Checker {
         env: &Env,
         call: AssocCall,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
         let AssocCall { type_fq, method, receiver, expected } = call;
         let instance = receiver.is_some();
@@ -3052,8 +3120,8 @@ impl Checker {
         if let Some(r) = receiver {
             typed.push(r);
         }
-        for (arg, pty) in args.iter().zip(expected_params.iter()) {
-            typed.push(self.check(heap, interp, env, *arg, Some(pty))?);
+        for (i, (arg, pty)) in args.iter().zip(expected_params.iter()).enumerate() {
+            typed.push(self.check_at(heap, interp, env, *arg, Some(pty), nth_loc(arg_locs, i))?);
         }
         for p in &def.params {
             if !subst.contains_key(p) {
@@ -3107,16 +3175,17 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
         if args.len() != 3 {
             return Err(Error::TypeError("if: (if cond then else)".into()));
         }
-        let cond = self.check(heap, interp, env, args[0], Some(&Type::Bool))?;
-        let then = self.check(heap, interp, env, args[1], expected)?;
+        let cond = self.check_at(heap, interp, env, args[0], Some(&Type::Bool), nth_loc(arg_locs, 0))?;
+        let then = self.check_at(heap, interp, env, args[1], expected, nth_loc(arg_locs, 1))?;
         // A diverging (`Never`) then branch must not constrain the else branch.
         let else_expected = non_never(&then.ty).or(expected);
-        let els = self.check(heap, interp, env, args[2], else_expected)?;
+        let els = self.check_at(heap, interp, env, args[2], else_expected, nth_loc(arg_locs, 2))?;
         let ty = join_types(&then.ty, &els.ty)?;
         Ok(Typed { loc: None, expr: Expr::If(Box::new(cond), Box::new(then), Box::new(els)), ty })
     }
@@ -3127,11 +3196,12 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
         if args.len() != 1 {
             return Err(Error::TypeError("panic: (panic message)".into()));
         }
-        let msg = self.check(heap, interp, env, args[0], Some(&Type::Str))?;
+        let msg = self.check_at(heap, interp, env, args[0], Some(&Type::Str), nth_loc(arg_locs, 0))?;
         Ok(Typed { loc: None, expr: Expr::Panic(Box::new(msg)), ty: Type::Never })
     }
 
@@ -3149,12 +3219,13 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
         if args.len() != 2 {
             return Err(Error::TypeError("the: (the Type expr)".into()));
         }
         let ty = self.canon(&parse_type(heap, args[0])?);
-        self.check(heap, interp, env, args[1], Some(&ty))
+        self.check_at(heap, interp, env, args[1], Some(&ty), nth_loc(arg_locs, 1))
     }
 
     /// `(as Type expr)` / `(try-as Type expr)`: a Rust-`as`-flavored
@@ -3178,6 +3249,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
         try_variant: bool,
     ) -> Result<Typed, Error> {
         let form_name = if try_variant { "try-as" } else { "as" };
@@ -3185,7 +3257,7 @@ impl Checker {
             return Err(Error::TypeError(format!("{}: ({} Type expr)", form_name, form_name)));
         }
         let target = self.canon(&parse_type(heap, args[0])?);
-        let src = self.check(heap, interp, env, args[1], None)?;
+        let src = self.check_at(heap, interp, env, args[1], None, nth_loc(arg_locs, 1))?;
 
         // Identity: same type, a no-op cast.
         if src.ty == target {
@@ -3215,6 +3287,7 @@ impl Checker {
             interp,
             env,
             AssocCall { type_fq: &owner, method, receiver: Some(src), expected: None },
+            &[],
             &[],
         )?;
 
@@ -3420,6 +3493,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
         if args.is_empty() {
@@ -3427,7 +3501,10 @@ impl Checker {
         }
         let mut binds = Vec::new();
         for binding in heap.list_to_vec(args[0])? {
-            let pair = heap.list_to_vec(binding)?;
+            // `list_to_vec_locs` so the binding value's own position reaches
+            // `check_at` (a bare-atom value keeps its `Loc` for hover).
+            let pair_locs = heap.list_to_vec_locs(binding)?;
+            let pair: Vec<Value> = pair_locs.iter().map(|(v, _)| *v).collect();
             if pair.len() != 2 {
                 return Err(Error::TypeError("let: binding must be (name val)".into()));
             }
@@ -3436,11 +3513,12 @@ impl Checker {
                 _ => return Err(Error::TypeError("let: binding name must be a symbol".into())),
             };
             // Binding values are checked in the *outer* environment (CL `let`).
-            let val = self.check(heap, interp, env, pair[1], None)?;
+            let val_loc = pair_locs.get(1).and_then(|(_, l)| l.clone());
+            let val = self.check_at(heap, interp, env, pair[1], None, val_loc)?;
             binds.push((name, val));
         }
         let child = env.extended(binds.iter().map(|(n, t)| (n.clone(), t.ty.clone())).collect());
-        let (body, ty) = self.check_seq(heap, interp, &child, &args[1..], expected)?;
+        let (body, ty) = self.check_seq(heap, interp, &child, &args[1..], &arg_locs[1..], expected)?;
         Ok(Typed { loc: None, expr: Expr::Let(binds, body), ty })
     }
 
@@ -3452,13 +3530,14 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
         if args.is_empty() {
             return Err(Error::TypeError("let*: (let* ((name val)...) body...)".into()));
         }
         let binds = heap.list_to_vec(args[0])?;
-        self.let_star_rec(heap, interp, env, &binds, &args[1..], expected)
+        self.let_star_rec(heap, interp, env, &binds, &args[1..], &arg_locs[1..], expected)
     }
 
     fn let_star_rec(
@@ -3468,13 +3547,15 @@ impl Checker {
         env: &Env,
         binds: &[Value],
         body: &[Value],
+        body_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
         if binds.is_empty() {
-            let (body, ty) = self.check_seq(heap, interp, env, body, expected)?;
+            let (body, ty) = self.check_seq(heap, interp, env, body, body_locs, expected)?;
             return Ok(Typed { loc: None, expr: Expr::Let(Vec::new(), body), ty });
         }
-        let pair = heap.list_to_vec(binds[0])?;
+        let pair_locs = heap.list_to_vec_locs(binds[0])?;
+        let pair: Vec<Value> = pair_locs.iter().map(|(v, _)| *v).collect();
         if pair.len() != 2 {
             return Err(Error::TypeError("let*: binding must be (name val)".into()));
         }
@@ -3482,9 +3563,10 @@ impl Checker {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("let*: binding name must be a symbol".into())),
         };
-        let val = self.check(heap, interp, env, pair[1], None)?;
+        let val_loc = pair_locs.get(1).and_then(|(_, l)| l.clone());
+        let val = self.check_at(heap, interp, env, pair[1], None, val_loc)?;
         let child = env.extended(vec![(name.clone(), val.ty.clone())]);
-        let inner = self.let_star_rec(heap, interp, &child, &binds[1..], body, expected)?;
+        let inner = self.let_star_rec(heap, interp, &child, &binds[1..], body, body_locs, expected)?;
         let ty = inner.ty.clone();
         Ok(Typed { loc: None, expr: Expr::Let(vec![(name, val)], vec![inner]), ty })
     }
@@ -3497,31 +3579,33 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
         if args.len() != 2 {
             return Err(Error::TypeError("setf: (setf var value)".into()));
         }
+        let value_loc = nth_loc(arg_locs, 1);
         if let Value::Path(pid) = args[0] {
             let segs: Vec<String> = heap
                 .path_segments(pid)
                 .iter()
                 .map(|s| heap.symbol_name(*s).to_string())
                 .collect();
-            return self.check_field_set(heap, interp, env, &segs, args[1]);
+            return self.check_field_set(heap, interp, env, &segs, args[1], value_loc);
         }
         let name = match args[0] {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("setf: target must be a variable".into())),
         };
         if let Some(ty) = env.get(&name).cloned() {
-            let value = self.check(heap, interp, env, args[1], Some(&ty))?;
+            let value = self.check_at(heap, interp, env, args[1], Some(&ty), value_loc)?;
             return Ok(Typed { loc: None, expr: Expr::Set(name, Box::new(value)), ty });
         }
         if let Some((path, vi)) = self.resolve_global(&name) {
             if !vi.mutable {
                 return Err(Error::TypeError(format!("setf: cannot assign to constant `{}`", name)));
             }
-            let value = self.check(heap, interp, env, args[1], Some(&vi.ty))?;
+            let value = self.check_at(heap, interp, env, args[1], Some(&vi.ty), value_loc)?;
             return Ok(Typed { loc: None, expr: Expr::SetGlobal(path, Box::new(value)), ty: vi.ty });
         }
         Err(Error::TypeError(format!("setf: unbound variable: {}", name)))
@@ -3542,6 +3626,7 @@ impl Checker {
         env: &Env,
         segs: &[String],
         value: Value,
+        value_loc: Option<Loc>,
     ) -> Result<Typed, Error> {
         let [recv_name, field] = segs else {
             return Err(Error::TypeError(format!("setf: unresolved path: {}", segs.join("::"))));
@@ -3572,6 +3657,7 @@ impl Checker {
             env,
             AssocCall { type_fq: &type_fq, method: &setter, receiver: Some(recv), expected: None },
             std::slice::from_ref(&value),
+            &[value_loc],
         )
     }
 
@@ -3643,8 +3729,9 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
-        let (body, ty) = self.check_loop_body(heap, interp, env, args, Type::Never)?;
+        let (body, ty) = self.check_loop_body(heap, interp, env, args, arg_locs, Type::Never)?;
         Ok(Typed { loc: None, expr: Expr::Loop(body), ty })
     }
 
@@ -3659,10 +3746,11 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         body: &[Value],
+        body_locs: &[Option<Loc>],
         seed: Type,
     ) -> Result<(Vec<Typed>, Type), Error> {
         self.loop_stack.borrow_mut().push(seed);
-        let result = self.check_seq(heap, interp, env, body, None);
+        let result = self.check_seq(heap, interp, env, body, body_locs, None);
         let ty = self.loop_stack.borrow_mut().pop().expect("pushed above");
         let (body, _) = result?;
         Ok((body, ty))
@@ -3686,6 +3774,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
         if args.len() > 1 {
             return Err(Error::TypeError("return: (return) or (return value)".into()));
@@ -3698,7 +3787,7 @@ impl Checker {
             .ok_or_else(|| Error::TypeError("return: not inside a loop".into()))?;
         let expected = non_never(&top).cloned();
         let value = match args.first() {
-            Some(v) => Some(self.check(heap, interp, env, *v, expected.as_ref())?),
+            Some(v) => Some(self.check_at(heap, interp, env, *v, expected.as_ref(), nth_loc(arg_locs, 0))?),
             None => None,
         };
         let ty = value.as_ref().map(|t| t.ty.clone()).unwrap_or(Type::Unit);
@@ -3727,6 +3816,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
         let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
         let (adt, cons_idx) = self.sexpr_cons_ctor();
@@ -3735,8 +3825,8 @@ impl Checker {
             expr: Expr::Construct { type_name: adt.clone(), variant: nil_idx, args: Vec::new(), mutable: false },
             ty: sexpr_ty.clone(),
         };
-        for &elem in args.iter().rev() {
-            let e = self.check(heap, interp, env, elem, Some(&sexpr_ty))?;
+        for (i, &elem) in args.iter().enumerate().rev() {
+            let e = self.check_at(heap, interp, env, elem, Some(&sexpr_ty), nth_loc(arg_locs, i))?;
             acc = Typed { loc: None,
                 expr: Expr::Construct { type_name: adt.clone(), variant: cons_idx, args: vec![e, acc], mutable: false },
                 ty: sexpr_ty.clone(),
@@ -3752,6 +3842,7 @@ impl Checker {
         env: &Env,
         name: &Path,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
         let sig = self.reg.fn_sig(name).expect("caller checked presence").clone();
         let fixed = sig.params.len();
@@ -3772,10 +3863,10 @@ impl Checker {
         let params: HashSet<String> = sig.type_params.iter().cloned().collect();
         let mut subst: HashMap<String, Type> = HashMap::new();
         let mut typed = Vec::new();
-        for (arg, pty) in args.iter().zip(sig.params.iter()) {
+        for (i, (arg, pty)) in args.iter().zip(sig.params.iter()).enumerate() {
             let st = subst_apply(pty, &subst);
             let exp = if type_has_param(&st, &params) { None } else { Some(st) };
-            let ta = self.check(heap, interp, env, *arg, exp.as_ref())?;
+            let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
             unify(&params, pty, &ta.ty, &mut subst)?;
             typed.push(ta);
         }
@@ -3935,6 +4026,7 @@ impl Checker {
         env: &Env,
         ctor: (&Path, usize),
         args: &[Value],
+        arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
         let (adt_name, variant) = ctor;
@@ -3962,10 +4054,10 @@ impl Checker {
         }
 
         let mut typed_args = Vec::new();
-        for (arg, field) in args.iter().zip(fields.iter()) {
+        for (i, (arg, field)) in args.iter().zip(fields.iter()).enumerate() {
             let st = subst_apply(field, &subst);
             let exp = if type_has_param(&st, &params) { None } else { Some(st) };
-            let ta = self.check(heap, interp, env, *arg, exp.as_ref())?;
+            let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
             unify(&params, field, &ta.ty, &mut subst)?;
             typed_args.push(ta);
         }
@@ -4001,12 +4093,13 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         args: &[Value],
+        arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
         if args.is_empty() {
             return Err(Error::TypeError("match: (match expr arms...)".into()));
         }
-        let scrut = self.check(heap, interp, env, args[0], None)?;
+        let scrut = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
         let (adt_name, _) = self.expect_adt(&scrut.ty)?;
         // `match` covers every sum type, `Sexpr` included. Symbol/Sexpr
         // redesign Phase 5 fenced `Sexpr` off here (its structure was to be
@@ -4028,7 +4121,10 @@ impl Checker {
         let mut result_ty: Option<Type> = expected.cloned();
 
         for arm_val in &args[1..] {
-            let parts = heap.list_to_vec(*arm_val)?;
+            // `list_to_vec_locs` so each arm body form keeps its own position
+            // (a bare-atom body, e.g. a pattern-bound variable, stays hoverable).
+            let parts_locs = heap.list_to_vec_locs(*arm_val)?;
+            let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
             if parts.is_empty() {
                 return Err(Error::TypeError("match: arm must be (pattern body...)".into()));
             }
@@ -4044,7 +4140,8 @@ impl Checker {
             // Diverging arms don't constrain the result type; concrete arms must
             // all agree (Never joins with anything).
             let arm_expected = result_ty.as_ref().and_then(non_never);
-            let (body, body_ty) = self.check_seq(heap, interp, &arm_env, &parts[1..], arm_expected)?;
+            let body_locs: Vec<Option<Loc>> = parts_locs[1..].iter().map(|(_, l)| l.clone()).collect();
+            let (body, body_ty) = self.check_seq(heap, interp, &arm_env, &parts[1..], &body_locs, arm_expected)?;
             result_ty = Some(match result_ty {
                 None => body_ty,
                 Some(r) => join_types(&r, &body_ty)?,
@@ -4164,6 +4261,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         body: &[Value],
+        body_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<(Vec<Typed>, Type), Error> {
         if body.is_empty() {
@@ -4181,7 +4279,7 @@ impl Checker {
         let last = body.len() - 1;
         for (i, expr) in body.iter().enumerate() {
             let exp = if i == last { expected } else { None };
-            out.push(self.check(heap, interp, env, *expr, exp)?);
+            out.push(self.check_at(heap, interp, env, *expr, exp, nth_loc(body_locs, i))?);
         }
         let ty = out[last].ty.clone();
         Ok((out, ty))
@@ -4206,6 +4304,14 @@ impl Default for Checker {
 }
 
 // ---- free helpers ---------------------------------------------------------
+
+/// The `i`-th element of a parallel element-location slice (see
+/// `Heap::list_to_vec_locs`), or `None` when the index is out of range or that
+/// element carried no recorded location. Used throughout `check_*` to pass a
+/// bare atom argument's own source location into [`Checker::check_at`].
+fn nth_loc(locs: &[Option<Loc>], i: usize) -> Option<Loc> {
+    locs.get(i).cloned().flatten()
+}
 
 /// Recursively convert a raw read `Value` into an owned [`QuotedSexpr`] (see
 /// [`Expr::Quote`] for why `quote` can't just keep the heap pointer). A

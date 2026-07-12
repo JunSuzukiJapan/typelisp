@@ -289,6 +289,10 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
     cur.next(); // '('
     let mark = heap.root_count();
     let mut elems: Vec<Value> = Vec::new();
+    // Source location of each element in `elems`, captured just before reading
+    // it — parallel to `elems`, so the build loop below can tag each spine
+    // cell's `car` with where that element began (see `Heap::set_elem_loc`).
+    let mut elem_locs: Vec<Loc> = Vec::new();
     let mut tail = Value::Empty;
 
     loop {
@@ -328,6 +332,7 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
                 break;
             }
             Some(_) => {
+                let elem_loc = cur.loc(); // where this element begins
                 let e = match read_datum(cur, heap) {
                     Ok(e) => e,
                     Err(err) => {
@@ -337,20 +342,27 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
                 };
                 heap.push_root(e); // keep alive while reading the rest / building
                 elems.push(e);
+                elem_locs.push(elem_loc);
             }
         }
     }
 
     // Build the cons chain from the back; the accumulator stays rooted so a GC
-    // triggered by `cons` cannot reclaim the part already built.
+    // triggered by `cons` cannot reclaim the part already built. Each spine
+    // cell is tagged with its `car`'s source location (`elem_locs`, walked in
+    // the same reverse order as `elems`) so the checker can give a bare-atom
+    // element its own `Loc` — see `Heap::set_elem_loc`.
     let mut acc = tail;
     heap.push_root(acc);
-    for &e in elems.iter().rev() {
+    for (&e, loc) in elems.iter().rev().zip(elem_locs.iter().rev()) {
         match heap.cons(e, acc) {
             Ok(cell) => {
                 heap.pop_root(); // old acc
                 heap.push_root(cell);
                 acc = cell;
+                if let Value::Cons(cr) = cell {
+                    heap.set_elem_loc(cr, loc.clone());
+                }
             }
             Err(err) => {
                 restore_roots(heap, mark);
