@@ -3374,4 +3374,60 @@ stdio実測（initialize→didOpen→completion/definition）でgoto-def・ア�
 
 副産物の発見（TODO.mdに既知の制限として記録）: catchallでないアーム本体内の補完は、
 カーソル以降の切り捨てで後続アームが消え非網羅エラーになるため、ローカル候補が出ない
-（truncate設計固有の制約、複数引数切り捨てと同族）。
+（truncate設計固有の制約、複数引数切り捨てと同族）。→次節「チェッカーのエラー回復モード」で解消。
+
+## チェッカーのエラー回復モード（2026-07-12、前節の既知の制限を解消）
+
+**背景**: 前節で「既知の制限」として記録した「非catchall `match`アーム本体内の補完で
+ローカル候補が出ない」問題の根治。補完のtruncate設計（カーソル以降を切り捨て+`(panic "")`+
+閉じ括弧補完）自体は変えず、**チェッカーを「最初のErrで中断」から「エラーを蓄積しつつ
+部分的な`Typed`木を返す」設計**に拡張した。場当たり修正（網羅性チェックだけ緩和／末尾温存）
+ではなく回復型への作り替えを選択したのは、(1)型エラーのあるファイルでもhover/goto/補完を
+動かしたい、(2)ファイル内の全エラーを一度に診断したい、という汎用的な要求のため。
+
+**アーキテクチャ**: `Result<_, Error>`のシグネチャは全て維持。`Checker`に`recover: bool`
+フラグと`errors: RefCell<Vec<Error>>`蓄積器を追加（`warnings`/`take_warnings`と同型の前例に倣う）。
+デフォルト`recover=false`は現行の厳格動作と完全一致するため、CLI/REPL/prelude/既存テスト
+（600+件）は無変更。LSPの`diagnostics_for`/`candidates_for`だけが`set_recover(true)`する。
+
+- **ホール表現**: 新`Expr`variantは追加せず`Expr::Panic`を再利用し`ty: Type::Never`。
+  `Never`は期待型照合・`join_types`で万能に吸収されるためカスケードエラーが出ず、
+  interp/ast_bridge/locate.rsは`Panic`を既に扱えるので下流は無変更。`Checker::hole(loc)`が生成。
+- **回復ヘルパー**: `recovered(r, loc)`（式スロットに`hole`を差し替え）と
+  `push_recovered(e, loc)`（`match`アーム/網羅性チェックのようにスロットがない箇所で記録のみ）。
+  いずれも`Error::at`の最内優先で位置が付く。
+
+**回復境界（6箇所）**:
+- **B1** `check_match`の網羅性チェック: recover時は`Err`にせず記録して**完全な`Match`ノードを返す**
+  （全アームは既にチェック済み）。動機バグはこれで直接解消。
+- **B2** `check_match`のアーム単位: 形状/`check_pattern`失敗のアームを記録してスキップ、
+  `arm_recovered`フラグで網羅性チェック自体を抑止（スキップでカバレッジ不明のため）。
+  `join_types`失敗はアームを保持したまま結果型のみ据え置き。
+- **B3** `check_seq`の要素単位: 本体の1フォームがホール化しても兄弟フォームは検査続行。
+  `defun`/`defmethod`/`defmacro`/`lambda`/`let`/`labels`/`loop`本体+`match`アーム本体すべてに効く
+  最重要境界。
+- **B4** `check_let`/`let*`の束縛init: initがホール化しても束縛は`Never`型でスコープに残り、
+  本体（と全束縛）が補完に見える。
+- **B5** `check_form`最上位: フォーム全体の`Err`を記録し`TopLevel::Expr(hole)`を返す。
+  `spec_pending`クリアを忘れると次フォームの`debug_assert`が落ちる。これにより
+  `load_source_inner`は無変更で最後まで走り、ファイルの`TopLevel::Module`が`pending`へpushされ、
+  部分木がLSPに届く。
+- **B6** `drain_specializations`: 主フォームは検査成功したが単型化に失敗した場合、主フォームの木を
+  保持しバンドルのみ破棄。単型化の中身は厳格のまま（テンプレート＝別ファイルの位置をホール化
+  すると位置が狂うため記録のみ）。
+
+**LSP配線**:
+- `diagnostics_for`: prelude（厳格）ロード後に`set_recover(true)`。`take_errors()`で
+  蓄積エラーを全て`error_diagnostic`化＝複数診断。`Analysis`は`result.is_ok()`
+  （＝reader成功で木がある）なら型エラーがあっても構築。readerエラー時のみ`None`で
+  last-good維持。
+- `candidates_for`: `set_recover(true)`+`result.is_ok()`ゲートを撤廃し常に`completion_locals`を
+  実行。readerエラー時は`pending`が空→`completion_locals`が`file`フィルタで空を返すので安全。
+
+**検証**: `tests/lsp_completion_test.rs`に`program_recover`ヘルパー（recoverモードで検査し
+`(body, errors)`を返す）と回復テスト7件——複数フォームエラー蓄積+間の`defun`は生存、
+非catchall `match`アーム内でローカル提供（動機バグ）、不正アームのスキップ+良アーム生存、
+不正本体フォームのホール化+兄弟生存、init失敗letの束縛保持、独立3エラーの個別位置記録。
+`src/bin/lsp.rs`の`completion_helper_tests`に`candidates_for`のE2E 1件（実際の
+patched text→recover経路でローカル候補が出ることを確認）。cargo test全green、
+厳格経路（既存600+件）は無変更。

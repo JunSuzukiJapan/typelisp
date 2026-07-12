@@ -439,6 +439,23 @@ pub struct Checker {
     /// Non-fatal diagnostics accumulated by [`Self::check_redef`] (currently
     /// just `RedefPolicy::Warn` redefinitions); drained by [`Self::take_warnings`].
     warnings: RefCell<Vec<String>>,
+    /// When true, the checker runs in *error-recovery* mode: at the handful of
+    /// recovery boundaries (`check_form`, `drain_specializations`, `check_seq`,
+    /// `check_let`, `check_match`) an `Err` from a sub-check is recorded in
+    /// [`Self::errors`] and replaced by a `Never`-typed hole node
+    /// ([`Self::hole`]) so checking of the rest of the form/file continues and
+    /// a partial [`Typed`] tree still comes back. Defaults to `false`, which
+    /// reproduces the strict "abort on first error" behaviour the CLI, REPL,
+    /// prelude, and the test suite depend on — recovery is used only by the
+    /// LSP (`diagnostics_for`/`candidates_for`), which needs a best-effort tree
+    /// for hover/goto-definition/completion even in the presence of type errors.
+    recover: bool,
+    /// Recoverable errors accumulated while `recover` is set — mirrors
+    /// `warnings`. Each carries its own innermost source location (via the
+    /// `check_at`/`check_form` `Error::at` tagging that already runs before the
+    /// error reaches a boundary). Drained by [`Self::take_errors`]. Always
+    /// empty when `recover` is false.
+    errors: RefCell<Vec<Error>>,
     /// Scratch accumulator for `DefLocs::local_refs`, written by
     /// [`Self::check_at`] whenever a `Var` reference resolves against an
     /// `Env` binding with a recorded position. A `RefCell` for the same
@@ -490,6 +507,8 @@ impl Checker {
             loop_stack: RefCell::new(Vec::new()),
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
+            recover: false,
+            errors: RefCell::new(Vec::new()),
             local_refs: RefCell::new(HashMap::new()),
             generic_fn_templates: HashMap::new(),
             generic_method_templates: HashMap::new(),
@@ -510,6 +529,64 @@ impl Checker {
     /// surface them (see `main.rs`/`prelude.rs`).
     pub fn take_warnings(&self) -> Vec<String> {
         std::mem::take(&mut *self.warnings.borrow_mut())
+    }
+
+    /// Turns error-recovery mode on or off (see [`Self::recover`]). The LSP
+    /// enables it before a check so a file with type errors still yields a
+    /// partial tree and a full list of errors; everything else leaves it off
+    /// and keeps the strict "abort on first error" behaviour.
+    pub fn set_recover(&mut self, on: bool) {
+        self.recover = on;
+    }
+
+    /// Drains and returns every error accumulated at a recovery boundary while
+    /// `recover` was set (see [`Self::errors`]). Each already carries its own
+    /// source location. Empty unless `recover` is enabled.
+    pub fn take_errors(&self) -> Vec<Error> {
+        std::mem::take(&mut *self.errors.borrow_mut())
+    }
+
+    /// A `Never`-typed placeholder for a sub-expression that failed to check.
+    /// Reuses [`Expr::Panic`] (already `Never`-typed, already handled by every
+    /// downstream consumer — the interpreter, `ast_bridge`, `locate.rs`) rather
+    /// than adding a new `Expr` variant, so recovery needs no changes outside
+    /// the checker. `Type::Never` unifies with any expected type, so a hole
+    /// flowing into a typed position never produces a cascade of follow-on
+    /// errors. `loc` is the failing form's position, so `locate_node` can still
+    /// land the cursor on it for completion/hover.
+    fn hole(loc: Option<Loc>) -> Typed {
+        Typed {
+            expr: Expr::Panic(Box::new(Typed::new(Expr::Str("<check-error>".into()), Type::Str))),
+            ty: Type::Never,
+            loc,
+        }
+    }
+
+    /// The single catch helper used at expression-level recovery boundaries: a
+    /// pass-through in strict mode, and in `recover` mode it records a failing
+    /// sub-check's error (tagged with `loc` if it lacks a more specific one)
+    /// and substitutes a [`Self::hole`] so checking continues.
+    fn recovered(&self, r: Result<Typed, Error>, loc: Option<Loc>) -> Result<Typed, Error> {
+        match r {
+            Err(e) if self.recover => {
+                self.push_recovered(e, loc.clone());
+                Ok(Self::hole(loc))
+            }
+            other => other,
+        }
+    }
+
+    /// Records a recoverable error at a boundary that has no `Typed` slot to
+    /// fill with a hole (a `match` arm that gets skipped, or the exhaustiveness
+    /// check). Tags with `loc` (a no-op if the error already carries a more
+    /// specific location) and pushes into [`Self::errors`]. Callers must have
+    /// already checked `self.recover`.
+    fn push_recovered(&self, e: Error, loc: Option<Loc>) {
+        let e = match loc {
+            Some(l) => e.at(l),
+            None => e,
+        };
+        self.errors.borrow_mut().push(e);
     }
 
     /// The one place the warn/error/silent (and "never touch a builtin")
@@ -569,7 +646,29 @@ impl Checker {
         // one — see its doc comment).
         let loc = heap.cons_loc(v);
         let primary = self.check_form_dispatch(heap, interp, v, loc.clone());
-        let bundled = primary.and_then(|tl| Ok((self.drain_specializations(heap, interp)?, tl)));
+        // Specialization-drain recovery boundary (B6): the primary form checked
+        // fine, but instantiating a generic it calls failed. In `recover` mode
+        // keep the primary form's typed tree (it's what completion/hover want)
+        // and drop only the failed bundle, rather than losing the whole form.
+        // Monomorphization itself stays strict — a template re-check error's
+        // location points into the (possibly foreign) template, so it is
+        // recorded as-is rather than turned into an in-body hole.
+        let bundled = match primary {
+            Err(e) => Err(e),
+            Ok(tl) => match self.drain_specializations(heap, interp) {
+                Ok(specs) => Ok((specs, tl)),
+                Err(e) if self.recover => {
+                    self.spec_pending.borrow_mut().clear();
+                    let e = match loc.clone() {
+                        Some(l) => e.at(l),
+                        None => e,
+                    };
+                    self.errors.borrow_mut().push(e);
+                    Ok((Vec::new(), tl))
+                }
+                Err(e) => Err(e),
+            },
+        };
         // Both maps reset per form regardless of outcome — see `spec_memo`'s
         // doc comment for why the memo must not outlive the form.
         self.spec_memo.borrow_mut().clear();
@@ -591,9 +690,25 @@ impl Checker {
                 Err(e)
             }
         };
-        match loc {
+        let result = match loc.clone() {
             Some(loc) => result.map_err(|e| e.at(loc)),
             None => result,
+        };
+        // Top-level recovery boundary (B5): in `recover` mode a form that fails
+        // to check must not abort the whole file — record its (already
+        // location-tagged) error and hand back a hole so `load_source_inner`
+        // keeps checking the remaining forms and still pushes this file's
+        // `TopLevel::Module`, which is what gives the LSP a partial tree. The
+        // `spec_pending` clear mirrors the `Err(e)` arm above: without it the
+        // `debug_assert!` at the top of the next `check_form` would fire on a
+        // request that leaked out of a failed specialization drain.
+        match result {
+            Err(e) if self.recover => {
+                self.spec_pending.borrow_mut().clear();
+                self.errors.borrow_mut().push(e);
+                Ok(TopLevel::Expr(Self::hole(loc)))
+            }
+            other => other,
         }
     }
 
@@ -3612,8 +3727,15 @@ impl Checker {
             };
             name_locs.push(pair_locs.first().and_then(|(_, l)| l.clone()));
             // Binding values are checked in the *outer* environment (CL `let`).
+            // Recovery boundary (B4): an ill-typed init becomes a `Never`-typed
+            // hole, so the binding still enters scope (as `Never`, which unifies
+            // with any later use) and the body — with all its bindings — stays
+            // available to completion.
             let val_loc = pair_locs.get(1).and_then(|(_, l)| l.clone());
-            let val = self.check_at(heap, interp, env, pair[1], None, val_loc)?;
+            let val = self.recovered(
+                self.check_at(heap, interp, env, pair[1], None, val_loc.clone()),
+                val_loc,
+            )?;
             binds.push((name, val));
         }
         let env_binds: Vec<(String, Type, Option<Loc>)> = binds
@@ -3669,7 +3791,11 @@ impl Checker {
         };
         let name_loc = pair_locs.first().and_then(|(_, l)| l.clone());
         let val_loc = pair_locs.get(1).and_then(|(_, l)| l.clone());
-        let val = self.check_at(heap, interp, env, pair[1], None, val_loc)?;
+        // Recovery boundary (B4): see `check_let`.
+        let val = self.recovered(
+            self.check_at(heap, interp, env, pair[1], None, val_loc.clone()),
+            val_loc,
+        )?;
         let child = env.extended_with_locs(vec![(name.clone(), val.ty.clone(), name_loc)]);
         let inner = self.let_star_rec(heap, interp, &child, &binds[1..], body, body_locs, expected)?;
         let ty = inner.ty.clone();
@@ -4224,16 +4350,40 @@ impl Checker {
         let mut covered: HashSet<usize> = HashSet::new();
         let mut catchall = false;
         let mut result_ty: Option<Type> = expected.cloned();
+        // Set (B2) when an arm is skipped in `recover` mode: a skipped arm's
+        // variant coverage is unknown, so the exhaustiveness check (B1) below
+        // must be suppressed for this `match` to avoid a spurious cascade.
+        let mut arm_recovered = false;
 
         for arm_val in &args[1..] {
+            let arm_loc = heap.cons_loc(*arm_val);
+            // Per-arm recovery boundary (B2): an arm whose shape or pattern is
+            // ill-typed is recorded and skipped (rather than aborting the whole
+            // `match`), so the surviving arms' bindings still reach completion.
+            // The arm *body* recovers at the finer `check_seq` element boundary
+            // (B3), so a bad body form holes just that form, not the arm.
+            macro_rules! recover_arm {
+                ($e:expr) => {
+                    match $e {
+                        Ok(v) => v,
+                        Err(e) if self.recover => {
+                            arm_recovered = true;
+                            self.push_recovered(e, arm_loc.clone());
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                };
+            }
             // `list_to_vec_locs` so each arm body form keeps its own position
             // (a bare-atom body, e.g. a pattern-bound variable, stays hoverable).
-            let parts_locs = heap.list_to_vec_locs(*arm_val)?;
+            let parts_locs = recover_arm!(heap.list_to_vec_locs(*arm_val));
             let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
             if parts.is_empty() {
-                return Err(Error::TypeError("match: arm must be (pattern body...)".into()));
+                recover_arm!(Err(Error::TypeError("match: arm must be (pattern body...)".into())));
             }
-            let (pat, binds) = self.check_pattern(heap, &scrut.ty, parts[0], parts_locs[0].1.clone())?;
+            let (pat, binds) =
+                recover_arm!(self.check_pattern(heap, &scrut.ty, parts[0], parts_locs[0].1.clone()));
             match &pat {
                 Pattern::Ctor { variant, .. } => {
                     covered.insert(*variant);
@@ -4246,23 +4396,51 @@ impl Checker {
             // all agree (Never joins with anything).
             let arm_expected = result_ty.as_ref().and_then(non_never);
             let body_locs: Vec<Option<Loc>> = parts_locs[1..].iter().map(|(_, l)| l.clone()).collect();
-            let (body, body_ty) = self.check_seq(heap, interp, &arm_env, &parts[1..], &body_locs, arm_expected)?;
+            let (body, body_ty) =
+                recover_arm!(self.check_seq(heap, interp, &arm_env, &parts[1..], &body_locs, arm_expected));
             result_ty = Some(match result_ty {
                 None => body_ty,
-                Some(r) => join_types(&r, &body_ty)?,
+                // A body that disagrees with the other arms' type: record it in
+                // recover mode but keep this arm (its subtree is valid, only the
+                // type join failed) and the previously-agreed result type.
+                Some(r) => match join_types(&r, &body_ty) {
+                    Ok(joined) => joined,
+                    Err(e) if self.recover => {
+                        self.push_recovered(e, arm_loc.clone());
+                        r
+                    }
+                    Err(e) => return Err(e),
+                },
             });
             arms.push(Arm { pat, body });
         }
 
-        if !catchall && covered.len() != total_variants {
-            return Err(Error::TypeError(format!(
+        // Exhaustiveness (B1): in `recover` mode a non-exhaustive `match`
+        // records the error but still returns a fully-typed `Match` node (every
+        // arm was already checked) — this is exactly what lets completion work
+        // inside a non-catchall arm, where truncating the source deletes the
+        // arms that would have made the match exhaustive. Suppressed when an
+        // arm was skipped (B2), since coverage is then unknown.
+        if !catchall && !arm_recovered && covered.len() != total_variants {
+            let e = Error::TypeError(format!(
                 "non-exhaustive match on `{}`: {}/{} variants covered",
                 adt_name,
                 covered.len(),
                 total_variants
-            )));
+            ));
+            if self.recover {
+                self.push_recovered(e, nth_loc(arg_locs, 0));
+            } else {
+                return Err(e);
+            }
         }
-        let ty = result_ty.ok_or_else(|| Error::TypeError("match: no arms".into()))?;
+        let ty = match result_ty {
+            Some(ty) => ty,
+            // No arms survived (all skipped in recover mode, or a genuinely
+            // empty `match`): a `Never`-typed hole stands in for the value.
+            None if self.recover => Type::Never,
+            None => return Err(Error::TypeError("match: no arms".into())),
+        };
         Ok(Typed { loc: None, expr: Expr::Match(Box::new(scrut), arms), ty })
     }
 
@@ -4395,7 +4573,15 @@ impl Checker {
         let last = body.len() - 1;
         for (i, expr) in body.iter().enumerate() {
             let exp = if i == last { expected } else { None };
-            out.push(self.check_at(heap, interp, env, *expr, exp, nth_loc(body_locs, i))?);
+            let loc = nth_loc(body_locs, i);
+            // Body-element recovery boundary (B3): one ill-typed form in a
+            // sequence becomes a `Never`-typed hole rather than aborting the
+            // whole body, so the surviving forms — and every `let`/`match`
+            // binding they introduce — still reach completion. This is the
+            // highest-leverage boundary: `check_seq` is the body checker for
+            // `defun`/`defmethod`/`defmacro`/`lambda`/`let`/`labels`/`loop`
+            // bodies and `match` arm bodies alike.
+            out.push(self.recovered(self.check_at(heap, interp, env, *expr, exp, loc.clone()), loc)?);
         }
         let ty = out[last].ty.clone();
         Ok((out, ty))

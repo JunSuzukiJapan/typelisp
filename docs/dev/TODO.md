@@ -42,12 +42,19 @@
 単体テスト: `tests/lsp_locate_test.rs`/`tests/lsp_completion_test.rs`（LSPのstdioトランスポートは
 介さず`Checker::check_form`を直接駆動してコアロジックのみ検証）。
 
+**チェッカーのエラー回復対応（2026-07-12、当初「既知の制限」だった非catchall `match`アーム内補完を解消）**:
+`Checker`に`set_recover(true)`モードを新設——最初のエラーで中断する代わりに、少数の回復境界
+（`check_form`/`drain_specializations`/`check_seq`/`check_let`/`check_match`）で`Err`を
+`errors`へ蓄積し`Never`型のホールノード（`Expr::Panic`再利用）に差し替えて検査を継続する。
+LSPの`diagnostics_for`/`candidates_for`のみがこのモードを使い、CLI/REPL/prelude/テストは従来の
+厳格モード（`recover=false`）のまま。これにより(1)型エラーのあるファイルでも部分的な`Typed`木が
+得られ補完/hover/gotoが動く、(2)ファイル内の全型エラーを一度に診断できる。とくに補完の
+truncate設計（カーソル以降を切り捨て）が非catchall `match`アーム内で後続アームを消して
+非網羅エラーにしていた問題は、非網羅を回復可能エラーとして記録しつつ完全な`Match`ノードを
+返すことで解消。詳細は[implementation-log.md](implementation-log.md)の
+「チェッカーのエラー回復モード」節。
+
 **既知の制限（意図的なMVPスコープ、解消せず残す）**:
-- 補完は「カーソル以降を切り捨ててチェックし直す」設計のため、**catchallでない`match`アームの
-  本体内**で補完すると後続アーム（`(_ ...)`等）ごと切り捨てられて非網羅エラーになり、
-  ローカル束縛の候補が出ない（Registry由来の候補は従来通り出る）。stdio実測で確認済み。
-  カーソル以降の温存はtruncate設計の作り替えが必要で見送り
-  （`needs_completion_placeholder`のdocコメントにある「複数引数の切り捨て」と同族の制約）。
 - アトム単体でも**リスト要素として現れる場合は**位置を持つ（2026-07-12対応）が、
   リストに一切現れない裸アトム（実質発生しない）は依然として位置を持てない。真のspan対応
   （reader全体の作り替えが必要）は引き続き見送り。

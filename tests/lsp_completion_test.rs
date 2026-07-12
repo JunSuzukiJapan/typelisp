@@ -13,7 +13,7 @@
 //! alongside user code.
 
 extern crate typelisp;
-use typelisp::{completion_candidates, completion_locals, Checker, CompletionCandidate, CompletionKind, Heap, Interp, Reader, TopLevel};
+use typelisp::{completion_candidates, completion_locals, Checker, CompletionCandidate, CompletionKind, Error, Heap, Interp, Reader, TopLevel};
 
 const FILE: &str = "test.typl";
 
@@ -41,6 +41,27 @@ fn program(src: &str) -> Vec<TopLevel> {
     let mut chk = Checker::new();
     let interp = Interp::new();
     vs.into_iter().map(|v| chk.check_form(&mut h, &interp, v).expect("check failed")).collect()
+}
+
+/// Like `program`, but runs the checker in error-recovery mode (the mode the
+/// LSP's `diagnostics_for`/`candidates_for` use). Returns both the partial
+/// checked forms `completion_locals` searches and the errors the checker
+/// accumulated instead of aborting on the first one. In recover mode
+/// `check_form` never returns `Err` for a readable form (type errors are
+/// recorded, not propagated), so `.expect` here only guards against a malformed
+/// test input.
+fn program_recover(src: &str) -> (Vec<TopLevel>, Vec<Error>) {
+    let mut h = Heap::with_capacity(1 << 16);
+    let r = Reader::new();
+    let vs = r.read_all_in(&mut h, FILE, src).expect("read failed");
+    let mut chk = Checker::new();
+    chk.set_recover(true);
+    let interp = Interp::new();
+    let body: Vec<TopLevel> = vs
+        .into_iter()
+        .map(|v| chk.check_form(&mut h, &interp, v).expect("recover mode never returns Err on a readable form"))
+        .collect();
+    (body, chk.take_errors())
 }
 
 fn has(kind: CompletionKind, candidates: &[CompletionCandidate], name: &str) -> bool {
@@ -155,4 +176,104 @@ fn completion_locals_sees_a_let_binding_from_an_empty_list_as_the_first_body_for
     let locals = completion_locals(&body, FILE, 1, 37);
     assert!(locals.contains(&"x".to_string()));
     assert!(locals.contains(&"n".to_string()));
+}
+
+// --- Error-recovery mode (`Checker::set_recover`) --------------------------
+//
+// The LSP checks in recover mode so a document with type errors still yields a
+// partial `Typed` tree for completion/hover/goto and reports *all* its errors,
+// not just the first. These tests drive `program_recover` (recover mode) the
+// same way the strict tests above drive `program`.
+
+#[test]
+fn recover_mode_records_multiple_form_errors_and_keeps_checking_the_rest() {
+    // Two ill-typed `defvar`s (a bool value where `i32` is declared) sandwich a
+    // well-typed `defun`. Strict checking would abort at the first; recover
+    // mode records both errors and still checks — and keeps — the `defun`.
+    let (body, errors) = program_recover(
+        "(defvar (x i32) true)\n(defun good ((p i32)) i32 p)\n(defvar (y i32) false)\n",
+    );
+    assert_eq!(errors.len(), 2, "both bad defvars recorded, not just the first");
+    // All three forms are still present (the bad ones as recovered holes).
+    assert_eq!(body.len(), 3);
+    // `good`'s body is intact: its parameter is offered to completion. Column
+    // 27 is the `p` reference in `(defun good ((p i32)) i32 p)` on line 2.
+    let locals = completion_locals(&body, FILE, 2, 27);
+    assert!(locals.contains(&"p".to_string()));
+}
+
+#[test]
+fn recover_mode_offers_locals_inside_a_non_catchall_match_arm() {
+    // The motivating bug: `handle_completion` truncates the source after the
+    // cursor, so a completion request inside `(Some x)`'s arm deletes the
+    // catchall arm that followed and leaves a *non-exhaustive* match. Strict
+    // checking errored out and dropped every local; recover mode records the
+    // non-exhaustiveness (B1) but still returns the fully-typed `Match`, so the
+    // arm's binding `x` and the parameter `o` are offered. This is the exact
+    // patched shape (placeholder `(panic "")` where the identifier was typed).
+    let (body, errors) =
+        program_recover("(defun f ((o Option<i32>)) i32 (match o ((Some x) (panic \"\"))))\n");
+    assert_eq!(errors.len(), 1, "exactly the non-exhaustive-match error");
+    // Column 51 is the placeholder inside the `(Some x)` arm body.
+    let locals = completion_locals(&body, FILE, 1, 51);
+    assert!(locals.contains(&"o".to_string()));
+    assert!(locals.contains(&"x".to_string()), "the arm's pattern binding is offered");
+}
+
+#[test]
+fn recover_mode_skips_a_bad_arm_but_keeps_the_good_arms_bindings() {
+    // An arm with an unknown constructor pattern is recorded and skipped (B2);
+    // the surviving `(Some x)` arm's binding is still reachable, and the skip
+    // suppresses the exhaustiveness check so no spurious cascade is added.
+    let (body, errors) = program_recover(
+        "(defun f ((o Option<i32>)) i32 (match o ((Some x) x) ((Bogus y) 0) (_ 0)))\n",
+    );
+    assert!(!errors.is_empty(), "the unknown-constructor arm is recorded");
+    // Column 51 is the `(Some x)` arm body (`x` reference).
+    let locals = completion_locals(&body, FILE, 1, 51);
+    assert!(locals.contains(&"x".to_string()));
+}
+
+#[test]
+fn recover_mode_holes_one_bad_body_form_and_keeps_the_siblings() {
+    // A bad first body form (`undefined`) becomes a hole (B3); the following
+    // `let` still checks, so its binding `n` and the parameter `x` are offered.
+    let (body, errors) =
+        program_recover("(defun f ((x i32)) i32 (progn undefined (let ((n 1)) n)))\n");
+    assert_eq!(errors.len(), 1, "just the unknown-variable error");
+    // Column 54 is the `n` reference inside the `let` body.
+    let locals = completion_locals(&body, FILE, 1, 54);
+    assert!(locals.contains(&"x".to_string()));
+    assert!(locals.contains(&"n".to_string()));
+}
+
+#[test]
+fn recover_mode_keeps_a_let_binding_whose_init_failed() {
+    // A `let` binding with an ill-typed initializer (B4): the init holes but
+    // the binding still enters scope (as `Never`), so `n` is offered in the
+    // body alongside the parameter `x`.
+    let (body, errors) =
+        program_recover("(defun f ((x i32)) i32 (let ((n bad_init)) n))\n");
+    assert_eq!(errors.len(), 1, "just the unknown-variable error in the init");
+    // Column 44 is the `n` reference inside the `let` body.
+    let locals = completion_locals(&body, FILE, 1, 44);
+    assert!(locals.contains(&"x".to_string()));
+    assert!(locals.contains(&"n".to_string()));
+}
+
+#[test]
+fn recover_mode_records_each_independent_error_with_its_own_location() {
+    // Three independent unknown variables in one body: each is recorded
+    // separately (holes don't cascade because `Never` unifies everywhere), and
+    // each error carries a distinct source location.
+    let (_body, errors) = program_recover("(defun f () i32 (progn err_a err_b err_c))\n");
+    assert_eq!(errors.len(), 3);
+    let cols: Vec<Option<u32>> = errors
+        .iter()
+        .map(|e| e.loc().map(|l| l.col))
+        .collect();
+    assert!(cols.iter().all(|c| c.is_some()), "every error is located");
+    let mut distinct = cols.clone();
+    distinct.dedup();
+    assert_eq!(distinct.len(), 3, "the three errors have distinct columns");
 }

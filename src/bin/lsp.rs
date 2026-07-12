@@ -266,17 +266,25 @@ fn publish_one(
 ///
 /// Also returns the filesystem paths of every dependency file the loader
 /// actually pulled in, so [`publish`] can tell which other open documents
-/// this one's diagnostics depend on — and, when the check succeeds, an
-/// [`Analysis`] for hover/goto-definition (`None` on a checker/read error:
-/// there is no complete `Typed` tree to search, and [`publish_one`] leaves
-/// whatever `Analysis` was cached from the last successful pass in place
+/// this one's diagnostics depend on — and, whenever the check produced a tree,
+/// an [`Analysis`] for hover/goto-definition (`None` only on a *read* error:
+/// there is no `Typed` tree to search, and [`publish_one`] leaves whatever
+/// `Analysis` was cached from the last pass that did produce one in place
 /// rather than clearing it).
+///
+/// The checker runs in error-recovery mode ([`Checker::set_recover`], enabled
+/// after the strict prelude load): a document with type errors still yields a
+/// partial `Typed` tree (so hover/goto keep working) and *all* of its type
+/// errors are reported at once (via [`Checker::take_errors`]) rather than only
+/// the first. `result` is `Err` only on a reader error, which stops the whole
+/// document (an s-expression reader can't resync past an unmatched paren).
 fn diagnostics_for(file: &str, text: &str, overlay: HashMap<PathBuf, String>) -> (Vec<Diagnostic>, HashSet<PathBuf>, Option<Analysis>) {
     let mut heap = Heap::with_capacity(1 << 16);
     let reader = Reader::new();
     let mut checker = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut checker, &mut interp);
+    checker.set_recover(true);
 
     let fs_file = FsPath::new(file);
     let dir = fs_file.parent().filter(|p| !p.as_os_str().is_empty()).map(FsPath::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
@@ -289,11 +297,17 @@ fn diagnostics_for(file: &str, text: &str, overlay: HashMap<PathBuf, String>) ->
     for w in checker.take_warnings() {
         diagnostics.push(warning_diagnostic(w));
     }
+    // Every recoverable type error accumulated across the whole document, each
+    // carrying its own source location — reported as its own diagnostic.
+    for e in checker.take_errors() {
+        diagnostics.push(error_diagnostic(&e, file));
+    }
     let analysis = if result.is_ok() {
         // The entry file's own `TopLevel::Module` is always the last one
         // pushed: `Loader::load_source_inner` recurses into every `use`
         // dependency (pushing each dependency's module first) before
-        // pushing its own — see that function's doc comment.
+        // pushing its own — see that function's doc comment. In recover mode
+        // this tree is present even when the document has type errors.
         let body = match loader.take_pending().pop() {
             Some(TopLevel::Module { body, .. }) => body,
             Some(other) => vec![other],
@@ -303,14 +317,18 @@ fn diagnostics_for(file: &str, text: &str, overlay: HashMap<PathBuf, String>) ->
     } else {
         None
     };
+    // A reader error (the only thing `result` reports in recover mode) stops
+    // the document, so report it too.
     if let Err(e) = result {
         diagnostics.push(error_diagnostic(&e, file));
     }
     (diagnostics, loader.loaded_files().clone(), analysis)
 }
 
-/// One open document's last *successful* check: the entry file's own
-/// checked top-level forms, and a snapshot of `Registry::def_locs` (the
+/// One open document's last check that produced a tree (in recover mode, any
+/// check that got past the reader — type errors don't prevent it): the entry
+/// file's own checked top-level forms, and a snapshot of `Registry::def_locs`
+/// (the
 /// definition-site locations `check::locate::definition_target` resolves a
 /// reference against) as of that check. Self-contained — `Typed`/`TopLevel`
 /// own their `Loc`s directly (no live `Heap`/`Checker` reference needed) —
@@ -436,44 +454,48 @@ fn handle_completion(id: RequestId, params: serde_json::Value, docs: &HashMap<Ur
 
 /// Re-checks `patched_text` as the content of `file` (see [`handle_completion`])
 /// and returns every name reachable at `(line, col)`: [`completion_candidates`]
-/// (module/`Registry`-level names) plus, when the check succeeds cleanly,
-/// [`completion_locals`] (`let`/`lambda`/`labels`/parameter names in lexical
+/// (module/`Registry`-level names) plus [`completion_locals`]
+/// (`let`/`lambda`/`labels`/parameter and `match`-pattern names in lexical
 /// scope there) — offered as [`CompletionKind::Variable`], matching how a
-/// `Registry` variable is rendered. Ignores whether the check itself
-/// succeeded for the `Registry` half, since a completion request's text is
-/// expected to be a document mid-edit — but `completion_locals` needs a
-/// complete, correctly-typed `Typed` tree to search (there is no
-/// "best-effort" partial tree the way there is a partially-populated
-/// `Registry`), so it's skipped on a failed check, same as hover/goto-
-/// definition's `Analysis` caching (`publish_one`'s doc comment) keeps
-/// serving the last-good data rather than going blank.
+/// `Registry` variable is rendered.
+///
+/// The checker runs in error-recovery mode ([`Checker::set_recover`]): a
+/// completion request's text is a document mid-edit and rarely type-checks, so
+/// instead of skipping locals on any error (which lost them inside, e.g., a
+/// non-catchall `match` arm, where truncating the source deletes the arms that
+/// made the match exhaustive) the checker records errors and still returns a
+/// best-effort partial `Typed` tree for `completion_locals` to search. `result`
+/// is `Err` only on a *reader* error, where the entry file's `TopLevel::Module`
+/// was never pushed; `take_pending().pop()` then yields either nothing or a
+/// dependency's module, and `completion_locals` filters by `file` and returns
+/// empty — so no gate is needed.
 fn candidates_for(file: &str, patched_text: &str, overlay: HashMap<PathBuf, String>, line: u32, col: u32) -> Vec<CompletionCandidate> {
     let mut heap = Heap::with_capacity(1 << 16);
     let reader = Reader::new();
     let mut checker = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut checker, &mut interp);
+    checker.set_recover(true);
 
     let fs_file = FsPath::new(file);
     let dir = fs_file.parent().filter(|p| !p.as_os_str().is_empty()).map(FsPath::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     let src_root = find_src_root(&dir).unwrap_or_else(|| dir.clone());
     let mut loader = Loader::new(src_root.clone());
     loader.set_overlay(overlay);
-    let result = loader.load_entry_src(&mut heap, &reader, &mut checker, &mut interp, fs_file, patched_text);
+    let _ = loader.load_entry_src(&mut heap, &reader, &mut checker, &mut interp, fs_file, patched_text);
 
     let module_path = module_segs_for(fs_file, &src_root).unwrap_or_default();
     let mut candidates = completion_candidates(checker.registry(), &module_path);
-    if result.is_ok() {
-        // Same extraction `diagnostics_for` uses for `Analysis.body` — the
-        // entry file's own `TopLevel::Module` is always the last one pushed.
-        let body = match loader.take_pending().pop() {
-            Some(TopLevel::Module { body, .. }) => body,
-            Some(other) => vec![other],
-            None => Vec::new(),
-        };
-        for name in completion_locals(&body, file, line, col) {
-            candidates.push(CompletionCandidate { name, kind: CompletionKind::Variable, detail: "local".to_string() });
-        }
+    // Same extraction `diagnostics_for` uses for `Analysis.body` — the entry
+    // file's own `TopLevel::Module` is always the last one pushed (empty on a
+    // reader error, which `completion_locals` handles by returning no names).
+    let body = match loader.take_pending().pop() {
+        Some(TopLevel::Module { body, .. }) => body,
+        Some(other) => vec![other],
+        None => Vec::new(),
+    };
+    for name in completion_locals(&body, file, line, col) {
+        candidates.push(CompletionCandidate { name, kind: CompletionKind::Variable, detail: "local".to_string() });
     }
     candidates
 }
@@ -795,5 +817,30 @@ mod completion_helper_tests {
     fn needs_completion_placeholder_is_false_at_the_very_start_of_the_document() {
         assert!(!needs_completion_placeholder(""));
         assert!(!needs_completion_placeholder("   "));
+    }
+
+    /// End-to-end regression for the motivating bug, through the real
+    /// `candidates_for` entry point (recover mode + no `result.is_ok()` gate):
+    /// the patched text `handle_completion` produces for a completion request
+    /// inside a *non-catchall* `match` arm — the trailing arms truncated away,
+    /// a `(panic "")` placeholder where the identifier was being typed. Before
+    /// recovery this failed the whole check (non-exhaustive match) and offered
+    /// no locals; now the arm's binding `x` and the parameter `o` appear.
+    #[test]
+    fn candidates_for_offers_locals_inside_a_truncated_non_catchall_match_arm() {
+        // A path under a directory with no `typelisp.toml` above it, so the
+        // loader treats it as a standalone entry (its text is passed directly,
+        // so the file need not exist on disk).
+        let file = "/tmp/typelisp-lsp-recover-test/f.typl";
+        let patched = "(defun f ((o Option<i32>)) i32 (match o ((Some x) (panic \"\"))))";
+        // The placeholder sits at 1-based column 51 (the `(` of `(panic "")`).
+        let candidates = candidates_for(file, patched, HashMap::new(), 1, 51);
+        let locals: Vec<&str> = candidates
+            .iter()
+            .filter(|c| c.kind == CompletionKind::Variable)
+            .map(|c| c.name.as_str())
+            .collect();
+        assert!(locals.contains(&"o"), "parameter offered, got {:?}", locals);
+        assert!(locals.contains(&"x"), "match-arm binding offered, got {:?}", locals);
     }
 }
