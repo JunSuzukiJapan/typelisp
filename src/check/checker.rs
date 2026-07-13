@@ -424,6 +424,21 @@ const SPECIALIZATION_BUDGET: usize = 512;
 pub struct Checker {
     reg: Registry,
     ns: Vec<String>,
+    /// Stack of enclosing *files'* own module paths, innermost last — set by
+    /// [`Self::enter_file_module`]/[`Self::exit_file_module`] (`project.rs`'s
+    /// file-level wrapping only, never [`Self::enter_module`]'s nested
+    /// `(module ...)` forms), so it stays fixed at "the loading file's own
+    /// path" even while `self.ns` grows deeper through a nested `module`
+    /// block inside that file. [`Self::find_module`]'s sibling-file
+    /// resolution tier reads the top of this stack (never `self.ns` itself)
+    /// so `(use foo)` inside a nested `module` block still resolves `foo`
+    /// relative to the *file's* directory, not that inner block's own
+    /// namespace (which has no filesystem counterpart to be a sibling of).
+    /// A recursively-loaded dependency pushes and fully pops its own frame
+    /// before the file that `use`s it resumes checking (`project.rs`'s
+    /// scan-before-check ordering), so this never needs more than simple
+    /// stack discipline.
+    file_ns: Vec<Vec<String>>,
     /// Stack of enclosing loops' accumulated exit type, innermost last.
     /// `break`/`return` unify their (optional) value's type into the top
     /// frame; `while`/`dotimes`/`dolist` seed it with `Unit` (their fixed
@@ -504,6 +519,7 @@ impl Checker {
         Checker {
             reg: Registry::with_builtins(),
             ns: Vec::new(),
+            file_ns: Vec::new(),
             loop_stack: RefCell::new(Vec::new()),
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
@@ -861,6 +877,22 @@ impl Checker {
                 expanded.extend_from_slice(rest);
                 if let Some(m) = self.reg.root.module(&expanded) {
                     return Some((expanded, m));
+                }
+            }
+        }
+        // 4. Sibling of the current *file* (not `self.ns`, which may be
+        // deeper than the file's own path inside a nested `(module ...)`
+        // block — see `file_ns`'s doc comment): a file in the same directory
+        // as the one currently being checked, reached without spelling out
+        // its full root-relative path. Tried last so it never shadows an
+        // existing root-relative/current-namespace/alias resolution — see
+        // `docs/dev/language-design.md` §2.4.
+        if let Some(cur_file) = self.file_ns.last() {
+            if !cur_file.is_empty() {
+                let mut sib = cur_file[..cur_file.len() - 1].to_vec();
+                sib.extend_from_slice(eff);
+                if let Some(m) = self.reg.root.module(&sib) {
+                    return Some((sib, m));
                 }
             }
         }
@@ -2161,6 +2193,25 @@ impl Checker {
         for _ in 0..depth {
             self.ns.pop();
         }
+    }
+
+    /// [`Self::enter_module`], plus recording `segs` as the file currently
+    /// being loaded's own module path — see [`Self::file_ns`]'s doc comment.
+    /// `project.rs` calls this (never [`Self::enter_module`] directly) when
+    /// wrapping a file's whole content in the module its location derives
+    /// to; a nested `(module ...)` form inside that file still goes through
+    /// plain [`Self::enter_module`] via [`Self::check_module`].
+    pub fn enter_file_module(&mut self, segs: &[String]) -> Path {
+        let path = self.enter_module(segs);
+        self.file_ns.push(self.ns.clone());
+        path
+    }
+
+    /// Pop `depth` segments pushed by [`Self::enter_file_module`], plus its
+    /// `file_ns` frame.
+    pub fn exit_file_module(&mut self, depth: usize) {
+        self.exit_module(depth);
+        self.file_ns.pop();
     }
 
     fn check_defmethod(

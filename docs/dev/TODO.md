@@ -23,7 +23,16 @@
   開いている文書の未保存内容は優先、`deps`の逆依存追跡で依存元も連鎖再診断——2026-07-11
   実装——だが、ディスク/overlayいずれにせよパス間キャッシュは無く、毎回ゼロから読み直す。
   大きなプロジェクトでキー入力毎の再読込コストが問題になったら着手）。
-- **`use`はソースルート相対のみ**: 兄弟ファイル相対の解決は未対応（MVP判断）。
+- ~~**`use`はソースルート相対のみ**: 兄弟ファイル相対の解決は未対応~~ **→ 2026-07-13 解消**。
+  `Loader::ensure_loaded`が各prefix長でroot-relative候補を試した後にsibling-relative候補
+  （`use`元ファイルのディレクトリを前置）もフォールバックとして試すよう拡張、
+  `Checker::find_module`に対応するsiblingティアを追加（新設`file_ns`スタックで、ファイル自身の
+  モジュールパスをネストした`(module ...)`越しにも安定して保持——`self.ns`をそのまま使うと
+  ネストmodule内の`use`が誤ってそのmodule自身の親を基準にしてしまう）。root-relativeが常に
+  優先されるため既存の解決結果は非破壊。`project.rs`は`enter_module`/`exit_module`ではなく
+  ファイル境界専用の`enter_file_module`/`exit_file_module`を使用（nested `(module ...)`は
+  従来通り`enter_module`のまま）。テスト: `module_file_test.rs`に3件追加
+  （bare名前解決・root優先・nested module内でもfile境界基準）。
 
 #### hover / goto-definition / 補完（すべて実装済み、ローカル変数含む——2026-07-11〜2026-07-12）
 

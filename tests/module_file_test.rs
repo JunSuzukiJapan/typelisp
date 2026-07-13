@@ -179,3 +179,58 @@ fn without_a_manifest_the_entry_directory_is_the_root() {
     );
     assert_eq!(result, Ok(Some(RtValue::Int(3))));
 }
+
+/// A `use` inside `geo/point.typl` names a sibling `geo/vector.typl` by its
+/// bare name (`vector`), without spelling out the `geo::` directory prefix —
+/// the sibling-relative resolution `Loader::ensure_loaded`'s doc comment and
+/// `Checker::find_module`'s file-sibling tier add.
+#[test]
+fn use_resolves_a_sibling_file_by_its_bare_name() {
+    let result = run_project(
+        "sibling-bare-name",
+        &[
+            ("geo/vector.typl", "(pub defun unit-x () i32 1)"),
+            ("geo/point.typl", "(use vector)\n(pub defun call-it () i32 (vector::unit-x))"),
+            ("main.typl", "(use geo::point)\n(point::call-it)"),
+        ],
+        "main.typl",
+    );
+    assert_eq!(result, Ok(Some(RtValue::Int(1))));
+}
+
+/// Sibling-relative resolution is a fallback tried only *after* root-relative
+/// resolution fails — an existing root-relative `use` naming a top-level
+/// module keeps working unchanged even from inside a subdirectory, and is
+/// never shadowed by a same-named sibling file.
+#[test]
+fn use_prefers_a_root_relative_module_over_a_same_named_sibling() {
+    let result = run_project(
+        "sibling-vs-root",
+        &[
+            ("helper.typl", "(pub defun which () i32 100)"), // root-relative
+            ("geo/helper.typl", "(pub defun which () i32 200)"), // same-named sibling
+            ("geo/point.typl", "(use helper)\n(pub defun call-it () i32 (helper::which))"),
+            ("main.typl", "(use geo::point)\n(point::call-it)"),
+        ],
+        "main.typl",
+    );
+    assert_eq!(result, Ok(Some(RtValue::Int(100))), "root-relative `helper` wins over the sibling");
+}
+
+/// A `use` inside a nested `(module inner ...)` block still resolves a
+/// sibling by the *enclosing file's* directory, not that inner block's own
+/// (filesystem-less) namespace — `Checker::file_ns` stays pinned to the
+/// file's own path across nested `module` forms.
+#[test]
+fn use_inside_a_nested_module_still_resolves_against_the_files_directory() {
+    let result = run_project(
+        "sibling-nested-module",
+        &[
+            ("geo/vector.typl", "(pub defun unit-x () i32 5)"),
+            ("geo/point.typl", "(module inner (use vector)\n(pub defun call-it () i32 (vector::unit-x)))"),
+            ("main.typl", "(use geo::point::inner)\n(inner::call-it)"),
+        ],
+        "main.typl",
+    );
+    assert_eq!(result, Ok(Some(RtValue::Int(5))));
+}

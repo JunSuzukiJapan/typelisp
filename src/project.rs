@@ -219,8 +219,10 @@ impl Loader {
         interp: &mut Interp,
         forms: &[Value],
     ) -> Result<(), Error> {
+        // No enclosing file — a REPL batch has no directory to be a sibling
+        // of, so `ensure_loaded`'s sibling-relative fallback never triggers.
         for v in forms {
-            self.scan_form(heap, reader, checker, interp, *v)?;
+            self.scan_form(heap, reader, checker, interp, *v, &[])?;
         }
         Ok(())
     }
@@ -268,15 +270,18 @@ impl Loader {
         };
 
         // Load dependencies first (recursive; each nested load pushes and
-        // pops its own roots strictly above ours).
+        // pops its own roots strictly above ours). `segs` is threaded
+        // through as the enclosing file's own module path, so a `use` can
+        // also resolve against a sibling file in the same directory — see
+        // `ensure_loaded`'s doc comment.
         for v in &forms {
-            if let Err(e) = self.scan_form(heap, reader, checker, interp, *v) {
+            if let Err(e) = self.scan_form(heap, reader, checker, interp, *v, segs) {
                 pop_roots_to(heap, mark);
                 return Err(e);
             }
         }
 
-        let path = checker.enter_module(segs);
+        let path = checker.enter_file_module(segs);
         let mut body = Vec::new();
         let mut check_err = None;
         for v in forms {
@@ -291,7 +296,7 @@ impl Loader {
                 }
             }
         }
-        checker.exit_module(segs.len());
+        checker.exit_file_module(segs.len());
         pop_roots_to(heap, mark);
         if let Some(e) = check_err {
             return Err(e);
@@ -304,7 +309,9 @@ impl Loader {
     /// when no file exists or it is already loaded — the checker's own
     /// `check_use` then resolves or reports as usual). Recurses into
     /// `(module name body...)` bodies, whose `use`s are equally top-level
-    /// declarations.
+    /// declarations. `cur_segs` is the enclosing *file's* own module path
+    /// (unchanged by a nested `(module ...)` body's recursion — see
+    /// `ensure_loaded`'s doc comment), empty for a REPL batch with no file.
     fn scan_form(
         &mut self,
         heap: &mut Heap,
@@ -312,6 +319,7 @@ impl Loader {
         checker: &mut Checker,
         interp: &mut Interp,
         v: Value,
+        cur_segs: &[String],
     ) -> Result<(), Error> {
         if !matches!(v, Value::Cons(_)) {
             return Ok(());
@@ -327,7 +335,7 @@ impl Loader {
                 if let Value::Cons(_) = rest {
                     let arg = heap.car(rest)?;
                     if let Some(segs) = value_path_segs(heap, arg) {
-                        self.ensure_loaded(heap, reader, checker, interp, &segs)?;
+                        self.ensure_loaded(heap, reader, checker, interp, &segs, cur_segs)?;
                     }
                 }
                 Ok(())
@@ -339,7 +347,7 @@ impl Loader {
                     rest = heap.cdr(rest)?;
                     while let Value::Cons(_) = rest {
                         let form = heap.car(rest)?;
-                        self.scan_form(heap, reader, checker, interp, form)?;
+                        self.scan_form(heap, reader, checker, interp, form, cur_segs)?;
                         rest = heap.cdr(rest)?;
                     }
                 }
@@ -352,7 +360,17 @@ impl Loader {
     /// Map a `use` path to a file and load it if it exists and hasn't been.
     /// `use a::b::c` may name module `a::b::c` itself or item `c` of module
     /// `a::b`, so candidate files are tried longest-prefix-first:
-    /// `a/b/c.typl`, then `a/b.typl`, then `a.typl`.
+    /// `a/b/c.typl`, then `a/b.typl`, then `a.typl`. For each prefix length,
+    /// a root-relative candidate (`<src-root>/a/b/c.typl`) is tried first —
+    /// unchanged from before, so an existing root-relative `use` is never
+    /// shadowed — and only if that doesn't exist, a *sibling-relative*
+    /// candidate (`<src-root>/<cur_segs' directory>/a/b/c.typl`) is tried, so
+    /// `(use vector)` inside `geo/point.typl` can also reach a sibling
+    /// `geo/vector.typl` without spelling out `(use geo::vector)`. Mirrored
+    /// on the checker side by `Checker::find_module`'s own sibling tier
+    /// (`file_ns`), which resolves the *name* `(use vector)` binds once this
+    /// has loaded the file under its true root-derived path (`geo::vector`,
+    /// never a synthetic relative one).
     fn ensure_loaded(
         &mut self,
         heap: &mut Heap,
@@ -360,37 +378,65 @@ impl Loader {
         checker: &mut Checker,
         interp: &mut Interp,
         use_segs: &[String],
+        cur_segs: &[String],
     ) -> Result<(), Error> {
         for n in (1..=use_segs.len()).rev() {
             let module_segs: Vec<String> = use_segs[..n].to_vec();
-            let mut file = self.src_root.clone();
-            for s in &module_segs {
-                file.push(s);
-            }
-            file.set_extension("typl");
-            // An overlay-only file (open in the editor, not yet saved) is a
-            // valid dependency too — checking the overlay alongside disk
-            // keeps a brand-new not-yet-saved file discoverable.
-            if !file.is_file() && !self.overlay.contains_key(&file) {
-                continue;
-            }
-            if self.loaded.contains(&module_segs) {
+            if self.try_load_module(heap, reader, checker, interp, &module_segs)? {
                 return Ok(());
             }
-            let display = module_segs.join("::");
-            if let Some(pos) = self.loading.iter().position(|m| *m == display) {
-                let mut chain: Vec<&str> = self.loading[pos..].iter().map(String::as_str).collect();
-                chain.push(&display);
-                return Err(Error::TypeError(format!(
-                    "circular module dependency: {}",
-                    chain.join(" -> ")
-                )));
+            if cur_segs.len() > 1 {
+                let mut sib_segs = cur_segs[..cur_segs.len() - 1].to_vec();
+                sib_segs.extend_from_slice(&module_segs);
+                if self.try_load_module(heap, reader, checker, interp, &sib_segs)? {
+                    return Ok(());
+                }
             }
-            let src = self.read_source(&file)?;
-            self.loaded_files.insert(file.clone());
-            return self.load_source(heap, reader, checker, interp, &file, &src, module_segs);
         }
         Ok(()) // no file — leave resolution (or its failure) to `check_use`
+    }
+
+    /// Loads `module_segs` as a root-relative file (`ensure_loaded`'s one
+    /// candidate-path shape, tried for both the root-relative and
+    /// sibling-relative cases). Returns `true` if `module_segs` names a real
+    /// file — whether it was freshly loaded here or already loaded/loading
+    /// before — so the caller stops trying shorter/sibling candidates;
+    /// `false` if no such file exists, so the caller should keep trying.
+    fn try_load_module(
+        &mut self,
+        heap: &mut Heap,
+        reader: &Reader,
+        checker: &mut Checker,
+        interp: &mut Interp,
+        module_segs: &[String],
+    ) -> Result<bool, Error> {
+        let mut file = self.src_root.clone();
+        for s in module_segs {
+            file.push(s);
+        }
+        file.set_extension("typl");
+        // An overlay-only file (open in the editor, not yet saved) is a
+        // valid dependency too — checking the overlay alongside disk keeps a
+        // brand-new not-yet-saved file discoverable.
+        if !file.is_file() && !self.overlay.contains_key(&file) {
+            return Ok(false);
+        }
+        if self.loaded.contains(module_segs) {
+            return Ok(true);
+        }
+        let display = module_segs.join("::");
+        if let Some(pos) = self.loading.iter().position(|m| *m == display) {
+            let mut chain: Vec<&str> = self.loading[pos..].iter().map(String::as_str).collect();
+            chain.push(&display);
+            return Err(Error::TypeError(format!(
+                "circular module dependency: {}",
+                chain.join(" -> ")
+            )));
+        }
+        let src = self.read_source(&file)?;
+        self.loaded_files.insert(file.clone());
+        self.load_source(heap, reader, checker, interp, &file, &src, module_segs.to_vec())?;
+        Ok(true)
     }
 
     /// `file`'s content: the overlay's copy if one exists (an open, possibly
