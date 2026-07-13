@@ -393,10 +393,13 @@ Phase 6.5 で将来課題とした2件（cons-cell への再帰的 Eq/Ord impl�
 - ~~`equalp` 系（case-insensitive）の compile~~ **→ 2026-07-13 解消**（char/string の `equalp` を
   `rt_char_equalp`/`rt_str_equalp` で対応、`compile-assoc` の char/string 分岐 + `char-native-method?`/
   `string-native-method?` に追加）。~~`HashTable::get`/`remove`（`Option` 返し）~~ も解消（上記参照）。
-- **残**: `f64` レシーバのメソッド compile。これは浮動小数点バックエンド自体の新設（LLVM `double`
-  型・`bitcast`・`fadd`/`fsub`/`fmul`/`fdiv`/`fcmp` ビルトイン、transcendental は libm）が必要な
-  独立した大きめタスク（compiled `f64` は生の bit パターンを i64 に埋め込む表現なので、演算は
-  bitcast→float op→bitcast で挟む）。
+- ~~`f64` レシーバのメソッド compile~~ **→ 2026-07-13 解消**（算術 `+`/`-`/`*`/`/`/`mod` と比較
+  `<`/`<=`/`>`/`>=`/`=`/`/=`/`eq`/`eql`/`equal`/`equalp`）。新設ビルトイン `build-fadd`/`fsub`/`fmul`/
+  `fdiv`/`frem`（各 `bitcast` i64↔double で挟む）+ `build-fcmp-*`、`compile-assoc` に f64 分岐 +
+  `float-native-method?`、`call_compiled` の f64 引数/戻り値マーシャリング。**残**: transcendental
+  （`sqrt`/`floor`/`expt`/...、libm 必要）と変換（`float->int`/`float->bignum`/`float->ratio`）。
+  落とし穴: LLVM `frem` は C の `fmod` 呼び出しに lower されるため、`fmod` という名の関数を compile
+  すると JIT のシンボル解決が衝突して無限再帰する。
 
 テスト: trait_test（defmethod 直書き where・再帰 impl・境界エラー3本）、seq_ops_test（ペアの
 equals/less/member/sort/ネスト/Eq 未実装エラー6本）、compile_test（i32/string/char の equals/less

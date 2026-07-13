@@ -1252,25 +1252,26 @@ fn the_compiler_body_compiles_an_i64_comparison() {
     assert_eq!(unsafe { lt.call([5, 3].as_ptr(), 2) }, 0);
 }
 
-/// `compile-assoc`'s receiver-type guard: an `f64` receiver (which defines
-/// the very same method names under `registry::float_assoc`, still out of
-/// scope — see `compile-assoc`'s doc comment) must panic clearly rather than
-/// silently misinterpreting its bit pattern as an `i64`. Now reached via the
-/// generic method-call branch instead of a dedicated `i64`/`i32`-only guard:
-/// this hand-fed Sexpr bypasses `Interp::compile_function`'s own up-front
-/// check (the normal way such a call is rejected, with a clearer message —
-/// see `compile_of_a_function_calling_an_uncompiled_builtin_method_is_a_clean_error`
-/// below), so the only thing left to catch it is `get-function` itself
-/// failing to find `"f64::+"` in this throwaway module.
+/// `compile-assoc`'s receiver-type guard for a method it still can't lower:
+/// `f64::sqrt` is a *non-native* `f64` method (`registry::float_assoc`'s
+/// transcendental family needs libm — out of scope, unlike the arithmetic /
+/// comparison methods `compile-assoc`'s f64 branch now lowers). It must panic
+/// clearly rather than silently misinterpret anything. Reached via the
+/// generic user-method branch (`compile-assoc-user`): this hand-fed Sexpr
+/// bypasses `Interp::compile_function`'s own up-front check (the normal
+/// rejection path, with a clearer message — see
+/// `compile_of_a_function_calling_an_unsupported_f64_method_is_a_clean_error`
+/// below), so the only thing left to catch it is `get-function` failing to
+/// find `"f64::sqrt"` in this throwaway module.
 #[test]
 fn compile_assoc_panics_on_an_unsupported_receiver_type() {
     let err = run_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "addf" '((a . 0) (b . 0))
-              '(assoc "f64" "+" true (0 var "a" false) (0 var "b" false)))"#,
+        r#"(compile-function (llvm-module::create "mod") "sqrtf" '((a . 0))
+              '(assoc "f64" "sqrt" true (0 var "a" false)))"#,
     )
-    .expect_err("expected a panic for a non-i64/i32 receiver");
+    .expect_err("expected a panic for a non-native f64 method");
     match err {
-        EvalError::Panic(msg) => assert!(msg.contains("no function named") && msg.contains("f64::+"), "message was: {}", msg),
+        EvalError::Panic(msg) => assert!(msg.contains("no function named") && msg.contains("f64::sqrt"), "message was: {}", msg),
         other => panic!("expected a Panic, got {:?}", other),
     }
 }
@@ -1903,7 +1904,7 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_str_local_rooted_across_
         (compile str-survives-gc)
         (str-survives-gc 5000)
         "#,
-        10500,
+        13000,
     )
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(11), "\"hello world\" has 11 characters, even after many unrelated conses force a gc()");
@@ -2136,24 +2137,27 @@ fn compile_transitively_compiles_a_called_user_method() {
 }
 
 /// The other half of `Interp::compile_function`'s `Expr::Assoc`-target check:
-/// a receiver type with no `self.methods` entry at all and not `i64`/`i32`
-/// (here `f64`, a registry-builtin receiver with no typelisp AST body to
-/// `compile` in the first place — still out of scope, see `compile-assoc`'s
-/// doc comment) is rejected with its own clear message up front, rather than
-/// a deep `get-function` failure from inside the generic branch.
+/// a *non-native* builtin method on an otherwise-native receiver — here
+/// `f64::sqrt` (`registry::float_assoc`'s transcendental family needs libm,
+/// still out of scope, unlike the arithmetic/comparison methods
+/// `compile-assoc`'s f64 branch now lowers) — is rejected with its own clear
+/// "no function named" message from `compile-assoc-user`'s `get-function`,
+/// rather than silently misbehaving. (`f64` was added to the native-receiver
+/// exclusion list, so this reaches the compiler rather than the up-front
+/// method-target check — the same treatment `string::upcase` gets.)
 #[test]
-fn compile_of_a_function_calling_an_uncompiled_builtin_method_is_a_clean_error() {
+fn compile_of_a_function_calling_an_unsupported_f64_method_is_a_clean_error() {
     let err = run_with_compiler_and_prelude(
         r#"
-        (defun add-floats ((a f64) (b f64)) f64 (+ a b))
-        (compile add-floats)
+        (defun root ((a f64)) f64 (sqrt a))
+        (compile root)
         "#,
     )
-    .expect_err("expected compiling a caller of a builtin f64 method to fail");
+    .expect_err("expected compiling a caller of the non-native f64 `sqrt` to fail");
     match err {
         EvalError::Panic(msg) => {
-            assert!(msg.contains("f64::+"), "message was: {}", msg);
-            assert!(msg.contains("builtin method"), "message was: {}", msg);
+            assert!(msg.contains("f64::sqrt"), "message was: {}", msg);
+            assert!(msg.contains("no function named"), "message was: {}", msg);
         }
         other => panic!("expected a Panic, got {:?}", other),
     }
@@ -3631,4 +3635,80 @@ fn compile_dispatches_string_equalp() {
     .expect("eval failed");
     // ABC vs abc: equalp not equal -> 1 (*100); abc vs abc: equal -> 2 (*10); abc vs abd: neither -> 0
     assert_eq!(v, RtValue::Int(120));
+}
+
+// ---- `f64` arithmetic/comparison methods, compiled -------------------------
+//
+// A compiled `f64` is its raw `f64::to_bits` pattern carried in an `i64`
+// register (`compile-float`); `compile-assoc`'s f64 branch lowers arithmetic
+// to `build-fadd`/... (each bitcasts to `double` and back) and comparisons to
+// `build-fcmp-*`. The JIT boundary encodes an `f64` argument as its bits and
+// decodes an `f64` result back (`Interp::call_compiled`). Transcendentals
+// (`sqrt`/...) and conversions (`float->int`/...) stay out of scope (libm /
+// heap), falling through to `compile-assoc-user`.
+
+/// Float arithmetic returning an `f64` across the JIT boundary — exercises
+/// `build-fadd`/`build-fsub`/`build-fmul`/`build-fdiv` and the `f64`
+/// argument/return marshaling.
+#[test]
+fn compile_dispatches_f64_arithmetic() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun combine ((a f64) (b f64)) f64
+          (/ (* (+ a b) (- a b)) 2.0))
+        (compile combine)
+        (combine 5.0 3.0)
+        "#,
+    )
+    .expect("eval failed");
+    // (5+3)*(5-3)/2 = 8*2/2 = 8.0
+    match v {
+        RtValue::Float(f) => assert!((f - 8.0).abs() < 1e-9, "expected 8.0, got {}", f),
+        other => panic!("expected an f64, got {:?}", other),
+    }
+}
+
+/// `mod` on `f64` lowers to `build-frem` (`a % b`, matching the interpreter's
+/// `eval_float_builtin`). The function is deliberately *not* named `fmod`:
+/// LLVM lowers an `frem` instruction to a call to the C `fmod` symbol, and
+/// the JIT's symbol resolver would bind that call to a same-named compiled
+/// typelisp function instead of libm — an infinite `frem`->`fmod`->`frem`
+/// recursion (a real footgun for a user who compiles a function literally
+/// named `fmod`, but an unusual name to pick).
+#[test]
+fn compile_dispatches_f64_mod() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun float-rem ((a f64) (b f64)) f64 (mod a b))
+        (compile float-rem)
+        (float-rem 7.5 2.0)
+        "#,
+    )
+    .expect("eval failed");
+    match v {
+        RtValue::Float(f) => assert!((f - 1.5).abs() < 1e-9, "7.5 mod 2.0 = 1.5, got {}", f),
+        other => panic!("expected an f64, got {:?}", other),
+    }
+}
+
+/// Float comparisons lower to `build-fcmp-*` (ordered `<`/`<=`/`>`/`>=`/`=`,
+/// unordered `/=`) — a `bool` result crosses the boundary. Agrees with the
+/// interpreter for the same source.
+#[test]
+fn compile_dispatches_f64_comparisons_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun classify ((a f64) (b f64)) i32
+          (if (< a b) 1
+          (if (= a b) 2
+          (if (> a b) 3 4))))
+    "#;
+    let interpreted =
+        run_with_compiler_and_prelude(&format!("{src}\n(+ (* 100 (classify 1.0 2.0)) (+ (* 10 (classify 2.0 2.0)) (classify 3.0 2.0)))"))
+            .expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!(
+        "{src}\n(compile classify)\n(+ (* 100 (classify 1.0 2.0)) (+ (* 10 (classify 2.0 2.0)) (classify 3.0 2.0)))"
+    ))
+    .expect("compiled failed");
+    assert_eq!(interpreted, RtValue::Int(123), "1<2 ->1, 2=2 ->2, 3>2 ->3 (interpreted)");
+    assert_eq!(compiled, interpreted, "compiled f64 comparisons agree with the interpreter");
 }

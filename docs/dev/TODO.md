@@ -88,13 +88,21 @@ truncate設計（カーソル以降を切り捨て）が非catchall `match`ア�
 を`compile-if`と同型のalloca+分岐+merge（phiビルトインなし）で呼び分け。詳細は
 [iter-compile-plan.md](iter-compile-plan.md)。
 
+その前に完了: **`f64` レシーバのメソッド compile**（2026-07-13）——算術（`+`/`-`/`*`/`/`/`mod`）と
+比較（`<`/`<=`/`>`/`>=`/`=`/`/=`/`eq`/`eql`/`equal`/`equalp`）を対応。compiled `f64`は生bitパターンを
+i64に埋め込む表現なので、新設ビルトイン`build-fadd`/`fsub`/`fmul`/`fdiv`/`frem`が各`bitcast`
+i64↔doubleで挟み、`build-fcmp-*`が比較（`<`等はordered、`/=`はRust`!=`に合わせunordered UNE）。
+`compile-assoc`にf64分岐+`float-native-method?`、`call_compiled`にf64引数/戻り値マーシャリング
+（`to_bits`/`from_bits`）、method-target検証除外に`f64`追加。**残る compile 未対応**: transcendental
+（`sqrt`/`floor`/`expt`/...、libm必要）と変換（`float->int`/`float->bignum`/`float->ratio`）。
+落とし穴: LLVM `frem`はCの`fmod`呼び出しにlowerされるため`fmod`という名の関数compileはJITシンボル
+解決衝突で無限再帰。テスト: compile_test 3件 + typelisp-rt（既存流用）。
+
 その前に完了: **char/string の `equalp`（ASCII大文字小文字無視）の compile**（2026-07-13）——
 `eq`/`equal`（生コードポイントの`icmp`/`rt_str_eq`）と違い`equalp`はcase-foldingするため単一命令に
 できない。新設`rt_char_equalp`（生i64コードポイント2つ）/`rt_str_equalp`を`compile-assoc`の
 char/string分岐から呼ぶ（`char-native-method?`/`string-native-method?`にも追加）。テスト:
-compile_test 2件 + typelisp-rt 2件。**残る compile 未対応**: `f64`レシーバのメソッド——浮動小数点
-バックエンド自体の新設（LLVM `double`型・`bitcast`・`fadd`/`fcmp`系ビルトイン、transcendentalはlibm）
-が必要な独立した大きめタスク（compiled `f64`は生bitパターンをi64埋め込みなので演算はbitcastで挟む）。
+compile_test 2件 + typelisp-rt 2件。
 
 その前に完了: **`Panic`/`MethodRef`/`Quote`の compile 対応（残っていた`unsupported`3件を解消）**
 （2026-07-12）——`ast_bridge.rs`の`Expr::Panic`/`Expr::MethodRef`/`Expr::Quote`アームを実装。

@@ -955,6 +955,11 @@ impl Interp {
                 // `Value::Str` (what `rt_str_*` expect).
                 RtValue::Bool(b) => Ok(i64::from(*b)),
                 RtValue::Char(c) => Ok(*c as i64),
+                // A compiled `f64` is its raw `f64::to_bits` pattern carried in
+                // an `i64` (`compile-float`/`llvm_builder_build_float_op`'s
+                // convention) — the exact inverse of the `Type::F64` return
+                // decode below.
+                RtValue::Float(f) => Ok(f.to_bits() as i64),
                 RtValue::Str(s) => {
                     let sv = heap.alloc_string(s.to_string());
                     heap.push_root(sv);
@@ -1013,6 +1018,12 @@ impl Interp {
                     )))
                 }
             }
+        } else if matches!(ret_ty, Type::F64) {
+            // A compiled `f64` result is its raw bit pattern in the `i64`
+            // return register (`llvm_builder_build_float_op`'s final
+            // `bitcast`); reinterpret it back to an `f64`, the inverse of the
+            // `RtValue::Float` argument encode above.
+            RtValue::Float(f64::from_bits(raw as u64))
         } else {
             RtValue::Int(raw)
         })
@@ -1431,16 +1442,17 @@ impl Interp {
                 }
                 // A user-registered method is a real call target even on a
                 // primitive receiver (`i32::equals`); only the natively
-                // lowered `i64`/`i32`/`char`/`string` builtins (`+`, `<`,
-                // `=`, `lt`, `length`, ...) are excluded — those become LLVM
-                // instructions / `rt_str_*` calls in `compile-assoc`, not
-                // function calls. (A builtin on these receivers that
-                // `compile-assoc` does *not* lower natively — `equalp`,
-                // `upcase`, ... — is also excluded here and panics inside
-                // `compile-assoc-user`'s `get-function` instead, still at
-                // compile time.)
+                // lowered `i64`/`i32`/`char`/`string`/`f64` builtins (`+`,
+                // `<`, `=`, `lt`, `length`, `fadd`, ...) are excluded — those
+                // become LLVM instructions / `rt_str_*` calls in
+                // `compile-assoc`, not function calls. (A builtin on these
+                // receivers that `compile-assoc` does *not* lower natively —
+                // `equalp` on `string` before it was added, `f64::sqrt`,
+                // `f64::float->int`, ... — is also excluded here and panics
+                // inside `compile-assoc-user`'s `get-function` instead, still
+                // at compile time.)
                 self.methods.contains_key(key)
-                    || !matches!(key.0.local(), "i64" | "i32" | "char" | "string")
+                    || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64")
             })
             .collect();
         for (type_name, method) in &method_targets {
@@ -2631,6 +2643,17 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-shl" => Some(llvm_builder_build_int_op(args, "shl", Builder::build_left_shift)),
             "build-lshr" => Some(llvm_builder_build_int_op(args, "lshr", |b, lhs, rhs, name| b.build_right_shift(lhs, rhs, false, name))),
             "build-ashr" => Some(llvm_builder_build_int_op(args, "ashr", |b, lhs, rhs, name| b.build_right_shift(lhs, rhs, true, name))),
+            "build-fadd" => Some(llvm_builder_build_float_op(args, "fadd", Builder::build_float_add)),
+            "build-fsub" => Some(llvm_builder_build_float_op(args, "fsub", Builder::build_float_sub)),
+            "build-fmul" => Some(llvm_builder_build_float_op(args, "fmul", Builder::build_float_mul)),
+            "build-fdiv" => Some(llvm_builder_build_float_op(args, "fdiv", Builder::build_float_div)),
+            "build-frem" => Some(llvm_builder_build_float_op(args, "frem", Builder::build_float_rem)),
+            "build-fcmp-lt" => Some(llvm_builder_build_fcmp(args, "fcmp_lt", inkwell::FloatPredicate::OLT)),
+            "build-fcmp-le" => Some(llvm_builder_build_fcmp(args, "fcmp_le", inkwell::FloatPredicate::OLE)),
+            "build-fcmp-gt" => Some(llvm_builder_build_fcmp(args, "fcmp_gt", inkwell::FloatPredicate::OGT)),
+            "build-fcmp-ge" => Some(llvm_builder_build_fcmp(args, "fcmp_ge", inkwell::FloatPredicate::OGE)),
+            "build-fcmp-eq" => Some(llvm_builder_build_fcmp(args, "fcmp_eq", inkwell::FloatPredicate::OEQ)),
+            "build-fcmp-ne" => Some(llvm_builder_build_fcmp(args, "fcmp_ne", inkwell::FloatPredicate::UNE)),
             "alloca-args" => Some(llvm_builder_alloca_args(args)),
             "store-arg" => Some(llvm_builder_store_arg(args)),
             "build-call" => Some(llvm_builder_build_call(args)),
@@ -3031,6 +3054,56 @@ fn llvm_builder_build_int_op(
     let b = expect_llvm_value(&args[2])?.into_int_value();
     let result = op(&builder.borrow(), a, b, name).map_err(|e| EvalError::Internal(format!("build-{}: {}", name, e)))?;
     Ok(RtValue::LlvmValue(result.into()))
+}
+
+/// Shared by `build-fadd`/`build-fsub`/`build-fmul`/`build-fdiv`/`build-frem`
+/// (compiled `f64` arithmetic). A compiled `f64` value is its raw `f64::to_bits`
+/// pattern carried in an `i64` register (`compile-float`'s convention — "every
+/// compiled value is a plain `i64`"), so each operand is `bitcast`ed `i64` ->
+/// `double` here, the `op` applied, and the `double` result `bitcast`ed back to
+/// `i64` — the whole float-ness stays contained in this one instruction from
+/// the surrounding IR's point of view, exactly the way a `char`'s code point
+/// stays a plain `i64` everywhere but the `char->int`/`int->char` edges.
+fn llvm_builder_build_float_op(
+    args: &[RtValue],
+    name: &str,
+    op: impl FnOnce(&Builder<'static>, inkwell::values::FloatValue<'static>, inkwell::values::FloatValue<'static>, &str) -> Result<inkwell::values::FloatValue<'static>, inkwell::builder::BuilderError>,
+) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let a_bits = expect_llvm_value(&args[1])?.into_int_value();
+    let b_bits = expect_llvm_value(&args[2])?.into_int_value();
+    let bld = builder.borrow();
+    let ctx = crate::compile::llvm_context();
+    let f64_ty = ctx.f64_type();
+    let err = |e: inkwell::builder::BuilderError| EvalError::Internal(format!("build-{}: {}", name, e));
+    let a = bld.build_bit_cast(a_bits, f64_ty, "a_f").map_err(err)?.into_float_value();
+    let b = bld.build_bit_cast(b_bits, f64_ty, "b_f").map_err(err)?.into_float_value();
+    let result = op(&bld, a, b, name).map_err(err)?;
+    let bits = bld.build_bit_cast(result, ctx.i64_type(), name).map_err(err)?;
+    Ok(RtValue::LlvmValue(bits))
+}
+
+/// The `f64` comparison counterpart of [`llvm_builder_build_int_op`]/
+/// [`llvm_builder_build_icmp`] combined: `bitcast` both `i64`-carried operands
+/// to `double`, `fcmp` with `predicate`, then zero-extend the `i1` result to
+/// the `i64` every compiled value is (`build-icmp`'s own widening step).
+/// `<`/`<=`/`>`/`>=` use the *ordered* predicates (`OLT`/... — false if either
+/// operand is NaN, matching Rust's `<`/... the interpreter's `eval_float_builtin`
+/// uses); `=`/`eq`/`eql`/`equal`/`equalp` use `OEQ` (NaN never equals NaN) and
+/// `/=` uses `UNE` (Rust's `!=` is `!(a == b)`, true when either is NaN).
+fn llvm_builder_build_fcmp(args: &[RtValue], name: &str, predicate: inkwell::FloatPredicate) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let a_bits = expect_llvm_value(&args[1])?.into_int_value();
+    let b_bits = expect_llvm_value(&args[2])?.into_int_value();
+    let bld = builder.borrow();
+    let ctx = crate::compile::llvm_context();
+    let f64_ty = ctx.f64_type();
+    let err = |e: inkwell::builder::BuilderError| EvalError::Internal(format!("{}: {}", name, e));
+    let a = bld.build_bit_cast(a_bits, f64_ty, "a_f").map_err(err)?.into_float_value();
+    let b = bld.build_bit_cast(b_bits, f64_ty, "b_f").map_err(err)?.into_float_value();
+    let cmp = bld.build_float_compare(predicate, a, b, name).map_err(err)?;
+    let widened = bld.build_int_z_extend(cmp, ctx.i64_type(), name).map_err(err)?;
+    Ok(RtValue::LlvmValue(widened.into()))
 }
 
 /// Stack-allocates a `[count x i64]` array and returns its base pointer, to

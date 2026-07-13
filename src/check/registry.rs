@@ -969,6 +969,21 @@ fn llvm_builder_def() -> AdtDef {
     // integers would come back corrupted.
     assoc.insert("build-lshr".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     assoc.insert("build-ashr".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    // `f64` arithmetic/comparison (`eval_llvm_builtin_method`'s
+    // `llvm_builder_build_float_op`/`_fcmp`): both operands and the arithmetic
+    // result are the *same* `i64`-carried representation every other
+    // `llvm-value` uses (a compiled `f64`'s raw `f64::to_bits` pattern) — the
+    // `i64`<->`double` `bitcast`ing is entirely internal to each op, so these
+    // are ordinary `i64`-in/`i64`-out builtins like `build-add`, and
+    // `compile-assoc`'s f64 branch composes them exactly like the int one
+    // composes `build-add`/`build-icmp-*`. A comparison yields a `0`/`1`
+    // `i64` (the `bool` representation), matching `build-icmp-*`.
+    for name in ["build-fadd", "build-fsub", "build-fmul", "build-fdiv", "build-frem"] {
+        assoc.insert(name.to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    }
+    for name in ["build-fcmp-lt", "build-fcmp-le", "build-fcmp-gt", "build-fcmp-ge", "build-fcmp-eq", "build-fcmp-ne"] {
+        assoc.insert(name.to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    }
     // `alloca-args`/`store-arg`/`build-call`: building a direct call to an
     // already-declared function (`get-function`'s result). `alloca-args`
     // stack-allocates a fresh `[count x i64]` array (mirroring the fixed-ABI

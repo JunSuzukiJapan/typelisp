@@ -659,6 +659,31 @@ pub const SOURCE: &str = r#"
   (if (equal method ">=") true
   false))))))))))
 
+;; `f64`'s natively-compilable methods: arithmetic (`+`/`-`/`*`/`/`/`mod`)
+;; lowers to LLVM float instructions (`build-fadd`/... — each `bitcast`s the
+;; `i64`-carried `f64` bits to `double` and back internally), comparisons
+;; (`<`/`<=`/`>`/`>=`/`=`/`/=` and the `eq`/`eql`/`equal`/`equalp` aliases) to
+;; `build-fcmp-*`. Transcendentals (`sqrt`/`floor`/`expt`/...) and conversions
+;; (`float->int`/...) stay non-native (libm / heap allocation) and fall
+;; through to `compile-assoc-user`, panicking clearly there if never compiled.
+(defun float-native-method? ((method string)) bool
+  (if (equal method "+") true
+  (if (equal method "-") true
+  (if (equal method "*") true
+  (if (equal method "/") true
+  (if (equal method "mod") true
+  (if (equal method "<") true
+  (if (equal method "<=") true
+  (if (equal method ">") true
+  (if (equal method ">=") true
+  (if (equal method "=") true
+  (if (equal method "/=") true
+  (if (equal method "eq") true
+  (if (equal method "eql") true
+  (if (equal method "equal") true
+  (if (equal method "equalp") true
+  false))))))))))))))))
+
 ;; Emits `rt_str_lt(x, y)` (strict lexicographic less-than, an `i64` 0/1). The
 ;; four string comparison operators all derive from it: `<`=lt(a,b),
 ;; `>`=lt(b,a), `<=`=not lt(b,a), `>=`=not lt(a,b) — so no `rt_str_le`/`_gt`/
@@ -1439,7 +1464,40 @@ pub const SOURCE: &str = r#"
                                                            (if (equal method ">=")
                                                                (build-icmp-ge builder a b2)
                                                                (build-icmp-eq builder a b2))))))))
-                                           (compile-assoc-user builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name method rest))))))))
+                                           ;; `f64` receivers: a compiled `f64` is
+                                           ;; its raw bits in an `i64`, so arithmetic
+                                           ;; lowers to `build-fadd`/... (each
+                                           ;; bitcasts to `double` and back) and
+                                           ;; comparisons to `build-fcmp-*`. `=` and
+                                           ;; its `eq`/`eql`/`equal`/`equalp` aliases
+                                           ;; all fold to the ordered `fcmp-eq`; `/=`
+                                           ;; to `fcmp-ne` (unordered, matching Rust
+                                           ;; `!=`); everything else is arithmetic.
+                                           (if (if (equal type-name "f64") (float-native-method? method) false)
+                                               (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+                                                 (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+                                                   (if (equal method "+")
+                                                       (build-fadd builder a b2)
+                                                       (if (equal method "-")
+                                                           (build-fsub builder a b2)
+                                                           (if (equal method "*")
+                                                               (build-fmul builder a b2)
+                                                               (if (equal method "/")
+                                                                   (build-fdiv builder a b2)
+                                                                   (if (equal method "mod")
+                                                                       (build-frem builder a b2)
+                                                                       (if (equal method "<")
+                                                                           (build-fcmp-lt builder a b2)
+                                                                           (if (equal method "<=")
+                                                                               (build-fcmp-le builder a b2)
+                                                                               (if (equal method ">")
+                                                                                   (build-fcmp-gt builder a b2)
+                                                                                   (if (equal method ">=")
+                                                                                       (build-fcmp-ge builder a b2)
+                                                                                       (if (equal method "/=")
+                                                                                           (build-fcmp-ne builder a b2)
+                                                                                           (build-fcmp-eq builder a b2)))))))))))))
+                                               (compile-assoc-user builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name method rest)))))))))
                        ;; The user-defined-method leg of `compile-assoc`'s
                        ;; dispatch (see its doc comment): call the callee
                        ;; under the mangled name `type-name::method`,
