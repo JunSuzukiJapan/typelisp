@@ -113,9 +113,11 @@ truncate設計（カーソル以降を切り捨て）が非catchall `match`ア�
 - 副産物として発覚した既存の欠落も同時解消: `char`リテラルが単体で`compile-value`の
   ディスパッチタグに存在しなかった（`(defun f () char #\A)`が常に失敗していた）ため、
   新設`compile-char`/`sexpr-char`（`registry.rs`/`Interp::eval_builtin`）で対応
-  （`char->int`のi32結果を`(as i64 ...)`の無償変換でi64化）。JIT呼び出し境界での`char`戻り値
-  デコードは既存のまま範囲外（`Interp::call_compiled`のdocコメント参照、テストはboolを介して
-  内部だけで完結させている）。
+  （`char->int`のi32結果を`(as i64 ...)`の無償変換でi64化）。~~JIT呼び出し境界での`char`戻り値
+  デコードは既存のまま範囲外~~ **→ 2026-07-13 解消**：`Interp::call_compiled`の戻り値デコードに
+  `Type::Char`アームを追加（生i64コードポイント→`char::from_u32`→`RtValue::Char`、引数側の
+  `*c as i64`の逆）。`char`を返すcompiled関数がインタプリタと相互運用可能に。テスト:
+  `compile_test`に2件（引数passthrough・if分岐で選択したcharリテラル）。
 - テスト: `tests/compile_test.rs`に6件（panic branch/char literal/builtin・ユーザー定義method
   reified/quoted list構築/JIT-interp一致/quoted symbolのclean error）、`ast_bridge.rs`単体
   テストに5件。

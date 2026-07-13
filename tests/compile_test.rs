@@ -3109,12 +3109,11 @@ fn compile_dispatches_a_function_with_an_untaken_panic_branch_to_native_code() {
 /// implementing `Expr::Quote`'s `Char` leaf (a real `Sexpr::Char`
 /// construction, e.g. `(Char c)`, already routed through `compile-value` on
 /// its own literal-`char` argument form, which previously had no dispatch
-/// tag at all). Returning a bare `char` across the JIT-call boundary stays
-/// out of scope (`Interp::call_compiled`'s own doc comment), so this keeps
-/// the literal entirely inside the compiled function, comparing it via the
-/// native `char` `equal` (`compile-assoc`'s char-native branch, already
-/// proven correct elsewhere in this file) — only the `Bool` result crosses
-/// the boundary.
+/// tag at all). This keeps the literal entirely inside the compiled
+/// function, comparing it via the native `char` `equal` (`compile-assoc`'s
+/// char-native branch) — only the `Bool` result crosses the boundary. (A
+/// `char` *return* crossing the boundary is now supported too — see
+/// `compile_returns_a_char_across_the_jit_boundary`.)
 #[test]
 fn compile_dispatches_a_function_containing_a_bare_char_literal_to_native_code() {
     let v = eval_ok_with_compiler(
@@ -3125,6 +3124,41 @@ fn compile_dispatches_a_function_containing_a_bare_char_literal_to_native_code()
         "#,
     );
     assert_eq!(v, RtValue::Int(1));
+}
+
+/// A `char`-returning compiled function's result crosses the JIT-call
+/// boundary as a real `RtValue::Char`, not a bare `RtValue::Int` of its code
+/// point (`Interp::call_compiled`'s `Type::Char` return decode, the inverse
+/// of the `*c as i64` a `char` argument crosses as). The function passes a
+/// `char` straight through — the raw `i64` code point that arrives as an
+/// argument is the same one handed back — so the decode is exercised on its
+/// own, independent of any in-function `char` construction.
+#[test]
+fn compile_returns_a_char_across_the_jit_boundary() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun echo-char ((c char)) char c)
+        (compile echo-char)
+        (echo-char #\Z)
+        "#,
+    );
+    assert_eq!(v, RtValue::Char('Z'));
+}
+
+/// The decode also runs on a `char` a compiled function *selects* rather than
+/// receives — here a bare `char` literal returned from one branch of an
+/// `if` — confirming the boundary decode doesn't depend on the value having
+/// arrived as an argument.
+#[test]
+fn compile_returns_a_selected_char_literal_across_the_jit_boundary() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun grade ((pass bool)) char (if pass #\P #\F))
+        (compile grade)
+        (grade true)
+        "#,
+    );
+    assert_eq!(v, RtValue::Char('P'));
 }
 
 /// `+` reified as a value (`Expr::MethodRef`, `Checker::method_value`) and

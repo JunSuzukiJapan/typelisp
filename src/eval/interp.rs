@@ -991,10 +991,28 @@ impl Interp {
             // Compiled code represents a `bool` as a raw 0/1 `i64` (LLVM
             // `icmp` results, zero-extended); decode it by the declared
             // return type so an interpreted `if` over a compiled predicate
-            // (`i32::equals`, ...) sees a real `RtValue::Bool`. `char`
-            // (also a raw code point in compiled code) stays out of scope
-            // alongside the rest of compiled-`char` support.
+            // (`i32::equals`, ...) sees a real `RtValue::Bool`.
             RtValue::Bool(raw != 0)
+        } else if matches!(ret_ty, Type::Char) {
+            // A compiled `char` is a raw `i64` Unicode scalar value (the
+            // widened `char->int` payload `compile-char`/`compile-sexpr-field`
+            // produce — the exact inverse of the `*c as i64` a `char`
+            // *argument* crosses as, above). Decode it back to a real
+            // `RtValue::Char` so a `char`-returning compiled function
+            // (`(defun first-char (...) char ...)`) interoperates with the
+            // interpreter, rather than surfacing its code point as a bare
+            // `RtValue::Int`. A compiled `char` only ever holds a value that
+            // was a valid `char` on the way in, so a decode failure here is
+            // an internal-invariant break, not a user-reachable error.
+            match char::from_u32(raw as u32) {
+                Some(c) => RtValue::Char(c),
+                None => {
+                    return Err(EvalError::Internal(format!(
+                        "compiled call returned {} for a `char` result, which is not a valid Unicode scalar value",
+                        raw
+                    )))
+                }
+            }
         } else {
             RtValue::Int(raw)
         })
