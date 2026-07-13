@@ -65,7 +65,19 @@ truncate設計（カーソル以降を切り捨て）が非catchall `match`ア�
 `unsupported`は2026-07-12時点で**解消済み**——残る`Expr::TraitCall`は単型化後に到達不能な
 診断専用ノードと確認済みで対象外（`tests/trait_test.rs`参照）。以下、直近の完了分。
 
-直近完了: **`Panic`/`MethodRef`/`Quote`の compile 対応（残っていた`unsupported`3件を解消）**
+直近完了: **Iter トレイトを持つ全型（Vector/HashTable）の compile 対応**（2026-07-13、branch
+`feature/iter-compile`）——「ジェネリック本体そのものの compile」（旧・将来課題）を解消。
+`doiter` / `map`・`filter`・`member` 等のコンビネータ over `Vector<T>`・`HashTable<K,V>` が compile
+可能に。ユーザー定義 Iter 型も、その `next` が compile 可能なプリミティブに落ちる限り**専用対応
+ゼロで**通る（トレイトディスパッチは単型化で消えるため）。実体は 2 つ: (1) コレクション・
+プリミティブ層（`vector-op`/`hashtable-op` ノード + `rt_struct_field_count`/`rt_struct_push_field`/
+`rt_hashtable_*` 群、要素型 kind によるタグ/デコード）、(2) `Interp::compile_function_rec`——
+`(compile fn)` が呼ぶ単型化インスタンス（`vector::iter <i64>` 等、空白マングル名で名指し不可）を
+推移的に自動 compile。詳細は [iter-compile-plan.md](iter-compile-plan.md)。
+**残る意図的な非対応**: `HashTable::get`/`remove`（`Option` 返しの compiled sum-ADT box 橋渡しは
+反復とは別問題）。
+
+その前に完了: **`Panic`/`MethodRef`/`Quote`の compile 対応（残っていた`unsupported`3件を解消）**
 （2026-07-12）——`ast_bridge.rs`の`Expr::Panic`/`Expr::MethodRef`/`Expr::Quote`アームを実装。
 - **`Panic`**: `(panic msg)` -> `(panic msg-form)`。`msg`は常に`Str`型なので`kind`分岐は不要、
   `compiler.rs`の新設`compile-panic`が`msg-form`を`compile-str`同様にタグ付き`Sexpr::Str`へ

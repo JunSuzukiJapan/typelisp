@@ -537,6 +537,218 @@ pub unsafe extern "C" fn rt_struct_field_set(args: *const i64, argc: u32) -> i64
     0
 }
 
+/// `(rt-struct-field-count s)` for compiled code — the number of fields boxed
+/// struct `args[0]` (a tagged `Sexpr`) holds, returned as a *raw* (untagged)
+/// `i64` (like `rt_str_length`'s own raw count result, and the raw index
+/// [`rt_struct_field_get`] consumes). `Vector<T>::len`'s primitive: a growable
+/// boxed struct's field count is its element count. Fatal if `args[0]` isn't a
+/// boxed struct. Allocates nothing, so triggers no GC.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// decoding to a `Value::Boxed` struct; a `Heap` must already be registered
+/// on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_struct_field_count(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_struct_field_count: expected 1 argument");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal("rt_struct_field_count: first argument is not a boxed Sexpr"),
+    };
+    active_heap().struct_field_count(id) as i64
+}
+
+/// `(rt-struct-push-field! s val)` for compiled code — appends `args[1]` (a
+/// tagged `Sexpr`) as a new field of boxed struct `args[0]`, growing its field
+/// count by one. `Vector<T>::push`'s primitive. Returns the compiled
+/// representation of `Unit` (`0`), the same convention [`rt_struct_field_set`]
+/// uses for its own in-place mutation. Fatal if `args[0]` isn't a boxed
+/// struct. Only pushes an already-decoded `Value` onto the struct's own field
+/// `Vec` (a Rust `Vec::push`, not a cons-heap allocation), so triggers no GC —
+/// the caller need not keep `val` rooted across this call.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s, the
+/// first decoding to a `Value::Boxed` struct; a `Heap` must already be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_struct_push_field(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_struct_push_field: expected 2 arguments");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal("rt_struct_push_field: first argument is not a boxed Sexpr"),
+    };
+    let val = decode(*args.add(1));
+    active_heap().struct_push_field(id, val);
+    0
+}
+
+// ---- Iter-compile plan, Stage C: `HashTable<K,V>` primitives ------------
+//
+// A `HashTable<K,V>` is a `BoxedObj::Struct` with a `StructPayload::Map`
+// payload (unlike a `Vector<T>`/`defstruct`'s `StructPayload::Fields`); the
+// mem layer owns the key hashing/interning (`Heap::hashtable_set` takes the
+// already-*tagged* key/value `Value`s and computes the `MemHashKey` itself),
+// so these are thin adapters, the same shape as the `rt_struct_*` family
+// above. The `Option`-returning lookups (`get`/`remove`) are deliberately
+// *not* here: a compiled `Option` is a `malloc`'d sum-ADT box, and bridging a
+// runtime map lookup into that representation is a separate problem from
+// iteration (which needs only build/populate/enumerate) — see
+// `docs/dev/iter-compile-plan.md`.
+
+/// `(rt-hashtable-new)` for compiled code — an empty `HashTable<K,V>`
+/// (`HashTable::new`). Ignores its arguments (the method takes none).
+///
+/// # Safety
+///
+/// A `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_new(_args: *const i64, _argc: u32) -> i64 {
+    encode(active_heap().alloc_hashtable())
+}
+
+/// `(rt-hashtable-set ht key val)` for compiled code — inserts/overwrites,
+/// with `args[1]`/`args[2]` already tagged `Sexpr`s (the mem layer hashes the
+/// key). Returns the compiled `Unit` (`0`), like `HashTable<K,V>::set`. Only
+/// stores already-decoded `Value`s into the map (no cons-heap allocation), so
+/// triggers no GC.
+///
+/// # Safety
+///
+/// `argc >= 3`, `args` valid for 3 `i64`s, `args[0]` a boxed `HashTable`; a
+/// `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_set(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_hashtable_set: expected 3 arguments");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal("rt_hashtable_set: first argument is not a boxed HashTable"),
+    };
+    let key = decode(*args.add(1));
+    let val = decode(*args.add(2));
+    active_heap().hashtable_set(id, key, val);
+    0
+}
+
+/// `(rt-hashtable-count ht)` for compiled code — the entry count as a raw
+/// `i64` (`HashTable<K,V>::count`, like `rt_struct_field_count`'s raw result).
+///
+/// # Safety
+///
+/// `argc >= 1`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_count(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_hashtable_count: expected 1 argument");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal("rt_hashtable_count: first argument is not a boxed HashTable"),
+    };
+    active_heap().hashtable_count(id) as i64
+}
+
+/// `(rt-hashtable-clear ht)` for compiled code — empties the map in place,
+/// returning `Unit` (`0`). Allocates nothing, so triggers no GC.
+///
+/// # Safety
+///
+/// `argc >= 1`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_clear(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_hashtable_clear: expected 1 argument");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal("rt_hashtable_clear: first argument is not a boxed HashTable"),
+    };
+    active_heap().hashtable_clear(id);
+    0
+}
+
+/// The `BoxId` of `args[0]` decoded as a boxed struct — shared preamble of the
+/// three `Vector`-building `HashTable` enumerators below.
+///
+/// # Safety
+///
+/// `argc >= 1`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
+unsafe fn hashtable_arg(args: *const i64, argc: u32, who: &str) -> BoxId {
+    if argc < 1 {
+        fatal(&format!("{who}: expected 1 argument"));
+    }
+    match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal(&format!("{who}: first argument is not a boxed HashTable")),
+    }
+}
+
+/// `(rt-hashtable-keys ht)` — a fresh `Vector<K>` of the map's keys, in the
+/// map's own iteration order. The keys are the map's already-tagged `Value`s,
+/// still reachable through the (caller-rooted) map box, so building the vector
+/// in a single `alloc_struct` needs no intermediate rooting.
+///
+/// # Safety
+///
+/// See [`hashtable_arg`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_keys(args: *const i64, argc: u32) -> i64 {
+    let id = hashtable_arg(args, argc, "rt_hashtable_keys");
+    let fields: Vec<Value> = active_heap().hashtable_pairs(id).into_iter().map(|(k, _)| k).collect();
+    encode(active_heap().alloc_struct("vector".to_string(), fields))
+}
+
+/// `(rt-hashtable-values ht)` — a fresh `Vector<V>` of the map's values; see
+/// [`rt_hashtable_keys`].
+///
+/// # Safety
+///
+/// See [`hashtable_arg`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_values(args: *const i64, argc: u32) -> i64 {
+    let id = hashtable_arg(args, argc, "rt_hashtable_values");
+    let fields: Vec<Value> = active_heap().hashtable_pairs(id).into_iter().map(|(_, v)| v).collect();
+    encode(active_heap().alloc_struct("vector".to_string(), fields))
+}
+
+/// `(rt-hashtable-entries ht)` — a fresh `Vector<cons-cell<K,V>>`, each entry
+/// a `cons-cell` boxing the pair (matching `Checker::check_construct`'s own
+/// `cons-cell` layout and the interpreter's `hashtable_entries`). Unlike
+/// `keys`/`values`, each `cons-cell` is a *new* allocation, so each is rooted
+/// as it is built — otherwise a later `alloc_struct`'s GC could reclaim an
+/// earlier, not-yet-referenced cell. (The pair's `Value`s themselves stay
+/// reachable through the map box while this runs, like `keys`/`values`.)
+///
+/// # Safety
+///
+/// See [`hashtable_arg`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_entries(args: *const i64, argc: u32) -> i64 {
+    let id = hashtable_arg(args, argc, "rt_hashtable_entries");
+    let pairs = active_heap().hashtable_pairs(id);
+    let mut fields = Vec::with_capacity(pairs.len());
+    let mut rooted = 0usize;
+    for (k, v) in pairs {
+        let cell = active_heap().alloc_struct("cons-cell".to_string(), vec![k, v]);
+        active_heap().push_root(cell);
+        rooted += 1;
+        fields.push(cell);
+    }
+    let vec = active_heap().alloc_struct("vector".to_string(), fields);
+    for _ in 0..rooted {
+        active_heap().pop_root();
+    }
+    encode(vec)
+}
+
 
 // ---- Stage 4: GC root safety -------------------------------------------
 
@@ -1078,7 +1290,8 @@ mod tests {
         active_heap, decode, encode, reset_global_table, rt_car, rt_cdr, rt_cons, rt_global_get, rt_global_new, rt_global_set,
         rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count,
         rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref,
-        rt_struct_field_get, rt_struct_field_set, rt_struct_new, set_active_heap,
+        rt_hashtable_count, rt_hashtable_entries, rt_hashtable_keys, rt_hashtable_new, rt_hashtable_set, rt_struct_field_count,
+        rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_struct_push_field, set_active_heap,
     };
 
     #[test]
@@ -1530,6 +1743,71 @@ mod tests {
         let get_y = [tagged, 1];
         assert_eq!(decode(unsafe { rt_struct_field_get(get_x.as_ptr(), 2) }), Value::Int(99));
         assert_eq!(decode(unsafe { rt_struct_field_get(get_y.as_ptr(), 2) }), Value::Int(2), "the other field is untouched");
+    }
+
+    #[test]
+    fn rt_struct_field_count_returns_the_raw_field_count() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let empty = unsafe { rt_struct_new([make_str("vector")].as_ptr(), 1) };
+        assert_eq!(unsafe { rt_struct_field_count([empty].as_ptr(), 1) }, 0, "empty vector has length 0");
+
+        let three = [make_str("vector"), encode(Value::Int(10)), encode(Value::Int(20)), encode(Value::Int(30))];
+        let tagged = unsafe { rt_struct_new(three.as_ptr(), 4) };
+        assert_eq!(unsafe { rt_struct_field_count([tagged].as_ptr(), 1) }, 3, "raw count, not a tagged Sexpr Int");
+    }
+
+    #[test]
+    fn rt_hashtable_new_set_count_and_entries_round_trip() {
+        let mut heap = Heap::with_capacity(64);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let ht = unsafe { rt_hashtable_new(std::ptr::null(), 0) };
+        assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 0, "a fresh map is empty");
+
+        // Two int->int entries (keys/values as raw tagged `Sexpr` ints).
+        assert_eq!(unsafe { rt_hashtable_set([ht, encode(Value::Int(1)), encode(Value::Int(10))].as_ptr(), 3) }, 0);
+        assert_eq!(unsafe { rt_hashtable_set([ht, encode(Value::Int(2)), encode(Value::Int(20))].as_ptr(), 3) }, 0);
+        // Overwriting an existing key doesn't grow the count.
+        assert_eq!(unsafe { rt_hashtable_set([ht, encode(Value::Int(1)), encode(Value::Int(99))].as_ptr(), 3) }, 0);
+        assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 2, "two distinct keys");
+
+        // `keys` builds a `Vector` whose field count matches the entry count.
+        let keys = unsafe { rt_hashtable_keys([ht].as_ptr(), 1) };
+        match decode(keys) {
+            Value::Boxed(id) => assert_eq!(unsafe { active_heap() }.struct_field_count(id), 2),
+            other => panic!("expected a boxed vector, got {:?}", other),
+        }
+
+        // `entries` builds a `Vector` of `cons-cell`s, one per entry.
+        let entries = unsafe { rt_hashtable_entries([ht].as_ptr(), 1) };
+        match decode(entries) {
+            Value::Boxed(id) => {
+                let h = unsafe { active_heap() };
+                assert_eq!(h.struct_field_count(id), 2, "one cons-cell per entry");
+                // Each element is itself a boxed cons-cell (2 fields: car, cdr).
+                match h.struct_field(id, 0) {
+                    Value::Boxed(cell) => assert_eq!(h.struct_field_count(cell), 2, "a cons-cell has car and cdr"),
+                    other => panic!("expected a boxed cons-cell, got {:?}", other),
+                }
+            }
+            other => panic!("expected a boxed vector, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rt_struct_push_field_grows_the_struct_and_appends_at_the_end() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let tagged = unsafe { rt_struct_new([make_str("vector")].as_ptr(), 1) };
+        assert_eq!(unsafe { rt_struct_push_field([tagged, encode(Value::Int(7))].as_ptr(), 2) }, 0, "push returns Unit (0)");
+        assert_eq!(unsafe { rt_struct_push_field([tagged, encode(Value::Int(8))].as_ptr(), 2) }, 0);
+
+        assert_eq!(unsafe { rt_struct_field_count([tagged].as_ptr(), 1) }, 2, "grew from 0 to 2");
+        assert_eq!(decode(unsafe { rt_struct_field_get([tagged, 0].as_ptr(), 2) }), Value::Int(7));
+        assert_eq!(decode(unsafe { rt_struct_field_get([tagged, 1].as_ptr(), 2) }), Value::Int(8), "second push lands at index 1");
     }
 
     /// A struct field that itself holds a cons must survive a GC the same

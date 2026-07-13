@@ -1013,7 +1013,11 @@ pub const SOURCE: &str = r#"
                                                                                                                         (compile-global-init builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                                         (if (equal s "panic")
                                                                                                                             (compile-panic builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                            (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))))))
+                                                                                                                            (if (equal s "vector-op")
+                                                                                                                                (compile-vector-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
+                                                                                                                                (if (equal s "hashtable-op")
+                                                                                                                                    (compile-hashtable-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
+                                                                                                                                    (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))))))))
                            )
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -2714,6 +2718,129 @@ pub const SOURCE: &str = r#"
                                          (store-arg builder args-ptr 2 tagged-v)
                                          (let ((ignored (build-call builder (get-function m "rt_struct_field_set") args-ptr 3)))
                                            (const-i64 builder 0)))))))))))
+                       ;; `(vector-op method kind v-form arg-form...)` — a
+                       ;; `Vector<T>` builtin method (`ast_bridge`'s
+                       ;; `translate_vector_method`), lowered here rather than
+                       ;; through `compile-assoc` because these have no
+                       ;; compiled `defmethod` body. `kind` is `T`'s
+                       ;; `struct_field_kind`; the vector itself is a boxed
+                       ;; struct (tagged `Sexpr`), so its elements cross the
+                       ;; `BoxedObj::Struct` boundary tagged and need the same
+                       ;; `compile-tag-struct-field` (encode, `push`/`set`) /
+                       ;; `compile-sexpr-field` (decode, `get`) `compile-field-
+                       ;; set`/`compile-field-get` use for a fixed-arity field
+                       ;; — the sole difference being a *runtime* index
+                       ;; (compiled from `idx-form`, already a raw `i64`)
+                       ;; rather than a compile-time-constant field offset.
+                       ;; `len`/`push` are the two new primitives:
+                       ;; `rt_struct_field_count` (raw element count) and
+                       ;; `rt_struct_push_field` (grow by one). An out-of-range
+                       ;; `get`/`set` index aborts inside `rt_struct_field_get`/
+                       ;; `_set` (the mem-layer bounds panic across the
+                       ;; `extern "C"` boundary), matching compiled code's
+                       ;; "abort, don't unwind" convention (`rt_panic`) — the
+                       ;; one intentional semantic gap from the interpreter,
+                       ;; which recovers the same overrun as an `EvalError`.
+                       ;; No extra GC-rooting beyond what `compile-field-set`
+                       ;; already relies on: the receiver flows in as an
+                       ;; ordinary (env-rooted) value, and `rt_struct_push_
+                       ;; field` allocates nothing.
+                       (compile-vector-op ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((method (sexpr-str (sexpr-car (sexpr-cdr e)))))
+                           (let ((kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+                             ;; `new` reuses the boxed-struct construct path: an
+                             ;; empty `"vector"` struct (the type-name form is
+                             ;; the node's lone operand, no fields).
+                             (if (equal method "new")
+                                 (compile-construct-boxed-struct builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))) (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
+                             (let ((v-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
+                               (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base v-form)))
+                                 (if (equal method "len")
+                                     (let ((args-ptr (alloca-args builder 1)))
+                                       (store-arg builder args-ptr 0 v)
+                                       (build-call builder (get-function m "rt_struct_field_count") args-ptr 1))
+                                     (if (equal method "push")
+                                         (let ((x-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+                                           (let ((x (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base x-form)))
+                                             (let ((tagged-x (compile-tag-struct-field builder m x kind)))
+                                               (let ((args-ptr (alloca-args builder 2)))
+                                                 (store-arg builder args-ptr 0 v)
+                                                 (store-arg builder args-ptr 1 tagged-x)
+                                                 (let ((ignored (build-call builder (get-function m "rt_struct_push_field") args-ptr 2)))
+                                                   (const-i64 builder 0))))))
+                                         (let ((idx-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+                                           (let ((idx (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base idx-form)))
+                                             (if (equal method "get")
+                                                 (let ((args-ptr (alloca-args builder 2)))
+                                                   (store-arg builder args-ptr 0 v)
+                                                   (store-arg builder args-ptr 1 idx)
+                                                   (let ((raw (build-call builder (get-function m "rt_struct_field_get") args-ptr 2)))
+                                                     (compile-sexpr-field builder m raw kind 0)))
+                                                 (let ((x-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
+                                                   (let ((x (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base x-form)))
+                                                     (let ((tagged-x (compile-tag-struct-field builder m x kind)))
+                                                       (let ((args-ptr (alloca-args builder 3)))
+                                                         (store-arg builder args-ptr 0 v)
+                                                         (store-arg builder args-ptr 1 idx)
+                                                         (store-arg builder args-ptr 2 tagged-x)
+                                                         (let ((ignored (build-call builder (get-function m "rt_struct_field_set") args-ptr 3)))
+                                                           (const-i64 builder 0)))))))))))))))))
+                       ;; `(hashtable-op method key-kind val-kind ht-form
+                       ;; ...)` — a `HashTable<K,V>` builtin (`ast_bridge`'s
+                       ;; `translate_hashtable_method`), lowered to the
+                       ;; `rt_hashtable_*` family (the mem layer owns the key
+                       ;; hashing). `new` builds an empty map (no operands);
+                       ;; `set` tags its key/value by `key-kind`/`val-kind`
+                       ;; (`compile-tag-struct-field`, as `compile-field-set`
+                       ;; does) before the mem layer hashes the key; `count`
+                       ;; returns a raw `i64`; `clear` returns `Unit`; and
+                       ;; `keys`/`values`/`entries` each build a fresh
+                       ;; `Vector` (`entries`'s of `cons-cell`s) that — like a
+                       ;; `compile-construct-boxed-struct` result — is
+                       ;; `push-permanent-sexpr-root`ed on the spot so a later
+                       ;; allocation can't reclaim it. `get`/`remove` are not
+                       ;; here: their `Option` return is a `malloc`'d sum-ADT
+                       ;; box, a separate problem from iteration (see
+                       ;; `docs/dev/iter-compile-plan.md`), so they fall
+                       ;; through to `compile-assoc` and panic clearly.
+                       (compile-hashtable-op ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((method (sexpr-str (sexpr-car (sexpr-cdr e)))))
+                           (if (equal method "new")
+                               (let ((args-ptr (alloca-args builder 1)))
+                                 (let ((result (build-call builder (get-function m "rt_hashtable_new") args-ptr 0)))
+                                   (push-permanent-sexpr-root builder m result)
+                                   result))
+                               (let ((key-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+                                 (let ((val-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+                                   (let ((ht-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+                                     (let ((ht (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base ht-form)))
+                                       (if (equal method "set")
+                                           (let ((key-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
+                                             (let ((val-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
+                                               (let ((k (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base key-form)))
+                                                 (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base val-form)))
+                                                   (let ((tk (compile-tag-struct-field builder m k key-kind)))
+                                                     (let ((tv (compile-tag-struct-field builder m v val-kind)))
+                                                       (let ((args-ptr (alloca-args builder 3)))
+                                                         (store-arg builder args-ptr 0 ht)
+                                                         (store-arg builder args-ptr 1 tk)
+                                                         (store-arg builder args-ptr 2 tv)
+                                                         (let ((ignored (build-call builder (get-function m "rt_hashtable_set") args-ptr 3)))
+                                                           (const-i64 builder 0)))))))))
+                                           (if (equal method "count")
+                                               (let ((args-ptr (alloca-args builder 1)))
+                                                 (store-arg builder args-ptr 0 ht)
+                                                 (build-call builder (get-function m "rt_hashtable_count") args-ptr 1))
+                                               (if (equal method "clear")
+                                                   (let ((args-ptr (alloca-args builder 1)))
+                                                     (store-arg builder args-ptr 0 ht)
+                                                     (let ((ignored (build-call builder (get-function m "rt_hashtable_clear") args-ptr 1)))
+                                                       (const-i64 builder 0)))
+                                                   (let ((args-ptr (alloca-args builder 1)))
+                                                     (store-arg builder args-ptr 0 ht)
+                                                     (let ((result (build-call builder (get-function m (append "rt_hashtable_" method)) args-ptr 1)))
+                                                       (push-permanent-sexpr-root builder m result)
+                                                       result))))))))))))
                        ;; `(global id kind)` — `id` is `path`'s already-
                        ;; promoted compiled-global slot
                        ;; (`Interp::add_compiled_function`'s

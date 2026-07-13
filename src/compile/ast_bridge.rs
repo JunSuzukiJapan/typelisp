@@ -281,6 +281,140 @@ fn struct_field_kind(ty: &Type, structs: &HashSet<Path>) -> i64 {
     }
 }
 
+/// `Vector<T>`'s builtin methods that have no compiled `defmethod` body and so
+/// must be lowered to a dedicated `vector-op` node (`translate_vector_method`)
+/// rather than routed through the generic `assoc` path. Deliberately *not*
+/// `iter`: that one is a real prelude `defmethod` (`vector-iter::new`), a
+/// normal compiled method, so it stays on the `assoc` path. `HashTable<K,V>`
+/// shares the `new`/`get`/`set` names but a different `type_name`, so the
+/// `type_name.local() == "vector"` guard at the call site keeps them apart.
+const VECTOR_BUILTIN_METHODS: [&str; 5] = ["new", "get", "set", "len", "push"];
+
+/// The element `kind` ([`struct_field_kind`]) for a `Vector<T>` method call:
+/// `T` from the receiver's `Vector<T>` type (`args[0]`), or `0` for `new`
+/// (no receiver — an empty struct has no element to tag). Uniform across
+/// `get`/`set`/`len`/`push` since every one either reads or writes a `T`.
+fn vector_element_kind(args: &[Typed], structs: &HashSet<Path>) -> i64 {
+    match args.first().map(|a| &a.ty) {
+        Some(Type::Named(p, targs)) if p.local() == "vector" => {
+            targs.first().map(|t| struct_field_kind(t, structs)).unwrap_or(0)
+        }
+        _ => 0,
+    }
+}
+
+/// A `Vector<T>` builtin method call -> a dedicated `(vector-op method kind
+/// arg-form...)` node, lowered directly to `rt_struct_new` (`new`) /
+/// `rt_struct_field_count` (`len`) / `rt_struct_field_get` (`get`) /
+/// `rt_struct_field_set` (`set`) / `rt_struct_push_field` (`push`) in
+/// `compiler.rs`'s `compile-vector-op`, because none of these has a compiled
+/// `defmethod` body. `kind` is `T`'s [`struct_field_kind`]: the element
+/// crosses the `BoxedObj::Struct` boundary tagged, so `compile-vector-op`
+/// tags (`push`/`set`) and untags (`get`) it with `compile-tag-struct-field`/
+/// `compile-sexpr-field`, exactly as `field-get`/`field-set` do for a
+/// fixed-arity field. `new` carries a `(str "vector")` type-name form
+/// ([`str_literal_form`]) — the sole "argument" it needs, reusing
+/// `compile-construct-boxed-struct`'s empty-field path — while the others
+/// translate their receiver/index/value operands as plain value forms
+/// ([`ast_list_to_sexpr`]); the one header `kind` covers the sole field that
+/// crosses the boundary, so no per-arg `(kind . form)` pairing is needed.
+fn translate_vector_method(heap: &mut Heap, method: &str, kind: i64, args: &[Typed], cx: Ctx) -> Result<Value, Error> {
+    let kind_v = Value::Int(kind);
+    let method_v = heap.alloc_string(method.to_string());
+    heap.push_root(method_v);
+    let forms = if method == "new" {
+        // `new` has no runtime operands; its lone "form" is the `"vector"`
+        // type-name literal `compile-construct-boxed-struct` feeds
+        // `rt_struct_new` (an empty field list builds an empty vector).
+        match str_literal_form(heap, "vector") {
+            Ok(form) => {
+                heap.push_root(form);
+                vec![form]
+            }
+            Err(e) => {
+                heap.pop_root(); // method_v
+                return Err(e);
+            }
+        }
+    } else {
+        match ast_list_to_sexpr(heap, args, cx) {
+            Ok(v) => v,
+            Err(e) => {
+                heap.pop_root(); // method_v
+                return Err(e);
+            }
+        }
+    };
+    let mut items = vec![method_v, kind_v];
+    items.extend(forms.iter().copied());
+    let result = tagged(heap, "vector-op", &items);
+    for _ in 0..forms.len() {
+        heap.pop_root();
+    }
+    heap.pop_root(); // method_v
+    result
+}
+
+/// `HashTable<K,V>`'s builtin methods lowered to a `hashtable-op` node
+/// (`translate_hashtable_method` -> the `rt_hashtable_*` family) rather than
+/// the generic `assoc` path — every one *except* the `Option`-returning
+/// `get`/`remove` (a compiled `Option` is a `malloc`'d sum-ADT box, a separate
+/// problem from iteration; they stay on the `assoc` path and panic clearly)
+/// and `iter` (a genuine prelude `defmethod`, `hashtable-iter::new`).
+const HASHTABLE_BUILTIN_METHODS: [&str; 7] = ["new", "set", "count", "clear", "keys", "values", "entries"];
+
+/// The `(K-kind, V-kind)` ([`struct_field_kind`]) for a `HashTable<K,V>`
+/// method call — from the receiver's `HashTable<K,V>` type (`args[0]`), or the
+/// method's `HashTable<K,V>` return type for `new` (no receiver). Only `set`
+/// actually consults them (to tag its key/value at the map boundary); the
+/// enumerators/`count`/`clear` pass `0`.
+fn hashtable_kv_kinds(args: &[Typed], ty: &Type, structs: &HashSet<Path>) -> (i64, i64) {
+    let ht_ty = args.first().map(|a| &a.ty).unwrap_or(ty);
+    match ht_ty {
+        Type::Named(p, targs) if p.local() == "hashtable" && targs.len() == 2 => {
+            (struct_field_kind(&targs[0], structs), struct_field_kind(&targs[1], structs))
+        }
+        _ => (0, 0),
+    }
+}
+
+/// A `HashTable<K,V>` builtin method call -> `(hashtable-op method key-kind
+/// val-kind operand-form...)`, the map counterpart of
+/// [`translate_vector_method`]. `new` carries no operands (an empty map);
+/// every other method translates its receiver (and, for `set`, key/value)
+/// operands as plain value forms. See [`compile-hashtable-op`] in
+/// `compiler.rs` for the per-method lowering.
+fn translate_hashtable_method(
+    heap: &mut Heap,
+    method: &str,
+    key_kind: i64,
+    val_kind: i64,
+    args: &[Typed],
+    cx: Ctx,
+) -> Result<Value, Error> {
+    let method_v = heap.alloc_string(method.to_string());
+    heap.push_root(method_v);
+    let forms = if method == "new" {
+        Vec::new()
+    } else {
+        match ast_list_to_sexpr(heap, args, cx) {
+            Ok(v) => v,
+            Err(e) => {
+                heap.pop_root(); // method_v
+                return Err(e);
+            }
+        }
+    };
+    let mut items = vec![method_v, Value::Int(key_kind), Value::Int(val_kind)];
+    items.extend(forms.iter().copied());
+    let result = tagged(heap, "hashtable-op", &items);
+    for _ in 0..forms.len() {
+        heap.pop_root();
+    }
+    heap.pop_root(); // method_v
+    result
+}
+
 /// `(unsupported "<Variant>")` — see this module's doc comment.
 fn unsupported(heap: &mut Heap, variant: &str) -> Result<Value, Error> {
     let name = heap.alloc_string(variant.to_string());
@@ -504,6 +638,23 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // the same `compile-call-args` retain/GC-root treatment an ordinary
         // call's arguments already get.
         Expr::Assoc { type_name, method, instance, args } => {
+            // `Vector<T>`'s field-backed builtin methods (`new`/`get`/`set`/
+            // `len`/`push`) have no compiled `defmethod` body; lower them to a
+            // dedicated `vector-op` node carrying the element kind (see
+            // `translate_vector_method`). Guarded by `type_name` so
+            // `HashTable::get`/`set`/`new` (a different type, different
+            // runtime) and `Vector`'s own `iter` (a real prelude `defmethod`)
+            // both stay on the generic `assoc` path below.
+            if type_name.local() == "vector" && VECTOR_BUILTIN_METHODS.contains(&method.as_str()) {
+                return translate_vector_method(heap, method, vector_element_kind(args, cx.structs), args, cx);
+            }
+            // `HashTable<K,V>`'s builtin methods (except the `Option`-returning
+            // `get`/`remove` and the `iter` `defmethod`) lower to a
+            // `hashtable-op` node — see `translate_hashtable_method`.
+            if type_name.local() == "hashtable" && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
+                let (kk, vk) = hashtable_kv_kinds(args, &typed.ty, cx.structs);
+                return translate_hashtable_method(heap, method, kk, vk, args, cx);
+            }
             let type_name_v = heap.alloc_string(type_name.local().to_string());
             heap.push_root(type_name_v);
             let method_v = heap.alloc_string(method.clone());

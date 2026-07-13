@@ -706,27 +706,25 @@ fn compile_dispatches_a_defun_that_calls_another_compiled_function() {
     }
 }
 
-/// `Interp::compile_function`'s up-front check (labels/closures Stage 3):
-/// `(compile sum-of-squares)` calls `square`, but nothing has `compile`d
-/// `square` yet — a clear `Panic` naming both functions, not a confusing one
-/// from deep inside the compiler body's `get-function`.
+/// `(compile sum-of-squares)` calls `square`, which nothing has `compile`d
+/// yet — so `Interp::compile_function_rec` (the Iter-compile plan's Stage B
+/// transitive driver) compiles `square` first, then `sum-of-squares`, rather
+/// than erroring. This is what lets a caller pull in the (whitespace-mangled,
+/// un-nameable) monomorphized method instantiations an `Iter` combinator
+/// bottoms out in; a plain named callee like `square` is the simplest case
+/// of the same recursion.
 #[test]
-fn compile_errors_clearly_when_a_called_function_is_not_yet_compiled() {
-    let err = run_with_compiler(
+fn compile_transitively_compiles_a_called_function() {
+    let v = run_with_compiler(
         r#"
         (defun square ((x i64)) i64 (* x x))
         (defun sum-of-squares ((a i64) (b i64)) i64 (+ (square a) (square b)))
         (compile sum-of-squares)
+        (sum-of-squares 3 4)
         "#,
     )
-    .expect_err("expected a clear must-compile-first error");
-    match err {
-        EvalError::Panic(msg) => {
-            assert!(msg.contains("square"), "message was: {}", msg);
-            assert!(msg.contains("sum-of-squares"), "message was: {}", msg);
-        }
-        other => panic!("expected a Panic, got {:?}", other),
-    }
+    .expect("transitive compile of `square` should succeed");
+    assert_eq!(v, RtValue::Int(25), "3*3 + 4*4 = 25, with `square` auto-compiled");
 }
 
 /// The end-to-end self-recursion counterpart of
@@ -2118,29 +2116,23 @@ fn compile_dispatches_a_self_recursive_method_to_native_code() {
     assert_eq!(v, RtValue::Int(0));
 }
 
-/// `Interp::compile_function`'s up-front check for an `Expr::Assoc` target
-/// (the method-call counterpart of `compile_errors_clearly_when_a_called_function_is_not_yet_compiled`):
-/// `sum-coords` calls `point::x`, but only `point::y` has been `compile`d —
-/// a clear `Panic` naming the exact missing method, not a confusing failure
-/// from deep inside `compile-assoc`'s own `get-function`.
+/// The method-call counterpart of `compile_transitively_compiles_a_called_function`
+/// (Stage B): `sum-coords` calls the auto-generated `point::x`/`point::y`
+/// accessors, neither `compile`d in advance — `compile_function_rec` compiles
+/// each on demand (their bodies are the `Expr::FieldGet` accessors registered
+/// in `self.methods`) rather than erroring.
 #[test]
-fn compile_of_a_function_calling_an_uncompiled_user_method_is_a_clean_error() {
-    let err = run_with_compiler_and_prelude(
+fn compile_transitively_compiles_a_called_user_method() {
+    let v = run_with_compiler_and_prelude(
         r#"
         (defstruct point (x i64) (y i64))
-        (compile point::y)
         (defun sum-coords ((p point)) i64 (+ p::x p::y))
         (compile sum-coords)
+        (sum-coords (point::new 3 4))
         "#,
     )
-    .expect_err("expected compiling a caller of an uncompiled method to fail");
-    match err {
-        EvalError::Panic(msg) => {
-            assert!(msg.contains("point::x"), "message was: {}", msg);
-            assert!(msg.contains("must be"), "message was: {}", msg);
-        }
-        other => panic!("expected a Panic, got {:?}", other),
-    }
+    .expect("transitive compile of the `point` accessors should succeed");
+    assert_eq!(v, RtValue::Int(7), "3 + 4 = 7, with `point::x`/`point::y` auto-compiled");
 }
 
 /// The other half of `Interp::compile_function`'s `Expr::Assoc`-target check:
@@ -2666,27 +2658,25 @@ fn compile_dispatches_less_on_a_primitive_receiver() {
     assert_eq!(v, RtValue::Bool(true));
 }
 
-/// `Interp::compile_function`'s up-front "must be `compile`d first" check
-/// now also covers a user method on a primitive receiver (formerly those
-/// targets were filtered out entirely and the caller compiled — only to
-/// panic later, or worse, inside `compile-assoc`): compiling a caller of a
-/// not-yet-compiled `i32::equals` names the exact missing method.
+/// A user method on a *primitive* receiver (the prelude's `impl Eq i32` ->
+/// `i32::equals`) is transitively compiled too (Stage B): `(compile run)`
+/// pulls in `i32::equals` on demand. `i32::equals`'s own body delegates to
+/// the native `=` (lowered in-place by `compile-assoc`, no further call), so
+/// the recursion bottoms out immediately. (A *builtin* method with no body —
+/// e.g. an `f64`/`char` builtin — still errors clearly; only methods with a
+/// real registered body are auto-compiled.)
 #[test]
-fn compile_of_a_caller_of_an_uncompiled_primitive_method_is_a_clean_error() {
-    let err = run_with_compiler_and_prelude(
+fn compile_transitively_compiles_a_called_primitive_receiver_method() {
+    let v = run_with_compiler_and_prelude(
         r#"
         (defun eq2 ((a i32) (b i32)) bool (equals a b))
-        (compile eq2)
+        (defun run () i64 (if (eq2 5 5) (if (eq2 5 6) 0 1) 0))
+        (compile run)
+        (run)
         "#,
     )
-    .expect_err("expected compiling a caller of an uncompiled i32::equals to fail");
-    match err {
-        EvalError::Panic(msg) => {
-            assert!(msg.contains("i32::equals"), "message was: {}", msg);
-            assert!(msg.contains("must be"), "message was: {}", msg);
-        }
-        other => panic!("expected a Panic, got {:?}", other),
-    }
+    .expect("transitive compile of `i32::equals` should succeed");
+    assert_eq!(v, RtValue::Int(1), "eq2(5,5) true and eq2(5,6) false, with `i32::equals` auto-compiled");
 }
 
 /// The `string` counterpart: `string::equals`'s body is `(equal self
@@ -3228,4 +3218,250 @@ fn compile_of_a_function_quoting_a_symbol_is_a_clean_error() {
     )
     .unwrap_err();
     assert!(matches!(err, EvalError::Panic(_)), "expected a Panic, got {:?}", err);
+}
+
+// ---- Stage A: `Vector<T>` builtin method compile (Iter-compile plan) --------
+//
+// `push`/`get`/`set`/`len` on a `Vector<T>` have no compiled `defmethod`
+// body; `ast_bridge::translate_vector_method` lowers them to a `vector-op`
+// node that `compiler.rs`'s `compile-vector-op` turns into
+// `rt_struct_push_field`/`rt_struct_field_get`/`rt_struct_field_set`/
+// `rt_struct_field_count`, tagging/untagging each element by its
+// `struct_field_kind` (`compile-tag-struct-field`/`compile-sexpr-field`) —
+// the same boxed-struct-boundary crossing `field-get`/`field-set` do, but
+// with a *runtime* index. These are the primitive layer every `Iter`
+// combinator over a `Vector` bottoms out in.
+
+/// `push` (grow) then `get` (read back) an `i64` element — kind `1`, so the
+/// element is `shl 3`-tagged on the way in and `ashr 3`-untagged on the way
+/// out.
+#[test]
+fn compile_dispatches_vector_push_and_get_of_an_i64_element_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun f () i64
+          (let ((v (the Vector<i64> (Vector::new))))
+            (push v 10)
+            (push v 20)
+            (push v 30)
+            (get v 1)))
+        (compile f)
+        (f)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(20), "the element pushed at index 1");
+}
+
+/// `set` overwrites an element in place (`rt_struct_field_set` with a
+/// tagged element), observable through a later `get`.
+#[test]
+fn compile_dispatches_vector_set_in_place_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun f () i64
+          (let ((v (the Vector<i64> (Vector::new))))
+            (push v 10)
+            (push v 20)
+            (set v 0 99)
+            (get v 0)))
+        (compile f)
+        (f)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(99), "index 0 was overwritten from 10 to 99");
+}
+
+/// `len` (`rt_struct_field_count`, one of the two new primitives) returns the
+/// element count as a raw `i64` — `push` grew the vector from 0 to 3.
+#[test]
+fn compile_dispatches_vector_len_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun f () i64
+          (let ((v (the Vector<i64> (Vector::new))))
+            (push v 10)
+            (push v 20)
+            (push v 30)
+            (as i64 (len v))))
+        (compile f)
+        (f)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(3), "three pushes -> length 3");
+}
+
+/// A passthrough (kind `6`) element type: a `Vector<string>` stores each
+/// element as an already-tagged `Sexpr`, so `push`/`get` neither tag nor
+/// untag (`compile-tag-struct-field`/`compile-sexpr-field`'s kind-`6`
+/// identity arm) — `get` hands back a real `Str` the compiled `length`
+/// (`rt_str_length`) can measure.
+#[test]
+fn compile_dispatches_vector_get_of_a_passthrough_string_element_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun f () i64
+          (let ((v (the Vector<string> (Vector::new))))
+            (push v "hi")
+            (push v "world")
+            (as i64 (length (get v 1)))))
+        (compile f)
+        (f)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(5), "\"world\" has 5 characters");
+}
+
+/// The JIT result of a function summing a `Vector<i64>` by index must match
+/// the interpreter's result for the same source — the end-to-end agreement
+/// check every other compile test pairs with its representation proof.
+#[test]
+fn compile_of_a_vector_summing_function_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun build-and-sum () i64
+          (let ((v (the Vector<i64> (Vector::new))))
+            (push v 3)
+            (push v 4)
+            (push v 5)
+            (+ (+ (get v 0) (get v 1)) (get v 2))))
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(build-and-sum)"))
+        .expect("interpreted eval failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile build-and-sum)\n(build-and-sum)"))
+        .expect("compiled eval failed");
+    assert_eq!(interpreted, RtValue::Int(12), "3 + 4 + 5 = 12, interpreted");
+    assert_eq!(compiled, interpreted, "JIT result matches the interpreter");
+}
+
+// ---- Stage B: `Iter` combinators over `Vector<T>` compile end-to-end -------
+//
+// `(compile fn)` now transitively compiles the monomorphized method/function
+// instantiations `fn` calls (`Interp::compile_function_rec`), so a caller that
+// iterates a `Vector` — `doiter`, or a prelude combinator like `map`/`member`
+// — pulls in `vector::iter <T>` / `vector-iter::next <T>` (and any `Eq`
+// instance the combinator needs) automatically, even though those
+// whitespace-mangled names can't be `(compile ...)`d by hand. This is the
+// real proof that "an `Iter` over a `Vector` compiles": closures + `Option`
+// construct/match + user-method dispatch + the Stage A `vector-op` primitives
+// all composed together.
+
+/// The minimal `Iter` end-to-end case: a `doiter` loop (expands to
+/// `while-let` + `next` on a `vector-iter<i64>`) summing a `Vector<i64>`,
+/// compiled and run natively — its result must match the interpreter's.
+#[test]
+fn compile_transitively_compiles_a_doiter_loop_over_a_vector() {
+    let src = r#"
+        (defun sum-vec ((v Vector<i64>)) i64
+          (let ((total (the i64 0)))
+            (doiter (x (iter v))
+              (setf total (+ total x)))
+            total))
+        (defun run () i64
+          (let ((v (the Vector<i64> (Vector::new))))
+            (push v 3) (push v 4) (push v 5)
+            (sum-vec v)))
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(run)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile sum-vec)\n(compile run)\n(run)")).expect("compiled failed");
+    assert_eq!(interpreted, RtValue::Int(12), "3 + 4 + 5 = 12 (interpreted)");
+    assert_eq!(compiled, interpreted, "the transitively-compiled doiter loop agrees with the interpreter");
+}
+
+/// The `member` combinator (`where (Iter I (Item A)) (Eq A)`) over a
+/// `Vector<i32>`: transitively compiling it drags in `vector-iter::next`
+/// *and* the element type's `Eq` instance (`i32::equals`). Returns the
+/// membership result via an `if` so the JIT boundary sees a plain `i64`.
+#[test]
+fn compile_transitively_compiles_the_member_combinator_over_a_vector() {
+    let src = r#"
+        (defun has-it ((v Vector<i32>) (needle i32)) i64
+          (if (member needle (iter v)) 1 0))
+        (defun run () i64
+          (let ((v (the Vector<i32> (Vector::new))))
+            (push v 10) (push v 20) (push v 30)
+            (+ (* (the i64 10) (has-it v 20)) (has-it v 99))))
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(run)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile has-it)\n(compile run)\n(run)")).expect("compiled failed");
+    assert_eq!(interpreted, RtValue::Int(10), "20 is a member (10), 99 is not (0) -> 10 (interpreted)");
+    assert_eq!(compiled, interpreted, "the transitively-compiled member combinator agrees with the interpreter");
+}
+
+/// The `map` combinator (builds a fresh `Vector<U>`, taking a closure `f`):
+/// transitively compiling `double-all` drags in `vector-iter::next` and
+/// exercises `map`'s own `push`/`Vector::new` (`vector-op`) plus a compiled
+/// closure argument. The result vector is read back by index.
+#[test]
+fn compile_transitively_compiles_the_map_combinator_over_a_vector() {
+    let src = r#"
+        (defun double-all ((v Vector<i64>)) i64
+          (let ((out (map (iter v) (lambda ((x i64)) i64 (* x 2)))))
+            (+ (get out 0) (get out 2))))
+        (defun run () i64
+          (let ((v (the Vector<i64> (Vector::new))))
+            (push v 1) (push v 2) (push v 3)
+            (double-all v)))
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(run)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile double-all)\n(compile run)\n(run)")).expect("compiled failed");
+    assert_eq!(interpreted, RtValue::Int(8), "doubled [2,4,6], out[0]+out[2] = 2+6 = 8 (interpreted)");
+    assert_eq!(compiled, interpreted, "the transitively-compiled map combinator agrees with the interpreter");
+}
+
+// ---- Stage D: `Iter` over a `HashTable<K,V>` compiles end-to-end -----------
+//
+// `HashTable<K,V>` iteration bottoms out in Stage A's `Vector` primitives:
+// `hashtable-iter<K,V>` walks a `Vector<cons-cell<K,V>>` *snapshot* that
+// `HashTable::iter` builds via `entries`. With Stage C's `rt_hashtable_*`
+// primitives (`new`/`set`/`entries`/...) and Stage B's transitive driver,
+// `(compile fn)` for a function that builds, populates, and iterates a map
+// compiles the whole chain (`hashtable::iter`, `hashtable-iter::next`,
+// `cons-cell` accessors) automatically.
+
+/// Build + populate + iterate a `HashTable<i64,i64>`, summing its values —
+/// the full HashTable-iteration chain, compiled and agreeing with the
+/// interpreter. Exercises `new`/`set`/`entries` (`hashtable-op`), the
+/// transitively-compiled `iter`/`next` methods, and `cons-cell`'s `cdr`.
+#[test]
+fn compile_transitively_compiles_iteration_over_a_hashtable() {
+    let src = r#"
+        (defun sum-values ((ht HashTable<i64,i64>)) i64
+          (let ((total (the i64 0)))
+            (doiter (e (iter ht))
+              (setf total (+ total (cdr e))))
+            total))
+        (defun run () i64
+          (let ((ht (the HashTable<i64,i64> (HashTable::new))))
+            (set ht 1 10)
+            (set ht 2 20)
+            (set ht 3 30)
+            (sum-values ht)))
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(run)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile sum-values)\n(compile run)\n(run)")).expect("compiled failed");
+    assert_eq!(interpreted, RtValue::Int(60), "10 + 20 + 30 = 60 (interpreted)");
+    assert_eq!(compiled, interpreted, "the transitively-compiled HashTable iteration agrees with the interpreter");
+}
+
+/// `count` (`rt_hashtable_count`) and `keys` (a fresh `Vector<K>` walked by
+/// `len`) over a compiled `HashTable`, confirming the non-`entries`
+/// enumerators lower correctly too.
+#[test]
+fn compile_dispatches_hashtable_count_and_keys_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun run () i64
+          (let ((ht (the HashTable<i64,i64> (HashTable::new))))
+            (set ht 1 10)
+            (set ht 2 20)
+            (+ (* (the i64 100) (as i64 (count ht))) (as i64 (len (keys ht))))))
+        (compile run)
+        (run)
+        "#,
+    )
+    .expect("compiled failed");
+    assert_eq!(v, RtValue::Int(202), "count 2 (*100) + keys length 2 = 202");
 }

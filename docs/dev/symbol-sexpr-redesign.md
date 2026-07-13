@@ -385,12 +385,13 @@ Phase 6.5 で将来課題とした2件（cons-cell への再帰的 Eq/Ord impl�
   （heap 確保＋call 中 root 保護）変換を追加。
 
 **残る将来課題（Phase 6.6 対象外）:**
-- ジェネリック本体そのもの（`member` 等の `Iter` コンビネータ）の compile: `Expr::TraitCall` が
-  ast_bridge で `unsupported` になる以前に、本体が呼ぶ `Vector<T>::get/len/push` 等の Rust builtin
-  メソッドに compile 実装が無い（equals とは無関係の先行ブロッカー）。
-- 空白入りマングル名の特殊化メソッド（`cons-cell::equals <i32,i32>`）は `(compile ...)` が
-  symbol/path しか受けないためソースから名指しできない（reader が空白で区切る）。
-- `equalp` 系（case-insensitive）の compile、`f64` レシーバのメソッド compile。
+- ~~ジェネリック本体そのもの（`member` 等の `Iter` コンビネータ）の compile~~ **→ 2026-07-13 解消**
+  （branch `feature/iter-compile`、[iter-compile-plan.md](iter-compile-plan.md)）。`Vector<T>::get/len/
+  push` 等は `vector-op`/`hashtable-op` ノード + `rt_struct_*`/`rt_hashtable_*` で compile 対応。
+  空白入りマングル名で名指しできない問題は `Interp::compile_function_rec` の**推移的自動 compile**で
+  解決（`(compile fn)` が呼ぶ単型化インスタンスを自動的に辿って compile）。
+- `equalp` 系（case-insensitive）の compile、`f64` レシーバのメソッド compile（[[typelisp-todo-md-staleness]]
+  の残タスク一覧参照）。`HashTable::get`/`remove`（`Option` 返し）の compile も未対応。
 
 テスト: trait_test（defmethod 直書き where・再帰 impl・境界エラー3本）、seq_ops_test（ペアの
 equals/less/member/sort/ネスト/Eq 未実装エラー6本）、compile_test（i32/string/char の equals/less

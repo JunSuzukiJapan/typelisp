@@ -1335,8 +1335,39 @@ impl Interp {
     /// (`f64`/`char` builtins — still out of scope) panics clearly right
     /// here rather than deep inside `compile-assoc`'s own `get-function`.
     fn compile_function(&self, heap: &mut Heap, name: &str) -> Result<RtValue, EvalError> {
+        let mut in_progress = std::collections::HashSet::new();
+        self.compile_function_rec(heap, name, &mut in_progress)
+    }
+
+    /// The transitive worker behind [`Self::compile_function`]: compiles
+    /// `name`, first recursively compiling any concrete function/method
+    /// *instantiation* its body calls that isn't compiled yet. This is what
+    /// lets a caller `(compile sum-vec)` pull in the monomorphized
+    /// `vector::iter <i64>` / `vector-iter::next <i64>` (and, transitively,
+    /// `map`/`member`/... over a concrete element type) an `Iter` combinator
+    /// bottoms out in — those specializations have real bodies in
+    /// [`Self::fns`]/[`Self::methods`] (`Checker::specialize_defun`) but
+    /// whitespace-mangled names (`"iter <i64>"`) that `(compile ...)` can't
+    /// name directly. `in_progress` guards against a compile-time cycle
+    /// (mutual recursion across *separate* compiled functions, which each
+    /// throwaway module can't forward-declare the way self-recursion is —
+    /// reported as a clear error rather than an infinite descent); a value
+    /// already in [`Self::compiled`]/[`Self::compiled_methods`] (a diamond in
+    /// the call graph — two callers sharing one callee) short-circuits.
+    fn compile_function_rec(
+        &self,
+        heap: &mut Heap,
+        name: &str,
+        in_progress: &mut std::collections::HashSet<String>,
+    ) -> Result<RtValue, EvalError> {
         let path = Path::root(name);
         let method_key = self.method_key(name);
+        match &method_key {
+            Some(key) if self.compiled_methods.borrow().contains_key(key) => return Ok(RtValue::Bool(true)),
+            None if self.compiled.borrow().contains_key(&path) => return Ok(RtValue::Bool(true)),
+            _ => {}
+        }
+        in_progress.insert(name.to_string());
         let (_, body) = self.compiled_fn_body(name)?;
         let call_targets: Vec<Path> = crate::compile::ast_bridge::collect_call_targets(&body)
             .into_iter()
@@ -1344,11 +1375,14 @@ impl Interp {
             .collect();
         for target in &call_targets {
             if !self.compiled.borrow().contains_key(target) {
-                return Err(EvalError::Panic(format!(
-                    "compile: \"{}\" calls \"{}\", which must be `compile`d first",
-                    name,
-                    target.local()
-                )));
+                let tname = target.local().to_string();
+                if in_progress.contains(&tname) {
+                    return Err(EvalError::Panic(format!(
+                        "compile: mutual recursion between \"{}\" and \"{}\" across separate compiled functions is not supported",
+                        name, tname
+                    )));
+                }
+                self.compile_function_rec(heap, &tname, in_progress)?;
             }
         }
 
@@ -1356,6 +1390,27 @@ impl Interp {
             .into_iter()
             .filter(|key| method_key.as_ref() != Some(key))
             .filter(|key| {
+                // `Vector<T>`'s field-backed builtin methods (`new`/`get`/
+                // `set`/`len`/`push`) are lowered to a `vector-op` node
+                // (`ast_bridge::translate_vector_method` -> `rt_struct_*`),
+                // not a method call, so — like the native primitive methods
+                // below — they are never a real call target. `vector::iter`
+                // is deliberately excluded from this list: it is a genuine
+                // prelude `defmethod` (`vector-iter::new`) and must be
+                // `compile`d like any other method.
+                if key.0.local() == "vector" && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push") {
+                    return false;
+                }
+                // `HashTable<K,V>`'s builtin methods lowered to a `hashtable-op`
+                // node (`ast_bridge::translate_hashtable_method`) are likewise
+                // never a real call target. `get`/`remove` (Option-returning,
+                // still on the `assoc` path) and `iter` (a real `defmethod`)
+                // are deliberately absent so they're validated normally.
+                if key.0.local() == "hashtable"
+                    && matches!(key.1.as_str(), "new" | "set" | "count" | "clear" | "keys" | "values" | "entries")
+                {
+                    return false;
+                }
                 // A user-registered method is a real call target even on a
                 // primitive receiver (`i32::equals`); only the natively
                 // lowered `i64`/`i32`/`char`/`string` builtins (`+`, `<`,
@@ -1380,11 +1435,19 @@ impl Interp {
                 )));
             }
             if !self.compiled_methods.borrow().contains_key(&key) {
-                return Err(EvalError::Panic(format!(
-                    "compile: \"{}\" calls \"{}\", which must be `compile`d first",
-                    name,
-                    method_link_name(type_name, method)
-                )));
+                // A user-defined method's own body is registered in
+                // `self.methods` (a specialization included), so compile it
+                // transitively — the caller can't name a whitespace-mangled
+                // instantiation by hand. `type_name::method` is the exact
+                // spelling `compiled_fn_body`/`method_key` resolve back.
+                let mname = format!("{}::{}", type_name.local(), method);
+                if in_progress.contains(&mname) {
+                    return Err(EvalError::Panic(format!(
+                        "compile: mutual recursion between \"{}\" and \"{}\" across separate compiled functions is not supported",
+                        name, mname
+                    )));
+                }
+                self.compile_function_rec(heap, &mname, in_progress)?;
             }
         }
 
@@ -2739,12 +2802,14 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// call these to build/read/write a `BoxedObj::Struct` — the same
 /// `BoxedObj::Struct` mem/rt-layer plumbing Stage 1 already exercised in
 /// isolation, wired to the compiler for the first time here.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 28] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 37] {
     use crate::compile::runtime::{
-        rt_box_kind, rt_car, rt_cdr, rt_cons, rt_float_new, rt_float_value, rt_global_get, rt_global_new, rt_global_set, rt_match_fail,
-        rt_panic, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr,
-        rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_get,
-        rt_struct_field_set, rt_struct_new, rt_truncate_sexpr_roots,
+        rt_box_kind, rt_car, rt_cdr, rt_cons, rt_float_new, rt_float_value, rt_global_get, rt_global_new, rt_global_set,
+        rt_hashtable_clear, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_keys, rt_hashtable_new, rt_hashtable_set,
+        rt_hashtable_values, rt_match_fail, rt_panic, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root,
+        rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_lt, rt_str_new,
+        rt_str_ref, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_struct_push_field,
+        rt_truncate_sexpr_roots,
     };
     [
         ("rt_car", rt_car as usize),
@@ -2772,6 +2837,15 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 28] {
         ("rt_struct_new", rt_struct_new as usize),
         ("rt_struct_field_get", rt_struct_field_get as usize),
         ("rt_struct_field_set", rt_struct_field_set as usize),
+        ("rt_struct_field_count", rt_struct_field_count as usize),
+        ("rt_struct_push_field", rt_struct_push_field as usize),
+        ("rt_hashtable_new", rt_hashtable_new as usize),
+        ("rt_hashtable_set", rt_hashtable_set as usize),
+        ("rt_hashtable_count", rt_hashtable_count as usize),
+        ("rt_hashtable_clear", rt_hashtable_clear as usize),
+        ("rt_hashtable_keys", rt_hashtable_keys as usize),
+        ("rt_hashtable_values", rt_hashtable_values as usize),
+        ("rt_hashtable_entries", rt_hashtable_entries as usize),
         ("rt_global_new", rt_global_new as usize),
         ("rt_global_get", rt_global_get as usize),
         ("rt_global_set", rt_global_set as usize),
