@@ -3587,3 +3587,48 @@ fn compile_dispatches_hashtable_get_of_a_passthrough_string_value_to_native_code
     .expect("compiled failed");
     assert_eq!(v, RtValue::Int(5), "\"hello\" has 5 characters");
 }
+
+// ---- `equalp` (ASCII case-insensitive) on char/string, compiled ------------
+//
+// Unlike `eq`/`equal` (a compiled `char`'s raw code-point `icmp`, a compiled
+// string's `rt_str_eq` content compare), `equalp` folds case and so has no
+// in-place lowering — `compile-assoc`'s char/string branches call the
+// dedicated `rt_char_equalp`/`rt_str_equalp` runtime helpers.
+
+/// `char::equalp` — `#\A` and `#\a` are `equalp` but not `equal`, over
+/// compiled code. A `bool` result crosses the JIT boundary.
+#[test]
+fn compile_dispatches_char_equalp() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun same-letter ((a char) (b char)) i32
+          (if (equalp a b) (if (equal a b) 2 1) 0))
+        (compile same-letter)
+        (+ (* 100 (same-letter #\A #\a))
+           (+ (* 10 (same-letter #\A #\A))
+              (same-letter #\A #\b)))
+        "#,
+    )
+    .expect("eval failed");
+    // A vs a: equalp but not equal -> 1 (*100); A vs A: equal -> 2 (*10); A vs b: neither -> 0
+    assert_eq!(v, RtValue::Int(120));
+}
+
+/// `string::equalp` — `"ABC"`/`"abc"` are `equalp` but not `equal`, over
+/// compiled code (`rt_str_equalp`).
+#[test]
+fn compile_dispatches_string_equalp() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun same-word ((a string) (b string)) i32
+          (if (equalp a b) (if (equal a b) 2 1) 0))
+        (compile same-word)
+        (+ (* 100 (same-word "ABC" "abc"))
+           (+ (* 10 (same-word "abc" "abc"))
+              (same-word "abc" "abd")))
+        "#,
+    )
+    .expect("eval failed");
+    // ABC vs abc: equalp not equal -> 1 (*100); abc vs abc: equal -> 2 (*10); abc vs abd: neither -> 0
+    assert_eq!(v, RtValue::Int(120));
+}

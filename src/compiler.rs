@@ -635,12 +635,13 @@ pub const SOURCE: &str = r#"
   (if (equal method "ref") true
   (if (equal method "eq") true
   (if (equal method "equal") true
+  (if (equal method "equalp") true
   (if (equal method "lt") true
   (if (equal method "<") true
   (if (equal method "<=") true
   (if (equal method ">") true
   (if (equal method ">=") true
-  (equal method "append")))))))))))
+  (equal method "append"))))))))))))
 
 ;; `char`'s natively-compilable methods: a compiled `char` is a raw `i64`
 ;; code point, so the content comparisons lower to the same integer `icmp`s
@@ -650,12 +651,13 @@ pub const SOURCE: &str = r#"
   (if (equal method "eq") true
   (if (equal method "eql") true
   (if (equal method "equal") true
+  (if (equal method "equalp") true
   (if (equal method "lt") true
   (if (equal method "<") true
   (if (equal method "<=") true
   (if (equal method ">") true
   (if (equal method ">=") true
-  false)))))))))
+  false))))))))))
 
 ;; Emits `rt_str_lt(x, y)` (strict lexicographic less-than, an `i64` 0/1). The
 ;; four string comparison operators all derive from it: `<`=lt(a,b),
@@ -1367,6 +1369,14 @@ pub const SOURCE: &str = r#"
                                                      (store-arg builder args-ptr 0 a)
                                                      (store-arg builder args-ptr 1 b)
                                                      (build-call builder (get-function m "rt_str_eq") args-ptr 2))
+                                                   ;; `equalp`: ASCII case-insensitive content equality
+                                                   ;; (`rt_str_equalp`) — no in-place lowering, unlike
+                                                   ;; `eq`/`equal`'s plain content compare above.
+                                                   (if (equal method "equalp")
+                                                       (let ((args-ptr (alloca-args builder 2)))
+                                                         (store-arg builder args-ptr 0 a)
+                                                         (store-arg builder args-ptr 1 b)
+                                                         (build-call builder (get-function m "rt_str_equalp") args-ptr 2))
                                                    ;; `<`/`>`/`<=`/`>=` all derive from `rt_str_lt`
                                                    ;; (`str-lt-call`); `not` is `(icmp-eq v 0)`.
                                                    (if (if (equal method "lt") true (equal method "<"))
@@ -1382,7 +1392,7 @@ pub const SOURCE: &str = r#"
                                                                          (store-arg builder args-ptr 0 a)
                                                                          (store-arg builder args-ptr 1 b)
                                                                          (build-call builder (get-function m "rt_str_append") args-ptr 2))
-                                                                       (panic (append "compile-assoc: unsupported str method " method))))))))))))
+                                                                       (panic (append "compile-assoc: unsupported str method " method)))))))))))))
                                    (if (if (if (equal type-name "i64") true (equal type-name "i32")) (int-native-method? method) false)
                                        (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
                                          (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
@@ -1410,8 +1420,16 @@ pub const SOURCE: &str = r#"
                                            ;; compiled code, so the comparisons lower to the
                                            ;; same integer `icmp`s the int branch uses —
                                            ;; `lt`/`<`/`<=`/`>`/`>=` and `eq`/`eql`/`equal` → eq.
+                                           ;; `equalp` alone folds case, so it calls the
+                                           ;; `rt_char_equalp` runtime helper (raw code-point
+                                           ;; args, matching this branch's own operands).
                                            (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
                                              (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+                                               (if (equal method "equalp")
+                                                   (let ((args-ptr (alloca-args builder 2)))
+                                                     (store-arg builder args-ptr 0 a)
+                                                     (store-arg builder args-ptr 1 b2)
+                                                     (build-call builder (get-function m "rt_char_equalp") args-ptr 2))
                                                (if (if (equal method "lt") true (equal method "<"))
                                                    (build-icmp-lt builder a b2)
                                                    (if (equal method "<=")
@@ -1420,7 +1438,7 @@ pub const SOURCE: &str = r#"
                                                            (build-icmp-gt builder a b2)
                                                            (if (equal method ">=")
                                                                (build-icmp-ge builder a b2)
-                                                               (build-icmp-eq builder a b2)))))))
+                                                               (build-icmp-eq builder a b2))))))))
                                            (compile-assoc-user builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name method rest))))))))
                        ;; The user-defined-method leg of `compile-assoc`'s
                        ;; dispatch (see its doc comment): call the callee

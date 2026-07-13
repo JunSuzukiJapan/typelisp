@@ -88,6 +88,14 @@ truncate設計（カーソル以降を切り捨て）が非catchall `match`ア�
 を`compile-if`と同型のalloca+分岐+merge（phiビルトインなし）で呼び分け。詳細は
 [iter-compile-plan.md](iter-compile-plan.md)。
 
+その前に完了: **char/string の `equalp`（ASCII大文字小文字無視）の compile**（2026-07-13）——
+`eq`/`equal`（生コードポイントの`icmp`/`rt_str_eq`）と違い`equalp`はcase-foldingするため単一命令に
+できない。新設`rt_char_equalp`（生i64コードポイント2つ）/`rt_str_equalp`を`compile-assoc`の
+char/string分岐から呼ぶ（`char-native-method?`/`string-native-method?`にも追加）。テスト:
+compile_test 2件 + typelisp-rt 2件。**残る compile 未対応**: `f64`レシーバのメソッド——浮動小数点
+バックエンド自体の新設（LLVM `double`型・`bitcast`・`fadd`/`fcmp`系ビルトイン、transcendentalはlibm）
+が必要な独立した大きめタスク（compiled `f64`は生bitパターンをi64埋め込みなので演算はbitcastで挟む）。
+
 その前に完了: **`Panic`/`MethodRef`/`Quote`の compile 対応（残っていた`unsupported`3件を解消）**
 （2026-07-12）——`ast_bridge.rs`の`Expr::Panic`/`Expr::MethodRef`/`Expr::Quote`アームを実装。
 - **`Panic`**: `(panic msg)` -> `(panic msg-form)`。`msg`は常に`Str`型なので`kind`分岐は不要、

@@ -1216,6 +1216,62 @@ pub unsafe extern "C" fn rt_str_lt(args: *const i64, argc: u32) -> i64 {
     i64::from(heap.string(a) < heap.string(b))
 }
 
+/// `str::equalp` for compiled code — ASCII case-insensitive content equality
+/// (`&str::eq_ignore_ascii_case`), matching the interpreter's own
+/// `string_content_eqp`. Returns a bare `0`/`1` like [`rt_str_eq`]. Unlike
+/// `eq`/`equal` (plain content comparison, `rt_str_eq`), `equalp` has no
+/// single-instruction lowering — the compiler can't fold case in place — so
+/// it needs this dedicated runtime helper.
+///
+/// # Safety
+///
+/// Same as [`rt_str_eq`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_str_equalp(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_str_equalp: expected 2 arguments");
+    }
+    let a = match decode(*args) {
+        Value::Str(id) => id,
+        _ => fatal("rt_str_equalp: first argument is not a Str"),
+    };
+    let b = match decode(*args.add(1)) {
+        Value::Str(id) => id,
+        _ => fatal("rt_str_equalp: second argument is not a Str"),
+    };
+    let heap = active_heap();
+    i64::from(heap.string(a).eq_ignore_ascii_case(heap.string(b)))
+}
+
+/// `char::equalp` for compiled code — ASCII case-insensitive equality
+/// (`char::eq_ignore_ascii_case`), matching the interpreter's own `char_eqp`.
+/// Unlike a compiled `char`'s `eq`/`eql`/`equal`/`<`/... (raw `i64` code-point
+/// `icmp`s, lowered in place by `compile-assoc`), `equalp` folds case and so
+/// has no single-instruction form. `args[0]`/`args[1]` are the *raw* (untagged)
+/// `i64` Unicode scalar values a compiled `char` is represented as — not
+/// tagged `Sexpr`s — matching `compile-assoc`'s char branch, which compiles
+/// its operands to bare code points. Returns a bare `0`/`1`.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+/// No `Heap` is needed (both operands are immediates).
+#[no_mangle]
+pub unsafe extern "C" fn rt_char_equalp(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_char_equalp: expected 2 arguments");
+    }
+    let a = *args;
+    let b = *args.add(1);
+    match (char::from_u32(a as u32), char::from_u32(b as u32)) {
+        (Some(x), Some(y)) => i64::from(x.eq_ignore_ascii_case(&y)),
+        // A compiled `char` always holds a valid scalar value; a mismatch here
+        // would be an internal invariant break, but two non-`char` bit
+        // patterns can still only be "equalp" if bit-identical.
+        _ => i64::from(a == b),
+    }
+}
+
 /// `str::append` for compiled code — concatenates the content of
 /// `args[0]`/`args[1]` into a freshly allocated string, matching the
 /// interpreter's own `string_append`. Returns the tagged form, exactly like
@@ -1372,10 +1428,10 @@ mod tests {
     use super::{
         active_heap, decode, encode, reset_global_table, rt_car, rt_cdr, rt_cons, rt_global_get, rt_global_new, rt_global_set,
         rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count,
-        rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref,
-        rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw, rt_hashtable_keys, rt_hashtable_new,
-        rt_hashtable_remove_raw, rt_hashtable_set, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set, rt_struct_new,
-        rt_struct_push_field, set_active_heap,
+        rt_char_equalp, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_equalp, rt_str_length, rt_str_lt,
+        rt_str_new, rt_str_ref, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw,
+        rt_hashtable_keys, rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_struct_field_count, rt_struct_field_get,
+        rt_struct_field_set, rt_struct_new, rt_struct_push_field, set_active_heap,
     };
 
     #[test]
@@ -1741,6 +1797,31 @@ mod tests {
         let c = make_str("bye");
         assert_eq!(unsafe { rt_str_eq([a, b].as_ptr(), 2) }, 1, "separately allocated, equal content");
         assert_eq!(unsafe { rt_str_eq([a, c].as_ptr(), 2) }, 0);
+    }
+
+    #[test]
+    fn rt_str_equalp_is_ascii_case_insensitive() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let a = make_str("Hello");
+        let b = make_str("hello");
+        let c = make_str("HELLO");
+        let d = make_str("world");
+        assert_eq!(unsafe { rt_str_equalp([a, b].as_ptr(), 2) }, 1, "differ only in case");
+        assert_eq!(unsafe { rt_str_equalp([a, c].as_ptr(), 2) }, 1);
+        assert_eq!(unsafe { rt_str_equalp([a, d].as_ptr(), 2) }, 0);
+        assert_eq!(unsafe { rt_str_eq([a, b].as_ptr(), 2) }, 0, "plain `eq` still distinguishes case");
+    }
+
+    #[test]
+    fn rt_char_equalp_is_ascii_case_insensitive() {
+        // `char` args are raw code points, not tagged Sexprs — no active heap
+        // is needed.
+        assert_eq!(unsafe { rt_char_equalp(['A' as i64, 'a' as i64].as_ptr(), 2) }, 1, "A equalp a");
+        assert_eq!(unsafe { rt_char_equalp(['A' as i64, 'A' as i64].as_ptr(), 2) }, 1);
+        assert_eq!(unsafe { rt_char_equalp(['A' as i64, 'b' as i64].as_ptr(), 2) }, 0);
+        assert_eq!(unsafe { rt_char_equalp(['1' as i64, '1' as i64].as_ptr(), 2) }, 1, "non-letters compare by value");
     }
 
     #[test]

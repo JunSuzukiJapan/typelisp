@@ -390,8 +390,13 @@ Phase 6.5 で将来課題とした2件（cons-cell への再帰的 Eq/Ord impl�
   push` 等は `vector-op`/`hashtable-op` ノード + `rt_struct_*`/`rt_hashtable_*` で compile 対応。
   空白入りマングル名で名指しできない問題は `Interp::compile_function_rec` の**推移的自動 compile**で
   解決（`(compile fn)` が呼ぶ単型化インスタンスを自動的に辿って compile）。
-- `equalp` 系（case-insensitive）の compile、`f64` レシーバのメソッド compile（[[typelisp-todo-md-staleness]]
-  の残タスク一覧参照）。`HashTable::get`/`remove`（`Option` 返し）の compile も未対応。
+- ~~`equalp` 系（case-insensitive）の compile~~ **→ 2026-07-13 解消**（char/string の `equalp` を
+  `rt_char_equalp`/`rt_str_equalp` で対応、`compile-assoc` の char/string 分岐 + `char-native-method?`/
+  `string-native-method?` に追加）。~~`HashTable::get`/`remove`（`Option` 返し）~~ も解消（上記参照）。
+- **残**: `f64` レシーバのメソッド compile。これは浮動小数点バックエンド自体の新設（LLVM `double`
+  型・`bitcast`・`fadd`/`fsub`/`fmul`/`fdiv`/`fcmp` ビルトイン、transcendental は libm）が必要な
+  独立した大きめタスク（compiled `f64` は生の bit パターンを i64 に埋め込む表現なので、演算は
+  bitcast→float op→bitcast で挟む）。
 
 テスト: trait_test（defmethod 直書き where・再帰 impl・境界エラー3本）、seq_ops_test（ペアの
 equals/less/member/sort/ネスト/Eq 未実装エラー6本）、compile_test（i32/string/char の equals/less
