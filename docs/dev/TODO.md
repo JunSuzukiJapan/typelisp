@@ -82,9 +82,11 @@ truncate設計（カーソル以降を切り捨て）が非catchall `match`ア�
 プリミティブ層（`vector-op`/`hashtable-op` ノード + `rt_struct_field_count`/`rt_struct_push_field`/
 `rt_hashtable_*` 群、要素型 kind によるタグ/デコード）、(2) `Interp::compile_function_rec`——
 `(compile fn)` が呼ぶ単型化インスタンス（`vector::iter <i64>` 等、空白マングル名で名指し不可）を
-推移的に自動 compile。詳細は [iter-compile-plan.md](iter-compile-plan.md)。
-**残る意図的な非対応**: `HashTable::get`/`remove`（`Option` 返しの compiled sum-ADT box 橋渡しは
-反復とは別問題）。
+推移的に自動 compile。当初「反復とは別問題」として対象外にしていた `HashTable::get`/`remove`
+（`Option` 返し）も同日中に追加解消——実行時の found/not-found 結果で `Some`/`None` を組み立てる
+ため`compile-construct-box`をそのまま使えず、新設`rt_hashtable_contains`/`_get_raw`/`_remove_raw`
+を`compile-if`と同型のalloca+分岐+merge（phiビルトインなし）で呼び分け。詳細は
+[iter-compile-plan.md](iter-compile-plan.md)。
 
 その前に完了: **`Panic`/`MethodRef`/`Quote`の compile 対応（残っていた`unsupported`3件を解消）**
 （2026-07-12）——`ast_bridge.rs`の`Expr::Panic`/`Expr::MethodRef`/`Expr::Quote`アームを実装。

@@ -750,6 +750,89 @@ pub unsafe extern "C" fn rt_hashtable_entries(args: *const i64, argc: u32) -> i6
 }
 
 
+/// `(rt-hashtable-contains ht key)` for compiled code — a raw `i64` 0/1: does
+/// `key` (already tagged) exist in the map? `HashTable<K,V>::get`/`remove`'s
+/// primitive (compiled): since a `mem::Value`'s tag space is fully used by
+/// real values, there is no free bit pattern to signal "absent" from a
+/// value-returning call alone, so `get`/`remove` are compiled as *two* calls
+/// — check here first, then [`rt_hashtable_get_raw`]/
+/// [`rt_hashtable_remove_raw`] only if this returned `1`. Safe (no race) in
+/// single-threaded compiled code: nothing between the two calls can remove
+/// the entry this one just confirmed present.
+///
+/// # Safety
+///
+/// `argc >= 2`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_contains(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_hashtable_contains: expected 2 arguments");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal("rt_hashtable_contains: first argument is not a boxed HashTable"),
+    };
+    let key = decode(*args.add(1));
+    if active_heap().hashtable_get(id, key).is_some() {
+        1
+    } else {
+        0
+    }
+}
+
+/// `(rt-hashtable-get-raw ht key)` — the tagged `Sexpr` value at `key`, for
+/// compiled code. Only ever called after [`rt_hashtable_contains`] confirmed
+/// `key` present; fatal if it turns out absent (an internal-invariant trap,
+/// the same convention every other `rt_*` bounds/shape violation here uses —
+/// the compiled caller's own `if` guard is responsible for never letting that
+/// happen). The caller (`compiler.rs`'s `compile-hashtable-op`) still decodes
+/// the raw tagged result per `V`'s `struct_field_kind` before storing it into
+/// a freshly built `Option<V>` box (`compile-sexpr-field`, the same decode a
+/// `BoxedObj::Struct` field read already uses).
+///
+/// # Safety
+///
+/// `argc >= 2`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_get_raw(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_hashtable_get_raw: expected 2 arguments");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal("rt_hashtable_get_raw: first argument is not a boxed HashTable"),
+    };
+    let key = decode(*args.add(1));
+    match active_heap().hashtable_get(id, key) {
+        Some(v) => encode(v),
+        None => fatal("rt_hashtable_get_raw: key not present (caller must check rt_hashtable_contains first)"),
+    }
+}
+
+/// `(rt-hashtable-remove-raw ht key)` — like [`rt_hashtable_get_raw`], but
+/// also deletes the entry (`HashTable<K,V>::remove`'s primitive). Same
+/// "caller already checked [`rt_hashtable_contains`]" precondition.
+///
+/// # Safety
+///
+/// `argc >= 2`, `args[0]` a boxed `HashTable`; a `Heap` must be registered.
+#[no_mangle]
+pub unsafe extern "C" fn rt_hashtable_remove_raw(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_hashtable_remove_raw: expected 2 arguments");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal("rt_hashtable_remove_raw: first argument is not a boxed HashTable"),
+    };
+    let key = decode(*args.add(1));
+    match active_heap().hashtable_remove(id, key) {
+        Some(v) => encode(v),
+        None => fatal("rt_hashtable_remove_raw: key not present (caller must check rt_hashtable_contains first)"),
+    }
+}
+
+
 // ---- Stage 4: GC root safety -------------------------------------------
 
 /// Registers a `Sexpr`-typed value as a GC root for as long as it's live in
@@ -1290,8 +1373,9 @@ mod tests {
         active_heap, decode, encode, reset_global_table, rt_car, rt_cdr, rt_cons, rt_global_get, rt_global_new, rt_global_set,
         rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count,
         rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref,
-        rt_hashtable_count, rt_hashtable_entries, rt_hashtable_keys, rt_hashtable_new, rt_hashtable_set, rt_struct_field_count,
-        rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_struct_push_field, set_active_heap,
+        rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw, rt_hashtable_keys, rt_hashtable_new,
+        rt_hashtable_remove_raw, rt_hashtable_set, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set, rt_struct_new,
+        rt_struct_push_field, set_active_heap,
     };
 
     #[test]
@@ -1794,6 +1878,25 @@ mod tests {
             }
             other => panic!("expected a boxed vector, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn rt_hashtable_contains_get_raw_and_remove_raw_round_trip() {
+        let mut heap = Heap::with_capacity(64);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let ht = unsafe { rt_hashtable_new(std::ptr::null(), 0) };
+        let key = encode(Value::Int(7));
+        let val = encode(Value::Int(70));
+
+        assert_eq!(unsafe { rt_hashtable_contains([ht, key].as_ptr(), 2) }, 0, "not present yet");
+
+        unsafe { rt_hashtable_set([ht, key, val].as_ptr(), 3) };
+        assert_eq!(unsafe { rt_hashtable_contains([ht, key].as_ptr(), 2) }, 1, "present after set");
+        assert_eq!(decode(unsafe { rt_hashtable_get_raw([ht, key].as_ptr(), 2) }), Value::Int(70));
+
+        assert_eq!(decode(unsafe { rt_hashtable_remove_raw([ht, key].as_ptr(), 2) }), Value::Int(70), "remove returns the removed value");
+        assert_eq!(unsafe { rt_hashtable_contains([ht, key].as_ptr(), 2) }, 0, "gone after remove");
     }
 
     #[test]

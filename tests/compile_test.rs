@@ -3465,3 +3465,91 @@ fn compile_dispatches_hashtable_count_and_keys_to_native_code() {
     .expect("compiled failed");
     assert_eq!(v, RtValue::Int(202), "count 2 (*100) + keys length 2 = 202");
 }
+
+// ---- HashTable::get/remove compile (Option-returning) ----------------------
+//
+// Unlike an ordinary `Option::some`/`none` source call (a compile-time-known
+// variant, `compile-construct-box`), `HashTable<K,V>::get`/`remove` decide
+// which variant to build from a *runtime* lookup outcome — real control flow
+// (`rt_hashtable_contains` + a branch), not a static dispatch. See
+// `compile-hashtable-op`'s doc comment in `compiler.rs`.
+
+/// `get` on a present key returns `Some(v)`; unwrapped via `unwrap-or` to a
+/// plain `i64` result so the JIT boundary sees a scalar, not a raw `Option`
+/// box pointer (`Interp::call_compiled`'s own decode is exercised by
+/// `compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_code`
+/// already; this test focuses on the runtime found/not-found branch itself).
+#[test]
+fn compile_dispatches_hashtable_get_of_a_present_key_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun run () i64
+          (let ((ht (the HashTable<i64,i64> (HashTable::new))))
+            (set ht 1 100)
+            (unwrap-or (get ht 1) 0)))
+        (compile run)
+        (run)
+        "#,
+    )
+    .expect("compiled failed");
+    assert_eq!(v, RtValue::Int(100));
+}
+
+/// `get` on an absent key returns `None`, taking the runtime "not found"
+/// branch (`rt_hashtable_contains` returns `0`) — the `else` side of the
+/// `alloca`+branch+merge machinery `compile-hashtable-op`'s get/remove
+/// handling builds (mirroring `compile-if`'s own shape, no `phi` builtin).
+#[test]
+fn compile_dispatches_hashtable_get_of_an_absent_key_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun run () i64
+          (let ((ht (the HashTable<i64,i64> (HashTable::new))))
+            (set ht 1 100)
+            (unwrap-or (get ht (the i64 99)) -1)))
+        (compile run)
+        (run)
+        "#,
+    )
+    .expect("compiled failed");
+    assert_eq!(v, RtValue::Int(-1), "key 99 was never set, so `get` returns None -> the -1 default");
+}
+
+/// `remove` both returns the removed value (`Some(v)`) *and* deletes the
+/// entry — a subsequent `get` for the same key must then miss.
+#[test]
+fn compile_dispatches_hashtable_remove_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun run () i64
+          (let ((ht (the HashTable<i64,i64> (HashTable::new))))
+            (set ht 1 100)
+            (let ((removed (unwrap-or (remove ht 1) 0)))
+              (+ (* (the i64 1000) removed) (unwrap-or (get ht 1) 0)))))
+        (compile run)
+        (run)
+        "#,
+    )
+    .expect("compiled failed");
+    assert_eq!(v, RtValue::Int(100000), "removed value 100 (*1000) + 0 (gone after remove) = 100000");
+}
+
+/// `get`/`remove` over a `HashTable<i64,string>` — a passthrough (kind `6`)
+/// value type — exercises the `push-permanent-sexpr-root`ed branch of
+/// `compile-hashtable-op`'s decode (a heap-referencing `Str` surviving
+/// inside the never-GC-scanned `Option` box).
+#[test]
+fn compile_dispatches_hashtable_get_of_a_passthrough_string_value_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun run () i64
+          (let ((ht (the HashTable<i64,string> (HashTable::new))))
+            (set ht 1 "hello")
+            (as i64 (length (unwrap-or (get ht 1) "")))))
+        (compile run)
+        (run)
+        "#,
+    )
+    .expect("compiled failed");
+    assert_eq!(v, RtValue::Int(5), "\"hello\" has 5 characters");
+}

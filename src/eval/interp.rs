@@ -1403,11 +1403,11 @@ impl Interp {
                 }
                 // `HashTable<K,V>`'s builtin methods lowered to a `hashtable-op`
                 // node (`ast_bridge::translate_hashtable_method`) are likewise
-                // never a real call target. `get`/`remove` (Option-returning,
-                // still on the `assoc` path) and `iter` (a real `defmethod`)
-                // are deliberately absent so they're validated normally.
+                // never a real call target. `iter` (a real `defmethod`) is
+                // deliberately absent so it's validated/transitively compiled
+                // normally.
                 if key.0.local() == "hashtable"
-                    && matches!(key.1.as_str(), "new" | "set" | "count" | "clear" | "keys" | "values" | "entries")
+                    && matches!(key.1.as_str(), "new" | "set" | "get" | "remove" | "count" | "clear" | "keys" | "values" | "entries")
                 {
                     return false;
                 }
@@ -2802,14 +2802,14 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// call these to build/read/write a `BoxedObj::Struct` — the same
 /// `BoxedObj::Struct` mem/rt-layer plumbing Stage 1 already exercised in
 /// isolation, wired to the compiler for the first time here.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 37] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 40] {
     use crate::compile::runtime::{
         rt_box_kind, rt_car, rt_cdr, rt_cons, rt_float_new, rt_float_value, rt_global_get, rt_global_new, rt_global_set,
-        rt_hashtable_clear, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_keys, rt_hashtable_new, rt_hashtable_set,
-        rt_hashtable_values, rt_match_fail, rt_panic, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root,
-        rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_length, rt_str_lt, rt_str_new,
-        rt_str_ref, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_struct_push_field,
-        rt_truncate_sexpr_roots,
+        rt_hashtable_clear, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw, rt_hashtable_keys,
+        rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_hashtable_values, rt_match_fail, rt_panic, rt_pop_sexpr_root,
+        rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append,
+        rt_str_eq, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
+        rt_struct_new, rt_struct_push_field, rt_truncate_sexpr_roots,
     };
     [
         ("rt_car", rt_car as usize),
@@ -2846,6 +2846,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 37] {
         ("rt_hashtable_keys", rt_hashtable_keys as usize),
         ("rt_hashtable_values", rt_hashtable_values as usize),
         ("rt_hashtable_entries", rt_hashtable_entries as usize),
+        ("rt_hashtable_contains", rt_hashtable_contains as usize),
+        ("rt_hashtable_get_raw", rt_hashtable_get_raw as usize),
+        ("rt_hashtable_remove_raw", rt_hashtable_remove_raw as usize),
         ("rt_global_new", rt_global_new as usize),
         ("rt_global_get", rt_global_get as usize),
         ("rt_global_set", rt_global_set as usize),

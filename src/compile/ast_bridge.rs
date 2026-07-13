@@ -357,11 +357,16 @@ fn translate_vector_method(heap: &mut Heap, method: &str, kind: i64, args: &[Typ
 
 /// `HashTable<K,V>`'s builtin methods lowered to a `hashtable-op` node
 /// (`translate_hashtable_method` -> the `rt_hashtable_*` family) rather than
-/// the generic `assoc` path — every one *except* the `Option`-returning
-/// `get`/`remove` (a compiled `Option` is a `malloc`'d sum-ADT box, a separate
-/// problem from iteration; they stay on the `assoc` path and panic clearly)
-/// and `iter` (a genuine prelude `defmethod`, `hashtable-iter::new`).
-const HASHTABLE_BUILTIN_METHODS: [&str; 7] = ["new", "set", "count", "clear", "keys", "values", "entries"];
+/// the generic `assoc` path — every one except `iter` (a genuine prelude
+/// `defmethod`, `hashtable-iter::new`). `get`/`remove` return `Option<V>`, a
+/// `malloc`'d sum-ADT box built directly by `compiler.rs`'s
+/// `compile-hashtable-op` (`rt_hashtable_contains` + `rt_hashtable_get_raw`/
+/// `rt_hashtable_remove_raw`, decoded per `V`'s `struct_field_kind` the same
+/// way a `BoxedObj::Struct` field read already is) rather than through the
+/// ordinary `Expr::Construct` path (there is no *source* `Option::some`/
+/// `none` call site here to translate — the box is synthesized straight from
+/// the runtime lookup's found/not-found outcome).
+const HASHTABLE_BUILTIN_METHODS: [&str; 9] = ["new", "set", "get", "remove", "count", "clear", "keys", "values", "entries"];
 
 /// The `(K-kind, V-kind)` ([`struct_field_kind`]) for a `HashTable<K,V>`
 /// method call — from the receiver's `HashTable<K,V>` type (`args[0]`), or the

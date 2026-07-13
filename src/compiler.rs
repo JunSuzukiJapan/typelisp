@@ -2827,6 +2827,69 @@ pub const SOURCE: &str = r#"
                                                          (store-arg builder args-ptr 2 tv)
                                                          (let ((ignored (build-call builder (get-function m "rt_hashtable_set") args-ptr 3)))
                                                            (const-i64 builder 0)))))))))
+                                           (if (if (equal method "get") true (equal method "remove"))
+                                               ;; `get`/`remove`: a runtime lookup whose found/not-found
+                                               ;; outcome decides *which sum-ADT variant* to build, so
+                                               ;; (unlike an ordinary `Option::some`/`none` source call,
+                                               ;; which `compile-construct-box` builds from a
+                                               ;; compile-time-known variant) this can't reuse that
+                                               ;; function directly — it needs real control flow. Follows
+                                               ;; `compile-if`'s own "alloca a merge slot, branch, store
+                                               ;; each arm's result, load after the merge block" shape
+                                               ;; (no `phi` builtin exists here) rather than a new one.
+                                               ;; `rt_hashtable_contains` is checked first (a `mem::Value`'s
+                                               ;; tag space has no free bit pattern to serve as a "not
+                                               ;; found" sentinel from a single value-returning call), then
+                                               ;; only the confirmed-present branch calls
+                                               ;; `rt_hashtable_get_raw`/`_remove_raw` — safe with no race,
+                                               ;; single-threaded compiled code can't remove the entry
+                                               ;; between the two calls. The found value, still tagged, is
+                                               ;; decoded into the `Option` box's own "verbatim compiled
+                                               ;; value" field convention via `compile-sexpr-field` — the
+                                               ;; exact same decode a `BoxedObj::Struct` field read already
+                                               ;; uses, which happens to already match a general-ADT box
+                                               ;; field's convention for every kind this reaches (scalar:
+                                               ;; untagged; kind 6: stays tagged, `push-permanent-sexpr-root`ed
+                                               ;; here exactly as `compile-construct-box-fields` does for its
+                                               ;; own kind-2 fields, since a `malloc`'d box is never
+                                               ;; GC-scanned; kind 0 — `Fn`/still-generic `V` — reaches
+                                               ;; `compile-sexpr-field`'s own existing "not representable"
+                                               ;; panic with no special-casing needed here). `Some`/`None`
+                                               ;; reuse `compile-construct-box`'s exact box layout
+                                               ;; (`[variant, field...]`, `option_def`'s `Some`=0/`None`=1)
+                                               ;; so `Interp::call_compiled` decodes the result exactly as
+                                               ;; it already does for a source-level `Option::some`/`none`.
+                                               (let ((key-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
+                                                 (let ((k (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base key-form)))
+                                                   (let ((tk (compile-tag-struct-field builder m k key-kind)))
+                                                     (let ((lookup-args (alloca-args builder 2)))
+                                                       (store-arg builder lookup-args 0 ht)
+                                                       (store-arg builder lookup-args 1 tk)
+                                                       (let ((found (build-call builder (get-function m "rt_hashtable_contains") lookup-args 2)))
+                                                         (let ((then-block (append-block cur-fn "ht-found")))
+                                                           (let ((else-block (append-block cur-fn "ht-not-found")))
+                                                             (let ((merge-block (append-block cur-fn "ht-merge")))
+                                                               (let ((slot (alloca-args builder 1)))
+                                                                 (build-cond-br builder found then-block else-block)
+                                                                 (position-at-end builder then-block)
+                                                                 (let ((raw-fn (if (equal method "get") "rt_hashtable_get_raw" "rt_hashtable_remove_raw")))
+                                                                   (let ((raw (build-call builder (get-function m raw-fn) lookup-args 2)))
+                                                                     (let ((decoded (compile-sexpr-field builder m raw val-kind 0)))
+                                                                       (if (eq val-kind 6)
+                                                                           (push-permanent-sexpr-root builder m decoded)
+                                                                           ())
+                                                                       (let ((some-box (build-malloc builder 2)))
+                                                                         (store-arg builder some-box 0 (const-i64 builder 0))
+                                                                         (store-arg builder some-box 1 decoded)
+                                                                         (let ((ignored (store-arg builder slot 0 (build-ptr-to-int builder some-box))))
+                                                                           (build-br builder merge-block))))))
+                                                                 (position-at-end builder else-block)
+                                                                 (let ((none-box (build-malloc builder 1)))
+                                                                   (store-arg builder none-box 0 (const-i64 builder 1))
+                                                                   (let ((ignored (store-arg builder slot 0 (build-ptr-to-int builder none-box))))
+                                                                     (build-br builder merge-block)))
+                                                                 (position-at-end builder merge-block)
+                                                                 (load-raw builder slot 0))))))))))
                                            (if (equal method "count")
                                                (let ((args-ptr (alloca-args builder 1)))
                                                  (store-arg builder args-ptr 0 ht)
@@ -2840,7 +2903,7 @@ pub const SOURCE: &str = r#"
                                                      (store-arg builder args-ptr 0 ht)
                                                      (let ((result (build-call builder (get-function m (append "rt_hashtable_" method)) args-ptr 1)))
                                                        (push-permanent-sexpr-root builder m result)
-                                                       result))))))))))))
+                                                       result)))))))))))))
                        ;; `(global id kind)` — `id` is `path`'s already-
                        ;; promoted compiled-global slot
                        ;; (`Interp::add_compiled_function`'s

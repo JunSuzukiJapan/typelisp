@@ -2,9 +2,11 @@
 
 起案: 2026-07-13 / ブランチ: `feature/iter-compile`
 
-> **状況（2026-07-13）**: Stage A〜D 実装完了。Vector/HashTable 反復が compile 可能になり、
-> ユーザー定義 Iter 型も推移的自動 compile で「タダで」通る。残: Stage E（docs 整備）。
-> `get`/`remove`（`Option` 返し）だけは意図的に未対応（下記）。
+> **状況（2026-07-13）**: Stage A〜E 全完了。Vector/HashTable 反復が compile 可能になり、
+> ユーザー定義 Iter 型も推移的自動 compile で「タダで」通る。当初「反復とは別問題」として
+> 意図的に対象外としていた `HashTable::get`/`remove`（`Option` 返し）も同日中に追加解消 —
+> `rt_hashtable_contains`/`_get_raw`/`_remove_raw` + 実行時分岐（`compile-if`と同型のalloca+
+> 分岐+merge、phiビルトインなし）で対応。
 
 ## 背景・目的
 
@@ -83,12 +85,20 @@ compile される。したがって本課題の本質は「底のプリミティ
   新設（typelisp-rt、キーのハッシュ化は mem 層が担当、`entries` は cons-cell を GC ルート保護しつつ
   Vector 化）+ `rt_extern_functions()` 登録 + `ast_bridge` の `hashtable-op` ノード
   （`translate_hashtable_method`、key/val 2 kind）+ `compiler.rs` の `compile-hashtable-op` +
-  method-target 検証除外。`get`/`remove`（`Option` 返し）は**意図的に未対応**（`Option` は compiled
-  では `malloc` sum-ADT box で、runtime map lookup をその表現へ橋渡しするのは反復とは別問題）。
-  テスト: typelisp-rt 単体1件。
+  method-target 検証除外。テスト: typelisp-rt 単体1件。
 - **Stage D ✅ — HashTable 反復 end-to-end**: `doiter`/`count`/`keys` over `HashTable<i64,i64>` が
   compile 通ることを検証（`hashtable-iter::next` は `entries` の Vector snapshot を Stage A の
   `vector-op` で歩く）。テスト: `compile_test` 2件。
+- **Stage C 追補 ✅ — `HashTable::get`/`remove`（`Option` 返し）**: 当初「反復とは別問題」として
+  対象外にしていたが同日中に解消。`get`/`remove` は**実行時**の found/not-found 結果で
+  `Some`/`None` どちらの variant を構築するか決まるため、`Option::some`/`none` の通常コンパイル
+  （`compile-construct-box`、コンパイル時定数variant）を単純に再利用できない。新設した
+  `rt_hashtable_contains`（0/1）+ `rt_hashtable_get_raw`/`_remove_raw`（存在確認済み前提、
+  タグ付き値を返す）を、`compile-if`と同型の「allocaでmergeスロット確保→分岐→各腕で結果を
+  store→merge後にload」（phiビルトインが無いための代替パターン）で呼び分け、見つかった値は
+  `compile-sexpr-field`（既存のstruct-fieldデコードをそのまま再利用——box内の値表現規約は
+  struct-fieldのそれと一致）でデコードし、`Some`/`None`ボックスを直接組み立てる。テスト:
+  `compile_test` 4件（found/absent/passthrough文字列/remove）。
 - **Stage E — docs & memory**: `functions.md`/`language-design.md` 更新、TODO.md の将来課題項を解消、
   メモリ記録。
 
@@ -97,6 +107,8 @@ compile される。したがって本課題の本質は「底のプリミティ
   compile 可能なプリミティブ（Vector/HashTable/scalar）に落ちる限り**専用対応ゼロで compile される**。
 - 本課題の実体は (1) コレクション・プリミティブ層（vector-op/hashtable-op）と
   (2) 単型化インスタンスの推移的 compile ドライバ、の 2 つだった。
+- `Option` 返しメソッドの compile は、`compile-if`の「alloca+分岐+merge」パターンを実行時分岐に
+  再利用すれば、`compile-construct-box`（コンパイル時定数variant専用）を作り直さずに済む。
 
 ## ビルド/テスト
 
