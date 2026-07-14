@@ -326,7 +326,7 @@ fn load_prefers_a_fresh_fasl_over_source() {
         }
         Fasl::capture(&fh, &fc, &mark, tls, source_hash(src)).unwrap()
     };
-    std::fs::write(dir.join("m.fasl"), fasl.to_bytes().unwrap()).unwrap();
+    std::fs::write(dir.join("m.fastl"), fasl.to_bytes().unwrap()).unwrap();
 
     let reader = R2::new();
     load_file_flat(&mut h, &reader, &mut c, &mut i, &dir, "m").expect("load");
@@ -357,7 +357,7 @@ fn load_falls_back_to_source_when_fasl_is_stale() {
         // Hash of the OLD source — won't match the current .typl.
         Fasl::capture(&fh, &fc, &mark, tls, source_hash(old_src)).unwrap()
     };
-    std::fs::write(dir.join("m.fasl"), fasl.to_bytes().unwrap()).unwrap();
+    std::fs::write(dir.join("m.fastl"), fasl.to_bytes().unwrap()).unwrap();
 
     let reader = R2::new();
     load_file_flat(&mut h, &reader, &mut c, &mut i, &dir, "m").expect("load");
@@ -394,7 +394,7 @@ fn compile_module_output_is_loadable() {
         .expect("run compile-module");
     assert!(status.success(), "compile-module exited with failure");
 
-    let fasl_path = dir.join("lib.fasl");
+    let fasl_path = dir.join("lib.fastl");
     assert!(fasl_path.is_file(), "fasl was not produced");
 
     // Load it into a fresh prelude environment and use both the defun and macro.

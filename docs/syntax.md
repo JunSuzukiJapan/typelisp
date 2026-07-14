@@ -190,11 +190,11 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 
 - CL 流の**フラットロード**: 対象ファイルのフォームを**カレント名前空間**にそのまま読み込む
   （`use` のようにモジュールで包まない）。トップレベル専用（関数本体内は型エラー）。
-- **コンパイル済み（fasl）優先**: `path.fasl` があり、その `source_hash` が `path.typl` の
+- **コンパイル済み（fastl）優先**: `path.fastl` があり、その `source_hash` が `path.typl` の
   現在の内容と一致すれば（または `.typl` が無ければ）、fasl を直接ロードする——read・マクロ展開・
   型チェックをすべてスキップ。無い/古い場合は `.typl` ソースを読む（**自動コンパイルはしない**）。
-- **fasl の生成**: `typl compile-module <file.typl> [-o <out.fasl>]` でチェック済み状態を
-  fasl（`.fasl`）に書き出す。fasl はネイティブコードではなく「チェック済み定義のシリアライズ」
+- **fasl の生成**: `typl compile-module <file.typl> [-o <out.fastl>]` でチェック済み状態を
+  fastl（`.fastl` 拡張子）に書き出す。fasl はネイティブコードではなく「チェック済み定義のシリアライズ」
   （LLVM の `(compile ...)`/`compile-file` とは無関係の別機構）。モジュールは定義のみで、
   トップレベル式を含むとエラー。
 - ロード時、ヒープ上の値（マクロ本体の quote 等）はランタイムの確保 API（`heap.cons` 等）で

@@ -61,11 +61,12 @@ fn compile_module(args: &[String]) -> i32 {
     let input = match input {
         Some(f) => f,
         None => {
-            eprintln!("compile-module: usage: typl compile-module <file.typl> [-o <out.fasl>]");
+            eprintln!("compile-module: usage: typl compile-module <file.typl> [-o <out.fastl>]");
             return 1;
         }
     };
-    let out_path = output.unwrap_or_else(|| PathBuf::from(input).with_extension("fasl").to_string_lossy().into_owned());
+    let out_path = output
+        .unwrap_or_else(|| PathBuf::from(input).with_extension(typelisp::project::FASL_EXTENSION).to_string_lossy().into_owned());
 
     let src = match std::fs::read_to_string(input) {
         Ok(s) => s,

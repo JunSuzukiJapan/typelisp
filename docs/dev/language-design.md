@@ -42,9 +42,10 @@
   リンクする）。旧実装は 2026-06-23 に `Vector<T>`/`defstruct` の全面リバートに伴って一度
   削除されたが、2026-06-25 以降 Vector/defstruct 再設計後の前提の上で再実装されている
   （対応構文の範囲は都度拡張中——詳細は `src/compile/`、[implementation-log.md](implementation-log.md) 参照）。
-- **ファイル拡張子**: ソースファイルは `.typl`。CL の `.fasl` に相当する「コンパイル済みファイル」
-  形式は無い——`compile-file` はコンパイル済み中間ファイルではなく、`cc` でリンクしたネイティブ
-  実行ファイルを直接出力する。`.typlc` という拡張子は実装上使用されていない。
+- **ファイル拡張子**: ソースファイルは `.typl`。コンパイル済みモジュール（CL の `.fasl` 相当の
+  「チェック済み定義のシリアライズ」——§2.4、`typl compile-module` が生成）は **`.fastl`**。
+  これは LLVM の `compile-file`（`cc` でリンクした**ネイティブ実行ファイル**を直接出力、中間
+  ファイルではない）とは別物。`.typlc` という拡張子は実装上使用されていない。
 - **命名規則 `!`/`?`**: 関数名の末尾に `!`（破壊的操作）や `?`（述語）を接尾辞として使わない（詳細・理由は §7.3）。
 
 ---
@@ -123,7 +124,7 @@
 ### 2.4 `(load)` とコンパイル済みモジュール（fasl、2026-07-14 実装）
 
 - **`(load "path")`**: CL流のフラットロード（対象ファイルのフォームをカレント名前空間に読み込む、
-  `use` のモジュール包みとは別）。トップレベル専用。`path.fasl` があり `source_hash` が `.typl` と
+  `use` のモジュール包みとは別）。トップレベル専用。`path.fastl` があり `source_hash` が `.typl` と
   一致すれば fasl を直接ロード（read・マクロ展開・型チェックを全スキップ）、無ければソース。
   **自動コンパイルはしない**。
 - **fasl の実体**: ネイティブコードではなく「**チェック済み状態のシリアライズ**」（`src/fasl.rs`、
@@ -131,7 +132,7 @@
   参照する Checker 状態を `OwnedForm` 化）+ チェック済み `TopLevel` 列（ロード時 `interp.exec` で
   再登録）。**生ポインタ処理系なのでヒープの clone/コピーは不可**——ロード時に確保 API
   （`heap.cons`/`alloc_string`/`intern_symbol`）で値を作り直す（`owned_to_value`）。
-- **生成**: `typl compile-module <file.typl> [-o out.fasl]`。モジュールは定義のみ（トップレベル式は
+- **生成**: `typl compile-module <file.typl> [-o out.fastl]`。モジュールは定義のみ（トップレベル式は
   エラー）。
 - **prelude 起動最適化**: prelude 自身もこの機構で起動時ロード（`prelude::load_cached`、
   専用ディレクトリ `$TYPL_CACHE_DIR`|`~/.typl/cache/` にキャッシュ）。LSP は prelude fasl を起動時に1つ構築し

@@ -465,8 +465,9 @@ fn pop_roots_to(heap: &mut Heap, mark: usize) {
     }
 }
 
-/// The extension a compiled (fasl) module carries — see [`load_file_flat`].
-pub const FASL_EXTENSION: &str = "fasl";
+/// The extension a compiled (fasl) module file carries on disk — see
+/// [`load_file_flat`].
+pub const FASL_EXTENSION: &str = "fastl";
 
 /// The CL-style `(load "path")` mechanism (`TopLevel::Load`): loads `path`'s
 /// definitions into the *current* environment (root namespace, no module

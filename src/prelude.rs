@@ -14,6 +14,7 @@
 use std::path::PathBuf;
 
 use crate::fasl::{registry_mark, source_hash, Fasl, FASL_FORMAT_VERSION};
+use crate::project::FASL_EXTENSION;
 use crate::{Checker, Heap, Interp, Reader};
 
 /// `consp`/`null`/`atom` only need `match` on `Sexpr`'s `Cons`/`Nil`
@@ -892,7 +893,7 @@ fn cache_path() -> Option<PathBuf> {
     let base = std::env::var_os("TYPL_CACHE_DIR")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".typl").join("cache")))?;
-    Some(base.join(format!("prelude-{:016x}-v{}.fasl", source_hash(SOURCE), FASL_FORMAT_VERSION)))
+    Some(base.join(format!("prelude-{:016x}-v{}.{}", source_hash(SOURCE), FASL_FORMAT_VERSION, FASL_EXTENSION)))
 }
 
 /// Loads the cached prelude fasl if present and valid (its `source_hash`
