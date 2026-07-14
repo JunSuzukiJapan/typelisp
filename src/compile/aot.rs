@@ -69,7 +69,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     crate::load_compiler(&mut heap, &mut chk, &mut interp);
 
     let reader = Reader::new();
-    let forms = reader.read_all_in(&mut heap, source_path, &source).map_err(|e| e.to_string())?;
+    let forms = reader.read_all_in_spanned(&mut heap, source_path, &source).map_err(|e| e.to_string())?;
 
     // Every top-level form in an AOT source file must be a `defun` or a
     // `defvar`/`defconstant` (see the module doc comment's scope note) —
@@ -85,8 +85,8 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // way JIT does).
     let mut fn_names: Vec<String> = Vec::new();
     let mut defvar_inits: Vec<(Path, Typed)> = Vec::new();
-    for v in forms {
-        let tl = chk.check_form(&mut heap, &interp, v).map_err(|e| e.to_string())?;
+    for (v, loc) in forms {
+        let tl = chk.check_form_at(&mut heap, &interp, v, Some(loc)).map_err(|e| e.to_string())?;
         // A defun that instantiates a generic function comes back bundled
         // with the (concrete, hence themselves compilable) specializations
         // it needs — flatten the synthetic module and treat each entry as a

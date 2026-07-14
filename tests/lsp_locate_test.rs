@@ -163,3 +163,24 @@ fn hover_on_a_let_bound_local_finds_its_own_type() {
     let node = locate_node(&body, FILE, 1, 38).expect("expected a located node");
     assert_eq!(hover_text(node), format!("{:?}", Type::Bool));
 }
+
+#[test]
+fn bare_toplevel_atom_gets_its_span_from_the_reader() {
+    // A lone atom at top level has no cons cell to key a location on in the
+    // heap's tables — its span travels alongside the value from
+    // `read_all_in_spanned` into `check_form_at`'s `loc_hint`.
+    let mut h = Heap::with_capacity(1 << 16);
+    let r = Reader::new();
+    let forms = r.read_all_in_spanned(&mut h, FILE, "42\n").expect("read failed");
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    let (v, loc) = forms[0].clone();
+    let tl = chk.check_form_at(&mut h, &interp, v, Some(loc)).expect("check failed");
+    match tl {
+        TopLevel::Expr(t) => {
+            let loc = t.loc.expect("bare atom should carry the reader's span");
+            assert_eq!((loc.line, loc.col, loc.end_line, loc.end_col), (1, 1, 1, 3));
+        }
+        other => panic!("expected an expression, got {:?}", other),
+    }
+}

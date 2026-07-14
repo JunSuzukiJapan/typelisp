@@ -84,7 +84,7 @@ fn compile_module(args: &[String]) -> i32 {
     load_prelude(&mut heap, &mut checker, &mut interp);
 
     let mark = registry_mark(&checker);
-    let forms = match reader.read_all_in(&mut heap, input, &src) {
+    let forms = match reader.read_all_in_spanned(&mut heap, input, &src) {
         Ok(fs) => fs,
         Err(e) => {
             eprintln!("compile-module: {}", e);
@@ -92,8 +92,8 @@ fn compile_module(args: &[String]) -> i32 {
         }
     };
     let mut top_levels = Vec::new();
-    for v in forms {
-        match checker.check_form(&mut heap, &interp, v) {
+    for (v, loc) in forms {
+        match checker.check_form_at(&mut heap, &interp, v, Some(loc)) {
             Ok(TopLevel::Expr(_)) => {
                 eprintln!("compile-module: `{}` contains a top-level expression; a module is definitions only", input);
                 return 1;
@@ -285,7 +285,7 @@ fn try_run_pending(
     pending: &mut String,
 ) {
     let mark = heap.root_count();
-    let forms = match reader.read_all_in(heap, "<stdin>", pending) {
+    let forms = match reader.read_all_in_spanned(heap, "<stdin>", pending) {
         Ok(forms) => forms,
         Err(e) => {
             while heap.root_count() > mark {
@@ -304,7 +304,8 @@ fn try_run_pending(
     // in the registry (see `typelisp::project`). A nested load pushes and
     // pops its own read roots strictly above this batch's, so the root-stack
     // discipline below is undisturbed.
-    if let Err(e) = loader.load_uses_in(heap, reader, checker, interp, &forms) {
+    let form_values: Vec<Value> = forms.iter().map(|(v, _)| *v).collect();
+    if let Err(e) = loader.load_uses_in(heap, reader, checker, interp, &form_values) {
         while heap.root_count() > mark {
             heap.pop_root();
         }
@@ -318,8 +319,8 @@ fn try_run_pending(
 
     let mut checked = Vec::with_capacity(forms.len());
     let mut check_err = None;
-    for v in forms {
-        let result = checker.check_form(heap, &*interp, v);
+    for (v, loc) in forms {
+        let result = checker.check_form_at(heap, &*interp, v, Some(loc));
         for w in checker.take_warnings() {
             eprintln!("{}", w);
         }

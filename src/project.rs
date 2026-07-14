@@ -261,7 +261,7 @@ impl Loader {
     ) -> Result<(), Error> {
         let file_name = file.to_string_lossy();
         let mark = heap.root_count();
-        let forms = match reader.read_all_in_keep_locs(heap, &file_name, src) {
+        let forms = match reader.read_all_in_keep_locs_spanned(heap, &file_name, src) {
             Ok(forms) => forms,
             Err(e) => {
                 pop_roots_to(heap, mark);
@@ -274,7 +274,7 @@ impl Loader {
         // through as the enclosing file's own module path, so a `use` can
         // also resolve against a sibling file in the same directory — see
         // `ensure_loaded`'s doc comment.
-        for v in &forms {
+        for (v, _) in &forms {
             if let Err(e) = self.scan_form(heap, reader, checker, interp, *v, segs) {
                 pop_roots_to(heap, mark);
                 return Err(e);
@@ -285,8 +285,8 @@ impl Loader {
         let path = checker.enter_file_module(segs);
         let mut body = Vec::new();
         let mut check_err = None;
-        for v in forms {
-            match checker.check_form(heap, &*interp, v) {
+        for (v, loc) in forms {
+            match checker.check_form_at(heap, &*interp, v, Some(loc)) {
                 // `(load ...)` loads inline (so subsequent forms see the
                 // definitions), preferring a compiled fasl — see
                 // `load_file_flat`.
@@ -538,7 +538,7 @@ pub fn load_source_flat(
 ) -> Result<(), Error> {
     let file_name = file.to_string_lossy();
     let mark = heap.root_count();
-    let forms = match reader.read_all_in_keep_locs(heap, &file_name, src) {
+    let forms = match reader.read_all_in_keep_locs_spanned(heap, &file_name, src) {
         Ok(forms) => forms,
         Err(e) => {
             pop_roots_to(heap, mark);
@@ -547,8 +547,8 @@ pub fn load_source_flat(
     };
     let dir = file.parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
     let mut result = Ok(());
-    for v in forms {
-        match checker.check_form(heap, &*interp, v) {
+    for (v, loc) in forms {
+        match checker.check_form_at(heap, &*interp, v, Some(loc)) {
             Ok(TopLevel::Load { path }) => {
                 if let Err(e) = load_file_flat(heap, reader, checker, interp, &dir, &path) {
                     result = Err(e);

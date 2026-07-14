@@ -659,6 +659,16 @@ impl Checker {
     /// form's specializations can never be separated from the form that
     /// needs them (see `spec_memo`'s doc comment for why that matters).
     pub fn check_form(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value) -> Result<TopLevel, Error> {
+        self.check_form_at(heap, interp, v, None)
+    }
+
+    /// [`Self::check_form`] with a caller-supplied location for `v` itself.
+    /// A list form carries its own recorded location (`heap.cons_loc`) and
+    /// ignores the hint, but a *bare atom* at top level (e.g. a lone `42`)
+    /// has no heap identity to key a location on — the reader hands its span
+    /// alongside the value (`Reader::read_all_in_spanned`) and this is where
+    /// it enters the checker. Mirrors [`Self::check_at`] vs [`Self::check`].
+    pub fn check_form_at(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value, loc_hint: Option<Loc>) -> Result<TopLevel, Error> {
         debug_assert!(
             self.spec_pending.borrow().is_empty(),
             "specialization requests must never leak across check_form calls"
@@ -667,7 +677,7 @@ impl Checker {
         // more specific one (a body-expression error already carries the
         // deeper location from `check`, and `Error::at` keeps that innermost
         // one — see its doc comment).
-        let loc = heap.cons_loc(v);
+        let loc = heap.cons_loc(v).or(loc_hint);
         let primary = self.check_form_dispatch(heap, interp, v, loc.clone());
         // Specialization-drain recovery boundary (B6): the primary form checked
         // fine, but instantiating a generic it calls failed. In `recover` mode
@@ -771,7 +781,10 @@ impl Checker {
             }
         }
         let env = Env::new();
-        let t = self.check(heap, interp, &env, v, None)?;
+        // `def_loc` doubles as the expression's own location hint: for a list
+        // form `check_at` prefers `cons_loc` (the same location) anyway, and
+        // for a bare top-level atom it is the only location there is.
+        let t = self.check_at(heap, interp, &env, v, None, def_loc)?;
         Ok(TopLevel::Expr(t))
     }
 
