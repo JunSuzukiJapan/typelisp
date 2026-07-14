@@ -1,7 +1,14 @@
 use std::{fmt, error};
 use std::rc::Rc;
 
-/// A source location: which file, and the 1-based line and column within it.
+/// A source location: which file, and the 1-based line/column span within it.
+///
+/// `line`/`col` are where the located thing *starts*; `end_line`/`end_col`
+/// are the position just past its last character (exclusive, still 1-based),
+/// so a span covers `[start, end)` and containment is `start <= p < end`.
+/// A `Loc` whose end equals its start is a *degenerate* span: only the start
+/// point is known (e.g. a read error, or a node synthesized by macro
+/// expansion). [`fmt::Display`] prints the start point only (`file:line:col`).
 ///
 /// Attached to an [`Error`] via [`Error::at`] / [`Error::At`] so every message
 /// can point at the exact spot in the user's `.typl` source where the problem
@@ -14,11 +21,33 @@ pub struct Loc {
     pub file: Rc<str>,
     pub line: u32,
     pub col: u32,
+    pub end_line: u32,
+    pub end_col: u32,
 }
 
 impl Loc {
+    /// A degenerate (point-only) location: the end is set equal to the start.
+    /// Use [`Loc::with_end`] afterwards when the true extent is known.
     pub fn new(file: Rc<str>, line: u32, col: u32) -> Loc {
-        Loc { file, line, col }
+        Loc { file, line, col, end_line: line, end_col: col }
+    }
+
+    /// This location with its exclusive end position set.
+    pub fn with_end(mut self, end_line: u32, end_col: u32) -> Loc {
+        self.end_line = end_line;
+        self.end_col = end_col;
+        self
+    }
+
+    /// Whether this is a point-only location (no known extent).
+    pub fn is_degenerate(&self) -> bool {
+        self.end_line == self.line && self.end_col == self.col
+    }
+
+    /// Whether the (1-based) position `line:col` falls inside this span
+    /// (`start <= p < end`). Always false for a degenerate span.
+    pub fn contains(&self, line: u32, col: u32) -> bool {
+        (self.line, self.col) <= (line, col) && (line, col) < (self.end_line, self.end_col)
     }
 }
 

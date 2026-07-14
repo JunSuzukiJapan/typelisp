@@ -332,7 +332,7 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 
 /// Bump on any change to the serialized shape — a loader seeing a different
 /// version silently falls back to the source file.
-pub const FASL_FORMAT_VERSION: u32 = 1;
+pub const FASL_FORMAT_VERSION: u32 = 2;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.
