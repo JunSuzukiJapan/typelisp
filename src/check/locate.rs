@@ -55,7 +55,8 @@ fn visit_top_level<'a>(
             }
         }
         TopLevel::Expr(t) => visit_typed(t, file, cursor, depth, best),
-        TopLevel::Use { .. } | TopLevel::Defstruct { .. } | TopLevel::Defenum { .. } => {}
+        // `Load` carries only a path string — nothing typed to locate into.
+        TopLevel::Use { .. } | TopLevel::Defstruct { .. } | TopLevel::Defenum { .. } | TopLevel::Load { .. } => {}
     }
 }
 
@@ -236,7 +237,7 @@ fn scope_top_level(tl: &TopLevel, target: *const Typed, scope: &mut Vec<String>)
         TopLevel::Defvar { value, .. } => scope_typed(value, target, scope),
         TopLevel::Module { body, .. } => body.iter().any(|tl| scope_top_level(tl, target, scope)),
         TopLevel::Expr(t) => scope_typed(t, target, scope),
-        TopLevel::Use { .. } | TopLevel::Defstruct { .. } | TopLevel::Defenum { .. } => false,
+        TopLevel::Use { .. } | TopLevel::Defstruct { .. } | TopLevel::Defenum { .. } | TopLevel::Load { .. } => false,
     };
     if !found {
         scope.truncate(mark);

@@ -17,7 +17,7 @@ use crate::{Loc, Path, Type};
 /// deliberately excluded from equality (see the manual [`PartialEq`] impl):
 /// two structurally identical trees read from different places are still
 /// equal, which keeps the checker's AST-shape tests location-independent.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Typed {
     pub expr: Expr,
     pub ty: Type,
@@ -44,7 +44,7 @@ impl PartialEq for Typed {
 pub type LabelDef = (String, Vec<(String, Type)>, Vec<Typed>);
 
 /// An expression. Children are [`Typed`] so the whole tree stays annotated.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Expr {
     Int(i64),
     Float(f64),
@@ -187,7 +187,7 @@ pub enum Expr {
 /// An owned, GC-heap-independent mirror of `Sexpr`'s shape, used by
 /// [`Expr::Quote`] (see its doc comment for why this can't just hold a raw
 /// [`Value`](crate::Value)).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum QuotedSexpr {
     Nil,
     Int(i64),
@@ -202,14 +202,14 @@ pub enum QuotedSexpr {
 }
 
 /// One arm of a `match`: a pattern and the body sequence it guards.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Arm {
     pub pat: Pattern,
     pub body: Vec<Typed>,
 }
 
 /// A match pattern.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Pattern {
     /// `_` — matches anything, binds nothing.
     Wildcard,

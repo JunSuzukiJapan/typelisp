@@ -9,6 +9,7 @@ use std::rc::Rc;
 /// produces many data (and thus potentially many located errors), all naming
 /// the same file.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Loc {
     pub file: Rc<str>,
     pub line: u32,

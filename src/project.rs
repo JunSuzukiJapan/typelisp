@@ -281,11 +281,21 @@ impl Loader {
             }
         }
 
+        let file_dir = file.parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
         let path = checker.enter_file_module(segs);
         let mut body = Vec::new();
         let mut check_err = None;
         for v in forms {
             match checker.check_form(heap, &*interp, v) {
+                // `(load ...)` loads inline (so subsequent forms see the
+                // definitions), preferring a compiled fasl — see
+                // `load_file_flat`.
+                Ok(TopLevel::Load { path: load_path }) => {
+                    if let Err(e) = load_file_flat(heap, reader, checker, interp, &file_dir, &load_path) {
+                        check_err = Some(e);
+                        break;
+                    }
+                }
                 Ok(tl) if needs_immediate_exec(&tl) => {
                     let _ = interp.exec(heap, tl);
                 }
@@ -453,6 +463,111 @@ fn pop_roots_to(heap: &mut Heap, mark: usize) {
     while heap.root_count() > mark {
         heap.pop_root();
     }
+}
+
+/// The extension a compiled (fasl) module carries — see [`load_file_flat`].
+pub const FASL_EXTENSION: &str = "fasl";
+
+/// The CL-style `(load "path")` mechanism (`TopLevel::Load`): loads `path`'s
+/// definitions into the *current* environment (root namespace, no module
+/// wrap), preferring a compiled `.fasl` over source.
+///
+/// Resolution:
+/// - `path` is taken relative to `dir` (the loading file's directory, or the
+///   process cwd for a REPL `(load)`), with `.typl` appended if it has no
+///   extension.
+/// - If a sibling `<stem>.fasl` exists and its `source_hash` matches the
+///   `.typl`'s current bytes (or the `.typl` is absent), the fasl is loaded
+///   via [`Fasl::load_into`] — no read/typecheck.
+/// - Otherwise the `.typl` source is read, checked form-by-form into the same
+///   `checker`/`interp`, and each form `exec`d (so later forms — here or in
+///   the caller — see the definitions). **Never auto-compiles** a missing
+///   fasl (per the design: compilation is an explicit `compile-module` step).
+///
+/// A `load`ed file's own `(load ...)`/`(use ...)` are honored recursively
+/// (the recursive `load_file_flat` / this `Loader`'s scan). Unlike a source
+/// load, the fasl path skips reading entirely, so a fasl's transitive
+/// `(load)`s are already baked into its `top_levels`/delta.
+pub fn load_file_flat(
+    heap: &mut Heap,
+    reader: &Reader,
+    checker: &mut Checker,
+    interp: &mut Interp,
+    dir: &FsPath,
+    path: &str,
+) -> Result<(), Error> {
+    let raw = FsPath::new(path);
+    let base = if raw.is_absolute() { raw.to_path_buf() } else { dir.join(raw) };
+    let typl = if base.extension().is_some() { base.clone() } else { base.with_extension("typl") };
+    let fasl = typl.with_extension(FASL_EXTENSION);
+
+    // Prefer a fresh-enough fasl.
+    if fasl.is_file() {
+        if let Ok(bytes) = fs::read(&fasl) {
+            if let Ok(f) = crate::fasl::Fasl::from_bytes(&bytes) {
+                let source_ok = match fs::read_to_string(&typl) {
+                    Ok(src) => crate::fasl::source_hash(&src) == f.source_hash,
+                    // No source alongside the fasl — trust the fasl.
+                    Err(_) => true,
+                };
+                if source_ok {
+                    return f.load_into(heap, checker, interp);
+                }
+            }
+        }
+        // A stale/unreadable fasl falls through to the source below.
+    }
+
+    let src = fs::read_to_string(&typl)
+        .map_err(|e| Error::TypeError(format!("load: cannot read `{}`: {}", typl.display(), e)))?;
+    load_source_flat(heap, reader, checker, interp, &typl, &src)
+}
+
+/// Reads, checks, and execs `src`'s forms into the current environment (root
+/// namespace) — the source half of [`load_file_flat`], factored out so
+/// `prelude::load`'s fallback and a `compile-module` capture can share it.
+/// A nested `(load ...)` resolves relative to `file`'s own directory.
+pub fn load_source_flat(
+    heap: &mut Heap,
+    reader: &Reader,
+    checker: &mut Checker,
+    interp: &mut Interp,
+    file: &FsPath,
+    src: &str,
+) -> Result<(), Error> {
+    let file_name = file.to_string_lossy();
+    let mark = heap.root_count();
+    let forms = match reader.read_all_in_keep_locs(heap, &file_name, src) {
+        Ok(forms) => forms,
+        Err(e) => {
+            pop_roots_to(heap, mark);
+            return Err(e);
+        }
+    };
+    let dir = file.parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
+    let mut result = Ok(());
+    for v in forms {
+        match checker.check_form(heap, &*interp, v) {
+            Ok(TopLevel::Load { path }) => {
+                if let Err(e) = load_file_flat(heap, reader, checker, interp, &dir, &path) {
+                    result = Err(e);
+                    break;
+                }
+            }
+            Ok(tl) => {
+                if let Err(e) = interp.exec(heap, tl) {
+                    result = Err(Error::TypeError(format!("load: exec failed: {}", e)));
+                    break;
+                }
+            }
+            Err(e) => {
+                result = Err(e);
+                break;
+            }
+        }
+    }
+    pop_roots_to(heap, mark);
+    result
 }
 
 /// The segments of a `use` argument: a bare symbol is one segment, a

@@ -10,19 +10,139 @@ use std::path::{Path as FsPath, PathBuf};
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
-use typelisp::project::{find_src_root, needs_immediate_exec, Loader};
+use typelisp::fasl::{registry_mark, source_hash, Fasl};
+use typelisp::project::{find_src_root, load_file_flat, needs_immediate_exec, Loader};
 use typelisp::*;
 
 const PROMPT_PRIMARY: &str = "typl> ";
 const PROMPT_CONTINUE: &str = "...   ";
 
 fn main() -> rustyline::Result<()> {
-    // The first non-flag argument names a source file to run instead of
-    // starting the REPL.
-    if let Some(file) = std::env::args().skip(1).find(|a| !a.starts_with("--")) {
-        std::process::exit(run_file(&file));
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // `typl compile-module <file.typl> [-o out.fasl]` — precompile a source
+    // file to a fasl (see `crate::fasl` / `compile_module`), for
+    // fasl-preferred `(load)`.
+    if args.first().map(String::as_str) == Some("compile-module") {
+        std::process::exit(compile_module(&args[1..]));
+    }
+    // Otherwise the first non-flag argument names a source file to run;
+    // with none, start the REPL.
+    if let Some(file) = args.iter().find(|a| !a.starts_with("--")) {
+        std::process::exit(run_file(file));
     }
     repl()
+}
+
+/// `compile-module <file.typl> [-o <out.fasl>]`: checks `file` against a
+/// prelude-loaded environment and writes a fasl of the definitions it added.
+/// Does *not* run the file's top-level expressions (only registrations are
+/// captured — a `TopLevel::Expr` in the source is a compile error, since a
+/// fasl is a module of definitions, not a script). Returns an exit code.
+fn compile_module(args: &[String]) -> i32 {
+    let mut input: Option<&str> = None;
+    let mut output: Option<String> = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "-o" => match it.next() {
+                Some(o) => output = Some(o.clone()),
+                None => {
+                    eprintln!("compile-module: -o needs an output path");
+                    return 1;
+                }
+            },
+            _ if input.is_none() => input = Some(a),
+            _ => {
+                eprintln!("compile-module: unexpected argument `{}`", a);
+                return 1;
+            }
+        }
+    }
+    let input = match input {
+        Some(f) => f,
+        None => {
+            eprintln!("compile-module: usage: typl compile-module <file.typl> [-o <out.fasl>]");
+            return 1;
+        }
+    };
+    let out_path = output.unwrap_or_else(|| PathBuf::from(input).with_extension("fasl").to_string_lossy().into_owned());
+
+    let src = match std::fs::read_to_string(input) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("compile-module: cannot read `{}`: {}", input, e);
+            return 1;
+        }
+    };
+
+    let mut heap = Heap::with_capacity(1 << 16);
+    let reader = Reader::new();
+    let mut checker = Checker::new();
+    checker.set_redef_policy(parse_redef_policy());
+    let mut interp = Interp::new();
+    load_prelude(&mut heap, &mut checker, &mut interp);
+
+    let mark = registry_mark(&checker);
+    let forms = match reader.read_all_in(&mut heap, input, &src) {
+        Ok(fs) => fs,
+        Err(e) => {
+            eprintln!("compile-module: {}", e);
+            return 1;
+        }
+    };
+    let mut top_levels = Vec::new();
+    for v in forms {
+        match checker.check_form(&mut heap, &interp, v) {
+            Ok(TopLevel::Expr(_)) => {
+                eprintln!("compile-module: `{}` contains a top-level expression; a module is definitions only", input);
+                return 1;
+            }
+            Ok(TopLevel::Load { path }) => {
+                // A `(load)` inside a compiled module is applied at compile
+                // time (its definitions become part of this module's own
+                // environment), the same as a source load.
+                let dir = PathBuf::from(input).parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
+                if let Err(e) = load_file_flat(&mut heap, &reader, &mut checker, &mut interp, &dir, &path) {
+                    eprintln!("compile-module: {}", e);
+                    return 1;
+                }
+            }
+            Ok(tl) => {
+                if let Err(e) = interp.exec(&mut heap, tl.clone()) {
+                    eprintln!("compile-module: exec: {}", e);
+                    return 1;
+                }
+                top_levels.push(tl);
+            }
+            Err(e) => {
+                eprintln!("compile-module: {}", e);
+                return 1;
+            }
+        }
+    }
+    for w in checker.take_warnings() {
+        eprintln!("{}", w);
+    }
+
+    let fasl = match Fasl::capture(&heap, &checker, &mark, top_levels, source_hash(&src)) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("compile-module: capture: {}", e);
+            return 1;
+        }
+    };
+    let bytes = match fasl.to_bytes() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("compile-module: serialize: {}", e);
+            return 1;
+        }
+    };
+    if let Err(e) = std::fs::write(&out_path, bytes) {
+        eprintln!("compile-module: cannot write `{}`: {}", out_path, e);
+        return 1;
+    }
+    0
 }
 
 /// Load and execute `file` (and, transitively, whatever its `use`s pull in).
@@ -34,7 +154,7 @@ fn run_file(file: &str) -> i32 {
     let mut checker = Checker::new();
     checker.set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
-    load_prelude(&mut heap, &mut checker, &mut interp);
+    typelisp::prelude::load_cached(&mut heap, &mut checker, &mut interp);
 
     let file = PathBuf::from(file);
     let dir = file.parent().filter(|p| !p.as_os_str().is_empty()).map(FsPath::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
@@ -67,7 +187,7 @@ fn repl() -> rustyline::Result<()> {
     let mut checker = Checker::new();
     checker.set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
-    load_prelude(&mut heap, &mut checker, &mut interp);
+    typelisp::prelude::load_cached(&mut heap, &mut checker, &mut interp);
     // `use` in the REPL resolves files against the current directory (or the
     // project root if a manifest is found above it).
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -203,6 +323,14 @@ fn try_run_pending(
             eprintln!("{}", w);
         }
         match result {
+            // `(load "path")` loads inline, fasl-preferred, into the current
+            // (root) environment — resolved relative to the process cwd.
+            Ok(TopLevel::Load { path }) => {
+                if let Err(e) = load_file_flat(heap, reader, checker, interp, FsPath::new("."), &path) {
+                    check_err = Some(e);
+                    break;
+                }
+            }
             Ok(tl) if needs_immediate_exec(&tl) => {
                 let _ = interp.exec(heap, tl);
             }

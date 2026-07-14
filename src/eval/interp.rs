@@ -411,6 +411,13 @@ impl Interp {
                 Ok(last)
             }
             TopLevel::Expr(t) => Ok(Some(self.eval(heap, &t, &Env::new())?)),
+            // `(load ...)` is resolved and applied by the *driver* at check
+            // time (`project::load_file_flat`), never reaching the
+            // interpreter's exec phase — the driver consumes a `Load` inline
+            // rather than queuing it. Reaching here would be a driver bug.
+            TopLevel::Load { .. } => Err(EvalError::Internal(
+                "TopLevel::Load must be handled by the driver, not exec'd".into(),
+            )),
         }
     }
 

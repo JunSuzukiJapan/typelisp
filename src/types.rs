@@ -23,6 +23,25 @@ use crate::{Error, Heap, Value};
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Path(Vec<String>);
 
+// A `Path` serializes as its `::`-joined string form rather than a segment
+// array, so a `HashMap<Path, _>` survives formats (like JSON) that require
+// object keys to be strings — the fasl format relies on this
+// (`AdtDef::trait_assoc`, `DefLocs`'s `Path`-keyed maps). Round-trips
+// exactly: a path segment can never itself contain `::` (the reader splits
+// tokens on `::` to form segments), so join/split is lossless.
+impl serde::Serialize for Path {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.0.join("::"))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Path {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Path, D::Error> {
+        let joined = String::deserialize(d)?;
+        Ok(Path(joined.split("::").map(str::to_string).collect()))
+    }
+}
+
 impl Path {
     /// Build a path from explicit segments.
     pub fn of(segments: &[&str]) -> Path {
@@ -73,7 +92,7 @@ impl fmt::Display for Path {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Type {
     I8,
     I16,

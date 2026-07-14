@@ -120,6 +120,24 @@
 - **実行**: `typl <file.typl>`（引数なしはREPL）。REPL の `use` も同じLoaderで解決。
   LSP（`typl-lsp`）も同じLoaderでクロスファイル診断を行う。
 
+### 2.4 `(load)` とコンパイル済みモジュール（fasl、2026-07-14 実装）
+
+- **`(load "path")`**: CL流のフラットロード（対象ファイルのフォームをカレント名前空間に読み込む、
+  `use` のモジュール包みとは別）。トップレベル専用。`path.fasl` があり `source_hash` が `.typl` と
+  一致すれば fasl を直接ロード（read・マクロ展開・型チェックを全スキップ）、無ければソース。
+  **自動コンパイルはしない**。
+- **fasl の実体**: ネイティブコードではなく「**チェック済み状態のシリアライズ**」（`src/fasl.rs`、
+  LLVM `(compile ...)` とは無関係）。中身は Registry の名前差分 + generic テンプレート（唯一 heap を
+  参照する Checker 状態を `OwnedForm` 化）+ チェック済み `TopLevel` 列（ロード時 `interp.exec` で
+  再登録）。**生ポインタ処理系なのでヒープの clone/コピーは不可**——ロード時に確保 API
+  （`heap.cons`/`alloc_string`/`intern_symbol`）で値を作り直す（`owned_to_value`）。
+- **生成**: `typl compile-module <file.typl> [-o out.fasl]`。モジュールは定義のみ（トップレベル式は
+  エラー）。
+- **prelude 起動最適化**: prelude 自身もこの機構で起動時ロード（`prelude::load_cached`、
+  `$XDG_CACHE_HOME|~/.cache/typelisp/` にキャッシュ）。LSP は prelude fasl を起動時に1つ構築し
+  各診断パスで `Fasl::load_into` 再利用——キー入力毎の prelude 再チェックが消える（実測 5.2倍速）。
+  `prelude::load`（純ソース）はテストの hermeticity のため据え置き。
+
 ### 2.4 名前解決規則
 - **裸名（修飾なし）**: 現在の module → root（組み込み）の順。**中間の親 module は歩かない**。
   曖昧（複数候補）または未発見は `TypeError`。

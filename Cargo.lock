@@ -232,6 +232,7 @@ dependencies = [
  "autocfg",
  "num-integer",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -253,6 +254,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -440,6 +442,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "rustyline",
+ "serde",
  "serde_json",
  "typelisp-mem",
  "typelisp-rt",
@@ -451,6 +454,7 @@ version = "0.1.0"
 dependencies = [
  "num-bigint",
  "num-rational",
+ "serde",
 ]
 
 [[package]]

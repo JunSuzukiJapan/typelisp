@@ -9,7 +9,7 @@ use crate::{Loc, Path, Type};
 
 /// One constructor of a data type: a name and its field types. Field types may
 /// reference the enclosing type's parameters as `Type::Named(param, [])`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Variant {
     pub name: String,
     pub fields: Vec<Type>,
@@ -20,7 +20,7 @@ pub struct Variant {
 /// `(Iter T (Item i32))` pins `T`'s `Item` to `i32`. `assoc` is empty for a
 /// bound with no pins (`(Iter T)`), which behaves exactly as before pins
 /// existed — see `Checker::parse_where_clause`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TraitBound {
     pub trait_path: Path,
     /// Associated-type name (lowercase) -> the concrete `Type` this bound
@@ -31,7 +31,7 @@ pub struct TraitBound {
 }
 
 /// A function's parameter and return types.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FnSig {
     /// Type parameter names declared by `(defun (name T1 T2...) ...)`. Empty
     /// for an ordinary (non-generic) function — callers resolve these against
@@ -58,7 +58,7 @@ pub struct FnSig {
 
 /// A type-associated function or method (Rust-style; types are *not*
 /// namespaces). `instance` is true when the first parameter is the receiver.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AssocFn {
     pub sig: FnSig,
     pub instance: bool,
@@ -69,7 +69,7 @@ pub struct AssocFn {
 /// A `defmacro`'s signature: an arity and whether it's variadic (every
 /// parameter and the implicit return are always `Sexpr`, so there is no
 /// per-parameter type to record — see `Checker::check_defmacro`).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MacroDef {
     /// The number of fixed (non-`&rest`) parameters.
     pub arity: usize,
@@ -86,7 +86,7 @@ pub struct MacroDef {
 }
 
 /// A global variable/constant: its type and whether it is assignable.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct VarInfo {
     pub ty: Type,
     pub mutable: bool,
@@ -106,7 +106,7 @@ pub struct VarInfo {
 /// [`crate::eval::RtValue::Data`] (`Checker::check_construct` decides which
 /// by this field) — see [`AdtDef::field_names`] for the other `Struct`-only
 /// piece of metadata.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AdtKind {
     Sum,
     Struct,
@@ -115,7 +115,7 @@ pub enum AdtKind {
 /// A built-in data-type definition (a sum type, e.g. `Option`/`Result`/
 /// `Sexpr`/`HashTable`). `name` is the fully-qualified (module-prefixed) type
 /// [`Path`] used as the type's identity.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AdtDef {
     pub name: Path,
     /// Type-parameter names (lowercase), e.g. `["t"]` for `Option<T>`.
@@ -167,7 +167,7 @@ pub struct AdtDef {
 /// called on a still-generic type-variable receiver (no concrete `AdtDef` to
 /// look the method up on yet) — `Checker::check_instance_method`'s
 /// type-variable branch.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TraitDef {
     pub name: Path,
     /// Associated type names (lowercase), e.g. `["item"]` for `Iter`.

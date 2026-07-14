@@ -108,7 +108,7 @@ pub trait MacroExpander {
 }
 
 /// A checked top-level form.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TopLevel {
     /// A `defun`: fully-qualified [`Path`], typed parameters, return type, body.
     /// `type_params` are the names declared by `(defun (name T1 T2...) ...)`
@@ -174,6 +174,13 @@ pub enum TopLevel {
     Defenum { name: Path },
     /// A bare top-level expression.
     Expr(Typed),
+    /// `(load "path")` — a CL-style flat load of another file's forms into
+    /// the *current* namespace (unlike `use`, which wraps a file in its own
+    /// module). The driver resolves `path` to a `.fasl` (compiled) or `.typl`
+    /// (source) file and loads it before checking subsequent forms; the
+    /// checker only records the request (it can't do file I/O itself). See
+    /// `crate::project::load_file_flat`.
+    Load { path: String },
 }
 
 /// A lexical environment mapping variable names to their types.
@@ -758,6 +765,7 @@ impl Checker {
                     "deftrait" => return self.check_deftrait(heap, &elems[1..], false, def_loc),
                     "impl" => return self.check_impl(heap, interp, &elems[1..], false),
                     "use" => return self.check_use(heap, &elems[1..]),
+                    "load" => return self.check_load(heap, &elems[1..]),
                     _ => {}
                 }
             }
@@ -772,6 +780,91 @@ impl Checker {
     /// `RtValue::Data` result.
     pub fn registry(&self) -> &Registry {
         &self.reg
+    }
+
+    /// Mutable registry access for the fasl loader (`crate::fasl`) — the one
+    /// caller that legitimately writes registry entries without going
+    /// through `check_form` (it replays entries a previous check already
+    /// produced and serialized).
+    pub(crate) fn registry_mut(&mut self) -> &mut Registry {
+        &mut self.reg
+    }
+
+    /// Exports the retained generic templates in the heap-independent
+    /// [`crate::fasl`] representation — the serialize-side half of the fasl
+    /// round trip (templates are the only checker state whose data lives on
+    /// the GC heap; see [`FnTemplate`]/[`MethodTemplate`]).
+    pub fn export_templates(
+        &self,
+        heap: &Heap,
+    ) -> Result<
+        (Vec<(Path, crate::fasl::FnTemplateRepr)>, Vec<(Path, String, crate::fasl::MethodTemplateRepr)>),
+        Error,
+    > {
+        let mut fns = Vec::new();
+        for (path, t) in &self.generic_fn_templates {
+            let parts = t.parts.iter().map(|v| crate::fasl::value_to_owned(heap, *v)).collect::<Result<_, _>>()?;
+            fns.push((
+                path.clone(),
+                crate::fasl::FnTemplateRepr { parts, ns: t.ns.clone(), type_params: t.type_params.clone() },
+            ));
+        }
+        let mut methods = Vec::new();
+        for ((owner, name), t) in &self.generic_method_templates {
+            let repr = match t {
+                MethodTemplate::Form { parts, ns, written_vars } => crate::fasl::MethodTemplateRepr::Form {
+                    parts: parts.iter().map(|v| crate::fasl::value_to_owned(heap, *v)).collect::<Result<_, _>>()?,
+                    ns: ns.clone(),
+                    written_vars: written_vars.clone(),
+                },
+                MethodTemplate::Getter { index } => crate::fasl::MethodTemplateRepr::Getter { index: *index },
+                MethodTemplate::Setter { index } => crate::fasl::MethodTemplateRepr::Setter { index: *index },
+            };
+            methods.push((owner.clone(), name.clone(), repr));
+        }
+        Ok((fns, methods))
+    }
+
+    /// Installs fasl-carried generic templates, rebuilding each raw form in
+    /// `heap` through its allocation APIs ([`crate::fasl::owned_to_value`])
+    /// and permanently rooting it — exactly the protection a source-checked
+    /// template's parts get (see the `push_permanent_root` calls in
+    /// [`Self::check_defun`]/[`Self::check_defmethod`]).
+    pub fn install_templates(
+        &mut self,
+        heap: &mut Heap,
+        fns: &[(Path, crate::fasl::FnTemplateRepr)],
+        methods: &[(Path, String, crate::fasl::MethodTemplateRepr)],
+    ) -> Result<(), Error> {
+        for (path, repr) in fns {
+            let mut parts = Vec::with_capacity(repr.parts.len());
+            for f in &repr.parts {
+                let v = crate::fasl::owned_to_value(heap, f)?;
+                heap.push_permanent_root(v);
+                parts.push(v);
+            }
+            self.generic_fn_templates.insert(
+                path.clone(),
+                FnTemplate { parts, ns: repr.ns.clone(), type_params: repr.type_params.clone() },
+            );
+        }
+        for (owner, name, repr) in methods {
+            let t = match repr {
+                crate::fasl::MethodTemplateRepr::Form { parts, ns, written_vars } => {
+                    let mut vs = Vec::with_capacity(parts.len());
+                    for f in parts {
+                        let v = crate::fasl::owned_to_value(heap, f)?;
+                        heap.push_permanent_root(v);
+                        vs.push(v);
+                    }
+                    MethodTemplate::Form { parts: vs, ns: ns.clone(), written_vars: written_vars.clone() }
+                }
+                crate::fasl::MethodTemplateRepr::Getter { index } => MethodTemplate::Getter { index: *index },
+                crate::fasl::MethodTemplateRepr::Setter { index } => MethodTemplate::Setter { index: *index },
+            };
+            self.generic_method_templates.insert((owner.clone(), name.clone()), t);
+        }
+        Ok(())
     }
 
     /// `(pub defun ...)` / `(pub defmethod ...)` etc. — mark the next definition public.
@@ -2578,6 +2671,20 @@ impl Checker {
             self.reg.def_locs.types.insert(type_fq.clone(), loc);
         }
         Ok(TopLevel::Defenum { name: type_fq })
+    }
+
+    /// `(load "path")` — records the flat-load request for the driver (see
+    /// [`TopLevel::Load`]). The argument must be a string *literal* (the
+    /// driver resolves it before any subsequent form is checked, so it can't
+    /// depend on runtime values).
+    fn check_load(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
+        if parts.len() != 1 {
+            return Err(Error::TypeError("load: (load \"path\")".into()));
+        }
+        match parts[0] {
+            Value::Str(id) => Ok(TopLevel::Load { path: heap.string(id).to_string() }),
+            _ => Err(Error::TypeError("load: expected a string-literal path".into())),
+        }
     }
 
     fn check_use(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
