@@ -308,3 +308,111 @@ fn default_file_name_is_input_placeholder() {
     let err = r.read(&mut h, ")").unwrap_err();
     assert_eq!(&*err.loc().expect("location").file, "<input>");
 }
+
+// ---- source spans ---------------------------------------------------------
+
+use typelisp::Loc;
+
+/// The four span coordinates as a tuple, for compact assertions.
+fn span(loc: &Loc) -> (u32, u32, u32, u32) {
+    (loc.line, loc.col, loc.end_line, loc.end_col)
+}
+
+/// Read all of `src` and return each top-level datum with its span.
+fn read_spanned(src: &str) -> (Heap, Vec<(Value, Loc)>) {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::new();
+    let out = r.read_all_in_spanned(&mut h, "t.typl", src).expect("read failed");
+    (h, out)
+}
+
+/// The element spans of a list, via the heap's `elem_locs` table.
+fn elem_spans(h: &Heap, v: Value) -> Vec<(u32, u32, u32, u32)> {
+    h.list_to_vec_locs(v)
+        .expect("proper list")
+        .iter()
+        .map(|(_, loc)| span(loc.as_ref().expect("element should have a location")))
+        .collect()
+}
+
+#[test]
+fn toplevel_bare_atom_has_a_span() {
+    let (_h, out) = read_spanned("42");
+    assert_eq!(out.len(), 1);
+    assert_eq!(span(&out[0].1), (1, 1, 1, 3));
+}
+
+#[test]
+fn toplevel_spans_skip_leading_whitespace_and_comments() {
+    let (_h, out) = read_spanned("  ; comment\n  foo  (bar)\n");
+    assert_eq!(out.len(), 2);
+    assert_eq!(span(&out[0].1), (2, 3, 2, 6)); // foo
+    assert_eq!(span(&out[1].1), (2, 8, 2, 13)); // (bar)
+}
+
+#[test]
+fn list_cons_loc_spans_open_through_close_paren() {
+    let (h, out) = read_spanned("(foo bar)");
+    let loc = h.cons_loc(out[0].0).expect("list should have a cons_loc");
+    assert_eq!(span(&loc), (1, 1, 1, 10));
+}
+
+#[test]
+fn list_element_spans_cover_each_element() {
+    let (h, out) = read_spanned("(foo bar)");
+    assert_eq!(elem_spans(&h, out[0].0), vec![(1, 2, 1, 5), (1, 6, 1, 9)]);
+}
+
+#[test]
+fn nested_list_records_its_own_span() {
+    let (h, out) = read_spanned("(a (b c) d)");
+    let outer = out[0].0;
+    assert_eq!(span(&h.cons_loc(outer).unwrap()), (1, 1, 1, 12));
+    let inner = h.list_to_vec_locs(outer).unwrap()[1].0;
+    assert_eq!(span(&h.cons_loc(inner).unwrap()), (1, 4, 1, 9));
+    // The nested list's elem_loc (on the outer spine) matches its cons_loc.
+    assert_eq!(elem_spans(&h, outer)[1], (1, 4, 1, 9));
+}
+
+#[test]
+fn multiline_form_span_ends_on_the_closing_line() {
+    let (h, out) = read_spanned("(foo\n  bar)");
+    assert_eq!(span(&h.cons_loc(out[0].0).unwrap()), (1, 1, 2, 7));
+    assert_eq!(elem_spans(&h, out[0].0), vec![(1, 2, 1, 5), (2, 3, 2, 6)]);
+}
+
+#[test]
+fn string_and_char_atoms_have_full_spans() {
+    let (_h, out) = read_spanned("\"hi\" #\\Space");
+    assert_eq!(span(&out[0].1), (1, 1, 1, 5));
+    assert_eq!(span(&out[1].1), (1, 6, 1, 13));
+}
+
+#[test]
+fn dotted_pair_span_includes_the_cdr() {
+    let (h, out) = read_spanned("(a . b)");
+    assert_eq!(span(&h.cons_loc(out[0].0).unwrap()), (1, 1, 1, 8));
+}
+
+#[test]
+fn quote_synthesized_list_gets_spans() {
+    let (h, out) = read_spanned("'x");
+    // The whole (quote x) form spans the ' through the datum.
+    assert_eq!(span(&out[0].1), (1, 1, 1, 3));
+    assert_eq!(span(&h.cons_loc(out[0].0).unwrap()), (1, 1, 1, 3));
+    // Elements: `quote` covers the prefix char, `x` its own character.
+    assert_eq!(elem_spans(&h, out[0].0), vec![(1, 1, 1, 2), (1, 2, 1, 3)]);
+}
+
+#[test]
+fn unquote_splicing_spans_both_prefix_chars() {
+    let (h, out) = read_spanned("`(,@xs)");
+    // (quasiquote ((unquote-splicing xs)))
+    let quasi = out[0].0;
+    assert_eq!(span(&h.cons_loc(quasi).unwrap()), (1, 1, 1, 8));
+    let inner_list = h.list_to_vec_locs(quasi).unwrap()[1].0;
+    let splice = h.list_to_vec_locs(inner_list).unwrap()[0].0;
+    assert_eq!(span(&h.cons_loc(splice).unwrap()), (1, 3, 1, 7));
+    // `unquote-splicing` covers the two prefix chars `,@`.
+    assert_eq!(elem_spans(&h, splice), vec![(1, 3, 1, 5), (1, 5, 1, 7)]);
+}

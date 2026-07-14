@@ -69,8 +69,7 @@ impl Reader {
     /// Like [`Reader::read_all`], but `file` names the source (used in the
     /// location prefix of any error message).
     pub fn read_all_in(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Vec<Value>, Error> {
-        heap.clear_cons_locs();
-        self.read_all_in_keep_locs(heap, file, src)
+        Ok(self.read_all_in_spanned(heap, file, src)?.into_iter().map(|(v, _)| v).collect())
     }
 
     /// Like [`Reader::read_all_in`], but *without* wiping the heap's
@@ -81,6 +80,23 @@ impl Reader {
     /// Only the driver that begins a fresh read session (the REPL batch, the
     /// loader's entry file) clears.
     pub fn read_all_in_keep_locs(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Vec<Value>, Error> {
+        Ok(self.read_all_in_keep_locs_spanned(heap, file, src)?.into_iter().map(|(v, _)| v).collect())
+    }
+
+    /// Like [`Reader::read_all_in`], but each top-level datum comes with the
+    /// source span it was read from. This is the only way a *bare atom* at
+    /// top level (e.g. a lone `42`) gets a location: atoms are immediate or
+    /// interned values with no pointer identity, so they cannot be keyed in
+    /// the heap's cons-location tables — the span must travel alongside the
+    /// value to whoever checks it (`Checker::check_form_at`'s `loc_hint`).
+    pub fn read_all_in_spanned(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Vec<(Value, Loc)>, Error> {
+        heap.clear_cons_locs();
+        self.read_all_in_keep_locs_spanned(heap, file, src)
+    }
+
+    /// [`Reader::read_all_in_spanned`] without wiping the location tables
+    /// first — see [`Reader::read_all_in_keep_locs`] for when that matters.
+    pub fn read_all_in_keep_locs_spanned(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Vec<(Value, Loc)>, Error> {
         let mut cur = Cursor::new(file, src);
         let mut out = Vec::new();
         loop {
@@ -88,12 +104,12 @@ impl Reader {
             if cur.at_end() {
                 break;
             }
-            let v = match read_datum(&mut cur, heap) {
-                Ok(v) => v,
+            let (v, loc) = match read_datum_spanned(&mut cur, heap) {
+                Ok(pair) => pair,
                 Err(e) => return Err(e.at(cur.loc())),
             };
             heap.push_root(v);
-            out.push(v);
+            out.push((v, loc));
         }
         Ok(out)
     }
@@ -237,18 +253,31 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
         Some('\'') => read_wrapped(cur, heap, "quote"),
         Some('`') => read_wrapped(cur, heap, "quasiquote"),
         Some(',') => {
+            let start = cur.loc(); // before the prefix, like read_wrapped
             cur.next(); // the ','
             if cur.peek() == Some('@') {
                 cur.next(); // the '@'
-                read_wrapped_body(cur, heap, "unquote-splicing")
+                read_wrapped_body(cur, heap, "unquote-splicing", start)
             } else {
-                read_wrapped_body(cur, heap, "unquote")
+                read_wrapped_body(cur, heap, "unquote", start)
             }
         }
         Some('"') => read_string(cur, heap),
         Some('#') => read_hash(cur, heap),
         Some(_) => read_atom(cur, heap),
     }
+}
+
+/// [`read_datum`] plus the source span the datum was read from. The start is
+/// captured *after* skipping leading whitespace/comments (so `read_datum`'s
+/// own leading skip is a no-op) and the end right after the datum's last
+/// character — no read function consumes trailing whitespace, so the cursor
+/// sits exactly past the datum when `read_datum` returns.
+fn read_datum_spanned(cur: &mut Cursor, heap: &mut Heap) -> Result<(Value, Loc), Error> {
+    skip_ws_comments(cur);
+    let start = cur.loc();
+    let v = read_datum(cur, heap)?;
+    Ok((v, start.with_end(cur.line, cur.col)))
 }
 
 /// Read `<prefix-char><datum>` as `(<head> datum)` — the shared shape behind
@@ -259,25 +288,41 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
 /// prefix characters (`,` then `@`), so its caller in [`read_datum`] does
 /// that part itself and calls `read_wrapped_body` directly.
 fn read_wrapped(cur: &mut Cursor, heap: &mut Heap, head: &str) -> Result<Value, Error> {
+    let start = cur.loc(); // the prefix character — where the whole form begins
     cur.next(); // the prefix character
-    read_wrapped_body(cur, heap, head)
+    read_wrapped_body(cur, heap, head, start)
 }
 
 /// Read `datum` and build `(head datum)`, the shared tail of [`read_wrapped`]
-/// — assumes any prefix character(s) have already been consumed.
-fn read_wrapped_body(cur: &mut Cursor, heap: &mut Heap, head: &str) -> Result<Value, Error> {
-    let d = read_datum(cur, heap)?;
+/// — assumes any prefix character(s) have already been consumed. `start` is
+/// the position of the first prefix character; the synthesized 2-element list
+/// gets the same location treatment as one read from explicit parens: the
+/// head cell's `cons_loc` spans prefix through datum end, the `head` symbol's
+/// `elem_loc` covers the prefix character(s), and the datum's `elem_loc` its
+/// own span.
+fn read_wrapped_body(cur: &mut Cursor, heap: &mut Heap, head: &str, start: Loc) -> Result<Value, Error> {
+    let head_loc = start.clone().with_end(cur.line, cur.col); // the consumed prefix
+    let (d, d_loc) = read_datum_spanned(cur, heap)?;
+    let form_loc = start.with_end(cur.line, cur.col);
     heap.push_root(d);
     let q = heap.intern_symbol(head); // symbols are permanent; no rooting needed
     let result = (|| {
         let inner = heap.cons(d, Value::Empty)?;
+        if let Value::Cons(cr) = inner {
+            heap.set_elem_loc(cr, d_loc);
+        }
         heap.push_root(inner);
         let r = heap.cons(q, inner);
         heap.pop_root(); // inner
         r
     })();
     heap.pop_root(); // d
-    result
+    let outer = result?;
+    if let Value::Cons(cr) = outer {
+        heap.set_cons_loc(cr, form_loc);
+        heap.set_elem_loc(cr, head_loc);
+    }
+    Ok(outer)
 }
 
 // ----------------------------------------------------------------------
@@ -332,9 +377,8 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
                 break;
             }
             Some(_) => {
-                let elem_loc = cur.loc(); // where this element begins
-                let e = match read_datum(cur, heap) {
-                    Ok(e) => e,
+                let (e, elem_loc) = match read_datum_spanned(cur, heap) {
+                    Ok(pair) => pair,
                     Err(err) => {
                         restore_roots(heap, mark);
                         return Err(err);
@@ -346,6 +390,10 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
             }
         }
     }
+    // The cursor now sits just past the closing ')' (both loop exits consume
+    // it), which is the list form's exclusive end; the cons-chain build below
+    // never moves the cursor.
+    let list_loc = open_loc.with_end(cur.line, cur.col);
 
     // Build the cons chain from the back; the accumulator stays rooted so a GC
     // triggered by `cons` cannot reclaim the part already built. Each spine
@@ -372,12 +420,13 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
     }
 
     restore_roots(heap, mark);
-    // Record where this list form began, so the checker/interpreter can point
-    // an error at it. Only the head cell is tagged; each nested list records
-    // its own head via its own `read_list` call. An empty list `()` reads as
-    // `Value::Empty` (no cell), so there is nothing to tag then.
+    // Record this list form's span ('(' through ')'), so the checker/
+    // interpreter can point an error at it. Only the head cell is tagged;
+    // each nested list records its own head via its own `read_list` call. An
+    // empty list `()` reads as `Value::Empty` (no cell), so there is nothing
+    // to tag then.
     if let Value::Cons(cr) = acc {
-        heap.set_cons_loc(cr, open_loc);
+        heap.set_cons_loc(cr, list_loc);
     }
     Ok(acc)
 }
