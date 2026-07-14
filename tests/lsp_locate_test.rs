@@ -159,8 +159,11 @@ fn hover_on_a_let_bound_local_finds_its_own_type() {
     // resolved to the enclosing `let` instead of the `n` reference itself.
     let src = "(defun f () i32 (let ((n true)) (if n 1 1)))\n";
     let (body, _) = program(src);
-    // `(let ((n true)) (if n 1 1))` — `n` inside the `if` condition.
-    let node = locate_node(&body, FILE, 1, 38).expect("expected a located node");
+    // `(let ((n true)) (if n 1 1))` — `n` inside the `if` condition is at
+    // column 37 exactly. (Column 38 — the space after it — used to resolve
+    // to `n` too under the pre-span closest-preceding-start search, but with
+    // true containment it correctly resolves to the enclosing `if` instead.)
+    let node = locate_node(&body, FILE, 1, 37).expect("expected a located node");
     assert_eq!(hover_text(node), format!("{:?}", Type::Bool));
 }
 
@@ -183,4 +186,44 @@ fn bare_toplevel_atom_gets_its_span_from_the_reader() {
         }
         other => panic!("expected an expression, got {:?}", other),
     }
+}
+
+#[test]
+fn locate_prefers_true_containment_over_a_closer_preceding_start() {
+    // Two sibling calls, both arguments to a user-defined `wrap` (unlike
+    // `+`, `wrap` has its own `def_locs` entry to resolve against). A
+    // cursor *between* the siblings — past `(add 1 2)`'s closing paren,
+    // before `(add 3 4)` — is contained by neither sibling but by the
+    // enclosing `(wrap ...)` call, whose start is *further* from the
+    // cursor than the first sibling's. The pre-span point search resolved
+    // this to the first sibling (`add`, line 1); containment resolves it
+    // to the enclosing call (`wrap`, line 2).
+    let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n(defun wrap ((a i32) (b i32)) i32 (+ a b))\n(defun main () i32 (wrap (add 1 2)  (add 3 4)))\n";
+    let (body, def_locs) = program(src);
+    // Line 3: `(wrap (add 1 2)  (add 3 4))` — the gap between siblings
+    // (the second of the two spaces) is column 36.
+    let node = locate_node(&body, FILE, 3, 36).expect("expected a located node");
+    let target = definition_target(node, &def_locs).expect("the enclosing call resolves");
+    assert_eq!((target.line, target.col), (2, 1), "expected wrap's defun, not add's");
+}
+
+#[test]
+fn locate_inside_a_sibling_still_finds_it() {
+    let src = "(defun add ((x i32) (y i32)) i32 (+ x y))\n(defun main () i32 (+ (add 1 2)  (add 3 4)))\n";
+    let (body, def_locs) = program(src);
+    // Column 35 is inside the second `(add 3 4)` call.
+    let node = locate_node(&body, FILE, 2, 35).expect("expected a located node");
+    let target = definition_target(node, &def_locs).expect("expected a resolvable reference");
+    assert_eq!((target.line, target.col), (1, 1)); // `add`'s defun
+}
+
+#[test]
+fn locate_past_every_span_falls_back_to_the_closest_preceding_node() {
+    // A cursor way past the last form's end is contained by nothing; the
+    // fallback (pre-span behavior) still resolves to the closest preceding
+    // node rather than returning nothing — completion_locals depends on
+    // locate_node finding *something* here.
+    let src = "(defun main () i32 (+ 1 2))\n";
+    let (body, _) = program(src);
+    assert!(locate_node(&body, FILE, 3, 1).is_some());
 }

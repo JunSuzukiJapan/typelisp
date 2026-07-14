@@ -1,38 +1,49 @@
 //! Cursor-position lookups over a checked document, for the LSP's hover and
 //! goto-definition (`src/bin/lsp.rs`).
 //!
-//! `Typed::loc` (`ast.rs`) is a *point*, not a span: for a list-form node it's
-//! the position of the opening parenthesis (`Heap::cons_loc`); for a bare atom
+//! `Typed::loc` (`ast.rs`) is a source *span*: for a list-form node it covers
+//! the opening through closing parenthesis (`Heap::cons_loc`); for a bare atom
 //! checked as an *element of some enclosing list* (e.g. an argument, a `let`
-//! binding value, a function body form) it's the position the reader recorded
+//! binding value, a function body form) it's the span the reader recorded
 //! for that specific occurrence (`Heap::elem_locs`, threaded through the
 //! checker as `arg_locs`/`Checker::check_at`) — this is what lets a `Var`
-//! (local variable) reference be found in its own right. An atom with *no*
-//! enclosing list at all (vanishingly rare — the entry point only ever checks
-//! whole top-level forms) still has no location. A full span (as opposed to
-//! just a start point) would need the reader rebuilt to track every token's
-//! end, not just its start — out of scope here.
+//! (local variable) reference be found in its own right. A bare atom at top
+//! level gets its span from the reader directly
+//! (`Reader::read_all_in_spanned` -> `Checker::check_form_at`).
 //!
-//! Even with only start points, the smallest node containing the cursor can
-//! still be found exactly: sibling forms never overlap in source order, so
-//! among every node whose start position is `<= cursor`, the one with the
-//! *greatest* start position is the innermost one that contains it (ties —
-//! a wrapper node sharing its first child's exact position — broken toward
-//! the deeper node). [`locate_node`] is that search.
+//! [`locate_node`] prefers true containment: among every node whose span
+//! contains the cursor (`Loc::contains`), the one with the greatest start
+//! position is the innermost (contained nodes form a nesting chain; ties —
+//! a wrapper node sharing its first child's exact position — are broken
+//! toward the deeper node). A node with a *degenerate* span (end unknown —
+//! e.g. one synthesized by macro expansion) can never contain a cursor, so
+//! when nothing contains it the search falls back to the pre-span behavior:
+//! the greatest start position `<=` cursor. That keeps positions past a
+//! form's end (or in macro-synthesized trees) resolving to *something*
+//! rather than nothing — `completion_locals` depends on that.
 
 use crate::{DefLocs, Expr, Loc, Pattern, Registry, TopLevel, Typed};
 
-/// Find the smallest node in `body` whose recorded location is at or before
-/// `(line, col)` in `file` — see the module doc comment for why "greatest
-/// start position `<=` cursor" is exactly "smallest containing node" here.
-/// `line`/`col` are 1-based, matching [`Loc`].
+/// The innermost candidates seen so far during [`locate_node`]'s walk: one
+/// among nodes whose span truly contains the cursor, one among nodes that
+/// merely start at or before it (the pre-span behavior, kept as a fallback —
+/// see the module doc comment). Each entry is (start position, depth, node).
+#[derive(Default)]
+struct Nearest<'a> {
+    contained: Option<((u32, u32), usize, &'a Typed)>,
+    preceding: Option<((u32, u32), usize, &'a Typed)>,
+}
+
+/// Find the smallest node in `body` whose span contains `(line, col)` in
+/// `file`, falling back to the closest-preceding node when nothing does —
+/// see the module doc comment. `line`/`col` are 1-based, matching [`Loc`].
 pub fn locate_node<'a>(body: &'a [TopLevel], file: &str, line: u32, col: u32) -> Option<&'a Typed> {
     let cursor = (line, col);
-    let mut best: Option<((u32, u32), usize, &'a Typed)> = None;
+    let mut best = Nearest::default();
     for tl in body {
         visit_top_level(tl, file, cursor, 0, &mut best);
     }
-    best.map(|(_, _, t)| t)
+    best.contained.or(best.preceding).map(|(_, _, t)| t)
 }
 
 fn visit_top_level<'a>(
@@ -40,7 +51,7 @@ fn visit_top_level<'a>(
     file: &str,
     cursor: (u32, u32),
     depth: usize,
-    best: &mut Option<((u32, u32), usize, &'a Typed)>,
+    best: &mut Nearest<'a>,
 ) {
     match tl {
         TopLevel::Defun { body, .. } | TopLevel::Defmethod { body, .. } | TopLevel::Defmacro { body, .. } => {
@@ -60,23 +71,26 @@ fn visit_top_level<'a>(
     }
 }
 
-fn visit_typed<'a>(
-    t: &'a Typed,
-    file: &str,
-    cursor: (u32, u32),
-    depth: usize,
-    best: &mut Option<((u32, u32), usize, &'a Typed)>,
-) {
+fn visit_typed<'a>(t: &'a Typed, file: &str, cursor: (u32, u32), depth: usize, best: &mut Nearest<'a>) {
     if let Some(loc) = &t.loc {
         if &*loc.file == file {
             let key = (loc.line, loc.col);
             if key <= cursor {
-                let better = match best {
-                    None => true,
-                    Some((bk, bd, _)) => key > *bk || (key == *bk && depth > *bd),
+                // "Greatest start (ties broken deeper) wins" — the same rule
+                // for both candidate kinds; contained nodes form a nesting
+                // chain, so among them this picks the innermost.
+                let update = |slot: &mut Option<((u32, u32), usize, &'a Typed)>| {
+                    let better = match slot {
+                        None => true,
+                        Some((bk, bd, _)) => key > *bk || (key == *bk && depth > *bd),
+                    };
+                    if better {
+                        *slot = Some((key, depth, t));
+                    }
                 };
-                if better {
-                    *best = Some((key, depth, t));
+                update(&mut best.preceding);
+                if loc.contains(cursor.0, cursor.1) {
+                    update(&mut best.contained);
                 }
             }
         }
@@ -183,15 +197,16 @@ pub fn hover_text(node: &Typed) -> String {
 /// arm's own body — the scrutinee and sibling arms never see them,
 /// matching `Checker::check_match`'s per-arm `extended_with_locs`.
 ///
-/// Residual caveat (a consequence of `Typed::loc` being a start *point*,
-/// not a span — see this module's own doc comment): the cursor position
-/// handed in is matched against the *closest preceding* node's start, with
-/// no way to tell "inside that node's own span" from "already past it,
-/// nothing positioned here yet". A cursor sitting right at a `let`/
-/// `lambda`/`labels` scope boundary with *nothing at all* positioned in the
-/// new scope can therefore resolve to a node one scope out (e.g. a binding
+/// Residual caveat (now limited to [`locate_node`]'s *fallback* path — a
+/// containment hit is exact): when nothing's span contains the cursor
+/// (e.g. a macro-synthesized tree with only degenerate spans), the cursor
+/// is matched against the *closest preceding* node's start, with no way to
+/// tell "inside that node's own span" from "already past it, nothing
+/// positioned here yet". A cursor sitting right at a `let`/`lambda`/
+/// `labels` scope boundary with *nothing at all* positioned in the new
+/// scope can therefore resolve to a node one scope out (e.g. a binding
 /// value), missing the boundary's own names. The LSP never hands in such a
-/// position anymore: `handle_completion` (`src/bin/lsp.rs`) splices its
+/// position anyway: `handle_completion` (`src/bin/lsp.rs`) splices its
 /// `(panic "")` placeholder at *exactly* the in-progress identifier's
 /// position (and a fresh `(` truncates to `()`, whose `Unit` node keeps the
 /// `(`'s own recorded element position), so the checked tree always has a

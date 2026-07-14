@@ -361,7 +361,11 @@ fn handle_hover(id: RequestId, params: serde_json::Value, analyses: &HashMap<Uri
         let pos = p.text_document_position_params.position;
         let analysis = analyses.get(&uri)?;
         let node = locate_node(&analysis.body, &analysis.file, pos.line + 1, pos.character + 1)?;
-        let hover = Hover { contents: HoverContents::Scalar(MarkedString::String(hover_text(node))), range: None };
+        // The hovered node's own span, so the editor highlights exactly what
+        // the type applies to. A degenerate span (macro-synthesized node)
+        // would highlight a stray single character — omit the range instead.
+        let range = node.loc.as_ref().filter(|l| !l.is_degenerate()).map(loc_to_range);
+        let hover = Hover { contents: HoverContents::Scalar(MarkedString::String(hover_text(node))), range };
         Some(serde_json::to_value(hover).expect("Hover always serializes"))
     })();
     Response { id, result, error: None }
@@ -723,12 +727,22 @@ fn diagnostic(message: String, range: Range, severity: DiagnosticSeverity) -> Di
     Diagnostic { range, severity: Some(severity), source: Some("typelisp".into()), message, ..Default::default() }
 }
 
-/// `Loc`'s line/col are 1-based; LSP's `Position` is 0-based. Highlights a
-/// single character at the location, since `Loc` is a point, not a span.
+/// `Loc`'s line/col are 1-based; LSP's `Position` is 0-based. Both ends are
+/// exclusive-exclusive-compatible: `Loc::end_*` is already exclusive, same as
+/// LSP's `Range.end`, so the span converts directly. A *degenerate* `Loc`
+/// (end unknown — e.g. a node synthesized by macro expansion, or a read
+/// error's point) falls back to highlighting a single character, the
+/// pre-span behavior.
 fn loc_to_range(loc: &Loc) -> Range {
     let line = loc.line.saturating_sub(1);
     let col = loc.col.saturating_sub(1);
-    Range::new(Position::new(line, col), Position::new(line, col + 1))
+    if loc.is_degenerate() {
+        return Range::new(Position::new(line, col), Position::new(line, col + 1));
+    }
+    Range::new(
+        Position::new(line, col),
+        Position::new(loc.end_line.saturating_sub(1), loc.end_col.saturating_sub(1)),
+    )
 }
 
 fn doc_start_range() -> Range {
