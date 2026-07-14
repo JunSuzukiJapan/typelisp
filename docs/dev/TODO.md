@@ -68,10 +68,19 @@ truncate設計（カーソル以降を切り捨て）が非catchall `match`ア�
 返すことで解消。詳細は[implementation-log.md](implementation-log.md)の
 「チェッカーのエラー回復モード」節。
 
-**既知の制限（意図的なMVPスコープ、解消せず残す）**:
-- アトム単体でも**リスト要素として現れる場合は**位置を持つ（2026-07-12対応）が、
-  リストに一切現れない裸アトム（実質発生しない）は依然として位置を持てない。真のspan対応
-  （reader全体の作り替えが必要）は引き続き見送り。
+直近完了: **リーダーの真のspan対応**（2026-07-14、branch `feature/reader-spans`）——
+「reader全体の作り替えが必要」として見送っていたが、位置テーブル機構（`cons_locs`/
+`elem_locs`）はそのままに`Loc`へ`end_line`/`end_col`（排他的終端）を追加する増分で解消。
+`Reader::read_datum_spanned`が全datumの開始〜終了を捕捉（末尾空白/コメントを消費する
+read関数が無いため追加演算ゼロ）、`read_list`はcons_locが`(`〜`)`の完全spanに、
+quote/quasiquote/unquote/unquote-splicing合成リストにも明示括弧と同等のcons_loc/elem_loc
+を付与（従来は一切位置が付かなかった）。トップレベル裸アトム（例: 単独の`42`）は
+`read_all_in_spanned`が`(Value, Loc)`で返しそのspanを`Checker::check_form_at`の`loc_hint`
+へ渡すことで初めて位置を持つ。LSP側は`locate_node`が「包含優先(`start<=cursor<end`)+
+非包含フォールバック(旧点近似)」の2段探索に、`loc_to_range`が実spanでrange構築（診断の
+アンダーラインがフォーム全体に）、hoverにもrangeを付与。`FASL_FORMAT_VERSION`を2へbump
+（`Loc`が`DefLocsRepr`/`Typed.loc`両方でserdeシリアライズされるため）。テスト:
+read_test 10件・lsp_locate_test 4件追加、miri(read_test/mem_test) green。
 
 `compile`（LLVM JIT/AOT）機能は現状「今のフェーズが実際に使うASTノードだけ本実装、それ以外は
 `ast_bridge`が`(unsupported "<Variant>")`を返しコンパイラ本体が明示的にpanicする」設計

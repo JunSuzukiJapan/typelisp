@@ -86,9 +86,10 @@ pub struct Heap {
     // has no consumer.
     dead_closure_tokens: Vec<u32>,
 
-    // Source locations of cons cells produced by the reader, keyed by the
-    // cell's raw address (`ConsRef::addr`), so an error about a form can be
-    // reported with the `file:line:col` it was read from. This is a pure
+    // Source *spans* (opening `(` through closing `)`) of cons cells produced
+    // by the reader, keyed by the cell's raw address (`ConsRef::addr`), so an
+    // error about a form can be reported with the `file:line:col` it was read
+    // from, and the LSP can underline its full extent. This is a pure
     // side table: it never keeps a cell alive (the mark phase ignores it) and
     // a stale entry (a freed cell's address later reused) is harmless because
     // the reader overwrites it on every fresh allocation and
@@ -97,10 +98,10 @@ pub struct Heap {
     // read→check cycle that consults it.
     cons_locs: HashMap<usize, crate::errors::Loc>,
 
-    // Source locations of *each list element*, keyed by the spine cons cell
+    // Source spans of *each list element*, keyed by the spine cons cell
     // whose `car` holds that element (`ConsRef::addr`). Where `cons_locs`
-    // records only a list form's opening `(` (its head cell), this records
-    // where every element — including a bare atom, which has no per-occurrence
+    // records a list form's own span (head cell), this records the span of
+    // every element — including a bare atom, which has no per-occurrence
     // identity of its own (interned symbols are shared) — begins. Same pure
     // side-table discipline as `cons_locs`: never keeps a cell alive, cleared
     // by `clear_cons_locs`, harmless if a freed cell's address is later reused

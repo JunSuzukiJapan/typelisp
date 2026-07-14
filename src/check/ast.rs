@@ -11,12 +11,17 @@ use crate::{Loc, Path, Type};
 
 /// An expression node annotated with its checked type.
 ///
-/// `loc` is the source location the node was read from (when known — only
-/// list forms carry one), set by [`Checker::check`](crate::Checker) so the
-/// interpreter can report a runtime error with its `file:line:col`. It is
-/// deliberately excluded from equality (see the manual [`PartialEq`] impl):
-/// two structurally identical trees read from different places are still
-/// equal, which keeps the checker's AST-shape tests location-independent.
+/// `loc` is the source span the node was read from (when known — a list
+/// form always carries one from its own `cons_loc`; a bare atom does too
+/// when it was read as a list element (`elem_locs`) or as a spanned
+/// top-level datum (`Reader::read_all_in_spanned` -> `Checker::
+/// check_form_at`'s `loc_hint`) — see `check::locate`'s module doc comment),
+/// set by [`Checker::check`](crate::Checker) so the interpreter can report a
+/// runtime error with its `file:line:col` and the LSP can underline the
+/// node's exact extent. It is deliberately excluded from equality (see the
+/// manual [`PartialEq`] impl): two structurally identical trees read from
+/// different places are still equal, which keeps the checker's AST-shape
+/// tests location-independent.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Typed {
     pub expr: Expr,
