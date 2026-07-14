@@ -880,14 +880,19 @@ fn source_load_capturing(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp
     Fasl::capture(heap, chk, &mark, top_levels, source_hash(SOURCE)).expect("prelude: fasl capture failed")
 }
 
-/// The prelude fasl's cache path: `<cache-dir>/typelisp/prelude-<hash>-v<ver>.fasl`,
-/// where `<cache-dir>` is `$XDG_CACHE_HOME`, else `$HOME/.cache` — resolved at
-/// runtime, never hardcoded. `None` if neither is set (no cache used).
+/// The prelude fasl's cache path:
+/// `<cache-dir>/prelude-<hash>-v<ver>.fasl`, where `<cache-dir>` is
+/// `$TYPL_CACHE_DIR` if set, else `$HOME/.typl/cache`. A *dedicated* typelisp
+/// directory — deliberately **not** the shared XDG `~/.cache`, so clearing
+/// another app's caches (or a blanket `rm -rf ~/.cache/*`) can't take
+/// typelisp's with it. Resolved at runtime, never hardcoded
+/// ([[feedback-no-hardcoded-absolute-paths]]). `None` if neither is set (no
+/// cache used — the source path still works).
 fn cache_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
+    let base = std::env::var_os("TYPL_CACHE_DIR")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
-    Some(base.join("typelisp").join(format!("prelude-{:016x}-v{}.fasl", source_hash(SOURCE), FASL_FORMAT_VERSION)))
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".typl").join("cache")))?;
+    Some(base.join(format!("prelude-{:016x}-v{}.fasl", source_hash(SOURCE), FASL_FORMAT_VERSION)))
 }
 
 /// Loads the cached prelude fasl if present and valid (its `source_hash`

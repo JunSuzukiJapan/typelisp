@@ -134,7 +134,7 @@
 - **生成**: `typl compile-module <file.typl> [-o out.fasl]`。モジュールは定義のみ（トップレベル式は
   エラー）。
 - **prelude 起動最適化**: prelude 自身もこの機構で起動時ロード（`prelude::load_cached`、
-  `$XDG_CACHE_HOME|~/.cache/typelisp/` にキャッシュ）。LSP は prelude fasl を起動時に1つ構築し
+  専用ディレクトリ `$TYPL_CACHE_DIR`|`~/.typl/cache/` にキャッシュ）。LSP は prelude fasl を起動時に1つ構築し
   各診断パスで `Fasl::load_into` 再利用——キー入力毎の prelude 再チェックが消える（実測 5.2倍速）。
   `prelude::load`（純ソース）はテストの hermeticity のため据え置き。
 

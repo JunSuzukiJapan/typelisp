@@ -25,7 +25,7 @@
   `Fasl::load_into`で新ヒープへ**確保API経由の再構築**（parse/型チェックなし、値はheap.cons等で
   作り直すのでポインタ問題なし）。LSPは起動時に`Rc<Fasl>`を1つ持ち各パスで再利用。詳細は
   [[typelisp-fasl-compiled-modules]]、`src/fasl.rs`。ユーザー面には`(load "path")`フォームと
-  `typl compile-module`サブコマンド、CLI/REPL起動の`prelude::load_cached`（`~/.cache`キャッシュ）
+  `typl compile-module`サブコマンド、CLI/REPL起動の`prelude::load_cached`（`$TYPL_CACHE_DIR`または`~/.typl/cache`にキャッシュ）
   として一般公開。**残**: 依存*ファイル*(use先)自体のパス間キャッシュは未対応だが、これも
   `(load)`のfasl優先で回避可能（依存を事前compileしておけば再読込・再チェックが消える）。
 - ~~**`use`はソースルート相対のみ**: 兄弟ファイル相対の解決は未対応~~ **→ 2026-07-13 解消**。
