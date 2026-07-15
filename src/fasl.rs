@@ -336,7 +336,11 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// 3: added `QuotedSexpr::Path` (a `::`-qualified path inside quoted data,
 /// e.g. a `defmacro` body's `'(dep::head)`), reachable from any serialized
 /// `Expr::Quote`/`Typed` — 2026-07-15.
-pub const FASL_FORMAT_VERSION: u32 = 3;
+///
+/// 4: re-added value-level `&rest`/`apply` (`FnSig.rest: Option<Type>`,
+/// `Type::Fn`'s second field), reachable from any serialized function
+/// signature or `Typed` whose type mentions a function type — 2026-07-15.
+pub const FASL_FORMAT_VERSION: u32 = 4;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.

@@ -36,8 +36,8 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - **Unit 型**: `()`
 - **Never 型**: `!`（`panic`/`unreachable`/`todo`/`return`しないループ 等、発散する式の型。
   任意の期待型に適合する）
-- **関数型**: `(fn (引数型...) 戻り値型)`。関数型は常に固定アリティ
-  （値レベルの可変長関数は無い。`&rest` は `defmacro` 専用）。
+- **関数型**: `(fn (引数型...) 戻り値型)`。可変長引数を持つ関数型は
+  `(fn (引数型... &rest 要素型) 戻り値型)`。
 - **ジェネリック型**: `Name<T1,T2,...>`（空白なしの1トークンとして読み取られ、内部で分解される）。
   例: `Option<i32>` `Result<i32,Error>` `HashTable<string,i32>` `Vector<T>`。
 - **修飾型名**: `module::Type` のように `::` で修飾できる。
@@ -56,8 +56,11 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - 引数の型・戻り値の型は必須。
 - ジェネリック関数は名前に山括弧で型パラメータを書く: `(defun name<T1,T2...> (params) Ret body...)`
   （型位置の `Vector<T>` と同じ山括弧構文。旧来の `(name T1 T2...)` リスト形式は廃止）。
-- `defun`/`lambda` は固定アリティのみ。可変長引数（`&rest`）は `defmacro` 専用で、
-  `defun`/`lambda`/`fn` 型では使えない。
+- `defun`/`lambda` は末尾に `&rest (name Type)` を書くと可変長引数を受け取れる:
+  `(defun name ((a Type1) &rest (xs Type2)) Ret body...)`（本体内では `xs` は常に `Sexpr` の
+  リストとして束縛される。呼び出し側の各実引数は `Type2` として個別に型検査される）。
+  `defmacro` にも独自の `&rest` があるが、常に無型の `Sexpr` である点が異なる（`defun`/`lambda`
+  は要素型を明示する）。`fn` 型でも `(fn (T1... &rest Te) Ret)` の形で可変長関数の型を書ける。
 - トレイト境界を要求する場合は本体の直前に `where` 節を書く:
   `(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
   （`(AssocName ConcreteType)` による関連型の固定は省略可能）。
@@ -295,6 +298,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 ```lisp
 (lambda (params) RetType body...)   ; 第一級関数値（クロージャ）を作る
 (labels ((name (params) RetType body...) ...) body...)   ; 相互再帰可能なローカル関数定義
+(apply f arg1 ... argN rest-list)   ; f（&rest を持つ可変長関数）を rest-list を展開して呼ぶ
 ```
 
 名前付き関数もそのまま値として渡せる（高階関数への引数など）。

@@ -13,13 +13,10 @@ Phase 4b と Phase 5 は元々一体だったが、リスク分離のため Phas
 **Phase 6.5（ユーザー面リスト/ペア走査 API の `cons<T,U>`/`Vector<T>`/`Iter` 上での再設計）と
 Phase 6.6（その残ギャップ解消＝impl メソッドの `where` 節＋compile の `equals`/`less` 対応）も完了**。
 残るは **Phase 7**（ドキュメント整備）。`defenum`（ユーザー多variant sum型）は本再設計とは別に
-2026-07-09実装済み（[implementation-log.md](implementation-log.md)参照）。
-
-> **Phase 6（`&rest` → `Vector<T>`）は破棄。** 当初は defun/lambda の型付き `&rest` を
-> `Vector<T>` に付け替える計画だったが、可変長パラメータを均質配列型で表すのは不自然という
-> 判断で、計画ごと撤回した。あわせて**値レベル `&rest` 構文（defun/lambda/`fn` 型）と
-> それに依存する `apply` 特殊形を言語から削除**した（後述）。`defmacro` の `&rest`（マクロ用の
-> Sexpr ベース、島）はそのまま維持する。
+2026-07-09実装済み（[implementation-log.md](implementation-log.md)参照）。値レベル `&rest`/`apply`
+（当初の Phase 6「`&rest` → `Vector<T>`」計画は破棄）は本再設計とは無関係な既知の制限として
+2026-07-08に一度削除されたが、2026-07-15に別件（`docs/dev/TODO.md`の残作業棚卸し）で再導入した
+（下記 Phase 6 節参照）。
 
 ---
 
@@ -280,14 +277,13 @@ eliminator として使えるようにした。ユーザー向けに実行時に
 
 検証: `cargo test` 全 suite green、`scripts/test-serial.sh` green。
 
-### Phase 6 — 破棄（値レベル `&rest` を削除）
-当初計画（`&rest` → `Vector<T>`）は撤回。代わりに**値レベル `&rest` を言語から削除**した:
-- `types.rs`: `(fn (…) &rest T)` 型構文を廃止し、`Type::Fn` の rest フィールド自体を除去。
-- `checker.rs`: `parse_params_rest` の `&rest` 受理を廃止（defun/lambda 引数リストの `&rest` は型エラー）。
-  `wrap_rest_elem`/`cons_rest_list`/`check_apply` の可変長分岐/`check_apply_form`（`apply` 特殊形）/
-  `check_call` の rest 分岐/`FnSig.rest` を除去。
-- `defmacro` の `&rest`（`MacroDef.rest`/`FnDef.rest`/`bind_macro_args`）は無変更で維持。
-- `Expr::Apply`（関数値の直接呼び出し）は残置。可変長でなくなっただけ。
+### Phase 6 — `&rest` → `Vector<T>`（破棄）
+当初計画（`defun`/`lambda` の型付き `&rest` を `Vector<T>` に付け替える）は破棄。可変長パラメータを
+均質配列型で表すのは不自然という判断。値レベル `&rest`/`apply` 自体は元の Sexpr ベース設計
+（本フェーズより前から実装済みだったもの）のまま存続——2026-07-08 に本 Phase 6 の破棄を理由に
+道連れで一度削除されたが、Sexpr ベース設計自体に欠陥があったわけではなかったため
+2026-07-15 に `docs/dev/TODO.md` の残作業棚卸しで再導入した。`defmacro` の `&rest` は元から
+Sexpr のまま（島）で変更なし。
 
 ### Phase 6.5 — ユーザー面リスト/ペア走査 API の再設計【✅ 完了】
 Phase 5 で**ユーザー面の `Sexpr` リスト操作を一括撤去**した（`consp`/`null`/`atom`/`length`/`append`/
