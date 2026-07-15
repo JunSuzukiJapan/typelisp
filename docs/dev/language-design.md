@@ -130,10 +130,11 @@
   ミラー表現として）。`(quote (dep::head))`や`` `(dep::head) ``（マクロ本体で他モジュールの
   関数を指す典型パターン）が型チェックを通るようになった。`value_to_quoted`
   （`src/check/checker.rs`）↔`alloc_quoted`（`src/eval/interp.rs`、`heap.intern_path`で復元）
-  が対。**compile（LLVM JIT/AOT）は非対応のまま**（`Sym`/`Bignum`/`Ratio`と同じグループで
-  `unsupported`、`ast_bridge.rs::translate_quote`）——`PathId`に対応する`rt_*`関数が無いのは
-  他の3者と同じ理由。`FASL_FORMAT_VERSION`を3へbump（新バリアント追加のため）。
-  テスト: `tests/macro_use_test.rs`。
+  が対。~~compile（LLVM JIT/AOT）は非対応のまま（`Sym`/`Bignum`/`Ratio`と同じグループで
+  `unsupported`）~~ **→ 2026-07-15 `Sym`/`Path`ともcompile対応**（`rt_intern_symbol`/
+  `rt_intern_path`を新設、`str`リテラルと同じ「タグ付き`Sexpr`をrt呼び出しで構築」方式、
+  `ast_bridge.rs::translate_quote`）。`FASL_FORMAT_VERSION`を3へbump（新バリアント追加のため）。
+  テスト: `tests/macro_use_test.rs`、`tests/compile_test.rs`。
 - **循環参照は明示エラー**（`circular module dependency: a -> b -> a`）: checkerは単一パスで
   Cのヘッダのような宣言/定義分離が無いため、サイレントスキップは後段の紛らわしい
   「no such function」になる。真の相互参照サポート（2段階チェック化）はスコープ外。
@@ -355,10 +356,13 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   （`AdtDef.trait_assoc`経由で解決した）実際の関連型と一致するかを検証する。満たさなければ
   型チェック時点でエラーになる——以前は境界を満たさない型を渡しても型チェックは通り、
   `Expr::TraitCall`評価時の実行時エラーに初めて落ちていた。
-- **既知の制限**: ネストしたジェネリック呼び出し——ある`where`境界付きジェネリック関数の中から、
+- ~~**既知の制限**: ネストしたジェネリック呼び出し——ある`where`境界付きジェネリック関数の中から、
   外側自身の型パラメータをそのまま渡して別の`where`境界付き関数を呼ぶケース——は呼び出し側検証の
   対象外（型変数が裸の場合はスキップして既存の実行時フォールバックに委ね、型変数を*含む*具体型
-  に包まれている場合はpin一致チェックが誤って失敗し得る）。`Sexpr`へのtrait実装は意図的に対象外
+  に包まれている場合はpin一致チェックが誤って失敗し得る）。~~ **→ 2026-07-15解消**:
+  `validate_where_bounds`に呼び出し元の`caller_bounds`を渡すようにし、裸の型変数は外側の`where`節に
+  一致するboundが宣言済みか照合、具体型に包まれた型変数はpin比較を（開いたままなら）単型化時の
+  再検証に委ねてスキップするよう修正。`Sexpr`へのtrait実装は意図的に対象外のまま
   （要素型が固定されないリストにジェネリックな`Iter<Item>`を被せるのは型システム上不適切、という
   ユーザー判断）。
 

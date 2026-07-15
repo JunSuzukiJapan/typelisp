@@ -202,11 +202,13 @@ IO系（`print`/`println`/`princ`/`format`/`read`/`read-line`）・型変換・i
 | `signum` | **TypeLisp** | 比較演算の組合せで実装可能 |
 | `random` | **Rust** | OS乱数源が必要 |
 
-#### g. `apply`（要設計）
+#### g. `apply` / `&rest` — 2026-07-15 実装完了
 
-既存カタログに記載済みだが、可変長引数をクロージャに渡す機構（`&rest`/可変アリティ）が前提となる。
-`defmacro` の `&rest` 対応（[TODO.md](TODO.md) 記載の既知の未実装項目）と合わせて設計する必要があり、
-本書では実装方針を確定せず、`&rest` 設計時に再検討する候補として明記するのみとする。
+値レベルの `&rest`（`Type::Fn` の第2フィールド、`FnSig.rest`）と `(apply f a1..aN rest-list)` 特殊形を
+再導入した。固定引数は静的型検査、rest-list は `Sexpr` 型として渡し、呼び出し側は各 rest 要素を
+`wrap_rest_elem`/`cons_rest_list` で単一 `Sexpr` リストへ畳んで実引数化する。詳細は
+[implementation-log.md](implementation-log.md) を参照。`compile`（LLVM）側は `&rest` 付き関数の
+compile 自体は非対応のまま（`unsupported` として明示的にテスト固定）。
 
 ## 3. 対象外（今回はユーザの判断で記載のみ）
 

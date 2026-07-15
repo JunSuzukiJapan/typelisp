@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-07-12 / ブランチ: `main`
+最終更新: 2026-07-15 / ブランチ: `feature/known-limitations`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離した）。
@@ -13,6 +13,46 @@
 ---
 
 ## 残っている作業（影響範囲の大きさで優先順位付け——[[feedback-impl-priority]]）
+
+### 「既知の制限・意図的に対象外」7項目の解消（2026-07-15）
+
+これまで「既知の制限」「対象外」として個別に記載していた項目のうち、ユーザーの指示
+（「対象外はほぼAIが勝手に決めたもの、客観的に実装可能性を判断せよ」）を受けて再調査した結果、
+文書上ユーザー自身の判断と確認できたのは **`Sexpr`への`Iter`トレイト実装のみ**（`language-design.md`に
+明記、[[typelisp-sexpr-hashtable-iter]]参照）で、残り7件は技術的に実装可能と判明し全て解消した
+（規模の大きい順）。branch `feature/known-limitations`、コミット1件=1項目。
+
+1. **値レベル`&rest`/`apply`の再導入**——`Type::Fn`の第2フィールド（rest要素型）と`FnSig.rest`を
+   復元、`(apply f a1..aN rest-list)`特殊形を再実装。固定引数は静的型検査、rest-listは`Sexpr`型で
+   渡し`wrap_rest_elem`/`cons_rest_list`で単一リストへ畳む。`FASL_FORMAT_VERSION`を4へbump。
+   `compile`（LLVM）側は`&rest`付き関数のcompile自体は引き続き非対応（`unsupported`で明示固定）。
+2. **依存ファイル（`use`先）のfaslインメモリキャッシュ**——上記「LSPの依存キャッシュなし」解消
+   （2026-07-14）で唯一残っていた「依存*ファイル*自体のパス間キャッシュ」を解消。
+   `Loader`に`ModuleCache`（`Rc<RefCell<HashMap<PathBuf, Entry>>>`、`Entry`はdeps（各依存ファイルの
+   パス+内容ハッシュ）と`Rc<Fasl>`）を追加、`try_load_module`がキャッシュ照合→ヒット時は
+   `Fasl::load_into`で新ヒープへ再構築（deps全ファイルの内容ハッシュ再検証込み）。LSP起動時に
+   `ModuleCache`を1つ持ち各診断/補完パスで共有。
+3. **ネストしたジェネリック呼び出しの`where`境界検証**——`validate_where_bounds`の2つの穴を解消。
+   (1) `Vector<U>`等に包んで転送する際の誤拒否（pin比較で開いた型変数を含む場合はスキップし
+   単型化時の再検証に委譲）、(2) 裸の型変数がboundなしで外側関数へ転送されるケースの見逃し
+   （`caller_bounds`を新設して外側のwhere節に一致するboundが宣言済みか照合）。
+4. **`Option`/`Result`型グローバルのcompile参照**——`RtValue::Data` ⇔ compiled sum-ADTボックス
+   （malloc配列`[variant, fields...]`）の相互変換を新設し、JIT/AOT双方から`Option`/`Result`型
+   `defvar`の読み取り・書き込みが可能に。ユーザー定義`defenum`型グローバルは今も対象外
+   （明確なエラーで固定）。
+5. **quoted data内の`Symbol`/`Path`のcompile対応**——`'foo`/`'(a b c)`/`'dep::head`が
+   compileを通るように。`rt_intern_symbol`/`rt_intern_path`を新設、`str`リテラルと同じ
+   「タグ付き`Sexpr`をrt呼び出しで構築」方式。
+6. **ユーザー定義関数のLLVMシンボルに`tl_`プレフィックス**——LLVMの`frem`命令がlibmの`fmod`
+   シンボル呼び出しへlowerされるため、`fmod`という名のユーザー関数をcompileすると無限再帰して
+   いた（旧「許容された既知のギャップ」）。`USER_SYMBOL_PREFIX = "tl_"`を導入し、通常呼び出し・
+   関数値化・メソッド呼び出し・JIT/AOT双方のシンボル解決すべてに一貫適用して解消。
+   `sexpr-car`/`sexpr-cdr`/`sexpr-cons`は`rt_car`/`rt_cdr`/`rt_cons`へ直接書き換わる
+   コンパイラ組み込み経路のため意図的にプレフィックス対象外。
+7. **`float->int`のLLVM `fptosi`飽和化**——素の`fptosi`命令はNaN/範囲外入力でpoison値になり
+   インタプリタの`float_to_int`（Rustの`as i64`、飽和キャスト）と食い違っていた（旧「許容された
+   既知のギャップ」）。`llvm.fptosi.sat`intrinsic（`i64`/`f64`でオーバーロード）へ切替え、
+   NaN→0・+inf/オーバーフロー→`i64::MAX`・-inf/アンダーフロー→`i64::MIN`をインタプリタと一致させた。
 
 ### マルチファイル/LSP関連（2026-07-11のファイル↔モジュール対応実装の残課題）
 
@@ -41,8 +81,8 @@
   作り直すのでポインタ問題なし）。LSPは起動時に`Rc<Fasl>`を1つ持ち各パスで再利用。詳細は
   [[typelisp-fasl-compiled-modules]]、`src/fasl.rs`。ユーザー面には`(load "path")`フォームと
   `typl compile-module`サブコマンド、CLI/REPL起動の`prelude::load_cached`（`$TYPL_CACHE_DIR`または`~/.typl/cache`にキャッシュ）
-  として一般公開。**残**: 依存*ファイル*(use先)自体のパス間キャッシュは未対応だが、これも
-  `(load)`のfasl優先で回避可能（依存を事前compileしておけば再読込・再チェックが消える）。
+  として一般公開。~~**残**: 依存*ファイル*(use先)自体のパス間キャッシュは未対応~~
+  **→ 2026-07-15 解消**（上記「既知の制限・意図的に対象外7項目の解消」2.参照）。
 - ~~**`use`はソースルート相対のみ**: 兄弟ファイル相対の解決は未対応~~ **→ 2026-07-13 解消**。
   `Loader::ensure_loaded`が各prefix長でroot-relative候補を試した後にsibling-relative候補
   （`use`元ファイルのディレクトリを前置）もフォールバックとして試すよう拡張、
@@ -150,10 +190,11 @@ Some/None両方、bignum/ratio双方）。落とし穴: 自己ホストコンパ
 スルーする構造に組み替え——元の構造は無条件に`b2`も評価していたため、単項メソッドをそのまま
 追加すると存在しない2引数目を読もうとして失敗する。~~**残る compile 未対応**:
 `float->bignum`/`float->ratio`のみ——`bignum`/`ratio`はcompiled表現が一切無い~~
-**→ 2026-07-15 解消**（上記「`bignum`/`ratio` の compile 対応」参照）。落とし穴: LLVMの`fptosi`はNaN/範囲外入力に対し値未定義
+**→ 2026-07-15 解消**（上記「`bignum`/`ratio` の compile 対応」参照）。~~落とし穴: LLVMの`fptosi`はNaN/範囲外入力に対し値未定義
 （poison）——インタプリタ側`float_to_int`（Rustの`as i64`、飽和的キャスト）とはその境界ケースのみ
-挙動が発散するが、`frem`/`fmod`名前衝突と同種の「許容された既知のギャップ」として明記に留める。
-テスト: `compile_test`に4件追加（transcendental 5種一括+expt+float->int+既存2件の対象差し替え
+挙動が発散するが、`frem`/`fmod`名前衝突と同種の「許容された既知のギャップ」として明記に留める。~~
+**→ 2026-07-15 `llvm.fptosi.sat`intrinsicへ切替えて解消**（上記「既知の制限・意図的に対象外7項目の解消」7.参照）。
+テスト: `compile_test`に4件追加(当時)（transcendental 5種一括+expt+float->int+既存2件の対象差し替え
 `sqrt`→`float->bignum`——sqrt自体がcompile可能になったため）。
 
 その前に完了: **Iter トレイトを持つ全型（Vector/HashTable）の compile 対応**（2026-07-13、branch
@@ -178,8 +219,9 @@ i64↔doubleで挟み、`build-fcmp-*`が比較（`<`等はordered、`/=`はRust
 （`to_bits`/`from_bits`）、method-target検証除外に`f64`追加。**残る compile 未対応**: transcendental
 （`sqrt`/`floor`/`expt`/...、libm必要）と変換（`float->int`/`float->bignum`/`float->ratio`）。
 → transcendental全種+`float->int`は2026-07-15解消（上記参照）、残るは`float->bignum`/`float->ratio`のみ。
-落とし穴: LLVM `frem`はCの`fmod`呼び出しにlowerされるため`fmod`という名の関数compileはJITシンボル
-解決衝突で無限再帰。テスト: compile_test 3件 + typelisp-rt（既存流用）。
+~~落とし穴: LLVM `frem`はCの`fmod`呼び出しにlowerされるため`fmod`という名の関数compileはJITシンボル
+解決衝突で無限再帰。~~ **→ 2026-07-15 `tl_`シンボルプレフィックス導入で解消**（上記
+「既知の制限・意図的に対象外7項目の解消」6.参照）。テスト: compile_test 3件 + typelisp-rt（既存流用）。
 
 その前に完了: **char/string の `equalp`（ASCII大文字小文字無視）の compile**（2026-07-13）——
 `eq`/`equal`（生コードポイントの`icmp`/`rt_str_eq`）と違い`equalp`はcase-foldingするため単一命令に
@@ -244,7 +286,10 @@ int/float/char/bool/passthroughが異なる）、`Pattern::Ctor`に`field_types:
 フィールド保護に使う既存機構を再利用）に「昇格」させる設計。一度もコンパイルされない
 グローバルは今まで通りインタプリタの`Slot`ベース経路のまま（`rtvalue_to_struct_field`が
 `RtValue::Data`＝`Option`/`Result`/ユーザー`defenum`を変換できないため、そうした型の
-グローバルはcompile対象から参照できない——既知の制限）。JITは参照時に遅延昇格
+グローバルはcompile対象から参照できない——既知の制限）。~~`Option`/`Result`型グローバルの
+compile参照は2026-07-15解消~~（`data_to_box`/`decode_data_value`新設、上記「既知の制限・
+意図的に対象外7項目の解消」4.参照）。ユーザー定義`defenum`型グローバルは今も対象外
+（明確なエラーで固定）。JITは参照時に遅延昇格
 （`Interp::promote_global`）、AOTは`compile-file`が全`defvar`をファイル宣言順に即座昇格
 （`Interp::promote_global`のdocコメント参照——2つのタイムライン（コンパイル時のRustプロセスと
 実行ファイル自身のランタイム）でid採番を一致させるため）し、`Interp::add_compiled_global_init`が
