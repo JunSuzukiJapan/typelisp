@@ -462,7 +462,16 @@ impl Interp {
             // `defvar`.
             Expr::Global(path) => {
                 if let Some(&id) = self.compiled_globals.borrow().get(path) {
-                    Ok(decode_field_typed(heap, heap.permanent_root(id), &t.ty))
+                    // `id` (`Self::promote_global`'s return value) is *not*
+                    // the `Heap::permanent_root` position — see
+                    // `typelisp_rt::global_new`'s doc comment (an
+                    // `Option`/`Result` global's own heap-referencing field
+                    // pushes its own extra permanent root during encoding,
+                    // desyncing the two) — `global_perm_idx` resolves it the
+                    // same way `rt_global_get` does.
+                    let perm_idx = crate::compile::runtime::global_perm_idx(id)
+                        .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id)))?;
+                    Ok(decode_field_typed(heap, heap.permanent_root(perm_idx), &t.ty))
                 } else {
                     self.globals
                         .get(path)
@@ -775,8 +784,24 @@ impl Interp {
             Expr::SetGlobal(path, value) => {
                 let v = self.eval(heap, value, env)?;
                 if let Some(&id) = self.compiled_globals.borrow().get(path) {
-                    let mv = rtvalue_to_struct_field(heap, &v)?;
-                    heap.set_permanent_root(id, mv);
+                    // See `Expr::Global`'s arm for why `id` needs resolving
+                    // through `global_perm_idx` rather than being used as
+                    // the `Heap::permanent_root` position directly.
+                    let perm_idx = crate::compile::runtime::global_perm_idx(id)
+                        .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id)))?;
+                    let mv = if let RtValue::Data { type_name, variant, fields } = &v {
+                        if *type_name == option_path() || *type_name == result_path() {
+                            Value::Int(data_to_box(heap, *variant, fields)?)
+                        } else {
+                            return Err(EvalError::Panic(format!(
+                                "global \"{}\": a user enum can't cross into compiled code yet",
+                                path
+                            )));
+                        }
+                    } else {
+                        rtvalue_to_struct_field(heap, &v)?
+                    };
+                    heap.set_permanent_root(perm_idx, mv);
                     Ok(v)
                 } else {
                     let cell = self
@@ -1197,13 +1222,44 @@ impl Interp {
             .get(path)
             .ok_or_else(|| EvalError::Internal(format!("compile: global \"{}\" is not defined", path)))?;
         let v = slot.get(heap);
-        let value = rtvalue_to_struct_field(heap, &v).map_err(|_| {
-            EvalError::Panic(format!(
-                "compile: global \"{}\" has a type not yet supported for compiled access \
-                 (Option/Result/a user enum can't cross into compiled code yet)",
-                path
-            ))
-        })?;
+        // `Option`/`Result` (`RtValue::Data`) don't fit `crate::mem::Value`
+        // (that crate can't depend on `RtValue`) — encoded instead as a raw,
+        // un-GC-managed box (`data_to_box`, the same shape `compiler.rs`'s
+        // `compile-construct-box` builds), whose pointer is stored verbatim
+        // as `Value::Int(ptr)` — *not* pre-shifted: `rt_global_get`'s own
+        // `runtime::encode` (`(n << 3) | TAG_FIXNUM`, `TAG_FIXNUM` being `0`)
+        // already reintroduces exactly the shift compiled code's
+        // `compile-sexpr-field` (`variant 10`) expects to `ashr` back off —
+        // the identical two-step kind `1` (a plain `i64` global) already
+        // relies on, since a `Value::Int` payload is always the *unshifted*
+        // native value (shifting here too would shift twice). A user
+        // `defenum` isn't supported this way yet (`data_variant_field_types`'s
+        // doc comment explains why) and still panics clearly below.
+        let value = if let RtValue::Data { type_name, variant, fields } = &v {
+            if *type_name == option_path() || *type_name == result_path() {
+                let ptr = data_to_box(heap, *variant, fields).map_err(|_| {
+                    EvalError::Panic(format!(
+                        "compile: global \"{}\" has an Option/Result field type not yet \
+                         representable in compiled code",
+                        path
+                    ))
+                })?;
+                Value::Int(ptr)
+            } else {
+                return Err(EvalError::Panic(format!(
+                    "compile: global \"{}\" has a type not yet supported for compiled access \
+                     (a user enum can't cross into compiled code yet)",
+                    path
+                )));
+            }
+        } else {
+            rtvalue_to_struct_field(heap, &v).map_err(|_| {
+                EvalError::Panic(format!(
+                    "compile: global \"{}\" has a type not yet supported for compiled access",
+                    path
+                ))
+            })?
+        };
         let id = crate::compile::runtime::global_new(heap, value);
         self.compiled_globals.borrow_mut().insert(path.clone(), id);
         Ok(id)
@@ -4066,6 +4122,154 @@ fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Value, EvalEr
     }
 }
 
+/// `Option`/`Result`'s fully-qualified [`Path`]s — the only `RtValue::Data`
+/// shapes [`data_to_box`]/[`decode_data_value`] support. A user `defenum`
+/// isn't representable here: unlike `Option<T>`/`Result<T,E>`, whose two
+/// variants' field types are always exactly the type's own generic
+/// arguments (readable straight off `Type::Named`'s `args`, no lookup
+/// needed), a user enum's field types live only in the checker's
+/// `Registry::type_def`, which `Interp` never retains at runtime (see
+/// `TopLevel::Defenum`'s own exec arm — a no-op, since an ordinary
+/// interpreted `Expr::Construct` builds a `RtValue::Data` fresh from typed
+/// sub-expressions and never needs to decode one back from an untyped
+/// memory blob the way a compiled global's permanent-root read does).
+fn option_path() -> Path {
+    Path::root("option")
+}
+fn result_path() -> Path {
+    Path::root("result")
+}
+
+/// Each declared field type of `Data`-shaped `ty`'s variant `variant`, or
+/// `None` if `ty` isn't `Option<T>`/`Result<T,E>` — see [`option_path`]'s
+/// doc comment for why only these two are supported. Mirrors
+/// `check::registry::option_def`/`result_def`'s variant layout exactly
+/// (`0`&nbsp;=&nbsp;`some`/`ok` with one field of `T`, `1`&nbsp;=&nbsp;`none`
+/// with no fields / `err` with one field of `E`).
+fn data_variant_field_types(ty: &Type, variant: usize) -> Option<Vec<Type>> {
+    match ty {
+        Type::Named(p, args) if *p == option_path() && args.len() == 1 => {
+            Some(if variant == 0 { vec![args[0].clone()] } else { vec![] })
+        }
+        Type::Named(p, args) if *p == result_path() && args.len() == 2 => {
+            Some(vec![args[variant.min(1)].clone()])
+        }
+        _ => None,
+    }
+}
+
+/// Encodes one `RtValue::Data` field as the plain `i64` slot value
+/// [`data_to_box`]'s raw box stores — driven entirely by the field's own
+/// `RtValue` shape (no declared type needed, unlike decoding): a scalar's
+/// native compiled bit pattern for `Int`/`Bool`/`Char`/`Float` (matching
+/// `compiler.rs`'s `compile-int`/`compile-bool`/`compile-char`/
+/// `compile-float` literal encodings exactly, since a field read back
+/// inside compiled code goes through the very same `compile-sexpr-field`
+/// kind dispatch a struct field does), or the ordinary tagged `Sexpr`
+/// encoding (`rtvalue_to_struct_field` + `runtime::encode`) for anything
+/// else representable there — `Str`/`Bignum`/`Ratio`/`Sexpr` today, the
+/// same passthrough set `binding_kind`'s `KIND_SEXPR` covers for a
+/// `Construct` field.
+fn encode_data_field(heap: &mut Heap, v: &RtValue) -> Result<i64, EvalError> {
+    match v {
+        RtValue::Int(n) => Ok(*n),
+        RtValue::Bool(b) => Ok(if *b { 1 } else { 0 }),
+        RtValue::Char(c) => Ok(*c as i64),
+        RtValue::Float(f) => Ok(f.to_bits() as i64),
+        RtValue::Str(_) | RtValue::Bignum(_) | RtValue::Ratio(_) | RtValue::Sexpr(_) => {
+            let field = rtvalue_to_struct_field(heap, v)?;
+            // The raw box this field ends up in (`data_to_box`) sits outside
+            // the heap's own arena, so GC never scans it — a heap-referencing
+            // field stored there and nowhere else would be silently
+            // reclaimed by the next unrelated allocation. `push_permanent_root`
+            // (the same mechanism `compile-construct-box-fields`'
+            // `push-permanent-sexpr-root` uses for a compiled box's own
+            // kind-`2` fields) keeps it alive for the process's lifetime,
+            // matching that box's own accepted "never freed" trade-off.
+            heap.push_permanent_root(field);
+            Ok(crate::compile::runtime::encode(field))
+        }
+        other => Err(EvalError::Internal(format!(
+            "compile: an Option/Result field of {:?} is not yet representable in a compiled global",
+            other
+        ))),
+    }
+}
+
+/// Builds the same raw, un-GC-managed `[variant, field0, field1, ...]` box
+/// `compiler.rs`'s `compile-construct-box` builds via `build-malloc` inside
+/// compiled code — the Rust-side encoder [`Interp::promote_global`] needs
+/// for an `Option`/`Result`-typed global's *initial* value (assigned before
+/// any compiled code has run yet, so there is no LLVM builder to emit
+/// `build-malloc` IR through). `Box<[i64]>`'s allocation is guaranteed
+/// 8-byte-aligned (its element type is `i64`), matching `build_array_malloc`'s
+/// own alignment — the precondition [`Interp::promote_global`]'s `>> 3`/`<< 3`
+/// round-trip through `Value::Int` relies on (see its call site). Leaked on
+/// purpose, never freed: the same accepted trade-off `compile-construct-box`
+/// itself documents for every box it builds.
+fn data_to_box(heap: &mut Heap, variant: usize, fields: &[RtValue]) -> Result<i64, EvalError> {
+    let mut slots: Vec<i64> = Vec::with_capacity(1 + fields.len());
+    slots.push(variant as i64);
+    for f in fields {
+        slots.push(encode_data_field(heap, f)?);
+    }
+    let fat: *mut [i64] = Box::into_raw(slots.into_boxed_slice());
+    Ok((fat as *mut i64 as usize) as i64)
+}
+
+/// The inverse of [`encode_data_field`]: reads raw slot value `raw` back as
+/// an `RtValue`, per its declared field type `ty` — needed (unlike the
+/// encode direction) because the box's own storage is untyped, so the shape
+/// can't be inferred from the bits alone the same way a tagged `Sexpr` can.
+fn decode_data_field(heap: &Heap, raw: i64, ty: &Type) -> RtValue {
+    if ty.is_integer() {
+        RtValue::Int(raw)
+    } else if *ty == Type::Bool {
+        RtValue::Bool(raw != 0)
+    } else if *ty == Type::Char {
+        RtValue::Char(char::from_u32(raw as u32).unwrap_or('\u{FFFD}'))
+    } else if ty.is_float() {
+        RtValue::Float(f64::from_bits(raw as u64))
+    } else {
+        decode_nonsexpr_field(heap, crate::compile::runtime::decode(raw))
+    }
+}
+
+/// Reads an `Option<T>`/`Result<T,E>` value back out of a global's
+/// permanent-root storage — [`Interp::promote_global`]'s `Value::Int(ptr)`
+/// encoding (the pointer stored verbatim, unshifted — see that call site's
+/// doc comment for why). `ty` is the global's own declared type
+/// (`Expr::Global`'s checked `Typed::ty`), which [`data_variant_field_types`]
+/// resolves straight from its generic arguments — see that function's doc
+/// comment for why this only covers `Option`/`Result`.
+///
+/// # Safety-adjacent
+/// Dereferences a raw pointer this same module allocated via
+/// [`data_to_box`] (`Box<[i64]>`, never freed) — sound as long as nothing
+/// but [`Interp::promote_global`]'s own `Value::Int` ever reaches here,
+/// which `decode_field_typed`'s `ty`-gated dispatch guarantees.
+fn decode_data_value(heap: &Heap, v: Value, ty: &Type) -> RtValue {
+    let ptr = match v {
+        Value::Int(n) => n as usize as *const i64,
+        other => panic!("decode_data_value: expected a compiled Option/Result's Value::Int slot, got {:?}", other),
+    };
+    // Safety: see this function's own doc comment.
+    let variant = unsafe { *ptr } as usize;
+    let type_name = if matches!(ty, Type::Named(p, _) if *p == option_path()) { option_path() } else { result_path() };
+    let field_types = data_variant_field_types(ty, variant).unwrap_or_default();
+    let fields = field_types
+        .iter()
+        .enumerate()
+        .map(|(i, fty)| {
+            // Safety: see this function's own doc comment; `i + 1` stays
+            // within the box's own field count by construction.
+            let raw = unsafe { *ptr.add(1 + i) };
+            decode_data_field(heap, raw, fty)
+        })
+        .collect();
+    RtValue::Data { type_name, variant, fields }
+}
+
 /// Decodes a `mem::Value` read out of a `BoxedObj::Struct` field (or
 /// `Vector<T>` element, `HashTable<K,V>` value) as the slot's *declared*
 /// type directs — `rtvalue_to_struct_field`'s inverse, and the type-driven
@@ -4080,6 +4284,8 @@ fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Value, EvalEr
 fn decode_field_typed(heap: &Heap, v: Value, ty: &Type) -> RtValue {
     if is_sexpr_ty(ty) {
         RtValue::Sexpr(v)
+    } else if matches!(ty, Type::Named(p, _) if *p == option_path() || *p == result_path()) {
+        decode_data_value(heap, v, ty)
     } else {
         decode_nonsexpr_field(heap, v)
     }

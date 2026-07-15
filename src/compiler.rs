@@ -3311,13 +3311,27 @@ pub const SOURCE: &str = r#"
                        ;; back to the global's own declared representation —
                        ;; `compile-sexpr-field` (this function's own decode
                        ;; step, shared with `compile-field-get`) does that.
+                       ;; `kind = 10` (an `Option`/`Result` global,
+                       ;; `ast_bridge::global_field_kind`) is handled here,
+                       ;; not folded into `compile-sexpr-field`'s own chain —
+                       ;; deliberately, to avoid adding a 13th nesting level
+                       ;; to that already-deep dispatch (checking/compiling
+                       ;; the self-hosted compiler's own body against a
+                       ;; deeper chain there was enough to overflow the stack
+                       ;; on an unrelated bignum test — the same class of
+                       ;; issue `docs/dev/implementation-log.md`'s "interp if
+                       ;; chain stack overflow" note records for `Expr::If`).
+                       ;; Bit-identical to `variant 1`'s own `ashr`
+                       ;; (`compile-sexpr-field`'s doc comment on why).
                        (compile-global ((builder llvm-builder) (e Sexpr)) llvm-value
                          (let ((id (sexpr-int (sexpr-car (sexpr-cdr e)))))
                            (let ((kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
                              (let ((args-ptr (alloca-args builder 1)))
                                (store-arg builder args-ptr 0 (const-i64 builder id))
                                (let ((raw (build-call builder (get-function m "rt_global_get") args-ptr 1)))
-                                 (compile-sexpr-field builder m raw kind 0))))))
+                                 (if (eq kind 10)
+                                     (build-ashr builder raw (const-i64 builder 3))
+                                     (compile-sexpr-field builder m raw kind 0)))))))
                        ;; `(set-global id kind value-form)` — `rt_global_set`
                        ;; overwrites the global's permanent root in place, so
                        ;; (unlike `compile-set`'s local-binding case) there is
@@ -3334,12 +3348,16 @@ pub const SOURCE: &str = r#"
                        ;; itself (the newly stored value in its own,
                        ;; already-untagged compiled representation),
                        ;; matching `Expr::SetGlobal`'s own checked type.
+                       ;; `kind = 10`: see `compile-global`'s doc comment on
+                       ;; why this is handled here rather than inside
+                       ;; `compile-tag-struct-field` itself. Bit-identical to
+                       ;; `kind 1`'s own `shl`.
                        (compile-set-global ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((id (sexpr-int (sexpr-car (sexpr-cdr e)))))
                            (let ((kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
                              (let ((value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
                                (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base value-form)))
-                                 (let ((tagged-v (compile-tag-struct-field builder m v kind)))
+                                 (let ((tagged-v (if (eq kind 10) (build-shl builder v (const-i64 builder 3)) (compile-tag-struct-field builder m v kind))))
                                    (let ((args-ptr (alloca-args builder 2)))
                                      (store-arg builder args-ptr 0 (const-i64 builder id))
                                      (store-arg builder args-ptr 1 tagged-v)
@@ -3359,11 +3377,12 @@ pub const SOURCE: &str = r#"
                        ;; compile-time ids in. The allocated id itself is
                        ;; discarded here (nothing at this call site needs it);
                        ;; this tag exists purely for its side effect.
+                       ;; `kind = 10`: see `compile-global`'s doc comment.
                        (compile-global-init ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((kind (sexpr-int (sexpr-car (sexpr-cdr e)))))
                            (let ((value-form (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
                              (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base value-form)))
-                               (let ((tagged-v (compile-tag-struct-field builder m v kind)))
+                               (let ((tagged-v (if (eq kind 10) (build-shl builder v (const-i64 builder 3)) (compile-tag-struct-field builder m v kind))))
                                  (let ((args-ptr (alloca-args builder 1)))
                                    (store-arg builder args-ptr 0 tagged-v)
                                    (build-call builder (get-function m "rt_global_new") args-ptr 1)))))))

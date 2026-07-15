@@ -1893,6 +1893,26 @@ pub unsafe extern "C" fn rt_global_new(args: *const i64, argc: u32) -> i64 {
     global_new(active_heap(), v) as i64
 }
 
+/// [`global_new`]'s id -> `Heap::permanent_root` position lookup, `pub` for
+/// the same cross-crate reason [`encode`]/[`decode`] are: `typelisp::eval::
+/// interp`'s `Expr::Global` (an *interpreted* read of a promoted global,
+/// bypassing the `rt_global_get`/`encode` FFI round trip entirely since it
+/// already holds the live `Heap`) needs the exact same id -> position
+/// resolution [`rt_global_get`] does below — reading `Heap::permanent_root(id)`
+/// directly would only coincidentally work were `id` and the position always
+/// equal, true only when nothing else has pushed a permanent root between
+/// two [`global_new`] calls (see [`global_new`]'s own doc comment for a case
+/// where that's no longer true: an `Option`/`Result`-typed global whose
+/// heap-referencing field also needs its own protecting permanent root).
+/// `None` if `id` was never returned by [`global_new`] on this thread since
+/// the last [`reset_global_table`] — callers across the FFI boundary
+/// (`rt_global_get`/`rt_global_set`) turn that into their own `fatal` abort
+/// rather than let a panic try to unwind through compiled native code; a
+/// plain Rust-to-Rust caller may still choose to panic on it.
+pub fn global_perm_idx(id: usize) -> Option<usize> {
+    GLOBAL_INDEX.with(|t| t.borrow().get(id).copied())
+}
+
 /// Reads global `id`'s (an [`rt_global_new`] return value) current value.
 ///
 /// # Safety
@@ -1906,9 +1926,7 @@ pub unsafe extern "C" fn rt_global_get(args: *const i64, argc: u32) -> i64 {
         fatal("rt_global_get: expected 1 argument (the global id)");
     }
     let id = *args as usize;
-    let perm_idx = GLOBAL_INDEX
-        .with(|t| t.borrow().get(id).copied())
-        .unwrap_or_else(|| fatal("rt_global_get: unknown global id"));
+    let perm_idx = global_perm_idx(id).unwrap_or_else(|| fatal("rt_global_get: unknown global id"));
     encode(active_heap().permanent_root(perm_idx))
 }
 
@@ -1927,9 +1945,7 @@ pub unsafe extern "C" fn rt_global_set(args: *const i64, argc: u32) -> i64 {
     }
     let id = *args as usize;
     let tagged = *args.add(1);
-    let perm_idx = GLOBAL_INDEX
-        .with(|t| t.borrow().get(id).copied())
-        .unwrap_or_else(|| fatal("rt_global_set: unknown global id"));
+    let perm_idx = global_perm_idx(id).unwrap_or_else(|| fatal("rt_global_set: unknown global id"));
     active_heap().set_permanent_root(perm_idx, decode(tagged));
     tagged
 }

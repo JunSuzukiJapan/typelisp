@@ -352,6 +352,27 @@ fn struct_field_kind(ty: &Type, structs: &HashSet<Path>) -> i64 {
     }
 }
 
+/// [`struct_field_kind`]'s counterpart for a `defvar`'s own declared type —
+/// used only by [`translate_global`]/[`translate_set_global`]/
+/// [`ast_to_sexpr_for_global_init`], never for an ordinary `defstruct`
+/// field (which stays on plain `struct_field_kind`, still `0`/unsupported
+/// for `Option`/`Result` — see that function's own doc comment on why:
+/// a *field*'s raw box pointer has nowhere GC-safe to live inside another
+/// heap-managed struct, but a *global*'s permanent-root slot is exactly
+/// that safe home, via `Interp::promote_global`'s `Value::Int(ptr >> 3)`
+/// encoding). Kind `10` — not `struct_field_kind`'s own `0`/unsupported —
+/// tells `compiler.rs`'s `compile-global`/`compile-set-global`/
+/// `compile-global-init` to take that same shift-tagged path instead of
+/// panicking. `Option`/`Result` only (`Interp::data_variant_field_types`'s
+/// doc comment explains why a user `defenum` isn't covered yet).
+fn global_field_kind(ty: &Type, structs: &HashSet<Path>) -> i64 {
+    match ty {
+        Type::Named(p, args) if p.local() == "option" && p.is_simple() && args.len() == 1 => 10,
+        Type::Named(p, args) if p.local() == "result" && p.is_simple() && args.len() == 2 => 10,
+        other => struct_field_kind(other, structs),
+    }
+}
+
 /// `Vector<T>`'s builtin methods that have no compiled `defmethod` body and so
 /// must be lowered to a dedicated `vector-op` node (`translate_vector_method`)
 /// rather than routed through the generic `assoc` path. Deliberately *not*
@@ -633,7 +654,7 @@ pub fn ast_to_sexpr_for_global_init(
 ) -> Result<Value, Error> {
     let direct = HashSet::new();
     let cx = Ctx { direct: &direct, outer_captured: &[], structs, globals };
-    let kind = Value::Int(struct_field_kind(&value.ty, structs));
+    let kind = Value::Int(global_field_kind(&value.ty, structs));
     let form = ast_to_sexpr_scoped(heap, value, cx)?;
     heap.push_root(form);
     let result = tagged(heap, "global-init", &[kind, form]);
@@ -990,7 +1011,7 @@ fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, cx: Ctx)
 /// to keep in sync with, only the one slot itself.
 fn translate_global(heap: &mut Heap, path: &Path, ty: &Type, cx: Ctx) -> Result<Value, Error> {
     let id = global_id(path, cx)?;
-    let kind = Value::Int(struct_field_kind(ty, cx.structs));
+    let kind = Value::Int(global_field_kind(ty, cx.structs));
     tagged(heap, "global", &[Value::Int(id as i64), kind])
 }
 
@@ -1005,7 +1026,7 @@ fn translate_global(heap: &mut Heap, path: &Path, ty: &Type, cx: Ctx) -> Result<
 /// [`translate_global`]'s doc comment gives.
 fn translate_set_global(heap: &mut Heap, path: &Path, value: &Typed, cx: Ctx) -> Result<Value, Error> {
     let id = global_id(path, cx)?;
-    let kind = Value::Int(struct_field_kind(&value.ty, cx.structs));
+    let kind = Value::Int(global_field_kind(&value.ty, cx.structs));
     let form = ast_to_sexpr_scoped(heap, value, cx)?;
     heap.push_root(form);
     let result = tagged(heap, "set-global", &[Value::Int(id as i64), kind, form]);

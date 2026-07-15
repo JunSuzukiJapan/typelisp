@@ -3096,21 +3096,124 @@ fn compile_dispatches_a_function_that_writes_a_global_to_native_code() {
 }
 
 /// A global whose declared type can't cross into compiled code
-/// (`Option<T>`/`Result<T,E>`/a user `defenum` — `RtValue::Data`,
-/// `rtvalue_to_struct_field`'s own documented gap) surfaces as a clean
-/// compile-time error rather than a panic deep inside the compiler body —
-/// see `Interp::promote_global`'s doc comment.
+/// `Option<T>`/`Result<T,E>` globals compile: reading one back through
+/// `match` from compiled code round-trips correctly (`Interp::promote_global`'s
+/// `RtValue::Data` -> raw-box encoding, `ast_bridge::global_field_kind`'s
+/// dedicated `kind = 10`). A user `defenum` global remains unsupported
+/// (`Interp::data_variant_field_types`'s doc comment) — see the next test.
 #[test]
-fn compile_of_a_function_referencing_an_option_typed_global_is_a_clean_error() {
-    let err = run_with_compiler(
+fn compile_of_a_function_referencing_an_option_typed_global_round_trips() {
+    let v = run_with_compiler(
+        r#"
+        (defvar (maybe Option<i64>) (Option::some 42))
+        (defun read-maybe () i64 (match maybe ((Some x) x) ((None) 0)))
+        (compile read-maybe)
+        (read-maybe)
+        "#,
+    )
+    .expect("eval failed");
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 42),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// `None`/an unset `Result` err case also round-trips (the zero-field
+/// variant, exercising `data_to_box`'s `fields: &[]` path).
+#[test]
+fn compile_of_a_function_referencing_a_none_typed_global_round_trips() {
+    let v = run_with_compiler(
         r#"
         (defvar (maybe Option<i64>) (Option::none))
-        (defun read-maybe () Option<i64> maybe)
+        (defun read-maybe () i64 (match maybe ((Some x) x) ((None) -1)))
         (compile read-maybe)
+        (read-maybe)
+        "#,
+    )
+    .expect("eval failed");
+    match v {
+        RtValue::Int(n) => assert_eq!(n, -1),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// Compiled code can also *write* an `Option`-typed global
+/// (`compile-set-global`'s new `kind = 10` encode path), and an interpreted
+/// read afterward sees the compiled write — `Expr::Global`'s own
+/// `decode_field_typed` dispatch, not just the compiled side's
+/// `rt_global_get`.
+#[test]
+fn compile_can_set_an_option_typed_global_and_the_interpreter_sees_the_write() {
+    let v = run_with_compiler(
+        r#"
+        (defvar (maybe Option<i64>) (Option::none))
+        (defun set-maybe () i64 (progn (setf maybe (Option::some 7)) 0))
+        (compile set-maybe)
+        (set-maybe)
+        (match maybe ((Some x) x) ((None) -1))
+        "#,
+    )
+    .expect("eval failed");
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 7),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// A user `defenum` global still surfaces a clean compile-time error rather
+/// than a panic deep inside the compiler body — `Interp::promote_global`'s
+/// doc comment explains why only `Option`/`Result` are supported today.
+#[test]
+fn compile_of_a_function_referencing_a_user_defenum_global_is_a_clean_error() {
+    let err = run_with_compiler(
+        r#"
+        (defenum color (red) (green) (blue))
+        (defvar (c color) (color::red))
+        (defun read-c () color c)
+        (compile read-c)
         "#,
     )
     .unwrap_err();
     assert!(matches!(err, EvalError::Panic(_)), "expected a Panic, got {:?}", err);
+}
+
+/// A `Str`-carrying `Option` global survives GC: `data_to_box`'s heap-
+/// allocated `Str` field lives *outside* the heap's own GC-scanned arena
+/// (the raw box `compile-construct-box` itself builds is never scanned), so
+/// without `Heap::push_permanent_root` protection a later, unrelated
+/// allocation forcing a collection would reclaim it out from under the
+/// global — this drives enough allocation (a small `Heap` capacity, a loop
+/// building throwaway `Vector`s) between the global's promotion and its
+/// read-back to make that failure mode observable rather than lucky. The
+/// final read is a plain top-level `match` (interpreted, not `(compile
+/// ...)`d), deliberately sidestepping `Interp::call_compiled`'s own
+/// pre-existing, unrelated gap in decoding a compiled function's `Str`
+/// *return value* (`is_boxed_sexpr_type` never matches `Type::Str`, so it
+/// falls through to a bare `RtValue::Int`) — out of scope here; this test
+/// only means to exercise `Expr::Global`'s `decode_field_typed` path for a
+/// promoted `Option<string>`.
+#[test]
+fn compile_of_a_function_referencing_a_str_option_global_survives_gc() {
+    let v = run_with_compiler_and_capacity(
+        r#"
+        (defvar (maybe Option<string>) (Option::some "hello"))
+        (defun touch-maybe () string (match maybe ((Some s) s) ((None) "")))
+        (compile touch-maybe)
+        (defvar (scratch Vector<i64>) (Vector::new))
+        (defvar (n i64) 20000)
+        (loop
+          (if (eq n 0)
+              (break)
+              (progn (push scratch n) (setf n (- n 1)))))
+        (match maybe ((Some s) s) ((None) ""))
+        "#,
+        1 << 14,
+    )
+    .expect("eval failed");
+    match v {
+        RtValue::Str(s) => assert_eq!(&*s, "hello"),
+        other => panic!("expected a Str, got {:?}", other),
+    }
 }
 
 // ---- `Expr::Panic`/`Expr::MethodRef`/`Expr::Quote` in compiled code --------
