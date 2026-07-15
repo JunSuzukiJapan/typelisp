@@ -15,6 +15,30 @@ pub mod freevars;
 /// crate keeps working unchanged.
 pub use typelisp_rt as runtime;
 
+/// Every *user*-defined `defun`/`defmethod`'s own LLVM symbol name (JIT and
+/// AOT alike) is this prefix followed by its typelisp name — never the bare
+/// name unprefixed. Without it, a user function whose name happens to
+/// collide with a libc symbol the LLVM backend itself calls into (`fmod`,
+/// the lowering target of the `frem` instruction `f64`'s `mod` compiles to —
+/// see `ast_bridge::translate_assoc`'s doc comment) would resolve to that
+/// libc symbol instead of the user's own compiled body, an infinite-
+/// recursion trap discovered compiling a test function literally named
+/// `fmod`. `rt_*` runtime shims (`typelisp_rt::rt_car` and friends) are
+/// untouched by this — they're never looked up through this prefix, only
+/// ever by their own hardcoded name in `compiler.rs`'s SOURCE and
+/// `Interp::rt_extern_functions` — so a user function named e.g. `rt_cons`
+/// is prefixed like any other and can't collide with the real `rt_cons`
+/// either.
+///
+/// The single source of truth for this name is `ast_bridge`'s own
+/// `user_symbol_name`/`user_method_symbol_name` — every call/reference site
+/// (a `(call ...)`/`(assoc ...)` node's embedded name string,
+/// `Interp::compile_function_rec`'s `declare_external_function`/`externals`
+/// wiring, `compile::aot`'s per-`defun` `internal_name`) goes through one of
+/// those two, so this prefix only needs to be applied once per definition
+/// site — never at a second, easy-to-desync spot.
+pub const USER_SYMBOL_PREFIX: &str = "tl_";
+
 use std::sync::{Mutex, OnceLock};
 
 use inkwell::context::Context;

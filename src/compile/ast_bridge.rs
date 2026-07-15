@@ -89,6 +89,26 @@ fn tagged(heap: &mut Heap, tag: &str, items: &[Value]) -> Result<Value, Error> {
     result
 }
 
+/// A user-defined free function/`labels` sibling's own LLVM symbol name —
+/// see [`crate::compile::USER_SYMBOL_PREFIX`]'s doc comment for why this is
+/// never `logical_name` unprefixed. The single place [`translate_call`]/
+/// [`translate_fnref`]'s embedded `(call ...)`-node name string is built,
+/// so it always agrees with whatever `Interp::compile_function_rec`/
+/// `compile::aot` declare/wire the *actual* LLVM function under.
+pub(crate) fn user_symbol_name(logical_name: &str) -> String {
+    format!("{}{}", crate::compile::USER_SYMBOL_PREFIX, logical_name)
+}
+
+/// A user-defined method's own LLVM symbol name — the `Expr::Assoc`
+/// counterpart of [`user_symbol_name`]. `compiler.rs`'s `compile-assoc-user`
+/// mangles `type-name`/`method` back into this exact same `tl_type::method`
+/// string (its own `(append "tl_" (append type-name (append "::" method)))`)
+/// before its `get-function` lookup, so this must stay in lockstep with
+/// that — see [`crate::compile::USER_SYMBOL_PREFIX`]'s doc comment.
+pub(crate) fn user_method_symbol_name(type_name: &Path, method: &str) -> String {
+    format!("{}{}::{}", crate::compile::USER_SYMBOL_PREFIX, type_name.local(), method)
+}
+
 /// Builds a `(str (int c0) (int c1) ...)` node for a compile-time-known
 /// host `&str` — [`ast_to_sexpr_scoped`]'s `Expr::Str` arm and
 /// [`translate_construct`]'s `type-name-str` header field (Stage 3 of the
@@ -1698,7 +1718,14 @@ fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Err
         _ => return unsupported(heap, "FnRef"),
     };
 
-    let target_v = heap.alloc_string(path.local().to_string());
+    // See `translate_call`'s matching check: `sexpr-car`/`sexpr-cdr`/
+    // `sexpr-cons` are never prefixed.
+    let raw_name = path.local();
+    let target_v = if crate::eval::interp::is_rt_builtin_name(raw_name) {
+        heap.alloc_string(raw_name.to_string())
+    } else {
+        heap.alloc_string(user_symbol_name(raw_name))
+    };
     heap.push_root(target_v);
     let mut var_values = Vec::with_capacity(params.len());
     for (n, t) in &params {
@@ -1772,7 +1799,18 @@ fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Err
 /// the destination module, matching how every compiled top-level function
 /// is itself declared under its local name (`Interp::add_compiled_function`).
 fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], cx: Ctx) -> Result<Value, Error> {
-    let name_v = heap.alloc_string(path.local().to_string());
+    // `sexpr-car`/`sexpr-cdr`/`sexpr-cons` are rewritten to `rt_car`/`rt_cdr`/
+    // `rt_cons` by `compiler.rs`'s `compile-call` itself, matching on this
+    // exact literal name (`crate::eval::interp::is_rt_builtin_name`) — they
+    // never go through `declare_external_function`/`user_symbol_name` at all
+    // (`Interp::compile_function_rec` excludes them from `call_targets` for
+    // the same reason), so prefixing them here would break that match.
+    let raw_name = path.local();
+    let name_v = if crate::eval::interp::is_rt_builtin_name(raw_name) {
+        heap.alloc_string(raw_name.to_string())
+    } else {
+        heap.alloc_string(user_symbol_name(raw_name))
+    };
     heap.push_root(name_v);
     let arg_values = match tagged_ast_list_to_sexpr(heap, args, cx) {
         Ok(v) => v,
@@ -2698,7 +2736,10 @@ mod tests {
     /// labels/closures Stage 3: a top-level `Expr::Call` becomes `(call name
     /// arg...)` — always a real translation, never `unsupported`, since
     /// `Checker::resolve_fn` guarantees the callee is already a registered
-    /// `defun` (see `translate_call`'s doc comment).
+    /// `defun` (see `translate_call`'s doc comment). The embedded name gets
+    /// the `tl_` `USER_SYMBOL_PREFIX` prefix — every user-defined function's
+    /// own LLVM symbol name, so a user function can never collide with a
+    /// libc/libm symbol LLVM itself calls (e.g. `frem` lowering to `fmod`).
     #[test]
     fn translates_a_call_to_another_top_level_function() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -2706,7 +2747,7 @@ mod tests {
         let v = ast_to_sexpr(&mut heap, &typed(call, Type::I64)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "call");
-        assert_eq!(expect_str(&heap, fields[0]), "square");
+        assert_eq!(expect_str(&heap, fields[0]), "tl_square");
         let (kind, arg_form) = untag_arg(&heap, fields[1]);
         assert_eq!(kind, KIND_PLAIN);
         let (arg_tag, arg_fields) = untag(&heap, arg_form);
@@ -2715,9 +2756,9 @@ mod tests {
     }
 
     /// Only the local segment of a qualified `Path` survives translation —
-    /// `compiler.rs`'s `compile-call` looks callees up by plain name, the
-    /// same way every compiled top-level function is itself declared (see
-    /// `translate_call`'s doc comment).
+    /// `compiler.rs`'s `compile-call` looks callees up by plain (prefixed)
+    /// name, the same way every compiled top-level function is itself
+    /// declared (see `translate_call`'s doc comment).
     #[test]
     fn translates_a_call_keeping_only_the_paths_local_segment() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -2725,7 +2766,7 @@ mod tests {
         let v = ast_to_sexpr(&mut heap, &typed(call, Type::I64)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "call");
-        assert_eq!(expect_str(&heap, fields[0]), "distance");
+        assert_eq!(expect_str(&heap, fields[0]), "tl_distance");
     }
 
     #[test]
@@ -2866,7 +2907,9 @@ mod tests {
 
     /// labels/closures Stage 4: `Expr::FnRef(path)` becomes a non-capturing
     /// `lambda` that forwards positionally-synthesized arguments straight
-    /// through to a `(call path-local-name ...)`.
+    /// through to a `(call path-local-name ...)` — the embedded name is
+    /// `tl_`-prefixed, same as an ordinary `Expr::Call` (see
+    /// `translate_call`'s test above).
     #[test]
     fn translates_an_fnref_as_a_forwarding_lambda() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -2879,7 +2922,7 @@ mod tests {
         assert_eq!(params.len(), 2);
         let (body_tag, body_fields) = untag(&heap, fields[3]);
         assert_eq!(body_tag, "call");
-        assert_eq!(expect_str(&heap, body_fields[0]), "add2");
+        assert_eq!(expect_str(&heap, body_fields[0]), "tl_add2");
         assert_eq!(body_fields.len() - 1, 2, "expected one forwarded arg per parameter");
         for (i, param) in params.iter().enumerate() {
             let (param_name, _) = untag_name(&heap, *param);

@@ -1813,7 +1813,7 @@ pub const SOURCE: &str = r#"
                        ;; toplevel `defun`) because it closes over `m` and
                        ;; mutually recurses with `compile-call-args`.
                        (compile-assoc-user ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (type-name string) (method string) (rest Sexpr)) llvm-value
-                         (let ((mangled (append type-name (append "::" method))))
+                         (let ((mangled (append "tl_" (append type-name (append "::" method)))))
                            (let ((argc (sexpr-list-length rest)))
                              (let ((args-ptr (alloca-args builder argc)))
                                (let ((pending-ptr (alloca-args builder argc)))

@@ -2993,6 +2993,32 @@ fn compile_matches_a_sexpr_scrutinee_and_extracts_payloads() {
     assert_eq!(v, RtValue::Int(42));
 }
 
+/// A user `defun` literally named `rt_cons` gets its own distinct LLVM
+/// symbol (`tl_rt_cons`, the `USER_SYMBOL_PREFIX` prefix) — it never
+/// collides with the real `rt_cons` runtime shim `compiler.rs`'s
+/// `compile-call` rewrites a bare `sexpr-cons` call to (see
+/// `is_rt_builtin_name`). Both the user's own `rt_cons` and the built-in
+/// `sexpr-cons`/`match`-on-`cons` machinery work correctly side by side.
+#[test]
+fn compile_of_a_user_function_literally_named_rt_cons_does_not_collide_with_the_rt_cons_shim() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun rt_cons ((a i64) (b i64)) i64 (+ a b))
+        (compile rt_cons)
+        (defun cons-and-extract () i64
+          (match (sexpr-cons (Int 5) (Int 9))
+            ((cons (int x) (int y)) (+ x y))
+            (_ 0)))
+        (compile cons-and-extract)
+        (+ (rt_cons 3 4) (cons-and-extract))
+        "#,
+    );
+    // rt_cons(3,4) = 3+4 = 7 (the user's own definition); the built-in
+    // sexpr-cons/car/cdr machinery still produces 5+9 = 14 unaffected;
+    // 7+14 = 21.
+    assert_eq!(v, RtValue::Int(21));
+}
+
 /// The three numeric boxed variants share `TAG_BOXED`, so their arms dispatch
 /// through `rt_box_kind` — a bignum/ratio scrutinee must *not* take a
 /// preceding `(float _)` arm even though it carries the same 3-bit tag.
@@ -3849,12 +3875,14 @@ fn compile_dispatches_f64_arithmetic() {
 }
 
 /// `mod` on `f64` lowers to `build-frem` (`a % b`, matching the interpreter's
-/// `eval_float_builtin`). The function is deliberately *not* named `fmod`:
-/// LLVM lowers an `frem` instruction to a call to the C `fmod` symbol, and
-/// the JIT's symbol resolver would bind that call to a same-named compiled
-/// typelisp function instead of libm — an infinite `frem`->`fmod`->`frem`
-/// recursion (a real footgun for a user who compiles a function literally
-/// named `fmod`, but an unusual name to pick).
+/// `eval_float_builtin`). LLVM lowers an `frem` instruction to a call to the
+/// C `fmod` symbol — every user-defined `defun`/`defmethod`'s own LLVM
+/// symbol name gets a `tl_` prefix (`crate::compile::USER_SYMBOL_PREFIX`,
+/// `ast_bridge::user_symbol_name`) specifically so a user function literally
+/// named `fmod` can never collide with it; see
+/// `compile_of_a_user_function_literally_named_fmod_does_not_collide_with_libms_fmod`
+/// below for the regression this prefix exists to prevent (a real footgun
+/// before it: an infinite `frem`->`fmod`->`frem` recursion).
 #[test]
 fn compile_dispatches_f64_mod() {
     let v = run_with_compiler_and_prelude(
@@ -3869,6 +3897,31 @@ fn compile_dispatches_f64_mod() {
         RtValue::Float(f) => assert!((f - 1.5).abs() < 1e-9, "7.5 mod 2.0 = 1.5, got {}", f),
         other => panic!("expected an f64, got {:?}", other),
     }
+}
+
+/// The regression `compile_dispatches_f64_mod`'s doc comment names: a user
+/// `defun` literally named `fmod` used to infinitely recurse once compiled
+/// (LLVM lowers `float-rem`'s `frem` instruction to a call to the C `fmod`
+/// symbol, and the JIT's symbol resolver bound that call to this same-named
+/// compiled typelisp function instead of libm). The `tl_` symbol prefix
+/// (`USER_SYMBOL_PREFIX`) means `fmod`'s own LLVM symbol is `tl_fmod`, never
+/// bare `fmod`, so the two can no longer collide — both compile and run
+/// correctly, and can even call each other.
+#[test]
+fn compile_of_a_user_function_literally_named_fmod_does_not_collide_with_libms_fmod() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun fmod ((a i32) (b i32)) i32 (+ a b))
+        (defun float-rem ((a f64) (b f64)) f64 (mod a b))
+        (compile fmod)
+        (compile float-rem)
+        (+ (fmod 3 4) (float->int (float-rem 7.5 2.0)))
+        "#,
+    )
+    .expect("eval failed");
+    // fmod(3,4) = 3+4 = 7 (the user's own definition, not libm's);
+    // float->int(7.5 mod 2.0) = float->int(1.5) = 1; 7+1 = 8.
+    assert_eq!(v, RtValue::Int(8));
 }
 
 /// Float comparisons lower to `build-fcmp-*` (ordered `<`/`<=`/`>`/`>=`/`=`,

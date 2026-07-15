@@ -1590,31 +1590,39 @@ impl Interp {
             let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
             let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("compiled")));
             for target in &call_targets {
-                declare_external_function(&module, target.local());
+                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(target.local()));
             }
             for (type_name, method) in &method_targets {
-                declare_external_function(&module, &method_link_name(type_name, method));
+                declare_external_function(&module, &crate::compile::ast_bridge::user_method_symbol_name(type_name, method));
             }
             for (rt_name, _) in rt_extern_functions() {
                 declare_external_function(&module, rt_name);
             }
             module
         };
-        self.add_compiled_function(heap, module.clone(), name, name)?;
+        self.add_compiled_function(heap, module.clone(), name, &crate::compile::ast_bridge::user_symbol_name(name))?;
 
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let mut externals: Vec<(String, usize)> = {
             let compiled = self.compiled.borrow();
             call_targets
                 .iter()
-                .map(|p| (p.local().to_string(), compiled.get(p).expect("checked compiled above").address()))
+                .map(|p| {
+                    (
+                        crate::compile::ast_bridge::user_symbol_name(p.local()),
+                        compiled.get(p).expect("checked compiled above").address(),
+                    )
+                })
                 .collect()
         };
         {
             let compiled_methods = self.compiled_methods.borrow();
             externals.extend(method_targets.iter().map(|(type_name, method)| {
                 let key = (type_name.clone(), method.clone());
-                (method_link_name(type_name, method), compiled_methods.get(&key).expect("checked compiled_methods above").address())
+                (
+                    crate::compile::ast_bridge::user_method_symbol_name(type_name, method),
+                    compiled_methods.get(&key).expect("checked compiled_methods above").address(),
+                )
             }));
         }
         externals.extend(rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)));
@@ -1634,7 +1642,7 @@ impl Interp {
         // catchable Rust error. Verifying first turns that into a clean
         // `Panic` instead.
         module.borrow().verify().map_err(|e| EvalError::Panic(format!("compile: module failed verification: {}", e)))?;
-        let compiled = crate::compile::CompiledFn::new(&module.borrow(), name, &externals)
+        let compiled = crate::compile::CompiledFn::new(&module.borrow(), &crate::compile::ast_bridge::user_symbol_name(name), &externals)
             .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
         match method_key {
             Some(key) => {
@@ -2910,7 +2918,7 @@ fn method_link_name(type_name: &Path, method: &str) -> String {
 /// the `sexpr-*` island layer (Symbol/Sexpr redesign Phase 4b): the free
 /// `car`/`cdr`/`cons` names are now the `cons<T,U>` pair (an ordinary
 /// `defstruct` method / `defun`, compiled the normal way), not `rt_*` shims.
-fn is_rt_builtin_name(name: &str) -> bool {
+pub(crate) fn is_rt_builtin_name(name: &str) -> bool {
     matches!(name, "sexpr-car" | "sexpr-cdr" | "sexpr-cons")
 }
 

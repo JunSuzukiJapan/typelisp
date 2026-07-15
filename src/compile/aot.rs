@@ -159,8 +159,12 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // touches the LLVM Context family of APIs directly with no calls back
     // into `Interp`/the typelisp compiler body.
     for name in &fn_names {
-        let internal_name = if name == ENTRY_POINT_NAME { ENTRY_POINT_INTERNAL_NAME } else { name.as_str() };
-        interp.add_compiled_function(&mut heap, module.clone(), name, internal_name).map_err(|e| e.to_string())?;
+        // Every user `defun`'s own LLVM symbol name gets the `tl_` prefix
+        // (`crate::compile::USER_SYMBOL_PREFIX`) — `main` is no longer a
+        // special case: `user_symbol_name("main")` already produces
+        // `ENTRY_POINT_INTERNAL_NAME` ("tl_main").
+        let internal_name = crate::compile::ast_bridge::user_symbol_name(name);
+        interp.add_compiled_function(&mut heap, module.clone(), name, &internal_name).map_err(|e| e.to_string())?;
     }
 
     // One `add_compiled_global_init` per `defvar`, in the same file-
