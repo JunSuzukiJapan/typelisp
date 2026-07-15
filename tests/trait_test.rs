@@ -204,3 +204,105 @@ fn call_site_rejects_a_type_that_does_not_implement_the_required_trait() {
     );
     assert!(check(&src).is_err());
 }
+
+// ---- nested generic call-site bound propagation ---------------------------
+// `Checker::validate_where_bounds`'s two "concrete isn't fully resolved"
+// cases, both arising only when a `where`-bounded call happens inside
+// *another* generic function's own body-check (its type parameter not yet
+// concrete) — see that function's doc comment.
+
+/// A bare type parameter forwarded straight through to a bounded call, with
+/// no matching `where` bound declared on the *enclosing* function: previously
+/// silently skipped (deferred to a runtime `Expr::TraitCall` failure that
+/// would only ever surface if `broken` were actually specialized and called
+/// at a type lacking the impl); now a real check-time error, since nothing
+/// about `broken`'s own signature promises its `T` implements `Counted`.
+#[test]
+fn forwarding_a_bare_type_parameter_without_a_matching_where_bound_is_a_type_error() {
+    let src = format!(
+        "{} (defun describe<T> ((it T)) i32 (where (Counted T)) (count it))
+            (defun broken<T> ((it T)) i32 (describe it))",
+        COUNTER_PRELUDE
+    );
+    let err = check(&src).expect_err("must fail to check");
+    let msg = format!("{:?}", err);
+    assert!(msg.contains("where"), "expected a where-bound propagation error, got: {}", msg);
+}
+
+/// The fix for the above: the enclosing function declares an equivalent
+/// `where` bound on the same type variable it forwards — this must type-check
+/// (validated symbolically, trait path match) and, once specialized at a
+/// concrete type that really does implement `Counted`, evaluate correctly.
+#[test]
+fn forwarding_a_bare_type_parameter_with_a_matching_where_bound_type_checks_and_runs() {
+    let src = format!(
+        "{} (defun describe<T> ((it T)) i32 (where (Counted T)) (count it))
+            (defun forwards<T> ((it T)) i32 (where (Counted T)) (describe it))
+            (forwards (box::new 7))",
+        COUNTER_PRELUDE
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(7));
+}
+
+/// A minimal trait/impl scaffold with an *associated type*, independent of
+/// `Vector`/`Iter`/`doiter` (all prelude-provided — this file's `check`/
+/// `eval_ok` don't load the prelude): `wrap<T>` is `Boxed` with `Item = T`,
+/// so wrapping an outer function's own still-open type parameter `U` in
+/// `wrap<U>` produces exactly the "assoc type resolves to an open variable"
+/// shape `Checker::validate_where_bounds`'s second case exists for.
+const BOXED_PRELUDE: &str = "
+(deftrait Boxed
+  (type Item)
+  (unbox ((self Self)) Item))
+(defstruct wrap<T> (v T))
+(impl Boxed wrap<T>
+  (type Item T)
+  (unbox ((self Self)) T self::v))
+(defun get-int<T> ((b T)) i32 (where (Boxed T (Item i32))) (unbox b))
+";
+
+/// A type parameter *wrapped* in a concrete generic type (not bare) forwarded
+/// to a bounded call whose pin requirement is itself concrete but whose
+/// *actual* associated-type resolution still mentions the open variable:
+/// `get-int`'s `(Item i32)` pin can't be verified against `wrap<U>`'s own
+/// `Item` (symbolically `U`, since `U` isn't resolved during `outer`'s own
+/// body-check) — must not be rejected outright (the bug this fixes), but
+/// isn't fully verified here either; real verification happens when `outer`
+/// is specialized at a concrete `U` and this same call is re-checked with
+/// `Item` fully resolved.
+#[test]
+fn forwarding_a_wrapped_open_type_variable_to_a_pinned_bound_does_not_reject_at_definition_time() {
+    let src = format!("{} (defun outer<U> ((w wrap<U>)) i32 (get-int w))", BOXED_PRELUDE);
+    assert!(check(&src).is_ok(), "must not reject a still-open Item pin at definition time");
+}
+
+/// The above, specialized and actually run at `U = i32` (a type that really
+/// does satisfy `Item i32`) — the deferred validation this relies on
+/// (`Self::specialize_defun_body`'s own re-check of `outer`'s body with `U`
+/// concrete) must still catch a genuine mismatch, so this also proves the
+/// skip isn't a silent hole: specializing at a non-`i32` element type is
+/// exercised by the next test.
+#[test]
+fn forwarding_a_wrapped_open_type_variable_specializes_and_runs_at_a_satisfying_type() {
+    let src = format!(
+        "{} (defun outer<U> ((w wrap<U>)) i32 (get-int w))
+            (outer (wrap::new 42))",
+        BOXED_PRELUDE
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(42));
+}
+
+/// The deferred-validation side of the same mechanism: `outer` itself never
+/// pins `U`, so it happily *defines*, but specializing it at a `wrap<T>`
+/// whose `Item` is not `i32` must still fail once `U` is concrete —
+/// `get-int`'s own pin requirement doesn't disappear just because the
+/// outer wrapper's definition-time check couldn't see it yet.
+#[test]
+fn forwarding_a_wrapped_open_type_variable_rejects_at_specialization_when_the_pin_fails() {
+    let src = format!(
+        "{} (defun outer<U> ((w wrap<U>)) i32 (get-int w))
+            (outer (wrap::new true))",
+        BOXED_PRELUDE
+    );
+    assert!(check(&src).is_err(), "Item bool must still fail the Item i32 pin once U is concrete");
+}
