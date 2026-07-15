@@ -973,6 +973,24 @@ impl Interp {
                     crossing_roots += 1;
                     Ok(crate::compile::runtime::encode(sv))
                 }
+                // `bignum`/`ratio` cross exactly like `Str` above: an
+                // interpreted `RtValue::Bignum`/`Ratio` is an `Rc`-managed
+                // value with no GC-heap presence of its own, so it's cloned
+                // onto the GC heap's `BoxedObj::Bignum`/`Ratio` store fresh
+                // for this call, rooted, and encoded — the tagged `i64`
+                // `rt_bignum_*`/`rt_ratio_*` (`typelisp-rt`) expect.
+                RtValue::Bignum(n) => {
+                    let sv = heap.alloc_bignum(n.as_ref().clone());
+                    heap.push_root(sv);
+                    crossing_roots += 1;
+                    Ok(crate::compile::runtime::encode(sv))
+                }
+                RtValue::Ratio(r) => {
+                    let sv = heap.alloc_ratio(r.as_ref().clone());
+                    heap.push_root(sv);
+                    crossing_roots += 1;
+                    Ok(crate::compile::runtime::encode(sv))
+                }
                 other => Err(EvalError::Internal(format!("compiled call: unsupported argument {:?}", other))),
             };
             match encoded {
@@ -1031,6 +1049,29 @@ impl Interp {
             // `bitcast`); reinterpret it back to an `f64`, the inverse of the
             // `RtValue::Float` argument encode above.
             RtValue::Float(f64::from_bits(raw as u64))
+        } else if matches!(ret_ty, Type::Bignum | Type::Ratio) {
+            // `bignum`/`ratio` aren't `Type::Named` (unlike a `defstruct`/
+            // `Vector<T>`), so `is_boxed_sexpr_type` above never catches
+            // them — without this arm, `raw` (a tagged `TAG_BOXED` pointer)
+            // would silently fall through to the plain `RtValue::Int(raw)`
+            // case below and be misread as an ordinary integer. `raw`
+            // decodes to a `Value::Boxed` id (`rt_bignum_new`/`rt_ratio_from_bignums`
+            // and every `rt_bignum_*`/`rt_ratio_*` arithmetic/conversion
+            // primitive already return one, the same tagged representation
+            // a `Str` argument crosses as above), so re-box its `BigInt`/
+            // `BigRational` into a fresh interpreter-side `Rc`, mirroring
+            // `RtValue::Bignum`/`Ratio`'s own "Rc, no GC-heap presence"
+            // shape.
+            match crate::compile::runtime::decode(raw) {
+                Value::Boxed(id) if matches!(ret_ty, Type::Bignum) => RtValue::Bignum(Rc::new(heap.bignum_value(id).clone())),
+                Value::Boxed(id) => RtValue::Ratio(Rc::new(heap.ratio_value(id).clone())),
+                other => {
+                    return Err(EvalError::Internal(format!(
+                        "compiled call returned {:?} for a bignum/ratio result, which is not a boxed Sexpr",
+                        other
+                    )))
+                }
+            }
         } else {
             RtValue::Int(raw)
         })
@@ -1449,17 +1490,18 @@ impl Interp {
                 }
                 // A user-registered method is a real call target even on a
                 // primitive receiver (`i32::equals`); only the natively
-                // lowered `i64`/`i32`/`char`/`string`/`f64` builtins (`+`,
-                // `<`, `=`, `lt`, `length`, `fadd`, ...) are excluded — those
-                // become LLVM instructions / `rt_str_*` calls in
-                // `compile-assoc`, not function calls. (A builtin on these
+                // lowered `i64`/`i32`/`char`/`string`/`f64`/`bignum`/`ratio`
+                // builtins (`+`, `<`, `=`, `lt`, `length`, `fadd`,
+                // `rt_bignum_add`, ...) are excluded — those become LLVM
+                // instructions / `rt_str_*`/`rt_bignum_*`/`rt_ratio_*` calls
+                // in `compile-assoc`, not function calls. (A builtin on these
                 // receivers that `compile-assoc` does *not* lower natively —
                 // `equalp` on `string` before it was added, `f64::sqrt`,
                 // `f64::float->int`, ... — is also excluded here and panics
                 // inside `compile-assoc-user`'s `get-function` instead, still
                 // at compile time.)
                 self.methods.contains_key(key)
-                    || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64")
+                    || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64" | "bignum" | "ratio")
             })
             .collect();
         for (type_name, method) in &method_targets {
@@ -2671,6 +2713,13 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-fcmp-ge" => Some(llvm_builder_build_fcmp(args, "fcmp_ge", inkwell::FloatPredicate::OGE)),
             "build-fcmp-eq" => Some(llvm_builder_build_fcmp(args, "fcmp_eq", inkwell::FloatPredicate::OEQ)),
             "build-fcmp-ne" => Some(llvm_builder_build_fcmp(args, "fcmp_ne", inkwell::FloatPredicate::UNE)),
+            "build-fsqrt" => Some(llvm_builder_build_float_unary_intrinsic(args, "fsqrt", "llvm.sqrt.f64")),
+            "build-ffloor" => Some(llvm_builder_build_float_unary_intrinsic(args, "ffloor", "llvm.floor.f64")),
+            "build-fceil" => Some(llvm_builder_build_float_unary_intrinsic(args, "fceil", "llvm.ceil.f64")),
+            "build-fround" => Some(llvm_builder_build_float_unary_intrinsic(args, "fround", "llvm.round.f64")),
+            "build-ftrunc" => Some(llvm_builder_build_float_unary_intrinsic(args, "ftrunc", "llvm.trunc.f64")),
+            "build-fpow" => Some(llvm_builder_build_fpow(args)),
+            "build-fptosi" => Some(llvm_builder_build_fptosi(args)),
             "alloca-args" => Some(llvm_builder_alloca_args(args)),
             "store-arg" => Some(llvm_builder_store_arg(args)),
             "build-call" => Some(llvm_builder_build_call(args)),
@@ -2860,14 +2909,18 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// call these to build/read/write a `BoxedObj::Struct` — the same
 /// `BoxedObj::Struct` mem/rt-layer plumbing Stage 1 already exercised in
 /// isolation, wired to the compiler for the first time here.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 42] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 68] {
     use crate::compile::runtime::{
-        rt_box_kind, rt_car, rt_cdr, rt_char_equalp, rt_cons, rt_float_new, rt_float_value, rt_global_get, rt_global_new,
-        rt_global_set, rt_hashtable_clear, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw,
-        rt_hashtable_keys, rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_hashtable_values, rt_match_fail, rt_panic,
-        rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root,
-        rt_str_append, rt_str_eq, rt_str_equalp, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_count,
-        rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_struct_push_field, rt_truncate_sexpr_roots,
+        rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new, rt_bignum_sub,
+        rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr, rt_char_equalp,
+        rt_cons, rt_float_new, rt_float_to_bignum, rt_float_to_ratio, rt_float_value, rt_global_get, rt_global_new, rt_global_set,
+        rt_hashtable_clear, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw, rt_hashtable_keys,
+        rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_hashtable_values, rt_int_to_bignum, rt_int_to_ratio,
+        rt_match_fail, rt_panic, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp,
+        rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul, rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum,
+        rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_equalp,
+        rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
+        rt_struct_new, rt_struct_push_field, rt_truncate_sexpr_roots,
     };
     [
         ("rt_car", rt_car as usize),
@@ -2912,6 +2965,32 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 42] {
         ("rt_global_new", rt_global_new as usize),
         ("rt_global_get", rt_global_get as usize),
         ("rt_global_set", rt_global_set as usize),
+        ("rt_bignum_new", rt_bignum_new as usize),
+        ("rt_ratio_from_bignums", rt_ratio_from_bignums as usize),
+        ("rt_bignum_add", rt_bignum_add as usize),
+        ("rt_bignum_sub", rt_bignum_sub as usize),
+        ("rt_bignum_mul", rt_bignum_mul as usize),
+        ("rt_bignum_div", rt_bignum_div as usize),
+        ("rt_bignum_mod", rt_bignum_mod as usize),
+        ("rt_bignum_cmp", rt_bignum_cmp as usize),
+        ("rt_bignum_to_int", rt_bignum_to_int as usize),
+        ("rt_bignum_fits_i32", rt_bignum_fits_i32 as usize),
+        ("rt_bignum_to_int_raw", rt_bignum_to_int_raw as usize),
+        ("rt_bignum_to_float", rt_bignum_to_float as usize),
+        ("rt_bignum_to_ratio", rt_bignum_to_ratio as usize),
+        ("rt_int_to_bignum", rt_int_to_bignum as usize),
+        ("rt_int_to_ratio", rt_int_to_ratio as usize),
+        ("rt_float_to_bignum", rt_float_to_bignum as usize),
+        ("rt_float_to_ratio", rt_float_to_ratio as usize),
+        ("rt_ratio_add", rt_ratio_add as usize),
+        ("rt_ratio_sub", rt_ratio_sub as usize),
+        ("rt_ratio_mul", rt_ratio_mul as usize),
+        ("rt_ratio_div", rt_ratio_div as usize),
+        ("rt_ratio_cmp", rt_ratio_cmp as usize),
+        ("rt_ratio_to_bignum", rt_ratio_to_bignum as usize),
+        ("rt_ratio_to_float", rt_ratio_to_float as usize),
+        ("rt_ratio_numerator", rt_ratio_numerator as usize),
+        ("rt_ratio_denominator", rt_ratio_denominator as usize),
     ]
 }
 
@@ -3121,6 +3200,93 @@ fn llvm_builder_build_fcmp(args: &[RtValue], name: &str, predicate: inkwell::Flo
     let cmp = bld.build_float_compare(predicate, a, b, name).map_err(err)?;
     let widened = bld.build_int_z_extend(cmp, ctx.i64_type(), name).map_err(err)?;
     Ok(RtValue::LlvmValue(widened.into()))
+}
+
+/// The unary transcendental/rounding counterpart of
+/// [`llvm_builder_build_float_op`]: `bitcast` the single `i64`-carried
+/// operand to `double`, call the named LLVM intrinsic (`llvm.sqrt.f64`/
+/// `llvm.floor.f64`/`llvm.ceil.f64`/`llvm.round.f64`/`llvm.trunc.f64`), then
+/// `bitcast` the `double` result back. Unlike `build-fadd`/... (plain LLVM
+/// instructions), these have no dedicated IR opcode, so they go through
+/// `module`'s intrinsic declaration (`Intrinsic::get_declaration`, itself
+/// idempotent — safe to call again for a later use of the same op in the
+/// same module, same as `get-function` finding an already-declared `rt_*`
+/// shim) rather than `get-function`'s fixed-ABI `rt_*` lookup. `round`
+/// matches Rust's `f64::round` (`float-native-method?`'s uncompiled
+/// fallback, kept in sync by `tests/compile_test.rs`): both round halfway
+/// cases away from zero, not to even. `sqrt`/`floor`/`ceil`/`trunc` are
+/// exact IEEE-754 operations with no rounding-mode ambiguity to begin with.
+fn llvm_builder_build_float_unary_intrinsic(args: &[RtValue], name: &str, intrinsic_name: &str) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let x_bits = expect_llvm_value(&args[2])?.into_int_value();
+    let bld = builder.borrow();
+    let ctx = crate::compile::llvm_context();
+    let f64_ty = ctx.f64_type();
+    let err = |e: String| EvalError::Internal(format!("build-{}: {}", name, e));
+    let x = bld.build_bit_cast(x_bits, f64_ty, "x_f").map_err(|e| err(e.to_string()))?.into_float_value();
+    let intrinsic = inkwell::intrinsics::Intrinsic::find(intrinsic_name)
+        .ok_or_else(|| err(format!("no such LLVM intrinsic {}", intrinsic_name)))?;
+    let decl = intrinsic
+        .get_declaration(&module.borrow(), &[f64_ty.into()])
+        .ok_or_else(|| err(format!("failed to declare {}", intrinsic_name)))?;
+    let call = bld.build_call(decl, &[x.into()], name).map_err(|e| err(e.to_string()))?;
+    let result = match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => v.into_float_value(),
+        inkwell::values::ValueKind::Instruction(_) => return Err(err(format!("{} produced no value", intrinsic_name))),
+    };
+    let bits = bld.build_bit_cast(result, ctx.i64_type(), name).map_err(|e| err(e.to_string()))?;
+    Ok(RtValue::LlvmValue(bits))
+}
+
+/// `expt` (`f64,f64->f64`): the binary counterpart of
+/// [`llvm_builder_build_float_unary_intrinsic`], `llvm.pow.f64` — matches
+/// the interpreter's `f64::powf` (`float_expt`), both ultimately the
+/// platform libm `pow` either way.
+fn llvm_builder_build_fpow(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let a_bits = expect_llvm_value(&args[2])?.into_int_value();
+    let b_bits = expect_llvm_value(&args[3])?.into_int_value();
+    let bld = builder.borrow();
+    let ctx = crate::compile::llvm_context();
+    let f64_ty = ctx.f64_type();
+    let err = |e: String| EvalError::Internal(format!("build-fpow: {}", e));
+    let a = bld.build_bit_cast(a_bits, f64_ty, "a_f").map_err(|e| err(e.to_string()))?.into_float_value();
+    let b = bld.build_bit_cast(b_bits, f64_ty, "b_f").map_err(|e| err(e.to_string()))?.into_float_value();
+    let intrinsic = inkwell::intrinsics::Intrinsic::find("llvm.pow.f64").ok_or_else(|| err("no such LLVM intrinsic llvm.pow.f64".into()))?;
+    let decl = intrinsic
+        .get_declaration(&module.borrow(), &[f64_ty.into()])
+        .ok_or_else(|| err("failed to declare llvm.pow.f64".into()))?;
+    let call = bld.build_call(decl, &[a.into(), b.into()], "fpow").map_err(|e| err(e.to_string()))?;
+    let result = match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => v.into_float_value(),
+        inkwell::values::ValueKind::Instruction(_) => return Err(err("llvm.pow.f64 produced no value".into())),
+    };
+    let bits = bld.build_bit_cast(result, ctx.i64_type(), "fpow_bits").map_err(|e| err(e.to_string()))?;
+    Ok(RtValue::LlvmValue(bits))
+}
+
+/// `float->int` (`f64->i32`, narrowing, truncating toward zero): a plain
+/// `fptosi` instruction — `bitcast` the `i64`-carried operand to `double`,
+/// `fptosi` straight to `i64` (every compiled integer, `i32` included, is
+/// carried in a full `i64` register — see `int-native-method?`'s doc
+/// comment), no heap allocation and no `module` lookup needed, unlike the
+/// transcendentals above. Diverges from the interpreter's `float_to_int`
+/// (`*f as i64`, Rust's *saturating* float-to-int cast) only for non-finite
+/// or out-of-range inputs: LLVM's `fptosi` is a poison value there rather
+/// than a saturated one — an accepted edge-case gap, the same class as
+/// `build-frem`'s documented `fmod`-collision risk.
+fn llvm_builder_build_fptosi(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let x_bits = expect_llvm_value(&args[1])?.into_int_value();
+    let bld = builder.borrow();
+    let ctx = crate::compile::llvm_context();
+    let f64_ty = ctx.f64_type();
+    let err = |e: inkwell::builder::BuilderError| EvalError::Internal(format!("build-fptosi: {}", e));
+    let x = bld.build_bit_cast(x_bits, f64_ty, "x_f").map_err(err)?.into_float_value();
+    let i = bld.build_float_to_signed_int(x, ctx.i64_type(), "fptosi").map_err(err)?;
+    Ok(RtValue::LlvmValue(i.into()))
 }
 
 /// Stack-allocates a `[count x i64]` array and returns its base pointer, to

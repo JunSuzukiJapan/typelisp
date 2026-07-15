@@ -103,7 +103,60 @@ read_test 10件・lsp_locate_test 4件追加、miri(read_test/mem_test) green。
 `unsupported`は2026-07-12時点で**解消済み**——残る`Expr::TraitCall`は単型化後に到達不能な
 診断専用ノードと確認済みで対象外（`tests/trait_test.rs`参照）。以下、直近の完了分。
 
-直近完了: **Iter トレイトを持つ全型（Vector/HashTable）の compile 対応**（2026-07-13、branch
+直近完了: **`bignum`/`ratio` の compile 対応**（2026-07-15）——下記の「残る compile 未対応」
+（`float->bignum`/`float->ratio`のみ）が実は氷山の一角で、`bignum`/`ratio`型そのものに
+compiled表現が一切無い状態だったのを解消。設計: `bignum`/`ratio`は`num_bigint::BigInt`/
+`num_rational::BigRational`という可変長Rust構造体で固定bit幅のFFI安全なレイアウトを持たない
+ため、`f64`のような「ネイティブ表現+box化」の二重化はできず、`Type::Str`と同じ
+「常にタグ付き`TAG_BOXED`ポインタ」規約に統一。`crates/typelisp-rt`に`rt_bignum_new`/
+`rt_ratio_from_bignums`（構築）・`rt_bignum_add/sub/mul/div/mod`/`rt_ratio_add/sub/mul/div`
+（二項演算）・`rt_bignum_cmp`/`rt_ratio_cmp`（3-way比較、`str-lt-call`と同じ「1プリミティブから
+6比較を派生」手法）・変換一式（`rt_int_to_bignum`/`rt_int_to_ratio`/`rt_float_to_bignum`/
+`rt_float_to_ratio`/`rt_bignum_to_int`/`rt_bignum_fits_i32`+`rt_bignum_to_int_raw`（`try-bignum
+->int`用Option二段呼び出し）/`rt_bignum_to_float`/`rt_bignum_to_ratio`/`rt_ratio_to_bignum`/
+`rt_ratio_to_float`/`rt_ratio_numerator`/`rt_ratio_denominator`）を新設（`num-bigint`/
+`num-rational`/`num-traits`を直接依存に追加）。ゼロ除算は`BigInt`/`BigRational`のDiv実装が
+生Rust panicを起こすため、`extern "C"`境界越えUBを避けて演算前に明示チェック→`fatal`。
+`ast_bridge.rs`側: `struct_field_kind`/`binding_kind`に`Type::Bignum`/`Type::Ratio`を
+`Str`と同じ扱いで追加（**後者はGC安全性の必須修正**——ヒープ参照なのにルート登録されない
+バグになるところだった）、`Expr::Bignum`/`Expr::Ratio`・`QuotedSexpr::Bignum`/`Ratio`を
+`unsupported`から実リテラル構築（`bignum_literal_form`/`ratio_literal_form`、`str_literal_form`
+と同じ「符号+桁を`(int _)`列として埋め込み、`rt_bignum_new`呼び出し」方式）に変更。
+`compiler.rs`側: `compile-bignum-literal`/`compile-ratio-literal`、
+`bignum-native-method?`/`ratio-native-method?`、`compile-assoc`への分岐追加、
+`compile-sexpr-field`/`compile-construct-sexpr`のvariant 8/9を「panic」から`str`と同じ
+passthrough に変更。`interp.rs`側: `call_compiled`の引数エンコード（`RtValue::Bignum`/`Ratio`
+を都度ヒープへclone+root、`Str`と同型）と戻り値デコード（`Type::Bignum`/`Ratio`は
+`Type::Named`でないため`is_boxed_sexpr_type`に掛からず、専用分岐が必須だった）、
+`rt_extern_functions`への26関数追加（JIT `add_global_mapping`用、AOTも同じ関数を再利用）、
+`compile_function`の「ネイティブ受け皿型」除外リストに`bignum`/`ratio`追加。
+テスト: `compile_test`に13件追加（リテラル・四則演算・比較・全変換・`try-bignum->int`の
+Some/None両方、bignum/ratio双方）。落とし穴: 自己ホストコンパイラ本体（`compiler.rs`の`SOURCE`
+文字列）は巨大なS式で、括弧の数え間違いが「離れた場所の`if`アリティ不整合」として現れ
+デバッグが難航——コメント/文字列/`#\c`文字リテラルを正しく読み飛ばす簡易パーサをその場で
+書いて特定した。既存テスト2件（`float->bignum`/`sqrt`をnon-native `f64`メソッドの例に使っていた
+もの）は本対応で前提が崩れたため`i64::int->char`（今も非ネイティブ）に差し替え。
+
+直近完了: **`f64` の超越関数/丸め関数 + `float->int` の compile 対応**（2026-07-15）——前回の
+`f64`算術/比較 compile対応（下記参照）で「残」としていたtranscendental（`sqrt`/`floor`/`ceiling`/
+`round`/`truncate`/`expt`）と`float->int`を解消。算術と同じく「compiled `f64`は生bitパターンを
+`i64`に埋め込む表現」を維持したまま、各操作をLLVM組み込み関数（`llvm.sqrt.f64`等、`expt`は
+`llvm.pow.f64`）にlowering——新設ビルトイン`build-fsqrt`/`build-ffloor`/`build-fceil`/
+`build-fround`/`build-ftrunc`/`build-fpow`が`Intrinsic::get_declaration`でモジュールへ宣言
+（同一モジュール内の再呼び出しに対して冪等なため`get-function`のような事前存在チェック不要）
+した上で`bitcast`+`build-call`+`bitcast`を行う（`build-fadd`等と同じ「i64-in/i64-out」規約）。
+`float->int`は`build-fptosi`——単一の`fptosi`命令のみ、ヒープ確保・モジュール引数とも不要。
+`compile-assoc`のf64分岐は先に単項（`a`のみ必要）を判定してから二項（`b2`も必要）へフォール
+スルーする構造に組み替え——元の構造は無条件に`b2`も評価していたため、単項メソッドをそのまま
+追加すると存在しない2引数目を読もうとして失敗する。~~**残る compile 未対応**:
+`float->bignum`/`float->ratio`のみ——`bignum`/`ratio`はcompiled表現が一切無い~~
+**→ 2026-07-15 解消**（上記「`bignum`/`ratio` の compile 対応」参照）。落とし穴: LLVMの`fptosi`はNaN/範囲外入力に対し値未定義
+（poison）——インタプリタ側`float_to_int`（Rustの`as i64`、飽和的キャスト）とはその境界ケースのみ
+挙動が発散するが、`frem`/`fmod`名前衝突と同種の「許容された既知のギャップ」として明記に留める。
+テスト: `compile_test`に4件追加（transcendental 5種一括+expt+float->int+既存2件の対象差し替え
+`sqrt`→`float->bignum`——sqrt自体がcompile可能になったため）。
+
+その前に完了: **Iter トレイトを持つ全型（Vector/HashTable）の compile 対応**（2026-07-13、branch
 `feature/iter-compile`）——「ジェネリック本体そのものの compile」（旧・将来課題）を解消。
 `doiter` / `map`・`filter`・`member` 等のコンビネータ over `Vector<T>`・`HashTable<K,V>` が compile
 可能に。ユーザー定義 Iter 型も、その `next` が compile 可能なプリミティブに落ちる限り**専用対応
@@ -124,6 +177,7 @@ i64↔doubleで挟み、`build-fcmp-*`が比較（`<`等はordered、`/=`はRust
 `compile-assoc`にf64分岐+`float-native-method?`、`call_compiled`にf64引数/戻り値マーシャリング
 （`to_bits`/`from_bits`）、method-target検証除外に`f64`追加。**残る compile 未対応**: transcendental
 （`sqrt`/`floor`/`expt`/...、libm必要）と変換（`float->int`/`float->bignum`/`float->ratio`）。
+→ transcendental全種+`float->int`は2026-07-15解消（上記参照）、残るは`float->bignum`/`float->ratio`のみ。
 落とし穴: LLVM `frem`はCの`fmod`呼び出しにlowerされるため`fmod`という名の関数compileはJITシンボル
 解決衝突で無限再帰。テスト: compile_test 3件 + typelisp-rt（既存流用）。
 

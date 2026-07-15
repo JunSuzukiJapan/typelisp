@@ -116,6 +116,63 @@ fn str_literal_form(heap: &mut Heap, s: &str) -> Result<Value, Error> {
     result
 }
 
+/// Builds a `(bignum (int sign) (int d0) (int d1) ...)` node for a
+/// compile-time-known `BigInt` — [`ast_to_sexpr_scoped`]'s `Expr::Bignum` arm
+/// and [`ratio_literal_form`] (for a ratio literal's numerator/denominator)
+/// both need this. Same reasoning as [`str_literal_form`] for why this isn't
+/// a pre-allocated `Value`: a `BigInt`'s digits are compile-time-known, but a
+/// compile-time `Heap::alloc_bignum`'s `BoxId` would be meaningless to the
+/// *target* program (AOT's compiled executable has its own, separate `Heap`
+/// with no shared box table). `sign` (`-1`/`0`/`1`) and each base-2^32 digit
+/// (`BigInt::to_u32_digits`, least-significant first) become their own `int`
+/// node, mirroring `rt_bignum_new`'s own "argc-many raw payload scalars"
+/// convention (`compiler.rs`'s `compile-bignum-literal` builds the args array
+/// from exactly these nodes).
+fn bignum_literal_form(heap: &mut Heap, n: &num_bigint::BigInt) -> Result<Value, Error> {
+    let (sign, digits) = n.to_u32_digits();
+    let sign_val = match sign {
+        num_bigint::Sign::Minus => -1,
+        num_bigint::Sign::NoSign => 0,
+        num_bigint::Sign::Plus => 1,
+    };
+    let mut nodes = Vec::with_capacity(digits.len() + 1);
+    let sign_node = tagged(heap, "int", &[Value::Int(sign_val)])?;
+    heap.push_root(sign_node);
+    nodes.push(sign_node);
+    for d in digits {
+        let node = tagged(heap, "int", &[Value::Int(d as i64)])?;
+        heap.push_root(node);
+        nodes.push(node);
+    }
+    let result = tagged(heap, "bignum", &nodes);
+    for _ in 0..nodes.len() {
+        heap.pop_root();
+    }
+    result
+}
+
+/// Builds a `(ratio numer-form denom-form)` node for a compile-time-known
+/// `BigRational` — [`ast_to_sexpr_scoped`]'s `Expr::Ratio` arm. Each of
+/// `numer()`/`denom()` becomes its own nested [`bignum_literal_form`]
+/// (`compiler.rs`'s `compile-ratio-literal` compiles both, then calls
+/// `rt_ratio_from_bignums`).
+fn ratio_literal_form(heap: &mut Heap, r: &num_rational::BigRational) -> Result<Value, Error> {
+    let numer_form = bignum_literal_form(heap, r.numer())?;
+    heap.push_root(numer_form);
+    let denom_form = match bignum_literal_form(heap, r.denom()) {
+        Ok(v) => v,
+        Err(e) => {
+            heap.pop_root();
+            return Err(e);
+        }
+    };
+    heap.push_root(denom_form);
+    let result = tagged(heap, "ratio", &[numer_form, denom_form]);
+    heap.pop_root();
+    heap.pop_root();
+    result
+}
+
 /// `binding_kind`'s three possible results — see that function's doc
 /// comment. Kept as plain `i64` constants (not a Rust enum) since the only
 /// thing that ever consumes one is `compiler.rs`, as a `Sexpr` `Int`.
@@ -196,7 +253,15 @@ fn match_scrut_kind(ty: &Type, cx: Ctx) -> Option<i64> {
 fn binding_kind(ty: &Type) -> i64 {
     if matches!(ty, Type::Fn(..)) {
         KIND_FN
-    } else if is_sexpr_type(ty) || matches!(ty, Type::Str) {
+    } else if is_sexpr_type(ty) || matches!(ty, Type::Str | Type::Bignum | Type::Ratio) {
+        // `bignum`/`ratio` join `Str` here for the same reason
+        // `struct_field_kind` gives them its own passthrough kind `6`: a
+        // bare `Type::Bignum`/`Type::Ratio` value's compiled representation
+        // *is* the tagged `TAG_BOXED` pointer a boxed `Sexpr::Bignum`/
+        // `Ratio` already is, so it needs the exact same GC-root push/pop
+        // protection across a binding boundary — leaving it `KIND_PLAIN`
+        // would silently drop the GC root on a value that's actually a
+        // live heap pointer.
         KIND_SEXPR
     } else {
         KIND_PLAIN
@@ -275,6 +340,12 @@ fn struct_field_kind(ty: &Type, structs: &HashSet<Path>) -> i64 {
         // A `Symbol` value is an already-tagged immediate (an interned
         // `Value::Symbol`), the same passthrough case as `Str`/`Sexpr`.
         Type::Symbol => 6,
+        // `bignum`/`ratio` are always a tagged `TAG_BOXED` pointer at a
+        // `BoxedObj::Bignum`/`Ratio` (no fixed-width native form the way
+        // `f64` has — see `crates/typelisp-rt/src/lib.rs`'s "bignum/ratio
+        // compiled representation" section), so they join `Str`/`Symbol`'s
+        // passthrough kind `6` rather than needing a tag of their own.
+        Type::Bignum | Type::Ratio => 6,
         _ if is_sexpr_type(ty) => 6,
         Type::Named(p, _) if structs.contains(p) => 6,
         _ => 0,
@@ -589,12 +660,12 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // time, via a fresh `rt_float_new` call in the compiled function
         // itself — mirroring `compile-str`'s own `rt_str_new` call.
         Expr::Float(f) => tagged(heap, "float", &[Value::Int(f.to_bits() as i64)]),
-        // `bignum`/`ratio` have no compiled-code representation yet (no
-        // `rt_bignum_*`/`rt_ratio_*` runtime support in `typelisp-rt`) — an
-        // explicit `unsupported` tag (the same treatment `TraitCall` below
-        // gets) rather than silently miscompiling.
-        Expr::Bignum(_) => unsupported(heap, "Bignum"),
-        Expr::Ratio(_) => unsupported(heap, "Ratio"),
+        // `(bignum (int sign) (int d0) ...)`/`(ratio numer-form denom-form)`
+        // — see `bignum_literal_form`/`ratio_literal_form`'s doc comments.
+        // `compiler.rs`'s `compile-bignum-literal`/`compile-ratio-literal`
+        // lower these to `rt_bignum_new`/`rt_ratio_from_bignums` calls.
+        Expr::Bignum(n) => bignum_literal_form(heap, n),
+        Expr::Ratio(r) => ratio_literal_form(heap, r),
         Expr::Bool(b) => tagged(heap, "bool", &[Value::Bool(*b)]),
         Expr::Char(c) => tagged(heap, "char", &[Value::Char(*c)]),
         // `(str (int c0) (int c1) ...)` — Stage 7 of the Sexpr-representation
@@ -1121,19 +1192,17 @@ fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Typ
 /// `Cons` already have a real compiled representation (used today by an
 /// ordinary `Sexpr` constructor call), so a quoted literal made only of
 /// those reuses it verbatim, recursively for a `Cons`'s two fields.
-/// `Sym`/`Bignum`/`Ratio`/`Path` don't (a `Sym`'s payload is a `SymId` with
-/// no compiled form, same for a `Path`'s `PathId`; `Bignum`/`Ratio` are heap
-/// objects with no `rt_bignum_*`/`rt_ratio_*` compiled support yet — see
-/// [`struct_field_kind`]'s doc comment for the same gap on the `defstruct`-
-/// field side), so a quoted literal containing one anywhere (even nested
-/// inside a `Cons`) stays `unsupported` here rather than reaching a
-/// confusing low-level panic deep inside the interpreted compiler body.
+/// `Sym`/`Path` don't (a `Sym`'s payload is a `SymId` with no compiled form,
+/// same for a `Path`'s `PathId`), so a quoted literal containing one of
+/// those anywhere (even nested inside a `Cons`) stays `unsupported` here
+/// rather than reaching a confusing low-level panic deep inside the
+/// interpreted compiler body. `Bignum`/`Ratio` *do* have compiled support
+/// (`bignum_literal_form`/`ratio_literal_form`, variants `8`/`9`), the same
+/// as every other leaf here.
 fn translate_quote(heap: &mut Heap, datum: &QuotedSexpr) -> Result<Value, Error> {
     match datum {
         QuotedSexpr::Nil => tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(0)]),
-        QuotedSexpr::Sym(_) | QuotedSexpr::Bignum(_) | QuotedSexpr::Ratio(_) | QuotedSexpr::Path(_) => {
-            unsupported(heap, "Quote")
-        }
+        QuotedSexpr::Sym(_) | QuotedSexpr::Path(_) => unsupported(heap, "Quote"),
         QuotedSexpr::Int(n) => {
             let leaf = tagged(heap, "int", &[Value::Int(*n)])?;
             heap.push_root(leaf);
@@ -1169,8 +1238,22 @@ fn translate_quote(heap: &mut Heap, datum: &QuotedSexpr) -> Result<Value, Error>
             heap.pop_root();
             result
         }
+        QuotedSexpr::Bignum(n) => {
+            let leaf = bignum_literal_form(heap, n)?;
+            heap.push_root(leaf);
+            let result = tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(8), leaf]);
+            heap.pop_root();
+            result
+        }
+        QuotedSexpr::Ratio(r) => {
+            let leaf = ratio_literal_form(heap, r)?;
+            heap.push_root(leaf);
+            let result = tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(9), leaf]);
+            heap.pop_root();
+            result
+        }
         QuotedSexpr::Cons(car, cdr) => {
-            // A nested `Sym`/`Bignum`/`Ratio` leaf translates to a valid
+            // A nested `Sym`/`Path` leaf translates to a valid
             // `(unsupported "Quote")` node, not an `Err` (`unsupported`'s own
             // signature) — propagate it as this whole `Cons`'s result instead
             // of embedding it as an ordinary field value, so the caller sees

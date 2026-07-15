@@ -1253,25 +1253,26 @@ fn the_compiler_body_compiles_an_i64_comparison() {
 }
 
 /// `compile-assoc`'s receiver-type guard for a method it still can't lower:
-/// `f64::sqrt` is a *non-native* `f64` method (`registry::float_assoc`'s
-/// transcendental family needs libm — out of scope, unlike the arithmetic /
-/// comparison methods `compile-assoc`'s f64 branch now lowers). It must panic
-/// clearly rather than silently misinterpret anything. Reached via the
-/// generic user-method branch (`compile-assoc-user`): this hand-fed Sexpr
-/// bypasses `Interp::compile_function`'s own up-front check (the normal
-/// rejection path, with a clearer message — see
-/// `compile_of_a_function_calling_an_unsupported_f64_method_is_a_clean_error`
+/// `i64::int->char` is a *non-native* `i64` method (`registry::int_assoc`'s
+/// `int->char`/`try-int->char` conversions have no compiled primitive behind
+/// them, unlike the arithmetic/comparison methods `int-native-method?`
+/// covers). It must panic clearly rather than silently misinterpret
+/// anything. Reached via the generic user-method branch
+/// (`compile-assoc-user`): this hand-fed Sexpr bypasses
+/// `Interp::compile_function`'s own up-front check (the normal rejection
+/// path, with a clearer message — see
+/// `compile_of_a_function_calling_an_unsupported_i64_method_is_a_clean_error`
 /// below), so the only thing left to catch it is `get-function` failing to
-/// find `"f64::sqrt"` in this throwaway module.
+/// find `"i64::int->char"` in this throwaway module.
 #[test]
 fn compile_assoc_panics_on_an_unsupported_receiver_type() {
     let err = run_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "sqrtf" '((a . 0))
-              '(assoc "f64" "sqrt" true (0 var "a" false)))"#,
+        r#"(compile-function (llvm-module::create "mod") "tochar" '((a . 0))
+              '(assoc "i64" "int->char" true (0 var "a" false)))"#,
     )
-    .expect_err("expected a panic for a non-native f64 method");
+    .expect_err("expected a panic for a non-native i64 method");
     match err {
-        EvalError::Panic(msg) => assert!(msg.contains("no function named") && msg.contains("f64::sqrt"), "message was: {}", msg),
+        EvalError::Panic(msg) => assert!(msg.contains("no function named") && msg.contains("i64::int->char"), "message was: {}", msg),
         other => panic!("expected a Panic, got {:?}", other),
     }
 }
@@ -2138,25 +2139,26 @@ fn compile_transitively_compiles_a_called_user_method() {
 
 /// The other half of `Interp::compile_function`'s `Expr::Assoc`-target check:
 /// a *non-native* builtin method on an otherwise-native receiver — here
-/// `f64::sqrt` (`registry::float_assoc`'s transcendental family needs libm,
-/// still out of scope, unlike the arithmetic/comparison methods
-/// `compile-assoc`'s f64 branch now lowers) — is rejected with its own clear
+/// `i64::int->char` (`registry::int_assoc`'s conversion, no compiled
+/// primitive backing it, unlike the arithmetic/comparison methods
+/// `compile-assoc`'s i64 branch lowers) — is rejected with its own clear
 /// "no function named" message from `compile-assoc-user`'s `get-function`,
-/// rather than silently misbehaving. (`f64` was added to the native-receiver
+/// rather than silently misbehaving. (`i64`/`i32` are in the native-receiver
 /// exclusion list, so this reaches the compiler rather than the up-front
-/// method-target check — the same treatment `string::upcase` gets.)
+/// method-target check — the same treatment `compile_assoc_panics_on_an_unsupported_receiver_type`
+/// exercises directly against a hand-fed Sexpr.)
 #[test]
-fn compile_of_a_function_calling_an_unsupported_f64_method_is_a_clean_error() {
+fn compile_of_a_function_calling_an_unsupported_i64_method_is_a_clean_error() {
     let err = run_with_compiler_and_prelude(
         r#"
-        (defun root ((a f64)) f64 (sqrt a))
+        (defun root ((a i64)) char (int->char a))
         (compile root)
         "#,
     )
-    .expect_err("expected compiling a caller of the non-native f64 `sqrt` to fail");
+    .expect_err("expected compiling a caller of the non-native i64 `int->char` to fail");
     match err {
         EvalError::Panic(msg) => {
-            assert!(msg.contains("f64::sqrt"), "message was: {}", msg);
+            assert!(msg.contains("i64::int->char"), "message was: {}", msg);
             assert!(msg.contains("no function named"), "message was: {}", msg);
         }
         other => panic!("expected a Panic, got {:?}", other),
@@ -3641,11 +3643,15 @@ fn compile_dispatches_string_equalp() {
 //
 // A compiled `f64` is its raw `f64::to_bits` pattern carried in an `i64`
 // register (`compile-float`); `compile-assoc`'s f64 branch lowers arithmetic
-// to `build-fadd`/... (each bitcasts to `double` and back) and comparisons to
-// `build-fcmp-*`. The JIT boundary encodes an `f64` argument as its bits and
-// decodes an `f64` result back (`Interp::call_compiled`). Transcendentals
-// (`sqrt`/...) and conversions (`float->int`/...) stay out of scope (libm /
-// heap), falling through to `compile-assoc-user`.
+// to `build-fadd`/... (each bitcasts to `double` and back), comparisons to
+// `build-fcmp-*`, the transcendental/rounding family (`sqrt`/`floor`/
+// `ceiling`/`round`/`truncate`/`expt`) to the matching LLVM intrinsic
+// (`build-fsqrt`/.../`build-fpow`), and `float->int` to a single `fptosi`
+// instruction (`build-fptosi`). The JIT boundary encodes an `f64` argument as
+// its bits and decodes an `f64` result back (`Interp::call_compiled`).
+// `float->bignum`/`float->ratio` alone stay out of scope (`bignum`/`ratio`
+// have no compiled representation at all yet), falling through to
+// `compile-assoc-user`.
 
 /// Float arithmetic returning an `f64` across the JIT boundary — exercises
 /// `build-fadd`/`build-fsub`/`build-fmul`/`build-fdiv` and the `f64`
@@ -3711,4 +3717,227 @@ fn compile_dispatches_f64_comparisons_and_agrees_with_the_interpreter() {
     .expect("compiled failed");
     assert_eq!(interpreted, RtValue::Int(123), "1<2 ->1, 2=2 ->2, 3>2 ->3 (interpreted)");
     assert_eq!(compiled, interpreted, "compiled f64 comparisons agree with the interpreter");
+}
+
+/// The unary transcendental/rounding family (`sqrt`/`floor`/`ceiling`/
+/// `round`/`truncate`) each lower to their own LLVM intrinsic
+/// (`build-fsqrt`/...) — this exercises all five in one compiled function
+/// and checks the JIT result against the interpreter's.
+#[test]
+fn compile_dispatches_f64_transcendentals_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun combine ((x f64)) f64
+          (+ (sqrt x)
+             (+ (floor x)
+                (+ (ceiling x)
+                   (+ (round x) (truncate x))))))
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(combine 6.25)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n(combine 6.25)")).expect("compiled failed");
+    match (interpreted, compiled) {
+        (RtValue::Float(i), RtValue::Float(c)) => assert!((i - c).abs() < 1e-9, "interpreted {} vs compiled {}", i, c),
+        other => panic!("expected two f64s, got {:?}", other),
+    }
+}
+
+/// `expt` (binary, `f64,f64->f64`) lowers to `build-fpow` (`llvm.pow.f64`).
+#[test]
+fn compile_dispatches_f64_expt_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun power ((base f64) (exp f64)) f64 (expt base exp))
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(power 2.0 10.0)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile power)\n(power 2.0 10.0)")).expect("compiled failed");
+    assert_eq!(interpreted, RtValue::Float(1024.0));
+    assert_eq!(compiled, interpreted, "compiled expt agrees with the interpreter");
+}
+
+/// `float->int` lowers to a single `fptosi` instruction (`build-fptosi`), no
+/// heap allocation involved.
+#[test]
+fn compile_dispatches_float_to_int_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun truncate-it ((x f64)) i32 (float->int x))
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(truncate-it 7.9)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile truncate-it)\n(truncate-it 7.9)")).expect("compiled failed");
+    assert_eq!(interpreted, RtValue::Int(7));
+    assert_eq!(compiled, interpreted, "compiled float->int agrees with the interpreter");
+}
+
+// ---- bignum/ratio compiled representation -------------------------------
+//
+// `bignum`/`ratio` are always a tagged `TAG_BOXED` pointer (no native
+// register form the way `f64` has — see `crates/typelisp-rt/src/lib.rs`'s
+// "bignum/ratio compiled representation" section), so a `bignum`/`ratio`
+// literal, arithmetic/comparison, and every conversion method now has a real
+// compiled form (`rt_bignum_*`/`rt_ratio_*`). Each test mirrors an existing
+// interpreter-only case from `tests/bignum_ratio_test.rs`, comparing the
+// compiled result against the interpreted one.
+
+/// A `bignum` literal too large for `i64` — `compile-bignum-literal`'s
+/// `rt_bignum_new` construction from the literal's embedded sign+digits.
+#[test]
+fn compile_constructs_a_bignum_literal_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun big () bignum 123456789012345678901234567890)
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(big)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile big)\n(big)")).expect("compiled failed");
+    assert_eq!(compiled, interpreted, "compiled bignum literal agrees with the interpreter");
+}
+
+/// `bignum` arithmetic (`+`/`-`/`*`/`/`/`mod`), each a single `rt_bignum_*`
+/// call.
+#[test]
+fn compile_dispatches_bignum_arithmetic_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun combine ((a bignum) (b bignum)) bignum
+          (+ (* a b) (mod (- a b) b)))
+    "#;
+    let call = "(combine 123456789012345678901234567890 98765432109876543210)";
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n{call}")).expect("compiled failed");
+    assert_eq!(compiled, interpreted, "compiled bignum arithmetic agrees with the interpreter");
+}
+
+/// `bignum` division by zero is a fatal, explicitly-checked runtime error
+/// (`rt_bignum_div`'s zero-divisor guard, `fatal`) rather than an unwinding
+/// Rust `panic!` crossing the `extern "C"` boundary — this only exercises
+/// the ordinary non-zero path (a deliberate process abort isn't something
+/// this test suite's harness verifies, matching how `rt_hashtable_get_raw`'s
+/// own "caller already checked" contract isn't abort-tested either).
+#[test]
+fn compile_dispatches_bignum_division_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun quotient ((a bignum) (b bignum)) bignum (/ a b))
+    "#;
+    let call = "(quotient 100000000000000000000 (int->bignum 3))";
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile quotient)\n{call}")).expect("compiled failed");
+    assert_eq!(compiled, interpreted, "compiled bignum division agrees with the interpreter");
+}
+
+/// The six `bignum` comparisons (`<`/`<=`/`>`/`>=`/`=`/`/=`) all derive from
+/// `rt_bignum_cmp`'s three-way result — this exercises each direction.
+#[test]
+fn compile_dispatches_bignum_comparisons_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun compare ((a bignum) (b bignum)) i64
+          (if (< a b) 1
+          (if (<= a b) 2
+          (if (> a b) 3
+          (if (>= a b) 4
+          (if (= a b) 5
+          (if (/= a b) 6 0)))))))
+    "#;
+    for call in [
+        "(compare 100000000000000000000 200000000000000000000)",
+        "(compare 200000000000000000000 100000000000000000000)",
+        "(compare 100000000000000000000 100000000000000000000)",
+    ] {
+        let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).expect("interpreted failed");
+        let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile compare)\n{call}")).expect("compiled failed");
+        assert_eq!(compiled, interpreted, "compiled bignum comparison ({call}) agrees with the interpreter");
+    }
+}
+
+/// `int->bignum`/`bignum->int`/`bignum->float`/`float->bignum`/
+/// `bignum->ratio` each lower to a single `rt_bignum_*`/`rt_int_to_bignum`/
+/// `rt_float_to_bignum` call.
+#[test]
+fn compile_dispatches_bignum_conversions_and_agrees_with_the_interpreter() {
+    let cases = [
+        ("(defun f ((a i32)) bignum (int->bignum a))", "(f 42)"),
+        ("(defun f ((a bignum)) i32 (bignum->int a))", "(f (int->bignum 42))"),
+        ("(defun f ((a bignum)) f64 (bignum->float a))", "(f (int->bignum 2))"),
+        ("(defun f ((a f64)) bignum (float->bignum a))", "(f 2.0)"),
+        ("(defun f ((a bignum)) ratio (bignum->ratio a))", "(f (int->bignum 5))"),
+    ];
+    for (def, call) in cases {
+        let interpreted = run_with_compiler_and_prelude(&format!("{def}\n{call}")).expect("interpreted failed");
+        let compiled = run_with_compiler_and_prelude(&format!("{def}\n(compile f)\n{call}")).expect("compiled failed");
+        assert_eq!(compiled, interpreted, "compiled `{def}` agrees with the interpreter");
+    }
+}
+
+/// `try-bignum->int` (`(try-as i32 n)`) — the `Option<i32>`-returning
+/// counterpart of `bignum->int`, compiled as a two-call
+/// `rt_bignum_fits_i32`/`rt_bignum_to_int_raw` sequence (the same
+/// alloca+branch+merge shape `compile-hashtable-op`'s `get`/`remove` already
+/// use) building a real `Some`/`None` box — exercises both outcomes.
+#[test]
+fn compile_dispatches_try_bignum_to_int_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun try-it ((n bignum)) bool (is-some (try-as i32 n)))
+    "#;
+    for call in ["(try-it (int->bignum 42))", "(try-it 123456789012345678901234567890)"] {
+        let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).expect("interpreted failed");
+        let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile try-it)\n{call}")).expect("compiled failed");
+        assert_eq!(compiled, interpreted, "compiled try-bignum->int ({call}) agrees with the interpreter");
+    }
+}
+
+/// A `ratio` literal — `compile-ratio-literal`'s two nested
+/// `compile-bignum-literal` calls + `rt_ratio_from_bignums`.
+#[test]
+fn compile_constructs_a_ratio_literal_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun frac () ratio 4/6)
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(frac)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile frac)\n(frac)")).expect("compiled failed");
+    assert_eq!(compiled, interpreted, "compiled ratio literal agrees with the interpreter (reduced to 2/3)");
+}
+
+/// `ratio` arithmetic (`+`/`-`/`*`/`/`), each a single `rt_ratio_*` call.
+#[test]
+fn compile_dispatches_ratio_arithmetic_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun combine ((a ratio) (b ratio)) ratio
+          (/ (+ a b) (* a b)))
+    "#;
+    let call = "(combine 1/2 2/3)";
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n{call}")).expect("compiled failed");
+    assert_eq!(compiled, interpreted, "compiled ratio arithmetic agrees with the interpreter");
+}
+
+/// The six `ratio` comparisons all derive from `rt_ratio_cmp`'s three-way
+/// result, the same shape as the bignum branch.
+#[test]
+fn compile_dispatches_ratio_comparisons_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun compare ((a ratio) (b ratio)) i64
+          (if (< a b) 1
+          (if (<= a b) 2
+          (if (> a b) 3
+          (if (>= a b) 4
+          (if (= a b) 5
+          (if (/= a b) 6 0)))))))
+    "#;
+    for call in ["(compare 1/2 2/3)", "(compare 2/3 1/2)", "(compare 1/2 2/4)"] {
+        let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).expect("interpreted failed");
+        let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile compare)\n{call}")).expect("compiled failed");
+        assert_eq!(compiled, interpreted, "compiled ratio comparison ({call}) agrees with the interpreter");
+    }
+}
+
+/// `int->ratio`/`ratio->bignum`/`ratio->float`/`float->ratio`/`numerator`/
+/// `denominator`, each a single `rt_ratio_*`/`rt_int_to_ratio` call.
+#[test]
+fn compile_dispatches_ratio_conversions_and_agrees_with_the_interpreter() {
+    let cases = [
+        ("(defun f ((a i32)) ratio (int->ratio a))", "(f 7)"),
+        ("(defun f ((r ratio)) bignum (ratio->bignum r))", "(f 7/2)"),
+        ("(defun f ((r ratio)) f64 (ratio->float r))", "(f 1/2)"),
+        ("(defun f ((a f64)) ratio (float->ratio a))", "(f 0.5)"),
+        ("(defun f ((r ratio)) bignum (numerator r))", "(f 4/6)"),
+        ("(defun f ((r ratio)) bignum (denominator r))", "(f 4/6)"),
+    ];
+    for (def, call) in cases {
+        let interpreted = run_with_compiler_and_prelude(&format!("{def}\n{call}")).expect("interpreted failed");
+        let compiled = run_with_compiler_and_prelude(&format!("{def}\n(compile f)\n{call}")).expect("compiled failed");
+        assert_eq!(compiled, interpreted, "compiled `{def}` agrees with the interpreter");
+    }
 }

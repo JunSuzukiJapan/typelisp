@@ -396,10 +396,19 @@ Phase 6.5 で将来課題とした2件（cons-cell への再帰的 Eq/Ord impl�
 - ~~`f64` レシーバのメソッド compile~~ **→ 2026-07-13 解消**（算術 `+`/`-`/`*`/`/`/`mod` と比較
   `<`/`<=`/`>`/`>=`/`=`/`/=`/`eq`/`eql`/`equal`/`equalp`）。新設ビルトイン `build-fadd`/`fsub`/`fmul`/
   `fdiv`/`frem`（各 `bitcast` i64↔double で挟む）+ `build-fcmp-*`、`compile-assoc` に f64 分岐 +
-  `float-native-method?`、`call_compiled` の f64 引数/戻り値マーシャリング。**残**: transcendental
-  （`sqrt`/`floor`/`expt`/...、libm 必要）と変換（`float->int`/`float->bignum`/`float->ratio`）。
+  `float-native-method?`、`call_compiled` の f64 引数/戻り値マーシャリング。~~残: transcendental
+  （`sqrt`/`floor`/`expt`/...、libm 必要）と変換（`float->int`/`float->bignum`/`float->ratio`）。~~
+  →2026-07-15 追加解消: transcendental 全種（`sqrt`/`floor`/`ceiling`/`round`/`truncate`/`expt`）と
+  `float->int`。各 LLVM 組み込み関数（`llvm.sqrt.f64`等、`expt`のみ`llvm.pow.f64`）へ lowering する
+  新設ビルトイン `build-fsqrt`/.../`build-fpow`（`Intrinsic::get_declaration` でモジュールへ宣言、
+  冪等なので再呼び出し安全）、`float->int` は単一 `fptosi` 命令の `build-fptosi`（ヒープ確保なし）。
+  ~~残るは `float->bignum`/`float->ratio` のみ——`bignum`/`ratio` はcompiled表現が無いため対象外~~
+  →2026-07-15 解消（`bignum`/`ratio` に `Type::Str` と同じ「常にタグ付き `TAG_BOXED` ポインタ」の
+  compiled表現を新設、`rt_bignum_*`/`rt_ratio_*` 一式・`compile-bignum-literal`/
+  `compile-ratio-literal`・`bignum-native-method?`/`ratio-native-method?` を追加）。
   落とし穴: LLVM `frem` は C の `fmod` 呼び出しに lower されるため、`fmod` という名の関数を compile
-  すると JIT のシンボル解決が衝突して無限再帰する。
+  すると JIT のシンボル解決が衝突して無限再帰する（`fptosi` にも類似の既知ギャップ: NaN/範囲外
+  入力で poison 値になり、インタプリタの飽和的 `as i64` キャストとは境界ケースのみ発散する）。
 
 テスト: trait_test（defmethod 直書き where・再帰 impl・境界エラー3本）、seq_ops_test（ペアの
 equals/less/member/sort/ネスト/Eq 未実装エラー6本）、compile_test（i32/string/char の equals/less

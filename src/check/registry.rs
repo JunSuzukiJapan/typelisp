@@ -984,6 +984,27 @@ fn llvm_builder_def() -> AdtDef {
     for name in ["build-fcmp-lt", "build-fcmp-le", "build-fcmp-gt", "build-fcmp-ge", "build-fcmp-eq", "build-fcmp-ne"] {
         assoc.insert(name.to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     }
+    // `f64` transcendentals (`float-native-method?`'s `sqrt`/`floor`/`ceiling`/
+    // `round`/`truncate`): each lowers to the matching LLVM intrinsic
+    // (`llvm.sqrt.f64`/...) declared on demand in `module` — unlike
+    // `build-fadd`/..., these need the module to look the intrinsic
+    // declaration up in (`eval_llvm_builtin_method`'s
+    // `llvm_builder_build_float_unary_intrinsic`), so they take `llvm-module`
+    // as a second argument the same way `build-closure-release` does.
+    for name in ["build-fsqrt", "build-ffloor", "build-fceil", "build-fround", "build-ftrunc"] {
+        assoc.insert(name.to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    }
+    // `expt` (`f64,f64->f64`): the binary counterpart of the unary
+    // transcendentals above, `llvm.pow.f64`.
+    assoc.insert(
+        "build-fpow".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true),
+    );
+    // `float->int` (`f64->i32`, narrowing, truncating toward zero): a single
+    // `fptosi` instruction, no heap allocation and no module lookup needed —
+    // unlike `float->bignum`/`float->ratio`, which stay non-native (see
+    // `float-native-method?`'s doc comment).
+    assoc.insert("build-fptosi".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
     // `alloca-args`/`store-arg`/`build-call`: building a direct call to an
     // already-declared function (`get-function`'s result). `alloca-args`
     // stack-allocates a fresh `[count x i64]` array (mirroring the fixed-ABI

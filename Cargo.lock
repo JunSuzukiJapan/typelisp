@@ -461,6 +461,9 @@ dependencies = [
 name = "typelisp-rt"
 version = "0.1.0"
 dependencies = [
+ "num-bigint",
+ "num-rational",
+ "num-traits",
  "typelisp-mem",
 ]
 

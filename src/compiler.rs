@@ -628,7 +628,13 @@ pub const SOURCE: &str = r#"
   (if (equal method ">=") true
   (if (equal method "=") true
   (if (equal method "eq") true
-  (equal method "/=")))))))))))
+  (if (equal method "/=") true
+  ;; `int->bignum`/`int->ratio`: always-exact widening into the two
+  ;; arbitrary-precision types (`rt_int_to_bignum`/`rt_int_to_ratio`) — unary,
+  ;; checked before `b2` the same way `float-native-method?`'s own unary
+  ;; conversions are.
+  (if (equal method "int->bignum") true
+  (equal method "int->ratio")))))))))))))
 
 (defun string-native-method? ((method string)) bool
   (if (equal method "length") true
@@ -663,10 +669,57 @@ pub const SOURCE: &str = r#"
 ;; lowers to LLVM float instructions (`build-fadd`/... — each `bitcast`s the
 ;; `i64`-carried `f64` bits to `double` and back internally), comparisons
 ;; (`<`/`<=`/`>`/`>=`/`=`/`/=` and the `eq`/`eql`/`equal`/`equalp` aliases) to
-;; `build-fcmp-*`. Transcendentals (`sqrt`/`floor`/`expt`/...) and conversions
-;; (`float->int`/...) stay non-native (libm / heap allocation) and fall
-;; through to `compile-assoc-user`, panicking clearly there if never compiled.
+;; `build-fcmp-*`. `expt` and the unary `sqrt`/`floor`/`ceiling`/`round`/
+;; `truncate` family lower to the corresponding LLVM intrinsic (`build-fpow`/
+;; `build-fsqrt`/...), and `float->int` to a single `fptosi` instruction
+;; (`build-fptosi`) — all native, same as the arithmetic ops. `float->bignum`/
+;; `float->ratio` are unary too (`rt_float_to_bignum`/`rt_float_to_ratio`),
+;; now that `bignum`/`ratio` have a compiled representation.
 (defun float-native-method? ((method string)) bool
+  (if (equal method "+") true
+  (if (equal method "-") true
+  (if (equal method "*") true
+  (if (equal method "/") true
+  (if (equal method "mod") true
+  (if (equal method "expt") true
+  (if (equal method "sqrt") true
+  (if (equal method "floor") true
+  (if (equal method "ceiling") true
+  (if (equal method "round") true
+  (if (equal method "truncate") true
+  (if (equal method "float->int") true
+  (if (equal method "float->bignum") true
+  (if (equal method "float->ratio") true
+  (if (equal method "<") true
+  (if (equal method "<=") true
+  (if (equal method ">") true
+  (if (equal method ">=") true
+  (if (equal method "=") true
+  (if (equal method "/=") true
+  (if (equal method "eq") true
+  (if (equal method "eql") true
+  (if (equal method "equal") true
+  (if (equal method "equalp") true
+  false)))))))))))))))))))))))))
+
+;; Emits `rt_str_lt(x, y)` (strict lexicographic less-than, an `i64` 0/1). The
+;; four string comparison operators all derive from it: `<`=lt(a,b),
+;; `>`=lt(b,a), `<=`=not lt(b,a), `>=`=not lt(a,b) — so no `rt_str_le`/`_gt`/
+;; `_ge` runtime helpers are needed (see `compile-assoc`'s string branch).
+(defun str-lt-call ((builder llvm-builder) (m llvm-module) (x llvm-value) (y llvm-value)) llvm-value
+  (let ((args-ptr (alloca-args builder 2)))
+    (store-arg builder args-ptr 0 x)
+    (store-arg builder args-ptr 1 y)
+    (build-call builder (get-function m "rt_str_lt") args-ptr 2)))
+
+;; `bignum` (`registry::bignum_assoc`)'s natively-compilable methods: a
+;; `bignum` receiver is always an already-tagged boxed value (like `str`, no
+;; bit manipulation needed), so arithmetic/comparison lower to a single
+;; `rt_bignum_*` call each. `eq`/`eql`/`equal`/`equalp` are aliases for `=`
+;; (`bignum_assoc`'s own doc comment — both operands are always `bignum`
+;; here). `bignum->int`/`try-bignum->int`/`bignum->float`/`bignum->ratio`
+;; round out the conversions.
+(defun bignum-native-method? ((method string)) bool
   (if (equal method "+") true
   (if (equal method "-") true
   (if (equal method "*") true
@@ -682,17 +735,80 @@ pub const SOURCE: &str = r#"
   (if (equal method "eql") true
   (if (equal method "equal") true
   (if (equal method "equalp") true
-  false))))))))))))))))
+  (if (equal method "bignum->int") true
+  (if (equal method "try-bignum->int") true
+  (if (equal method "bignum->float") true
+  (equal method "bignum->ratio"))))))))))))))))))))
 
-;; Emits `rt_str_lt(x, y)` (strict lexicographic less-than, an `i64` 0/1). The
-;; four string comparison operators all derive from it: `<`=lt(a,b),
-;; `>`=lt(b,a), `<=`=not lt(b,a), `>=`=not lt(a,b) — so no `rt_str_le`/`_gt`/
-;; `_ge` runtime helpers are needed (see `compile-assoc`'s string branch).
-(defun str-lt-call ((builder llvm-builder) (m llvm-module) (x llvm-value) (y llvm-value)) llvm-value
+;; `ratio` (`registry::ratio_assoc`)'s natively-compilable methods — the
+;; `ratio` counterpart of [`bignum-native-method?`] (no `mod`, CL doesn't
+;; define a rational remainder), plus `ratio->bignum`/`ratio->float`/
+;; `numerator`/`denominator`.
+(defun ratio-native-method? ((method string)) bool
+  (if (equal method "+") true
+  (if (equal method "-") true
+  (if (equal method "*") true
+  (if (equal method "/") true
+  (if (equal method "<") true
+  (if (equal method "<=") true
+  (if (equal method ">") true
+  (if (equal method ">=") true
+  (if (equal method "=") true
+  (if (equal method "/=") true
+  (if (equal method "eq") true
+  (if (equal method "eql") true
+  (if (equal method "equal") true
+  (if (equal method "equalp") true
+  (if (equal method "ratio->bignum") true
+  (if (equal method "ratio->float") true
+  (if (equal method "numerator") true
+  (equal method "denominator")))))))))))))))))))
+
+;; Emits `rt_bignum_cmp(x, y)` (three-way `-1`/`0`/`1`, `BigInt::cmp`) — every
+;; bignum comparison operator derives from it via a single `icmp` against
+;; `0`, the same "one primitive, several derived comparisons" shape
+;; `str-lt-call` establishes for strings (`compile-assoc`'s bignum branch).
+(defun bignum-cmp-call ((builder llvm-builder) (m llvm-module) (x llvm-value) (y llvm-value)) llvm-value
   (let ((args-ptr (alloca-args builder 2)))
     (store-arg builder args-ptr 0 x)
     (store-arg builder args-ptr 1 y)
-    (build-call builder (get-function m "rt_str_lt") args-ptr 2)))
+    (build-call builder (get-function m "rt_bignum_cmp") args-ptr 2)))
+
+;; `ratio` counterpart of [`bignum-cmp-call`] (`rt_ratio_cmp`).
+(defun ratio-cmp-call ((builder llvm-builder) (m llvm-module) (x llvm-value) (y llvm-value)) llvm-value
+  (let ((args-ptr (alloca-args builder 2)))
+    (store-arg builder args-ptr 0 x)
+    (store-arg builder args-ptr 1 y)
+    (build-call builder (get-function m "rt_ratio_cmp") args-ptr 2)))
+
+;; Shared two-operand `rt_bignum_*` call shape (`+`/`-`/`*`/`/`/`mod`) —
+;; `fname` names which primitive (`compile-assoc`'s bignum branch).
+(defun bignum-binop-call ((builder llvm-builder) (m llvm-module) (fname string) (x llvm-value) (y llvm-value)) llvm-value
+  (let ((args-ptr (alloca-args builder 2)))
+    (store-arg builder args-ptr 0 x)
+    (store-arg builder args-ptr 1 y)
+    (build-call builder (get-function m fname) args-ptr 2)))
+
+;; Shared one-operand `rt_bignum_*` call shape (the conversions:
+;; `bignum->int`/`bignum->float`/`bignum->ratio`).
+(defun bignum-unary-call ((builder llvm-builder) (m llvm-module) (fname string) (x llvm-value)) llvm-value
+  (let ((args-ptr (alloca-args builder 1)))
+    (store-arg builder args-ptr 0 x)
+    (build-call builder (get-function m fname) args-ptr 1)))
+
+;; `ratio` counterpart of [`bignum-binop-call`].
+(defun ratio-binop-call ((builder llvm-builder) (m llvm-module) (fname string) (x llvm-value) (y llvm-value)) llvm-value
+  (let ((args-ptr (alloca-args builder 2)))
+    (store-arg builder args-ptr 0 x)
+    (store-arg builder args-ptr 1 y)
+    (build-call builder (get-function m fname) args-ptr 2)))
+
+;; `ratio` counterpart of [`bignum-unary-call`] (`ratio->bignum`/
+;; `ratio->float`/`numerator`/`denominator`).
+(defun ratio-unary-call ((builder llvm-builder) (m llvm-module) (fname string) (x llvm-value)) llvm-value
+  (let ((args-ptr (alloca-args builder 1)))
+    (store-arg builder args-ptr 0 x)
+    (build-call builder (get-function m fname) args-ptr 1)))
 
 ;; Counts a plain `Sexpr` list's elements — used to size the `i64*` args
 ;; array a direct call needs (`compile-apply`'s `alloca-args`/`build-call`),
@@ -894,8 +1010,12 @@ pub const SOURCE: &str = r#"
                       v
                       (if (eq variant 5)
                           (panic "compile-sexpr-field: a sym's Symbol payload is not representable in compiled code yet; match it with (sym _) instead of binding it")
+                          ;; `bignum`(8)/`ratio`(9): the "payload" *is* the
+                          ;; already-tagged boxed value itself (no separate
+                          ;; scalar to unwrap the way int/char/bool have) —
+                          ;; same passthrough as `str`(6).
                           (if (if (eq variant 8) true (eq variant 9))
-                              (panic "compile-sexpr-field: bignum/ratio payloads are not representable in compiled code yet; match them with (bignum _)/(ratio _) instead of binding them")
+                              v
                               (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))))))))
 
 ;; The encode-side mirror of `compile-sexpr-field`'s decode, over the exact
@@ -996,6 +1116,10 @@ pub const SOURCE: &str = r#"
                                         (compile-float builder e)
                                     (if (equal s "str")
                                         (compile-str builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
+                                    (if (equal s "bignum")
+                                        (compile-bignum-literal builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
+                                    (if (equal s "ratio")
+                                        (compile-ratio-literal builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                     (if (equal s "unit")
                                         (compile-unit builder)
                                         (if (equal s "var")
@@ -1044,7 +1168,7 @@ pub const SOURCE: &str = r#"
                                                                                                                                 (compile-vector-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                                                 (if (equal s "hashtable-op")
                                                                                                                                     (compile-hashtable-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                                    (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))))))))
+                                                                                                                                    (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))))))))))
                            )
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -1134,6 +1258,47 @@ pub const SOURCE: &str = r#"
                                (store-arg builder args-ptr idx (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base form))
                                (store-str-chars builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr rest (+ idx 1)))
                              ()))
+                       ;; `(bignum (int sign) (int d0) (int d1) ...)` —
+                       ;; `ast_bridge::bignum_literal_form`'s doc comment.
+                       ;; Same shape as `compile-str`/`store-str-chars` (one
+                       ;; `(int _)` node per raw payload scalar, reused
+                       ;; verbatim to fill the args array), calling
+                       ;; `rt_bignum_new` instead of `rt_str_new`. Like `str`,
+                       ;; the result is already a fully tagged `Sexpr::Bignum`
+                       ;; — no further bit manipulation needed at the
+                       ;; `compile-construct-sexpr`/`compile-sexpr-field`
+                       ;; boundary (both treat variant `8` as passthrough).
+                       (compile-bignum-literal ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((parts (sexpr-cdr e)))
+                           (let ((n (sexpr-list-length parts)))
+                             (let ((args-ptr (alloca-args builder n)))
+                               (store-str-chars builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr parts 0)
+                               (build-call builder (get-function m "rt_bignum_new") args-ptr n)))))
+                       ;; `(ratio numer-form denom-form)` —
+                       ;; `ast_bridge::ratio_literal_form`'s doc comment. Both
+                       ;; sub-forms are themselves `(bignum ...)` nodes,
+                       ;; compiled via the ordinary `compile-value` dispatch
+                       ;; (so a `ratio` literal's numerator/denominator go
+                       ;; through `compile-bignum-literal` exactly like any
+                       ;; other bignum), then combined with
+                       ;; `rt_ratio_from_bignums` — same GC-root discipline as
+                       ;; `compile-construct-sexpr`'s `Cons` (variant `7`)
+                       ;; case: each already-boxed sub-value is rooted before
+                       ;; the next is built, in case building it triggers a
+                       ;; collection.
+                       (compile-ratio-literal ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((numer-form (sexpr-car (sexpr-cdr e))) (denom-form (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
+                           (let ((args-ptr (alloca-args builder 2)))
+                             (let ((numer-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base numer-form)))
+                               (store-arg builder args-ptr 0 numer-v)
+                               (push-sexpr-root builder m numer-v)
+                               (let ((denom-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base denom-form)))
+                                 (store-arg builder args-ptr 1 denom-v)
+                                 (push-sexpr-root builder m denom-v)
+                                 (let ((result (build-call builder (get-function m "rt_ratio_from_bignums") args-ptr 2)))
+                                   (pop-sexpr-root builder m)
+                                   (pop-sexpr-root builder m)
+                                   result))))))
                        ;; `(var name is-fn)` — a plain variable reference,
                        ;; ordinary or a `labels` sibling/self referenced *as
                        ;; a value* rather than called (e.g. a `labels`
@@ -1420,6 +1585,18 @@ pub const SOURCE: &str = r#"
                                                                        (panic (append "compile-assoc: unsupported str method " method)))))))))))))
                                    (if (if (if (equal type-name "i64") true (equal type-name "i32")) (int-native-method? method) false)
                                        (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+                                         ;; `int->bignum`/`int->ratio`: unary, checked before `b2`
+                                         ;; is read — same reason `float-native-method?`'s own
+                                         ;; unary conversions are checked first (there is no
+                                         ;; second argument form to compile for these).
+                                         (if (equal method "int->bignum")
+                                             (let ((args-ptr (alloca-args builder 1)))
+                                               (store-arg builder args-ptr 0 a)
+                                               (build-call builder (get-function m "rt_int_to_bignum") args-ptr 1))
+                                         (if (equal method "int->ratio")
+                                             (let ((args-ptr (alloca-args builder 1)))
+                                               (store-arg builder args-ptr 0 a)
+                                               (build-call builder (get-function m "rt_int_to_ratio") args-ptr 1))
                                          (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
                                            (if (equal method "+")
                                                (build-add builder a b2)
@@ -1439,7 +1616,7 @@ pub const SOURCE: &str = r#"
                                                                            (build-icmp-eq builder a b2)
                                                                            (if (equal method "/=")
                                                                                (build-icmp-ne builder a b2)
-                                                                               (panic (append "compile-assoc: unsupported method " method)))))))))))))
+                                                                               (panic (append "compile-assoc: unsupported method " method)))))))))))))))
                                        (if (if (equal type-name "char") (char-native-method? method) false)
                                            ;; `char` receivers: raw `i64` code points in
                                            ;; compiled code, so the comparisons lower to the
@@ -1472,32 +1649,162 @@ pub const SOURCE: &str = r#"
                                            ;; its `eq`/`eql`/`equal`/`equalp` aliases
                                            ;; all fold to the ordered `fcmp-eq`; `/=`
                                            ;; to `fcmp-ne` (unordered, matching Rust
-                                           ;; `!=`); everything else is arithmetic.
+                                           ;; `!=`); the arithmetic ops and `expt`
+                                           ;; (`build-fpow`, LLVM's `llvm.pow.f64`
+                                           ;; intrinsic) need a second operand `b2`;
+                                           ;; the unary transcendental/rounding family
+                                           ;; (`sqrt`/`floor`/`ceiling`/`round`/
+                                           ;; `truncate`, each its own LLVM intrinsic
+                                           ;; via `build-f*`), `float->int`
+                                           ;; (`build-fptosi`, a single `fptosi`
+                                           ;; instruction), and `float->bignum`/
+                                           ;; `float->ratio` (`rt_float_to_bignum`/
+                                           ;; `rt_float_to_ratio`, allocating heap
+                                           ;; calls — the one exception in this group
+                                           ;; that isn't a bare LLVM instruction) only
+                                           ;; need `a`, so they're checked first to
+                                           ;; avoid evaluating a nonexistent second
+                                           ;; argument form.
                                            (if (if (equal type-name "f64") (float-native-method? method) false)
                                                (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
-                                                 (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                                                   (if (equal method "+")
-                                                       (build-fadd builder a b2)
-                                                       (if (equal method "-")
-                                                           (build-fsub builder a b2)
-                                                           (if (equal method "*")
-                                                               (build-fmul builder a b2)
-                                                               (if (equal method "/")
-                                                                   (build-fdiv builder a b2)
-                                                                   (if (equal method "mod")
-                                                                       (build-frem builder a b2)
-                                                                       (if (equal method "<")
-                                                                           (build-fcmp-lt builder a b2)
-                                                                           (if (equal method "<=")
-                                                                               (build-fcmp-le builder a b2)
-                                                                               (if (equal method ">")
-                                                                                   (build-fcmp-gt builder a b2)
-                                                                                   (if (equal method ">=")
-                                                                                       (build-fcmp-ge builder a b2)
-                                                                                       (if (equal method "/=")
-                                                                                           (build-fcmp-ne builder a b2)
-                                                                                           (build-fcmp-eq builder a b2)))))))))))))
-                                               (compile-assoc-user builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name method rest)))))))))
+                                                 (if (equal method "sqrt")
+                                                     (build-fsqrt builder m a)
+                                                     (if (equal method "floor")
+                                                         (build-ffloor builder m a)
+                                                         (if (equal method "ceiling")
+                                                             (build-fceil builder m a)
+                                                             (if (equal method "round")
+                                                                 (build-fround builder m a)
+                                                                 (if (equal method "truncate")
+                                                                     (build-ftrunc builder m a)
+                                                                     (if (equal method "float->int")
+                                                                         (build-fptosi builder a)
+                                                                         (if (equal method "float->bignum")
+                                                                             (let ((args-ptr (alloca-args builder 1)))
+                                                                               (store-arg builder args-ptr 0 a)
+                                                                               (build-call builder (get-function m "rt_float_to_bignum") args-ptr 1))
+                                                                         (if (equal method "float->ratio")
+                                                                             (let ((args-ptr (alloca-args builder 1)))
+                                                                               (store-arg builder args-ptr 0 a)
+                                                                               (build-call builder (get-function m "rt_float_to_ratio") args-ptr 1))
+                                                                         (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+                                                                           (if (equal method "+")
+                                                                               (build-fadd builder a b2)
+                                                                               (if (equal method "-")
+                                                                                   (build-fsub builder a b2)
+                                                                                   (if (equal method "*")
+                                                                                       (build-fmul builder a b2)
+                                                                                       (if (equal method "/")
+                                                                                           (build-fdiv builder a b2)
+                                                                                           (if (equal method "mod")
+                                                                                               (build-frem builder a b2)
+                                                                                               (if (equal method "expt")
+                                                                                                   (build-fpow builder m a b2)
+                                                                                                   (if (equal method "<")
+                                                                                                       (build-fcmp-lt builder a b2)
+                                                                                                       (if (equal method "<=")
+                                                                                                           (build-fcmp-le builder a b2)
+                                                                                                           (if (equal method ">")
+                                                                                                               (build-fcmp-gt builder a b2)
+                                                                                                               (if (equal method ">=")
+                                                                                                                   (build-fcmp-ge builder a b2)
+                                                                                                                   (if (equal method "/=")
+                                                                                                                       (build-fcmp-ne builder a b2)
+                                                                                                                       (build-fcmp-eq builder a b2))))))))))))))))))))))
+                                               (if (if (equal type-name "bignum") (bignum-native-method? method) false)
+    (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+      (if (equal method "bignum->int")
+          (bignum-unary-call builder m "rt_bignum_to_int" a)
+      (if (equal method "bignum->float")
+          (bignum-unary-call builder m "rt_bignum_to_float" a)
+      (if (equal method "bignum->ratio")
+          (bignum-unary-call builder m "rt_bignum_to_ratio" a)
+      (if (equal method "try-bignum->int")
+          ;; `Option<i32>` result: real control flow (found/overflow), the
+          ;; same `compile-if`-shaped "alloca a merge slot, branch, store
+          ;; each arm's result, load after the merge block" `compile-hashtable-op`'s
+          ;; own `get`/`remove` case already uses — `rt_bignum_fits_i32`
+          ;; checked first, `rt_bignum_to_int_raw` only called once that
+          ;; confirms `1`. The `Some`/`None` box's field is a plain `i32`
+          ;; (kind `1`, never a `Sexpr`), so — unlike `compile-hashtable-op`'s
+          ;; generic `val-kind` — it needs no `compile-sexpr-field` decode or
+          ;; `push-permanent-sexpr-root` protection, just the raw result
+          ;; stored straight into the box.
+          (let ((fits-args (alloca-args builder 1)))
+            (store-arg builder fits-args 0 a)
+            (let ((fits (build-call builder (get-function m "rt_bignum_fits_i32") fits-args 1)))
+              (let ((then-block (append-block cur-fn "bignum-fits")))
+                (let ((else-block (append-block cur-fn "bignum-overflow")))
+                  (let ((merge-block (append-block cur-fn "bignum-try-merge")))
+                    (let ((slot (alloca-args builder 1)))
+                      (build-cond-br builder fits then-block else-block)
+                      (position-at-end builder then-block)
+                      (let ((raw (build-call builder (get-function m "rt_bignum_to_int_raw") fits-args 1)))
+                        (let ((some-box (build-malloc builder 2)))
+                          (store-arg builder some-box 0 (const-i64 builder 0))
+                          (store-arg builder some-box 1 raw)
+                          (let ((ignored (store-arg builder slot 0 (build-ptr-to-int builder some-box))))
+                            (build-br builder merge-block))))
+                      (position-at-end builder else-block)
+                      (let ((none-box (build-malloc builder 1)))
+                        (store-arg builder none-box 0 (const-i64 builder 1))
+                        (let ((ignored (store-arg builder slot 0 (build-ptr-to-int builder none-box))))
+                          (build-br builder merge-block)))
+                      (position-at-end builder merge-block)
+                      (load-raw builder slot 0)))))))
+          (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+            (if (equal method "+")
+                (bignum-binop-call builder m "rt_bignum_add" a b2)
+                (if (equal method "-")
+                    (bignum-binop-call builder m "rt_bignum_sub" a b2)
+                    (if (equal method "*")
+                        (bignum-binop-call builder m "rt_bignum_mul" a b2)
+                        (if (equal method "/")
+                            (bignum-binop-call builder m "rt_bignum_div" a b2)
+                            (if (equal method "mod")
+                                (bignum-binop-call builder m "rt_bignum_mod" a b2)
+                                (if (equal method "<")
+                                    (build-icmp-lt builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))
+                                    (if (equal method "<=")
+                                        (build-icmp-le builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))
+                                        (if (equal method ">")
+                                            (build-icmp-gt builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))
+                                            (if (equal method ">=")
+                                                (build-icmp-ge builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))
+                                                (if (equal method "/=")
+                                                    (build-icmp-ne builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))
+                                                    (build-icmp-eq builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))))))))))))))))))
+    (if (if (equal type-name "ratio") (ratio-native-method? method) false)
+        (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+          (if (equal method "ratio->bignum")
+              (ratio-unary-call builder m "rt_ratio_to_bignum" a)
+          (if (equal method "ratio->float")
+              (ratio-unary-call builder m "rt_ratio_to_float" a)
+          (if (equal method "numerator")
+              (ratio-unary-call builder m "rt_ratio_numerator" a)
+          (if (equal method "denominator")
+              (ratio-unary-call builder m "rt_ratio_denominator" a)
+          (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+            (if (equal method "+")
+                (ratio-binop-call builder m "rt_ratio_add" a b2)
+                (if (equal method "-")
+                    (ratio-binop-call builder m "rt_ratio_sub" a b2)
+                    (if (equal method "*")
+                        (ratio-binop-call builder m "rt_ratio_mul" a b2)
+                        (if (equal method "/")
+                            (ratio-binop-call builder m "rt_ratio_div" a b2)
+                            (if (equal method "<")
+                                (build-icmp-lt builder (ratio-cmp-call builder m a b2) (const-i64 builder 0))
+                                (if (equal method "<=")
+                                    (build-icmp-le builder (ratio-cmp-call builder m a b2) (const-i64 builder 0))
+                                    (if (equal method ">")
+                                        (build-icmp-gt builder (ratio-cmp-call builder m a b2) (const-i64 builder 0))
+                                        (if (equal method ">=")
+                                            (build-icmp-ge builder (ratio-cmp-call builder m a b2) (const-i64 builder 0))
+                                            (if (equal method "/=")
+                                                (build-icmp-ne builder (ratio-cmp-call builder m a b2) (const-i64 builder 0))
+                                                (build-icmp-eq builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)))))))))))))))))
+        (compile-assoc-user builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name method rest)))))))))))
                        ;; The user-defined-method leg of `compile-assoc`'s
                        ;; dispatch (see its doc comment): call the callee
                        ;; under the mangled name `type-name::method`,
@@ -2733,7 +3040,15 @@ pub const SOURCE: &str = r#"
                                                      result))))
                                              (if (eq variant 6)
                                                  (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-car arg-forms))
-                                                 (panic "compile-construct-sexpr: field type is not representable in compiled code yet")))))))))
+                                                 ;; `bignum`(8)/`ratio`(9): same "already fully tagged, no
+                                                 ;; further bit manipulation" passthrough as `str`(6) above —
+                                                 ;; the field's own compiled form is `compile-bignum-literal`/
+                                                 ;; `compile-ratio-literal`'s `rt_bignum_new`/
+                                                 ;; `rt_ratio_from_bignums` call result, already a proper
+                                                 ;; `TAG_BOXED` `Sexpr::Bignum`/`Ratio`.
+                                                 (if (if (eq variant 8) true (eq variant 9))
+                                                     (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-car arg-forms))
+                                                     (panic "compile-construct-sexpr: field type is not representable in compiled code yet"))))))))))
                        ;; `(field-get idx-unary-list kind-i64 obj-form)`
                        ;; (Stage 6, extended by Stage 3 of the Sexpr/RtValue
                        ;; unification plan — `docs/implementation-log.md` —
