@@ -2510,7 +2510,7 @@ mod tests {
     }
 
     fn fn_ty() -> Type {
-        Type::Fn(vec![Type::I64], Box::new(Type::I64))
+        Type::Fn(vec![Type::I64], None, Box::new(Type::I64))
     }
 
     fn expect_str(heap: &Heap, v: Value) -> String {
@@ -2810,7 +2810,7 @@ mod tests {
     #[test]
     fn translates_an_fnref_as_a_forwarding_lambda() {
         let mut heap = Heap::with_capacity(1 << 10);
-        let ty = Type::Fn(vec![Type::I64, Type::I64], Box::new(Type::I64));
+        let ty = Type::Fn(vec![Type::I64, Type::I64], None, Box::new(Type::I64));
         let v = ast_to_sexpr(&mut heap, &typed(Expr::FnRef(crate::Path::root("add2")), ty)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "lambda");
@@ -2852,7 +2852,7 @@ mod tests {
     #[test]
     fn translates_a_methodref_as_a_forwarding_lambda() {
         let mut heap = Heap::with_capacity(1 << 10);
-        let ty = Type::Fn(vec![Type::I64, Type::I64], Box::new(Type::I64));
+        let ty = Type::Fn(vec![Type::I64, Type::I64], None, Box::new(Type::I64));
         let v = ast_to_sexpr(&mut heap, &typed(Expr::MethodRef { type_name: Path::root("i64"), method: "+".to_string() }, ty)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "lambda");

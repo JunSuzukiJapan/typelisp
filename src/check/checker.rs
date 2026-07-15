@@ -115,10 +115,9 @@ pub enum TopLevel {
     /// (empty for an ordinary, non-generic function) — the evaluator ignores
     /// them (type information is erased before execution; see
     /// `Checker::check_call`).
-    /// `params` is the function's fixed parameter list — `defun`/`lambda`
-    /// have no `&rest` (variadic value-level functions were removed); only
-    /// `defmacro` still has a `&rest` lambda-list marker. See
-    /// `Checker::check_defun`/`parse_params`.
+    /// `params` includes a trailing `&rest` parameter's name last (bound to
+    /// a plain `Sexpr` list), exactly like `Defmacro::params` — see
+    /// `Checker::check_defun`/`parse_params_rest`.
     Defun {
         name: Path,
         type_params: Vec<String>,
@@ -182,6 +181,10 @@ pub enum TopLevel {
     /// `crate::project::load_file_flat`.
     Load { path: String },
 }
+
+/// A `&rest` parameter's `(name, elem-type, name's source position)`, as
+/// returned by [`Checker::parse_params_rest`] alongside the fixed params.
+type RestParam = (String, Type, Option<Loc>);
 
 /// A lexical environment mapping variable names to their types.
 #[derive(Clone)]
@@ -1241,6 +1244,56 @@ impl Checker {
         self.reg.root.static_uses.get(name).cloned()
     }
 
+    /// Wraps an already-checked `&rest` element `e` (statically `elem_ty`,
+    /// already resolved to a concrete type — see [`Self::cons_rest_list`])
+    /// as a `Sexpr` value, so a sequence of them can be `cons`-ed into a
+    /// plain list — see [`sexpr_ty`]'s doc comment. `elem_ty` itself needs no
+    /// wrapping (already `Sexpr`); every other supported element type goes
+    /// through its own `Sexpr` constructor (`sexpr_ctor_for`) exactly as if
+    /// the caller had written e.g. `(Int e)` by hand — `construct_sexpr`
+    /// (`crate::eval::interp`) only ever reads the field's *runtime* value
+    /// (an `i32`/`i64` argument both evaluate to the same `RtValue::Int`),
+    /// so this never goes through the normal field-type validation
+    /// `check_construct` would otherwise apply, but is sound for the same
+    /// reason. An `elem_ty` with no `Sexpr` encoding (e.g. `Option<T>`) is a
+    /// `TypeError` here, not a panic — unlike most of `&rest`'s checking,
+    /// this can't happen any earlier than this, since a generic `&rest`'s
+    /// declared type may only resolve to something concrete at a given call
+    /// site (see `Self::check_call`'s `subst_apply`).
+    fn wrap_rest_elem(&self, elem_ty: &Type, e: Typed) -> Result<Typed, Error> {
+        if *elem_ty == sexpr_ty() {
+            return Ok(e);
+        }
+        let ctor = sexpr_ctor_for(elem_ty).ok_or_else(|| {
+            Error::TypeError(format!(
+                "&rest: element type {:?} has no Sexpr encoding (use one of i32/i64/f64/bool/char/string/Sexpr)",
+                elem_ty
+            ))
+        })?;
+        let (type_name, variant) = self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
+        Ok(Typed { loc: None, expr: Expr::Construct { type_name, variant, args: vec![e], mutable: false }, ty: sexpr_ty() })
+    }
+
+    /// Collects already-checked `&rest` elements into one `Sexpr` list
+    /// expression, back-to-front (mirroring `Interp::bind_macro_args`'s
+    /// runtime construction of `defmacro`'s own `&rest` list) — `(cons
+    /// (wrap e1) (cons (wrap e2) ... ()))`. The empty case is the `Nil`
+    /// literal, reusing the same `Expr::Quote(QuotedSexpr::Nil)` shape `()`
+    /// itself checks to.
+    fn cons_rest_list(&self, elem_ty: &Type, items: Vec<Typed>) -> Result<Typed, Error> {
+        // `sexpr-cons`, not the free `cons` (which is the `cons<T,U>` pair
+        // builder now — Symbol/Sexpr redesign Phase 4b): a `&rest` list is a
+        // `Sexpr`, built through the island cons layer.
+        let cons_path = Path::root("sexpr-cons");
+        items.into_iter().rev().try_fold(
+            Typed { loc: None, expr: Expr::Quote(QuotedSexpr::Nil), ty: sexpr_ty() },
+            |acc, item| {
+                let item = self.wrap_rest_elem(elem_ty, item)?;
+                Ok(Typed { loc: None, expr: Expr::Call(cons_path.clone(), vec![item, acc]), ty: sexpr_ty() })
+            },
+        )
+    }
+
     /// Resolve a `module::...::Type` segment path to the type's [`Path`].
     fn resolve_type_path(&self, segs: &[String]) -> Option<Path> {
         if segs.is_empty() {
@@ -1345,7 +1398,7 @@ impl Checker {
     /// `FnRef` that could never be applied anyway).
     fn fn_ref_node(&self, fq: Path, expected: Option<&Type>) -> Result<Typed, Error> {
         let sig = self.reg.fn_sig(&fq).expect("resolved fn exists").clone();
-        let tmpl_ty = Type::Fn(sig.params.clone(), Box::new(sig.ret.clone()));
+        let tmpl_ty = Type::Fn(sig.params.clone(), sig.rest.clone().map(Box::new), Box::new(sig.ret.clone()));
         if sig.type_params.is_empty() {
             return Ok(Typed { loc: None, expr: Expr::FnRef(fq), ty: tmpl_ty });
         }
@@ -1392,7 +1445,7 @@ impl Checker {
     /// template (a Rust builtin like `HashTable::get`) still can't be
     /// reified and fails to match, as before.
     fn method_value(&self, name: &str, expected: Option<&Type>) -> Option<Typed> {
-        let Type::Fn(params, _) = expected? else { return None };
+        let Type::Fn(params, _, _) = expected? else { return None };
         let type_fq = match params.first()? {
             Type::Named(n, _) => n.clone(),
             other => prim_type_path(other)?,
@@ -1402,7 +1455,7 @@ impl Checker {
         if !af.instance {
             return None;
         }
-        let ty = Type::Fn(af.sig.params.clone(), Box::new(af.sig.ret.clone()));
+        let ty = Type::Fn(af.sig.params.clone(), af.sig.rest.clone().map(Box::new), Box::new(af.sig.ret.clone()));
         if !def.params.is_empty() {
             let tparams: HashSet<String> = def.params.iter().cloned().collect();
             let mut subst: HashMap<String, Type> = HashMap::new();
@@ -1497,8 +1550,9 @@ impl Checker {
                     args.iter().map(|a| self.canon(a)).collect(),
                 )
             }
-            Type::Fn(ps, r) => Type::Fn(
+            Type::Fn(ps, rest, r) => Type::Fn(
                 ps.iter().map(|p| self.canon(p)).collect(),
+                rest.as_ref().map(|t| Box::new(self.canon(t))),
                 Box::new(self.canon(r)),
             ),
             other => other.clone(),
@@ -1529,7 +1583,7 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
-        let (params, param_locs, ret, bounds, body_start) = self.parse_defun_sig(heap, parts)?;
+        let (params, param_locs, rest, ret, bounds, body_start) = self.parse_defun_sig(heap, parts)?;
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
         let fq_name = self.fq(&name);
 
@@ -1558,6 +1612,7 @@ impl Checker {
             params: params.iter().map(|(_, t)| t.clone()).collect(),
             ret: ret.clone(),
             public,
+            rest: rest.as_ref().map(|(_, t, _)| t.clone()),
             builtin: false,
             bounds: bounds.clone(),
         };
@@ -1566,6 +1621,20 @@ impl Checker {
             self.reg.def_locs.fns.insert(fq_name.clone(), loc);
         }
 
+        // The body additionally sees the `&rest` parameter (if any) bound to
+        // a plain `Sexpr` list collecting every variadic argument (see
+        // `sexpr_ty`'s doc comment) — the call-site desugaring
+        // (`Self::check_call`) always supplies exactly one such list as the
+        // last actual argument, so the stored `params` below (consumed only
+        // for its *names* by `Interp::exec`) already lines up 1:1 with
+        // arguments at runtime; mirrors `TopLevel::Defmacro::params`
+        // including its `&rest` name last.
+        let mut params = params;
+        let mut param_locs = param_locs;
+        if let Some((rname, _, rloc)) = &rest {
+            params.push((rname.clone(), sexpr_ty()));
+            param_locs.push(rloc.clone());
+        }
         let binds: Vec<(String, Type, Option<Loc>)> = params
             .iter()
             .cloned()
@@ -1594,12 +1663,12 @@ impl Checker {
         &self,
         heap: &Heap,
         parts: &[Value],
-    ) -> Result<(Vec<(String, Type)>, Vec<Option<Loc>>, Type, HashMap<String, Vec<TraitBound>>, usize), Error>
+    ) -> Result<(Vec<(String, Type)>, Vec<Option<Loc>>, Option<RestParam>, Type, HashMap<String, Vec<TraitBound>>, usize), Error>
     {
         if parts.len() < 3 {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
-        let (params, param_locs) = self.parse_params(heap, parts[1])?;
+        let (params, param_locs, rest) = self.parse_params_rest(heap, parts[1])?;
         let ret = self.canon(&parse_type(heap, parts[2])?);
         let mut body_start = 3;
         let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
@@ -1609,7 +1678,7 @@ impl Checker {
                 body_start = 4;
             }
         }
-        Ok((params, param_locs, ret, bounds, body_start))
+        Ok((params, param_locs, rest, ret, bounds, body_start))
     }
 
     // ---- monomorphization ---------------------------------------------------
@@ -1871,7 +1940,11 @@ impl Checker {
         // the bounds branch), and the bounds' own validity was already
         // verified at the call site that requested this instantiation
         // (`check_call`'s where-clause validation).
-        let (params, _param_locs, ret, _bounds, body_start) = self.parse_defun_sig(heap, &tmpl.parts)?;
+        let (params, _param_locs, rest, ret, _bounds, body_start) = self.parse_defun_sig(heap, &tmpl.parts)?;
+        let mut params = params;
+        if let Some((rname, _, _)) = &rest {
+            params.push((rname.clone(), sexpr_ty()));
+        }
         let env = Env::new().extended(params.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &tmpl.parts[body_start..], &[], Some(&ret))?;
         Ok(TopLevel::Defun { name: mangled.clone(), type_params: Vec::new(), params, ret, body })
@@ -1915,8 +1988,10 @@ impl Checker {
                 (args.is_empty() && n.is_simple() && self.reg.type_def(n).is_none())
                     || args.iter().any(|a| self.type_is_open(a))
             }
-            Type::Fn(ps, r) => {
-                ps.iter().any(|p| self.type_is_open(p)) || self.type_is_open(r)
+            Type::Fn(ps, rest, r) => {
+                ps.iter().any(|p| self.type_is_open(p))
+                    || matches!(rest, Some(t) if self.type_is_open(t))
+                    || self.type_is_open(r)
             }
             _ => false,
         }
@@ -2065,20 +2140,64 @@ impl Checker {
     }
 
     /// Parse a `((name type)...)` parameter list (types canonicalized to FQ)
-    /// for `defun`/`lambda`/`labels`. These are always fixed-arity: `&rest` is
-    /// rejected here (only `defmacro` has a `&rest` lambda-list marker — see
+    /// for `labels`/`defmethod` — always fixed-arity (`defun`/`lambda` accept
+    /// a trailing `&rest` through `Self::parse_params_rest` instead, and
+    /// `defmacro` has its own untyped `&rest` lambda-list marker — see
     /// `Self::check_defmacro`). Also returns each parameter name's own source
     /// position (parallel to the returned params), for the checked body's
     /// `Env` binding (`Env::extended_with_locs`) — see `Self::parse_param_pairs`.
     #[allow(clippy::type_complexity)]
     fn parse_params(&self, heap: &Heap, v: Value) -> Result<(Vec<(String, Type)>, Vec<Option<Loc>>), Error> {
         let elems = heap.list_to_vec(v)?;
-        if elems.iter().any(|p| matches!(p, Value::Symbol(id) if heap.symbol_name(*id) == "&rest")) {
-            return Err(Error::TypeError(
-                "&rest is not allowed in a defun/lambda parameter list (only defmacro is variadic)".into(),
-            ));
-        }
         self.parse_param_pairs(heap, &elems)
+    }
+
+    /// Parse a `((name type)... [&rest (name elem-type)])` parameter list for
+    /// `defun`/`lambda`: an optional trailing `&rest (name elem-type)` marks
+    /// the function variadic — every call-site argument from that position on
+    /// must have type `elem-type`, individually checked, then collected into
+    /// a single `Sexpr` list bound to `name` inside the body (see
+    /// `Self::check_defun`/`Self::check_lambda`) — like every Lisp's `&rest`
+    /// parameter, an ordinary list, never a homogeneous array type; unlike
+    /// `Self::check_defmacro`'s bare `&rest name` (always untyped `Sexpr`),
+    /// `defun`/`lambda` additionally check each element against `elem-type`
+    /// at every call site, since `defun`/`lambda` parameters always carry an
+    /// explicit type. The rest parameter comes back with its name's source
+    /// position (see [`RestParam`]), same as the fixed params' parallel locs.
+    #[allow(clippy::type_complexity)]
+    fn parse_params_rest(
+        &self,
+        heap: &Heap,
+        v: Value,
+    ) -> Result<(Vec<(String, Type)>, Vec<Option<Loc>>, Option<RestParam>), Error> {
+        let elems = heap.list_to_vec(v)?;
+        let rest_marker = elems
+            .iter()
+            .position(|p| matches!(p, Value::Symbol(id) if heap.symbol_name(*id) == "&rest"));
+        match rest_marker {
+            Some(i) => {
+                if i + 2 != elems.len() {
+                    return Err(Error::TypeError(
+                        "&rest must be followed by exactly one parameter, as the last item in the parameter list".into(),
+                    ));
+                }
+                let (params, param_locs) = self.parse_param_pairs(heap, &elems[..i])?;
+                let (mut rest, mut rest_locs) = self.parse_param_pairs(heap, &elems[i + 1..])?;
+                // `&rest`'s declared element type isn't validated against
+                // `sexpr_ctor_for` here: a generic `defun` (e.g. `(defun
+                // (f T) ((a T) &rest (xs T)) ...)`) may declare it as a bare
+                // type parameter, only resolved to something concrete once a
+                // call site's actual arguments are checked — see
+                // `Checker::wrap_rest_elem`, which validates the *resolved*
+                // type instead, every time the list is actually collected.
+                let (rname, rty) = rest.remove(0);
+                Ok((params, param_locs, Some((rname, rty, rest_locs.remove(0)))))
+            }
+            None => {
+                let (params, param_locs) = self.parse_param_pairs(heap, &elems)?;
+                Ok((params, param_locs, None))
+            }
+        }
     }
 
     /// Parse a slice of `(name type)` binding forms, alongside each binding's
@@ -2184,6 +2303,7 @@ impl Checker {
                 params: params.iter().map(|(_, t)| t.clone()).collect(),
                 ret,
                 public: true,
+                rest: None,
                 builtin: false,
                 bounds: HashMap::new(),
             };
@@ -2531,7 +2651,7 @@ impl Checker {
             sig_params.push(recv_ty.clone());
         }
         sig_params.extend(params.iter().map(|(_, t)| t.clone()));
-        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public, builtin: false, bounds: bounds.clone() };
+        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public, rest: None, builtin: false, bounds: bounds.clone() };
         self.check_redef("method", &method, self.reg.type_def(&type_fq).and_then(|d| d.assoc.get(&method)))?;
         if let Some(def) = self.reg.type_def_mut(&type_fq) {
             def.assoc.insert(method.clone(), AssocFn { sig, instance, builtin: false });
@@ -2680,6 +2800,7 @@ impl Checker {
                 params: vec![recv_ty.clone()],
                 ret: field_ty.clone(),
                 public: field_public,
+                rest: None,
                 builtin: false,
                 bounds: HashMap::new(),
             };
@@ -2704,6 +2825,7 @@ impl Checker {
                 params: vec![recv_ty.clone(), field_ty.clone()],
                 ret: Type::Unit,
                 public: field_public,
+                rest: None,
                 builtin: false,
                 bounds: HashMap::new(),
             };
@@ -3175,6 +3297,7 @@ impl Checker {
             "list" => return self.check_list_lit(heap, interp, env, args, arg_locs),
             "lambda" => return self.check_lambda(heap, interp, env, args, arg_locs),
             "labels" => return self.check_labels(heap, interp, env, args, arg_locs, expected),
+            "apply" => return self.check_apply_form(heap, interp, env, args, arg_locs),
             "match" => return self.check_match(heap, interp, env, args, arg_locs, expected),
             "panic" => return self.check_panic(heap, interp, env, args, arg_locs),
             "the" => return self.check_the(heap, interp, env, args, arg_locs),
@@ -3269,12 +3392,21 @@ impl Checker {
         if args.len() < 2 {
             return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
         }
-        let (params, param_locs) = self.parse_params(heap, args[0])?;
+        let (params, param_locs, rest) = self.parse_params_rest(heap, args[0])?;
         let ret = self.canon(&parse_type(heap, args[1])?);
         let fn_ty = Type::Fn(
             params.iter().map(|(_, t)| t.clone()).collect(),
+            rest.as_ref().map(|(_, t, _)| Box::new(t.clone())),
             Box::new(ret.clone()),
         );
+        // The body additionally sees the `&rest` parameter (if any) bound to
+        // a plain `Sexpr` list — see `Self::check_defun`'s identical treatment.
+        let mut params = params;
+        let mut param_locs = param_locs;
+        if let Some((rname, _, rloc)) = rest {
+            params.push((rname, sexpr_ty()));
+            param_locs.push(rloc);
+        }
         let binds: Vec<(String, Type, Option<Loc>)> =
             params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
         let child = env.extended_with_locs(binds);
@@ -3344,7 +3476,7 @@ impl Checker {
             let name_loc = parts_locs.first().and_then(|(_, l)| l.clone());
             let (params, param_locs) = self.parse_params(heap, parts[1])?;
             let ret = self.canon(&parse_type(heap, parts[2])?);
-            let fn_ty = Type::Fn(params.iter().map(|(_, t)| t.clone()).collect(), Box::new(ret.clone()));
+            let fn_ty = Type::Fn(params.iter().map(|(_, t)| t.clone()).collect(), None, Box::new(ret.clone()));
             sigs.push((name.clone(), fn_ty, name_loc));
             let body_locs = parts_locs[3..].iter().map(|(_, l)| l.clone()).collect();
             parsed.push(Spec { name, params, param_locs, ret, raw_body: parts[3..].to_vec(), body_locs });
@@ -3371,9 +3503,12 @@ impl Checker {
         Ok(Typed { loc: None, expr: Expr::Labels { defs, body }, ty })
     }
 
-    /// Type-check applying a function *value* `callee` to `args`. Functions
-    /// are fixed-arity, so `args` must match the callee's parameter count
-    /// exactly (each checked against the corresponding parameter type).
+    /// Type-check applying a function *value* `callee` to `args`. If
+    /// `callee`'s type is variadic (`Type::Fn`'s `rest` is `Some`), every
+    /// argument past the fixed parameters is checked against the rest
+    /// element type and collected into a single `Sexpr` list actual
+    /// argument — the value-level counterpart of `Self::check_call`'s
+    /// desugaring for a named function.
     fn check_apply(
         &self,
         heap: &mut Heap,
@@ -3383,21 +3518,91 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
-        let (params, ret) = match &callee.ty {
-            Type::Fn(p, ret) => (p.clone(), (**ret).clone()),
+        let (params, rest, ret) = match &callee.ty {
+            Type::Fn(p, r, ret) => (p.clone(), r.clone(), (**ret).clone()),
             other => return Err(Error::TypeError(format!("value is not callable: {:?}", other))),
         };
-        if args.len() != params.len() {
+        let fixed = params.len();
+        match &rest {
+            None if args.len() != fixed => {
+                return Err(Error::TypeError(format!(
+                    "function expects {} argument(s), got {}",
+                    fixed,
+                    args.len()
+                )));
+            }
+            Some(_) if args.len() < fixed => {
+                return Err(Error::TypeError(format!(
+                    "function expects at least {} argument(s), got {}",
+                    fixed,
+                    args.len()
+                )));
+            }
+            _ => {}
+        }
+        let mut typed = Vec::new();
+        for (i, (arg, pty)) in args[..fixed].iter().zip(params.iter()).enumerate() {
+            typed.push(self.check_at(heap, interp, env, *arg, Some(pty), nth_loc(arg_locs, i))?);
+        }
+        if let Some(elem_ty) = &rest {
+            let mut rest_typed = Vec::new();
+            for (i, arg) in args[fixed..].iter().enumerate() {
+                rest_typed.push(self.check_at(heap, interp, env, *arg, Some(elem_ty), nth_loc(arg_locs, fixed + i))?);
+            }
+            typed.push(self.cons_rest_list(elem_ty, rest_typed)?);
+        }
+        Ok(Typed { loc: None, expr: Expr::Apply(Box::new(callee), typed), ty: ret })
+    }
+
+    /// `(apply f arg1 ... argN rest-list)`: call the *variadic* function
+    /// value `f` — its type must be `(fn (T1..Tn) &rest Te) R)` — with
+    /// `arg1..argN` bound to its fixed parameters and `rest-list` (already a
+    /// plain `Sexpr` list, e.g. a `quote`d list or one built by `cons`)
+    /// passed straight through as its `&rest` argument, instead of
+    /// `Self::check_apply`'s usual one-by-one collection from individually-
+    /// typed trailing expressions. Note `rest-list`'s elements are *not*
+    /// checked against `Te` here — same as CL's `apply`, which never checks a
+    /// list's contents either; the callee's own body is responsible for
+    /// whatever it does with each element. Desugars to the very same
+    /// `Expr::Apply` shape `check_apply` produces for `(f arg1 .. argN e1 e2
+    /// e3)` if `rest-list` were three literal elements `e1 e2 e3` instead of
+    /// one dynamic list — so the interpreter needs no `apply`-specific
+    /// evaluation at all.
+    fn check_apply_form(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Typed, Error> {
+        if args.len() < 2 {
+            return Err(Error::TypeError("apply: (apply function arg... rest-list)".into()));
+        }
+        let callee = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
+        let (params, ret) = match &callee.ty {
+            Type::Fn(p, Some(_), ret) => (p.clone(), (**ret).clone()),
+            Type::Fn(_, None, _) => {
+                return Err(Error::TypeError(
+                    "apply: function has no `&rest` parameter to apply a list to".into(),
+                ))
+            }
+            other => return Err(Error::TypeError(format!("apply: value is not callable: {:?}", other))),
+        };
+        let (fixed_args, list_arg) = args[1..].split_at(args.len() - 2);
+        if fixed_args.len() != params.len() {
             return Err(Error::TypeError(format!(
-                "function expects {} argument(s), got {}",
+                "apply: expected {} fixed argument(s) before the rest list, got {}",
                 params.len(),
-                args.len()
+                fixed_args.len()
             )));
         }
         let mut typed = Vec::new();
-        for (i, (arg, pty)) in args.iter().zip(params.iter()).enumerate() {
-            typed.push(self.check_at(heap, interp, env, *arg, Some(pty), nth_loc(arg_locs, i))?);
+        for (i, (arg, pty)) in fixed_args.iter().zip(params.iter()).enumerate() {
+            typed.push(self.check_at(heap, interp, env, *arg, Some(pty), nth_loc(arg_locs, i + 1))?);
         }
+        let list_loc = nth_loc(arg_locs, args.len() - 1);
+        typed.push(self.check_at(heap, interp, env, list_arg[0], Some(&sexpr_ty()), list_loc)?);
         Ok(Typed { loc: None, expr: Expr::Apply(Box::new(callee), typed), ty: ret })
     }
 
@@ -4411,13 +4616,24 @@ impl Checker {
     ) -> Result<Typed, Error> {
         let sig = self.reg.fn_sig(name).expect("caller checked presence").clone();
         let fixed = sig.params.len();
-        if args.len() != fixed {
-            return Err(Error::TypeError(format!(
-                "{}: expected {} argument(s), got {}",
-                name,
-                fixed,
-                args.len()
-            )));
+        match &sig.rest {
+            None if args.len() != fixed => {
+                return Err(Error::TypeError(format!(
+                    "{}: expected {} argument(s), got {}",
+                    name,
+                    fixed,
+                    args.len()
+                )));
+            }
+            Some(_) if args.len() < fixed => {
+                return Err(Error::TypeError(format!(
+                    "{}: expected at least {} argument(s), got {}",
+                    name,
+                    fixed,
+                    args.len()
+                )));
+            }
+            _ => {}
         }
         // Non-generic functions (the overwhelming majority) take the fast
         // path: `params`/`subst` stay empty, so `subst_apply`/`type_has_param`
@@ -4428,12 +4644,29 @@ impl Checker {
         let params: HashSet<String> = sig.type_params.iter().cloned().collect();
         let mut subst: HashMap<String, Type> = HashMap::new();
         let mut typed = Vec::new();
-        for (i, (arg, pty)) in args.iter().zip(sig.params.iter()).enumerate() {
+        for (i, (arg, pty)) in args[..fixed].iter().zip(sig.params.iter()).enumerate() {
             let st = subst_apply(pty, &subst);
             let exp = if type_has_param(&st, &params) { None } else { Some(st) };
             let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
             unify(&params, pty, &ta.ty, &mut subst)?;
             typed.push(ta);
+        }
+        // A variadic function: every remaining argument is individually
+        // checked against the (possibly still-generic) rest element type,
+        // then collected into a single `Sexpr` list actual argument — see
+        // `sexpr_ty`'s doc comment and `Self::check_apply`'s value-level
+        // counterpart.
+        if let Some(elem_ty) = &sig.rest {
+            let mut rest_typed = Vec::new();
+            for (i, arg) in args[fixed..].iter().enumerate() {
+                let st = subst_apply(elem_ty, &subst);
+                let exp = if type_has_param(&st, &params) { None } else { Some(st) };
+                let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, fixed + i))?;
+                unify(&params, elem_ty, &ta.ty, &mut subst)?;
+                rest_typed.push(ta);
+            }
+            let resolved = subst_apply(elem_ty, &subst);
+            typed.push(self.cons_rest_list(&resolved, rest_typed)?);
         }
         // Associated-type pins participate in *inference*, not just
         // verification: when a `where` bound pins an associated type to one of
@@ -5062,14 +5295,23 @@ fn join_types(a: &Type, b: &Type) -> Result<Type, Error> {
     )))
 }
 
-/// The built-in `Sexpr` type (`read`/`eval`/`print`/`defmacro` island).
+/// `Sexpr` — the type a `&rest` parameter's collected arguments are bound as
+/// inside a `defun`/`lambda` body, and the type `apply`'s trailing list
+/// argument must have (see `Checker::parse_params_rest`/`check_call`/
+/// `check_apply_form`). Every Lisp's `&rest` parameter is an ordinary list
+/// (built from cons cells), never a homogeneous array type — `defmacro`'s own
+/// `&rest` already works this way unconditionally (`Interp::bind_macro_args`);
+/// `defun`/`lambda`'s `&rest` now matches it, just with an added call-site
+/// check (below) that every individual variadic argument satisfies the
+/// declared element type before it's wrapped into the list.
 fn sexpr_ty() -> Type {
     Type::Named(Path::root("sexpr"), vec![])
 }
 
 /// The `Sexpr` constructor name that exactly represents a value of `elem_ty`
-/// (`Sexpr` itself needs no wrapping). Used to coerce a `Symbol` into its
-/// `Sexpr::Sym` datum where a `Sexpr` is expected (see `Checker::check`).
+/// (`Sexpr` itself needs no wrapping — see [`Checker::wrap_rest_elem`]).
+/// `&rest`'s declared element type must be one of these (or `Sexpr`) since
+/// nothing else has a lossless `Sexpr` encoding to collect into a list with.
 fn sexpr_ctor_for(elem_ty: &Type) -> Option<&'static str> {
     match elem_ty {
         Type::I64 | Type::I32 => Some("int"),
@@ -5111,8 +5353,10 @@ fn type_has_param(t: &Type, params: &HashSet<String>) -> bool {
         Type::Named(n, args) => {
             (args.is_empty() && is_param(n, params)) || args.iter().any(|a| type_has_param(a, params))
         }
-        Type::Fn(ps, r) => {
-            ps.iter().any(|p| type_has_param(p, params)) || type_has_param(r, params)
+        Type::Fn(ps, rest, r) => {
+            ps.iter().any(|p| type_has_param(p, params))
+                || matches!(rest, Some(t) if type_has_param(t, params))
+                || type_has_param(r, params)
         }
         _ => false,
     }
@@ -5149,8 +5393,11 @@ fn mangle_type(t: &Type) -> String {
         Type::Named(p, args) => {
             format!("{}<{}>", p, args.iter().map(mangle_type).collect::<Vec<_>>().join(","))
         }
-        Type::Fn(ps, r) => {
-            let inner: Vec<String> = ps.iter().map(mangle_type).collect();
+        Type::Fn(ps, rest, r) => {
+            let mut inner: Vec<String> = ps.iter().map(mangle_type).collect();
+            if let Some(t) = rest {
+                inner.push(format!("&rest {}", mangle_type(t)));
+            }
             format!("(fn ({}) {})", inner.join(","), mangle_type(r))
         }
     }
@@ -5185,8 +5432,9 @@ fn subst_apply(t: &Type, subst: &HashMap<String, Type>) -> Type {
         Type::Named(n, args) => {
             Type::Named(n.clone(), args.iter().map(|a| subst_apply(a, subst)).collect())
         }
-        Type::Fn(ps, r) => Type::Fn(
+        Type::Fn(ps, rest, r) => Type::Fn(
             ps.iter().map(|p| subst_apply(p, subst)).collect(),
+            rest.as_ref().map(|t| Box::new(subst_apply(t, subst))),
             Box::new(subst_apply(r, subst)),
         ),
         other => other.clone(),
@@ -5245,9 +5493,19 @@ fn unify(
             }
             Ok(())
         }
-        (Type::Fn(p1, r1), Type::Fn(p2, r2)) if p1.len() == p2.len() => {
+        (Type::Fn(p1, rest1, r1), Type::Fn(p2, rest2, r2)) if p1.len() == p2.len() => {
             for (t, a) in p1.iter().zip(p2.iter()) {
                 unify(params, t, a, subst)?;
+            }
+            match (rest1, rest2) {
+                (Some(t1), Some(t2)) => unify(params, t1, t2, subst)?,
+                (None, None) => {}
+                _ => {
+                    return Err(Error::TypeError(format!(
+                        "type mismatch: expected {:?}, found {:?}",
+                        tmpl, actual
+                    )))
+                }
             }
             unify(params, r1, r2, subst)
         }

@@ -646,6 +646,111 @@ fn labels_function_can_be_bound_to_a_variable_like_any_other() {
     assert_eq!(eval_ok(src), RtValue::Int(11));
 }
 
+// ---- &rest / apply (roadmap step 10) -----------------------------------------
+//
+// `&rest`'s collected arguments are bound to a plain `Sexpr` list (an
+// ordinary Lisp list of cons cells, like every Lisp's `&rest` parameter —
+// never a homogeneous array type), with each element wrapped in its
+// `Sexpr` constructor (`(Int n)` for an `i32`/`i64` element here) — see
+// `Checker::wrap_rest_elem`'s doc comment. These tests use `run`/`eval_ok`
+// (no prelude loaded), so list length/indexing is done directly via the
+// `sexpr-*` accessor layer (`match` on `Sexpr` is fenced off — Symbol/Sexpr
+// redesign Phase 5 — and `car`/`cdr` are repurposed to a `cons<T,U>` pair).
+
+const LEN_HELPER: &str =
+    "(defun len ((s Sexpr)) i32 (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))";
+
+#[test]
+fn defun_rest_collects_extra_arguments_into_a_list() {
+    let src = format!(
+        "{}
+         (defun count-extra ((a i32) &rest (xs i32)) i32 (len xs))
+         (count-extra 1 2 3 4)",
+        LEN_HELPER
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(3));
+}
+
+#[test]
+fn defun_rest_with_no_extra_arguments_is_an_empty_list() {
+    let src = format!(
+        "{}
+         (defun count-extra ((a i32) &rest (xs i32)) i32 (len xs))
+         (count-extra 1)",
+        LEN_HELPER
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(0));
+}
+
+#[test]
+fn defun_rest_with_no_fixed_params_collects_every_argument() {
+    let src = format!(
+        "{}
+         (defun count-all (&rest (xs i32)) i32 (len xs)) (count-all 1 2 3)",
+        LEN_HELPER
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(3));
+}
+
+#[test]
+fn defun_rest_elements_keep_their_order_and_values() {
+    // `Sexpr`'s own `Int` constructor always holds an `i64` (regardless of
+    // whether the `&rest` element type was declared `i32` or `i64` — both
+    // wrap into the same `Sexpr` variant, see `sexpr_ctor_for`), so
+    // extracting one back out via `sexpr-int` yields `i64`, not `i32`.
+    let src = "(defun second-extra ((a i32) &rest (xs i32)) i64
+                 (sexpr-int (sexpr-car (sexpr-cdr xs))))
+               (second-extra 1 10 20 30)";
+    assert_eq!(eval_ok(src), RtValue::Int(20));
+}
+
+#[test]
+fn lambda_rest_collects_extra_arguments_into_a_list() {
+    let src = format!(
+        "{}
+         ((lambda ((a i32) &rest (xs i32)) i32 (len xs)) 1 2 3)",
+        LEN_HELPER
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(2));
+}
+
+#[test]
+fn generic_rest_function_works_at_different_element_types() {
+    let src = "(defun firstn<T> ((a T) &rest (xs T)) T a)
+               (firstn (firstn 1 2 3) (firstn 4 5))";
+    assert_eq!(eval_ok(src), RtValue::Int(1));
+}
+
+#[test]
+fn apply_calls_a_named_variadic_function_with_a_runtime_list() {
+    let src = "(defun first-extra ((a i32) &rest (xs i32)) i64
+                 (sexpr-int (sexpr-car xs)))
+               (apply first-extra 1 (quote (10 20)))";
+    assert_eq!(eval_ok(src), RtValue::Int(10));
+}
+
+#[test]
+fn apply_calls_a_variadic_lambda_value() {
+    let src = format!(
+        "{}
+         (let ((f (lambda ((a i32) &rest (xs i32)) i32 (+ a (len xs)))))
+           (apply f 10 (quote (1 2))))",
+        LEN_HELPER
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(12));
+}
+
+#[test]
+fn apply_with_no_fixed_arguments_passes_the_whole_list_as_rest() {
+    let src = format!(
+        "{}
+         (defun count-all (&rest (xs i32)) i32 (len xs))
+         (apply count-all (quote (1 2 3)))",
+        LEN_HELPER
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(3));
+}
+
 // ---- the (type annotation) ---------------------------------------------------
 
 #[test]

@@ -530,6 +530,30 @@ fn compile_returns_true_on_success() {
     assert!(expect_bool(v));
 }
 
+/// A `&rest` parameter is bound to a plain `Sexpr` inside the body (see
+/// `Checker::check_defun`'s desugaring), and `Sexpr` already has full
+/// `compile` support — so a variadic function compiles with no special-
+/// casing at all, as long as its body sticks to already-compilable
+/// operations on the rest list (e.g. `sexpr-car`/`sexpr-cdr`, which
+/// `is_rt_builtin_name` recognizes as `rt_*` shims rather than something
+/// `compile_function_rec` needs to recursively compile).
+#[test]
+fn a_variadic_function_compiles_and_dispatches_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun first-of-rest ((a i64) &rest (xs i64)) i64
+          a)
+        (compile first-of-rest)
+        (first-of-rest 1 10 20)
+        "#,
+    )
+    .expect("eval failed");
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 1),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
 #[test]
 fn an_uncompiled_function_still_tree_walks_normally() {
     // Sanity check that `compiled`-table dispatch doesn't break the

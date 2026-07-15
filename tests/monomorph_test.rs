@@ -184,10 +184,10 @@ fn a_generic_instantiated_from_a_macro_body_works() {
 }
 
 #[test]
-fn a_generic_multi_arg_function_specializes() {
+fn a_generic_rest_function_specializes() {
     let src = r#"
-        (defun firstof<T> ((a T) (b T) (c T)) T a)
-        (firstof 1 2 3)
+        (defun firstn<T> ((a T) &rest (xs T)) T a)
+        (firstn 1 2 3)
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(1));
 }

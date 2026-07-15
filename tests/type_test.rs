@@ -79,21 +79,40 @@ fn qualified_path_types() {
 fn function_types() {
     assert_eq!(
         parse("(fn (i32 i32) i32)"),
-        Type::Fn(vec![Type::I32, Type::I32], Box::new(Type::I32))
+        Type::Fn(vec![Type::I32, Type::I32], None, Box::new(Type::I32))
     );
-    assert_eq!(parse("(fn () bool)"), Type::Fn(vec![], Box::new(Type::Bool)));
+    assert_eq!(parse("(fn () bool)"), Type::Fn(vec![], None, Box::new(Type::Bool)));
     assert_eq!(
         parse("(fn (Option<i32>) i32)"),
-        Type::Fn(vec![Type::Named(Path::root("option"), vec![Type::I32])], Box::new(Type::I32))
+        Type::Fn(vec![Type::Named(Path::root("option"), vec![Type::I32])], None, Box::new(Type::I32))
     );
 }
 
 #[test]
-fn rest_in_a_function_type_is_rejected() {
-    // Function types are always fixed-arity — there are no variadic
-    // value-level functions, so `&rest` is not a valid `fn`-type parameter.
+fn variadic_function_types() {
+    assert_eq!(
+        parse("(fn (i32 &rest i32) i32)"),
+        Type::Fn(vec![Type::I32], Some(Box::new(Type::I32)), Box::new(Type::I32))
+    );
+    // `&rest` with no fixed parameters before it.
+    assert_eq!(
+        parse("(fn (&rest bool) bool)"),
+        Type::Fn(vec![], Some(Box::new(Type::Bool)), Box::new(Type::Bool))
+    );
+}
+
+#[test]
+fn rest_not_last_in_a_function_type_is_an_error() {
     let mut h = Heap::with_capacity(256);
     let r = Reader::new();
-    let v = r.read(&mut h, "(fn (i32 &rest i32) i32)").expect("read failed");
+    let v = r.read(&mut h, "(fn (&rest i32 i32) i32)").expect("read failed");
+    assert!(parse_type(&h, v).is_err());
+}
+
+#[test]
+fn rest_with_no_element_type_in_a_function_type_is_an_error() {
+    let mut h = Heap::with_capacity(256);
+    let r = Reader::new();
+    let v = r.read(&mut h, "(fn (&rest) i32)").expect("read failed");
     assert!(parse_type(&h, v).is_err());
 }
