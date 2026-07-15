@@ -43,6 +43,7 @@
 //! going blank. Completion is still unimplemented; see the `TODO` list in
 //! `docs/dev/` if picking this back up.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
@@ -62,7 +63,7 @@ use lsp_types::{
 };
 
 use typelisp::fasl::Fasl;
-use typelisp::project::{find_src_root, module_segs_for, Loader};
+use typelisp::project::{find_src_root, module_segs_for, Loader, ModuleCache};
 use typelisp::*;
 
 fn main() {
@@ -96,6 +97,13 @@ fn run(connection: Connection) {
     // `Fasl::load_into` — allocation-API rebuild + registry insert, no
     // re-reading or re-typechecking the ~800-line source per keystroke.
     let prelude: Rc<Fasl> = Rc::new(typelisp::prelude::prelude_fasl());
+    // A cache of already-checked *dependency* modules (never an open
+    // document's own entry — see `Loader::try_load_module`'s doc comment),
+    // shared across every diagnostics/completion pass for the life of this
+    // server: a `use`d file that hasn't changed skips parse and type-check
+    // entirely on the next pass, the same win the prelude fasl above gets,
+    // now extended to project files.
+    let module_cache: ModuleCache = Rc::new(RefCell::new(HashMap::new()));
 
     let mut docs: HashMap<Uri, String> = HashMap::new();
     // The filesystem paths each open document's last diagnostics pass
@@ -120,7 +128,7 @@ fn run(connection: Connection) {
                 } else if req.method == GotoDefinition::METHOD {
                     handle_goto_definition(req.id, req.params, &analyses)
                 } else if req.method == Completion::METHOD {
-                    handle_completion(req.id, req.params, &prelude, &docs)
+                    handle_completion(req.id, req.params, &prelude, &module_cache, &docs)
                 } else {
                     // No other requests are handled; respond so a
                     // spec-compliant client doesn't hang waiting for a
@@ -144,7 +152,7 @@ fn run(connection: Connection) {
                     if let Ok(p) = serde_json::from_value::<lsp_types::DidOpenTextDocumentParams>(not.params) {
                         let uri = p.text_document.uri;
                         docs.insert(uri.clone(), p.text_document.text);
-                        publish(&connection, &prelude, &uri, &docs, &mut deps, &mut analyses);
+                        publish(&connection, &prelude, &module_cache, &uri, &docs, &mut deps, &mut analyses);
                     }
                 }
                 m if m == DidChangeTextDocument::METHOD => {
@@ -155,7 +163,7 @@ fn run(connection: Connection) {
                         if let Some(change) = p.content_changes.pop() {
                             let uri = p.text_document.uri;
                             docs.insert(uri.clone(), change.text);
-                            publish(&connection, &prelude, &uri, &docs, &mut deps, &mut analyses);
+                            publish(&connection, &prelude, &module_cache, &uri, &docs, &mut deps, &mut analyses);
                         }
                     }
                 }
@@ -163,7 +171,7 @@ fn run(connection: Connection) {
                     if let Ok(p) = serde_json::from_value::<lsp_types::DidSaveTextDocumentParams>(not.params) {
                         let uri = p.text_document.uri;
                         if docs.contains_key(&uri) {
-                            publish(&connection, &prelude, &uri, &docs, &mut deps, &mut analyses);
+                            publish(&connection, &prelude, &module_cache, &uri, &docs, &mut deps, &mut analyses);
                         }
                     }
                 }
@@ -197,6 +205,7 @@ fn run(connection: Connection) {
 fn publish(
     connection: &Connection,
     prelude: &Rc<Fasl>,
+    module_cache: &ModuleCache,
     uri: &Uri,
     docs: &HashMap<Uri, String>,
     deps: &mut HashMap<Uri, HashSet<PathBuf>>,
@@ -207,7 +216,7 @@ fn publish(
     visited.insert(uri.clone());
     queue.push_back(uri.clone());
     while let Some(cur) = queue.pop_front() {
-        publish_one(connection, prelude, &cur, docs, deps, analyses);
+        publish_one(connection, prelude, module_cache, &cur, docs, deps, analyses);
         let cur_path = PathBuf::from(cur.path().as_str());
         for other in docs.keys() {
             if visited.contains(other) {
@@ -241,6 +250,7 @@ fn build_overlay(docs: &HashMap<Uri, String>, exclude: &Uri) -> HashMap<PathBuf,
 fn publish_one(
     connection: &Connection,
     prelude: &Rc<Fasl>,
+    module_cache: &ModuleCache,
     uri: &Uri,
     docs: &HashMap<Uri, String>,
     deps: &mut HashMap<Uri, HashSet<PathBuf>>,
@@ -251,7 +261,7 @@ fn publish_one(
     // The URI's path component as a filesystem path (`file:///tmp/a.typl` ->
     // `/tmp/a.typl`). Percent-encoded characters are not decoded — good
     // enough for the ordinary-ASCII paths this MVP targets.
-    let (diagnostics, loaded, analysis) = diagnostics_for(prelude, uri.path().as_str(), text, overlay);
+    let (diagnostics, loaded, analysis) = diagnostics_for(prelude, module_cache, uri.path().as_str(), text, overlay);
     deps.insert(uri.clone(), loaded);
     if let Some(a) = analysis {
         analyses.insert(uri.clone(), a);
@@ -289,7 +299,13 @@ fn publish_one(
 /// errors are reported at once (via [`Checker::take_errors`]) rather than only
 /// the first. `result` is `Err` only on a reader error, which stops the whole
 /// document (an s-expression reader can't resync past an unmatched paren).
-fn diagnostics_for(prelude: &Rc<Fasl>, file: &str, text: &str, overlay: HashMap<PathBuf, String>) -> (Vec<Diagnostic>, HashSet<PathBuf>, Option<Analysis>) {
+fn diagnostics_for(
+    prelude: &Rc<Fasl>,
+    module_cache: &ModuleCache,
+    file: &str,
+    text: &str,
+    overlay: HashMap<PathBuf, String>,
+) -> (Vec<Diagnostic>, HashSet<PathBuf>, Option<Analysis>) {
     let mut heap = Heap::with_capacity(1 << 16);
     let reader = Reader::new();
     let mut checker = Checker::new();
@@ -302,6 +318,7 @@ fn diagnostics_for(prelude: &Rc<Fasl>, file: &str, text: &str, overlay: HashMap<
     let src_root = find_src_root(&dir).unwrap_or(dir);
     let mut loader = Loader::new(src_root);
     loader.set_overlay(overlay);
+    loader.set_module_cache(module_cache.clone());
 
     let mut diagnostics = Vec::new();
     let result = loader.load_entry_src(&mut heap, &reader, &mut checker, &mut interp, fs_file, text);
@@ -417,7 +434,13 @@ fn handle_goto_definition(id: RequestId, params: serde_json::Value, analyses: &H
 /// if the patched text still fails to check for some other reason, whatever
 /// got registered before that failure point is still usable — this is
 /// deliberately lenient rather than requiring a clean check.
-fn handle_completion(id: RequestId, params: serde_json::Value, prelude: &Rc<Fasl>, docs: &HashMap<Uri, String>) -> Response {
+fn handle_completion(
+    id: RequestId,
+    params: serde_json::Value,
+    prelude: &Rc<Fasl>,
+    module_cache: &ModuleCache,
+    docs: &HashMap<Uri, String>,
+) -> Response {
     let result = (|| {
         let p: CompletionParams = serde_json::from_value(params).ok()?;
         let uri = p.text_document_position.text_document.uri.clone();
@@ -451,7 +474,7 @@ fn handle_completion(id: RequestId, params: serde_json::Value, prelude: &Rc<Fasl
         }
         let patched = heuristically_close(&truncated);
         let overlay = build_overlay(docs, &uri);
-        let candidates = candidates_for(prelude, uri.path().as_str(), &patched, overlay, line, col);
+        let candidates = candidates_for(prelude, module_cache, uri.path().as_str(), &patched, overlay, line, col);
         let items: Vec<CompletionItem> = candidates
             .into_iter()
             .filter(|c| prefix.is_empty() || c.name.starts_with(&prefix))
@@ -484,7 +507,15 @@ fn handle_completion(id: RequestId, params: serde_json::Value, prelude: &Rc<Fasl
 /// was never pushed; `take_pending().pop()` then yields either nothing or a
 /// dependency's module, and `completion_locals` filters by `file` and returns
 /// empty — so no gate is needed.
-fn candidates_for(prelude: &Rc<Fasl>, file: &str, patched_text: &str, overlay: HashMap<PathBuf, String>, line: u32, col: u32) -> Vec<CompletionCandidate> {
+fn candidates_for(
+    prelude: &Rc<Fasl>,
+    module_cache: &ModuleCache,
+    file: &str,
+    patched_text: &str,
+    overlay: HashMap<PathBuf, String>,
+    line: u32,
+    col: u32,
+) -> Vec<CompletionCandidate> {
     let mut heap = Heap::with_capacity(1 << 16);
     let reader = Reader::new();
     let mut checker = Checker::new();
@@ -497,6 +528,7 @@ fn candidates_for(prelude: &Rc<Fasl>, file: &str, patched_text: &str, overlay: H
     let src_root = find_src_root(&dir).unwrap_or_else(|| dir.clone());
     let mut loader = Loader::new(src_root.clone());
     loader.set_overlay(overlay);
+    loader.set_module_cache(module_cache.clone());
     let _ = loader.load_entry_src(&mut heap, &reader, &mut checker, &mut interp, fs_file, patched_text);
 
     let module_path = module_segs_for(fs_file, &src_root).unwrap_or_default();
@@ -859,8 +891,9 @@ mod completion_helper_tests {
         let file = "/tmp/typelisp-lsp-recover-test/f.typl";
         let patched = "(defun f ((o Option<i32>)) i32 (match o ((Some x) (panic \"\"))))";
         let prelude = Rc::new(typelisp::prelude::prelude_fasl());
+        let module_cache: ModuleCache = Rc::new(RefCell::new(HashMap::new()));
         // The placeholder sits at 1-based column 51 (the `(` of `(panic "")`).
-        let candidates = candidates_for(&prelude, file, patched, HashMap::new(), 1, 51);
+        let candidates = candidates_for(&prelude, &module_cache, file, patched, HashMap::new(), 1, 51);
         let locals: Vec<&str> = candidates
             .iter()
             .filter(|c| c.kind == CompletionKind::Variable)
