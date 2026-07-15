@@ -3333,26 +3333,39 @@ fn llvm_builder_build_fpow(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::LlvmValue(bits))
 }
 
-/// `float->int` (`f64->i32`, narrowing, truncating toward zero): a plain
-/// `fptosi` instruction — `bitcast` the `i64`-carried operand to `double`,
-/// `fptosi` straight to `i64` (every compiled integer, `i32` included, is
-/// carried in a full `i64` register — see `int-native-method?`'s doc
-/// comment), no heap allocation and no `module` lookup needed, unlike the
-/// transcendentals above. Diverges from the interpreter's `float_to_int`
-/// (`*f as i64`, Rust's *saturating* float-to-int cast) only for non-finite
-/// or out-of-range inputs: LLVM's `fptosi` is a poison value there rather
-/// than a saturated one — an accepted edge-case gap, the same class as
-/// `build-frem`'s documented `fmod`-collision risk.
+/// `float->int` (`f64->i32`, narrowing, truncating toward zero): `bitcast`
+/// the `i64`-carried operand to `double`, then the `llvm.fptosi.sat`
+/// intrinsic (overloaded on both its `i64` result and `f64` operand type,
+/// hence the `module` parameter every other overloaded-intrinsic builtin
+/// here already takes — see [`llvm_builder_build_float_unary_intrinsic`]/
+/// [`llvm_builder_build_fpow`]) straight to `i64` (every compiled integer,
+/// `i32` included, is carried in a full `i64` register — see
+/// `int-native-method?`'s doc comment). Unlike a plain `fptosi`
+/// instruction (poison on NaN/out-of-range input), `.sat` clamps: NaN -> 0,
+/// `+inf`/an overflowing magnitude -> `i64::MAX`, `-inf`/an underflowing
+/// magnitude -> `i64::MIN` — exactly Rust's `as` cast semantics, matching
+/// the interpreter's `float_to_int` (`*f as i64`) bit for bit.
 fn llvm_builder_build_fptosi(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
-    let x_bits = expect_llvm_value(&args[1])?.into_int_value();
+    let module = expect_llvm_module(&args[1])?;
+    let x_bits = expect_llvm_value(&args[2])?.into_int_value();
     let bld = builder.borrow();
     let ctx = crate::compile::llvm_context();
     let f64_ty = ctx.f64_type();
-    let err = |e: inkwell::builder::BuilderError| EvalError::Internal(format!("build-fptosi: {}", e));
-    let x = bld.build_bit_cast(x_bits, f64_ty, "x_f").map_err(err)?.into_float_value();
-    let i = bld.build_float_to_signed_int(x, ctx.i64_type(), "fptosi").map_err(err)?;
-    Ok(RtValue::LlvmValue(i.into()))
+    let i64_ty = ctx.i64_type();
+    let err = |e: String| EvalError::Internal(format!("build-fptosi: {}", e));
+    let x = bld.build_bit_cast(x_bits, f64_ty, "x_f").map_err(|e| err(e.to_string()))?.into_float_value();
+    let intrinsic =
+        inkwell::intrinsics::Intrinsic::find("llvm.fptosi.sat").ok_or_else(|| err("no such LLVM intrinsic llvm.fptosi.sat".into()))?;
+    let decl = intrinsic
+        .get_declaration(&module.borrow(), &[i64_ty.into(), f64_ty.into()])
+        .ok_or_else(|| err("failed to declare llvm.fptosi.sat".into()))?;
+    let call = bld.build_call(decl, &[x.into()], "fptosi_sat").map_err(|e| err(e.to_string()))?;
+    let result = match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
+        inkwell::values::ValueKind::Instruction(_) => return Err(err("llvm.fptosi.sat produced no value".into())),
+    };
+    Ok(RtValue::LlvmValue(result.into()))
 }
 
 /// Stack-allocates a `[count x i64]` array and returns its base pointer, to

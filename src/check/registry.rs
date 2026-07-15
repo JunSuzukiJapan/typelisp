@@ -1012,7 +1012,7 @@ fn llvm_builder_def() -> AdtDef {
     // `fptosi` instruction, no heap allocation and no module lookup needed —
     // unlike `float->bignum`/`float->ratio`, which stay non-native (see
     // `float-native-method?`'s doc comment).
-    assoc.insert("build-fptosi".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    assoc.insert("build-fptosi".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty()], llvm_value_ty(), true));
     // `alloca-args`/`store-arg`/`build-call`: building a direct call to an
     // already-declared function (`get-function`'s result). `alloca-args`
     // stack-allocates a fresh `[count x i64]` array (mirroring the fixed-ABI

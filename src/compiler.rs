@@ -1656,8 +1656,10 @@ pub const SOURCE: &str = r#"
                                            ;; (`sqrt`/`floor`/`ceiling`/`round`/
                                            ;; `truncate`, each its own LLVM intrinsic
                                            ;; via `build-f*`), `float->int`
-                                           ;; (`build-fptosi`, a single `fptosi`
-                                           ;; instruction), and `float->bignum`/
+                                           ;; (`build-fptosi`, the saturating
+                                           ;; `llvm.fptosi.sat` intrinsic — matches
+                                           ;; the interpreter's `as`-cast semantics
+                                           ;; on NaN/out-of-range input), and `float->bignum`/
                                            ;; `float->ratio` (`rt_float_to_bignum`/
                                            ;; `rt_float_to_ratio`, allocating heap
                                            ;; calls — the one exception in this group
@@ -1678,7 +1680,7 @@ pub const SOURCE: &str = r#"
                                                                  (if (equal method "truncate")
                                                                      (build-ftrunc builder m a)
                                                                      (if (equal method "float->int")
-                                                                         (build-fptosi builder a)
+                                                                         (build-fptosi builder m a)
                                                                          (if (equal method "float->bignum")
                                                                              (let ((args-ptr (alloca-args builder 1)))
                                                                                (store-arg builder args-ptr 0 a)

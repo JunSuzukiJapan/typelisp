@@ -3979,8 +3979,8 @@ fn compile_dispatches_f64_expt_and_agrees_with_the_interpreter() {
     assert_eq!(compiled, interpreted, "compiled expt agrees with the interpreter");
 }
 
-/// `float->int` lowers to a single `fptosi` instruction (`build-fptosi`), no
-/// heap allocation involved.
+/// `float->int` lowers to the saturating `llvm.fptosi.sat` intrinsic
+/// (`build-fptosi`), no heap allocation involved.
 #[test]
 fn compile_dispatches_float_to_int_and_agrees_with_the_interpreter() {
     let src = r#"
@@ -3990,6 +3990,36 @@ fn compile_dispatches_float_to_int_and_agrees_with_the_interpreter() {
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile truncate-it)\n(truncate-it 7.9)")).expect("compiled failed");
     assert_eq!(interpreted, RtValue::Int(7));
     assert_eq!(compiled, interpreted, "compiled float->int agrees with the interpreter");
+}
+
+/// `llvm.fptosi.sat` clamps exactly like Rust's `as i64` cast (the
+/// interpreter's own `float_to_int`, `*f as i64`) — unlike a plain `fptosi`
+/// instruction, which is a poison value on NaN/out-of-range input. Covers
+/// every edge case that distinction matters for: NaN -> `0`, `+inf`/an
+/// overflowing magnitude -> `i64::MAX`, `-inf`/an underflowing magnitude ->
+/// `i64::MIN`, and one ordinary finite value as a sanity check that the
+/// intrinsic swap didn't change everyday behavior.
+#[test]
+fn compile_dispatches_float_to_int_on_nan_and_out_of_range_inputs_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun to-int ((x f64)) i32 (float->int x))
+    "#;
+    let cases: &[(&str, i64)] = &[
+        ("(/ 0.0 0.0)", 0),                // NaN -> 0
+        ("(/ 1.0 0.0)", i64::MAX),          // +inf -> i64::MAX
+        ("(/ -1.0 0.0)", i64::MIN),         // -inf -> i64::MIN
+        ("1e300", i64::MAX),                // overflowing magnitude -> i64::MAX
+        ("-1e300", i64::MIN),               // underflowing magnitude -> i64::MIN
+        ("7.9", 7),                         // ordinary finite value, unaffected
+    ];
+    for (expr, expected) in cases {
+        let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(to-int {expr})"))
+            .unwrap_or_else(|e| panic!("interpreted failed for {}: {}", expr, e));
+        let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile to-int)\n(to-int {expr})"))
+            .unwrap_or_else(|e| panic!("compiled failed for {}: {}", expr, e));
+        assert_eq!(interpreted, RtValue::Int(*expected), "interpreted float->int of {expr}");
+        assert_eq!(compiled, interpreted, "compiled float->int of {expr} agrees with the interpreter");
+    }
 }
 
 // ---- bignum/ratio compiled representation -------------------------------
