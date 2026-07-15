@@ -1890,6 +1890,16 @@ fn alloc_quoted(heap: &mut Heap, qs: &QuotedSexpr) -> Result<Value, EvalError> {
         QuotedSexpr::Char(c) => Ok(Value::Char(*c)),
         QuotedSexpr::Bool(b) => Ok(Value::Bool(*b)),
         QuotedSexpr::Sym(s) => Ok(heap.intern_symbol(s)),
+        QuotedSexpr::Path(segs) => {
+            let sym_ids = segs
+                .iter()
+                .map(|s| match heap.intern_symbol(s) {
+                    Value::Symbol(id) => id,
+                    _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
+                })
+                .collect::<Vec<_>>();
+            Ok(heap.intern_path(&sym_ids))
+        }
         QuotedSexpr::Str(s) => Ok(heap.alloc_string(s.clone())),
         QuotedSexpr::Cons(car, cdr) => {
             let cv = alloc_quoted(heap, car)?;

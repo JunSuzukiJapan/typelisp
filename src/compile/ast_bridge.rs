@@ -1121,17 +1121,19 @@ fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Typ
 /// `Cons` already have a real compiled representation (used today by an
 /// ordinary `Sexpr` constructor call), so a quoted literal made only of
 /// those reuses it verbatim, recursively for a `Cons`'s two fields.
-/// `Sym`/`Bignum`/`Ratio` don't (a `Sym`'s payload is a `SymId` with no
-/// compiled form; `Bignum`/`Ratio` are heap objects with no `rt_bignum_*`/
-/// `rt_ratio_*` compiled support yet — see [`struct_field_kind`]'s doc
-/// comment for the same gap on the `defstruct`-field side), so a quoted
-/// literal containing one anywhere (even nested inside a `Cons`) stays
-/// `unsupported` here rather than reaching a confusing low-level panic deep
-/// inside the interpreted compiler body.
+/// `Sym`/`Bignum`/`Ratio`/`Path` don't (a `Sym`'s payload is a `SymId` with
+/// no compiled form, same for a `Path`'s `PathId`; `Bignum`/`Ratio` are heap
+/// objects with no `rt_bignum_*`/`rt_ratio_*` compiled support yet — see
+/// [`struct_field_kind`]'s doc comment for the same gap on the `defstruct`-
+/// field side), so a quoted literal containing one anywhere (even nested
+/// inside a `Cons`) stays `unsupported` here rather than reaching a
+/// confusing low-level panic deep inside the interpreted compiler body.
 fn translate_quote(heap: &mut Heap, datum: &QuotedSexpr) -> Result<Value, Error> {
     match datum {
         QuotedSexpr::Nil => tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(0)]),
-        QuotedSexpr::Sym(_) | QuotedSexpr::Bignum(_) | QuotedSexpr::Ratio(_) => unsupported(heap, "Quote"),
+        QuotedSexpr::Sym(_) | QuotedSexpr::Bignum(_) | QuotedSexpr::Ratio(_) | QuotedSexpr::Path(_) => {
+            unsupported(heap, "Quote")
+        }
         QuotedSexpr::Int(n) => {
             let leaf = tagged(heap, "int", &[Value::Int(*n)])?;
             heap.push_root(leaf);

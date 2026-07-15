@@ -1082,6 +1082,26 @@ impl Checker {
         None
     }
 
+    /// Resolve a module-qualified macro name (`mod::macro-name`) to its
+    /// absolute [`Path`], fixed arity, and whether it's variadic (`&rest`) —
+    /// the path-qualified counterpart of [`Self::resolve_macro`], mirroring
+    /// [`Self::resolve_fn_path`]'s module lookup and visibility rule (public
+    /// unless called from the defining module itself).
+    fn resolve_macro_path(&self, segs: &[String]) -> Option<(Path, usize, bool)> {
+        if segs.is_empty() {
+            return None;
+        }
+        let (mods, last) = segs.split_at(segs.len() - 1);
+        let (abs, m) = self.find_module(mods)?;
+        let def = m.macros.get(&last[0])?;
+        if !def.public && !self.same_module(&abs) {
+            return None;
+        }
+        let mut full = abs;
+        full.push(last[0].clone());
+        Some((Path::from_segments(full), def.arity, def.rest))
+    }
+
     /// Heads with built-in meaning — the expression special forms matched in
     /// [`Self::check_list`] and the top-level forms matched in
     /// [`Self::check_form_dispatch`]. [`Self::try_expand_toplevel_macro`]
@@ -1102,16 +1122,17 @@ impl Checker {
         )
     }
 
-    /// If `v` is a compound form whose head symbol resolves to a macro
-    /// ([`Self::resolve_macro`], so the current namespace matters), expand it
-    /// one step against the unevaluated argument forms and return the
-    /// expansion; `Ok(None)` when `v` is not a macro call. Built-in form
-    /// heads are never treated as macro calls — see
-    /// [`Self::is_builtin_form_head`]. Public so the loader
-    /// (`crate::project`) can pre-expand a top-level form and scan the
-    /// expansion for `(use ...)` dependencies before checking it. The caller
-    /// must root the returned expansion (`Heap::push_root`) before anything
-    /// that may allocate.
+    /// If `v` is a compound form whose head resolves to a macro — a bare
+    /// name ([`Self::resolve_macro`], current namespace) or a `mod::name`
+    /// path ([`Self::resolve_macro_path`], cross-module) — expand it one
+    /// step against the unevaluated argument forms and return the expansion;
+    /// `Ok(None)` when `v` is not a macro call. A bare built-in form head is
+    /// never treated as a macro call — see [`Self::is_builtin_form_head`]
+    /// (no path is ever a built-in head, so no equivalent guard is needed on
+    /// that branch). Public so the loader (`crate::project`) can pre-expand
+    /// a top-level form and scan the expansion for `(use ...)` dependencies
+    /// before checking it. The caller must root the returned expansion
+    /// (`Heap::push_root`) before anything that may allocate.
     pub fn try_expand_toplevel_macro(
         &self,
         heap: &mut Heap,
@@ -1122,22 +1143,32 @@ impl Checker {
             return Ok(None);
         }
         let elems = heap.list_to_vec(v)?;
-        let head = match elems.first() {
-            Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+        let (macro_path, arity, rest, display) = match elems.first() {
+            Some(Value::Symbol(id)) => {
+                let head = heap.symbol_name(*id).to_string();
+                if Self::is_builtin_form_head(&head) {
+                    return Ok(None);
+                }
+                match self.resolve_macro(&head) {
+                    Some((p, arity, rest)) => (p, arity, rest, head),
+                    None => return Ok(None),
+                }
+            }
+            Some(Value::Path(pid)) => {
+                let segs: Vec<String> =
+                    heap.path_segments(*pid).iter().map(|s| heap.symbol_name(*s).to_string()).collect();
+                match self.resolve_macro_path(&segs) {
+                    Some((p, arity, rest)) => (p, arity, rest, segs.join("::")),
+                    None => return Ok(None),
+                }
+            }
             _ => return Ok(None),
         };
-        if Self::is_builtin_form_head(&head) {
-            return Ok(None);
-        }
-        let (macro_path, arity, rest) = match self.resolve_macro(&head) {
-            Some(m) => m,
-            None => return Ok(None),
-        };
         let args = &elems[1..];
-        Self::check_macro_arity(&head, arity, rest, args.len())?;
+        Self::check_macro_arity(&display, arity, rest, args.len())?;
         let expanded = interp
             .expand_macro(heap, &macro_path, args.to_vec())
-            .map_err(|e| Error::TypeError(format!("macro `{}`: {}", head, e)))?;
+            .map_err(|e| Error::TypeError(format!("macro `{}`: {}", display, e)))?;
         Ok(Some(expanded))
     }
 
@@ -3370,7 +3401,7 @@ impl Checker {
         Ok(Typed { loc: None, expr: Expr::Apply(Box::new(callee), typed), ty: ret })
     }
 
-    /// A `::`-qualified call: a module-qualified free function, or a
+    /// A `::`-qualified call: a module-qualified macro, free function, or
     /// `Type::method` static associated function.
     fn check_path_call(
         &self,
@@ -3382,6 +3413,22 @@ impl Checker {
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<Typed, Error> {
+        // A module-qualified macro call, e.g. `mod::my-macro` — checked
+        // first, mirroring the bare-name case in `check_list` (a macro is a
+        // purely compile-time name, resolved before any runtime call shape;
+        // `resolve_macro_path` is the `::`-qualified counterpart of the
+        // bare-name `resolve_macro` that branch uses).
+        if let Some((macro_path, arity, rest)) = self.resolve_macro_path(segs) {
+            let display = segs.join("::");
+            Self::check_macro_arity(&display, arity, rest, args.len())?;
+            let expanded = interp
+                .expand_macro(heap, &macro_path, args.to_vec())
+                .map_err(|e| Error::TypeError(format!("macro `{}`: {}", display, e)))?;
+            heap.push_root(expanded);
+            let result = self.check(heap, interp, env, expanded, expected);
+            heap.pop_root();
+            return result;
+        }
         // A module-qualified free function, e.g. `math::id`.
         if let Some(fq) = self.resolve_fn_path(segs) {
             return self.check_call(heap, interp, env, &fq, args, arg_locs);
@@ -4904,9 +4951,11 @@ fn nth_loc(locs: &[Option<Loc>], i: usize) -> Option<Loc> {
 
 /// Recursively convert a raw read `Value` into an owned [`QuotedSexpr`] (see
 /// [`Expr::Quote`] for why `quote` can't just keep the heap pointer). A
-/// `Value::Path` (a `::`-qualified token, e.g. `a::b`, appearing inside quoted
-/// data) has no `Sexpr` counterpart yet (the built-in `Sexpr` ADT doesn't have
-/// a `Path` variant — see `docs/language-design.md` §2.1) so it is rejected.
+/// `Value::Path` (a `::`-qualified token, e.g. `a::b`, appearing inside
+/// quoted data — most commonly inside a macro body that generates
+/// module-qualified code) mirrors to `QuotedSexpr::Path`, its segments in
+/// written order (see `docs/dev/language-design.md` §2.1 for `Value::Path`
+/// itself). `alloc_quoted` (`eval/interp.rs`) is this function's inverse.
 fn value_to_quoted(heap: &Heap, v: Value) -> Result<QuotedSexpr, Error> {
     Ok(match v {
         Value::Empty => QuotedSexpr::Nil,
@@ -4925,10 +4974,8 @@ fn value_to_quoted(heap: &Heap, v: Value) -> Result<QuotedSexpr, Error> {
             let cdr = value_to_quoted(heap, heap.cdr(v)?)?;
             QuotedSexpr::Cons(Box::new(car), Box::new(cdr))
         }
-        Value::Path(_) => {
-            return Err(Error::TypeError(
-                "quote: `::`-paths inside quoted data are not yet supported".into(),
-            ))
+        Value::Path(id) => {
+            QuotedSexpr::Path(heap.path_segments(id).iter().map(|s| heap.symbol_name(*s).to_string()).collect())
         }
     })
 }

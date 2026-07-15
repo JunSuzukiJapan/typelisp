@@ -118,6 +118,21 @@
   ロードは名前空間コンテキストを一時退避して行う（`Checker::suspend_ns_context`——
   依存モジュールが現在ファイルのモジュール配下にネスト登録されるのを防ぐ）。
   式位置に `use`/`module` が現れた場合は専用エラー（トップレベル専用である旨）。
+  マクロの呼び出し可能タイミング自体の制約は§3の`defmacro`仕様を参照。
+  テスト: `tests/macro_use_test.rs`。
+- **モジュール越しのマクロ呼び出し**（2026-07-15 実装）: `resolve_macro_path`（`resolve_fn_path`の
+  マクロ版、同じ可視性規則）を新設し、`mod::macro-name`という`::`修飾呼び出しを式位置
+  （`check_path_call`）・トップレベル（`try_expand_toplevel_macro`）の両方で解決する。
+  上記のマクロ生成`use`と組み合わせ可能（例: `lib::get-answer`というマクロが`'(dep::answer)`を
+  生成するなら、`dep`は自動でロードされる）。
+- **quoted data内の`::`パス**（2026-07-15 実装）: `QuotedSexpr::Path(Vec<String>)`を新設
+  （`Sexpr`組み込みADTに`Path`バリアントを追加するのではなく、`Sym`同様チェッカー内部の
+  ミラー表現として）。`(quote (dep::head))`や`` `(dep::head) ``（マクロ本体で他モジュールの
+  関数を指す典型パターン）が型チェックを通るようになった。`value_to_quoted`
+  （`src/check/checker.rs`）↔`alloc_quoted`（`src/eval/interp.rs`、`heap.intern_path`で復元）
+  が対。**compile（LLVM JIT/AOT）は非対応のまま**（`Sym`/`Bignum`/`Ratio`と同じグループで
+  `unsupported`、`ast_bridge.rs::translate_quote`）——`PathId`に対応する`rt_*`関数が無いのは
+  他の3者と同じ理由。`FASL_FORMAT_VERSION`を3へbump（新バリアント追加のため）。
   テスト: `tests/macro_use_test.rs`。
 - **循環参照は明示エラー**（`circular module dependency: a -> b -> a`）: checkerは単一パスで
   Cのヘッダのような宣言/定義分離が無いため、サイレントスキップは後段の紛らわしい
@@ -188,6 +203,15 @@
 戻り値`Option<Item>`）から自動推論するため、checker特殊形にする必要はない。`while-let`を呼ぶだけの
 薄い`defmacro`、§5.1のtrait機構参照）。`defmacro` は CL 流（非衛生的）— 詳細は
 [implementation-log.md](implementation-log.md) のステップ 4k を参照。`defstruct`/`defenum`は§6参照。
+
+**仕様: マクロは定義（`defmacro`のチェック）より後のフォームでのみ呼び出せる**（同一ファイル内
+の前方参照は不可）。checkerは単一パスで、`defmacro`自体の登録（マクロ展開器`Interp::fns`への
+登録）はそのフォームをチェックした副作用として起きるため、原理的にそれより前のフォームからは
+呼び出せない——C言語のヘッダのような宣言/定義分離が無い設計（§2.3の循環参照エラーと同じ理由）
+の帰結であり、依存ロード・`use`生成マクロ（下記）を含め全マクロ呼び出しに共通するルール。
+`mod::macro-name`という`::`修飾呼び出しでモジュール越しにマクロを呼ぶこともできる（`use`のエイリ
+アス経由ではなく常にフルパス、`pub defmacro`でなければ定義モジュール外から不可視——`defun`の
+`mod::fn`呼び出しと同じ可視性規則）。
 `when`/`unless`/`and`/`or`/`cond`/`let*` は `if`/`let` への脱糖。`setf`（可変ローカル/グローバル変数）/`while` は専用 AST
 ノード（eval 環境は `Rc<RefCell>` の可変スロット）。`defvar`（可変）/`defconstant`（不変）はグローバル変数を現在の
 名前空間に登録する。型注釈は**必須**——`(defvar (name Type) value)`（グローバルの型はプログラムの

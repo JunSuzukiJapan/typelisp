@@ -27,9 +27,13 @@
   チェック（二重展開なし）。チェック途中の依存ロードは`Checker::suspend_ns_context`で
   名前空間を退避（現在ファイルのモジュール配下へのネスト登録を防ぐ——重要な罠だった）。
   副産物: 式位置の`use`/`module`は「トップレベル専用」の明確なエラーに（従来は紛らわしい
-  "unbound variable"）。**残**: マクロ生成`use`はマクロ定義より後のフォームでのみ機能
-  （原理的制約）。モジュール越しのマクロ呼び出し自体が未サポート（`resolve_macro`は
-  現在ns→root公開の2段のみ、これは従来から）。テスト: `tests/macro_use_test.rs`（8件）。
+  "unbound variable"）。マクロ生成`use`はマクロ定義より後のフォームでのみ機能するが、これは
+  バグではなく仕様（単一パスチェックの原理的帰結、`language-design.md`§3の`defmacro`仕様に
+  明記）。同日中に追加解消: モジュール越しのマクロ呼び出し（`resolve_macro_path`を新設、
+  `mod::macro-name`が式位置・トップレベル双方で解決可能に）、quoted data内の`::`パス
+  （`QuotedSexpr::Path`を新設、`'(dep::head)`が型チェックを通るように——`FASL_FORMAT_VERSION`を
+  3へbump）。compile（LLVM）側はPathも`Sym`/`Bignum`/`Ratio`同様unsupportedのまま。
+  テスト: `tests/macro_use_test.rs`。
 - ~~**LSPの依存キャッシュなし**: 診断パスごとにpreludeソース(822行)をparse+型チェックし直す~~
   **→ 2026-07-14 解消**（真のコスト要因はprelude再ロードだった）。fasl(コンパイル済みモジュール)
   機構を新設し、preludeを一度だけチェックして`Fasl`(ヒープ非依存のシリアライズ)化、各診断パスは

@@ -332,7 +332,11 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 
 /// Bump on any change to the serialized shape — a loader seeing a different
 /// version silently falls back to the source file.
-pub const FASL_FORMAT_VERSION: u32 = 2;
+///
+/// 3: added `QuotedSexpr::Path` (a `::`-qualified path inside quoted data,
+/// e.g. a `defmacro` body's `'(dep::head)`), reachable from any serialized
+/// `Expr::Quote`/`Typed` — 2026-07-15.
+pub const FASL_FORMAT_VERSION: u32 = 3;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.

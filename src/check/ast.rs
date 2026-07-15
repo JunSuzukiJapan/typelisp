@@ -202,6 +202,10 @@ pub enum QuotedSexpr {
     Char(char),
     Bool(bool),
     Sym(String),
+    /// A `::`-qualified path (e.g. `dep::head`), segments in written order —
+    /// the reader's `Value::Path` mirrored heap-independently, same reason
+    /// as the rest of this type (see [`Expr::Quote`]'s doc comment).
+    Path(Vec<String>),
     Str(String),
     Cons(Box<QuotedSexpr>, Box<QuotedSexpr>),
 }

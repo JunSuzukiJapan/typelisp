@@ -7,6 +7,13 @@
 //! misleading "unbound variable" — the known limitation recorded in
 //! `docs/dev/TODO.md` until 2026-07-15.
 //!
+//! Also covers two related features added the same day:
+//! `mod::macro-name`-qualified cross-module macro calls
+//! (`Checker::resolve_macro_path`), and `::`-qualified paths inside quoted
+//! data (`QuotedSexpr::Path`, e.g. a macro body's `'(dep::head)`) — both
+//! documented as part of the `defmacro` spec in
+//! `docs/dev/language-design.md`.
+//!
 //! Project-driving tests reuse `module_file_test.rs`'s fixture scheme:
 //! each test builds its own directory under
 //! `target/module-test-tmp/<test name>` and runs the real `Loader` +
@@ -215,4 +222,101 @@ fn macro_generated_defun_defines_a_callable_function() {
         "(defmacro make-forty () '(defun forty () i32 40))\n(make-forty)\n(forty)",
     );
     assert_eq!(result, Ok(RtValue::Int(40)));
+}
+
+// ---- cross-module macro calls (`Checker::resolve_macro_path`) -------------
+
+/// A `pub defmacro` in one file is callable from another via a `mod::name`
+/// path, in expression position, without any `use` aliasing (mirrors an
+/// ordinary `mod::fn` call — no `use` needed once the module is loaded).
+#[test]
+fn cross_module_macro_call_in_expression_position() {
+    let result = run_project(
+        "macro-cross-module-expr",
+        &[
+            ("lib.typl", "(pub defmacro triple (x) `(+ ,x (+ ,x ,x)))"),
+            ("main.typl", "(use lib)\n(lib::triple 4)"),
+        ],
+        "main.typl",
+    );
+    assert_eq!(result, Ok(Some(RtValue::Int(12))));
+}
+
+/// The same `mod::name` resolution also works when the macro call is itself
+/// a *top-level* form (`Checker::check_form_dispatch`'s macro re-dispatch —
+/// exercised via `try_expand_toplevel_macro`'s `Value::Path`-head branch),
+/// producing a definition.
+#[test]
+fn cross_module_macro_call_at_top_level() {
+    let result = run_project(
+        "macro-cross-module-toplevel",
+        &[
+            ("lib.typl", "(pub defmacro make-fifty () '(defun fifty () i32 50))"),
+            ("main.typl", "(use lib)\n(lib::make-fifty)\n(fifty)"),
+        ],
+        "main.typl",
+    );
+    assert_eq!(result, Ok(Some(RtValue::Int(50))));
+}
+
+/// A non-`pub` macro is invisible from outside its defining module — same
+/// visibility rule as an ordinary `mod::fn` call.
+#[test]
+fn cross_module_macro_call_respects_visibility() {
+    let result = run_project(
+        "macro-cross-module-private",
+        &[
+            ("lib.typl", "(defmacro secret () '5)"),
+            ("main.typl", "(use lib)\n(lib::secret)"),
+        ],
+        "main.typl",
+    );
+    assert!(result.is_err(), "a non-pub macro must not be callable across modules");
+}
+
+// ---- `::`-paths inside quoted data (`QuotedSexpr::Path`) ------------------
+
+/// A macro whose body quotes a module-qualified call (`'(dep::head)`) used
+/// to fail to check ("`::`-paths inside quoted data are not yet
+/// supported"). The expansion, once spliced into real code and checked,
+/// resolves the path exactly like a literal `(dep::head)` would.
+#[test]
+fn quoted_path_inside_a_macro_body_resolves_when_expanded() {
+    let result = run_project(
+        "macro-quoted-path",
+        &[
+            ("dep.typl", "(pub defun answer () i32 55)"),
+            (
+                "main.typl",
+                "(use dep)\n(defmacro call-dep () '(dep::answer))\n(call-dep)",
+            ),
+        ],
+        "main.typl",
+    );
+    assert_eq!(result, Ok(Some(RtValue::Int(55))));
+}
+
+/// `(quote ...)` directly (no macro involved) also accepts a `::`-path
+/// anywhere inside the quoted tree, including nested inside a list.
+#[test]
+fn quote_accepts_a_bare_path_and_a_nested_one() {
+    assert_eq!(run_forms("(quote dep::head)").map(|_| ()), Ok(()));
+    assert_eq!(run_forms("(quote (a (dep::head 1) b))").map(|_| ()), Ok(()));
+}
+
+/// The two new features compose: a cross-module macro (`lib::get-answer`)
+/// whose body quotes a path into a *third* module (`dep::answer`) — the
+/// expansion, checked where `lib::get-answer` is called, must resolve both.
+#[test]
+fn cross_module_macro_generating_a_quoted_path_to_a_third_module() {
+    let result = run_project(
+        "macro-cross-module-quoted-path",
+        &[
+            ("dep.typl", "(pub defun answer () i32 77)"),
+            ("lib.typl", "(use dep)\n(pub defmacro get-answer () '(dep::answer))"),
+            ("main.typl", "(use lib)\n(lib::get-answer)"),
+        ],
+        "main.typl",
+    );
+    assert_eq!(result, Ok(Some(RtValue::Int(77))));
 }
