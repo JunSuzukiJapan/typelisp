@@ -23,8 +23,19 @@
 //! (rather than catching `Error::ModuleNotLoaded` mid-check and retrying the
 //! form) means no form is ever checked twice, so loading can't produce
 //! spurious redefinition warnings. The structured error still exists as the
-//! checker's signal for a `use` no scan could see (e.g. one produced by a
-//! macro expansion) — such a `use` reports "unresolved" rather than loading.
+//! checker's signal for a `use` naming a path no file maps to.
+//!
+//! A `use` produced by *macro expansion* can't be seen by that pre-check scan
+//! (the macro it comes from is only registered by checking an earlier form of
+//! the very same file, so a scan running before any checking has nothing to
+//! expand — the reason the scan alone can't cover this). Instead, the check
+//! loop pre-expands each top-level macro call
+//! (`Checker::try_expand_toplevel_macro`), scans the expansion the same way
+//! (loading any dependency it `use`s — with the checker's namespace context
+//! suspended, see `try_load_module`), and checks the expanded form directly,
+//! so nothing expands twice. Consequence: a macro-generated `use` works in
+//! any form *after* the `defmacro`, which is the strongest guarantee possible
+//! under single-pass checking. See `tests/macro_use_test.rs`.
 //!
 //! Circular dependencies are a hard error, reported with the whole chain
 //! (`circular module dependency: a -> b -> a`). The checker is single-pass —
@@ -286,6 +297,28 @@ impl Loader {
         let mut body = Vec::new();
         let mut check_err = None;
         for (v, loc) in forms {
+            // A top-level macro call may expand to `(use ...)` (or to a
+            // `(module ...)` containing one) — a dependency the pre-check
+            // scan above cannot see, since the macro only got registered by
+            // checking an earlier form of this very file. Expand here, scan
+            // each expansion so its dependency files get loaded, and check
+            // the final expansion directly (the checker then has nothing
+            // left to expand at top level, so nothing expands twice).
+            // Expansion *errors* are deliberately ignored: `check_form_at`
+            // re-expands and reports them with proper location and recovery
+            // handling.
+            let mut v = v;
+            while let Ok(Some(expanded)) = checker.try_expand_toplevel_macro(heap, &*interp, v) {
+                heap.push_root(expanded); // popped by `pop_roots_to(mark)` below
+                if let Err(e) = self.scan_form(heap, reader, checker, interp, expanded, segs) {
+                    check_err = Some(e);
+                    break;
+                }
+                v = expanded;
+            }
+            if check_err.is_some() {
+                break;
+            }
             match checker.check_form_at(heap, &*interp, v, Some(loc)) {
                 // `(load ...)` loads inline (so subsequent forms see the
                 // definitions), preferring a compiled fasl — see
@@ -363,7 +396,26 @@ impl Loader {
                 }
                 Ok(())
             }
-            _ => Ok(()),
+            _ => {
+                // A macro call encountered while scanning (inside a nested
+                // `(module ...)` body, or a macro→macro chain link from
+                // `load_source_inner`'s pre-expansion) may itself expand to
+                // `(use ...)`: expand, scan the expansion, and discard it —
+                // the checker re-expands when it checks this form. Only
+                // macros already registered at this point resolve (the
+                // pre-check scan runs before any of this file's own
+                // `defmacro`s are checked; `load_source_inner`'s per-form
+                // pre-expansion covers those). Expansion failures are
+                // ignored: the checker reports them with proper location
+                // and recovery handling.
+                if let Ok(Some(expanded)) = checker.try_expand_toplevel_macro(heap, &*interp, v) {
+                    heap.push_root(expanded);
+                    let result = self.scan_form(heap, reader, checker, interp, expanded, cur_segs);
+                    heap.pop_root();
+                    return result;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -445,7 +497,16 @@ impl Loader {
         }
         let src = self.read_source(&file)?;
         self.loaded_files.insert(file.clone());
-        self.load_source(heap, reader, checker, interp, &file, &src, module_segs.to_vec())?;
+        // A dependency file's own module must never nest under whichever
+        // module the checker is currently inside: during the normal
+        // pre-check scan the context is already clean (making the suspend a
+        // no-op), but a load triggered mid-check — a `use` surfaced by macro
+        // expansion, see `load_source_inner`'s check loop — runs inside the
+        // requesting file's module context.
+        let saved = checker.suspend_ns_context();
+        let result = self.load_source(heap, reader, checker, interp, &file, &src, module_segs.to_vec());
+        checker.resume_ns_context(saved);
+        result?;
         Ok(true)
     }
 

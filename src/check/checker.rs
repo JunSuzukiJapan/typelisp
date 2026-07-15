@@ -426,6 +426,12 @@ pub const MONO_BUNDLE_MODULE: &str = "<monomorph specializations>";
 /// generics per form; hitting this is a `TypeError`, not a hang.
 const SPECIALIZATION_BUDGET: usize = 512;
 
+/// Opaque saved namespace context — see [`Checker::suspend_ns_context`].
+pub struct NsContext {
+    ns: Vec<String>,
+    file_ns: Vec<Vec<String>>,
+}
+
 /// The type checker, holding the data-type and function registries plus the
 /// current namespace (module) path.
 pub struct Checker {
@@ -779,6 +785,17 @@ impl Checker {
                     _ => {}
                 }
             }
+            // A top-level macro call: expand and re-dispatch the expansion as
+            // a top-level form — a macro can produce `use`/`defun`/`module`/
+            // any definition form, not just an expression (recursion covers
+            // macro→macro chains). Expression-position macro calls are
+            // unaffected: those expand inside `check_list` as before.
+            if let Some(expanded) = self.try_expand_toplevel_macro(heap, interp, v)? {
+                heap.push_root(expanded);
+                let result = self.check_form_dispatch(heap, interp, expanded, def_loc);
+                heap.pop_root();
+                return result;
+            }
         }
         let env = Env::new();
         // `def_loc` doubles as the expression's own location hint: for a list
@@ -1063,6 +1080,84 @@ impl Checker {
             }
         }
         None
+    }
+
+    /// Heads with built-in meaning — the expression special forms matched in
+    /// [`Self::check_list`] and the top-level forms matched in
+    /// [`Self::check_form_dispatch`]. [`Self::try_expand_toplevel_macro`]
+    /// never treats these as macro calls, so a macro sharing such a name can
+    /// never hijack the built-in form (both existing `match`es already win
+    /// over `resolve_macro` by being tried first; this keeps the loader's
+    /// pre-expansion consistent with that order).
+    fn is_builtin_form_head(name: &str) -> bool {
+        matches!(
+            name,
+            // expression special forms (`check_list`)
+            "if" | "let" | "let*" | "progn" | "setf" | "loop" | "break" | "return" | "list"
+                | "lambda" | "labels" | "match" | "panic" | "the" | "as" | "try-as" | "compile"
+                | "quote" | "quasiquote"
+                // top-level forms (`check_form_dispatch`)
+                | "pub" | "defun" | "defvar" | "defconstant" | "defmacro" | "module"
+                | "defmethod" | "defstruct" | "defenum" | "deftrait" | "impl" | "use" | "load"
+        )
+    }
+
+    /// If `v` is a compound form whose head symbol resolves to a macro
+    /// ([`Self::resolve_macro`], so the current namespace matters), expand it
+    /// one step against the unevaluated argument forms and return the
+    /// expansion; `Ok(None)` when `v` is not a macro call. Built-in form
+    /// heads are never treated as macro calls — see
+    /// [`Self::is_builtin_form_head`]. Public so the loader
+    /// (`crate::project`) can pre-expand a top-level form and scan the
+    /// expansion for `(use ...)` dependencies before checking it. The caller
+    /// must root the returned expansion (`Heap::push_root`) before anything
+    /// that may allocate.
+    pub fn try_expand_toplevel_macro(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        v: Value,
+    ) -> Result<Option<Value>, Error> {
+        if !matches!(v, Value::Cons(_)) {
+            return Ok(None);
+        }
+        let elems = heap.list_to_vec(v)?;
+        let head = match elems.first() {
+            Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+            _ => return Ok(None),
+        };
+        if Self::is_builtin_form_head(&head) {
+            return Ok(None);
+        }
+        let (macro_path, arity, rest) = match self.resolve_macro(&head) {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+        let args = &elems[1..];
+        Self::check_macro_arity(&head, arity, rest, args.len())?;
+        let expanded = interp
+            .expand_macro(heap, &macro_path, args.to_vec())
+            .map_err(|e| Error::TypeError(format!("macro `{}`: {}", head, e)))?;
+        Ok(Some(expanded))
+    }
+
+    /// The arity check shared by every macro-expansion site (a `&rest` macro
+    /// takes at least `arity` arguments, a fixed one exactly `arity`).
+    fn check_macro_arity(head: &str, arity: usize, rest: bool, got: usize) -> Result<(), Error> {
+        if rest {
+            if got < arity {
+                return Err(Error::TypeError(format!(
+                    "macro `{}` expects at least {} argument(s), got {}",
+                    head, arity, got
+                )));
+            }
+        } else if got != arity {
+            return Err(Error::TypeError(format!(
+                "macro `{}` expects {} argument(s), got {}",
+                head, arity, got
+            )));
+        }
+        Ok(())
     }
 
     /// Resolve a bare constructor name to its `(type path, variant index)`,
@@ -2320,6 +2415,33 @@ impl Checker {
         self.file_ns.pop();
     }
 
+    /// Temporarily clear the namespace context (`ns` and `file_ns`) so the
+    /// loader can load a *dependency file* from inside another file's check
+    /// loop without registering it under that file's module. Dependency
+    /// loads normally run with a clean context (`project.rs` scans a file's
+    /// `use`s before `enter_file_module`), but a `use` surfaced by macro
+    /// expansion is only discovered mid-check — see
+    /// `Loader::load_source_inner`. Pair with [`Self::resume_ns_context`].
+    pub fn suspend_ns_context(&mut self) -> NsContext {
+        NsContext {
+            ns: std::mem::take(&mut self.ns),
+            file_ns: std::mem::take(&mut self.file_ns),
+        }
+    }
+
+    /// Restore the context saved by [`Self::suspend_ns_context`]. The
+    /// in-between load must have left the context empty again (every
+    /// `enter_file_module` paired with an `exit_file_module`, even on error
+    /// — see `load_source_inner`).
+    pub fn resume_ns_context(&mut self, saved: NsContext) {
+        debug_assert!(
+            self.ns.is_empty() && self.file_ns.is_empty(),
+            "dependency load left an unbalanced namespace context"
+        );
+        self.ns = saved.ns;
+        self.file_ns = saved.file_ns;
+    }
+
     fn check_defmethod(
         &mut self,
         heap: &mut Heap,
@@ -3030,6 +3152,16 @@ impl Checker {
             "compile" => return self.check_compile(heap, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
+            // Top-level-only forms reaching expression position (e.g. a
+            // macro expanding to `(use ...)` inside a function body) get a
+            // clear error instead of the misleading "unbound variable" the
+            // fallthrough resolution below would produce.
+            "use" | "module" => {
+                return Err(Error::TypeError(format!(
+                    "{}: only allowed at top level, not in expression position",
+                    head
+                )))
+            }
             _ => {}
         }
         // A local variable holding a function value is applied directly (locals
@@ -3050,23 +3182,7 @@ impl Checker {
         // call is resolved below), since a macro is a purely compile-time
         // name with no runtime value to shadow or be shadowed by.
         if let Some((macro_path, arity, rest)) = self.resolve_macro(&head) {
-            if rest {
-                if args.len() < arity {
-                    return Err(Error::TypeError(format!(
-                        "macro `{}` expects at least {} argument(s), got {}",
-                        head,
-                        arity,
-                        args.len()
-                    )));
-                }
-            } else if args.len() != arity {
-                return Err(Error::TypeError(format!(
-                    "macro `{}` expects {} argument(s), got {}",
-                    head,
-                    arity,
-                    args.len()
-                )));
-            }
+            Self::check_macro_arity(&head, arity, rest, args.len())?;
             let expanded = interp
                 .expand_macro(heap, &macro_path, args.to_vec())
                 .map_err(|e| Error::TypeError(format!("macro `{}`: {}", head, e)))?;
