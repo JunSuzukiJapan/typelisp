@@ -2965,18 +2965,18 @@ fn is_rt_builtin_name(name: &str) -> bool {
 /// call these to build/read/write a `BoxedObj::Struct` — the same
 /// `BoxedObj::Struct` mem/rt-layer plumbing Stage 1 already exercised in
 /// isolation, wired to the compiler for the first time here.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 68] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 70] {
     use crate::compile::runtime::{
         rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new, rt_bignum_sub,
         rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr, rt_char_equalp,
         rt_cons, rt_float_new, rt_float_to_bignum, rt_float_to_ratio, rt_float_value, rt_global_get, rt_global_new, rt_global_set,
         rt_hashtable_clear, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw, rt_hashtable_keys,
         rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_hashtable_values, rt_int_to_bignum, rt_int_to_ratio,
-        rt_match_fail, rt_panic, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp,
-        rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul, rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum,
-        rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_equalp,
-        rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
-        rt_struct_new, rt_struct_push_field, rt_truncate_sexpr_roots,
+        rt_intern_path, rt_intern_symbol, rt_match_fail, rt_panic, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root,
+        rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul, rt_ratio_numerator,
+        rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append,
+        rt_str_eq, rt_str_equalp, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_count, rt_struct_field_get,
+        rt_struct_field_set, rt_struct_new, rt_struct_push_field, rt_truncate_sexpr_roots,
     };
     [
         ("rt_car", rt_car as usize),
@@ -3047,6 +3047,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 68] {
         ("rt_ratio_to_float", rt_ratio_to_float as usize),
         ("rt_ratio_numerator", rt_ratio_numerator as usize),
         ("rt_ratio_denominator", rt_ratio_denominator as usize),
+        ("rt_intern_symbol", rt_intern_symbol as usize),
+        ("rt_intern_path", rt_intern_path as usize),
     ]
 }
 

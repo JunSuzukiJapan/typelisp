@@ -2843,17 +2843,70 @@ pub const SOURCE: &str = r#"
                        ;; ADT's general `malloc`'d-box representation
                        ;; (`compile-construct-box`) — see those three
                        ;; functions' doc comments.
+                       ;; `variant` `5`/`10` (quoted `Sym`/`Path` —
+                       ;; `ast_bridge::translate_quote`'s doc comment) are
+                       ;; peeled off *here*, before delegating to
+                       ;; `compile-construct-sexpr`, rather than folded into
+                       ;; that function's own already-deep dispatch chain —
+                       ;; adding even one more arm there was enough to
+                       ;; overflow an unrelated test's stack (`scripts/
+                       ;; test-serial.sh`'s `RUST_MIN_STACK` comment records
+                       ;; the incident), since `Checker::check_if`/
+                       ;; `Interp::eval` never loopified `if`-chain recursion
+                       ;; the way `compile-value`'s own dispatch did.
                        (compile-construct ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((is-sexpr (sexpr-bool (sexpr-car (sexpr-cdr e)))))
                            (let ((mutable (sexpr-bool (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
                              (let ((type-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
                                (let ((variant (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
                                  (let ((arg-forms (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
-                                   (if is-sexpr
-                                       (compile-construct-sexpr builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base variant arg-forms)
-                                       (if mutable
-                                           (compile-construct-boxed-struct builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name-form arg-forms)
-                                           (compile-construct-box builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base variant arg-forms)))))))))
+                                   (if (eq variant 5)
+                                       (compile-construct-sym builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base arg-forms)
+                                       (if (eq variant 10)
+                                           (compile-construct-path builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base arg-forms)
+                                           (if is-sexpr
+                                               (compile-construct-sexpr builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base variant arg-forms)
+                                               (if mutable
+                                                   (compile-construct-boxed-struct builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name-form arg-forms)
+                                                   (compile-construct-box builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base variant arg-forms)))))))))))
+                       ;; `(construct true false empty 5 name-form)` — a
+                       ;; quoted symbol literal (`ast_bridge::translate_quote`'s
+                       ;; `Sym` arm). `name-form` is an ordinary `(str ...)`
+                       ;; node (`str_literal_form`); compiling it yields a
+                       ;; fully tagged `Sexpr::Str`, handed straight to
+                       ;; `rt_intern_symbol` (no GC-root protection needed —
+                       ;; an interned symbol is permanent, unlike the `Str`
+                       ;; that briefly holds its name).
+                       (compile-construct-sym ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (arg-forms Sexpr)) llvm-value
+                         (let ((name-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-car arg-forms))))
+                           (let ((args-ptr (alloca-args builder 1)))
+                             (store-arg builder args-ptr 0 name-v)
+                             (build-call builder (get-function m "rt_intern_symbol") args-ptr 1))))
+                       ;; `(construct true false empty 10 seg-form...)` — a
+                       ;; quoted `::`-path literal (`ast_bridge::translate_quote`'s
+                       ;; `Path` arm), one `(str ...)` node per segment.
+                       ;; `compile-construct-path-segs` interns each segment
+                       ;; (`rt_intern_symbol`, same as `compile-construct-sym`)
+                       ;; into a fresh `args-ptr` array, then `rt_intern_path`
+                       ;; combines them into the final tagged `Sexpr::Path`.
+                       (compile-construct-path ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (arg-forms Sexpr)) llvm-value
+                         (let ((n (sexpr-list-length arg-forms)))
+                           (let ((args-ptr (alloca-args builder n)))
+                             (compile-construct-path-segs builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr arg-forms 0)
+                             (build-call builder (get-function m "rt_intern_path") args-ptr n))))
+                       ;; Fills a `compile-construct-path`-allocated array,
+                       ;; one interned segment `Sexpr::Symbol` per slot —
+                       ;; the path-literal analogue of `store-str-chars`.
+                       (compile-construct-path-segs ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (args-ptr llvm-value) (forms Sexpr) (idx i32)) ()
+                         (if (sexpr-consp forms)
+                             (let ((form (sexpr-car forms)) (rest (sexpr-cdr forms)))
+                               (let ((name-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base form)))
+                                 (let ((seg-args-ptr (alloca-args builder 1)))
+                                   (store-arg builder seg-args-ptr 0 name-v)
+                                   (let ((sym-v (build-call builder (get-function m "rt_intern_symbol") seg-args-ptr 1)))
+                                     (store-arg builder args-ptr idx sym-v)
+                                     (compile-construct-path-segs builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr rest (+ idx 1))))))
+                             ()))
                        ;; Builds a `BoxedObj::Struct` (Stage 3 of the
                        ;; Sexpr/RtValue unification plan,
                        ;; `docs/implementation-log.md`) for a `mutable`

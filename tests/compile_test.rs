@@ -3369,23 +3369,70 @@ fn compile_and_interpret_agree_on_a_quoted_list() {
     assert_eq!(compiled, RtValue::Int(6));
 }
 
-/// A quoted symbol has no compiled representation (a `Sym`'s payload is a
-/// `SymId`, same gap `compile-sexpr-field`'s own doc comment already
-/// documents) — `translate_quote` bails out to a clean bridge-level
-/// `unsupported`, even though the *surrounding* function is otherwise
-/// perfectly compilable, rather than reaching a confusing low-level panic
-/// deep inside the interpreted compiler body.
+/// A quoted symbol compiles: `translate_quote`'s `Sym` arm embeds the name
+/// as an ordinary `(str ...)` literal and interns it for real at runtime
+/// (`rt_intern_symbol`) — round-tripped here through `eq` against the same
+/// symbol quoted on the interpreted side (interning is content-addressed,
+/// so the two `Value::Symbol`s compare equal regardless of which `Heap`
+/// interned them first).
 #[test]
-fn compile_of_a_function_quoting_a_symbol_is_a_clean_error() {
-    let err = run_with_compiler(
+fn compile_of_a_function_quoting_a_symbol_round_trips() {
+    let v = eval_ok_with_compiler(
         r#"
         (defun q () Sexpr (quote foo))
         (compile q)
+        (eq (q) (quote foo))
         "#,
-    )
-    .unwrap_err();
-    assert!(matches!(err, EvalError::Panic(_)), "expected a Panic, got {:?}", err);
+    );
+    assert!(expect_bool(v));
 }
+
+/// A quoted list containing a symbol also compiles — the `Cons` case no
+/// longer needs to bail out on a nested `Sym`/`Path` leaf now that both have
+/// real compiled representations.
+#[test]
+fn compile_of_a_function_quoting_a_list_of_symbols_round_trips() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun q () Sexpr (quote (a b c)))
+        (compile q)
+        (equal (q) (quote (a b c)))
+        "#,
+    );
+    assert!(expect_bool(v));
+}
+
+/// A quoted `::`-qualified path compiles: `translate_quote`'s `Path` arm
+/// interns each segment (`rt_intern_symbol`) then combines them
+/// (`rt_intern_path`).
+#[test]
+fn compile_of_a_function_quoting_a_path_round_trips() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun q () Sexpr (quote dep::head))
+        (compile q)
+        (eq (q) (quote dep::head))
+        "#,
+    );
+    assert!(expect_bool(v));
+}
+
+/// `match` on a compiled function's quoted-symbol result dispatches
+/// correctly by tag (`compile-sexpr-tag-test`'s existing `variant 5` arm,
+/// exercised for the first time now that a quoted symbol can actually reach
+/// compiled code) — proves the tag test, not just `eq`, sees a real `Sym`.
+#[test]
+fn compile_of_a_function_matching_a_quoted_symbol_dispatches_by_tag() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun q () i64 (match (quote foo) ((sym _) 1) (_ 0)))
+        (compile q)
+        (q)
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(1));
+}
+
 
 // ---- Stage A: `Vector<T>` builtin method compile (Iter-compile plan) --------
 //

@@ -1209,21 +1209,60 @@ fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Typ
 /// from any real `Typed` sub-expression (there is none; `datum` is already
 /// fully known at check time, `Checker`'s own `QuotedSexpr`). Reusing
 /// `compile-construct-sexpr`'s existing per-variant dispatch this way needs
-/// no new machinery in `compiler.rs`: `Nil`/`Int`/`Float`/`Bool`/`Char`/`Str`/
-/// `Cons` already have a real compiled representation (used today by an
-/// ordinary `Sexpr` constructor call), so a quoted literal made only of
-/// those reuses it verbatim, recursively for a `Cons`'s two fields.
-/// `Sym`/`Path` don't (a `Sym`'s payload is a `SymId` with no compiled form,
-/// same for a `Path`'s `PathId`), so a quoted literal containing one of
-/// those anywhere (even nested inside a `Cons`) stays `unsupported` here
-/// rather than reaching a confusing low-level panic deep inside the
-/// interpreted compiler body. `Bignum`/`Ratio` *do* have compiled support
-/// (`bignum_literal_form`/`ratio_literal_form`, variants `8`/`9`), the same
-/// as every other leaf here.
+/// no new machinery in `compiler.rs` for most leaves: `Nil`/`Int`/`Float`/
+/// `Bool`/`Char`/`Str`/`Cons` already have a real compiled representation
+/// (used today by an ordinary `Sexpr` constructor call), so a quoted literal
+/// made only of those reuses it verbatim, recursively for a `Cons`'s two
+/// fields. `Bignum`/`Ratio` *do* have compiled support too
+/// (`bignum_literal_form`/`ratio_literal_form`, variants `8`/`9`).
+///
+/// `Sym`/`Path` (variants `5`/`10`) are the two exceptions: a `Sym`'s/
+/// `Path`'s tagged payload is a `SymId`/`PathId` with no compile-time-known
+/// value the way every other leaf's payload is (the interning table only
+/// exists in whichever `Heap` ends up running the code — AOT's target
+/// program has its own, separate one) — the same reason `Str` embeds its
+/// *characters*, not a pre-allocated `Value::Str`, rather than that these
+/// two variants have no compiled representation at all. `compiler.rs`'s
+/// dedicated `compile-construct-sym`/`compile-construct-path` (called
+/// directly by `compile-construct`, *not* folded into
+/// `compile-construct-sexpr`'s own dispatch — see that function's own call
+/// site for why) mirror `Str`'s approach: each segment's *name* is embedded
+/// as an ordinary `(str (int c0) ...)` node (built by [`str_literal_form`],
+/// the exact same helper `Str` itself uses) and interned for real at
+/// startup, via `rt_intern_symbol`/`rt_intern_path`.
 fn translate_quote(heap: &mut Heap, datum: &QuotedSexpr) -> Result<Value, Error> {
     match datum {
         QuotedSexpr::Nil => tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(0)]),
-        QuotedSexpr::Sym(_) | QuotedSexpr::Path(_) => unsupported(heap, "Quote"),
+        QuotedSexpr::Sym(name) => {
+            let leaf = str_literal_form(heap, name)?;
+            heap.push_root(leaf);
+            let result = tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(5), leaf]);
+            heap.pop_root();
+            result
+        }
+        QuotedSexpr::Path(segs) => {
+            let mut leaves = Vec::with_capacity(segs.len());
+            for seg in segs {
+                let leaf = match str_literal_form(heap, seg) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        for _ in &leaves {
+                            heap.pop_root();
+                        }
+                        return Err(e);
+                    }
+                };
+                heap.push_root(leaf);
+                leaves.push(leaf);
+            }
+            let mut fields = vec![Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(10)];
+            fields.extend(leaves.iter().copied());
+            let result = tagged(heap, "construct", &fields);
+            for _ in &leaves {
+                heap.pop_root();
+            }
+            result
+        }
         QuotedSexpr::Int(n) => {
             let leaf = tagged(heap, "int", &[Value::Int(*n)])?;
             heap.push_root(leaf);
@@ -2933,17 +2972,37 @@ mod tests {
         assert_eq!(cdr_fields[3], Value::Int(0), "Nil is Sexpr variant 0");
     }
 
-    /// A quoted symbol has no compiled representation (a `Sym`'s payload is
-    /// a `SymId`) — `translate_quote` bails to a clean `unsupported`, even
-    /// nested inside an otherwise-representable `Cons`.
+    /// A quoted symbol nested inside a `Cons` compiles: `translate_quote`'s
+    /// `Sym` arm produces a `(construct true false empty 5 name-form)` node
+    /// like any other leaf, recursed into the same way `Int`/`Str`/... are.
     #[test]
-    fn a_quoted_symbol_nested_in_a_cons_is_unsupported() {
+    fn a_quoted_symbol_nested_in_a_cons_compiles() {
         let mut heap = Heap::with_capacity(1 << 10);
         let datum = QuotedSexpr::Cons(Box::new(QuotedSexpr::Sym("foo".to_string())), Box::new(QuotedSexpr::Nil));
         let v = ast_to_sexpr(&mut heap, &typed(Expr::Quote(datum), sexpr_ty())).unwrap();
         let (tag, fields) = untag(&heap, v);
-        assert_eq!(tag, "unsupported");
-        assert_eq!(expect_str(&heap, fields[0]), "Quote");
+        assert_eq!(tag, "construct");
+        assert_eq!(fields[3], Value::Int(7), "Cons is Sexpr variant 7");
+        let (car_tag, car_fields) = untag(&heap, fields[4]);
+        assert_eq!(car_tag, "construct");
+        assert_eq!(car_fields[3], Value::Int(5), "Sym is Sexpr variant 5");
+        let (cdr_tag, cdr_fields) = untag(&heap, fields[5]);
+        assert_eq!(cdr_tag, "construct");
+        assert_eq!(cdr_fields[3], Value::Int(0), "Nil is Sexpr variant 0");
+    }
+
+    /// A quoted `::`-path compiles: `translate_quote`'s `Path` arm produces
+    /// a `(construct true false empty 10 seg-form...)` node, one leaf per
+    /// segment.
+    #[test]
+    fn a_quoted_path_compiles() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let datum = QuotedSexpr::Path(vec!["dep".to_string(), "head".to_string()]);
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Quote(datum), sexpr_ty())).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "construct");
+        assert_eq!(fields[3], Value::Int(10), "Path is Sexpr variant 10");
+        assert_eq!(fields.len(), 6, "2 segments -> 2 leaf fields after the 4 header fields");
     }
 
     /// if/let/comparisons, labels/closures Stage 5: `Expr::If` -> `(if is-fn

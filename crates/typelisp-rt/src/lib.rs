@@ -1623,6 +1623,63 @@ pub unsafe extern "C" fn rt_str_new(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().alloc_string(s))
 }
 
+/// Interns `args[0]` (a tagged `Value::Str`) as a symbol, returning it as a
+/// tagged `Value::Symbol` — the compiled-code half of a quoted symbol
+/// literal (`ast_bridge::translate_quote`'s `Sym` arm builds the name as an
+/// ordinary `(str (int c0) ...)` node, exactly like any other string
+/// literal, then wraps the compiled result in a call here rather than
+/// needing its own character-embedding mechanism the way `rt_str_new`
+/// needed one for `Str`). Interning is idempotent and the result is
+/// permanent (`Heap::intern_symbol` — symbols are never collected, unlike a
+/// fresh `Str`), so unlike `rt_str_new`/`rt_cons` this needs no GC-root
+/// protection at all.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// encoding a `Value::Str`; a `Heap` must already be registered on this
+/// thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_intern_symbol(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_intern_symbol: expected 1 argument");
+    }
+    let name = match decode(*args) {
+        Value::Str(id) => active_heap().string(id).to_string(),
+        _ => fatal("rt_intern_symbol: argument is not a Str"),
+    };
+    encode(active_heap().intern_symbol(&name))
+}
+
+/// Interns `args[0..argc]` (each a tagged `Value::Symbol`, one per `::`
+/// segment, in order — `ast_bridge::translate_quote`'s `Path` arm builds
+/// each segment as its own `(str ...)` literal, so the compiled IR calls
+/// [`rt_intern_symbol`] once per segment before collecting the results
+/// here) as a single `::`-path, returning it as a tagged `Value::Path`.
+/// Same permanence/no-GC-root-needed reasoning as `rt_intern_symbol`
+/// (`Heap::intern_path` — a path references only permanent symbols and is
+/// itself permanent).
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least `argc` valid
+/// `i64`s, each encoding a `Value::Symbol`; a `Heap` must already be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_intern_path(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_intern_path: expected at least 1 argument");
+    }
+    let mut segs = Vec::with_capacity(argc as usize);
+    for i in 0..argc as isize {
+        match decode(*args.offset(i)) {
+            Value::Symbol(id) => segs.push(id),
+            _ => fatal("rt_intern_path: argument is not a Symbol"),
+        }
+    }
+    encode(active_heap().intern_path(&segs))
+}
+
 /// `str::length` for compiled code — the character count (not byte length)
 /// of `args[0]`, matching the interpreter's own `string_length`. Returns a
 /// bare `i64` (a `Type::I64` result is never itself Sexpr-tagged).
