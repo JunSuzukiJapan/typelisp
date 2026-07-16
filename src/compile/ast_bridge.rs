@@ -275,10 +275,13 @@ fn match_scrut_kind(ty: &Type, cx: Ctx) -> Option<i64> {
 /// booleans) keeps the cases mutually exclusive by construction, the same
 /// way a `Typed` node has exactly one static type — see `compiler.rs`'s
 /// `retain-bindings`/`release-bindings`/`bind-let-values`/`restore-let-values`.
-fn binding_kind(ty: &Type) -> i64 {
+fn binding_kind(ty: &Type, enums: &HashSet<Path>) -> i64 {
     if matches!(ty, Type::Fn(..)) {
         KIND_FN
-    } else if is_sexpr_type(ty) || matches!(ty, Type::Str | Type::Bignum | Type::Ratio) {
+    } else if is_sexpr_type(ty)
+        || matches!(ty, Type::Str | Type::Bignum | Type::Ratio)
+        || is_enum_ty(ty, enums)
+    {
         // `bignum`/`ratio` join `Str` here for the same reason
         // `struct_field_kind` gives them its own passthrough kind `6`: a
         // bare `Type::Bignum`/`Type::Ratio` value's compiled representation
@@ -286,10 +289,31 @@ fn binding_kind(ty: &Type) -> i64 {
         // `Ratio` already is, so it needs the exact same GC-root push/pop
         // protection across a binding boundary — leaving it `KIND_PLAIN`
         // would silently drop the GC root on a value that's actually a
-        // live heap pointer.
+        // live heap pointer. An enum-typed binding (`Option`/`Result`/user
+        // `defenum`) joins them since the enum-representation unification's
+        // compiler flip: it's now a real `BoxedObj::Enum` heap value (every
+        // enum type compiled code can ever mention is heap-repr by
+        // construction — see `struct_field_kind`'s doc comment), not the
+        // un-GC-managed leaked `malloc` box the pre-flip design never
+        // needed root protection for.
         KIND_SEXPR
     } else {
         KIND_PLAIN
+    }
+}
+
+/// Whether `ty` is `Option`/`Result`/`Error`/a user `defenum` in `enums` —
+/// [`binding_kind`]'s enum test, split out since it also needs the
+/// `Option`/`Result` structural checks [`struct_field_kind`] inlines
+/// directly (no `Ctx` available at every `binding_kind` call site to reuse
+/// that function outright).
+fn is_enum_ty(ty: &Type, enums: &HashSet<Path>) -> bool {
+    match ty {
+        Type::Named(p, args) if p.local() == "option" && p.is_simple() && args.len() == 1 => true,
+        Type::Named(p, args) if p.local() == "result" && p.is_simple() && args.len() == 2 => true,
+        Type::Named(p, _) if p.local() == "error" && p.is_simple() => true,
+        Type::Named(p, _) => enums.contains(p),
+        _ => false,
     }
 }
 
@@ -302,11 +326,11 @@ fn binding_kind(ty: &Type) -> i64 {
 /// sharing it (rather than that method re-deriving its own, now-stale
 /// `Bool`-tagged copy) is what keeps the two from desyncing the way they
 /// did when Stage 6 first generalized this tag.
-pub(crate) fn tagged_sym_list(heap: &mut Heap, names: &[(String, Type)]) -> Result<Value, Error> {
+pub(crate) fn tagged_sym_list(heap: &mut Heap, names: &[(String, Type)], enums: &HashSet<Path>) -> Result<Value, Error> {
     let mut acc = Value::Empty;
     for (n, ty) in names.iter().rev() {
         let sym = heap.intern_symbol(n);
-        let kind = Value::Int(binding_kind(ty));
+        let kind = Value::Int(binding_kind(ty, enums));
         heap.push_root(sym);
         let pair = heap.cons(sym, kind);
         heap.pop_root();
@@ -345,18 +369,23 @@ pub(crate) fn tagged_sym_list(heap: &mut Heap, names: &[(String, Type)]) -> Resu
 /// for a value that is already properly tagged). `0` (otherwise `nil`, never
 /// a valid field type) marks the types with a genuine representation gap
 /// left: `Type::Fn` (no `ClosureBox` integration with a GC-tracked struct
-/// field yet — Closure unification, Stage 6a-6b), a general-ADT `Option`/
-/// `Result`/user sum type (an untagged raw `malloc`'d pointer that must
-/// *not* flow into `rt_struct_new` unconverted — it has no GC-heap
-/// representation until general ADTs are themselves boxed; a *global* of
-/// such a type is fine, via [`global_field_kind`]'s kind-`10` permanent-
-/// root path), and a still-generic type variable (a `defstruct`'s own `T`
-/// field compiled from the generic definition — resolving it would take
-/// monomorphized compilation, not more type information at this site). A clear compile-time panic
+/// field yet — Closure unification, Stage 6a-6b), and a still-generic type
+/// variable (a `defstruct`'s own `T` field compiled from the generic
+/// definition — resolving it would take monomorphized compilation, not
+/// more type information at this site). A clear compile-time panic
 /// (`compile-tag-struct-field`/`compile-sexpr-field`'s own existing "not
 /// representable yet" message) is the accepted result for those, the same
-/// as a `Sym` field in a `Sexpr` construct.
-fn struct_field_kind(ty: &Type, structs: &HashSet<Path>) -> i64 {
+/// as a `Sym` field in a `Sexpr` construct. `Option`/`Result`/a user
+/// `defenum` used to belong on this list too (an untagged raw `malloc`'d
+/// pointer that couldn't flow into `rt_struct_new` unconverted) — since
+/// the enum-representation unification's compiler flip, every enum
+/// *compiled code ever touches* is heap-repr by construction (an LLVM
+/// handle, the one thing that can force an enum instantiation native, is a
+/// type only the (typelisp-hosted) compiler's own interpreted body ever
+/// uses — never a type a compiled `defun` can mention), so an enum field
+/// joins `Str`/`Symbol`'s passthrough kind `6` like any other already-boxed
+/// value.
+fn struct_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> i64 {
     match ty {
         _ if ty.is_integer() => 1,
         _ if ty.is_float() => 2,
@@ -374,6 +403,7 @@ fn struct_field_kind(ty: &Type, structs: &HashSet<Path>) -> i64 {
         Type::Bignum | Type::Ratio => 6,
         _ if is_sexpr_type(ty) => 6,
         Type::Named(p, _) if structs.contains(p) => 6,
+        _ if is_enum_ty(ty, enums) => 6,
         _ => 0,
     }
 }
@@ -381,26 +411,18 @@ fn struct_field_kind(ty: &Type, structs: &HashSet<Path>) -> i64 {
 /// [`struct_field_kind`]'s counterpart for a `defvar`'s own declared type —
 /// used only by [`translate_global`]/[`translate_set_global`]/
 /// [`ast_to_sexpr_for_global_init`], never for an ordinary `defstruct`
-/// field (which stays on plain `struct_field_kind`, still `0`/unsupported
-/// for `Option`/`Result` — see that function's own doc comment on why:
-/// a *field*'s raw box pointer has nowhere GC-safe to live inside another
-/// heap-managed struct, but a *global*'s permanent-root slot is exactly
-/// that safe home, via `Interp::promote_global`'s `Value::Int(ptr >> 3)`
-/// encoding). Kind `10` — not `struct_field_kind`'s own `0`/unsupported —
-/// tells `compiler.rs`'s `compile-global`/`compile-set-global`/
-/// `compile-global-init` to take that same shift-tagged path instead of
-/// panicking. Covers `Option`/`Result` and every user `defenum` in `enums`
-/// ([`Ctx::enums`]) — the kind-`10` path is variant-agnostic (a
-/// shift-tagged raw box pointer, whatever its layout), so the same
-/// compiled code handles all three; the layout-aware half lives on the
-/// Rust side (`Interp`'s `data_variant_field_types`).
+/// field. A `defvar`'s promoted permanent-root slot and a `defstruct`
+/// field now classify identically (both `struct_field_kind`) since the
+/// enum-representation unification's compiler flip retired this
+/// function's own former kind-`10` shift-tagged special case — an enum
+/// global crosses the very same tagged-`Sexpr` boundary
+/// `compile-global`/`compile-set-global`/`compile-global-init` already
+/// handle for any other kind-`6` value (a boxed struct, a `Str`, ...). Kept
+/// as a distinct function (rather than every call site calling
+/// `struct_field_kind` directly) so a future divergence between the two
+/// has one obvious place to reintroduce.
 fn global_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> i64 {
-    match ty {
-        Type::Named(p, args) if p.local() == "option" && p.is_simple() && args.len() == 1 => 10,
-        Type::Named(p, args) if p.local() == "result" && p.is_simple() && args.len() == 2 => 10,
-        Type::Named(p, _) if enums.contains(p) => 10,
-        other => struct_field_kind(other, structs),
-    }
+    struct_field_kind(ty, structs, enums)
 }
 
 /// `Vector<T>`'s builtin methods that have no compiled `defmethod` body and so
@@ -416,10 +438,10 @@ const VECTOR_BUILTIN_METHODS: [&str; 5] = ["new", "get", "set", "len", "push"];
 /// `T` from the receiver's `Vector<T>` type (`args[0]`), or `0` for `new`
 /// (no receiver — an empty struct has no element to tag). Uniform across
 /// `get`/`set`/`len`/`push` since every one either reads or writes a `T`.
-fn vector_element_kind(args: &[Typed], structs: &HashSet<Path>) -> i64 {
+fn vector_element_kind(args: &[Typed], structs: &HashSet<Path>, enums: &HashSet<Path>) -> i64 {
     match args.first().map(|a| &a.ty) {
         Some(Type::Named(p, targs)) if p.local() == "vector" => {
-            targs.first().map(|t| struct_field_kind(t, structs)).unwrap_or(0)
+            targs.first().map(|t| struct_field_kind(t, structs, enums)).unwrap_or(0)
         }
         _ => 0,
     }
@@ -495,22 +517,27 @@ const HASHTABLE_BUILTIN_METHODS: [&str; 9] = ["new", "set", "get", "remove", "co
 /// method's `HashTable<K,V>` return type for `new` (no receiver). Only `set`
 /// actually consults them (to tag its key/value at the map boundary); the
 /// enumerators/`count`/`clear` pass `0`.
-fn hashtable_kv_kinds(args: &[Typed], ty: &Type, structs: &HashSet<Path>) -> (i64, i64) {
+fn hashtable_kv_kinds(args: &[Typed], ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> (i64, i64) {
     let ht_ty = args.first().map(|a| &a.ty).unwrap_or(ty);
     match ht_ty {
         Type::Named(p, targs) if p.local() == "hashtable" && targs.len() == 2 => {
-            (struct_field_kind(&targs[0], structs), struct_field_kind(&targs[1], structs))
+            (struct_field_kind(&targs[0], structs, enums), struct_field_kind(&targs[1], structs, enums))
         }
         _ => (0, 0),
     }
 }
 
 /// A `HashTable<K,V>` builtin method call -> `(hashtable-op method key-kind
-/// val-kind operand-form...)`, the map counterpart of
+/// val-kind option-type-name-form operand-form...)`, the map counterpart of
 /// [`translate_vector_method`]. `new` carries no operands (an empty map);
 /// every other method translates its receiver (and, for `set`, key/value)
-/// operands as plain value forms. See [`compile-hashtable-op`] in
-/// `compiler.rs` for the per-method lowering.
+/// operands as plain value forms. `option-type-name-form` (a `(str ...)`
+/// literal, [`str_literal_form`]) is only ever compiled for `get`/`remove` —
+/// `compile-hashtable-op` needs it to build their `Option<V>` result via
+/// `rt_data_new` (the enum-representation unification's compiler flip),
+/// the same way [`translate_construct`] supplies one for an ordinary
+/// `Option::some`/`none` call site; `Value::Empty` elsewhere, unused. See
+/// [`compile-hashtable-op`] in `compiler.rs` for the per-method lowering.
 fn translate_hashtable_method(
     heap: &mut Heap,
     method: &str,
@@ -519,6 +546,9 @@ fn translate_hashtable_method(
     args: &[Typed],
     cx: Ctx,
 ) -> Result<Value, Error> {
+    let option_type_name_form =
+        if method == "get" || method == "remove" { str_literal_form(heap, "option")? } else { Value::Empty };
+    heap.push_root(option_type_name_form);
     let method_v = heap.alloc_string(method.to_string());
     heap.push_root(method_v);
     let forms = if method == "new" {
@@ -528,17 +558,19 @@ fn translate_hashtable_method(
             Ok(v) => v,
             Err(e) => {
                 heap.pop_root(); // method_v
+                heap.pop_root(); // option_type_name_form
                 return Err(e);
             }
         }
     };
-    let mut items = vec![method_v, Value::Int(key_kind), Value::Int(val_kind)];
+    let mut items = vec![method_v, Value::Int(key_kind), Value::Int(val_kind), option_type_name_form];
     items.extend(forms.iter().copied());
     let result = tagged(heap, "hashtable-op", &items);
     for _ in 0..forms.len() {
         heap.pop_root();
     }
     heap.pop_root(); // method_v
+    heap.pop_root(); // option_type_name_form
     result
 }
 
@@ -595,7 +627,8 @@ fn ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], cx: Ctx) -> Result<Vec<Va
 /// [`binding_kind`] rather than re-deriving the same 3-way classification a
 /// third time.
 fn tagged_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], cx: Ctx) -> Result<Vec<Value>, Error> {
-    tagged_ast_list_to_sexpr_with(heap, items, cx, binding_kind)
+    let enums = cx.enums;
+    tagged_ast_list_to_sexpr_with(heap, items, cx, move |ty| binding_kind(ty, enums))
 }
 
 /// [`translate_construct`]'s `mutable` (`defstruct`/`Vector<T>`/
@@ -607,7 +640,8 @@ fn tagged_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], cx: Ctx) -> Result
 /// whether it needs GC-root/`ClosureBox` bookkeeping.
 fn struct_field_ast_list_to_sexpr(heap: &mut Heap, items: &[Typed], cx: Ctx) -> Result<Vec<Value>, Error> {
     let structs = cx.structs;
-    tagged_ast_list_to_sexpr_with(heap, items, cx, move |ty| struct_field_kind(ty, structs))
+    let enums = cx.enums;
+    tagged_ast_list_to_sexpr_with(heap, items, cx, move |ty| struct_field_kind(ty, structs, enums))
 }
 
 /// Shared by [`tagged_ast_list_to_sexpr`]/[`struct_field_ast_list_to_sexpr`]
@@ -780,13 +814,13 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
             // runtime) and `Vector`'s own `iter` (a real prelude `defmethod`)
             // both stay on the generic `assoc` path below.
             if type_name.local() == "vector" && VECTOR_BUILTIN_METHODS.contains(&method.as_str()) {
-                return translate_vector_method(heap, method, vector_element_kind(args, cx.structs), args, cx);
+                return translate_vector_method(heap, method, vector_element_kind(args, cx.structs, cx.enums), args, cx);
             }
             // `HashTable<K,V>`'s builtin methods (except the `Option`-returning
             // `get`/`remove` and the `iter` `defmethod`) lower to a
             // `hashtable-op` node — see `translate_hashtable_method`.
             if type_name.local() == "hashtable" && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
-                let (kk, vk) = hashtable_kv_kinds(args, &typed.ty, cx.structs);
+                let (kk, vk) = hashtable_kv_kinds(args, &typed.ty, cx.structs, cx.enums);
                 return translate_hashtable_method(heap, method, kk, vk, args, cx);
             }
             let type_name_v = heap.alloc_string(type_name.local().to_string());
@@ -819,8 +853,8 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // than building out unrooted multi-child plumbing nothing exercises
         // yet — see the module doc comment.
         Expr::Global(path) => translate_global(heap, path, &typed.ty, cx),
-        Expr::FnRef(path) => translate_fnref(heap, path, &typed.ty),
-        Expr::MethodRef { type_name, method } => translate_methodref(heap, type_name, method, &typed.ty),
+        Expr::FnRef(path) => translate_fnref(heap, path, &typed.ty, cx.enums),
+        Expr::MethodRef { type_name, method } => translate_methodref(heap, type_name, method, &typed.ty, cx.enums),
         Expr::If(cond, then, els) => translate_if(heap, cond, then, els, &typed.ty, cx),
         Expr::Let(binds, body) => translate_let(heap, binds, body, cx),
         Expr::Call(path, args) => translate_call(heap, path, args, cx),
@@ -916,7 +950,7 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], cx:
     let mut pair_values = Vec::with_capacity(binds.len());
     for (name, val) in binds {
         let name_sym = heap.intern_symbol(name);
-        let kind = Value::Int(binding_kind(&val.ty));
+        let kind = Value::Int(binding_kind(&val.ty, cx.enums));
         heap.push_root(name_sym);
         let name_pair = heap.cons(name_sym, kind);
         heap.pop_root(); // name_sym
@@ -1014,7 +1048,7 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], cx:
 fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, cx: Ctx) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
-    let kind = Value::Int(binding_kind(ty));
+    let kind = Value::Int(binding_kind(ty, cx.enums));
     let form = match ast_to_sexpr_scoped(heap, value, cx) {
         Ok(v) => v,
         Err(e) => {
@@ -1177,7 +1211,7 @@ fn translate_panic(heap: &mut Heap, msg: &Typed, cx: Ctx) -> Result<Value, Error
 /// reaching this function is `Type::Fn(_, None, _)` in every reachable case.
 /// `params` is built the same way as [`translate_fnref`]'s purely so both
 /// stay visibly in sync should `defmethod` ever gain `&rest` support.
-fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Type) -> Result<Value, Error> {
+fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Type, enums: &HashSet<Path>) -> Result<Value, Error> {
     let params: Vec<(String, Type)> = match ty {
         Type::Fn(params, ..) => params.iter().enumerate().map(|(i, t)| (format!("arg{}", i), t.clone())).collect(),
         _ => return unsupported(heap, "MethodRef"),
@@ -1206,7 +1240,7 @@ fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Typ
         };
         heap.pop_root(); // s
         heap.push_root(v);
-        let pair = heap.cons(Value::Int(binding_kind(t)), v);
+        let pair = heap.cons(Value::Int(binding_kind(t, enums)), v);
         heap.pop_root(); // v
         let pair = match pair {
             Ok(p) => p,
@@ -1241,7 +1275,7 @@ fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Typ
     heap.pop_root(); // method_v
     heap.pop_root(); // type_name_v
     heap.push_root(call_body);
-    let result = build_lambda_tag(heap, &fresh_lambda_name("methodref"), &[], &params, call_body);
+    let result = build_lambda_tag(heap, &fresh_lambda_name("methodref"), &[], &params, call_body, enums);
     heap.pop_root(); // call_body
     result
 }
@@ -1439,7 +1473,7 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], cx: Ctx)
     // directly callable, and this block's captured list becomes the enclosing
     // one for any nested block. `structs` is invariant.
     let inner = Ctx { direct: &siblings, outer_captured: &captured_names, ..cx };
-    let captured_list = tagged_sym_list(heap, &captured_names)?;
+    let captured_list = tagged_sym_list(heap, &captured_names, cx.enums)?;
     heap.push_root(captured_list);
 
     let mut def_values = Vec::with_capacity(defs.len());
@@ -1516,7 +1550,7 @@ fn translate_labels_def(
 ) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
-    let param_list = match tagged_sym_list(heap, params) {
+    let param_list = match tagged_sym_list(heap, params, cx.enums) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -1654,10 +1688,17 @@ fn translate_indirect_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], cx:
 /// by the caller (the same convention [`tagged`]'s own `items` slice
 /// elements rely on) and remains the caller's to pop afterward; this
 /// function only roots/pops what it itself allocates.
-fn build_lambda_tag(heap: &mut Heap, name: &str, captured: &[(String, Type)], params: &[(String, Type)], body: Value) -> Result<Value, Error> {
+fn build_lambda_tag(
+    heap: &mut Heap,
+    name: &str,
+    captured: &[(String, Type)],
+    params: &[(String, Type)],
+    body: Value,
+    enums: &HashSet<Path>,
+) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
-    let captured_list = match tagged_sym_list(heap, captured) {
+    let captured_list = match tagged_sym_list(heap, captured, enums) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // name_v
@@ -1665,7 +1706,7 @@ fn build_lambda_tag(heap: &mut Heap, name: &str, captured: &[(String, Type)], pa
         }
     };
     heap.push_root(captured_list);
-    let param_list = match tagged_sym_list(heap, params) {
+    let param_list = match tagged_sym_list(heap, params, enums) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // captured_list
@@ -1724,7 +1765,7 @@ fn translate_lambda(
     let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals };
     let body_v = ast_to_sexpr_scoped(heap, &body[0], cx)?;
     heap.push_root(body_v);
-    let result = build_lambda_tag(heap, &fresh_lambda_name("lambda"), &captured_names, params, body_v);
+    let result = build_lambda_tag(heap, &fresh_lambda_name("lambda"), &captured_names, params, body_v, enums);
     heap.pop_root(); // body_v
     result
 }
@@ -1760,7 +1801,7 @@ fn rest_sexpr_type() -> Type {
 /// convention (`build-closure-apply`/`compile-apply-indirect`) passes
 /// arguments through an arity-generic array, exactly like [`translate_lambda`]
 /// already relies on for a `&rest`-declared `lambda` literal.
-fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Error> {
+fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type, enums: &HashSet<Path>) -> Result<Value, Error> {
     let mut params: Vec<(String, Type)> = match ty {
         Type::Fn(params, ..) => params.iter().enumerate().map(|(i, t)| (format!("arg{}", i), t.clone())).collect(),
         _ => return unsupported(heap, "FnRef"),
@@ -1802,7 +1843,7 @@ fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Err
         // forms are synthesized from `ty`'s arity rather than translated
         // from real `Typed` argument nodes.
         heap.push_root(v);
-        let pair = heap.cons(Value::Int(binding_kind(t)), v);
+        let pair = heap.cons(Value::Int(binding_kind(t, enums)), v);
         heap.pop_root(); // v
         let pair = match pair {
             Ok(p) => p,
@@ -1834,7 +1875,7 @@ fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Err
     }
     heap.pop_root(); // target_v
     heap.push_root(call_body);
-    let result = build_lambda_tag(heap, &fresh_lambda_name("fnref"), &[], &params, call_body);
+    let result = build_lambda_tag(heap, &fresh_lambda_name("fnref"), &[], &params, call_body, enums);
     heap.pop_root(); // call_body
     result
 }
@@ -1938,8 +1979,16 @@ fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern, cx: Ctx) -> Result<Value, Er
                 heap.pop_root();
             }
             heap.push_root(list);
-            let kind_values: Vec<Value> = if kind == MATCH_KIND_STRUCT {
-                field_types.iter().map(|t| Value::Int(struct_field_kind(t, cx.structs))).collect()
+            // Built for a boxed struct *and* an enum box now (`compile-
+            // box-field`'s own `kind` argument, mirroring `compile-struct-
+            // field`'s — see `compiler.rs`'s doc comment): every enum
+            // type compiled code can ever mention is heap-repr, so an enum
+            // field's `kind` is exactly `struct_field_kind` too, not the
+            // "untagged raw slot" a general-ADT box used to have. Only a
+            // plain `Sexpr` scrutinee needs none — `compile-sexpr-field`
+            // reads its own field's shape straight off the variant number.
+            let kind_values: Vec<Value> = if kind == MATCH_KIND_STRUCT || kind == MATCH_KIND_BOX {
+                field_types.iter().map(|t| Value::Int(struct_field_kind(t, cx.structs, cx.enums))).collect()
             } else {
                 Vec::new()
             };
@@ -2115,40 +2164,35 @@ fn translate_arms(heap: &mut Heap, arms: &[Arm], cx: Ctx) -> Result<Vec<Value>, 
 /// representation the interpreter's own `Expr::Construct` `mutable` arm
 /// already uses (`heap.alloc_struct`), so a value either side builds
 /// interoperates with the other; every other ADT (`Option`/`Result`/a user
-/// sum type) allocates a fresh `malloc`'d box instead
-/// (`compile-construct-box`, a variant-tag slot then one slot per field) —
-/// deciding all of this here, from `ty`/`mutable`, is what lets
-/// `compiler.rs` stay registry-free, the same reason [`translate_match`]
-/// reads `is_sexpr_type` off the scrutinee rather than `compile-match`
-/// re-deriving it from a type name string.
+/// `defenum`) builds a `BoxedObj::Enum` via `rt_data_new`
+/// (`compile-construct-box`, a type-name slot, a variant-index slot, then
+/// one tagged slot per field) — the same `heap.alloc_enum` representation
+/// the interpreter's own general-ADT `Expr::Construct` arm uses (since the
+/// enum-representation unification) — deciding all of this here, from
+/// `ty`/`mutable`, is what lets `compiler.rs` stay registry-free, the same
+/// reason [`translate_match`] reads `is_sexpr_type` off the scrutinee
+/// rather than `compile-match` re-deriving it from a type name string.
 ///
-/// `args`' own translation differs between the three branches: `is-sexpr`
-/// stays plain/untagged ([`ast_list_to_sexpr`], the same as `Expr::Assoc`'s
-/// own arithmetic operands) — `Sexpr`'s own fields (an `Int`'s payload, a
+/// `args`' own translation differs between the two non-`Sexpr` branches
+/// only in *which* type's fields they are, not in kind: `is-sexpr` stays
+/// plain/untagged ([`ast_list_to_sexpr`], the same as `Expr::Assoc`'s own
+/// arithmetic operands) — `Sexpr`'s own fields (an `Int`'s payload, a
 /// `Cons`'s two `Sexpr` fields, ...) are never `Fn`- or (recursively)
 /// `Sexpr`-typed in a way `compile-construct-sexpr` doesn't already
-/// special-case (its `Cons` arm roots both fields itself). `mutable` uses
-/// [`struct_field_ast_list_to_sexpr`] — a `(kind . form)` tagging by
-/// [`struct_field_kind`] (not [`binding_kind`]: a struct field's `kind` must
-/// pick the exact tagged-`Sexpr` shape to build, not merely whether GC-root/
-/// `ClosureBox` bookkeeping is needed). The remaining (general-ADT) case
-/// reuses [`tagged_ast_list_to_sexpr`] — the exact same `(kind . form)`
-/// wrapping `Expr::Call`'s own call-argument list gets — so
-/// `compile-construct-box-fields` can tell which fields are `Sexpr`-typed
-/// (`kind = 2`) and need [`crate::compile::runtime::rt_push_permanent_sexpr_root`]'s
-/// protection once stored into the box: unlike a call argument's root (popped
-/// right after the call returns), a box field's value must stay reachable
-/// for the box's own lifetime, which can outlive this activation — see that
-/// function's doc comment. A `Fn`-typed field (`kind = 1`) still gets no
-/// `ClosureBox` retain at all (deliberately leaked, same as before — see
-/// `compiler.rs`'s `compile-construct-box` doc comment); only the
-/// GC-root gap this tag closes is in scope here.
+/// special-case (its `Cons` arm roots both fields itself). Both `mutable`
+/// and the general-ADT (enum) case use [`struct_field_ast_list_to_sexpr`] —
+/// a `(kind . form)` tagging by [`struct_field_kind`] (not [`binding_kind`]:
+/// a field's `kind` must pick the exact tagged-`Sexpr` shape to build, not
+/// merely whether GC-root/`ClosureBox` bookkeeping is needed) — since every
+/// enum type compiled code can ever mention is heap-repr by construction
+/// (see `struct_field_kind`'s doc comment), so an enum field crosses the
+/// exact same tagged-`Sexpr` boundary a struct field does; there is no
+/// longer a distinct "general-ADT field" tagging scheme to keep separate.
 ///
-/// `type-name-str` ([`str_literal_form`]) is that struct's own local type
-/// name, only ever built for the `mutable` branch (an empty placeholder,
-/// `Value::Empty`, elsewhere); still always present in the tagged shape for a
-/// uniform header regardless of which branch `compiler.rs`'s
-/// `compile-construct` takes.
+/// `type-name-str` ([`str_literal_form`]) is that type's own local name,
+/// built for both non-`Sexpr` branches now (an empty placeholder,
+/// `Value::Empty`, only for `is-sexpr`) — `rt_data_new`'s `args[0]` needs it
+/// exactly as `rt_struct_new`'s already did.
 fn translate_construct(
     heap: &mut Heap,
     type_name: &Path,
@@ -2159,15 +2203,20 @@ fn translate_construct(
     cx: Ctx,
 ) -> Result<Value, Error> {
     let is_sexpr = is_sexpr_type(ty);
-    let type_name_form = if !is_sexpr && mutable { str_literal_form(heap, type_name.local())? } else { Value::Empty };
+    // Built for both non-`Sexpr` branches now: an enum construct needs its
+    // own type name for `rt_data_new`'s `args[0]` too, exactly like a
+    // `mutable` struct construct needs it for `rt_struct_new`'s — see
+    // `compiler.rs`'s `compile-construct-box` doc comment.
+    let type_name_form = if !is_sexpr { str_literal_form(heap, type_name.local())? } else { Value::Empty };
     heap.push_root(type_name_form);
-    let arg_result = if is_sexpr {
-        ast_list_to_sexpr(heap, args, cx)
-    } else if mutable {
-        struct_field_ast_list_to_sexpr(heap, args, cx)
-    } else {
-        tagged_ast_list_to_sexpr(heap, args, cx)
-    };
+    // `mutable` and the general-ADT (enum) case now tag identically
+    // (`struct_field_ast_list_to_sexpr`/`struct_field_kind`): every enum
+    // type compiled code can ever mention is heap-repr by construction (see
+    // `struct_field_kind`'s doc comment), so there's no longer a distinct
+    // "general-ADT field" tagging scheme (`tagged_ast_list_to_sexpr`'s
+    // `binding_kind`) to keep separate from a struct field's.
+    let arg_result =
+        if is_sexpr { ast_list_to_sexpr(heap, args, cx) } else { struct_field_ast_list_to_sexpr(heap, args, cx) };
     let arg_values = match arg_result {
         Ok(v) => v,
         Err(e) => {
@@ -2234,7 +2283,7 @@ fn translate_field_get(heap: &mut Heap, obj: &Typed, idx: usize, field_ty: &Type
         }
     };
     heap.push_root(obj_v);
-    let kind = Value::Int(struct_field_kind(field_ty, cx.structs));
+    let kind = Value::Int(struct_field_kind(field_ty, cx.structs, cx.enums));
     let result = tagged(heap, "field-get", &[idx_list, kind, obj_v]);
     heap.pop_root(); // obj_v
     heap.pop_root(); // idx_list
@@ -2271,7 +2320,7 @@ fn translate_field_set(heap: &mut Heap, obj: &Typed, idx: usize, value: &Typed, 
         }
     };
     heap.push_root(value_v);
-    let kind = Value::Int(struct_field_kind(&value.ty, cx.structs));
+    let kind = Value::Int(struct_field_kind(&value.ty, cx.structs, cx.enums));
     let result = tagged(heap, "field-set", &[idx_list, kind, obj_v, value_v]);
     heap.pop_root(); // value_v
     heap.pop_root(); // obj_v
@@ -3578,13 +3627,14 @@ mod tests {
     /// `Expr::Construct` over a general ADT (`Option<i64>`'s `Some`, an
     /// `AdtKind::Sum`) -> `(construct false false empty variant-i64
     /// (kind . arg-form)...)` — `is-sexpr` is `false` and `mutable` is
-    /// `false`, dispatching to `compile-construct-box`'s `malloc`'d-box path.
-    /// Multiple args are each translated in order, each wrapped in the same
-    /// `(kind . form)` shape `Expr::Call`'s own argument list gets
-    /// (`tagged_ast_list_to_sexpr`/`binding_kind`) — an `i64` field is
-    /// `KIND_PLAIN`, a `bool` field likewise (see `translate_construct`'s
-    /// doc comment for why this is needed: `compile-construct-box-fields`
-    /// reads `kind` to decide which fields need `rt_push_permanent_sexpr_root`).
+    /// `false`, dispatching to `compile-construct-box`'s `rt_data_new` path
+    /// (the enum-representation unification's compiler flip). Multiple args
+    /// are each translated in order, each wrapped in the same `(kind . form)`
+    /// shape a `mutable` struct construct's fields get
+    /// (`struct_field_ast_list_to_sexpr`/`struct_field_kind`, not
+    /// `binding_kind` — an enum field is heap-repr by construction, see that
+    /// function's doc comment) — an `i64` field is kind `1`, a `bool` field
+    /// kind `4`.
     #[test]
     fn translates_a_general_adt_construct() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -3600,24 +3650,25 @@ mod tests {
         assert_eq!(tag, "construct");
         assert_eq!(fields[0], Value::Bool(false), "a non-Sexpr ADT dispatches to a boxed path");
         assert_eq!(fields[1], Value::Bool(false), "an AdtKind::Sum construct is not mutable");
-        assert!(fields[2].is_empty(), "type-name-str is an unused placeholder for the general-ADT branch");
+        assert!(!fields[2].is_empty(), "type-name-str is built for every non-Sexpr construct now, not just mutable ones");
         assert_eq!(fields[3], Value::Int(0));
         let (kind0, arg0_form) = untag_arg(&heap, fields[4]);
-        assert_eq!(kind0, 0, "an i64 field is KIND_PLAIN");
+        assert_eq!(kind0, 1, "an i64 field is struct_field_kind 1");
         let (arg0_tag, arg0_fields) = untag(&heap, arg0_form);
         assert_eq!(arg0_tag, "int");
         assert_eq!(arg0_fields, vec![Value::Int(7)]);
         let (kind1, arg1_form) = untag_arg(&heap, fields[5]);
-        assert_eq!(kind1, 0, "a bool field is KIND_PLAIN");
+        assert_eq!(kind1, 4, "a bool field is struct_field_kind 4");
         let (arg1_tag, _) = untag(&heap, arg1_form);
         assert_eq!(arg1_tag, "bool");
     }
 
     /// A `Sexpr`-typed field of a general ADT (e.g. an `Option<Sexpr>`
-    /// field) is tagged `KIND_SEXPR` — the case
-    /// `compile-construct-box-fields` actually roots.
+    /// field) is tagged `struct_field_kind`'s passthrough kind `6` — the
+    /// same tag a boxed struct's own `Sexpr`-typed field gets, since an enum
+    /// field now crosses the identical tagged-`Sexpr` boundary.
     #[test]
-    fn a_sexpr_typed_field_of_a_general_adt_construct_is_tagged_kind_sexpr() {
+    fn a_sexpr_typed_field_of_a_general_adt_construct_is_tagged_kind_six() {
         let mut heap = Heap::with_capacity(1 << 10);
         let ctor = Expr::Construct {
             type_name: Path::root("holder"),
@@ -3629,7 +3680,7 @@ mod tests {
         let v = ast_to_sexpr(&mut heap, &typed(ctor, ty)).unwrap();
         let (_, fields) = untag(&heap, v);
         let (kind, _) = untag_arg(&heap, fields[4]);
-        assert_eq!(kind, 2, "a Sexpr-typed field is KIND_SEXPR");
+        assert_eq!(kind, 6, "a Sexpr-typed field is struct_field_kind's passthrough kind 6");
     }
 
     /// `Expr::Construct` over a `mutable` `defstruct` (`AdtKind::Struct`) ->

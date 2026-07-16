@@ -1961,46 +1961,40 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_str_local_rooted_across_
         (compile str-survives-gc)
         (str-survives-gc 5000)
         "#,
-        13000,
+        // Bumped from 13000: the enum-representation unification added new
+        // compiler-body functions/symbols (`rt_data_*`, `compile-option-
+        // type-name`, ...), raising the self-hosted compiler's own baseline
+        // heap usage enough to tip this tightly-tuned capacity over —
+        // unrelated to this test's own correctness claim, the same class of
+        // margin issue `scripts/test-serial.sh`'s `RUST_MIN_STACK` comment
+        // documents for stack depth.
+        20000,
     )
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(11), "\"hello world\" has 11 characters, even after many unrelated conses force a gc()");
 }
 
 /// A general ADT (`Option<i64>`'s `Some`, `AdtKind::Sum`) constructs via
-/// `compile-construct-box`'s `malloc`'d-box path instead —
-/// `[0, field0]`: slot `0` the variant tag, slot `1` the lone field.
-/// `Expr::Call`'s existing `Sexpr`-only decode step (Stage 5) doesn't know
-/// about this representation, so the box's raw address surfaces as a
-/// (representationally faithful, just not yet correctly *typed*)
-/// `RtValue::Int` — the same kind of documented, deferred gap Stage 5 left
-/// for a compiled `bool` predicate's return value. Reading the box's own
-/// memory directly (the same flavor of test `debug-closure-refcount` exists
-/// for `ClosureBox`) is what actually proves `compile-construct-box` built
-/// the right thing.
+/// `compile-construct-box`'s `rt_data_new` path (the enum-representation
+/// unification's compiler flip) into a real `BoxedObj::Enum` — and
+/// `Interp::call_compiled`'s `is_boxed_sexpr_type` extension decodes the
+/// compiled function's `Option<i64>` return value as the proper
+/// `RtValue::Sexpr` rather than the raw, undecoded box address this test
+/// used to read directly out of process memory (a documented, now-closed
+/// gap). An ordinary *interpreted* `match` over that returned value proves
+/// both halves at once: the box really is heap-shaped correctly, and it
+/// interoperates with the interpreter like any other enum value.
 #[test]
 fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
         (defun make-some ((n i64)) Option<i64> (Option::some n))
         (compile make-some)
-        (make-some 42)
+        (match (make-some 42) ((Some x) x) ((None) -1))
         "#,
     )
     .expect("eval failed");
-    let raw = match v {
-        RtValue::Int(n) => n,
-        other => panic!("expected the box's raw address as an Int (see this test's doc comment), got {:?}", other),
-    };
-    // SAFETY: `raw` is `build-ptr-to-int`'s result over a `build-malloc`'d,
-    // never-freed `[2 x i64]` array (`compile-construct-box`'s layout: slot
-    // 0 = variant tag, slot 1 = the lone field) — still valid to read.
-    let (variant, field0) = unsafe {
-        let p = raw as *const i64;
-        (*p.add(0), *p.add(1))
-    };
-    assert_eq!(variant, 0, "Some is option_def's variant 0");
-    assert_eq!(field0, 42);
+    assert_eq!(v, RtValue::Int(42));
 }
 
 /// A `mutable` `AdtKind::Struct` (`defstruct`) instance, unlike `Some`'s
