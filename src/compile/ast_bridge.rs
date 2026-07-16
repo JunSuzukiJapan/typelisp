@@ -209,9 +209,9 @@ const KIND_SEXPR: i64 = 2;
 /// needs to single it out specifically: [`translate_match`] (a `Sexpr`
 /// scrutinee is [`MATCH_KIND_SEXPR`]), [`translate_construct`] (`Sexpr`'s own
 /// variants compile to the tagged-`i64`/`rt_cons` representation Stage
-/// 2/3/4/5 already built, every *other* ADT compiles to a freshly
-/// `malloc`'d box instead — Stage 6 of the Sexpr-representation plan,
-/// `docs/implementation-log.md`), and [`binding_kind`].
+/// 2/3/4/5 already built, every *other* ADT compiles to a `BoxedObj::Enum`
+/// via `rt_data_new` instead — the enum-representation unification), and
+/// [`binding_kind`].
 fn is_sexpr_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(p, _) if *p == Path::root("sexpr"))
 }
@@ -219,14 +219,14 @@ fn is_sexpr_type(ty: &Type) -> bool {
 /// [`translate_match`]/[`pattern_to_sexpr`]'s scrutinee-representation tags
 /// (`compiler.rs`'s `compile-match`/`compile-pattern-test` read the same
 /// numbering back): a tagged `Sexpr` (the tagged-`i64` bit tests
-/// `compile-sexpr-tag-test`/`compile-sexpr-field` do — needs a GC root of
-/// its own, since it's an ordinary heap-managed value); a sum-ADT box
-/// (`Option`/`Result`/a `defenum`, `compile-construct-box`'s raw `malloc`'d
-/// array tested by `compile-box-tag-test`/`compile-box-field` — never
-/// GC-managed, so needs no root); a boxed struct (`defstruct`/`Vector`,
-/// properly tagged like a `Sexpr` — needs the same root — but single-variant,
-/// so no tag test is ever emitted, only per-field extraction via
-/// `compile-struct-field`).
+/// `compile-sexpr-tag-test`/`compile-sexpr-field` do); an enum box
+/// (`Option`/`Result`/a `defenum`, `compile-construct-box`'s `BoxedObj::Enum`
+/// via `rt_data_new`, tested by `compile-box-tag-test`/`compile-box-field`
+/// — a real GC-managed value since the enum-representation unification, so
+/// it needs the same root protection a `Sexpr` scrutinee does); a boxed
+/// struct (`defstruct`/`Vector`, properly tagged like a `Sexpr` — needs the
+/// same root — but single-variant, so no tag test is ever emitted, only
+/// per-field extraction via `compile-struct-field`).
 const MATCH_KIND_SEXPR: i64 = 0;
 const MATCH_KIND_BOX: i64 = 1;
 const MATCH_KIND_STRUCT: i64 = 2;
@@ -503,13 +503,13 @@ fn translate_vector_method(heap: &mut Heap, method: &str, kind: i64, args: &[Typ
 /// (`translate_hashtable_method` -> the `rt_hashtable_*` family) rather than
 /// the generic `assoc` path — every one except `iter` (a genuine prelude
 /// `defmethod`, `hashtable-iter::new`). `get`/`remove` return `Option<V>`, a
-/// `malloc`'d sum-ADT box built directly by `compiler.rs`'s
-/// `compile-hashtable-op` (`rt_hashtable_contains` + `rt_hashtable_get_raw`/
-/// `rt_hashtable_remove_raw`, decoded per `V`'s `struct_field_kind` the same
-/// way a `BoxedObj::Struct` field read already is) rather than through the
-/// ordinary `Expr::Construct` path (there is no *source* `Option::some`/
-/// `none` call site here to translate — the box is synthesized straight from
-/// the runtime lookup's found/not-found outcome).
+/// `BoxedObj::Enum` built directly by `compiler.rs`'s `compile-hashtable-op`
+/// via `rt_data_new` (`rt_hashtable_contains` + `rt_hashtable_get_raw`/
+/// `rt_hashtable_remove_raw` supply the found/not-found outcome and the
+/// already-tagged stored value) rather than through the ordinary
+/// `Expr::Construct` path — there is no *source* `Option::some`/`none` call
+/// site here to translate, so [`translate_hashtable_method`] supplies the
+/// `"option"` type-name form itself.
 const HASHTABLE_BUILTIN_METHODS: [&str; 9] = ["new", "set", "get", "remove", "count", "clear", "keys", "values", "entries"];
 
 /// The `(K-kind, V-kind)` ([`struct_field_kind`]) for a `HashTable<K,V>`
