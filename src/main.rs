@@ -397,6 +397,10 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
         RtValue::Char(c) => format!("#\\{}", c),
         RtValue::Str(s) => format!("{:?}", s),
         RtValue::Unit => "()".to_string(),
+        // The native-repr fallback for an enum instantiated over a type
+        // the heap cannot represent (`build_enum_value`'s doc comment) —
+        // e.g. an `Option<llvm-value>` surfacing at a REPL somehow. Prints
+        // the same shape `format_sexpr`'s boxed-enum arm does.
         RtValue::Data { type_name, variant, fields } => {
             let name = reg
                 .type_def(type_name)
@@ -410,7 +414,7 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
                 format!("({} {})", name, parts.join(" "))
             }
         }
-        RtValue::Sexpr(sv) => format_sexpr(heap, *sv),
+        RtValue::Sexpr(sv) => format_sexpr(heap, reg, *sv),
         RtValue::Builtin(name) => format!("#<builtin {}>", name),
         RtValue::BuiltinMethod(type_name, method) => format!("#<builtin {}::{}>", type_name, method),
         RtValue::Scope(scope) => format!("#<scope depth={}>", scope.depth()),
@@ -425,21 +429,46 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
 }
 
 /// Format a Sexpr-side `mem::Value` (the `RtValue::Sexpr` payload),
-/// recursively, in the reader's own syntax.
-fn format_sexpr(heap: &Heap, v: Value) -> String {
+/// recursively, in the reader's own syntax. `reg` recovers an enum box's
+/// variant *name* (the runtime stores only the index) so `(some 1)` prints
+/// the way it always has.
+fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
     match v {
         Value::Empty => "()".to_string(),
         Value::Int(i) => i.to_string(),
         // `Sexpr::Float`, a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance,
-        // and a `HashTable<K,V>` are all heap-boxed (`Value::Boxed`, see
-        // `BoxedObj`) — `heap.is_struct`/`is_hashtable` tell them apart. A
-        // boxed struct prints positionally (no field names at runtime, same
-        // as `RtValue::Data`'s field list), recursing through this same
-        // function for each field.
+        // a `HashTable<K,V>`, and an enum value are all heap-boxed
+        // (`Value::Boxed`, see `BoxedObj`) — `heap.is_struct`/
+        // `is_hashtable`/`is_enum` tell them apart. A boxed struct prints
+        // positionally (no field names at runtime), recursing through this
+        // same function for each field.
         Value::Boxed(id) if heap.is_struct(id) => {
             let parts: Vec<String> =
-                (0..heap.struct_field_count(id)).map(|i| format_sexpr(heap, heap.struct_field(id, i))).collect();
+                (0..heap.struct_field_count(id)).map(|i| format_sexpr(heap, reg, heap.struct_field(id, i))).collect();
             format!("#<{} {}>", heap.struct_type_name(id), parts.join(" "))
+        }
+        // An enum value prints as its variant name applied to its fields —
+        // `(some 1)` / a bare `none` — the exact shape the old
+        // `RtValue::Data` arm produced. The box stores the *type* name and
+        // variant *index*; the variant's name lives only in the checker's
+        // registry, looked up by re-parsing the stored `Path` string.
+        Value::Boxed(id) if heap.is_enum(id) => {
+            let type_path = typelisp::Path::from_segments(
+                heap.enum_type_name(id).split("::").map(|s| s.to_string()).collect(),
+            );
+            let variant = heap.enum_variant(id);
+            let name = reg
+                .type_def(&type_path)
+                .and_then(|d| d.variants.get(variant))
+                .map(|v| v.name.clone())
+                .unwrap_or_else(|| "<unknown-variant>".to_string());
+            if heap.enum_field_count(id) == 0 {
+                name
+            } else {
+                let parts: Vec<String> =
+                    (0..heap.enum_field_count(id)).map(|i| format_sexpr(heap, reg, heap.enum_field(id, i))).collect();
+                format!("({} {})", name, parts.join(" "))
+            }
         }
         Value::Boxed(id) if heap.is_hashtable(id) => format!("#<hashtable count={}>", heap.hashtable_count(id)),
         // A `Scope<V>` with heap-repr `V` is boxed too since Stage 8 —
@@ -465,11 +494,11 @@ fn format_sexpr(heap: &Heap, v: Value) -> String {
             .map(|s| heap.symbol_name(*s))
             .collect::<Vec<_>>()
             .join("::"),
-        Value::Cons(_) => format_list(heap, v),
+        Value::Cons(_) => format_list(heap, reg, v),
     }
 }
 
-fn format_list(heap: &Heap, mut v: Value) -> String {
+fn format_list(heap: &Heap, reg: &Registry, mut v: Value) -> String {
     let mut parts = Vec::new();
     loop {
         match v {
@@ -477,11 +506,11 @@ fn format_list(heap: &Heap, mut v: Value) -> String {
                 // Safe: `v` was just matched as `Cons`, so `car`/`cdr` cannot
                 // return `Error::NotACons` here.
                 let car = heap.car(v).expect("cons car");
-                parts.push(format_sexpr(heap, car));
+                parts.push(format_sexpr(heap, reg, car));
                 v = heap.cdr(v).expect("cons cdr");
             }
             Value::Empty => return format!("({})", parts.join(" ")),
-            other => return format!("({} . {})", parts.join(" "), format_sexpr(heap, other)),
+            other => return format!("({} . {})", parts.join(" "), format_sexpr(heap, reg, other)),
         }
     }
 }

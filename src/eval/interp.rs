@@ -288,15 +288,70 @@ impl Interp {
     /// through a binding cell. Both twins must agree, and the checker's
     /// carries the matching arm.
     fn heap_repr_kind(&self, ty: &Type) -> SlotKind {
+        if self.is_heap_repr_ty(ty, &mut HashSet::new()) { SlotKind::Heap } else { SlotKind::Native }
+    }
+
+    /// The recursive core of [`Self::heap_repr_kind`] — see that method's
+    /// doc comment. `seen` is threaded through unchanged from
+    /// [`Self::enum_fields_representable`]'s own doc comment (the
+    /// self-/mutually-referential `defenum` guard).
+    fn is_heap_repr_ty(&self, ty: &Type, seen: &mut HashSet<Path>) -> bool {
         match ty {
-            Type::Named(p, _)
-                if is_sexpr_type(p) || *p == Path::root("hashtable") || self.struct_types.contains(p) =>
-            {
-                SlotKind::Heap
-            }
-            Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => self.heap_repr_kind(&args[0]),
-            _ => SlotKind::Native,
+            Type::Named(p, _) if is_sexpr_type(p) || *p == Path::root("hashtable") || self.struct_types.contains(p) => true,
+            Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => self.is_heap_repr_ty(&args[0], seen),
+            Type::Named(p, args) if self.is_enum_path(p) => self.enum_fields_representable(p, args, seen),
+            _ => false,
         }
+    }
+
+    /// Whether `p` names an enum type — one whose runtime value is
+    /// *potentially* a boxed `BoxedObj::Enum`: the built-in
+    /// `Option`/`Result`/`Error`, or a user `defenum` recorded in
+    /// [`Self::enum_defs`]. Whether a *given instantiation* actually is
+    /// heap-repr (as opposed to falling back to native `RtValue::Data`) is
+    /// [`Self::enum_fields_representable`]'s job, not this one — this just
+    /// identifies the type family. The interpreter-side twin of the
+    /// checker's `Registry`-driven `AdtKind::Sum && !variants.is_empty()`
+    /// test in `Checker::is_heap_repr_seen`.
+    fn is_enum_path(&self, p: &Path) -> bool {
+        *p == option_path() || *p == result_path() || *p == Path::root("error") || self.enum_defs.contains_key(p)
+    }
+
+    /// Whether every field of every variant of enum type `name` —
+    /// instantiated with `args` — is itself representable (a plain scalar
+    /// that boxes trivially, or recursively heap-repr) — see
+    /// `Checker::enum_fields_representable`'s doc comment for the full
+    /// rationale (`Option<llvm-value>` and friends must classify `false`
+    /// here). `option`/`result`'s field types are read straight off `args`
+    /// (mirroring `data_variant_field_types`'s own dedicated arms, since
+    /// `Interp` holds no `Registry` to look them up in); `error`'s one
+    /// field is always `Str`, hence always representable; a user `defenum`
+    /// looks up [`Self::enum_defs`] and substitutes `args` for its params,
+    /// exactly as `Checker::enum_fields_representable` does with the
+    /// checker's own registry-backed copy.
+    fn enum_fields_representable(&self, name: &Path, args: &[Type], seen: &mut HashSet<Path>) -> bool {
+        if *name == Path::root("error") {
+            return true;
+        }
+        if !seen.insert(name.clone()) {
+            return true;
+        }
+        let field_types: Vec<Type> = if *name == option_path() && args.len() == 1 {
+            vec![args[0].clone()]
+        } else if *name == result_path() && args.len() == 2 {
+            args.to_vec()
+        } else if let Some(def) = self.enum_defs.get(name) {
+            let subst: HashMap<String, Type> = def.params.iter().cloned().zip(args.iter().cloned()).collect();
+            def.variants
+                .iter()
+                .flat_map(|v| v.fields.iter().map(|f| crate::check::checker::subst_apply(f, &subst)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let ok = field_types.iter().all(|fty| crate::check::checker::is_boxable_scalar(fty) || self.is_heap_repr_ty(fty, seen));
+        seen.remove(name);
+        ok
     }
 
     /// Whether a `Scope<V>` type's runtime representation is the heap
@@ -693,8 +748,14 @@ impl Interp {
                         .collect::<Result<Vec<Value>, EvalError>>()?;
                     Ok(RtValue::Sexpr(heap.alloc_struct(type_name.to_string(), mem_fields)))
                 } else {
+                    // An enum value (`Option`/`Result`/user `defenum`) — see
+                    // `build_enum_value`'s doc comment for the heap/native
+                    // duality this goes through (the same one `Scope<V>`
+                    // already has, since `Option<llvm-value>` and friends
+                    // are exactly the (typelisp-hosted) compiler's own
+                    // native-only instantiation).
                     let (fields, _slots) = self.eval_args(heap, args, env)?;
-                    Ok(RtValue::Data { type_name: type_name.clone(), variant: *variant, fields })
+                    Ok(build_enum_value(heap, type_name.clone(), *variant, fields))
                 }
             }
             Expr::Lambda { params, body } => {
@@ -820,10 +881,12 @@ impl Interp {
                     // the `Heap::permanent_root` position directly.
                     let perm_idx = crate::compile::runtime::global_perm_idx(id)
                         .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id)))?;
-                    let mv = if let RtValue::Data { variant, fields, .. } = &v {
-                        Value::Int(data_to_box(heap, *variant, fields)?)
-                    } else {
-                        rtvalue_to_struct_field(heap, &v)?
+                    let mv = match &v {
+                        // An enum value headed for a *promoted* global must
+                        // cross into the compiled-side raw-box encoding
+                        // (`kind = 10`) — see `data_to_box`'s doc comment.
+                        RtValue::Sexpr(Value::Boxed(id)) if heap.is_enum(*id) => Value::Int(data_to_box(heap, *id)?),
+                        _ => rtvalue_to_struct_field(heap, &v)?,
                     };
                     heap.set_permanent_root(perm_idx, mv);
                     Ok(v)
@@ -1261,15 +1324,24 @@ impl Interp {
         // value-shape-driven); the decode direction's field types come from
         // the declared type's args or [`Self::enum_defs`] — see
         // `data_variant_field_types`.
-        let value = if let RtValue::Data { variant, fields, .. } = &v {
-            let ptr = data_to_box(heap, *variant, fields).map_err(|_| {
-                EvalError::Panic(format!(
-                    "compile: global \"{}\" has an enum field type not yet \
-                     representable in compiled code",
-                    path
-                ))
-            })?;
-            Value::Int(ptr)
+        let value = if let RtValue::Sexpr(Value::Boxed(id)) = &v {
+            if heap.is_enum(*id) {
+                let ptr = data_to_box(heap, *id).map_err(|_| {
+                    EvalError::Panic(format!(
+                        "compile: global \"{}\" has an enum field type not yet \
+                         representable in compiled code",
+                        path
+                    ))
+                })?;
+                Value::Int(ptr)
+            } else {
+                rtvalue_to_struct_field(heap, &v).map_err(|_| {
+                    EvalError::Panic(format!(
+                        "compile: global \"{}\" has a type not yet supported for compiled access",
+                        path
+                    ))
+                })?
+            }
         } else {
             rtvalue_to_struct_field(heap, &v).map_err(|_| {
                 EvalError::Panic(format!(
@@ -2086,19 +2158,26 @@ fn option_payload_ty(ret_ty: &Type) -> Result<Type, EvalError> {
     }
 }
 
-/// Recursively gather every `Sexpr` value reachable from `v` through nested
-/// `Data` fields or `Scope` frames. (A closure needs no arm of its own:
-/// since Stage 6b it *is* an `RtValue::Sexpr` closure box — pushed by the
-/// plain `Sexpr` arm, with the GC tracing its heap-cell captures from
-/// there — while its `Native` captures are each already registered in
-/// [`Interp::slots`].) A boxed struct (`RtValue::Sexpr(Value::Boxed(_))`,
-/// since the `Sexpr`/`RtValue` unification's Stage 2 — `HashTable<K,V>`
-/// included, since Stage 5) needs no separate arm here — the plain `Sexpr`
-/// one already pushes its `Value::Boxed` root, and `Heap::gc`'s mark phase
-/// traces *into* a `BoxedObj::Struct`'s own fields (or, for a `HashTable`,
-/// its `StructPayload::Map` keys/values) from there (see
+/// Recursively gather every `Sexpr` value reachable from `v` through
+/// native-repr `Data` fields or `Scope` frames. (A closure needs no arm of
+/// its own: since Stage 6b it *is* an `RtValue::Sexpr` closure box —
+/// pushed by the plain `Sexpr` arm, with the GC tracing its heap-cell
+/// captures from there — while its `Native` captures are each already
+/// registered in [`Interp::slots`].) A boxed struct or enum
+/// (`RtValue::Sexpr(Value::Boxed(_))`, since the `Sexpr`/`RtValue`
+/// unification's Stage 2 and the enum-representation unification
+/// respectively — `HashTable<K,V>` included, since Stage 5) needs no
+/// separate arm here — the plain `Sexpr` one already pushes its
+/// `Value::Boxed` root, and `Heap::gc`'s mark phase traces *into* a
+/// `BoxedObj::Struct`/`Enum`'s own fields (or, for a `HashTable`, its
+/// `StructPayload::Map` keys/values) from there (see
 /// `Heap::push_boxed_nested`), the same way it already does for a `Cons`
-/// cell's `car`/`cdr`.
+/// cell's `car`/`cdr`. A *native-repr* `RtValue::Data`
+/// (`build_enum_value`'s fallback for a field the heap cannot represent —
+/// `Option<llvm-value>` and the like) is never itself heap-resident, but
+/// its fields might each independently hold a `Sexpr` (e.g. an
+/// `Option<Sexpr>` alongside a native one elsewhere in the same value), so
+/// this still has to recurse into it, same as the pre-unification code did.
 fn collect_sexpr_roots(v: &RtValue, out: &mut Vec<Value>) {
     match v {
         RtValue::Sexpr(val) => out.push(*val),
@@ -2263,12 +2342,12 @@ fn int_to_char(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// `try-int->char` (`registry::int_assoc`): the `Option`-returning
 /// counterpart of [`int_to_char`], for `Checker::check_as`'s `try-as` —
 /// same Unicode-scalar-value validity check, `None` instead of a panic.
-fn try_int_to_char(args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn try_int_to_char(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     match args.first() {
         Some(RtValue::Int(n)) => {
             let in_u32_range = *n >= 0 && *n <= i64::from(u32::MAX);
             let c = in_u32_range.then_some(*n as u32).and_then(char::from_u32);
-            Ok(option_value(c.map(RtValue::Char)))
+            Ok(option_value(heap, c.map(RtValue::Char)))
         }
         other => Err(EvalError::Internal(format!("try-int->char: expected an integer, got {:?}", other))),
     }
@@ -2419,9 +2498,10 @@ fn bignum_to_int(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// `try-bignum->int` (`registry::bignum_assoc`): the `Option`-returning
 /// counterpart of [`bignum_to_int`], for `Checker::check_as`'s `try-as` —
 /// same "fits in an `i64`" check, `None` instead of a panic on overflow.
-fn try_bignum_to_int(args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn try_bignum_to_int(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let n = expect_bignum(&args[0])?;
-    Ok(option_value(n.to_i64().map(RtValue::Int)))
+    let int = n.to_i64().map(RtValue::Int);
+    Ok(option_value(heap, int))
 }
 
 /// `bignum->float` (`registry::bignum_assoc`): widening, possibly lossy for
@@ -2611,7 +2691,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
                 "clone-frames" => Some(scope_clone_frames(args)),
                 "push-frame" => Some(scope_push_frame(args)),
                 "pop-frame" => Some(scope_pop_frame(args)),
-                "get" => Some(scope_get(args)),
+                "get" => Some(scope_get(heap, args)),
                 "set" => Some(scope_set(args)),
                 _ => None,
             }
@@ -2668,7 +2748,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "eq" | "eql" | "equal" | "equalp" => eval_int_builtin("=", args),
             "int->float" => Some(int_to_float(args)),
             "int->char" => Some(int_to_char(args)),
-            "try-int->char" => Some(try_int_to_char(args)),
+            "try-int->char" => Some(try_int_to_char(heap, args)),
             "int->bignum" => Some(int_to_bignum(args)),
             "int->ratio" => Some(int_to_ratio(args)),
             _ => None,
@@ -2699,7 +2779,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             }
             "eq" | "eql" | "equal" | "equalp" => eval_bignum_builtin("=", args),
             "bignum->int" => Some(bignum_to_int(args)),
-            "try-bignum->int" => Some(try_bignum_to_int(args)),
+            "try-bignum->int" => Some(try_bignum_to_int(heap, args)),
             "bignum->float" => Some(bignum_to_float(args)),
             "bignum->ratio" => Some(bignum_to_ratio(args)),
             _ => None,
@@ -4030,13 +4110,45 @@ fn llvm_builder_build_ptr_to_int(args: &[RtValue]) -> Result<RtValue, EvalError>
     Ok(RtValue::LlvmValue(v.into()))
 }
 
-/// `Some(v)`/`None` as an `RtValue::Data`, matching `option_def`'s variant
-/// order (`some` = 0, `none` = 1).
-fn option_value(v: Option<RtValue>) -> RtValue {
-    match v {
-        Some(x) => RtValue::Data { type_name: Path::root("option"), variant: 0, fields: vec![x] },
-        None => RtValue::Data { type_name: Path::root("option"), variant: 1, fields: vec![] },
+/// Builds an enum value (`Option`/`Result`/user `defenum`) for `type_name`'s
+/// `variant`, from already-evaluated `fields` — the encode-direction
+/// counterpart of `match_pattern`'s dual heap-enum/native-`Data` decode.
+/// Boxes onto the GC heap (`BoxedObj::Enum`) when every field converts via
+/// `rtvalue_to_struct_field` (the same representable set every other
+/// heap-boxed container already requires); for a field holding something
+/// the heap cannot represent at all (an LLVM handle, a native-repr
+/// `Scope<V>`, `Unit`, a `Builtin` function value — precisely
+/// `Option<llvm-value>`/`Option<llvm-basic-block>`/... the (typelisp-hosted)
+/// compiler body itself constructs throughout `compile-value` and friends),
+/// falls back to the native `RtValue::Data`, mirroring `Scope<V>`'s own
+/// heap-repr/native-repr duality (`Interp::heap_repr_kind`) — but decided
+/// from the *value* already in hand rather than a static type, since
+/// encoding (unlike decoding) is unambiguous regardless: unlike
+/// `decode_field_typed`'s "quoted scalar vs plain scalar" ambiguity (a
+/// decode-only concern), `rtvalue_to_struct_field` either faithfully
+/// converts a field or doesn't apply to it at all. Any field converted
+/// before a later one fails is harmless heap churn (the GC reclaims it),
+/// not a leak.
+fn build_enum_value(heap: &mut Heap, type_name: Path, variant: usize, fields: Vec<RtValue>) -> RtValue {
+    let mut mem_fields = Vec::with_capacity(fields.len());
+    for f in &fields {
+        match rtvalue_to_struct_field(heap, f) {
+            Ok(mv) => mem_fields.push(mv),
+            Err(_) => return RtValue::Data { type_name, variant, fields },
+        }
     }
+    RtValue::Sexpr(heap.alloc_enum(type_name.to_string(), variant, mem_fields))
+}
+
+/// `Some(v)`/`None`, matching `option_def`'s variant order (`some` = 0,
+/// `none` = 1) — see [`build_enum_value`] for the heap/native duality this
+/// goes through.
+fn option_value(heap: &mut Heap, v: Option<RtValue>) -> RtValue {
+    let (variant, fields) = match v {
+        Some(x) => (0, vec![x]),
+        None => (1, vec![]),
+    };
+    build_enum_value(heap, Path::root("option"), variant, fields)
 }
 
 /// Rejects a `HashTable<K,V>` key argument before it ever reaches
@@ -4060,7 +4172,8 @@ fn hashtable_get(heap: &mut Heap, args: &[RtValue], ret_ty: &Type, enums: &HashM
     expect_hashable_key(&args[1])?;
     let key = rtvalue_to_struct_field(heap, &args[1])?;
     let val_ty = option_payload_ty(ret_ty)?;
-    Ok(option_value(heap.hashtable_get(id, key).map(|v| decode_field_typed(heap, v, &val_ty, enums))))
+    let found = heap.hashtable_get(id, key).map(|v| decode_field_typed(heap, v, &val_ty, enums));
+    Ok(option_value(heap, found))
 }
 
 fn hashtable_set(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -4077,7 +4190,8 @@ fn hashtable_remove(heap: &mut Heap, args: &[RtValue], ret_ty: &Type, enums: &Ha
     expect_hashable_key(&args[1])?;
     let key = rtvalue_to_struct_field(heap, &args[1])?;
     let val_ty = option_payload_ty(ret_ty)?;
-    Ok(option_value(heap.hashtable_remove(id, key).map(|v| decode_field_typed(heap, v, &val_ty, enums))))
+    let removed = heap.hashtable_remove(id, key).map(|v| decode_field_typed(heap, v, &val_ty, enums));
+    Ok(option_value(heap, removed))
 }
 
 fn hashtable_count(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -4266,20 +4380,32 @@ fn encode_data_field(heap: &mut Heap, v: &RtValue) -> Result<i64, EvalError> {
 
 /// Builds the same raw, un-GC-managed `[variant, field0, field1, ...]` box
 /// `compiler.rs`'s `compile-construct-box` builds via `build-malloc` inside
-/// compiled code — the Rust-side encoder [`Interp::promote_global`] needs
-/// for an enum-typed global's *initial* value (assigned before
-/// any compiled code has run yet, so there is no LLVM builder to emit
-/// `build-malloc` IR through). `Box<[i64]>`'s allocation is guaranteed
-/// 8-byte-aligned (its element type is `i64`), matching `build_array_malloc`'s
-/// own alignment — the precondition [`Interp::promote_global`]'s `>> 3`/`<< 3`
-/// round-trip through `Value::Int` relies on (see its call site). Leaked on
-/// purpose, never freed: the same accepted trade-off `compile-construct-box`
-/// itself documents for every box it builds.
-fn data_to_box(heap: &mut Heap, variant: usize, fields: &[RtValue]) -> Result<i64, EvalError> {
-    let mut slots: Vec<i64> = Vec::with_capacity(1 + fields.len());
+/// compiled code, reading the value out of heap enum box `id` (the unified
+/// `BoxedObj::Enum` representation every interpreter-side enum value now
+/// uses) — the transitional bridge [`Interp::promote_global`] needs while
+/// compiled code's own enum representation is still the raw box (`kind =
+/// 10` global access; the compiler flip retires this whole function).
+/// `Box<[i64]>`'s allocation is guaranteed 8-byte-aligned (its element
+/// type is `i64`), matching `build_array_malloc`'s own alignment — the
+/// precondition [`Interp::promote_global`]'s `>> 3`/`<< 3` round-trip
+/// through `Value::Int` relies on (see its call site). Leaked on purpose,
+/// never freed: the same accepted trade-off `compile-construct-box` itself
+/// documents for every box it builds.
+///
+/// Each stored field decodes by *shape* (`decode_nonsexpr_field`) before
+/// re-encoding — which cannot tell a `Sexpr`-declared field holding a
+/// scalar datum (a quoted `42`) from a plain scalar field, so that one
+/// niche shape would re-encode as a raw scalar slot instead of a tagged
+/// one. Accepted for this bridge's short life: the compiler flip stores
+/// the tagged box directly and the ambiguity disappears with the bridge.
+fn data_to_box(heap: &mut Heap, id: crate::BoxId) -> Result<i64, EvalError> {
+    let variant = heap.enum_variant(id);
+    let count = heap.enum_field_count(id);
+    let mut slots: Vec<i64> = Vec::with_capacity(1 + count);
     slots.push(variant as i64);
-    for f in fields {
-        slots.push(encode_data_field(heap, f)?);
+    for i in 0..count {
+        let f = decode_nonsexpr_field(heap, heap.enum_field(id, i));
+        slots.push(encode_data_field(heap, &f)?);
     }
     let fat: *mut [i64] = Box::into_raw(slots.into_boxed_slice());
     Ok((fat as *mut i64 as usize) as i64)
@@ -4303,24 +4429,35 @@ fn decode_data_field(heap: &Heap, raw: i64, ty: &Type) -> RtValue {
     }
 }
 
-/// Reads an `Option<T>`/`Result<T,E>`/user-`defenum` value back out of a
-/// global's permanent-root storage — [`Interp::promote_global`]'s
-/// `Value::Int(ptr)` encoding (the pointer stored verbatim, unshifted — see
-/// that call site's doc comment for why). `ty` is the global's own declared
-/// type (`Expr::Global`'s checked `Typed::ty`), whose variant field types
-/// [`data_variant_field_types`] resolves — straight from the generic
-/// arguments for `Option`/`Result`, via `enums` ([`Interp::enum_defs`]) for
-/// a user enum.
+/// Reads an `Option<T>`/`Result<T,E>`/user-`defenum` value back out of an
+/// enum-typed slot, in either of the two storages an enum value can sit in
+/// during the representation-unification transition:
+///
+/// - `Value::Boxed` at a `BoxedObj::Enum` — the unified heap
+///   representation everything interpreter-side now uses (vector elements,
+///   hashtable values, heap binding cells) — passed through unchanged.
+/// - `Value::Int(ptr)` at a raw compiled-side `malloc` box —
+///   [`Interp::promote_global`]'s encoding for a *promoted global* (the
+///   pointer stored verbatim, unshifted — see that call site's doc comment
+///   for why), still what compiled code's `kind = 10` global access
+///   reads/writes until the compiler flips to `rt_data_*`. Decoded into a
+///   fresh heap enum box: `ty` (the global's own declared type,
+///   `Expr::Global`'s checked `Typed::ty`) supplies the variant's field
+///   types via [`data_variant_field_types`] — needed because the raw box's
+///   slots are untyped — and each field re-encodes through
+///   `rtvalue_to_struct_field` (infallible here: a raw box only ever holds
+///   the representable set that encoded it).
 ///
 /// # Safety-adjacent
-/// Dereferences a raw pointer this same module allocated via
+/// The `Int` arm dereferences a raw pointer this same module allocated via
 /// [`data_to_box`] (`Box<[i64]>`, never freed) — sound as long as nothing
 /// but [`Interp::promote_global`]'s own `Value::Int` ever reaches here,
 /// which `decode_field_typed`'s `ty`-gated dispatch guarantees.
-fn decode_data_value(heap: &Heap, v: Value, ty: &Type, enums: &HashMap<Path, EnumDef>) -> RtValue {
+fn decode_data_value(heap: &mut Heap, v: Value, ty: &Type, enums: &HashMap<Path, EnumDef>) -> RtValue {
     let ptr = match v {
+        Value::Boxed(id) if heap.is_enum(id) => return RtValue::Sexpr(v),
         Value::Int(n) => n as usize as *const i64,
-        other => panic!("decode_data_value: expected a compiled Option/Result/enum's Value::Int slot, got {:?}", other),
+        other => panic!("decode_data_value: expected an enum value's slot, got {:?}", other),
     };
     // Safety: see this function's own doc comment.
     let variant = unsafe { *ptr } as usize;
@@ -4329,17 +4466,19 @@ fn decode_data_value(heap: &Heap, v: Value, ty: &Type, enums: &HashMap<Path, Enu
         other => panic!("decode_data_value: expected a named enum type, got {:?}", other),
     };
     let field_types = data_variant_field_types(ty, variant, enums).unwrap_or_default();
-    let fields = field_types
+    let mem_fields = field_types
         .iter()
         .enumerate()
         .map(|(i, fty)| {
             // Safety: see this function's own doc comment; `i + 1` stays
             // within the box's own field count by construction.
             let raw = unsafe { *ptr.add(1 + i) };
-            decode_data_field(heap, raw, fty)
+            let f = decode_data_field(heap, raw, fty);
+            rtvalue_to_struct_field(heap, &f)
+                .expect("a raw enum box field decoded to an unrepresentable RtValue (internal invariant)")
         })
         .collect();
-    RtValue::Data { type_name, variant, fields }
+    RtValue::Sexpr(heap.alloc_enum(type_name.to_string(), variant, mem_fields))
 }
 
 /// Decodes a `mem::Value` read out of a `BoxedObj::Struct` field (or
@@ -4353,10 +4492,11 @@ fn decode_data_value(heap: &Heap, v: Value, ty: &Type, enums: &HashMap<Path, Enu
 /// is a `Value::Int` that must come back as the `Sexpr` it is, not as
 /// `RtValue::Int` — is decided statically here, never guessed from the
 /// value.
-fn decode_field_typed(heap: &Heap, v: Value, ty: &Type, enums: &HashMap<Path, EnumDef>) -> RtValue {
+fn decode_field_typed(heap: &mut Heap, v: Value, ty: &Type, enums: &HashMap<Path, EnumDef>) -> RtValue {
     if is_sexpr_ty(ty) {
         RtValue::Sexpr(v)
-    } else if matches!(ty, Type::Named(p, _) if *p == option_path() || *p == result_path() || enums.contains_key(p)) {
+    } else if matches!(ty, Type::Named(p, _) if *p == option_path() || *p == result_path() || *p == Path::root("error") || enums.contains_key(p))
+    {
         decode_data_value(heap, v, ty, enums)
     } else {
         decode_nonsexpr_field(heap, v)
@@ -4407,7 +4547,7 @@ fn vector_push(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> 
 /// element type post-monomorphization (`Vector<Sexpr>`'s `get` returns
 /// `Sexpr` there), so the element decode is fully type-directed; see
 /// [`decode_field_typed`].
-fn vector_get(heap: &Heap, args: &[RtValue], ret_ty: &Type, enums: &HashMap<Path, EnumDef>) -> Result<RtValue, EvalError> {
+fn vector_get(heap: &mut Heap, args: &[RtValue], ret_ty: &Type, enums: &HashMap<Path, EnumDef>) -> Result<RtValue, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let i = expect_int_index(&args[1])?;
     if i >= heap.struct_field_count(id) {
@@ -4463,10 +4603,11 @@ fn scope_pop_frame(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Unit)
 }
 
-fn scope_get(args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn scope_get(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let scope = expect_scope(&args[0])?;
     let name = expect_str(&args[1])?;
-    Ok(option_value(scope.get(name)))
+    let found = scope.get(name);
+    Ok(option_value(heap, found))
 }
 
 fn scope_set(args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -4503,10 +4644,11 @@ fn scope_pop_frame_heap(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, Ev
     Ok(RtValue::Unit)
 }
 
-fn scope_get_heap(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn scope_get_heap(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let name = expect_str(&args[1])?;
-    Ok(option_value(heap.scope_get(id, name).map(RtValue::Sexpr)))
+    let found = heap.scope_get(id, name).map(RtValue::Sexpr);
+    Ok(option_value(heap, found))
 }
 
 /// `Heap::scope_set` panics on an empty frame stack (the mem layer's
@@ -4822,10 +4964,40 @@ fn match_pattern(heap: &Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(String,
             _ => None,
         },
         Pattern::Ctor { variant, args, sexpr_fields, .. } => match v {
+            // The native-repr fallback for an enum instantiated over a
+            // type the heap cannot represent at all (`build_enum_value`'s
+            // doc comment — `Option<llvm-value>` and friends). Matched by
+            // recursing on each field directly, exactly like the pre-
+            // unification code always did; no `sexpr_fields`/heap decode
+            // needed since a native field is never `mem::Value`-encoded.
             RtValue::Data { variant: vv, fields, .. } if vv == variant && fields.len() == args.len() => {
                 let mut binds = Vec::new();
                 for (p, f) in args.iter().zip(fields.iter()) {
                     binds.extend(match_pattern(heap, p, f)?);
+                }
+                Some(binds)
+            }
+            // An enum value (`Option`/`Result`/user `defenum`) is a boxed
+            // `BoxedObj::Enum`: tag-test its variant index, then decode each
+            // field exactly the way the struct arm below does. Guarded on
+            // `heap.is_enum` first (like the struct arm's own guard) so a
+            // genuine `Sexpr` datum falls through to the `RtValue::Sexpr`
+            // arm; a *matching-shape* enum whose variant differs also falls
+            // through, where `match_sexpr_ctor`'s own guards all fail —
+            // `None`, the same "try the next match arm" a wrong-variant
+            // `RtValue::Data` used to produce.
+            RtValue::Sexpr(Value::Boxed(id))
+                if heap.is_enum(*id) && heap.enum_variant(*id) == *variant && heap.enum_field_count(*id) == args.len() =>
+            {
+                let mut binds = Vec::new();
+                for (i, p) in args.iter().enumerate() {
+                    let raw = heap.enum_field(*id, i);
+                    let f = if sexpr_fields.get(i).copied().unwrap_or(false) {
+                        RtValue::Sexpr(raw)
+                    } else {
+                        decode_nonsexpr_field(heap, raw)
+                    };
+                    binds.extend(match_pattern(heap, p, &f)?);
                 }
                 Some(binds)
             }

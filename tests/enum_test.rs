@@ -50,6 +50,33 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+/// Run `src` and destructure the resulting enum value — a boxed
+/// `BoxedObj::Enum` since the enum-representation unification (the old
+/// `RtValue::Data` is gone) — into its variant index and raw field
+/// `Value`s. Keeps the heap alive across the destructure, which `run`'s
+/// own signature can't.
+fn eval_enum(src: &str) -> (usize, Vec<typelisp::Value>) {
+    let mut h = Heap::with_capacity(1 << 16);
+    let r = Reader::new();
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(v) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = v;
+        }
+    }
+    match last {
+        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_enum(id) => {
+            (h.enum_variant(id), (0..h.enum_field_count(id)).map(|i| h.enum_field(id, i)).collect())
+        }
+        other => panic!("expected an enum value, got {:?}", other),
+    }
+}
+
 fn assert_check_err(src: &str, needle: &str) {
     match check(src) {
         Ok(_) => panic!("expected a check error containing {:?}, but check succeeded", needle),
@@ -65,44 +92,30 @@ fn assert_check_err(src: &str, needle: &str) {
 #[test]
 fn defenum_constructs_a_nullary_variant() {
     // `Color::Red` is variant index 0 (declaration order), no payload.
-    match eval_ok("(defenum Color (Red) (Green) (Blue)) (Color::Red)") {
-        RtValue::Data { variant, fields, .. } => {
-            assert_eq!(variant, 0);
-            assert!(fields.is_empty());
-        }
-        other => panic!("expected Data, got {:?}", other),
-    }
+    let (variant, fields) = eval_enum("(defenum Color (Red) (Green) (Blue)) (Color::Red)");
+    assert_eq!(variant, 0);
+    assert!(fields.is_empty());
 }
 
 #[test]
 fn defenum_constructs_a_later_variant() {
-    match eval_ok("(defenum Color (Red) (Green) (Blue)) (Color::Blue)") {
-        RtValue::Data { variant, .. } => assert_eq!(variant, 2),
-        other => panic!("expected Data, got {:?}", other),
-    }
+    let (variant, _) = eval_enum("(defenum Color (Red) (Green) (Blue)) (Color::Blue)");
+    assert_eq!(variant, 2);
 }
 
 #[test]
 fn defenum_constructs_a_variant_with_a_payload() {
-    match eval_ok("(defenum Shape (Circle i32) (Nothing)) (Shape::Circle 7)") {
-        RtValue::Data { variant, fields, .. } => {
-            assert_eq!(variant, 0);
-            assert_eq!(fields, vec![RtValue::Int(7)]);
-        }
-        other => panic!("expected Data, got {:?}", other),
-    }
+    let (variant, fields) = eval_enum("(defenum Shape (Circle i32) (Nothing)) (Shape::Circle 7)");
+    assert_eq!(variant, 0);
+    assert_eq!(fields, vec![typelisp::Value::Int(7)]);
 }
 
 #[test]
 fn a_bare_symbol_nullary_variant_is_accepted() {
     // `A` (no parens) is a nullary variant, equivalent to `(A)`.
-    match eval_ok("(defenum E A (B i32)) (E::A)") {
-        RtValue::Data { variant, fields, .. } => {
-            assert_eq!(variant, 0);
-            assert!(fields.is_empty());
-        }
-        other => panic!("expected Data, got {:?}", other),
-    }
+    let (variant, fields) = eval_enum("(defenum E A (B i32)) (E::A)");
+    assert_eq!(variant, 0);
+    assert!(fields.is_empty());
 }
 
 // ---- match ------------------------------------------------------------------
@@ -175,10 +188,8 @@ fn a_bare_constructor_is_unresolved_without_use() {
 #[test]
 fn use_makes_constructors_bare_callable() {
     let src = "(defenum Color (Red) (Green) (Blue)) (use Color) (Green)";
-    match eval_ok(src) {
-        RtValue::Data { variant, .. } => assert_eq!(variant, 1),
-        other => panic!("expected Data, got {:?}", other),
-    }
+    let (variant, _) = eval_enum(src);
+    assert_eq!(variant, 1);
 }
 
 // ---- error cases ------------------------------------------------------------

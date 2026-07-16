@@ -273,8 +273,19 @@ pub enum RtValue {
     /// equal/equalp section.
     Str(Rc<str>),
     Unit,
-    /// A constructor instance: the type's [`Path`], the variant index, and the
-    /// evaluated field values.
+    /// An enum value (`Option`/`Result`/user `defenum` instance) **of a
+    /// native-repr instantiation only**: one whose variant fields include a
+    /// type the GC heap cannot store — an LLVM handle, a native-`V`
+    /// `Scope`, a function type (whose value may be a [`RtValue::Builtin`],
+    /// not a heap closure box), or `Unit` — e.g. the `Option<llvm-value>`
+    /// the (typelisp-hosted) compiler body's `scope::get` returns. Every
+    /// *other* enum instantiation is a heap `BoxedObj::Enum` behind
+    /// [`RtValue::Sexpr`] since the enum-representation unification; the
+    /// tier is decided statically from the concrete instantiated type
+    /// (`Interp::enum_ty_is_native` / the checker's `is_heap_repr` twin),
+    /// never from a value's shape — the exact split [`RtValue::Scope`]
+    /// already established for `Scope<V>`, and for the same reason: an
+    /// LLVM handle can never reach the GC heap through any container.
     Data {
         type_name: Path,
         variant: usize,
@@ -297,6 +308,12 @@ pub enum RtValue {
     /// identity, GC tracing, and cycle collection (`labels`) all come from
     /// the same heap machinery as every other boxed value, and no dedicated
     /// `RtValue::Closure` variant exists anymore.
+    /// Since the enum-representation unification this is also where an
+    /// *enum value* (`Option`/`Result`/`Error`/user `defenum`) lives: a
+    /// `Value::Boxed` pointing at a `BoxedObj::Enum` (variant index +
+    /// fields) — the dedicated `RtValue::Data` variant is gone, and the
+    /// same one heap object is what compiled code reads/writes through
+    /// `rt_data_*`.
     Sexpr(Value),
     /// A built-in *free* function used as a function value (e.g. `gensym`).
     Builtin(String),

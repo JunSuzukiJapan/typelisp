@@ -1961,23 +1961,65 @@ impl Checker {
     /// itself, any `AdtKind::Struct` type (`defstruct`/`Vector<T>`/
     /// `cons-cell<K,V>`), `HashTable<K,V>` (boxed since the unification's
     /// Stage 5, though its `AdtDef` still says `Sum` — a recorded historical
-    /// asymmetry), or a `Scope<V>` whose `V` is itself heap-repr (boxed
-    /// since the unification's Stage 8; a scope of anything else — LLVM
-    /// handles above all — stays Rust-native). This is the checker-side
-    /// twin of the interpreter's `Interp::heap_repr_kind` (which carries
-    /// the matching `Scope<V>` recursion), used to bake binding-slot
-    /// routing into `Pattern::Bind` (the one binding site whose type the
-    /// evaluator can't read off its own AST node).
+    /// asymmetry), a `Scope<V>` whose `V` is itself heap-repr (boxed since
+    /// the unification's Stage 8; a scope of anything else — LLVM handles
+    /// above all — stays Rust-native), or an enum instantiation
+    /// (`Option`/`Result`/`Error`/user `defenum`) *every one of whose
+    /// variant fields is itself representable* — see
+    /// [`Self::enum_fields_representable`] for why this must recurse rather
+    /// than key on "is this a `Sum` with variants": `Option<llvm-value>`
+    /// and friends (the (typelisp-hosted) compiler body's own bread and
+    /// butter — `loop-exit`/`loop-slot`/every `env`/`fn-env` lookup) are
+    /// exactly the same `Sum`-with-variants shape as `Option<i64>`, yet
+    /// must stay native (`RtValue::Data`, a Rust-side value with no heap
+    /// form at all) since an LLVM handle can never be heap-boxed. This is
+    /// the checker-side twin of the interpreter's
+    /// `Interp::heap_repr_kind`/`enum_fields_representable` (which carry
+    /// the matching `Scope<V>` recursion and enum-field recursion), used to
+    /// bake binding-slot routing into `Pattern::Bind` (the one binding site
+    /// whose type the evaluator can't read off its own AST node).
     fn is_heap_repr(&self, ty: &Type) -> bool {
+        self.is_heap_repr_seen(ty, &mut HashSet::new())
+    }
+
+    fn is_heap_repr_seen(&self, ty: &Type, seen: &mut HashSet<Path>) -> bool {
         match ty {
-            Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => self.is_heap_repr(&args[0]),
-            Type::Named(p, _) => {
-                *p == Path::root("sexpr")
-                    || *p == Path::root("hashtable")
-                    || self.reg.type_def(p).map(|d| d.kind == AdtKind::Struct).unwrap_or(false)
-            }
+            Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => self.is_heap_repr_seen(&args[0], seen),
+            Type::Named(p, _) if *p == Path::root("sexpr") || *p == Path::root("hashtable") => true,
+            Type::Named(p, args) => match self.reg.type_def(p) {
+                Some(d) if d.kind == AdtKind::Struct => true,
+                Some(d) if d.kind == AdtKind::Sum && !d.variants.is_empty() => {
+                    self.enum_fields_representable(p, &d.params, &d.variants, args, seen)
+                }
+                _ => false,
+            },
             _ => false,
         }
+    }
+
+    /// Whether every field of every variant of enum type `name` — after
+    /// substituting `args` for `params` — is itself representable (a plain
+    /// scalar that boxes trivially, e.g. `i64`/`Str`, or recursively
+    /// heap-repr by [`Self::is_heap_repr_seen`]). `seen` guards a
+    /// self-/mutually-referential `defenum` (e.g. a tree type) from
+    /// infinite recursion: revisiting a path already being computed can't
+    /// introduce a new native-only leaf, so it's treated as representable
+    /// there — the same short-circuit `Sexpr`'s own recursive `Cons`
+    /// variant gets for free by being special-cased before ever reaching
+    /// here.
+    fn enum_fields_representable(&self, name: &Path, params: &[String], variants: &[Variant], args: &[Type], seen: &mut HashSet<Path>) -> bool {
+        if !seen.insert(name.clone()) {
+            return true;
+        }
+        let subst: HashMap<String, Type> = params.iter().cloned().zip(args.iter().cloned()).collect();
+        let ok = variants.iter().all(|variant| {
+            variant.fields.iter().all(|f| {
+                let fty = subst_apply(f, &subst);
+                is_boxable_scalar(&fty) || self.is_heap_repr_seen(&fty, seen)
+            })
+        });
+        seen.remove(name);
+        ok
     }
 
     /// Whether `t` still mentions an unresolved type variable — a
@@ -5477,6 +5519,18 @@ fn mangled_fn_path(base: &Path, args: &[Type]) -> Path {
 /// space makes collisions with source-written names impossible.
 fn mangled_method_name(base: &str, args: &[Type]) -> String {
     format!("{} <{}>", base, args.iter().map(mangle_type).collect::<Vec<_>>().join(","))
+}
+
+/// A type whose runtime value always boxes trivially via
+/// `crate::eval::interp::rtvalue_to_struct_field` — the scalar half of
+/// `Checker::enum_fields_representable`'s "is this field representable"
+/// test (the other half being [`Checker::is_heap_repr_seen`]'s recursive
+/// one). Mirrored by `crate::eval::interp::is_boxable_scalar` — the two
+/// must agree on exactly this set, since together they decide whether an
+/// enum instantiation is heap- or native-repr on both sides of the
+/// checker/interpreter twin contract.
+pub(crate) fn is_boxable_scalar(ty: &Type) -> bool {
+    ty.is_integer() || ty.is_float() || matches!(ty, Type::Bool | Type::Char | Type::Str | Type::Bignum | Type::Ratio)
 }
 
 /// Replace type parameters in `t` with their bindings from `subst`.

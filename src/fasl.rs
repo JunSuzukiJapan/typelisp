@@ -344,7 +344,16 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// 5: `TopLevel::Defenum` now carries its `params`/`variants` (each
 /// variant's field types, baked in at check time for the compiled-global
 /// box decode — `Interp::enum_defs`) — 2026-07-16.
-pub const FASL_FORMAT_VERSION: u32 = 5;
+///
+/// 6: enum values became heap-boxed (`BoxedObj::Enum`, the
+/// enum-representation unification), which changes two pieces of *baked*
+/// data without changing any serialized shape: `Pattern::Bind`'s
+/// heap-slot-routing bool is now `true` for enum-typed bindings
+/// (`Checker::is_heap_repr`'s "Sum with variants" arm), and an
+/// enum-typed anything now classifies heap-repr throughout — a stale
+/// cache's `false` would put a GC-heap value in a Native slot the GC
+/// can't see through compiled code's own collections — 2026-07-16.
+pub const FASL_FORMAT_VERSION: u32 = 6;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.
