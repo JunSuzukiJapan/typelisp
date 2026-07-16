@@ -340,7 +340,11 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// 4: re-added value-level `&rest`/`apply` (`FnSig.rest: Option<Type>`,
 /// `Type::Fn`'s second field), reachable from any serialized function
 /// signature or `Typed` whose type mentions a function type — 2026-07-15.
-pub const FASL_FORMAT_VERSION: u32 = 4;
+///
+/// 5: `TopLevel::Defenum` now carries its `params`/`variants` (each
+/// variant's field types, baked in at check time for the compiled-global
+/// box decode — `Interp::enum_defs`) — 2026-07-16.
+pub const FASL_FORMAT_VERSION: u32 = 5;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.

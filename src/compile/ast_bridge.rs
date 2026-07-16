@@ -16,9 +16,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::freevars::{labels_free_vars, lambda_free_vars};
 use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, QuotedSexpr, Type, Typed, Value};
 
-/// The four read-only inputs every scoped `translate_*` threads through
+/// The five read-only inputs every scoped `translate_*` threads through
 /// unchanged, bundled so a call passes one `cx` instead of re-listing all
-/// four, and a new scope re-binds only the field that actually changed
+/// five, and a new scope re-binds only the field that actually changed
 /// (`Ctx { direct: &siblings, ..cx }`) rather than restating the rest:
 /// - `direct`: names resolving to a direct call — in-scope `labels`
 ///   siblings/self (see [`ast_to_sexpr_scoped`]/[`translate_apply`]). Empty at
@@ -27,6 +27,10 @@ use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, QuotedSexpr, Type, 
 ///   nested block can forward those values along (see [`translate_labels`]).
 /// - `structs`: the type paths the checker resolved to `AdtKind::Struct` (see
 ///   [`struct_field_kind`]); fixed for a whole translation, never re-bound.
+/// - `enums`: the type paths of user `defenum`s (`Interp::enum_defs`'s keys
+///   at the only real call site) — pre-resolved plain data like `structs`,
+///   keeping this module `Registry`-free. Only [`global_field_kind`]'s
+///   kind-`10` classification reads it; fixed for a whole translation.
 /// - `globals`: every `Expr::Global`/`Expr::SetGlobal` path this translation
 ///   may reference, mapped to its already-promoted compiled-global id
 ///   (`typelisp_rt::global_new`'s return value) — populated by
@@ -35,12 +39,13 @@ use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, QuotedSexpr, Type, 
 ///   guaranteed present; see [`translate_global`]. Fixed for a whole
 ///   translation, exactly like `structs`.
 ///
-/// `Copy` so it passes by value freely — it's four shared references.
+/// `Copy` so it passes by value freely — it's five shared references.
 #[derive(Clone, Copy)]
 struct Ctx<'a> {
     direct: &'a HashSet<String>,
     outer_captured: &'a [(String, Type)],
     structs: &'a HashSet<Path>,
+    enums: &'a HashSet<Path>,
     globals: &'a HashMap<Path, usize>,
 }
 
@@ -343,10 +348,11 @@ pub(crate) fn tagged_sym_list(heap: &mut Heap, names: &[(String, Type)]) -> Resu
 /// field yet — Closure unification, Stage 6a-6b), a general-ADT `Option`/
 /// `Result`/user sum type (an untagged raw `malloc`'d pointer that must
 /// *not* flow into `rt_struct_new` unconverted — it has no GC-heap
-/// representation until general ADTs are themselves boxed), and a still-
-/// generic type variable (a `defstruct`'s own `T` field compiled from the
-/// generic definition — resolving it would take monomorphized compilation,
-/// not more type information at this site). A clear compile-time panic
+/// representation until general ADTs are themselves boxed; a *global* of
+/// such a type is fine, via [`global_field_kind`]'s kind-`10` permanent-
+/// root path), and a still-generic type variable (a `defstruct`'s own `T`
+/// field compiled from the generic definition — resolving it would take
+/// monomorphized compilation, not more type information at this site). A clear compile-time panic
 /// (`compile-tag-struct-field`/`compile-sexpr-field`'s own existing "not
 /// representable yet" message) is the accepted result for those, the same
 /// as a `Sym` field in a `Sexpr` construct.
@@ -383,12 +389,16 @@ fn struct_field_kind(ty: &Type, structs: &HashSet<Path>) -> i64 {
 /// encoding). Kind `10` — not `struct_field_kind`'s own `0`/unsupported —
 /// tells `compiler.rs`'s `compile-global`/`compile-set-global`/
 /// `compile-global-init` to take that same shift-tagged path instead of
-/// panicking. `Option`/`Result` only (`Interp::data_variant_field_types`'s
-/// doc comment explains why a user `defenum` isn't covered yet).
-fn global_field_kind(ty: &Type, structs: &HashSet<Path>) -> i64 {
+/// panicking. Covers `Option`/`Result` and every user `defenum` in `enums`
+/// ([`Ctx::enums`]) — the kind-`10` path is variant-agnostic (a
+/// shift-tagged raw box pointer, whatever its layout), so the same
+/// compiled code handles all three; the layout-aware half lives on the
+/// Rust side (`Interp`'s `data_variant_field_types`).
+fn global_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> i64 {
     match ty {
         Type::Named(p, args) if p.local() == "option" && p.is_simple() && args.len() == 1 => 10,
         Type::Named(p, args) if p.local() == "result" && p.is_simple() && args.len() == 2 => 10,
+        Type::Named(p, _) if enums.contains(p) => 10,
         other => struct_field_kind(other, structs),
     }
 }
@@ -647,9 +657,15 @@ fn tagged_ast_list_to_sexpr_with(
 /// is every global variable this translation may reference, already
 /// promoted to a compiled-global id — see [`Ctx`]'s doc comment and
 /// [`collect_global_targets`].
-pub fn ast_to_sexpr(heap: &mut Heap, typed: &Typed, structs: &HashSet<Path>, globals: &HashMap<Path, usize>) -> Result<Value, Error> {
+pub fn ast_to_sexpr(
+    heap: &mut Heap,
+    typed: &Typed,
+    structs: &HashSet<Path>,
+    enums: &HashSet<Path>,
+    globals: &HashMap<Path, usize>,
+) -> Result<Value, Error> {
     let direct = HashSet::new();
-    let cx = Ctx { direct: &direct, outer_captured: &[], structs, globals };
+    let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals };
     ast_to_sexpr_scoped(heap, typed, cx)
 }
 
@@ -670,11 +686,12 @@ pub fn ast_to_sexpr_for_global_init(
     heap: &mut Heap,
     value: &Typed,
     structs: &HashSet<Path>,
+    enums: &HashSet<Path>,
     globals: &HashMap<Path, usize>,
 ) -> Result<Value, Error> {
     let direct = HashSet::new();
-    let cx = Ctx { direct: &direct, outer_captured: &[], structs, globals };
-    let kind = Value::Int(global_field_kind(&value.ty, structs));
+    let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals };
+    let kind = Value::Int(global_field_kind(&value.ty, structs, enums));
     let form = ast_to_sexpr_scoped(heap, value, cx)?;
     heap.push_root(form);
     let result = tagged(heap, "global-init", &[kind, form]);
@@ -807,7 +824,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         Expr::If(cond, then, els) => translate_if(heap, cond, then, els, &typed.ty, cx),
         Expr::Let(binds, body) => translate_let(heap, binds, body, cx),
         Expr::Call(path, args) => translate_call(heap, path, args, cx),
-        Expr::Lambda { params, body } => translate_lambda(heap, params, body, cx.structs, cx.globals),
+        Expr::Lambda { params, body } => translate_lambda(heap, params, body, cx.structs, cx.enums, cx.globals),
         Expr::Labels { defs, body } => translate_labels(heap, defs, body, cx),
         Expr::Apply(callee, args) => translate_apply(heap, callee, args, cx),
         Expr::Construct { type_name, variant, args, mutable } => translate_construct(heap, type_name, &typed.ty, *variant, args, *mutable, cx),
@@ -1031,7 +1048,7 @@ fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, cx: Ctx)
 /// to keep in sync with, only the one slot itself.
 fn translate_global(heap: &mut Heap, path: &Path, ty: &Type, cx: Ctx) -> Result<Value, Error> {
     let id = global_id(path, cx)?;
-    let kind = Value::Int(global_field_kind(ty, cx.structs));
+    let kind = Value::Int(global_field_kind(ty, cx.structs, cx.enums));
     tagged(heap, "global", &[Value::Int(id as i64), kind])
 }
 
@@ -1046,7 +1063,7 @@ fn translate_global(heap: &mut Heap, path: &Path, ty: &Type, cx: Ctx) -> Result<
 /// [`translate_global`]'s doc comment gives.
 fn translate_set_global(heap: &mut Heap, path: &Path, value: &Typed, cx: Ctx) -> Result<Value, Error> {
     let id = global_id(path, cx)?;
-    let kind = Value::Int(global_field_kind(&value.ty, cx.structs));
+    let kind = Value::Int(global_field_kind(&value.ty, cx.structs, cx.enums));
     let form = ast_to_sexpr_scoped(heap, value, cx)?;
     heap.push_root(form);
     let result = tagged(heap, "set-global", &[Value::Int(id as i64), kind, form]);
@@ -1421,7 +1438,7 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], cx: Ctx)
     // The scope each def's body / the trailing body sees: siblings become
     // directly callable, and this block's captured list becomes the enclosing
     // one for any nested block. `structs` is invariant.
-    let inner = Ctx { direct: &siblings, outer_captured: &captured_names, structs: cx.structs, globals: cx.globals };
+    let inner = Ctx { direct: &siblings, outer_captured: &captured_names, ..cx };
     let captured_list = tagged_sym_list(heap, &captured_names)?;
     heap.push_root(captured_list);
 
@@ -1685,7 +1702,14 @@ fn build_lambda_tag(heap: &mut Heap, name: &str, captured: &[(String, Type)], pa
 /// `compile-env-args`/`resolve-value` box the sibling there, and the boxed
 /// value flows into this lambda's own `env` via the ordinary `bind-captures`
 /// path — no special-casing needed inside the lambda's own body at all.
-fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed], structs: &HashSet<Path>, globals: &HashMap<Path, usize>) -> Result<Value, Error> {
+fn translate_lambda(
+    heap: &mut Heap,
+    params: &[(String, Type)],
+    body: &[Typed],
+    structs: &HashSet<Path>,
+    enums: &HashSet<Path>,
+    globals: &HashMap<Path, usize>,
+) -> Result<Value, Error> {
     if body.len() != 1 {
         return Err(Error::TypeError("compile: lambda has a multi-expression body, not yet supported".into()));
     }
@@ -1697,7 +1721,7 @@ fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed], 
     // inside *this* body has no enclosing block's captured-list to prefix
     // its own with, regardless of what scope the `lambda` itself sits in.
     let direct = HashSet::new();
-    let cx = Ctx { direct: &direct, outer_captured: &[], structs, globals };
+    let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals };
     let body_v = ast_to_sexpr_scoped(heap, &body[0], cx)?;
     heap.push_root(body_v);
     let result = build_lambda_tag(heap, &fresh_lambda_name("lambda"), &captured_names, params, body_v);
@@ -2471,14 +2495,14 @@ mod tests {
         Typed { loc: None, expr, ty }
     }
 
-    /// Shadows `super::ast_to_sexpr` with an empty `structs` set and no
-    /// promoted globals — the pre-existing tests here never involve a
-    /// struct-typed field or a global reference, so threading either
-    /// through each call adds nothing. A test that *does* care (nested-
-    /// struct field classification, `Global`/`SetGlobal`) calls
-    /// `super::ast_to_sexpr` with real ones instead.
+    /// Shadows `super::ast_to_sexpr` with empty `structs`/`enums` sets and
+    /// no promoted globals — the pre-existing tests here never involve a
+    /// struct-typed field, an enum-typed global, or a global reference, so
+    /// threading them through each call adds nothing. A test that *does*
+    /// care (nested-struct field classification, `Global`/`SetGlobal`)
+    /// calls `super::ast_to_sexpr` with real ones instead.
     fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
-        super::ast_to_sexpr(heap, typed, &HashSet::new(), &HashMap::new())
+        super::ast_to_sexpr(heap, typed, &HashSet::new(), &HashSet::new(), &HashMap::new())
     }
 
     /// Unpacks a tagged-list `Value` into (tag name, field values), asserting
@@ -3388,7 +3412,8 @@ mod tests {
         structs.insert(point.clone());
         let globals = HashMap::new();
         let direct = HashSet::new();
-        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, globals: &globals };
+        let enums = HashSet::new();
+        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals };
 
         let point_ty = Type::Named(point.clone(), vec![]);
         let scrut = typed(Expr::Var("p".to_string()), point_ty.clone());
@@ -3475,8 +3500,9 @@ mod tests {
         let pat_lit_payload = |heap: &mut Heap, pat: &Pattern| -> i64 {
             let direct = HashSet::new();
             let structs = HashSet::new();
+            let enums = HashSet::new();
             let globals = HashMap::new();
-            let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, globals: &globals };
+            let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals };
             let v = pattern_to_sexpr(heap, pat, cx).unwrap();
             let (tag, fields) = untag(heap, v);
             assert_eq!(tag, "pat-lit");

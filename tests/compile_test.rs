@@ -3153,12 +3153,11 @@ fn compile_dispatches_a_function_that_writes_a_global_to_native_code() {
     assert_eq!(v, RtValue::Int(2));
 }
 
-/// A global whose declared type can't cross into compiled code
 /// `Option<T>`/`Result<T,E>` globals compile: reading one back through
 /// `match` from compiled code round-trips correctly (`Interp::promote_global`'s
 /// `RtValue::Data` -> raw-box encoding, `ast_bridge::global_field_kind`'s
-/// dedicated `kind = 10`). A user `defenum` global remains unsupported
-/// (`Interp::data_variant_field_types`'s doc comment) — see the next test.
+/// dedicated `kind = 10`). User `defenum` globals ride the same path — see
+/// the tests below.
 #[test]
 fn compile_of_a_function_referencing_an_option_typed_global_round_trips() {
     let v = run_with_compiler(
@@ -3218,21 +3217,97 @@ fn compile_can_set_an_option_typed_global_and_the_interpreter_sees_the_write() {
     }
 }
 
-/// A user `defenum` global still surfaces a clean compile-time error rather
-/// than a panic deep inside the compiler body — `Interp::promote_global`'s
-/// doc comment explains why only `Option`/`Result` are supported today.
+/// A user `defenum` global crosses into compiled code the same way an
+/// `Option` one does (`Interp::promote_global`'s `data_to_box` encoding,
+/// `global_field_kind`'s `kind = 10`), with the variant field types coming
+/// from `Interp::enum_defs` (`TopLevel::Defenum`'s baked-in definition)
+/// instead of the type's own generic args — nullary variants here, so this
+/// is the `fields: &[]` shape plus the tag-slot discrimination.
 #[test]
-fn compile_of_a_function_referencing_a_user_defenum_global_is_a_clean_error() {
-    let err = run_with_compiler(
+fn compile_of_a_function_referencing_a_user_defenum_global_round_trips() {
+    let v = run_with_compiler(
         r#"
         (defenum color (red) (green) (blue))
-        (defvar (c color) (color::red))
-        (defun read-c () color c)
+        (defvar (c color) (color::green))
+        (defun read-c () i64 (match c ((red) 1) ((green) 2) ((blue) 3)))
         (compile read-c)
+        (read-c)
         "#,
     )
-    .unwrap_err();
-    assert!(matches!(err, EvalError::Panic(_)), "expected a Panic, got {:?}", err);
+    .expect("eval failed");
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 2),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// A payload-carrying `defenum` global: the compiled `match` reads the box's
+/// tag slot *and* decodes each variant's fields per its declared field types
+/// — the multi-field variant exercises `data_variant_field_types`' indexed
+/// slot layout beyond what single-field `Option`/`Result` cover.
+#[test]
+fn compile_of_a_function_referencing_a_payload_defenum_global_round_trips() {
+    let v = run_with_compiler(
+        r#"
+        (defenum shape (Circle i64) (Rect i64 i64))
+        (defvar (s shape) (shape::Rect 3 4))
+        (defun area () i64 (match s ((Circle r) (* r r)) ((Rect w h) (* w h))))
+        (compile area)
+        (area)
+        "#,
+    )
+    .expect("eval failed");
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 12),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// Compiled code can also *write* a `defenum` global (`compile-set-global`'s
+/// `kind = 10` encode path), and an interpreted read afterward sees the
+/// compiled write — the enum mirror of the `Option` write test above,
+/// exercising `Expr::Global`'s `decode_field_typed` dispatch through
+/// `Interp::enum_defs`.
+#[test]
+fn compile_can_set_a_defenum_global_and_the_interpreter_sees_the_write() {
+    let v = run_with_compiler(
+        r#"
+        (defenum shape (Circle i64) (Rect i64 i64))
+        (defvar (s shape) (shape::Circle 1))
+        (defun set-s () i64 (progn (setf s (shape::Circle 7)) 0))
+        (compile set-s)
+        (set-s)
+        (match s ((Circle r) r) ((Rect w h) (+ w h)))
+        "#,
+    )
+    .expect("eval failed");
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 7),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// A *generic* `defenum` global: the variant's declared field type is the
+/// type parameter `T`, so decoding must substitute the global's concrete
+/// argument (`Maybe<i64>` -> `T = i64`) into it — `data_variant_field_types`'
+/// `subst_apply` path, which `Option`/`Result` (whose field types *are* the
+/// args) never exercise.
+#[test]
+fn compile_of_a_function_referencing_a_generic_defenum_global_round_trips() {
+    let v = run_with_compiler(
+        r#"
+        (defenum Maybe<T> (Just T) (Nothing))
+        (defvar (m Maybe<i64>) (Maybe::Just 42))
+        (defun read-m () i64 (match m ((Just x) x) ((Nothing) -1)))
+        (compile read-m)
+        (read-m)
+        "#,
+    )
+    .expect("eval failed");
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 42),
+        other => panic!("expected an Int, got {:?}", other),
+    }
 }
 
 /// A `Str`-carrying `Option` global survives GC: `data_to_box`'s heap-
@@ -3264,6 +3339,35 @@ fn compile_of_a_function_referencing_a_str_option_global_survives_gc() {
               (break)
               (progn (push scratch n) (setf n (- n 1)))))
         (match maybe ((Some s) s) ((None) ""))
+        "#,
+        1 << 14,
+    )
+    .expect("eval failed");
+    match v {
+        RtValue::Str(s) => assert_eq!(&*s, "hello"),
+        other => panic!("expected a Str, got {:?}", other),
+    }
+}
+
+/// The `defenum` mirror of the `Option<string>` GC test above: a user
+/// enum's `Str`-carrying field goes through the very same
+/// `encode_data_field` `push_permanent_root` protection, so it too must
+/// survive collections between promotion and read-back.
+#[test]
+fn compile_of_a_function_referencing_a_str_defenum_global_survives_gc() {
+    let v = run_with_compiler_and_capacity(
+        r#"
+        (defenum named (N string) (Anon))
+        (defvar (who named) (named::N "hello"))
+        (defun touch-who () string (match who ((N s) s) ((Anon) "")))
+        (compile touch-who)
+        (defvar (scratch Vector<i64>) (Vector::new))
+        (defvar (n i64) 20000)
+        (loop
+          (if (eq n 0)
+              (break)
+              (progn (push scratch n) (setf n (- n 1)))))
+        (match who ((N s) s) ((Anon) ""))
         "#,
         1 << 14,
     )

@@ -52,8 +52,15 @@
    （`caller_bounds`を新設して外側のwhere節に一致するboundが宣言済みか照合）。
 4. **`Option`/`Result`型グローバルのcompile参照**——`RtValue::Data` ⇔ compiled sum-ADTボックス
    （malloc配列`[variant, fields...]`）の相互変換を新設し、JIT/AOT双方から`Option`/`Result`型
-   `defvar`の読み取り・書き込みが可能に。ユーザー定義`defenum`型グローバルは今も対象外
-   （明確なエラーで固定）。
+   `defvar`の読み取り・書き込みが可能に。~~ユーザー定義`defenum`型グローバルは今も対象外~~
+   **→ 2026-07-16 解消**。checkerが`TopLevel::Defenum`にvariantフィールド型を焼き込み
+   （FASL_FORMAT_VERSION 5）、`Interp::enum_defs`が保持、`data_variant_field_types`が
+   `subst_apply`でジェネリック引数を置換してデコード。encode側（`data_to_box`）は元々
+   値形状駆動で型不要のため変更なし。`global_field_kind`はユーザーenumも`kind=10`に分類
+   （kind-10経路はvariant非依存のためcompiler.rs側は無変更）。AOTも`defenum`トップレベルを
+   受理。残る制限: enum値のネストした`Option`等`RtValue::Data`フィールドのencode
+   （`encode_data_field`の既存ギャップ）、関数引数/戻り値としてのenum越境
+   （`rtvalue_to_struct_field`のギャップ）。
 5. **quoted data内の`Symbol`/`Path`のcompile対応**——`'foo`/`'(a b c)`/`'dep::head`が
    compileを通るように。`rt_intern_symbol`/`rt_intern_path`を新設、`str`リテラルと同じ
    「タグ付き`Sexpr`をrt呼び出しで構築」方式。
@@ -302,8 +309,9 @@ int/float/char/bool/passthroughが異なる）、`Pattern::Ctor`に`field_types:
 `RtValue::Data`＝`Option`/`Result`/ユーザー`defenum`を変換できないため、そうした型の
 グローバルはcompile対象から参照できない——既知の制限）。~~`Option`/`Result`型グローバルの
 compile参照は2026-07-15解消~~（`data_to_box`/`decode_data_value`新設、上記「既知の制限・
-意図的に対象外7項目の解消」4.参照）。ユーザー定義`defenum`型グローバルは今も対象外
-（明確なエラーで固定）。JITは参照時に遅延昇格
+意図的に対象外7項目の解消」4.参照）。~~ユーザー定義`defenum`型グローバルは今も対象外~~
+**→ 2026-07-16 解消**（同4.の追記参照——`TopLevel::Defenum`への焼き込み+`Interp::enum_defs`）。
+JITは参照時に遅延昇格
 （`Interp::promote_global`）、AOTは`compile-file`が全`defvar`をファイル宣言順に即座昇格
 （`Interp::promote_global`のdocコメント参照——2つのタイムライン（コンパイル時のRustプロセスと
 実行ファイル自身のランタイム）でid採番を一致させるため）し、`Interp::add_compiled_global_init`が

@@ -544,3 +544,58 @@ fn jit_and_aot_agree_on_a_global_read_and_write() {
 
     assert_eq!(jit_value, aot_exit_code);
 }
+
+/// A top-level `defenum` is accepted by `compile-file` (its exec records
+/// the variant field types in `Interp::enum_defs`), and an enum-typed
+/// `defvar` promotes and reads back in the standalone executable — the
+/// startup `$global_init$N` builds the box via the ordinary
+/// `compile-construct-box`, and `main`'s `match` discriminates on its tag.
+#[test]
+fn compiles_and_runs_main_that_reads_a_defenum_global() {
+    let src = r#"
+        (defenum shape (Circle i64) (Rect i64 i64))
+        (defvar (s shape) (shape::Rect 6 7))
+        (defun main () i64 (match s ((Circle r) (* r r)) ((Rect w h) (* w h))))
+    "#;
+    assert_eq!(compile_and_run("defenum_global_read", src), 42);
+}
+
+/// The `defenum`-global mirror of `jit_and_aot_agree_on_a_global_read_and_write`:
+/// both pipelines must agree on a `main` that writes and then reads an
+/// enum-typed global.
+#[test]
+fn jit_and_aot_agree_on_a_defenum_global_read_and_write() {
+    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+
+    let src = r#"
+        (defenum counter (At i64))
+        (defvar (c counter) (counter::At 0))
+        (defun bump () i64
+          (match c ((At n) (progn (setf c (counter::At (+ n 1))) (+ n 1)))))
+        (defun main () i64 (let ((ignored (bump))) (bump)))
+    "#;
+
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    typelisp::load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r
+        .read_all(&mut h, &format!("{}\n(compile bump)\n(compile main)\n(main)", src))
+        .expect("read failed");
+    let mut jit_result = None;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("exec failed") {
+            jit_result = Some(val);
+        }
+    }
+    let jit_value = match jit_result {
+        Some(RtValue::Int(n)) => n,
+        other => panic!("expected an Int from the JIT path, got {:?}", other),
+    };
+
+    let aot_exit_code = compile_and_run("jit_aot_defenum_global_pair", src) as i64;
+
+    assert_eq!(jit_value, aot_exit_code);
+}

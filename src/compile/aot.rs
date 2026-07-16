@@ -102,9 +102,13 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
                     None
                 }
                 TopLevel::Defvar { name, value, .. } => Some((name.clone(), value.clone())),
+                // No codegen of its own — `exec` below records the enum's
+                // variant field types in `Interp::enum_defs`, which the
+                // `promote_global` an enum-typed `defvar` triggers reads.
+                TopLevel::Defenum { .. } => None,
                 other => {
                     return Err(format!(
-                        "compile-file only supports top-level `defun`/`defvar`/`defconstant`, found {:?}",
+                        "compile-file only supports top-level `defun`/`defvar`/`defconstant`/`defenum`, found {:?}",
                         other
                     ))
                 }

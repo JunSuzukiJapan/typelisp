@@ -164,13 +164,19 @@ pub enum TopLevel {
     /// needing no runtime registration of their own.
     Defstruct { name: Path },
     /// A `defenum`: registers a multi-variant `AdtKind::Sum` type
-    /// (`Checker::check_defenum`). Like `Defstruct`, carries only the name and
-    /// is a runtime no-op — the registry mutation happened at check time, and
-    /// variant construction/`match` are the same `Expr::Construct`/`Expr::Match`
-    /// machinery `Option`/`Result` already use. Unlike `Defstruct`, it is *not*
-    /// added to the interpreter's `struct_types` set: an enum instance is an
-    /// immutable `RtValue::Data`, never a boxed struct.
-    Defenum { name: Path },
+    /// (`Checker::check_defenum`). Variant construction/`match` are the same
+    /// `Expr::Construct`/`Expr::Match` machinery `Option`/`Result` already
+    /// use, and unlike `Defstruct` the name is *not* added to the
+    /// interpreter's `struct_types` set: an enum instance is an immutable
+    /// `RtValue::Data`, never a boxed struct. `params`/`variants` are the
+    /// type's declared parameters and each variant's field types, baked in
+    /// at check time (the checker always knows the types — the same
+    /// bake-into-the-AST principle `Expr::Construct`'s resolved fields
+    /// follow) so `Interp::exec` can record them in `Interp::enum_defs`:
+    /// the compiled-global boundary's box -> `RtValue::Data` decode
+    /// (`decode_data_value`) needs each variant's field types, and the
+    /// checker's `Registry` no longer exists by then.
+    Defenum { name: Path, params: Vec<String>, variants: Vec<Variant> },
     /// A bare top-level expression.
     Expr(Typed),
     /// `(load "path")` — a CL-style flat load of another file's forms into
@@ -2944,8 +2950,8 @@ impl Checker {
         let type_fq = self.fq(&name);
         let def = AdtDef {
             name: type_fq.clone(),
-            params: type_params,
-            variants,
+            params: type_params.clone(),
+            variants: variants.clone(),
             assoc: HashMap::new(),
             public,
             builtin: false,
@@ -2958,7 +2964,7 @@ impl Checker {
         if let Some(loc) = def_loc {
             self.reg.def_locs.types.insert(type_fq.clone(), loc);
         }
-        Ok(TopLevel::Defenum { name: type_fq })
+        Ok(TopLevel::Defenum { name: type_fq, params: type_params, variants })
     }
 
     /// `(load "path")` — records the flat-load request for the driver (see
@@ -5474,7 +5480,10 @@ fn mangled_method_name(base: &str, args: &[Type]) -> String {
 }
 
 /// Replace type parameters in `t` with their bindings from `subst`.
-fn subst_apply(t: &Type, subst: &HashMap<String, Type>) -> Type {
+/// `pub(crate)`: `crate::eval::interp`'s `data_variant_field_types` reuses it
+/// to instantiate a generic enum's variant field types when decoding a
+/// compiled global (`Interp::enum_defs`).
+pub(crate) fn subst_apply(t: &Type, subst: &HashMap<String, Type>) -> Type {
     match t {
         Type::Named(n, args) if args.is_empty() && n.is_simple() => match subst.get(n.local()) {
             Some(bound) => bound.clone(),
