@@ -1997,6 +1997,162 @@ fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_cod
     assert_eq!(v, RtValue::Int(42));
 }
 
+// ---- enum-representation unification (Stage 4): newly-opened scenarios ----
+//
+// The compiler flip (`compile-construct-box`/`compile-box-tag-test`/
+// `compile-box-field` now building/reading a real `BoxedObj::Enum` via
+// `rt_data_new`/`rt_data_variant`/`rt_data_field`, `struct_field_kind`
+// classifying every enum type as kind `6`) opens several scenarios that
+// either panicked or silently misbehaved before: an enum-typed compiled
+// argument (`call_compiled`'s own argument encoding already treated
+// `RtValue::Sexpr` uniformly, but no compiled function could receive an
+// enum value produced by `Expr::Construct` before this flip made
+// `Option::some`/`none` themselves heap-repr), a nested enum, an enum
+// stored inside a `Vector<T>`/`HashTable<K,V>`/`defstruct` field, and GC
+// safety for an enum value under root-stack pressure.
+
+/// An enum-typed *parameter* — `Interp::call_compiled`'s argument encoding
+/// (already value-shape-driven, `RtValue::Sexpr` crosses uniformly) now
+/// actually receives something to encode: `Option::some`'s own construction
+/// is heap-repr since the compiler flip, so this is the first case where a
+/// compiled function can be handed a real enum value as an argument at all.
+#[test]
+fn compile_dispatches_a_function_taking_an_enum_typed_argument_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun unwrap-or-zero ((o Option<i64>)) i64 (match o ((Some x) x) ((None) 0)))
+        (compile unwrap-or-zero)
+        (unwrap-or-zero (Option::some 99))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(99));
+}
+
+/// A nested enum (`Option<Option<i64>>`): `struct_field_kind`'s recursive
+/// classification (an `Option<T>` field is kind `6` regardless of what `T`
+/// is) means the inner `Option<i64>` crosses the outer box's field boundary
+/// as an ordinary tagged `Sexpr`, no different from a `Str` or boxed struct
+/// field.
+#[test]
+fn compile_dispatches_a_function_constructing_a_nested_option_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun wrap ((n i64)) Option<Option<i64>> (Option::some (Option::some n)))
+        (compile wrap)
+        (match (wrap 7)
+          ((Some inner) (match inner ((Some x) x) ((None) -1)))
+          ((None) -2))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(7));
+}
+
+/// A user `defenum` whose variant carries a builtin `Option<T>` field —
+/// two different enum types nesting through the same tagged-`Sexpr`
+/// boundary.
+#[test]
+fn compile_dispatches_a_function_constructing_a_user_defenum_with_an_option_field_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defenum wrapper (w Option<i64>))
+        (defun mk ((n i64)) wrapper (wrapper::w (Option::some n)))
+        (compile mk)
+        (match (mk 5) ((w o) (match o ((Some x) x) ((None) -1))))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(5));
+}
+
+/// `Vector<Option<i64>>::push`/`get` — the element `kind`
+/// (`vector_element_kind`/`struct_field_kind`) is now `6` for an `Option<T>`
+/// element (previously `0`/unsupported), so a compiled `Vector` can hold
+/// enum values at all.
+#[test]
+fn compile_dispatches_vector_push_and_get_of_an_option_element_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun f () i64
+          (let ((v (the Vector<Option<i64>> (Vector::new))))
+            (push v (Option::some 3))
+            (push v (Option::none))
+            (match (get v 0) ((Some x) x) ((None) -1))))
+        (compile f)
+        (f)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(3));
+}
+
+/// `HashTable<i64, Option<i64>>::get` returns `Option<Option<i64>>` — the
+/// map's own `get`/`remove` (`compile-hashtable-op`'s `rt_data_new` path)
+/// nests with a user-stored `Option<i64>` value (an ordinary `Expr::Construct`
+/// through the generic `val-kind` tagging), exercising both enum-construction
+/// paths together.
+#[test]
+fn compile_dispatches_hashtable_get_of_an_option_typed_value_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun run () i64
+          (let ((ht (the HashTable<i64,Option<i64>> (HashTable::new))))
+            (set ht 1 (Option::some 42))
+            (match (get ht 1)
+              ((Some inner) (match inner ((Some x) x) ((None) -1)))
+              ((None) -2))))
+        (compile run)
+        (run)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(42));
+}
+
+/// A `defstruct` field of enum type — `struct_field_kind`'s kind `6` for
+/// `Option<T>` applies identically whether the enum sits in a general-ADT
+/// box, a `Vector`/`HashTable` slot, or (here) a boxed struct's own field.
+#[test]
+fn compile_dispatches_a_defstruct_field_of_option_type_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defstruct holder (val Option<i64>))
+        (defun mk ((n i64)) holder (holder::new (Option::some n)))
+        (compile mk)
+        (match (val (mk 8)) ((Some x) x) ((None) -1))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(8));
+}
+
+/// GC stress: constructs many enum values inside a loop with a small heap,
+/// forcing a real `gc()` mid-construction — proves an enum box is a real
+/// GC-traced value now (`compile-match`'s root-protection no longer
+/// excludes `scrut-kind = 1`, and `rt_data_new`'s result is a properly
+/// GC-visible `BoxedObj::Enum`, not the old leaked, never-scanned `malloc`
+/// box that needed no such protection).
+#[test]
+fn compile_dispatches_a_function_that_keeps_an_enum_scrutinee_rooted_across_many_allocations() {
+    let v = run_with_compiler_and_prelude_and_capacity(
+        r#"
+        (defun sum-after-gc ((n i64)) i64
+          (let ((scratch (the Vector<i64> (Vector::new))))
+            (loop
+              (if (eq n 0) (break) ())
+              (push scratch n)
+              (setf n (- n 1)))
+            (match (Option::some (the i64 123)) ((Some x) x) ((None) -1))))
+        (compile sum-after-gc)
+        (sum-after-gc 5000)
+        "#,
+        1 << 15,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(123));
+}
+
 /// A `mutable` `AdtKind::Struct` (`defstruct`) instance, unlike `Some`'s
 /// `malloc`'d-box representation above — `point::new`'s `Expr::Construct`
 /// dispatches to `compile-construct-boxed-struct` instead (Stage 3 of the
