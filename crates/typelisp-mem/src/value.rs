@@ -182,6 +182,24 @@ pub(crate) enum BoxedObj {
     /// normalizes on construction). Same heap-boxing rationale as `Bignum`.
     Ratio(BigRational),
     Struct { type_name: String, payload: StructPayload },
+    /// An enum (sum-ADT) value: `Option<T>`/`Result<T,E>`/a user `defenum`
+    /// instance — one variant's index plus that variant's field values. The
+    /// third case of the unification mechanism (after `Float` and `Struct`),
+    /// replacing *two* prior representations at once: the interpreter's
+    /// Rust-side `RtValue::Data` (heap-invisible, so it could never sit in
+    /// a struct field, cross `call_compiled`, or nest) and compiled code's
+    /// raw un-GC-managed `malloc` box (deliberately leaked, its heap-tagged
+    /// fields pinned as permanent roots forever). A *separate* variant from
+    /// [`Struct`], not `Fields` with the tag squeezed in as `fields[0]`:
+    /// `Heap::is_struct` must stay `false` for an enum (the interpreter's
+    /// `match` dispatch, struct field accessors, and `rt_struct_*` all key
+    /// on it), and `Some(x)` would otherwise be indistinguishable from a
+    /// one-field struct. `type_name` is kept for display/debugging (variant
+    /// *names* live in the checker's registry; the runtime needs only the
+    /// index), mirroring `Struct`'s own. Enum values are immutable — no
+    /// setter exists at any layer — so sharing one box between bindings is
+    /// unobservable.
+    Enum { type_name: String, variant: usize, fields: Vec<Value> },
     /// A shared mutable variable slot — the heap-resident replacement for
     /// the interpreter's `Rc<RefCell<RtValue>>` binding cells, for bindings
     /// whose static type's runtime representation is a `Value` (`Sexpr`,

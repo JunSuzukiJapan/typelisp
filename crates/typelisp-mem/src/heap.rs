@@ -587,6 +587,71 @@ impl Heap {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Map(_), .. }))
     }
 
+    // ---- enums ----------------------------------------------------------------
+
+    /// Store an enum (sum-ADT) value — variant index `variant` of `type_name`
+    /// with that variant's `fields` — returning its `Value::Boxed`; the
+    /// runtime representation `Option<T>`/`Result<T,E>`/user `defenum`
+    /// instances all share (see [`BoxedObj::Enum`]'s doc comment for why
+    /// this is a variant of its own, not a `Struct`). The enum counterpart
+    /// of [`alloc_struct`](Self::alloc_struct); like `type_name` there,
+    /// `variant` is stored uninterpreted — which variant means what is the
+    /// checker's business, this layer only carries the index.
+    pub fn alloc_enum(&mut self, type_name: String, variant: usize, fields: Vec<Value>) -> Value {
+        self.alloc_boxed(BoxedObj::Enum { type_name, variant, fields })
+    }
+
+    /// True if `id` holds a `BoxedObj::Enum` — the enum peer of
+    /// [`is_struct`](Self::is_struct), for callers decoding an unknown
+    /// `Value::Boxed`.
+    pub fn is_enum(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Enum { .. }))
+    }
+
+    /// The type name of a boxed enum value. Panics if `id` doesn't hold a
+    /// `BoxedObj::Enum` — same internal-invariant-trap convention as
+    /// [`struct_type_name`](Self::struct_type_name).
+    pub fn enum_type_name(&self, id: BoxId) -> &str {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Enum { type_name, .. }) => type_name,
+            _ => panic!("BoxId does not hold an Enum"),
+        }
+    }
+
+    /// The variant index of a boxed enum value — what a `match` arm's tag
+    /// test compares against. Panics if `id` doesn't hold a `BoxedObj::Enum`.
+    pub fn enum_variant(&self, id: BoxId) -> usize {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Enum { variant, .. }) => *variant,
+            _ => panic!("BoxId does not hold an Enum"),
+        }
+    }
+
+    /// The number of fields the boxed enum value's variant carries — a
+    /// `match` pattern's arity check reads this alongside
+    /// [`enum_variant`](Self::enum_variant). Panics if `id` doesn't hold a
+    /// `BoxedObj::Enum`.
+    pub fn enum_field_count(&self, id: BoxId) -> usize {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Enum { fields, .. }) => fields.len(),
+            _ => panic!("BoxId does not hold an Enum"),
+        }
+    }
+
+    /// The `idx`-th field of a boxed enum value. Panics if `id` doesn't hold
+    /// a `BoxedObj::Enum` or if `idx` is out of range — the checker's
+    /// pattern-arity guarantee makes that an internal invariant, the same
+    /// convention as [`struct_field`](Self::struct_field). No `set`
+    /// counterpart exists: enum values are immutable.
+    pub fn enum_field(&self, id: BoxId, idx: usize) -> Value {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Enum { fields, .. }) => {
+                *fields.get(idx).unwrap_or_else(|| panic!("enum field index {} out of range", idx))
+            }
+            _ => panic!("BoxId does not hold an Enum"),
+        }
+    }
+
     // ---- cells ----------------------------------------------------------------
 
     /// Store a mutable variable slot holding `v`, returning an owning
@@ -1095,6 +1160,14 @@ impl Heap {
             // `Str`'s buffer) and hold no nested `Value` — nothing to trace.
             BoxedObj::Float(_) | BoxedObj::Bignum(_) | BoxedObj::Ratio(_) => {}
             BoxedObj::Struct { payload: StructPayload::Fields(fields), .. } => {
+                for &v in fields {
+                    stack.push(v);
+                }
+            }
+            // A live enum value keeps its variant's fields live — the same
+            // fan-out as a struct's fields (a field can itself hold a cons,
+            // a string, or another boxed value).
+            BoxedObj::Enum { fields, .. } => {
                 for &v in fields {
                     stack.push(v);
                 }

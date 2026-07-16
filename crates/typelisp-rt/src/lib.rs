@@ -1021,6 +1021,101 @@ pub unsafe extern "C" fn rt_struct_field_get(args: *const i64, argc: u32) -> i64
     encode(active_heap().struct_field(id, idx as usize))
 }
 
+// ---- enum values (Option/Result/defenum) — the heap-unified shape ------
+//
+// `BoxedObj::Enum` (`typelisp-mem`) is the shared runtime shape behind
+// every enum value: `Option<T>`/`Result<T,E>`/a user `defenum` instance —
+// see its doc comment for what it replaces (the interpreter's Rust-side
+// `RtValue::Data` and compiled code's raw leaked `malloc` box). These three
+// mirror `rt_struct_new`/`rt_struct_field_get`'s shapes; a separate family
+// rather than `rt_struct_*` reuse so no caller ever has to know about a
+// variant-tag slot offset, and so `rt_struct_field_get`'s "is a Struct"
+// invariant stays intact.
+
+/// `(rt-data-new type-name variant field0 field1 ...)` for compiled code —
+/// allocates a boxed enum value. `args[0]` is a tagged `Sexpr` `Str` (the
+/// enum's type name, copied out like [`rt_struct_new`]'s), `args[1]` is the
+/// *raw* (untagged) variant index, `args[2..argc]` are the variant's field
+/// values, already-tagged `Sexpr`s stored unchanged.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2`, `args` must point to at least `argc` valid
+/// `i64`s, and `args[0]` must decode to a `Value::Str`; a `Heap` must
+/// already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_data_new(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_data_new: expected at least 2 arguments (type name, variant)");
+    }
+    let type_name = match decode(*args) {
+        Value::Str(id) => active_heap().string(id).to_string(),
+        _ => fatal("rt_data_new: first argument is not a Str"),
+    };
+    let variant = *args.add(1);
+    if variant < 0 {
+        fatal("rt_data_new: negative variant index");
+    }
+    let mut fields = Vec::with_capacity(argc as usize - 2);
+    for i in 2..argc as isize {
+        fields.push(decode(*args.offset(i)));
+    }
+    encode(active_heap().alloc_enum(type_name, variant as usize, fields))
+}
+
+/// `(rt-data-variant v)` for compiled code — the variant index of boxed
+/// enum value `args[0]` (a tagged `Sexpr`), returned as a *raw* (untagged)
+/// `i64`, ready for a `match` arm's tag comparison. Fatal if `args[0]`
+/// isn't a boxed enum — the checker's type discipline is what guarantees
+/// only enum-typed scrutinees reach a tag test. Allocates nothing, so
+/// triggers no GC.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// decoding to a `Value::Boxed` enum; a `Heap` must already be registered
+/// on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_data_variant(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_data_variant: expected 1 argument");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) if active_heap().is_enum(id) => id,
+        _ => fatal("rt_data_variant: argument is not a boxed enum value"),
+    };
+    active_heap().enum_variant(id) as i64
+}
+
+/// `(rt-data-field v idx)` for compiled code — the `idx`-th field of boxed
+/// enum value `args[0]` (a tagged `Sexpr`), where `args[1]` is a *raw*
+/// (untagged) index like [`rt_struct_field_get`]'s. The result is the
+/// stored tagged `Sexpr`; per-kind untagging is the caller's job
+/// (`compile-sexpr-field`), exactly as for a struct field. Fatal if
+/// `args[0]` isn't a boxed enum or `idx` is out of range. No `set`
+/// counterpart exists: enum values are immutable.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s,
+/// the first decoding to a `Value::Boxed` enum; a `Heap` must already be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_data_field(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_data_field: expected 2 arguments");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) if active_heap().is_enum(id) => id,
+        _ => fatal("rt_data_field: first argument is not a boxed enum value"),
+    };
+    let idx = *args.add(1);
+    if idx < 0 {
+        fatal("rt_data_field: negative field index");
+    }
+    encode(active_heap().enum_field(id, idx as usize))
+}
+
 /// `(rt-struct-field-set! s idx val)` for compiled code — overwrites the
 /// `idx`-th field of boxed struct `args[0]` in place with `args[2]` (a
 /// tagged `Sexpr`); `args[1]` is a raw index, like [`rt_struct_field_get`].
@@ -2016,8 +2111,8 @@ mod tests {
         rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count,
         rt_char_equalp, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_equalp, rt_str_length, rt_str_lt,
         rt_str_new, rt_str_ref, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw,
-        rt_hashtable_keys, rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_struct_field_count, rt_struct_field_get,
-        rt_struct_field_set, rt_struct_new, rt_struct_push_field, set_active_heap,
+        rt_hashtable_keys, rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_data_field, rt_data_new, rt_data_variant,
+        rt_struct_field_count, rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_struct_push_field, set_active_heap,
     };
 
     #[test]
@@ -2475,6 +2570,82 @@ mod tests {
         match decode(tagged) {
             Value::Boxed(id) => assert_eq!(unsafe { active_heap() }.struct_field_count(id), 0),
             other => panic!("expected a boxed struct, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn rt_data_new_builds_a_boxed_enum_with_its_variant_and_fields() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let type_name = make_str("option");
+        let payload = encode(Value::Int(42));
+        // args = [type-name, raw variant index, field0]
+        let args = [type_name, 0, payload];
+        let tagged = unsafe { rt_data_new(args.as_ptr(), 3) };
+
+        match decode(tagged) {
+            Value::Boxed(id) => {
+                let h = unsafe { active_heap() };
+                assert!(h.is_enum(id));
+                assert!(!h.is_struct(id), "an enum box must not read as a struct");
+                assert_eq!(h.enum_type_name(id), "option");
+                assert_eq!(h.enum_variant(id), 0);
+                assert_eq!(h.enum_field_count(id), 1);
+            }
+            other => panic!("expected a boxed enum, got {:?}", other),
+        }
+
+        assert_eq!(unsafe { rt_data_variant([tagged].as_ptr(), 1) }, 0);
+        assert_eq!(decode(unsafe { rt_data_field([tagged, 0].as_ptr(), 2) }), Value::Int(42));
+    }
+
+    #[test]
+    fn rt_data_new_with_no_fields_builds_a_nullary_variant() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let type_name = make_str("option");
+        let args = [type_name, 1];
+        let tagged = unsafe { rt_data_new(args.as_ptr(), 2) };
+
+        match decode(tagged) {
+            Value::Boxed(id) => {
+                let h = unsafe { active_heap() };
+                assert_eq!(h.enum_variant(id), 1);
+                assert_eq!(h.enum_field_count(id), 0);
+            }
+            other => panic!("expected a boxed enum, got {:?}", other),
+        }
+        assert_eq!(unsafe { rt_data_variant([tagged].as_ptr(), 1) }, 1);
+    }
+
+    /// A rooted enum box keeps its heap-referencing field alive across a
+    /// collection — the mark-phase fan-out `push_boxed_nested`'s `Enum` arm
+    /// provides, mirroring what a struct's fields already get.
+    #[test]
+    fn a_rooted_enum_box_keeps_its_cons_field_alive_across_gc() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let cell = heap.cons(Value::Int(7), Value::Empty).expect("cons");
+        let type_name = make_str("option");
+        let args = [type_name, 0, encode(cell)];
+        let tagged = unsafe { rt_data_new(args.as_ptr(), 3) };
+        let boxed = decode(tagged);
+
+        heap.push_root(boxed);
+        heap.gc();
+
+        let id = match boxed {
+            Value::Boxed(id) => id,
+            other => panic!("expected a boxed enum, got {:?}", other),
+        };
+        match unsafe { active_heap() }.enum_field(id, 0) {
+            Value::Cons(_) => {
+                assert_eq!(heap.car(unsafe { active_heap() }.enum_field(id, 0)).expect("car"), Value::Int(7));
+            }
+            other => panic!("expected the cons field to survive, got {:?}", other),
         }
     }
 
