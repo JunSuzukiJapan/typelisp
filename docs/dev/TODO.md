@@ -25,7 +25,21 @@
 1. **値レベル`&rest`/`apply`の再導入**——`Type::Fn`の第2フィールド（rest要素型）と`FnSig.rest`を
    復元、`(apply f a1..aN rest-list)`特殊形を再実装。固定引数は静的型検査、rest-listは`Sexpr`型で
    渡し`wrap_rest_elem`/`cons_rest_list`で単一リストへ畳む。`FASL_FORMAT_VERSION`を4へbump。
-   `compile`（LLVM）側は`&rest`付き関数のcompile自体は引き続き非対応（`unsupported`で明示固定）。
+   ~~`compile`（LLVM）側は`&rest`付き関数のcompile自体は引き続き非対応（`unsupported`で明示固定）~~
+   **→ この記述は不正確だった（2026-07-16訂正）**: `&rest`付き`defun`の直接compile・`apply`経由の
+   compile済み呼び出しはいずれも元から動作していた（`Checker::check_defun`が`&rest`引数を
+   `(rest名, Sexpr型)`として`params`末尾へ折り込む脱糖段階で、`Interp::compiled_fn_body`が読む
+   名前・型のペア数は最初から一致しているため——`tests/compile_test.rs`の
+   `a_variadic_function_compiles_and_dispatches_to_native_code`が元から証明済み）。唯一実在した
+   ギャップは、`&rest`関数を**第一級の値として参照する**（`Expr::FnRef`化される）場合のみ:
+   `ast_bridge.rs`の`translate_fnref`が合成する転送用クロージャがrestパラメータを一切
+   宣言・転送しないまま固定引数のみで組み立てられていた——compileはエラーにならず成功するが、
+   実行時に空/未ルートの`xs`を読むため誤った値を返すか、GCが介入するとnullポインタ参照で
+   クラッシュする「静かな不正確さ」だった。2026-07-16解消（`translate_fnref`の合成パラメータ
+   リストに、`ty`の`rest`フィールドから`check_defun`/`check_lambda`と同じ`(rest名, Sexpr型)`を
+   追加、回帰テスト`fnref_of_a_variadic_function_forwards_the_rest_list`で検証）。
+   `translate_methodref`にも見た目上同じロジックがあるが、`defmethod`構文に`&rest`が存在しない
+   （`MethodSig`に`rest`フィールドが無い）ため到達不可能と確認済み、コード変更は不要だった。
 2. **依存ファイル（`use`先）のfaslインメモリキャッシュ**——上記「LSPの依存キャッシュなし」解消
    （2026-07-14）で唯一残っていた「依存*ファイル*自体のパス間キャッシュ」を解消。
    `Loader`に`ModuleCache`（`Rc<RefCell<HashMap<PathBuf, Entry>>>`、`Entry`はdeps（各依存ファイルの

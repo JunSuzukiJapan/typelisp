@@ -1152,7 +1152,14 @@ fn translate_panic(heap: &mut Heap, msg: &Typed, cx: Ctx) -> Result<Value, Error
 /// (`Checker::method_value`'s own `Type::Fn(af.sig.params, ..)` keeps the
 /// method's own registered signature unchanged, receiver included), matching
 /// `Expr::Assoc`'s own convention that the receiver is simply `args[0]`, so
-/// no special-casing is needed here.
+/// no special-casing is needed here. Unlike [`translate_fnref`], this
+/// function does *not* need a `&rest`-forwarding parameter appended: a
+/// `defmethod`'s parameter list has no `&rest` syntax at all (`MethodSig`
+/// carries no `rest` field, `Checker::parse_defmethod_sig` never parses one),
+/// and no builtin `AssocFn` registration sets `FnSig::rest` either — so `ty`
+/// reaching this function is `Type::Fn(_, None, _)` in every reachable case.
+/// `params` is built the same way as [`translate_fnref`]'s purely so both
+/// stay visibly in sync should `defmethod` ever gain `&rest` support.
 fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Type) -> Result<Value, Error> {
     let params: Vec<(String, Type)> = match ty {
         Type::Fn(params, ..) => params.iter().enumerate().map(|(i, t)| (format!("arg{}", i), t.clone())).collect(),
@@ -1698,6 +1705,15 @@ fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed], 
     result
 }
 
+/// The `Sexpr` type a `&rest`-forwarding synthetic parameter always has —
+/// [`translate_fnref`]'s counterpart to `Checker::sexpr_ty()` (private to
+/// `checker.rs`), needed here because `ast_bridge.rs` synthesizes this
+/// parameter itself rather than receiving it pre-typed on a real `Typed`
+/// node.
+fn rest_sexpr_type() -> Type {
+    Type::Named(Path::root("sexpr"), vec![])
+}
+
 /// `Expr::FnRef(path)` -> a non-capturing `lambda` tag that just forwards
 /// every argument straight through to the named top-level `defun`
 /// (labels/closures Stage 4): `(lambda fnref$N () (arg0 arg1 ...) (call
@@ -1708,15 +1724,27 @@ fn translate_lambda(heap: &mut Heap, params: &[(String, Type)], body: &[Typed], 
 /// "function reference" values — `compile-lambda` builds this wrapper's
 /// `ClosureBox` exactly like any other, `compile-call` (already built for
 /// labels/closures Stage 3) handles the forwarding call inside it. Param
-/// names are synthesized positionally from `ty`'s arity (the only place that
-/// arity is available — an `Expr::FnRef` carries no parameter names of its
-/// own, just a `Path`) — a variadic target's `&rest` parameter isn't
-/// forwarded (out of scope; this only synthesizes `ty`'s fixed parameters).
+/// names are synthesized positionally from `ty`'s fixed arity (the only
+/// place that arity is available — an `Expr::FnRef` carries no parameter
+/// names of its own, just a `Path`); when `ty`'s target is variadic (its
+/// `rest` field is `Some`), one more synthetic `Sexpr`-typed trailing
+/// parameter is appended and forwarded too — the exact same `(name,
+/// rest_sexpr_type())` append `Checker::check_defun`/`check_lambda` already
+/// do for a directly declared `&rest` parameter, so the wrapper closure ends
+/// up with the identical N+1-param shape a real `&rest`-taking closure has.
+/// No downstream special-casing is needed for this: the `ClosureBox` calling
+/// convention (`build-closure-apply`/`compile-apply-indirect`) passes
+/// arguments through an arity-generic array, exactly like [`translate_lambda`]
+/// already relies on for a `&rest`-declared `lambda` literal.
 fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type) -> Result<Value, Error> {
-    let params: Vec<(String, Type)> = match ty {
+    let mut params: Vec<(String, Type)> = match ty {
         Type::Fn(params, ..) => params.iter().enumerate().map(|(i, t)| (format!("arg{}", i), t.clone())).collect(),
         _ => return unsupported(heap, "FnRef"),
     };
+    if let Type::Fn(_, Some(_), _) = ty {
+        let rest_name = format!("arg{}", params.len());
+        params.push((rest_name, rest_sexpr_type()));
+    }
 
     // See `translate_call`'s matching check: `sexpr-car`/`sexpr-cdr`/
     // `sexpr-cons` are never prefixed.

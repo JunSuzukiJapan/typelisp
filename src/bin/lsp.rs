@@ -22,8 +22,10 @@
 //! references resolve. A dependency that is itself open in the editor is
 //! read from its in-memory buffer (`Loader::set_overlay`, fed from this
 //! file's `docs` map) rather than disk, so an unsaved edit to it is visible
-//! immediately; a dependency that isn't open is read from disk, still
-//! without a cross-pass cache.
+//! immediately; a dependency that isn't open is read from disk, through the
+//! shared `ModuleCache` (content-hash-validated across passes, see
+//! `typelisp::project::ModuleCache`) so re-checking it from scratch on every
+//! keystroke is the exception rather than the rule.
 //!
 //! Editing a dependency also refreshes whoever depends on it: `publish`
 //! records each document's `Loader::loaded_files` in `deps` and, after
@@ -40,8 +42,10 @@
 //! already carry a fully-qualified path (`Global`/`Call`/`FnRef`/`Assoc`/
 //! `MethodRef`/`Construct` — not a local variable). A document with a
 //! current type error keeps serving its last-good `Analysis` rather than
-//! going blank. Completion is still unimplemented; see the `TODO` list in
-//! `docs/dev/` if picking this back up.
+//! going blank. Completion is served from the same `Analysis` plus
+//! `check::locate::completion_candidates`/`completion_locals` (globals and
+//! local bindings, including inside non-catchall `match` arms via the
+//! checker's error-recovery mode — see `Checker::set_recover`).
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};

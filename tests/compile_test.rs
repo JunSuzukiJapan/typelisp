@@ -554,6 +554,38 @@ fn a_variadic_function_compiles_and_dispatches_to_native_code() {
     }
 }
 
+/// `target` (a `&rest`-taking `defun`) is referenced *bare* — not called
+/// directly — inside `run-it`'s own `let`, so the checker reifies it as
+/// `Expr::FnRef`. `ast_bridge::translate_fnref` used to synthesize a
+/// forwarding wrapper closure with only `target`'s *fixed* parameters,
+/// silently dropping the rest list rather than failing to compile — the
+/// wrapper still compiled and ran, it just always called `target` with an
+/// empty/garbage `xs`. This asserts the actual forwarded content, not just
+/// that compilation succeeds, since a "compiles fine but silently wrong"
+/// bug is exactly what a `compile ok` check alone would miss. Everything
+/// happens inside the single compiled `run-it` function (never observed by
+/// the tree-walking interpreter in between), matching
+/// `compile_dispatches_a_top_level_function_passed_by_name_through_apply_fn`'s
+/// own reasoning for why that's necessary.
+#[test]
+fn fnref_of_a_variadic_function_forwards_the_rest_list() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun target ((a i64) &rest (xs i64)) i64
+          (match (sexpr-car xs)
+            ((int n) n)
+            (_ -1)))
+        (defun run-it () i64
+          (let ((f target))
+            (apply f 1 (sexpr-cons (Int 10) (Int 20)))))
+        (compile target)
+        (compile run-it)
+        (run-it)
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(10));
+}
+
 #[test]
 fn an_uncompiled_function_still_tree_walks_normally() {
     // Sanity check that `compiled`-table dispatch doesn't break the
