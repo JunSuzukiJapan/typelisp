@@ -538,12 +538,17 @@ impl Interp {
                 None => return Err(JitDecline::Gap(format!("internal: captured name \"{}\" not found in env", name))),
             }
         }
-        // Every `Expr::Call`/`Expr::Assoc` target `t`'s body reaches must
-        // already be JIT'd, or the constructor's module would forward-
-        // declare a symbol with no address to wire — unlike
-        // `Self::compile_scc`'s SCC machinery, there is no dependency
-        // ordering here to guarantee that in general (Stage 8's job to grow
-        // coverage of), so this is a graceful `Err`, not a `.expect()`.
+        // Every `Expr::Call`/`Expr::Assoc` target `t`'s body reaches must be
+        // JIT'd before the constructor's module can wire its forward
+        // declaration to a real address — so a not-yet-compiled target is
+        // *driven through* the same Tarjan SCC machinery `(compile name)`
+        // itself uses ([`Self::compile_function`], Stage 8) rather than
+        // declined: this is exactly the dependency-ordering role Stage 5
+        // built that machinery for ("needed once each `labels` sibling
+        // becomes an independent JIT unit" — its plan note). A target the
+        // machinery *can't* compile (an unsupported construct somewhere in
+        // its transitive graph) comes back as a graceful `Gap`, and the
+        // definition falls back to an interpreted closure as before.
         // Filtering matches `Self::call_graph_edges`'s own exactly (see that
         // method for the rationale of each exclusion): a known
         // `rt`-shimmed/`vector-op`/`hashtable-op`/native-primitive-receiver
@@ -555,7 +560,17 @@ impl Interp {
             .collect();
         for p in &call_targets {
             if !self.compiled.borrow().contains_key(p) {
-                return Err(JitDecline::Gap(format!("call target \"{}\" is not yet compiled", p)));
+                // The SCC machinery's node identity is a *root-level* name
+                // (`CallEdge::node_name` collapses to `Path::local`, and
+                // `Self::resolve_fn_def` resolves through `Path::root`) — a
+                // module-qualified `defun` (`m::inc`) is out of its reach,
+                // an inherited Stage 5 limitation, not something this call
+                // site can paper over.
+                if !p.is_simple() {
+                    return Err(JitDecline::Gap(format!("call target \"{}\" is module-qualified, which the SCC compile machinery cannot resolve yet", p)));
+                }
+                self.compile_function(heap, p.local())
+                    .map_err(|e| JitDecline::Gap(format!("transitive compile of call target \"{}\" failed: {}", p, e)))?;
             }
         }
         let assoc_targets: Vec<(Path, String)> = crate::compile::ast_bridge::collect_assoc_targets(t)
@@ -574,7 +589,11 @@ impl Interp {
             .collect();
         for (p, m) in &assoc_targets {
             if !self.compiled_methods.borrow().contains_key(&(p.clone(), m.clone())) {
-                return Err(JitDecline::Gap(format!("method target \"{}::{}\" is not yet compiled", p.local(), m)));
+                // Same transitive drive as the call targets above —
+                // `"type::method"` is exactly the name shape a standalone
+                // `(compile "type::method")` resolves via `Self::method_key`.
+                self.compile_function(heap, &format!("{}::{}", p.local(), m))
+                    .map_err(|e| JitDecline::Gap(format!("transitive compile of method target \"{}::{}\" failed: {}", p.local(), m, e)))?;
             }
         }
 
@@ -635,7 +654,7 @@ impl Interp {
                 declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(p.local()));
             }
             for (p, m) in assoc_targets {
-                declare_external_function(&module, &method_link_name(p, m));
+                declare_external_function(&module, &crate::compile::ast_bridge::user_method_symbol_name(p, m));
             }
             for (rt_name, _) in rt_extern_functions() {
                 declare_external_function(&module, rt_name);
@@ -660,7 +679,7 @@ impl Interp {
             let compiled_methods = self.compiled_methods.borrow();
             for (p, m) in assoc_targets {
                 let addr = compiled_methods.get(&(p.clone(), m.clone())).expect("checked already-compiled above").address();
-                externals.push((method_link_name(p, m), addr));
+                externals.push((crate::compile::ast_bridge::user_method_symbol_name(p, m), addr));
             }
         }
         externals.extend(rt_extern_functions().iter().map(|(n, a)| (n.to_string(), *a)));
