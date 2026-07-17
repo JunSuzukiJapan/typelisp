@@ -935,10 +935,10 @@ pub const SOURCE: &str = r#"
 
 ;; The encode-side mirror of `compile-sexpr-field`'s decode, over the exact
 ;; same `ast_bridge::struct_field_kind`/`Sexpr`-variant numbering (`1`=int
-;; `2`=float `3`=char `4`=bool `6`=str/`Sexpr`/nested-boxed-struct
-;; passthrough — a `defstruct`/`Vector<T>`/`cons-cell<K,V>`-typed field's
-;; value is already a properly tagged `Sexpr`, so it passes through
-;; unchanged exactly like a `Str` — `0`=not representable yet: a `Fn`/
+;; `2`=float `3`=char `4`=bool `6`=str/`Sexpr`/nested-boxed-struct/`Fn`
+;; passthrough — a `defstruct`/`Vector<T>`/`cons-cell<K,V>`/closure-typed
+;; field's value is already a properly tagged `Sexpr`, so it passes through
+;; unchanged exactly like a `Str` — `0`=not representable yet: a
 ;; general-ADT/still-generic field) — `compile-construct-boxed-struct-fields`/
 ;; `compile-field-set` both call this to turn an already-compiled field
 ;; value `v` (a scalar kind's own untagged bit pattern, or an already-tagged

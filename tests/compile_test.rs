@@ -801,14 +801,15 @@ fn compile_dispatches_a_defun_with_a_capturing_immediately_invoked_lambda_to_nat
 /// The end-to-end Stage 4 slice (escaping + capturing `lambda`): `adder`
 /// returns a closure that captures its own parameter `n`, and `apply-fn`
 /// (a separately-compiled function taking a `(fn (i64) i64)` *parameter*)
-/// calls it through `apply-indirect`/`build-closure-apply` — the closure
-/// value never gets inspected by tree-walking code along the way (it flows
-/// from one `compile`d function's `i64` return straight into another's
-/// `i64` argument via the ordinary `Expr::Call`-dispatches-to-`Interp::compiled`
-/// path — see `Interp::compile_function`'s doc comment), which is exactly
-/// what keeps this in scope (a compiled closure observed *by tree-walking
-/// code* — e.g. printed, `eq`-compared, stored in a `HashTable` — is the
-/// one documented exclusion, not this).
+/// calls it through `apply-indirect`/`build-closure-apply` — flowing from
+/// one `compile`d function's `i64` return straight into another's `i64`
+/// argument via the ordinary `Expr::Call`-dispatches-to-`Interp::compiled`
+/// path (see `Interp::compile_function`'s doc comment). This closure value
+/// happens to never get inspected by tree-walking code along the way here —
+/// unlike, since the closure-representation unification's boundary-opening
+/// (Stage 3), `compile_interp_applies_a_closure_returned_by_compiled_code`
+/// below, which *does* have the interpreter apply a compiled-produced
+/// closure directly.
 #[test]
 fn compile_dispatches_an_escaping_capturing_lambda_called_through_another_compiled_function() {
     let v = eval_ok_with_compiler(
@@ -835,14 +836,16 @@ fn compile_dispatches_an_escaping_capturing_lambda_called_through_another_compil
 ///
 /// `run-it`'s body (not the top-level call site) is where `square` appears
 /// bare — deliberately, since the *tree-walking* interpreter's own
-/// `Expr::FnRef` evaluation produces an `RtValue::Closure`, not a plain
-/// `i64` (see `Interp::eval`'s `Expr::FnRef` arm) — feeding that straight
-/// into a *compiled* function's fixed `i64` ABI from the top level would be
-/// exactly the "compiled closure observed by tree-walking code" case
-/// `compile-lambda`'s doc comment explicitly excludes. Routing the `FnRef`
-/// through another `compile`d function instead (`run-it`, itself dispatched
-/// via `Expr::Call` -> `Interp.compiled` like any Stage 3 call) keeps the
-/// `ClosureBox` entirely on the compiled side throughout.
+/// `Expr::FnRef` evaluation produces an `RtValue::Closure` (an
+/// *interpreted* closure, still rejected at the compiled boundary — see
+/// `Interp::call_compiled`'s `is_closure` arm), not a plain `i64` (see
+/// `Interp::eval`'s `Expr::FnRef` arm) — feeding that straight into a
+/// *compiled* function's fixed `i64` ABI from the top level would hit
+/// exactly that rejection. Routing the `FnRef` through another `compile`d
+/// function instead (`run-it`, itself dispatched via `Expr::Call` ->
+/// `Interp.compiled` like any Stage 3 call) keeps the closure entirely on
+/// the compiled side throughout (`ast_bridge::translate_fnref`'s forwarding
+/// `lambda`), never reifying an interpreted one at all.
 #[test]
 fn compile_dispatches_a_top_level_function_passed_by_name_through_apply_fn() {
     let v = eval_ok_with_compiler(
@@ -860,6 +863,83 @@ fn compile_dispatches_a_top_level_function_passed_by_name_through_apply_fn() {
         RtValue::Int(n) => assert_eq!(n, 25),
         other => panic!("expected an Int, got {:?}", other),
     }
+}
+
+/// Closure-representation unification, Stage 3 (interp<->compiled boundary
+/// opening): `make-adder` is `compile`d and returns a `(fn (i64) i64)`; the
+/// call site is a bare top-level `let`, so it's tree-walked, not compiled.
+/// `(make-adder 3)` decodes through `Interp::call_compiled`'s `Type::Fn` arm
+/// of `is_boxed_sexpr_type` into a real `RtValue::Sexpr(Value::Boxed(_))` at
+/// a `BoxedObj::CompiledClosure` (not the misread `RtValue::Int` the pre-
+/// Stage-3 gap left it as), and `(adder 5)` — an ordinary `Expr::Apply` on a
+/// let-bound variable — dispatches through `Interp::eval`'s new
+/// `is_compiled_closure` arm (`Self::call_closure_box`), the first time a
+/// compiled closure is directly invoked *by* tree-walking code rather than
+/// merely passed between two compiled functions.
+#[test]
+fn compile_interp_applies_a_closure_returned_by_compiled_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun make-adder ((n i64)) (fn (i64) i64) (lambda ((x i64)) i64 (+ x n)))
+        (compile make-adder)
+        (let ((adder (make-adder 3))) (adder 5))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(8));
+}
+
+/// Stage 3's other half: a compiled-produced `Fn` value crossing back into
+/// *another* compiled call's argument list after having been visibly
+/// `RtValue::Sexpr`-decoded and interpreter-applied first (unlike
+/// `compile_dispatches_an_escaping_capturing_lambda_called_through_another_compiled_function`
+/// above, where the closure never left compiled-to-compiled `Expr::Call`
+/// dispatch) — `adder` is applied once directly by the interpreter, then the
+/// very same closure value is handed to `apply-fn` (compiled) as an
+/// ordinary argument, proving `encode_crossing_args` round-trips a
+/// `BoxedObj::CompiledClosure` correctly whether or not tree-walking code
+/// touched it in between.
+#[test]
+fn compile_a_compiled_produced_closure_survives_interp_apply_then_crosses_into_another_compiled_call() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun make-adder ((n i64)) (fn (i64) i64) (lambda ((x i64)) i64 (+ x n)))
+        (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
+        (compile make-adder)
+        (compile apply-fn)
+        (let ((adder (make-adder 3)))
+          (let ((direct (adder 5)))
+            (+ direct (apply-fn adder 10))))
+        "#,
+    );
+    // direct = 3 + 5 = 8; apply-fn adder 10 = 3 + 10 = 13; 8 + 13 = 21.
+    assert_eq!(v, RtValue::Int(21));
+}
+
+/// Closure-representation unification, Stage 3 (`struct_field_kind` gap
+/// (c)): a `defstruct` field of `Fn` type used to classify as kind `0` ("not
+/// representable yet" — see that function's doc comment), panicking
+/// `compile-tag-struct-field`/`compile-sexpr-field` on construction/read.
+/// `Type::Fn` now joins `Str`/nested-struct's passthrough kind `6`, so
+/// `make-holder` (constructing a `holder` whose field holds `make-adder`'s
+/// compiled closure) and `call-held` (reading the field back and applying
+/// it) both compile and dispatch to native code.
+#[test]
+fn compile_dispatches_a_defstruct_field_of_fn_type_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defstruct holder (f (fn (i64) i64)))
+        (defun make-adder ((n i64)) (fn (i64) i64) (lambda ((x i64)) i64 (+ x n)))
+        (defun make-holder ((n i64)) holder (holder::new (make-adder n)))
+        (compile make-adder)
+        (compile make-holder)
+        (compile holder::f)
+        (defun call-held ((h holder) (x i64)) i64 (let ((f h::f)) (f x)))
+        (compile call-held)
+        (call-held (make-holder 3) 5)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(8));
 }
 
 /// Follow-up to Stage 4: a `labels` sibling referenced *as a value* (not

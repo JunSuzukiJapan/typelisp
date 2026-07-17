@@ -378,24 +378,25 @@ pub(crate) fn tagged_sym_list(heap: &mut Heap, names: &[(String, Type)], enums: 
 /// passthrough kind `6` (both `compile-tag-struct-field` and
 /// `compile-sexpr-field` leave a kind-`6` value untouched — exactly right
 /// for a value that is already properly tagged). `0` (otherwise `nil`, never
-/// a valid field type) marks the types with a genuine representation gap
-/// left: `Type::Fn` (no `ClosureBox` integration with a GC-tracked struct
-/// field yet — Closure unification, Stage 6a-6b), and a still-generic type
-/// variable (a `defstruct`'s own `T` field compiled from the generic
-/// definition — resolving it would take monomorphized compilation, not
-/// more type information at this site). A clear compile-time panic
-/// (`compile-tag-struct-field`/`compile-sexpr-field`'s own existing "not
-/// representable yet" message) is the accepted result for those, the same
-/// as a `Sym` field in a `Sexpr` construct. `Option`/`Result`/a user
-/// `defenum` used to belong on this list too (an untagged raw `malloc`'d
-/// pointer that couldn't flow into `rt_struct_new` unconverted) — since
-/// the enum-representation unification's compiler flip, every enum
-/// *compiled code ever touches* is heap-repr by construction (an LLVM
-/// handle, the one thing that can force an enum instantiation native, is a
-/// type only the (typelisp-hosted) compiler's own interpreted body ever
-/// uses — never a type a compiled `defun` can mention), so an enum field
-/// joins `Str`/`Symbol`'s passthrough kind `6` like any other already-boxed
-/// value.
+/// a valid field type) marks the one type still left with a genuine
+/// representation gap: a still-generic type variable (a `defstruct`'s own
+/// `T` field compiled from the generic definition — resolving it would take
+/// monomorphized compilation, not more type information at this site). A
+/// clear compile-time panic (`compile-tag-struct-field`/`compile-sexpr-field`'s
+/// own existing "not representable yet" message) is the accepted result for
+/// that, the same as a `Sym` field in a `Sexpr` construct. `Option`/`Result`/a
+/// user `defenum` and `Type::Fn` used to belong on this list too — an
+/// untagged raw `malloc`'d pointer that couldn't flow into `rt_struct_new`
+/// unconverted, for both: since the enum-representation unification's
+/// compiler flip, every enum *compiled code ever touches* is heap-repr by
+/// construction (an LLVM handle, the one thing that can force an enum
+/// instantiation native, is a type only the (typelisp-hosted) compiler's own
+/// interpreted body ever uses — never a type a compiled `defun` can
+/// mention); since the closure-representation unification's compiled flip
+/// (Stage 2), every closure a compiled `defun` can mention is likewise a
+/// `BoxedObj::CompiledClosure` tagged `Sexpr` by construction (the ARC
+/// `ClosureBox` this gap used to describe is gone). Both now join
+/// `Str`/`Symbol`'s passthrough kind `6` like any other already-boxed value.
 fn struct_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> i64 {
     match ty {
         _ if ty.is_integer() => 1,
@@ -415,6 +416,13 @@ fn struct_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) 
         _ if is_sexpr_type(ty) => 6,
         Type::Named(p, _) if structs.contains(p) => 6,
         _ if is_enum_ty(ty, enums) => 6,
+        // A closure value (`Type::Fn`) is a tagged `Sexpr` at a
+        // `BoxedObj::CompiledClosure` now (the closure-representation
+        // unification's compiled flip), the exact same passthrough shape a
+        // `Str`/nested struct already gets — see `compile-tag-struct-field`/
+        // `compile-sexpr-field` in `compiler.rs` for the kind-`6` encode/
+        // decode this now routes a `Fn`-typed field through unchanged.
+        Type::Fn(..) => 6,
         _ => 0,
     }
 }

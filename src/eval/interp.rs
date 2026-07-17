@@ -814,6 +814,25 @@ impl Interp {
                         }
                         self.eval_seq(heap, &cb.body, &cenv)
                     }
+                    // The compiled peer of the interp-closure arm above —
+                    // reached whenever this `Apply`'s callee was itself
+                    // produced by compiled code: a compiled function
+                    // returning a `Fn` (decoded via `is_boxed_sexpr_type`'s
+                    // `Type::Fn` arm), or a compiled closure the interpreter
+                    // is merely threading through a chain of `Expr::Apply`s
+                    // it's driving (e.g. `((make-adder n) x)` where
+                    // `make-adder` is `compile`d). Marshals `argv`/decodes
+                    // the result exactly like a top-level `call_compiled`
+                    // call, via the same two halves that split out of it.
+                    RtValue::Sexpr(Value::Boxed(id)) if heap.is_compiled_closure(id) => {
+                        let (int_args, crossing_roots) = self.encode_crossing_args(heap, &argv)?;
+                        crate::compile::runtime::set_active_heap(heap as *mut Heap);
+                        let raw = Self::call_closure_box(heap, id, &int_args);
+                        for _ in 0..crossing_roots {
+                            heap.pop_root();
+                        }
+                        self.decode_compiled_return(heap, raw, &t.ty)
+                    }
                     RtValue::Builtin(name) => match self.eval_builtin(heap, &name, &argv) {
                         Some(r) => r,
                         None => Err(EvalError::NoSuchFunction(name)),
@@ -1015,43 +1034,49 @@ impl Interp {
     /// `Expr::Call` already would for a general-ADT parameter — a clear
     /// internal error here, not a silent misread of unrelated bits.
     fn call_compiled(&self, heap: &mut Heap, compiled: &crate::compile::CompiledFn, argv: &[RtValue], ret_ty: &Type) -> Result<RtValue, EvalError> {
-        // Encoded off `argv`'s own runtime shape, not each parameter's
-        // *static* type (unlike `ret_ty`'s decode below) — a generic
-        // parameter (`(defun (describe T) ((it T)) ...)`) has no concrete
-        // `Type` to classify at all here, only whatever `T` happened to be
-        // substituted with at this call site, and `Self::struct_types`
-        // (keyed by concrete type `Path`, never a type variable) can't
-        // answer that. `RtValue::Sexpr`/`RtValue::Int` are themselves
-        // unambiguous — a well-typed argument's `RtValue` variant is already
-        // exactly the one `Self::is_boxed_sexpr_type` would have derived
-        // from its (possibly-generic) static type anyway, so no information
-        // is lost by reading it directly off the value instead.
-        // Every heap-backed argument is rooted for the duration of marshaling
-        // + the call, then LIFO-popped after (per the `sync_roots` invariant).
-        // Two reasons, both because a raw encoded `i64` in `int_args` is
-        // unreachable from any GC root (the interp-side `argv` is not one):
-        // (a) a `Str` arg is freshly heap-allocated here (an interp
-        // `RtValue::Str` is an `Rc<str>`, not a heap `Value::Str`) and nothing
-        // else holds it; (b) an *earlier* `Sexpr` arg, already encoded to a
-        // raw pointer, would otherwise be swept if a *later* `Str` arg's
-        // `alloc_string` triggers a GC mid-marshaling — so `Sexpr` args are
-        // rooted too, before any such allocation can happen. Immediate
-        // `Value`s root harmlessly (the GC marker's `_ => {}` arm skips them).
-        // Explicit loop (not `map().collect()?`) so an error partway through
-        // still pops the roots pushed so far before returning — an early `?`
-        // out of the middle would otherwise leak them past the post-call
-        // pop, corrupting the LIFO root stack for later work on this heap.
+        let (int_args, crossing_roots) = self.encode_crossing_args(heap, argv)?;
+        // Registers `heap` as this thread's active `Heap` (see
+        // `compile::runtime::set_active_heap`'s doc comment) so any
+        // `rt-cons`/`rt-car`/... call the compiled code makes — directly or
+        // transitively through another compiled function — resolves against
+        // the right heap. Done on every call rather than once, since it's
+        // one pointer store and there's no cheaper place to detect "this
+        // callee might transitively touch the heap" ahead of time.
+        crate::compile::runtime::set_active_heap(heap as *mut Heap);
+        let raw = compiled.call(&int_args);
+        for _ in 0..crossing_roots {
+            heap.pop_root();
+        }
+        self.decode_compiled_return(heap, raw, ret_ty)
+    }
+
+    /// [`Self::call_compiled`]'s argument-marshaling half, factored out so
+    /// [`Self::eval`]'s `Expr::Apply` arm can reuse it when the callee is a
+    /// `BoxedObj::CompiledClosure` rather than a top-level `(compile ...)`d
+    /// function — both cross the exact same interp-`RtValue` -> compiled-ABI
+    /// `i64` boundary. Returns the encoded `int_args` plus how many roots it
+    /// pushed (over `argv`'s heap-backed elements only); the caller must pop
+    /// exactly that many once the call this feeds into has returned. See
+    /// `call_compiled`'s (pre-refactor) doc comment for why encoding reads
+    /// `argv`'s own runtime shape rather than each parameter's static type,
+    /// and why every heap-backed argument is rooted for the marshaling+call
+    /// window.
+    fn encode_crossing_args(&self, heap: &mut Heap, argv: &[RtValue]) -> Result<(Vec<i64>, usize), EvalError> {
         let mut crossing_roots = 0usize;
         let mut int_args: Vec<i64> = Vec::with_capacity(argv.len());
         for v in argv {
             let encoded = match v {
                 // An *interpreted* closure box must not silently cross this
                 // boundary: compiled code represents function values as its
-                // own `ClosureBox` (a malloc'd i64 pointer), and a tagged
-                // interp closure handed over as a plain `Sexpr` would be
+                // own `BoxedObj::CompiledClosure`, and a tagged interp
+                // closure handed over as a plain `Sexpr` would be
                 // dereferenced as one — same "clear internal error, not a
                 // silent misread" stance the pre-6b `RtValue::Closure`
-                // rejection took.
+                // rejection took. A *compiled* closure (also a tagged
+                // `Sexpr`) needs no such rejection — it falls through to the
+                // ordinary `RtValue::Sexpr` arm just below like any other
+                // boxed value, since compiled code on both sides of this
+                // call already agrees on `BoxedObj::CompiledClosure`'s shape.
                 RtValue::Sexpr(Value::Boxed(id)) if heap.is_closure(*id) => Err(EvalError::Internal(
                     "compiled call: an interpreted closure cannot be passed to compiled code".into(),
                 )),
@@ -1108,18 +1133,15 @@ impl Interp {
                 }
             }
         }
-        // Registers `heap` as this thread's active `Heap` (see
-        // `compile::runtime::set_active_heap`'s doc comment) so any
-        // `rt-cons`/`rt-car`/... call the compiled code makes — directly or
-        // transitively through another compiled function — resolves against
-        // the right heap. Done on every call rather than once, since it's
-        // one pointer store and there's no cheaper place to detect "this
-        // callee might transitively touch the heap" ahead of time.
-        crate::compile::runtime::set_active_heap(heap as *mut Heap);
-        let raw = compiled.call(&int_args);
-        for _ in 0..crossing_roots {
-            heap.pop_root();
-        }
+        Ok((int_args, crossing_roots))
+    }
+
+    /// [`Self::call_compiled`]'s return-value half, factored out for the
+    /// same reason as [`Self::encode_crossing_args`] — a direct
+    /// `Expr::Apply` on a `BoxedObj::CompiledClosure` decodes its raw `i64`
+    /// result exactly like a top-level compiled call's, by the callee's
+    /// declared (here: the closure's `Type::Fn` return) type.
+    fn decode_compiled_return(&self, heap: &mut Heap, raw: i64, ret_ty: &Type) -> Result<RtValue, EvalError> {
         Ok(if self.is_boxed_sexpr_type(ret_ty) {
             RtValue::Sexpr(crate::compile::runtime::decode(raw))
         } else if matches!(ret_ty, Type::Bool) {
@@ -1182,24 +1204,70 @@ impl Interp {
         })
     }
 
+    /// Invokes a `BoxedObj::CompiledClosure` directly from interp Rust code
+    /// — the `Expr::Apply` counterpart of a top-level `(compile ...)`d
+    /// function call, for a callee produced by compiled code (returned
+    /// across the boundary, or built and threaded through a chain of
+    /// `Expr::Apply`s the interpreter is itself driving). `args` are
+    /// already-encoded raw i64s ([`Self::encode_crossing_args`]'s output);
+    /// the caller must already have called `compile::runtime::set_active_heap`
+    /// (the closure's own body may call back into the `rt_*` runtime,
+    /// directly or transitively through another compiled function).
+    /// Marshals the closure's captured environment into the fixed
+    /// `compiled_fn_type_with_env` ABI (`args_ptr, argc, env_ptr, env_len`)
+    /// every closure-boxed compiled function shares — the exact inverse of
+    /// `rt_closure_env_get`'s per-slot re-encode, done here in one pass
+    /// since the whole env crosses at once rather than one slot per call.
+    fn call_closure_box(heap: &Heap, id: BoxId, args: &[i64]) -> i64 {
+        let env_len = heap.compiled_closure_env_len(id);
+        let mask = heap.compiled_closure_mask(id);
+        let env: Vec<i64> = (0..env_len)
+            .map(|i| {
+                let v = heap.compiled_closure_env_get(id, i);
+                if mask & (1 << i) != 0 {
+                    crate::compile::runtime::encode(v)
+                } else {
+                    match v {
+                        Value::Int(raw) => raw,
+                        other => unreachable!("compiled closure env slot {} holds a non-raw value {:?} for an unmasked slot", i, other),
+                    }
+                }
+            })
+            .collect();
+        let fn_ptr = heap.compiled_closure_fnptr(id);
+        // SAFETY: every `BoxedObj::CompiledClosure` in the heap was built by
+        // `rt_closure_new` from a real LLVM function pointer compiled under
+        // `compiled_fn_type_with_env`'s exact signature (`build-make-closure`
+        // in `compiler.rs`'s `compile-lambda`/`resolve-value` is its only
+        // producer) — there is no other way to construct one, so `fn_ptr`
+        // always points at a function with this signature.
+        let f: unsafe extern "C" fn(*const i64, u32, *const i64, u32) -> i64 = unsafe { std::mem::transmute(fn_ptr) };
+        unsafe { f(args.as_ptr(), args.len() as u32, env.as_ptr(), env.len() as u32) }
+    }
+
     /// Whether `ty`'s compiled representation crosses the typelisp-call-
     /// syntax/compiled-code boundary as a tagged `Sexpr`
     /// (`compile::runtime::encode`/`decode`, [`Self::call_compiled`]) rather
     /// than a plain `i64` — `Sexpr` itself, any `Type::Named` this `Interp`
     /// has recorded in [`Self::struct_types`] (Stage 3 of the Sexpr/RtValue
-    /// unification plan, `docs/implementation-log.md`), or an enum type
+    /// unification plan, `docs/implementation-log.md`), an enum type
     /// (`Option`/`Result`/`Error`/user `defenum`) — since the enum-
     /// representation unification's compiler flip, a compiled function
     /// returning e.g. `Option<i64>` really does hand back a tagged
     /// `Value::Boxed` at a `BoxedObj::Enum`, not the raw box address the
     /// pre-flip design left undecoded here (this is where that gap used to
-    /// surface a bare `RtValue::Int` for an enum-typed return). Every enum
-    /// type compiled code can ever mention is heap-repr by construction
-    /// (see `ast_bridge::struct_field_kind`'s doc comment), so `is_enum_path`
+    /// surface a bare `RtValue::Int` for an enum-typed return) — or a
+    /// `Type::Fn`: since the closure-representation unification's compiled
+    /// flip (Stage 2), a compiled function returning a closure hands back a
+    /// tagged `Value::Boxed` at a `BoxedObj::CompiledClosure` exactly the
+    /// same way, so without this arm the same kind of gap would surface
+    /// (a bare `RtValue::Int` for a `Fn`-typed return). Every enum type
+    /// compiled code can ever mention is heap-repr by construction (see
+    /// `ast_bridge::struct_field_kind`'s doc comment), so `is_enum_path`
     /// alone is enough — no need to also check field representability the
     /// way `Interp::enum_fields_representable` does for a binding.
     fn is_boxed_sexpr_type(&self, ty: &Type) -> bool {
-        matches!(ty, Type::Named(p, _) if is_sexpr_type(p) || self.struct_types.contains(p) || self.is_enum_path(p))
+        matches!(ty, Type::Fn(..)) || matches!(ty, Type::Named(p, _) if is_sexpr_type(p) || self.struct_types.contains(p) || self.is_enum_path(p))
     }
 
     /// Finds the registered `(Path, String)` key for a `"type::method"`
