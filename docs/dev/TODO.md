@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-07-15 / ブランチ: `feature/known-limitations`
+最終更新: 2026-07-17 / ブランチ: `feature/closure-unification`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離した）。
@@ -13,6 +13,68 @@
 ---
 
 ## 残っている作業（影響範囲の大きさで優先順位付け——[[feedback-impl-priority]]）
+
+### クロージャ表現統一（labels/closures unification）Stage 7-10（branch `feature/closure-unification`）
+
+**背景**: interpクロージャとcompiledクロージャ(ClosureBox)の二重表現による境界ギャップ
+（interpクロージャをcompiled関数に渡せない/compiled関数のFn戻り値がIntに化ける/structフィールド
+へのFn格納不可）を解消する10段階計画。方針は「クロージャは定義時にJITコンパイルしてcompiled
+表現に統一、捕獲変数へのsetfは共有セル（CL的）」。Phase I（表現統一、Stage 1-6）は2026-07-17
+完了済み——Stage 1: mem/rt基盤（`BoxedObj::CompiledClosure`+`rt_closure_*`/`rt_cell_*`）、
+Stage 2: compiled側flip+ARC全廃、Stage 3: 境界開通（Fn引数/戻り値/structフィールド）、
+Stage 4: 共有セル捕獲（`Ctx::cell_names`/`Ctx::visible_siblings`、`cellvar`/`cellset`タグ）、
+Stage 5: compileパイプラインのTarjan SCCベース多パス化（`Interp::compute_sccs`/`compile_scc`、
+`CompiledFn::new_multi`）、Stage 6: defun/lambda/labels/matchアームの複数式body対応
+（`ast_bridge::single_body_expr`、`(let () e1 e2 ...)`ラップ）。全stage独立コミット・
+`scripts/test-serial.sh`全green維持。
+
+**Stage 5実装時の発見（Stage 7設計に影響）**: 別々のトップレベル`defun`同士の構文上の相互再帰は
+現行チェッカー（`Checker::check_form_at`がトップレベルformを出現順に1つずつ検査、前方参照不可）
+では**そもそも記述不能**（`docs/syntax.md`が`labels`を「相互再帰可能なローカル関数定義」と
+明記する通り、相互再帰は`labels`専用の言語機能）。Stage 5のSCC機構は現状ユーザー可視の
+プログラムからは（生成した`FnDef`を直接`Interp::fns`へ注入する`src/eval/interp.rs`の
+`scc_tests`モジュールでのみ）到達するが、**Stage 7で各`labels`siblingが独立JIT単位になった
+時点で実際に必要になる**基盤という位置づけ。
+
+以下、未着手の残りstage（計画書全文は元セッションの`~/.claude/plans/
+compile-traitcall-traitcall-cuddly-corbato.md`、リポジトリ外のためこの節が主要な引き継ぎ資料）。
+
+- **Stage 7: 定義時JITドライバ**（Phase II開始点、最大の設計判断を伴う）
+  - `Expr::Lambda`/`Labels`/`FnRef`/`MethodRef`のevalアームに「tier判定→コンストラクタ関数JIT
+    （定義サイトの`Loc`+型署名でキャッシュ）→失敗時は既存の`make_closure`（interpクロージャ）へ
+    fallback+理由ログ」という経路を追加。JIT可能tier判定基準: パラメータ・戻り値・捕獲名の型が
+    すべてcompiled表現可能（native型捕獲＝自己ホストコンパイラ島専用、およびマクロ展開中は
+    fallback対象）。
+  - 新設`Slot::TypedCell`（Stage 4の共有セルをinterp側束縛生成時点から使う経路）。
+  - マクロ展開時（check時）はJIT抑止フラグを`Interp`に持たせ、interpクロージャを使う
+    （LSPは「コード実行なし方針」を維持するため今後もJITしない）。
+  - JITエンジンの寿命管理: `fn_ptr`が`ClosureBox`に残り続けるため実行エンジンをdropしない
+    「墓場」`Vec`を`Interp`に新設。再定義（redefine）テストで要注意。
+  - 環境変数`TYPELISP_CLOSURE_JIT=off|prefer|require`でモード切替を仕込む（`require`モードは
+    このstageでは全green化しなくてよい——網羅性はStage 8で埋める）。fallbackがある限り既存
+    テストはgreenのまま。
+  - fasl形式は変更不要（JITコードはプロセスローカル）。AOTはcompiler.rs共有のため自動反映、
+    `rt_closure_*`/`rt_cell_*`のstaticlib export追加のみ確認。
+
+- **Stage 8: compiled被覆拡大**（Stage 7の`require`モード失敗を計画的に潰す複数コミット群）
+  - 新しい`rt_*`シム追加（`random`/`gensym`/`equal`/`equalp`等、未compile対応のbuiltin）。
+  - `compile-assoc`のlowering追加（`f64::sqrt`等、既にcompile対応済みのものは除く——
+    `docs/dev/TODO.md`の`f64`関連の節を参照して重複しないこと）。
+  - `TYPELISP_CLOSURE_JIT=require`での失敗理由ログを起点に網羅的に潰す。
+
+- **Stage 9: JIT必須化**
+  - fallbackを「native tier（自己ホストコンパイラ島）+マクロ展開時のみ」へ制限。
+  - compilable tierでのJIT失敗は明確な`Panic`にする（サイレントfallback廃止）。
+  - 受け入れ基準は全体`scripts/test-serial.sh`の完走。
+
+- **Stage 10: 掃除**
+  - 到達不能コード削除（`call_compiled`のinterpクロージャ拒否コメント、
+    `compiler.rs`/`freevars.rs`のdocumented gap記述の更新）。
+  - `docs/dev/implementation-log.md`・`docs/dev/language-design.md`更新。
+  - **フォローアップとして必ずTODO.mdへ記録すること**: interpクロージャの完全削除
+    （`BoxedObj::Closure`/`ClosureBody`/`Capture`/`closure_bodies`/`make_closure`/`Apply`の
+    interpクロージャアーム）は本計画のスコープ外——自己ホストコンパイラ島自体をAOT化する
+    フォローアップ企画が前提になる。
 
 ### 「既知の制限・意図的に対象外」7項目の解消（2026-07-15）
 
