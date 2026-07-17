@@ -144,7 +144,7 @@ fn tagged(heap: &mut Heap, tag: &str, items: &[Value]) -> Result<Value, Error> {
 /// see [`crate::compile::USER_SYMBOL_PREFIX`]'s doc comment for why this is
 /// never `logical_name` unprefixed. The single place [`translate_call`]/
 /// [`translate_fnref`]'s embedded `(call ...)`-node name string is built,
-/// so it always agrees with whatever `Interp::compile_function_rec`/
+/// so it always agrees with whatever `Interp::compile_scc`/
 /// `compile::aot` declare/wire the *actual* LLVM function under.
 pub(crate) fn user_symbol_name(logical_name: &str) -> String {
     format!("{}{}", crate::compile::USER_SYMBOL_PREFIX, logical_name)
@@ -2094,7 +2094,7 @@ fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], cx: Ctx) -> Resu
     // `rt_cons` by `compiler.rs`'s `compile-call` itself, matching on this
     // exact literal name (`crate::eval::interp::is_rt_builtin_name`) — they
     // never go through `declare_external_function`/`user_symbol_name` at all
-    // (`Interp::compile_function_rec` excludes them from `call_targets` for
+    // (`Interp::compile_scc` excludes them from `call_targets` for
     // the same reason), so prefixing them here would break that match.
     let raw_name = path.local();
     let name_v = if crate::eval::interp::is_rt_builtin_name(raw_name) {

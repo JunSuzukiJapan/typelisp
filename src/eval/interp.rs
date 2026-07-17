@@ -166,6 +166,32 @@ pub struct Interp {
     compiled_globals: RefCell<HashMap<Path, usize>>,
 }
 
+/// One outgoing edge of the top-level compile call graph
+/// [`Interp::compute_sccs`] walks: either a plain `Expr::Call` target (a
+/// `defun`) or an `Expr::Assoc` target (a `defmethod`, keyed the same way
+/// [`Interp::method_key`] keys `self.methods`/`self.compiled_methods`).
+/// Carries the full typed key (not just its string name) so
+/// [`Interp::compile_scc`] can reuse it directly to declare/wire the target
+/// without re-deriving it from the name.
+enum CallEdge {
+    Fn(Path),
+    Method(Path, String),
+}
+
+impl CallEdge {
+    /// The node identity [`Interp::compute_sccs`]'s graph traversal keys on
+    /// — a bare `defun` name, or `"type::method"` for a `defmethod`, exactly
+    /// the string shape [`Interp::compiled_fn_body`]/[`Interp::method_key`]
+    /// already resolve back (`compile_function_rec`'s pre-Stage-5 `mname`
+    /// convention, kept unchanged).
+    fn node_name(&self) -> String {
+        match self {
+            CallEdge::Fn(p) => p.local().to_string(),
+            CallEdge::Method(p, m) => format!("{}::{}", p.local(), m),
+        }
+    }
+}
+
 impl Interp {
     pub fn new() -> Interp {
         // A fresh `Interp` always pairs with a fresh `Heap` (every caller in
@@ -1562,28 +1588,35 @@ impl Interp {
     /// tree-walking it from then on. See [`Self::add_compiled_function`] for
     /// the supported-shape scope.
     ///
-    /// labels/closures Stage 3: unlike `compile::aot::compile_file` (one
-    /// shared module built up over every `defun` in file order, so a callee
-    /// is always already fully defined in that same module by the time its
-    /// caller is compiled — see that module's doc comment), every `compile`
-    /// call gets its own throwaway module/engine (this method's
-    /// long-standing design, unchanged). So a *different* top-level function
-    /// this body's `Expr::Call`s reach
-    /// (`crate::compile::ast_bridge::collect_call_targets`) has to be
-    /// handled by hand, in three steps: (1) it must already be `compile`d
-    /// (checked against [`Self::compiled`] up front, so a missing one
-    /// surfaces as a clear `Panic` here rather than a confusing one from
-    /// deep inside the compiler body's `get-function`); (2) forward-declared
-    /// — no body — in this throwaway module *before* the compiler body runs
-    /// (`compile-call`'s `get-function` needs to find *something* by that
-    /// name); (3) wired to the real, already-running JIT code's address via
-    /// `add_global_mapping` *after* (`crate::compile::CompiledFn::new`'s
-    /// `externals` parameter) — can't happen any earlier, since the engine
-    /// that will actually run this function's code doesn't exist until then.
-    /// Self-recursion needs none of this: `compile-function`'s own first
-    /// step (`add-function`) already declares this very function in its own
-    /// module before compiling its body, so it's excluded from every step
-    /// above.
+    /// labels/closures Stage 3 (single-function shape) / Stage 5 (SCC
+    /// generalization): unlike `compile::aot::compile_file` (one shared
+    /// module built up over every `defun` in file order, so a callee is
+    /// always already fully defined in that same module by the time its
+    /// caller is compiled — see that module's doc comment), `name`'s own
+    /// strongly connected component of the top-level call graph —
+    /// [`Self::compute_sccs`], usually just `{name}` itself, but a genuine
+    /// group for mutual recursion across *separate* top-level functions —
+    /// gets one throwaway module/engine per SCC ([`Self::compile_scc`]),
+    /// processed leaf-SCC-first. Every target *outside* the current SCC
+    /// (`crate::compile::ast_bridge::collect_call_targets`/
+    /// `collect_assoc_targets`, gathered via [`Self::call_graph_edges`]) is
+    /// handled by hand, in three steps: (1) it must already be `compile`d by
+    /// the time its SCC is processed — [`Self::compute_sccs`]'s finish-order
+    /// contract guarantees this, so a violation is an internal-invariant
+    /// `.expect()`, not a user-facing error; (2) forward-declared — no body
+    /// — in this SCC's module *before* the compiler body runs for any of its
+    /// members (`compile-call`'s `get-function` needs to find *something* by
+    /// that name); (3) wired to the real, already-running JIT code's address
+    /// via `add_global_mapping` *after* (`crate::compile::CompiledFn::
+    /// new_multi`'s `externals` parameter) — can't happen any earlier, since
+    /// the engine that will actually run this SCC's code doesn't exist until
+    /// then. Self-recursion, and recursion among an SCC's own members, needs
+    /// none of this: every member of the SCC is forward-declared under its
+    /// own name in the *same* module before any of their bodies are
+    /// translated, so `compile-function`'s own `(add-function m name)`
+    /// (reusing that declaration — see [`llvm_module_add_function`]'s doc
+    /// comment) already gives every sibling something to call before any
+    /// body exists.
     ///
     /// A user-defined method this body calls (`Expr::Assoc`,
     /// `crate::compile::ast_bridge::collect_assoc_targets`) goes through the
@@ -1611,56 +1644,51 @@ impl Interp {
     /// (`f64`/`char` builtins — still out of scope) panics clearly right
     /// here rather than deep inside `compile-assoc`'s own `get-function`.
     fn compile_function(&self, heap: &mut Heap, name: &str) -> Result<RtValue, EvalError> {
-        let mut in_progress = std::collections::HashSet::new();
-        self.compile_function_rec(heap, name, &mut in_progress)
+        if self.is_compiled_name(name) {
+            return Ok(RtValue::Bool(true));
+        }
+        for scc in self.compute_sccs(name)? {
+            self.compile_scc(heap, &scc)?;
+        }
+        Ok(RtValue::Bool(true))
     }
 
-    /// The transitive worker behind [`Self::compile_function`]: compiles
-    /// `name`, first recursively compiling any concrete function/method
-    /// *instantiation* its body calls that isn't compiled yet. This is what
-    /// lets a caller `(compile sum-vec)` pull in the monomorphized
-    /// `vector::iter <i64>` / `vector-iter::next <i64>` (and, transitively,
-    /// `map`/`member`/... over a concrete element type) an `Iter` combinator
-    /// bottoms out in — those specializations have real bodies in
-    /// [`Self::fns`]/[`Self::methods`] (`Checker::specialize_defun`) but
-    /// whitespace-mangled names (`"iter <i64>"`) that `(compile ...)` can't
-    /// name directly. `in_progress` guards against a compile-time cycle
-    /// (mutual recursion across *separate* compiled functions, which each
-    /// throwaway module can't forward-declare the way self-recursion is —
-    /// reported as a clear error rather than an infinite descent); a value
-    /// already in [`Self::compiled`]/[`Self::compiled_methods`] (a diamond in
-    /// the call graph — two callers sharing one callee) short-circuits.
-    fn compile_function_rec(
-        &self,
-        heap: &mut Heap,
-        name: &str,
-        in_progress: &mut std::collections::HashSet<String>,
-    ) -> Result<RtValue, EvalError> {
+    /// True once `name` (a bare `defun` name, or `"type::method"`) already
+    /// has a compiled entry — [`Self::compiled`] or [`Self::compiled_methods`]
+    /// depending on which [`Self::method_key`] resolves it to.
+    fn is_compiled_name(&self, name: &str) -> bool {
+        match self.method_key(name) {
+            Some(key) => self.compiled_methods.borrow().contains_key(&key),
+            None => self.compiled.borrow().contains_key(&Path::root(name)),
+        }
+    }
+
+    /// `name`'s own outgoing edges in the top-level compile call graph —
+    /// every concrete function/method *instantiation* `name`'s body calls,
+    /// filtered exactly the way `compile_function_rec` always has: self-
+    /// recursion and `rt_*`/native builtins excluded from
+    /// [`CallEdge::Fn`]; `Vector`/`HashTable`'s op-node-lowered builtin
+    /// methods and natively-lowered primitive-receiver builtins excluded
+    /// from [`CallEdge::Method`]. A method target with no registered
+    /// implementation at all (a builtin `compile-assoc` doesn't lower
+    /// natively, e.g. `f64::sqrt`) is a compile-time error here, same as
+    /// before Stage 5 — this is the one path that produces a real user-
+    /// facing error out of graph construction, everything else just shapes
+    /// the graph [`Self::compute_sccs`] walks. Shared by that graph walk and
+    /// [`Self::compile_scc`] (which needs the same edges again, in typed
+    /// form, to know what to forward-declare/wire as `externals`).
+    fn call_graph_edges(&self, name: &str) -> Result<Vec<CallEdge>, EvalError> {
         let path = Path::root(name);
         let method_key = self.method_key(name);
-        match &method_key {
-            Some(key) if self.compiled_methods.borrow().contains_key(key) => return Ok(RtValue::Bool(true)),
-            None if self.compiled.borrow().contains_key(&path) => return Ok(RtValue::Bool(true)),
-            _ => {}
-        }
-        in_progress.insert(name.to_string());
         let (_, body) = self.compiled_fn_body(name)?;
-        let call_targets: Vec<Path> = crate::compile::ast_bridge::collect_call_targets(&body)
-            .into_iter()
-            .filter(|p| *p != path && !is_rt_builtin_name(p.local()))
-            .collect();
-        for target in &call_targets {
-            if !self.compiled.borrow().contains_key(target) {
-                let tname = target.local().to_string();
-                if in_progress.contains(&tname) {
-                    return Err(EvalError::Panic(format!(
-                        "compile: mutual recursion between \"{}\" and \"{}\" across separate compiled functions is not supported",
-                        name, tname
-                    )));
-                }
-                self.compile_function_rec(heap, &tname, in_progress)?;
-            }
-        }
+        let mut edges = Vec::new();
+
+        edges.extend(
+            crate::compile::ast_bridge::collect_call_targets(&body)
+                .into_iter()
+                .filter(|p| *p != path && !is_rt_builtin_name(p.local()))
+                .map(CallEdge::Fn),
+        );
 
         let method_targets: Vec<(Path, String)> = crate::compile::ast_bridge::collect_assoc_targets(&body)
             .into_iter()
@@ -1712,26 +1740,145 @@ impl Interp {
                     method_link_name(type_name, method)
                 )));
             }
-            if !self.compiled_methods.borrow().contains_key(&key) {
-                // A user-defined method's own body is registered in
-                // `self.methods` (a specialization included), so compile it
-                // transitively — the caller can't name a whitespace-mangled
-                // instantiation by hand. `type_name::method` is the exact
-                // spelling `compiled_fn_body`/`method_key` resolve back.
-                let mname = format!("{}::{}", type_name.local(), method);
-                if in_progress.contains(&mname) {
-                    return Err(EvalError::Panic(format!(
-                        "compile: mutual recursion between \"{}\" and \"{}\" across separate compiled functions is not supported",
-                        name, mname
-                    )));
+        }
+        edges.extend(method_targets.into_iter().map(|(p, m)| CallEdge::Method(p, m)));
+        Ok(edges)
+    }
+
+    /// Tarjan's algorithm over the top-level compile call graph, rooted at
+    /// `name`, restricted to the induced subgraph of not-yet-`compile`d
+    /// nodes (labels/closures Stage 5) — an edge into an already-compiled
+    /// target is a leaf for this traversal's purposes, since its address is
+    /// already known and needs no further graph treatment. Returns every
+    /// strongly connected component this traversal reaches, **in the order
+    /// Tarjan completes them**: a classic property of the algorithm is that
+    /// this finish order is a reverse topological order of the SCC
+    /// condensation — if `A` calls something in a different SCC `B`, `B`
+    /// finishes (and is pushed onto the result) before `A` does. That is
+    /// exactly the order [`Self::compile_function`] needs to hand to
+    /// [`Self::compile_scc`]: every SCC's external dependencies are already
+    /// compiled by the time it's processed. A single-member SCC with no
+    /// self-loop is the common case (an ordinary, non-recursive-with-others
+    /// function); a multi-member SCC is genuine mutual recursion across
+    /// separate top-level functions, unsupported before this stage.
+    fn compute_sccs(&self, name: &str) -> Result<Vec<Vec<String>>, EvalError> {
+        let mut counter = 0usize;
+        let mut indices: HashMap<String, usize> = HashMap::new();
+        let mut lowlink: HashMap<String, usize> = HashMap::new();
+        let mut on_stack: HashSet<String> = HashSet::new();
+        let mut stack: Vec<String> = Vec::new();
+        let mut sccs: Vec<Vec<String>> = Vec::new();
+        self.scc_strongconnect(name, &mut counter, &mut indices, &mut lowlink, &mut on_stack, &mut stack, &mut sccs)?;
+        Ok(sccs)
+    }
+
+    /// One node's worth of Tarjan's `strongconnect` — see
+    /// [`Self::compute_sccs`]'s doc comment for the algorithm-level
+    /// contract. Recursive over [`Self::call_graph_edges`]; an edge whose
+    /// target is already compiled is skipped outright (never entered into
+    /// `indices` at all), so it never contributes a spurious singleton SCC.
+    #[allow(clippy::too_many_arguments)]
+    fn scc_strongconnect(
+        &self,
+        node: &str,
+        counter: &mut usize,
+        indices: &mut HashMap<String, usize>,
+        lowlink: &mut HashMap<String, usize>,
+        on_stack: &mut HashSet<String>,
+        stack: &mut Vec<String>,
+        sccs: &mut Vec<Vec<String>>,
+    ) -> Result<(), EvalError> {
+        indices.insert(node.to_string(), *counter);
+        lowlink.insert(node.to_string(), *counter);
+        *counter += 1;
+        stack.push(node.to_string());
+        on_stack.insert(node.to_string());
+
+        for edge in self.call_graph_edges(node)? {
+            let already_compiled = match &edge {
+                CallEdge::Fn(p) => self.compiled.borrow().contains_key(p),
+                CallEdge::Method(p, m) => self.compiled_methods.borrow().contains_key(&(p.clone(), m.clone())),
+            };
+            if already_compiled {
+                continue;
+            }
+            let target = edge.node_name();
+            if !indices.contains_key(&target) {
+                self.scc_strongconnect(&target, counter, indices, lowlink, on_stack, stack, sccs)?;
+                let merged = lowlink[node].min(lowlink[&target]);
+                lowlink.insert(node.to_string(), merged);
+            } else if on_stack.contains(&target) {
+                let merged = lowlink[node].min(indices[&target]);
+                lowlink.insert(node.to_string(), merged);
+            }
+        }
+
+        if lowlink[node] == indices[node] {
+            let mut component = Vec::new();
+            loop {
+                let w = stack.pop().expect("node's own strongconnect frame pushed it onto the stack");
+                on_stack.remove(&w);
+                let is_root = w == node;
+                component.push(w);
+                if is_root {
+                    break;
                 }
-                self.compile_function_rec(heap, &mname, in_progress)?;
+            }
+            sccs.push(component);
+        }
+        Ok(())
+    }
+
+    /// Compiles one strongly connected component of the top-level call graph
+    /// (labels/closures Stage 5) — a single function/method, or a set of
+    /// separate top-level `defun`/`defmethod`s mutually recursive with each
+    /// other — into one shared, throwaway LLVM module, replacing the single-
+    /// function-per-module shape every `compile_function_rec` call used
+    /// before this stage. Every `members` name is forward-declared under its
+    /// real internal name (`ast_bridge::user_symbol_name`) *before* any of
+    /// their bodies are translated, exactly like an external call target
+    /// always was — so a call from one member to a sibling still without a
+    /// body yet resolves to that same declaration by name
+    /// (`compile-call`'s `get-function`), and [`Self::add_compiled_function`]
+    /// (via `compiler.rs`'s `compile-function`, whose own `(add-function m
+    /// name)` now reuses an existing declaration instead of minting a second,
+    /// disjoint one — see [`llvm_module_add_function`]'s doc comment) attaches
+    /// that member's real body to it in place. Targets *outside* `members`
+    /// are handled exactly like [`Self::call_graph_edges`]'s callers always
+    /// have: forward-declared, then wired post-hoc via `add_global_mapping`
+    /// (`externals`) to their already-compiled address — guaranteed to exist
+    /// by [`Self::compute_sccs`]'s finish-order contract. The whole module is
+    /// JIT'd exactly once via [`crate::compile::CompiledFn::new_multi`], so
+    /// every member shares one execution engine (mutual calls within the SCC
+    /// need no `add_global_mapping` entry at all — LLVM resolves them
+    /// directly against the sibling's own definition in this same module).
+    fn compile_scc(&self, heap: &mut Heap, members: &[String]) -> Result<(), EvalError> {
+        let member_set: HashSet<&str> = members.iter().map(|s| s.as_str()).collect();
+
+        let mut call_targets: Vec<Path> = Vec::new();
+        let mut method_targets: Vec<(Path, String)> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
+        for member in members {
+            for edge in self.call_graph_edges(member)? {
+                let target_name = edge.node_name();
+                // A sibling within this same SCC resolves through the SCC's
+                // own internal forward declarations below, not `externals`.
+                if member_set.contains(target_name.as_str()) || !seen.insert(target_name) {
+                    continue;
+                }
+                match edge {
+                    CallEdge::Fn(p) => call_targets.push(p),
+                    CallEdge::Method(p, m) => method_targets.push((p, m)),
+                }
             }
         }
 
         let module = {
             let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
             let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("compiled")));
+            for member in members {
+                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(member));
+            }
             for target in &call_targets {
                 declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(target.local()));
             }
@@ -1743,7 +1890,10 @@ impl Interp {
             }
             module
         };
-        self.add_compiled_function(heap, module.clone(), name, &crate::compile::ast_bridge::user_symbol_name(name))?;
+
+        for member in members {
+            self.add_compiled_function(heap, module.clone(), member, &crate::compile::ast_bridge::user_symbol_name(member))?;
+        }
 
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let mut externals: Vec<(String, usize)> = {
@@ -1753,7 +1903,7 @@ impl Interp {
                 .map(|p| {
                     (
                         crate::compile::ast_bridge::user_symbol_name(p.local()),
-                        compiled.get(p).expect("checked compiled above").address(),
+                        compiled.get(p).expect("Self::compute_sccs's finish order guarantees this is already compiled").address(),
                     )
                 })
                 .collect()
@@ -1764,7 +1914,10 @@ impl Interp {
                 let key = (type_name.clone(), method.clone());
                 (
                     crate::compile::ast_bridge::user_method_symbol_name(type_name, method),
-                    compiled_methods.get(&key).expect("checked compiled_methods above").address(),
+                    compiled_methods
+                        .get(&key)
+                        .expect("Self::compute_sccs's finish order guarantees this is already compiled")
+                        .address(),
                 )
             }));
         }
@@ -1774,22 +1927,25 @@ impl Interp {
         // typelisp-hosted `compiler.rs` bug that emits
         // instructions after a block's terminator (the `compile-let`
         // GC-root-leak fix's own doc comment names this exact risk) would
-        // otherwise reach `CompiledFn::new`'s `create_jit_execution_engine`
+        // otherwise reach `CompiledFn::new_multi`'s `create_jit_execution_engine`
         // as malformed IR — undefined behavior in LLVM itself, not a
         // catchable Rust error. Verifying first turns that into a clean
         // `Panic` instead.
         module.borrow().verify().map_err(|e| EvalError::Panic(format!("compile: module failed verification: {}", e)))?;
-        let compiled = crate::compile::CompiledFn::new(&module.borrow(), &crate::compile::ast_bridge::user_symbol_name(name), &externals)
+        let internal_names: Vec<String> = members.iter().map(|m| crate::compile::ast_bridge::user_symbol_name(m)).collect();
+        let compiled_fns = crate::compile::CompiledFn::new_multi(&module.borrow(), &internal_names, &externals)
             .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
-        match method_key {
-            Some(key) => {
-                self.compiled_methods.borrow_mut().insert(key, compiled);
-            }
-            None => {
-                self.compiled.borrow_mut().insert(path, compiled);
+        for (member, compiled) in members.iter().zip(compiled_fns) {
+            match self.method_key(member) {
+                Some(key) => {
+                    self.compiled_methods.borrow_mut().insert(key, compiled);
+                }
+                None => {
+                    self.compiled.borrow_mut().insert(Path::root(member), compiled);
+                }
             }
         }
-        Ok(RtValue::Bool(true))
+        Ok(())
     }
 
     /// Build the argument vector for a macro call: the first `fixed` raw
@@ -3013,10 +3169,26 @@ fn compiled_fn_type() -> inkwell::types::FunctionType<'static> {
     ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
 }
 
+/// Get-or-create: reuses an existing declaration under `name` (a bodyless
+/// forward declaration — [`declare_external_function`] or an earlier call to
+/// this very builtin) instead of always minting a fresh one. LLVM's own
+/// `LLVMAddFunction` does *not* do this — a second call with a colliding
+/// name silently gets uniquified (`"name.1"`), never merged with the first —
+/// so this reuse has to happen here. Needed since labels/closures Stage 5:
+/// [`Interp::compile_scc`] forward-declares every member of a mutually
+/// recursive group under its real internal name *before* any member's body
+/// is translated, and `compiler.rs`'s `compile-function` (the sole caller of
+/// this builtin) must attach that member's own body to that exact same
+/// declaration, not a second, disconnected one — otherwise a sibling's call
+/// to it (resolved by name against the module) would find only the empty
+/// declaration. A no-op generalization for every call site that predates
+/// Stage 5: none of them ever collided with a pre-existing declaration under
+/// the same name.
 fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(&args[1])?;
-    let function = module.borrow_mut().add_function(name, compiled_fn_type(), None);
+    let existing = module.borrow().get_function(name);
+    let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(name, compiled_fn_type(), None));
     Ok(RtValue::LlvmFunction(function))
 }
 
@@ -4773,5 +4945,63 @@ fn match_sexpr_ctor(heap: &Heap, variant: usize, args: &[Pattern], v: Value) -> 
             Some(binds)
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod scc_tests {
+    use super::*;
+
+    /// Surface `defun`/`defmethod` syntax can never actually exercise the
+    /// mutual-recursion branch of [`Interp::compute_sccs`]/
+    /// [`Interp::compile_scc`]: `Checker::check_form_at` checks one top-level
+    /// form at a time, in file order, so a `defun` can only ever call a name
+    /// already registered *earlier* — `docs/syntax.md`'s own description of
+    /// `labels` ("相互再帰可能なローカル関数定義") confirms mutual recursion
+    /// is deliberately a `labels`-only, local-scope feature, not something a
+    /// pair of top-level `defun`s can express. So this bypasses the checker
+    /// entirely — inserting two hand-built [`FnDef`]s that call each other
+    /// straight into [`Interp::fns`], the same "same-module direct access"
+    /// trick this file's own [`Interp`] fields allow — to prove the SCC
+    /// machinery itself (labels/closures Stage 5) handles a genuine cycle
+    /// between two *separately* JIT'd top-level functions: forward-declares
+    /// both in one shared module before either body is translated, JITs the
+    /// module once via `CompiledFn::new_multi`, and both end up in
+    /// `Interp::compiled` with no "mutual recursion ... is not supported"
+    /// `Panic` (the pre-Stage-5 behavior this replaces).
+    #[test]
+    fn compile_function_compiles_a_genuine_two_node_cycle_bypassing_the_checker() {
+        let mut heap = Heap::with_capacity(1 << 16);
+        let mut checker = crate::Checker::new();
+        let mut interp = Interp::new();
+        crate::load_compiler(&mut heap, &mut checker, &mut interp);
+
+        // `(defun a () i64 (b))` / `(defun b () i64 (a))` — never checked,
+        // built directly as already-typed AST, so the checker's forward-
+        // reference restriction never comes into play.
+        interp.fns.insert(
+            Path::root("a"),
+            FnDef {
+                params: vec![],
+                kinds: vec![],
+                body: vec![Typed::new(Expr::Call(Path::root("b"), vec![]), Type::I64)],
+                rest: false,
+                sig: Some((vec![], Type::I64)),
+            },
+        );
+        interp.fns.insert(
+            Path::root("b"),
+            FnDef {
+                params: vec![],
+                kinds: vec![],
+                body: vec![Typed::new(Expr::Call(Path::root("a"), vec![]), Type::I64)],
+                rest: false,
+                sig: Some((vec![], Type::I64)),
+            },
+        );
+
+        interp.compile_function(&mut heap, "a").expect("mutual recursion across separate top-level functions should now compile");
+        assert!(interp.compiled.borrow().contains_key(&Path::root("a")), "\"a\" should have ended up compiled");
+        assert!(interp.compiled.borrow().contains_key(&Path::root("b")), "\"b\", pulled in transitively as part of the same SCC, should have ended up compiled too");
     }
 }

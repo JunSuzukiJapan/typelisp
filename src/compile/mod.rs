@@ -32,7 +32,7 @@ pub use typelisp_rt as runtime;
 /// The single source of truth for this name is `ast_bridge`'s own
 /// `user_symbol_name`/`user_method_symbol_name` — every call/reference site
 /// (a `(call ...)`/`(assoc ...)` node's embedded name string,
-/// `Interp::compile_function_rec`'s `declare_external_function`/`externals`
+/// `Interp::compile_scc`'s `declare_external_function`/`externals`
 /// wiring, `compile::aot`'s per-`defun` `internal_name`) goes through one of
 /// those two, so this prefix only needs to be applied once per definition
 /// site — never at a second, easy-to-desync spot.
@@ -113,6 +113,43 @@ impl CompiledFn {
         let f = unsafe { engine.get_function::<CompiledSignature>(fn_name).map_err(|e| e.to_string())? };
         let addr = engine.get_function_address(fn_name).map_err(|e| e.to_string())?;
         Ok(CompiledFn { f, addr })
+    }
+
+    /// Like [`Self::new`], but resolves every name in `fn_names` out of one
+    /// shared JIT execution engine over `module` — labels/closures Stage 5's
+    /// SCC compile path: a mutually recursive group of top-level functions
+    /// is emitted into one shared module (every member forward-declared
+    /// before any body is translated — see
+    /// [`crate::eval::interp::Interp::compile_scc`]'s doc comment), so they
+    /// must all be JIT'd together out of the same engine rather than one
+    /// throwaway engine per function. A call from one member's body to a
+    /// sibling still-being-compiled member needs no `add_global_mapping`
+    /// entry — LLVM resolves it directly against the sibling's own
+    /// already-emitted definition in this same module, the same way ordinary
+    /// self-recursion always has; `externals` is only ever the set of
+    /// already-`compile`d targets *outside* this group, exactly like
+    /// [`Self::new`]'s own `externals`. `fn_name`s from
+    /// [`inkwell::execution_engine::ExecutionEngine::get_function`] each
+    /// clone their own reference to the shared engine internally (see that
+    /// method's doc comment), so every returned [`CompiledFn`] independently
+    /// keeps it alive — dropping some of them early is safe. Must be called
+    /// with [`COMPILE_LOCK`] held.
+    pub fn new_multi(module: &Module<'static>, fn_names: &[String], externals: &[(String, usize)]) -> Result<Vec<CompiledFn>, String> {
+        let engine = module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?;
+        for (name, addr) in externals {
+            let decl = module
+                .get_function(name)
+                .ok_or_else(|| format!("internal error: no forward declaration for \"{}\" in this module", name))?;
+            engine.add_global_mapping(&decl, *addr);
+        }
+        fn_names
+            .iter()
+            .map(|fn_name| {
+                let f = unsafe { engine.get_function::<CompiledSignature>(fn_name).map_err(|e| e.to_string())? };
+                let addr = engine.get_function_address(fn_name).map_err(|e| e.to_string())?;
+                Ok(CompiledFn { f, addr })
+            })
+            .collect()
     }
 
     pub fn call(&self, args: &[i64]) -> i64 {
