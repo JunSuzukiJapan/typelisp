@@ -1332,33 +1332,29 @@ impl Interp {
     }
 
     /// Looks up `name`'s registered `defun`/`defmethod` body (see
-    /// [`Self::resolve_fn_def`]), enforcing the two constraints every entry
+    /// [`Self::resolve_fn_def`]), enforcing the one constraint every entry
     /// point into the compiler shares: a real type signature (so an LLVM
-    /// function type can be built — never set for a `defmacro`) and a
-    /// single-expression body (`compile`'s long-standing scope, unchanged by
-    /// labels/closures Stage 3). For an instance method, `params`/`sig.0`
+    /// function type can be built — never set for a `defmacro`). A multi-
+    /// expression body is collapsed to one `Typed` via
+    /// [`crate::compile::ast_bridge::single_body_expr`] (labels/closures
+    /// Stage 6 — see that function's doc comment for why this needs no
+    /// `compiler.rs` change). For an instance method, `params`/`sig.0`
     /// already carry the receiver as element `0` (`Checker::check_defmethod`
     /// pushes the receiver's own type onto `sig_params` before the method's
     /// declared parameters) — so it flows through exactly like any other
     /// parameter here, no special-casing needed. Shared by
     /// [`Self::add_compiled_function`] (the actual AST-bridge step) and
-    /// [`Self::compile_function`] (which needs the body slightly earlier —
-    /// to collect `Expr::Call` targets, see that method's doc comment —
-    /// before `add_compiled_function` ever runs).
+    /// [`Self::compile_function`]/[`Self::call_graph_edges`] (which need the
+    /// body slightly earlier — to collect `Expr::Call` targets — before
+    /// `add_compiled_function` ever runs).
     fn compiled_fn_body(&self, name: &str) -> Result<(Vec<(String, Type)>, Typed), EvalError> {
         let f = self.resolve_fn_def(name)?;
         let sig = f
             .sig
             .as_ref()
             .ok_or_else(|| EvalError::Panic(format!("compile: \"{}\" has no type signature (is it a defmacro?)", name)))?;
-        if f.body.len() != 1 {
-            return Err(EvalError::Panic(format!(
-                "compile: \"{}\" has a multi-expression body, not yet supported",
-                name
-            )));
-        }
         let params = f.params.iter().cloned().zip(sig.0.iter().cloned()).collect();
-        Ok((params, f.body[0].clone()))
+        Ok((params, crate::compile::ast_bridge::single_body_expr(&f.body)))
     }
 
     /// Ensures `path` (a global some compiled function's body references)

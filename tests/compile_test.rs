@@ -772,6 +772,119 @@ fn compile_succeeds_for_a_self_recursive_defun_without_being_run() {
     assert!(expect_bool(v));
 }
 
+/// The end-to-end proof of labels/closures Stage 6 (multi-expression body
+/// support): a top-level `defun`'s body with *two* statements — a `setf` on
+/// a global (evaluated purely for effect, its own value discarded) then a
+/// final arithmetic expression (the function's real return value).
+/// `Interp::compiled_fn_body` used to reject any `f.body.len() != 1`; it now
+/// collapses a multi-expression body to a single bindingless `(let () e1
+/// e2)` via `ast_bridge::single_body_expr`, which `compiler.rs`'s existing
+/// `compile-let`/`compile-let-body` already know how to sequence — so this
+/// needs no `compiler.rs` change, only proof the wrapping/collapsing is
+/// wired correctly end to end. The global write is what proves the first
+/// statement actually *ran* (not just parsed harmlessly): the assertion
+/// checks both the return value and the mutated global.
+#[test]
+fn compile_dispatches_a_defun_with_a_two_statement_body_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defvar (counter i64) 0)
+        (defun bump ((x i64)) i64
+          (setf counter (+ counter 1))
+          (+ x 100))
+        (compile bump)
+        (+ (bump 1) (* counter 1000))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(1101), "bump(1)=101 or the setf never ran (counter would still read 0)");
+}
+
+/// The `lambda` counterpart of the two-statement `defun` test above: an
+/// *escaping* lambda (boxed into a `ClosureBox`, not an IIFE) whose body has
+/// two statements — proves `ast_bridge::translate_lambda`'s own
+/// `single_body_expr` wrapping is wired correctly, independent of
+/// `compiled_fn_body`'s.
+#[test]
+fn compile_dispatches_an_escaping_lambda_with_a_two_statement_body_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defvar (calls i64) 0)
+        (defun make-adder ((n i64)) (fn (i64) i64)
+          (lambda ((x i64)) i64
+            (setf calls (+ calls 1))
+            (+ x n)))
+        (defun apply-fn ((f (fn (i64) i64)) (n i64)) i64 (f n))
+        (compile make-adder)
+        (compile apply-fn)
+        (+ (apply-fn (make-adder 5) 10) (* calls 1000))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(1015), "adder(10)=15 with n=5, plus 1000*calls proving the setf statement ran once");
+}
+
+/// The `labels` sibling counterpart: one sibling's own body has two
+/// statements — proves `ast_bridge::translate_labels_def`'s caller
+/// (`translate_labels`, over each `LabelDef`'s own body) wraps correctly,
+/// independent of the trailing-body wrapping exercised below.
+#[test]
+fn compile_dispatches_a_labels_sibling_with_a_two_statement_body_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defvar (calls i64) 0)
+        (defun sum-of-squares ((a i64) (b i64)) i64
+          (labels ((square ((x i64)) i64
+                     (setf calls (+ calls 1))
+                     (* x x))
+                   (sum-helper ((x i64) (y i64)) i64 (+ (square x) (square y))))
+            (sum-helper a b)))
+        (compile sum-of-squares)
+        (+ (sum-of-squares 3 4) (* calls 1000))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(2025), "3*3+4*4=25, plus 1000*calls (square called twice) proving each call's first statement ran");
+}
+
+/// The `labels` *trailing body* counterpart: the block's own trailing body
+/// (after all sibling defs) has two statements, not just one — proves
+/// `translate_labels`'s own separate wrapping of `body` (as opposed to each
+/// def's own `fbody`) is wired correctly.
+#[test]
+fn compile_dispatches_a_labels_trailing_body_with_two_statements_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defvar (calls i64) 0)
+        (defun sum-of-squares ((a i64) (b i64)) i64
+          (labels ((square ((x i64)) i64 (* x x))
+                   (sum-helper ((x i64) (y i64)) i64 (+ (square x) (square y))))
+            (setf calls (+ calls 1))
+            (sum-helper a b)))
+        (compile sum-of-squares)
+        (+ (sum-of-squares 3 4) (* calls 1000))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(1025), "3*3+4*4=25, plus 1000*calls proving the trailing body's first statement ran");
+}
+
+/// The `match` arm counterpart: one arm's own body has two statements —
+/// proves `ast_bridge::translate_arms`'s `single_body_expr` wrapping is
+/// wired correctly.
+#[test]
+fn compile_matches_with_a_two_statement_arm_body_to_native_code() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defvar (calls i64) 0)
+        (defenum Maybe<T> (Just T) (Nothing))
+        (defun m ((x i64)) i64
+          (match (Maybe::Just x)
+            ((Just v) (setf calls (+ calls 1)) v)
+            ((Nothing) x)))
+        (compile m)
+        (+ (m 7) (* calls 1000))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(1007), "m(7)=7 via the Just arm, plus 1000*calls proving its first statement ran");
+}
+
 /// The end-to-end Stage 4 slice (immediate-call, non-capturing): an IIFE
 /// (`((lambda (params) body) args...)`) translates to a single-def `labels`
 /// block (`ast_bridge::translate_immediate_lambda_call`), not a boxed

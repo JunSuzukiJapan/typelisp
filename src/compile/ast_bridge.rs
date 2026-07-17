@@ -95,6 +95,30 @@ fn name_set(names: &[(String, Type)]) -> HashSet<String> {
     names.iter().map(|(n, _)| n.clone()).collect()
 }
 
+/// Collapses a `defun`/`defmethod`/`lambda`/`labels`-def/match-arm body
+/// (`Vec<Typed>`, always non-empty — the parser requires at least one form)
+/// down to the single `Typed` every translation site here was written
+/// against, *without* losing anything after the first expression
+/// (labels/closures Stage 6). The common case (`[one]`) is returned as-is,
+/// no allocation; a genuine sequence is wrapped as a bindingless
+/// `(let () e1 e2 ... eN)` — `Expr::Let(vec![], body)` — so every existing
+/// single-expression call site keeps working completely unchanged: `compile-
+/// let`/`compile-let-body` (`compiler.rs`) already fully support an
+/// N-expression trailing body (a `let`'s own body was always a sequence,
+/// long before this stage), so this needs no new tag and no `compiler.rs`
+/// change at all. The wrapper's own type is the last expression's checked
+/// type — exactly what `Expr::Let`'s type always is (the whole point of a
+/// body sequence: only the last expression's value/type is the block's own).
+pub(crate) fn single_body_expr(body: &[Typed]) -> Typed {
+    match body {
+        [one] => one.clone(),
+        _ => {
+            let ty = body.last().expect("a defun/lambda/labels body has at least one expression").ty.clone();
+            Typed::new(Expr::Let(Vec::new(), body.to_vec()), ty)
+        }
+    }
+}
+
 /// A process-wide counter for synthesizing unique LLVM symbol names for
 /// anonymous functions — every `lambda`/`Expr::FnRef`-forwarding-wrapper/
 /// immediately-invoked-lambda gets one (labels/closures Stage 4), since none
@@ -1628,17 +1652,8 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], cx: Ctx)
 
     let mut def_values = Vec::with_capacity(defs.len());
     for (name, params, fbody) in defs {
-        if fbody.len() != 1 {
-            for _ in 0..def_values.len() {
-                heap.pop_root();
-            }
-            heap.pop_root(); // captured_list
-            return Err(Error::TypeError(format!(
-                "compile: labels function \"{}\" has a multi-expression body, not yet supported",
-                name
-            )));
-        }
-        match translate_labels_def(heap, name, params, &fbody[0], inner) {
+        let fbody_one = single_body_expr(fbody);
+        match translate_labels_def(heap, name, params, &fbody_one, inner) {
             Ok(v) => {
                 heap.push_root(v);
                 def_values.push(v);
@@ -1667,11 +1682,6 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], cx: Ctx)
     }
     heap.push_root(defs_list);
 
-    if body.len() != 1 {
-        heap.pop_root(); // defs_list
-        heap.pop_root(); // captured_list
-        return Err(Error::TypeError("compile: labels body has a multi-expression body, not yet supported".into()));
-    }
     // The trailing body isn't a function of its own (no params), but a `let`
     // anywhere inside it can still be captured by a `lambda`/`labels`
     // nested further in — extend the shared base with exactly those names,
@@ -1679,7 +1689,8 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], cx: Ctx)
     // def's own body below.
     let trailing_cell_names: HashSet<String> = captured_cell_names.union(&names_captured_by_nested(body)).cloned().collect();
     let trailing_cx = Ctx { cell_names: &trailing_cell_names, ..inner };
-    let body_v = match ast_to_sexpr_scoped(heap, &body[0], trailing_cx) {
+    let body_one = single_body_expr(body);
+    let body_v = match ast_to_sexpr_scoped(heap, &body_one, trailing_cx) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // defs_list
@@ -1927,9 +1938,6 @@ fn translate_lambda(
     globals: &HashMap<Path, usize>,
     visible_siblings: &HashSet<String>,
 ) -> Result<Value, Error> {
-    if body.len() != 1 {
-        return Err(Error::TypeError("compile: lambda has a multi-expression body, not yet supported".into()));
-    }
     let captured_names = lambda_free_vars(params, body);
     // This lambda's own `cell_names`: every name it captures unioned with its
     // own params that some closure nested *within* its body captures —
@@ -1960,7 +1968,8 @@ fn translate_lambda(
     // `direct`) — see that field's own doc comment.
     let direct = HashSet::new();
     let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals, cell_names: &cell_names, visible_siblings };
-    let body_v = ast_to_sexpr_scoped(heap, &body[0], cx)?;
+    let body_one = single_body_expr(body);
+    let body_v = ast_to_sexpr_scoped(heap, &body_one, cx)?;
     heap.push_root(body_v);
     let result = build_lambda_tag(heap, &fresh_lambda_name("lambda"), &captured_names, params, body_v, structs, enums, &cell_names);
     heap.pop_root(); // body_v
@@ -2250,9 +2259,10 @@ fn pattern_list_to_sexpr(heap: &mut Heap, pats: &[Pattern], cx: Ctx) -> Result<V
 /// boundary of its own, so a borrowed `Fn`-typed arm result needs the same
 /// explicit retain `compiler.rs`'s `compile-if-branch` already provides
 /// (reused as-is for each arm's body — see `compile-match-arms`'s doc
-/// comment). Each arm's body is restricted to a single expression, the same
-/// limit every other multi-expression body shape in this module has
-/// ([`translate_let`]'s body, a `labels` def's body, ...).
+/// comment). Each arm's body is collapsed to a single expression via
+/// [`translate_arms`]'s [`single_body_expr`] call (labels/closures Stage 6),
+/// the same treatment every other multi-expression body shape in this
+/// module gets ([`translate_let`]'s body, a `labels` def's body, ...).
 fn translate_match(heap: &mut Heap, scrut: &Typed, arms: &[Arm], ty: &Type, cx: Ctx) -> Result<Value, Error> {
     let kind = match match_scrut_kind(&scrut.ty, cx) {
         Some(k) => k,
@@ -2298,12 +2308,6 @@ fn translate_match(heap: &mut Heap, scrut: &Typed, arms: &[Arm], ty: &Type, cx: 
 fn translate_arms(heap: &mut Heap, arms: &[Arm], cx: Ctx) -> Result<Vec<Value>, Error> {
     let mut values = Vec::with_capacity(arms.len());
     for arm in arms {
-        if arm.body.len() != 1 {
-            for _ in 0..values.len() {
-                heap.pop_root();
-            }
-            return Err(Error::TypeError("compile: match arm has a multi-expression body, not yet supported".into()));
-        }
         let pat_v = match pattern_to_sexpr(heap, &arm.pat, cx) {
             Ok(v) => v,
             Err(e) => {
@@ -2314,7 +2318,8 @@ fn translate_arms(heap: &mut Heap, arms: &[Arm], cx: Ctx) -> Result<Vec<Value>, 
             }
         };
         heap.push_root(pat_v);
-        let body_v = match ast_to_sexpr_scoped(heap, &arm.body[0], cx) {
+        let arm_body_one = single_body_expr(&arm.body);
+        let body_v = match ast_to_sexpr_scoped(heap, &arm_body_one, cx) {
             Ok(v) => v,
             Err(e) => {
                 heap.pop_root(); // pat_v
@@ -3814,22 +3819,29 @@ mod tests {
         assert_eq!(pat_lit_payload(&mut heap, &Pattern::Char('A')), 'A' as i64);
     }
 
-    /// A `match` arm whose body is more than one expression isn't
-    /// supported yet — mirrors `translate_let`/`translate_labels_def`'s
-    /// own single-expression-body restriction.
+    /// A `match` arm whose body is more than one expression is collapsed to
+    /// a single bindingless `(let () e1 e2)` via `single_body_expr`
+    /// (labels/closures Stage 6) — mirrors `translate_let`'s own body,
+    /// which already had no such restriction. The arm's compiled body-form
+    /// is that `let` wrapper, not a bare `(bool false)` (the arm's *last*
+    /// expression) — proves the earlier statement isn't silently dropped.
     #[test]
-    fn match_rejects_a_multi_expression_arm_body() {
+    fn match_collapses_a_multi_expression_arm_body_into_a_let_wrapper() {
         let mut heap = Heap::with_capacity(1 << 10);
         let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
         let arms = vec![Arm {
             pat: Pattern::Wildcard,
             body: vec![typed(Expr::Bool(true), Type::Bool), typed(Expr::Bool(false), Type::Bool)],
         }];
-        let err = ast_to_sexpr(&mut heap, &typed(Expr::Match(Box::new(scrut), arms), Type::Bool)).unwrap_err();
-        match err {
-            Error::TypeError(msg) => assert!(msg.contains("multi-expression body"), "message was: {}", msg),
-            other => panic!("expected a TypeError, got {:?}", other),
-        }
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::Match(Box::new(scrut), arms), Type::Bool)).unwrap();
+        let (tag, fields) = untag(&heap, v);
+        assert_eq!(tag, "match");
+        let arms_list = fields[2];
+        let pair = heap.car(arms_list).unwrap();
+        let body_v = heap.cdr(pair).unwrap();
+        let (body_tag, body_fields) = untag(&heap, body_v);
+        assert_eq!(body_tag, "let", "a multi-expression arm body should compile to a `let` wrapper, not just its last expression");
+        assert_eq!(body_fields.len(), 3, "empty bindings list + 2 body forms (bool true, bool false)");
     }
 
     /// `collect_call_targets` recurses into a `Match`'s scrutinee and
