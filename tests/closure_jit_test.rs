@@ -149,6 +149,31 @@ fn a_unit_returning_closure_performs_its_effect_and_returns_unit() {
     assert_eq!(eval_ok(src), RtValue::Int(2));
 }
 
+/// A variadic (`&rest`) lambda JITs like any other (closure unification
+/// Stage 8, retiring Stage 7's blanket `&rest` rejection): the checker
+/// folded `xs` into the lambda's params as an ordinary `Sexpr`, and this
+/// call site packed `2 3 4` into one list at check time — so the compiled
+/// closure sees a fixed 2-argument call.
+#[test]
+fn a_variadic_lambda_jits_and_collects_its_rest_list() {
+    let src = "(defun sexpr-len ((s Sexpr)) i64 (if (sexpr-consp s) (+ (the i64 1) (sexpr-len (sexpr-cdr s))) (the i64 0))) \
+               ((lambda ((a i64) &rest (xs i64)) i64 (+ a (sexpr-len xs))) 1 2 3)";
+    assert_eq!(eval_ok(src), RtValue::Int(3));
+}
+
+/// `FnRef` of a variadic named function — the reified forwarding closure
+/// (`translate_fnref`) must declare and forward the rest parameter too
+/// (the 2026-07-16 `fnref_of_a_variadic_function_forwards_the_rest_list`
+/// fix), now reached through definition-time JIT instead of `(compile ...)`.
+#[test]
+fn fnref_of_a_variadic_function_jits_and_forwards_the_rest_list() {
+    let src = "(defun sexpr-len ((s Sexpr)) i64 (if (sexpr-consp s) (+ (the i64 1) (sexpr-len (sexpr-cdr s))) (the i64 0))) \
+               (defun count-extra ((base i64) &rest (xs i64)) i64 (+ base (sexpr-len xs))) \
+               (defun use-it ((f (fn (i64 &rest i64) i64))) i64 (f 10 1 2 3)) \
+               (use-it count-extra)";
+    assert_eq!(eval_ok(src), RtValue::Int(13));
+}
+
 /// Regression for the macro-expansion JIT-suppression flag
 /// (`Interp::jit_suppressed`): `dotimes`'s own expansion
 /// (`prelude::SOURCE`) runs through `Interp::expand_macro` at *check* time,

@@ -504,13 +504,21 @@ impl Interp {
         if !self.fns.contains_key(&Path::root("compile-function")) {
             return Err(JitDecline::Benign("compiler island not loaded".to_string()));
         }
-        let (param_tys, rest, ret_ty) = match &t.ty {
-            Type::Fn(p, r, ret) => (p, r, ret),
+        let (param_tys, ret_ty) = match &t.ty {
+            Type::Fn(p, _rest, ret) => (p, ret),
             other => return Err(JitDecline::Gap(format!("internal: closure value has non-Fn type {:?}", other))),
         };
-        if rest.is_some() {
-            return Err(JitDecline::Gap("&rest closures are not yet definition-time-JIT-able".to_string()));
-        }
+        // `&rest` needs no special JIT handling (Stage 8, retiring Stage 7's
+        // blanket rejection): the checker already folded the rest parameter
+        // into the node's `params` as an ordinary `(name, Sexpr)` pair
+        // (`Checker::check_lambda`/`check_defun`'s shared treatment), and
+        // every call site packs surplus arguments into that single `Sexpr`
+        // list at *check* time (`wrap_rest_elem`/`cons_rest_list`) — so by
+        // the time anything is applied, arity always matches and the rest
+        // list crosses the compiled boundary like any other `Sexpr`
+        // argument. `t.ty`'s `rest` field still matters to those check-time
+        // call sites, just not here.
+        //
         // `Unit` is a *return-position-only* allowance: `compile-unit`
         // (`compiler.rs`) compiles a `Unit`-typed body tail to a plain `0`,
         // so a `Unit`-returning closure JITs fine — but a `Unit`-typed
