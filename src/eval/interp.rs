@@ -26,7 +26,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
-use crate::{BoxId, Expr, Heap, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
+use crate::{BoxId, Expr, Heap, Loc, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
 
 use super::value::{Capture, ClosureBody, EvalError, NativeScope, RtValue, Slot, SlotKind};
 
@@ -164,6 +164,41 @@ pub struct Interp {
     /// ordinary [`Slot`] in [`Self::globals`] untouched — see that
     /// method's doc comment for why only a promoted global's storage moves.
     compiled_globals: RefCell<HashMap<Path, usize>>,
+    /// Closure unification Stage 7 reentrancy guard: `> 0` while
+    /// [`Self::expand_macro`] is tree-walking a macro's own body (check
+    /// time), during which every `Expr::Lambda`/`Labels`/`FnRef`/
+    /// `MethodRef` must fall back to [`Self::make_closure`] unconditionally
+    /// — the LSP's "no code execution" policy (and, more fundamentally,
+    /// definition-time JIT during a `Checker::check` pass would try to JIT
+    /// arbitrary macro-generated code with no guarantee it's even
+    /// tier-representable) — rather than attempt [`Self::jit_define_closure`].
+    /// A `Cell<u32>` rather than `bool` since macro expansion can nest
+    /// (a macro's expansion invoking another macro).
+    jit_suppressed: Cell<u32>,
+    /// Every closure "constructor" [`Self::jit_define_closure`] has ever
+    /// JIT-compiled, held forever so the `ExecutionEngine`/code backing each
+    /// one's `fn_ptr` is never dropped — the "engine graveyard" the
+    /// closure-unification plan calls for: a `BoxedObj::CompiledClosure`
+    /// only stores a bare `fn_ptr: usize` (see that variant's doc comment),
+    /// nothing else keeps the JIT engine that produced it alive once the
+    /// constructor call returns.
+    jit_graveyard: RefCell<Vec<Rc<crate::compile::CompiledFn>>>,
+    /// Definition-site cache for [`Self::jit_define_closure`]: `(Loc, debug
+    /// repr of the closure's `Type::Fn`)` -> the already-JIT'd constructor,
+    /// so evaluating the same `lambda` literal repeatedly (a loop body, a
+    /// hot function) JITs its constructor once. `Type` has no `Eq`/`Hash`
+    /// (`src/types.rs`), so the signature half of the key is its `Debug`
+    /// string rather than the `Type` itself — adequate for a cache (a false
+    /// miss only costs a redundant JIT, never incorrect reuse, since
+    /// `Debug` is structural). A node with no `Loc` (macro-synthesized, a
+    /// `labels` sibling — [`Self::jit_define_closure`] doesn't try to
+    /// synthesize one) is never cached, only ever freshly compiled.
+    jit_ctor_cache: RefCell<HashMap<(Loc, String), Rc<crate::compile::CompiledFn>>>,
+    /// Monotonic source for [`Self::jit_define_closure`]'s synthetic
+    /// constructor function names (`"closure_ctor$0"`, `"closure_ctor$1"`,
+    /// ...) — never reused, so two constructors can never collide even
+    /// across separate throwaway modules.
+    jit_ctor_counter: Cell<u64>,
 }
 
 /// One outgoing edge of the top-level compile call graph
@@ -228,6 +263,10 @@ impl Interp {
             struct_types: HashSet::from([Path::root("vector")]),
             enum_defs: HashMap::new(),
             compiled_globals: RefCell::new(HashMap::new()),
+            jit_suppressed: Cell::new(0),
+            jit_graveyard: RefCell::new(Vec::new()),
+            jit_ctor_cache: RefCell::new(HashMap::new()),
+            jit_ctor_counter: Cell::new(0),
         }
     }
 
@@ -260,6 +299,20 @@ impl Interp {
         Slot::Native(s)
     }
 
+    /// A `Slot::TypedCell` — closure unification Stage 7's promotion of an
+    /// otherwise-`Native` binding to a GC heap cell because
+    /// `freevars::names_captured_by_nested` says some nested `lambda`/
+    /// `labels` in the enclosing body captures it (see call sites in
+    /// [`Self::apply`]/`Expr::Let`). `ty` is the binding's own declared
+    /// type — `Slot::TypedCell::get`/`set` need it to decode/encode the
+    /// cell's raw `mem::Value` correctly (`rtvalue_to_struct_field`'s
+    /// encoding is only unambiguous with the static type in hand, exactly
+    /// like a `defstruct` field read).
+    fn typed_cell_slot(&self, heap: &mut Heap, ty: Type, v: RtValue) -> Result<Slot, EvalError> {
+        let encoded = rtvalue_to_struct_field(heap, &v)?;
+        Ok(Slot::TypedCell(heap.alloc_cell(encoded), ty))
+    }
+
     /// The number of live entries in the closure side table — exposed for
     /// tests proving the table shrinks in step with the GC (see
     /// `closure_bodies`); not meaningful to ordinary callers.
@@ -288,6 +341,10 @@ impl Interp {
                     Capture::Heap(heap_env.len() - 1)
                 }
                 Slot::Native(rc) => Capture::Native(rc.clone()),
+                Slot::TypedCell(id, ty) => {
+                    heap_env.push(Value::Boxed(**id));
+                    Capture::TypedCell(heap_env.len() - 1, ty.clone())
+                }
             };
             layout.push((name.clone(), cap));
         }
@@ -314,6 +371,288 @@ impl Interp {
     /// carries the matching arm.
     fn heap_repr_kind(&self, ty: &Type) -> SlotKind {
         if self.is_heap_repr_ty(ty, &mut HashSet::new()) { SlotKind::Heap } else { SlotKind::Native }
+    }
+
+    /// Closure unification Stage 7's JIT tier judgment: whether `ty` has
+    /// *any* compiled representation at all — as opposed to
+    /// [`Self::heap_repr_kind`], which only decides *which* representation a
+    /// type that unconditionally has one gets. Every ordinary user type
+    /// (scalars, `Str`, `Fn`, `Sexpr`, structs, enums, `bignum`/`ratio`) is
+    /// `true`; the five LLVM FFI handle types and a `Scope<V>` of one of
+    /// them — used only inside the self-hosted compiler's own source
+    /// (`compiler.rs`'s embedded `SOURCE`) — are `false`. A `lambda`/
+    /// `labels`/`FnRef`/`MethodRef` whose parameter, return, or any captured
+    /// name's type fails this check must fall back to an interpreted
+    /// closure (`Self::make_closure`) rather than attempt definition-time
+    /// JIT — this is what keeps the compiler island's own `compile-lambda`
+    /// (whose captures include `llvm-builder`/`Scope<llvm-value>`) from a
+    /// bootstrap paradox (JIT-compiling itself to run itself), with no
+    /// special-cased "is this the compiler island" check needed: the type
+    /// system alone decides. Reuses `ast_bridge::struct_field_kind`'s own
+    /// classification (kind `0` is its catch-all "not representable" arm —
+    /// every representable type has an explicit kind `1`-`6`), the same
+    /// table `tagged_sym_list`/`ast_to_sexpr` already commit to for any
+    /// value that actually does cross the compiled boundary.
+    fn is_jit_tier_ty(&self, ty: &Type) -> bool {
+        let enum_types: HashSet<Path> = self.enum_defs.keys().cloned().collect();
+        crate::compile::ast_bridge::struct_field_kind(ty, &self.struct_types, &enum_types) != 0
+    }
+
+    /// Closure unification Stage 7's definition-time JIT driver. Attempts to
+    /// build `t` (an `Expr::Lambda`/`Expr::FnRef`/`Expr::MethodRef` node, or
+    /// a synthetic `Expr::Lambda` wrapper `Expr::Labels` builds for one
+    /// sibling — see that eval arm) as a *compiled* closure value instead of
+    /// [`Self::make_closure`]'s interpreted one. `captured` is `t`'s free
+    /// variables (name + declared type), `[]` for `FnRef`/`MethodRef`. Never
+    /// panics — every failure comes back as `Err(reason)` so every caller
+    /// can fall back unconditionally; only `JitMode::Require` turns a
+    /// failure into a hard error, and only at the eval-arm call site, not
+    /// here.
+    ///
+    /// The trick that avoids JIT-compiling any new self-hosted Lisp at all:
+    /// `t.ty` is already `Type::Fn(params, rest, ret)`, the exact shape
+    /// `compiler.rs`'s `compile-lambda` (reached by wrapping `t` as a
+    /// throwaway top-level `defun`'s *entire* body — a body that is
+    /// literally `(lambda ...)`, exactly what `ast_bridge::translate_lambda`
+    /// already emits for a real `Expr::Lambda`) already knows how to turn
+    /// into a `BoxedObj::CompiledClosure`. That throwaway "constructor"
+    /// function's own *parameters* are one per name in `captured`, each
+    /// declared `Type::Sexpr` regardless of its real type — not because the
+    /// value is a `Sexpr`, but because `Type::Sexpr`'s `struct_field_kind`
+    /// is the tagged-pointer-passthrough kind `6` (`bind-params` roots the
+    /// incoming word and binds it unchanged, no decode) — exactly the
+    /// existing GC cell reference (`Slot::Heap`/`Slot::TypedCell`, already
+    /// established at the binding site that introduced this name — see
+    /// `Self::apply`/`Expr::Let`) each argument actually *is*. When
+    /// `compile-lambda`'s own outer half later builds its captured-value
+    /// array from the constructor's `env` for the *inner* (real) `lambda`,
+    /// it reads that exact same cell pointer back out unchanged and hands
+    /// it to `rt_closure_new` — so the constructor never re-boxes anything;
+    /// it exists purely to give the self-hosted compiler a `builder`/`env`
+    /// to compile `(lambda ...)` *in*. Calling the constructor (an ordinary
+    /// 2-argument-ABI `CompiledFn`, ABI-wise indistinguishable from any
+    /// other `(compile ...)`d top-level function) is then a single
+    /// `CompiledFn::call`, and its `i64` result is the finished
+    /// `BoxedObj::CompiledClosure`'s own tagged encoding — built once by
+    /// `rt_closure_new`, never touched by Rust at all.
+    fn jit_define_closure(&self, heap: &mut Heap, env: &Env, t: &Typed, captured: &[(String, Type)]) -> Result<RtValue, String> {
+        match jit_mode() {
+            JitMode::Off => return Err("TYPELISP_CLOSURE_JIT=off".to_string()),
+            JitMode::Prefer | JitMode::Require => {}
+        }
+        if self.jit_suppressed.get() > 0 {
+            return Err("suppressed during macro expansion".to_string());
+        }
+        let (param_tys, rest, ret_ty) = match &t.ty {
+            Type::Fn(p, r, ret) => (p, r, ret),
+            other => return Err(format!("internal: closure value has non-Fn type {:?}", other)),
+        };
+        if rest.is_some() {
+            return Err("&rest closures are not yet definition-time-JIT-able".to_string());
+        }
+        if !self.is_jit_tier_ty(ret_ty) {
+            return Err(format!("return type {:?} has no compiled representation", ret_ty));
+        }
+        for ty in param_tys {
+            if !self.is_jit_tier_ty(ty) {
+                return Err(format!("parameter type {:?} has no compiled representation", ty));
+            }
+        }
+        for (name, ty) in captured {
+            if !self.is_jit_tier_ty(ty) {
+                return Err(format!("captured name \"{}\" has type {:?} with no compiled representation", name, ty));
+            }
+        }
+        // Every captured name must already be bound to a GC cell — the
+        // binding-time promotion (`Self::apply`/`Expr::Let`, driven by
+        // `freevars::names_captured_by_nested`) is what's supposed to
+        // guarantee this; a `Slot::Native` capture here means some binding
+        // site doesn't cell-ize yet (a coverage gap for Stage 8, not a
+        // bug) — fail cleanly rather than panic.
+        let mut cell_ids: Vec<(String, Rc<BoxId>)> = Vec::with_capacity(captured.len());
+        for (name, _ty) in captured {
+            match env.iter().rev().find(|(n, _)| n == name) {
+                Some((_, Slot::Heap(id))) | Some((_, Slot::TypedCell(id, _))) => cell_ids.push((name.clone(), id.clone())),
+                Some((_, Slot::Native(_))) => return Err(format!("captured name \"{}\" is not yet cell-bound", name)),
+                None => return Err(format!("internal: captured name \"{}\" not found in env", name)),
+            }
+        }
+        // Every `Expr::Call`/`Expr::Assoc` target `t`'s body reaches must
+        // already be JIT'd, or the constructor's module would forward-
+        // declare a symbol with no address to wire — unlike
+        // `Self::compile_scc`'s SCC machinery, there is no dependency
+        // ordering here to guarantee that in general (Stage 8's job to grow
+        // coverage of), so this is a graceful `Err`, not a `.expect()`.
+        // Filtering matches `Self::call_graph_edges`'s own exactly (see that
+        // method for the rationale of each exclusion): a known
+        // `rt`-shimmed/`vector-op`/`hashtable-op`/native-primitive-receiver
+        // target compiles with no external symbol at all, so requiring one
+        // here would reject perfectly JIT-able code.
+        let call_targets: Vec<Path> = crate::compile::ast_bridge::collect_call_targets(t)
+            .into_iter()
+            .filter(|p| !is_rt_builtin_name(p.local()))
+            .collect();
+        for p in &call_targets {
+            if !self.compiled.borrow().contains_key(p) {
+                return Err(format!("call target \"{}\" is not yet compiled", p));
+            }
+        }
+        let assoc_targets: Vec<(Path, String)> = crate::compile::ast_bridge::collect_assoc_targets(t)
+            .into_iter()
+            .filter(|key| {
+                if key.0.local() == "vector" && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push") {
+                    return false;
+                }
+                if key.0.local() == "hashtable"
+                    && matches!(key.1.as_str(), "new" | "set" | "get" | "remove" | "count" | "clear" | "keys" | "values" | "entries")
+                {
+                    return false;
+                }
+                self.methods.contains_key(key) || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64" | "bignum" | "ratio")
+            })
+            .collect();
+        for (p, m) in &assoc_targets {
+            if !self.compiled_methods.borrow().contains_key(&(p.clone(), m.clone())) {
+                return Err(format!("method target \"{}::{}\" is not yet compiled", p.local(), m));
+            }
+        }
+
+        let cache_key = t.loc.as_ref().map(|loc| (loc.clone(), format!("{:?}", &t.ty)));
+        let cached = cache_key.as_ref().and_then(|k| self.jit_ctor_cache.borrow().get(k).cloned());
+        let ctor = match cached {
+            Some(c) => c,
+            None => {
+                let ctor = self
+                    .jit_compile_closure_ctor(heap, t, captured, &call_targets, &assoc_targets)
+                    .map_err(|e| format!("constructor JIT failed: {}", e))?;
+                let ctor = Rc::new(ctor);
+                if let Some(k) = cache_key {
+                    self.jit_ctor_cache.borrow_mut().insert(k, ctor.clone());
+                }
+                self.jit_graveyard.borrow_mut().push(ctor.clone());
+                ctor
+            }
+        };
+
+        let int_args: Vec<i64> = cell_ids.iter().map(|(_, id)| crate::compile::runtime::encode(Value::Boxed(**id))).collect();
+        // Every `CompiledFn::call` must register the active `Heap` first —
+        // see `Self::call_compiled`'s matching call for why (any `rt_*` the
+        // constructor's body transitively reaches, `rt_closure_new` above
+        // all, needs it).
+        crate::compile::runtime::set_active_heap(heap as *mut Heap);
+        let raw = ctor.call(&int_args);
+        Ok(RtValue::Sexpr(crate::compile::runtime::decode(raw)))
+    }
+
+    /// The actual JIT-compilation half of [`Self::jit_define_closure`] — see
+    /// that method's doc comment for the "wrap `t` as a throwaway top-level
+    /// function whose params are all `Type::Sexpr`" trick this builds.
+    /// Returns the finished, callable [`crate::compile::CompiledFn`]; never
+    /// caches or graveyards it (the caller does both, only for a fresh —
+    /// not cache-hit — compile).
+    fn jit_compile_closure_ctor(
+        &self,
+        heap: &mut Heap,
+        t: &Typed,
+        captured: &[(String, Type)],
+        call_targets: &[Path],
+        assoc_targets: &[(Path, String)],
+    ) -> Result<crate::compile::CompiledFn, String> {
+        let ctor_name = {
+            let n = self.jit_ctor_counter.get();
+            self.jit_ctor_counter.set(n + 1);
+            format!("closure_ctor${}", n)
+        };
+        let ctor_params: Vec<(String, Type)> =
+            captured.iter().map(|(name, _)| (name.clone(), Type::Named(Path::root("sexpr"), Vec::new()))).collect();
+        let exclude: HashSet<String> = captured.iter().map(|(name, _)| name.clone()).collect();
+
+        let module = {
+            let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+            let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("closure_ctor")));
+            for p in call_targets {
+                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(p.local()));
+            }
+            for (p, m) in assoc_targets {
+                declare_external_function(&module, &method_link_name(p, m));
+            }
+            for (rt_name, _) in rt_extern_functions() {
+                declare_external_function(&module, rt_name);
+            }
+            module
+        };
+
+        self.translate_and_compile(heap, module.clone(), &ctor_params, t, &ctor_name, &exclude)
+            .map_err(|e| e.to_string())?;
+
+        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+        module.borrow().verify().map_err(|e| format!("module failed verification: {}", e))?;
+        let mut externals: Vec<(String, usize)> = Vec::new();
+        {
+            let compiled = self.compiled.borrow();
+            for p in call_targets {
+                let addr = compiled.get(p).expect("checked already-compiled above").address();
+                externals.push((crate::compile::ast_bridge::user_symbol_name(p.local()), addr));
+            }
+        }
+        {
+            let compiled_methods = self.compiled_methods.borrow();
+            for (p, m) in assoc_targets {
+                let addr = compiled_methods.get(&(p.clone(), m.clone())).expect("checked already-compiled above").address();
+                externals.push((method_link_name(p, m), addr));
+            }
+        }
+        externals.extend(rt_extern_functions().iter().map(|(n, a)| (n.to_string(), *a)));
+        let compiled_fn = crate::compile::CompiledFn::new(&module.borrow(), &ctor_name, &externals).map_err(|e| format!("JIT failed: {}", e))?;
+        Ok(compiled_fn)
+    }
+
+    /// The shared policy every `Expr::Lambda`/`Labels`/`FnRef`/`MethodRef`
+    /// eval arm applies around [`Self::jit_define_closure`]: on success,
+    /// use it; on failure, `JitMode::Require` promotes the failure reason
+    /// to a hard error (Stage 8's coverage-gap discovery switch — see
+    /// `JitMode`'s doc comment), otherwise (`Prefer`, the default, or
+    /// `Off`, which `jit_define_closure` itself already turns into an
+    /// immediate `Err`) silently calls `fallback` — silently unless
+    /// `TYPELISP_CLOSURE_JIT_LOG` is set, since `Prefer` mode's fallback is
+    /// still the common case for most programs until Stage 8 grows
+    /// coverage, and every existing test would otherwise spew a fallback
+    /// reason per closure evaluated.
+    fn jit_or_make_closure(
+        &self,
+        heap: &mut Heap,
+        env: &Env,
+        t: &Typed,
+        captured: &[(String, Type)],
+        fallback: impl FnOnce(&mut Heap) -> RtValue,
+    ) -> Result<RtValue, EvalError> {
+        let result = self.jit_define_closure(heap, env, t, captured);
+        self.jit_result_or_make_closure(heap, result, fallback)
+    }
+
+    /// [`Self::jit_or_make_closure`]'s policy half, taking an
+    /// already-computed [`Self::jit_define_closure`] result rather than the
+    /// inputs to compute one — for a caller (`Expr::Lambda`'s eval arm) that
+    /// needs to skip *computing* those inputs entirely on a cheap
+    /// pre-check, not just skip acting on the result.
+    fn jit_result_or_make_closure(
+        &self,
+        heap: &mut Heap,
+        result: Result<RtValue, String>,
+        fallback: impl FnOnce(&mut Heap) -> RtValue,
+    ) -> Result<RtValue, EvalError> {
+        match result {
+            Ok(v) => Ok(v),
+            Err(reason) => {
+                if jit_mode() == JitMode::Require {
+                    return Err(EvalError::Panic(format!("TYPELISP_CLOSURE_JIT=require: definition-time JIT failed: {}", reason)));
+                }
+                if std::env::var_os("TYPELISP_CLOSURE_JIT_LOG").is_some() {
+                    eprintln!("closure JIT fallback: {}", reason);
+                }
+                Ok(fallback(heap))
+            }
+        }
     }
 
     /// The recursive core of [`Self::heap_repr_kind`] — see that method's
@@ -590,26 +929,30 @@ impl Interp {
                         .ok_or_else(|| EvalError::Unbound(path.to_string()))
                 }
             }
-            Expr::FnRef(path) => Ok(match self.fns.get(path) {
-                // Reify a user function as a closure with no captured environment.
-                Some(f) => {
+            Expr::FnRef(path) => match self.fns.get(path) {
+                // Reify a user function as a closure with no captured
+                // environment. Closure unification Stage 7: no captures
+                // means no cell-binding prerequisite at all, the simplest
+                // possible JIT attempt — try it first, `make_closure`
+                // fallback otherwise (`Self::jit_or_make_closure`'s doc
+                // comment covers the `TYPELISP_CLOSURE_JIT=require` policy
+                // shared by all four call sites).
+                Some(f) => self.jit_or_make_closure(heap, env, t, &[], |heap| {
                     let params = f.params.iter().cloned().zip(f.kinds.iter().copied()).collect();
                     let body = f.body.clone();
                     self.make_closure(heap, params, body, &Env::new())
-                }
+                }),
                 // Otherwise a built-in operator (lives at the root, simple path).
-                None => RtValue::Builtin(path.local().to_string()),
-            }),
-            Expr::MethodRef { type_name, method } => {
-                Ok(match self.methods.get(&(type_name.clone(), method.clone())) {
-                    Some(m) => {
-                        let params = m.params.iter().cloned().zip(m.kinds.iter().copied()).collect();
-                        let body = m.body.clone();
-                        self.make_closure(heap, params, body, &Env::new())
-                    }
-                    None => RtValue::BuiltinMethod(type_name.clone(), method.clone()),
-                })
-            }
+                None => Ok(RtValue::Builtin(path.local().to_string())),
+            },
+            Expr::MethodRef { type_name, method } => match self.methods.get(&(type_name.clone(), method.clone())) {
+                Some(m) => self.jit_or_make_closure(heap, env, t, &[], |heap| {
+                    let params = m.params.iter().cloned().zip(m.kinds.iter().copied()).collect();
+                    let body = m.body.clone();
+                    self.make_closure(heap, params, body, &Env::new())
+                }),
+                None => Ok(RtValue::BuiltinMethod(type_name.clone(), method.clone())),
+            },
             Expr::If(..) => {
                 // Walks a right-leaning `if`/`else-if` chain (`(if c1 b1 (if
                 // c2 b2 (if c3 b3 ...)))`, exactly what `cond`'s expansion —
@@ -650,11 +993,22 @@ impl Interp {
                 // Slot routing comes from each binding's checked type
                 // (`val.ty`) — static information carried by the AST, never
                 // the evaluated value's shape.
+                // Closure unification Stage 7: same capture-cell promotion
+                // as `Self::apply` — see that method's matching comment,
+                // including the `is_jit_tier_ty` gate (a `let`-bound
+                // `llvm-*`/native-`Scope<V>` value inside the self-hosted
+                // compiler's own body is just as captured-by-a-nested-
+                // closure, by the same walk, as an ordinary user binding).
+                let cell_names = crate::compile::freevars::names_captured_by_nested(body);
                 let mut child = env.clone();
                 for (name, val) in binds {
                     let v = self.eval(heap, val, env)?;
                     let kind = self.heap_repr_kind(&val.ty);
-                    let s = self.slot(heap, kind, v)?;
+                    let s = if kind == SlotKind::Native && cell_names.contains(name) && self.is_jit_tier_ty(&val.ty) {
+                        self.typed_cell_slot(heap, val.ty.clone(), v)?
+                    } else {
+                        self.slot(heap, kind, v)?
+                    };
                     child.push((name.clone(), s));
                 }
                 self.eval_seq(heap, body, &child)
@@ -683,11 +1037,51 @@ impl Interp {
                     slots.push(s);
                 }
                 for ((_, params, fbody), slot) in defs.iter().zip(&slots) {
-                    let kinds: Vec<(String, SlotKind)> = params
-                        .iter()
-                        .map(|(n, ty)| (n.clone(), self.heap_repr_kind(ty)))
-                        .collect();
-                    let closure = self.make_closure(heap, kinds, fbody.clone(), &child);
+                    // Closure unification Stage 7: each sibling is JIT'd
+                    // *independently* (no SCC/shared-module batching,
+                    // unlike `compiler.rs`'s own `compile-labels-bodies`,
+                    // which can only batch siblings compiled as part of the
+                    // *same* already-compiled outer function) — a
+                    // sibling-to-sibling call, including self-recursion,
+                    // is just an ordinary captured-name reference (this
+                    // block's own placeholder cells, above), reached
+                    // through the same `apply-indirect` path any other
+                    // escaping closure call uses. `lambda_free_vars` (not
+                    // `labels_free_vars`) is deliberate: the latter treats
+                    // sibling names as *direct calls* to exclude from the
+                    // captured list — correct only when every sibling
+                    // compiles into one shared module/`fn-env`, which
+                    // Stage 7's one-sibling-at-a-time JIT never does — so
+                    // every sibling name a body references must flow
+                    // through `captured`/the cell mechanism like any other
+                    // free variable, exactly what `lambda_free_vars` (whose
+                    // own doc comment notes it walks with an empty
+                    // siblings set) already does.
+                    // Cheap (`O(params)`, no body walk) pre-check before
+                    // `lambda_free_vars` — see `Expr::Lambda`'s matching
+                    // comment for why this ordering matters: the self-
+                    // hosted compiler's own `labels` siblings (`compile-
+                    // value` above all) always declare an `llvm-builder`/
+                    // `Scope<llvm-value>`/... param, so this alone already
+                    // excludes them before ever recursively walking a body
+                    // the size of that dispatcher.
+                    let ret_ty = fbody.last().expect("a labels def's body has at least one expression").ty.clone();
+                    let jit_worth_trying = self.is_jit_tier_ty(&ret_ty) && params.iter().all(|(_, ty)| self.is_jit_tier_ty(ty));
+                    let jit_result = if jit_worth_trying {
+                        let captured = crate::compile::freevars::lambda_free_vars(params, fbody);
+                        let fn_ty = Type::Fn(params.iter().map(|(_, ty)| ty.clone()).collect(), None, Box::new(ret_ty));
+                        let synthetic = Typed::new(Expr::Lambda { params: params.clone(), body: fbody.clone() }, fn_ty);
+                        self.jit_define_closure(heap, &child, &synthetic, &captured)
+                    } else {
+                        Err("a declared parameter or the return type has no compiled representation".to_string())
+                    };
+                    let closure = self.jit_result_or_make_closure(heap, jit_result, |heap| {
+                        let kinds: Vec<(String, SlotKind)> = params
+                            .iter()
+                            .map(|(n, ty)| (n.clone(), self.heap_repr_kind(ty)))
+                            .collect();
+                        self.make_closure(heap, kinds, fbody.clone(), &child)
+                    })?;
                     slot.set(heap, closure)?;
                 }
                 self.eval_seq(heap, body, &child)
@@ -784,11 +1178,33 @@ impl Interp {
                 }
             }
             Expr::Lambda { params, body } => {
-                // Capture the current environment (shared slots) for the
-                // closure, recording each parameter's slot routing from its
-                // declared type.
-                let kinds = params.iter().map(|(n, ty)| (n.clone(), self.heap_repr_kind(ty))).collect();
-                Ok(self.make_closure(heap, kinds, body.clone(), env))
+                // Closure unification Stage 7: try definition-time JIT
+                // first — but only bother computing `captured` (a full
+                // recursive walk of `body`, `freevars::lambda_free_vars`) if
+                // every *declared* param already passes the tier check —
+                // this shallow, O(params) test is what actually excludes
+                // the self-hosted compiler's own `lambda`/`labels` (whose
+                // params always include an `llvm-builder`/`Scope<llvm-
+                // value>`/... — see `Self::is_jit_tier_ty`'s doc comment)
+                // *before* ever descending into a body that, for something
+                // the size of `compiler.rs`'s own `compile-value`
+                // dispatcher, is deep and wide enough to overflow the stack
+                // on a plain recursive walk purely to compute a captured
+                // list that was always going to fail tier anyway.
+                let jit_worth_trying = params.iter().all(|(_, ty)| self.is_jit_tier_ty(ty));
+                let jit_result = if jit_worth_trying {
+                    let captured = crate::compile::freevars::lambda_free_vars(params, body);
+                    self.jit_define_closure(heap, env, t, &captured)
+                } else {
+                    Err("a declared parameter has no compiled representation".to_string())
+                };
+                self.jit_result_or_make_closure(heap, jit_result, |heap| {
+                    // Capture the current environment (shared slots) for the
+                    // closure, recording each parameter's slot routing from
+                    // its declared type.
+                    let kinds = params.iter().map(|(n, ty)| (n.clone(), self.heap_repr_kind(ty))).collect();
+                    self.make_closure(heap, kinds, body.clone(), env)
+                })
             }
             Expr::Apply(callee, args) => {
                 let f = self.eval(heap, callee, env)?;
@@ -831,6 +1247,15 @@ impl Interp {
                                     }
                                 },
                                 Capture::Native(rc) => Slot::Native(rc.clone()),
+                                Capture::TypedCell(i, ty) => match heap_env[*i] {
+                                    Value::Boxed(cell) => Slot::TypedCell(heap.adopt_cell(cell), ty.clone()),
+                                    other => {
+                                        return Err(EvalError::Internal(format!(
+                                            "closure env slot {} is not a cell: {:?}",
+                                            i, other
+                                        )))
+                                    }
+                                },
                             };
                             cenv.push((name.clone(), slot));
                         }
@@ -1035,9 +1460,39 @@ impl Interp {
         if def.params.len() != args.len() {
             return Err(EvalError::Internal("arity mismatch".into()));
         }
+        // Closure unification Stage 7: a param this body's own nested
+        // `lambda`/`labels` captures must be a GC cell (`Slot::TypedCell`)
+        // even when its declared type would otherwise route it `Native` —
+        // see `Slot::TypedCell`'s doc comment. Recomputed per call for now
+        // (correctness first, matching Stage 4's own "全捕獲セル化" choice);
+        // caching this per-`FnDef` is a follow-up optimization.
+        //
+        // Gated on `is_jit_tier_ty` too: `names_captured_by_nested` doesn't
+        // know or care whether a capture is JIT-representable — it fires
+        // just as readily for the self-hosted compiler's own `compile-
+        // function` (`m: llvm-module`, captured by `compile-lambda` and
+        // friends within its own `labels` body) as for ordinary user code.
+        // `rtvalue_to_struct_field` has no encoding for an `RtValue::
+        // LlvmModule`/`LlvmBuilder`/... (by design — see that function's
+        // doc comment), so cell-boxing one would be an immediate internal
+        // error for every single `(compile ...)` call. A capture that can
+        // never cross into compiled code can also never be read by a
+        // *compiled* closure, so it has no reason to be a GC cell at all —
+        // `Slot::Native` (this binding's existing, correct behavior) is
+        // exactly right for it, `Self::jit_define_closure`'s own tier check
+        // will reject any closure trying to capture it either way.
+        let cell_names = crate::compile::freevars::names_captured_by_nested(&def.body);
         let mut env: Env = Vec::with_capacity(args.len());
-        for ((name, kind), v) in def.params.iter().zip(def.kinds.iter()).zip(args) {
-            let s = self.slot(heap, *kind, v)?;
+        for (i, ((name, kind), v)) in def.params.iter().zip(def.kinds.iter()).zip(args).enumerate() {
+            let ty = def.sig.as_ref().map(|(ptys, _)| ptys[i].clone());
+            let s = if *kind == SlotKind::Native && cell_names.contains(name) && ty.as_ref().is_some_and(|ty| self.is_jit_tier_ty(ty)) {
+                match ty {
+                    Some(ty) => self.typed_cell_slot(heap, ty, v)?,
+                    None => self.slot(heap, *kind, v)?,
+                }
+            } else {
+                self.slot(heap, *kind, v)?
+            };
             env.push((name.clone(), s));
         }
         self.eval_seq(heap, &def.body, &env)
@@ -1444,13 +1899,46 @@ impl Interp {
         internal_name: &str,
     ) -> Result<(), EvalError> {
         let (params, body) = self.compiled_fn_body(name)?;
+        self.translate_and_compile(heap, module, &params, &body, internal_name, &HashSet::new())
+    }
 
+    /// The AST-bridge-and-emit half of [`Self::add_compiled_function`],
+    /// factored out (no behavior change for that caller) so closure
+    /// unification Stage 7's [`Self::jit_define_closure`] can drive the same
+    /// translate-then-`compile-function` pipeline for a *synthetic*
+    /// top-level function — a "closure constructor" whose own `params` are
+    /// **not** a real `defun`'s declared parameters but a captured-cell
+    /// reference per free variable — rather than one looked up by name via
+    /// [`Self::compiled_fn_body`].
+    ///
+    /// `extra_exclude_from_cell_names` is empty for every ordinary caller
+    /// (`add_compiled_function`'s own behavior, unchanged); Stage 7's ctor
+    /// passes its own synthetic parameter names there, because
+    /// `names_captured_by_nested`'s free-variable walk of `body` (which
+    /// literally *is* `(lambda ...)`, wrapping the real closure being
+    /// JIT'd) would otherwise "discover" that the ctor's own params are
+    /// captured by the nested `lambda` it wraps and — wrongly — cell-box
+    /// them a second time (`tagged_sym_list`'s `kind + 10`): the ctor's own
+    /// params are declared `Sexpr` specifically so `bind-params` passes
+    /// each cell reference through unchanged (kind `6`, the same tagged-
+    /// pointer passthrough any other boxed value gets), for the *inner*
+    /// `lambda`'s own (correctly, separately, computed) `lcaptured` list to
+    /// pick up as-is.
+    fn translate_and_compile(
+        &self,
+        heap: &mut Heap,
+        module: Rc<RefCell<Module<'static>>>,
+        params: &[(String, Type)],
+        body: &Typed,
+        internal_name: &str,
+        extra_exclude_from_cell_names: &HashSet<String>,
+    ) -> Result<(), EvalError> {
         // Every global this body reads/assigns must have a compiled-global
         // slot before translation starts — `ast_to_sexpr` looks each one up
         // by id, not by name (see `Ctx::globals`'s doc comment), so there is
         // nothing to resolve lazily mid-translation the way `compile-call`'s
         // `get-function` can for an ordinary function name.
-        for target in crate::compile::ast_bridge::collect_global_targets(&body) {
+        for target in crate::compile::ast_bridge::collect_global_targets(body) {
             self.promote_global(heap, &target)?;
         }
         let compiled_globals = self.compiled_globals.borrow();
@@ -1466,7 +1954,10 @@ impl Interp {
         // unification, Stage 4) is exactly its own params/`let`-bindings
         // that some nested `lambda`/`labels` in `body` captures — see
         // `ast_bridge::names_captured_by_nested`'s doc comment.
-        let cell_names = crate::compile::freevars::names_captured_by_nested(std::slice::from_ref(&body));
+        let mut cell_names = crate::compile::freevars::names_captured_by_nested(std::slice::from_ref(body));
+        for n in extra_exclude_from_cell_names {
+            cell_names.remove(n);
+        }
 
         // Builds `((a . kind) (b . kind) ...)`, the `Sexpr` list of typed
         // name pairs `compiler.rs`'s `bind-params` walks to know which
@@ -1478,13 +1969,13 @@ impl Interp {
         // construction (a `labels`/`lambda` parameter or captured-name list
         // needs the identical shape) rather than re-deriving it here, so
         // the two can never desync.
-        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, &params, &self.struct_types, &enum_types, &cell_names) {
+        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, params, &self.struct_types, &enum_types, &cell_names) {
             Ok(v) => v,
             Err(e) => return Err(EvalError::Panic(e.to_string())),
         };
         heap.push_root(param_list);
         let body_sexpr =
-            match crate::compile::ast_bridge::ast_to_sexpr(heap, &body, &self.struct_types, &enum_types, &compiled_globals, &cell_names) {
+            match crate::compile::ast_bridge::ast_to_sexpr(heap, body, &self.struct_types, &enum_types, &compiled_globals, &cell_names) {
                 Ok(v) => v,
                 Err(e) => {
                     heap.pop_root(); // param_list
@@ -2228,10 +2719,19 @@ impl MacroExpander for Interp {
         for v in &raw_args {
             heap.push_root(*v);
         }
+        // Closure unification Stage 7: suppress definition-time JIT for the
+        // whole extent of the macro body's execution — `Cell<u32>` (not
+        // `bool`) since a macro's own expansion can itself invoke another
+        // macro, and the guard must stay up until the *outermost* expansion
+        // finishes. See `Interp::jit_suppressed`'s doc comment for why (the
+        // LSP's "no code execution" policy, and the fact that macro-
+        // generated code has no guarantee of being tier-representable).
+        self.jit_suppressed.set(self.jit_suppressed.get() + 1);
         let result = match self.bind_macro_args(heap, f, &raw_args, fixed) {
             Ok(argv) => self.apply(heap, f, argv),
             Err(e) => Err(e),
         };
+        self.jit_suppressed.set(self.jit_suppressed.get() - 1);
         for _ in 0..self.rooted.replace(0) {
             heap.pop_root();
         }
@@ -3201,6 +3701,34 @@ fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// [`crate::compile::COMPILE_LOCK`] held.
 fn declare_external_function(module: &Rc<RefCell<Module<'static>>>, name: &str) {
     module.borrow_mut().add_function(name, compiled_fn_type(), None);
+}
+
+/// Closure unification Stage 7's `TYPELISP_CLOSURE_JIT` mode switch — read
+/// once (`std::env::var_os`, the same convention `src/prelude.rs`'s
+/// `$TYPL_CACHE_DIR` lookup already uses) and cached in a
+/// [`std::sync::OnceLock`], since every `eval` call site checks it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum JitMode {
+    /// Never attempt definition-time JIT — every closure value is built by
+    /// [`Interp::make_closure`], unconditionally.
+    Off,
+    /// Attempt [`Interp::jit_define_closure`]; silently fall back to
+    /// [`Interp::make_closure`] on any failure. The default.
+    Prefer,
+    /// Attempt [`Interp::jit_define_closure`]; a failure becomes a hard
+    /// `EvalError` instead of a silent fallback — Stage 8's coverage-gap
+    /// discovery tool, not (yet) something the whole test suite need pass
+    /// under.
+    Require,
+}
+
+fn jit_mode() -> JitMode {
+    static MODE: std::sync::OnceLock<JitMode> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| match std::env::var_os("TYPELISP_CLOSURE_JIT") {
+        Some(v) if v == "off" => JitMode::Off,
+        Some(v) if v == "require" => JitMode::Require,
+        _ => JitMode::Prefer,
+    })
 }
 
 /// The LLVM-visible name a method's own compiled function is declared/
@@ -4327,7 +4855,7 @@ fn expect_struct_box(v: &RtValue) -> Result<BoxId, EvalError> {
 /// Stage 6b (a function value is a `Value::Boxed` closure box riding in
 /// `RtValue::Sexpr`, storable like any other boxed value), and heap-repr-`V`
 /// scopes at Stage 8, the same way.
-fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Value, EvalError> {
+pub(super) fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Value, EvalError> {
     match v {
         RtValue::Int(n) => Ok(Value::Int(*n)),
         RtValue::Bool(b) => Ok(Value::Bool(*b)),
@@ -4370,7 +4898,7 @@ fn result_path() -> Path {
 /// flip): it's a `Value::Boxed` at a `BoxedObj::Enum`, which
 /// [`decode_nonsexpr_field`]'s catch-all already turns into `RtValue::Sexpr`
 /// correctly, the same as any other boxed value.
-fn decode_field_typed(heap: &Heap, v: Value, ty: &Type) -> RtValue {
+pub(super) fn decode_field_typed(heap: &Heap, v: Value, ty: &Type) -> RtValue {
     if is_sexpr_ty(ty) {
         RtValue::Sexpr(v)
     } else {

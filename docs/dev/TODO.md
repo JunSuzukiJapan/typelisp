@@ -14,7 +14,7 @@
 
 ## 残っている作業（影響範囲の大きさで優先順位付け——[[feedback-impl-priority]]）
 
-### クロージャ表現統一（labels/closures unification）Stage 7-10（branch `feature/closure-unification`）
+### クロージャ表現統一（labels/closures unification）Stage 8-10（branch `feature/closure-unification`）
 
 **背景**: interpクロージャとcompiledクロージャ(ClosureBox)の二重表現による境界ギャップ
 （interpクロージャをcompiled関数に渡せない/compiled関数のFn戻り値がIntに化ける/structフィールド
@@ -25,7 +25,8 @@ Stage 2: compiled側flip+ARC全廃、Stage 3: 境界開通（Fn引数/戻り値/
 Stage 4: 共有セル捕獲（`Ctx::cell_names`/`Ctx::visible_siblings`、`cellvar`/`cellset`タグ）、
 Stage 5: compileパイプラインのTarjan SCCベース多パス化（`Interp::compute_sccs`/`compile_scc`、
 `CompiledFn::new_multi`）、Stage 6: defun/lambda/labels/matchアームの複数式body対応
-（`ast_bridge::single_body_expr`、`(let () e1 e2 ...)`ラップ）。全stage独立コミット・
+（`ast_bridge::single_body_expr`、`(let () e1 e2 ...)`ラップ）。Phase II開始点の**Stage 7
+（定義時JITドライバ）も2026-07-17完了**——詳細は下記。全stage独立コミット・
 `scripts/test-serial.sh`全green維持。
 
 **Stage 5実装時の発見（Stage 7設計に影響）**: 別々のトップレベル`defun`同士の構文上の相互再帰は
@@ -36,25 +37,79 @@ Stage 5: compileパイプラインのTarjan SCCベース多パス化（`Interp::
 `scc_tests`モジュールでのみ）到達するが、**Stage 7で各`labels`siblingが独立JIT単位になった
 時点で実際に必要になる**基盤という位置づけ。
 
-以下、未着手の残りstage（計画書全文は元セッションの`~/.claude/plans/
+以下、Stage 7完了・Stage 8-10未着手（計画書全文は元セッションの`~/.claude/plans/
 compile-traitcall-traitcall-cuddly-corbato.md`、リポジトリ外のためこの節が主要な引き継ぎ資料）。
 
-- **Stage 7: 定義時JITドライバ**（Phase II開始点、最大の設計判断を伴う）
-  - `Expr::Lambda`/`Labels`/`FnRef`/`MethodRef`のevalアームに「tier判定→コンストラクタ関数JIT
-    （定義サイトの`Loc`+型署名でキャッシュ）→失敗時は既存の`make_closure`（interpクロージャ）へ
-    fallback+理由ログ」という経路を追加。JIT可能tier判定基準: パラメータ・戻り値・捕獲名の型が
-    すべてcompiled表現可能（native型捕獲＝自己ホストコンパイラ島専用、およびマクロ展開中は
-    fallback対象）。
-  - 新設`Slot::TypedCell`（Stage 4の共有セルをinterp側束縛生成時点から使う経路）。
-  - マクロ展開時（check時）はJIT抑止フラグを`Interp`に持たせ、interpクロージャを使う
-    （LSPは「コード実行なし方針」を維持するため今後もJITしない）。
-  - JITエンジンの寿命管理: `fn_ptr`が`ClosureBox`に残り続けるため実行エンジンをdropしない
-    「墓場」`Vec`を`Interp`に新設。再定義（redefine）テストで要注意。
-  - 環境変数`TYPELISP_CLOSURE_JIT=off|prefer|require`でモード切替を仕込む（`require`モードは
-    このstageでは全green化しなくてよい——網羅性はStage 8で埋める）。fallbackがある限り既存
-    テストはgreenのまま。
-  - fasl形式は変更不要（JITコードはプロセスローカル）。AOTはcompiler.rs共有のため自動反映、
-    `rt_closure_*`/`rt_cell_*`のstaticlib export追加のみ確認。
+**Stage 7: 定義時JITドライバ 完了**（2026-07-17）——`Expr::Lambda`/`Labels`/`FnRef`/`MethodRef`の
+evalアームが、interpクロージャ（`make_closure`）を作る前にまず定義時JITを試みるようになった
+（`Interp::jit_define_closure`、`interp.rs`）。設計は計画書からの想定どおり進んだ部分と、
+実装時に判明して簡略化した部分がある——後者を優先して記す。
+
+- **「コンストラクタ関数」の実体は自己ホストコンパイラの`compile-lambda`をそのまま再利用**:
+  計画書は「捕獲セル参照を引数に取りClosureBoxを返すコンストラクタ関数」を新規にJITする想定
+  だったが、実装時に`compile-lambda`（`compiler.rs`）自身が既にその形をしていると判明した——
+  ラムダ/labels siblingを**捕獲名だけを引数に取る使い捨てトップレベル`defun`の唯一のbody式**
+  として包む（`(defun __ctor (cap1 cap2 ...) (lambda name (captured...) (params...) body))`
+  相当）だけで、既存の`compile-function`/`compile-lambda`パイプラインがClosureBox構築まで
+  丸ごとやってくれる。唯一の仕掛けは、ctor自身の各引数の宣言型を**捕獲変数の実際の型ではなく
+  常に`Sexpr`にする**こと——`struct_field_kind`のkind`6`（タグ付きポインタのパススルー、
+  GCルート付き）を経由させることで、渡した既存セル参照（`Value::Boxed(cell_id)`）が
+  再パッケージされず生の値のまま`env`に束縛され、内側の`(lambda ...)`が`compile-lambda`の
+  outer half（`compile-escaping-env-args`/`resolve-value`）で読み出す時にそのまま拾える。
+  結果、Stage 7のために新規の自己ホストLispコードは一切書いていない
+  （`Interp::translate_and_compile`——旧`add_compiled_function`本体を汎用化したRust側の薄い層のみ）。
+- **`Slot::TypedCell`**（`src/eval/value.rs`）: `Slot::Heap`と同じ`BoxedObj::Cell`だが
+  `RtValue::Sexpr`限定ではなく任意の型を`rtvalue_to_struct_field`/`decode_field_typed`
+  （`defstruct`フィールドと同じエンコード）で出し入れする。`Interp::apply`/`Expr::Let`が
+  `freevars::names_captured_by_nested`で「ネストしたlambda/labelsに捕獲される束縛」を検出し、
+  型がNative（スカラー等）かつ**JIT表現可能**（下記`is_jit_tier_ty`）な場合だけこのセルへ昇格する
+  ——`Slot::Heap`が既にセルであるHeap-kind束縛（struct/enum/Fn等）は変更不要。
+- **JIT tier判定**（`Interp::is_jit_tier_ty`）は`ast_bridge::struct_field_kind`のkind`0`
+  （非対応の catch-all）を「compiled表現なし」の判定にそのまま流用——`llvm-builder`/
+  `Scope<llvm-value>`等の自己ホストコンパイラ島専用ネイティブ型だけがここで弾かれ、
+  特別な「コンパイラ島判定」を書かずに型システムだけでブートストラップ・パラドックス
+  （compile-functionの実行に自身のJITが必要になる循環）を回避できた。
+  - **落とし穴（初回実装で規模の大きい回帰を2件出した）**: (1) `Interp::apply`の新しい
+    セル昇格判定を`is_jit_tier_ty`でガードし忘れ、`compile-function`自身の呼び出し
+    （`m: llvm-module`引数、自身の`labels`内siblingに捕獲される）で`RtValue::LlvmModule`を
+    セルへ詰めようとして`rtvalue_to_struct_field`が内部エラーになり、`(compile ...)`を使う
+    テストが軒並み壊れた——`compile_test.rs`161/173件が一時失敗。(2) `Expr::Labels`/
+    `jit_define_closure`が`collect_call_targets`/`collect_assoc_targets`の結果を無フィルタで
+    「未コンパイルなら失敗」扱いしていたため、`i32::+`等のネイティブ組み込みメソッド
+    （コンパイル時は`compile-assoc`が直接LLVM命令へlowerする、`self.methods`に登録がない）まで
+    要求してしまっていた——`Interp::call_graph_edges`と同じフィルタ（vector-op/hashtable-op
+    除外、`i64`/`i32`/`char`/`string`/`f64`/`bignum`/`ratio`はネイティブ、ユーザー定義
+    methodは`self.methods`にあれば要求）を複製して解消。
+  - **スタックオーバーフロー**: `Expr::Labels`/`Expr::Lambda`のtier判定を「捕獲名の型」より
+    前に「宣言パラメータの型」だけで先にふるいにかける（`freevars::lambda_free_vars`という
+    body全体を再帰的に歩く重い解析を、対象が自己ホストコンパイラ島だと分かった時点で省略する）
+    ようにしたが、それでも`Interp::apply`自身の`names_captured_by_nested`呼び出し
+    （`compile-function`の巨大な`labels`本体を毎回歩く）が`freevars::walk`の
+    `Expr::If`素朴再帰と組み合わさり、`compile-value`ディスパッチ（~40タグの右下がりif連鎖）
+    で`compile_dispatches_bignum_comparisons_and_agrees_with_the_interpreter`をスタック
+    オーバーフローさせた。`Interp::eval`の`Expr::If`アームが既に採用している「反復的に
+    else連鎖を辿る」手法（`docs/dev/implementation-log.md`の"interp if連鎖スタック
+    オーバーフロー"参照）を`freevars::walk`にも移植して解消——既存の
+    `scripts/test-serial.sh`の`RUST_MIN_STACK=32MB`余裕と合わせて全green。
+  - **`set_active_heap`漏れ**: コンストラクタ関数呼び出し（`CompiledFn::call`）の前に
+    `crate::compile::runtime::set_active_heap`を呼び忘れ、`rt_closure_new`等が
+    "no active Heap registered" でpanicしていた——`Interp::call_compiled`と同じ手順を追加。
+- **マクロ展開時のJIT抑止**: `Interp::jit_suppressed`（再入可能な`Cell<u32>`）を新設、
+  `expand_macro`が`self.apply`を呼ぶ前後でinc/dec。
+- **JITエンジンの「墓場」+定義サイトキャッシュ**: `Interp::jit_graveyard`
+  （`Vec<Rc<CompiledFn>>`、永続保持でengine/codeを生かし続ける）と`Interp::jit_ctor_cache`
+  （`(Loc, 型のDebug文字列) -> Rc<CompiledFn>`、`Type`に`Eq`/`Hash`が無いためDebug文字列で代用）。
+  `Loc`が無い合成ノード（`labels` siblingをラップする際に新規合成する`Typed`等）はキャッシュ
+  対象外——毎回JITし直す（正しさ優先、Stage 8以降の最適化候補）。
+- **環境変数`TYPELISP_CLOSURE_JIT=off|prefer|require`**実装済み（デフォルト`prefer`）。
+  `require`は現状まだ全green化していない（想定どおり、Stage 8の仕事）——具体的には
+  自己ホストコンパイラ自身のreentrant実行中に別のJIT試行が失敗すると`require`下では
+  そのままpanicとして伝播する等、被覆の狭さがそのまま見える。`prefer`（デフォルト）は
+  `scripts/test-serial.sh`全体で green。
+- テスト: 新規`tests/closure_jit_test.rs`（`(compile ...)`を一切呼ばない純粋interp実行での
+  FnRef/MethodRef/lambda捕獲/make-counter型共有セル/labels相互再帰/labels間セル共有/
+  マクロ展開との共存、計9件）。`TYPELISP_CLOSURE_JIT=require`で個別に再実行すると
+  実際にJIT経路を通ったことを確認できる（ただし上記の理由で全件通るわけではない）。
 
 - **Stage 8: compiled被覆拡大**（Stage 7の`require`モード失敗を計画的に潰す複数コミット群）
   - 新しい`rt_*`シム追加（`random`/`gensym`/`equal`/`equalp`等、未compile対応のbuiltin）。

@@ -114,9 +114,35 @@ fn walk(typed: &Typed, bound: &HashSet<String>, siblings: &HashSet<String>, seen
         Expr::Var(name) => note(name, &typed.ty, bound, siblings, seen, order),
         Expr::Global(_) | Expr::FnRef(_) | Expr::MethodRef { .. } => {}
         Expr::If(cond, then, els) => {
-            walk(cond, bound, siblings, seen, order);
-            walk(then, bound, siblings, seen, order);
-            walk(els, bound, siblings, seen, order);
+            // Walks a right-leaning `if`/`else-if` chain iteratively rather
+            // than recursing once per link — the same reason
+            // `Interp::eval`'s own `Expr::If` arm does (see that arm's doc
+            // comment): a chain the size of `compiler.rs`'s `compile-value`
+            // dispatcher (~40 tags) is deep enough to overflow the stack on
+            // a naive recursive walk, and unlike `eval` (which only ever
+            // needs to descend into whichever single branch the condition
+            // selects), a free-variable walk must visit *every* branch —
+            // but only the `els` side ever chains to another `Expr::If`, so
+            // iterating that one link keeps the other two (`cond`/`then`,
+            // ordinary recursive calls) at their natural, shallow depth.
+            let mut cond = cond;
+            let mut then = then;
+            let mut els = els;
+            loop {
+                walk(cond, bound, siblings, seen, order);
+                walk(then, bound, siblings, seen, order);
+                match &els.expr {
+                    Expr::If(c2, t2, e2) => {
+                        cond = c2;
+                        then = t2;
+                        els = e2;
+                    }
+                    _ => {
+                        walk(els, bound, siblings, seen, order);
+                        break;
+                    }
+                }
+            }
         }
         Expr::Let(bindings, body) => {
             for (_, value) in bindings {

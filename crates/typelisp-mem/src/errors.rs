@@ -15,7 +15,7 @@ use std::rc::Rc;
 /// occurred. `file` is shared (`Rc<str>`) because a single source string
 /// produces many data (and thus potentially many located errors), all naming
 /// the same file.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Loc {
     pub file: Rc<str>,

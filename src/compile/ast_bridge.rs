@@ -490,7 +490,7 @@ pub(crate) fn tagged_sym_list(
 /// `BoxedObj::CompiledClosure` tagged `Sexpr` by construction (the ARC
 /// `ClosureBox` this gap used to describe is gone). Both now join
 /// `Str`/`Symbol`'s passthrough kind `6` like any other already-boxed value.
-fn struct_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> i64 {
+pub(crate) fn struct_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> i64 {
     match ty {
         _ if ty.is_integer() => 1,
         _ if ty.is_float() => 2,

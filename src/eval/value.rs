@@ -12,7 +12,7 @@ use inkwell::values::{BasicValueEnum, FunctionValue};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-use crate::{BoxId, Heap, Loc, Path, Typed, Value};
+use crate::{BoxId, Heap, Loc, Path, Type, Typed, Value};
 
 /// One `Scope<V>` frame — see [`RtValue::Scope`]'s doc comment.
 pub type ScopeFrame = Rc<RefCell<HashMap<String, RtValue>>>;
@@ -167,6 +167,23 @@ pub enum SlotKind {
 pub enum Slot {
     Heap(Rc<BoxId>),
     Native(Rc<RefCell<RtValue>>),
+    /// A GC-heap `BoxedObj::Cell` for a binding whose static type is
+    /// otherwise `Native` (a scalar, `Str`, `Fn`, ...) — closure
+    /// unification Stage 7's answer to "a nested `lambda`/`labels` captures
+    /// this name, and the capture must be visible to *compiled* code too".
+    /// The underlying cell (`Heap::alloc_cell`/`cell_get`/`cell_set`) is
+    /// already generic over any `Value`, not `Sexpr`-only — `Slot::Heap`'s
+    /// restriction to `RtValue::Sexpr` is this wrapper's own choice, not the
+    /// heap's, so this variant simply carries the declared `Type` alongside
+    /// the cell and routes get/set through the same
+    /// encode/decode(`rtvalue_to_struct_field`/`decode_field_typed`) a
+    /// `defstruct` field already uses — a scalar-typed capture becomes a
+    /// tagged `i64` `rt_cell_get`/`rt_cell_set` on the compiled side can
+    /// read/write directly, without requiring a heap-repr type. Chosen only
+    /// at binding sites `freevars::names_captured_by_nested` marks as
+    /// captured-by-a-nested-closure (see `Interp::apply`/`Expr::Let`); every
+    /// other `Native`-typed binding is untouched.
+    TypedCell(Rc<BoxId>, Type),
 }
 
 impl Slot {
@@ -175,6 +192,7 @@ impl Slot {
         match self {
             Slot::Heap(id) => RtValue::Sexpr(heap.cell_get(**id)),
             Slot::Native(rc) => rc.borrow().clone(),
+            Slot::TypedCell(id, ty) => super::interp::decode_field_typed(heap, heap.cell_get(**id), ty),
         }
     }
 
@@ -199,6 +217,11 @@ impl Slot {
                 *rc.borrow_mut() = v;
                 Ok(())
             }
+            Slot::TypedCell(id, _ty) => {
+                let encoded = super::interp::rtvalue_to_struct_field(heap, &v)?;
+                heap.cell_set(**id, encoded);
+                Ok(())
+            }
         }
     }
 }
@@ -219,6 +242,11 @@ impl Slot {
 pub enum Capture {
     Heap(usize),
     Native(Rc<RefCell<RtValue>>),
+    /// The `Slot::TypedCell` counterpart of `Heap(i)`: same env-array
+    /// indexing (the cell reference is a `Value::Boxed` slot like any other
+    /// heap capture), but the slot must be re-decoded through `ty` rather
+    /// than assumed `Sexpr` — see `Slot::TypedCell`'s doc comment.
+    TypedCell(usize, Type),
 }
 
 /// The interpreter-side half of a closure — everything `crate::mem` cannot
