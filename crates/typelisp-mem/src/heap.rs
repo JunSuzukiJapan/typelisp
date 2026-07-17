@@ -715,6 +715,18 @@ impl Heap {
         rc
     }
 
+    /// [`alloc_cell`](Self::alloc_cell) without the owning-`Rc` liveness
+    /// registration — for *compiled* code (`rt_cell_new`), which has no Rust
+    /// `Rc` to hold: the cell's lifetime is governed purely by ordinary
+    /// reachability (a GC root, a compiled closure's env slot, another
+    /// cell, ...), exactly like any other boxed object. The caller must
+    /// therefore make the returned value reachable before anything can
+    /// trigger a collection; like `alloc_cell`, the allocation itself never
+    /// triggers one.
+    pub fn alloc_cell_unregistered(&mut self, v: Value) -> Value {
+        self.alloc_boxed(BoxedObj::Cell(v))
+    }
+
     // ---- closures --------------------------------------------------------------
 
     /// Store a function value, returning its `Value::Boxed` — see
@@ -765,6 +777,66 @@ impl Heap {
     /// allocation.
     pub fn take_dead_closure_tokens(&mut self) -> Vec<u32> {
         std::mem::take(&mut self.dead_closure_tokens)
+    }
+
+    // ---- compiled closures ------------------------------------------------------
+
+    /// Store a compiled function value — native entry point `fn_ptr` plus
+    /// its captured environment — returning its `Value::Boxed`; see
+    /// [`BoxedObj::CompiledClosure`] for the `env`/`sexpr_mask` slot
+    /// convention. Like [`alloc_closure`](Self::alloc_closure), never
+    /// itself triggers a collection, so the env values may be un-rooted at
+    /// the moment of the call.
+    pub fn alloc_compiled_closure(&mut self, fn_ptr: usize, env: Vec<Value>, sexpr_mask: u64) -> Value {
+        self.alloc_boxed(BoxedObj::CompiledClosure { fn_ptr, env, sexpr_mask })
+    }
+
+    /// True if `id` holds a `BoxedObj::CompiledClosure` — the compiled peer
+    /// of [`is_closure`](Self::is_closure).
+    pub fn is_compiled_closure(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::CompiledClosure { .. }))
+    }
+
+    /// A compiled closure's native entry point. Panics if `id` doesn't hold
+    /// a `BoxedObj::CompiledClosure` — same internal-invariant-trap
+    /// convention as [`closure_token`](Self::closure_token).
+    pub fn compiled_closure_fnptr(&self, id: BoxId) -> usize {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::CompiledClosure { fn_ptr, .. }) => *fn_ptr,
+            _ => panic!("BoxId does not hold a CompiledClosure"),
+        }
+    }
+
+    /// A compiled closure's capture mask — bit `i` set means env slot `i`
+    /// holds a real tagged value (see [`BoxedObj::CompiledClosure`]).
+    /// Panics like [`compiled_closure_fnptr`](Self::compiled_closure_fnptr).
+    pub fn compiled_closure_mask(&self, id: BoxId) -> u64 {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::CompiledClosure { sexpr_mask, .. }) => *sexpr_mask,
+            _ => panic!("BoxId does not hold a CompiledClosure"),
+        }
+    }
+
+    /// The number of captured slots a compiled closure carries. Panics like
+    /// [`compiled_closure_fnptr`](Self::compiled_closure_fnptr).
+    pub fn compiled_closure_env_len(&self, id: BoxId) -> usize {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::CompiledClosure { env, .. }) => env.len(),
+            _ => panic!("BoxId does not hold a CompiledClosure"),
+        }
+    }
+
+    /// The `idx`-th captured slot of a compiled closure. Panics if `id`
+    /// doesn't hold a `BoxedObj::CompiledClosure` or if `idx` is out of
+    /// range — the compiler's capture-layout guarantee makes that an
+    /// internal invariant, same convention as [`enum_field`](Self::enum_field).
+    pub fn compiled_closure_env_get(&self, id: BoxId, idx: usize) -> Value {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::CompiledClosure { env, .. }) => {
+                *env.get(idx).unwrap_or_else(|| panic!("compiled closure env index {} out of range", idx))
+            }
+            _ => panic!("BoxId does not hold a CompiledClosure"),
+        }
     }
 
     // ---- hash tables --------------------------------------------------------
@@ -1202,6 +1274,16 @@ impl Heap {
             // (cell -> closure -> sibling cell -> ...), which mark-sweep
             // reclaims as a unit once nothing external reaches it.
             BoxedObj::Closure { env, .. } => {
+                for &v in env {
+                    stack.push(v);
+                }
+            }
+            // A live compiled closure keeps its captured slots live. Every
+            // slot is traced uniformly — an unmasked (raw native bits) slot
+            // rides in an immediate `Value::Int`, so tracing it is a no-op
+            // by construction (see `BoxedObj::CompiledClosure`); `fn_ptr`
+            // is machine code, not a heap value, nothing to trace.
+            BoxedObj::CompiledClosure { env, .. } => {
                 for &v in env {
                     stack.push(v);
                 }

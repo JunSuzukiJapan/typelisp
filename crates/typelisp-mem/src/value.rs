@@ -226,6 +226,31 @@ pub(crate) enum BoxedObj {
     /// side-table entry too — including its `Native` captures (LLVM handles
     /// among them), so nothing leaks.
     Closure { body_token: u32, env: Vec<Value> },
+    /// A *compiled* function value: a native entry point plus its captured
+    /// environment — the closure case of the unification mechanism (the
+    /// enum-style flip of compiled code's raw un-GC-managed `malloc`
+    /// `ClosureBox`, whose reference-counting header, retain/release calls,
+    /// and capture mask globals it replaces wholesale; lifetime is the
+    /// GC's business now, which also reclaims `labels` sibling cycles the
+    /// refcount scheme deliberately leaked). A *separate* variant from
+    /// [`Closure`]: that one's body is a checked AST in the *interpreter's*
+    /// side table, this one's is JIT/AOT-emitted machine code — nothing to
+    /// key a side table with, nothing for the sweep to report.
+    ///
+    /// `fn_ptr` is the native entry point (the `compiled_fn_type_with_env`
+    /// ABI: `(args_ptr, argc, env_ptr, env_len) -> i64`), opaque at this
+    /// layer exactly like `Closure`'s `body_token`. `env` holds one `Value`
+    /// per captured slot, but only slots whose bit is set in `sexpr_mask`
+    /// (bit `i` = slot `i`, so at most 64 captures — the same limit the
+    /// replaced `ClosureBox` fn-mask had) are *real* tagged values the mark
+    /// phase must trace; an unset bit means the slot carries raw native
+    /// bits (an untagged scalar, float bits, ...) smuggled through
+    /// `Value::Int`, GC-invisible by construction. Tracing every slot
+    /// uniformly is still correct — a raw slot's `Value::Int` is immediate
+    /// — the mask exists so the *accessors* can hand compiled code back the
+    /// exact raw word it stored (`rt_closure_env_get` re-encodes masked
+    /// slots and unwraps unmasked ones).
+    CompiledClosure { fn_ptr: usize, env: Vec<Value>, sexpr_mask: u64 },
 }
 
 /// A `HashTable<K,V>` key at the mem layer — the runtime encoding of a

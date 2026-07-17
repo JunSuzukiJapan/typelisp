@@ -3049,10 +3049,17 @@ pub(crate) fn is_rt_builtin_name(name: &str) -> bool {
 /// call these to build/read/write a `BoxedObj::Struct` — the same
 /// `BoxedObj::Struct` mem/rt-layer plumbing Stage 1 already exercised in
 /// isolation, wired to the compiler for the first time here.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 73] {
+///
+/// `rt_closure_*`/`rt_cell_*` (closure unification, Stage 1): the GC-heap
+/// `BoxedObj::CompiledClosure` that replaces the raw `malloc`'d
+/// reference-counted `ClosureBox`, plus the shared binding cells
+/// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
+/// `setf` mutate the very same object.
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 80] {
     use crate::compile::runtime::{
         rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new, rt_bignum_sub,
-        rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr, rt_char_equalp,
+        rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr, rt_cell_get,
+        rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len, rt_closure_fnptr, rt_closure_new,
         rt_cons, rt_data_field, rt_data_new, rt_data_variant, rt_float_new, rt_float_to_bignum, rt_float_to_ratio, rt_float_value,
         rt_global_get, rt_global_new, rt_global_set,
         rt_hashtable_clear, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw, rt_hashtable_keys,
@@ -3093,6 +3100,13 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 73] {
         ("rt_struct_field_set", rt_struct_field_set as usize),
         ("rt_struct_field_count", rt_struct_field_count as usize),
         ("rt_struct_push_field", rt_struct_push_field as usize),
+        ("rt_closure_new", rt_closure_new as usize),
+        ("rt_closure_fnptr", rt_closure_fnptr as usize),
+        ("rt_closure_env_len", rt_closure_env_len as usize),
+        ("rt_closure_env_get", rt_closure_env_get as usize),
+        ("rt_cell_new", rt_cell_new as usize),
+        ("rt_cell_get", rt_cell_get as usize),
+        ("rt_cell_set", rt_cell_set as usize),
         ("rt_data_new", rt_data_new as usize),
         ("rt_data_variant", rt_data_variant as usize),
         ("rt_data_field", rt_data_field as usize),

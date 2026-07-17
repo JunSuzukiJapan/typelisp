@@ -1116,6 +1116,211 @@ pub unsafe extern "C" fn rt_data_field(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().enum_field(id, idx as usize))
 }
 
+// ---- compiled closures & binding cells — the heap-unified function value --
+//
+// `BoxedObj::CompiledClosure` (`typelisp-mem`) is the GC-heap flip of
+// compiled code's raw `malloc`'d, reference-counted `ClosureBox` — see its
+// doc comment for the env/`sexpr_mask` slot convention these four expose.
+// `BoxedObj::Cell` (the interpreter's own shared binding cell) gets its
+// first compiled-code face here too (`rt_cell_*`): a capture that must obey
+// the language's shared-cell `setf` semantics is a cell *reference* in the
+// closure env, and both worlds mutate the very same heap object.
+
+/// `(rt-closure-new fn-ptr sexpr-mask slot0 slot1 ...)` for compiled code —
+/// allocates a boxed compiled closure. `args[0]` is the *raw* native entry
+/// point (a `compiled_fn_type_with_env`-ABI function pointer), `args[1]` is
+/// the *raw* capture mask (bit `i` set ⇒ `args[2+i]` is a tagged `Sexpr`,
+/// stored decoded; clear ⇒ raw native bits, stored verbatim behind an
+/// immediate `Value::Int` — see `BoxedObj::CompiledClosure`), and
+/// `args[2..argc]` are the captured slots. At most 64 slots — the same
+/// limit the replaced `ClosureBox` fn-mask had. Allocation never triggers a
+/// collection (the box store grows on demand), so the slot values may be
+/// un-rooted at the moment of the call.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2`, `args` must point to at least `argc` valid
+/// `i64`s, masked slots must hold valid tagged values, and `args[0]` must
+/// be a valid function pointer (opaque here — only stored); a `Heap` must
+/// already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_closure_new(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_closure_new: expected at least 2 arguments (fn ptr, sexpr mask)");
+    }
+    let env_len = argc as usize - 2;
+    if env_len > 64 {
+        fatal("rt_closure_new: more than 64 captured slots");
+    }
+    let fn_ptr = *args as usize;
+    let sexpr_mask = *args.add(1) as u64;
+    let mut env = Vec::with_capacity(env_len);
+    for i in 0..env_len {
+        let raw = *args.add(2 + i);
+        if sexpr_mask & (1 << i) != 0 {
+            env.push(decode(raw));
+        } else {
+            env.push(Value::Int(raw));
+        }
+    }
+    encode(active_heap().alloc_compiled_closure(fn_ptr, env, sexpr_mask))
+}
+
+/// `(rt-closure-fnptr clo)` for compiled code — the *raw* native entry
+/// point of boxed compiled closure `args[0]` (a tagged `Sexpr`), ready for
+/// an indirect call. Fatal if `args[0]` isn't a boxed compiled closure —
+/// the checker's type discipline (`Type::Fn`) is what guarantees only
+/// function values reach an apply site. Allocates nothing, so triggers no
+/// GC.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// decoding to a `Value::Boxed` compiled closure; a `Heap` must already be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_closure_fnptr(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_closure_fnptr: expected 1 argument");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) if active_heap().is_compiled_closure(id) => id,
+        _ => fatal("rt_closure_fnptr: argument is not a boxed compiled closure"),
+    };
+    active_heap().compiled_closure_fnptr(id) as i64
+}
+
+/// `(rt-closure-env-len clo)` for compiled code — the number of captured
+/// slots boxed compiled closure `args[0]` carries, as a *raw* `i64` (the
+/// `env_len` argument an indirect `compiled_fn_type_with_env` call passes
+/// on). Fatal like [`rt_closure_fnptr`]. Allocates nothing.
+///
+/// # Safety
+///
+/// Same contract as [`rt_closure_fnptr`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_closure_env_len(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_closure_env_len: expected 1 argument");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) if active_heap().is_compiled_closure(id) => id,
+        _ => fatal("rt_closure_env_len: argument is not a boxed compiled closure"),
+    };
+    active_heap().compiled_closure_env_len(id) as i64
+}
+
+/// `(rt-closure-env-get clo idx)` for compiled code — the `idx`-th captured
+/// slot of boxed compiled closure `args[0]`, where `args[1]` is a *raw*
+/// index. Hands back the exact `i64` word the slot was created with: a
+/// masked slot re-encodes its stored tagged value, an unmasked slot unwraps
+/// the raw native bits it smuggled through `Value::Int` (see
+/// [`rt_closure_new`]). Fatal if `args[0]` isn't a boxed compiled closure
+/// or `idx` is out of range. Allocates nothing.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s,
+/// the first decoding to a `Value::Boxed` compiled closure; a `Heap` must
+/// already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_closure_env_get(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_closure_env_get: expected 2 arguments");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) if active_heap().is_compiled_closure(id) => id,
+        _ => fatal("rt_closure_env_get: first argument is not a boxed compiled closure"),
+    };
+    let idx = *args.add(1);
+    if idx < 0 {
+        fatal("rt_closure_env_get: negative slot index");
+    }
+    let heap = active_heap();
+    let v = heap.compiled_closure_env_get(id, idx as usize);
+    if heap.compiled_closure_mask(id) & (1 << idx) != 0 {
+        encode(v)
+    } else {
+        match v {
+            Value::Int(raw) => raw,
+            other => fatal(&format!("rt_closure_env_get: unmasked slot holds a non-raw value {:?}", other)),
+        }
+    }
+}
+
+/// `(rt-cell-new v)` for compiled code — allocates a shared binding cell
+/// (`BoxedObj::Cell`) holding tagged `Sexpr` `args[0]`, returning the
+/// cell's own tagged reference. Unlike the interpreter's `Heap::alloc_cell`
+/// there is no owning-`Rc` liveness registration — the cell lives by
+/// ordinary reachability (a root, a closure env slot, ...) like any other
+/// box. Allocation never triggers a collection, so `args[0]` may be
+/// un-rooted at the moment of the call — but the caller must make the
+/// returned cell reachable before anything can trigger one.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// holding a valid tagged value; a `Heap` must already be registered on
+/// this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_cell_new(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_cell_new: expected 1 argument");
+    }
+    let v = decode(*args);
+    encode(active_heap().alloc_cell_unregistered(v))
+}
+
+/// `(rt-cell-get c)` for compiled code — the current contents of binding
+/// cell `args[0]` (a tagged `Sexpr` reference to a `BoxedObj::Cell`), as a
+/// tagged `Sexpr`; per-kind untagging is the caller's job
+/// (`compile-sexpr-field` conventions), exactly as for a struct field.
+/// Fatal if `args[0]` isn't a boxed cell. Allocates nothing.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// decoding to a `Value::Boxed` cell; a `Heap` must already be registered
+/// on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_cell_get(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_cell_get: expected 1 argument");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) if active_heap().is_cell(id) => id,
+        _ => fatal("rt_cell_get: argument is not a boxed cell"),
+    };
+    encode(active_heap().cell_get(id))
+}
+
+/// `(rt-cell-set! c v)` for compiled code — overwrites binding cell
+/// `args[0]`'s contents in place with tagged `Sexpr` `args[1]`; `setf`'s
+/// primitive for a shared (captured) binding, visible to every holder of
+/// the cell — interpreter bindings included, since both worlds share the
+/// very same `BoxedObj::Cell`. Returns the compiled representation of
+/// `Unit` (`0`), the same convention [`rt_struct_field_set`] uses. Fatal if
+/// `args[0]` isn't a boxed cell. Allocates nothing.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s,
+/// the first decoding to a `Value::Boxed` cell, the second holding a valid
+/// tagged value; a `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_cell_set(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_cell_set: expected 2 arguments");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) if active_heap().is_cell(id) => id,
+        _ => fatal("rt_cell_set: first argument is not a boxed cell"),
+    };
+    let v = decode(*args.add(1));
+    active_heap().cell_set(id, v);
+    0
+}
+
 /// `(rt-struct-field-set! s idx val)` for compiled code — overwrites the
 /// `idx`-th field of boxed struct `args[0]` in place with `args[2]` (a
 /// tagged `Sexpr`); `args[1]` is a raw index, like [`rt_struct_field_get`].
@@ -2112,6 +2317,7 @@ mod tests {
         rt_char_equalp, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_equalp, rt_str_length, rt_str_lt,
         rt_str_new, rt_str_ref, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw,
         rt_hashtable_keys, rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_data_field, rt_data_new, rt_data_variant,
+        rt_cell_get, rt_cell_new, rt_cell_set, rt_closure_env_get, rt_closure_env_len, rt_closure_fnptr, rt_closure_new,
         rt_struct_field_count, rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_struct_push_field, set_active_heap,
     };
 
@@ -2647,6 +2853,99 @@ mod tests {
             }
             other => panic!("expected the cons field to survive, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn rt_closure_new_round_trips_fnptr_mask_and_slots() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        // slot 0 (masked): a tagged int; slot 1 (unmasked): raw float bits,
+        // stored and handed back verbatim.
+        let tagged_int = encode(Value::Int(7));
+        let raw_bits = (1.5f64).to_bits() as i64;
+        let fn_ptr = 0x1000i64; // opaque at this layer — only stored
+        let args = [fn_ptr, 0b01, tagged_int, raw_bits];
+        let clo = unsafe { rt_closure_new(args.as_ptr(), 4) };
+
+        match decode(clo) {
+            Value::Boxed(id) => {
+                let h = unsafe { active_heap() };
+                assert!(h.is_compiled_closure(id));
+                assert!(!h.is_closure(id), "a compiled closure must not read as an interp closure");
+                assert_eq!(h.compiled_closure_mask(id), 0b01);
+            }
+            other => panic!("expected a boxed compiled closure, got {:?}", other),
+        }
+        assert_eq!(unsafe { rt_closure_fnptr([clo].as_ptr(), 1) }, fn_ptr);
+        assert_eq!(unsafe { rt_closure_env_len([clo].as_ptr(), 1) }, 2);
+        assert_eq!(unsafe { rt_closure_env_get([clo, 0].as_ptr(), 2) }, tagged_int);
+        assert_eq!(unsafe { rt_closure_env_get([clo, 1].as_ptr(), 2) }, raw_bits);
+    }
+
+    /// A rooted compiled closure keeps its captured cell — and through it
+    /// the cell's contents — alive across a collection: the mark-phase
+    /// fan-out `push_boxed_nested`'s `CompiledClosure` arm, mirroring what
+    /// an interp closure's env already gets.
+    #[test]
+    fn a_rooted_compiled_closure_keeps_its_captured_cell_alive_across_gc() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let cons = heap.cons(Value::Int(7), Value::Empty).expect("cons");
+        let cell = unsafe { rt_cell_new([encode(cons)].as_ptr(), 1) };
+        let clo = unsafe { rt_closure_new([0x1000, 0b1, cell].as_ptr(), 3) };
+        let boxed = decode(clo);
+
+        heap.push_root(boxed);
+        heap.gc();
+
+        let got_cell = unsafe { rt_closure_env_get([clo, 0].as_ptr(), 2) };
+        assert_eq!(got_cell, cell, "the captured cell slot survives verbatim");
+        let contents = unsafe { rt_cell_get([got_cell].as_ptr(), 1) };
+        assert_eq!(heap.car(decode(contents)).expect("car"), Value::Int(7));
+    }
+
+    #[test]
+    fn rt_cell_set_mutates_the_shared_cell_both_worlds_see() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let cell = unsafe { rt_cell_new([encode(Value::Int(1))].as_ptr(), 1) };
+        assert_eq!(unsafe { rt_cell_get([cell].as_ptr(), 1) }, encode(Value::Int(1)));
+        assert_eq!(unsafe { rt_cell_set([cell, encode(Value::Int(2))].as_ptr(), 2) }, 0, "cell-set returns Unit (0)");
+        assert_eq!(unsafe { rt_cell_get([cell].as_ptr(), 1) }, encode(Value::Int(2)));
+
+        // The very same heap object is what the interpreter's own cell API
+        // sees — a compiled `setf` and an interp `setf` mutate one binding.
+        let id = match decode(cell) {
+            Value::Boxed(id) => id,
+            other => panic!("expected a boxed cell, got {:?}", other),
+        };
+        let h = unsafe { active_heap() };
+        assert!(h.is_cell(id));
+        assert_eq!(h.cell_get(id), Value::Int(2));
+        h.cell_set(id, Value::Int(3));
+        assert_eq!(unsafe { rt_cell_get([cell].as_ptr(), 1) }, encode(Value::Int(3)));
+    }
+
+    /// An unreachable compiled closure is swept like any other box — and,
+    /// having no interpreter side table, must *not* report a dead token
+    /// the way a swept `BoxedObj::Closure` does.
+    #[test]
+    fn an_unreachable_compiled_closure_is_swept_without_reporting_a_dead_token() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let clo = unsafe { rt_closure_new([0x1000, 0].as_ptr(), 2) };
+        let id = match decode(clo) {
+            Value::Boxed(id) => id,
+            other => panic!("expected a boxed compiled closure, got {:?}", other),
+        };
+        heap.gc(); // nothing roots it
+
+        assert!(!heap.is_compiled_closure(id), "the unrooted closure box was swept");
+        assert!(heap.take_dead_closure_tokens().is_empty(), "a compiled closure has no side-table token to report");
     }
 
     #[test]
