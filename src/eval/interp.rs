@@ -227,6 +227,61 @@ impl CallEdge {
     }
 }
 
+/// Why a [`Interp::jit_define_closure`] attempt didn't produce a compiled
+/// closure — the classification [`JitMode::Require`] keys on (closure
+/// unification Stage 8). The distinction matters because `Require` is a
+/// coverage-gap *discovery* switch: it must escalate exactly the failures
+/// that represent actionable holes in compiled coverage, and nothing else.
+enum JitDecline {
+    /// Falling back to an interpreted closure here is the *correct*,
+    /// permanent behavior, not a coverage gap — the same fallback set
+    /// Stage 9 keeps once silent fallback is otherwise abolished:
+    /// `TYPELISP_CLOSURE_JIT=off`, macro expansion
+    /// ([`Interp::jit_suppressed`]), a native-tier type (the self-hosted
+    /// compiler island's own `llvm-*`/`Scope<llvm-value>` closures — see
+    /// [`Interp::is_jit_tier_ty`]; classifying these as benign is also what
+    /// keeps `Require` from panicking *inside* a reentrant
+    /// `compile-function` run, whose own `labels`/`lambda`s are all
+    /// native-tier), the compiler island not being loaded at all (the plain
+    /// `typl` CLI/REPL never calls `load_compiler`, so there is nothing to
+    /// JIT *with*), and heap exhaustion mid-JIT (a resource condition of
+    /// the moment, not a representational hole). Even `Require` mode falls
+    /// back silently on these.
+    Benign(String),
+    /// A real, actionable hole in compiled coverage (an uncompiled call
+    /// target, an `&rest` closure, a constructor-JIT failure, ...) —
+    /// `Require` escalates this to a hard [`EvalError::Panic`] so Stage 8
+    /// work can find and fix it; `Prefer` still falls back silently.
+    Gap(String),
+}
+
+impl JitDecline {
+    /// The human-readable reason, for `TYPELISP_CLOSURE_JIT_LOG`/`Require`
+    /// diagnostics.
+    fn reason(&self) -> &str {
+        match self {
+            JitDecline::Benign(r) | JitDecline::Gap(r) => r,
+        }
+    }
+
+    /// Classifies an error out of the constructor-JIT pipeline
+    /// ([`Interp::jit_compile_closure_ctor`]'s `translate_and_compile` →
+    /// `apply`(`compile-function`) → verify → JIT chain): heap exhaustion is
+    /// [`JitDecline::Benign`] (see that variant's doc comment), everything
+    /// else a real [`JitDecline::Gap`]. Matching on the rendered message is
+    /// deliberate: `typelisp-mem`'s `Error::HeapExhausted` has long been
+    /// stringified into [`EvalError::Panic`] by the time it crosses
+    /// `Interp::apply`, and the needle is built from the variant's own
+    /// `Display` (not a copied literal) so the two can never drift apart.
+    fn from_ctor_error(msg: String) -> JitDecline {
+        if msg.contains(&crate::mem::Error::HeapExhausted.to_string()) {
+            JitDecline::Benign(format!("constructor JIT failed: {}", msg))
+        } else {
+            JitDecline::Gap(format!("constructor JIT failed: {}", msg))
+        }
+    }
+}
+
 impl Interp {
     pub fn new() -> Interp {
         // A fresh `Interp` always pairs with a fresh `Heap` (every caller in
@@ -435,32 +490,38 @@ impl Interp {
     /// `CompiledFn::call`, and its `i64` result is the finished
     /// `BoxedObj::CompiledClosure`'s own tagged encoding — built once by
     /// `rt_closure_new`, never touched by Rust at all.
-    fn jit_define_closure(&self, heap: &mut Heap, env: &Env, t: &Typed, captured: &[(String, Type)]) -> Result<RtValue, String> {
+    fn jit_define_closure(&self, heap: &mut Heap, env: &Env, t: &Typed, captured: &[(String, Type)]) -> Result<RtValue, JitDecline> {
         match jit_mode() {
-            JitMode::Off => return Err("TYPELISP_CLOSURE_JIT=off".to_string()),
+            JitMode::Off => return Err(JitDecline::Benign("TYPELISP_CLOSURE_JIT=off".to_string())),
             JitMode::Prefer | JitMode::Require => {}
         }
         if self.jit_suppressed.get() > 0 {
-            return Err("suppressed during macro expansion".to_string());
+            return Err(JitDecline::Benign("suppressed during macro expansion".to_string()));
+        }
+        // No self-hosted compiler island loaded means there is nothing to
+        // JIT *with* — the plain `typl` CLI/REPL never calls
+        // `load_compiler`, so this is an expected environment, not a gap.
+        if !self.fns.contains_key(&Path::root("compile-function")) {
+            return Err(JitDecline::Benign("compiler island not loaded".to_string()));
         }
         let (param_tys, rest, ret_ty) = match &t.ty {
             Type::Fn(p, r, ret) => (p, r, ret),
-            other => return Err(format!("internal: closure value has non-Fn type {:?}", other)),
+            other => return Err(JitDecline::Gap(format!("internal: closure value has non-Fn type {:?}", other))),
         };
         if rest.is_some() {
-            return Err("&rest closures are not yet definition-time-JIT-able".to_string());
+            return Err(JitDecline::Gap("&rest closures are not yet definition-time-JIT-able".to_string()));
         }
         if !self.is_jit_tier_ty(ret_ty) {
-            return Err(format!("return type {:?} has no compiled representation", ret_ty));
+            return Err(JitDecline::Benign(format!("return type {:?} has no compiled representation", ret_ty)));
         }
         for ty in param_tys {
             if !self.is_jit_tier_ty(ty) {
-                return Err(format!("parameter type {:?} has no compiled representation", ty));
+                return Err(JitDecline::Benign(format!("parameter type {:?} has no compiled representation", ty)));
             }
         }
         for (name, ty) in captured {
             if !self.is_jit_tier_ty(ty) {
-                return Err(format!("captured name \"{}\" has type {:?} with no compiled representation", name, ty));
+                return Err(JitDecline::Benign(format!("captured name \"{}\" has type {:?} with no compiled representation", name, ty)));
             }
         }
         // Every captured name must already be bound to a GC cell — the
@@ -473,8 +534,8 @@ impl Interp {
         for (name, _ty) in captured {
             match env.iter().rev().find(|(n, _)| n == name) {
                 Some((_, Slot::Heap(id))) | Some((_, Slot::TypedCell(id, _))) => cell_ids.push((name.clone(), id.clone())),
-                Some((_, Slot::Native(_))) => return Err(format!("captured name \"{}\" is not yet cell-bound", name)),
-                None => return Err(format!("internal: captured name \"{}\" not found in env", name)),
+                Some((_, Slot::Native(_))) => return Err(JitDecline::Gap(format!("captured name \"{}\" is not yet cell-bound", name))),
+                None => return Err(JitDecline::Gap(format!("internal: captured name \"{}\" not found in env", name))),
             }
         }
         // Every `Expr::Call`/`Expr::Assoc` target `t`'s body reaches must
@@ -494,7 +555,7 @@ impl Interp {
             .collect();
         for p in &call_targets {
             if !self.compiled.borrow().contains_key(p) {
-                return Err(format!("call target \"{}\" is not yet compiled", p));
+                return Err(JitDecline::Gap(format!("call target \"{}\" is not yet compiled", p)));
             }
         }
         let assoc_targets: Vec<(Path, String)> = crate::compile::ast_bridge::collect_assoc_targets(t)
@@ -513,7 +574,7 @@ impl Interp {
             .collect();
         for (p, m) in &assoc_targets {
             if !self.compiled_methods.borrow().contains_key(&(p.clone(), m.clone())) {
-                return Err(format!("method target \"{}::{}\" is not yet compiled", p.local(), m));
+                return Err(JitDecline::Gap(format!("method target \"{}::{}\" is not yet compiled", p.local(), m)));
             }
         }
 
@@ -524,7 +585,7 @@ impl Interp {
             None => {
                 let ctor = self
                     .jit_compile_closure_ctor(heap, t, captured, &call_targets, &assoc_targets)
-                    .map_err(|e| format!("constructor JIT failed: {}", e))?;
+                    .map_err(JitDecline::from_ctor_error)?;
                 let ctor = Rc::new(ctor);
                 if let Some(k) = cache_key {
                     self.jit_ctor_cache.borrow_mut().insert(k, ctor.clone());
@@ -609,15 +670,18 @@ impl Interp {
 
     /// The shared policy every `Expr::Lambda`/`Labels`/`FnRef`/`MethodRef`
     /// eval arm applies around [`Self::jit_define_closure`]: on success,
-    /// use it; on failure, `JitMode::Require` promotes the failure reason
-    /// to a hard error (Stage 8's coverage-gap discovery switch — see
-    /// `JitMode`'s doc comment), otherwise (`Prefer`, the default, or
-    /// `Off`, which `jit_define_closure` itself already turns into an
-    /// immediate `Err`) silently calls `fallback` — silently unless
-    /// `TYPELISP_CLOSURE_JIT_LOG` is set, since `Prefer` mode's fallback is
-    /// still the common case for most programs until Stage 8 grows
-    /// coverage, and every existing test would otherwise spew a fallback
-    /// reason per closure evaluated.
+    /// use it; on a [`JitDecline::Gap`] failure, `JitMode::Require`
+    /// promotes the failure reason to a hard error (Stage 8's coverage-gap
+    /// discovery switch — see `JitMode`'s doc comment) while a
+    /// [`JitDecline::Benign`] one falls back even under `Require` (see
+    /// `JitDecline`'s doc comment for the classification — these are the
+    /// fallbacks Stage 9 permanently keeps); otherwise (`Prefer`, the
+    /// default, or `Off`, which `jit_define_closure` itself already turns
+    /// into an immediate benign decline) silently calls `fallback` —
+    /// silently unless `TYPELISP_CLOSURE_JIT_LOG` is set, since `Prefer`
+    /// mode's fallback is still the common case for most programs until
+    /// Stage 8 grows coverage, and every existing test would otherwise spew
+    /// a fallback reason per closure evaluated.
     fn jit_or_make_closure(
         &self,
         heap: &mut Heap,
@@ -638,17 +702,19 @@ impl Interp {
     fn jit_result_or_make_closure(
         &self,
         heap: &mut Heap,
-        result: Result<RtValue, String>,
+        result: Result<RtValue, JitDecline>,
         fallback: impl FnOnce(&mut Heap) -> RtValue,
     ) -> Result<RtValue, EvalError> {
         match result {
             Ok(v) => Ok(v),
-            Err(reason) => {
+            Err(decline) => {
                 if jit_mode() == JitMode::Require {
-                    return Err(EvalError::Panic(format!("TYPELISP_CLOSURE_JIT=require: definition-time JIT failed: {}", reason)));
+                    if let JitDecline::Gap(reason) = &decline {
+                        return Err(EvalError::Panic(format!("TYPELISP_CLOSURE_JIT=require: definition-time JIT failed: {}", reason)));
+                    }
                 }
                 if std::env::var_os("TYPELISP_CLOSURE_JIT_LOG").is_some() {
-                    eprintln!("closure JIT fallback: {}", reason);
+                    eprintln!("closure JIT fallback: {}", decline.reason());
                 }
                 Ok(fallback(heap))
             }
@@ -1073,7 +1139,7 @@ impl Interp {
                         let synthetic = Typed::new(Expr::Lambda { params: params.clone(), body: fbody.clone() }, fn_ty);
                         self.jit_define_closure(heap, &child, &synthetic, &captured)
                     } else {
-                        Err("a declared parameter or the return type has no compiled representation".to_string())
+                        Err(JitDecline::Benign("a declared parameter or the return type has no compiled representation".to_string()))
                     };
                     let closure = self.jit_result_or_make_closure(heap, jit_result, |heap| {
                         let kinds: Vec<(String, SlotKind)> = params
@@ -1196,7 +1262,7 @@ impl Interp {
                     let captured = crate::compile::freevars::lambda_free_vars(params, body);
                     self.jit_define_closure(heap, env, t, &captured)
                 } else {
-                    Err("a declared parameter has no compiled representation".to_string())
+                    Err(JitDecline::Benign("a declared parameter has no compiled representation".to_string()))
                 };
                 self.jit_result_or_make_closure(heap, jit_result, |heap| {
                     // Capture the current environment (shared slots) for the
