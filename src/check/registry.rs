@@ -425,8 +425,8 @@ impl Registry {
         // builtins (`Interp::eval_builtin`) so the island no longer needs the
         // user-facing `match` at all. Each panics on a tag mismatch, preserving
         // the old defuns' `(_ (panic ...))` contract. `sexpr-symp` is the tag
-        // predicate its two non-panic-fallback callers (`form-is-borrowed?`/
-        // `bare-returned-own-name`) need to branch on a `Sym` node — a peer of
+        // predicate its non-panic-fallback caller (`form-is-borrowed?`) needs
+        // to branch on a `Sym` node — a peer of
         // `sexpr-consp`/`sexpr-null`/`sexpr-atom`.
         root.fns.insert("sexpr-int".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::I64, public: true, builtin: true, bounds: HashMap::new() });
         root.fns.insert("sexpr-float".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: Type::F64, public: true, builtin: true, bounds: HashMap::new() });
@@ -998,7 +998,8 @@ fn llvm_builder_def() -> AdtDef {
     // `build-fadd`/..., these need the module to look the intrinsic
     // declaration up in (`eval_llvm_builtin_method`'s
     // `llvm_builder_build_float_unary_intrinsic`), so they take `llvm-module`
-    // as a second argument the same way `build-closure-release` does.
+    // as a second argument the same way `build-make-closure`/
+    // `build-closure-apply` do.
     for name in ["build-fsqrt", "build-ffloor", "build-fceil", "build-fround", "build-ftrunc"] {
         assoc.insert(name.to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty()], llvm_value_ty(), true));
     }
@@ -1045,73 +1046,51 @@ fn llvm_builder_def() -> AdtDef {
             true,
         ),
     );
-    // `build-make-closure`/`build-closure-env-get`/`build-closure-apply`/
-    // `build-closure-retain`/`build-closure-release`: a `ClosureBox` — the
-    // runtime representation of a `lambda` value that *escapes* its defining
-    // function (rather than being called directly while statically known,
-    // like every `apply`/`call` site above) — labels/closures Stage 4.
-    // Heap-allocated (`malloc`/`free`, not a Rust-side runtime shim — see
-    // `compile::CompiledFn`'s module doc comment for the staticlib
-    // alternative this replaces) with a fixed `i64` layout: `fn_ptr`,
-    // `env_len`, `refcount`, then `env_len` captured values inline. The
-    // resulting `i64` *is* the closure value, exactly like every other
-    // compiled value — see `registry::llvm_module_def`'s doc comment for why
-    // every compiled value is a plain, untagged `i64`.
+    // `build-make-closure`/`build-closure-apply`: `BoxedObj::CompiledClosure`
+    // (`typelisp-mem`) — the GC-heap runtime representation of a `lambda`
+    // value that *escapes* its defining function (rather than being called
+    // directly while statically known, like every `apply`/`call` site
+    // above) — labels/closures Stage 4, flipped off the raw `malloc`'d,
+    // reference-counted `ClosureBox` it used to be at the closure-
+    // representation unification (see that variant's own doc comment). The
+    // resulting value is a tagged `Sexpr` reference, exactly like every
+    // other `BoxedObj` constructor's result (`rt_struct_new`, `rt_data_new`,
+    // ...) — no longer a bare untagged `i64` the way the old `ClosureBox`
+    // pointer was.
     //
     // `build-make-closure` takes the already-compiled `target` (declared
     // under `add-function-with-env`'s ABI — *every* closure-boxed function
     // uses that ABI, capturing or not, so `build-closure-apply` never has to
-    // decide which ABI to call through) and an env array built the same way
-    // a direct capturing call already builds one (`alloca-args`/`store-arg`/
-    // `compile-env-args`), copying it into the new heap box rather than
-    // passing it straight through (the stack array doesn't outlive this
-    // call). `build-closure-env-get` is `load-env`'s closure-value
-    // counterpart (reads a captured slot back out of the box itself, for the
-    // *nested* function's own body — the closure-boxed function still reads
-    // its captures via `load-env`/its own env parameter, never this one;
-    // this one is for code holding the closure *value* from the outside).
+    // decide which ABI to call through), an env array built the same way a
+    // direct capturing call already builds one (`alloca-args`/`store-arg`/
+    // `compile-env-args`), and `sexpr_mask` (a bitmask, one bit per captured
+    // slot, computed entirely at compile time by `compiler.rs`'s
+    // `compute-sexpr-mask`) marking which captured slots are tagged `Sexpr`
+    // values for the GC mark phase to trace — see
+    // `interp::llvm_builder_build_make_closure`'s doc comment for how it
+    // gets copied into the new box via `rt_closure_new`.
     // `build-closure-apply` is `build-call-with-env`'s indirect counterpart:
-    // the callee isn't a statically-known `llvm-function` here, just an
-    // `i64` value, so it loads `fn_ptr`/`env_len`/the env pointer out of the
-    // box at runtime and calls through `build_indirect_call` instead.
-    // `build-closure-retain` increments the refcount and returns the closure
-    // itself (chainable); `build-closure-release` decrements it and, once it
-    // reaches zero, recursively releases any captured slot `fn_mask` marks
-    // as itself `Fn`-typed before freeing the box (automatic retain/release
-    // insertion, a follow-up to labels/closures Stage 4 — see
-    // `compiler.rs`'s `resolve-value`/`compile-lambda` for where retains are
-    // inserted on the way in). `build-make-closure`'s `fn_mask` (a bitmask,
-    // one bit per captured slot, computed entirely at compile time by
-    // `compiler.rs`'s `compute-fn-mask`) is what makes that cascade
-    // possible — without it, `build-closure-release` would have no way to
-    // tell a captured closure pointer apart from an ordinary `i64` at
-    // runtime. A true reference cycle between two `ClosureBox`es still isn't
-    // constructible under this design (see `resolve-value`'s doc comment),
-    // so the cascade's recursion is always finite in practice even though
-    // nothing here guards against one.
+    // the callee isn't a statically-known `llvm-function` here, just a
+    // tagged closure reference, so it reads `fn_ptr`/`env_len`/each captured
+    // slot back out via `rt_closure_fnptr`/`rt_closure_env_len`/
+    // `rt_closure_env_get` at runtime and calls through
+    // `build_indirect_call` instead — see that builtin's own doc comment.
+    // Neither builtin needs a retain/release counterpart anymore: the box's
+    // lifetime is the GC's business now, including a `labels` cycle between
+    // two mutually-capturing siblings, which mark-sweep reclaims like any
+    // other unreachable structure.
     assoc.insert(
         "build-make-closure".to_string(),
-        assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty(), Type::I32, Type::I64], llvm_value_ty(), true),
-    );
-    assoc.insert(
-        "build-closure-env-get".to_string(),
-        assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
+        assoc_fn(
+            vec![llvm_builder_ty(), llvm_module_ty(), llvm_function_ty(), llvm_value_ty(), Type::I32, Type::I64],
+            llvm_value_ty(),
+            true,
+        ),
     );
     assoc.insert(
         "build-closure-apply".to_string(),
-        assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
+        assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty(), Type::I32], llvm_value_ty(), true),
     );
-    assoc.insert("build-closure-retain".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
-    assoc.insert(
-        "build-closure-release".to_string(),
-        assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty()], Type::Unit, true),
-    );
-    // Test-only: reads a `ClosureBox`'s refcount slot directly, as an
-    // ordinary `llvm-value` — never called from `compiler.rs` itself, only
-    // from `tests/compile_test.rs` to verify the automatic retain/release
-    // insertion work, see `interp::llvm_builder_debug_closure_refcount`'s
-    // doc comment.
-    assoc.insert("debug-closure-refcount".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty()], llvm_value_ty(), true));
     // The generic-pointer read counterpart of `store-arg` — see
     // `interp::llvm_builder_load_raw`'s doc comment.
     assoc.insert(

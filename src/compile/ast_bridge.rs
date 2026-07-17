@@ -198,11 +198,17 @@ fn ratio_literal_form(heap: &mut Heap, r: &num_rational::BigRational) -> Result<
     result
 }
 
-/// `binding_kind`'s three possible results — see that function's doc
-/// comment. Kept as plain `i64` constants (not a Rust enum) since the only
-/// thing that ever consumes one is `compiler.rs`, as a `Sexpr` `Int`.
+/// `binding_kind`'s two possible results — see that function's doc comment.
+/// Kept as plain `i64` constants (not a Rust enum) since the only thing that
+/// ever consumes one is `compiler.rs`, as a `Sexpr` `Int`. A third value (`1`,
+/// formerly `KIND_FN`) existed before the closure-representation unification:
+/// a `Fn`-typed binding got its own `ClosureBox` retain/release treatment,
+/// distinct from `Sexpr`'s GC-root push/pop. Since a compiled closure is now
+/// itself a GC-heap `BoxedObj::CompiledClosure` (`typelisp-mem`) — a tagged
+/// value exactly like any other `Sexpr` — it needs the very same root
+/// protection, nothing ARC-specific, so `Type::Fn` now maps to `KIND_SEXPR`
+/// below and `1` is retired rather than reassigned.
 const KIND_PLAIN: i64 = 0;
-const KIND_FN: i64 = 1;
 const KIND_SEXPR: i64 = 2;
 
 /// Whether `ty` is the built-in `Sexpr` type — shared by every place that
@@ -259,27 +265,29 @@ fn match_scrut_kind(ty: &Type, cx: Ctx) -> Option<i64> {
 /// Classifies a bound name's (or `let` binding's) static type for the
 /// per-binding bookkeeping `compiler.rs` must do at the point such a value
 /// crosses a binding boundary (a function's own parameters/captures, a
-/// `let` binding): a `Fn`-typed one needs `ClosureBox` retain/release
-/// (labels/closures Stage 4); a `Sexpr`-typed *or* `Str`-typed one needs
-/// GC-root push/pop instead (Stage 6 of the Sexpr-representation plan,
-/// `docs/implementation-log.md` — the "Sexprルート挿入パス"; `Str` joins it
-/// in Stage 7) — a tagged `i64` that may point into the GC-managed cons/
-/// string heap, never something `build-closure-retain`/`build-closure-release`
-/// could safely touch; anything else needs neither. `Str` reuses `KIND_SEXPR`
-/// rather than a fourth tag of its own because a bare `Type::Str` value's
-/// compiled representation *is* the exact same tagged immediate a
-/// `Sexpr::Str` is (`compiler.rs`'s `compile-sexpr-field`/
-/// `compile-construct-sexpr` doc comments) — the same `rt_push_sexpr_root`/
+/// `let` binding): a `Sexpr`-typed, `Str`-typed, *or* `Fn`-typed one needs
+/// GC-root push/pop (Stage 6 of the Sexpr-representation plan,
+/// `docs/implementation-log.md` — the "Sexprルート挿入パス"; `Str` joined in
+/// Stage 7, `Fn` at the closure-representation unification) — a tagged `i64`
+/// that may point into the GC-managed cons/string/closure heap; anything
+/// else needs no protection at all. `Str`/`Fn` reuse `KIND_SEXPR` rather than
+/// a tag of their own because their compiled representation *is* the exact
+/// same tagged immediate a `Sexpr::Str`/a `BoxedObj::CompiledClosure`
+/// reference already is (`compiler.rs`'s `compile-sexpr-field`/
+/// `compile-construct-sexpr` doc comments; `crate::mem::BoxedObj`'s own doc
+/// comment for the closure case) — the same `rt_push_sexpr_root`/
 /// `rt_pop_sexpr_root` calls this drives already protect it correctly with
-/// no changes of their own. A single `kind` tag (rather than independent
-/// booleans) keeps the cases mutually exclusive by construction, the same
-/// way a `Typed` node has exactly one static type — see `compiler.rs`'s
-/// `retain-bindings`/`release-bindings`/`bind-let-values`/`restore-let-values`.
+/// no changes of their own. A `Fn`-typed binding used to get its own
+/// `ClosureBox` retain/release treatment instead (`KIND_FN`, labels/closures
+/// Stage 4) — retired along with that ARC scheme once a compiled closure
+/// became an ordinary GC-heap value with nothing to refcount. A single
+/// `kind` tag (rather than independent booleans) keeps the cases mutually
+/// exclusive by construction, the same way a `Typed` node has exactly one
+/// static type — see `compiler.rs`'s `retain-bindings`/`release-bindings`/
+/// `bind-let-values`.
 fn binding_kind(ty: &Type, enums: &HashSet<Path>) -> i64 {
-    if matches!(ty, Type::Fn(..)) {
-        KIND_FN
-    } else if is_sexpr_type(ty)
-        || matches!(ty, Type::Str | Type::Bignum | Type::Ratio)
+    if is_sexpr_type(ty)
+        || matches!(ty, Type::Str | Type::Bignum | Type::Ratio | Type::Fn(..))
         || is_enum_ty(ty, enums)
     {
         // `bignum`/`ratio` join `Str` here for the same reason
@@ -295,7 +303,10 @@ fn binding_kind(ty: &Type, enums: &HashSet<Path>) -> i64 {
         // enum type compiled code can ever mention is heap-repr by
         // construction — see `struct_field_kind`'s doc comment), not the
         // un-GC-managed leaked `malloc` box the pre-flip design never
-        // needed root protection for.
+        // needed root protection for. `Type::Fn` joins them since the
+        // closure-representation unification: a compiled closure is now a
+        // `BoxedObj::CompiledClosure` reference the same way, not the
+        // un-GC-managed `ClosureBox` the old ARC scheme protected instead.
         KIND_SEXPR
     } else {
         KIND_PLAIN
@@ -886,12 +897,15 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
 /// `Fn`-ness — the same per-node tag `Expr::Var`'s own `(var name is-fn)`
 /// carries — because `if` doesn't introduce a function boundary the way a
 /// `call`/`apply`/`labels`/`lambda` result does: nothing here automatically
-/// "freshens" a branch's value the way `bare-returned-own-name`/R1-R4 do at an
-/// actual function exit. `compiler.rs`'s `compile-if` reads this tag to know
-/// whether it must retain a *borrowed* branch value before it can safely flow
-/// out as the `if`'s own (necessarily fresh, by the time any caller sees it)
-/// result — see that function's doc comment for the full reasoning. Every
-/// other compiled node shape here is already either inherently fresh
+/// "freshens" a branch's value the way an actual function exit does.
+/// `compiler.rs`'s `compile-if` reads this tag — historically to decide
+/// whether it must retain a *borrowed* `Fn`-typed branch value before it
+/// could safely flow out as the `if`'s own result (retired at the
+/// closure-representation unification, once a compiled closure became an
+/// ordinary GC-heap value with nothing to retain); `is-fn` remains on this
+/// node shape only so `compile-if`/`compile-if-branch` don't need a
+/// separate call convention. Every other compiled node shape here is
+/// already either inherently fresh
 /// (`int`/`bool`/arithmetic/a fresh `lambda`/`labels` box) or a function
 /// boundary that already freshens its result, so `if` is the one place this
 /// module needs to carry that information explicitly rather than letting

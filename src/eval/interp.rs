@@ -19,9 +19,8 @@ use std::rc::{Rc, Weak};
 
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
-use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{BasicValueEnum, FunctionValue};
 use inkwell::AddressSpace;
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -1694,15 +1693,9 @@ impl Interp {
             }));
         }
         externals.extend(rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)));
-        // A no-op on everything this typelisp-hosted compiler body emits
-        // today (see that pass's own doc comment) — run unconditionally
-        // anyway, the same "cheap, provably-safe cleanup pass" spirit as
-        // running an optimizer at `OptimizationLevel::None` costs nothing
-        // when it finds nothing to do.
-        crate::compile::arc_opt::eliminate_redundant_retain_release_pairs(&module.borrow());
         // Mirrors `compile::aot::compile_file`'s own `verify()` call in the
-        // same position (after `arc_opt`, before handing the module to LLVM
-        // for real): a typelisp-hosted `compiler.rs` bug that emits
+        // same position, before handing the module to LLVM for real: a
+        // typelisp-hosted `compiler.rs` bug that emits
         // instructions after a block's terminator (the `compile-let`
         // GC-root-leak fix's own doc comment names this exact risk) would
         // otherwise reach `CompiledFn::new`'s `create_jit_execution_engine`
@@ -1953,9 +1946,9 @@ impl Interp {
                 _ => Some(Err(EvalError::Internal("sexpr-sym-name: expected a Sexpr argument".into()))),
             },
             // `sexpr-symp`: the tag predicate a `match (car x) ((Sym s) ...) (_ ...))`
-            // with a *non-panic* fallback rewrites to (`form-is-borrowed?`/
-            // `bare-returned-own-name` in `compiler.rs`) — a peer of
-            // `sexpr-consp`/`sexpr-null`/`sexpr-atom`, reading the tag directly.
+            // with a *non-panic* fallback rewrites to (`form-is-borrowed?` in
+            // `compiler.rs`) — a peer of `sexpr-consp`/`sexpr-null`/`sexpr-atom`,
+            // reading the tag directly.
             "sexpr-symp" => match args.first() {
                 Some(RtValue::Sexpr(v)) => Some(Ok(RtValue::Bool(matches!(v, Value::Symbol(_))))),
                 Some(_) => Some(Err(EvalError::Internal("sexpr-symp: expected a Sexpr argument".into()))),
@@ -2866,11 +2859,7 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "load-env" => Some(llvm_builder_load_env(args)),
             "build-call-with-env" => Some(llvm_builder_build_call_with_env(args)),
             "build-make-closure" => Some(llvm_builder_build_make_closure(args)),
-            "build-closure-env-get" => Some(llvm_builder_build_closure_env_get(args)),
             "build-closure-apply" => Some(llvm_builder_build_closure_apply(args)),
-            "build-closure-retain" => Some(llvm_builder_build_closure_retain(args)),
-            "build-closure-release" => Some(llvm_builder_build_closure_release(args)),
-            "debug-closure-refcount" => Some(llvm_builder_debug_closure_refcount(args)),
             "load-raw" => Some(llvm_builder_load_raw(args)),
             "build-icmp-lt" => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
             "build-icmp-le" => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
@@ -3013,10 +3002,10 @@ pub(crate) fn is_rt_builtin_name(name: &str) -> bool {
 /// Sexpr-representation plan, `docs/implementation-log.md` — the "Sexprルート挿入パス"):
 /// unlike `rt_car`/.../`rt_match_fail`, nothing here rewrites a *user-visible*
 /// call name to reach these (`is_rt_builtin_name`'s list is unchanged) —
-/// `compiler.rs`'s `retain-bindings`/`release-bindings`/`bind-let-values`/
-/// `restore-let-values` call them directly via `get-function`/`build-call`,
-/// the same way `release-pending-args` calls `build-closure-release`
-/// directly rather than through the `(call name args)` tag. They still need
+/// `compiler.rs`'s `retain-bindings`/`release-bindings`/`bind-let-values`
+/// call them directly via `get-function`/`build-call`, the same way
+/// `build-make-closure`/`build-closure-apply` call `rt_closure_*` directly
+/// rather than through the `(call name args)` tag. They still need
 /// the same forward-declaration/global-mapping treatment as every other
 /// `rt_*` shim, so they belong in this one shared list regardless.
 ///
@@ -3548,8 +3537,8 @@ fn llvm_builder_build_icmp(args: &[RtValue], name: &str, predicate: inkwell::Int
 /// `compile-if`'s branch primitive: branches to `then_block` when `cond`
 /// (an ordinary `i64`-valued `llvm-value`) is nonzero, `else_block`
 /// otherwise — built from an `icmp ne cond, 0` plus a conditional branch, the
-/// same shape [`get_or_define_closure_release_fn`] already uses internally
-/// for its own null/refcount checks.
+/// same shape [`llvm_builder_build_closure_apply`] already uses internally
+/// for its own env-loop bounds check.
 fn llvm_builder_build_cond_br(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let cond = expect_llvm_value(&args[1])?.into_int_value();
@@ -3640,378 +3629,218 @@ fn llvm_builder_build_call_with_env(args: &[RtValue]) -> Result<RtValue, EvalErr
     }
 }
 
-/// A `ClosureBox`'s fixed heap layout (labels/closures Stage 4): 4 header
-/// slots, then `env_len` captured `i64` values inline right after — see
-/// `registry::llvm_builder_def`'s doc comment on `build-make-closure` for
-/// why this exists at all (a `lambda` value that *escapes* its defining
-/// function, rather than being called directly while still statically
-/// resolvable — `compile-apply`/`compile-call`'s direct-call scope).
-const CLOSURE_HEADER_SLOTS: u64 = 4;
-const CLOSURE_FN_PTR_SLOT: u64 = 0;
-const CLOSURE_ENV_LEN_SLOT: u64 = 1;
-const CLOSURE_REFCOUNT_SLOT: u64 = 2;
-/// A bitmask, one bit per captured slot (so up to 64 captures), marking
-/// which of a `ClosureBox`'s captured values are themselves `Fn`-typed —
-/// the automatic retain/release insertion work's piece of per-box metadata,
-/// computed entirely at compile time (`compiler.rs`'s `compute-fn-mask`)
-/// from the static types already known for every captured name. Needed so
-/// [`get_or_define_closure_release_fn`]'s cascading release (a box being
-/// freed must also release any closure-typed values it captured — the
-/// `Drop`/`deinit`-cascade counterpart of `compile-lambda`'s/`resolve-value`'s
-/// retain at capture time) knows, at *runtime*, which slots to recurse into
-/// without corrupting an ordinary `i64` by treating it as a pointer.
-const CLOSURE_FN_MASK_SLOT: u64 = 3;
-
-/// GEPs to slot `slot` of a `ClosureBox` whose base address is `base` — the
-/// same flat-`i64`-array GEP pattern [`llvm_builder_load_arg`]/
-/// [`llvm_builder_store_arg`] already use for the args/env arrays, just
-/// against heap-allocated closure storage instead of a stack one.
-fn closure_slot_ptr(b: &Builder<'static>, base: PointerValue<'static>, slot: u64) -> Result<PointerValue<'static>, EvalError> {
-    let ctx = crate::compile::llvm_context();
-    let idx_val = ctx.i64_type().const_int(slot, false);
-    unsafe {
-        b.build_gep(ctx.i64_type(), base, &[idx_val], "closure_slot_ptr")
-            .map_err(|e| EvalError::Internal(format!("closure: {}", e)))
-    }
-}
-
-/// The dynamic-index counterpart of [`closure_slot_ptr`] — `idx` is a
-/// runtime `i64` value rather than a compile-time constant, for
-/// [`get_or_define_closure_release_fn`]'s captured-slot scan (the number of
-/// captures, and which slot index is being visited, are only known once the
-/// loop is actually running).
-fn closure_slot_ptr_dyn(
-    b: &Builder<'static>,
-    base: PointerValue<'static>,
-    idx: inkwell::values::IntValue<'static>,
-) -> Result<PointerValue<'static>, EvalError> {
-    let ctx = crate::compile::llvm_context();
-    unsafe {
-        b.build_gep(ctx.i64_type(), base, &[idx], "closure_slot_ptr_dyn")
-            .map_err(|e| EvalError::Internal(format!("closure: {}", e)))
-    }
-}
-
-fn store_closure_slot(
-    b: &Builder<'static>,
-    base: PointerValue<'static>,
-    slot: u64,
-    value: BasicValueEnum<'static>,
-    who: &str,
-) -> Result<(), EvalError> {
-    let ptr = closure_slot_ptr(b, base, slot)?;
-    b.build_store(ptr, value).map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))?;
-    Ok(())
-}
-
-fn load_closure_slot(b: &Builder<'static>, base: PointerValue<'static>, slot: u64, who: &str) -> Result<inkwell::values::IntValue<'static>, EvalError> {
-    let ptr = closure_slot_ptr(b, base, slot)?;
-    let ctx = crate::compile::llvm_context();
-    b.build_load(ctx.i64_type(), ptr, "closure_slot_val")
-        .map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))
-        .map(|v| v.into_int_value())
-}
-
-/// Reinterprets a closure `i64` value back into the `ClosureBox` pointer it
-/// actually is — the inverse of `build-make-closure`'s final `ptrtoint`.
-fn closure_box_ptr(b: &Builder<'static>, closure: BasicValueEnum<'static>, who: &str) -> Result<PointerValue<'static>, EvalError> {
-    let ctx = crate::compile::llvm_context();
-    let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    b.build_int_to_ptr(closure.into_int_value(), ptr_ty, "closure_box_ptr")
-        .map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))
-}
-
-/// Heap-allocates a `ClosureBox` wrapping `target` (a function declared via
-/// `add-function-with-env` — see `compiled_fn_type_with_env`'s doc comment
-/// for why *every* closure-boxed function uses that ABI) and a copy of
-/// `env`'s `env_len` values (an already-built `alloca-args`/`store-arg`
-/// array — the same shape a direct capturing call already builds, see
-/// `compiler.rs`'s `compile-env-args`). Uses `Builder::build_array_malloc`
-/// (LLVM's legacy `malloc`-declaring IR helper, not a Rust-side runtime
-/// shim — see `registry::llvm_builder_def`'s doc comment for that decision):
-/// `malloc`/`free` are ordinary, already-linked C library symbols on both
-/// backends (AOT's `cc` step links libc by default; MCJIT resolves
-/// unmapped externals against the host process's own symbol table by
-/// default, and this process is itself linked against libc) — unlike
-/// Stage 3's cross-`compile`-call case, no `add_global_mapping` wiring is
-/// needed here at all. `fn_mask` (automatic retain/release insertion
-/// follow-up) is stored verbatim into `CLOSURE_FN_MASK_SLOT` — a bitmask,
-/// computed entirely at compile time by `compiler.rs`'s `compute-fn-mask`,
-/// of which captured slots are themselves `Fn`-typed, so
-/// [`get_or_define_closure_release_fn`]'s cascading release knows which
-/// slots to recurse into when this box is finally freed.
+/// Heap-allocates a `BoxedObj::CompiledClosure` (`typelisp-mem`) wrapping
+/// `target` (a function declared via `add-function-with-env` — see
+/// `compiled_fn_type_with_env`'s doc comment for why *every* closure-boxed
+/// function uses that ABI) and a copy of `env`'s `env_len` values (an
+/// already-built `alloca-args`/`store-arg` array — the same shape a direct
+/// capturing call already builds, see `compiler.rs`'s `compile-env-args`).
+/// The closure-representation unification's flip of the retired
+/// `ClosureBox` (a raw `malloc`'d, reference-counted block the GC never saw)
+/// to a GC-heap value: builds a scratch `rt_closure_new` argument array
+/// (`target`'s raw address, `sexpr_mask`, then each captured slot copied
+/// verbatim from `env_ptr`) and calls it through the ordinary `rt_*` FFI
+/// convention every other `BoxedObj` constructor uses (`rt_struct_new`,
+/// `rt_data_new`, ...) — `rt_closure_new` is unconditionally forward-declared
+/// into every module (`rt_extern_functions`), so `target`'s own parent module
+/// already has it. `sexpr_mask` (`compiler.rs`'s `compute-sexpr-mask`) is
+/// passed straight through unchanged: it marks which captured slots are
+/// tagged `Sexpr` values for `rt_closure_new` to `decode`, exactly the mask
+/// [`BoxedObj::CompiledClosure`]'s own doc comment describes.
 fn llvm_builder_build_make_closure(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
-    let target = expect_llvm_function(&args[1])?;
-    let env_ptr = expect_llvm_value(&args[2])?.into_pointer_value();
-    let env_len = match &args[3] {
+    let module = expect_llvm_module(&args[1])?;
+    let target = expect_llvm_function(&args[2])?;
+    let env_ptr = expect_llvm_value(&args[3])?.into_pointer_value();
+    let env_len = match &args[4] {
         RtValue::Int(n) => *n as u64,
         other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
     };
-    let fn_mask = match &args[4] {
+    let sexpr_mask = match &args[5] {
         RtValue::Int(n) => *n as u64,
         other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
     };
     let ctx = crate::compile::llvm_context();
     let b = builder.borrow();
-    let total_slots = ctx.i64_type().const_int(CLOSURE_HEADER_SLOTS + env_len, false);
-    let box_ptr = b
-        .build_array_malloc(ctx.i64_type(), total_slots, "closure_box")
+    let module = module.borrow();
+    let rt_closure_new = module
+        .get_function("rt_closure_new")
+        .ok_or_else(|| EvalError::Internal("build-make-closure: rt_closure_new not declared in this module".into()))?;
+
+    let i64_ty = ctx.i64_type();
+    let argc = 2 + env_len;
+    let ctor_args_ptr = b
+        .build_alloca(i64_ty.array_type(argc as u32), "closure_ctor_args")
         .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
+    let store_slot = |idx: u64, v: BasicValueEnum<'static>| -> Result<(), EvalError> {
+        let idx_val = i64_ty.const_int(idx, false);
+        let p = unsafe {
+            b.build_gep(i64_ty, ctor_args_ptr, &[idx_val], "closure_ctor_arg_ptr")
+                .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?
+        };
+        b.build_store(p, v).map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
+        Ok(())
+    };
 
     let fn_ptr_int = b
-        .build_ptr_to_int(target.as_global_value().as_pointer_value(), ctx.i64_type(), "closure_fn_ptr")
+        .build_ptr_to_int(target.as_global_value().as_pointer_value(), i64_ty, "closure_fn_ptr")
         .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
-    store_closure_slot(&b, box_ptr, CLOSURE_FN_PTR_SLOT, fn_ptr_int.into(), "build-make-closure")?;
-    store_closure_slot(&b, box_ptr, CLOSURE_ENV_LEN_SLOT, ctx.i64_type().const_int(env_len, false).into(), "build-make-closure")?;
-    store_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, ctx.i64_type().const_int(1, false).into(), "build-make-closure")?;
-    store_closure_slot(&b, box_ptr, CLOSURE_FN_MASK_SLOT, ctx.i64_type().const_int(fn_mask, false).into(), "build-make-closure")?;
-
+    store_slot(0, fn_ptr_int.into())?;
+    store_slot(1, i64_ty.const_int(sexpr_mask, false).into())?;
     for i in 0..env_len {
-        let idx_val = ctx.i64_type().const_int(i, false);
+        let idx_val = i64_ty.const_int(i, false);
         let src_ptr = unsafe {
-            b.build_gep(ctx.i64_type(), env_ptr, &[idx_val], "closure_env_src")
+            b.build_gep(i64_ty, env_ptr, &[idx_val], "closure_env_src")
                 .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?
         };
         let v = b
-            .build_load(ctx.i64_type(), src_ptr, "closure_env_val")
+            .build_load(i64_ty, src_ptr, "closure_env_val")
             .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
-        store_closure_slot(&b, box_ptr, CLOSURE_HEADER_SLOTS + i, v, "build-make-closure")?;
+        store_slot(2 + i, v)?;
     }
 
-    let closure_val = b
-        .build_ptr_to_int(box_ptr, ctx.i64_type(), "closure_value")
+    let argc_val = ctx.i32_type().const_int(argc, false);
+    let call = b
+        .build_call(rt_closure_new, &[ctor_args_ptr.into(), argc_val.into()], "closure_new_result")
         .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
-    Ok(RtValue::LlvmValue(closure_val.into()))
-}
-
-/// `load-env`'s closure-value counterpart: reads captured slot `index` back
-/// out of a `ClosureBox` value directly, for code *holding the closure
-/// value* (e.g. about to forward its captures elsewhere) — the closure-boxed
-/// function's own body still reads its captures via `load-env` against its
-/// own env parameter, never this one.
-fn llvm_builder_build_closure_env_get(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let closure = expect_llvm_value(&args[1])?;
-    let index = match &args[2] {
-        RtValue::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
-    let b = builder.borrow();
-    let box_ptr = closure_box_ptr(&b, closure, "build-closure-env-get")?;
-    let v = load_closure_slot(&b, box_ptr, CLOSURE_HEADER_SLOTS + index, "build-closure-env-get")?;
-    Ok(RtValue::LlvmValue(v.into()))
+    match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => Ok(RtValue::LlvmValue(v)),
+        inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-make-closure: rt_closure_new produced no value".into())),
+    }
 }
 
 /// `build-call-with-env`'s indirect counterpart: the callee isn't a
-/// statically-known `llvm-function` here, only an `i64` closure value, so
-/// this loads `fn_ptr`/`env_len`/the env array straight out of the box at
-/// runtime and calls through `Builder::build_indirect_call` against the one
-/// fixed `compiled_fn_type_with_env` signature every closure-boxed function
-/// shares (see that function's doc comment for why no ABI branch is needed
-/// here).
+/// statically-known `llvm-function` here, only a tagged `Sexpr` closure
+/// reference, so this reads `fn_ptr`/`env_len` back out via `rt_closure_fnptr`/
+/// `rt_closure_env_len`, copies each captured slot into a fixed 64-slot
+/// scratch buffer via a genuine runtime loop over `rt_closure_env_get`
+/// (`env_len` is only known once the closure value actually exists, not at
+/// IR-build time; 64 is `rt_closure_new`'s own capture-count ceiling — see
+/// `BoxedObj::CompiledClosure`'s doc comment — so a fixed-capacity buffer
+/// avoids a dynamic-sized `alloca`), then calls through
+/// `Builder::build_indirect_call` against the one fixed
+/// `compiled_fn_type_with_env` signature every closure-boxed function shares
+/// (see that function's doc comment for why no ABI branch is needed here).
+/// Never exposes `env`'s backing `Vec<Value>` as a raw pointer across an `rt_*`
+/// call boundary (Stage 1's "don't hold an env pointer across an rt call"
+/// convention — a GC triggered inside `rt_closure_env_get` could move/resize
+/// that `Vec`), which is exactly why each slot is copied out one at a time
+/// through the accessor rather than read directly.
 fn llvm_builder_build_closure_apply(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
-    let closure = expect_llvm_value(&args[1])?;
-    let args_ptr = expect_llvm_value(&args[2])?;
-    let argc = match &args[3] {
+    let module = expect_llvm_module(&args[1])?;
+    let closure = expect_llvm_value(&args[2])?;
+    let args_ptr = expect_llvm_value(&args[3])?;
+    let argc = match &args[4] {
         RtValue::Int(n) => *n as u64,
         other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
     };
     let ctx = crate::compile::llvm_context();
     let b = builder.borrow();
-    let box_ptr = closure_box_ptr(&b, closure, "build-closure-apply")?;
-    let fn_ptr_int = load_closure_slot(&b, box_ptr, CLOSURE_FN_PTR_SLOT, "build-closure-apply")?;
-    let env_len_int = load_closure_slot(&b, box_ptr, CLOSURE_ENV_LEN_SLOT, "build-closure-apply")?;
-    let env_len_i32 = b
-        .build_int_truncate(env_len_int, ctx.i32_type(), "closure_env_len_i32")
-        .map_err(|e| EvalError::Internal(format!("build-closure-apply: {}", e)))?;
-    let env_ptr = closure_slot_ptr(&b, box_ptr, CLOSURE_HEADER_SLOTS)?;
+    let module = module.borrow();
+    let err = |e: inkwell::builder::BuilderError| EvalError::Internal(format!("build-closure-apply: {}", e));
+
+    let function = b
+        .get_insert_block()
+        .and_then(|blk| blk.get_parent())
+        .ok_or_else(|| EvalError::Internal("build-closure-apply: builder has no current function".into()))?;
+    let rt_closure_fnptr = module
+        .get_function("rt_closure_fnptr")
+        .ok_or_else(|| EvalError::Internal("build-closure-apply: rt_closure_fnptr not declared in this module".into()))?;
+    let rt_closure_env_len = module
+        .get_function("rt_closure_env_len")
+        .ok_or_else(|| EvalError::Internal("build-closure-apply: rt_closure_env_len not declared in this module".into()))?;
+    let rt_closure_env_get = module
+        .get_function("rt_closure_env_get")
+        .ok_or_else(|| EvalError::Internal("build-closure-apply: rt_closure_env_get not declared in this module".into()))?;
+
+    let i64_ty = ctx.i64_type();
+    let closure_int = closure.into_int_value();
+
+    // Every `rt_*` shim shares the one uniform `(args_ptr, argc) -> i64` ABI
+    // (`compiled_fn_type`) — including these three — never raw scalar
+    // parameters, so each call below builds its own small `alloca`'d
+    // argument array first, exactly the way `compiler.rs`'s own
+    // `alloca-args`/`store-arg`/`build-call` triple does for every other
+    // `rt_*` call.
+    let call_rt1 = |target: FunctionValue<'static>, a0: BasicValueEnum<'static>, name: &str| -> Result<inkwell::values::IntValue<'static>, EvalError> {
+        let ap = b.build_alloca(i64_ty.array_type(1), "rt1_args").map_err(err)?;
+        let p0 = unsafe { b.build_gep(i64_ty, ap, &[i64_ty.const_int(0, false)], "rt1_arg0_ptr").map_err(err)? };
+        b.build_store(p0, a0).map_err(err)?;
+        let argc = ctx.i32_type().const_int(1, false);
+        let call = b.build_call(target, &[ap.into(), argc.into()], name).map_err(err)?;
+        match call.try_as_basic_value() {
+            inkwell::values::ValueKind::Basic(v) => Ok(v.into_int_value()),
+            inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal(format!("build-closure-apply: {} produced no value", name))),
+        }
+    };
+    let call_rt2 = |target: FunctionValue<'static>,
+                     a0: BasicValueEnum<'static>,
+                     a1: BasicValueEnum<'static>,
+                     name: &str|
+     -> Result<BasicValueEnum<'static>, EvalError> {
+        let ap = b.build_alloca(i64_ty.array_type(2), "rt2_args").map_err(err)?;
+        let p0 = unsafe { b.build_gep(i64_ty, ap, &[i64_ty.const_int(0, false)], "rt2_arg0_ptr").map_err(err)? };
+        b.build_store(p0, a0).map_err(err)?;
+        let p1 = unsafe { b.build_gep(i64_ty, ap, &[i64_ty.const_int(1, false)], "rt2_arg1_ptr").map_err(err)? };
+        b.build_store(p1, a1).map_err(err)?;
+        let argc = ctx.i32_type().const_int(2, false);
+        let call = b.build_call(target, &[ap.into(), argc.into()], name).map_err(err)?;
+        match call.try_as_basic_value() {
+            inkwell::values::ValueKind::Basic(v) => Ok(v),
+            inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal(format!("build-closure-apply: {} produced no value", name))),
+        }
+    };
+
+    let fn_ptr_int = call_rt1(rt_closure_fnptr, closure_int.into(), "closure_fnptr_raw")?;
+    let env_len_i64 = call_rt1(rt_closure_env_len, closure_int.into(), "closure_env_len_raw")?;
+
+    // Fixed-capacity (64) scratch buffer — the same cap `rt_closure_new`
+    // enforces — filled by a genuine runtime loop since `env_len_i64` is
+    // only known once this closure value actually exists.
+    let scratch_ptr = b
+        .build_alloca(i64_ty.array_type(64), "closure_apply_env_scratch")
+        .map_err(err)?;
+    let idx_alloca = b.build_alloca(i64_ty, "closure_apply_env_idx").map_err(err)?;
+    b.build_store(idx_alloca, i64_ty.const_int(0, false)).map_err(err)?;
+
+    let loop_header = ctx.append_basic_block(function, "closure_apply_env_loop_header");
+    let loop_body = ctx.append_basic_block(function, "closure_apply_env_loop_body");
+    let loop_exit = ctx.append_basic_block(function, "closure_apply_env_loop_exit");
+    b.build_unconditional_branch(loop_header).map_err(err)?;
+
+    b.position_at_end(loop_header);
+    let i_val = b.build_load(i64_ty, idx_alloca, "closure_apply_env_i").map_err(err)?.into_int_value();
+    let in_range = b.build_int_compare(inkwell::IntPredicate::ULT, i_val, env_len_i64, "closure_apply_env_in_range").map_err(err)?;
+    b.build_conditional_branch(in_range, loop_body, loop_exit).map_err(err)?;
+
+    b.position_at_end(loop_body);
+    let elem_v = call_rt2(rt_closure_env_get, closure_int.into(), i_val.into(), "closure_env_elem")?;
+    let dst_ptr = unsafe {
+        b.build_gep(i64_ty, scratch_ptr, &[i_val], "closure_apply_env_dst").map_err(err)?
+    };
+    b.build_store(dst_ptr, elem_v).map_err(err)?;
+    let i_next = b.build_int_add(i_val, i64_ty.const_int(1, false), "closure_apply_env_i_next").map_err(err)?;
+    b.build_store(idx_alloca, i_next).map_err(err)?;
+    b.build_unconditional_branch(loop_header).map_err(err)?;
+
+    b.position_at_end(loop_exit);
+    let env_len_i32 = b.build_int_truncate(env_len_i64, ctx.i32_type(), "closure_env_len_i32").map_err(err)?;
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let fn_ptr = b
-        .build_int_to_ptr(fn_ptr_int, ptr_ty, "closure_fn_ptr_val")
-        .map_err(|e| EvalError::Internal(format!("build-closure-apply: {}", e)))?;
+    let fn_ptr = b.build_int_to_ptr(fn_ptr_int, ptr_ty, "closure_fn_ptr_val").map_err(err)?;
     let argc_val = ctx.i32_type().const_int(argc, false);
     let call = b
         .build_indirect_call(
             compiled_fn_type_with_env(),
             fn_ptr,
-            &[args_ptr.into(), argc_val.into(), env_ptr.into(), env_len_i32.into()],
+            &[args_ptr.into(), argc_val.into(), scratch_ptr.into(), env_len_i32.into()],
             "closure_apply_result",
         )
-        .map_err(|e| EvalError::Internal(format!("build-closure-apply: {}", e)))?;
+        .map_err(err)?;
     match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => Ok(RtValue::LlvmValue(v)),
         inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-closure-apply: callee produced no value".into())),
     }
-}
-
-/// Increments a `ClosureBox`'s refcount and returns the closure value
-/// itself unchanged, so calls can chain (`(build-closure-retain b (compile-value ...))`)
-/// without a separate `let` to hold onto the original value.
-fn llvm_builder_build_closure_retain(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let closure = expect_llvm_value(&args[1])?;
-    let ctx = crate::compile::llvm_context();
-    let b = builder.borrow();
-    let box_ptr = closure_box_ptr(&b, closure, "build-closure-retain")?;
-    let rc = load_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, "build-closure-retain")?;
-    let one = ctx.i64_type().const_int(1, false);
-    let rc2 = b.build_int_add(rc, one, "closure_rc_inc").map_err(|e| EvalError::Internal(format!("build-closure-retain: {}", e)))?;
-    store_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, rc2.into(), "build-closure-retain")?;
-    Ok(RtValue::LlvmValue(closure))
-}
-
-/// Builds (once per `module`) the shared LLVM function backing
-/// `build-closure-release`: `void __typelisp_closure_release(i64 closure)`.
-/// Decrements `closure`'s refcount; once that reaches zero, walks its
-/// captured slots (`CLOSURE_FN_MASK_SLOT` says which ones are themselves
-/// `Fn`-typed) recursively releasing each one *before* freeing the box
-/// itself — the `Drop`/`deinit`-cascade counterpart of `compile-lambda`'s/
-/// `resolve-value`'s retain at capture time (automatic retain/release
-/// insertion, a follow-up to labels/closures Stage 4).
-///
-/// This has to be a real, runtime-self-recursive *LLVM function* — not a
-/// Rust-side recursive call that statically unrolls the IR — because a
-/// captured slot's own `env_len`/`fn_mask` live *inside* the box it points
-/// to, which this code generator has no way to know at the point it's
-/// generating IR for the *outer* box: "release whatever this slot turns out
-/// to point to, recursively" can only be resolved once that pointer's value
-/// actually exists, at runtime. `Module::get_function` makes building this
-/// idempotent: every `build-closure-release` call (and the function's own
-/// body, for its self-call) shares the one definition already in `module`,
-/// built lazily the first time any `ClosureBox` work happens in it.
-///
-/// Recursion only ever terminates because a true reference cycle between
-/// two `ClosureBox`es isn't constructible under this design (see
-/// `compiler.rs`'s `resolve-value` doc comment) — nothing here detects or
-/// guards against one; a cyclic structure, were one ever constructed some
-/// other way, would recurse until the native stack overflows.
-fn get_or_define_closure_release_fn(
-    module: &Rc<RefCell<Module<'static>>>,
-    ctx: &'static Context,
-) -> Result<FunctionValue<'static>, EvalError> {
-    const RELEASE_FN_NAME: &str = "__typelisp_closure_release";
-    if let Some(f) = module.borrow().get_function(RELEASE_FN_NAME) {
-        return Ok(f);
-    }
-
-    let i64_ty = ctx.i64_type();
-    let fn_ty = ctx.void_type().fn_type(&[i64_ty.into()], false);
-    let function = module.borrow_mut().add_function(RELEASE_FN_NAME, fn_ty, None);
-
-    let entry = ctx.append_basic_block(function, "entry");
-    let not_null = ctx.append_basic_block(function, "not_null");
-    let free_block = ctx.append_basic_block(function, "free");
-    let loop_header = ctx.append_basic_block(function, "loop_header");
-    let loop_check_fn = ctx.append_basic_block(function, "loop_check_fn");
-    let loop_release = ctx.append_basic_block(function, "loop_release");
-    let loop_inc = ctx.append_basic_block(function, "loop_inc");
-    let loop_exit = ctx.append_basic_block(function, "loop_exit");
-    let cont_block = ctx.append_basic_block(function, "cont");
-
-    let b = ctx.create_builder();
-    let err = |e: inkwell::builder::BuilderError| EvalError::Internal(format!("closure_release: {}", e));
-    let one = i64_ty.const_int(1, false);
-    let zero = i64_ty.const_int(0, false);
-
-    b.position_at_end(entry);
-    let closure = function
-        .get_nth_param(0)
-        .ok_or_else(|| EvalError::Internal("closure_release: missing param".into()))?
-        .into_int_value();
-    // `release-pending-args` (automatic retain/release insertion) calls
-    // this unconditionally on every slot of a "pending release" array, even
-    // ones it marked with the `0` sentinel for "nothing to release here" —
-    // `malloc` never returns a null pointer for a real allocation, so `0`
-    // can never collide with an actual `ClosureBox`. Tolerating it here
-    // keeps that caller from needing a runtime branch of its own (`compiler.rs`
-    // has no general `if` to build one with).
-    let is_null = b.build_int_compare(inkwell::IntPredicate::EQ, closure, zero, "closure_release_is_null").map_err(err)?;
-    b.build_conditional_branch(is_null, cont_block, not_null).map_err(err)?;
-
-    b.position_at_end(not_null);
-    let box_ptr = closure_box_ptr(&b, closure.into(), "closure_release")?;
-    let rc = load_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, "closure_release")?;
-    let rc2 = b.build_int_sub(rc, one, "closure_rc_dec").map_err(err)?;
-    store_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, rc2.into(), "closure_release")?;
-    let is_zero = b.build_int_compare(inkwell::IntPredicate::EQ, rc2, zero, "closure_rc_is_zero").map_err(err)?;
-    b.build_conditional_branch(is_zero, free_block, cont_block).map_err(err)?;
-
-    // free: scan the captured slots, recursively releasing the `Fn`-typed
-    // ones, before freeing the box itself.
-    b.position_at_end(free_block);
-    let env_len = load_closure_slot(&b, box_ptr, CLOSURE_ENV_LEN_SLOT, "closure_release")?;
-    let fn_mask = load_closure_slot(&b, box_ptr, CLOSURE_FN_MASK_SLOT, "closure_release")?;
-    let idx_alloca = b.build_alloca(i64_ty, "release_idx").map_err(err)?;
-    b.build_store(idx_alloca, zero).map_err(err)?;
-    b.build_unconditional_branch(loop_header).map_err(err)?;
-
-    b.position_at_end(loop_header);
-    let i_val = b.build_load(i64_ty, idx_alloca, "release_i").map_err(err)?.into_int_value();
-    let in_range = b.build_int_compare(inkwell::IntPredicate::ULT, i_val, env_len, "release_i_lt_len").map_err(err)?;
-    b.build_conditional_branch(in_range, loop_check_fn, loop_exit).map_err(err)?;
-
-    b.position_at_end(loop_check_fn);
-    let shifted = b.build_right_shift(fn_mask, i_val, false, "release_mask_shifted").map_err(err)?;
-    let bit = b.build_and(shifted, one, "release_mask_bit").map_err(err)?;
-    let is_fn = b.build_int_compare(inkwell::IntPredicate::EQ, bit, one, "release_is_fn").map_err(err)?;
-    b.build_conditional_branch(is_fn, loop_release, loop_inc).map_err(err)?;
-
-    b.position_at_end(loop_release);
-    let slot_idx = b.build_int_add(i64_ty.const_int(CLOSURE_HEADER_SLOTS, false), i_val, "release_slot_idx").map_err(err)?;
-    let slot_ptr = closure_slot_ptr_dyn(&b, box_ptr, slot_idx)?;
-    let captured_val = b.build_load(i64_ty, slot_ptr, "release_captured_val").map_err(err)?;
-    b.build_call(function, &[captured_val.into()], "").map_err(err)?;
-    b.build_unconditional_branch(loop_inc).map_err(err)?;
-
-    b.position_at_end(loop_inc);
-    let i_next = b.build_int_add(i_val, one, "release_i_next").map_err(err)?;
-    b.build_store(idx_alloca, i_next).map_err(err)?;
-    b.build_unconditional_branch(loop_header).map_err(err)?;
-
-    b.position_at_end(loop_exit);
-    b.build_free(box_ptr).map_err(err)?;
-    b.build_unconditional_branch(cont_block).map_err(err)?;
-
-    b.position_at_end(cont_block);
-    b.build_return(None).map_err(err)?;
-
-    Ok(function)
-}
-
-/// `build-closure-release`: a thin wrapper emitting one
-/// `call void @__typelisp_closure_release(i64 closure)` against the shared,
-/// self-recursive function [`get_or_define_closure_release_fn`] builds (and
-/// memoizes) in `module` — see that function's doc comment for why the
-/// actual decrement/cascade logic has to live there rather than here.
-fn llvm_builder_build_closure_release(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let module = expect_llvm_module(&args[1])?;
-    let closure = expect_llvm_value(&args[2])?;
-    let ctx = crate::compile::llvm_context();
-    let release_fn = get_or_define_closure_release_fn(module, ctx)?;
-    let b = builder.borrow();
-    b.build_call(release_fn, &[closure.into()], "")
-        .map_err(|e| EvalError::Internal(format!("build-closure-release: {}", e)))?;
-    Ok(RtValue::Unit)
-}
-
-/// Test-only observation hook: reads a `ClosureBox`'s refcount slot
-/// straight out, as an ordinary `llvm-value` the caller can `build-ret`/
-/// inspect — never called from `compiler.rs` itself, only from
-/// `tests/compile_test.rs` to verify the automatic retain/release insertion
-/// work actually keeps a box's refcount at the expected value at a given
-/// point, rather than only checking "didn't crash" (this builtin's whole
-/// reason for existing — there's no other way to observe a refcount that
-/// isn't itself a behavior change to the compiled code under test).
-fn llvm_builder_debug_closure_refcount(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let closure = expect_llvm_value(&args[1])?;
-    let b = builder.borrow();
-    let box_ptr = closure_box_ptr(&b, closure, "debug-closure-refcount")?;
-    let rc = load_closure_slot(&b, box_ptr, CLOSURE_REFCOUNT_SLOT, "debug-closure-refcount")?;
-    Ok(RtValue::LlvmValue(rc.into()))
 }
 
 // ---- Stage 6 of the Sexpr-representation plan: generic malloc/free ------
@@ -4062,10 +3891,8 @@ fn llvm_builder_build_free(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// value is a plain `i64` (`registry::llvm_module_def`'s doc comment), so a
 /// general ADT box value read back out of a slot/argument/field needs this
 /// before `load-raw`/`store-arg` (which both expect an already-pointer-typed
-/// `llvm-value`) can dereference it. The generic, builtin-exposed
-/// counterpart of [`closure_box_ptr`] — `compiler.rs`'s `compile-field-get`/
-/// `compile-field-set` need it directly, unlike `ClosureBox`'s own
-/// fixed-shape accessors.
+/// `llvm-value`) can dereference it — `compiler.rs`'s `compile-field-get`/
+/// `compile-field-set` need it directly.
 fn llvm_builder_build_int_to_ptr(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let v = expect_llvm_value(&args[1])?.into_int_value();
