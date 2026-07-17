@@ -1760,6 +1760,24 @@ impl Interp {
             // `bitcast`); reinterpret it back to an `f64`, the inverse of the
             // `RtValue::Float` argument encode above.
             RtValue::Float(f64::from_bits(raw as u64))
+        } else if matches!(ret_ty, Type::Str) {
+            // A compiled `string` value is a tagged `Value::Str` word
+            // (`Type::Str`'s passthrough kind); `Type::Str` isn't
+            // `Type::Named`, so `is_boxed_sexpr_type` above never catches it
+            // — without this arm the tagged pointer fell through to the
+            // bare `RtValue::Int` case below (the formerly-documented gap
+            // `compile_of_a_function_referencing_a_str_option_global_...`'s
+            // doc comment used to note). Decoded to an interp-side
+            // `RtValue::Str` exactly like the `sexpr-str` builtin does.
+            match crate::compile::runtime::decode(raw) {
+                Value::Str(id) => RtValue::Str(heap.string(id).into()),
+                other => {
+                    return Err(EvalError::Internal(format!(
+                        "compiled call returned {:?} for a string result, which is not a Str",
+                        other
+                    )))
+                }
+            }
         } else if matches!(ret_ty, Type::Bignum | Type::Ratio) {
             // `bignum`/`ratio` aren't `Type::Named` (unlike a `defstruct`/
             // `Vector<T>`), so `is_boxed_sexpr_type` above never catches
@@ -3855,11 +3873,28 @@ fn method_link_name(type_name: &Path, method: &str) -> String {
 /// — direct cons-heap access, Rust-only), so [`Interp::compile_function`]
 /// excludes them from its normal "every call target must already be compiled"
 /// check and instead always wires them via [`rt_extern_functions`]. These are
-/// the `sexpr-*` island layer (Symbol/Sexpr redesign Phase 4b): the free
-/// `car`/`cdr`/`cons` names are now the `cons<T,U>` pair (an ordinary
+/// the `sexpr-*` island layer (Symbol/Sexpr redesign Phase 4b) — the whole
+/// family since closure unification Stage 8 (tag predicates and typed
+/// payload extractors included, not just `car`/`cdr`/`cons`). The free
+/// `car`/`cdr`/`cons` names are the `cons<T,U>` pair (an ordinary
 /// `defstruct` method / `defun`, compiled the normal way), not `rt_*` shims.
 pub(crate) fn is_rt_builtin_name(name: &str) -> bool {
-    matches!(name, "sexpr-car" | "sexpr-cdr" | "sexpr-cons")
+    matches!(
+        name,
+        "sexpr-car"
+            | "sexpr-cdr"
+            | "sexpr-cons"
+            | "sexpr-consp"
+            | "sexpr-null"
+            | "sexpr-atom"
+            | "sexpr-symp"
+            | "sexpr-int"
+            | "sexpr-bool"
+            | "sexpr-char"
+            | "sexpr-float"
+            | "sexpr-str"
+            | "sexpr-sym-name"
+    )
 }
 
 /// The fixed set of `crate::compile::runtime` shims every compiled function
@@ -3919,25 +3954,35 @@ pub(crate) fn is_rt_builtin_name(name: &str) -> bool {
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 80] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 89] {
     use crate::compile::runtime::{
-        rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new, rt_bignum_sub,
-        rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr, rt_cell_get,
-        rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len, rt_closure_fnptr, rt_closure_new,
-        rt_cons, rt_data_field, rt_data_new, rt_data_variant, rt_float_new, rt_float_to_bignum, rt_float_to_ratio, rt_float_value,
-        rt_global_get, rt_global_new, rt_global_set,
+        rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
+        rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
+        rt_cell_get, rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len, rt_closure_fnptr,
+        rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_float_new, rt_float_to_bignum,
+        rt_float_to_ratio, rt_float_value, rt_global_get, rt_global_new, rt_global_set,
         rt_hashtable_clear, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw, rt_hashtable_keys,
         rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_hashtable_values, rt_int_to_bignum, rt_int_to_ratio,
-        rt_intern_path, rt_intern_symbol, rt_match_fail, rt_panic, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root,
-        rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul, rt_ratio_numerator,
-        rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append,
-        rt_str_eq, rt_str_equalp, rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_count, rt_struct_field_get,
-        rt_struct_field_set, rt_struct_new, rt_struct_push_field, rt_truncate_sexpr_roots,
+        rt_intern_path, rt_intern_symbol, rt_match_fail, rt_null, rt_panic, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
+        rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
+        rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
+        rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_int, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
+        rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
+        rt_struct_new, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
     };
     [
         ("rt_car", rt_car as usize),
         ("rt_cdr", rt_cdr as usize),
         ("rt_cons", rt_cons as usize),
+        ("rt_consp", rt_consp as usize),
+        ("rt_null", rt_null as usize),
+        ("rt_atom", rt_atom as usize),
+        ("rt_symp", rt_symp as usize),
+        ("rt_sexpr_int", rt_sexpr_int as usize),
+        ("rt_sexpr_bool", rt_sexpr_bool as usize),
+        ("rt_sexpr_char", rt_sexpr_char as usize),
+        ("rt_sexpr_str", rt_sexpr_str as usize),
+        ("rt_sym_name", rt_sym_name as usize),
         ("rt_set_car", rt_set_car as usize),
         ("rt_set_cdr", rt_set_cdr as usize),
         ("rt_match_fail", rt_match_fail as usize),

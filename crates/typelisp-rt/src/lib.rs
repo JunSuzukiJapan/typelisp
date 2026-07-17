@@ -354,6 +354,166 @@ pub unsafe extern "C" fn rt_set_cdr(args: *const i64, argc: u32) -> i64 {
     }
 }
 
+// ---- sexpr-* island accessors (closure unification Stage 8) -------------
+//
+// The rest of the `sexpr-*` island layer beyond `car`/`cdr`/`cons`: the tag
+// predicates (`sexpr-consp`/`sexpr-null`/`sexpr-atom`/`sexpr-symp`) and the
+// typed payload extractors (`sexpr-int`/`sexpr-bool`/`sexpr-char`/
+// `sexpr-str`/`sexpr-sym-name`; `sexpr-float` reuses [`rt_float_value`],
+// whose bits-in-`i64` result is exactly the compiled `f64` convention).
+// Before Stage 8 these builtins had no compiled lowering at all, so any
+// user function walking a `Sexpr` list (every `&rest` consumer, above all)
+// was uncompilable. Each mirrors its interpreter builtin
+// (`Interp::eval_builtin`'s matching arm) exactly, including the
+// panic-on-tag-mismatch contract of the extractors. `compiler.rs`'s
+// `compile-call` rename table maps the `sexpr-*` names here.
+
+/// `(sexpr-consp x)`: `1` if the tagged value is a cons cell, else `0` —
+/// the compiled `bool` convention.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_consp(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_consp: expected 1 argument");
+    }
+    i64::from(matches!(decode(*args), Value::Cons(_)))
+}
+
+/// `(sexpr-null x)`: `1` if the tagged value is the empty list `()`.
+///
+/// # Safety
+///
+/// Same as [`rt_consp`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_null(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_null: expected 1 argument");
+    }
+    i64::from(matches!(decode(*args), Value::Empty))
+}
+
+/// `(sexpr-atom x)`: `1` if the tagged value is *not* a cons cell — the
+/// exact negation of [`rt_consp`], mirroring the interpreter's `!v.is_cons()`.
+///
+/// # Safety
+///
+/// Same as [`rt_consp`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_atom(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_atom: expected 1 argument");
+    }
+    i64::from(!matches!(decode(*args), Value::Cons(_)))
+}
+
+/// `(sexpr-symp x)`: `1` if the tagged value is an interned symbol.
+///
+/// # Safety
+///
+/// Same as [`rt_consp`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_symp(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_symp: expected 1 argument");
+    }
+    i64::from(matches!(decode(*args), Value::Symbol(_)))
+}
+
+/// `(sexpr-int x)`: the raw `i64` payload of an `Int` node. Fatal on any
+/// other tag — the same panic contract the interpreter's `sexpr-int` has.
+///
+/// # Safety
+///
+/// Same as [`rt_consp`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_sexpr_int(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sexpr_int: expected 1 argument");
+    }
+    match decode(*args) {
+        Value::Int(n) => n,
+        _ => fatal("sexpr-int: expected an Int Sexpr node"),
+    }
+}
+
+/// `(sexpr-bool x)`: the `Bool` node's payload as compiled `0`/`1`.
+///
+/// # Safety
+///
+/// Same as [`rt_consp`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_sexpr_bool(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sexpr_bool: expected 1 argument");
+    }
+    match decode(*args) {
+        Value::Bool(b) => i64::from(b),
+        _ => fatal("sexpr-bool: expected a Bool Sexpr node"),
+    }
+}
+
+/// `(sexpr-char x)`: the `Char` node's Unicode scalar value as a raw `i64`
+/// — the compiled `char` convention (`compile-char`'s own widened payload).
+///
+/// # Safety
+///
+/// Same as [`rt_consp`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_sexpr_char(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sexpr_char: expected 1 argument");
+    }
+    match decode(*args) {
+        Value::Char(c) => c as i64,
+        _ => fatal("sexpr-char: expected a Char Sexpr node"),
+    }
+}
+
+/// `(sexpr-str x)`: the `Str` node itself, unchanged — a compiled `str`
+/// value *is* the tagged `Value::Str` word (`Type::Str`'s passthrough kind),
+/// so the extraction is an identity plus the tag check the interpreter's
+/// arm also performs.
+///
+/// # Safety
+///
+/// Same as [`rt_consp`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_sexpr_str(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sexpr_str: expected 1 argument");
+    }
+    match decode(*args) {
+        Value::Str(_) => *args,
+        _ => fatal("sexpr-str: expected a Str Sexpr node"),
+    }
+}
+
+/// `(sexpr-sym-name x)`: a fresh `Str` holding the symbol's name — the
+/// fused `(Sym v)`-bind + `symbol->string` read the interpreter's
+/// `sexpr-sym-name` performs. Allocates (like [`rt_str_append`]); a `Heap`
+/// must be registered.
+///
+/// # Safety
+///
+/// Same as [`rt_consp`], plus a registered `Heap` (this allocates).
+#[no_mangle]
+pub unsafe extern "C" fn rt_sym_name(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sym_name: expected 1 argument");
+    }
+    match decode(*args) {
+        Value::Symbol(id) => {
+            let heap = active_heap();
+            let name = heap.symbol_name(id).to_string();
+            encode(heap.alloc_string(name))
+        }
+        _ => fatal("sexpr-sym-name: expected a Sym Sexpr node"),
+    }
+}
+
 // ---- Sexpr/RtValue unification, Stage 0: boxed objects (Float) ---------
 //
 // `Value::Boxed` (`TAG_BOXED`) is the tagged representation for the heap's

@@ -3447,11 +3447,11 @@ fn compile_of_a_function_referencing_a_generic_defenum_global_round_trips() {
 /// read-back to make that failure mode observable rather than lucky. The
 /// final read is a plain top-level `match` (interpreted, not `(compile
 /// ...)`d), deliberately sidestepping `Interp::call_compiled`'s own
-/// pre-existing, unrelated gap in decoding a compiled function's `Str`
-/// *return value* (`is_boxed_sexpr_type` never matches `Type::Str`, so it
-/// falls through to a bare `RtValue::Int`) — out of scope here; this test
-/// only means to exercise `Expr::Global`'s `decode_field_typed` path for a
-/// promoted `Option<string>`.
+/// formerly-documented gap in decoding a compiled function's `Str`
+/// *return value* (closed by `decode_compiled_return`'s `Type::Str` arm,
+/// closure unification Stage 8); this test only means to exercise
+/// `Expr::Global`'s `decode_field_typed` path for a promoted
+/// `Option<string>`.
 #[test]
 fn compile_of_a_function_referencing_a_str_option_global_survives_gc() {
     let v = run_with_compiler_and_capacity(
@@ -4454,6 +4454,40 @@ fn compile_dispatches_ratio_conversions_and_agrees_with_the_interpreter() {
         ("(defun f ((a f64)) ratio (float->ratio a))", "(f 0.5)"),
         ("(defun f ((r ratio)) bignum (numerator r))", "(f 4/6)"),
         ("(defun f ((r ratio)) bignum (denominator r))", "(f 4/6)"),
+    ];
+    for (def, call) in cases {
+        let interpreted = run_with_compiler_and_prelude(&format!("{def}\n{call}")).expect("interpreted failed");
+        let compiled = run_with_compiler_and_prelude(&format!("{def}\n(compile f)\n{call}")).expect("compiled failed");
+        assert_eq!(compiled, interpreted, "compiled `{def}` agrees with the interpreter");
+    }
+}
+
+/// The `sexpr-*` island layer beyond `car`/`cdr`/`cons` (closure
+/// unification Stage 8): the tag predicates and typed payload extractors
+/// now lower to `rt_*` shims (`rt_consp`/`rt_null`/`rt_atom`/`rt_symp`/
+/// `rt_sexpr_int`/`rt_sexpr_bool`/`rt_sexpr_char`/`rt_float_value`/
+/// `rt_sexpr_str`/`rt_sym_name` — `compile-call`'s rename table), so a
+/// `defun` walking a `Sexpr` list compiles. Each case runs interpreted and
+/// compiled and must agree.
+#[test]
+fn compile_dispatches_sexpr_accessors_and_agrees_with_the_interpreter() {
+    let cases = [
+        // Recursive list walk: `sexpr-consp` steering, `sexpr-cdr` descent.
+        (
+            "(defun f ((s Sexpr)) i64 (if (sexpr-consp s) (+ (the i64 1) (f (sexpr-cdr s))) (the i64 0)))",
+            "(f '(10 20 30))",
+        ),
+        // `sexpr-null`/`sexpr-atom` predicates surface as bools.
+        ("(defun f ((s Sexpr)) bool (sexpr-null s))", "(f '())"),
+        ("(defun f ((s Sexpr)) bool (sexpr-atom s))", "(f '(1 2))"),
+        ("(defun f ((s Sexpr)) bool (sexpr-symp s))", "(f 'hello)"),
+        // Typed payload extractors.
+        ("(defun f ((s Sexpr)) i64 (sexpr-int (sexpr-car s)))", "(f '(42 43))"),
+        ("(defun f ((s Sexpr)) bool (sexpr-bool (sexpr-car s)))", "(f '(true))"),
+        ("(defun f ((s Sexpr)) char (sexpr-char (sexpr-car s)))", r#"(f '(#\A #\B))"#),
+        ("(defun f ((s Sexpr)) f64 (sexpr-float (sexpr-car s)))", "(f '(2.5))"),
+        ("(defun f ((s Sexpr)) string (sexpr-str (sexpr-car s)))", r#"(f '("hi"))"#),
+        ("(defun f ((s Sexpr)) string (sexpr-sym-name (sexpr-car s)))", "(f '(hello))"),
     ];
     for (def, call) in cases {
         let interpreted = run_with_compiler_and_prelude(&format!("{def}\n{call}")).expect("interpreted failed");

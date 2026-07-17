@@ -1990,7 +1990,17 @@ pub const SOURCE: &str = r#"
                            (let ((nm (if (equal raw-nm "sexpr-car") "rt_car"
                                          (if (equal raw-nm "sexpr-cdr") "rt_cdr"
                                              (if (equal raw-nm "sexpr-cons") "rt_cons"
-                                                 raw-nm)))))
+                                                 (if (equal raw-nm "sexpr-consp") "rt_consp"
+                                                     (if (equal raw-nm "sexpr-null") "rt_null"
+                                                         (if (equal raw-nm "sexpr-atom") "rt_atom"
+                                                             (if (equal raw-nm "sexpr-symp") "rt_symp"
+                                                                 (if (equal raw-nm "sexpr-int") "rt_sexpr_int"
+                                                                     (if (equal raw-nm "sexpr-bool") "rt_sexpr_bool"
+                                                                         (if (equal raw-nm "sexpr-char") "rt_sexpr_char"
+                                                                             (if (equal raw-nm "sexpr-float") "rt_float_value"
+                                                                                 (if (equal raw-nm "sexpr-str") "rt_sexpr_str"
+                                                                                     (if (equal raw-nm "sexpr-sym-name") "rt_sym_name"
+                                                                                         raw-nm)))))))))))))))
                              (let ((arg-forms (sexpr-cdr (sexpr-cdr e))))
                                (let ((argc (sexpr-list-length arg-forms)))
                                  (let ((args-ptr (alloca-args builder argc)))
