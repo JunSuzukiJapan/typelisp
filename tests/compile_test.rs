@@ -1668,7 +1668,7 @@ fn compile_dispatches_a_counting_loop_with_setf_and_conditional_return_to_native
 /// crashing on malformed IR from a missed `block-terminated?` guard) is to
 /// run it: a hung or crashed test is the failure signature here, not a
 /// wrong return value (see `compile_dispatches_a_value_less_return_from_a_loop_to_native_code`'s
-/// doc comment for why the result is `RtValue::Int(0)` regardless).
+/// doc comment — the `Unit` result decodes as a real `RtValue::Unit` now).
 #[test]
 fn compile_dispatches_a_loop_exited_via_a_bare_break_to_native_code() {
     let v = eval_ok_with_compiler(
@@ -1683,8 +1683,8 @@ fn compile_dispatches_a_loop_exited_via_a_bare_break_to_native_code() {
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 0),
-        other => panic!("expected an Int, got {:?}", other),
+        RtValue::Unit => {}
+        other => panic!("expected Unit, got {:?}", other),
     }
 }
 
@@ -1748,8 +1748,8 @@ fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
     )
     .expect("eval failed");
     match v {
-        RtValue::Int(n) => assert_eq!(n, 0),
-        other => panic!("expected an Int, got {:?}", other),
+        RtValue::Unit => {}
+        other => panic!("expected Unit, got {:?}", other),
     }
 }
 
