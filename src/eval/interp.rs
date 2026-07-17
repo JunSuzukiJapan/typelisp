@@ -511,7 +511,13 @@ impl Interp {
         if rest.is_some() {
             return Err(JitDecline::Gap("&rest closures are not yet definition-time-JIT-able".to_string()));
         }
-        if !self.is_jit_tier_ty(ret_ty) {
+        // `Unit` is a *return-position-only* allowance: `compile-unit`
+        // (`compiler.rs`) compiles a `Unit`-typed body tail to a plain `0`,
+        // so a `Unit`-returning closure JITs fine — but a `Unit`-typed
+        // parameter or capture has no crossing encoding
+        // (`struct_field_kind` kind `0`, no `encode_crossing_args` arm), so
+        // those checks below stay on the plain tier test.
+        if !self.is_jit_tier_ty(ret_ty) && !matches!(**ret_ty, Type::Unit) {
             return Err(JitDecline::Benign(format!("return type {:?} has no compiled representation", ret_ty)));
         }
         for ty in param_tys {
@@ -1151,7 +1157,11 @@ impl Interp {
                     // excludes them before ever recursively walking a body
                     // the size of that dispatcher.
                     let ret_ty = fbody.last().expect("a labels def's body has at least one expression").ty.clone();
-                    let jit_worth_trying = self.is_jit_tier_ty(&ret_ty) && params.iter().all(|(_, ty)| self.is_jit_tier_ty(ty));
+                    // `Unit` return allowed for the same reason as
+                    // `jit_define_closure`'s own return-type check — see
+                    // the comment there.
+                    let jit_worth_trying = (self.is_jit_tier_ty(&ret_ty) || matches!(ret_ty, Type::Unit))
+                        && params.iter().all(|(_, ty)| self.is_jit_tier_ty(ty));
                     let jit_result = if jit_worth_trying {
                         let captured = crate::compile::freevars::lambda_free_vars(params, fbody);
                         let fn_ty = Type::Fn(params.iter().map(|(_, ty)| ty.clone()).collect(), None, Box::new(ret_ty));
@@ -1710,6 +1720,14 @@ impl Interp {
     fn decode_compiled_return(&self, heap: &mut Heap, raw: i64, ret_ty: &Type) -> Result<RtValue, EvalError> {
         Ok(if self.is_boxed_sexpr_type(ret_ty) {
             RtValue::Sexpr(crate::compile::runtime::decode(raw))
+        } else if matches!(ret_ty, Type::Unit) {
+            // A `Unit`-typed body compiles to a plain `0` (`compile-unit`) —
+            // decode it back to the real `RtValue::Unit` rather than
+            // surfacing the raw word as a bogus `RtValue::Int(0)` (the
+            // pre-Stage-8 fallthrough this arm replaces), so a
+            // `Unit`-returning compiled function/closure interoperates with
+            // interpreted code exactly like an interpreted one.
+            RtValue::Unit
         } else if matches!(ret_ty, Type::Bool) {
             // Compiled code represents a `bool` as a raw 0/1 `i64` (LLVM
             // `icmp` results, zero-extended); decode it by the declared

@@ -1612,14 +1612,12 @@ fn compile_dispatches_a_bare_return_inside_a_loop_to_native_code() {
 
 /// `(return)` with no value — `ast_bridge::translate_return`'s implicit-
 /// `Unit` case, which also exercises `compile-value`'s new `"unit"` arm
-/// (`compile-unit`). The tree-walking call dispatch
-/// (`Expr::Call`'s `compiled.borrow().get(name)` branch in `interp.rs`)
-/// always wraps a compiled call's raw `i64` result as `RtValue::Int`
-/// regardless of the callee's declared return type — a pre-existing gap,
-/// not something this stage introduces or fixes — so a `unit`-returning
-/// compiled function surfaces here as `RtValue::Int(0)` (`compile-unit`'s
-/// `0` encoding), not `RtValue::Unit`; what matters for this test is that
-/// it compiles and runs at all.
+/// (`compile-unit`). The tree-walking call dispatch decodes the raw `i64`
+/// result by the callee's declared return type
+/// (`Interp::decode_compiled_return`), whose `Type::Unit` arm (closure
+/// unification Stage 8) turns `compile-unit`'s `0` encoding back into a
+/// real `RtValue::Unit` — closing the pre-Stage-8 gap where it surfaced
+/// as a bogus `RtValue::Int(0)`.
 #[test]
 fn compile_dispatches_a_value_less_return_from_a_loop_to_native_code() {
     let v = eval_ok_with_compiler(
@@ -1630,8 +1628,8 @@ fn compile_dispatches_a_value_less_return_from_a_loop_to_native_code() {
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 0),
-        other => panic!("expected an Int, got {:?}", other),
+        RtValue::Unit => {}
+        other => panic!("expected Unit, got {:?}", other),
     }
 }
 

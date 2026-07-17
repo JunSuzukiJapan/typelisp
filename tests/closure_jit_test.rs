@@ -133,6 +133,22 @@ fn setf_through_one_labels_sibling_is_visible_through_another_sharing_the_same_c
     assert_eq!(eval_ok(src), RtValue::Int(12));
 }
 
+/// A `Unit`-returning closure JITs too (closure unification Stage 8):
+/// `compile-unit` encodes the body's `Unit` tail as a plain `0`, and
+/// `Interp::decode_compiled_return`'s `Type::Unit` arm decodes it back to a
+/// real `RtValue::Unit` — the observable effect (the `setf` through the
+/// capture) plus the `Unit` result must both come through the compiled
+/// boundary intact.
+#[test]
+fn a_unit_returning_closure_performs_its_effect_and_returns_unit() {
+    let src = "(defun run-thunk ((f (fn () ()))) () (f)) \
+               (let ((hits 0)) \
+                 (run-thunk (lambda () () (setf hits (+ hits 1)) ())) \
+                 (run-thunk (lambda () () (setf hits (+ hits 1)) ())) \
+                 hits)";
+    assert_eq!(eval_ok(src), RtValue::Int(2));
+}
+
 /// Regression for the macro-expansion JIT-suppression flag
 /// (`Interp::jit_suppressed`): `dotimes`'s own expansion
 /// (`prelude::SOURCE`) runs through `Interp::expand_macro` at *check* time,
