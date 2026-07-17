@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-07-17 / ブランチ: `feature/closure-unification`
+最終更新: 2026-07-18 / ブランチ: `feature/closure-unification`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離した）。
@@ -14,7 +14,7 @@
 
 ## 残っている作業（影響範囲の大きさで優先順位付け——[[feedback-impl-priority]]）
 
-### クロージャ表現統一（labels/closures unification）Stage 8-10（branch `feature/closure-unification`）
+### クロージャ表現統一（labels/closures unification）Stage 9-10（branch `feature/closure-unification`、Stage 8まで完了）
 
 **背景**: interpクロージャとcompiledクロージャ(ClosureBox)の二重表現による境界ギャップ
 （interpクロージャをcompiled関数に渡せない/compiled関数のFn戻り値がIntに化ける/structフィールド
@@ -111,15 +111,58 @@ evalアームが、interpクロージャ（`make_closure`）を作る前にま�
   マクロ展開との共存、計9件）。`TYPELISP_CLOSURE_JIT=require`で個別に再実行すると
   実際にJIT経路を通ったことを確認できる（ただし上記の理由で全件通るわけではない）。
 
-- **Stage 8: compiled被覆拡大**（Stage 7の`require`モード失敗を計画的に潰す複数コミット群）
-  - 新しい`rt_*`シム追加（`random`/`gensym`/`equal`/`equalp`等、未compile対応のbuiltin）。
-  - `compile-assoc`のlowering追加（`f64::sqrt`等、既にcompile対応済みのものは除く——
-    `docs/dev/TODO.md`の`f64`関連の節を参照して重複しないこと）。
-  - `TYPELISP_CLOSURE_JIT=require`での失敗理由ログを起点に網羅的に潰す。
+**Stage 8: compiled被覆拡大 完了**（2026-07-18、6コミット）——受け入れ基準だった
+「`TYPELISP_CLOSURE_JIT=require`での全体`scripts/test-serial.sh`完走」を達成
+（41テストバイナリ全green、デフォルトpreferも当然green）。requireログの失敗約240件を
+根因5種に分類し、次の順で潰した:
+
+1. **`JitDecline` benign/gap二分類**——requireが「実際に埋めるべき被覆ギャップ(Gap)」だけを
+   hard error化し、恒久的に正当なfallback（Benign＝Stage 9でも許容が確定しているもの:
+   off指定／マクロ展開中／native tier型／コンパイラ島未ロード（`typl` CLI/REPLは
+   `load_compiler`を呼ばない設計）／JIT中のheap枯渇（資源起因。needleは
+   `mem::Error::HeapExhausted`のDisplayから構築し文字列照合））はrequire下でも静かに
+   fallbackする。これが最大の雪崩3種を解消——(1)reentrantな`compile-function`実行中に
+   コンパイラ島自身のlabelsのtier落ちがpanic化して外側のcompile全体を殺す
+   （compile_testの129件・`--lib` SCCテストの正体）、(2)コンパイラ未ロードテストでの
+   全lambda定義失敗、(3)極小ヒープGC圧テストのheap枯渇panic。
+2. **推移的ターゲットcompile**——`jit_define_closure`が未compileのcall/assocターゲットで
+   諦める代わりにStage 5のSCC機構（`compile_function`/`compile_scc`）を駆動して依存グラフ
+   ごとcompile（Stage 5計画書の「Stage 7で実際に必要になる基盤」がここで本来の役割に就いた）。
+   副産物でStage 7の潜在バグも修正: ctorのmethod external宣言/配線が`tl_`プレフィックスなしの
+   旧`method_link_name`を使っており`compile-assoc`の`tl_type::method`ルックアップと不一致
+   だった（「未compileなら即Err」ガードの陰で従来は到達不能）。
+3. **`Unit`戻り値**——tier判定で戻り値位置に限り`Unit`を許可（`compile-unit`は元から存在。
+   引数/捕獲位置はcrossing encodingが無いため除外のまま）+`decode_compiled_return`に
+   `Type::Unit`アーム（compiled Unit戻りが生`Int(0)`でなく`RtValue::Unit`に。
+   既存テスト3件が文書化していた旧挙動の期待値も更新）。
+4. **`sexpr-*`アイランド層全体の`rt_*`シム**——car/cdr/cons以外（述語`consp`/`null`/`atom`/
+   `symp`、抽出`int`/`bool`/`char`/`str`/`sym-name`）にcompiled loweringが無く、Sexprリストを
+   歩くユーザー関数（`&rest`消費側の全て）がcompile不能だった。`rt_consp`等9関数を新設
+   （`sexpr-float`は既存`rt_float_value`を再利用——bits-in-i64がcompiled f64規約そのもの）、
+   `compile-call`のrename表・`is_rt_builtin_name`・`rt_extern_functions`に追加。あわせて
+   compiled関数の**string戻り値**が`is_boxed_sexpr_type`に掛からず生Int化する既知の文書化済み
+   ギャップも`Type::Str`アームで解消。
+5. **`&rest`クロージャ解禁**——Stage 7の一律拒否を撤去するだけで動いた: checkerがrest引数を
+   params末尾へ`(名前, Sexpr)`として折り込み済みで、余剰引数のパッキングも呼び出しサイトで
+   check時に完了している（`wrap_rest_elem`/`cons_rest_list`）ため、apply時点でアリティは
+   常に一致する。
+
+  Stage 8で**表面化しなかった**ためやらなかったこと（要求が現れたら再訪）:
+  - 計画時に候補として挙げていた`random`/`gensym`/`equal`/`equalp`等の`rt_*`シムと
+    `compile-assoc`のlowering追加——現テストスイートのJIT経路からは一度も要求されなかった。
+  - **モジュール修飾defun（`m::inc`）のcall target**——SCC機構のノード同一性がroot名前提
+    （`CallEdge::node_name`が`Path::local`へ潰す/`resolve_fn_def`が`Path::root`で引く）のため
+    推移的compile不能で明示Gapにしてある（Stage 5からの継承制限）。現テストでは
+    コンパイラ島未ロード（benign）の陰に隠れて顕在化しない。
 
 - **Stage 9: JIT必須化**
   - fallbackを「native tier（自己ホストコンパイラ島）+マクロ展開時のみ」へ制限。
-  - compilable tierでのJIT失敗は明確な`Panic`にする（サイレントfallback廃止）。
+  - compilable tierでのJIT失敗は明確な`Panic`にする（サイレントfallback廃止）——
+    Stage 8の`JitDecline`分類がそのまま土台になる（Benignの集合=Stage 9で残すfallback）。
+  - **Stage 8で判明した論点**: Benignには「コンパイラ島未ロード」と「JIT中heap枯渇」も
+    含めてある。前者は`typl` CLI/REPLが`load_compiler`を呼ばない現設計の帰結で、Stage 9で
+    「CLIでもコンパイラ島をロードする」か「未ロードfallbackを恒久許容に含める」かの決定が要る。
+    後者も資源起因fallbackとして残すかどうか要判断。
   - 受け入れ基準は全体`scripts/test-serial.sh`の完走。
 
 - **Stage 10: 掃除**
