@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::freevars::{labels_free_vars, lambda_free_vars};
+use super::freevars::{labels_free_vars, lambda_free_vars, names_captured_by_nested};
 use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, QuotedSexpr, Type, Typed, Value};
 
 /// The five read-only inputs every scoped `translate_*` threads through
@@ -39,7 +39,7 @@ use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, QuotedSexpr, Type, 
 ///   guaranteed present; see [`translate_global`]. Fixed for a whole
 ///   translation, exactly like `structs`.
 ///
-/// `Copy` so it passes by value freely — it's five shared references.
+/// `Copy` so it passes by value freely — it's shared references.
 #[derive(Clone, Copy)]
 struct Ctx<'a> {
     direct: &'a HashSet<String>,
@@ -47,6 +47,52 @@ struct Ctx<'a> {
     structs: &'a HashSet<Path>,
     enums: &'a HashSet<Path>,
     globals: &'a HashMap<Path, usize>,
+    /// Names, in the *current* function-like scope (a `defun`/`lambda`/
+    /// `labels`-def body under translation), that are cell-boxed —
+    /// closure-representation unification, Stage 4: a shared `BoxedObj::Cell`
+    /// rather than an ordinary stack slot, so a `setf` inside a capturing
+    /// closure is visible everywhere else that shares the binding (CL
+    /// semantics, matching the interpreter's own heap-cell captures). Always
+    /// exactly the union of (a) this scope's own params/`let`-bindings that
+    /// [`freevars::names_captured_by_nested`] flags (referenced inside some
+    /// closure nested in this same body) and (b) every name this scope
+    /// itself receives as a capture (`captured`/`fn-env`'s shared list) —
+    /// unconditionally cell, since Stage 4 cell-boxes every captured binding
+    /// regardless of whether it's ever actually reassigned (a later,
+    /// deliberately deferred optimization narrows this to only the ones that
+    /// are). [`Expr::Var`]/[`Expr::Set`] check membership here to decide
+    /// `(var ...)` vs `(cellvar ...)` / `(set ...)` vs `(cellset ...)`;
+    /// [`translate_let`]/[`tagged_sym_list`] check it per binding to decide
+    /// `bind-let-values`/`bind-params`'s own plain-vs-cell codegen. Reset to
+    /// a *fresh* set (never inherited) whenever a nested `lambda`/`labels`
+    /// starts a new scope — see [`translate_lambda`]/[`translate_labels`]'s
+    /// own computation for why this needs no explicit inheritance from the
+    /// enclosing scope's own `cell_names` to stay consistent with it.
+    cell_names: &'a HashSet<String>,
+    /// Every `labels` sibling name reachable from *any* ancestor scope —
+    /// unlike `direct` (reset to empty whenever a `lambda` starts a fresh
+    /// scope, since a `lambda` never gets *direct-call* access to an
+    /// enclosing block's siblings), this is never reset, only grown, when
+    /// entering a nested `labels` block (`direct ∪ that block's own def
+    /// names`). A name that ends up in a `lambda`'s own `captured_names`
+    /// (`lambda_free_vars`) *and* in this set is a sibling being captured
+    /// *as a value* (`compiler.rs`'s `resolve-value` boxes it into a fresh
+    /// `BoxedObj::CompiledClosure` on the spot, once, at capture time) —
+    /// never a mutable binding, so it must stay out of `cell_names`
+    /// regardless of how many `lambda` boundaries separate it from its
+    /// defining `labels` block (a sibling can never be `setf`'d — see
+    /// `compile-set`'s own doc comment — so there is nothing to share).
+    /// [`translate_lambda`] is the only place that reads this.
+    visible_siblings: &'a HashSet<String>,
+}
+
+/// The bare name set of a typed name list — [`tagged_sym_list`]'s "every
+/// entry is unconditionally a cell" callers (a `labels`/`lambda`'s own
+/// shared captured-list) pass `&name_set(list)` as `cell_names` so every
+/// entry classifies as cell regardless of its own `binding_kind`, matching
+/// Stage 4's "cellify every capture" rule.
+fn name_set(names: &[(String, Type)]) -> HashSet<String> {
+    names.iter().map(|(n, _)| n.clone()).collect()
 }
 
 /// A process-wide counter for synthesizing unique LLVM symbol names for
@@ -337,11 +383,34 @@ fn is_enum_ty(ty: &Type, enums: &HashSet<Path>) -> bool {
 /// sharing it (rather than that method re-deriving its own, now-stale
 /// `Bool`-tagged copy) is what keeps the two from desyncing the way they
 /// did when Stage 6 first generalized this tag.
-pub(crate) fn tagged_sym_list(heap: &mut Heap, names: &[(String, Type)], enums: &HashSet<Path>) -> Result<Value, Error> {
+///
+/// `kind` gains a fourth shape at the closure-representation unification's
+/// Stage 4: for any name in `cell_names`, `10 + `[`struct_field_kind`]`(ty)`
+/// instead of [`binding_kind`]`(ty)` — `compiler.rs`'s `bind-params`/
+/// `bind-let-values`/`retain-bindings`/`release-bindings` read `kind >= 10`
+/// as "this name is cell-boxed" and `kind - 10` as the underlying value's
+/// own tag/detag classification (the same numbering a `defstruct` field
+/// already uses to cross the `rt_struct_*` boundary — a cell crosses the
+/// `rt_cell_*` boundary identically, one slot instead of N). Plain
+/// `binding_kind` alone can't carry this: it only distinguishes "needs a GC
+/// root" from "doesn't" (two states), while tagging a *cell*'s payload
+/// needs the finer int/float/char/bool/passthrough split `struct_field_kind`
+/// already computes for exactly this reason.
+pub(crate) fn tagged_sym_list(
+    heap: &mut Heap,
+    names: &[(String, Type)],
+    structs: &HashSet<Path>,
+    enums: &HashSet<Path>,
+    cell_names: &HashSet<String>,
+) -> Result<Value, Error> {
     let mut acc = Value::Empty;
     for (n, ty) in names.iter().rev() {
         let sym = heap.intern_symbol(n);
-        let kind = Value::Int(binding_kind(ty, enums));
+        let kind = Value::Int(if cell_names.contains(n) {
+            10 + struct_field_kind(ty, structs, enums)
+        } else {
+            binding_kind(ty, enums)
+        });
         heap.push_root(sym);
         let pair = heap.cons(sym, kind);
         heap.pop_root();
@@ -709,16 +778,22 @@ fn tagged_ast_list_to_sexpr_with(
 /// see [`struct_field_kind`] for the one classification it drives. `globals`
 /// is every global variable this translation may reference, already
 /// promoted to a compiled-global id — see [`Ctx`]'s doc comment and
-/// [`collect_global_targets`].
+/// [`collect_global_targets`]. `cell_names` is this (top-level `defun`)
+/// body's own [`freevars::names_captured_by_nested`] result — a top-level
+/// `defun` has no enclosing lexical scope to capture *from*, so unlike
+/// [`translate_lambda`]/[`translate_labels`]'s own computation there is
+/// nothing else to union in here (see [`Ctx::cell_names`]'s doc comment).
 pub fn ast_to_sexpr(
     heap: &mut Heap,
     typed: &Typed,
     structs: &HashSet<Path>,
     enums: &HashSet<Path>,
     globals: &HashMap<Path, usize>,
+    cell_names: &HashSet<String>,
 ) -> Result<Value, Error> {
     let direct = HashSet::new();
-    let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals };
+    let no_siblings = HashSet::new();
+    let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals, cell_names, visible_siblings: &no_siblings };
     ast_to_sexpr_scoped(heap, typed, cx)
 }
 
@@ -743,7 +818,9 @@ pub fn ast_to_sexpr_for_global_init(
     globals: &HashMap<Path, usize>,
 ) -> Result<Value, Error> {
     let direct = HashSet::new();
-    let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals };
+    let no_cells = HashSet::new();
+    let no_siblings = HashSet::new();
+    let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals, cell_names: &no_cells, visible_siblings: &no_siblings };
     let kind = Value::Int(global_field_kind(&value.ty, structs, enums));
     let form = ast_to_sexpr_scoped(heap, value, cx)?;
     heap.push_root(form);
@@ -799,6 +876,21 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // (where the relevant `fn-env` is still in scope) rather than here
         // avoids colliding with `compile-lambda`'s own, separate decision to
         // always give an escaping `lambda`'s body a *fresh* `fn-env`.
+        // A cell-boxed name (`cx.cell_names`, closure-representation
+        // unification Stage 4) instead becomes `(cellvar name kind)` — a
+        // dedicated tag rather than folding this into `(var ...)`'s own
+        // `is-fn` field, so every existing `(var name is-fn)`-shaped IR
+        // literal (this module's and `compiler.rs`'s own tests) stays valid
+        // unchanged. `kind` is `struct_field_kind`'s tag/detag
+        // classification of `typed.ty` — `compiler.rs`'s `compile-cellvar`
+        // reads the cell's stored tagged payload back out via
+        // `rt_cell_get` and detags it per this same numbering
+        // (`compile-sexpr-field`, reused verbatim).
+        Expr::Var(name) if cx.cell_names.contains(name) => {
+            let v = heap.alloc_string(name.clone());
+            let kind = Value::Int(struct_field_kind(&typed.ty, cx.structs, cx.enums));
+            tagged(heap, "cellvar", &[v, kind])
+        }
         Expr::Var(name) => {
             let v = heap.alloc_string(name.clone());
             let is_fn = Value::Bool(matches!(typed.ty, Type::Fn(..)));
@@ -872,12 +964,12 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // than building out unrooted multi-child plumbing nothing exercises
         // yet — see the module doc comment.
         Expr::Global(path) => translate_global(heap, path, &typed.ty, cx),
-        Expr::FnRef(path) => translate_fnref(heap, path, &typed.ty, cx.enums),
-        Expr::MethodRef { type_name, method } => translate_methodref(heap, type_name, method, &typed.ty, cx.enums),
+        Expr::FnRef(path) => translate_fnref(heap, path, &typed.ty, cx.structs, cx.enums),
+        Expr::MethodRef { type_name, method } => translate_methodref(heap, type_name, method, &typed.ty, cx.structs, cx.enums),
         Expr::If(cond, then, els) => translate_if(heap, cond, then, els, &typed.ty, cx),
         Expr::Let(binds, body) => translate_let(heap, binds, body, cx),
         Expr::Call(path, args) => translate_call(heap, path, args, cx),
-        Expr::Lambda { params, body } => translate_lambda(heap, params, body, cx.structs, cx.enums, cx.globals),
+        Expr::Lambda { params, body } => translate_lambda(heap, params, body, cx.structs, cx.enums, cx.globals, cx.visible_siblings),
         Expr::Labels { defs, body } => translate_labels(heap, defs, body, cx),
         Expr::Apply(callee, args) => translate_apply(heap, callee, args, cx),
         Expr::Construct { type_name, variant, args, mutable } => translate_construct(heap, type_name, &typed.ty, *variant, args, *mutable, cx),
@@ -972,7 +1064,15 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], cx:
     let mut pair_values = Vec::with_capacity(binds.len());
     for (name, val) in binds {
         let name_sym = heap.intern_symbol(name);
-        let kind = Value::Int(binding_kind(&val.ty, cx.enums));
+        // See `tagged_sym_list`'s doc comment for the `kind >= 10` cell
+        // scheme (closure-representation unification, Stage 4) — a `let`
+        // binding uses the exact same pair shape/numbering, checked against
+        // `cx.cell_names` the same way a `Var`/`Set` reference is.
+        let kind = Value::Int(if cx.cell_names.contains(name) {
+            10 + struct_field_kind(&val.ty, cx.structs, cx.enums)
+        } else {
+            binding_kind(&val.ty, cx.enums)
+        });
         heap.push_root(name_sym);
         let name_pair = heap.cons(name_sym, kind);
         heap.pop_root(); // name_sym
@@ -1070,7 +1170,19 @@ fn translate_let(heap: &mut Heap, binds: &[(String, Typed)], body: &[Typed], cx:
 fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, cx: Ctx) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
-    let kind = Value::Int(binding_kind(ty, cx.enums));
+    // A cell-boxed target (`cx.cell_names`, closure-representation
+    // unification Stage 4) gets its own `(cellset name kind value-form)` tag
+    // — `kind` here is `struct_field_kind`'s tag/detag classification (like
+    // `Expr::Var`'s `cellvar` arm above), not `binding_kind`'s GC-root-only
+    // split: `compiler.rs`'s `compile-cellset` re-tags the new value and
+    // writes it through `rt_cell_set`, mutating the shared cell in place
+    // rather than the slot itself (a cell-kind slot's own word 0 never
+    // changes after `bind-params`/`bind-let-values`/`bind-captures` first
+    // populate it, so there is no root-index to update the way ordinary
+    // `kind = 2` `compile-set` needs — the cell reference *is* the binding's
+    // permanent root for its whole activation).
+    let is_cell = cx.cell_names.contains(name);
+    let kind = Value::Int(if is_cell { struct_field_kind(ty, cx.structs, cx.enums) } else { binding_kind(ty, cx.enums) });
     let form = match ast_to_sexpr_scoped(heap, value, cx) {
         Ok(v) => v,
         Err(e) => {
@@ -1079,7 +1191,8 @@ fn translate_set(heap: &mut Heap, name: &str, value: &Typed, ty: &Type, cx: Ctx)
         }
     };
     heap.push_root(form);
-    let result = tagged(heap, "set", &[name_v, kind, form]);
+    let tag = if is_cell { "cellset" } else { "set" };
+    let result = tagged(heap, tag, &[name_v, kind, form]);
     heap.pop_root(); // form
     heap.pop_root(); // name_v
     result
@@ -1233,7 +1346,7 @@ fn translate_panic(heap: &mut Heap, msg: &Typed, cx: Ctx) -> Result<Value, Error
 /// reaching this function is `Type::Fn(_, None, _)` in every reachable case.
 /// `params` is built the same way as [`translate_fnref`]'s purely so both
 /// stay visibly in sync should `defmethod` ever gain `&rest` support.
-fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Type, enums: &HashSet<Path>) -> Result<Value, Error> {
+fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> Result<Value, Error> {
     let params: Vec<(String, Type)> = match ty {
         Type::Fn(params, ..) => params.iter().enumerate().map(|(i, t)| (format!("arg{}", i), t.clone())).collect(),
         _ => return unsupported(heap, "MethodRef"),
@@ -1297,7 +1410,8 @@ fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Typ
     heap.pop_root(); // method_v
     heap.pop_root(); // type_name_v
     heap.push_root(call_body);
-    let result = build_lambda_tag(heap, &fresh_lambda_name("methodref"), &[], &params, call_body, enums);
+    let no_cells = HashSet::new();
+    let result = build_lambda_tag(heap, &fresh_lambda_name("methodref"), &[], &params, call_body, structs, enums, &no_cells);
     heap.pop_root(); // call_body
     result
 }
@@ -1491,11 +1605,25 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], cx: Ctx)
     }
 
     let captured_names = labels_free_vars(defs, cx.direct, cx.outer_captured);
+    // Every name this block captures is unconditionally cell-boxed (closure-
+    // representation unification, Stage 4 — see `Ctx::cell_names`'s doc
+    // comment for why this needs no explicit inheritance from the enclosing
+    // scope's own `cell_names` to stay consistent with it): this becomes the
+    // *base* `cell_names` for both `captured_list` itself and (extended
+    // per-def/for the trailing body below) every nested translation.
+    let captured_cell_names = name_set(&captured_names);
+    // Grown, not reset (unlike `direct`/`cell_names`) — see
+    // `Ctx::visible_siblings`'s doc comment: a `lambda` nested arbitrarily
+    // deep inside this block's own defs/trailing body still needs to
+    // recognize `siblings`' names as sibling-derived, never cell-boxed, even
+    // though it can't call them directly.
+    let visible_siblings: HashSet<String> = cx.visible_siblings.union(&siblings).cloned().collect();
     // The scope each def's body / the trailing body sees: siblings become
     // directly callable, and this block's captured list becomes the enclosing
-    // one for any nested block. `structs` is invariant.
-    let inner = Ctx { direct: &siblings, outer_captured: &captured_names, ..cx };
-    let captured_list = tagged_sym_list(heap, &captured_names, cx.enums)?;
+    // one for any nested block. `structs` is invariant. `cell_names` is
+    // deliberately *not* inherited from `cx` via `..cx` here — see above.
+    let inner = Ctx { direct: &siblings, outer_captured: &captured_names, cell_names: &captured_cell_names, visible_siblings: &visible_siblings, ..cx };
+    let captured_list = tagged_sym_list(heap, &captured_names, cx.structs, cx.enums, &captured_cell_names)?;
     heap.push_root(captured_list);
 
     let mut def_values = Vec::with_capacity(defs.len());
@@ -1544,7 +1672,14 @@ fn translate_labels(heap: &mut Heap, defs: &[LabelDef], body: &[Typed], cx: Ctx)
         heap.pop_root(); // captured_list
         return Err(Error::TypeError("compile: labels body has a multi-expression body, not yet supported".into()));
     }
-    let body_v = match ast_to_sexpr_scoped(heap, &body[0], inner) {
+    // The trailing body isn't a function of its own (no params), but a `let`
+    // anywhere inside it can still be captured by a `lambda`/`labels`
+    // nested further in — extend the shared base with exactly those names,
+    // the same per-scope union `translate_labels_def` computes for each
+    // def's own body below.
+    let trailing_cell_names: HashSet<String> = captured_cell_names.union(&names_captured_by_nested(body)).cloned().collect();
+    let trailing_cx = Ctx { cell_names: &trailing_cell_names, ..inner };
+    let body_v = match ast_to_sexpr_scoped(heap, &body[0], trailing_cx) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // defs_list
@@ -1570,9 +1705,17 @@ fn translate_labels_def(
     body: &Typed,
     cx: Ctx,
 ) -> Result<Value, Error> {
+    // `cx.cell_names` (in) is the block's shared *base* (every captured
+    // name, all unconditionally cell) — extended here with this specific
+    // def's *own* params/`let`-bindings that `names_captured_by_nested`
+    // flags against its *own* body alone (never another sibling's, since
+    // params aren't shared the way `captured` is — see `Ctx::cell_names`'s
+    // doc comment).
+    let own_cell_names: HashSet<String> = cx.cell_names.union(&names_captured_by_nested(std::slice::from_ref(body))).cloned().collect();
+    let cx = Ctx { cell_names: &own_cell_names, ..cx };
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
-    let param_list = match tagged_sym_list(heap, params, cx.enums) {
+    let param_list = match tagged_sym_list(heap, params, cx.structs, cx.enums, cx.cell_names) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root();
@@ -1716,11 +1859,21 @@ fn build_lambda_tag(
     captured: &[(String, Type)],
     params: &[(String, Type)],
     body: Value,
+    structs: &HashSet<Path>,
     enums: &HashSet<Path>,
+    param_cell_names: &HashSet<String>,
 ) -> Result<Value, Error> {
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);
-    let captured_list = match tagged_sym_list(heap, captured, enums) {
+    // Every captured name is cell-boxed *unless* `translate_lambda` already
+    // excluded it from `param_cell_names` as sibling-derived (see that
+    // function's own doc comment) — `param_cell_names`, despite its name, is
+    // the caller's one unified cell set covering both its own params and its
+    // captures (a `translate_methodref`/`translate_fnref` caller passes an
+    // empty `captured` *and* an empty `param_cell_names`, so this reuse is
+    // moot there — only a real `translate_lambda` call has anything in
+    // `captured` to classify).
+    let captured_list = match tagged_sym_list(heap, captured, structs, enums, param_cell_names) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // name_v
@@ -1728,7 +1881,7 @@ fn build_lambda_tag(
         }
     };
     heap.push_root(captured_list);
-    let param_list = match tagged_sym_list(heap, params, enums) {
+    let param_list = match tagged_sym_list(heap, params, structs, enums, param_cell_names) {
         Ok(v) => v,
         Err(e) => {
             heap.pop_root(); // captured_list
@@ -1772,22 +1925,44 @@ fn translate_lambda(
     structs: &HashSet<Path>,
     enums: &HashSet<Path>,
     globals: &HashMap<Path, usize>,
+    visible_siblings: &HashSet<String>,
 ) -> Result<Value, Error> {
     if body.len() != 1 {
         return Err(Error::TypeError("compile: lambda has a multi-expression body, not yet supported".into()));
     }
     let captured_names = lambda_free_vars(params, body);
+    // This lambda's own `cell_names`: every name it captures unioned with its
+    // own params that some closure nested *within* its body captures —
+    // deliberately not inherited from any enclosing scope's own `cell_names`
+    // (see `Ctx::cell_names`'s doc comment for why that's still consistent),
+    // matching `outer_captured`'s own reset to empty just below for the
+    // identical reason (a fresh `fn-env`). Every captured name is cell-boxed
+    // *except* one found in `visible_siblings` — a `labels` sibling from some
+    // ancestor scope, captured here *as a value* (`lambda_free_vars` doesn't
+    // distinguish that case from an ordinary capture — see its own doc
+    // comment), never a mutable binding a cell's sharing semantics apply to
+    // (see `Ctx::visible_siblings`'s doc comment for why this check has to
+    // reach arbitrarily far up, not just this lambda's own immediate
+    // enclosing scope).
+    let mut cell_names = names_captured_by_nested(body);
+    for (n, _) in &captured_names {
+        if !visible_siblings.contains(n) {
+            cell_names.insert(n.clone());
+        }
+    }
     // An empty `outer_captured`, not whatever the enclosing scope's own was:
     // unlike `labels` (which shares `compiler.rs`'s `fn-env` scope stack
     // down through nesting), a `lambda` is compiled with a *fresh* `fn-env`
     // (`compile-lambda`'s own `(new-fn-env)`) — so a `labels` block nested
     // inside *this* body has no enclosing block's captured-list to prefix
     // its own with, regardless of what scope the `lambda` itself sits in.
+    // `visible_siblings` is passed through *unchanged* though (unlike
+    // `direct`) — see that field's own doc comment.
     let direct = HashSet::new();
-    let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals };
+    let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals, cell_names: &cell_names, visible_siblings };
     let body_v = ast_to_sexpr_scoped(heap, &body[0], cx)?;
     heap.push_root(body_v);
-    let result = build_lambda_tag(heap, &fresh_lambda_name("lambda"), &captured_names, params, body_v, enums);
+    let result = build_lambda_tag(heap, &fresh_lambda_name("lambda"), &captured_names, params, body_v, structs, enums, &cell_names);
     heap.pop_root(); // body_v
     result
 }
@@ -1823,7 +1998,7 @@ fn rest_sexpr_type() -> Type {
 /// convention (`build-closure-apply`/`compile-apply-indirect`) passes
 /// arguments through an arity-generic array, exactly like [`translate_lambda`]
 /// already relies on for a `&rest`-declared `lambda` literal.
-fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type, enums: &HashSet<Path>) -> Result<Value, Error> {
+fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> Result<Value, Error> {
     let mut params: Vec<(String, Type)> = match ty {
         Type::Fn(params, ..) => params.iter().enumerate().map(|(i, t)| (format!("arg{}", i), t.clone())).collect(),
         _ => return unsupported(heap, "FnRef"),
@@ -1897,7 +2072,8 @@ fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type, enums: &HashSet<Path
     }
     heap.pop_root(); // target_v
     heap.push_root(call_body);
-    let result = build_lambda_tag(heap, &fresh_lambda_name("fnref"), &[], &params, call_body, enums);
+    let no_cells = HashSet::new();
+    let result = build_lambda_tag(heap, &fresh_lambda_name("fnref"), &[], &params, call_body, structs, enums, &no_cells);
     heap.pop_root(); // call_body
     result
 }
@@ -2573,7 +2749,7 @@ mod tests {
     /// care (nested-struct field classification, `Global`/`SetGlobal`)
     /// calls `super::ast_to_sexpr` with real ones instead.
     fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
-        super::ast_to_sexpr(heap, typed, &HashSet::new(), &HashSet::new(), &HashMap::new())
+        super::ast_to_sexpr(heap, typed, &HashSet::new(), &HashSet::new(), &HashMap::new(), &HashSet::new())
     }
 
     /// Unpacks a tagged-list `Value` into (tag name, field values), asserting
@@ -2832,7 +3008,11 @@ mod tests {
         assert_eq!(captured.len(), 1);
         let (name, kind) = untag_name(&heap, captured[0]);
         assert_eq!(name, "offset");
-        assert_eq!(kind, KIND_PLAIN);
+        // Closure-representation unification, Stage 4: every captured name
+        // is unconditionally cell-boxed now, regardless of its own
+        // `binding_kind` — `10 + struct_field_kind(I64)` = `10 + 1`, not the
+        // pre-Stage-4 `KIND_PLAIN`.
+        assert_eq!(kind, 11);
     }
 
     /// A call to a function value that *isn't* a currently in-scope `labels`
@@ -3002,7 +3182,51 @@ mod tests {
         assert_eq!(captured.len(), 1);
         let (name, kind) = untag_name(&heap, captured[0]);
         assert_eq!(name, "x");
-        assert_eq!(kind, KIND_PLAIN);
+        // See the matching assertion in
+        // `translates_a_labels_form_that_captures_an_outer_scope_name` —
+        // same Stage 4 "every capture is cell-boxed" rule.
+        assert_eq!(kind, 11);
+    }
+
+    /// Closure-representation unification, Stage 4: a *reference* to a
+    /// captured name inside the capturing `lambda`'s own body becomes
+    /// `(cellvar name kind)`, not `(var name is-fn)` — the tag
+    /// `compiler.rs`'s `compile-cellvar` dispatches on to read the shared
+    /// cell (`rt_cell_get`) instead of an ordinary slot. `kind` here is
+    /// `struct_field_kind`'s classification (`1` for `i64`), *not* the
+    /// captured-list's own `10 + kind` offset scheme — the offset only
+    /// applies to `bind-params`/`bind-let-values`' per-binding tag, not a
+    /// reference site's own tag/detag instruction.
+    #[test]
+    fn a_reference_to_a_captured_name_inside_the_capturing_lambda_becomes_cellvar() {
+        let mut heap = Heap::with_capacity(1 << 10);
+        let lambda = Expr::Lambda {
+            params: vec![("y".to_string(), Type::I64)],
+            body: vec![typed(
+                Expr::Assoc {
+                    type_name: crate::Path::root("i64"),
+                    method: "+".to_string(),
+                    instance: true,
+                    args: vec![typed(Expr::Var("y".to_string()), Type::I64), typed(Expr::Var("x".to_string()), Type::I64)],
+                },
+                Type::I64,
+            )],
+        };
+        let v = ast_to_sexpr(&mut heap, &typed(lambda, fn_ty())).unwrap();
+        let (_, fields) = untag(&heap, v);
+        let (_, assoc_fields) = untag(&heap, fields[3]);
+        // `(assoc type-name method instance (kind . arg0) (kind . arg1))` —
+        // `arg0` is `y` (an ordinary param, stays `var`), `arg1` is `x`
+        // (captured, `cellvar`).
+        let (_, y_form) = untag_arg(&heap, assoc_fields[3]);
+        let (y_tag, y_fields) = untag(&heap, y_form);
+        assert_eq!(y_tag, "var");
+        assert_eq!(expect_str(&heap, y_fields[0]), "y");
+        let (_, x_form) = untag_arg(&heap, assoc_fields[4]);
+        let (x_tag, x_fields) = untag(&heap, x_form);
+        assert_eq!(x_tag, "cellvar");
+        assert_eq!(expect_str(&heap, x_fields[0]), "x");
+        assert_eq!(x_fields[1], Value::Int(1), "i64's struct_field_kind is 1");
     }
 
     /// labels/closures Stage 4: `((lambda (params) body) args...)` becomes a
@@ -3484,7 +3708,8 @@ mod tests {
         let globals = HashMap::new();
         let direct = HashSet::new();
         let enums = HashSet::new();
-        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals };
+        let cell_names = HashSet::new();
+        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals, cell_names: &cell_names, visible_siblings: &HashSet::new() };
 
         let point_ty = Type::Named(point.clone(), vec![]);
         let scrut = typed(Expr::Var("p".to_string()), point_ty.clone());
@@ -3573,7 +3798,8 @@ mod tests {
             let structs = HashSet::new();
             let enums = HashSet::new();
             let globals = HashMap::new();
-            let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals };
+            let cell_names = HashSet::new();
+        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals, cell_names: &cell_names, visible_siblings: &HashSet::new() };
             let v = pattern_to_sexpr(heap, pat, cx).unwrap();
             let (tag, fields) = untag(heap, v);
             assert_eq!(tag, "pat-lit");

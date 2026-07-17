@@ -1439,6 +1439,13 @@ impl Interp {
         // second always-current set alongside `enum_defs` isn't worth it.
         let enum_types: HashSet<Path> = self.enum_defs.keys().cloned().collect();
 
+        // A top-level `defun` has no enclosing lexical scope to capture
+        // *from*, so its own `cell_names` (closure-representation
+        // unification, Stage 4) is exactly its own params/`let`-bindings
+        // that some nested `lambda`/`labels` in `body` captures — see
+        // `ast_bridge::names_captured_by_nested`'s doc comment.
+        let cell_names = crate::compile::freevars::names_captured_by_nested(std::slice::from_ref(&body));
+
         // Builds `((a . kind) (b . kind) ...)`, the `Sexpr` list of typed
         // name pairs `compiler.rs`'s `bind-params` walks to know which
         // logical argument-array slot binds to which name — and, for the
@@ -1449,18 +1456,19 @@ impl Interp {
         // construction (a `labels`/`lambda` parameter or captured-name list
         // needs the identical shape) rather than re-deriving it here, so
         // the two can never desync.
-        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, &params, &enum_types) {
+        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, &params, &self.struct_types, &enum_types, &cell_names) {
             Ok(v) => v,
             Err(e) => return Err(EvalError::Panic(e.to_string())),
         };
         heap.push_root(param_list);
-        let body_sexpr = match crate::compile::ast_bridge::ast_to_sexpr(heap, &body, &self.struct_types, &enum_types, &compiled_globals) {
-            Ok(v) => v,
-            Err(e) => {
-                heap.pop_root(); // param_list
-                return Err(EvalError::Panic(e.to_string()));
-            }
-        };
+        let body_sexpr =
+            match crate::compile::ast_bridge::ast_to_sexpr(heap, &body, &self.struct_types, &enum_types, &compiled_globals, &cell_names) {
+                Ok(v) => v,
+                Err(e) => {
+                    heap.pop_root(); // param_list
+                    return Err(EvalError::Panic(e.to_string()));
+                }
+            };
         heap.pop_root(); // param_list
 
         let compiler_path = Path::root("compile-function");
@@ -1515,7 +1523,7 @@ impl Interp {
         // membership crosses as a per-compilation set.
         let enum_types: HashSet<Path> = self.enum_defs.keys().cloned().collect();
 
-        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, &[], &enum_types) {
+        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, &[], &self.struct_types, &enum_types, &HashSet::new()) {
             Ok(v) => v,
             Err(e) => return Err(EvalError::Panic(e.to_string())),
         };

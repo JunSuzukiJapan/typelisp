@@ -47,17 +47,28 @@
 //! immutable once defined, and nothing here builds real LLVM `phi` nodes —
 //! see `compile-if`'s own alloca-based merge for why). `resolve-value`/
 //! `retain-bindings`/`release-bindings` all `load-raw` a slot before
-//! treating it as "the value"; `compile-set` is the only place that writes
-//! to an existing slot a second time. `setf` on a *captured* name only
-//! mutates this activation's own local copy (loaded once into its own slot
-//! by `bind-captures`) — it does not write back to the original binding or
-//! propagate to any other closure sharing that logical capture, unlike the
-//! tree-walking interpreter's true shared-cell closures (heap-cell captures,
-//! see `BoxedObj::Closure`/`ClosureBody`).
-//! Accepted as a documented gap rather than solved: none of `while`/
-//! `dotimes`/`dolist` (or anything else this compiler is exercised against)
-//! ever `setf`s a captured name, only a `let`-bound loop counter local to
-//! the activation doing the looping.
+//! treating it as "the value"; `compile-set`/`compile-cellset` are the only
+//! places that write to an existing slot a second time (or, for a cell-kind
+//! name, to the cell itself — see just below). A `setf` on a *captured*
+//! name now genuinely shares — closure-representation unification, Stage 4:
+//! any name `ast_bridge::names_captured_by_nested` finds referenced inside a
+//! nested `lambda`/`labels` is promoted, at `bind-params`/`bind-let-values`
+//! time, to a shared `BoxedObj::Cell` (`rt_cell_new`) instead of an ordinary
+//! stack slot — a captured name is *always* one of these (every entry a
+//! `labels`/`lambda`'s own shared captured-list can ever hold is cell-kind
+//! unconditionally, since Stage 4 doesn't yet narrow this to only the names
+//! actually reassigned somewhere — a deliberately deferred optimization).
+//! `compile-cellvar`/`compile-cellset` read/write through the cell
+//! (`rt_cell_get`/`rt_cell_set`) rather than the slot itself, so every
+//! holder of that same cell — an outer activation's own binding, a sibling
+//! closure that also captured it, even the tree-walking interpreter's own
+//! `Slot::Heap` if this cell originated there — sees the write immediately,
+//! matching the interpreter's own true shared-cell closures (heap-cell
+//! captures, see `BoxedObj::Closure`/`ClosureBody`) exactly. The one
+//! exception: a `labels` sibling captured *as a value* (not called) is
+//! never cell-boxed even though it appears in the very same captured-list —
+//! see `Ctx::visible_siblings`'s doc comment (`ast_bridge.rs`) for why a
+//! sibling reference has no sharable mutable state to begin with.
 //!
 //! **`break`/`return` always exit the *nearest enclosing loop*, never a
 //! function** (`Expr::Return`'s own doc comment — this is CL's `(return
@@ -265,6 +276,107 @@ pub const SOURCE: &str = r#"
 ;; user-facing `match` (Phase 5 fences `match` to enum scrutinees). Each still
 ;; panics on a tag mismatch, exactly as the old `(_ (panic ...))` arms did.
 
+;; Extracts Sexpr variant `variant`'s field `idx` (0-based) from tagged
+;; value `v` -- the inverse of `typelisp-rt`'s `encode` for each field
+;; kind representable in compiled code today: `int`'s `i64` payload
+;; (signed, `build-ashr`), `char`'s scalar (`build-lshr`), `bool`'s
+;; payload (`1`/`2` -> `0`/`1`, matching `compile-bool`'s own convention),
+;; `cons`'s two `Sexpr` fields (via `rt_car`/`rt_cdr` -- the only field kind
+;; that needs a real heap read rather than pure bit manipulation), and (Stage
+;; 7) `str`'s `Str` field. `str` is deliberately the *odd one out* among
+;; these: unlike `int`/`char`/`bool`, extraction here does *not* strip the
+;; 3-bit tag -- it returns `v` unchanged. That's not an oversight: a bare
+;; `Type::Str` value's compiled representation is *defined* to be the exact
+;; same tagged immediate a `Sexpr::Str` already is (`typelisp-rt`'s
+;; `rt_str_new` returns it pre-tagged for the same reason), specifically so
+;; it stays heap-referencing-and-therefore-GC-root-eligible under
+;; `rt_push_sexpr_root`/`rt_pop_sexpr_root`'s existing generic `decode` --
+;; stripping the tag the way `char` does would make a `Str` field
+;; indistinguishable from a plain integer to that machinery, silently
+;; reopening the exact GC-safety gap Stage 4/6 closed for `Sexpr`. `float`'s
+;; `f64` field (Sexpr/RtValue unification, Stage 0) goes through
+;; `rt_float_value` -- a real heap read, like `cons`, since a float is now
+;; boxed rather than an immediate bit pattern (see `typelisp-rt`'s
+;; `TAG_BOXED`). `sym`'s `Symbol` field still isn't representable in
+;; compiled code (a `Sym`'s tagged payload is a `SymId`; `Type::Symbol` has
+;; no compiled representation, and `Interp::call_compiled`'s return-value
+;; decode would degrade one to a plain `Int` at the JIT boundary), and
+;; neither are `bignum`/`ratio`'s payloads (`Type::Bignum`/`Type::Ratio`
+;; are heap objects with no `rt_bignum_*`/`rt_ratio_*` support yet — see
+;; `ast_bridge`'s `Expr::Bignum` note), so a `Bind` pattern trying to
+;; extract any of these panics clearly here rather than producing garbage --
+;; never reached for a `Wildcard` sub-pattern (`compile-ctor-subpatterns`
+;; skips the call entirely then), so tag-only dispatch on `(sym _)`/
+;; `(bignum _)`/`(ratio _)` arms still compiles fine.
+;;
+;; Relocated ahead of `bind-params` (closure-representation unification,
+;; Stage 4): that function's own new `kind >= 10` cell branch needs to call
+;; this and `compile-tag-struct-field` below, and this island has no forward
+;; declarations — a `defun` can only call a name already defined earlier in
+;; this same source string (see this module's doc comment's "Helpers that
+;; only ever call *out* of the ring" paragraph for the general shape of this
+;; constraint). Purely a textual move; neither function's own body changed.
+(defun compile-sexpr-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant i64) (idx i32)) llvm-value
+  (if (eq variant 1)
+      (build-ashr builder v (const-i64 builder 3))
+      (if (eq variant 2)
+          (let ((args-ptr (alloca-args builder 1)))
+            (store-arg builder args-ptr 0 v)
+            (build-call builder (get-function m "rt_float_value") args-ptr 1))
+      (if (eq variant 3)
+          (build-lshr builder v (const-i64 builder 3))
+          (if (eq variant 4)
+              (build-sub builder (build-lshr builder v (const-i64 builder 3)) (const-i64 builder 1))
+              (if (eq variant 7)
+                  (let ((args-ptr (alloca-args builder 1)))
+                    (store-arg builder args-ptr 0 v)
+                    (if (eq idx 0)
+                        (build-call builder (get-function m "rt_car") args-ptr 1)
+                        (build-call builder (get-function m "rt_cdr") args-ptr 1)))
+                  (if (eq variant 6)
+                      v
+                      (if (eq variant 5)
+                          (panic "compile-sexpr-field: a sym's Symbol payload is not representable in compiled code yet; match it with (sym _) instead of binding it")
+                          ;; `bignum`(8)/`ratio`(9): the "payload" *is* the
+                          ;; already-tagged boxed value itself (no separate
+                          ;; scalar to unwrap the way int/char/bool have) —
+                          ;; same passthrough as `str`(6).
+                          (if (if (eq variant 8) true (eq variant 9))
+                              v
+                              (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))))))))
+
+;; The encode-side mirror of `compile-sexpr-field`'s decode, over the exact
+;; same `ast_bridge::struct_field_kind`/`Sexpr`-variant numbering (`1`=int
+;; `2`=float `3`=char `4`=bool `6`=str/`Sexpr`/nested-boxed-struct/`Fn`
+;; passthrough — a `defstruct`/`Vector<T>`/`cons-cell<K,V>`/closure-typed
+;; field's value is already a properly tagged `Sexpr`, so it passes through
+;; unchanged exactly like a `Str` — `0`=not representable yet: a
+;; general-ADT/still-generic field) — `compile-construct-boxed-struct-fields`/
+;; `compile-field-set` both call this to turn an already-compiled field
+;; value `v` (a scalar kind's own untagged bit pattern, or an already-tagged
+;; `Sexpr` for kind `6`) into the properly tagged `Sexpr` `rt_struct_new`/
+;; `rt_struct_field_set` require (Stage 3 of the Sexpr/RtValue unification
+;; plan, `docs/implementation-log.md`). Mirrors `compile-construct-sexpr`'s
+;; own per-variant `int`/`float`/`char`/`bool`/`str` arms bit-for-bit rather
+;; than calling into that function directly, since here `v` is already a
+;; compiled value (there is no `arg-forms` sub-expression left to compile) --
+;; see that function's own doc comment for why each shift/tag constant is
+;; what it is.
+(defun compile-tag-struct-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (kind i64)) llvm-value
+  (if (eq kind 1)
+      (build-shl builder v (const-i64 builder 3))
+      (if (eq kind 2)
+          (let ((args-ptr (alloca-args builder 1)))
+            (store-arg builder args-ptr 0 v)
+            (build-call builder (get-function m "rt_float_new") args-ptr 1))
+          (if (eq kind 3)
+              (build-or builder (build-shl builder v (const-i64 builder 3)) (const-i64 builder 4))
+              (if (eq kind 4)
+                  (build-or builder (build-shl builder (build-add builder v (const-i64 builder 1)) (const-i64 builder 3)) (const-i64 builder 6))
+                  (if (eq kind 6)
+                      v
+                      (panic "compile-tag-struct-field: field type is not representable in compiled code yet")))))))
+
 ;; `names` is now a list of `(name . kind)` pairs (`ast_bridge::tagged_sym_list`
 ;; — `kind` generalized from a plain `is-fn` `Bool` to a 3-way `Int` tag in
 ;; Stage 6), not bare symbols — `kind` itself isn't needed here (binding a
@@ -290,14 +402,54 @@ pub const SOURCE: &str = r#"
 ;; Allocating the second word unconditionally (rather than only for `kind =
 ;; 2`) keeps this function kind-agnostic — for any other `kind`, offset 1 is
 ;; simply never read.
-(defun bind-params ((env Scope<llvm-value>) (builder llvm-builder) (f llvm-function) (names Sexpr) (idx i32)) ()
+;;
+;; `kind >= 10` (closure-representation unification, Stage 4 — see
+;; `ast_bridge::tagged_sym_list`'s doc comment for the `10 + struct_field_kind`
+;; numbering): this parameter is captured by some closure nested in its own
+;; function body, so it must be a shared `BoxedObj::Cell` (`rt_cell_new`), not
+;; a plain stack slot — a `setf` inside the capturing closure has to be
+;; visible here, and vice versa. The incoming raw argument word is first
+;; tagged per `kind - 10` (`compile-tag-struct-field`, the same encode a
+;; struct field's own write already uses) since `rt_cell_new` expects an
+;; already-tagged `Sexpr`; the tagged value is transiently rooted around that
+;; one call (`push-sexpr-root`/`pop-sexpr-root`) since tagging a `kind = 2`
+;; (`f64`) payload allocates a fresh `rt_float_new` box that would otherwise
+;; sit one GC away from being reclaimed before `rt_cell_new` gets to copy it
+;; in. The resulting cell reference is then given its own *permanent* root —
+;; pushed here and never popped by this function, unlike the transient one
+;; just above — because `retain-bindings`'s own later pass (this function's
+;; caller always runs it right after) only ever pushes for `kind = 2`, never
+;; `kind >= 10`: a cell must be protected from the very *first* instant it
+;; exists, not just once every name in `names` has been bound. Left for
+;; `retain-bindings` to push instead, a second cell-kind param bound moments
+;; later could allocate (its own `rt_cell_new`) and trigger a GC that
+;; reclaims the *first* one, still sitting unrooted in its own slot at that
+;; point — this permanent push closes exactly that window.
+;; `release-bindings` pops it at function exit, alongside every `kind = 2`
+;; root `retain-bindings` pushed — see that function's own doc comment for
+;; why popping order among a same-activation batch never matters.
+(defun bind-params ((env Scope<llvm-value>) (builder llvm-builder) (m llvm-module) (f llvm-function) (names Sexpr) (idx i32)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
-        (let ((nm (sexpr-sym-name (sexpr-car name-pair))))
-          (let ((slot (alloca-args builder 2)))
-            (store-arg builder slot 0 (load-arg builder f idx))
-            (set env nm slot))
-          (bind-params env builder f rest (+ idx 1))))
+        (let ((nm (sexpr-sym-name (sexpr-car name-pair))) (kind (sexpr-int (sexpr-cdr name-pair))))
+          (let ((raw (load-arg builder f idx)))
+            (let ((slot (alloca-args builder 2)))
+              (if (>= kind 10)
+                  (let ((tagged (compile-tag-struct-field builder m raw (- kind 10))))
+                    (let ((tag-args-ptr (alloca-args builder 1)))
+                      (store-arg builder tag-args-ptr 0 tagged)
+                      (let ((ignored1 (build-call builder (get-function m "rt_push_sexpr_root") tag-args-ptr 1)))
+                        (let ((cell-args-ptr (alloca-args builder 1)))
+                          (store-arg builder cell-args-ptr 0 tagged)
+                          (let ((cell-ref (build-call builder (get-function m "rt_cell_new") cell-args-ptr 1)))
+                            (let ((ignored2 (build-call builder (get-function m "rt_pop_sexpr_root") (alloca-args builder 0) 0)))
+                              (let ((root-args-ptr (alloca-args builder 1)))
+                                (store-arg builder root-args-ptr 0 cell-ref)
+                                (let ((ignored3 (build-call builder (get-function m "rt_push_sexpr_root") root-args-ptr 1)))
+                                  (store-arg builder slot 0 cell-ref)))))))))
+                  (store-arg builder slot 0 raw))
+              (set env nm slot)))
+          (bind-params env builder m f rest (+ idx 1))))
       ()))
 
 ;; The captures counterpart of `bind-params` (labels/closures Stage 2):
@@ -307,14 +459,35 @@ pub const SOURCE: &str = r#"
 ;; directly), so `compile-var`'s ordinary by-name lookup finds it exactly
 ;; like a regular parameter. A no-op when `names` is empty — the Stage 1
 ;; (no-capture) path this leaves untouched.
-(defun bind-captures ((env Scope<llvm-value>) (builder llvm-builder) (f llvm-function) (names Sexpr) (idx i32)) ()
+;;
+;; Every entry `names` (`captured`/`lcaptured`) can ever hold is `kind >= 10`
+;; now (closure-representation unification, Stage 4 — `ast_bridge`'s shared
+;; captured-list builder tags *every* capture as cell-boxed, unconditionally
+;; — see `Ctx::cell_names`'s doc comment), so unlike `bind-params` there is no
+;; plain-value branch to keep: the value copied out of the env array is
+;; already a valid cell reference (whatever produced this closure's env array
+;; — `compile-escaping-env-args`/`compile-env-args` — put it there without
+;; dereferencing), so no tagging or `rt_cell_new` call is needed here, just
+;; the same permanent `push-sexpr-root` `bind-params` gives a *freshly made*
+;; cell — this one protects the *copy* in this activation's own slot, for the
+;; identical "protect it before the next capture in this same batch might
+;; allocate" reason (a captured name is never rooted purely by inheriting the
+;; closure box's own rooting, since the copy lives in a plain stack slot, not
+;; scanned by the GC).
+(defun bind-captures ((env Scope<llvm-value>) (builder llvm-builder) (m llvm-module) (f llvm-function) (names Sexpr) (idx i32)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
-        (let ((nm (sexpr-sym-name (sexpr-car name-pair))))
+        (let ((nm (sexpr-sym-name (sexpr-car name-pair))) (kind (sexpr-int (sexpr-cdr name-pair))))
           (let ((slot (alloca-args builder 2)))
-            (store-arg builder slot 0 (load-env builder f idx))
+            (let ((v (load-env builder f idx)))
+              (store-arg builder slot 0 v)
+              (if (if (eq kind 2) true (>= kind 10))
+                  (let ((args-ptr (alloca-args builder 1)))
+                    (store-arg builder args-ptr 0 v)
+                    (let ((ignored (build-call builder (get-function m "rt_push_sexpr_root") args-ptr 1))) ()))
+                  ()))
             (set env nm slot))
-          (bind-captures env builder f rest (+ idx 1))))
+          (bind-captures env builder m f rest (+ idx 1))))
       ()))
 
 ;; 2^n by repeated doubling — `compute-sexpr-mask`'s one helper, not a
@@ -433,11 +606,19 @@ pub const SOURCE: &str = r#"
 ;; of the ARC scheme, since a GC root pop was never conditional on ownership
 ;; to begin with — see `retain-bindings`'s doc comment for why every capture/
 ;; parameter is `kind = 0` or `kind = 2` now.
+;;
+;; `kind >= 10` (Stage 4) also pops one — not because *this* function pushed
+;; it (unlike `kind = 2`, always `retain-bindings`'s own), but because
+;; whichever of `bind-params`/`bind-captures` bound this name pushed exactly
+;; one permanent root for it directly (see their own doc comments for why the
+;; push has to happen immediately at bind time, not deferred here the way
+;; `kind = 2`'s is) — `release-bindings` is where every binding's root, no
+;; matter which function pushed it, is popped in one place at function exit.
 (defun release-bindings ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (names Sexpr)) ()
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
        (let ((kind (sexpr-int (sexpr-cdr name-pair))))
-         (if (eq kind 2)
+         (if (if (eq kind 2) true (>= kind 10))
              (let ((args-ptr (alloca-args builder 0)))
                (let ((ignored (build-call builder (get-function m "rt_pop_sexpr_root") args-ptr 0))) ()))
              ())
@@ -780,6 +961,16 @@ pub const SOURCE: &str = r#"
 ;; (`bind-params`'s doc comment), the GC-root stack index this `rt_push_sexpr_root`
 ;; call is about to occupy (`rt_root_count`, called first) — `compile-set`
 ;; reads it back to update that exact root in place on a later `setf`.
+;;
+;; `kind >= 10` (closure-representation unification, Stage 4): same cell
+;; promotion `bind-params`'s own `kind >= 10` branch does, for the identical
+;; reason (this specific `let`-bound name is captured by a closure nested in
+;; its own scope) — tag `v` per `kind - 10`, allocate a cell holding it, and
+;; give the *cell reference* a permanent root immediately (not deferred to
+;; any later pass, and not recorded in the slot's offset 1 either: unlike a
+;; `kind = 2` binding, a cell-kind slot's own word 0 never changes after this
+;; — `compile-cellset` mutates the cell in place, never the slot — so there
+;; is no root-index for a later `setf` to update).
 (defun bind-let-values ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (bindings Sexpr) (acc Scope<llvm-value>)) ()
   (if (sexpr-consp bindings)
       (let ((pair (sexpr-car bindings)) (rest (sexpr-cdr bindings)))
@@ -788,15 +979,24 @@ pub const SOURCE: &str = r#"
          (let ((kind (sexpr-int (sexpr-cdr name-pair))))
            (match (get acc nm)
              ((Some v) (let ((slot (alloca-args builder 2)))
-                         (store-arg builder slot 0 v)
-                         (set env nm slot)
-                         (if (eq kind 2)
-                             (let ((root-idx (build-call builder (get-function m "rt_root_count") (alloca-args builder 0) 0)))
-                               (store-arg builder slot 1 root-idx)
+                         (if (>= kind 10)
+                             (let ((tagged (compile-tag-struct-field builder m v (- kind 10))))
+                               (push-sexpr-root builder m tagged)
                                (let ((args-ptr (alloca-args builder 1)))
-                                 (store-arg builder args-ptr 0 v)
-                                 (let ((ignored (build-call builder (get-function m "rt_push_sexpr_root") args-ptr 1))) ())))
-                             ())))
+                                 (store-arg builder args-ptr 0 tagged)
+                                 (let ((cell-ref (build-call builder (get-function m "rt_cell_new") args-ptr 1)))
+                                   (pop-sexpr-root builder m)
+                                   (push-sexpr-root builder m cell-ref)
+                                   (store-arg builder slot 0 cell-ref))))
+                             (let ((ignored (store-arg builder slot 0 v)))
+                               (if (eq kind 2)
+                                   (let ((root-idx (build-call builder (get-function m "rt_root_count") (alloca-args builder 0) 0)))
+                                     (store-arg builder slot 1 root-idx)
+                                     (let ((args-ptr (alloca-args builder 1)))
+                                       (store-arg builder args-ptr 0 v)
+                                       (let ((ignored2 (build-call builder (get-function m "rt_push_sexpr_root") args-ptr 1))) ())))
+                                   ())))
+                         (set env nm slot)))
              (None (panic "bind-let-values: missing computed value")))
            (bind-let-values builder m env rest acc)))))
       ()))
@@ -826,11 +1026,15 @@ pub const SOURCE: &str = r#"
 ;; scope's, however many are nested between here and the loop. This function
 ;; only ever needs to handle the *normal* (falls off the end of the body)
 ;; exit path now.
+;; `kind >= 10` (Stage 4) pops one too, matching `release-bindings`'s own
+;; broadened condition — `bind-let-values`'s cell branch pushes its cell
+;; reference's root permanently at bind time, so it needs the same unwind
+;; here as a `kind = 2` binding's does.
 (defun unroot-let-sexpr-values ((builder llvm-builder) (m llvm-module) (bindings Sexpr)) ()
   (if (sexpr-consp bindings)
       (let ((pair (sexpr-car bindings)) (rest (sexpr-cdr bindings)))
        (let ((kind (sexpr-int (sexpr-cdr (sexpr-car pair)))))
-         (if (eq kind 2)
+         (if (if (eq kind 2) true (>= kind 10))
              (let ((args-ptr (alloca-args builder 0)))
                (let ((ignored (build-call builder (get-function m "rt_pop_sexpr_root") args-ptr 0))) ()))
              ())
@@ -871,99 +1075,6 @@ pub const SOURCE: &str = r#"
                                                        (if (eq variant 6) 3
                                                            (if (eq variant 7) 1
                                                                (panic "compile-sexpr-tag-test: unknown Sexpr variant")))))))))))))
-
-;; Extracts Sexpr variant `variant`'s field `idx` (0-based) from tagged
-;; value `v` -- the inverse of `typelisp-rt`'s `encode` for each field
-;; kind representable in compiled code today: `int`'s `i64` payload
-;; (signed, `build-ashr`), `char`'s scalar (`build-lshr`), `bool`'s
-;; payload (`1`/`2` -> `0`/`1`, matching `compile-bool`'s own convention),
-;; `cons`'s two `Sexpr` fields (via `rt_car`/`rt_cdr` -- the only field kind
-;; that needs a real heap read rather than pure bit manipulation), and (Stage
-;; 7) `str`'s `Str` field. `str` is deliberately the *odd one out* among
-;; these: unlike `int`/`char`/`bool`, extraction here does *not* strip the
-;; 3-bit tag -- it returns `v` unchanged. That's not an oversight: a bare
-;; `Type::Str` value's compiled representation is *defined* to be the exact
-;; same tagged immediate a `Sexpr::Str` already is (`typelisp-rt`'s
-;; `rt_str_new` returns it pre-tagged for the same reason), specifically so
-;; it stays heap-referencing-and-therefore-GC-root-eligible under
-;; `rt_push_sexpr_root`/`rt_pop_sexpr_root`'s existing generic `decode` --
-;; stripping the tag the way `char` does would make a `Str` field
-;; indistinguishable from a plain integer to that machinery, silently
-;; reopening the exact GC-safety gap Stage 4/6 closed for `Sexpr`. `float`'s
-;; `f64` field (Sexpr/RtValue unification, Stage 0) goes through
-;; `rt_float_value` -- a real heap read, like `cons`, since a float is now
-;; boxed rather than an immediate bit pattern (see `typelisp-rt`'s
-;; `TAG_BOXED`). `sym`'s `Symbol` field still isn't representable in
-;; compiled code (a `Sym`'s tagged payload is a `SymId`; `Type::Symbol` has
-;; no compiled representation, and `Interp::call_compiled`'s return-value
-;; decode would degrade one to a plain `Int` at the JIT boundary), and
-;; neither are `bignum`/`ratio`'s payloads (`Type::Bignum`/`Type::Ratio`
-;; are heap objects with no `rt_bignum_*`/`rt_ratio_*` support yet — see
-;; `ast_bridge`'s `Expr::Bignum` note), so a `Bind` pattern trying to
-;; extract any of these panics clearly here rather than producing garbage --
-;; never reached for a `Wildcard` sub-pattern (`compile-ctor-subpatterns`
-;; skips the call entirely then), so tag-only dispatch on `(sym _)`/
-;; `(bignum _)`/`(ratio _)` arms still compiles fine.
-(defun compile-sexpr-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant i64) (idx i32)) llvm-value
-  (if (eq variant 1)
-      (build-ashr builder v (const-i64 builder 3))
-      (if (eq variant 2)
-          (let ((args-ptr (alloca-args builder 1)))
-            (store-arg builder args-ptr 0 v)
-            (build-call builder (get-function m "rt_float_value") args-ptr 1))
-      (if (eq variant 3)
-          (build-lshr builder v (const-i64 builder 3))
-          (if (eq variant 4)
-              (build-sub builder (build-lshr builder v (const-i64 builder 3)) (const-i64 builder 1))
-              (if (eq variant 7)
-                  (let ((args-ptr (alloca-args builder 1)))
-                    (store-arg builder args-ptr 0 v)
-                    (if (eq idx 0)
-                        (build-call builder (get-function m "rt_car") args-ptr 1)
-                        (build-call builder (get-function m "rt_cdr") args-ptr 1)))
-                  (if (eq variant 6)
-                      v
-                      (if (eq variant 5)
-                          (panic "compile-sexpr-field: a sym's Symbol payload is not representable in compiled code yet; match it with (sym _) instead of binding it")
-                          ;; `bignum`(8)/`ratio`(9): the "payload" *is* the
-                          ;; already-tagged boxed value itself (no separate
-                          ;; scalar to unwrap the way int/char/bool have) —
-                          ;; same passthrough as `str`(6).
-                          (if (if (eq variant 8) true (eq variant 9))
-                              v
-                              (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))))))))
-
-;; The encode-side mirror of `compile-sexpr-field`'s decode, over the exact
-;; same `ast_bridge::struct_field_kind`/`Sexpr`-variant numbering (`1`=int
-;; `2`=float `3`=char `4`=bool `6`=str/`Sexpr`/nested-boxed-struct/`Fn`
-;; passthrough — a `defstruct`/`Vector<T>`/`cons-cell<K,V>`/closure-typed
-;; field's value is already a properly tagged `Sexpr`, so it passes through
-;; unchanged exactly like a `Str` — `0`=not representable yet: a
-;; general-ADT/still-generic field) — `compile-construct-boxed-struct-fields`/
-;; `compile-field-set` both call this to turn an already-compiled field
-;; value `v` (a scalar kind's own untagged bit pattern, or an already-tagged
-;; `Sexpr` for kind `6`) into the properly tagged `Sexpr` `rt_struct_new`/
-;; `rt_struct_field_set` require (Stage 3 of the Sexpr/RtValue unification
-;; plan, `docs/implementation-log.md`). Mirrors `compile-construct-sexpr`'s
-;; own per-variant `int`/`float`/`char`/`bool`/`str` arms bit-for-bit rather
-;; than calling into that function directly, since here `v` is already a
-;; compiled value (there is no `arg-forms` sub-expression left to compile) --
-;; see that function's own doc comment for why each shift/tag constant is
-;; what it is.
-(defun compile-tag-struct-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (kind i64)) llvm-value
-  (if (eq kind 1)
-      (build-shl builder v (const-i64 builder 3))
-      (if (eq kind 2)
-          (let ((args-ptr (alloca-args builder 1)))
-            (store-arg builder args-ptr 0 v)
-            (build-call builder (get-function m "rt_float_new") args-ptr 1))
-          (if (eq kind 3)
-              (build-or builder (build-shl builder v (const-i64 builder 3)) (const-i64 builder 4))
-              (if (eq kind 4)
-                  (build-or builder (build-shl builder (build-add builder v (const-i64 builder 1)) (const-i64 builder 3)) (const-i64 builder 6))
-                  (if (eq kind 6)
-                      v
-                      (panic "compile-tag-struct-field: field type is not representable in compiled code yet")))))))
 
 ;; Shared by every atomic pattern test (`pat-lit`'s literal-equality
 ;; check, a Ctor pattern's tag test): appends a fresh "this test passed"
@@ -1040,7 +1151,7 @@ pub const SOURCE: &str = r#"
         (let ((builder (llvm-builder::create)))
           (position-at-end builder b)
           (let ((env (new-env)))
-            (bind-params env builder f param-names 0)
+            (bind-params env builder m f param-names 0)
             (retain-bindings builder m env param-names)
             (let ((fn-env (new-fn-env)))
               (labels ((compile-value ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
@@ -1063,6 +1174,8 @@ pub const SOURCE: &str = r#"
                                         (compile-unit builder)
                                         (if (equal s "var")
                                             (compile-var builder env fn-env captured e)
+                                            (if (equal s "cellvar")
+                                            (compile-cellvar builder env fn-env captured e)
                                             (if (equal s "assoc")
                                                 (compile-assoc builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                 (if (equal s "apply")
@@ -1087,6 +1200,8 @@ pub const SOURCE: &str = r#"
                                                                                         (compile-return builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                         (if (equal s "set")
                                                                                             (compile-set builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
+                                                                                            (if (equal s "cellset")
+                                                                                            (compile-cellset builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                             (if (equal s "match")
                                                                                                 (compile-match builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                 (if (equal s "construct")
@@ -1107,7 +1222,7 @@ pub const SOURCE: &str = r#"
                                                                                                                                 (compile-vector-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                                                 (if (equal s "hashtable-op")
                                                                                                                                     (compile-hashtable-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                                    (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))))))))))
+                                                                                                                                    (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))))))))))))
                            )
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -1257,6 +1372,34 @@ pub const SOURCE: &str = r#"
                        ;; sibling-as-value case resolves.
                        (compile-var ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
                          (resolve-value builder env fn-env captured (sexpr-str (sexpr-car (sexpr-cdr e)))))
+                       ;; `(cellvar name kind)` — a reference to a cell-boxed
+                       ;; name (`ast_bridge`'s `cx.cell_names`, closure-
+                       ;; representation unification Stage 4): unlike
+                       ;; `compile-var`, `env`'s slot holds a *cell reference*
+                       ;; (`bind-params`/`bind-let-values`/`bind-captures`'
+                       ;; own `kind >= 10` branches), not the value itself, so
+                       ;; this dereferences it via `rt_cell_get` and detags the
+                       ;; result per `kind` (`compile-sexpr-field`, the exact
+                       ;; same decoder a `defstruct` field's own read uses).
+                       ;; Always resolves through `env` — a `labels`
+                       ;; sibling/self name is never cell-boxed (siblings
+                       ;; always go through `fn-env`/direct calls, never a
+                       ;; captured binding), so unlike `resolve-value` there is
+                       ;; no `fn-env` fallback to try; a name absent from
+                       ;; `env` here is a genuine internal-invariant break
+                       ;; (`ast_bridge` only ever emits this tag for a name it
+                       ;; already knows is a cell-boxed local/param/capture).
+                       (compile-cellvar ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (e Sexpr)) llvm-value
+                         (let ((name (sexpr-str (sexpr-car (sexpr-cdr e)))))
+                           (let ((kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+                             (match (get env name)
+                               ((Some slot)
+                                (let ((cell-ref (load-raw builder slot 0)))
+                                  (let ((args-ptr (alloca-args builder 1)))
+                                    (store-arg builder args-ptr 0 cell-ref)
+                                    (let ((raw (build-call builder (get-function m "rt_cell_get") args-ptr 1)))
+                                      (compile-sexpr-field builder m raw kind 0)))))
+                               (None (panic (append "compile-cellvar: unbound variable " name)))))))
                        ;; Resolves `name` to a value two ways, in order:
                        ;; (1) an ordinary binding in `env` (a parameter, or a
                        ;; captured name already loaded by `bind-captures`) —
@@ -2099,10 +2242,20 @@ pub const SOURCE: &str = r#"
                                      (let ((nested-builder (llvm-builder::create)))
                                        (position-at-end nested-builder nested-block)
                                        (let ((nested-env (new-env)))
-                                         (bind-params nested-env nested-builder nested-fn lparams 0)
+                                         (bind-params nested-env nested-builder m nested-fn lparams 0)
                                          (retain-bindings nested-builder m nested-env lparams)
-                                         (bind-captures nested-env nested-builder nested-fn lcaptured 0)
-                                         (retain-bindings nested-builder m nested-env lcaptured)
+                                         ;; No `retain-bindings` call for
+                                         ;; `lcaptured` here (unlike
+                                         ;; `lparams` just above): every
+                                         ;; entry a captured-name list can
+                                         ;; ever hold is `kind >= 10` now
+                                         ;; (Stage 4), and `bind-captures`
+                                         ;; itself already pushes a
+                                         ;; permanent root for each one — a
+                                         ;; `retain-bindings` pass here would
+                                         ;; only ever match its now-unused
+                                         ;; `kind = 2` case, a pure no-op.
+                                         (bind-captures nested-env nested-builder m nested-fn lcaptured 0)
                                          ;; `loop`/`break`/`return`/`setf`: a
                                          ;; `lambda` is a new function
                                          ;; boundary — `break`/`return` can't
@@ -2200,10 +2353,15 @@ pub const SOURCE: &str = r#"
                                        (let ((sib-builder (llvm-builder::create)))
                                          (position-at-end sib-builder sib-block)
                                          (let ((sib-env (new-env)))
-                                           (bind-params sib-env sib-builder sib-fn param-syms 0)
+                                           (bind-params sib-env sib-builder m sib-fn param-syms 0)
                                            (retain-bindings sib-builder m sib-env param-syms)
-                                           (bind-captures sib-env sib-builder sib-fn captured 0)
-                                           (retain-bindings sib-builder m sib-env captured)
+                                           ;; See `compile-lambda`'s matching
+                                           ;; comment: no `retain-bindings`
+                                           ;; call for `captured` — every
+                                           ;; entry is `kind >= 10` now, and
+                                           ;; `bind-captures` already roots
+                                           ;; each one itself.
+                                           (bind-captures sib-env sib-builder m sib-fn captured 0)
                                            ;; `loop`/`break`/`return`/`setf`:
                                            ;; a `labels` sibling's own body is
                                            ;; a new function boundary too
@@ -2488,6 +2646,49 @@ pub const SOURCE: &str = r#"
                                           ())
                                       v)
                                      (None (panic (append "compile-set: unbound variable " nm))))))))))
+                       ;; `(cellset name kind value-form)` — `setf` on a
+                       ;; cell-boxed name (closure-representation unification
+                       ;; Stage 4): unlike `compile-set`, the target's own
+                       ;; slot (word 0) is never touched again after
+                       ;; `bind-params`/`bind-let-values`/`bind-captures`
+                       ;; first populated it with the cell reference — this
+                       ;; mutates the *cell itself* in place via
+                       ;; `rt_cell_set`, so every other holder of that same
+                       ;; `BoxedObj::Cell` (an outer scope's own binding, a
+                       ;; sibling closure that captured it, the interpreter's
+                       ;; own `Slot::Heap` if this cell originated there) sees
+                       ;; the write immediately — the CL "shared mutable
+                       ;; capture" semantics this whole stage exists to give.
+                       ;; No `compile-if-branch`/borrowed-value handling is
+                       ;; needed the way `compile-set` still nominally has:
+                       ;; that machinery is inert since the ARC scheme it once
+                       ;; served was removed (`compile-if-branch` is now just
+                       ;; `compile-value`, see its own doc comment), so this
+                       ;; calls `compile-value` directly. No transient
+                       ;; `push-sexpr-root` around `compile-tag-struct-field`'s
+                       ;; result is needed either, unlike `bind-params`'/
+                       ;; `bind-let-values`' own cell-creation: `rt_cell_set`
+                       ;; itself allocates nothing, so there is no allocating
+                       ;; call for the freshly tagged value to need protecting
+                       ;; across — it is consumed immediately, in the very
+                       ;; next instruction. Returns `v` (the new, untagged
+                       ;; value), matching `compile-set`'s own "a `setf`
+                       ;; evaluates to the value that was set" convention.
+                       (compile-cellset ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((nm (sexpr-str (sexpr-car (sexpr-cdr e)))))
+                           (let ((kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+                             (let ((value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
+                               (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base value-form)))
+                                 (match (get env nm)
+                                   ((Some slot)
+                                    (let ((cell-ref (load-raw builder slot 0)))
+                                      (let ((tagged (compile-tag-struct-field builder m v kind)))
+                                        (let ((args-ptr (alloca-args builder 2)))
+                                          (store-arg builder args-ptr 0 cell-ref)
+                                          (store-arg builder args-ptr 1 tagged)
+                                          (let ((ignored (build-call builder (get-function m "rt_cell_set") args-ptr 2)))
+                                            v)))))
+                                   (None (panic (append "compile-cellset: unbound variable " nm)))))))))
                        ;; Tests `v` against pattern `pat`; on failure
                        ;; branches to `fail-block` (jumping straight to
                        ;; whatever should run next -- never returning to

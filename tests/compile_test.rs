@@ -249,8 +249,21 @@ fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
 /// test above exercises (its captured list is always empty).
 #[test]
 fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value() {
+    // `bind-captures` unconditionally roots every captured value now
+    // (closure-representation unification, Stage 4 — every real
+    // `ast_bridge`-built captured list is unconditionally cell-kind, so a
+    // plain `rt_push_sexpr_root` per entry, no branching, is enough; this
+    // hand-written IR literal's own `kind = 0` never reaches a dereferencing
+    // path either way), so `rt_push_sexpr_root` needs an explicit
+    // declaration here — this module is built by a direct `compile-function`
+    // call, bypassing `Interp::compile_function`'s automatic `rt_*`
+    // forward-declaration (see
+    // `the_compiler_body_boxes_a_bare_labels_sibling_reference`'s doc
+    // comment for the same idiom).
     let module = match eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (0 var "k" false) (0 var "offset" false)))) (apply "go" (0 var "n" false))))"#,
+        r#"(let ((m (llvm-module::create "mod")))
+             (let ((ignored (add-function m "rt_push_sexpr_root"))) ())
+             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (0 var "k" false) (0 var "offset" false)))) (apply "go" (0 var "n" false)))))"#,
     ) {
         RtValue::LlvmModule(m) => m,
         other => panic!("expected an LlvmModule, got {:?}", other),
@@ -1000,13 +1013,17 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
 fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_outer_value() {
     // See `the_compiler_body_boxes_a_bare_labels_sibling_reference`'s doc
     // comment for why `rt_closure_new` needs an explicit declaration and
-    // `Heap` needs to be active here.
+    // `Heap` needs to be active here. `rt_push_sexpr_root` needs one too now
+    // — see `the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value`'s
+    // own doc comment (`bind-captures` unconditionally roots every captured
+    // value, closure-representation unification Stage 4).
     let module = match eval_ok_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_closure_new"))) ())
              (let ((ignored-fnptr (add-function m "rt_closure_fnptr"))) ())
              (let ((ignored-envlen (add-function m "rt_closure_env_len"))) ())
              (let ((ignored-envget (add-function m "rt_closure_env_get"))) ())
+             (let ((ignored-push (add-function m "rt_push_sexpr_root"))) ())
              (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "go" true) (0 int 5)))))"#,
     ) {
         RtValue::LlvmModule(m) => m,
@@ -1208,6 +1225,98 @@ fn an_escaping_lambdas_captured_closure_survives_gc_pressure() {
     )
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(10), "the wrapper's captured inner closure survives many unrelated conses forcing repeated gc() runs");
+}
+
+/// Closure-representation unification, Stage 4 (shared-cell captures): a
+/// `setf` on a captured name inside a compiled closure mutates the *shared*
+/// `BoxedObj::Cell` (`compile-cellset`/`rt_cell_set`), not a per-call
+/// snapshot — so `counter`, called twice, sees its own previous write on the
+/// second call. Before this stage, `bind-params`/`bind-captures` copied a
+/// captured value into each activation's own stack slot; a `setf` there
+/// would only ever have mutated that local copy, invisible to the next call
+/// through the same closure — the documented gap this stage exists to close
+/// (CL semantics, matching the interpreter's own heap-cell captures).
+#[test]
+fn compile_a_setf_on_a_captured_name_is_visible_on_the_next_call_through_the_same_closure() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun make-counter ((start i64)) (fn () i64)
+          (lambda () i64 (setf start (+ start 1))))
+        (defun call-twice ((c (fn () i64))) i64
+          (let ((a (c))) (let ((b (c))) (+ a (* b 100)))))
+        (compile make-counter)
+        (compile call-twice)
+        (call-twice (make-counter 0))
+        "#,
+    );
+    // First call: start 0 -> 1, returns 1 (a = 1). Second call, same
+    // closure, same cell: start 1 -> 2, returns 2 (b = 2). 1 + 200 = 201 —
+    // only possible if both calls mutated and read the *same* cell.
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 201),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// Stage 4's other half: two `labels` siblings that both capture the *same*
+/// outer name share the *same* cell too — a `setf` through one
+/// (`bump`) is immediately visible through the other (`read-it`), proving
+/// the sharing isn't an artifact of always calling through one particular
+/// closure value (the test above) but genuine shared mutable state, exactly
+/// like two closures over the same CL `let` binding.
+#[test]
+fn compile_a_setf_through_one_labels_sibling_is_visible_through_another_sharing_the_same_capture() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun make-pair ((start i64)) i64
+          (labels ((bump () i64 (setf start (+ start 1)))
+                   (read-it () i64 start))
+            (let ((ignored1 (bump)))
+              (let ((ignored2 (bump)))
+                (read-it)))))
+        (compile make-pair)
+        (make-pair 10)
+        "#,
+    );
+    // bump: 10 -> 11, bump: 11 -> 12, read-it: 12 — read-it never itself
+    // writes, so it can only see 12 by reading the exact cell bump wrote to.
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 12),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// GC stress for Stage 4's cell-rooting scheme: `bind-params`'/
+/// `bind-let-values`'s cell-kind branch and `bind-captures`'s own permanent
+/// `push-sexpr-root` (see those functions' own doc comments for why each
+/// needs one, immediately, rather than relying on a later batched pass) are
+/// the only things keeping a freshly allocated `BoxedObj::Cell` alive across
+/// the many unrelated `cons` allocations a `gc()` needs to actually trigger
+/// under a small heap — proves the cell (and the closures sharing it)
+/// survive real collections, not just a GC-pressure-free happy path.
+#[test]
+fn compile_a_captured_cell_survives_gc_pressure_across_many_calls() {
+    let v = run_with_compiler_and_capacity(
+        r#"
+        (defun make-counter ((start i64)) (fn () i64)
+          (lambda () i64 (setf start (+ start 1))))
+        (defun pump ((c (fn () i64)) (n i64)) i64
+          (let ((ignored (loop
+                           (if (eq n 0) (break) ())
+                           (sexpr-cons (Int 0) (Int 0))
+                           (setf n (- n 1)))))
+            (c)))
+        (defun run-it ((start i64) (n i64)) i64
+          (pump (make-counter start) n))
+        (compile make-counter)
+        (compile pump)
+        (compile run-it)
+        (run-it 0 5000)
+        "#,
+        20000,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(1), "the counter's cell survives many unrelated conses forcing repeated gc() runs, then the single (c) call sees start still at 0");
 }
 
 // --- if/let/comparisons (labels/closures Stage 5) ---

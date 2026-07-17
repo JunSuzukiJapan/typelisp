@@ -210,6 +210,132 @@ fn walk(typed: &Typed, bound: &HashSet<String>, siblings: &HashSet<String>, seen
     }
 }
 
+/// Names bound in the *enclosing* function-like scope (a `defun`/`lambda`/
+/// `labels`-def body under translation) that some directly-or-transitively
+/// nested `lambda`/`labels` captures — closure-representation unification,
+/// Stage 4. `ast_bridge` intersects this against its own params/`let`-bound
+/// names to decide which specific bindings must be promoted to a shared
+/// `BoxedObj::Cell` at bind time (`compiler.rs`'s `bind-params`/
+/// `bind-let-values`) rather than living in an ordinary stack slot — the
+/// promotion a mutable *captured* binding needs so a `setf` inside the
+/// capturing closure is visible everywhere else that shares it (CL
+/// semantics, matching the interpreter's own heap-cell captures).
+///
+/// Walks `body` without descending into a found nested `Lambda`/`Labels`'s
+/// own body: [`lambda_free_vars`]/[`labels_free_vars`] already resolve
+/// arbitrarily deep beneath it (a name two closures deep still surfaces
+/// here, since neither of those functions' own walks stop at a nested
+/// closure boundary either — they only stop at *their own* params). Called
+/// with an empty `outer_direct`/`outer_captured` for the `Labels` case
+/// deliberately: the extra names that imprecision can add are never among
+/// the enclosing scope's own bound names anyway (a `labels` sibling name
+/// lives in a separate `fn-env` namespace, and a name from even further out
+/// can't collide with one this body itself binds), so the caller's later
+/// intersection against its own bound-name set silently discards them.
+///
+/// Deliberately over-approximates rather than being scope-precise about
+/// shadowing (a name that's both an outer binding *and* an unrelated,
+/// shadowing inner one can get flagged from either occurrence) — Stage 4's
+/// explicit "correctness first" scope: an unnecessary cell costs a little
+/// codegen complexity, never correctness, and precise shadow-tracking is
+/// deferred to a later optimization pass (only a captured-and-`setf`
+/// binding truly needs one at all; Stage 4 cell-boxes every captured
+/// binding unconditionally).
+pub fn names_captured_by_nested(body: &[Typed]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for t in body {
+        collect_nested_captures(t, &mut out);
+    }
+    out
+}
+
+fn collect_nested_captures(typed: &Typed, out: &mut HashSet<String>) {
+    match &typed.expr {
+        Expr::Lambda { params, body } => {
+            for (n, _) in lambda_free_vars(params, body) {
+                out.insert(n);
+            }
+        }
+        Expr::Labels { defs, body } => {
+            for (n, _) in labels_free_vars(defs, &HashSet::new(), &[]) {
+                out.insert(n);
+            }
+            for t in body {
+                collect_nested_captures(t, out);
+            }
+        }
+        Expr::Int(_)
+        | Expr::Float(_)
+        | Expr::Bignum(_)
+        | Expr::Ratio(_)
+        | Expr::Bool(_)
+        | Expr::Char(_)
+        | Expr::Str(_)
+        | Expr::Unit
+        | Expr::Var(_)
+        | Expr::Global(_)
+        | Expr::FnRef(_)
+        | Expr::MethodRef { .. }
+        | Expr::Break
+        | Expr::Quote(_) => {}
+        Expr::If(c, t2, e) => {
+            collect_nested_captures(c, out);
+            collect_nested_captures(t2, out);
+            collect_nested_captures(e, out);
+        }
+        Expr::Let(bindings, body) => {
+            for (_, v) in bindings {
+                collect_nested_captures(v, out);
+            }
+            for t in body {
+                collect_nested_captures(t, out);
+            }
+        }
+        Expr::Call(_, args) => {
+            for a in args {
+                collect_nested_captures(a, out);
+            }
+        }
+        Expr::Apply(callee, args) => {
+            collect_nested_captures(callee, out);
+            for a in args {
+                collect_nested_captures(a, out);
+            }
+        }
+        Expr::Assoc { args, .. } | Expr::TraitCall { args, .. } | Expr::Construct { args, .. } => {
+            for a in args {
+                collect_nested_captures(a, out);
+            }
+        }
+        Expr::FieldGet(inner, _) => collect_nested_captures(inner, out),
+        Expr::FieldSet(inner, _, value) => {
+            collect_nested_captures(inner, out);
+            collect_nested_captures(value, out);
+        }
+        Expr::Match(scrutinee, arms) => {
+            collect_nested_captures(scrutinee, out);
+            for arm in arms {
+                for t in &arm.body {
+                    collect_nested_captures(t, out);
+                }
+            }
+        }
+        Expr::Set(_, value) => collect_nested_captures(value, out),
+        Expr::SetGlobal(_, value) => collect_nested_captures(value, out),
+        Expr::Loop(body) => {
+            for t in body {
+                collect_nested_captures(t, out);
+            }
+        }
+        Expr::Return(value) => {
+            if let Some(v) = value {
+                collect_nested_captures(v, out);
+            }
+        }
+        Expr::Panic(msg) => collect_nested_captures(msg, out),
+    }
+}
+
 fn collect_pattern_bindings(pat: &Pattern, bound: &mut HashSet<String>) {
     match pat {
         Pattern::Wildcard | Pattern::Int(_) | Pattern::Bool(_) | Pattern::Char(_) => {}
@@ -333,5 +459,75 @@ mod tests {
             Type::I64,
         )];
         assert_eq!(lambda_free_vars(&[], &body), vec![("f".to_string(), fn_ty)]);
+    }
+
+    /// `names_captured_by_nested`: an outer `n` referenced inside a nested
+    /// `lambda` is flagged — the exact case that needs `n`'s own `defun`
+    /// param slot cell-boxed (closure-representation unification, Stage 4).
+    #[test]
+    fn a_name_referenced_inside_a_nested_lambda_is_captured_by_nested() {
+        let inner = vec![typed(
+            Expr::Assoc {
+                type_name: crate::Path::root("i64"),
+                method: "+".to_string(),
+                instance: true,
+                args: vec![typed(Expr::Var("x".to_string()), Type::I64), typed(Expr::Var("n".to_string()), Type::I64)],
+            },
+            Type::I64,
+        )];
+        let body = vec![typed(
+            Expr::Lambda { params: vec![("x".to_string(), Type::I64)], body: inner },
+            Type::Fn(vec![Type::I64], None, Box::new(Type::I64)),
+        )];
+        let mut expected = HashSet::new();
+        expected.insert("n".to_string());
+        assert_eq!(names_captured_by_nested(&body), expected);
+    }
+
+    /// A name only ever referenced *outside* any nested closure is not
+    /// flagged — an ordinary local stays an ordinary stack slot.
+    #[test]
+    fn a_name_never_referenced_inside_a_nested_closure_is_not_captured_by_nested() {
+        let body = vec![typed(Expr::Var("n".to_string()), Type::I64)];
+        assert_eq!(names_captured_by_nested(&body), HashSet::new());
+    }
+
+    /// Doubly-nested: `n` is referenced only inside a `lambda` nested inside
+    /// *another* `lambda` — both `lambda_free_vars` calls (the inner one via
+    /// `walk`'s own recursion into `Expr::Lambda`, transparently) surface it
+    /// as free relative to the outermost nested lambda, so it's still found
+    /// here without any special doubly-nested handling of its own.
+    #[test]
+    fn a_name_captured_by_a_doubly_nested_lambda_is_still_found() {
+        let innermost = vec![typed(Expr::Var("n".to_string()), Type::I64)];
+        let middle = vec![typed(
+            Expr::Lambda { params: vec![("y".to_string(), Type::I64)], body: innermost },
+            Type::Fn(vec![Type::I64], None, Box::new(Type::I64)),
+        )];
+        let body = vec![typed(
+            Expr::Lambda { params: vec![("x".to_string(), Type::I64)], body: middle },
+            Type::Fn(vec![Type::I64], None, Box::new(Type::I64)),
+        )];
+        let mut expected = HashSet::new();
+        expected.insert("n".to_string());
+        assert_eq!(names_captured_by_nested(&body), expected);
+    }
+
+    /// A `labels` block nested inside the body is treated the same as a
+    /// `lambda` — its own free variables (via `labels_free_vars`) surface as
+    /// captured-by-nested, and walking continues into its own trailing body
+    /// afterward (unlike a `lambda`, whose entire body is opaque to this
+    /// walk once `lambda_free_vars` has been called on it, a `labels`
+    /// block's trailing body is *not* part of any def's own closure — only
+    /// each def's own body is).
+    #[test]
+    fn a_labels_block_nested_in_the_body_contributes_its_own_free_variables() {
+        let go_body = vec![typed(Expr::Var("n".to_string()), Type::I64)];
+        let defs = vec![("go".to_string(), vec![], go_body)];
+        let trailing = vec![typed(Expr::Var("m".to_string()), Type::I64)];
+        let body = vec![typed(Expr::Labels { defs, body: trailing }, Type::I64)];
+        let mut expected = HashSet::new();
+        expected.insert("n".to_string());
+        assert_eq!(names_captured_by_nested(&body), expected);
     }
 }
