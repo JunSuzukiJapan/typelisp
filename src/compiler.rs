@@ -1280,8 +1280,20 @@ pub const SOURCE: &str = r#"
                        ;; already has: `compile-int` returns a bare `i64`,
                        ;; `compile-construct-sexpr`'s `build-shl`/tag-OR is
                        ;; what actually makes it a `Sexpr::Int`).
+                       ;; `bits` arrives as two 32-bit halves `(float hi lo)`
+                       ;; (`ast_bridge`'s `Expr::Float`, interp-closure removal
+                       ;; Stage 8a): a single tagged `Sexpr` `Int` would lose
+                       ;; the top 3 bits of a full-width `f64` pattern when
+                       ;; read back here (`sexpr-int` = `>> 3`), decoding e.g.
+                       ;; `2.0` to `0.0`. Each half is < 2^32 so both survive
+                       ;; the tag; reassemble with `(hi << 32) | lo` — LLVM
+                       ;; constant-folds it back to the exact 64-bit pattern.
                        (compile-float ((builder llvm-builder) (e Sexpr)) llvm-value
-                         (const-i64 builder (sexpr-int (sexpr-car (sexpr-cdr e)))))
+                         (let ((hi (sexpr-int (sexpr-car (sexpr-cdr e))))
+                               (lo (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+                           (build-or builder
+                                     (build-shl builder (const-i64 builder hi) (const-i64 builder 32))
+                                     (const-i64 builder lo))))
                        ;; `(str (int c0) (int c1) ...)` (Stage 7 of the
                        ;; Sexpr-representation plan, `docs/implementation-log.md`)
                        ;; — a string literal's content, one `(int c)` node per

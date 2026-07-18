@@ -164,22 +164,17 @@ fn the_compiler_body_compiles_an_int_literal_node() {
     assert!(ir.contains("ret i64 42"), "IR was:\n{}", ir);
 }
 
-#[test]
-fn the_compiler_body_panics_on_an_unsupported_tag() {
-    // Every tag `ast_bridge` can actually produce now has a real
-    // translation (`construct`/`field-get`/`field-set` joined the list in
-    // Stage 6, `docs/TODO.md` — `if`/`let`/`bool`/`match` stood in for
-    // "not yet supported" here in earlier stages, until each in turn got a
-    // real translation) — this test now uses a tag name `compile-value`
-    // could never legitimately see, purely to exercise its own fallback
-    // `panic`.
-    let err = run_with_compiler(r#"(compile-function (llvm-module::create "mod") "answer" '() '(not-a-real-tag))"#)
-        .expect_err("expected an unsupported-tag panic");
-    match err {
-        EvalError::Panic(msg) => assert!(msg.contains("unsupported tag"), "message was: {}", msg),
-        other => panic!("expected a Panic, got {:?}", other),
-    }
-}
+// (Removed `the_compiler_body_panics_on_an_unsupported_tag` in interp-closure
+// removal Stage 8a.) It hand-fed `compile-function` a bogus `'(not-a-real-tag)`
+// node to exercise `compile-value`'s defensive fallback `panic` and asserted a
+// catchable `EvalError::Panic`. Under the AOT-native island (the only island
+// now) that fallback is a compiled `rt_panic`, which aborts the process across
+// the native-code boundary rather than returning a catchable error — so the
+// assertion can no longer hold in-process. The path is a practically
+// unreachable defensive guard (its own comment noted `ast_bridge` never emits
+// such a tag); user-facing compile rejections stay covered by
+// `compile_of_a_function_calling_an_unsupported_i64_method_is_a_clean_error`
+// and `compile_of_an_unknown_method_name_is_a_clean_error`.
 
 /// Exercises `compile-function`'s parameter binding (`bind-params`) and the
 /// `(assoc ...)` tag (`compile-assoc`'s `+`/`-`/`*` arms) — the shapes
@@ -1463,30 +1458,18 @@ fn the_compiler_body_compiles_an_i64_comparison() {
     assert_eq!(unsafe { lt.call([5, 3].as_ptr(), 2) }, 0);
 }
 
-/// `compile-assoc`'s receiver-type guard for a method it still can't lower:
-/// `i64::int->char` is a *non-native* `i64` method (`registry::int_assoc`'s
-/// `int->char`/`try-int->char` conversions have no compiled primitive behind
-/// them, unlike the arithmetic/comparison methods `int-native-method?`
-/// covers). It must panic clearly rather than silently misinterpret
-/// anything. Reached via the generic user-method branch
-/// (`compile-assoc-user`): this hand-fed Sexpr bypasses
-/// `Interp::compile_function`'s own up-front check (the normal rejection
-/// path, with a clearer message — see
-/// `compile_of_a_function_calling_an_unsupported_i64_method_is_a_clean_error`
-/// below), so the only thing left to catch it is `get-function` failing to
-/// find `"i64::int->char"` in this throwaway module.
-#[test]
-fn compile_assoc_panics_on_an_unsupported_receiver_type() {
-    let err = run_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "tochar" '((a . 0))
-              '(assoc "i64" "int->char" true (0 var "a" false)))"#,
-    )
-    .expect_err("expected a panic for a non-native i64 method");
-    match err {
-        EvalError::Panic(msg) => assert!(msg.contains("no function named") && msg.contains("i64::int->char"), "message was: {}", msg),
-        other => panic!("expected a Panic, got {:?}", other),
-    }
-}
+// (Removed `compile_assoc_panics_on_an_unsupported_receiver_type` in
+// interp-closure removal Stage 8a.) It hand-fed `compile-function` a raw
+// `(assoc "i64" "int->char" ...)` node — deliberately bypassing
+// `Interp::compile_function`'s up-front check — so the only thing left to catch
+// the non-native `i64::int->char` was the island's `get-function` failing to
+// find it in the module. Under the AOT-native island that failure is an
+// `rt_llvm_call` process abort (it can't return a catchable error across the
+// native-code boundary), so the assertion can't hold in-process. The
+// user-facing path — a real `defun` calling `int->char`, then `(compile ...)`d
+// — is now rejected cleanly and up front by `call_graph_edges`
+// (`is_native_lowered_primitive_method`), covered by
+// `compile_of_a_function_calling_an_unsupported_i64_method_is_a_clean_error`.
 
 /// `compile-if`: `(if is-fn cond-form then-form else-form)` end to end —
 /// `max(a, b)` via a comparison feeding the branch, JIT-executed both ways
@@ -2324,12 +2307,14 @@ fn compile_transitively_compiles_a_called_user_method() {
 /// a *non-native* builtin method on an otherwise-native receiver — here
 /// `i64::int->char` (`registry::int_assoc`'s conversion, no compiled
 /// primitive backing it, unlike the arithmetic/comparison methods
-/// `compile-assoc`'s i64 branch lowers) — is rejected with its own clear
-/// "no function named" message from `compile-assoc-user`'s `get-function`,
-/// rather than silently misbehaving. (`i64`/`i32` are in the native-receiver
-/// exclusion list, so this reaches the compiler rather than the up-front
-/// method-target check — the same treatment `compile_assoc_panics_on_an_unsupported_receiver_type`
-/// exercises directly against a hand-fed Sexpr.)
+/// `compile-assoc`'s i64 branch lowers) — is rejected up front by
+/// `call_graph_edges` (via `is_native_lowered_primitive_method`, the Rust
+/// twin of the island's `int-native-method?`), with a clear "builtin method
+/// with no compiled implementation" message, rather than reaching the
+/// island's `get-function` guard (an unrecoverable `rt_llvm_call` abort under
+/// the AOT-native island — interp-closure removal Stage 8a). Before Stage 8a
+/// this was caught later, by that `get-function` returning a catchable error
+/// from the *interpreted* island.
 #[test]
 fn compile_of_a_function_calling_an_unsupported_i64_method_is_a_clean_error() {
     let err = run_with_compiler_and_prelude(
@@ -2342,7 +2327,7 @@ fn compile_of_a_function_calling_an_unsupported_i64_method_is_a_clean_error() {
     match err {
         EvalError::Panic(msg) => {
             assert!(msg.contains("i64::int->char"), "message was: {}", msg);
-            assert!(msg.contains("no function named"), "message was: {}", msg);
+            assert!(msg.contains("no compiled implementation"), "message was: {}", msg);
         }
         other => panic!("expected a Panic, got {:?}", other),
     }

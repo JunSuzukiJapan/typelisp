@@ -2493,17 +2493,21 @@ impl Interp {
                 // A user-registered method is a real call target even on a
                 // primitive receiver (`i32::equals`); only the natively
                 // lowered `i64`/`i32`/`char`/`string`/`f64`/`bignum`/`ratio`
-                // builtins (`+`, `<`, `=`, `lt`, `length`, `fadd`,
+                // builtins (`+`, `<`, `=`, `lt`, `length`, `sqrt`, `fadd`,
                 // `rt_bignum_add`, ...) are excluded — those become LLVM
                 // instructions / `rt_str_*`/`rt_bignum_*`/`rt_ratio_*` calls
-                // in `compile-assoc`, not function calls. (A builtin on these
-                // receivers that `compile-assoc` does *not* lower natively —
-                // `equalp` on `string` before it was added, `f64::sqrt`,
-                // `f64::float->int`, ... — is also excluded here and panics
-                // inside `compile-assoc-user`'s `get-function` instead, still
-                // at compile time.)
+                // in `compile-assoc`, not function calls. A builtin on these
+                // receivers that `compile-assoc` does *not* lower natively
+                // (`i64::int->char`, `char::equalp`, ...) is kept as a target
+                // so the `!self.methods.contains_key` check below rejects it
+                // with a clean up-front error — otherwise it reaches the
+                // island's `get-function` guard, an unrecoverable
+                // `rt_llvm_call` abort under the AOT-native island
+                // (interp-closure removal Stage 8a). `is_native_lowered_primitive_method`
+                // is the Rust twin of the island's `*-native-method?` list.
                 self.methods.contains_key(key)
                     || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64" | "bignum" | "ratio")
+                    || !is_native_lowered_primitive_method(key.0.local(), &key.1)
             })
             .collect();
         for (type_name, method) in &method_targets {
@@ -4034,6 +4038,59 @@ pub(crate) fn is_rt_builtin_name(name: &str) -> bool {
             | "sexpr-str"
             | "sexpr-sym-name"
     )
+}
+
+/// Whether a builtin method on a primitive receiver (`i64`/`i32`/`char`/
+/// `string`/`f64`/`bignum`/`ratio`) is one `compiler.rs`'s `compile-assoc`
+/// lowers *natively* — to an inline LLVM instruction or an `rt_*` call —
+/// rather than to an ordinary function call that would need the method
+/// `compile`d as its own function first. The Rust-side twin of the island's
+/// own `int-native-method?`/`string-native-method?`/`char-native-method?`/
+/// `float-native-method?`/`bignum-native-method?`/`ratio-native-method?`
+/// predicates (`compiler.rs`'s `SOURCE`); the lists must stay in lockstep,
+/// the same way [`Interp::heap_repr_kind`] mirrors the checker's
+/// `is_heap_repr`.
+///
+/// [`Interp::call_graph_edges`] needs this so it can reject — cleanly, up
+/// front — a compile whose body calls a *non*-native primitive builtin
+/// (`i64::int->char`, `char::equalp`, ...): those have no compiled lowering
+/// *and* no function to link, so left to reach the island they hit its
+/// `get-function` guard, which under the AOT-native island is a hard
+/// `rt_llvm_call` process abort rather than a catchable error. Catching them
+/// here keeps `(compile bad-fn)` a clean `EvalError` — the behavior the
+/// interpreted island used to give from `get-function` directly.
+pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str) -> bool {
+    match type_local {
+        "i64" | "i32" => matches!(
+            method,
+            "+" | "-" | "*" | "<" | "<=" | ">" | ">=" | "=" | "eq" | "/=" | "int->bignum" | "int->ratio"
+        ),
+        "string" => matches!(
+            method,
+            "length" | "ref" | "eq" | "equal" | "equalp" | "lt" | "<" | "<=" | ">" | ">=" | "append"
+        ),
+        "char" => matches!(
+            method,
+            "eq" | "eql" | "equal" | "equalp" | "lt" | "<" | "<=" | ">" | ">=" | "char->int"
+        ),
+        "f64" => matches!(
+            method,
+            "+" | "-" | "*" | "/" | "mod" | "expt" | "sqrt" | "floor" | "ceiling" | "round" | "truncate"
+                | "float->int" | "float->bignum" | "float->ratio"
+                | "<" | "<=" | ">" | ">=" | "=" | "/=" | "eq" | "eql" | "equal" | "equalp"
+        ),
+        "bignum" => matches!(
+            method,
+            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "eq" | "eql" | "equal" | "equalp"
+                | "bignum->int" | "try-bignum->int" | "bignum->float" | "bignum->ratio"
+        ),
+        "ratio" => matches!(
+            method,
+            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "eq" | "eql" | "equal" | "equalp"
+                | "ratio->bignum" | "ratio->float" | "numerator" | "denominator"
+        ),
+        _ => false,
+    }
 }
 
 /// The fixed set of `crate::compile::runtime` shims every compiled function

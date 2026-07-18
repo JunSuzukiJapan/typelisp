@@ -412,20 +412,33 @@ pub(crate) fn is_llvm_handle_ty(ty: &Type) -> bool {
 }
 
 /// The stable operation id compiled code passes as `rt_llvm_call`'s first
-/// argument: FNV-1a over `"type-key::method"`. A *hash*, not a table
-/// index, so the id embedded in a committed compiler-island bitcode
-/// artifact (interp-closure removal Stage 3) survives methods being added
-/// to or removed from the table in a later build — an index would silently
-/// shift. Collisions are checked once at table construction
-/// (`interp`'s `llvm_op_table`), which panics rather than dispatching two
-/// methods through one id.
+/// argument: FNV-1a over `"type-key::method"`, folded into a tagged-`Sexpr`
+/// integer's 61-bit signed payload. A *hash*, not a table index, so the id
+/// embedded in a committed compiler-island bitcode artifact (interp-closure
+/// removal Stage 3) survives methods being added to or removed from the
+/// table in a later build — an index would silently shift. Collisions are
+/// checked once at table construction (`interp`'s `llvm_op_table`), which
+/// panics rather than dispatching two methods through one id.
+///
+/// The `<< 3 >> 3` fold is load-bearing, not cosmetic: this id is baked into
+/// the `llvm-op` node as a `Sexpr` `Int`, and the *compiled* island reads
+/// `Sexpr` ints back in the 3-bit-tagged representation (`raw >> 3`), which
+/// would silently drop the top 3 bits of a full-width hash — so a
+/// natively-compiled `rt_llvm_call` would pass a truncated id the table (keyed
+/// on the full hash) has no entry for, aborting at runtime. Folding here means
+/// the id already fits 61 bits, so it round-trips identically through the
+/// tagged compiled path and the interpreter's full-width `Value::Int`, and the
+/// table (built from this same function) keys on exactly what compiled code
+/// passes. (A change to this fold requires regenerating `compiler_island.bc`,
+/// whose own native-scope ops carry ids baked by it — the freshness test
+/// catches a stale artifact.)
 pub(crate) fn llvm_op_id(type_key: &str, method: &str) -> i64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in type_key.as_bytes().iter().chain(b"::").chain(method.as_bytes()) {
         h ^= u64::from(*b);
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    h as i64
+    ((h as i64) << 3) >> 3
 }
 
 /// Which `rt_llvm_call` dispatch key an `Expr::Assoc` belongs to, or `None`
@@ -951,7 +964,20 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // `compiler.rs`'s `compile-float` boxes it for real at IR-build
         // time, via a fresh `rt_float_new` call in the compiled function
         // itself — mirroring `compile-str`'s own `rt_str_new` call.
-        Expr::Float(f) => tagged(heap, "float", &[Value::Int(f.to_bits() as i64)]),
+        //
+        // The 64-bit pattern is split into two 32-bit halves
+        // (`(float hi lo)`), not one `Value::Int` (interp-closure removal
+        // Stage 8a): the *compiled* island reads a `Sexpr` `Int` back through
+        // the 3-bit tag (`>> 3`), which silently drops the top 3 bits of a
+        // full-width word — fine for ordinary small `int` literals, but an
+        // `f64`'s bit pattern uses all 64 (e.g. `2.0` = `0x4000…0`, whose top
+        // bits vanish, decoding to `0.0`). Each half fits 61 bits, so both
+        // survive the tag; `compile-float` reassembles them with `shl`/`or`.
+        Expr::Float(f) => tagged(
+            heap,
+            "float",
+            &[Value::Int((f.to_bits() >> 32) as i64), Value::Int((f.to_bits() & 0xFFFF_FFFF) as i64)],
+        ),
         // `(bignum (int sign) (int d0) ...)`/`(ratio numer-form denom-form)`
         // — see `bignum_literal_form`/`ratio_literal_form`'s doc comments.
         // `compiler.rs`'s `compile-bignum-literal`/`compile-ratio-literal`
@@ -1609,7 +1635,14 @@ fn translate_quote(heap: &mut Heap, datum: &QuotedSexpr) -> Result<Value, Error>
             result
         }
         QuotedSexpr::Float(f) => {
-            let leaf = tagged(heap, "float", &[Value::Int(f.to_bits() as i64)])?;
+            // Two 32-bit halves, same as `Expr::Float` above — a single
+            // `Value::Int` of the full `f64` bits would lose its top 3 bits
+            // to the compiled island's tagged-`Int` read (Stage 8a).
+            let leaf = tagged(
+                heap,
+                "float",
+                &[Value::Int((f.to_bits() >> 32) as i64), Value::Int((f.to_bits() & 0xFFFF_FFFF) as i64)],
+            )?;
             heap.push_root(leaf);
             let result = tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(2), leaf]);
             heap.pop_root();
