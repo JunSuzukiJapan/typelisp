@@ -1822,7 +1822,25 @@ fn translate_labels_def(
     // flags against its *own* body alone (never another sibling's, since
     // params aren't shared the way `captured` is — see `Ctx::cell_names`'s
     // doc comment).
-    let own_cell_names: HashSet<String> = cx.cell_names.union(&names_captured_by_nested(std::slice::from_ref(body))).cloned().collect();
+    //
+    // A def's own parameter *shadows* any block-captured name it collides
+    // with: `resolve-value`'s `name` parameter and the block's captured
+    // `name` (the enclosing `compile-function`'s, which some *other* sibling
+    // references) are different bindings that happen to share a spelling, and
+    // within `resolve-value` the parameter must win. So the parameter names
+    // are subtracted from the inherited cell set before this def's own
+    // nested-capture additions are unioned back in — otherwise a `Var("name")`
+    // in the body would translate to a `cellvar` reading the captured cell
+    // instead of the parameter (observed self-hosting the island: a compiled
+    // `compile-var` read the function `name` it was compiling in place of the
+    // variable-reference node's own name). A parameter that a *nested* lambda
+    // in this same body genuinely captures is re-added by
+    // `names_captured_by_nested` below, so this only drops the spurious
+    // collisions, never a real cell.
+    let param_names: HashSet<String> = params.iter().map(|(n, _)| n.clone()).collect();
+    let inherited_minus_params: HashSet<String> = cx.cell_names.difference(&param_names).cloned().collect();
+    let own_cell_names: HashSet<String> =
+        inherited_minus_params.union(&names_captured_by_nested(std::slice::from_ref(body))).cloned().collect();
     let cx = Ctx { cell_names: &own_cell_names, ..cx };
     let name_v = heap.alloc_string(name.to_string());
     heap.push_root(name_v);

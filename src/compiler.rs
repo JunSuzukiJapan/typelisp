@@ -2290,20 +2290,25 @@ pub const SOURCE: &str = r#"
                                      (let ((nested-builder (llvm-builder::create)))
                                        (position-at-end nested-builder nested-block)
                                        (let ((nested-env (new-env)))
-                                         (bind-params nested-env nested-builder m nested-fn lparams 0)
-                                         (retain-bindings nested-builder m nested-env lparams)
+                                         ;; `bind-captures` before `bind-params`
+                                         ;; so a parameter shadows any captured
+                                         ;; name it collides with — see
+                                         ;; `compile-labels-bodies`'s matching
+                                         ;; comment for why this ordering is
+                                         ;; correct and root-neutral.
                                          ;; No `retain-bindings` call for
-                                         ;; `lcaptured` here (unlike
-                                         ;; `lparams` just above): every
-                                         ;; entry a captured-name list can
+                                         ;; `lcaptured` (unlike `lparams`):
+                                         ;; every entry a captured-name list can
                                          ;; ever hold is `kind >= 10` now
                                          ;; (Stage 4), and `bind-captures`
-                                         ;; itself already pushes a
-                                         ;; permanent root for each one — a
+                                         ;; itself already pushes a permanent
+                                         ;; root for each one — a
                                          ;; `retain-bindings` pass here would
                                          ;; only ever match its now-unused
                                          ;; `kind = 2` case, a pure no-op.
                                          (bind-captures nested-env nested-builder m nested-fn lcaptured 0)
+                                         (bind-params nested-env nested-builder m nested-fn lparams 0)
+                                         (retain-bindings nested-builder m nested-env lparams)
                                          ;; `loop`/`break`/`return`/`setf`: a
                                          ;; `lambda` is a new function
                                          ;; boundary — `break`/`return` can't
@@ -2401,15 +2406,33 @@ pub const SOURCE: &str = r#"
                                        (let ((sib-builder (llvm-builder::create)))
                                          (position-at-end sib-builder sib-block)
                                          (let ((sib-env (new-env)))
+                                           ;; `bind-captures` runs *before*
+                                           ;; `bind-params` so a parameter
+                                           ;; shadows any block-captured name
+                                           ;; it collides with: both bind into
+                                           ;; `sib-env` by name, and the last
+                                           ;; write wins, so the parameter must
+                                           ;; be second (lexical shadowing —
+                                           ;; e.g. `resolve-value`'s own `name`
+                                           ;; parameter must shadow the
+                                           ;; captured enclosing `name` that
+                                           ;; `declare-labels-siblings`
+                                           ;; genuinely needs; observed
+                                           ;; self-hosting the island). Root
+                                           ;; bookkeeping is unaffected:
+                                           ;; `release-bindings` is count-based
+                                           ;; (it pops the top of the root
+                                           ;; stack N times, never by name), so
+                                           ;; the two lists' pushes and pops
+                                           ;; stay balanced regardless of bind
+                                           ;; order. No `retain-bindings` call
+                                           ;; for `captured` — every entry is
+                                           ;; `kind >= 10` now, and
+                                           ;; `bind-captures` already roots each
+                                           ;; one itself.
+                                           (bind-captures sib-env sib-builder m sib-fn captured 0)
                                            (bind-params sib-env sib-builder m sib-fn param-syms 0)
                                            (retain-bindings sib-builder m sib-env param-syms)
-                                           ;; See `compile-lambda`'s matching
-                                           ;; comment: no `retain-bindings`
-                                           ;; call for `captured` — every
-                                           ;; entry is `kind >= 10` now, and
-                                           ;; `bind-captures` already roots
-                                           ;; each one itself.
-                                           (bind-captures sib-env sib-builder m sib-fn captured 0)
                                            ;; `loop`/`break`/`return`/`setf`:
                                            ;; a `labels` sibling's own body is
                                            ;; a new function boundary too
@@ -3573,4 +3596,46 @@ pub fn load(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
         }
         interp.exec(heap, tl).expect("compiler: eval failed");
     }
+}
+
+/// The precompiled compiler-island bitcode (interp-closure removal Stage 3),
+/// embedded so [`load_aot`] needs no filesystem access at runtime. Kept in
+/// sync with `SOURCE` by `scripts/regen-compiler-island.sh` and the
+/// `island_artifacts_are_fresh` test.
+pub const ISLAND_BITCODE: &[u8] = include_bytes!("compiler_island.bc");
+
+/// Loads the compiler island as **native code** (interp-closure removal
+/// Stage 4): the same read/check/`exec` of `SOURCE` [`load`] does — which
+/// registers each island `defun`'s interpreted `FnDef` and checker state but
+/// allocates no closures (a `defun` only *builds* a closure when its body is
+/// *called* interpreted, which never happens after this) — followed by
+/// installing the committed AOT bitcode's native function bodies into
+/// [`Interp`]'s compiled-function table
+/// ([`Interp::install_island_bitcode`]).
+///
+/// After this, calling `compile-function` (directly via `(compile ...)`, or
+/// transitively when a user closure is JIT-compiled at definition time)
+/// dispatches to the native island rather than tree-walking it — so the
+/// island's own `labels`/`lambda` bodies never become interpreted closures,
+/// which is what lets interpreted closures be removed entirely (Stage 8).
+/// `SOURCE` being fixed and the bitcode a committed, freshness-checked
+/// artifact, any failure here is a build/bug condition, not a user error —
+/// hence the panics, matching [`load`].
+pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
+    let r = Reader::new();
+    let forms = r.read_all(heap, SOURCE).expect("compiler: read failed");
+    let mut island_defuns: Vec<String> = Vec::new();
+    for v in forms {
+        let tl = chk.check_form(heap, &*interp, v).expect("compiler: check failed");
+        for w in chk.take_warnings() {
+            eprintln!("{}", w);
+        }
+        if let crate::TopLevel::Defun { name, .. } = &tl {
+            island_defuns.push(name.local().to_string());
+        }
+        interp.exec(heap, tl).expect("compiler: eval failed");
+    }
+    interp
+        .install_island_bitcode(ISLAND_BITCODE, &island_defuns)
+        .expect("compiler: island bitcode install failed");
 }

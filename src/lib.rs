@@ -19,3 +19,4 @@ pub use check::*;
 pub use eval::*;
 pub use prelude::load as load_prelude;
 pub use compiler::load as load_compiler;
+pub use compiler::load_aot as load_compiler_aot;

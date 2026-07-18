@@ -19,6 +19,7 @@ use std::rc::{Rc, Weak};
 
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
+use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::Module;
 use inkwell::values::{BasicValueEnum, FunctionValue};
 use inkwell::AddressSpace;
@@ -905,6 +906,55 @@ impl Interp {
         self.fns.keys().map(|p| p.local().to_string()).collect()
     }
 
+    /// Installs the precompiled compiler island (interp-closure removal
+    /// Stage 4): parses the committed bitcode ([`crate::compile::bootstrap`])
+    /// and registers every island top-level `defun` named in `island_defuns`
+    /// into [`Self::compiled`], so a later call to `compile-function` (and
+    /// the whole island it drives) runs as native code instead of being
+    /// tree-walked. [`crate::compiler::load_aot`] calls this after re-checking
+    /// and `exec`ing the island `SOURCE` (which registers the interpreted
+    /// `FnDef`s + checker state the compiled bodies still need for
+    /// signatures/fallback), passing the `defun` names it collected there.
+    ///
+    /// The island bitcode references no external symbols other than the
+    /// `rt_*` runtime shims (verified: it is one self-contained module whose
+    /// functions call each other directly and lower every builtin to an
+    /// `rt_*`/`rt_llvm_call`), so `externals` is exactly
+    /// [`rt_extern_functions`] — the same set `compile_scc` supplies for a
+    /// JIT'd SCC. The embedded source hash is checked against the live
+    /// `SOURCE` first; a mismatch means the committed `.bc` is stale (someone
+    /// edited `compiler.rs` without running `scripts/regen-compiler-island.sh`)
+    /// and is a hard error rather than a silent load of wrong-version native
+    /// bodies.
+    pub(crate) fn install_island_bitcode(&self, bitcode: &[u8], island_defuns: &[String]) -> Result<(), String> {
+        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+        let buffer = MemoryBuffer::create_from_memory_range_copy(bitcode, "compiler_island");
+        let module = Module::parse_bitcode_from_buffer(&buffer, crate::compile::llvm_context())
+            .map_err(|e| format!("compiler island bitcode failed to parse: {}", e))?;
+
+        let embedded = crate::compile::bootstrap::read_embedded_source_hash(&module)
+            .ok_or_else(|| "compiler island bitcode has no embedded source hash".to_string())?;
+        if embedded != crate::fasl::source_hash(crate::compiler::SOURCE) {
+            return Err(
+                "compiler island bitcode is stale relative to compiler.rs's SOURCE — run scripts/regen-compiler-island.sh"
+                    .to_string(),
+            );
+        }
+
+        let internal_names: Vec<String> =
+            island_defuns.iter().map(|n| crate::compile::ast_bridge::user_symbol_name(n)).collect();
+        let externals: Vec<(String, usize)> =
+            rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)).collect();
+        let compiled_fns = crate::compile::CompiledFn::new_multi(&module, &internal_names, &externals)
+            .map_err(|e| format!("compiler island JIT install failed: {}", e))?;
+
+        let mut compiled = self.compiled.borrow_mut();
+        for (name, cf) in island_defuns.iter().zip(compiled_fns) {
+            compiled.insert(Path::root(name), cf);
+        }
+        Ok(())
+    }
+
     pub fn exec(&mut self, heap: &mut Heap, tl: TopLevel) -> Result<Option<RtValue>, EvalError> {
         match tl {
             TopLevel::Defun { name, type_params, params, ret, body } => {
@@ -1681,6 +1731,26 @@ impl Interp {
     fn encode_crossing_args(&self, heap: &mut Heap, argv: &[RtValue]) -> Result<(Vec<i64>, usize), EvalError> {
         let mut crossing_roots = 0usize;
         let mut int_args: Vec<i64> = Vec::with_capacity(argv.len());
+        // Root every already-heap-resident `Sexpr` argument up front, before
+        // the encode loop below allocates anything. A later argument's
+        // encoding can allocate — a `Str`/`Bignum`/`Ratio` argument copies
+        // itself onto the GC heap — and that allocation can trigger a GC;
+        // without this pre-pass, an *earlier-in-`argv`* alloc (e.g. a
+        // leading `Str` argument) would collect a not-yet-rooted `Sexpr`
+        // argument sitting later in `argv`, whose freed string/cons slots
+        // then get recycled under it (observed compiling the self-hosted
+        // island: a `defun`'s `name` string argument's `alloc_string`
+        // reclaimed its own body AST, so a `(var "x")` node read back as the
+        // `name`). Rooting order doesn't matter for protection — only that
+        // every heap arg is rooted before the first allocation — so this
+        // separate pass is the whole fix; the encode loop then just skips
+        // re-rooting `Sexpr`s.
+        for v in argv {
+            if let RtValue::Sexpr(sv) = v {
+                heap.push_root(*sv);
+                crossing_roots += 1;
+            }
+        }
         for v in argv {
             let encoded = match v {
                 // An *interpreted* closure box must not silently cross this
@@ -1713,11 +1783,8 @@ impl Interp {
                 RtValue::Sexpr(Value::Boxed(id)) if heap.is_closure(*id) => Err(EvalError::Internal(
                     "compiled call: an interpreted closure cannot be passed to compiled code".into(),
                 )),
-                RtValue::Sexpr(sv) => {
-                    heap.push_root(*sv);
-                    crossing_roots += 1;
-                    Ok(crate::compile::runtime::encode(*sv))
-                }
+                // Already rooted by the pre-pass above — just encode.
+                RtValue::Sexpr(sv) => Ok(crate::compile::runtime::encode(*sv)),
                 RtValue::Int(n) => Ok(*n),
                 // The remaining scalar crossings, by the same encodings
                 // compiled code uses internally: `bool` and `char` are raw
@@ -2188,20 +2255,59 @@ impl Interp {
             };
         heap.pop_root(); // param_list
 
+        self.run_compile_function(heap, module, internal_name, param_list, body_sexpr)
+    }
+
+    /// Drives the island's `compile-function` over one already-translated
+    /// function `(param_list, body_sexpr)` into `module` — the shared tail of
+    /// [`Self::translate_and_compile`] and [`Self::add_compiled_global_init`].
+    ///
+    /// Dispatches to the *compiled* island `compile-function` whenever it is
+    /// installed in [`Self::compiled`] (interp-closure removal Stage 4: after
+    /// [`crate::compiler::load_aot`], so the island runs natively and its own
+    /// `labels`/`lambda` bodies are never built as interpreted closures),
+    /// falling back to the interpreted `FnDef` otherwise — a plain
+    /// `load_compiler` environment, or the bootstrap
+    /// ([`crate::compile::bootstrap`]) that produces the island bitcode in
+    /// the first place, where the compiled island doesn't exist yet.
+    ///
+    /// The compiled `compile-function` returns the very `llvm-module` it was
+    /// handed (mutated in place); both callers care only about that side
+    /// effect and ignore the return, but it is still decoded so
+    /// [`Self::call_compiled`]'s LLVM-handle bookkeeping stays balanced. A
+    /// [`llvm_handles_mark`]/[`llvm_handles_release`] pair brackets the call
+    /// so the transient handles the native compiler registers while walking
+    /// the AST don't accumulate across many compiles.
+    fn run_compile_function(
+        &self,
+        heap: &mut Heap,
+        module: Rc<RefCell<Module<'static>>>,
+        internal_name: &str,
+        param_list: Value,
+        body_sexpr: Value,
+    ) -> Result<(), EvalError> {
         let compiler_path = Path::root("compile-function");
+        let argv = vec![
+            RtValue::LlvmModule(module),
+            RtValue::Str(internal_name.into()),
+            RtValue::Sexpr(param_list),
+            RtValue::Sexpr(body_sexpr),
+        ];
+        {
+            let compiled = self.compiled.borrow();
+            if let Some(cf) = compiled.get(&compiler_path) {
+                let ret_ty = Type::Named(Path::root("llvm-module"), Vec::new());
+                let mark = llvm_handles_mark();
+                let r = self.call_compiled(heap, cf, &argv, &ret_ty);
+                llvm_handles_release(mark);
+                r?;
+                return Ok(());
+            }
+        }
         let compiler_def = self.fns.get(&compiler_path).ok_or_else(|| {
             EvalError::Internal("compile: compiler body not loaded — call load_compiler first".into())
         })?;
-        self.apply(
-            heap,
-            compiler_def,
-            vec![
-                RtValue::LlvmModule(module),
-                RtValue::Str(internal_name.into()),
-                RtValue::Sexpr(param_list),
-                RtValue::Sexpr(body_sexpr),
-            ],
-        )?;
+        self.apply(heap, compiler_def, argv)?;
         Ok(())
     }
 
@@ -2255,21 +2361,7 @@ impl Interp {
             };
         heap.pop_root(); // param_list
 
-        let compiler_path = Path::root("compile-function");
-        let compiler_def = self.fns.get(&compiler_path).ok_or_else(|| {
-            EvalError::Internal("compile: compiler body not loaded — call load_compiler first".into())
-        })?;
-        self.apply(
-            heap,
-            compiler_def,
-            vec![
-                RtValue::LlvmModule(module),
-                RtValue::Str(internal_name.into()),
-                RtValue::Sexpr(param_list),
-                RtValue::Sexpr(body_sexpr),
-            ],
-        )?;
-        Ok(())
+        self.run_compile_function(heap, module, internal_name, param_list, body_sexpr)
     }
 
     /// `(compile fn-name)` (or `(compile type::method)`): JIT-compiles a

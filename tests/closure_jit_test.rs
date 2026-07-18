@@ -135,6 +135,27 @@ fn setf_through_one_labels_sibling_is_visible_through_another_sharing_the_same_c
     assert_eq!(eval_ok(src), RtValue::Int(12));
 }
 
+/// A `labels` sibling whose own parameter *shadows* a name the block
+/// captures must read the parameter, not the capture (interp-closure removal
+/// Stage 4). `use-cap` genuinely captures the enclosing `n`; `shadow-it`'s
+/// own `n` parameter collides with that captured name, and lexical scoping
+/// requires the parameter to win. This is the exact collision the
+/// self-hosted island hit compiling itself (`resolve-value`'s `name`
+/// parameter vs. the captured `name` `declare-labels-siblings` needs), which
+/// surfaced that `bind-captures` was overwriting `bind-params` in a
+/// sibling's `env`; the fix binds captures first so parameters shadow them.
+#[test]
+fn a_labels_param_shadows_a_captured_name_of_the_same_spelling() {
+    let src = "(defun outer ((n i64)) i64
+                 (labels ((use-cap ((x i64)) i64 (+ x n))
+                          (shadow-it ((n i64)) i64 n))
+                   (+ (use-cap 1) (shadow-it 100))))
+               (outer 5)";
+    // use-cap: 1 + captured n(5) = 6; shadow-it: param n(100) = 100; sum 106.
+    // (Before the fix shadow-it read the captured n(5), giving 11.)
+    assert_eq!(eval_ok(src), RtValue::Int(106));
+}
+
 /// A `Unit`-returning closure JITs too (closure unification Stage 8):
 /// `compile-unit` encodes the body's `Unit` tail as a plain `0`, and
 /// `Interp::decode_compiled_return`'s `Type::Unit` arm decodes it back to a
