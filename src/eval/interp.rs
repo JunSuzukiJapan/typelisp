@@ -902,35 +902,56 @@ impl Interp {
     /// functions call each other directly and lower every builtin to an
     /// `rt_*`/`rt_llvm_call`), so `externals` is exactly
     /// [`rt_extern_functions`] — the same set `compile_scc` supplies for a
-    /// JIT'd SCC. The embedded source hash is checked against the live
-    /// `SOURCE` first; a mismatch means the committed `.bc` is stale (someone
-    /// edited `compiler.rs` without running `scripts/regen-compiler-island.sh`)
-    /// and is a hard error rather than a silent load of wrong-version native
-    /// bodies.
-    pub(crate) fn install_island_bitcode(&self, bitcode: &[u8], island_defuns: &[String]) -> Result<(), String> {
+    /// JIT'd SCC.
+    ///
+    /// `check_hash` selects the two callers' differing staleness needs. The
+    /// runtime loader ([`crate::compiler::load_aot`], `check_hash = true`)
+    /// compares the bitcode's embedded source hash against the live `SOURCE`
+    /// and hard-errors on a mismatch: a stale committed `.bc` (someone edited
+    /// `compiler.rs` without running `scripts/regen-compiler-island.sh`) must
+    /// never be silently loaded as wrong-version native bodies. The bootstrap
+    /// regenerator ([`crate::compile::bootstrap::build_island_bitcode`],
+    /// `check_hash = false`) *deliberately* loads the committed — necessarily
+    /// older — `.bc` to compile a possibly-changed `SOURCE` with it (the
+    /// snapshot chain that lets interpreted closures be removed: the *previous*
+    /// native island recompiles the next one), so a mismatch is expected, not
+    /// an error. In that mode a `defun` present in `island_defuns` but absent
+    /// from the older `.bc` (a newly added island function) is skipped here and
+    /// gets freshly compiled by the just-installed native `compile-function`
+    /// like any other new body, rather than failing the whole install.
+    pub(crate) fn install_island_bitcode(&self, bitcode: &[u8], island_defuns: &[String], check_hash: bool) -> Result<(), String> {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let buffer = MemoryBuffer::create_from_memory_range_copy(bitcode, "compiler_island");
         let module = Module::parse_bitcode_from_buffer(&buffer, crate::compile::llvm_context())
             .map_err(|e| format!("compiler island bitcode failed to parse: {}", e))?;
 
-        let embedded = crate::compile::bootstrap::read_embedded_source_hash(&module)
-            .ok_or_else(|| "compiler island bitcode has no embedded source hash".to_string())?;
-        if embedded != crate::fasl::source_hash(crate::compiler::SOURCE) {
-            return Err(
-                "compiler island bitcode is stale relative to compiler.rs's SOURCE — run scripts/regen-compiler-island.sh"
-                    .to_string(),
-            );
+        if check_hash {
+            let embedded = crate::compile::bootstrap::read_embedded_source_hash(&module)
+                .ok_or_else(|| "compiler island bitcode has no embedded source hash".to_string())?;
+            if embedded != crate::fasl::source_hash(crate::compiler::SOURCE) {
+                return Err(
+                    "compiler island bitcode is stale relative to compiler.rs's SOURCE — run scripts/regen-compiler-island.sh"
+                        .to_string(),
+                );
+            }
         }
 
+        // In bootstrap mode, keep only names the (older) module actually
+        // defines; a `check_hash` load has a fresh `.bc` so all are present.
+        let names: Vec<String> = island_defuns
+            .iter()
+            .filter(|n| check_hash || module.get_function(&crate::compile::ast_bridge::user_symbol_name(n)).is_some())
+            .cloned()
+            .collect();
         let internal_names: Vec<String> =
-            island_defuns.iter().map(|n| crate::compile::ast_bridge::user_symbol_name(n)).collect();
+            names.iter().map(|n| crate::compile::ast_bridge::user_symbol_name(n)).collect();
         let externals: Vec<(String, usize)> =
             rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)).collect();
         let compiled_fns = crate::compile::CompiledFn::new_multi(&module, &internal_names, &externals)
             .map_err(|e| format!("compiler island JIT install failed: {}", e))?;
 
         let mut compiled = self.compiled.borrow_mut();
-        for (name, cf) in island_defuns.iter().zip(compiled_fns) {
+        for (name, cf) in names.iter().zip(compiled_fns) {
             compiled.insert(Path::root(name), cf);
         }
         Ok(())

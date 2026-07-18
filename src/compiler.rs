@@ -3648,6 +3648,6 @@ pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
         interp.exec(heap, tl).expect("compiler: eval failed");
     }
     interp
-        .install_island_bitcode(ISLAND_BITCODE, &island_defuns)
+        .install_island_bitcode(ISLAND_BITCODE, &island_defuns, true)
         .expect("compiler: island bitcode install failed");
 }

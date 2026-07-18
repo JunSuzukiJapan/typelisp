@@ -20,14 +20,13 @@
 //! to `SOURCE` — the same staleness check `prelude`'s fasl cache uses, with
 //! no separate sidecar file.
 //!
-//! Building this runs the *interpreted* island's `compile-function` to emit
-//! each defun's IR, so it depends on interpreted closures still existing —
-//! it is the initial link of the snapshot chain that lets interpreted
-//! closures be removed entirely (interp-closure removal Stage 8): once a
-//! native island is committed, a later island edit is recompiled by the
-//! *previous* native island (`load_aot` then this same function, now
-//! dispatching `compile-function` to compiled code), never by interpreted
-//! island code again.
+//! Building this installs the *committed* (previous) `.bc` first and drives
+//! its **native** `compile-function` to emit each defun's IR — the snapshot
+//! chain (interp-closure removal Stage 8b), so regeneration no longer depends
+//! on interpreted closures and they can be deleted entirely (Stage 8c). The
+//! very first `.bc` was built by the interpreted island (before this chain
+//! existed); every one since is recompiled by its predecessor. See
+//! [`build_island_bitcode`]'s own `install_island_bitcode(..., false)` call.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -74,6 +73,22 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
         }
         interp.exec(&mut heap, tl).map_err(|e| format!("island exec failed: {}", e))?;
     }
+
+    // Install the *committed* island bitcode so the compile loop below drives
+    // the previous build's **native** `compile-function`, not an interpreted
+    // one (the snapshot chain — interp-closure removal Stage 8b). `check_hash`
+    // is `false`: the committed `.bc` is by construction one generation behind
+    // the `SOURCE` we're recompiling, so a hash mismatch is expected. Any
+    // island `defun` added since that `.bc` is simply absent from it and gets
+    // compiled fresh by the just-installed native `compile-function`. This is
+    // what lets interpreted closures be deleted (Stage 8c): regenerating the
+    // island no longer needs the interpreter to tree-walk `compile-function`'s
+    // own `labels`/`lambda`s. (The very first `.bc`, before this chain existed,
+    // was built by the interpreted island; every one since is built by its
+    // predecessor.)
+    interp
+        .install_island_bitcode(crate::compiler::ISLAND_BITCODE, &fn_names, false)
+        .map_err(|e| format!("island bootstrap install of the committed .bc failed: {}", e))?;
 
     let ctx = crate::compile::llvm_context();
     let module = {
