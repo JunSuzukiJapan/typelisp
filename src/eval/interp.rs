@@ -1658,11 +1658,27 @@ impl Interp {
                 // closure handed over as a plain `Sexpr` would be
                 // dereferenced as one — same "clear internal error, not a
                 // silent misread" stance the pre-6b `RtValue::Closure`
-                // rejection took. A *compiled* closure (also a tagged
-                // `Sexpr`) needs no such rejection — it falls through to the
-                // ordinary `RtValue::Sexpr` arm just below like any other
-                // boxed value, since compiled code on both sides of this
-                // call already agrees on `BoxedObj::CompiledClosure`'s shape.
+                // rejection took. Since closure unification Stage 9 made a
+                // compiled-coverage gap an unconditional panic at
+                // definition time (`Interp::jit_result_or_make_closure`), an
+                // `RtValue::Closure` can only reach *this* boundary via one
+                // of the permanent Benign fallbacks (see `JitDecline`'s doc
+                // comment) — overwhelmingly the self-hosted compiler
+                // island's own native-tier closures (an `llvm-builder`/
+                // `Scope<llvm-value>` capture, say), which by construction
+                // never have a JIT-tier `Fn` type a compiled function could
+                // declare a parameter as in the first place, so they can't
+                // actually reach here; realistically this only fires under
+                // `TYPELISP_CLOSURE_JIT=off` (every closure stays
+                // interpreted, including ones a separately-`(compile
+                // ...)`d function then receives) or a JIT-time heap
+                // exhaustion that happened to hit a closure whose type
+                // would otherwise have JIT'd fine. A *compiled* closure
+                // (also a tagged `Sexpr`) needs no such rejection — it falls
+                // through to the ordinary `RtValue::Sexpr` arm just below
+                // like any other boxed value, since compiled code on both
+                // sides of this call already agrees on
+                // `BoxedObj::CompiledClosure`'s shape.
                 RtValue::Sexpr(Value::Boxed(id)) if heap.is_closure(*id) => Err(EvalError::Internal(
                     "compiled call: an interpreted closure cannot be passed to compiled code".into(),
                 )),

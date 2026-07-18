@@ -1,6 +1,6 @@
 # typelisp 言語設計（確定仕様）
 
-最終更新: 2026-07-11 / ブランチ: `main`
+最終更新: 2026-07-18 / ブランチ: `main`
 
 このドキュメントは、設計で**確定した言語仕様**を後から見返せるよう記録するもの。
 現在の残作業は [TODO.md](TODO.md)、完了した実装の経緯は [implementation-log.md](implementation-log.md) を参照。
@@ -219,10 +219,18 @@
 公開サーフェスであり初期化子から推論しない。型なしの`(defvar name value)`形式は2026-07-03に削除。
 副次的に、注釈が初期化子のexpected型になるため`(defvar (f (fn (i32) i32)) identity)`のような
 ジェネリック関数値の単型化解決もここから効く）。
-**`lambda`** は関数を第一級の値（GCヒープ上のクロージャボックス、`BoxedObj::Closure`）にする: `(lambda (params) ret body...)`、型は `(fn ...)`。
+**`lambda`** は関数を第一級の値（GCヒープ上のクロージャボックス）にする: `(lambda (params) ret body...)`、型は `(fn ...)`。
 定義時の環境（可変スロット）を捕捉する真のクロージャ。関数値の呼び出しは頭がローカル変数・グローバル変数・任意の式
 （例 `((lambda ...) x)`）のとき `Expr::Apply` に。**名前付き関数も値化可能**（`id` 等を高階関数へ渡せる。`Expr::FnRef`、
-組み込みは `RtValue::Builtin`）。**`dotimes`** `(dotimes (var count) body...)` は `let`+`while`+`setf` への脱糖。
+組み込みは `RtValue::Builtin`）。**クロージャ表現統一**（`docs/dev/implementation-log.md`「クロージャ表現統一」節、
+2026-07-18 Stage 1-9 完了）により、`lambda`/`labels` の各兄弟/`FnRef`/`MethodRef` は評価（定義）時にまず自己ホスト
+コンパイラで JIT され、`BoxedObj::CompiledClosure`（コンパイル済みコードと表現を共有する GC ヒープ値）として構築
+されるのが既定動作——`BoxedObj::Closure`（tree-walk インタプリタが実行する側の表現）へフォールバックするのは
+恒久的に許容される少数のケースのみ（自己ホストコンパイラ島自身が使う `llvm-builder`/`Scope<llvm-value>` 等の
+コンパイル表現を持たないネイティブ型を捕獲/引数/戻り値に含むクロージャ、マクロ展開中の評価、
+`TYPELISP_CLOSURE_JIT=off`、コンパイラ島が未ロード、JIT 中のヒープ枯渇）。これら以外の被覆穴は
+`EvalError::Panic` になる（Stage 9「JIT必須化」）。捕獲変数への `setf` は共有セル（CL 的、書き換えは同一セルを
+指す全クロージャから見える）——値のスナップショットではない。**`dotimes`** `(dotimes (var count) body...)` は `let`+`while`+`setf` への脱糖。
 **`list`** `(list e1 ... en)` は `(Cons e1 (Cons e2 (... (Nil))))` への脱糖（`(list)` は `(Nil)`）。**`dolist`**
 （`let`+`while`+`match` で `Sexpr` の `Cons`/`Nil` を辿る特殊形だった）は削除済み——`Iter` トレイト
 経由で任意のコレクションを辿れる `doiter`（本節末尾）に統合された。
