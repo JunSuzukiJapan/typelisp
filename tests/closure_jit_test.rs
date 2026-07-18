@@ -213,3 +213,22 @@ fn a_macro_expansion_and_a_real_closure_coexist() {
                  total)";
     assert_eq!(eval_ok(src), RtValue::Int(6));
 }
+
+/// interp-closure removal Stage 6 (retiring `jit_suppressed`): a closure the
+/// macro *body itself* builds and calls *while it expands* — at check time —
+/// now goes through definition-time JIT like any other, instead of the
+/// blanket `make_closure` fallback the suppression guard used to force. `mk`
+/// is a genuine capturing closure (it closes over `op`) constructed inside
+/// `expand_macro`; the macro calls it (`(mk (quote (1 2)))` builds the sexpr
+/// `(+ 1 2)`) and returns that, so `(plus-list)` expands to `(+ 1 2)` = 3. A
+/// passing result confirms the macro-body closure JIT'd (the island is loaded)
+/// without a spurious coverage-gap panic now that suppression is gone.
+#[test]
+fn a_closure_built_inside_a_macro_body_jits_during_expansion() {
+    let src = "(defmacro plus-list () \
+                 (let ((op (quote +))) \
+                   (let ((mk (lambda ((s Sexpr)) Sexpr (sexpr-cons op s)))) \
+                     (mk (quote (1 2)))))) \
+               (plus-list)";
+    assert_eq!(eval_ok(src), RtValue::Int(3));
+}

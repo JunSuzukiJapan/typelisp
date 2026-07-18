@@ -165,17 +165,6 @@ pub struct Interp {
     /// ordinary [`Slot`] in [`Self::globals`] untouched — see that
     /// method's doc comment for why only a promoted global's storage moves.
     compiled_globals: RefCell<HashMap<Path, usize>>,
-    /// Closure unification Stage 7 reentrancy guard: `> 0` while
-    /// [`Self::expand_macro`] is tree-walking a macro's own body (check
-    /// time), during which every `Expr::Lambda`/`Labels`/`FnRef`/
-    /// `MethodRef` must fall back to [`Self::make_closure`] unconditionally
-    /// — the LSP's "no code execution" policy (and, more fundamentally,
-    /// definition-time JIT during a `Checker::check` pass would try to JIT
-    /// arbitrary macro-generated code with no guarantee it's even
-    /// tier-representable) — rather than attempt [`Self::jit_define_closure`].
-    /// A `Cell<u32>` rather than `bool` since macro expansion can nest
-    /// (a macro's expansion invoking another macro).
-    jit_suppressed: Cell<u32>,
     /// Every closure "constructor" [`Self::jit_define_closure`] has ever
     /// JIT-compiled, held forever so the `ExecutionEngine`/code backing each
     /// one's `fn_ptr` is never dropped — the "engine graveyard" the
@@ -238,8 +227,7 @@ enum JitDecline {
     /// Falling back to an interpreted closure here is the *correct*,
     /// permanent behavior, not a coverage gap — the fallback set Stage 9
     /// keeps now that silent fallback is otherwise abolished:
-    /// `TYPELISP_CLOSURE_JIT=off`, macro expansion
-    /// ([`Interp::jit_suppressed`]), a native-tier type (the self-hosted
+    /// `TYPELISP_CLOSURE_JIT=off`, a native-tier type (the self-hosted
     /// compiler island's own `llvm-*`/`Scope<llvm-value>` closures — see
     /// [`Interp::is_jit_tier_ty`]; classifying these as benign is also what
     /// keeps the default mode from panicking *inside* a reentrant
@@ -248,10 +236,12 @@ enum JitDecline {
     /// Stage 5 every `typl` entry point loads it via `compiler::load_aot`, so
     /// this only remains for an embedder that skips island loading — there is
     /// then nothing to JIT *with*), and heap exhaustion mid-JIT (a resource
-    /// condition of the moment, not a representational hole). These five fall back
-    /// silently regardless of mode — `TYPELISP_CLOSURE_JIT=off` included,
+    /// condition of the moment, not a representational hole). These four fall
+    /// back silently regardless of mode — `TYPELISP_CLOSURE_JIT=off` included,
     /// since `jit_define_closure` turns that switch itself into exactly this
-    /// variant before any of the other four checks even run.
+    /// variant before any of the other three checks even run. (Macro-expansion
+    /// suppression was a fifth until Stage 6 retired it — a closure built while
+    /// a macro body runs now JITs like any other.)
     Benign(String),
     /// A real, actionable hole in compiled coverage (an uncompiled call
     /// target, an `&rest` closure, a constructor-JIT failure, ...) — always
@@ -323,7 +313,6 @@ impl Interp {
             struct_types: HashSet::from([Path::root("vector")]),
             enum_defs: HashMap::new(),
             compiled_globals: RefCell::new(HashMap::new()),
-            jit_suppressed: Cell::new(0),
             jit_graveyard: RefCell::new(Vec::new()),
             jit_ctor_cache: RefCell::new(HashMap::new()),
             jit_ctor_counter: Cell::new(0),
@@ -508,9 +497,6 @@ impl Interp {
     fn jit_define_closure(&self, heap: &mut Heap, env: &Env, t: &Typed, captured: &[(String, Type)]) -> Result<RtValue, JitDecline> {
         if jit_mode() == JitMode::Off {
             return Err(JitDecline::Benign("TYPELISP_CLOSURE_JIT=off".to_string()));
-        }
-        if self.jit_suppressed.get() > 0 {
-            return Err(JitDecline::Benign("suppressed during macro expansion".to_string()));
         }
         // No self-hosted compiler island loaded means there is nothing to
         // JIT *with*. Since interp-closure removal Stage 5 every `typl`
@@ -3029,19 +3015,19 @@ impl MacroExpander for Interp {
         for v in &raw_args {
             heap.push_root(*v);
         }
-        // Closure unification Stage 7: suppress definition-time JIT for the
-        // whole extent of the macro body's execution — `Cell<u32>` (not
-        // `bool`) since a macro's own expansion can itself invoke another
-        // macro, and the guard must stay up until the *outermost* expansion
-        // finishes. See `Interp::jit_suppressed`'s doc comment for why (the
-        // LSP's "no code execution" policy, and the fact that macro-
-        // generated code has no guarantee of being tier-representable).
-        self.jit_suppressed.set(self.jit_suppressed.get() + 1);
+        // A closure built while a macro body executes (check-time expansion)
+        // is JIT-compiled like any other (interp-closure removal Stage 6,
+        // retiring Stage 7's `jit_suppressed` guard): the island is always
+        // loaded (Stage 5), so `jit_define_closure` succeeds; in an embedder
+        // that skipped island loading it declines *Benign* ("island not
+        // loaded") and falls back exactly as before. A macro that builds a
+        // closure over a non-tier type is the only behavior change — it now
+        // JITs (or hard-declines *Gap*) instead of silently interpreting —
+        // and no such macro exists (macro bodies close over ordinary types).
         let result = match self.bind_macro_args(heap, f, &raw_args, fixed) {
             Ok(argv) => self.apply(heap, f, argv),
             Err(e) => Err(e),
         };
-        self.jit_suppressed.set(self.jit_suppressed.get() - 1);
         for _ in 0..self.rooted.replace(0) {
             heap.pop_root();
         }
