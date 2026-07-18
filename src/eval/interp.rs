@@ -896,6 +896,15 @@ impl Interp {
 
     /// Execute a checked top-level form. Definitions register and return `None`;
     /// a bare expression returns `Some(value)`.
+    /// Every currently-registered top-level function's *local* name, in no
+    /// particular order — for tooling and tests that need to enumerate what
+    /// a given load produced (e.g. deriving the compiler island's own
+    /// `defun` set by diffing a prelude-only interpreter against one that
+    /// also ran `load_compiler`; interp-closure removal Stage 2 onward).
+    pub fn function_names(&self) -> Vec<String> {
+        self.fns.keys().map(|p| p.local().to_string()).collect()
+    }
+
     pub fn exec(&mut self, heap: &mut Heap, tl: TopLevel) -> Result<Option<RtValue>, EvalError> {
         match tl {
             TopLevel::Defun { name, type_params, params, ret, body } => {

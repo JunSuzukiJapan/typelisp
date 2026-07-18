@@ -748,7 +748,10 @@ pub const SOURCE: &str = r#"
 ;; `char`'s natively-compilable methods: a compiled `char` is a raw `i64`
 ;; code point, so the content comparisons lower to the same integer `icmp`s
 ;; the int branch uses. `equalp` (ASCII case-insensitive) has no single
-;; instruction and stays non-native.
+;; instruction and stays non-native. `char->int` is the identity at the
+;; compiled level (a `char`'s value *is* its code point, and `i32`/`i64`
+;; share width) — needed so the island's own `compile-char` (which calls
+;; `(char->int (sexpr-char ...))`) is itself compilable.
 (defun char-native-method? ((method string)) bool
   (if (equal method "eq") true
   (if (equal method "eql") true
@@ -759,7 +762,8 @@ pub const SOURCE: &str = r#"
   (if (equal method "<=") true
   (if (equal method ">") true
   (if (equal method ">=") true
-  false))))))))))
+  (if (equal method "char->int") true
+  false)))))))))))
 
 ;; `f64`'s natively-compilable methods: arithmetic (`+`/`-`/`*`/`/`/`mod`)
 ;; lowers to LLVM float instructions (`build-fadd`/... — each `bitcast`s the
@@ -1681,6 +1685,13 @@ pub const SOURCE: &str = r#"
                                            ;; `rt_char_equalp` runtime helper (raw code-point
                                            ;; args, matching this branch's own operands).
                                            (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+                                             ;; `char->int` is unary (receiver only) and the
+                                             ;; identity at the compiled level — return the
+                                             ;; receiver's raw code point unchanged, before
+                                             ;; the binary branch below tries to read a
+                                             ;; (non-existent) second operand.
+                                             (if (equal method "char->int")
+                                                 a
                                              (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
                                                (if (equal method "equalp")
                                                    (let ((args-ptr (alloca-args builder 2)))
@@ -1695,7 +1706,7 @@ pub const SOURCE: &str = r#"
                                                            (build-icmp-gt builder a b2)
                                                            (if (equal method ">=")
                                                                (build-icmp-ge builder a b2)
-                                                               (build-icmp-eq builder a b2))))))))
+                                                               (build-icmp-eq builder a b2)))))))))
                                            ;; `f64` receivers: a compiled `f64` is
                                            ;; its raw bits in an `i64`, so arithmetic
                                            ;; lowers to `build-fadd`/... (each
