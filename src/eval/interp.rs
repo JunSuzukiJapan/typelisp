@@ -228,36 +228,39 @@ impl CallEdge {
 }
 
 /// Why a [`Interp::jit_define_closure`] attempt didn't produce a compiled
-/// closure — the classification [`JitMode::Require`] keys on (closure
-/// unification Stage 8). The distinction matters because `Require` is a
-/// coverage-gap *discovery* switch: it must escalate exactly the failures
-/// that represent actionable holes in compiled coverage, and nothing else.
+/// closure — the classification that made closure unification Stage 8's
+/// `TYPELISP_CLOSURE_JIT=require` a coverage-gap *discovery* switch, and
+/// that Stage 9 promotes to unconditional policy (see [`JitMode`]): it must
+/// escalate exactly the failures that represent actionable holes in
+/// compiled coverage, and nothing else.
 enum JitDecline {
     /// Falling back to an interpreted closure here is the *correct*,
-    /// permanent behavior, not a coverage gap — the same fallback set
-    /// Stage 9 keeps once silent fallback is otherwise abolished:
+    /// permanent behavior, not a coverage gap — the fallback set Stage 9
+    /// keeps now that silent fallback is otherwise abolished:
     /// `TYPELISP_CLOSURE_JIT=off`, macro expansion
     /// ([`Interp::jit_suppressed`]), a native-tier type (the self-hosted
     /// compiler island's own `llvm-*`/`Scope<llvm-value>` closures — see
     /// [`Interp::is_jit_tier_ty`]; classifying these as benign is also what
-    /// keeps `Require` from panicking *inside* a reentrant
+    /// keeps the default mode from panicking *inside* a reentrant
     /// `compile-function` run, whose own `labels`/`lambda`s are all
     /// native-tier), the compiler island not being loaded at all (the plain
     /// `typl` CLI/REPL never calls `load_compiler`, so there is nothing to
     /// JIT *with*), and heap exhaustion mid-JIT (a resource condition of
-    /// the moment, not a representational hole). Even `Require` mode falls
-    /// back silently on these.
+    /// the moment, not a representational hole). These five fall back
+    /// silently regardless of mode — `TYPELISP_CLOSURE_JIT=off` included,
+    /// since `jit_define_closure` turns that switch itself into exactly this
+    /// variant before any of the other four checks even run.
     Benign(String),
     /// A real, actionable hole in compiled coverage (an uncompiled call
-    /// target, an `&rest` closure, a constructor-JIT failure, ...) —
-    /// `Require` escalates this to a hard [`EvalError::Panic`] so Stage 8
-    /// work can find and fix it; `Prefer` still falls back silently.
+    /// target, an `&rest` closure, a constructor-JIT failure, ...) — always
+    /// escalated to a hard [`EvalError::Panic`] (Stage 9: unconditionally,
+    /// not just under the old `require` opt-in — see [`JitMode`]).
     Gap(String),
 }
 
 impl JitDecline {
-    /// The human-readable reason, for `TYPELISP_CLOSURE_JIT_LOG`/`Require`
-    /// diagnostics.
+    /// The human-readable reason, for `TYPELISP_CLOSURE_JIT_LOG` and the
+    /// `Gap` panic message.
     fn reason(&self) -> &str {
         match self {
             JitDecline::Benign(r) | JitDecline::Gap(r) => r,
@@ -459,10 +462,10 @@ impl Interp {
     /// sibling — see that eval arm) as a *compiled* closure value instead of
     /// [`Self::make_closure`]'s interpreted one. `captured` is `t`'s free
     /// variables (name + declared type), `[]` for `FnRef`/`MethodRef`. Never
-    /// panics — every failure comes back as `Err(reason)` so every caller
-    /// can fall back unconditionally; only `JitMode::Require` turns a
-    /// failure into a hard error, and only at the eval-arm call site, not
-    /// here.
+    /// panics itself — every failure comes back as `Err(reason)` so the
+    /// caller can decide what to do with it; a [`JitDecline::Gap`] becomes a
+    /// hard error, but only at the eval-arm call site
+    /// ([`Self::jit_result_or_make_closure`]), not here.
     ///
     /// The trick that avoids JIT-compiling any new self-hosted Lisp at all:
     /// `t.ty` is already `Type::Fn(params, rest, ret)`, the exact shape
@@ -491,9 +494,8 @@ impl Interp {
     /// `BoxedObj::CompiledClosure`'s own tagged encoding — built once by
     /// `rt_closure_new`, never touched by Rust at all.
     fn jit_define_closure(&self, heap: &mut Heap, env: &Env, t: &Typed, captured: &[(String, Type)]) -> Result<RtValue, JitDecline> {
-        match jit_mode() {
-            JitMode::Off => return Err(JitDecline::Benign("TYPELISP_CLOSURE_JIT=off".to_string())),
-            JitMode::Prefer | JitMode::Require => {}
+        if jit_mode() == JitMode::Off {
+            return Err(JitDecline::Benign("TYPELISP_CLOSURE_JIT=off".to_string()));
         }
         if self.jit_suppressed.get() > 0 {
             return Err(JitDecline::Benign("suppressed during macro expansion".to_string()));
@@ -702,19 +704,21 @@ impl Interp {
     }
 
     /// The shared policy every `Expr::Lambda`/`Labels`/`FnRef`/`MethodRef`
-    /// eval arm applies around [`Self::jit_define_closure`]: on success,
-    /// use it; on a [`JitDecline::Gap`] failure, `JitMode::Require`
-    /// promotes the failure reason to a hard error (Stage 8's coverage-gap
-    /// discovery switch — see `JitMode`'s doc comment) while a
-    /// [`JitDecline::Benign`] one falls back even under `Require` (see
-    /// `JitDecline`'s doc comment for the classification — these are the
-    /// fallbacks Stage 9 permanently keeps); otherwise (`Prefer`, the
-    /// default, or `Off`, which `jit_define_closure` itself already turns
-    /// into an immediate benign decline) silently calls `fallback` —
-    /// silently unless `TYPELISP_CLOSURE_JIT_LOG` is set, since `Prefer`
-    /// mode's fallback is still the common case for most programs until
-    /// Stage 8 grows coverage, and every existing test would otherwise spew
-    /// a fallback reason per closure evaluated.
+    /// eval arm applies around [`Self::jit_define_closure`]: on success, use
+    /// it; on a [`JitDecline::Gap`] failure, promote the failure reason to a
+    /// hard error unconditionally (Stage 9: no mode makes this silent
+    /// anymore — Stage 8's `TYPELISP_CLOSURE_JIT=require` opt-in *was* this
+    /// policy, just gated; Stage 9 removes the gate); on a
+    /// [`JitDecline::Benign`] one, silently call `fallback` (these are the
+    /// fallbacks Stage 9 permanently keeps — see `JitDecline`'s doc comment
+    /// for the classification, and `JitMode`'s for the one remaining
+    /// exception, `TYPELISP_CLOSURE_JIT=off`, which never reaches a `Gap` at
+    /// all since `jit_define_closure` turns it into a `Benign` decline
+    /// before any coverage check runs). "Silently" here still means
+    /// `TYPELISP_CLOSURE_JIT_LOG`-gated logging, not total silence — the
+    /// `Benign` set (native-tier self-hosted-compiler closures above all) is
+    /// the overwhelmingly common case, and every existing test would
+    /// otherwise spew a fallback reason per closure evaluated.
     fn jit_or_make_closure(
         &self,
         heap: &mut Heap,
@@ -740,12 +744,10 @@ impl Interp {
     ) -> Result<RtValue, EvalError> {
         match result {
             Ok(v) => Ok(v),
+            // Stage 9: a coverage gap is always a hard error now — no mode
+            // silences this arm anymore (see this method's doc comment).
+            Err(JitDecline::Gap(reason)) => Err(EvalError::Panic(format!("definition-time JIT failed: {}", reason))),
             Err(decline) => {
-                if jit_mode() == JitMode::Require {
-                    if let JitDecline::Gap(reason) = &decline {
-                        return Err(EvalError::Panic(format!("TYPELISP_CLOSURE_JIT=require: definition-time JIT failed: {}", reason)));
-                    }
-                }
                 if std::env::var_os("TYPELISP_CLOSURE_JIT_LOG").is_some() {
                     eprintln!("closure JIT fallback: {}", decline.reason());
                 }
@@ -1034,8 +1036,8 @@ impl Interp {
                 // means no cell-binding prerequisite at all, the simplest
                 // possible JIT attempt — try it first, `make_closure`
                 // fallback otherwise (`Self::jit_or_make_closure`'s doc
-                // comment covers the `TYPELISP_CLOSURE_JIT=require` policy
-                // shared by all four call sites).
+                // comment covers the mandatory-JIT policy shared by all four
+                // call sites).
                 Some(f) => self.jit_or_make_closure(heap, env, t, &[], |heap| {
                     let params = f.params.iter().cloned().zip(f.kinds.iter().copied()).collect();
                     let body = f.body.clone();
@@ -3836,27 +3838,41 @@ fn declare_external_function(module: &Rc<RefCell<Module<'static>>>, name: &str) 
 /// once (`std::env::var_os`, the same convention `src/prelude.rs`'s
 /// `$TYPL_CACHE_DIR` lookup already uses) and cached in a
 /// [`std::sync::OnceLock`], since every `eval` call site checks it.
+///
+/// Stage 8 had a third state here, `Prefer` (attempt JIT, fall back to
+/// [`Interp::make_closure`] silently on *any* failure) — the default at the
+/// time, with `Require`'s hard-error-on-[`JitDecline::Gap`] behavior an
+/// explicit opt-in used only to hunt coverage gaps. Stage 9 ("JIT必須化",
+/// making JIT mandatory) promotes `Require`'s behavior to unconditional
+/// policy — [`Interp::jit_result_or_make_closure`] now always turns a `Gap`
+/// into a panic — which leaves nothing left for `Prefer` to mean, so it's
+/// gone. `Off` survives as the one remaining escape hatch: it doesn't weaken
+/// the Stage 9 guarantee, it disables JIT *attempts* entirely (every closure
+/// goes through [`Interp::make_closure`] unconditionally), which is exactly
+/// what `jit_define_closure` already models as an immediate
+/// [`JitDecline::Benign`] — so `Off` never reaches a `Gap` decline in the
+/// first place, never mind the panic.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum JitMode {
     /// Never attempt definition-time JIT — every closure value is built by
     /// [`Interp::make_closure`], unconditionally.
     Off,
-    /// Attempt [`Interp::jit_define_closure`]; silently fall back to
-    /// [`Interp::make_closure`] on any failure. The default.
-    Prefer,
-    /// Attempt [`Interp::jit_define_closure`]; a failure becomes a hard
-    /// `EvalError` instead of a silent fallback — Stage 8's coverage-gap
-    /// discovery tool, not (yet) something the whole test suite need pass
-    /// under.
-    Require,
+    /// Attempt [`Interp::jit_define_closure`]; a [`JitDecline::Gap`] failure
+    /// is always a hard `EvalError::Panic` (a [`JitDecline::Benign`] one
+    /// still falls back silently — see that enum's doc comment for the
+    /// permanent fallback set). The default, and — since Stage 9 — the only
+    /// mode besides `Off`.
+    On,
 }
 
 fn jit_mode() -> JitMode {
     static MODE: std::sync::OnceLock<JitMode> = std::sync::OnceLock::new();
     *MODE.get_or_init(|| match std::env::var_os("TYPELISP_CLOSURE_JIT") {
         Some(v) if v == "off" => JitMode::Off,
-        Some(v) if v == "require" => JitMode::Require,
-        _ => JitMode::Prefer,
+        // `require` (Stage 8's opt-in name for what is now unconditional
+        // policy) and `prefer` (Stage 8's now-retired default) both still
+        // parse, as harmless synonyms for the only non-`Off` mode there is.
+        _ => JitMode::On,
     })
 }
 

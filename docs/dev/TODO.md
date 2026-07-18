@@ -14,7 +14,7 @@
 
 ## 残っている作業（影響範囲の大きさで優先順位付け——[[feedback-impl-priority]]）
 
-### クロージャ表現統一（labels/closures unification）Stage 9-10（branch `feature/closure-unification`、Stage 8まで完了）
+### クロージャ表現統一（labels/closures unification）Stage 10（branch `feature/closure-unification`、Stage 9まで完了）
 
 **背景**: interpクロージャとcompiledクロージャ(ClosureBox)の二重表現による境界ギャップ
 （interpクロージャをcompiled関数に渡せない/compiled関数のFn戻り値がIntに化ける/structフィールド
@@ -155,15 +155,48 @@ evalアームが、interpクロージャ（`make_closure`）を作る前にま�
     推移的compile不能で明示Gapにしてある（Stage 5からの継承制限）。現テストでは
     コンパイラ島未ロード（benign）の陰に隠れて顕在化しない。
 
-- **Stage 9: JIT必須化**
-  - fallbackを「native tier（自己ホストコンパイラ島）+マクロ展開時のみ」へ制限。
-  - compilable tierでのJIT失敗は明確な`Panic`にする（サイレントfallback廃止）——
-    Stage 8の`JitDecline`分類がそのまま土台になる（Benignの集合=Stage 9で残すfallback）。
-  - **Stage 8で判明した論点**: Benignには「コンパイラ島未ロード」と「JIT中heap枯渇」も
-    含めてある。前者は`typl` CLI/REPLが`load_compiler`を呼ばない現設計の帰結で、Stage 9で
-    「CLIでもコンパイラ島をロードする」か「未ロードfallbackを恒久許容に含める」かの決定が要る。
-    後者も資源起因fallbackとして残すかどうか要判断。
-  - 受け入れ基準は全体`scripts/test-serial.sh`の完走。
+**Stage 9: JIT必須化 完了**（2026-07-18）——受け入れ基準だった「（オプトインなしの）通常の
+`scripts/test-serial.sh`完走」を達成（全ターゲットgreen、`TYPELISP_CLOSURE_JIT`を一切設定
+しない素の実行で）。Stage 8時点では`Gap`失敗が`Require`モード（明示的opt-in）でのみ
+`EvalError::Panic`に昇格し、デフォルトの`Prefer`モードは黙ってfallbackしていた——Stage 9は
+「`Require`が正しい動作」という前提のもと、この昇格を無条件化しただけ（新規のfallback判定
+ロジックは書いていない、Stage 8の`JitDecline` Benign/Gap分類がそのまま土台）。
+
+- **`JitMode`を2値に整理**（`src/eval/interp.rs`）: `Off`/`Prefer`/`Require`の3値だった
+  ところ、`Prefer`は「意味が消えた」ため削除——`Require`の「`Gap`は即`Panic`」という挙動を
+  唯一の非`Off`モード`On`としてデフォルト化した。`jit_result_or_make_closure`の
+  `if jit_mode() == JitMode::Require { ... }`ガードを撤去し、`Err(JitDecline::Gap(reason))`
+  を無条件で`EvalError::Panic`にマッチさせる`match`アームへ差し替え——`Off`モードは
+  `jit_define_closure`の入口で常に`Benign`declineとして即return する設計だった（Stage 7
+  から不変）ため、`Off`が`Gap`分岐に到達することはそもそもなく、ガード撤去は安全と確認済み。
+  環境変数`TYPELISP_CLOSURE_JIT`の文字列パースは`"off"`のみ意味を持ち、`"require"`/`"prefer"`
+  含む他の値は（後方互換のため）すべて`On`として無害に解釈される。
+- **Stage 8で残っていた2つの論点は「現状維持」で決定**——いずれもBenignとして恒久許容する側を
+  選んだ（Stage 8の`JitDecline::Benign`docコメント自体が既にこの5項目を「Stage 9が残す
+  fallback集合」と明記していたため、実装上の変更は不要だった）:
+  - **コンパイラ島未ロード**: 「`typl` CLI/REPLでも`load_compiler`を常時呼ぶ」方向へは
+    変更しなかった——`tests/*.rs`の大半（`struct_test`/`vector_test`/`iter_test`等）が
+    軽量な`Interp::new()`+`load_prelude`のみで多数のクロージャ評価を行っており、
+    全部にコンパイラ島ロードを強制すると起動コスト・ブランチ影響範囲が「JIT必須化」という
+    今回のスコープを大きく超える。「未ロードなら諦めてinterpクロージャを使う」という
+    既存のBenign fallbackを恒久仕様として確定させた。
+  - **JIT中のheap枯渇**: 資源起因の一時的条件であり表現力のギャップではないため、Benignの
+    ままとした（インタプリタ経路の通常のheap枯渇と同様、そもそも`HeapExhausted`は既に
+    到る所で`Panic`化する一般的な失敗モードであり、JIT構築中に限って隠す理由がない一方、
+    「構築中に限ってこれだけ黙ってinterpにfallbackする」挙動を変える積極的理由もない
+    ため現状維持）。
+  - 上記2点により、実質的なBenign集合は「native tier型」「マクロ展開中」
+    「`TYPELISP_CLOSURE_JIT=off`」「コンパイラ島未ロード」「JIT中heap枯渇」の5項目のまま
+    （Stage 8から不変）。
+- ドキュメント更新: `JitDecline`/`JitMode`/`jit_or_make_closure`/`jit_result_or_make_closure`
+  等のdocコメントから「`Prefer`/`Require`」という語彙を一掃し、「常時`On`、`Off`だけが例外」
+  という新しい前提に書き換え。`tests/closure_jit_test.rs`冒頭のモジュールdocコメントも
+  「デフォルトは`prefer`」という古い説明を削除し、Stage 9後の挙動（`Gap`は常にpanic、
+  Benign集合のみ黙ってfallback）に合わせて更新。
+- 検証: `scripts/with-llvm-env.sh scripts/test-serial.sh`（`TYPELISP_CLOSURE_JIT`未設定、
+  つまり新デフォルト = 旧`require`相当）を通し実行、全ターゲットgreenを確認
+  （Stage 8が`TYPELISP_CLOSURE_JIT=require`個別実行で先に証明済みだった内容が、
+  無条件デフォルトとして再現されたことの確認）。
 
 - **Stage 10: 掃除**
   - 到達不能コード削除（`call_compiled`のinterpクロージャ拒否コメント、

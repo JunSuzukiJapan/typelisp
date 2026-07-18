@@ -7,16 +7,18 @@
 //! covers.
 //!
 //! Every assertion here is correct whether the JIT attempt actually
-//! succeeds or silently falls back to `Interp::make_closure`
-//! (`TYPELISP_CLOSURE_JIT` defaults to `prefer`) — that's the point: Stage 7
-//! must never change a program's observable behavior. To confirm the JIT
-//! path is the one that actually ran (rather than a silent fallback masking
-//! a bug that would otherwise show up once Stage 9 makes JIT mandatory),
-//! rerun this file with:
+//! succeeds or falls back to `Interp::make_closure` — that's the point:
+//! Stage 7 must never change a program's observable behavior. Since Stage 9
+//! ("JIT必須化"), a *coverage-gap* fallback (`JitDecline::Gap`) is always a
+//! hard `EvalError::Panic`, not just under an opt-in switch — only the
+//! permanent `JitDecline::Benign` set (native-tier types, macro-expansion
+//! suppression, `TYPELISP_CLOSURE_JIT=off`, compiler island not loaded, JIT-
+//! time heap exhaustion) still falls back silently, so a passing test here
+//! already confirms the JIT path is either the one that ran or one of those
+//! permanently-allowed exceptions. `TYPELISP_CLOSURE_JIT=off` still disables
+//! JIT entirely, for comparison:
 //!
-//!   TYPELISP_CLOSURE_JIT=require scripts/with-llvm-env.sh cargo test --test closure_jit_test
-//!
-//! which turns every fallback into a hard `EvalError::Panic` instead.
+//!   TYPELISP_CLOSURE_JIT=off scripts/with-llvm-env.sh cargo test --test closure_jit_test
 
 extern crate typelisp;
 use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
@@ -178,9 +180,9 @@ fn fnref_of_a_variadic_function_jits_and_forwards_the_rest_list() {
 /// (`Interp::jit_suppressed`): `dotimes`'s own expansion
 /// (`prelude::SOURCE`) runs through `Interp::expand_macro` at *check* time,
 /// and its use here also builds/calls a real closure at *run* time — this
-/// must still produce the right answer (and, under
-/// `TYPELISP_CLOSURE_JIT=require`, must not turn a suppressed
-/// check-time JIT attempt into a spurious hard failure).
+/// must still produce the right answer, and (since Stage 9 makes a
+/// coverage-gap decline a hard failure unconditionally) must not turn a
+/// suppressed check-time JIT attempt into a spurious one.
 #[test]
 fn a_macro_expansion_and_a_real_closure_coexist() {
     let src = "(defun make-counter () (fn () i32) \
