@@ -244,10 +244,11 @@ enum JitDecline {
     /// [`Interp::is_jit_tier_ty`]; classifying these as benign is also what
     /// keeps the default mode from panicking *inside* a reentrant
     /// `compile-function` run, whose own `labels`/`lambda`s are all
-    /// native-tier), the compiler island not being loaded at all (the plain
-    /// `typl` CLI/REPL never calls `load_compiler`, so there is nothing to
-    /// JIT *with*), and heap exhaustion mid-JIT (a resource condition of
-    /// the moment, not a representational hole). These five fall back
+    /// native-tier), the compiler island not being loaded at all (since
+    /// Stage 5 every `typl` entry point loads it via `compiler::load_aot`, so
+    /// this only remains for an embedder that skips island loading — there is
+    /// then nothing to JIT *with*), and heap exhaustion mid-JIT (a resource
+    /// condition of the moment, not a representational hole). These five fall back
     /// silently regardless of mode — `TYPELISP_CLOSURE_JIT=off` included,
     /// since `jit_define_closure` turns that switch itself into exactly this
     /// variant before any of the other four checks even run.
@@ -512,8 +513,11 @@ impl Interp {
             return Err(JitDecline::Benign("suppressed during macro expansion".to_string()));
         }
         // No self-hosted compiler island loaded means there is nothing to
-        // JIT *with* — the plain `typl` CLI/REPL never calls
-        // `load_compiler`, so this is an expected environment, not a gap.
+        // JIT *with*. Since interp-closure removal Stage 5 every `typl`
+        // entry point (CLI `run_file`/REPL/`compile-module`) loads the island
+        // natively (`compiler::load_aot`), so this only fires for an *embedder*
+        // that builds an `Interp` and execs closure-defining code without
+        // loading any island — an expected environment, not a coverage gap.
         if !self.fns.contains_key(&Path::root("compile-function")) {
             return Err(JitDecline::Benign("compiler island not loaded".to_string()));
         }

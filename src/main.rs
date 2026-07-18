@@ -82,6 +82,10 @@ fn compile_module(args: &[String]) -> i32 {
     checker.set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut checker, &mut interp);
+    // Load the compiler island natively (interp-closure removal Stage 5) so a
+    // module whose top-level initializer builds a closure JIT-compiles it at
+    // definition time instead of falling back to an interpreted closure.
+    typelisp::load_compiler_aot(&mut heap, &mut checker, &mut interp);
 
     let mark = registry_mark(&checker);
     let forms = match reader.read_all_in_spanned(&mut heap, input, &src) {
@@ -156,6 +160,10 @@ fn run_file(file: &str) -> i32 {
     checker.set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
     typelisp::prelude::load_cached(&mut heap, &mut checker, &mut interp);
+    // The compiler island is always loaded (interp-closure removal Stage 5),
+    // as native AOT code, so any closure this file defines is JIT-compiled at
+    // definition time rather than falling back to an interpreted closure.
+    typelisp::load_compiler_aot(&mut heap, &mut checker, &mut interp);
 
     let file = PathBuf::from(file);
     let dir = file.parent().filter(|p| !p.as_os_str().is_empty()).map(FsPath::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
@@ -189,6 +197,10 @@ fn repl() -> rustyline::Result<()> {
     checker.set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
     typelisp::prelude::load_cached(&mut heap, &mut checker, &mut interp);
+    // The compiler island is always loaded (interp-closure removal Stage 5),
+    // as native AOT code, so a closure typed at the REPL is JIT-compiled at
+    // definition time rather than falling back to an interpreted closure.
+    typelisp::load_compiler_aot(&mut heap, &mut checker, &mut interp);
     // `use` in the REPL resolves files against the current directory (or the
     // project root if a manifest is found above it).
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
