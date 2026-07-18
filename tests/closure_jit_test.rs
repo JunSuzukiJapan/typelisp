@@ -8,17 +8,16 @@
 //!
 //! Every assertion here is correct whether the JIT attempt actually
 //! succeeds or falls back to `Interp::make_closure` — that's the point:
-//! Stage 7 must never change a program's observable behavior. Since Stage 9
-//! ("JIT必須化"), a *coverage-gap* fallback (`JitDecline::Gap`) is always a
-//! hard `EvalError::Panic`, not just under an opt-in switch — only the
-//! permanent `JitDecline::Benign` set (native-tier types, macro-expansion
-//! suppression, `TYPELISP_CLOSURE_JIT=off`, compiler island not loaded, JIT-
-//! time heap exhaustion) still falls back silently, so a passing test here
+//! definition-time JIT must never change a program's observable behavior.
+//! Since Stage 9 ("JIT必須化"), a *coverage-gap* fallback (`JitDecline::Gap`)
+//! is always a hard `EvalError::Panic` — and interp-closure removal Stage 7
+//! narrowed the permanent `JitDecline::Benign` set to just native-tier types
+//! and "compiler island not loaded" (both only reachable via the interpreted
+//! island `load_compiler` these tests use, or an island-less embedder;
+//! `TYPELISP_CLOSURE_JIT=off`, macro-expansion suppression, and JIT-time
+//! heap exhaustion were all retired in Stages 6–7). So a passing test here
 //! already confirms the JIT path is either the one that ran or one of those
-//! permanently-allowed exceptions. `TYPELISP_CLOSURE_JIT=off` still disables
-//! JIT entirely, for comparison:
-//!
-//!   TYPELISP_CLOSURE_JIT=off scripts/with-llvm-env.sh cargo test --test closure_jit_test
+//! two permanently-allowed exceptions.
 
 extern crate typelisp;
 use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
