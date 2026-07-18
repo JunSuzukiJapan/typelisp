@@ -39,3 +39,11 @@ path = "src/main.rs"
 [[bin]]
 name = "typl-lsp"
 path = "src/bin/lsp.rs"
+
+# Regenerates the committed compiler-island AOT artifacts
+# (src/compiler_island.bc/.fasl). Run via scripts/regen-compiler-island.sh
+# whenever compiler.rs's SOURCE changes; the island_artifacts_are_fresh test
+# fails until it is re-run. Interp-closure removal Stage 3.
+[[bin]]
+name = "typl-bootstrap-island"
+path = "src/bin/bootstrap_island.rs"

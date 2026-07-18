@@ -6,6 +6,7 @@
 
 pub mod aot;
 pub mod ast_bridge;
+pub mod bootstrap;
 pub mod freevars;
 
 /// The shared Rust-only runtime library (`typelisp-rt`, a separate crate —

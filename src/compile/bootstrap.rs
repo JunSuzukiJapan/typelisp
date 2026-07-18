@@ -1,0 +1,121 @@
+//! interp-closure removal Stage 3: producing the committed, precompiled
+//! compiler-island artifact that Stage 4's `compiler::load_aot` loads at
+//! runtime *instead of* interpreting the island's bodies.
+//!
+//! [`build_island_bitcode`] compiles every island `defun` (`compiler.rs`'s
+//! `SOURCE`) into one shared LLVM module and serializes it to bitcode. The
+//! bootstrap binary (`src/bin/bootstrap_island.rs`) writes those bytes to
+//! `src/compiler_island.bc`, which is committed and `include_bytes!`'d by
+//! `load_aot`.
+//!
+//! Only the *native bodies* are committed — no checker/interpreter state.
+//! `load_aot` rebuilds that by re-checking `SOURCE` (registering each
+//! `defun`'s `FnDef`, which allocates no closures — closures only appear
+//! when an island body is *called* interpreted, which `load_aot` never
+//! does), exactly the way today's `compiler::load` already does; the bitcode
+//! only supplies the compiled function bodies that make those calls native.
+//! A [`SOURCE_HASH_GLOBAL`] i64 global carrying [`crate::fasl::source_hash`]
+//! of `SOURCE` is embedded in the module so `load_aot` and the
+//! `island_artifacts_are_fresh` test can detect a `.bc` gone stale relative
+//! to `SOURCE` — the same staleness check `prelude`'s fasl cache uses, with
+//! no separate sidecar file.
+//!
+//! Building this runs the *interpreted* island's `compile-function` to emit
+//! each defun's IR, so it depends on interpreted closures still existing —
+//! it is the initial link of the snapshot chain that lets interpreted
+//! closures be removed entirely (interp-closure removal Stage 8): once a
+//! native island is committed, a later island edit is recompiled by the
+//! *previous* native island (`load_aot` then this same function, now
+//! dispatching `compile-function` to compiled code), never by interpreted
+//! island code again.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use inkwell::module::Module;
+use inkwell::AddressSpace;
+
+use crate::fasl::source_hash;
+use crate::{Checker, Heap, Interp, Reader, TopLevel};
+
+/// The name of the i64 global the island bitcode carries its source hash in.
+/// Read back by [`read_embedded_source_hash`].
+pub const SOURCE_HASH_GLOBAL: &str = "__typelisp_island_source_hash";
+
+/// Builds the compiler island's AOT bitcode in a throwaway environment.
+///
+/// The module mirrors [`crate::compile::aot::compile_file`]'s shared module
+/// (rt_* forward declarations + one `add_compiled_function` per defun, each
+/// defun's `labels` siblings emitted alongside it by the island's own
+/// `compile-labels`) minus the `main` wrapper — the island is a library of
+/// compiled functions, not an executable. No `add_global_mapping` is done
+/// here: the rt_* addresses are supplied at load time by `load_aot`'s
+/// `CompiledFn::new_multi`, and the bitcode only needs to carry the
+/// declarations (which it does).
+pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
+    let mut heap = Heap::with_capacity(1 << 18);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+
+    crate::load_prelude(&mut heap, &mut chk, &mut interp);
+
+    let reader = Reader::new();
+    let forms = reader
+        .read_all(&mut heap, crate::compiler::SOURCE)
+        .map_err(|e| format!("island read failed: {}", e))?;
+    let mut fn_names: Vec<String> = Vec::new();
+    for v in forms {
+        let tl = chk.check_form(&mut heap, &interp, v).map_err(|e| format!("island check failed: {}", e))?;
+        for w in chk.take_warnings() {
+            eprintln!("{}", w);
+        }
+        if let TopLevel::Defun { name, .. } = &tl {
+            fn_names.push(name.local().to_string());
+        }
+        interp.exec(&mut heap, tl).map_err(|e| format!("island exec failed: {}", e))?;
+    }
+
+    let ctx = crate::compile::llvm_context();
+    let module = {
+        let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+        let module = ctx.create_module("compiler_island");
+        let ptr_ty = ctx.ptr_type(AddressSpace::default());
+        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        for (name, _) in crate::eval::interp::rt_extern_functions() {
+            module.add_function(name, fn_ty, None);
+        }
+        // Embed the source hash as an i64 global with a constant initializer
+        // (internal linkage — it's read by value from the parsed module, never
+        // linked against).
+        let i64_ty = ctx.i64_type();
+        let hash_global = module.add_global(i64_ty, None, SOURCE_HASH_GLOBAL);
+        hash_global.set_initializer(&i64_ty.const_int(source_hash(crate::compiler::SOURCE), false));
+        hash_global.set_constant(true);
+        Rc::new(RefCell::new(module))
+    };
+    // `add_compiled_function` locks `COMPILE_LOCK` per LLVM builtin call
+    // (`eval_llvm_builtin_method`) and `Mutex` isn't reentrant, so it must
+    // run without the lock held — same constraint `aot::compile_file`
+    // documents at its own loop.
+    for name in &fn_names {
+        let internal_name = crate::compile::ast_bridge::user_symbol_name(name);
+        interp
+            .add_compiled_function(&mut heap, module.clone(), name, &internal_name)
+            .map_err(|e| format!("island compile of `{}` failed: {}", name, e))?;
+    }
+
+    let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+    let module = module.borrow();
+    module.verify().map_err(|e| format!("island module failed verification: {}", e))?;
+    Ok(module.write_bitcode_to_memory().as_slice().to_vec())
+}
+
+/// Reads the [`SOURCE_HASH_GLOBAL`] i64 constant back out of an
+/// already-parsed island `module` — the staleness key `load_aot` and the
+/// freshness test compare against [`source_hash`]`(SOURCE)`. `None` if the
+/// global is absent or not a constant integer (a `.bc` from before this
+/// global existed, or a corrupt one).
+pub fn read_embedded_source_hash(module: &Module<'static>) -> Option<u64> {
+    let global = module.get_global(SOURCE_HASH_GLOBAL)?;
+    global.get_initializer()?.into_int_value().get_zero_extended_constant()
+}
