@@ -383,6 +383,80 @@ fn binding_kind(ty: &Type, enums: &HashSet<Path>) -> i64 {
     }
 }
 
+/// Whether `ty`'s compiled representation is an *LLVM handle*: an index
+/// into the interpreter's thread-local handle registry
+/// (`interp::llvm_handle_register`), standing in for a Rust-native
+/// `RtValue::LlvmModule`/`LlvmBuilder`/`LlvmFunction`/`LlvmBasicBlock`/
+/// `LlvmValue`, or a `Scope<V>` whose element `V` is itself one of those
+/// (the `RtValue::Scope` native scope). Introduced by the interp-closure
+/// removal plan's Stage 1 so the self-hosted compiler island's own
+/// functions become compilable: a handle is a plain untraced `i64`, so
+/// these types share the integer kind `1` in [`struct_field_kind`] (tag =
+/// `<< 3`, detag = `ashr 3`, no GC root — bit-for-bit the `i64` encode/
+/// decode `compiler.rs`'s `compile-tag-struct-field`/`compile-sexpr-field`
+/// already implement, which is exactly why no new kind number was minted:
+/// the kind numbering shares `Sexpr`'s variant space and `10 + kind` cell
+/// encoding, leaving no free single-digit slot). Closure-JIT tier
+/// classification must still *exclude* these types
+/// (`Interp::is_jit_tier_ty`) — an interpreted `compile-function` run
+/// JIT-compiling its own `labels` siblings would recurse into itself.
+pub(crate) fn is_llvm_handle_ty(ty: &Type) -> bool {
+    match ty {
+        Type::Named(p, args) if p.is_simple() => match p.local() {
+            "llvm-module" | "llvm-function" | "llvm-builder" | "llvm-basic-block" | "llvm-value" => true,
+            "scope" => args.len() == 1 && is_llvm_handle_ty(&args[0]),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// The stable operation id compiled code passes as `rt_llvm_call`'s first
+/// argument: FNV-1a over `"type-key::method"`. A *hash*, not a table
+/// index, so the id embedded in a committed compiler-island bitcode
+/// artifact (interp-closure removal Stage 3) survives methods being added
+/// to or removed from the table in a later build — an index would silently
+/// shift. Collisions are checked once at table construction
+/// (`interp`'s `llvm_op_table`), which panics rather than dispatching two
+/// methods through one id.
+pub(crate) fn llvm_op_id(type_key: &str, method: &str) -> i64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in type_key.as_bytes().iter().chain(b"::").chain(method.as_bytes()) {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h as i64
+}
+
+/// Which `rt_llvm_call` dispatch key an `Expr::Assoc` belongs to, or `None`
+/// for the generic `assoc` path. `llvm-module`/`llvm-function`/
+/// `llvm-builder` methods key by their own type name; a `scope` method
+/// keys as `"native-scope"` exactly when its element type `V` is an LLVM
+/// handle (the `RtValue::Scope` native representation — `Interp::scope_is_heap`'s
+/// `false` side), read off the receiver (`args[0]`) or, for the
+/// receiver-less `new`, the node's own checked `Scope<V>` return type. A
+/// heap-repr `Scope<V>` (or any other `V`) falls through to the generic
+/// path unchanged.
+fn llvm_assoc_key(type_name: &Path, instance: bool, args: &[Typed], node_ty: &Type) -> Option<&'static str> {
+    match type_name.local() {
+        "llvm-module" => Some("llvm-module"),
+        "llvm-function" => Some("llvm-function"),
+        "llvm-builder" => Some("llvm-builder"),
+        "scope" => {
+            let scope_ty = if instance { args.first().map(|a| &a.ty) } else { Some(node_ty) };
+            match scope_ty {
+                Some(Type::Named(p, targs))
+                    if p.local() == "scope" && targs.len() == 1 && is_llvm_handle_ty(&targs[0]) =>
+                {
+                    Some("native-scope")
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Whether `ty` is `Option`/`Result`/`Error`/a user `defenum` in `enums` —
 /// [`binding_kind`]'s enum test, split out since it also needs the
 /// `Option`/`Result` structural checks [`struct_field_kind`] inlines
@@ -493,6 +567,12 @@ pub(crate) fn tagged_sym_list(
 pub(crate) fn struct_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> i64 {
     match ty {
         _ if ty.is_integer() => 1,
+        // An LLVM handle (interp-closure removal Stage 1) shares the
+        // integer kind: its compiled representation *is* a plain untraced
+        // `i64` registry index, so the int tag/detag bit ops are exactly
+        // right and no GC root is ever wanted — see [`is_llvm_handle_ty`]'s
+        // doc comment for why it doesn't get a kind of its own.
+        _ if is_llvm_handle_ty(ty) => 1,
         _ if ty.is_float() => 2,
         Type::Char => 3,
         Type::Bool => 4,
@@ -957,6 +1037,26 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
             if type_name.local() == "hashtable" && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
                 let (kk, vk) = hashtable_kv_kinds(args, &typed.ty, cx.structs, cx.enums);
                 return translate_hashtable_method(heap, method, kk, vk, args, cx);
+            }
+            // An `llvm-*`/native-`Scope<V>` builtin method (interp-closure
+            // removal Stage 1) lowers to a dedicated `llvm-op` node: `(llvm-op
+            // opid (kind . arg)...)`, compiled by `compiler.rs`'s
+            // `compile-llvm-op` into a single `rt_llvm_call` — the generic
+            // dispatch shim over `eval_llvm_builtin_method`/the native scope
+            // builtins. The op id is resolved *here*, at translate time (the
+            // same Rust table `rt_llvm_call` dispatches by — see
+            // [`llvm_op_id`]), so the generated code carries one integer
+            // constant instead of two runtime-allocated name strings.
+            if let Some(key) = llvm_assoc_key(type_name, *instance, args, &typed.ty) {
+                let opid = Value::Int(llvm_op_id(key, method));
+                let arg_values = tagged_ast_list_to_sexpr(heap, args, cx)?;
+                let mut items = vec![opid];
+                items.extend(arg_values.iter().copied());
+                let result = tagged(heap, "llvm-op", &items);
+                for _ in 0..arg_values.len() {
+                    heap.pop_root();
+                }
+                return result;
             }
             let type_name_v = heap.alloc_string(type_name.local().to_string());
             heap.push_root(type_name_v);

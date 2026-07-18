@@ -104,6 +104,20 @@ unsafe fn active_heap() -> &'static mut Heap {
     &mut *ptr
 }
 
+/// [`active_heap`] for `rt_*`-shaped shims living in the *main* crate
+/// (`rt_llvm_call`, interp-closure removal Stage 1) — those can't be
+/// defined here because they dispatch into `inkwell`-backed builtins this
+/// crate deliberately doesn't depend on.
+///
+/// # Safety
+///
+/// Identical contract to [`active_heap`]: a still-valid `Heap` must be
+/// registered on this thread and no other reference to it may be live for
+/// the duration of the returned borrow.
+pub unsafe fn shim_active_heap() -> &'static mut Heap {
+    active_heap()
+}
+
 /// The cons-cell arena size an AOT-compiled executable allocates for itself
 /// at startup (see [`rt_heap_init`]) when its `main` doesn't otherwise say
 /// — matches the capacity `compile-file` itself already uses for the

@@ -452,6 +452,16 @@ impl Interp {
     /// table `tagged_sym_list`/`ast_to_sexpr` already commit to for any
     /// value that actually does cross the compiled boundary.
     fn is_jit_tier_ty(&self, ty: &Type) -> bool {
+        // LLVM handle types gained a compiled representation (kind `1`,
+        // interp-closure removal Stage 1) so the compiler island's own
+        // `defun`s can be whole-function compiled — but *closure* JIT must
+        // keep excluding them: an interpreted `compile-function` run would
+        // otherwise try to JIT its own `labels` siblings, recursing into
+        // itself. Once the island is AOT-loaded its closures are built by
+        // native code and never reach this classification at all.
+        if crate::compile::ast_bridge::is_llvm_handle_ty(ty) {
+            return false;
+        }
         let enum_types: HashSet<Path> = self.enum_defs.keys().cloned().collect();
         crate::compile::ast_bridge::struct_field_kind(ty, &self.struct_types, &enum_types) != 0
     }
@@ -598,6 +608,18 @@ impl Interp {
                 if key.0.local() == "hashtable"
                     && matches!(key.1.as_str(), "new" | "set" | "get" | "remove" | "count" | "clear" | "keys" | "values" | "entries")
                 {
+                    return false;
+                }
+                // `llvm-*`/`scope` builtin methods are natively lowered to
+                // the `rt_llvm_call` dispatch shim (an `llvm-op` node,
+                // interp-closure removal Stage 1), never a method-call
+                // target. A *heap*-repr `Scope<V>` method has no compiled
+                // lowering, but excluding it here follows the existing
+                // convention for non-lowered builtins (see
+                // `call_graph_edges`' comment): it panics inside
+                // `compile-assoc-user`'s `get-function`, still at compile
+                // time.
+                if matches!(key.0.local(), "llvm-module" | "llvm-function" | "llvm-builder" | "scope") {
                     return false;
                 }
                 self.methods.contains_key(key) || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64" | "bignum" | "ratio")
@@ -1723,6 +1745,19 @@ impl Interp {
                     crossing_roots += 1;
                     Ok(crate::compile::runtime::encode(sv))
                 }
+                // A Rust-native LLVM value / native scope crosses as an
+                // LLVM handle: a raw untraced registry index (interp-closure
+                // removal Stage 1 — `ast_bridge::is_llvm_handle_ty`'s
+                // integer-kind representation). The registry entry keeps the
+                // `Rc`/`Copy` payload alive for compiled code to hand back
+                // through `rt_llvm_call`/the return decode; no GC root, the
+                // registry itself is the owner.
+                RtValue::LlvmModule(_)
+                | RtValue::LlvmBuilder(_)
+                | RtValue::LlvmFunction(_)
+                | RtValue::LlvmBasicBlock(_)
+                | RtValue::LlvmValue(_)
+                | RtValue::Scope(_) => Ok(llvm_handle_register(v.clone())),
                 other => Err(EvalError::Internal(format!("compiled call: unsupported argument {:?}", other))),
             };
             match encoded {
@@ -1744,6 +1779,19 @@ impl Interp {
     /// result exactly like a top-level compiled call's, by the callee's
     /// declared (here: the closure's `Type::Fn` return) type.
     fn decode_compiled_return(&self, heap: &mut Heap, raw: i64, ret_ty: &Type) -> Result<RtValue, EvalError> {
+        // An LLVM-handle-typed result (interp-closure removal Stage 1) is a
+        // raw registry index — resolve it back to the Rust-native
+        // `RtValue::Llvm*`/`Scope` the interpreter works with, the exact
+        // inverse of `encode_crossing_args`' handle registration. Checked
+        // before every other arm since these are `Type::Named` and would
+        // otherwise be misread by `is_boxed_sexpr_type`'s catch-all or fall
+        // through to the bare `RtValue::Int`.
+        if crate::compile::ast_bridge::is_llvm_handle_ty(ret_ty) {
+            return match llvm_handle_get(raw) {
+                Some(v) => Ok(v),
+                None => Err(EvalError::Internal(format!("compiled call returned dangling llvm handle {}", raw))),
+            };
+        }
         Ok(if self.is_boxed_sexpr_type(ret_ty) {
             RtValue::Sexpr(crate::compile::runtime::decode(raw))
         } else if matches!(ret_ty, Type::Unit) {
@@ -2347,6 +2395,16 @@ impl Interp {
                 if key.0.local() == "hashtable"
                     && matches!(key.1.as_str(), "new" | "set" | "get" | "remove" | "count" | "clear" | "keys" | "values" | "entries")
                 {
+                    return false;
+                }
+                // `llvm-*`/`scope` builtin methods are natively lowered to
+                // the `rt_llvm_call` dispatch shim (an `llvm-op` node,
+                // interp-closure removal Stage 1) — like `vector-op`/
+                // `hashtable-op` above, never a real call target. A
+                // heap-repr `Scope<V>` method has no compiled lowering and
+                // panics inside `compile-assoc-user`'s `get-function`
+                // instead, per the convention in the next comment.
+                if matches!(key.0.local(), "llvm-module" | "llvm-function" | "llvm-builder" | "scope") {
                     return false;
                 }
                 // A user-registered method is a real call target even on a
@@ -3994,7 +4052,7 @@ pub(crate) fn is_rt_builtin_name(name: &str) -> bool {
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 89] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 90] {
     use crate::compile::runtime::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
@@ -4011,6 +4069,14 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 89] {
         rt_struct_new, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
     };
     [
+        // The one main-crate entry: the generic `llvm-*`/native-scope
+        // builtin dispatch shim (interp-closure removal Stage 1) — it can't
+        // live in `typelisp-rt` because it calls into the `inkwell`-backed
+        // [`eval_llvm_builtin_method`]. Never referenced by AOT-linked user
+        // executables (LLVM handle types are unreachable from user code, so
+        // `compile-file` output never emits a call to it — an unreferenced
+        // declaration emits no symbol for the linker to miss).
+        ("rt_llvm_call", rt_llvm_call as usize),
         ("rt_car", rt_car as usize),
         ("rt_cdr", rt_cdr as usize),
         ("rt_cons", rt_cons as usize),
@@ -5206,6 +5272,283 @@ fn scope_set(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let name = expect_str(&args[1])?;
     scope.set(name, args[2].clone())?;
     Ok(RtValue::Unit)
+}
+
+// ---- LLVM handle registry + `rt_llvm_call` (interp-closure removal ------
+// ---- Stage 1) -----------------------------------------------------------
+//
+// Compiled code represents every Rust-native LLVM value (`RtValue::
+// LlvmModule`/`LlvmBuilder`/`LlvmFunction`/`LlvmBasicBlock`/`LlvmValue`)
+// and the native `RtValue::Scope` as an *LLVM handle*: an index into this
+// thread-local registry, carried as a plain untraced `i64`
+// (`ast_bridge::is_llvm_handle_ty` — kind `1`, the integer kind). That is
+// what makes the self-hosted compiler island's own `defun`s compilable:
+// their `llvm-*` method calls lower to a single generic shim,
+// [`rt_llvm_call`], which decodes handles back to `RtValue`s, dispatches
+// into the very same [`eval_llvm_builtin_method`]/native-scope builtins the
+// interpreter uses, and encodes the result.
+//
+// Registry entries are only ever *appended* during a compile session; the
+// mark/release pair below lets the outermost compiled-island entry point
+// drop everything it accumulated once the session ends (the `Rc`s inside
+// the registered `RtValue`s keep shared structures like a module or a
+// scope's frames alive exactly as long as some other owner still needs
+// them). Thread-local for the same reason `set_active_heap` is: `cargo
+// test` workers each drive their own independent `Heap`/LLVM session.
+
+thread_local! {
+    static LLVM_HANDLES: RefCell<Vec<RtValue>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Registers `v` and returns its handle — the raw `i64` compiled code
+/// carries in place of the Rust-native value.
+pub(crate) fn llvm_handle_register(v: RtValue) -> i64 {
+    LLVM_HANDLES.with(|t| {
+        let mut t = t.borrow_mut();
+        t.push(v);
+        (t.len() - 1) as i64
+    })
+}
+
+/// The value behind handle `h`, or `None` for a never-issued (or already
+/// released) handle.
+pub(crate) fn llvm_handle_get(h: i64) -> Option<RtValue> {
+    if h < 0 {
+        return None;
+    }
+    LLVM_HANDLES.with(|t| t.borrow().get(h as usize).cloned())
+}
+
+/// The current registry length — pass to [`llvm_handles_release`] to drop
+/// every handle issued after this point. Wired to the compiled-island
+/// session boundaries in a later stage of the interp-closure removal plan
+/// (nothing calls a compiled function with LLVM-handle-typed values yet
+/// outside tests, whose registries die with their test process).
+#[allow(dead_code)]
+pub(crate) fn llvm_handles_mark() -> usize {
+    LLVM_HANDLES.with(|t| t.borrow().len())
+}
+
+/// Drops every handle issued since the matching [`llvm_handles_mark`].
+#[allow(dead_code)]
+pub(crate) fn llvm_handles_release(mark: usize) {
+    LLVM_HANDLES.with(|t| t.borrow_mut().truncate(mark));
+}
+
+/// How `rt_llvm_call` decodes one raw argument word, per the op table.
+#[derive(Clone, Copy, Debug)]
+enum LlvmArgK {
+    /// A registry handle — decode via [`llvm_handle_get`].
+    Handle,
+    /// A tagged heap `Value::Str` — decode to `RtValue::Str`.
+    Str,
+    /// A raw untagged integer.
+    Int,
+    /// A raw 0/1 word.
+    Bool,
+}
+
+/// How `rt_llvm_call` encodes the builtin's `RtValue` result.
+#[derive(Clone, Copy, Debug)]
+enum LlvmRetK {
+    /// Register the value, return its handle.
+    Handle,
+    /// Return `0` (`compile-unit`'s convention).
+    Unit,
+    /// Raw 0/1.
+    Bool,
+    /// A freshly-allocated tagged heap `Value::Str`.
+    Str,
+    /// `Option<handle>` as a heap `BoxedObj::Enum` (`Some` payload =
+    /// `Value::Int(handle)`, decoded through the ordinary integer field
+    /// kind by a compiled `match`) — the native scope `get`'s shape.
+    OptHandle,
+}
+
+/// One dispatchable builtin: `(type_key, method)` plus its marshaling
+/// shape, keyed in [`llvm_op_table`] by [`ast_bridge::llvm_op_id`].
+struct LlvmOp {
+    type_key: &'static str,
+    method: String,
+    args: Vec<LlvmArgK>,
+    ret: LlvmRetK,
+}
+
+fn llvm_arg_kind(ty: &Type) -> LlvmArgK {
+    if crate::compile::ast_bridge::is_llvm_handle_ty(ty) {
+        LlvmArgK::Handle
+    } else if ty.is_integer() {
+        LlvmArgK::Int
+    } else {
+        match ty {
+            Type::Str => LlvmArgK::Str,
+            Type::Bool => LlvmArgK::Bool,
+            other => panic!("llvm_op_table: parameter type {:?} has no rt_llvm_call marshaling", other),
+        }
+    }
+}
+
+fn llvm_ret_kind(ty: &Type) -> LlvmRetK {
+    if crate::compile::ast_bridge::is_llvm_handle_ty(ty) {
+        LlvmRetK::Handle
+    } else {
+        match ty {
+            Type::Unit => LlvmRetK::Unit,
+            Type::Bool => LlvmRetK::Bool,
+            Type::Str => LlvmRetK::Str,
+            other => panic!("llvm_op_table: return type {:?} has no rt_llvm_call marshaling", other),
+        }
+    }
+}
+
+/// The `rt_llvm_call` dispatch table, keyed by [`ast_bridge::llvm_op_id`]'s
+/// stable hash. The `llvm-*` entries are *derived* from the same
+/// `check::registry` `AdtDef`s the checker types these methods with —
+/// table and signatures cannot drift apart. The six `native-scope` entries
+/// are written out by hand because `scope_def`'s signatures are generic
+/// over `V` (here always an LLVM handle — see
+/// `ast_bridge::llvm_assoc_key`, which only routes a `Scope<V>` with an
+/// LLVM-handle `V` to this table in the first place).
+fn llvm_op_table() -> &'static HashMap<i64, LlvmOp> {
+    static TABLE: std::sync::OnceLock<HashMap<i64, LlvmOp>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut t: HashMap<i64, LlvmOp> = HashMap::new();
+        let insert = |t: &mut HashMap<i64, LlvmOp>, type_key: &'static str, method: String, args: Vec<LlvmArgK>, ret: LlvmRetK| {
+            let id = crate::compile::ast_bridge::llvm_op_id(type_key, &method);
+            if t.insert(id, LlvmOp { type_key, method, args, ret }).is_some() {
+                panic!("llvm_op_table: op id collision on {}", id);
+            }
+        };
+        for (type_key, def) in [
+            ("llvm-module", crate::check::registry::llvm_module_def()),
+            ("llvm-function", crate::check::registry::llvm_function_def()),
+            ("llvm-builder", crate::check::registry::llvm_builder_def()),
+        ] {
+            for (method, af) in def.assoc {
+                let args = af.sig.params.iter().map(llvm_arg_kind).collect();
+                let ret = llvm_ret_kind(&af.sig.ret);
+                insert(&mut t, type_key, method, args, ret);
+            }
+        }
+        use LlvmArgK::{Handle as H, Str as S};
+        insert(&mut t, "native-scope", "new".to_string(), vec![], LlvmRetK::Handle);
+        insert(&mut t, "native-scope", "clone-frames".to_string(), vec![H], LlvmRetK::Handle);
+        insert(&mut t, "native-scope", "push-frame".to_string(), vec![H], LlvmRetK::Unit);
+        insert(&mut t, "native-scope", "pop-frame".to_string(), vec![H], LlvmRetK::Unit);
+        insert(&mut t, "native-scope", "get".to_string(), vec![H, S], LlvmRetK::OptHandle);
+        insert(&mut t, "native-scope", "set".to_string(), vec![H, S, H], LlvmRetK::Unit);
+        t
+    })
+}
+
+/// The `rt_*` family's abort-on-invariant-break convention
+/// (`typelisp-rt`'s `fatal`), local to the one main-crate shim.
+fn rt_llvm_fatal(msg: &str) -> ! {
+    eprintln!("typelisp runtime error: {}", msg);
+    std::process::abort();
+}
+
+/// `(rt-llvm-call opid arg...)` for compiled code — the generic dispatch
+/// shim behind every compiled `llvm-*`/native-`Scope<V>` builtin method
+/// call (`compiler.rs`'s `compile-llvm-op`; interp-closure removal Stage
+/// 1). `args[0]` is the [`ast_bridge::llvm_op_id`] hash embedded at
+/// translate time; the rest are marshaled per the matching
+/// [`llvm_op_table`] entry and dispatched into the *exact same*
+/// [`eval_llvm_builtin_method`]/native-scope builtins the interpreter
+/// itself uses — one implementation, two callers, no drift.
+///
+/// Argument values are fully materialized into Rust-side `RtValue`s
+/// *before* anything here can allocate on the GC heap, so callers only
+/// need their usual kind-driven rooting (a tagged `Str` argument crossing
+/// in stays valid until then because nothing between the caller's own
+/// allocation and this decode allocates).
+///
+/// # Safety
+///
+/// `args` must point to `argc` valid `i64`s; a `Heap` must already be
+/// registered on this thread (`set_active_heap`). Errors abort via
+/// [`rt_llvm_fatal`], mirroring `typelisp-rt`'s `fatal`.
+pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64 {
+    let argv = std::slice::from_raw_parts(args, argc as usize);
+    let Some((&opid, raw_args)) = argv.split_first() else {
+        rt_llvm_fatal("rt_llvm_call: missing op id");
+    };
+    let Some(op) = llvm_op_table().get(&opid) else {
+        rt_llvm_fatal(&format!("rt_llvm_call: unknown op id {}", opid));
+    };
+    if raw_args.len() != op.args.len() {
+        rt_llvm_fatal(&format!(
+            "rt_llvm_call: {}::{} expects {} arguments, got {}",
+            op.type_key,
+            op.method,
+            op.args.len(),
+            raw_args.len()
+        ));
+    }
+    let heap = crate::compile::runtime::shim_active_heap();
+    let mut vals: Vec<RtValue> = Vec::with_capacity(raw_args.len());
+    for (raw, k) in raw_args.iter().zip(&op.args) {
+        vals.push(match k {
+            LlvmArgK::Handle => match llvm_handle_get(*raw) {
+                Some(v) => v,
+                None => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: dangling llvm handle {}", op.type_key, op.method, raw)),
+            },
+            LlvmArgK::Str => match crate::compile::runtime::decode(*raw) {
+                Value::Str(id) => RtValue::Str(heap.string(id).into()),
+                other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a Str argument, got {:?}", op.type_key, op.method, other)),
+            },
+            LlvmArgK::Int => RtValue::Int(*raw),
+            LlvmArgK::Bool => RtValue::Bool(*raw != 0),
+        });
+    }
+    // The native scope `get` returns `Option<V>` — encoded specially, so
+    // it's handled before the generic single-`RtValue` result path.
+    if op.type_key == "native-scope" && op.method == "get" {
+        let found = match (expect_scope(&vals[0]), expect_str(&vals[1])) {
+            (Ok(scope), Ok(name)) => scope.get(name),
+            (Err(e), _) | (_, Err(e)) => rt_llvm_fatal(&format!("rt_llvm_call: native-scope::get: {:?}", e)),
+        };
+        let boxed = match found {
+            Some(v) => {
+                let h = llvm_handle_register(v);
+                heap.alloc_enum("option".to_string(), 0, vec![Value::Int(h)])
+            }
+            None => heap.alloc_enum("option".to_string(), 1, vec![]),
+        };
+        return crate::compile::runtime::encode(boxed);
+    }
+    let result: Result<RtValue, EvalError> = if op.type_key == "native-scope" {
+        match op.method.as_str() {
+            "new" => Ok(scope_new()),
+            "clone-frames" => scope_clone_frames(&vals),
+            "push-frame" => scope_push_frame(&vals),
+            "pop-frame" => scope_pop_frame(&vals),
+            "set" => scope_set(&vals),
+            other => rt_llvm_fatal(&format!("rt_llvm_call: unknown native-scope method {}", other)),
+        }
+    } else {
+        match eval_llvm_builtin_method(&Path::root(op.type_key), &op.method, &vals) {
+            Some(r) => r,
+            None => rt_llvm_fatal(&format!("rt_llvm_call: {} has no builtin method {}", op.type_key, op.method)),
+        }
+    };
+    let v = match result {
+        Ok(v) => v,
+        Err(e) => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: {:?}", op.type_key, op.method, e)),
+    };
+    match op.ret {
+        LlvmRetK::Handle => llvm_handle_register(v),
+        LlvmRetK::Unit => 0,
+        LlvmRetK::Bool => match v {
+            RtValue::Bool(b) => i64::from(b),
+            other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a Bool result, got {:?}", op.type_key, op.method, other)),
+        },
+        LlvmRetK::Str => match v {
+            RtValue::Str(s) => crate::compile::runtime::encode(heap.alloc_string(s.to_string())),
+            other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a Str result, got {:?}", op.type_key, op.method, other)),
+        },
+        LlvmRetK::OptHandle => rt_llvm_fatal("rt_llvm_call: OptHandle result outside native-scope::get"),
+    }
 }
 
 // The `Scope<V>`-with-heap-repr-`V` counterparts of the native scope

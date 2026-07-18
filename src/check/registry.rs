@@ -904,7 +904,7 @@ fn assoc_fn(params: Vec<Type>, ret: Type, instance: bool) -> AssocFn {
 /// way (rather than generating a distinct LLVM signature per arity) is what
 /// lets `compile::CompiledFn` call *any* compiled function through one Rust
 /// function-pointer type — other return types are a later phase's concern.
-fn llvm_module_def() -> AdtDef {
+pub(crate) fn llvm_module_def() -> AdtDef {
     let mut assoc = HashMap::new();
     assoc.insert("create".to_string(), assoc_fn(vec![Type::Str], llvm_module_ty(), false));
     assoc.insert("add-function".to_string(), assoc_fn(vec![llvm_module_ty(), Type::Str], llvm_function_ty(), true));
@@ -930,7 +930,7 @@ fn llvm_module_def() -> AdtDef {
 }
 
 /// A declared LLVM function (a `Module::add-function` result).
-fn llvm_function_def() -> AdtDef {
+pub(crate) fn llvm_function_def() -> AdtDef {
     let mut assoc = HashMap::new();
     assoc.insert("append-block".to_string(), assoc_fn(vec![llvm_function_ty(), Type::Str], llvm_basic_block_ty(), true));
     AdtDef { name: Path::root("llvm-function"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new() }
@@ -948,7 +948,7 @@ fn llvm_basic_block_def() -> AdtDef {
 /// arithmetic (comparisons, which return `bool` rather than `i64`, are a
 /// later phase's concern — keeping every builtin here `i64`-in-`i64`-out
 /// for now).
-fn llvm_builder_def() -> AdtDef {
+pub(crate) fn llvm_builder_def() -> AdtDef {
     let mut assoc = HashMap::new();
     assoc.insert("create".to_string(), assoc_fn(vec![], llvm_builder_ty(), false));
     assoc.insert("position-at-end".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_basic_block_ty()], Type::Unit, true));

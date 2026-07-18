@@ -1176,6 +1176,8 @@ pub const SOURCE: &str = r#"
                                             (compile-var builder env fn-env captured e)
                                             (if (equal s "cellvar")
                                             (compile-cellvar builder env fn-env captured e)
+                                            (if (equal s "llvm-op")
+                                                (compile-llvm-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                             (if (equal s "assoc")
                                                 (compile-assoc builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                 (if (equal s "apply")
@@ -1222,7 +1224,7 @@ pub const SOURCE: &str = r#"
                                                                                                                                 (compile-vector-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                                                 (if (equal s "hashtable-op")
                                                                                                                                     (compile-hashtable-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                                    (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))))))))))))
+                                                                                                                                    (panic (append "compile-value: unsupported tag " s)))))))))))))))))))))))))))))))))))))
                            )
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -1883,6 +1885,31 @@ pub const SOURCE: &str = r#"
                                  (let ((result (build-call builder (get-function m mangled) args-ptr argc)))
                                    (pop-sexpr-roots builder m sexpr-roots)
                                    result))))))
+                       ;; `(llvm-op opid (kind . arg)...)` — an `llvm-*`/
+                       ;; native-`Scope<V>` builtin method call
+                       ;; (`ast_bridge`'s `Expr::Assoc` lowering, interp-
+                       ;; closure removal Stage 1): one call to the generic
+                       ;; Rust-side dispatch shim `rt_llvm_call`, passing the
+                       ;; translate-time-resolved op id (`ast_bridge::
+                       ;; llvm_op_id`'s stable hash) in slot 0 and the
+                       ;; compiled arguments after it. Argument handling is
+                       ;; exactly `compile-assoc-user`'s (`compile-call-args`
+                       ;; roots the tagged-`Sexpr`-kind ones across later
+                       ;; arguments' own allocations); the op id itself is a
+                       ;; raw constant with nothing to root. The result's
+                       ;; encoding (handle / unit / bool / tagged str /
+                       ;; boxed `Option`) is dictated by the node's checked
+                       ;; type, the same as every other compiled value.
+                       (compile-llvm-op ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((opid (sexpr-int (sexpr-car (sexpr-cdr e)))))
+                           (let ((arg-forms (sexpr-cdr (sexpr-cdr e))))
+                             (let ((argc (+ (sexpr-list-length arg-forms) 1)))
+                               (let ((args-ptr (alloca-args builder argc)))
+                                 (store-arg builder args-ptr 0 (const-i64 builder opid))
+                                 (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr arg-forms 1)))
+                                   (let ((result (build-call builder (get-function m "rt_llvm_call") args-ptr argc)))
+                                     (pop-sexpr-roots builder m sexpr-roots)
+                                     result)))))))
                        ;; Fills a previously-`alloca-args`'d array, one
                        ;; compiled argument per slot, exactly as before —
                        ;; each `forms` element is a `(kind . arg-form)` pair
