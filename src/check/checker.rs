@@ -4731,6 +4731,39 @@ impl Checker {
         // message.
         for (tparam, trait_bounds) in &sig.bounds {
             let Some(concrete) = subst.get(tparam).cloned() else { continue };
+            // `concrete` may itself be a **bare** unresolved type variable —
+            // the enclosing generic function's own type parameter, forwarded
+            // straight through (this call is nested inside another
+            // `where`-bounded generic's own diagnostic body-check, mirroring
+            // `Self::validate_where_bounds`'s bare-variable case below).
+            // There is no registered type to look an associated-type impl up
+            // on yet, but the *enclosing* function's own `where` clause may
+            // already pin the same associated type on the same trait —
+            // propagate that pin into `subst` instead of leaving `name`'s
+            // parameter uninferred (e.g. `elt` calling `nth n it` with `it:
+            // I` forwards `elt`'s own `(Iter I (Item A))` pin so `nth`'s own
+            // `A` resolves to `elt`'s own, still-open `A`; both become
+            // concrete together once the enclosing function is specialized).
+            if let Type::Named(n, args) = &concrete {
+                if args.is_empty() && n.is_simple() && self.reg.type_def(n).is_none() {
+                    let var_name = n.local();
+                    if let Some(caller_tbs) = env.bounds.get(var_name) {
+                        for tb in trait_bounds {
+                            let Some(caller_tb) =
+                                caller_tbs.iter().find(|c| c.trait_path == tb.trait_path)
+                            else {
+                                continue;
+                            };
+                            for (assoc_name, declared_ty) in &tb.assoc {
+                                if let Some(caller_ty) = caller_tb.assoc.get(assoc_name) {
+                                    let _ = unify(&params, declared_ty, caller_ty, &mut subst);
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
             let type_fq = match &concrete {
                 Type::Named(n, _) if n.is_simple() && self.reg.type_def(n).is_none() => None,
                 Type::Named(n, _) => Some(n.clone()),
@@ -5005,13 +5038,19 @@ impl Checker {
         // navigated only through the `sexpr-*` accessor island), but that
         // stance was reversed in preparation for a user-facing `(read)`:
         // read data's type is only known at runtime, and `match` — with type
-        // refinement and exhaustiveness over the ten `Sexpr` variants — is
+        // refinement and exhaustiveness over the eleven `Sexpr` variants — is
         // the language's natural eliminator for it. The runtime machinery
         // (`match_sexpr_ctor` in the interpreter, `compile-sexpr-tag-test`/
         // `compile-sexpr-field` in `compiler.rs`) predates the fence and
-        // serves both eras unchanged. Note `Value::Path` (an `a::b` token)
-        // has no `Sexpr` variant: a path scrutinee only ever falls through
-        // to a wildcard arm.
+        // serves both eras unchanged. `Value::Path` (an `a::b` token) has its
+        // own `path` variant (added 2026-07-19, `registry::sexpr_def`'s
+        // eleventh) — `(path s)` binds `s : Sexpr`, a fresh proper list of
+        // the segments as `sym`s (the only `match_sexpr_ctor` arm that
+        // allocates — see its doc comment for the GC-rooting that needs).
+        // Both `sym`'s and `path`'s payloads compile too (`compile-sexpr-
+        // field`/`compile-construct-sexpr` variants `5`/`10` in
+        // `compiler.rs`, plus the new `rt_path_to_list`/`rt_list_to_path`
+        // runtime shims for `path`'s list building).
         let total_variants = self.reg.type_def(&adt_name).expect("adt exists").variants.len();
 
         let mut arms = Vec::new();
