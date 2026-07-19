@@ -336,14 +336,33 @@ pub const SOURCE: &str = r#"
                   (if (eq variant 6)
                       v
                       (if (eq variant 5)
-                          (panic "compile-sexpr-field: a sym's Symbol payload is not representable in compiled code yet; match it with (sym _) instead of binding it")
+                          ;; A `sym`'s `Symbol` payload is already a fully
+                          ;; tagged immediate (`ast_bridge::struct_field_kind`'s
+                          ;; `Type::Symbol => 6` passthrough kind) — the exact
+                          ;; same shape a `Sexpr::Sym`'s own tagged word already
+                          ;; is, so no bit manipulation is needed, same as
+                          ;; `str`(6) above.
+                          v
                           ;; `bignum`(8)/`ratio`(9): the "payload" *is* the
                           ;; already-tagged boxed value itself (no separate
                           ;; scalar to unwrap the way int/char/bool have) —
                           ;; same passthrough as `str`(6).
                           (if (if (eq variant 8) true (eq variant 9))
                               v
-                              (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))))))))
+                              ;; `path`(10): the payload isn't a scalar or an
+                              ;; already-tagged value at all — it's a fresh
+                              ;; `Sexpr` list of `sym`s built from the tagged
+                              ;; `Value::Path`'s interned segments, mirroring
+                              ;; `typelisp::eval::interp`'s `match_sexpr_ctor`
+                              ;; `SEXPR_PATH` arm exactly (`rt_path_to_list`
+                              ;; does the same rooted `cons`-chain build, just
+                              ;; in Rust runtime code instead of the self-
+                              ;; hosted island).
+                              (if (eq variant 10)
+                                  (let ((args-ptr (alloca-args builder 1)))
+                                    (store-arg builder args-ptr 0 v)
+                                    (build-call builder (get-function m "rt_path_to_list") args-ptr 1))
+                                  (panic "compile-sexpr-field: field type is not representable in compiled code yet")))))))))))
 
 ;; The encode-side mirror of `compile-sexpr-field`'s decode, over the exact
 ;; same `ast_bridge::struct_field_kind`/`Sexpr`-variant numbering (`1`=int
@@ -1060,7 +1079,7 @@ pub const SOURCE: &str = r#"
 
 ;; Tests whether tagged Sexpr value `v` is Sexpr variant `variant`
 ;; (`registry::sexpr_def`'s variant order: 0=nil 1=int 2=float 3=char
-;; 4=bool 5=sym 6=str 7=cons 8=bignum 9=ratio) -- `nil`/`bool` both compile
+;; 4=bool 5=sym 6=str 7=cons 8=bignum 9=ratio 10=path) -- `nil`/`bool` both compile
 ;; to the same 3-bit tag (`typelisp-rt`'s `TAG_IMMEDIATE`, 6) and are told
 ;; apart by `v`'s payload bits instead (`0` vs non-zero, see that crate's
 ;; `encode`/`decode`). `float`/`bignum`/`ratio` all share `TAG_BOXED` (7)
@@ -1091,7 +1110,8 @@ pub const SOURCE: &str = r#"
                                                    (if (eq variant 5) 2
                                                        (if (eq variant 6) 3
                                                            (if (eq variant 7) 1
-                                                               (panic "compile-sexpr-tag-test: unknown Sexpr variant")))))))))))))
+                                                               (if (eq variant 10) 5
+                                                                   (panic "compile-sexpr-tag-test: unknown Sexpr variant"))))))))))))))
 
 ;; Shared by every atomic pattern test (`pat-lit`'s literal-equality
 ;; check, a Ctor pattern's tag test): appends a fresh "this test passed"
@@ -3064,35 +3084,49 @@ pub const SOURCE: &str = r#"
                              (let ((type-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
                                (let ((variant (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
                                  (let ((arg-forms (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
-                                   (if (eq variant 5)
+                                   ;; `100`/`101` (`ast_bridge::QUOTE_SYM_MARKER`/
+                                   ;; `QUOTE_PATH_MARKER`) are out-of-band markers a
+                                   ;; quoted `Sym`/`Path` *literal* uses — deliberately
+                                   ;; not the real `sym`/`path` Sexpr variant indices
+                                   ;; `5`/`10`, which a *written* `(Sym x)`/`(Path segs)`
+                                   ;; constructor call (already-tagged runtime `x`/`segs`,
+                                   ;; not a compile-time-known name) also produces and
+                                   ;; must instead fall through to the ordinary
+                                   ;; `compile-construct-sexpr` dispatch below — routing
+                                   ;; that case here too, as `5`/`10` briefly did, feeds an
+                                   ;; already-tagged `Sexpr` value into
+                                   ;; `compile-construct-sym`/`-path`'s literal-name reader,
+                                   ;; which chokes trying to `rt_intern_symbol` it.
+                                   (if (eq variant 100)
                                        (compile-construct-sym builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base arg-forms)
-                                       (if (eq variant 10)
+                                       (if (eq variant 101)
                                            (compile-construct-path builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base arg-forms)
                                            (if is-sexpr
                                                (compile-construct-sexpr builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base variant arg-forms)
                                                (if mutable
                                                    (compile-construct-boxed-struct builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name-form arg-forms)
                                                    (compile-construct-box builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name-form variant arg-forms)))))))))))
-                       ;; `(construct true false empty 5 name-form)` — a
+                       ;; `(construct true false empty 100 name-form)` — a
                        ;; quoted symbol literal (`ast_bridge::translate_quote`'s
-                       ;; `Sym` arm). `name-form` is an ordinary `(str ...)`
-                       ;; node (`str_literal_form`); compiling it yields a
-                       ;; fully tagged `Sexpr::Str`, handed straight to
-                       ;; `rt_intern_symbol` (no GC-root protection needed —
-                       ;; an interned symbol is permanent, unlike the `Str`
-                       ;; that briefly holds its name).
+                       ;; `Sym` arm, `QUOTE_SYM_MARKER`). `name-form` is an
+                       ;; ordinary `(str ...)` node (`str_literal_form`);
+                       ;; compiling it yields a fully tagged `Sexpr::Str`,
+                       ;; handed straight to `rt_intern_symbol` (no GC-root
+                       ;; protection needed — an interned symbol is permanent,
+                       ;; unlike the `Str` that briefly holds its name).
                        (compile-construct-sym ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (arg-forms Sexpr)) llvm-value
                          (let ((name-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-car arg-forms))))
                            (let ((args-ptr (alloca-args builder 1)))
                              (store-arg builder args-ptr 0 name-v)
                              (build-call builder (get-function m "rt_intern_symbol") args-ptr 1))))
-                       ;; `(construct true false empty 10 seg-form...)` — a
+                       ;; `(construct true false empty 101 seg-form...)` — a
                        ;; quoted `::`-path literal (`ast_bridge::translate_quote`'s
-                       ;; `Path` arm), one `(str ...)` node per segment.
-                       ;; `compile-construct-path-segs` interns each segment
-                       ;; (`rt_intern_symbol`, same as `compile-construct-sym`)
-                       ;; into a fresh `args-ptr` array, then `rt_intern_path`
-                       ;; combines them into the final tagged `Sexpr::Path`.
+                       ;; `Path` arm, `QUOTE_PATH_MARKER`), one `(str ...)`
+                       ;; node per segment. `compile-construct-path-segs`
+                       ;; interns each segment (`rt_intern_symbol`, same as
+                       ;; `compile-construct-sym`) into a fresh `args-ptr`
+                       ;; array, then `rt_intern_path` combines them into the
+                       ;; final tagged `Sexpr::Path`.
                        (compile-construct-path ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (arg-forms Sexpr)) llvm-value
                          (let ((n (sexpr-list-length arg-forms)))
                            (let ((args-ptr (alloca-args builder n)))
@@ -3279,15 +3313,31 @@ pub const SOURCE: &str = r#"
                                                      result))))
                                              (if (eq variant 6)
                                                  (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-car arg-forms))
-                                                 ;; `bignum`(8)/`ratio`(9): same "already fully tagged, no
-                                                 ;; further bit manipulation" passthrough as `str`(6) above —
-                                                 ;; the field's own compiled form is `compile-bignum-literal`/
-                                                 ;; `compile-ratio-literal`'s `rt_bignum_new`/
-                                                 ;; `rt_ratio_from_bignums` call result, already a proper
-                                                 ;; `TAG_BOXED` `Sexpr::Bignum`/`Ratio`.
-                                                 (if (if (eq variant 8) true (eq variant 9))
+                                                 (if (eq variant 5)
+                                                     ;; A `sym`'s `Symbol` payload is already a fully
+                                                     ;; tagged immediate, the same passthrough as
+                                                     ;; `str`(6) above — see `compile-sexpr-field`'s own
+                                                     ;; doc comment for why.
                                                      (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-car arg-forms))
-                                                     (panic "compile-construct-sexpr: field type is not representable in compiled code yet"))))))))))
+                                                     ;; `bignum`(8)/`ratio`(9): same "already fully tagged, no
+                                                     ;; further bit manipulation" passthrough as `str`(6) above —
+                                                     ;; the field's own compiled form is `compile-bignum-literal`/
+                                                     ;; `compile-ratio-literal`'s `rt_bignum_new`/
+                                                     ;; `rt_ratio_from_bignums` call result, already a proper
+                                                     ;; `TAG_BOXED` `Sexpr::Bignum`/`Ratio`.
+                                                     (if (if (eq variant 8) true (eq variant 9))
+                                                         (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-car arg-forms))
+                                                         ;; `path`(10): the argument form compiles to an
+                                                         ;; already-tagged `Sexpr` list of `sym`s (the same
+                                                         ;; shape `compile-sexpr-field`'s own `path`
+                                                         ;; extraction produces) — `rt_list_to_path` walks
+                                                         ;; it at runtime and interns the result, the
+                                                         ;; construct-side mirror of `rt_path_to_list`.
+                                                         (if (eq variant 10)
+                                                             (let ((args-ptr (alloca-args builder 1)))
+                                                               (store-arg builder args-ptr 0 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-car arg-forms)))
+                                                               (build-call builder (get-function m "rt_list_to_path") args-ptr 1))
+                                                             (panic "compile-construct-sexpr: field type is not representable in compiled code yet"))))))))))))
                        ;; `(field-get idx-unary-list kind-i64 obj-form)`
                        ;; (Stage 6, extended by Stage 3 of the Sexpr/RtValue
                        ;; unification plan — `docs/implementation-log.md` —

@@ -564,11 +564,12 @@ fn error_def() -> AdtDef {
 
 /// The built-in `Sexpr` sum type (the result type of `read`).
 ///
-/// `Sexpr = Nil | Int | Float | Char | Bool | Sym | Str | Cons(Sexpr, Sexpr)`:
-/// the empty list `()` is the nullary `Nil` constructor (a `Sexpr` value in its
-/// own right, on par with `cons` cells), and `cons` holds two `Sexpr` fields —
-/// matching Lisp's `list = cons | nil` duality so `car`/`cdr` and list
-/// operations (`cons`/`car`/`cdr`/`list`/`dolist`) stay in `Sexpr` throughout.
+/// `Sexpr = Nil | Int | Float | Char | Bool | Sym | Str | Cons(Sexpr, Sexpr) |
+/// Bignum | Ratio | Path`: the empty list `()` is the nullary `Nil`
+/// constructor (a `Sexpr` value in its own right, on par with `cons` cells),
+/// and `cons` holds two `Sexpr` fields — matching Lisp's `list = cons | nil`
+/// duality so `car`/`cdr` and list operations (`cons`/`car`/`cdr`/`list`/
+/// `dolist`) stay in `Sexpr` throughout.
 fn sexpr_def() -> AdtDef {
     AdtDef {
         name: Path::root("sexpr"),
@@ -587,6 +588,22 @@ fn sexpr_def() -> AdtDef {
             // (`crate::eval::interp`) stay valid.
             Variant { name: "bignum".to_string(), fields: vec![Type::Bignum] },
             Variant { name: "ratio".to_string(), fields: vec![Type::Ratio] },
+            // A `::`-qualified path (e.g. `dep::head`), the reader's
+            // `Value::Path` (`crate::mem::Value`) made matchable. Its single
+            // field is a proper `Sexpr` list of `sym`s (its segments, in
+            // written order) — the same shape a quoted `'(dep head)` list
+            // already has — not a re-stringified `"dep::head"`: a segment
+            // once split out of the reader's token stays a real `Symbol`,
+            // never gets flattened back into text, and the list's own
+            // length/`car`/`cdr` give the segment count and per-segment
+            // access for free through the ordinary list-processing
+            // machinery, instead of needing a second parse. Building this
+            // list means allocating fresh `Cons` cells during pattern
+            // matching itself, which none of the other variants'
+            // `match_sexpr_ctor` arms need to (they only ever read
+            // already-heap-resident data) — see that function's own doc
+            // comment for the GC-rooting this requires.
+            Variant { name: "path".to_string(), fields: vec![sexpr()] },
         ],
         assoc: sexpr_assoc(),
         public: true,

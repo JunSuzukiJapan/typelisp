@@ -1566,6 +1566,20 @@ fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Typ
     result
 }
 
+/// [`translate_quote`]'s out-of-band marker for a quoted symbol literal —
+/// deliberately *not* `5` (the real `sym` `Sexpr` ADT variant index,
+/// `registry::sexpr_def`), which a *written* `(Sym x)` constructor call
+/// (`translate_construct`) also produces and needs `compiler.rs`'s ordinary
+/// `compile-construct-sexpr` dispatch, not the literal-name reader
+/// `compile-construct-sym` expects. See [`translate_quote`]'s own doc
+/// comment for the collision this used to be.
+const QUOTE_SYM_MARKER: i64 = 100;
+
+/// [`translate_quote`]'s out-of-band marker for a quoted `::`-path literal —
+/// the `Path`/`QUOTE_PATH_MARKER` counterpart of [`QUOTE_SYM_MARKER`],
+/// distinct from the real `path` `Sexpr` ADT variant index (`10`).
+const QUOTE_PATH_MARKER: i64 = 101;
+
 /// `Expr::Quote(datum)` -> a synthesized `(construct true false empty
 /// variant arg-form...)` node — the exact wire shape [`translate_construct`]
 /// already produces for a *written* `Sexpr` constructor call (e.g. `(Int
@@ -1580,7 +1594,9 @@ fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Typ
 /// fields. `Bignum`/`Ratio` *do* have compiled support too
 /// (`bignum_literal_form`/`ratio_literal_form`, variants `8`/`9`).
 ///
-/// `Sym`/`Path` (variants `5`/`10`) are the two exceptions: a `Sym`'s/
+/// `Sym`/`Path` literals get their own out-of-band variant markers (`100`/
+/// `101` — see [`QUOTE_SYM_MARKER`]/[`QUOTE_PATH_MARKER`]) rather than the
+/// real `sym`/`path` `Sexpr` ADT variant indices (`5`/`10`): a `Sym`'s/
 /// `Path`'s tagged payload is a `SymId`/`PathId` with no compile-time-known
 /// value the way every other leaf's payload is (the interning table only
 /// exists in whichever `Heap` ends up running the code — AOT's target
@@ -1593,14 +1609,24 @@ fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Typ
 /// site for why) mirror `Str`'s approach: each segment's *name* is embedded
 /// as an ordinary `(str (int c0) ...)` node (built by [`str_literal_form`],
 /// the exact same helper `Str` itself uses) and interned for real at
-/// startup, via `rt_intern_symbol`/`rt_intern_path`.
+/// startup, via `rt_intern_symbol`/`rt_intern_path`. Marker values distinct
+/// from the real variant indices matter because a `(Sym x)`/`(Path segs)`
+/// *written* constructor call (`translate_construct`, `x`/`segs` an
+/// already-tagged runtime value, not a compile-time-known name) is a
+/// genuinely different wire shape reusing the same real indices `5`/`10` —
+/// before these markers were split out (2026-07-19, alongside the `path`
+/// ADT variant's introduction) both cases shared indices `5`/`10` and a
+/// `(Path segs)` construct call was silently misrouted into
+/// `compile-construct-path`'s segment-list-of-literals reader, which choked
+/// trying to `rt_intern_symbol` an already-tagged `Sexpr` list.
 fn translate_quote(heap: &mut Heap, datum: &QuotedSexpr) -> Result<Value, Error> {
     match datum {
         QuotedSexpr::Nil => tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(0)]),
         QuotedSexpr::Sym(name) => {
             let leaf = str_literal_form(heap, name)?;
             heap.push_root(leaf);
-            let result = tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(5), leaf]);
+            let result =
+                tagged(heap, "construct", &[Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(QUOTE_SYM_MARKER), leaf]);
             heap.pop_root();
             result
         }
@@ -1619,7 +1645,7 @@ fn translate_quote(heap: &mut Heap, datum: &QuotedSexpr) -> Result<Value, Error>
                 heap.push_root(leaf);
                 leaves.push(leaf);
             }
-            let mut fields = vec![Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(10)];
+            let mut fields = vec![Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(QUOTE_PATH_MARKER)];
             fields.extend(leaves.iter().copied());
             let result = tagged(heap, "construct", &fields);
             for _ in &leaves {
@@ -3528,8 +3554,11 @@ mod tests {
     }
 
     /// A quoted symbol nested inside a `Cons` compiles: `translate_quote`'s
-    /// `Sym` arm produces a `(construct true false empty 5 name-form)` node
-    /// like any other leaf, recursed into the same way `Int`/`Str`/... are.
+    /// `Sym` arm produces a `(construct true false empty QUOTE_SYM_MARKER
+    /// name-form)` node like any other leaf, recursed into the same way
+    /// `Int`/`Str`/... are. `QUOTE_SYM_MARKER` (`100`), not the real `sym`
+    /// variant index `5` — see [`translate_quote`]'s doc comment for why a
+    /// *written* `(Sym x)` constructor call needs the two kept apart.
     #[test]
     fn a_quoted_symbol_nested_in_a_cons_compiles() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -3540,15 +3569,16 @@ mod tests {
         assert_eq!(fields[3], Value::Int(7), "Cons is Sexpr variant 7");
         let (car_tag, car_fields) = untag(&heap, fields[4]);
         assert_eq!(car_tag, "construct");
-        assert_eq!(car_fields[3], Value::Int(5), "Sym is Sexpr variant 5");
+        assert_eq!(car_fields[3], Value::Int(QUOTE_SYM_MARKER), "quoted Sym literal uses the out-of-band marker, not the real variant 5");
         let (cdr_tag, cdr_fields) = untag(&heap, fields[5]);
         assert_eq!(cdr_tag, "construct");
         assert_eq!(cdr_fields[3], Value::Int(0), "Nil is Sexpr variant 0");
     }
 
     /// A quoted `::`-path compiles: `translate_quote`'s `Path` arm produces
-    /// a `(construct true false empty 10 seg-form...)` node, one leaf per
-    /// segment.
+    /// a `(construct true false empty QUOTE_PATH_MARKER seg-form...)` node,
+    /// one leaf per segment. `QUOTE_PATH_MARKER` (`101`), not the real
+    /// `path` variant index `10` — same reason as `QUOTE_SYM_MARKER` above.
     #[test]
     fn a_quoted_path_compiles() {
         let mut heap = Heap::with_capacity(1 << 10);
@@ -3556,7 +3586,7 @@ mod tests {
         let v = ast_to_sexpr(&mut heap, &typed(Expr::Quote(datum), sexpr_ty())).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "construct");
-        assert_eq!(fields[3], Value::Int(10), "Path is Sexpr variant 10");
+        assert_eq!(fields[3], Value::Int(QUOTE_PATH_MARKER), "quoted Path literal uses the out-of-band marker, not the real variant 10");
         assert_eq!(fields.len(), 6, "2 segments -> 2 leaf fields after the 4 header fields");
     }
 

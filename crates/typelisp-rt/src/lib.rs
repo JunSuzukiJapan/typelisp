@@ -2214,6 +2214,88 @@ pub unsafe extern "C" fn rt_intern_path(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().intern_path(&segs))
 }
 
+/// Converts a tagged `Value::Path` into a fresh `Sexpr` list of its segments
+/// as `Value::Symbol`s — the compiled-code half of the `Sexpr` `path`
+/// variant's field extraction (`compiler.rs`'s `compile-sexpr-field` variant
+/// `10`), mirroring `typelisp::eval::interp`'s `match_sexpr_ctor` `SEXPR_PATH`
+/// arm exactly. Every segment is a permanent interned `Value::Symbol` (never
+/// GC-collected), so only the freshly built `Cons` chain linking them needs
+/// root protection while under construction, the same discipline
+/// [`rt_cons`] itself would need for a multi-cell build.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// encoding a `Value::Path`; a `Heap` must already be registered on this
+/// thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_path_to_list(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_path_to_list: expected 1 argument");
+    }
+    let id = match decode(*args) {
+        Value::Path(id) => id,
+        _ => fatal("rt_path_to_list: argument is not a Path"),
+    };
+    let heap = active_heap();
+    let segs = heap.path_segments(id).to_vec();
+    let mut acc = Value::Empty;
+    for seg in segs.into_iter().rev() {
+        heap.push_root(acc);
+        let result = heap.cons(Value::Symbol(seg), acc);
+        heap.pop_root();
+        acc = match result {
+            Ok(v) => v,
+            Err(_) => fatal("rt_path_to_list: heap exhausted, no cons cell could be reclaimed"),
+        };
+    }
+    encode(acc)
+}
+
+/// The inverse of [`rt_path_to_list`]: walks a tagged `Sexpr` list of
+/// `Value::Symbol`s and interns it as a `Value::Path` — the compiled-code
+/// half of the `Sexpr` `path` variant's construction (`compiler.rs`'s
+/// `compile-construct-sexpr` variant `10`). Unlike [`rt_intern_path`] (whose
+/// segments are a compile-time-known-arity variadic argument list, for a
+/// literal quoted path), this one's segment count is only known at runtime —
+/// the list itself is a single already-compiled value, not `N` separate
+/// compiled sub-expressions.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// encoding a proper `Sexpr` list of `Value::Symbol`s; a `Heap` must already
+/// be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_list_to_path(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_list_to_path: expected 1 argument");
+    }
+    let heap = active_heap();
+    let mut segs = Vec::new();
+    let mut cur = decode(*args);
+    loop {
+        match cur {
+            Value::Empty => break,
+            Value::Cons(_) => {
+                match heap.car(cur) {
+                    Ok(Value::Symbol(id)) => segs.push(id),
+                    _ => fatal("rt_list_to_path: list element is not a Symbol"),
+                }
+                cur = match heap.cdr(cur) {
+                    Ok(v) => v,
+                    Err(_) => fatal("rt_list_to_path: argument is not a proper list"),
+                };
+            }
+            _ => fatal("rt_list_to_path: argument is not a proper list"),
+        }
+    }
+    if segs.is_empty() {
+        fatal("rt_list_to_path: path must have at least one segment");
+    }
+    encode(heap.intern_path(&segs))
+}
+
 /// `str::length` for compiled code — the character count (not byte length)
 /// of `args[0]`, matching the interpreter's own `string_length`. Returns a
 /// bare `i64` (a `Type::I64` result is never itself Sexpr-tagged).

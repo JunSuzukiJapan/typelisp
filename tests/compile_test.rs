@@ -3181,9 +3181,7 @@ fn compile_match_distinguishes_float_bignum_and_ratio_boxes() {
     assert_eq!(v, RtValue::Int(321));
 }
 
-/// Tag-only dispatch covers every variant, including `sym`, whose *payload*
-/// still has no compiled representation (binding it is a clear
-/// `compile-sexpr-field` panic; `(sym _)` never extracts, so it compiles).
+/// Tag-only dispatch covers every variant, including `sym`.
 #[test]
 fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
     let v = eval_ok_with_compiler(
@@ -3198,6 +3196,68 @@ fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
         "#,
     );
     assert_eq!(v, RtValue::Int(4321));
+}
+
+/// A `sym`'s `Symbol` payload — unlike `bignum`/`ratio` (still `unsupported`)
+/// — is already a fully tagged immediate, the same passthrough kind
+/// `struct_field_kind` gives `Str`/`Sexpr` (`ast_bridge.rs`'s `Type::Symbol
+/// => 6`), so binding `(sym x)` and returning `x` compiles: `compile-sexpr-
+/// field`'s variant-5 arm passes the tagged word through unchanged. Crossing
+/// back out to interpreted code exercises `Interp::decode_compiled_return`'s
+/// own `Type::Symbol` arm (added alongside this), which the un-fixed
+/// fallthrough would have misdecoded as a bare `RtValue::Int`.
+#[test]
+fn compile_match_binds_and_returns_a_sym_payload() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun get-sym ((s Sexpr)) Symbol
+          (match s ((sym x) x) (_ (panic "not a sym"))))
+        (compile get-sym)
+        (symbol->string (get-sym (quote hello)))
+        "#,
+    );
+    assert_eq!(v, RtValue::Str("hello".into()));
+}
+
+/// The `path` variant (`registry::sexpr_def`'s eleventh, added alongside
+/// `sym`'s fix): tag-tests against `TAG_PATH` (`compile-sexpr-tag-test`
+/// variant `10` -> tag `5`) and extracts its payload as a fresh `Sexpr` list
+/// of `sym`s via the new `rt_path_to_list` runtime shim (`compile-sexpr-
+/// field` variant `10`) — the compiled-code mirror of `typelisp::eval::
+/// interp`'s own `match_sexpr_ctor` `SEXPR_PATH` arm.
+#[test]
+fn compile_match_dispatches_and_extracts_the_path_variant() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun path-segs ((s Sexpr)) Sexpr
+          (match s ((path segs) segs) (_ (panic "not a path"))))
+        (compile path-segs)
+        (equal (path-segs (quote dep::head)) (list (quote dep) (quote head)))
+        "#,
+    );
+    assert_eq!(v, RtValue::Bool(true));
+}
+
+/// `(Path segs)` construction, the inverse of the extraction test above: a
+/// compiled `Sexpr` list of `sym`s becomes a genuine `Value::Path` through
+/// the new `rt_list_to_path` runtime shim (`compile-construct-sexpr` variant
+/// `10`). The result crosses back out as an ordinary `Sexpr` (already
+/// `is_boxed_sexpr_type`-covered — no return-decode fix needed, unlike
+/// `sym`), so the round trip through `match`'s own `path` arm is checked in
+/// interpreted code.
+#[test]
+fn compile_construct_and_round_trips_the_path_variant() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun make-path ((segs Sexpr)) Sexpr
+          (Path segs))
+        (compile make-path)
+        (match (make-path (list (quote a) (quote b)))
+          ((path segs) (equal segs (list (quote a) (quote b))))
+          (_ false))
+        "#,
+    );
+    assert_eq!(v, RtValue::Bool(true));
 }
 
 /// Compiled and interpreted `match` agree over the same Sexpr inputs.

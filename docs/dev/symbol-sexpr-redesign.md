@@ -269,8 +269,37 @@ eliminator として使えるようにした。ユーザー向けに実行時に
   `(bignum _)`/`(ratio _)` のようなワイルドカード付き ctor パターンでも無条件に `compile-sexpr-field` を
   呼んでいた。`eq`→`equal` に修正（`compiler.rs` 2 箇所）。Sexpr match 解禁でこの経路が初めて実際に
   踏まれるようになるまで顕在化していなかった。
-- **注記（未対応のまま）**: 実行時 `Value::Path`（`a::b` トークン）に対応する `Sexpr` variant は存在しない。
-  path な `Sexpr` 値は `match` では `_` にしか落ちない。`(read)` 導入時に扱いを決める。
+- ~~**注記（未対応のまま）**: 実行時 `Value::Path`（`a::b` トークン）に対応する `Sexpr` variant は存在しない。
+  path な `Sexpr` 値は `match` では `_` にしか落ちない。`(read)` 導入時に扱いを決める。~~
+  **→ 2026-07-19 解消**（`registry::sexpr_def`に11番目のvariant`path`を追加、`crate::eval::interp`の
+  `SEXPR_PATH`）。フィールド型は当初`Str`（書かれた形へ再結合、例`"dep::head"`）で実装したが、
+  ユーザー指摘（「一般的に、いったん分解した要素を文字列に直すのは筋が悪く使い勝手が悪くなる」）
+  により`Sexpr`のsym列（真のリスト、quoted `'(dep head)`と同じ形）へ設計変更——セグメント数や
+  `car`/`cdr`による個別アクセスが再パース無しで手に入る。真のリスト構築は`match`中に新規cons
+  セル確保が必要になる（既存のどの`match_sexpr_ctor`腕も「既にヒープ上のデータを読むだけ」だった
+  唯一の例外）ため、`match_pattern`/`match_sexpr_ctor`のシグネチャを`&Heap`→`&mut Heap`に変更し、
+  `alloc_quoted`の`QuotedSexpr::Cons`と同じ`push_root`/`pop_root`規律でリストを構築
+  （要素は全て永続internされた`Value::Symbol`なのでルート不要、新規consチェーン自体のみ保護が必要）。
+  構築（`(Path segs)`、`segs`はsymのリスト）も対称に対応。
+  **自己ホストコンパイラ側も同日中に対応**（`sym`のペイロードも含めユーザー指示で追加実装）:
+  `struct_field_kind`が既に`Type::Symbol => 6`（`Str`と同じpassthrough kind）としていたことが手掛かりで、
+  `compile-sexpr-field`/`compile-construct-sexpr`のvariant5（sym）はpanicからpassthroughへ、variant10
+  （path）は新設`rt_path_to_list`/`rt_list_to_path`（`typelisp-rt`、pathのinternセグメントから
+  cons チェーンを構築/逆にリストをinternする、同じpush_root規律）呼び出しへ変更、
+  `compile-sexpr-tag-test`にvariant10→タグ5（`TAG_PATH`）を追加。`Interp::decode_compiled_return`にも
+  欠落していた`Type::Symbol`腕を追加（`is_boxed_sexpr_type`が拾わずbare`RtValue::Int`に化けていた
+  既存の欠落、`sym`を返すcompiled関数がinterp境界を越えると壊れていた）。
+  **踏んだ罠**: `ast_bridge.rs`の`translate_quote`（quoted symbol/path literal、2026-07-15の
+  「既知の制限7項目解消」で追加）が既にvariant番号`5`/`10`を「リテラル名文字列からintern」という
+  **別の意味**でマジックナンバー使用済みだったため、`compile-construct`の`(eq variant 5)`/
+  `(eq variant 10)`早期分岐が今回追加した「既存のタグ付き値からconstruct」ケースと衝突し、
+  `(Path segs)`（`segs`が既にタグ付きSexprリスト）を書くと`rt_intern_symbol`が非Str引数を受け取り
+  abort——`compile_construct_and_round_trips_the_path_variant`テストのSIGABRTで発覚。
+  quoted literal側を範囲外の専用マーカー`QUOTE_SYM_MARKER=100`/`QUOTE_PATH_MARKER=101`へ振り直して
+  解消（`ast_bridge.rs`の定数+`compiler.rs`の対応する分岐、単体テスト2件も更新）。
+  テスト: `tests/match_sexpr_test.rs`に3件（構築/分解の往復、非pathスクルティニーが誤って`path`腕に
+  落ちないことの確認、既存の網羅的11分岐テストも更新）、`tests/compile_test.rs`に3件
+  （sym payloadのbind+JIT境界越え往復、pathのタグ判定+抽出、pathの構築+往復）。
 - **テスト**: `tests/match_sexpr_test.rs` 新設（interp 側、全 variant・ネストパターン・網羅性エラー・
   `if-let`/`while-let`）。`tests/compile_test.rs` 末尾に compile 側 4 本追加
   （payload 抽出、float/bignum/ratio 判別、nil/sym/str/bool のタグのみ分岐、interp/compile 一致）。

@@ -118,12 +118,44 @@ fn match_dispatches_a_runtime_chosen_variant() {
         (defun tag ((s Sexpr)) i32
           (match s
             ((nil) 0) ((int _) 1) ((float _) 2) ((char _) 3) ((bool _) 4)
-            ((sym _) 5) ((str _) 6) ((cons _ _) 7) ((bignum _) 8) ((ratio _) 9)))
+            ((sym _) 5) ((str _) 6) ((cons _ _) 7) ((bignum _) 8) ((ratio _) 9)
+            ((path _) 10)))
         (+ (+ (tag (Int 1)) (* 10 (tag (Str "s")))) (* 100 (tag (sexpr-cons (Nil) (Nil)))))
     "#;
-    // 1 + 60 + 700: int=1, str=6, cons=7 — and the ten-armed match above is
-    // exhaustive without a wildcard, exercising full variant coverage.
+    // 1 + 60 + 700: int=1, str=6, cons=7 — and the eleven-armed match above
+    // is exhaustive without a wildcard, exercising full variant coverage.
     assert_eq!(eval_ok(src), RtValue::Int(761));
+}
+
+#[test]
+fn match_dispatches_and_destructures_the_path_arm() {
+    // A quoted `::`-path evaluates to `Value::Path` at runtime; `(path s)`
+    // binds `s : Sexpr`, a fresh proper list of the segments as `sym`s (the
+    // same shape a quoted `'(dep head)` list already has).
+    assert_eq!(
+        eval_ok(
+            "(match (quote dep::head) ((path s) (equal s (list (quote dep) (quote head)))) (_ false))"
+        ),
+        RtValue::Bool(true)
+    );
+    // Segments stay real `sym`s, not re-stringified text: the first one is
+    // reachable through ordinary list access.
+    assert_eq!(
+        eval_ok("(match (quote dep::head) ((path s) (sexpr-sym-name (sexpr-car s))) (_ \"no\"))"),
+        RtValue::Str("dep".into())
+    );
+    // `Path` also constructs one back from a segment list — the inverse of
+    // the match arm above.
+    assert_eq!(
+        eval_ok(
+            "(match (Path (list (quote a) (quote b) (quote c)))
+               ((path s) (equal s (list (quote a) (quote b) (quote c))))
+               (_ false))"
+        ),
+        RtValue::Bool(true)
+    );
+    // A non-path scrutinee doesn't spuriously hit the `path` arm.
+    assert_eq!(eval_ok("(match (Int 1) ((path _) 1) (_ 0))"), RtValue::Int(0));
 }
 
 // ---- structural (nested) patterns --------------------------------------------

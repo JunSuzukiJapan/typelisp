@@ -27,7 +27,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
-use crate::{BoxId, Expr, Heap, Loc, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
+use crate::{BoxId, Expr, Heap, Loc, MacroExpander, Path, Pattern, QuotedSexpr, SymId, TopLevel, Type, Typed, Value};
 
 use super::value::{EvalError, NativeScope, RtValue, Slot, SlotKind};
 
@@ -1494,6 +1494,14 @@ impl Interp {
             }
             SEXPR_BIGNUM => heap.alloc_bignum((*rt_bignum(&vs[0])?).clone()),
             SEXPR_RATIO => heap.alloc_ratio((*rt_ratio(&vs[0])?).clone()),
+            // `(Path segs)` where `segs : Sexpr` is a proper list of `sym`s —
+            // walks it into `Vec<SymId>` and re-interns, the inverse of
+            // `match_sexpr_ctor`'s `SEXPR_PATH` arm, which builds that same
+            // list fresh from an existing `Value::Path`'s interned segments.
+            SEXPR_PATH => {
+                let ids = sexpr_list_to_symbols(heap, rt_sexpr(&vs[0])?)?;
+                heap.intern_path(&ids)
+            }
             _ => return Err(EvalError::Internal("sexpr: unknown variant".into())),
         };
         Ok(RtValue::Sexpr(v))
@@ -1807,6 +1815,27 @@ impl Interp {
                 other => {
                     return Err(EvalError::Internal(format!(
                         "compiled call returned {:?} for a bignum/ratio result, which is not a boxed Sexpr",
+                        other
+                    )))
+                }
+            }
+        } else if matches!(ret_ty, Type::Symbol) {
+            // `Type::Symbol` isn't `Type::Named` either, so `is_boxed_sexpr_type`
+            // never catches it — without this arm a compiled `Symbol` result
+            // (the tagged `Value::Symbol` word `compile-sexpr-field`'s `sym`
+            // passthrough / `compile-construct-sexpr`'s `rt_intern_symbol`
+            // already produce) would silently misdecode as a plain
+            // `RtValue::Int` below. A `Symbol`-typed interp value is always
+            // carried generically as `RtValue::Sexpr(Value::Symbol(_))` (see
+            // `match_sexpr_ctor`'s own `SEXPR_SYM` arm's doc comment) — which
+            // is also exactly why *argument* encoding needed no matching fix:
+            // `encode_crossing_args`' `RtValue::Sexpr(sv) => encode(*sv)` arm
+            // already covers a `Symbol` argument for free.
+            match crate::compile::runtime::decode(raw) {
+                v @ Value::Symbol(_) => RtValue::Sexpr(v),
+                other => {
+                    return Err(EvalError::Internal(format!(
+                        "compiled call returned {:?} for a Symbol result, which is not a Symbol",
                         other
                     )))
                 }
@@ -3114,6 +3143,29 @@ fn rt_sexpr(v: &RtValue) -> Result<Value, EvalError> {
     }
 }
 
+/// Walks a proper `Sexpr` list of `sym`s into a `Vec<SymId>` —
+/// `construct_sexpr`'s `SEXPR_PATH` arm's own reverse of
+/// `match_sexpr_ctor`'s path-segments-to-list direction. Read-only (no
+/// allocation): every `car` must already be a `Value::Symbol` and the `cdr`
+/// chain must terminate in `Value::Empty`, or the path being constructed
+/// isn't well-formed.
+fn sexpr_list_to_symbols(heap: &Heap, mut v: Value) -> Result<Vec<SymId>, EvalError> {
+    let mut ids = Vec::new();
+    loop {
+        match v {
+            Value::Empty => return Ok(ids),
+            Value::Cons(_) => {
+                match heap.car(v) {
+                    Ok(Value::Symbol(id)) => ids.push(id),
+                    _ => return Err(EvalError::Internal("sexpr: path segment is not a sym".into())),
+                }
+                v = heap.cdr(v).map_err(|e| EvalError::Internal(e.to_string()))?;
+            }
+            _ => return Err(EvalError::Internal("sexpr: path segments are not a proper list".into())),
+        }
+    }
+}
+
 /// Variant indices of `Sexpr`'s constructors (see `check::registry::sexpr_def`).
 const SEXPR_NIL: usize = 0;
 const SEXPR_INT: usize = 1;
@@ -3125,6 +3177,7 @@ const SEXPR_STR: usize = 6;
 const SEXPR_CONS: usize = 7;
 const SEXPR_BIGNUM: usize = 8;
 const SEXPR_RATIO: usize = 9;
+const SEXPR_PATH: usize = 10;
 
 /// Evaluate a built-in `i32`/`i64` arithmetic/comparison instance method
 /// (`registry::int_assoc`) — shared by both widths since `RtValue::Int`
@@ -4049,7 +4102,7 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 93] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 95] {
     use crate::compile::runtime::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
@@ -4058,7 +4111,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 93] {
         rt_float_to_ratio, rt_float_value, rt_gensym, rt_global_get, rt_global_new, rt_global_set, rt_i64_div, rt_i64_mod,
         rt_hashtable_clear, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw, rt_hashtable_keys,
         rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_hashtable_values, rt_int_to_bignum, rt_int_to_ratio,
-        rt_intern_path, rt_intern_symbol, rt_match_fail, rt_null, rt_panic, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
+        rt_intern_path, rt_intern_symbol, rt_list_to_path, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
         rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_int, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
@@ -4163,6 +4216,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 93] {
         ("rt_ratio_denominator", rt_ratio_denominator as usize),
         ("rt_intern_symbol", rt_intern_symbol as usize),
         ("rt_intern_path", rt_intern_path as usize),
+        ("rt_path_to_list", rt_path_to_list as usize),
+        ("rt_list_to_path", rt_list_to_path as usize),
         ("rt_gensym", rt_gensym as usize),
         ("rt_i64_div", rt_i64_div as usize),
         ("rt_i64_mod", rt_i64_mod as usize),
@@ -5877,8 +5932,12 @@ fn sexpr_equalp(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
 
 /// Try to match a pattern against a value, returning the bindings on success.
 /// `heap` is needed to destructure `Sexpr` values (`RtValue::Sexpr`), which
-/// hold their `Cons`/`Str`/`Sym` payloads in the cons heap.
-fn match_pattern(heap: &Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(String, SlotKind, RtValue)>> {
+/// hold their `Cons`/`Str`/`Sym` payloads in the cons heap. `&mut` (not `&`)
+/// since `match_sexpr_ctor`'s `path` arm allocates a fresh `Sexpr` list of
+/// `sym`s while decomposing a `Value::Path` — the one arm across every
+/// variant that builds heap data rather than only reading already-resident
+/// data — and needs `Heap::push_root`/`cons` for that.
+fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(String, SlotKind, RtValue)>> {
     match pat {
         Pattern::Wildcard => Some(Vec::new()),
         Pattern::Bind(n, heap_bind) => {
@@ -5969,7 +6028,7 @@ fn match_pattern(heap: &Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(String,
 /// Match a `Sexpr` constructor pattern against a heap-backed `Sexpr` value,
 /// destructuring through `heap` (`car`/`cdr`/`symbol_name`/`string`) rather
 /// than an `RtValue::Data` shape.
-fn match_sexpr_ctor(heap: &Heap, variant: usize, args: &[Pattern], v: Value) -> Option<Vec<(String, SlotKind, RtValue)>> {
+fn match_sexpr_ctor(heap: &mut Heap, variant: usize, args: &[Pattern], v: Value) -> Option<Vec<(String, SlotKind, RtValue)>> {
     match (variant, v) {
         (SEXPR_NIL, Value::Empty) => Some(Vec::new()),
         (SEXPR_INT, Value::Int(n)) => match_pattern(heap, &args[0], &RtValue::Int(n)),
@@ -5998,6 +6057,26 @@ fn match_sexpr_ctor(heap: &Heap, variant: usize, args: &[Pattern], v: Value) -> 
             let mut binds = match_pattern(heap, &args[0], &RtValue::Sexpr(car))?;
             binds.extend(match_pattern(heap, &args[1], &RtValue::Sexpr(cdr))?);
             Some(binds)
+        }
+        // `(Path v)` binds `v : Sexpr` — a fresh proper list of the path's
+        // segments as `sym`s, in written order — the inverse of
+        // `construct_sexpr`'s `SEXPR_PATH` arm. The only `match_sexpr_ctor`
+        // arm that allocates: `path_segments` only borrows a permanent
+        // (non-GC) table, but the list linking those segments together is
+        // built fresh here, so the growing accumulator needs rooting across
+        // each `cons` call exactly like `alloc_quoted`'s `QuotedSexpr::Cons`
+        // case does — every element is a permanent `Value::Symbol` (never
+        // GC-collected), so only the `Cons` chain itself is at risk.
+        (SEXPR_PATH, Value::Path(id)) => {
+            let segs = heap.path_segments(id).to_vec();
+            let mut acc = Value::Empty;
+            for seg in segs.into_iter().rev() {
+                heap.push_root(acc);
+                let result = heap.cons(Value::Symbol(seg), acc);
+                heap.pop_root();
+                acc = result.ok()?;
+            }
+            match_pattern(heap, &args[0], &RtValue::Sexpr(acc))
         }
         _ => None,
     }
