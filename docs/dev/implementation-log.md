@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-07-03 / ブランチ: `feature/compile-sexpr`
+最終更新: 2026-07-19 / ブランチ: `main`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -3775,3 +3775,323 @@ Stage 8cで`jit_closure`/`jit_closure_from_result`（`interp.rs:685`/`700`）は
 **残る作業**: `docs/dev/TODO.md`のフォローアップ項目クローズ（本節完了により対応）、
 `docs/dev/language-design.md`のfallback記述更新（恒久Benign集合という概念自体が実質消滅した
 ことの反映）。
+
+---
+
+## compile機能: TraitCall機構の削除（2026-07-04）
+
+ジェネリック単型化（2026-07-03、上記「ジェネリック単型化とSexpr/RtValue統合Stage 6」参照）で
+`Expr::TraitCall`がコンパイル可能ソースから到達不能になったため、compile側の実行時ディスパッチ
+機構を全撤去。削除対象: `ast_bridge`の`translate_trait_call`/`collect_trait_call_targets`/
+`is_compilable_trait_impl`/`type_id_hash`、`compiler.rs`の`compile-trait-call`/
+`compile-trait-dispatch`/`compile-recv-type-id`とディスパッチアーム、ランタイムの
+`rt_trait_call_fail`/`rt_struct_type_id_hash`。あわせて一般ADT boxの先頭type-idスロット（trait
+ディスパッチ専用の死んだヘッダ）を撤去し、`construct`ノードとboxレイアウトを
+`[variant, field...]`に簡素化（`compile-field-get`/`compile-field-set`はもともと
+`rt_struct_field_get`経由でこのレイアウトに非依存）。`Expr::TraitCall`ノード自体はチェッカが
+ジェネリック定義時本体で生成しインタプリタが内部エラーとしてトラップする診断専用ノードとして
+存続するが、`trait_name`/`impls`フィールドと`Checker::trait_impls`はcompile専用だったため撤去し
+`{ method, args }`のみに縮小。
+
+---
+
+## compile機能: `Panic`/`MethodRef`/`Quote`対応（2026-07-12）
+
+`ast_bridge.rs`の`Expr::Panic`/`Expr::MethodRef`/`Expr::Quote`アームを実装し、残っていた
+`unsupported`3件を解消。
+
+- **`Panic`**: `(panic msg)` -> `(panic msg-form)`。`msg`は常に`Str`型なので`kind`分岐は不要、
+  `compiler.rs`の新設`compile-panic`が`msg-form`を`compile-str`同様にタグ付き`Sexpr::Str`へ
+  コンパイルし新設`rt_panic`（`typelisp-rt`）へ渡す。`rt_panic`はインタプリタ経路の
+  `EvalError::Panic`と同じ`"panic: {msg}"`書式を出力して`abort()`——コンパイル済みコードは
+  JIT/AOTネイティブ境界を安全にunwindできないため、`rt_match_fail`と同じ「abortのみ許容」規約
+  に従う意図的な仕様差（インタプリタ側は`Result`として回収可能だが、コンパイル済みコードでは
+  プロセスごと落ちる）。
+- **`MethodRef`**: `+`等のメソッドを値として使う式（`Checker::method_value`）->
+  引数を`(assoc type-name method true ...)`呼び出しへそのまま転送する非キャプチャ`lambda`
+  （`translate_fnref`の転送ラッパー手法をinstanceメソッドへ一般化、受け手は`compile-assoc`/
+  `compile-assoc-user`——ネイティブ演算もユーザー定義メソッドも既存の`recv::method`呼び出し経路を
+  再利用するため`compiler.rs`側の変更ゼロ）。ただし転送先の`(type_name, method)`を
+  `ast_bridge::collect_calls`（前方宣言収集）が`Expr::Assoc`と同様に辿るよう追加が必要だった
+  ——`Expr::FnRef`が転送`call`ラッパーに対して同じ扱いを受けているのと対称。
+- **`Quote`**: `(quote datum)` -> `translate_construct`と全く同じ`(construct true false empty
+  variant arg-form...)`ワイヤ形状を`QuotedSexpr`から直接合成（`Cons`は再帰）。
+  `Nil`/`Int`/`Float`/`Bool`/`Char`/`Str`/`Cons`は既存の`compile-construct-sexpr`がそのまま
+  対応、`Sym`/`Bignum`/`Ratio`（コンパイル表現なし）は入れ子内のどこにあっても`unsupported`へ
+  伝播（`unsupported`は`Ok`を返す設計のため、再帰呼び出し結果のタグを見て伝播させる必要があった
+  ——素朴に`?`へ任せると`(unsupported ...)`タグがデータとして埋め込まれてしまう落とし穴）。
+- 副産物として発覚した既存の欠落も同時解消: `char`リテラルが単体で`compile-value`の
+  ディスパッチタグに存在しなかった（`(defun f () char #\A)`が常に失敗していた）ため、
+  新設`compile-char`/`sexpr-char`（`registry.rs`/`Interp::eval_builtin`）で対応
+  （`char->int`のi32結果を`(as i64 ...)`の無償変換でi64化）。JIT呼び出し境界での`char`戻り値
+  デコードも同日中に解消: `Interp::call_compiled`の戻り値デコードに`Type::Char`アームを追加
+  （生i64コードポイント→`char::from_u32`→`RtValue::Char`、引数側の`*c as i64`の逆）。`char`を
+  返すcompiled関数がインタプリタと相互運用可能に。
+- テスト: `tests/compile_test.rs`に6件（panic branch/char literal/builtin・ユーザー定義method
+  reified/quoted list構築/JIT-interp一致/quoted symbolのclean error）、`ast_bridge.rs`単体
+  テストに5件。
+
+---
+
+## compile機能: `Match`のstruct-kind（`defstruct`/`Vector`のboxed-struct表現）scrutinee対応（2026-07-12）
+
+これで`Match`の`unsupported`分岐は解消（sum-ADT box/struct-kind/`Sexpr`の3種すべてcompile時
+`match`が可能に）。`translate_match`/`pattern_to_sexpr`の`is-box: bool`を`scrut-kind: i64`
+（0=`Sexpr`、1=sum-ADT box、2=boxed struct、`ast_bridge::MATCH_KIND_*`）に一般化し、`pat-ctor`に
+`field-kinds`（各フィールドの`struct_field_kind`のリスト、struct-kind時のみ意味を持つ）を追加。
+boxed structは単一variant（`new`）なのでタグテストは一切発行せず（`compiler.rs::compile-pattern-test`
+の`scrut-kind = 2`分岐）、フィールド抽出だけを行う新設`compile-struct-field`
+（`rt_struct_field_get`→`compile-sexpr-field`、`compile-field-get`と同じ経路の再利用）で対応。
+sum-ADT boxと異なりboxed structは通常のGC管理ヒープ値なので`compile-match`のGCルート要否判定
+（`push-sexpr-root`/`pop-sexpr-root`）も`Sexpr`側と同様に必要（boxのみ不要）——ここは`scrut-kind`
+を素朴に真偽反転しただけでは見落としがちな罠だった。フィールドごとの型情報が必要になったのは
+今回が初めてで（sum-ADT boxは自身の`variant`だけで全フィールド共通のデコードができたが、
+boxed structはフィールドごとにint/float/char/bool/passthroughが異なる）、`Pattern::Ctor`に
+`field_types: Vec<Type>`を新設（`Checker::check_ctor_pattern`が`sexpr_fields`と並べて計算、
+インタプリタ側は変更なし）。
+
+---
+
+## ファイル↔モジュール対応: `use`のsibling-relative解決（2026-07-13）
+
+「`use`はソースルート相対のみ、兄弟ファイル相対の解決は未対応」を解消。`Loader::ensure_loaded`
+が各prefix長でroot-relative候補を試した後にsibling-relative候補（`use`元ファイルのディレクトリを
+前置）もフォールバックとして試すよう拡張、`Checker::find_module`に対応するsiblingティアを追加
+（新設`file_ns`スタックで、ファイル自身のモジュールパスをネストした`(module ...)`越しにも
+安定して保持——`self.ns`をそのまま使うとネストmodule内の`use`が誤ってそのmodule自身の親を
+基準にしてしまう）。root-relativeが常に優先されるため既存の解決結果は非破壊。`project.rs`は
+`enter_module`/`exit_module`ではなくファイル境界専用の`enter_file_module`/`exit_file_module`を
+使用（nested `(module ...)`は従来通り`enter_module`のまま）。テスト: `module_file_test.rs`に
+3件追加（bare名前解決・root優先・nested module内でもfile境界基準）。
+
+---
+
+## compile機能: char/stringの`equalp`（ASCII大文字小文字無視）対応（2026-07-13）
+
+`eq`/`equal`（生コードポイントの`icmp`/`rt_str_eq`）と違い`equalp`はcase-foldingするため単一命令に
+できない。新設`rt_char_equalp`（生i64コードポイント2つ）/`rt_str_equalp`を`compile-assoc`の
+char/string分岐から呼ぶ（`char-native-method?`/`string-native-method?`にも追加）。テスト:
+compile_test 2件 + typelisp-rt 2件。
+
+---
+
+## compile機能: `f64`レシーバのメソッド対応（2026-07-13）
+
+算術（`+`/`-`/`*`/`/`/`mod`）と比較（`<`/`<=`/`>`/`>=`/`=`/`/=`/`eq`/`eql`/`equal`/`equalp`）を
+対応。compiled `f64`は生bitパターンをi64に埋め込む表現なので、新設ビルトイン`build-fadd`/`fsub`/
+`fmul`/`fdiv`/`frem`が各`bitcast` i64↔doubleで挟み、`build-fcmp-*`が比較（`<`等はordered、`/=`は
+Rust`!=`に合わせunordered UNE）。`compile-assoc`にf64分岐+`float-native-method?`、
+`call_compiled`にf64引数/戻り値マーシャリング（`to_bits`/`from_bits`）、method-target検証除外に
+`f64`追加。当時の残課題（transcendental・変換）は後続節「`f64`の超越関数/丸め関数」
+「`bignum`/`ratio`のcompile対応」で解消。落とし穴: LLVM `frem`はCの`fmod`呼び出しにlowerされる
+ため`fmod`という名の関数compileはJITシンボル解決衝突で無限再帰したが、これは
+「既知の制限・意図的に対象外7項目の解消」節（`tl_`シンボルプレフィックス導入）で解消。
+テスト: compile_test 3件 + typelisp-rt（既存流用）。
+
+---
+
+## Iterトレイトを持つ全型（Vector/HashTable）のcompile対応（2026-07-13、branch `feature/iter-compile`）
+
+「ジェネリック本体そのもののcompile」（旧・将来課題）を解消。`doiter`/`map`・`filter`・`member`等の
+コンビネータ over `Vector<T>`・`HashTable<K,V>`がcompile可能に。ユーザー定義Iter型も、その`next`が
+compile可能なプリミティブに落ちる限り専用対応ゼロで通る（トレイトディスパッチは単型化で消える
+ため）。実体は2つ: (1) コレクション・プリミティブ層（`vector-op`/`hashtable-op`ノード +
+`rt_struct_field_count`/`rt_struct_push_field`/`rt_hashtable_*`群、要素型kindによるタグ/デコード）、
+(2) `Interp::compile_function_rec`——`(compile fn)`が呼ぶ単型化インスタンス（`vector::iter <i64>`等、
+空白マングル名で名指し不可）を推移的に自動compile。当初「反復とは別問題」として対象外にしていた
+`HashTable::get`/`remove`（`Option`返し）も同日中に追加解消——実行時のfound/not-found結果で
+`Some`/`None`を組み立てるため`compile-construct-box`をそのまま使えず、新設
+`rt_hashtable_contains`/`_get_raw`/`_remove_raw`を`compile-if`と同型のalloca+分岐+merge
+（phiビルトインなし）で呼び分け。詳細は[iter-compile-plan.md](iter-compile-plan.md)。
+
+---
+
+## fasl（コンパイル済みモジュール）機構 + `(load)`（2026-07-14）
+
+「LSPの依存キャッシュなし: 診断パスごとにpreludeソース(822行)をparse+型チェックし直す」を
+解消——真のコスト要因はprelude再ロードだった。fasl機構を新設し、preludeを一度だけチェックして
+`Fasl`（ヒープ非依存のシリアライズ）化、各診断パスは`Fasl::load_into`で新ヒープへ**確保API経由の
+再構築**（parse/型チェックなし、値はheap.cons等で作り直すのでポインタ問題なし）。LSPは起動時に
+`Rc<Fasl>`を1つ持ち各パスで再利用。ユーザー面には`(load "path")`フォームと`typl compile-module`
+サブコマンド、CLI/REPL起動の`prelude::load_cached`（`$TYPL_CACHE_DIR`または`~/.typl/cache`に
+キャッシュ）として一般公開。詳細は[[typelisp-fasl-compiled-modules]]、`src/fasl.rs`。
+
+**残**（当時）: 依存*ファイル*（`use`先）自体のパス間キャッシュは未対応——2026-07-15に
+「既知の制限・意図的に対象外7項目の解消」節の2番で解消（`ModuleCache`）。
+
+---
+
+## リーダーの真のspan対応（2026-07-14、branch `feature/reader-spans`）
+
+「reader全体の作り替えが必要」として見送っていたが、位置テーブル機構（`cons_locs`/`elem_locs`）
+はそのままに`Loc`へ`end_line`/`end_col`（排他的終端）を追加する増分で解消。
+`Reader::read_datum_spanned`が全datumの開始〜終了を捕捉（末尾空白/コメントを消費するread関数が
+無いため追加演算ゼロ）、`read_list`はcons_locが`(`〜`)`の完全spanに、quote/quasiquote/unquote/
+unquote-splicing合成リストにも明示括弧と同等のcons_loc/elem_locを付与（従来は一切位置が
+付かなかった）。トップレベル裸アトム（例: 単独の`42`）は`read_all_in_spanned`が`(Value, Loc)`で
+返しそのspanを`Checker::check_form_at`の`loc_hint`へ渡すことで初めて位置を持つ。LSP側は
+`locate_node`が「包含優先(`start<=cursor<end`)+非包含フォールバック(旧点近似)」の2段探索に、
+`loc_to_range`が実spanでrange構築（診断のアンダーラインがフォーム全体に）、hoverにもrangeを
+付与。`FASL_FORMAT_VERSION`を2へbump（`Loc`が`DefLocsRepr`/`Typed.loc`両方でserdeシリアライズ
+されるため）。テスト: read_test 10件・lsp_locate_test 4件追加、miri(read_test/mem_test) green。
+
+---
+
+## マクロ生成`use` + モジュール越しマクロ呼出 + quoted `::`パス（2026-07-15）
+
+「マクロ展開が生成した`use`はロードされない」を解消。根本原因は2つの複合だった: (1)checkerが
+トップレベルのマクロ呼び出しを式として扱い、展開結果の`use`がトップレベル専用の`check_use`に
+到達しない、(2)依存ロードの事前走査（`scan_form`）はマクロ展開前に走るため展開結果が映らない
+（`defmacro`の登録自体がチェックループの副作用なので、一括の事前走査では原理的に展開不可能）。
+対応: `Checker::try_expand_toplevel_macro`を新設し、`check_form_dispatch`が展開結果をトップレベル
+形として再ディスパッチ（`use`だけでなく`defun`/`module`等の定義形の生成も可能に）、Loaderの
+チェックループがフォームごとに事前展開→展開結果を`scan_form`で走査（依存ロード）→展開済み
+フォームをチェック（二重展開なし）。チェック途中の依存ロードは`Checker::suspend_ns_context`で
+名前空間を退避（現在ファイルのモジュール配下へのネスト登録を防ぐ——重要な罠だった）。副産物:
+式位置の`use`/`module`は「トップレベル専用」の明確なエラーに（従来は紛らわしい
+"unbound variable"）。マクロ生成`use`はマクロ定義より後のフォームでのみ機能するが、これは
+バグではなく仕様（単一パスチェックの原理的帰結、`language-design.md`§3の`defmacro`仕様に明記）。
+
+同日中に追加解消: モジュール越しのマクロ呼び出し（`resolve_macro_path`を新設、`mod::macro-name`
+が式位置・トップレベル双方で解決可能に）、quoted data内の`::`パス（`QuotedSexpr::Path`を新設、
+`'(dep::head)`が型チェックを通るように——`FASL_FORMAT_VERSION`を3へbump）。compile（LLVM）側は
+Pathも`Sym`/`Bignum`/`Ratio`同様unsupportedのまま。テスト: `tests/macro_use_test.rs`。
+
+---
+
+## `bignum`/`ratio`型のcompile対応（2026-07-15）
+
+「`f64`の超越関数/丸め関数」節の残課題（`float->bignum`/`float->ratio`のみ）が実は氷山の一角で、
+`bignum`/`ratio`型そのものにcompiled表現が一切無い状態だったのを解消。設計: `bignum`/`ratio`は
+`num_bigint::BigInt`/`num_rational::BigRational`という可変長Rust構造体で固定bit幅のFFI安全な
+レイアウトを持たないため、`f64`のような「ネイティブ表現+box化」の二重化はできず、`Type::Str`と
+同じ「常にタグ付き`TAG_BOXED`ポインタ」規約に統一。`crates/typelisp-rt`に`rt_bignum_new`/
+`rt_ratio_from_bignums`（構築）・`rt_bignum_add/sub/mul/div/mod`/`rt_ratio_add/sub/mul/div`
+（二項演算）・`rt_bignum_cmp`/`rt_ratio_cmp`（3-way比較、`str-lt-call`と同じ「1プリミティブから
+6比較を派生」手法）・変換一式（`rt_int_to_bignum`/`rt_int_to_ratio`/`rt_float_to_bignum`/
+`rt_float_to_ratio`/`rt_bignum_to_int`/`rt_bignum_fits_i32`+`rt_bignum_to_int_raw`（`try-bignum
+->int`用Option二段呼び出し）/`rt_bignum_to_float`/`rt_bignum_to_ratio`/`rt_ratio_to_bignum`/
+`rt_ratio_to_float`/`rt_ratio_numerator`/`rt_ratio_denominator`）を新設（`num-bigint`/
+`num-rational`/`num-traits`を直接依存に追加）。ゼロ除算は`BigInt`/`BigRational`のDiv実装が
+生Rust panicを起こすため、`extern "C"`境界越えUBを避けて演算前に明示チェック→`fatal`。
+`ast_bridge.rs`側: `struct_field_kind`/`binding_kind`に`Type::Bignum`/`Type::Ratio`を`Str`と同じ
+扱いで追加（後者はGC安全性の必須修正——ヒープ参照なのにルート登録されないバグになるところ
+だった）、`Expr::Bignum`/`Expr::Ratio`・`QuotedSexpr::Bignum`/`Ratio`を`unsupported`から実リテラル
+構築（`bignum_literal_form`/`ratio_literal_form`、`str_literal_form`と同じ「符号+桁を`(int _)`列
+として埋め込み、`rt_bignum_new`呼び出し」方式）に変更。`compiler.rs`側: `compile-bignum-literal`/
+`compile-ratio-literal`、`bignum-native-method?`/`ratio-native-method?`、`compile-assoc`への
+分岐追加、`compile-sexpr-field`/`compile-construct-sexpr`のvariant 8/9を「panic」から`str`と同じ
+passthroughに変更。`interp.rs`側: `call_compiled`の引数エンコード（`RtValue::Bignum`/`Ratio`を
+都度ヒープへclone+root、`Str`と同型）と戻り値デコード（`Type::Bignum`/`Ratio`は`Type::Named`で
+ないため`is_boxed_sexpr_type`に掛からず、専用分岐が必須だった）、`rt_extern_functions`への
+26関数追加（JIT `add_global_mapping`用、AOTも同じ関数を再利用）、`compile_function`の
+「ネイティブ受け皿型」除外リストに`bignum`/`ratio`追加。テスト: `compile_test`に13件追加
+（リテラル・四則演算・比較・全変換・`try-bignum->int`のSome/None両方、bignum/ratio双方）。
+
+落とし穴: 自己ホストコンパイラ本体（`compiler.rs`の`SOURCE`文字列）は巨大なS式で、括弧の数え
+間違いが「離れた場所の`if`アリティ不整合」として現れデバッグが難航——コメント/文字列/`#\c`文字
+リテラルを正しく読み飛ばす簡易パーサをその場で書いて特定した。既存テスト2件（`float->bignum`/
+`sqrt`をnon-native `f64`メソッドの例に使っていたもの）は本対応で前提が崩れたため
+`i64::int->char`（今も非ネイティブ）に差し替え。
+
+---
+
+## `f64`の超越関数/丸め関数 + `float->int`のcompile対応（2026-07-15）
+
+「`f64`レシーバのメソッド対応」節で残としていたtranscendental（`sqrt`/`floor`/`ceiling`/`round`/
+`truncate`/`expt`）と`float->int`を解消。算術と同じく「compiled `f64`は生bitパターンを`i64`に
+埋め込む表現」を維持したまま、各操作をLLVM組み込み関数（`llvm.sqrt.f64`等、`expt`は
+`llvm.pow.f64`）にlowering——新設ビルトイン`build-fsqrt`/`build-ffloor`/`build-fceil`/
+`build-fround`/`build-ftrunc`/`build-fpow`が`Intrinsic::get_declaration`でモジュールへ宣言
+（同一モジュール内の再呼び出しに対して冪等なため`get-function`のような事前存在チェック不要）
+した上で`bitcast`+`build-call`+`bitcast`を行う（`build-fadd`等と同じ「i64-in/i64-out」規約）。
+`float->int`は`build-fptosi`——単一の`fptosi`命令のみ、ヒープ確保・モジュール引数とも不要。
+`compile-assoc`のf64分岐は先に単項（`a`のみ必要）を判定してから二項（`b2`も必要）へフォール
+スルーする構造に組み替え——元の構造は無条件に`b2`も評価していたため、単項メソッドをそのまま
+追加すると存在しない2引数目を読もうとして失敗する。残る未対応だった`float->bignum`/
+`float->ratio`は同日中に前節「`bignum`/`ratio`型のcompile対応」で解消。
+
+落とし穴: LLVMの`fptosi`はNaN/範囲外入力に対し値未定義（poison）——インタプリタ側`float_to_int`
+（Rustの`as i64`、飽和的キャスト）とはその境界ケースのみ挙動が発散する。この差は同日中に
+「既知の制限・意図的に対象外7項目の解消」節7番（`llvm.fptosi.sat`intrinsicへの切替え）で解消。
+
+テスト: `compile_test`に4件追加（当時）（transcendental 5種一括+expt+float->int+既存2件の対象
+差し替え`sqrt`→`float->bignum`——sqrt自体がcompile可能になったため）。
+
+---
+
+## 「既知の制限・意図的に対象外」7項目の解消（2026-07-15、branch `feature/known-limitations`）
+
+これまで「既知の制限」「対象外」として個別に記載していた項目のうち、ユーザーの指示
+（「対象外はほぼAIが勝手に決めたもの、客観的に実装可能性を判断せよ」）を受けて再調査した結果、
+文書上ユーザー自身の判断と確認できたのは**`Sexpr`への`Iter`トレイト実装のみ**
+（`language-design.md`に明記、[[typelisp-sexpr-hashtable-iter]]参照）で、残り7件は技術的に
+実装可能と判明し全て解消した（規模の大きい順、コミット1件=1項目）。
+
+1. **値レベル`&rest`/`apply`の再導入**——`Type::Fn`の第2フィールド（rest要素型）と`FnSig.rest`を
+   復元、`(apply f a1..aN rest-list)`特殊形を再実装。固定引数は静的型検査、rest-listは`Sexpr`型で
+   渡し`wrap_rest_elem`/`cons_rest_list`で単一リストへ畳む。`FASL_FORMAT_VERSION`を4へbump。
+   唯一実在したギャップは、`&rest`関数を**第一級の値として参照する**（`Expr::FnRef`化される）
+   場合のみ: `ast_bridge.rs`の`translate_fnref`が合成する転送用クロージャがrestパラメータを一切
+   宣言・転送しないまま固定引数のみで組み立てられていた——compileはエラーにならず成功するが、
+   実行時に空/未ルートの`xs`を読むため誤った値を返すか、GCが介入するとnullポインタ参照で
+   クラッシュする「静かな不正確さ」だった。2026-07-16解消（`translate_fnref`の合成パラメータ
+   リストに、`ty`の`rest`フィールドから`check_defun`/`check_lambda`と同じ`(rest名, Sexpr型)`を
+   追加、回帰テスト`fnref_of_a_variadic_function_forwards_the_rest_list`で検証）。
+   `translate_methodref`にも見た目上同じロジックがあるが、`defmethod`構文に`&rest`が存在しない
+   （`MethodSig`に`rest`フィールドが無い）ため到達不可能と確認済み、コード変更は不要だった。
+   （注: `&rest`付き`defun`自体の直接compile・`apply`経由の呼び出しは元から動作しており
+   `unsupported`ではなかった——`Checker::check_defun`が`&rest`引数を`(rest名, Sexpr型)`として
+   `params`末尾へ折り込む脱糖段階で、`Interp::compiled_fn_body`が読む名前・型のペア数は最初から
+   一致しているため。`tests/compile_test.rs`の
+   `a_variadic_function_compiles_and_dispatches_to_native_code`が元から証明済み。）
+2. **依存ファイル（`use`先）のfaslインメモリキャッシュ**——「fasl機構+`(load)`」節（2026-07-14）で
+   唯一残っていた「依存*ファイル*自体のパス間キャッシュ」を解消。`Loader`に`ModuleCache`
+   （`Rc<RefCell<HashMap<PathBuf, Entry>>>`、`Entry`はdeps（各依存ファイルのパス+内容ハッシュ）と
+   `Rc<Fasl>`）を追加、`try_load_module`がキャッシュ照合→ヒット時は`Fasl::load_into`で新ヒープへ
+   再構築（deps全ファイルの内容ハッシュ再検証込み）。LSP起動時に`ModuleCache`を1つ持ち各診断/
+   補完パスで共有。
+3. **ネストしたジェネリック呼び出しの`where`境界検証**——`validate_where_bounds`の2つの穴を解消。
+   (1) `Vector<U>`等に包んで転送する際の誤拒否（pin比較で開いた型変数を含む場合はスキップし
+   単型化時の再検証に委譲）、(2) 裸の型変数がboundなしで外側関数へ転送されるケースの見逃し
+   （`caller_bounds`を新設して外側のwhere節に一致するboundが宣言済みか照合）。
+4. **`Option`/`Result`型グローバルのcompile参照**——`RtValue::Data` ⇔ compiled sum-ADTボックス
+   （malloc配列`[variant, fields...]`）の相互変換（`data_to_box`/`decode_data_value`）を新設し、
+   JIT/AOT双方から`Option`/`Result`型`defvar`の読み取り・書き込みが可能に。ユーザー定義`defenum`
+   型グローバルは2026-07-16に追加解消（`TopLevel::Defenum`へのvariantフィールド型焼き込み+
+   `Interp::enum_defs`、[[typelisp-defenum-global-compile]]）。`data_to_box`/`decode_data_value`
+   という変換自体も同日中の「enum値のGCヒープ表現統一」（branch `feature/enum-heap-unification`、
+   [[typelisp-enum-heap-unification]]）で全廃: enum値（`Option`/`Result`/ユーザー`defenum`）を
+   defstructと同じGCヒープオブジェクト（`BoxedObj::Enum`、`rt_data_new`/`rt_data_variant`/
+   `rt_data_field`）に統一し、interp/compiled両側が同じ表現を共有するようになった。旧
+   `data_to_box`/`decode_data_value`/kind=10特殊経路は全廃、`global_field_kind`は他の値同様
+   `kind=6`（struct_field_kind一本化）。ただしLLVMハンドル等ヒープ非対応型でインスタンス化された
+   enum（`Option<llvm-value>`——自己ホストコンパイラ本体が多用）は`RtValue::Data`のnativeフォール
+   バックとして存続（`Scope<V>`と同型の二重表現、`Checker::is_heap_repr`/
+   `Interp::enum_fields_representable`が再帰的に判定）。これにより「enum値のネストしたOption等
+   フィールドのencode不可」「enum引数/戻り値のcall_compiled非対応」の2つの残課題も解消。
+5. **quoted data内の`Symbol`/`Path`のcompile対応**——`'foo`/`'(a b c)`/`'dep::head`がcompileを
+   通るように。`rt_intern_symbol`/`rt_intern_path`を新設、`str`リテラルと同じ「タグ付き`Sexpr`を
+   rt呼び出しで構築」方式。
+6. **ユーザー定義関数のLLVMシンボルに`tl_`プレフィックス**——LLVMの`frem`命令がlibmの`fmod`
+   シンボル呼び出しへlowerされるため、`fmod`という名のユーザー関数をcompileすると無限再帰して
+   いた（旧「許容された既知のギャップ」）。`USER_SYMBOL_PREFIX = "tl_"`を導入し、通常呼び出し・
+   関数値化・メソッド呼び出し・JIT/AOT双方のシンボル解決すべてに一貫適用して解消。
+   `sexpr-car`/`sexpr-cdr`/`sexpr-cons`は`rt_car`/`rt_cdr`/`rt_cons`へ直接書き換わる
+   コンパイラ組み込み経路のため意図的にプレフィックス対象外。
+7. **`float->int`のLLVM `fptosi`飽和化**——素の`fptosi`命令はNaN/範囲外入力でpoison値になり
+   インタプリタの`float_to_int`（Rustの`as i64`、飽和キャスト）と食い違っていた（旧「許容された
+   既知のギャップ」）。`llvm.fptosi.sat`intrinsic（`i64`/`f64`でオーバーロード）へ切替え、
+   NaN→0・+inf/オーバーフロー→`i64::MAX`・-inf/アンダーフロー→`i64::MIN`をインタプリタと
+   一致させた。
+
+---
+
+## defenum型グローバルのcompile対応 + enum値のGCヒープ表現統一（2026-07-16）
+
+上記「既知の制限・意図的に対象外7項目の解消」節4番の追記そのもの——branch
+`feature/defenum-global-compile`と`feature/enum-heap-unification`（5 stage）で、
+`TopLevel::Defenum`へのvariant型焼き込み+`Interp::enum_defs`+`subst_apply`（`FASL_FORMAT_VERSION`
+を5へbump）、続けてenum値（`Option`/`Result`/ユーザー`defenum`）をdefstructと同じGCヒープ
+オブジェクト（`BoxedObj::Enum`）に統一。詳細は上記4番および[[typelisp-defenum-global-compile]]/
+[[typelisp-enum-heap-unification]]を参照。
