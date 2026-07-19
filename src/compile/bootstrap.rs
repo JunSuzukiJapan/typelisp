@@ -10,10 +10,9 @@
 //!
 //! Only the *native bodies* are committed — no checker/interpreter state.
 //! `load_aot` rebuilds that by re-checking `SOURCE` (registering each
-//! `defun`'s `FnDef`, which allocates no closures — closures only appear
-//! when an island body is *called* interpreted, which `load_aot` never
-//! does), exactly the way today's `compiler::load` already does; the bitcode
-//! only supplies the compiled function bodies that make those calls native.
+//! `defun`'s `FnDef`, which allocates no closures — an island body is never
+//! *called* interpreted, only compiled); the bitcode supplies the compiled
+//! function bodies that make those calls native.
 //! A [`SOURCE_HASH_GLOBAL`] i64 global carrying [`crate::fasl::source_hash`]
 //! of `SOURCE` is embedded in the module so `load_aot` and the
 //! `island_artifacts_are_fresh` test can detect a `.bc` gone stale relative

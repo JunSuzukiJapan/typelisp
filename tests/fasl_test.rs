@@ -104,7 +104,7 @@ fn rebuild_protects_its_intermediates_from_mid_rebuild_gc() {
 
 use typelisp::fasl::{registry_mark, source_hash, Fasl};
 use typelisp::{
-    completion_candidates, load_prelude, Checker, EvalError, Interp, RtValue, TopLevel,
+    completion_candidates, load_compiler, load_prelude, Checker, EvalError, Interp, RtValue, TopLevel,
 };
 
 /// Load the prelude by source into a fresh environment.
@@ -113,6 +113,10 @@ fn source_loaded() -> (Heap, Checker, Interp) {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
+    // Some comparison programs build closures, which JIT through the compiler
+    // island (interp-closure removal Stage 8c: no interpreted-closure
+    // fallback), so both environments must have it loaded.
+    load_compiler(&mut h, &mut chk, &mut interp);
     (h, chk, interp)
 }
 
@@ -150,6 +154,9 @@ fn fasl_loaded(fasl: &Fasl) -> (Heap, Checker, Interp) {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     fasl.load_into(&mut h, &mut chk, &mut interp).expect("load_into");
+    // Match `source_loaded`: the island is needed to JIT any closure a
+    // comparison program builds (interp-closure removal Stage 8c).
+    load_compiler(&mut h, &mut chk, &mut interp);
     (h, chk, interp)
 }
 

@@ -353,7 +353,15 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// enum-typed anything now classifies heap-repr throughout — a stale
 /// cache's `false` would put a GC-heap value in a Native slot the GC
 /// can't see through compiled code's own collections — 2026-07-16.
-pub const FASL_FORMAT_VERSION: u32 = 6;
+///
+/// 7: the `Symbol`->`Sexpr` widening (`Checker::check_inner`'s reconciliation)
+/// stopped wrapping the value in a `Sexpr::Sym` *constructor* node and now
+/// emits a transparent retype instead — a `gensym`'d temp captured by a
+/// macro-expansion lambda is compiled since interp-closure removal, and the
+/// compiler lowered that constructor as a name-interning `compile-construct-sym`
+/// that aborted on an already-built `Symbol`. A stale cache carries the old
+/// `Construct` node and would re-hit the abort — 2026-07-19.
+pub const FASL_FORMAT_VERSION: u32 = 7;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.

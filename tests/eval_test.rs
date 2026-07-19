@@ -1,15 +1,24 @@
 //! Tests for the tree-walking interpreter over the typed AST (step 4a).
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
+use typelisp::{load_prelude, load_compiler, Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
 
 /// Read, type-check, and evaluate a program; return the last expression's value.
+///
+/// Loads the prelude and the native compiler island first: since interp-closure
+/// removal Stage 8c every `lambda`/`labels`/`FnRef` value is JIT-compiled
+/// through the island (no interpreted-closure fallback), so the many closure
+/// tests here that evaluate through `eval_ok` need it loaded. Loading before
+/// the read also keeps the program's GC roots off the stack while the island
+/// loads; the heap is sized for prelude + island accordingly.
 fn run(src: &str) -> Result<RtValue, EvalError> {
-    let mut h = Heap::with_capacity(8192);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
@@ -33,6 +42,7 @@ fn run_with_prelude(src: &str) -> Result<RtValue, EvalError> {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = RtValue::Unit;
@@ -785,6 +795,7 @@ fn eval_under_gc_pressure(src: &str, rt_cells: usize) -> RtValue {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut src_heap, &mut chk, &mut interp);
+    load_compiler(&mut src_heap, &mut chk, &mut interp);
     let vs = r.read_all(&mut src_heap, src).expect("read failed");
     let tls: Vec<_> = vs
         .into_iter()
@@ -833,11 +844,17 @@ fn a_defvar_sexpr_global_survives_gc_pressure_across_forms() {
 
 #[test]
 fn a_lambda_captured_sexpr_binding_survives_gc_pressure() {
+    // 48 cells: since interp-closure removal the `lambda` is JIT-compiled at
+    // definition time, which itself allocates cons cells for the AST — the old
+    // 4-cell heap can't even hold that. 48 clears the JIT floor (~20) with
+    // margin; the churn count (200, far over the heap size) is what now forces
+    // the repeated collections the captured `s` must survive, so the test still
+    // fails if the capture isn't rooted through GC.
     let src = "(let ((s (cons (Int 6) (Nil)))) \
                  (let ((f (lambda () Sexpr (car s)))) \
-                   (dotimes (i 40) (cons (Int 2) (Nil))) \
+                   (dotimes (i 200) (cons (Int 2) (Nil))) \
                    (f)))";
-    assert_eq!(eval_under_gc_pressure(src, 4), RtValue::Sexpr(Value::Int(6)));
+    assert_eq!(eval_under_gc_pressure(src, 48), RtValue::Sexpr(Value::Int(6)));
 }
 
 // ---- heap-boxed closures (Sexpr/RtValue unification Stage 6b) ----------------
@@ -846,22 +863,30 @@ fn a_lambda_captured_sexpr_binding_survives_gc_pressure() {
 fn an_unnamed_callee_survives_argument_evaluation_under_gc_pressure() {
     // `((f ...) arg)`-shaped calls bind the callee to nothing — only
     // `Expr::Apply`'s own anchor keeps the closure box alive while the
-    // argument churns allocations. 6 cells: enough for the loop to run only
-    // if garbage is collected, which would sweep an unanchored callee.
+    // argument churns allocations, which would sweep an unanchored callee. 48
+    // cells clears the definition-time JIT floor (interp-closure removal — the
+    // old 6-cell heap can't hold the compiled closures' AST); the 200-iteration
+    // churn, far over the heap size, is what forces the collections now.
     let src = "(let ((mk (lambda ((s Sexpr)) (fn (i32) Sexpr) (lambda ((n i32)) Sexpr (sexpr-car s))))) \
                  (let ((f (mk (sexpr-cons (Int 4) (Nil))))) \
-                   (dotimes (i 40) (sexpr-cons (Int 2) (Nil))) \
+                   (dotimes (i 200) (sexpr-cons (Int 2) (Nil))) \
                    (f 0)))";
-    assert_eq!(eval_under_gc_pressure(src, 6), RtValue::Sexpr(Value::Int(4)));
+    assert_eq!(eval_under_gc_pressure(src, 48), RtValue::Sexpr(Value::Int(4)));
 }
 
 #[test]
 fn labels_siblings_mutually_recurse_under_gc_pressure() {
+    // 64 cells clears the definition-time JIT floor for the two `labels`
+    // siblings (interp-closure removal — the old 4-cell heap can't hold their
+    // compiled AST, and the two-member SCC keeps both siblings' AST sexprs
+    // live at once, measured floor ~51); the 200-iteration churn, far over
+    // the heap size, forces the collections the mutually-recursive closures
+    // must survive.
     let src = "(labels ((is-even ((n i32)) bool (if (= n 0) true (is-odd (- n 1)))) \
                         (is-odd ((n i32)) bool (if (= n 0) false (is-even (- n 1))))) \
-                 (dotimes (i 30) (cons (Int 2) (Nil))) \
+                 (dotimes (i 200) (cons (Int 2) (Nil))) \
                  (if (is-even 10) (Int 1) (Int 0)))";
-    assert_eq!(eval_under_gc_pressure(src, 4), RtValue::Sexpr(Value::Int(1)));
+    assert_eq!(eval_under_gc_pressure(src, 64), RtValue::Sexpr(Value::Int(1)));
 }
 
 #[test]
@@ -877,40 +902,13 @@ fn setf_through_a_shared_capture_is_visible_to_the_sibling_closure() {
     assert_eq!(eval_ok_with_prelude(src), RtValue::Sexpr(Value::Int(9)));
 }
 
-#[test]
-fn the_closure_side_table_shrinks_when_the_gc_sweeps_closure_boxes() {
-    // Each loop iteration creates a lambda and drops it; the side table must
-    // track the heap (via `take_dead_closure_tokens`) instead of growing
-    // forever — including the `labels`-style cell<->closure cycle, which the
-    // old `Rc` representation leaked by design.
-    let mut h = Heap::with_capacity(1 << 16);
-    let r = Reader::new();
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let src = "(dotimes (i 50) \
-                 (labels ((self-ref ((n i32)) i32 (if (= n 0) 0 (self-ref (- n 1))))) \
-                   (self-ref 3)))";
-    for v in r.read_all(&mut h, src).expect("read failed") {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        interp.exec(&mut h, tl).expect("eval failed");
-    }
-    let before = interp.closure_body_count();
-    // Everything above is out of scope; a collection plus one sync (any
-    // allocating evaluation) must drain the dead closures' side entries.
-    h.gc();
-    for v in r.read_all(&mut h, "(sexpr-cons (Int 1) (Nil))").expect("read failed") {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        interp.exec(&mut h, tl).expect("eval failed");
-    }
-    let after = interp.closure_body_count();
-    assert!(
-        after < before && after <= 2,
-        "side table must shrink with the GC: before={} after={}",
-        before,
-        after
-    );
-}
+// (Removed `the_closure_side_table_shrinks_when_the_gc_sweeps_closure_boxes`
+// in interp-closure removal Stage 8c.) It proved `Interp`'s interpreted-
+// closure side table (`closure_bodies`, drained via
+// `Heap::take_dead_closure_tokens`) shrank in step with the GC. Both the side
+// table and that drain mechanism are gone now that every closure is a compiled
+// `BoxedObj::CompiledClosure` carrying its own env inline — there is no
+// interpreter-side per-closure state left to leak.
 
 /// A runtime error (here a `panic`) carries the source location of the form it
 /// came from, so messages read `file:line:col: ...` — down to the innermost

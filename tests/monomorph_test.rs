@@ -10,14 +10,21 @@
 //! tests below pin that contract down.
 
 extern crate typelisp;
-use typelisp::{Checker, Error, Heap, Interp, Reader, RtValue, TopLevel, Value, MONO_BUNDLE_MODULE, Path};
+use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader, RtValue, TopLevel, Value, MONO_BUNDLE_MODULE, Path};
 
 fn run(src: &str) -> Result<RtValue, Error> {
     let mut h = Heap::with_capacity(1 << 16);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let mut interp = Interp::new();
+    // Load the prelude then the native compiler island *before* reading the
+    // program: a generic function used as a value reifies to an `FnRef`
+    // closure, which JIT-compiles through the island (interp-closure removal
+    // Stage 8c — no interpreted-closure fallback). Loading first also keeps
+    // the read program's GC roots off the stack while the island loads.
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;

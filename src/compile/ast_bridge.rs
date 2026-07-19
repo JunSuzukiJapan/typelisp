@@ -2169,12 +2169,13 @@ fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type, structs: &HashSet<Pa
     }
 
     // See `translate_call`'s matching check: `sexpr-car`/`sexpr-cdr`/
-    // `sexpr-cons` are never prefixed.
+    // `sexpr-cons` are never prefixed, and a module-qualified target mangles
+    // by its full `::`-joined path so `m::inc` never collides with root `inc`.
     let raw_name = path.local();
     let target_v = if crate::eval::interp::is_rt_builtin_name(raw_name) {
         heap.alloc_string(raw_name.to_string())
     } else {
-        heap.alloc_string(user_symbol_name(raw_name))
+        heap.alloc_string(user_symbol_name(&path.segments().join("::")))
     };
     heap.push_root(target_v);
     let mut var_values = Vec::with_capacity(params.len());
@@ -2260,7 +2261,12 @@ fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], cx: Ctx) -> Resu
     let name_v = if crate::eval::interp::is_rt_builtin_name(raw_name) {
         heap.alloc_string(raw_name.to_string())
     } else {
-        heap.alloc_string(user_symbol_name(raw_name))
+        // Module-qualified callees mangle by their *full* `::`-joined path
+        // (`m::inc` -> `tl_m::inc`), never the bare local (`tl_inc`), so a
+        // module function and a same-named root function don't collide — the
+        // `Interp::compile_scc`/`resolve_fn_def` side keys on the identical
+        // qualified string (interp-closure removal: module-qualified targets).
+        heap.alloc_string(user_symbol_name(&path.segments().join("::")))
     };
     heap.push_root(name_v);
     let arg_values = match tagged_ast_list_to_sexpr(heap, args, cx) {
@@ -3219,13 +3225,16 @@ mod tests {
     /// name, the same way every compiled top-level function is itself
     /// declared (see `translate_call`'s doc comment).
     #[test]
-    fn translates_a_call_keeping_only_the_paths_local_segment() {
+    fn translates_a_call_mangling_the_paths_full_qualified_segments() {
+        // Module-qualified callees mangle by their full `::`-joined path
+        // (interp-closure removal: module-qualified SCC extension) so a
+        // module function and a same-named root function don't collide.
         let mut heap = Heap::with_capacity(1 << 10);
         let call = Expr::Call(crate::Path::of(&["geo", "distance"]), vec![]);
         let v = ast_to_sexpr(&mut heap, &typed(call, Type::I64)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "call");
-        assert_eq!(expect_str(&heap, fields[0]), "tl_distance");
+        assert_eq!(expect_str(&heap, fields[0]), "tl_geo::distance");
     }
 
     #[test]

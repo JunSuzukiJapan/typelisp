@@ -487,9 +487,10 @@ fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
         // printed the same way `format_value`'s `RtValue::Scope` arm prints
         // a native-`V` scope.
         Value::Boxed(id) if heap.is_scope(id) => format!("#<scope depth={}>", heap.scope_frame_count(id)),
-        // A closure is a boxed value too since Stage 6b — printed opaquely,
-        // as the old dedicated `RtValue::Closure` arm did.
-        Value::Boxed(id) if heap.is_closure(id) => "#<closure>".to_string(),
+        // A closure is a boxed value, printed opaquely. Always a compiled
+        // closure since interp-closure removal Stage 8c (`BoxedObj::Closure`
+        // is gone); `BoxedObj::CompiledClosure` is the only closure box left.
+        Value::Boxed(id) if heap.is_compiled_closure(id) => "#<closure>".to_string(),
         Value::Boxed(id) if heap.is_bignum(id) => heap.bignum_value(id).to_string(),
         Value::Boxed(id) if heap.is_ratio(id) => {
             let r = heap.ratio_value(id);

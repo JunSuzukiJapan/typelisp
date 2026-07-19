@@ -29,7 +29,7 @@ use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
 use crate::{BoxId, Expr, Heap, Loc, MacroExpander, Path, Pattern, QuotedSexpr, TopLevel, Type, Typed, Value};
 
-use super::value::{Capture, ClosureBody, EvalError, NativeScope, RtValue, Slot, SlotKind};
+use super::value::{EvalError, NativeScope, RtValue, Slot, SlotKind};
 
 /// A registered function or method body with its parameter names.
 struct FnDef {
@@ -94,11 +94,6 @@ pub struct Interp {
     /// How many roots `sync_roots` last pushed onto the heap, so it knows how
     /// many to pop before recomputing the set from scratch.
     rooted: Cell<usize>,
-    /// Monotonic counter backing `gensym`. typelisp symbols are always
-    /// interned and permanent (no uninterned-symbol concept), so `gensym`
-    /// can only offer collision-*resistant* fresh names, not CL's
-    /// unforgeable ones — see [`Self::eval_builtin`]'s `"gensym"` arm.
-    gensym_counter: Cell<u64>,
     /// Functions JIT-compiled by `(compile name)` (see
     /// [`Self::compile_function`]), by their fully-qualified `Path`.
     /// `RefCell` because `compile` is itself an ordinary builtin reached
@@ -111,20 +106,6 @@ pub struct Interp {
     /// already is, so the two can never drift. `Expr::Assoc`'s eval arm
     /// checks here first, mirroring `Expr::Call`'s own `compiled` check.
     compiled_methods: RefCell<HashMap<(Path, String), crate::compile::CompiledFn>>,
-    /// The interpreter-side half of every live closure (body + `Native`
-    /// captures), keyed by the token its heap box carries — see
-    /// [`ClosureBody`]/`BoxedObj::Closure`. Entries are inserted by
-    /// [`Self::make_closure`] and removed by [`Self::sync_roots`] as the GC
-    /// reports their boxes swept (`Heap::take_dead_closure_tokens`), so the
-    /// table tracks heap liveness with at most one allocation of lag.
-    /// `Rc<ClosureBody>` so an in-flight `Expr::Apply` keeps the body alive
-    /// even if the box (and hence this entry) dies mid-call. Assumes the
-    /// one-`Heap`-per-`Interp` usage every caller already follows — tokens
-    /// from another heap would be meaningless here.
-    closure_bodies: RefCell<HashMap<u32, Rc<ClosureBody>>>,
-    /// Monotonic token source for `closure_bodies` — never reused, so a
-    /// swept box's token can't be mistaken for a newer closure's (no ABA).
-    closure_tokens: Cell<u32>,
     /// Every `Type::Named` path whose compiled representation is a tagged
     /// `Sexpr` `Value::Boxed` struct (Stage 3 of the Sexpr/RtValue
     /// unification plan, `docs/implementation-log.md`) — a user `defstruct`
@@ -211,9 +192,32 @@ impl CallEdge {
     /// convention, kept unchanged).
     fn node_name(&self) -> String {
         match self {
-            CallEdge::Fn(p) => p.local().to_string(),
+            CallEdge::Fn(p) => qualified_fn_name(p),
             CallEdge::Method(p, m) => format!("{}::{}", p.local(), m),
         }
+    }
+}
+
+/// The compile-graph node identity for a top-level function `Path`: its full
+/// `::`-joined name (`m::inc`), collapsing to the bare local for a root
+/// function (`inc`). Inverse of [`fn_path_from_node_name`]. Keeps a
+/// module-qualified closure target distinct from a same-named root function
+/// throughout the SCC machinery (interp-closure removal) — without it, both
+/// mangled to `tl_inc` and the wrong body was linked / the compiled entry
+/// stored under a colliding key.
+fn qualified_fn_name(p: &Path) -> String {
+    p.segments().join("::")
+}
+
+/// Parse a [`CallEdge::Fn`] node name back to its `Path` — `"m::inc"` ->
+/// `Path[m, inc]`, `"inc"` -> `Path::root("inc")`. Only ever applied to a name
+/// [`Interp::method_key`] has already ruled out as a `type::method`, so a
+/// `"::"` here is unambiguously a module separator.
+fn fn_path_from_node_name(name: &str) -> Path {
+    if name.contains("::") {
+        Path::from_segments(name.split("::").map(|s| s.to_string()).collect())
+    } else {
+        Path::root(name)
     }
 }
 
@@ -222,24 +226,23 @@ impl CallEdge {
 /// onward) is unconditional policy: it must escalate exactly the failures
 /// that represent actionable holes in compiled coverage, and nothing else.
 enum JitDecline {
-    /// Falling back to an interpreted closure here is the *correct*,
-    /// permanent behavior, not a coverage gap. Interp-closure removal
-    /// narrowed this set to the two cases that can only arise with the
-    /// *interpreted* compiler island (`compiler::load`, retained for tests
-    /// until Stage 8) or an embedder that loads no island at all: a
-    /// native-tier type (the self-hosted compiler island's own
-    /// `llvm-*`/`Scope<llvm-value>` closures — see
-    /// [`Interp::is_jit_tier_ty`]; classifying these as benign is what keeps
-    /// the default mode from panicking *inside* a reentrant
-    /// `compile-function` run tree-walked by the interpreted island, whose
-    /// own `labels`/`lambda`s are all native-tier), and the compiler island
-    /// not being loaded at all (since Stage 5 every `typl` entry point loads
-    /// it via `compiler::load_aot`, so this only remains for an embedder that
-    /// skips island loading — there is then nothing to JIT *with*).
-    /// (`TYPELISP_CLOSURE_JIT=off` was a third and heap exhaustion mid-JIT a
-    /// fourth until Stage 7 retired both; macro-expansion suppression a fifth
-    /// until Stage 6. Under the always-native island (Stage 8) neither
-    /// remaining case is reachable, which is what lets `make_closure` go.)
+    /// A decline that is not itself a *coverage* gap — a setup/environment
+    /// condition rather than a hole in what the compiler can lower. Two cases
+    /// remain: a native-tier type (the self-hosted compiler island's own
+    /// `llvm-*`/`Scope<llvm-value>` closures — see [`Interp::is_jit_tier_ty`];
+    /// kept distinct so the reason string names the real cause), and the
+    /// compiler island not being loaded at all. Both are unreachable in
+    /// normal operation — since Stage 5 every `typl` entry point installs the
+    /// native island ([`crate::compiler::load_aot`]), which runs *compiled*,
+    /// so its own bodies never reach definition-time JIT, and no user type is
+    /// native-tier; "island not loaded" survives only for an embedder that
+    /// builds an `Interp` and skips island loading. Interp-closure removal
+    /// Stage 8c deleted the interpreted-closure fallback these used to select,
+    /// so [`Interp::jit_closure_from_result`] now escalates a `Benign` decline
+    /// to the same hard [`EvalError::Panic`] a `Gap` gets — there is no longer
+    /// a distinct behavior, only a distinct message. (`TYPELISP_CLOSURE_JIT=off`
+    /// and heap exhaustion mid-JIT were `Benign` too until Stage 7 retired
+    /// both; macro-expansion suppression until Stage 6.)
     Benign(String),
     /// A real, actionable hole in compiled coverage (an uncompiled call
     /// target, a constructor-JIT failure, a JIT-time heap exhaustion, ...) —
@@ -290,10 +293,7 @@ impl Interp {
             methods: HashMap::new(),
             globals: HashMap::new(),
             slots: RefCell::new(Vec::new()),
-            closure_bodies: RefCell::new(HashMap::new()),
-            closure_tokens: Cell::new(0),
             rooted: Cell::new(0),
-            gensym_counter: Cell::new(0),
             compiled: RefCell::new(HashMap::new()),
             compiled_methods: RefCell::new(HashMap::new()),
             // `vector` is registered directly in `Registry::with_builtins`
@@ -359,48 +359,6 @@ impl Interp {
         Ok(Slot::TypedCell(heap.alloc_cell(encoded), ty))
     }
 
-    /// The number of live entries in the closure side table — exposed for
-    /// tests proving the table shrinks in step with the GC (see
-    /// `closure_bodies`); not meaningful to ordinary callers.
-    pub fn closure_body_count(&self) -> usize {
-        self.closure_bodies.borrow().len()
-    }
-
-    /// Builds a closure value: splits the captured environment by slot tier
-    /// — heap cells into the closure box's GC-traced `env`, `Native` slots
-    /// into the side-table [`ClosureBody`] — and returns the box as the
-    /// `RtValue::Sexpr` every function value now is. (`Heap::alloc_closure`
-    /// never itself collects, so the env walk needs no rooting.)
-    fn make_closure(
-        &self,
-        heap: &mut Heap,
-        params: Vec<(String, SlotKind)>,
-        body: Vec<Typed>,
-        env: &Env,
-    ) -> RtValue {
-        let mut heap_env: Vec<Value> = Vec::new();
-        let mut layout: Vec<(String, Capture)> = Vec::with_capacity(env.len());
-        for (name, slot) in env {
-            let cap = match slot {
-                Slot::Heap(id) => {
-                    heap_env.push(Value::Boxed(**id));
-                    Capture::Heap(heap_env.len() - 1)
-                }
-                Slot::Native(rc) => Capture::Native(rc.clone()),
-                Slot::TypedCell(id, ty) => {
-                    heap_env.push(Value::Boxed(**id));
-                    Capture::TypedCell(heap_env.len() - 1, ty.clone())
-                }
-            };
-            layout.push((name.clone(), cap));
-        }
-        let token = self.closure_tokens.get();
-        self.closure_tokens.set(token + 1);
-        self.closure_bodies
-            .borrow_mut()
-            .insert(token, Rc::new(ClosureBody { params, body, layout }));
-        RtValue::Sexpr(heap.alloc_closure(token, heap_env))
-    }
 
     /// Whether a declared type's runtime representation is always
     /// `RtValue::Sexpr` — the interpreter-side twin of the checker's
@@ -428,13 +386,16 @@ impl Interp {
     /// them — used only inside the self-hosted compiler's own source
     /// (`compiler.rs`'s embedded `SOURCE`) — are `false`. A `lambda`/
     /// `labels`/`FnRef`/`MethodRef` whose parameter, return, or any captured
-    /// name's type fails this check must fall back to an interpreted
-    /// closure (`Self::make_closure`) rather than attempt definition-time
-    /// JIT — this is what keeps the compiler island's own `compile-lambda`
-    /// (whose captures include `llvm-builder`/`Scope<llvm-value>`) from a
-    /// bootstrap paradox (JIT-compiling itself to run itself), with no
-    /// special-cased "is this the compiler island" check needed: the type
-    /// system alone decides. Reuses `ast_bridge::struct_field_kind`'s own
+    /// name's type fails this check cannot be JIT-compiled and declines
+    /// [`JitDecline::Benign`] — which kept the interpreted compiler island's
+    /// own `compile-lambda` (whose captures include `llvm-builder`/
+    /// `Scope<llvm-value>`) from a bootstrap paradox (JIT-compiling itself to
+    /// run itself), with no special-cased "is this the compiler island" check
+    /// needed: the type system alone decides. Since interp-closure removal
+    /// Stage 8c the island always runs *compiled*, so its own closures are
+    /// built by native code and never reach this classification (see
+    /// `Self::jit_define_closure`'s own note) — the check now only guards the
+    /// unreachable path, still without a special case. Reuses `ast_bridge::struct_field_kind`'s own
     /// classification (kind `0` is its catch-all "not representable" arm —
     /// every representable type has an explicit kind `1`-`6`), the same
     /// table `tagged_sym_list`/`ast_to_sexpr` already commit to for any
@@ -457,13 +418,13 @@ impl Interp {
     /// Closure unification Stage 7's definition-time JIT driver. Attempts to
     /// build `t` (an `Expr::Lambda`/`Expr::FnRef`/`Expr::MethodRef` node, or
     /// a synthetic `Expr::Lambda` wrapper `Expr::Labels` builds for one
-    /// sibling — see that eval arm) as a *compiled* closure value instead of
-    /// [`Self::make_closure`]'s interpreted one. `captured` is `t`'s free
-    /// variables (name + declared type), `[]` for `FnRef`/`MethodRef`. Never
-    /// panics itself — every failure comes back as `Err(reason)` so the
-    /// caller can decide what to do with it; a [`JitDecline::Gap`] becomes a
-    /// hard error, but only at the eval-arm call site
-    /// ([`Self::jit_result_or_make_closure`]), not here.
+    /// sibling — see that eval arm) as a *compiled* closure value — the only
+    /// kind there is since interp-closure removal Stage 8c. `captured` is
+    /// `t`'s free variables (name + declared type), `[]` for
+    /// `FnRef`/`MethodRef`. Never panics itself — every failure comes back as
+    /// `Err(reason)` so the caller can decide what to do with it; the failure
+    /// becomes a hard error only at the eval-arm call site
+    /// ([`Self::jit_closure_from_result`]), not here.
     ///
     /// The trick that avoids JIT-compiling any new self-hosted Lisp at all:
     /// `t.ty` is already `Type::Fn(params, rest, ret)`, the exact shape
@@ -571,16 +532,13 @@ impl Interp {
             .collect();
         for p in &call_targets {
             if !self.compiled.borrow().contains_key(p) {
-                // The SCC machinery's node identity is a *root-level* name
-                // (`CallEdge::node_name` collapses to `Path::local`, and
-                // `Self::resolve_fn_def` resolves through `Path::root`) — a
-                // module-qualified `defun` (`m::inc`) is out of its reach,
-                // an inherited Stage 5 limitation, not something this call
-                // site can paper over.
-                if !p.is_simple() {
-                    return Err(JitDecline::Gap(format!("call target \"{}\" is module-qualified, which the SCC compile machinery cannot resolve yet", p)));
-                }
-                self.compile_function(heap, p.local())
+                // The SCC machinery keys on a node name that is the callee's
+                // full `::`-joined path (`qualified_fn_name`), so a
+                // module-qualified `defun` (`m::inc`) is transitively compiled
+                // and stored/linked under a name distinct from a same-named
+                // root function — the old "module-qualified is out of reach"
+                // Stage 5 limitation is gone (interp-closure removal).
+                self.compile_function(heap, &qualified_fn_name(p))
                     .map_err(|e| JitDecline::Gap(format!("transitive compile of call target \"{}\" failed: {}", p, e)))?;
             }
         }
@@ -607,7 +565,7 @@ impl Interp {
                 if matches!(key.0.local(), "llvm-module" | "llvm-function" | "llvm-builder" | "scope") {
                     return false;
                 }
-                self.methods.contains_key(key) || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64" | "bignum" | "ratio")
+                self.methods.contains_key(key) || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64" | "bignum" | "ratio" | "sexpr")
             })
             .collect();
         for (p, m) in &assoc_targets {
@@ -674,7 +632,7 @@ impl Interp {
             let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
             let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("closure_ctor")));
             for p in call_targets {
-                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(p.local()));
+                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(&qualified_fn_name(p)));
             }
             for (p, m) in assoc_targets {
                 declare_external_function(&module, &crate::compile::ast_bridge::user_method_symbol_name(p, m));
@@ -695,7 +653,7 @@ impl Interp {
             let compiled = self.compiled.borrow();
             for p in call_targets {
                 let addr = compiled.get(p).expect("checked already-compiled above").address();
-                externals.push((crate::compile::ast_bridge::user_symbol_name(p.local()), addr));
+                externals.push((crate::compile::ast_bridge::user_symbol_name(&qualified_fn_name(p)), addr));
             }
         }
         {
@@ -712,51 +670,37 @@ impl Interp {
 
     /// The shared policy every `Expr::Lambda`/`Labels`/`FnRef`/`MethodRef`
     /// eval arm applies around [`Self::jit_define_closure`]: on success, use
-    /// it; on a [`JitDecline::Gap`] failure, promote the failure reason to a
-    /// hard error unconditionally (Stage 9 made this the only behavior; there
-    /// is no mode switch anymore — interp-closure removal Stage 7 deleted the
-    /// last one); on a [`JitDecline::Benign`] one, silently call `fallback`
-    /// (see `JitDecline`'s doc comment for the two cases still classified
-    /// benign — both only reachable via the interpreted island or an
-    /// island-less embedder). "Silently" here still means
-    /// `TYPELISP_CLOSURE_JIT_LOG`-gated logging, not total silence — the
-    /// `Benign` set (native-tier self-hosted-compiler closures above all) is
-    /// the overwhelmingly common case *under the interpreted island*, and
-    /// every such test would otherwise spew a fallback reason per closure.
-    fn jit_or_make_closure(
+    /// the compiled closure; on *any* decline, a hard [`EvalError::Panic`].
+    /// Interp-closure removal Stage 8c deleted the interpreted-closure
+    /// fallback (`make_closure`) this used to take, so there is nothing to
+    /// fall back *to* anymore — every closure value is a compiled one. A
+    /// [`JitDecline::Gap`] was already a hard error (Stage 9); the two
+    /// remaining [`JitDecline::Benign`] cases (a native-tier type, the island
+    /// not loaded) are both unreachable under the always-loaded AOT-native
+    /// island every entry point installs (Stage 5), so reaching one is a real
+    /// error — an embedder that skipped island loading, say — not a silent
+    /// downgrade. `EvalError::Panic` is a catchable interpreter error (not a
+    /// process abort), so a caller like `Interp::expand_macro` still surfaces
+    /// it as a diagnostic rather than crashing.
+    fn jit_closure(
         &self,
         heap: &mut Heap,
         env: &Env,
         t: &Typed,
         captured: &[(String, Type)],
-        fallback: impl FnOnce(&mut Heap) -> RtValue,
     ) -> Result<RtValue, EvalError> {
         let result = self.jit_define_closure(heap, env, t, captured);
-        self.jit_result_or_make_closure(heap, result, fallback)
+        self.jit_closure_from_result(result)
     }
 
-    /// [`Self::jit_or_make_closure`]'s policy half, taking an
-    /// already-computed [`Self::jit_define_closure`] result rather than the
-    /// inputs to compute one — for a caller (`Expr::Lambda`'s eval arm) that
-    /// needs to skip *computing* those inputs entirely on a cheap
-    /// pre-check, not just skip acting on the result.
-    fn jit_result_or_make_closure(
-        &self,
-        heap: &mut Heap,
-        result: Result<RtValue, JitDecline>,
-        fallback: impl FnOnce(&mut Heap) -> RtValue,
-    ) -> Result<RtValue, EvalError> {
+    /// [`Self::jit_closure`]'s policy half, taking an already-computed
+    /// [`Self::jit_define_closure`] result rather than the inputs to compute
+    /// one — for a caller (`Expr::Lambda`/`Expr::Labels`' eval arms) that
+    /// builds the `Typed`/captured inputs itself before invoking the JIT.
+    fn jit_closure_from_result(&self, result: Result<RtValue, JitDecline>) -> Result<RtValue, EvalError> {
         match result {
             Ok(v) => Ok(v),
-            // Stage 9: a coverage gap is always a hard error now — no mode
-            // silences this arm anymore (see this method's doc comment).
-            Err(JitDecline::Gap(reason)) => Err(EvalError::Panic(format!("definition-time JIT failed: {}", reason))),
-            Err(decline) => {
-                if std::env::var_os("TYPELISP_CLOSURE_JIT_LOG").is_some() {
-                    eprintln!("closure JIT fallback: {}", decline.reason());
-                }
-                Ok(fallback(heap))
-            }
+            Err(decline) => Err(EvalError::Panic(format!("definition-time JIT failed: {}", decline.reason()))),
         }
     }
 
@@ -853,12 +797,6 @@ impl Interp {
     /// triggered from *anywhere* — including compiled code, which never
     /// re-syncs the interpreter's roots.
     fn sync_roots(&self, heap: &mut Heap) {
-        // Release the interpreter-side half of every closure the GC swept
-        // since the last sync — see `closure_bodies`. Dropping an entry also
-        // drops its `Capture::Native` `Rc`s (LLVM handles included).
-        for t in heap.take_dead_closure_tokens() {
-            self.closure_bodies.borrow_mut().remove(&t);
-        }
         for _ in 0..self.rooted.replace(0) {
             heap.pop_root();
         }
@@ -945,8 +883,19 @@ impl Interp {
             .collect();
         let internal_names: Vec<String> =
             names.iter().map(|n| crate::compile::ast_bridge::user_symbol_name(n)).collect();
-        let externals: Vec<(String, usize)> =
-            rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)).collect();
+        // Wire only the `rt_*` shims the module actually forward-declares. A
+        // `check_hash` load has a fresh `.bc` that declares exactly the current
+        // set, but the bootstrap snapshot chain installs the *committed* (older)
+        // `.bc`: if this generation added a new shim (e.g. `rt_gensym`, made to
+        // compile `gensym` in macro-expansion lambdas), that older module never
+        // declared it — and never called it either, so skipping its mapping is
+        // correct, whereas passing it to `new_multi` would fail its "no forward
+        // declaration" guard.
+        let externals: Vec<(String, usize)> = rt_extern_functions()
+            .iter()
+            .filter(|(n, _)| check_hash || module.get_function(n).is_some())
+            .map(|(n, addr)| (n.to_string(), *addr))
+            .collect();
         let compiled_fns = crate::compile::CompiledFn::new_multi(&module, &internal_names, &externals)
             .map_err(|e| format!("compiler island JIT install failed: {}", e))?;
 
@@ -1115,26 +1064,16 @@ impl Interp {
             }
             Expr::FnRef(path) => match self.fns.get(path) {
                 // Reify a user function as a closure with no captured
-                // environment. Closure unification Stage 7: no captures
-                // means no cell-binding prerequisite at all, the simplest
-                // possible JIT attempt — try it first, `make_closure`
-                // fallback otherwise (`Self::jit_or_make_closure`'s doc
+                // environment. No captures means no cell-binding prerequisite
+                // at all, the simplest possible JIT (`Self::jit_closure`'s doc
                 // comment covers the mandatory-JIT policy shared by all four
-                // call sites).
-                Some(f) => self.jit_or_make_closure(heap, env, t, &[], |heap| {
-                    let params = f.params.iter().cloned().zip(f.kinds.iter().copied()).collect();
-                    let body = f.body.clone();
-                    self.make_closure(heap, params, body, &Env::new())
-                }),
+                // call sites since interp-closure removal Stage 8c).
+                Some(_) => self.jit_closure(heap, env, t, &[]),
                 // Otherwise a built-in operator (lives at the root, simple path).
                 None => Ok(RtValue::Builtin(path.local().to_string())),
             },
             Expr::MethodRef { type_name, method } => match self.methods.get(&(type_name.clone(), method.clone())) {
-                Some(m) => self.jit_or_make_closure(heap, env, t, &[], |heap| {
-                    let params = m.params.iter().cloned().zip(m.kinds.iter().copied()).collect();
-                    let body = m.body.clone();
-                    self.make_closure(heap, params, body, &Env::new())
-                }),
+                Some(_) => self.jit_closure(heap, env, t, &[]),
                 None => Ok(RtValue::BuiltinMethod(type_name.clone(), method.clone())),
             },
             Expr::If(..) => {
@@ -1263,13 +1202,7 @@ impl Interp {
                     } else {
                         Err(JitDecline::Benign("a declared parameter or the return type has no compiled representation".to_string()))
                     };
-                    let closure = self.jit_result_or_make_closure(heap, jit_result, |heap| {
-                        let kinds: Vec<(String, SlotKind)> = params
-                            .iter()
-                            .map(|(n, ty)| (n.clone(), self.heap_repr_kind(ty)))
-                            .collect();
-                        self.make_closure(heap, kinds, fbody.clone(), &child)
-                    })?;
+                    let closure = self.jit_closure_from_result(jit_result)?;
                     slot.set(heap, closure)?;
                 }
                 self.eval_seq(heap, body, &child)
@@ -1386,13 +1319,7 @@ impl Interp {
                 } else {
                     Err(JitDecline::Benign("a declared parameter has no compiled representation".to_string()))
                 };
-                self.jit_result_or_make_closure(heap, jit_result, |heap| {
-                    // Capture the current environment (shared slots) for the
-                    // closure, recording each parameter's slot routing from
-                    // its declared type.
-                    let kinds = params.iter().map(|(n, ty)| (n.clone(), self.heap_repr_kind(ty))).collect();
-                    self.make_closure(heap, kinds, body.clone(), env)
-                })
+                self.jit_closure_from_result(jit_result)
             }
             Expr::Apply(callee, args) => {
                 let f = self.eval(heap, callee, env)?;
@@ -1404,65 +1331,20 @@ impl Interp {
                 let _f_anchor = self.native_slot(f.clone());
                 let (argv, _slots) = self.eval_args(heap, args, env)?;
                 match f {
-                    RtValue::Sexpr(Value::Boxed(id)) if heap.is_closure(id) => {
-                        let token = heap.closure_token(id);
-                        // Cloned out so the body survives even if the box —
-                        // and with it this table entry — is swept mid-call.
-                        let cb = self
-                            .closure_bodies
-                            .borrow()
-                            .get(&token)
-                            .cloned()
-                            .ok_or_else(|| EvalError::Internal("closure body missing from side table".into()))?;
-                        if cb.params.len() != argv.len() {
-                            return Err(EvalError::Internal("closure arity mismatch".into()));
-                        }
-                        // Rebuild the captured environment in layout order.
-                        // Heap captures are re-owned (`Heap::adopt_cell`) so
-                        // each frame binding keeps its cell alive on its
-                        // own, independent of the closure box.
-                        let heap_env: Vec<Value> = heap.closure_env(id).to_vec();
-                        let mut cenv: Env = Vec::with_capacity(cb.layout.len() + argv.len());
-                        for (name, cap) in &cb.layout {
-                            let slot = match cap {
-                                Capture::Heap(i) => match heap_env[*i] {
-                                    Value::Boxed(cell) => Slot::Heap(heap.adopt_cell(cell)),
-                                    other => {
-                                        return Err(EvalError::Internal(format!(
-                                            "closure env slot {} is not a cell: {:?}",
-                                            i, other
-                                        )))
-                                    }
-                                },
-                                Capture::Native(rc) => Slot::Native(rc.clone()),
-                                Capture::TypedCell(i, ty) => match heap_env[*i] {
-                                    Value::Boxed(cell) => Slot::TypedCell(heap.adopt_cell(cell), ty.clone()),
-                                    other => {
-                                        return Err(EvalError::Internal(format!(
-                                            "closure env slot {} is not a cell: {:?}",
-                                            i, other
-                                        )))
-                                    }
-                                },
-                            };
-                            cenv.push((name.clone(), slot));
-                        }
-                        for ((n, kind), v) in cb.params.iter().zip(argv) {
-                            let s = self.slot(heap, *kind, v)?;
-                            cenv.push((n.clone(), s));
-                        }
-                        self.eval_seq(heap, &cb.body, &cenv)
-                    }
-                    // The compiled peer of the interp-closure arm above —
-                    // reached whenever this `Apply`'s callee was itself
-                    // produced by compiled code: a compiled function
-                    // returning a `Fn` (decoded via `is_boxed_sexpr_type`'s
-                    // `Type::Fn` arm), or a compiled closure the interpreter
-                    // is merely threading through a chain of `Expr::Apply`s
-                    // it's driving (e.g. `((make-adder n) x)` where
-                    // `make-adder` is `compile`d). Marshals `argv`/decodes
-                    // the result exactly like a top-level `call_compiled`
-                    // call, via the same two halves that split out of it.
+                    // A closure callee is always a *compiled* closure now
+                    // (interp-closure removal Stage 8c deleted the interpreted
+                    // `BoxedObj::Closure` arm that used to precede this one):
+                    // every `lambda`/`labels`/`FnRef`/`MethodRef` value is
+                    // built by definition-time JIT. Reached whenever this
+                    // `Apply`'s callee was produced by compiled code — a
+                    // compiled function returning a `Fn` (decoded via
+                    // `is_boxed_sexpr_type`'s `Type::Fn` arm), or a compiled
+                    // closure the interpreter is threading through a chain of
+                    // `Expr::Apply`s it's driving (e.g. `((make-adder n) x)`
+                    // where `make-adder` is `compile`d). Marshals `argv`/
+                    // decodes the result exactly like a top-level
+                    // `call_compiled` call, via the same two halves that split
+                    // out of it.
                     RtValue::Sexpr(Value::Boxed(id)) if heap.is_compiled_closure(id) => {
                         let (int_args, crossing_roots) = self.encode_crossing_args(heap, &argv)?;
                         crate::compile::runtime::set_active_heap(heap as *mut Heap);
@@ -1755,38 +1637,13 @@ impl Interp {
         }
         for v in argv {
             let encoded = match v {
-                // An *interpreted* closure box must not silently cross this
-                // boundary: compiled code represents function values as its
-                // own `BoxedObj::CompiledClosure`, and a tagged interp
-                // closure handed over as a plain `Sexpr` would be
-                // dereferenced as one — same "clear internal error, not a
-                // silent misread" stance the pre-6b `RtValue::Closure`
-                // rejection took. Since closure unification Stage 9 made a
-                // compiled-coverage gap an unconditional panic at
-                // definition time (`Interp::jit_result_or_make_closure`), an
-                // `RtValue::Closure` can only reach *this* boundary via one
-                // of the permanent Benign fallbacks (see `JitDecline`'s doc
-                // comment) — the self-hosted compiler island's own
-                // native-tier closures (an `llvm-builder`/`Scope<llvm-value>`
-                // capture, say), which by construction never have a JIT-tier
-                // `Fn` type a compiled function could declare a parameter as
-                // in the first place, so they can't actually reach here — and
-                // then only while the island runs *interpreted*
-                // (`compiler::load`, tests only); an island-less embedder is
-                // the other Benign case but never reaches compiled code at
-                // all. Interp-closure removal Stage 7 retired the two cases
-                // that used to make this realistically reachable
-                // (`TYPELISP_CLOSURE_JIT=off` and JIT-time heap exhaustion).
-                // A *compiled* closure
-                // (also a tagged `Sexpr`) needs no such rejection — it falls
-                // through to the ordinary `RtValue::Sexpr` arm just below
-                // like any other boxed value, since compiled code on both
-                // sides of this call already agrees on
-                // `BoxedObj::CompiledClosure`'s shape.
-                RtValue::Sexpr(Value::Boxed(id)) if heap.is_closure(*id) => Err(EvalError::Internal(
-                    "compiled call: an interpreted closure cannot be passed to compiled code".into(),
-                )),
-                // Already rooted by the pre-pass above — just encode.
+                // A closure crossing into compiled code is always a
+                // `BoxedObj::CompiledClosure` now (interp-closure removal
+                // Stage 8c deleted `BoxedObj::Closure`), a tagged `Sexpr` like
+                // any other boxed value — so it just falls through to the
+                // ordinary `RtValue::Sexpr` arm; compiled code on both sides
+                // already agrees on its shape. Already rooted by the pre-pass
+                // above, so this only encodes.
                 RtValue::Sexpr(sv) => Ok(crate::compile::runtime::encode(*sv)),
                 RtValue::Int(n) => Ok(*n),
                 // The remaining scalar crossings, by the same encodings
@@ -2052,12 +1909,21 @@ impl Interp {
     /// the first place). See [`Self::method_key`] for how `name` decides
     /// which of the two this is.
     fn resolve_fn_def(&self, name: &str) -> Result<&FnDef, EvalError> {
+        // A `"::"` name is a `type::method` (a `defmethod`) *or* a
+        // module-qualified `defun` (`m::inc`) — both share the separator.
+        // `method_key` matches only a genuinely registered method, so try it
+        // first; a miss falls through to a `self.fns` lookup by the full parsed
+        // path (interp-closure removal: module-qualified closure targets).
         if name.contains("::") {
-            let key = self.method_key(name).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))?;
-            self.methods.get(&key).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))
-        } else {
-            self.fns.get(&Path::root(name)).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))
+            if let Some(key) = self.method_key(name) {
+                return self.methods.get(&key).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()));
+            }
+            return self
+                .fns
+                .get(&fn_path_from_node_name(name))
+                .ok_or_else(|| EvalError::NoSuchFunction(name.to_string()));
         }
+        self.fns.get(&Path::root(name)).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))
     }
 
     /// Looks up `name`'s registered `defun`/`defmethod` body (see
@@ -2445,7 +2311,7 @@ impl Interp {
     fn is_compiled_name(&self, name: &str) -> bool {
         match self.method_key(name) {
             Some(key) => self.compiled_methods.borrow().contains_key(&key),
-            None => self.compiled.borrow().contains_key(&Path::root(name)),
+            None => self.compiled.borrow().contains_key(&fn_path_from_node_name(name)),
         }
     }
 
@@ -2464,7 +2330,7 @@ impl Interp {
     /// [`Self::compile_scc`] (which needs the same edges again, in typed
     /// form, to know what to forward-declare/wire as `externals`).
     fn call_graph_edges(&self, name: &str) -> Result<Vec<CallEdge>, EvalError> {
-        let path = Path::root(name);
+        let path = fn_path_from_node_name(name);
         let method_key = self.method_key(name);
         let (_, body) = self.compiled_fn_body(name)?;
         let mut edges = Vec::new();
@@ -2527,7 +2393,7 @@ impl Interp {
                 // (interp-closure removal Stage 8a). `is_native_lowered_primitive_method`
                 // is the Rust twin of the island's `*-native-method?` list.
                 self.methods.contains_key(key)
-                    || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64" | "bignum" | "ratio")
+                    || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64" | "bignum" | "ratio" | "sexpr")
                     || !is_native_lowered_primitive_method(key.0.local(), &key.1)
             })
             .collect();
@@ -2680,7 +2546,7 @@ impl Interp {
                 declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(member));
             }
             for target in &call_targets {
-                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(target.local()));
+                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(&qualified_fn_name(target)));
             }
             for (type_name, method) in &method_targets {
                 declare_external_function(&module, &crate::compile::ast_bridge::user_method_symbol_name(type_name, method));
@@ -2702,7 +2568,7 @@ impl Interp {
                 .iter()
                 .map(|p| {
                     (
-                        crate::compile::ast_bridge::user_symbol_name(p.local()),
+                        crate::compile::ast_bridge::user_symbol_name(&qualified_fn_name(p)),
                         compiled.get(p).expect("Self::compute_sccs's finish order guarantees this is already compiled").address(),
                     )
                 })
@@ -2741,7 +2607,7 @@ impl Interp {
                     self.compiled_methods.borrow_mut().insert(key, compiled);
                 }
                 None => {
-                    self.compiled.borrow_mut().insert(Path::root(member), compiled);
+                    self.compiled.borrow_mut().insert(fn_path_from_node_name(member), compiled);
                 }
             }
         }
@@ -2856,14 +2722,12 @@ impl Interp {
                 Err(e) => Some(Err(e)),
             },
             "gensym" => {
-                // A leading space mirrors the hidden-binding idiom already
-                // used for `dotimes`/`dolist`'s internal variables in the
-                // checker (e.g. `" dotimes-limit"`): it can never collide
-                // with a name a user actually types, since the reader's
-                // symbol tokenizer can't produce a space mid-token.
-                let n = self.gensym_counter.get();
-                self.gensym_counter.set(n + 1);
-                Some(Ok(RtValue::Sexpr(heap.intern_symbol(&format!(" gensym-{}", n)))))
+                // Both the fresh-name scheme (leading-space, unforgeable) and
+                // the monotonic counter live on the `Heap` now
+                // (`Heap::gensym`), so this interpreted path and the compiled
+                // `rt_gensym` shim share one sequence — see that method's doc
+                // comment for why they must.
+                Some(Ok(RtValue::Sexpr(heap.gensym())))
             }
             // `symbol->string`/`string->symbol`: the `Symbol`<->`Str` bridges.
             // A `Symbol` value shares the `Value::Symbol(id)` carrier of a
@@ -4058,6 +3922,13 @@ pub(crate) fn is_rt_builtin_name(name: &str) -> bool {
             | "sexpr-float"
             | "sexpr-str"
             | "sexpr-sym-name"
+            // `gensym`: a free builtin (not a `sexpr-*` accessor) with no
+            // typelisp body — `compile-call` rewrites it to the `rt_gensym`
+            // shim, the same wiring as the accessors above. It must be here so
+            // a macro-expansion lambda that calls it (e.g. `do`'s per-binding
+            // temporaries) doesn't send `call_graph_edges` looking for a
+            // (nonexistent) `gensym` function to transitively compile.
+            | "gensym"
     )
 }
 
@@ -4084,7 +3955,7 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
     match type_local {
         "i64" | "i32" => matches!(
             method,
-            "+" | "-" | "*" | "<" | "<=" | ">" | ">=" | "=" | "eq" | "/=" | "int->bignum" | "int->ratio"
+            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "eq" | "/=" | "int->bignum" | "int->ratio"
         ),
         "string" => matches!(
             method,
@@ -4110,6 +3981,13 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "eq" | "eql" | "equal" | "equalp"
                 | "ratio->bignum" | "ratio->float" | "numerator" | "denominator"
         ),
+        // `Sexpr` values are raw tagged `i64` handles in compiled code, and
+        // interned symbols/`nil`/small atoms are handle-identical, so `eq`
+        // (CL identity) lowers to a plain `icmp eq` on the two handles —
+        // `compile-assoc`'s `sexpr` arm, mirroring the `char` branch. Only
+        // `eq` is native; structural `equal` stays an ordinary prelude
+        // `defun` compiled the normal way.
+        "sexpr" => matches!(method, "eq"),
         _ => false,
     }
 }
@@ -4171,13 +4049,13 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 90] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 93] {
     use crate::compile::runtime::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
         rt_cell_get, rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len, rt_closure_fnptr,
         rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_float_new, rt_float_to_bignum,
-        rt_float_to_ratio, rt_float_value, rt_global_get, rt_global_new, rt_global_set,
+        rt_float_to_ratio, rt_float_value, rt_gensym, rt_global_get, rt_global_new, rt_global_set, rt_i64_div, rt_i64_mod,
         rt_hashtable_clear, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw, rt_hashtable_keys,
         rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_hashtable_values, rt_int_to_bignum, rt_int_to_ratio,
         rt_intern_path, rt_intern_symbol, rt_match_fail, rt_null, rt_panic, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
@@ -4285,6 +4163,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 90] {
         ("rt_ratio_denominator", rt_ratio_denominator as usize),
         ("rt_intern_symbol", rt_intern_symbol as usize),
         ("rt_intern_path", rt_intern_path as usize),
+        ("rt_gensym", rt_gensym as usize),
+        ("rt_i64_div", rt_i64_div as usize),
+        ("rt_i64_mod", rt_i64_mod as usize),
     ]
 }
 

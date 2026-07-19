@@ -956,17 +956,13 @@ fn compile_dispatches_an_escaping_capturing_lambda_called_through_another_compil
 /// `build-closure-apply` machinery the closure-value test above does.
 ///
 /// `run-it`'s body (not the top-level call site) is where `square` appears
-/// bare — deliberately, since the *tree-walking* interpreter's own
-/// `Expr::FnRef` evaluation produces an `RtValue::Closure` (an
-/// *interpreted* closure, still rejected at the compiled boundary — see
-/// `Interp::call_compiled`'s `is_closure` arm), not a plain `i64` (see
-/// `Interp::eval`'s `Expr::FnRef` arm) — feeding that straight into a
-/// *compiled* function's fixed `i64` ABI from the top level would hit
-/// exactly that rejection. Routing the `FnRef` through another `compile`d
-/// function instead (`run-it`, itself dispatched via `Expr::Call` ->
-/// `Interp.compiled` like any Stage 3 call) keeps the closure entirely on
-/// the compiled side throughout (`ast_bridge::translate_fnref`'s forwarding
-/// `lambda`), never reifying an interpreted one at all.
+/// bare, so the whole chain — `run-it` -> `apply-fn` -> the `square` `FnRef`
+/// — stays compiled. (Historically this routing mattered because the
+/// tree-walking interpreter's `Expr::FnRef` produced an *interpreted* closure
+/// that was rejected at the compiled boundary; since interp-closure removal
+/// Stage 8c `Expr::FnRef` JIT-compiles to a `BoxedObj::CompiledClosure` that
+/// crosses fine, so a bare top-level `(apply-fn square 5)` would work too —
+/// this test keeps the `run-it` form as the original end-to-end slice.)
 #[test]
 fn compile_dispatches_a_top_level_function_passed_by_name_through_apply_fn() {
     let v = eval_ok_with_compiler(

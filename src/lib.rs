@@ -18,11 +18,10 @@ pub use types::*;
 pub use check::*;
 pub use eval::*;
 pub use prelude::load as load_prelude;
-// interp-closure removal Stage 8a: every island load now goes through the
-// native AOT loader (`load_aot`), so no test or embedder tree-walks the
-// island's own bodies anymore — the prerequisite for deleting interpreted
-// closures. `load_compiler` is kept as the historical name; the interpreted
-// `compiler::load` still exists but is no longer wired to anything (removed
-// with the rest of the interp-closure machinery in Stage 8c).
+// interp-closure removal: every island load goes through the native AOT
+// loader (`load_aot`), so nothing tree-walks the island's own bodies — the
+// prerequisite for deleting interpreted closures (Stage 8a wired this;
+// Stage 8c removed the interpreted `compiler::load` entirely). `load_compiler`
+// is kept as the historical name for the one loader there is.
 pub use compiler::load_aot as load_compiler;
 pub use compiler::load_aot as load_compiler_aot;

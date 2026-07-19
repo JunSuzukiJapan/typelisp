@@ -63,8 +63,8 @@
 //! holder of that same cell — an outer activation's own binding, a sibling
 //! closure that also captured it, even the tree-walking interpreter's own
 //! `Slot::Heap` if this cell originated there — sees the write immediately,
-//! matching the interpreter's own true shared-cell closures (heap-cell
-//! captures, see `BoxedObj::Closure`/`ClosureBody`) exactly. The one
+//! matching the shared-cell semantics the interpreter gives a captured
+//! binding through the same `BoxedObj::Cell` heap cells. The one
 //! exception: a `labels` sibling captured *as a value* (not called) is
 //! never cell-boxed even though it appears in the very same captured-list —
 //! see `Ctx::visible_siblings`'s doc comment (`ast_bridge.rs`) for why a
@@ -513,7 +513,15 @@ pub const SOURCE: &str = r#"
   (if (sexpr-consp names)
       (let ((name-pair (sexpr-car names)) (rest (sexpr-cdr names)))
         (let ((kind (sexpr-int (sexpr-cdr name-pair))))
-          (if (eq kind 2)
+          ;; Trace a slot whose tag is `2` (a plain tagged `Sexpr` value) *or*
+          ;; `>= 10` (a cell-boxed capture — `tagged_sym_list`'s `10 +
+          ;; struct_field_kind`): the cell slot holds a `BoxedObj::Cell`
+          ;; reference, itself a live heap value the GC mark phase must follow
+          ;; to keep the captured binding (and whatever it holds) alive. Missing
+          ;; the `>= 10` case let a nested closure's cell-boxed capture — e.g. a
+          ;; compiled function's own parameter captured by an inner `lambda` —
+          ;; be swept out from under it under GC pressure.
+          (if (if (eq kind 2) true (>= kind 10))
               (+ (pow2 idx) (compute-sexpr-mask rest (+ idx 1)))
               (compute-sexpr-mask rest (+ idx 1)))))
       0))
@@ -718,6 +726,11 @@ pub const SOURCE: &str = r#"
   (if (equal method "+") true
   (if (equal method "-") true
   (if (equal method "*") true
+  ;; `/`/`mod` lower to the `rt_i64_div`/`rt_i64_mod` shims (integer division
+  ;; can't be a bare LLVM instruction — `sdiv`/`srem` by zero is UB), not a
+  ;; straight instruction like the others, but they're still native here.
+  (if (equal method "/") true
+  (if (equal method "mod") true
   (if (equal method "<") true
   (if (equal method "<=") true
   (if (equal method ">") true
@@ -730,7 +743,7 @@ pub const SOURCE: &str = r#"
   ;; checked before `b2` the same way `float-native-method?`'s own unary
   ;; conversions are.
   (if (equal method "int->bignum") true
-  (equal method "int->ratio")))))))))))))
+  (equal method "int->ratio")))))))))))))))
 
 (defun string-native-method? ((method string)) bool
   (if (equal method "length") true
@@ -1608,6 +1621,20 @@ pub const SOURCE: &str = r#"
                          (let ((type-name (sexpr-str (sexpr-car (sexpr-cdr e)))))
                            (let ((method (sexpr-str (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
                              (let ((rest (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
+                               (if (if (equal type-name "sexpr") (equal method "eq") false)
+                                   ;; `Sexpr` `eq`: CL identity on the raw tagged
+                                   ;; `i64` handles — interned symbols/`nil`/small
+                                   ;; atoms are handle-identical, so `icmp eq` on
+                                   ;; the operands *is* `eq`. It never dereferences
+                                   ;; either operand (the comparison is on the
+                                   ;; handle bits), so — unlike a call that reads
+                                   ;; through them — no `push-sexpr-root` is needed
+                                   ;; between compiling the two, same as the `char`
+                                   ;; branch's own `eq`. Structural `equal` is not
+                                   ;; here: it stays an ordinary prelude `defun`.
+                                   (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+                                     (let ((b (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+                                       (build-icmp-eq builder a b)))
                                (if (if (equal type-name "string") (string-native-method? method) false)
                                    (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
                                      (if (equal method "length")
@@ -1675,6 +1702,22 @@ pub const SOURCE: &str = r#"
                                                    (build-sub builder a b2)
                                                    (if (equal method "*")
                                                        (build-mul builder a b2)
+                                                       ;; `/` and `mod`: unlike `+`/`-`/`*`, integer
+                                                       ;; division can't be a bare LLVM instruction —
+                                                       ;; `sdiv`/`srem` by zero is UB — so both route
+                                                       ;; through `rt_i64_div`/`rt_i64_mod`, which
+                                                       ;; check the divisor (and `MIN/-1`) and abort
+                                                       ;; cleanly, matching the interpreter's panic.
+                                                       (if (equal method "/")
+                                                           (let ((args-ptr (alloca-args builder 2)))
+                                                             (store-arg builder args-ptr 0 a)
+                                                             (store-arg builder args-ptr 1 b2)
+                                                             (build-call builder (get-function m "rt_i64_div") args-ptr 2))
+                                                       (if (equal method "mod")
+                                                           (let ((args-ptr (alloca-args builder 2)))
+                                                             (store-arg builder args-ptr 0 a)
+                                                             (store-arg builder args-ptr 1 b2)
+                                                             (build-call builder (get-function m "rt_i64_mod") args-ptr 2))
                                                        (if (equal method "<")
                                                            (build-icmp-lt builder a b2)
                                                            (if (equal method "<=")
@@ -1687,7 +1730,7 @@ pub const SOURCE: &str = r#"
                                                                            (build-icmp-eq builder a b2)
                                                                            (if (equal method "/=")
                                                                                (build-icmp-ne builder a b2)
-                                                                               (panic (append "compile-assoc: unsupported method " method)))))))))))))))
+                                                                               (panic (append "compile-assoc: unsupported method " method)))))))))))))))))
                                        (if (if (equal type-name "char") (char-native-method? method) false)
                                            ;; `char` receivers: raw `i64` code points in
                                            ;; compiled code, so the comparisons lower to the
@@ -1892,7 +1935,7 @@ pub const SOURCE: &str = r#"
                                             (if (equal method "/=")
                                                 (build-icmp-ne builder (ratio-cmp-call builder m a b2) (const-i64 builder 0))
                                                 (build-icmp-eq builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)))))))))))))))))
-        (compile-assoc-user builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name method rest)))))))))))
+        (compile-assoc-user builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name method rest))))))))))))
                        ;; The user-defined-method leg of `compile-assoc`'s
                        ;; dispatch (see its doc comment): call the callee
                        ;; under the mangled name `type-name::method`,
@@ -2050,7 +2093,14 @@ pub const SOURCE: &str = r#"
                                                                              (if (equal raw-nm "sexpr-float") "rt_float_value"
                                                                                  (if (equal raw-nm "sexpr-str") "rt_sexpr_str"
                                                                                      (if (equal raw-nm "sexpr-sym-name") "rt_sym_name"
-                                                                                         raw-nm)))))))))))))))
+                                                                                         ;; `gensym`: the one non-`sexpr-*` free
+                                                                                         ;; builtin rewritten here — a nullary
+                                                                                         ;; call to the `rt_gensym` shim (mints a
+                                                                                         ;; fresh interned symbol), the same
+                                                                                         ;; wiring the accessors above get. See
+                                                                                         ;; `interp::is_rt_builtin_name`.
+                                                                                         (if (equal raw-nm "gensym") "rt_gensym"
+                                                                                             raw-nm))))))))))))))))
                              (let ((arg-forms (sexpr-cdr (sexpr-cdr e))))
                                (let ((argc (sexpr-list-length arg-forms)))
                                  (let ((args-ptr (alloca-args builder argc)))
@@ -3594,21 +3644,13 @@ pub const SOURCE: &str = r#"
                   m))))))))
 "#;
 
-/// Loads the compiler body. Like [`crate::load_prelude`], `SOURCE` is fixed
-/// and known-good, so a failure here is a bug in this file, not a user
-/// error — panics rather than threading a `Result` callers couldn't
-/// meaningfully recover from.
-pub fn load(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
-    let r = Reader::new();
-    let forms = r.read_all(heap, SOURCE).expect("compiler: read failed");
-    for v in forms {
-        let tl = chk.check_form(heap, &*interp, v).expect("compiler: check failed");
-        for w in chk.take_warnings() {
-            eprintln!("{}", w);
-        }
-        interp.exec(heap, tl).expect("compiler: eval failed");
-    }
-}
+// (Removed the interpreted island loader `load` in interp-closure removal
+// Stage 8c.) It read/checked/`exec`d `SOURCE` without installing the native
+// bitcode, so calling `compile-function` afterward tree-walked the island —
+// which built interpreted closures for its own `labels`/`lambda`s. With those
+// closures gone, that path can no longer run; [`load_aot`] (the only loader
+// now, behind `crate::load_compiler`) installs the native bodies so the island
+// runs compiled.
 
 /// The precompiled compiler-island bitcode (interp-closure removal Stage 3),
 /// embedded so [`load_aot`] needs no filesystem access at runtime. Kept in

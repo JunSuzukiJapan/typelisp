@@ -8,7 +8,7 @@
 
 extern crate typelisp;
 use std::cell::RefCell;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, RtValue};
 
 // Every test below shares one (Heap, Checker, Interp) per thread instead of
 // reloading the prelude from scratch each time — loading it ~100+ times is
@@ -31,6 +31,7 @@ fn with_ctx<R>(f: impl FnOnce(&mut Heap, &mut Checker, &mut Interp) -> R) -> R {
             let mut chk = Checker::new();
             let mut interp = Interp::new();
             load_prelude(&mut h, &mut chk, &mut interp);
+            load_compiler(&mut h, &mut chk, &mut interp);
             (h, chk, interp)
         });
         f(h, chk, interp)

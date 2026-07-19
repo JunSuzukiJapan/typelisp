@@ -3268,19 +3268,21 @@ impl Checker {
         // expected type.
         if let Some(e) = expected {
             if typed.ty != Type::Never && &typed.ty != e {
-                // A `Symbol` is a valid `Sexpr` datum, so it is wrapped into
-                // `Sexpr::Sym` wherever a `Sexpr` is expected (a `gensym`'d
-                // temp flowing into a `list`/`cons`/quasiquote code position).
-                // The runtime bits are identical, so `construct_sexpr`'s
-                // `SEXPR_SYM` arm is an effective no-op.
+                // A `Symbol` is a valid `Sexpr` datum wherever a `Sexpr` is
+                // expected (a `gensym`'d temp flowing into a `list`/`cons`/
+                // quasiquote code position). Its runtime representation is
+                // already exactly its `Sexpr::Sym` — `RtValue::Sexpr(Value::
+                // Symbol)`, see `construct_sexpr`'s SEXPR_SYM arm — so widening
+                // the static type needs no runtime work. Emit a transparent
+                // *retype*, not a `Sexpr::Sym` constructor node: the
+                // interpreter treated that constructor as a no-op, but the
+                // compiler lowers a variant-5 construct as
+                // `compile-construct-sym`, which interns a *name string*.
+                // Feeding it an already-built `Symbol` value (a `gensym`'d temp
+                // captured by a now-compiled macro-expansion lambda) aborts in
+                // `rt_intern_symbol`. A bare retype is correct for both tiers.
                 if *e == sexpr_ty() && typed.ty == Type::Symbol {
-                    let ctor = sexpr_ctor_for(&Type::Symbol).expect("Symbol has a Sexpr encoding");
-                    let (type_name, variant) =
-                        self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
-                    return Ok(Typed { loc: None,
-                        expr: Expr::Construct { type_name, variant, args: vec![typed], mutable: false },
-                        ty: sexpr_ty(),
-                    });
+                    return Ok(Typed { loc: typed.loc, expr: typed.expr, ty: sexpr_ty() });
                 }
                 return Err(Error::TypeError(format!(
                     "type mismatch: expected {:?}, found {:?}",

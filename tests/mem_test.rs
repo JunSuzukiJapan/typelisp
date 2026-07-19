@@ -952,63 +952,12 @@ fn gc_traces_through_cell_then_struct_then_cons() {
     assert_eq!(h.live_count(), 1);
 }
 
-// ---- closures (`BoxedObj::Closure`, Sexpr/RtValue unification Stage 6b) ------
-
-#[test]
-fn a_rooted_closure_keeps_its_captured_cells_and_their_contents_alive() {
-    let mut h = Heap::with_capacity(4);
-    let kept = h.cons(Value::Int(5), Value::Empty).unwrap();
-    let cell = h.alloc_cell(kept);
-    let clo = h.alloc_closure(0, vec![Value::Boxed(*cell)]);
-    // Drop the cell's own handle: the closure box is now the only thing
-    // keeping the cell (and, through it, the cons) alive.
-    drop(cell);
-    h.push_root(clo);
-    h.gc();
-    let id = match clo {
-        Value::Boxed(id) => id,
-        _ => unreachable!(),
-    };
-    let held = match h.closure_env(id)[0] {
-        Value::Boxed(c) => h.cell_get(c),
-        other => panic!("expected the captured cell, got {:?}", other),
-    };
-    assert_eq!(h.car(held).unwrap(), Value::Int(5));
-    assert_eq!(h.live_count(), 1);
-    h.pop_root();
-}
-
-#[test]
-fn sweeping_an_unreachable_closure_reports_its_token() {
-    let mut h = Heap::with_capacity(4);
-    let _ = h.alloc_closure(41, Vec::new());
-    assert_eq!(h.box_count(), 1);
-    h.gc();
-    assert_eq!(h.box_count(), 0);
-    assert_eq!(h.take_dead_closure_tokens(), vec![41]);
-    // Drained: a second call reports nothing.
-    assert!(h.take_dead_closure_tokens().is_empty());
-}
-
-#[test]
-fn a_cell_closure_cycle_is_collected_as_a_unit_and_reported() {
-    // The `labels` shape: a binding cell holding a closure whose captured
-    // env points back at that very cell. Under the old `Rc` representation
-    // this cycle leaked by design; as heap objects, mark-sweep reclaims
-    // both once the external handle drops — and reports the token so the
-    // interpreter's side table can follow.
-    let mut h = Heap::with_capacity(4);
-    let cell = h.alloc_cell(Value::Empty);
-    let clo = h.alloc_closure(7, vec![Value::Boxed(*cell)]);
-    h.cell_set(*cell, clo);
-    assert_eq!(h.box_count(), 2);
-    h.gc();
-    assert_eq!(h.box_count(), 2, "the external cell handle keeps the knot alive");
-    drop(cell);
-    h.gc();
-    assert_eq!(h.box_count(), 0, "the whole cycle is reclaimed together");
-    assert_eq!(h.take_dead_closure_tokens(), vec![7]);
-}
+// (The `BoxedObj::Closure` heap tests — a rooted closure keeping its
+// captured cells alive, a swept closure reporting its side-table token, and a
+// cell↔closure `labels` cycle collected as a unit — were removed in
+// interp-closure removal Stage 8c along with `BoxedObj::Closure` itself.
+// `BoxedObj::CompiledClosure` is the only closure box now; its own env-tracing
+// and sweep behavior are covered in `crates/typelisp-rt`'s closure tests.)
 
 // ---- boxed scopes (`StructPayload::Frames`, Sexpr/RtValue unification Stage 7) ----
 //

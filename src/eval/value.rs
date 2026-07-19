@@ -12,7 +12,7 @@ use inkwell::values::{BasicValueEnum, FunctionValue};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-use crate::{BoxId, Heap, Loc, Path, Type, Typed, Value};
+use crate::{BoxId, Heap, Loc, Path, Type, Value};
 
 /// One `Scope<V>` frame — see [`RtValue::Scope`]'s doc comment.
 pub type ScopeFrame = Rc<RefCell<HashMap<String, RtValue>>>;
@@ -226,43 +226,6 @@ impl Slot {
     }
 }
 
-/// Where one of a closure's captured bindings lives — the two-tier [`Slot`]
-/// split carried through capture:
-///
-/// * `Heap(i)` — the capture is a heap cell; index `i` into the closure
-///   box's own `env: Vec<Value>` (`BoxedObj::Closure`), which is the part
-///   the GC traces.
-/// * `Native(rc)` — the capture is a `Native` slot (a scalar, an LLVM
-///   handle, ...); held right here in the side table, invisible to the GC
-///   by construction.
-///
-/// `layout` (below) keeps name → capture in original environment order, so
-/// shadowing resolves exactly as it did in the defining scope.
-#[derive(Clone, Debug)]
-pub enum Capture {
-    Heap(usize),
-    Native(Rc<RefCell<RtValue>>),
-    /// The `Slot::TypedCell` counterpart of `Heap(i)`: same env-array
-    /// indexing (the cell reference is a `Value::Boxed` slot like any other
-    /// heap capture), but the slot must be re-decoded through `ty` rather
-    /// than assumed `Sexpr` — see `Slot::TypedCell`'s doc comment.
-    TypedCell(usize, Type),
-}
-
-/// The interpreter-side half of a closure — everything `crate::mem` cannot
-/// hold: the checked body, the parameter names/slot kinds, and the `Native`
-/// captures. Lives in `Interp`'s side table keyed by the closure box's
-/// `body_token` (`BoxedObj::Closure`), and is dropped when the GC reports
-/// the box swept (`Heap::take_dead_closure_tokens`) — which releases the
-/// `Native` captures' `Rc`s (LLVM handles included), so the side table can
-/// never leak what the heap already freed.
-#[derive(Debug)]
-pub struct ClosureBody {
-    pub params: Vec<(String, SlotKind)>,
-    pub body: Vec<Typed>,
-    pub layout: Vec<(String, Capture)>,
-}
-
 /// A runtime value. Data-type instances (constructors of `Option`/`Result`/
 /// user structs) are represented uniformly by [`RtValue::Data`]; `Sexpr` is
 /// the one exception — it is the cons/nil-bearing builtin the GC-managed cons
@@ -330,12 +293,13 @@ pub enum RtValue {
     /// — `heap.is_struct`/`struct_type_name`/`struct_field`/etc. distinguish
     /// it from a boxed float or a genuine quoted `Sexpr` datum at each read
     /// site (`interp.rs`'s `expect_struct_box`/`decode_field_typed`).
-    /// Since Stage 6b this is also where a *closure* lives: a
-    /// `Value::Boxed` pointing at a `BoxedObj::Closure` (heap-cell captures +
-    /// a token into `Interp`'s `ClosureBody` side table) — so closure
-    /// identity, GC tracing, and cycle collection (`labels`) all come from
-    /// the same heap machinery as every other boxed value, and no dedicated
-    /// `RtValue::Closure` variant exists anymore.
+    /// This is also where a *closure* lives: a `Value::Boxed` pointing at a
+    /// `BoxedObj::CompiledClosure` (a JIT/AOT function pointer + its captured
+    /// environment) — so closure identity and GC tracing come from the same
+    /// heap machinery as every other boxed value, and no dedicated
+    /// `RtValue::Closure` variant exists. (The interpreted `BoxedObj::Closure`
+    /// that stood here through Stages 6b–8b was removed in interp-closure
+    /// removal Stage 8c; every closure is compiled now.)
     /// Since the enum-representation unification this is also where an
     /// *enum value* (`Option`/`Result`/`Error`/user `defenum`) lives: a
     /// `Value::Boxed` pointing at a `BoxedObj::Enum` (variant index +

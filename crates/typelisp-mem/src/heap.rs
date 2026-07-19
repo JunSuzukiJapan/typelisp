@@ -43,6 +43,17 @@ pub struct Heap {
     sym_names: Vec<String>,
     sym_ids: HashMap<String, u32>,
 
+    // Monotonic counter backing `gensym`. Lives on the `Heap` — not the
+    // `Interp` — so both the interpreter's `gensym` builtin and the compiled
+    // `rt_gensym` shim (which only ever sees this shared, thread-registered
+    // heap) draw from *one* sequence: a macro expansion mixing interpreted
+    // `gensym` calls (a macro body's own, e.g. `case`'s `tmp`) with compiled
+    // ones (a JIT'd expansion-lambda's, e.g. `do`'s per-binding temporaries)
+    // must never mint the same " gensym-N" symbol twice, or two "fresh"
+    // symbols would be `eq`-identical (symbols are interned/permanent) and
+    // hygiene would break.
+    gensym_counter: u64,
+
     // interned `::` paths (permanent; reference only permanent symbols)
     paths: Vec<Vec<SymId>>,
     path_ids: HashMap<Vec<SymId>, u32>,
@@ -76,15 +87,6 @@ pub struct Heap {
     // compiled code, which knows nothing about the interpreter's
     // root-resyncing) can never sweep a live binding cell.
     cell_registry: Vec<std::rc::Weak<BoxId>>,
-
-    // Tokens of `BoxedObj::Closure`s freed by the most recent sweeps, not
-    // yet drained by the interpreter (`take_dead_closure_tokens`) — the
-    // bridge that lets the side table holding each closure's body (and its
-    // GC-invisible `Native` captures) release entries in step with the
-    // heap. Accumulated rather than returned from `gc()` because most
-    // collections run *implicitly* inside `cons()`, where a return value
-    // has no consumer.
-    dead_closure_tokens: Vec<u32>,
 
     // Source *spans* (opening `(` through closing `)`) of cons cells produced
     // by the reader, keyed by the cell's raw address (`ConsRef::addr`), so an
@@ -137,6 +139,7 @@ impl Heap {
             permanent_roots: Vec::new(),
             sym_names: Vec::new(),
             sym_ids: HashMap::new(),
+            gensym_counter: 0,
             paths: Vec::new(),
             path_ids: HashMap::new(),
             str_slots: Vec::new(),
@@ -147,7 +150,6 @@ impl Heap {
             box_free: Vec::new(),
             box_marks: Vec::new(),
             cell_registry: Vec::new(),
-            dead_closure_tokens: Vec::new(),
             cons_locs: HashMap::new(),
             elem_locs: HashMap::new(),
         }
@@ -330,6 +332,19 @@ impl Heap {
     /// The name of an interned symbol.
     pub fn symbol_name(&self, id: SymId) -> &str {
         &self.sym_names[id.0 as usize]
+    }
+
+    /// Mint a fresh, unforgeable symbol for `gensym`, returning its
+    /// `Value::Symbol`. The name uses a leading space (` gensym-N`) the
+    /// reader's tokenizer can never produce mid-token, so it can never collide
+    /// with a symbol a user actually types; `N` is a per-heap monotonic
+    /// counter, so it never collides with an earlier `gensym` either. Both the
+    /// interpreter's `gensym` builtin and the compiled `rt_gensym` shim funnel
+    /// through here (see [`Heap::gensym_counter`]) so the two never overlap.
+    pub fn gensym(&mut self) -> Value {
+        let n = self.gensym_counter;
+        self.gensym_counter += 1;
+        self.intern_symbol(&format!(" gensym-{}", n))
     }
 
     // ---- paths ------------------------------------------------------------
@@ -701,20 +716,6 @@ impl Heap {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Cell(_)))
     }
 
-    /// Re-registers an *existing*, live cell in the liveness registry,
-    /// returning a fresh owning handle — for a caller that reached the cell
-    /// through a heap reference (a closure's captured environment) rather
-    /// than an `Rc` it already holds, and now needs the cell to outlive
-    /// that reference (e.g. a call frame binding that must survive the
-    /// closure box itself being swept mid-call). Panics if `id` is not a
-    /// live cell, same convention as [`cell_get`](Self::cell_get).
-    pub fn adopt_cell(&mut self, id: BoxId) -> std::rc::Rc<BoxId> {
-        assert!(self.is_cell(id), "adopt_cell: BoxId does not hold a live Cell");
-        let rc = std::rc::Rc::new(id);
-        self.cell_registry.push(std::rc::Rc::downgrade(&rc));
-        rc
-    }
-
     /// [`alloc_cell`](Self::alloc_cell) without the owning-`Rc` liveness
     /// registration — for *compiled* code (`rt_cell_new`), which has no Rust
     /// `Rc` to hold: the cell's lifetime is governed purely by ordinary
@@ -729,20 +730,6 @@ impl Heap {
 
     // ---- closures --------------------------------------------------------------
 
-    /// Store a function value, returning its `Value::Boxed` — see
-    /// [`BoxedObj::Closure`]. `env` must hold only `Value::Boxed` cell
-    /// references (the closure's heap-cell captures); the body lives in the
-    /// caller's side table under `body_token`. Like
-    /// [`alloc_cell`](Self::alloc_cell), never itself triggers a collection.
-    pub fn alloc_closure(&mut self, body_token: u32, env: Vec<Value>) -> Value {
-        self.alloc_boxed(BoxedObj::Closure { body_token, env })
-    }
-
-    /// True if `id` holds a `BoxedObj::Closure`.
-    pub fn is_closure(&self, id: BoxId) -> bool {
-        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Closure { .. }))
-    }
-
     /// True if `id` holds a `BoxedObj::Float` — the *positive* float test
     /// callers decoding an unknown `Value::Boxed` must use now that "not a
     /// struct and not a hashtable" no longer implies float (cells and
@@ -751,55 +738,27 @@ impl Heap {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Float(_)))
     }
 
-    /// A closure's side-table key. Panics if `id` doesn't hold a
-    /// `BoxedObj::Closure` — same internal-invariant-trap convention as
-    /// [`float_value`](Self::float_value).
-    pub fn closure_token(&self, id: BoxId) -> u32 {
-        match &self.box_slots[id.0 as usize] {
-            Some(BoxedObj::Closure { body_token, .. }) => *body_token,
-            _ => panic!("BoxId does not hold a Closure"),
-        }
-    }
-
-    /// A closure's heap-cell captures, in layout order. Panics like
-    /// [`closure_token`](Self::closure_token).
-    pub fn closure_env(&self, id: BoxId) -> &[Value] {
-        match &self.box_slots[id.0 as usize] {
-            Some(BoxedObj::Closure { env, .. }) => env,
-            _ => panic!("BoxId does not hold a Closure"),
-        }
-    }
-
-    /// Drains the tokens of every closure freed by collections since the
-    /// last drain — see the `dead_closure_tokens` field. The interpreter
-    /// calls this from `sync_roots` (which precedes every allocation) so a
-    /// side-table entry outlives its swept closure by at most one
-    /// allocation.
-    pub fn take_dead_closure_tokens(&mut self) -> Vec<u32> {
-        std::mem::take(&mut self.dead_closure_tokens)
-    }
-
     // ---- compiled closures ------------------------------------------------------
 
     /// Store a compiled function value — native entry point `fn_ptr` plus
     /// its captured environment — returning its `Value::Boxed`; see
     /// [`BoxedObj::CompiledClosure`] for the `env`/`sexpr_mask` slot
-    /// convention. Like [`alloc_closure`](Self::alloc_closure), never
-    /// itself triggers a collection, so the env values may be un-rooted at
-    /// the moment of the call.
+    /// convention. Like [`alloc_cell`](Self::alloc_cell), never itself
+    /// triggers a collection, so the env values may be un-rooted at the
+    /// moment of the call.
     pub fn alloc_compiled_closure(&mut self, fn_ptr: usize, env: Vec<Value>, sexpr_mask: u64) -> Value {
         self.alloc_boxed(BoxedObj::CompiledClosure { fn_ptr, env, sexpr_mask })
     }
 
-    /// True if `id` holds a `BoxedObj::CompiledClosure` — the compiled peer
-    /// of [`is_closure`](Self::is_closure).
+    /// True if `id` holds a `BoxedObj::CompiledClosure` — the only closure
+    /// box there is since interp-closure removal Stage 8c.
     pub fn is_compiled_closure(&self, id: BoxId) -> bool {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::CompiledClosure { .. }))
     }
 
     /// A compiled closure's native entry point. Panics if `id` doesn't hold
-    /// a `BoxedObj::CompiledClosure` — same internal-invariant-trap
-    /// convention as [`closure_token`](Self::closure_token).
+    /// a `BoxedObj::CompiledClosure` — the same internal-invariant-trap
+    /// convention as [`float_value`](Self::float_value).
     pub fn compiled_closure_fnptr(&self, id: BoxId) -> usize {
         match &self.box_slots[id.0 as usize] {
             Some(BoxedObj::CompiledClosure { fn_ptr, .. }) => *fn_ptr,
@@ -1269,15 +1228,6 @@ impl Heap {
             }
             // A live binding cell keeps whatever it currently holds live.
             BoxedObj::Cell(v) => stack.push(*v),
-            // A live closure keeps its captured cells (and, through them,
-            // their contents) live — including a `labels` cycle
-            // (cell -> closure -> sibling cell -> ...), which mark-sweep
-            // reclaims as a unit once nothing external reaches it.
-            BoxedObj::Closure { env, .. } => {
-                for &v in env {
-                    stack.push(v);
-                }
-            }
             // A live compiled closure keeps its captured slots live. Every
             // slot is traced uniformly — an unmasked (raw native bits) slot
             // rides in an immediate `Value::Int`, so tracing it is a no-op
@@ -1381,14 +1331,9 @@ impl Heap {
             }
         }
 
-        // SWEEP boxed objects: same recycling scheme as strings. A swept
-        // closure additionally reports its side-table token — see
-        // `take_dead_closure_tokens`.
+        // SWEEP boxed objects: same recycling scheme as strings.
         for i in 0..self.box_slots.len() {
             if self.box_slots[i].is_some() && !self.box_marks[i] {
-                if let Some(BoxedObj::Closure { body_token, .. }) = &self.box_slots[i] {
-                    self.dead_closure_tokens.push(*body_token);
-                }
                 self.box_slots[i] = None;
                 self.box_free.push(i as u32);
             }

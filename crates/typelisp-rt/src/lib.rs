@@ -2125,6 +2125,66 @@ pub unsafe extern "C" fn rt_intern_symbol(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().intern_symbol(&name))
 }
 
+/// Mints a fresh `gensym` symbol, returning it as a tagged `Value::Symbol` —
+/// the compiled-code half of `gensym` (`compiler.rs`'s `compile-call` rewrites
+/// the free call `(gensym)` to this shim by name, the same way it rewrites
+/// `sexpr-car` -> `rt_car`). Takes no arguments. Delegates to [`Heap::gensym`]
+/// so it draws from the *same* per-heap counter the interpreter's `gensym`
+/// builtin uses — a program whose macro expansion mixes interpreted and
+/// compiled `gensym` calls (a `case` body's own vs. a JIT'd `do` expansion-
+/// lambda's) must never mint the same name twice. The result is a permanent
+/// interned symbol, so — like [`rt_intern_symbol`] — it needs no GC-root
+/// protection.
+///
+/// # Safety
+///
+/// A `Heap` must already be registered on this thread. `args`/`argc` are
+/// unused (`gensym` is nullary).
+#[no_mangle]
+pub unsafe extern "C" fn rt_gensym(_args: *const i64, _argc: u32) -> i64 {
+    encode(active_heap().gensym())
+}
+
+/// Signed integer division `a / b` — the compiled-code half of `i64`/`i32`
+/// `/`, which (unlike `+`/`-`/`*`) can't be a bare LLVM instruction because
+/// LLVM `sdiv` by zero is undefined behavior. Matches the interpreter's
+/// `int_binop`, which panics on a zero divisor; `checked_div` also catches the
+/// one other trap case, `i64::MIN / -1` (arithmetic overflow). Operands are
+/// raw untagged `i64`s (the int branch of `compile-assoc` computes them the
+/// same way `build-add` does), so there is no decode/encode here.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_i64_div(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_i64_div: expected 2 arguments");
+    }
+    match (*args).checked_div(*args.add(1)) {
+        Some(q) => q,
+        None => fatal("divide by zero"),
+    }
+}
+
+/// Signed integer remainder `a % b` — the compiled-code half of `i64`/`i32`
+/// `mod`, the `srem` companion of [`rt_i64_div`]. Same zero-/overflow-trap
+/// handling (`checked_rem`) and raw-`i64` operand convention.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_i64_mod(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_i64_mod: expected 2 arguments");
+    }
+    match (*args).checked_rem(*args.add(1)) {
+        Some(r) => r,
+        None => fatal("mod by zero"),
+    }
+}
+
 /// Interns `args[0..argc]` (each a tagged `Value::Symbol`, one per `::`
 /// segment, in order — `ast_bridge::translate_quote`'s `Path` arm builds
 /// each segment as its own `(str ...)` literal, so the compiled IR calls
@@ -3046,7 +3106,6 @@ mod tests {
             Value::Boxed(id) => {
                 let h = unsafe { active_heap() };
                 assert!(h.is_compiled_closure(id));
-                assert!(!h.is_closure(id), "a compiled closure must not read as an interp closure");
                 assert_eq!(h.compiled_closure_mask(id), 0b01);
             }
             other => panic!("expected a boxed compiled closure, got {:?}", other),
@@ -3059,8 +3118,8 @@ mod tests {
 
     /// A rooted compiled closure keeps its captured cell — and through it
     /// the cell's contents — alive across a collection: the mark-phase
-    /// fan-out `push_boxed_nested`'s `CompiledClosure` arm, mirroring what
-    /// an interp closure's env already gets.
+    /// fan-out `push_boxed_nested`'s `CompiledClosure` arm (the only closure
+    /// arm since interp-closure removal Stage 8c).
     #[test]
     fn a_rooted_compiled_closure_keeps_its_captured_cell_alive_across_gc() {
         let mut heap = Heap::with_capacity(8);
@@ -3103,11 +3162,13 @@ mod tests {
         assert_eq!(unsafe { rt_cell_get([cell].as_ptr(), 1) }, encode(Value::Int(3)));
     }
 
-    /// An unreachable compiled closure is swept like any other box — and,
-    /// having no interpreter side table, must *not* report a dead token
-    /// the way a swept `BoxedObj::Closure` does.
+    /// An unreachable compiled closure is swept like any other box. (It has
+    /// no interpreter side table to release — the `BoxedObj::CompiledClosure`
+    /// carries its own env inline; the interpreted `BoxedObj::Closure` that
+    /// once needed a swept-token report was removed in interp-closure removal
+    /// Stage 8c, and with it the whole dead-token mechanism.)
     #[test]
-    fn an_unreachable_compiled_closure_is_swept_without_reporting_a_dead_token() {
+    fn an_unreachable_compiled_closure_is_swept() {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
@@ -3119,7 +3180,6 @@ mod tests {
         heap.gc(); // nothing roots it
 
         assert!(!heap.is_compiled_closure(id), "the unrooted closure box was swept");
-        assert!(heap.take_dead_closure_tokens().is_empty(), "a compiled closure has no side-table token to report");
     }
 
     #[test]

@@ -15,7 +15,7 @@
 //! specializer matches the call.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, load_compiler, Checker, Error, Heap, Interp, Reader, RtValue};
 
 fn run(src: &str) -> Result<RtValue, String> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -23,6 +23,7 @@ fn run(src: &str) -> Result<RtValue, String> {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
     let vs = r.read_all(&mut h, src).map_err(|e| format!("{:?}", e))?;
     let mut last = RtValue::Unit;
     for v in vs {
