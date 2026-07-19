@@ -8,12 +8,14 @@
 > `rt_hashtable_contains`/`_get_raw`/`_remove_raw` + 実行時分岐（`compile-if`と同型のalloca+
 > 分岐+merge、phiビルトインなし）で対応。
 
-## 背景・目的
+## 背景・目的（起案時点、2026-07-13）
 
-`compile`（LLVM JIT/AOT）は現状、ユーザーが普通に書けるコードから到達しうる `unsupported` は
+`compile`（LLVM JIT/AOT）は起案時点で、ユーザーが普通に書けるコードから到達しうる `unsupported` は
 解消済み（TODO.md）だが、**Iter トレイトを介したコレクション反復**（`doiter` / `map`/`filter`/
-`member`/`foldl` 等のコンビネータ）は compile できない。これは `docs/dev/TODO.md` で「将来課題
+`member`/`foldl` 等のコンビネータ）は compile できなかった。これは `docs/dev/TODO.md` で「将来課題
 （Phase 6.6 対象外）」として明示的に見送られていた項目。本計画はこれを解消する。
+
+> 上記は起案時点の状態描写であり現状ではない。冒頭の状況ノート通り Stage A〜E 全完了済み。
 
 ### 誤解しやすい点: トレイトディスパッチは compile のブロッカーではない
 

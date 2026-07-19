@@ -321,9 +321,24 @@ Phase 5 で**ユーザー面の `Sexpr` リスト操作を一括撤去**した�
   - `nth`/`elt` は範囲外で `nil` でなく **`Option<A>`**（`find`/`position` の慣習に合わせた）。
     CL の引数順をそのまま踏襲: `(nth n it)` だが `(elt it n)`。
   - `subseq` は `end` が入力長を超えてもクランプする（CL はエラー）。
-- **generic `defun` 本体は自己完結が必須**: `where` 境界の伝播は未実装（`Checker::check_call` の
+- ~~**generic `defun` 本体は自己完結が必須**: `where` 境界の伝播は未実装（`Checker::check_call` の
   `cannot infer type parameter` 判定）のため、境界付き generic の本体から別の境界付き generic を
-  呼べない。`elt` が `nth` へ委譲せず同じループを複製しているのはこのため。
+  呼べない。`elt` が `nth` へ委譲せず同じループを複製しているのはこのため。~~
+  **→ 2026-07-19 解消**。原因は`check_call`の関連型ピン推論ループ（`sig.bounds`から`subst`へ
+  実際の紐付けを解決する箇所）が、束縛先の型が**まだ裸の未解決型変数**（＝呼び出し元自身の型
+  パラメータがそのまま転送されてきた場合）だと`reg.type_def`で引けず単に`continue`していたため
+  ——`elt`の本体診断チェック中、`it : I`（`elt`自身の未解決`I`）を`nth`へそのまま渡すと、`nth`の
+  戻り型`Option<A>`の`A`を紐付ける手掛かりが`(Item A)`ピン一本だけなのに、そのピン解決が
+  スキップされ`A`が永久に未解決のまま「`cannot infer type parameter A for nth`」になっていた。
+  `validate_where_bounds`（呼び出し先の検証側）は同種の裸型変数ケースを`caller_bounds`
+  （`Env::bounds`、囲む関数自身の`where`節）と照合する分岐を2026-07-15の「既知の制限7項目解消」
+  で既に持っていたが、*推論*側の同名ループには同じ分岐が無かった——検証は直っていたのに推論が
+  直っていない、という非対称な見落とし。`validate_where_bounds`と対になる分岐を推論ループにも
+  追加し、束縛先が裸の型変数のときは`env.bounds`から同じtrait名の呼び出し元自身の境界を探し、
+  その関連型ピン（`elt`の`(Item A)`の`A`、まだ開いたまま）を`subst`へ直接unifyするよう変更
+  （`check_call`、`src/check/checker.rs`）。`elt`を実際に`nth`へ委譲するよう`prelude.rs`を更新。
+  テスト: `tests/tmp_where_bound_check.rs`で確認後削除（使い捨て）、既存の`tests/seq_ops_test.rs`の
+  `elt`テストがそのまま回帰確認になる（実装が変わっても外部から見た挙動は同一）。
 - **`compile`（自己ホストコンパイラ）は Phase 6.5 時点では未対応**（`compile-assoc` の固定リスト外
   panic）→ **Phase 6.6 で解消済み**（下記。primitive レシーバのユーザーメソッドが compile 可能に）。
 

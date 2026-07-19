@@ -190,7 +190,7 @@ IO系（`print`/`println`/`princ`/`format`/`read`/`read-line`）・型変換・i
 | 関数 | 分類 | 備考 |
 |---|---|---|
 | `remove` / `remove-if` / `remove-if-not` / `count` / `count-if` / `position` / `position-if` / `copy-list` / `nthcdr` / `butlast` / `elt` / `subseq` | **TypeLisp** | すべて既存の `cons`/`car`/`cdr`/`match`/`length`/`append` の組合せで実装可能 |
-| `nconc` / `nreverse`（破壊的） | **TypeLisp** | `set-car`/`set-cdr` の組合せで実装可能（`set-car`/`set-cdr` 自体はRust。既存カタログ記載済みだが未実装） |
+| `nconc` / `nreverse`（破壊的） | **TypeLisp** | `set-car`/`set-cdr` の組合せで実装可能（`set-car`/`set-cdr` 自体はRust）。**追記（2026-07-19）**: 提案通り一度実装されたが（[implementation-log.md](implementation-log.md)参照）、`symbol-sexpr-redesign.md` Phase 5 で cons チェーン専用APIとして削除され、非破壊 generic `reverse`（Phase 4a）に一本化された。意図的な設計変更であり未実装ではない |
 
 #### f. 数値拡張
 
