@@ -3642,3 +3642,136 @@ Stage 8で**表面化しなかった**ためやらなかったこと（要求が
 interpクロージャアーム）は本計画のスコープ外——自己ホストコンパイラ島自体（`compile-function`
 等が読む埋め込みSOURCE）をAOT化し、コンパイラ島自身がJITを必要としなくなることが前提になる
 （そうなって初めて、恒久Benign集合のうち「native tier型」の存在理由が消える）。
+
+## interpクロージャ完全削除 実装計画（2026-07-18起案、Stage 1-8c全完了 2026-07-19）
+
+**背景**: 上記クロージャ表現統一計画のフォローアップ。恒久Benign fallback 5項目のうち
+「マクロ展開中」「コンパイラ島未ロード」「native tier型」を消すには、コンパイラ島自体
+（`src/compiler.rs`の埋め込みSOURCE）をAOT化し島自身がJITを必要としない状態にする必要がある。
+branch `feature/closure-unification`→（Stage 8以降）`feature/interp-closure-removal`。
+ユーザー決定: フル実装・島は真のAOT化（λリフトではなくコミット済みbitcode方式）。
+
+- **Stage 1（`73d7763`）**: llvm-*型のcompiled表現をi64ハンドルレジストリ化し、単一ディスパッチ
+  `rt_llvm_call(op, a1..aN)`で既存`eval_llvm_builtin_method`へ橋渡し。個別シムを書かずに
+  約45メソッドを吸収。
+- **Stage 2（`ca85b84`）**: 島41 defun全数のSCC経由self-compileが成立することを検証、
+  `char->int`をネイティブ化。
+- **Stage 3（`99bba76`）**: `typl-bootstrap-island`バイナリでcheck済み島を`Fasl::capture`+
+  全defunをcompiled moduleへ書き出し、`src/compiler_island.bc`+`.fasl`としてコミット。
+  鮮度テスト（埋め込みfaslの`source_hash` vs 現在の`SOURCE`のhash）を追加。初回生成時は
+  現行interp島で実行（この時点ではinterpクロージャ健在）。
+- **Stage 4（`be47b95`）**: 実行時AOTローダ`compiler::load_aot`——`Fasl::from_bytes`+
+  `Module::parse_bitcode_from_buffer`+`CompiledFn::new_multi`（externalsは`rt_extern_functions()`を
+  module内宣言でフィルタ）+`Interp::install_compiled`。
+- **Stage 5（`f444ae4`）**: `typl` CLI/REPL/LSP/全テストヘルパで`load_aot`を常時実行、
+  「島未ロード」fallbackを実質廃止。
+- **Stage 6（`2cfdf53`）**: マクロ展開中の定義時JIT解禁（`jit_suppressed`撤去）。島がAOT済みなら
+  展開中JITの再入問題は消えるという想定通りだった。
+- **Stage 7（`5c77d40`）**: `TYPELISP_CLOSURE_JIT`環境変数と`JitMode`を削除、JIT中heap枯渇の
+  Benign分類を廃止し通常のheap枯渇と同様panic化。
+- **Stage 8a（`50a235a`）**: 全経路`load_compiler`→`load_aot`移行。この移行で**native島の隠れ
+  バグ2件**が露見（Stages 1-7ではllvm_shim/compile_testがinterpreted島に対して実行されていた
+  ため潜在化していた）:
+  1. **op-idの61bit切り詰め**——`llvm_op_id`のフルFNVハッシュがタグ付きsexpr Int（下位3bit
+     タグ）で上位3bit消失。`llvm_op_id`を`((h<<3)>>3)`に修正。
+  2. **f64リテラルの切り詰め**——f64ビットを`(float bits-as-int)`でタグ付きsexpr Intへ渡す
+     箇所が同じ理由で下位3bitを失い、2.0が0.0化して除算がinfになる形で発覚。`(float hi lo)`の
+     32bit×2分割に変更（`ast_bridge.rs`両呼び出し箇所+島`compile-float`、`build-shl`/`build-or`で
+     再構成）。**教訓: op-id/f64ビット/大きなi64リテラルのようなフル64bit値はタグ付きsexpr
+     Intで運べない**（大きなi64リテラルは同根の潜在バグとして未修正のまま残存、失敗テスト
+     なし）。
+  加えてnative島はコンパイルエラーがRust側のcatchable `EvalError`ではなくFFI境界を跨いで
+  **abort**するため、`call_graph_edges`に`is_native_lowered_primitive_method`
+  （島の`*-native-method?`述語のRust twin）を追加し、未対応メソッド呼び出しを島実行前に
+  クリーンエラー化。
+- **Stage 8b（`e9737a1`）**: bootstrapを自己ホスト・スナップショット連鎖化——`SOURCE`変更時は
+  コミット済み**旧**`.bc`のnative `compile-function`で新`SOURCE`を再コンパイルする
+  `scripts/regen-compiler-island.sh`。`install_island_bitcode`に`check_hash`引数追加。
+  regenした`.bc`が従来とバイト完全一致することを確認し、連鎖が安定していることを実証。
+- **Stage 8c（`2c604a5`、2026-07-19）**: interpクロージャ機構の物理削除——
+  `BoxedObj::Closure`/`ClosureBody`/`Capture`/`Interp::closure_bodies`/`Interp::closure_tokens`/
+  `make_closure`/`closure_body_count`/`Expr::Apply`のinterpアーム/`adopt_cell`/
+  `dead_closure_tokens`/`take_dead_closure_tokens`/interpreted版`compiler::load`を全削除。
+  `jit_or_make_closure`は`jit_closure`（フォールバック無し、JIT不能クロージャは即
+  `EvalError::Panic`）へリネーム。`CompiledClosure`/`rt_closure_*`/`build-make-closure`は別物
+  として存続。削除後、interpクロージャ抜きでもregenがバイト完全一致することを確認——regenに
+  interpクロージャが不要であることの実証にもなった。
+
+  **真のブロッカー=マクロ展開時lambda**（発見・解消 2026-07-19）: prelude
+  `case`/`do`マクロは展開時に`sexpr-map`へlambdaを渡す。フォールバックが消えたためそのlambdaは
+  JIT必須になったが、本体が`sexpr::eq`（case）/`gensym`（do）という非コンパイル可能な操作を
+  使っていた。解消:
+  - **gensym**→`rt_gensym`シム（`typelisp-rt`、`Heap::gensym()`でカウンタをHeapへ移動し
+    interpの`gensym`ビルトインと共有、展開中にinterp/compiled両方のgensymが走っても同名衝突
+    しない）。島`compile-call`に`gensym`→`rt_gensym`のリネームを追加。
+  - **sexpr eq**→島`compile-assoc`に`sexpr`分岐（`build-icmp-eq`、charと同型、生ハンドル比較
+    なのでルート不要）。`is_native_lowered_primitive_method`と、transitive-compileの2箇所の
+    フィルタ（`call_graph_edges`と`jit_define_closure`内のassoc_targetsフィルタ、独立した
+    2箇所あるので両方に追加が必要）に`sexpr`を追加。
+  - **同時発見のSymbol→Sexpr coercionバグ**: checkerの型調整が`Symbol`を`Sexpr`期待位置で
+    `Construct{SEXPR_SYM,[val]}`に包んでいた。interpは`rt_sexpr`パススルー（no-op）で無害だった
+    が、島は変種5 constructを`compile-construct-sym`（名前文字列→`rt_intern_symbol`）に
+    loweringするため、既にSymbol値のtmpを渡すとabortする。これがgensymの結果を`case`が使う
+    まさにこの経路で踏まれた。修正はconstruct でラップせず透明にretypeする方式に変更
+    （`Symbol`値の実行時表現は既に`RtValue::Sexpr(Value::Symbol)`——`construct_sexpr`の
+    SEXPR_SYM armが実証）。`FASL_FORMAT_VERSION`を6→7へbump（キャッシュ済みASTに旧Construct
+    ノードが残るため）。
+
+  **case/do解消後、フルスイートで新たに露見した3カテゴリ**（フォールバック撤去で
+  「JIT不能クロージャ」が即エラー化したことで初めて全経路のJIT健全性が問われた）:
+  1. **整数`/`・`mod`が島未lowering**（`count_tallies`テスト）→`rt_i64_div`/`rt_i64_mod`シム
+     （Rust側`checked_div`/`checked_rem`で0除算+`i64::MIN / -1`をどちらも`fatal`化、生i64演算）
+     +島`compile-assoc`のint分岐+`int-native-method?`述語+`is_native_lowered_primitive_method`
+     に`/`/`mod`を追加。
+  2. **module修飾クロージャのSCC解決**（`module_function_as_value`テスト）→SCC機構をroot名から
+     `qualified_fn_name`（full `::`結合、`fn_path_from_node_name`で逆変換）へ拡張:
+     `CallEdge::node_name`/`resolve_fn_def`（method_key優先→module fn path）/`is_compiled_name`/
+     `call_graph_edges`/`compile_scc`のuser_symbol_name・格納key/`ast_bridge.rs`の
+     `translate_call`・`translate_fnref`のmangle名を全てqualified化。`jit_define_closure`の
+     module修飾拒否ガードを削除。副産物として`tests/compile_test.rs`の
+     `translates_a_call_keeping_only_the_paths_local_segment`
+     （ローカルセグメントのみへ切り詰める旧仕様の回帰テスト）が新仕様と正しく矛盾するため
+     `translates_a_call_mangling_the_paths_full_qualified_segments`へ更新——
+     `m::inc`が`tl_inc`ではなく`tl_m::inc`へmangleされることを検証する内容に変更。
+  3. **GC圧テスト3件のヒープ容量不足**（`*_survives_gc_pressure`）→定義時JIT自体がAST用cons
+     cellを消費するため、旧2〜6セルのヒープでは「JIT中heap枯渇」で即失敗する。二分探索
+     ハーネス（一時ファイル、削除済み）で実測した各シェイプの最小通過セル数はlambda単体18、
+     `labels`2兄弟SCC=51（両siblingのASTを同時に保持するため単独lambdaより高い）。
+     `a_lambda_captured_sexpr_binding_survives_gc_pressure`/
+     `an_unnamed_callee_survives_argument_evaluation_under_gc_pressure`は48セル、
+     `labels_siblings_mutually_recurse_under_gc_pressure`は64セルへ設定（churnは200のまま）。
+     「32768セルでも失敗する」という調査中の一時的な観測は、後述のGCマスクバグが未修正
+     だった時点のものであり、修正後は純粋な容量閾値の問題であってdotimes（ループ）の
+     有無とも無関係と実証済み。
+
+  **②の調査で連鎖的に発覚した本物のGCバグ**: `an_unnamed_callee_...`テストをJIT可能な
+  ヒープサイズにしたところ`rt_cell_get: not a boxed cell`で別クラッシュ。原因は島
+  `compute-sexpr-mask`が`kind==2`（tagged Sexpr）しかトレース対象にマスクしておらず、
+  **cell化キャプチャ（`kind>=10`、ネスト捕獲で自動cell化された束縛）を非トレース扱い**に
+  していたこと。cell slotは`BoxedObj::Cell`への生きたヒープ参照なのでGC markがこれを
+  辿れないと、外側の関数がネストlambdaに捕獲された（自動cell化済みの）パラメータを持つ場合、
+  GC圧下でcell自体が回収されてダングリング参照になる。修正は
+  `(if (eq kind 2) true (>= kind 10))`。読み取り専用キャプチャ（kind 2）は元々マスク済み
+  だったため他のテストは無事で、GC圧テストが従来極小ヒープでJIT自体に失敗していたために
+  このバグが一度も実行に到達せず、8c以前は発見されなかった。**教訓: フォールバック撤去は
+  「JITできるか」だけでなく「JITしたクロージャの実行時GC健全性」も初めて全経路で問う**。
+
+- 検証: `scripts/with-llvm-env.sh scripts/test-serial.sh`全green（45バイナリ、`--lib`含む）。
+
+**standalone `typl <file>`のprelude非可視は仕様**（本計画中の変更のバグではない）:
+entry fileは`module_segs_for`で必ずファイル名モジュールに包まれ、`resolve_fn`
+（`checker.rs:1052-1055`）は非pub root fnをサブモジュールから見せない
+（[[typelisp-visibility-pub]]と同じ設計）。preludeの`abs`等は非pubなので裸の`.typl`ファイルから
+呼ぶと「no such function」になるが、これは意図された可視性セマンティクスであり検証は
+REPL（root namespace）かテストハーネスで行うべき、という混同注意点。
+
+Stage 8cで`jit_closure`/`jit_closure_from_result`（`interp.rs:685`/`700`）は「フォールバック
+無し」に確定した——`JitDecline::Gap`もBenign（native tier型 / コンパイラ島未ロード、以前の
+5項目のうち残る2つ）も全て`EvalError::Panic`へ変換される。Stage 5で島は全エントリポイントで
+常時ロードされるため「島未ロード」は実質到達不能（自前で島ロードを省略した組み込み側でのみ
+起こりうる真のエラー）、「native tier型」もcompiled関数のパラメータ/戻り値型になり得ない
+ため到達しない。
+
+**残る作業**: `docs/dev/TODO.md`のフォローアップ項目クローズ（本節完了により対応）、
+`docs/dev/language-design.md`のfallback記述更新（恒久Benign集合という概念自体が実質消滅した
+ことの反映）。

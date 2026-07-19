@@ -14,7 +14,7 @@
 
 ## 残っている作業（影響範囲の大きさで優先順位付け——[[feedback-impl-priority]]）
 
-### クロージャ表現統一（labels/closures unification）——完了、フォローアップ1件のみ残
+### クロージャ表現統一（labels/closures unification）——完了
 
 **2026-07-18、branch `feature/closure-unification`、Stage 1-10全完了**。interpクロージャと
 compiledクロージャ(ClosureBox)の二重表現による境界ギャップを解消し、クロージャは定義時に
@@ -23,10 +23,13 @@ compiledクロージャ(ClosureBox)の二重表現による境界ギャップを
 [implementation-log.md](implementation-log.md)の「クロージャ表現統一（labels/closures
 unification）実装計画」節を参照。
 
-**フォローアップ（未着手）**: interpクロージャの完全削除（`BoxedObj::Closure`/`ClosureBody`/
-`Capture`/`closure_bodies`/`make_closure`/`Expr::Apply`のinterpクロージャアーム）は本計画の
-スコープ外——自己ホストコンパイラ島自体（`compiler.rs`の埋め込みSOURCE）をAOT化し、コンパイラ
-島自身がJITを必要としなくなることが前提になる企画。
+**フォローアップのinterpクロージャ完全削除も2026-07-19完了**（branch
+`feature/interp-closure-removal`、Stage 1-8c）。自己ホストコンパイラ島をAOT bitcode方式で
+ビルド時コンパイル+コミットし、実行時は常時ネイティブロード。これにより`BoxedObj::Closure`/
+`ClosureBody`/`Capture`/`closure_bodies`/`make_closure`/`Expr::Apply`のinterpクロージャアームを
+物理削除、恒久Benign fallbackという概念自体が実質消滅した。経緯・発見したバグ（native島の
+op-id/f64切り詰め、Symbol→Sexpr coercion、compute-sexpr-maskのGCマスク漏れ等）は
+[implementation-log.md](implementation-log.md)の「interpクロージャ完全削除 実装計画」節を参照。
 
 ### 「既知の制限・意図的に対象外」7項目の解消（2026-07-15）
 
