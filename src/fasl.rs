@@ -361,7 +361,28 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// compiler lowered that constructor as a name-interning `compile-construct-sym`
 /// that aborted on an already-built `Symbol`. A stale cache carries the old
 /// `Construct` node and would re-hit the abort — 2026-07-19.
-pub const FASL_FORMAT_VERSION: u32 = 7;
+///
+/// 8: `Interp`'s flat `Path`-keyed `fns`/`methods`/`globals`/`compiled`/
+/// `compiled_methods`/`struct_types`/`enum_defs` tables were replaced by a
+/// runtime module-scope tree (`eval::scope::ModuleScope`) that re-derives
+/// visibility independently instead of trusting a checker-baked `Path` as a
+/// lookup key. `Expr::Call`/`Global`/`FnRef`/`SetGlobal` now carry a `Ref`
+/// (`written`/`home`/`resolved`) instead of a bare `Path`, and
+/// `Expr::Assoc`/`MethodRef` gained a `home` field; `TopLevel::Defun`/
+/// `Defmethod`/`Defvar`/`Defmacro` gained a `public` field. A stale cache
+/// serialized under the old `Expr`/`TopLevel` shapes would fail to
+/// deserialize — 2026-07-21.
+///
+/// 9: `(compile name)`/`(compile type::method)` stopped being a disguised
+/// `Expr::Call` to a registered `compile` builtin taking a string argument —
+/// `Checker::check_compile` now builds a dedicated `Expr::CompileFn
+/// (CompileTarget)` node directly from its own `written`+`home`/`type_name`
+/// resolution, the same independent re-resolution every other reference
+/// gets, instead of handing `Interp` a bare name string to re-resolve with
+/// an unqualified, module-blind search. A stale cache holding the old
+/// `Expr::Call`-shaped node would fail to deserialize (or, worse, silently
+/// keep the old module-blind resolution) — 2026-07-21.
+pub const FASL_FORMAT_VERSION: u32 = 9;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.

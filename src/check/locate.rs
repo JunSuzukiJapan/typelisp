@@ -22,7 +22,7 @@
 //! form's end (or in macro-synthesized trees) resolving to *something*
 //! rather than nothing — `completion_locals` depends on that.
 
-use crate::{DefLocs, Expr, Loc, Pattern, Registry, TopLevel, Typed};
+use crate::{CompileTarget, DefLocs, Expr, Loc, Pattern, Registry, TopLevel, Typed};
 
 /// The innermost candidates seen so far during [`locate_node`]'s walk: one
 /// among nodes whose span truly contains the cursor, one among nodes that
@@ -137,7 +137,8 @@ fn expr_children(e: &Expr) -> Vec<&Typed> {
         | Expr::FnRef(_)
         | Expr::MethodRef { .. }
         | Expr::Break
-        | Expr::Quote(_) => vec![],
+        | Expr::Quote(_)
+        | Expr::CompileFn(_) => vec![],
     }
 }
 
@@ -156,12 +157,16 @@ fn expr_children(e: &Expr) -> Vec<&Typed> {
 /// a resolvable reference.
 pub fn definition_target(node: &Typed, def_locs: &DefLocs) -> Option<Loc> {
     match &node.expr {
-        Expr::Global(p) | Expr::SetGlobal(p, _) => def_locs.vars.get(p).cloned(),
-        Expr::FnRef(p) | Expr::Call(p, _) => def_locs.fns.get(p).cloned(),
-        Expr::MethodRef { type_name, method } | Expr::Assoc { type_name, method, .. } => {
+        Expr::Global(r) | Expr::SetGlobal(r, _) => def_locs.vars.get(&r.resolved).cloned(),
+        Expr::FnRef(r) | Expr::Call(r, _) => def_locs.fns.get(&r.resolved).cloned(),
+        Expr::MethodRef { type_name, method, .. } | Expr::Assoc { type_name, method, .. } => {
             def_locs.methods.get(&(type_name.clone(), method.clone())).cloned()
         }
         Expr::Construct { type_name, .. } => def_locs.types.get(type_name).cloned(),
+        Expr::CompileFn(CompileTarget::Fn(r)) => def_locs.fns.get(&r.resolved).cloned(),
+        Expr::CompileFn(CompileTarget::Method { type_name, method, .. }) => {
+            def_locs.methods.get(&(type_name.clone(), method.clone())).cloned()
+        }
         Expr::Var(_) => {
             let l = node.loc.as_ref()?;
             def_locs.local_refs.get(&(l.line, l.col)).cloned()

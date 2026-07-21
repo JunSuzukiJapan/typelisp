@@ -9,7 +9,7 @@ pub mod registry;
 pub mod checker;
 pub mod locate;
 
-pub use ast::{Arm, Expr, LabelDef, Pattern, QuotedSexpr, Typed};
+pub use ast::{Arm, CompileTarget, Expr, LabelDef, Pattern, QuotedSexpr, Ref, Typed};
 pub use registry::{AdtDef, AdtKind, AssocFn, DefLocs, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};
 pub use checker::{Checker, MacroExpander, RedefPolicy, TopLevel, MONO_BUNDLE_MODULE};
 pub use locate::{

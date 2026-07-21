@@ -1,9 +1,12 @@
 //! A tree-walking interpreter over the checker's typed AST.
 //!
-//! Top-level definitions (`defun`/`defmethod`) are registered by fully-qualified
-//! name; expressions are evaluated against those registries plus a lexical
-//! environment. Functions are not closures — a body sees only its parameters and
-//! the global definitions, matching top-level `defun`/`defmethod` semantics.
+//! Top-level definitions (`defun`/`defmethod`) are registered at [`Interp::root`],
+//! a runtime mirror of the checker's own module tree (see `eval::scope`'s module
+//! doc comment) — each at the node for its own defining module, under its own
+//! unqualified name, never in one flat table spanning the whole program.
+//! Expressions are evaluated against that tree plus a lexical environment.
+//! Functions are not closures — a body sees only its parameters and the global
+//! definitions, matching top-level `defun`/`defmethod` semantics.
 //!
 //! `Sexpr` values (see [`RtValue::Sexpr`]) live in the GC-managed cons [`Heap`]
 //! shared with the reader, so `eval` threads a `&mut Heap` throughout. Since
@@ -27,24 +30,27 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
-use crate::{BoxId, Expr, Heap, Loc, MacroExpander, Path, Pattern, QuotedSexpr, SymId, TopLevel, Type, Typed, Value};
+use crate::{BoxId, CompileTarget, Expr, Heap, Loc, MacroExpander, Path, Pattern, QuotedSexpr, Ref, SymId, TopLevel, Type, Typed, Value};
 
+use super::scope;
 use super::value::{EvalError, NativeScope, RtValue, Slot, SlotKind};
 
-/// A registered function or method body with its parameter names.
-struct FnDef {
+/// A registered function or method body with its parameter names. Lives at
+/// exactly one [`scope::ModuleScope`] tree node — its own defining module —
+/// rather than in a flat program-wide table; see that module's doc comment.
+pub(crate) struct FnDef {
     /// Parameter names, including the receiver name first for instance methods.
-    params: Vec<String>,
+    pub(crate) params: Vec<String>,
     /// Each parameter's binding-slot routing, parallel to `params` — derived
     /// once at registration from the declared parameter types (`sig`; a
     /// `defmacro`'s parameters are all `Sexpr`, hence all `Heap`), so
     /// `Interp::apply` needs no type information per call.
-    kinds: Vec<SlotKind>,
-    body: Vec<Typed>,
+    pub(crate) kinds: Vec<SlotKind>,
+    pub(crate) body: Vec<Typed>,
     /// Only ever set for a `defmacro` with a trailing `&rest` parameter (see
     /// [`Interp::expand_macro`]); always `false` for `defun`/`defmethod`,
     /// which `apply` calls 1:1 regardless.
-    rest: bool,
+    pub(crate) rest: bool,
     /// `(parameter types, return type)`, parallel to `params` — `None` for a
     /// `defmacro` (every parameter and the implicit return are always
     /// `Sexpr`, see `check::registry::MacroDef`'s doc comment) since a macro
@@ -54,7 +60,38 @@ struct FnDef {
     /// `Interp::compile_function` can build an LLVM function signature
     /// without the checker's `Registry` (which `Interp` otherwise has no
     /// access to).
-    sig: Option<(Vec<Type>, Type)>,
+    pub(crate) sig: Option<(Vec<Type>, Type)>,
+    /// Whether this definition is `pub` — the runtime twin of
+    /// `FnSig`/`VarInfo`/`AssocFn.sig`'s own `public` bit
+    /// (`check::registry`), baked onto the `TopLevel` node by the checker
+    /// (which computed it once already) so `scope::ModuleScope`'s qualified-
+    /// path resolution can enforce `Checker::resolve_fn_path`'s
+    /// `public || in_scope` gate without needing the checker's `Registry` at
+    /// runtime.
+    pub(crate) public: bool,
+    /// This definition's JIT/AOT-compiled form, if `(compile name)` (or an
+    /// AOT pass) has ever produced one — the direct replacement for the old
+    /// standalone `Interp::compiled`/`compiled_methods` side tables (`Path`-
+    /// keyed, "must never drift" from `fns`/`methods` by discipline alone).
+    /// Living on the same node `scope::ModuleScope::resolve_fn`/
+    /// `resolve_method` already found eliminates that duplication
+    /// structurally: the compiled-fast-path check in `Call`/`Assoc` eval is
+    /// just "does the `FnDef` I already have in hand carry one?". Purely a
+    /// machine-code-linkage implementation detail — never consulted by this
+    /// module's own visibility/resolution logic.
+    ///
+    /// Its own `RefCell`, separate from the rest of this struct (the tree
+    /// stores `Rc<FnDef>`, not `Rc<RefCell<FnDef>>`): `Self::apply` holds a
+    /// plain `&FnDef` borrowed out of that `Rc` for the *entire* recursive
+    /// evaluation of `body` (needed since `body`'s `Vec<Typed>` is too large
+    /// to clone per call) — if `compiled` needed the same outer `RefCell`,
+    /// an inner `(compile name)` call reached from within that body (e.g. a
+    /// self-referential or mutually-recursive JIT request) that tried to
+    /// populate this very same `FnDef`'s `compiled` slot would panic against
+    /// `apply`'s already-live borrow. Scoping the `RefCell` down to just this
+    /// field keeps that borrow-and-mutate pair independent, exactly like the
+    /// old design's two separate top-level fields (`fns`/`compiled`) did.
+    pub(crate) compiled: RefCell<Option<Rc<crate::compile::CompiledFn>>>,
 }
 
 /// A user `defenum`'s type parameters and variants (each one's declared
@@ -62,6 +99,7 @@ struct FnDef {
 /// entry [`Interp::enum_defs`] keeps per enum type; see that field's doc
 /// comment for why the interpreter needs this at all (compiled-global box
 /// decoding) and why `Option`/`Result` are not represented this way.
+#[derive(Clone)]
 pub(crate) struct EnumDef {
     pub(crate) params: Vec<String>,
     pub(crate) variants: Vec<crate::check::registry::Variant>,
@@ -79,12 +117,15 @@ enum Step {
     Exit(RtValue),
 }
 
-/// The interpreter state: free functions (by [`Path`]), type-associated methods
-/// (by type [`Path`] and method name), and global variables (by [`Path`]).
+/// The interpreter state: a runtime mirror of the checker's module tree
+/// ([`scope::ModuleScope`], rooted here), holding every free function/
+/// macro/method/global/struct/enum by its own defining module and
+/// unqualified name — never by a single flat [`Path`]-keyed table spanning
+/// the whole program. See `eval::scope`'s module doc comment for why, and
+/// for how a reference re-resolves against this tree instead of trusting a
+/// checker-baked [`Path`] as a lookup key.
 pub struct Interp {
-    fns: HashMap<Path, FnDef>,
-    methods: HashMap<(Path, String), FnDef>,
-    globals: HashMap<Path, Slot>,
+    root: scope::ModuleScope,
     /// Every `Native` slot ever created, held weakly. A slot stays discoverable
     /// here for exactly as long as it's reachable some other way (an env frame
     /// on the call stack, `globals`, or a closure's captured environment) —
@@ -94,46 +135,6 @@ pub struct Interp {
     /// How many roots `sync_roots` last pushed onto the heap, so it knows how
     /// many to pop before recomputing the set from scratch.
     rooted: Cell<usize>,
-    /// Functions JIT-compiled by `(compile name)` (see
-    /// [`Self::compile_function`]), by their fully-qualified `Path`.
-    /// `RefCell` because `compile` is itself an ordinary builtin reached
-    /// through `eval`'s `&self` — the same internal-mutability pattern
-    /// `slots` above already uses. `Expr::Call`'s eval arm checks here
-    /// first, before falling back to the tree-walking `fns` entry.
-    compiled: RefCell<HashMap<Path, crate::compile::CompiledFn>>,
-    /// `compiled`'s counterpart for an instance/static method JIT-compiled by
-    /// `(compile type::method)` — keyed the same way [`Self::methods`]
-    /// already is, so the two can never drift. `Expr::Assoc`'s eval arm
-    /// checks here first, mirroring `Expr::Call`'s own `compiled` check.
-    compiled_methods: RefCell<HashMap<(Path, String), crate::compile::CompiledFn>>,
-    /// Every `Type::Named` path whose compiled representation is a tagged
-    /// `Sexpr` `Value::Boxed` struct (Stage 3 of the Sexpr/RtValue
-    /// unification plan, `docs/implementation-log.md`) — a user `defstruct`
-    /// (inserted on its own `TopLevel::Defstruct` exec, below) or `vector`
-    /// (`registry::vector_def`'s `AdtKind::Struct`, the one builtin type
-    /// that shares this same shape without ever producing a
-    /// `TopLevel::Defstruct` of its own, seeded in [`Self::new`] — see that
-    /// registration's own comment for why `hashtable`/`scope` don't need the
-    /// same treatment). Needed at the compiled/interpreted call boundary
-    /// ([`Self::call_compiled`], via [`Self::is_boxed_sexpr_type`]) to
-    /// decode/encode such a value the same way a `Sexpr`-typed one already
-    /// is — `crate::compile::ast_bridge` can't answer this itself
-    /// (deliberately `Registry`-free, see that module's `is_sexpr_type` doc
-    /// comment), so `Interp` tracks it independently.
-    struct_types: HashSet<Path>,
-    /// Every user `defenum`'s declared type parameters and variant field
-    /// types, recorded on its `TopLevel::Defenum` exec (the checker bakes
-    /// them into that node — its `Registry` no longer exists at runtime).
-    /// The same "track it independently, keep `ast_bridge` `Registry`-free"
-    /// pattern as [`Self::struct_types`], but carrying full [`EnumDef`]s
-    /// rather than bare membership: the compiled-global boundary's
-    /// box -> `RtValue::Data` decode ([`decode_data_value`], via
-    /// [`data_variant_field_types`]) needs each variant's field types to
-    /// know how to read the box's untyped `i64` slots back. `Option`/
-    /// `Result` are *not* seeded here — their field types read straight off
-    /// `Type::Named`'s args, so `data_variant_field_types` keeps its
-    /// dedicated arms for them.
-    enum_defs: HashMap<Path, EnumDef>,
     /// Every `defvar`/`defconstant` global some compiled function has
     /// referenced, promoted to a compiled-global slot (a permanent GC root
     /// — `typelisp_rt::global_new`) and mapped to the id that slot got.
@@ -175,7 +176,7 @@ pub struct Interp {
 /// One outgoing edge of the top-level compile call graph
 /// [`Interp::compute_sccs`] walks: either a plain `Expr::Call` target (a
 /// `defun`) or an `Expr::Assoc` target (a `defmethod`, keyed the same way
-/// [`Interp::method_key`] keys `self.methods`/`self.compiled_methods`).
+/// [`Interp::method_key`] keys the scope tree's `methods`/`compiled`).
 /// Carries the full typed key (not just its string name) so
 /// [`Interp::compile_scc`] can reuse it directly to declare/wire the target
 /// without re-deriving it from the name.
@@ -288,27 +289,23 @@ impl Interp {
         // permanent-root position in a `Heap` that no longer exists. See
         // `typelisp_rt::reset_global_table`'s doc comment.
         crate::compile::runtime::reset_global_table();
+        // `vector` is registered directly in `Registry::with_builtins`
+        // (`registry::vector_def`) with `AdtKind::Struct`, so its
+        // `Expr::Construct` sites already get `mutable = true`
+        // (`Checker::check_construct`) — but it never executes a
+        // `TopLevel::Defstruct`, the only other place a struct `TypeEntry`
+        // gets populated, so it's seeded here by hand, directly at the root
+        // node (it has no defining module of its own). `hashtable`/`scope`
+        // don't need this: both are `AdtKind::Sum` (`registry::hashtable_def`/
+        // `scope_def`) with no `variants`/`field_names` of their own — user
+        // code only ever builds one through its `::new()` assoc fn, never
+        // `Expr::Construct`, so there is no construct site to affect.
+        let mut root = scope::ModuleScope::default();
+        root.types.insert("vector".to_string(), scope::TypeEntry::Struct);
         Interp {
-            fns: HashMap::new(),
-            methods: HashMap::new(),
-            globals: HashMap::new(),
+            root,
             slots: RefCell::new(Vec::new()),
             rooted: Cell::new(0),
-            compiled: RefCell::new(HashMap::new()),
-            compiled_methods: RefCell::new(HashMap::new()),
-            // `vector` is registered directly in `Registry::with_builtins`
-            // (`registry::vector_def`) with `AdtKind::Struct`, so its
-            // `Expr::Construct` sites already get `mutable = true`
-            // (`Checker::check_construct`) — but it never executes a
-            // `TopLevel::Defstruct`, the only other place `struct_types`
-            // gets populated, so it's seeded here by hand. `hashtable`/
-            // `scope` don't need this: both are `AdtKind::Sum`
-            // (`registry::hashtable_def`/`scope_def`) with no `variants`/
-            // `field_names` of their own — user code only ever builds one
-            // through its `::new()` assoc fn, never `Expr::Construct`, so
-            // there is no construct site for `struct_types` to affect.
-            struct_types: HashSet::from([Path::root("vector")]),
-            enum_defs: HashMap::new(),
             compiled_globals: RefCell::new(HashMap::new()),
             jit_graveyard: RefCell::new(Vec::new()),
             jit_ctor_cache: RefCell::new(HashMap::new()),
@@ -411,8 +408,9 @@ impl Interp {
         if crate::compile::ast_bridge::is_llvm_handle_ty(ty) {
             return false;
         }
-        let enum_types: HashSet<Path> = self.enum_defs.keys().cloned().collect();
-        crate::compile::ast_bridge::struct_field_kind(ty, &self.struct_types, &enum_types) != 0
+        let (struct_types, enum_defs) = self.root.collect_struct_and_enum_types();
+        let enum_types: HashSet<Path> = enum_defs.keys().cloned().collect();
+        crate::compile::ast_bridge::struct_field_kind(ty, &struct_types, &enum_types) != 0
     }
 
     /// Closure unification Stage 7's definition-time JIT driver. Attempts to
@@ -459,7 +457,7 @@ impl Interp {
         // natively (`compiler::load_aot`), so this only fires for an *embedder*
         // that builds an `Interp` and execs closure-defining code without
         // loading any island — an expected environment, not a coverage gap.
-        if !self.fns.contains_key(&Path::root("compile-function")) {
+        if !self.root.fns.contains_key("compile-function") {
             return Err(JitDecline::Benign("compiler island not loaded".to_string()));
         }
         let (param_tys, ret_ty) = match &t.ty {
@@ -531,14 +529,14 @@ impl Interp {
             .filter(|p| !is_rt_builtin_name(p.local()))
             .collect();
         for p in &call_targets {
-            if !self.compiled.borrow().contains_key(p) {
+            if !self.root.fn_compiled(p) {
                 // The SCC machinery keys on a node name that is the callee's
                 // full `::`-joined path (`qualified_fn_name`), so a
                 // module-qualified `defun` (`m::inc`) is transitively compiled
                 // and stored/linked under a name distinct from a same-named
                 // root function — the old "module-qualified is out of reach"
                 // Stage 5 limitation is gone (interp-closure removal).
-                self.compile_function(heap, &qualified_fn_name(p))
+                self.compile_function(heap, &CompileTarget::Fn(Ref::synthetic(p.clone())))
                     .map_err(|e| JitDecline::Gap(format!("transitive compile of call target \"{}\" failed: {}", p, e)))?;
             }
         }
@@ -565,15 +563,16 @@ impl Interp {
                 if matches!(key.0.local(), "llvm-module" | "llvm-function" | "llvm-builder" | "scope") {
                     return false;
                 }
-                self.methods.contains_key(key) || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64" | "bignum" | "ratio" | "sexpr")
+                self.root.has_method(&key.0, &key.1) || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64" | "bignum" | "ratio" | "sexpr")
             })
             .collect();
         for (p, m) in &assoc_targets {
-            if !self.compiled_methods.borrow().contains_key(&(p.clone(), m.clone())) {
+            if !self.root.method_compiled(p, m) {
                 // Same transitive drive as the call targets above —
                 // `"type::method"` is exactly the name shape a standalone
                 // `(compile "type::method")` resolves via `Self::method_key`.
-                self.compile_function(heap, &format!("{}::{}", p.local(), m))
+                let target = CompileTarget::Method { type_name: p.clone(), method: m.clone(), home: p.parent().to_vec() };
+                self.compile_function(heap, &target)
                     .map_err(|e| JitDecline::Gap(format!("transitive compile of method target \"{}::{}\" failed: {}", p.local(), m, e)))?;
             }
         }
@@ -649,19 +648,15 @@ impl Interp {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         module.borrow().verify().map_err(|e| format!("module failed verification: {}", e))?;
         let mut externals: Vec<(String, usize)> = Vec::new();
-        {
-            let compiled = self.compiled.borrow();
-            for p in call_targets {
-                let addr = compiled.get(p).expect("checked already-compiled above").address();
-                externals.push((crate::compile::ast_bridge::user_symbol_name(&qualified_fn_name(p)), addr));
-            }
+        for p in call_targets {
+            let f = self.root.get_fn(p).expect("checked already-compiled above");
+            let addr = f.compiled.borrow().as_ref().expect("checked already-compiled above").address();
+            externals.push((crate::compile::ast_bridge::user_symbol_name(&qualified_fn_name(p)), addr));
         }
-        {
-            let compiled_methods = self.compiled_methods.borrow();
-            for (p, m) in assoc_targets {
-                let addr = compiled_methods.get(&(p.clone(), m.clone())).expect("checked already-compiled above").address();
-                externals.push((crate::compile::ast_bridge::user_method_symbol_name(p, m), addr));
-            }
+        for (p, m) in assoc_targets {
+            let f = self.root.get_method(p, m).expect("checked already-compiled above");
+            let addr = f.compiled.borrow().as_ref().expect("checked already-compiled above").address();
+            externals.push((crate::compile::ast_bridge::user_method_symbol_name(p, m), addr));
         }
         externals.extend(rt_extern_functions().iter().map(|(n, a)| (n.to_string(), *a)));
         let compiled_fn = crate::compile::CompiledFn::new(&module.borrow(), &ctor_name, &externals).map_err(|e| format!("JIT failed: {}", e))?;
@@ -710,7 +705,7 @@ impl Interp {
     /// self-/mutually-referential `defenum` guard).
     fn is_heap_repr_ty(&self, ty: &Type, seen: &mut HashSet<Path>) -> bool {
         match ty {
-            Type::Named(p, _) if is_sexpr_type(p) || *p == Path::root("hashtable") || self.struct_types.contains(p) => true,
+            Type::Named(p, _) if is_sexpr_type(p) || *p == Path::root("hashtable") || matches!(self.root.find_type(p), Some(scope::TypeEntry::Struct)) => true,
             Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => self.is_heap_repr_ty(&args[0], seen),
             Type::Named(p, args) if self.is_enum_path(p) => self.enum_fields_representable(p, args, seen),
             _ => false,
@@ -727,7 +722,7 @@ impl Interp {
     /// checker's `Registry`-driven `AdtKind::Sum && !variants.is_empty()`
     /// test in `Checker::is_heap_repr_seen`.
     fn is_enum_path(&self, p: &Path) -> bool {
-        *p == option_path() || *p == result_path() || *p == Path::root("error") || self.enum_defs.contains_key(p)
+        *p == option_path() || *p == result_path() || *p == Path::root("error") || matches!(self.root.find_type(p), Some(scope::TypeEntry::Enum(_)))
     }
 
     /// Whether every field of every variant of enum type `name` —
@@ -753,7 +748,7 @@ impl Interp {
             vec![args[0].clone()]
         } else if *name == result_path() && args.len() == 2 {
             args.to_vec()
-        } else if let Some(def) = self.enum_defs.get(name) {
+        } else if let Some(scope::TypeEntry::Enum(def)) = self.root.find_type(name) {
             let subst: HashMap<String, Type> = def.params.iter().cloned().zip(args.iter().cloned()).collect();
             def.variants
                 .iter()
@@ -822,7 +817,7 @@ impl Interp {
     /// `defun` set by diffing a prelude-only interpreter against one that
     /// also ran `load_compiler`; interp-closure removal Stage 2 onward).
     pub fn function_names(&self) -> Vec<String> {
-        self.fns.keys().map(|p| p.local().to_string()).collect()
+        self.root.all_fn_names()
     }
 
     /// Installs the precompiled compiler island (interp-closure removal
@@ -899,16 +894,16 @@ impl Interp {
         let compiled_fns = crate::compile::CompiledFn::new_multi(&module, &internal_names, &externals)
             .map_err(|e| format!("compiler island JIT install failed: {}", e))?;
 
-        let mut compiled = self.compiled.borrow_mut();
         for (name, cf) in names.iter().zip(compiled_fns) {
-            compiled.insert(Path::root(name), cf);
+            let f = self.root.get_fn(&Path::root(name)).expect("island defun already registered by exec'ing SOURCE");
+            *f.compiled.borrow_mut() = Some(Rc::new(cf));
         }
         Ok(())
     }
 
     pub fn exec(&mut self, heap: &mut Heap, tl: TopLevel) -> Result<Option<RtValue>, EvalError> {
         match tl {
-            TopLevel::Defun { name, type_params, params, ret, body } => {
+            TopLevel::Defun { name, type_params, params, ret, body, public } => {
                 // A generic defun's own body was checked with its type
                 // variables still abstract — a type-erased artifact kept only
                 // for definition-time diagnostics. It must never run: every
@@ -921,10 +916,11 @@ impl Interp {
                 }
                 let (names, types): (Vec<String>, Vec<Type>) = params.into_iter().unzip();
                 let kinds = types.iter().map(|ty| self.heap_repr_kind(ty)).collect();
-                self.fns.insert(name, FnDef { params: names, kinds, body, rest: false, sig: Some((types, ret)) });
+                let def = FnDef { params: names, kinds, body, rest: false, sig: Some((types, ret)), public, compiled: RefCell::new(None) };
+                self.root.get_or_create(name.parent()).fns.insert(name.local().to_string(), Rc::new(def));
                 Ok(None)
             }
-            TopLevel::Defmethod { type_name, method, self_name, params, ret, body, type_params, .. } => {
+            TopLevel::Defmethod { type_name, method, self_name, params, ret, body, type_params, public, .. } => {
                 // A generic-owner method's erased body is diagnostics-only,
                 // exactly like a generic `Defun`'s above — every call site
                 // was rewritten to a monomorphized specialization.
@@ -942,51 +938,65 @@ impl Interp {
                     types.push(t);
                 }
                 let kinds = types.iter().map(|ty| self.heap_repr_kind(ty)).collect();
-                self.methods.insert((type_name, method), FnDef { params: names, kinds, body, rest: false, sig: Some((types, ret)) });
+                let def = FnDef { params: names, kinds, body, rest: false, sig: Some((types, ret)), public, compiled: RefCell::new(None) };
+                self.root.get_or_create(type_name.parent()).methods.insert((type_name.local().to_string(), method), Rc::new(def));
                 Ok(None)
             }
-            TopLevel::Defmacro { name, params, body, rest } => {
+            TopLevel::Defmacro { name, params, body, rest, public } => {
                 // A macro's body is callable exactly like a `defun`'s — see
                 // `MacroExpander`/`Self::expand_macro` — so it's stored in
                 // the very same `fns` table; no separate macro table exists.
                 // Every macro parameter is `Sexpr` by definition, hence all
                 // `Heap` slots.
                 let kinds = vec![SlotKind::Heap; params.len()];
-                self.fns.insert(name, FnDef { params, kinds, body, rest, sig: None });
+                let def = FnDef { params, kinds, body, rest, sig: None, public, compiled: RefCell::new(None) };
+                self.root.get_or_create(name.parent()).fns.insert(name.local().to_string(), Rc::new(def));
                 Ok(None)
             }
             TopLevel::Use { .. } => Ok(None),
             // The type itself was already registered in the checker's
             // `Registry` at check time — there's nothing else for the
             // interpreter to do, the same as `Option`/`Result` needing no
-            // runtime registration of their own. Recording `name` in
-            // `struct_types` is the one exception (Stage 3 of the
+            // runtime registration of their own. Recording `name` as a
+            // `TypeEntry::Struct` is the one exception (Stage 3 of the
             // Sexpr/RtValue unification plan, `docs/implementation-log.md`
-            // — see that field's doc comment).
+            // — see `scope::TypeEntry`'s doc comment).
             TopLevel::Defstruct { name } => {
-                self.struct_types.insert(name);
+                self.root.get_or_create(name.parent()).types.insert(name.local().to_string(), scope::TypeEntry::Struct);
                 Ok(None)
             }
             // A `defenum` sum type is a check-time registration, like
-            // `Option`/`Result`. Unlike `Defstruct` it is *not* recorded in
-            // `struct_types` (an enum instance is an immutable
+            // `Option`/`Result`. Unlike `Defstruct` it is *not* recorded as a
+            // `TypeEntry::Struct` (an enum instance is an immutable
             // `RtValue::Data`, never a boxed struct) — but its variants'
-            // field types *are* recorded, in `enum_defs`: the compiled-global
-            // boundary needs them to decode a box back into a `RtValue::Data`
-            // (see that field's doc comment). The same one-exception pattern
-            // `Defstruct`/`struct_types` follows.
+            // field types *are* recorded, as `TypeEntry::Enum`: the
+            // compiled-global boundary needs them to decode a box back into a
+            // `RtValue::Data` (see `scope::TypeEntry`'s doc comment). The same
+            // one-exception pattern `Defstruct` follows.
             TopLevel::Defenum { name, params, variants } => {
-                self.enum_defs.insert(name, EnumDef { params, variants });
+                self.root.get_or_create(name.parent()).types.insert(name.local().to_string(), scope::TypeEntry::Enum(EnumDef { params, variants }));
                 Ok(None)
             }
-            TopLevel::Defvar { name, ty, value, .. } => {
+            TopLevel::Defvar { name, ty, value, public, .. } => {
                 let v = self.eval(heap, &value, &Env::new())?;
                 let kind = self.heap_repr_kind(&ty);
-                let s = self.slot(heap, kind, v)?;
-                self.globals.insert(name, s);
+                let slot = self.slot(heap, kind, v)?;
+                self.root.get_or_create(name.parent()).globals.insert(name.local().to_string(), scope::GlobalDef { slot, public });
                 Ok(None)
             }
-            TopLevel::Module { body, .. } => {
+            TopLevel::Module { path, body } => {
+                // Ensures the tree node for `path` exists (idempotent — a
+                // "mkdir -p") before its own body registers into it; doesn't
+                // need to *stay* "current" for anything else, since every
+                // nested `Defun`/`Defmethod`/`Defvar`/`Defmacro`'s own `name`/
+                // `type_name` is already absolute regardless of nesting (see
+                // `scope`'s module doc comment) — registration is direct
+                // descent from `self.root`, never relative to a live "current
+                // module" cursor. This also means a `Defmacro` already
+                // exec'd immediately (`project::needs_immediate_exec`, before
+                // this `Module` wrapper was even built) lands at the exact
+                // same node here, with no ordering dependency.
+                self.root.get_or_create(path.segments());
                 let mut last = None;
                 for t in body {
                     last = self.exec(heap, t)?;
@@ -1023,6 +1033,29 @@ impl Interp {
         }
     }
 
+    /// Resolves a `Call`/`FnRef` [`Ref`]: tries the independent
+    /// re-derivation first ([`scope::ModuleScope::resolve_fn`]), falling
+    /// back to direct descent via `r.resolved` only when that search comes
+    /// up empty. The one legitimate reason that happens: `r.written` named a
+    /// `use` alias (a bare-name import, or a module alias like `use
+    /// geo::point` making `point::f` resolve to `geo::point::f`) —
+    /// `Checker::lookup_alias`/`find_module`'s alias branches are check-time
+    /// -only machinery (the alias table itself is never mirrored into this
+    /// tree, see `eval::scope`'s module doc comment), so the literal
+    /// written text has no ancestor-chain-searchable meaning at runtime.
+    /// Falling back to `resolved` — a well-typed program's checker-verified
+    /// answer — is still a direct tree descent, not a flat-table trust
+    /// fallback: only the *search strategy* differs from the ordinary case,
+    /// not the mechanism.
+    fn resolve_fn_ref(&self, r: &Ref) -> Option<Rc<FnDef>> {
+        self.root.resolve_fn(&r.home, &r.written).or_else(|| self.root.get_fn(&r.resolved))
+    }
+
+    /// [`Self::resolve_fn_ref`]'s twin for `Global`/`SetGlobal`.
+    fn resolve_global_ref(&self, r: &Ref) -> Option<Slot> {
+        self.root.resolve_global(&r.home, &r.written).or_else(|| self.root.get_global(&r.resolved))
+    }
+
     fn eval_inner(&self, heap: &mut Heap, t: &Typed, env: &Env) -> Result<RtValue, EvalError> {
         match &t.expr {
             Expr::Int(n) => Ok(RtValue::Int(*n)),
@@ -1043,8 +1076,8 @@ impl Interp {
             // interpreted read could see a stale value a compiled write
             // already updated, even though both sides name the same
             // `defvar`.
-            Expr::Global(path) => {
-                if let Some(&id) = self.compiled_globals.borrow().get(path) {
+            Expr::Global(r) => {
+                if let Some(&id) = self.compiled_globals.borrow().get(&r.resolved) {
                     // `id` (`Self::promote_global`'s return value) is *not*
                     // the `Heap::permanent_root` position — see
                     // `typelisp_rt::global_new`'s doc comment (an
@@ -1053,16 +1086,15 @@ impl Interp {
                     // desyncing the two) — `global_perm_idx` resolves it the
                     // same way `rt_global_get` does.
                     let perm_idx = crate::compile::runtime::global_perm_idx(id)
-                        .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id)))?;
+                        .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", r.resolved, id)))?;
                     Ok(decode_field_typed(heap, heap.permanent_root(perm_idx), &t.ty))
                 } else {
-                    self.globals
-                        .get(path)
+                    self.resolve_global_ref(r)
                         .map(|s| s.get(heap))
-                        .ok_or_else(|| EvalError::Unbound(path.to_string()))
+                        .ok_or_else(|| EvalError::Unbound(r.resolved.to_string()))
                 }
             }
-            Expr::FnRef(path) => match self.fns.get(path) {
+            Expr::FnRef(r) => match self.resolve_fn_ref(r) {
                 // Reify a user function as a closure with no captured
                 // environment. No captures means no cell-binding prerequisite
                 // at all, the simplest possible JIT (`Self::jit_closure`'s doc
@@ -1070,9 +1102,9 @@ impl Interp {
                 // call sites since interp-closure removal Stage 8c).
                 Some(_) => self.jit_closure(heap, env, t, &[]),
                 // Otherwise a built-in operator (lives at the root, simple path).
-                None => Ok(RtValue::Builtin(path.local().to_string())),
+                None => Ok(RtValue::Builtin(r.resolved.local().to_string())),
             },
-            Expr::MethodRef { type_name, method } => match self.methods.get(&(type_name.clone(), method.clone())) {
+            Expr::MethodRef { type_name, method, home, .. } => match self.root.resolve_method(home, type_name, method) {
                 Some(_) => self.jit_closure(heap, env, t, &[]),
                 None => Ok(RtValue::BuiltinMethod(type_name.clone(), method.clone())),
             },
@@ -1207,58 +1239,55 @@ impl Interp {
                 }
                 self.eval_seq(heap, body, &child)
             }
-            Expr::Call(name, args) => {
+            Expr::Call(r, args) => {
                 let (argv, _slots) = self.eval_args(heap, args, env)?;
-                // A `(compile name)`d function dispatches to native code
-                // first — checked ahead of `fns` so a later recompile (not
-                // possible yet, but the ordering is the cheap-to-get-right
-                // choice) would naturally take precedence over the
-                // tree-walked body.
-                if let Some(compiled) = self.compiled.borrow().get(name) {
-                    // `compile_function` never registers a `compiled` entry
-                    // without first going through `compiled_fn_body`, which
-                    // requires `fns[name].sig` to be `Some` — so this is an
-                    // internal invariant, not a user-reachable error.
-                    let (_, ret_ty) = self
-                        .fns
-                        .get(name)
-                        .and_then(|f| f.sig.as_ref())
-                        .expect("a compiled function always has a type signature");
-                    return self.call_compiled(heap, compiled, &argv, ret_ty);
-                }
-                if let Some(f) = self.fns.get(name) {
-                    self.apply(heap, f, argv)
-                } else if name.is_simple() {
-                    match self.eval_builtin(heap, name.local(), &argv) {
-                        Some(result) => result,
-                        None => Err(EvalError::NoSuchFunction(name.to_string())),
+                match self.resolve_fn_ref(r) {
+                    Some(f) => {
+                        // A `(compile name)`d function dispatches to native
+                        // code first — checked ahead of the tree-walked body
+                        // so a later recompile (not possible yet, but the
+                        // ordering is the cheap-to-get-right choice) would
+                        // naturally take precedence.
+                        let compiled = f.compiled.borrow().clone();
+                        if let Some(compiled) = compiled {
+                            // `compile_function` never populates `compiled`
+                            // without first going through `compiled_fn_body`,
+                            // which requires `f.sig` to be `Some` — so this
+                            // is an internal invariant, not a user-reachable
+                            // error.
+                            let ret_ty = &f.sig.as_ref().expect("a compiled function always has a type signature").1;
+                            return self.call_compiled(heap, &compiled, &argv, ret_ty);
+                        }
+                        self.apply(heap, &f, argv)
                     }
-                } else {
-                    Err(EvalError::NoSuchFunction(name.to_string()))
+                    None if r.written.len() == 1 => match self.eval_builtin(heap, &r.written[0], &argv) {
+                        Some(result) => result,
+                        None => Err(EvalError::NoSuchFunction(r.resolved.to_string())),
+                    },
+                    None => Err(EvalError::NoSuchFunction(r.resolved.to_string())),
                 }
             }
-            Expr::Assoc { type_name, method, args, .. } => {
+            Expr::Assoc { type_name, method, args, home, .. } => {
                 let (argv, _slots) = self.eval_args(heap, args, env)?;
-                let key = (type_name.clone(), method.clone());
-                // `compiled_methods`'s counterpart of `Expr::Call`'s own
-                // `compiled` check above — see [`Self::call_compiled`]'s doc
-                // comment for the one extra risk a method's receiver carries
-                // that a plain function's parameters never do.
-                if let Some(compiled) = self.compiled_methods.borrow().get(&key) {
-                    let (_, ret_ty) = self
-                        .methods
-                        .get(&key)
-                        .and_then(|f| f.sig.as_ref())
-                        .expect("a compiled method always has a type signature");
-                    return self.call_compiled(heap, compiled, &argv, ret_ty);
-                }
-                if let Some(m) = self.methods.get(&key) {
-                    self.apply(heap, m, argv)
-                } else {
-                    let recv_ty = args.first().map(|a| &a.ty);
-                    match eval_builtin_method(self, heap, type_name, method, recv_ty, &argv, &t.ty) {
-                        Some(result) => result,
-                        None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
+                match self.root.resolve_method(home, type_name, method) {
+                    Some(f) => {
+                        // `Expr::Call`'s own `compiled` fast-path check above
+                        // — see `Self::call_compiled`'s doc comment for the
+                        // one extra risk a method's receiver carries that a
+                        // plain function's parameters never do.
+                        let compiled = f.compiled.borrow().clone();
+                        if let Some(compiled) = compiled {
+                            let ret_ty = &f.sig.as_ref().expect("a compiled method always has a type signature").1;
+                            return self.call_compiled(heap, &compiled, &argv, ret_ty);
+                        }
+                        self.apply(heap, &f, argv)
+                    }
+                    None => {
+                        let recv_ty = args.first().map(|a| &a.ty);
+                        match eval_builtin_method(self, heap, type_name, method, recv_ty, &argv, &t.ty) {
+                            Some(result) => result,
+                            None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
+                        }
                     }
                 }
             }
@@ -1412,23 +1441,19 @@ impl Interp {
             // See `Expr::Global`'s arm above for why a promoted global must
             // be written through the same permanent-root storage a
             // compiled write would use, not the plain `Slot` below.
-            Expr::SetGlobal(path, value) => {
+            Expr::SetGlobal(r, value) => {
                 let v = self.eval(heap, value, env)?;
-                if let Some(&id) = self.compiled_globals.borrow().get(path) {
+                if let Some(&id) = self.compiled_globals.borrow().get(&r.resolved) {
                     // See `Expr::Global`'s arm for why `id` needs resolving
                     // through `global_perm_idx` rather than being used as
                     // the `Heap::permanent_root` position directly.
                     let perm_idx = crate::compile::runtime::global_perm_idx(id)
-                        .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id)))?;
+                        .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", r.resolved, id)))?;
                     let mv = rtvalue_to_struct_field(heap, &v)?;
                     heap.set_permanent_root(perm_idx, mv);
                     Ok(v)
                 } else {
-                    let cell = self
-                        .globals
-                        .get(path)
-                        .ok_or_else(|| EvalError::Unbound(path.to_string()))?
-                        .clone();
+                    let cell = self.resolve_global_ref(r).ok_or_else(|| EvalError::Unbound(r.resolved.to_string()))?;
                     cell.set(heap, v.clone())?;
                     Ok(v)
                 }
@@ -1458,6 +1483,7 @@ impl Interp {
                 let v = alloc_quoted(heap, qs)?;
                 Ok(RtValue::Sexpr(v))
             }
+            Expr::CompileFn(target) => self.compile_function(heap, target),
         }
     }
 
@@ -1908,7 +1934,8 @@ impl Interp {
     /// alone is enough — no need to also check field representability the
     /// way `Interp::enum_fields_representable` does for a binding.
     fn is_boxed_sexpr_type(&self, ty: &Type) -> bool {
-        matches!(ty, Type::Fn(..)) || matches!(ty, Type::Named(p, _) if is_sexpr_type(p) || self.struct_types.contains(p) || self.is_enum_path(p))
+        matches!(ty, Type::Fn(..))
+            || matches!(ty, Type::Named(p, _) if is_sexpr_type(p) || matches!(self.root.find_type(p), Some(scope::TypeEntry::Struct)) || self.is_enum_path(p))
     }
 
     /// Finds the registered `(Path, String)` key for a `"type::method"`
@@ -1927,32 +1954,33 @@ impl Interp {
     /// `(Path, String)` key.
     fn method_key(&self, name: &str) -> Option<(Path, String)> {
         let (type_name, method) = name.split_once("::")?;
-        self.methods.keys().find(|(p, m)| p.local() == type_name && m == method).cloned()
+        self.root.find_method_by_local(type_name, method).map(|p| (p, method.to_string()))
     }
 
-    /// Resolves a `(compile name)` argument against either `self.fns` (a
-    /// plain name, a top-level `defun`) or `self.methods` (a `"type::method"`
-    /// name, an instance/static `defmethod` — including a `defstruct`'s
+    /// Resolves a `(compile name)` argument against either the scope tree's
+    /// free functions (a plain name, a top-level `defun`) or its methods (a
+    /// `"type::method"` name, an instance/static `defmethod` — including a `defstruct`'s
     /// auto-generated field accessor/setter, whose body is the `Expr::FieldGet`/
     /// `FieldSet` `compile-field-get`/`compile-field-set` exist to compile in
     /// the first place). See [`Self::method_key`] for how `name` decides
     /// which of the two this is.
-    fn resolve_fn_def(&self, name: &str) -> Result<&FnDef, EvalError> {
+    fn resolve_fn_def(&self, name: &str) -> Result<Rc<FnDef>, EvalError> {
         // A `"::"` name is a `type::method` (a `defmethod`) *or* a
         // module-qualified `defun` (`m::inc`) — both share the separator.
         // `method_key` matches only a genuinely registered method, so try it
-        // first; a miss falls through to a `self.fns` lookup by the full parsed
-        // path (interp-closure removal: module-qualified closure targets).
+        // first; a miss falls through to a direct-descent lookup by the full
+        // parsed path (interp-closure removal: module-qualified closure
+        // targets).
         if name.contains("::") {
-            if let Some(key) = self.method_key(name) {
-                return self.methods.get(&key).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()));
+            if let Some((type_path, method)) = self.method_key(name) {
+                return self.root.get_method(&type_path, &method).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()));
             }
             return self
-                .fns
-                .get(&fn_path_from_node_name(name))
+                .root
+                .get_fn(&fn_path_from_node_name(name))
                 .ok_or_else(|| EvalError::NoSuchFunction(name.to_string()));
         }
-        self.fns.get(&Path::root(name)).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))
+        self.root.get_fn(&Path::root(name)).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))
     }
 
     /// Looks up `name`'s registered `defun`/`defmethod` body (see
@@ -2025,8 +2053,8 @@ impl Interp {
             return Ok(id);
         }
         let slot = self
-            .globals
-            .get(path)
+            .root
+            .get_global(path)
             .ok_or_else(|| EvalError::Internal(format!("compile: global \"{}\" is not defined", path)))?;
         let v = slot.get(heap);
         let value = rtvalue_to_struct_field(heap, &v).map_err(|_| {
@@ -2037,7 +2065,7 @@ impl Interp {
         Ok(id)
     }
 
-    /// Compiles the `defun` named `name` (looked up in `self.fns`) into one
+    /// Compiles the `defun` named `name` (looked up in the scope tree) into one
     /// LLVM function — named `internal_name` — added to `module`. Shared by
     /// [`Self::compile_function`] (JIT, Phase 1) — which always passes a
     /// throwaway, single-use module and the same name twice — and
@@ -2111,12 +2139,12 @@ impl Interp {
             self.promote_global(heap, &target)?;
         }
         let compiled_globals = self.compiled_globals.borrow();
-        // `ast_bridge` is deliberately `Registry`-free, so hand it the enum
-        // membership (`global_field_kind`'s kind-`10` classification) as
-        // plain data, the same way `struct_types` already crosses. Collected
-        // fresh per compilation — compiling is rare enough that keeping a
-        // second always-current set alongside `enum_defs` isn't worth it.
-        let enum_types: HashSet<Path> = self.enum_defs.keys().cloned().collect();
+        // `ast_bridge` is deliberately `Registry`-free, so hand it the
+        // struct/enum classification as a plain flattened snapshot of the
+        // scope tree. Collected fresh per compilation — compiling is rare
+        // enough that keeping a second always-current copy isn't worth it.
+        let (struct_types, enum_defs) = self.root.collect_struct_and_enum_types();
+        let enum_types: HashSet<Path> = enum_defs.keys().cloned().collect();
 
         // A top-level `defun` has no enclosing lexical scope to capture
         // *from*, so its own `cell_names` (closure-representation
@@ -2138,13 +2166,13 @@ impl Interp {
         // construction (a `labels`/`lambda` parameter or captured-name list
         // needs the identical shape) rather than re-deriving it here, so
         // the two can never desync.
-        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, params, &self.struct_types, &enum_types, &cell_names) {
+        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, params, &struct_types, &enum_types, &cell_names) {
             Ok(v) => v,
             Err(e) => return Err(EvalError::Panic(e.to_string())),
         };
         heap.push_root(param_list);
         let body_sexpr =
-            match crate::compile::ast_bridge::ast_to_sexpr(heap, body, &self.struct_types, &enum_types, &compiled_globals, &cell_names) {
+            match crate::compile::ast_bridge::ast_to_sexpr(heap, body, &struct_types, &enum_types, &compiled_globals, &cell_names) {
                 Ok(v) => v,
                 Err(e) => {
                     heap.pop_root(); // param_list
@@ -2191,21 +2219,19 @@ impl Interp {
             RtValue::Sexpr(param_list),
             RtValue::Sexpr(body_sexpr),
         ];
-        {
-            let compiled = self.compiled.borrow();
-            if let Some(cf) = compiled.get(&compiler_path) {
-                let ret_ty = Type::Named(Path::root("llvm-module"), Vec::new());
-                let mark = llvm_handles_mark();
-                let r = self.call_compiled(heap, cf, &argv, &ret_ty);
-                llvm_handles_release(mark);
-                r?;
-                return Ok(());
-            }
-        }
-        let compiler_def = self.fns.get(&compiler_path).ok_or_else(|| {
+        let compiler_def = self.root.get_fn(&compiler_path).ok_or_else(|| {
             EvalError::Internal("compile: compiler body not loaded — call load_compiler first".into())
         })?;
-        self.apply(heap, compiler_def, argv)?;
+        let compiled = compiler_def.compiled.borrow().clone();
+        if let Some(cf) = compiled {
+            let ret_ty = Type::Named(Path::root("llvm-module"), Vec::new());
+            let mark = llvm_handles_mark();
+            let r = self.call_compiled(heap, &cf, &argv, &ret_ty);
+            llvm_handles_release(mark);
+            r?;
+            return Ok(());
+        }
+        self.apply(heap, &compiler_def, argv)?;
         Ok(())
     }
 
@@ -2240,17 +2266,18 @@ impl Interp {
             self.promote_global(heap, &target)?;
         }
         let compiled_globals = self.compiled_globals.borrow();
-        // See `add_compiled_function`'s own copy of this for why the enum
-        // membership crosses as a per-compilation set.
-        let enum_types: HashSet<Path> = self.enum_defs.keys().cloned().collect();
+        // See `add_compiled_function`'s own copy of this for why the
+        // struct/enum classification crosses as a per-compilation snapshot.
+        let (struct_types, enum_defs) = self.root.collect_struct_and_enum_types();
+        let enum_types: HashSet<Path> = enum_defs.keys().cloned().collect();
 
-        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, &[], &self.struct_types, &enum_types, &HashSet::new()) {
+        let param_list = match crate::compile::ast_bridge::tagged_sym_list(heap, &[], &struct_types, &enum_types, &HashSet::new()) {
             Ok(v) => v,
             Err(e) => return Err(EvalError::Panic(e.to_string())),
         };
         heap.push_root(param_list);
         let body_sexpr =
-            match crate::compile::ast_bridge::ast_to_sexpr_for_global_init(heap, value, &self.struct_types, &enum_types, &compiled_globals) {
+            match crate::compile::ast_bridge::ast_to_sexpr_for_global_init(heap, value, &struct_types, &enum_types, &compiled_globals) {
                 Ok(v) => v,
                 Err(e) => {
                     heap.pop_root(); // param_list
@@ -2263,11 +2290,20 @@ impl Interp {
     }
 
     /// `(compile fn-name)` (or `(compile type::method)`): JIT-compiles a
-    /// previously-defined `defun`/`defmethod` and registers the result in
-    /// [`Self::compiled`]/[`Self::compiled_methods`] (see [`Self::method_key`])
-    /// so `Expr::Call`/`Expr::Assoc` dispatches to native code instead of
-    /// tree-walking it from then on. See [`Self::add_compiled_function`] for
-    /// the supported-shape scope.
+    /// previously-defined `defun`/`defmethod` and marks the target `FnDef`
+    /// node compiled (see `FnDef::compiled`) so `Expr::Call`/`Expr::Assoc`
+    /// dispatches to native code instead of tree-walking it from then on.
+    /// `target` is already fully resolved by `Checker::check_compile` (a
+    /// `Ref` re-verified here via `Self::resolve_fn_ref`, or a `type_name`+
+    /// `method` re-verified via `ModuleScope::resolve_method` — the same
+    /// independent re-resolution every other reference gets, not a bare
+    /// name to search the whole tree for by local name alone). The
+    /// qualified string this derives from that resolved identity only feeds
+    /// [`Self::compute_sccs`]'s *internal* graph bookkeeping — unchanged
+    /// from before, and still keyed by local type name for a method
+    /// ([`Self::method_key`]), since transitively-discovered call targets
+    /// already reach that machinery the same way. See
+    /// [`Self::add_compiled_function`] for the supported-shape scope.
     ///
     /// labels/closures Stage 3 (single-function shape) / Stage 5 (SCC
     /// generalization): unlike `compile::aot::compile_file` (one shared
@@ -2312,36 +2348,38 @@ impl Interp {
     /// — so the three names (this method's own `internal_name`, this
     /// method's entry in `externals`, and a *caller's* `compile-assoc`
     /// lookup) can never drift apart. A primitive-receiver target *not*
-    /// registered in `self.methods` (`i64`/`i32`'s own built-in arithmetic;
-    /// `string`'s, since Stage 7 of the Sexpr-representation plan —
+    /// registered in the scope tree's `methods` (`i64`/`i32`'s own built-in
+    /// arithmetic; `string`'s, since Stage 7 of the Sexpr-representation plan —
     /// `docs/implementation-log.md`) needs none of this: those compile
     /// natively with no external call (`compile-assoc`'s own dispatch, which
     /// panics clearly on its own for any one of *their* methods it doesn't
     /// actually implement, e.g. `string::upcase`). But a *user-defined*
     /// method on a primitive receiver (e.g. the prelude's `impl Eq i32` →
-    /// `i32::equals`) is in `self.methods` like any `defstruct` method and
+    /// `i32::equals`) is registered like any other `defstruct` method and
     /// takes the normal three steps — `compile-assoc`'s dispatch falls
     /// through to the same mangled-name call for it. Anything else
     /// (`f64`/`char` builtins — still out of scope) panics clearly right
     /// here rather than deep inside `compile-assoc`'s own `get-function`.
-    fn compile_function(&self, heap: &mut Heap, name: &str) -> Result<RtValue, EvalError> {
-        if self.is_compiled_name(name) {
+    fn compile_function(&self, heap: &mut Heap, target: &CompileTarget) -> Result<RtValue, EvalError> {
+        let (name, already_compiled) = match target {
+            CompileTarget::Fn(r) => {
+                self.resolve_fn_ref(r).ok_or_else(|| EvalError::NoSuchFunction(r.written.join("::")))?;
+                (qualified_fn_name(&r.resolved), self.root.fn_compiled(&r.resolved))
+            }
+            CompileTarget::Method { type_name, method, home } => {
+                self.root
+                    .resolve_method(home, type_name, method)
+                    .ok_or_else(|| EvalError::NoSuchFunction(format!("{}::{}", type_name, method)))?;
+                (format!("{}::{}", type_name.local(), method), self.root.method_compiled(type_name, method))
+            }
+        };
+        if already_compiled {
             return Ok(RtValue::Bool(true));
         }
-        for scc in self.compute_sccs(name)? {
+        for scc in self.compute_sccs(&name)? {
             self.compile_scc(heap, &scc)?;
         }
         Ok(RtValue::Bool(true))
-    }
-
-    /// True once `name` (a bare `defun` name, or `"type::method"`) already
-    /// has a compiled entry — [`Self::compiled`] or [`Self::compiled_methods`]
-    /// depending on which [`Self::method_key`] resolves it to.
-    fn is_compiled_name(&self, name: &str) -> bool {
-        match self.method_key(name) {
-            Some(key) => self.compiled_methods.borrow().contains_key(&key),
-            None => self.compiled.borrow().contains_key(&fn_path_from_node_name(name)),
-        }
     }
 
     /// `name`'s own outgoing edges in the top-level compile call graph —
@@ -2421,14 +2459,13 @@ impl Interp {
                 // `rt_llvm_call` abort under the AOT-native island
                 // (interp-closure removal Stage 8a). `is_native_lowered_primitive_method`
                 // is the Rust twin of the island's `*-native-method?` list.
-                self.methods.contains_key(key)
+                self.root.has_method(&key.0, &key.1)
                     || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64" | "bignum" | "ratio" | "sexpr")
                     || !is_native_lowered_primitive_method(key.0.local(), &key.1)
             })
             .collect();
         for (type_name, method) in &method_targets {
-            let key = (type_name.clone(), method.clone());
-            if !self.methods.contains_key(&key) {
+            if !self.root.has_method(type_name, method) {
                 return Err(EvalError::Panic(format!(
                     "compile: \"{}\" calls \"{}\", a builtin method with no compiled implementation",
                     name,
@@ -2491,8 +2528,8 @@ impl Interp {
 
         for edge in self.call_graph_edges(node)? {
             let already_compiled = match &edge {
-                CallEdge::Fn(p) => self.compiled.borrow().contains_key(p),
-                CallEdge::Method(p, m) => self.compiled_methods.borrow().contains_key(&(p.clone(), m.clone())),
+                CallEdge::Fn(p) => self.root.fn_compiled(p),
+                CallEdge::Method(p, m) => self.root.method_compiled(p, m),
             };
             if already_compiled {
                 continue;
@@ -2591,31 +2628,19 @@ impl Interp {
         }
 
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-        let mut externals: Vec<(String, usize)> = {
-            let compiled = self.compiled.borrow();
-            call_targets
-                .iter()
-                .map(|p| {
-                    (
-                        crate::compile::ast_bridge::user_symbol_name(&qualified_fn_name(p)),
-                        compiled.get(p).expect("Self::compute_sccs's finish order guarantees this is already compiled").address(),
-                    )
-                })
-                .collect()
-        };
-        {
-            let compiled_methods = self.compiled_methods.borrow();
-            externals.extend(method_targets.iter().map(|(type_name, method)| {
-                let key = (type_name.clone(), method.clone());
-                (
-                    crate::compile::ast_bridge::user_method_symbol_name(type_name, method),
-                    compiled_methods
-                        .get(&key)
-                        .expect("Self::compute_sccs's finish order guarantees this is already compiled")
-                        .address(),
-                )
-            }));
-        }
+        let mut externals: Vec<(String, usize)> = call_targets
+            .iter()
+            .map(|p| {
+                let f = self.root.get_fn(p).expect("Self::compute_sccs's finish order guarantees this is already compiled");
+                let addr = f.compiled.borrow().as_ref().expect("Self::compute_sccs's finish order guarantees this is already compiled").address();
+                (crate::compile::ast_bridge::user_symbol_name(&qualified_fn_name(p)), addr)
+            })
+            .collect();
+        externals.extend(method_targets.iter().map(|(type_name, method)| {
+            let f = self.root.get_method(type_name, method).expect("Self::compute_sccs's finish order guarantees this is already compiled");
+            let addr = f.compiled.borrow().as_ref().expect("Self::compute_sccs's finish order guarantees this is already compiled").address();
+            (crate::compile::ast_bridge::user_method_symbol_name(type_name, method), addr)
+        }));
         externals.extend(rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)));
         // Mirrors `compile::aot::compile_file`'s own `verify()` call in the
         // same position, before handing the module to LLVM for real: a
@@ -2632,11 +2657,13 @@ impl Interp {
             .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
         for (member, compiled) in members.iter().zip(compiled_fns) {
             match self.method_key(member) {
-                Some(key) => {
-                    self.compiled_methods.borrow_mut().insert(key, compiled);
+                Some((type_path, method)) => {
+                    let f = self.root.get_method(&type_path, &method).expect("member is a registered method");
+                    *f.compiled.borrow_mut() = Some(Rc::new(compiled));
                 }
                 None => {
-                    self.compiled.borrow_mut().insert(fn_path_from_node_name(member), compiled);
+                    let f = self.root.get_fn(&fn_path_from_node_name(member)).expect("member is a registered function");
+                    *f.compiled.borrow_mut() = Some(Rc::new(compiled));
                 }
             }
         }
@@ -2708,13 +2735,6 @@ impl Interp {
     /// on, so it stays a free function too.)
     fn eval_builtin(&self, heap: &mut Heap, name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
         match name {
-            "compile" => {
-                let fn_name = match expect_str(&args[0]) {
-                    Ok(s) => s.to_string(),
-                    Err(e) => return Some(Err(e)),
-                };
-                Some(self.compile_function(heap, &fn_name))
-            }
             // `(compile-file "source.typl" "output")`: AOT-compiles an
             // independent source file straight to a native executable —
             // see `compile::aot::compile_file`'s doc comment for why this
@@ -2909,7 +2929,7 @@ impl MacroExpander for Interp {
     /// next caller (e.g. a later top-level form), since `sync_roots` always
     /// trusts its own `rooted` count to know how much to pop.
     fn expand_macro(&self, heap: &mut Heap, path: &Path, raw_args: Vec<Value>) -> Result<Value, String> {
-        let f = self.fns.get(path).ok_or_else(|| format!("no such macro: {}", path))?;
+        let f = self.root.get_fn(path).ok_or_else(|| format!("no such macro: {}", path))?;
         let fixed = if f.rest { f.params.len() - 1 } else { f.params.len() };
         if f.rest {
             if raw_args.len() < fixed {
@@ -2934,8 +2954,8 @@ impl MacroExpander for Interp {
         // closure over a non-tier type is the only behavior change — it now
         // JITs (or hard-declines *Gap*) instead of silently interpreting —
         // and no such macro exists (macro bodies close over ordinary types).
-        let result = match self.bind_macro_args(heap, f, &raw_args, fixed) {
-            Ok(argv) => self.apply(heap, f, argv),
+        let result = match self.bind_macro_args(heap, &f, &raw_args, fixed) {
+            Ok(argv) => self.apply(heap, &f, argv),
             Err(e) => Err(e),
         };
         for _ in 0..self.rooted.replace(0) {
@@ -6113,29 +6133,35 @@ mod scc_tests {
         // `(defun a () i64 (b))` / `(defun b () i64 (a))` — never checked,
         // built directly as already-typed AST, so the checker's forward-
         // reference restriction never comes into play.
-        interp.fns.insert(
-            Path::root("a"),
-            FnDef {
+        interp.root.fns.insert(
+            "a".to_string(),
+            Rc::new(FnDef {
                 params: vec![],
                 kinds: vec![],
-                body: vec![Typed::new(Expr::Call(Path::root("b"), vec![]), Type::I64)],
+                body: vec![Typed::new(Expr::Call(crate::check::ast::Ref::synthetic(Path::root("b")), vec![]), Type::I64)],
                 rest: false,
                 sig: Some((vec![], Type::I64)),
-            },
+                public: true,
+                compiled: RefCell::new(None),
+            }),
         );
-        interp.fns.insert(
-            Path::root("b"),
-            FnDef {
+        interp.root.fns.insert(
+            "b".to_string(),
+            Rc::new(FnDef {
                 params: vec![],
                 kinds: vec![],
-                body: vec![Typed::new(Expr::Call(Path::root("a"), vec![]), Type::I64)],
+                body: vec![Typed::new(Expr::Call(crate::check::ast::Ref::synthetic(Path::root("a")), vec![]), Type::I64)],
                 rest: false,
                 sig: Some((vec![], Type::I64)),
-            },
+                public: true,
+                compiled: RefCell::new(None),
+            }),
         );
 
-        interp.compile_function(&mut heap, "a").expect("mutual recursion across separate top-level functions should now compile");
-        assert!(interp.compiled.borrow().contains_key(&Path::root("a")), "\"a\" should have ended up compiled");
-        assert!(interp.compiled.borrow().contains_key(&Path::root("b")), "\"b\", pulled in transitively as part of the same SCC, should have ended up compiled too");
+        interp
+            .compile_function(&mut heap, &CompileTarget::Fn(crate::check::ast::Ref::synthetic(Path::root("a"))))
+            .expect("mutual recursion across separate top-level functions should now compile");
+        assert!(interp.root.fn_compiled(&Path::root("a")), "\"a\" should have ended up compiled");
+        assert!(interp.root.fn_compiled(&Path::root("b")), "\"b\", pulled in transitively as part of the same SCC, should have ended up compiled too");
     }
 }

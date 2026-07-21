@@ -466,15 +466,12 @@ impl Registry {
         // it stays an ordinary `Rust` builtin rather than a `defmacro`. `Never`
         // return type, same as `panic`, so it satisfies any expected type.
         root.fns.insert("exit".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::Never, public: true, builtin: true, bounds: HashMap::new() });
-        // `compile`: JIT-compiles a previously-defined `defun` (see
-        // `Interp::compile_function`) so later calls dispatch to native
-        // code. This `Type::Str` signature is the internal shape only —
-        // surface syntax takes an unevaluated symbol or `::`-path
-        // (`(compile foo)`, `(compile point::x)`), special-cased in
-        // `Checker::check_compile` to convert that name to the string this
-        // entry expects before an ordinary call is built; a string literal
-        // there (`(compile "foo")`) is a type error.
-        root.fns.insert("compile".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
+        // `compile` is a genuine special form (`Checker::check_compile`,
+        // dispatched by name in `Checker::check_list` alongside `quote`/
+        // `panic`/etc. — never an ordinary call), so unlike `compile-file`
+        // below it has no `root.fns` entry: its argument is an unevaluated
+        // symbol or `::`-path, resolved directly against the current
+        // namespace into an `Expr::CompileFn(CompileTarget)` node.
         // `compile-file`: AOT-compiles an independent source file to a
         // native executable (see `Interp::eval_builtin`'s `"compile-file"`
         // arm / `compile::aot::compile_file`). Same free-function shape as

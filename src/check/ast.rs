@@ -48,6 +48,66 @@ impl PartialEq for Typed {
 /// parameters, and checked body.
 pub type LabelDef = (String, Vec<(String, Type)>, Vec<Typed>);
 
+/// A reference to a free function or global variable — everything both
+/// `Interp` and the compile pipeline need to resolve one, kept as two
+/// independent halves rather than a single collapsed `Path`:
+///
+/// - `written`/`home` are what `eval::scope::ModuleScope` (see that
+///   module's doc comment) uses to *re-derive* the target itself at
+///   runtime, walking its own tree from `home` — mirroring
+///   `Checker::resolve_fn`/`resolve_fn_path`/`resolve_global`/
+///   `resolve_global_path` (checker.rs:1061-1093, 1374-1410) — rather than
+///   trusting `resolved` as a lookup key. `written` is the name exactly as
+///   it appeared at the reference site (`["inc"]` bare, `["m","inc"]`
+///   qualified) and `home` is the lexically enclosing module's own raw
+///   segments (`Checker::ns` at the point this reference was checked, e.g.
+///   `[]` at the root) — the walk's starting point. Plain `Vec<String>`
+///   rather than [`Path`] because the root module has *zero* segments,
+///   which `Path` (always at least one — the local name) can't represent.
+/// - `resolved` is the checker's own fully-qualified answer, kept only for
+///   compile-time-only consumers that have no way to redo resolution
+///   themselves: `compile::ast_bridge` (deliberately `Registry`-free),
+///   `compile::aot`, and `check::locate`'s LSP goto-definition. `Interp`
+///   itself never reads this field.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Ref {
+    pub written: Vec<String>,
+    pub home: Vec<String>,
+    pub resolved: Path,
+}
+
+impl Ref {
+    /// A synthesized reference with no real "as written" source form (the
+    /// checker's own internal rewrites — e.g. `sexpr-cons`, quasiquote's
+    /// `append_fq` — where `resolved` is already exactly right and there's
+    /// no user-facing shadowing concern `written`+`home` would need to
+    /// disambiguate). `home` is `resolved`'s own parent module, so a
+    /// bare-name ancestor-walk starting there still finds the same target
+    /// as direct descent would.
+    pub fn synthetic(resolved: Path) -> Ref {
+        let written = vec![resolved.local().to_string()];
+        let home = resolved.parent().to_vec();
+        Ref { written, home, resolved }
+    }
+}
+
+/// The target of a `(compile name)` / `(compile type::method)` form —
+/// `Checker::check_compile` builds this from whichever resolution it
+/// already performs for its own generic-target check (`resolve_fn`/
+/// `resolve_type_name`), instead of discarding that result and handing
+/// `Interp` a bare name string to re-resolve by an unqualified, module-blind
+/// search (the bug this replaces — see `docs/implementation-log.md`).
+/// `Fn`'s `Ref` gets the exact same independent `written`+`home`
+/// re-resolution at runtime as an ordinary `Expr::Call`; `Method`'s
+/// `type_name` is already a fully resolved type identity (never searched,
+/// same reasoning as `Expr::Assoc`/`MethodRef`), so only `home` is needed
+/// for the `pub`-or-`in_scope` check.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum CompileTarget {
+    Fn(Ref),
+    Method { type_name: Path, method: String, home: Vec<String> },
+}
+
 /// An expression. Children are [`Typed`] so the whole tree stays annotated.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Expr {
@@ -69,22 +129,25 @@ pub enum Expr {
     Unit,
     /// A reference to a bound (local) variable.
     Var(String),
-    /// A reference to a global variable/constant, by its [`Path`].
-    Global(Path),
+    /// A reference to a global variable/constant.
+    Global(Ref),
     /// A named free function used as a value (reified into a function value).
-    FnRef(Path),
+    FnRef(Ref),
     /// A named *instance* method used as a value, e.g. passing `+` (an `i32`
     /// instance method, see `registry::int_assoc`) where a `(fn (i32 i32)
     /// i32)` is expected — the receiver type is resolved from that expected
     /// function type at the use site (`Checker::method_value`), since there's
-    /// no receiver expression to dispatch on.
-    MethodRef { type_name: Path, method: String },
+    /// no receiver expression to dispatch on. `type_name` is already a fully
+    /// resolved type identity (never searched, unlike a `Ref`'s `written`
+    /// name) — see `Expr::Assoc`'s doc comment for why `home` alone (no full
+    /// `Ref`) suffices here.
+    MethodRef { type_name: Path, method: String, home: Vec<String> },
     /// `(if cond then else)`.
     If(Box<Typed>, Box<Typed>, Box<Typed>),
     /// `(let ((name val)...) body...)` — bindings, then a body sequence.
     Let(Vec<(String, Typed)>, Vec<Typed>),
-    /// A call to a free function, identified by its fully-qualified [`Path`].
-    Call(Path, Vec<Typed>),
+    /// A call to a free function.
+    Call(Ref, Vec<Typed>),
     /// An anonymous function `(lambda (params) ret body...)`. Its type is
     /// [`Type::Fn`](crate::Type).
     Lambda { params: Vec<(String, Type)>, body: Vec<Typed> },
@@ -102,12 +165,22 @@ pub enum Expr {
     /// Apply a function *value* (a closure) to arguments.
     Apply(Box<Typed>, Vec<Typed>),
     /// A type-associated call: an instance method (`args[0]` is the receiver)
-    /// or a static associated function. `type_name` is the type's [`Path`].
+    /// or a static associated function. `type_name` is the type's [`Path`] —
+    /// already a fully resolved, statically-known identity from type
+    /// inference (never an ambiguous bare name to search for), so unlike
+    /// `Call`/`Global`/`FnRef` this never needs `eval::scope::ModuleScope`'s
+    /// ancestor-chain walk; `Interp` only needs a direct descent to
+    /// `type_name`'s own module plus a `public`-or-`in_scope` check against
+    /// `home` (the reference's own lexical module, read against the target
+    /// `FnDef`'s own `public` bit at eval time) — `Interp` re-derives this
+    /// independently, the same `Checker::assoc_visible` (checker.rs:989-991)
+    /// rule, rather than trusting a precomputed bit.
     Assoc {
         type_name: Path,
         method: String,
         instance: bool,
         args: Vec<Typed>,
+        home: Vec<String>,
     },
     /// A call to a trait method on a still-generic type-variable receiver
     /// inside a `where`-bounded function body (`Checker::check_instance_method`'s
@@ -167,7 +240,7 @@ pub enum Expr {
     /// `(setf var value)` — assign to a local variable; evaluates to the value.
     Set(String, Box<Typed>),
     /// `(setf global value)` — assign to a global; evaluates to the value.
-    SetGlobal(Path, Box<Typed>),
+    SetGlobal(Ref, Box<Typed>),
     /// `(loop body...)` — loop forever, exited via `break`/`return`. Its type is
     /// the join of every `break`/`return` reached directly inside it (not
     /// crossing a nested loop or `lambda`); `Never` if it never exits.
@@ -187,6 +260,11 @@ pub enum Expr {
     /// literal here would be invisible to the collector. The interpreter
     /// reconstructs a fresh heap value from this on every evaluation.
     Quote(QuotedSexpr),
+    /// `(compile name)` / `(compile type::method)` — JIT-compiles the named
+    /// function/method against the running `Interp`, returning `bool`. See
+    /// `CompileTarget`'s doc comment for why this is its own node rather
+    /// than a disguised `Call` to a builtin taking a string argument.
+    CompileFn(CompileTarget),
 }
 
 /// An owned, GC-heap-independent mirror of `Sexpr`'s shape, used by

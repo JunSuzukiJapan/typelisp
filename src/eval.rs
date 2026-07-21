@@ -4,6 +4,7 @@
 
 mod value;
 pub(crate) mod interp;
+pub(crate) mod scope;
 
 pub use value::{EvalError, RtValue};
 pub use interp::Interp;

@@ -15,6 +15,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::freevars::{labels_free_vars, lambda_free_vars, names_captured_by_nested};
 use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, QuotedSexpr, Type, Typed, Value};
+#[cfg(test)]
+use crate::Ref;
 
 /// The five read-only inputs every scoped `translate_*` threads through
 /// unchanged, bundled so a call passes one `cx` instead of re-listing all
@@ -1046,7 +1048,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // method's receiver/arguments can be `Fn`- or `Sexpr`-typed and need
         // the same `compile-call-args` retain/GC-root treatment an ordinary
         // call's arguments already get.
-        Expr::Assoc { type_name, method, instance, args } => {
+        Expr::Assoc { type_name, method, instance, args, .. } => {
             // `Vector<T>`'s field-backed builtin methods (`new`/`get`/`set`/
             // `len`/`push`) have no compiled `defmethod` body; lower them to a
             // dedicated `vector-op` node carrying the element kind (see
@@ -1113,12 +1115,12 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // deliberately deferred to the phase that first needs them, rather
         // than building out unrooted multi-child plumbing nothing exercises
         // yet — see the module doc comment.
-        Expr::Global(path) => translate_global(heap, path, &typed.ty, cx),
-        Expr::FnRef(path) => translate_fnref(heap, path, &typed.ty, cx.structs, cx.enums),
-        Expr::MethodRef { type_name, method } => translate_methodref(heap, type_name, method, &typed.ty, cx.structs, cx.enums),
+        Expr::Global(r) => translate_global(heap, &r.resolved, &typed.ty, cx),
+        Expr::FnRef(r) => translate_fnref(heap, &r.resolved, &typed.ty, cx.structs, cx.enums),
+        Expr::MethodRef { type_name, method, .. } => translate_methodref(heap, type_name, method, &typed.ty, cx.structs, cx.enums),
         Expr::If(cond, then, els) => translate_if(heap, cond, then, els, &typed.ty, cx),
         Expr::Let(binds, body) => translate_let(heap, binds, body, cx),
-        Expr::Call(path, args) => translate_call(heap, path, args, cx),
+        Expr::Call(r, args) => translate_call(heap, &r.resolved, args, cx),
         Expr::Lambda { params, body } => translate_lambda(heap, params, body, cx.structs, cx.enums, cx.globals, cx.visible_siblings),
         Expr::Labels { defs, body } => translate_labels(heap, defs, body, cx),
         Expr::Apply(callee, args) => translate_apply(heap, callee, args, cx),
@@ -1127,7 +1129,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         Expr::FieldSet(obj, idx, value) => translate_field_set(heap, obj, *idx, value, cx),
         Expr::Match(scrut, arms) => translate_match(heap, scrut, arms, &typed.ty, cx),
         Expr::Set(name, value) => translate_set(heap, name, value, &typed.ty, cx),
-        Expr::SetGlobal(path, value) => translate_set_global(heap, path, value, cx),
+        Expr::SetGlobal(r, value) => translate_set_global(heap, &r.resolved, value, cx),
         Expr::Loop(body) => translate_loop(heap, body, cx),
         Expr::Break => tagged(heap, "break", &[]),
         Expr::Return(value) => translate_return(heap, value, cx),
@@ -1139,6 +1141,12 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // unreachable from any compilable source. The old dispatch-chain
         // lowering it used to have is gone.
         Expr::TraitCall { .. } => unsupported(heap, "TraitCall"),
+        // `(compile name)` is an interpreter-only reflective action (it JIT-
+        // compiles a target against the *running* `Interp`'s own heap/scope
+        // tree) — it has no meaning inside code that is itself being
+        // compiled ahead of time, so this node can never reach here from
+        // real compilable source, same reasoning as `TraitCall` above.
+        Expr::CompileFn(_) => unsupported(heap, "CompileFn"),
     }
 }
 
@@ -2783,9 +2791,9 @@ pub fn collect_global_targets(typed: &Typed) -> Vec<Path> {
 
 fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
     match &typed.expr {
-        Expr::Call(path, args) => {
-            if !targets.calls.contains(path) {
-                targets.calls.push(path.clone());
+        Expr::Call(r, args) => {
+            if !targets.calls.contains(&r.resolved) {
+                targets.calls.push(r.resolved.clone());
             }
             for a in args {
                 collect_calls(a, targets);
@@ -2794,9 +2802,9 @@ fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
         // `translate_fnref` turns this into a forwarding `(call
         // path-local-name ...)` wrapper, so `path` needs the same
         // pre-declaration treatment as a real `Expr::Call` would.
-        Expr::FnRef(path) => {
-            if !targets.calls.contains(path) {
-                targets.calls.push(path.clone());
+        Expr::FnRef(r) => {
+            if !targets.calls.contains(&r.resolved) {
+                targets.calls.push(r.resolved.clone());
             }
         }
         Expr::Assoc { type_name, method, args, .. } => {
@@ -2893,14 +2901,14 @@ fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
             collect_calls(obj, targets);
             collect_calls(value, targets);
         }
-        Expr::Global(path) => {
-            if !targets.globals.contains(path) {
-                targets.globals.push(path.clone());
+        Expr::Global(r) => {
+            if !targets.globals.contains(&r.resolved) {
+                targets.globals.push(r.resolved.clone());
             }
         }
-        Expr::SetGlobal(path, value) => {
-            if !targets.globals.contains(path) {
-                targets.globals.push(path.clone());
+        Expr::SetGlobal(r, value) => {
+            if !targets.globals.contains(&r.resolved) {
+                targets.globals.push(r.resolved.clone());
             }
             collect_calls(value, targets);
         }
@@ -2909,7 +2917,7 @@ fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
         // forwarding-`call`-wrapper treatment above), so `(type_name,
         // method)` needs the exact same pre-declaration treatment a direct
         // `Expr::Assoc` call already gets.
-        Expr::MethodRef { type_name, method } => {
+        Expr::MethodRef { type_name, method, .. } => {
             let key = (type_name.clone(), method.clone());
             if !targets.methods.contains(&key) {
                 targets.methods.push(key);
@@ -3055,6 +3063,7 @@ mod tests {
             method: "+".to_string(),
             instance: true,
             args: vec![a, b],
+            home: vec![],
         };
         let v = ast_to_sexpr(&mut heap, &typed(assoc, Type::I64)).unwrap();
         let (tag, fields) = untag(&heap, v);
@@ -3180,6 +3189,7 @@ mod tests {
                 method: "+".to_string(),
                 instance: true,
                 args: vec![typed(Expr::Var("k".to_string()), Type::I64), typed(Expr::Var("offset".to_string()), Type::I64)],
+                home: vec![],
             },
             Type::I64,
         )];
@@ -3234,7 +3244,7 @@ mod tests {
     #[test]
     fn translates_a_call_to_another_top_level_function() {
         let mut heap = Heap::with_capacity(1 << 10);
-        let call = Expr::Call(crate::Path::root("square"), vec![typed(Expr::Var("a".to_string()), Type::I64)]);
+        let call = Expr::Call(Ref::synthetic(crate::Path::root("square")), vec![typed(Expr::Var("a".to_string()), Type::I64)]);
         let v = ast_to_sexpr(&mut heap, &typed(call, Type::I64)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "call");
@@ -3256,7 +3266,7 @@ mod tests {
         // (interp-closure removal: module-qualified SCC extension) so a
         // module function and a same-named root function don't collide.
         let mut heap = Heap::with_capacity(1 << 10);
-        let call = Expr::Call(crate::Path::of(&["geo", "distance"]), vec![]);
+        let call = Expr::Call(Ref::synthetic(crate::Path::of(&["geo", "distance"])), vec![]);
         let v = ast_to_sexpr(&mut heap, &typed(call, Type::I64)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "call");
@@ -3271,7 +3281,7 @@ mod tests {
 
     #[test]
     fn collect_call_targets_finds_a_direct_top_level_call() {
-        let v = typed(Expr::Call(crate::Path::root("g"), vec![typed(Expr::Int(1), Type::I64)]), Type::I64);
+        let v = typed(Expr::Call(Ref::synthetic(crate::Path::root("g")), vec![typed(Expr::Int(1), Type::I64)]), Type::I64);
         assert_eq!(collect_call_targets(&v), vec![crate::Path::root("g")]);
     }
 
@@ -3282,7 +3292,7 @@ mod tests {
     /// them pre-declared, not just calls sitting directly in the outer body.
     #[test]
     fn collect_call_targets_finds_a_call_nested_inside_a_labels_def_body() {
-        let inner = typed(Expr::Call(crate::Path::root("helper"), vec![typed(Expr::Int(1), Type::I64)]), Type::I64);
+        let inner = typed(Expr::Call(Ref::synthetic(crate::Path::root("helper")), vec![typed(Expr::Int(1), Type::I64)]), Type::I64);
         let defs = vec![("f".to_string(), vec![], vec![inner])];
         let body = vec![typed(
             Expr::Apply(Box::new(typed(Expr::Var("f".to_string()), fn_ty())), vec![]),
@@ -3300,9 +3310,10 @@ mod tests {
                 method: "+".to_string(),
                 instance: true,
                 args: vec![
-                    typed(Expr::Call(crate::Path::root("g"), vec![]), Type::I64),
-                    typed(Expr::Call(crate::Path::root("g"), vec![]), Type::I64),
+                    typed(Expr::Call(Ref::synthetic(crate::Path::root("g")), vec![]), Type::I64),
+                    typed(Expr::Call(Ref::synthetic(crate::Path::root("g")), vec![]), Type::I64),
                 ],
+                home: vec![],
             },
             Type::I64,
         );
@@ -3362,6 +3373,7 @@ mod tests {
                     method: "+".to_string(),
                     instance: true,
                     args: vec![typed(Expr::Var("y".to_string()), Type::I64), typed(Expr::Var("x".to_string()), Type::I64)],
+                    home: vec![],
                 },
                 Type::I64,
             )],
@@ -3399,6 +3411,7 @@ mod tests {
                     method: "+".to_string(),
                     instance: true,
                     args: vec![typed(Expr::Var("y".to_string()), Type::I64), typed(Expr::Var("x".to_string()), Type::I64)],
+                    home: vec![],
                 },
                 Type::I64,
             )],
@@ -3452,7 +3465,7 @@ mod tests {
     fn translates_an_fnref_as_a_forwarding_lambda() {
         let mut heap = Heap::with_capacity(1 << 10);
         let ty = Type::Fn(vec![Type::I64, Type::I64], None, Box::new(Type::I64));
-        let v = ast_to_sexpr(&mut heap, &typed(Expr::FnRef(crate::Path::root("add2")), ty)).unwrap();
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::FnRef(Ref::synthetic(crate::Path::root("add2"))), ty)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "lambda");
         assert!(fields[1].is_empty(), "expected an empty captured list, got {:?}", fields[1]);
@@ -3494,7 +3507,7 @@ mod tests {
     fn translates_a_methodref_as_a_forwarding_lambda() {
         let mut heap = Heap::with_capacity(1 << 10);
         let ty = Type::Fn(vec![Type::I64, Type::I64], None, Box::new(Type::I64));
-        let v = ast_to_sexpr(&mut heap, &typed(Expr::MethodRef { type_name: Path::root("i64"), method: "+".to_string() }, ty)).unwrap();
+        let v = ast_to_sexpr(&mut heap, &typed(Expr::MethodRef { type_name: Path::root("i64"), method: "+".to_string(), home: vec![] }, ty)).unwrap();
         let (tag, fields) = untag(&heap, v);
         assert_eq!(tag, "lambda");
         assert!(fields[1].is_empty(), "expected an empty captured list, got {:?}", fields[1]);
@@ -3698,7 +3711,7 @@ mod tests {
     #[test]
     fn collect_call_targets_finds_a_call_nested_inside_an_if_branch() {
         let cond = typed(Expr::Bool(true), Type::Bool);
-        let then = typed(Expr::Call(crate::Path::root("g"), vec![]), Type::I64);
+        let then = typed(Expr::Call(Ref::synthetic(crate::Path::root("g")), vec![]), Type::I64);
         let els = typed(Expr::Int(0), Type::I64);
         let v = typed(Expr::If(Box::new(cond), Box::new(then), Box::new(els)), Type::I64);
         assert_eq!(collect_call_targets(&v), vec![crate::Path::root("g")]);
@@ -3708,7 +3721,7 @@ mod tests {
     /// its body.
     #[test]
     fn collect_call_targets_finds_a_call_nested_inside_a_let_binding() {
-        let binds = vec![("x".to_string(), typed(Expr::Call(crate::Path::root("g"), vec![]), Type::I64))];
+        let binds = vec![("x".to_string(), typed(Expr::Call(Ref::synthetic(crate::Path::root("g")), vec![]), Type::I64))];
         let body = vec![typed(Expr::Var("x".to_string()), Type::I64)];
         let v = typed(Expr::Let(binds, body), Type::I64);
         assert_eq!(collect_call_targets(&v), vec![crate::Path::root("g")]);
@@ -3814,15 +3827,15 @@ mod tests {
     /// value, and a `Return`'s value.
     #[test]
     fn collect_call_targets_finds_calls_nested_inside_loop_set_and_return() {
-        let loop_body = vec![typed(Expr::Call(crate::Path::root("a"), vec![]), Type::I64)];
+        let loop_body = vec![typed(Expr::Call(Ref::synthetic(crate::Path::root("a")), vec![]), Type::I64)];
         let v = typed(Expr::Loop(loop_body), Type::Unit);
         assert_eq!(collect_call_targets(&v), vec![crate::Path::root("a")]);
 
-        let set = Expr::Set("x".to_string(), Box::new(typed(Expr::Call(crate::Path::root("b"), vec![]), Type::I64)));
+        let set = Expr::Set("x".to_string(), Box::new(typed(Expr::Call(Ref::synthetic(crate::Path::root("b")), vec![]), Type::I64)));
         let v = typed(set, Type::I64);
         assert_eq!(collect_call_targets(&v), vec![crate::Path::root("b")]);
 
-        let ret = Expr::Return(Some(Box::new(typed(Expr::Call(crate::Path::root("c"), vec![]), Type::I64))));
+        let ret = Expr::Return(Some(Box::new(typed(Expr::Call(Ref::synthetic(crate::Path::root("c")), vec![]), Type::I64))));
         let v = typed(ret, Type::Never);
         assert_eq!(collect_call_targets(&v), vec![crate::Path::root("c")]);
     }
@@ -4039,8 +4052,8 @@ mod tests {
     /// (no sub-expression slot at all), so only those two need walking.
     #[test]
     fn collect_call_targets_finds_calls_nested_inside_a_match_scrutinee_and_arm_body() {
-        let scrut = typed(Expr::Call(crate::Path::root("a"), vec![]), sexpr_ty());
-        let arms = vec![Arm { pat: Pattern::Wildcard, body: vec![typed(Expr::Call(crate::Path::root("b"), vec![]), Type::I64)] }];
+        let scrut = typed(Expr::Call(Ref::synthetic(crate::Path::root("a")), vec![]), sexpr_ty());
+        let arms = vec![Arm { pat: Pattern::Wildcard, body: vec![typed(Expr::Call(Ref::synthetic(crate::Path::root("b")), vec![]), Type::I64)] }];
         let v = typed(Expr::Match(Box::new(scrut), arms), Type::I64);
         assert_eq!(collect_call_targets(&v), vec![crate::Path::root("a"), crate::Path::root("b")]);
     }
@@ -4249,7 +4262,7 @@ mod tests {
         let ctor = Expr::Construct {
             type_name: Path::root("option"),
             variant: 0,
-            args: vec![typed(Expr::Call(crate::Path::root("g"), vec![]), Type::I64)],
+            args: vec![typed(Expr::Call(Ref::synthetic(crate::Path::root("g")), vec![]), Type::I64)],
             mutable: false,
         };
         let v = typed(ctor, Type::Named(Path::root("option"), vec![Type::I64]));
@@ -4261,12 +4274,12 @@ mod tests {
     #[test]
     fn collect_call_targets_finds_calls_nested_inside_field_get_and_field_set() {
         let point_ty = Type::Named(Path::root("point"), vec![]);
-        let obj = typed(Expr::Call(crate::Path::root("get-point"), vec![]), point_ty.clone());
+        let obj = typed(Expr::Call(Ref::synthetic(crate::Path::root("get-point")), vec![]), point_ty.clone());
         let v = typed(Expr::FieldGet(Box::new(obj), 0), Type::I64);
         assert_eq!(collect_call_targets(&v), vec![crate::Path::root("get-point")]);
 
-        let obj = typed(Expr::Call(crate::Path::root("get-point"), vec![]), point_ty);
-        let value = typed(Expr::Call(crate::Path::root("new-value"), vec![]), Type::I64);
+        let obj = typed(Expr::Call(Ref::synthetic(crate::Path::root("get-point")), vec![]), point_ty);
+        let value = typed(Expr::Call(Ref::synthetic(crate::Path::root("new-value")), vec![]), Type::I64);
         let v = typed(Expr::FieldSet(Box::new(obj), 0, Box::new(value)), Type::Unit);
         assert_eq!(
             collect_call_targets(&v),
@@ -4290,7 +4303,7 @@ mod tests {
     #[test]
     fn collect_assoc_targets_finds_an_instance_method_call() {
         let a = typed(Expr::Var("p".to_string()), Type::Named(Path::root("point"), vec![]));
-        let assoc = Expr::Assoc { type_name: Path::root("point"), method: "x".to_string(), instance: true, args: vec![a] };
+        let assoc = Expr::Assoc { type_name: Path::root("point"), method: "x".to_string(), instance: true, args: vec![a], home: vec![] };
         let v = typed(assoc, Type::I64);
         assert_eq!(collect_assoc_targets(&v), vec![(Path::root("point"), "x".to_string())]);
         assert!(collect_call_targets(&v).is_empty(), "an Expr::Assoc target is never a call target");
@@ -4300,7 +4313,7 @@ mod tests {
     fn collect_assoc_targets_deduplicates_repeated_calls_to_the_same_method() {
         let a = typed(Expr::Var("p".to_string()), Type::Named(Path::root("point"), vec![]));
         let inner = typed(
-            Expr::Assoc { type_name: Path::root("point"), method: "x".to_string(), instance: true, args: vec![a] },
+            Expr::Assoc { type_name: Path::root("point"), method: "x".to_string(), instance: true, args: vec![a], home: vec![] },
             Type::I64,
         );
         // The outer `Expr::Assoc` is itself a target too (`collect_assoc_targets`
@@ -4309,7 +4322,7 @@ mod tests {
         // job, not this walker's), so both ends up in the result; only the
         // *repeated* `point::x` target is deduplicated.
         let outer = typed(
-            Expr::Assoc { type_name: Path::root("i64"), method: "+".to_string(), instance: true, args: vec![inner.clone(), inner] },
+            Expr::Assoc { type_name: Path::root("i64"), method: "+".to_string(), instance: true, args: vec![inner.clone(), inner], home: vec![] },
             Type::I64,
         );
         assert_eq!(
@@ -4326,7 +4339,7 @@ mod tests {
     fn collect_assoc_targets_recurses_into_an_if_branch() {
         let receiver = typed(Expr::Var("p".to_string()), Type::Named(Path::root("point"), vec![]));
         let then_branch = typed(
-            Expr::Assoc { type_name: Path::root("point"), method: "x".to_string(), instance: true, args: vec![receiver] },
+            Expr::Assoc { type_name: Path::root("point"), method: "x".to_string(), instance: true, args: vec![receiver], home: vec![] },
             Type::I64,
         );
         let v = typed(

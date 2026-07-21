@@ -233,6 +233,7 @@ fn walk(typed: &Typed, bound: &HashSet<String>, siblings: &HashSet<String>, seen
         }
         Expr::Panic(msg) => walk(msg, bound, siblings, seen, order),
         Expr::Quote(_) => {}
+        Expr::CompileFn(_) => {}
     }
 }
 
@@ -303,7 +304,8 @@ fn collect_nested_captures(typed: &Typed, out: &mut HashSet<String>) {
         | Expr::FnRef(_)
         | Expr::MethodRef { .. }
         | Expr::Break
-        | Expr::Quote(_) => {}
+        | Expr::Quote(_)
+        | Expr::CompileFn(_) => {}
         Expr::If(c, t2, e) => {
             collect_nested_captures(c, out);
             collect_nested_captures(t2, out);
@@ -395,6 +397,7 @@ mod tests {
                 method: "+".to_string(),
                 instance: true,
                 args: vec![typed(Expr::Var("k".to_string()), Type::I64), typed(Expr::Var("offset".to_string()), Type::I64)],
+                home: vec![],
             },
             Type::I64,
         )];
@@ -421,6 +424,7 @@ mod tests {
                 method: "+".to_string(),
                 instance: true,
                 args: vec![typed(Expr::Var("x".to_string()), Type::I64), typed(Expr::Var("shared".to_string()), Type::I64)],
+                home: vec![],
             },
             Type::I64,
         )];
@@ -461,6 +465,7 @@ mod tests {
                 method: "+".to_string(),
                 instance: true,
                 args: vec![typed(Expr::Var("y".to_string()), Type::I64), typed(Expr::Var("x".to_string()), Type::I64)],
+                home: vec![],
             },
             Type::I64,
         )];
@@ -498,6 +503,7 @@ mod tests {
                 method: "+".to_string(),
                 instance: true,
                 args: vec![typed(Expr::Var("x".to_string()), Type::I64), typed(Expr::Var("n".to_string()), Type::I64)],
+                home: vec![],
             },
             Type::I64,
         )];

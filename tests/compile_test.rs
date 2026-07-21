@@ -2360,6 +2360,50 @@ fn compile_of_an_unknown_method_name_is_a_clean_error() {
     }
 }
 
+/// `(compile name)`'s bare-name argument must resolve against the *calling*
+/// form's own lexical module — not just the root — the same ancestor-chain
+/// resolution an ordinary bare `Call` already gets (`Checker::resolve_fn`).
+/// Before this fix, `Interp`'s own runtime resolution of a bare (non-`::`)
+/// `(compile name)` argument only ever looked the name up at the root
+/// (`Path::root(name)`), so `(compile helper)` from inside a module whose
+/// `helper` was never registered at root would fail with `NoSuchFunction`
+/// even though `helper` is genuinely in scope and callable from there.
+#[test]
+fn compile_resolves_a_bare_name_against_its_own_module_not_just_root() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (module m
+          (pub defun helper () i64 42)
+          (pub defun use-it () bool (compile helper)))
+        (m::use-it)
+        "#,
+    );
+    assert!(expect_bool(v));
+}
+
+/// The module-scoped counterpart of `compile_resolves_a_bare_name_against_its_own_module_not_just_root`:
+/// two sibling modules each define their own `tag`, and `(compile tag)`
+/// written inside `a` must resolve — and actually dispatch — to `a`'s own
+/// `tag`, never `b`'s same-named one, even though nothing here is `pub`. The
+/// old module-blind runtime resolution (`Interp::method_key`'s "search the
+/// whole tree by local name" fallback) had no way to prefer the caller's own
+/// module in a case like this; the new `written`+`home` resolution does, by
+/// construction (`ModuleScope::resolve_fn`'s ancestor-chain walk starting
+/// from `a` never even reaches `b`).
+#[test]
+fn compile_bare_name_prefers_the_callers_own_module_over_a_same_named_sibling() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (module a
+          (defun tag () i64 1)
+          (pub defun get-it () i64 (compile tag) (tag)))
+        (module b (defun tag () i64 2))
+        (a::get-it)
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(1));
+}
+
 /// `(compile "name")`/`(compile "type::method")` — a string literal, not an
 /// unevaluated symbol or `::`-path — is a type error caught at check time,
 /// before the compiler ever runs (see `Checker::check_compile`'s doc

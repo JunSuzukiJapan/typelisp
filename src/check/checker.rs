@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{parse_type, prim_type_path, Error, Heap, Loc, Path, Type, Value};
 use crate::name_lexer::{NameLexer, NameTok};
 
-use super::ast::{Arm, Expr, Pattern, QuotedSexpr, Typed};
+use super::ast::{Arm, CompileTarget, Expr, Pattern, QuotedSexpr, Ref, Typed};
 use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Registry, TraitBound, TraitDef, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
@@ -124,6 +124,12 @@ pub enum TopLevel {
         params: Vec<(String, Type)>,
         ret: Type,
         body: Vec<Typed>,
+        /// Whether this `defun` is `pub` — the runtime twin of `FnSig::public`
+        /// (`check::registry`), baked in here so `eval::scope::ModuleScope`'s
+        /// qualified-path resolution can enforce visibility without the
+        /// checker's `Registry` at runtime (see `eval::scope`'s module doc
+        /// comment).
+        public: bool,
     },
     /// A `defmethod`: instance or static associated function of a type.
     Defmethod {
@@ -141,15 +147,18 @@ pub enum TopLevel {
         /// must skip, exactly like `Defun::type_params`; empty for a
         /// concrete method or a generated specialization.
         type_params: Vec<String>,
+        /// Whether this `defmethod` is `pub` — see `Defun::public`'s doc
+        /// comment; the runtime twin of `AssocFn.sig.public`.
+        public: bool,
     },
     /// A `defmacro`: a compile-time, `Sexpr`-to-`Sexpr` code transformer.
     /// Stored as an ordinary callable body — calling it (at macro-expansion
     /// time, via [`MacroExpander`]) is identical to calling a `defun`. `params`
     /// includes the `&rest` parameter's name last (with the `&rest` marker
     /// itself dropped) when `rest` is true; see [`Checker::check_defmacro`].
-    Defmacro { name: Path, params: Vec<String>, body: Vec<Typed>, rest: bool },
+    Defmacro { name: Path, params: Vec<String>, body: Vec<Typed>, rest: bool, public: bool },
     /// A `defvar`/`defconstant`: a global variable (`mutable`) or constant.
-    Defvar { name: Path, ty: Type, value: Typed, mutable: bool },
+    Defvar { name: Path, ty: Type, value: Typed, mutable: bool, public: bool },
     /// A `module`: a namespace and its checked body forms.
     Module { path: Path, body: Vec<TopLevel> },
     /// A `use`: a name brought into the current scope (alias -> target path).
@@ -975,6 +984,18 @@ impl Checker {
         self.ns.len() >= item_ns.len() && self.ns[..item_ns.len()] == *item_ns
     }
 
+    /// Build a [`Ref`] for a `Call`/`Global`/`FnRef`/`SetGlobal` node: pairs
+    /// the name exactly as written at the reference site with the current
+    /// namespace (the walk's starting point for `Interp`'s own independent
+    /// re-resolution, see `eval::scope`'s module doc comment) and the
+    /// already-resolved target (for compile-time-only consumers). Ordinary
+    /// call sites use this; a synthesized reference with no real "as
+    /// written" form (a mangled specialization, a compiler-internal
+    /// rewrite) uses [`Ref::synthetic`] instead.
+    fn mk_ref(&self, written: Vec<String>, resolved: Path) -> Ref {
+        Ref { written, home: self.ns.clone(), resolved }
+    }
+
     /// Whether an associated function/method `af` of `type_fq` is reachable
     /// from the current namespace: public, or in scope (declared in the
     /// same module or an ancestor of it) — mirrors `resolve_fn_path`'s
@@ -1306,7 +1327,7 @@ impl Checker {
             Typed { loc: None, expr: Expr::Quote(QuotedSexpr::Nil), ty: sexpr_ty() },
             |acc, item| {
                 let item = self.wrap_rest_elem(elem_ty, item)?;
-                Ok(Typed { loc: None, expr: Expr::Call(cons_path.clone(), vec![item, acc]), ty: sexpr_ty() })
+                Ok(Typed { loc: None, expr: Expr::Call(Ref::synthetic(cons_path.clone()), vec![item, acc]), ty: sexpr_ty() })
             },
         )
     }
@@ -1410,13 +1431,13 @@ impl Checker {
     /// that can't be instantiated here — see [`Self::fn_ref_node`].
     fn fn_value(&self, name: &str, expected: Option<&Type>) -> Option<Result<Typed, Error>> {
         let fq = self.resolve_fn(name)?;
-        Some(self.fn_ref_node(fq, expected))
+        Some(self.fn_ref_node(vec![name.to_string()], fq, expected))
     }
 
     /// Reify a qualified free-function path as a function value (`FnRef`).
     fn fn_path_value(&self, segs: &[String], expected: Option<&Type>) -> Option<Result<Typed, Error>> {
         let fq = self.resolve_fn_path(segs)?;
-        Some(self.fn_ref_node(fq, expected))
+        Some(self.fn_ref_node(segs.to_vec(), fq, expected))
     }
 
     /// Build an `FnRef` node carrying the function's `(fn ...)` type.
@@ -1430,11 +1451,13 @@ impl Checker {
     /// like a direct call's. With no expectation to resolve from this is a
     /// check-time error (previously it produced a type-variable-ridden
     /// `FnRef` that could never be applied anyway).
-    fn fn_ref_node(&self, fq: Path, expected: Option<&Type>) -> Result<Typed, Error> {
+    fn fn_ref_node(&self, written: Vec<String>, fq: Path, expected: Option<&Type>) -> Result<Typed, Error> {
         let sig = self.reg.fn_sig(&fq).expect("resolved fn exists").clone();
         let tmpl_ty = Type::Fn(sig.params.clone(), sig.rest.clone().map(Box::new), Box::new(sig.ret.clone()));
+        let home = self.ns.clone();
         if sig.type_params.is_empty() {
-            return Ok(Typed { loc: None, expr: Expr::FnRef(fq), ty: tmpl_ty });
+            let r = Ref { written, home, resolved: fq };
+            return Ok(Typed { loc: None, expr: Expr::FnRef(r), ty: tmpl_ty });
         }
         if let Some(exp) = expected {
             let params: HashSet<String> = sig.type_params.iter().cloned().collect();
@@ -1446,17 +1469,25 @@ impl Checker {
                 let resolved_ty = subst_apply(&tmpl_ty, &subst);
                 if !targs.iter().any(|t| self.type_is_open(t)) && self.generic_fn_templates.contains_key(&fq) {
                     let mangled = self.request_fn_specialization(&fq, targs);
-                    return Ok(Typed { loc: None, expr: Expr::FnRef(mangled), ty: resolved_ty });
+                    // A monomorphized specialization has no "as written"
+                    // source form of its own — `Ref::synthetic` resolves it
+                    // by its own mangled identity directly, exactly where
+                    // `Interp::exec` registers it, rather than re-searching
+                    // for the (unspecialized) generic template by the
+                    // original bare name.
+                    return Ok(Typed { loc: None, expr: Expr::FnRef(Ref::synthetic(mangled)), ty: resolved_ty });
                 }
                 // Open type arguments: we're inside another generic
                 // function's diagnostics-only body check — the node is never
                 // executed, and that function's own specialization will
                 // re-check this reference with the types concrete.
-                return Ok(Typed { loc: None, expr: Expr::FnRef(fq), ty: resolved_ty });
+                let r = Ref { written, home, resolved: fq };
+                return Ok(Typed { loc: None, expr: Expr::FnRef(r), ty: resolved_ty });
             }
             // Shape mismatch: hand back the generic node so `check`'s
             // ordinary expected-vs-actual reconciliation reports it.
-            return Ok(Typed { loc: None, expr: Expr::FnRef(fq), ty: tmpl_ty });
+            let r = Ref { written, home, resolved: fq };
+            return Ok(Typed { loc: None, expr: Expr::FnRef(r), ty: tmpl_ty });
         }
         Err(Error::TypeError(format!(
             "generic function `{}` used as a value needs a concrete function-type context \
@@ -1502,7 +1533,7 @@ impl Checker {
                 {
                     let mangled = self.request_method_specialization(&type_fq, name, targs);
                     return Some(Typed { loc: None,
-                        expr: Expr::MethodRef { type_name: type_fq, method: mangled },
+                        expr: Expr::MethodRef { type_name: type_fq, method: mangled, home: self.ns.clone() },
                         ty: subst_apply(&ty, &subst),
                     });
                 }
@@ -1512,7 +1543,7 @@ impl Checker {
         if &ty != expected.unwrap() {
             return None;
         }
-        Some(Typed { loc: None, expr: Expr::MethodRef { type_name: type_fq, method: name.to_string() }, ty })
+        Some(Typed { loc: None, expr: Expr::MethodRef { type_name: type_fq, method: name.to_string(), home: self.ns.clone() }, ty })
     }
 
     /// `var::field`: if `segs` is `[recv, method]` and `recv` names a bound
@@ -1544,7 +1575,7 @@ impl Checker {
             Typed { loc: None, expr: Expr::Var(recv_name.clone()), ty: t.clone() }
         } else {
             let (path, vi) = self.resolve_global(recv_name)?;
-            Typed { loc: None, expr: Expr::Global(path), ty: vi.ty }
+            Typed { loc: None, expr: Expr::Global(self.mk_ref(vec![recv_name.clone()], path)), ty: vi.ty }
         };
         let Type::Named(type_fq, _) = &recv.ty else { return None };
         let af = self.reg.type_def(type_fq)?.assoc.get(method)?;
@@ -1678,7 +1709,7 @@ impl Checker {
         let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
-        Ok(TopLevel::Defun { name: fq_name, type_params, params, ret, body })
+        Ok(TopLevel::Defun { name: fq_name, type_params, params, ret, body, public })
     }
 
     /// Parses a `defun` form's parameter list, return type, and optional
@@ -1810,10 +1841,13 @@ impl Checker {
             .get(base)
             .expect("a specialization is only ever requested for a retained template")
             .clone();
+        // A specialization's own `public` mirrors the unspecialized
+        // template's — see `Self::specialize_method`'s identical treatment.
+        let public = self.reg.fn_sig(base).map(|s| s.public).unwrap_or(true);
         let bindings: HashMap<String, Type> =
             tmpl.type_params.iter().cloned().zip(args.iter().cloned()).collect();
         let (saved_ns, saved_loops, saved_bindings) = self.enter_specialization(tmpl.ns.clone(), bindings);
-        let result = self.specialize_defun_body(heap, interp, &tmpl, mangled);
+        let result = self.specialize_defun_body(heap, interp, &tmpl, mangled, public);
         self.exit_specialization(saved_ns, saved_loops, saved_bindings);
         result
     }
@@ -1863,6 +1897,16 @@ impl Checker {
         let SpecRequest::Method { type_fq, base, args, mangled } = req else {
             unreachable!("drain routes Method requests here")
         };
+        // A specialization's own `public` mirrors the unspecialized template
+        // method's — `Interp`'s scope tree gates visibility on this bit (see
+        // `Expr::Assoc`'s doc comment), so a generated specialization must
+        // carry the same one its template declared, not a default.
+        let public = self
+            .reg
+            .type_def(type_fq)
+            .and_then(|d| d.assoc.get(base))
+            .map(|af| af.sig.public)
+            .unwrap_or(true);
         let tmpl = self
             .generic_method_templates
             .get(&(type_fq.clone(), base.clone()))
@@ -1873,12 +1917,12 @@ impl Checker {
                 let bindings: HashMap<String, Type> =
                     written_vars.into_iter().zip(args.iter().cloned()).collect();
                 let (saved_ns, saved_loops, saved_bindings) = self.enter_specialization(ns, bindings);
-                let result = self.specialize_method_form(heap, interp, &parts, mangled);
+                let result = self.specialize_method_form(heap, interp, &parts, mangled, public);
                 self.exit_specialization(saved_ns, saved_loops, saved_bindings);
                 result
             }
-            MethodTemplate::Getter { index } => Ok(self.synthesize_accessor(type_fq, args, index, mangled, true)),
-            MethodTemplate::Setter { index } => Ok(self.synthesize_accessor(type_fq, args, index, mangled, false)),
+            MethodTemplate::Getter { index } => Ok(self.synthesize_accessor(type_fq, args, index, mangled, true, public)),
+            MethodTemplate::Setter { index } => Ok(self.synthesize_accessor(type_fq, args, index, mangled, false, public)),
         }
     }
 
@@ -1888,6 +1932,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         parts: &[Value],
         mangled: &str,
+        public: bool,
     ) -> Result<TopLevel, Error> {
         let MethodSig { instance, self_name, recv_ty, type_fq, params, ret, body_start, .. } =
             self.parse_defmethod_sig(heap, parts)?;
@@ -1911,6 +1956,7 @@ impl Checker {
             ret,
             body,
             type_params: Vec::new(),
+            public,
         })
     }
 
@@ -1925,6 +1971,7 @@ impl Checker {
         index: usize,
         mangled: &str,
         getter: bool,
+        public: bool,
     ) -> TopLevel {
         let def = self.reg.type_def(type_fq).expect("an accessor template implies the type exists");
         let subst: HashMap<String, Type> =
@@ -1942,6 +1989,7 @@ impl Checker {
                 ret: field_ty.clone(),
                 body: vec![Typed { loc: None, expr: Expr::FieldGet(Box::new(self_var), index), ty: field_ty }],
                 type_params: Vec::new(),
+                public,
             }
         } else {
             let value_var = Typed { loc: None, expr: Expr::Var("value".to_string()), ty: field_ty.clone() };
@@ -1957,6 +2005,7 @@ impl Checker {
                     ty: Type::Unit,
                 }],
                 type_params: Vec::new(),
+                public,
             }
         }
     }
@@ -1967,6 +2016,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         tmpl: &FnTemplate,
         mangled: &Path,
+        public: bool,
     ) -> Result<TopLevel, Error> {
         // `bounds` deliberately dropped: the type variables are concrete
         // here, so method calls on them resolve directly against the real
@@ -1981,7 +2031,7 @@ impl Checker {
         }
         let env = Env::new().extended(params.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &tmpl.parts[body_start..], &[], Some(&ret))?;
-        Ok(TopLevel::Defun { name: mangled.clone(), type_params: Vec::new(), params, ret, body })
+        Ok(TopLevel::Defun { name: mangled.clone(), type_params: Vec::new(), params, ret, body, public })
     }
 
     /// Whether a declared type's *runtime representation* is a heap value
@@ -2212,7 +2262,7 @@ impl Checker {
         let env = Env::new().extended(params.iter().map(|p| (p.clone(), sexpr_ty.clone())).collect());
         let body_locs = parts_locs.get(2..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[2..], body_locs, Some(&sexpr_ty))?;
-        Ok(TopLevel::Defmacro { name: fq_name, params, body, rest })
+        Ok(TopLevel::Defmacro { name: fq_name, params, body, rest, public })
     }
 
     /// Parse a `((name type)...)` parameter list (types canonicalized to FQ)
@@ -2751,7 +2801,7 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
         let type_params = if is_generic_template { written_vars } else { Vec::new() };
-        Ok(TopLevel::Defmethod { type_name: type_fq, method, instance, self_name, params, ret, body, type_params })
+        Ok(TopLevel::Defmethod { type_name: type_fq, method, instance, self_name, params, ret, body, type_params, public })
     }
 
     /// Parses a `defmethod` form's name, receiver, parameters, and return
@@ -2891,6 +2941,7 @@ impl Checker {
                 ret: field_ty.clone(),
                 body: vec![Typed { loc: None, expr: Expr::FieldGet(Box::new(self_var), i), ty: field_ty.clone() }],
                 type_params: type_params.clone(),
+                public: field_public,
             });
 
             // Setter (`set-car`/`set-cdr`'s `set-` prefix, no `!` — see
@@ -2920,6 +2971,7 @@ impl Checker {
                     ty: Type::Unit,
                 }],
                 type_params: type_params.clone(),
+                public: field_public,
             });
 
             // A generic defstruct's accessors mention the type parameters
@@ -3255,7 +3307,7 @@ impl Checker {
                 if let Some(t) = env.get(name) {
                     Typed { loc: None, expr: Expr::Var(name.to_string()), ty: t.clone() }
                 } else if let Some((path, vi)) = self.resolve_global(name) {
-                    Typed { loc: None, expr: Expr::Global(path), ty: vi.ty }
+                    Typed { loc: None, expr: Expr::Global(self.mk_ref(vec![name.to_string()], path)), ty: vi.ty }
                 } else if let Some(t) = self.fn_value(name, expected) {
                     t?
                 } else if let Some(t) = self.method_value(name, expected) {
@@ -3282,7 +3334,7 @@ impl Checker {
                 if let Some(result) = self.try_field_access(heap, interp, env, &segs) {
                     result?
                 } else if let Some((path, vi)) = self.resolve_global_path(&segs) {
-                    Typed { loc: None, expr: Expr::Global(path), ty: vi.ty }
+                    Typed { loc: None, expr: Expr::Global(self.mk_ref(segs.clone(), path)), ty: vi.ty }
                 } else if let Some(t) = self.fn_path_value(&segs, expected) {
                     t?
                 } else {
@@ -3448,9 +3500,9 @@ impl Checker {
         } else if let Some(result) = self.try_instance_method(heap, interp, env, &head, args, arg_locs) {
             result
         } else if let Some(fq) = self.resolve_fn(&head) {
-            self.check_call(heap, interp, env, &fq, args, arg_locs)
+            self.check_call(heap, interp, env, std::slice::from_ref(&head), &fq, args, arg_locs)
         } else if let Some((path, vi)) = self.resolve_global(&head) {
-            let callee = Typed { loc: None, expr: Expr::Global(path), ty: vi.ty };
+            let callee = Typed { loc: None, expr: Expr::Global(self.mk_ref(vec![head.clone()], path)), ty: vi.ty };
             self.check_apply(heap, interp, env, callee, args, arg_locs)
         } else {
             self.check_instance_method(heap, interp, env, &head, args, arg_locs)
@@ -3714,7 +3766,7 @@ impl Checker {
         }
         // A module-qualified free function, e.g. `math::id`.
         if let Some(fq) = self.resolve_fn_path(segs) {
-            return self.check_call(heap, interp, env, &fq, args, arg_locs);
+            return self.check_call(heap, interp, env, segs, &fq, args, arg_locs);
         }
         // Otherwise `Type::member`: split the last segment as the member and
         // resolve the prefix as a type. The member is a constructor or a static
@@ -3991,6 +4043,7 @@ impl Checker {
                 method: method_name,
                 instance,
                 args: typed,
+                home: self.ns.clone(),
             },
             ty: subst_apply(&af.sig.ret, &subst),
         })
@@ -4144,12 +4197,26 @@ impl Checker {
     /// its argument is special-cased here to read as an unevaluated symbol or
     /// `::`-path rather than a checked expression. A string (`(compile
     /// "name")`) is a type error: it would let the same name be spelled two
-    /// incompatible ways for no benefit. Converts the symbol/path straight to
-    /// the plain `&str` `Interp::eval_builtin`'s `"compile"` arm and
-    /// `Interp::method_key` already expect (`"name"` or `"type::method"`),
-    /// then re-wraps it as an ordinary call to the registered `compile`
-    /// builtin (`Registry::with_builtins`, still `Type::Str` -> `Type::Bool`)
-    /// so every other part of the pipeline is untouched.
+    /// incompatible ways for no benefit.
+    ///
+    /// Builds a [`CompileTarget`] directly from whichever resolution this
+    /// already has to do anyway (`resolve_fn`/`resolve_fn_path` for a free
+    /// function, `resolve_bare_type`/`resolve_type_path` for a `type::method`)
+    /// instead of discarding the resolved `Path` and handing `Interp` a bare
+    /// name string to re-resolve with an unqualified, module-blind search —
+    /// the same `written`+`home` independent re-resolution every other
+    /// reference (`Call`/`Global`/`FnRef`) gets, not a special case.
+    ///
+    /// A name this can't resolve (never registered, or genuinely private
+    /// from here — `resolve_fn`/`resolve_fn_path` already fold "exists but
+    /// not visible" into "doesn't resolve", same as every other reference)
+    /// is deliberately *not* a check-time error: a `CompileTarget::Fn` is
+    /// still built, with a best-effort placeholder `resolved` `Path` (never
+    /// looked at unless resolution also fails again at runtime, in which
+    /// case it's only used to name the failure) — preserving the existing
+    /// `EvalError::NoSuchFunction` this has always surfaced through
+    /// `Interp::resolve_fn_ref` at the actual `(compile ...)` call, not a
+    /// check-time rejection.
     fn check_compile(&self, heap: &Heap, args: &[Value]) -> Result<Typed, Error> {
         if args.len() != 1 {
             return Err(Error::TypeError("compile: (compile name) — expected exactly 1 argument".into()));
@@ -4168,34 +4235,55 @@ impl Checker {
                 ))
             }
         };
-        // A generic target has no erased runtime body to compile — post-
-        // monomorphization only concrete specializations exist, generated
-        // per call site. Rejected here with a real explanation instead of
-        // the bare runtime `NoSuchFunction` the missing registration would
-        // otherwise produce.
-        let is_generic = match name.rsplit_once("::") {
-            None => self
-                .resolve_fn(&name)
-                .map(|fq| self.generic_fn_templates.contains_key(&fq))
-                .unwrap_or(false),
-            Some((type_part, method)) => {
-                let segs: Vec<String> = type_part.split("::").map(|s| s.to_string()).collect();
-                let type_fq = self.resolve_type_name(&Path::from_segments(segs));
-                self.generic_method_templates.contains_key(&(type_fq, method.to_string()))
-            }
-        };
-        if is_generic {
-            return Err(Error::TypeError(format!(
+        let generic_err = || {
+            Error::TypeError(format!(
                 "compile: `{}` is generic — a generic function has no single compiled body; \
                  call it at concrete types and compile those uses' enclosing functions instead",
                 name
-            )));
-        }
-        let sig = self.reg.fn_sig(&Path::root("compile")).expect("compile is always registered");
-        Ok(Typed { loc: None,
-            expr: Expr::Call(Path::root("compile"), vec![Typed { loc: None, expr: Expr::Str(name), ty: Type::Str }]),
-            ty: sig.ret.clone(),
-        })
+            ))
+        };
+        let target = match name.rsplit_once("::") {
+            None => {
+                let resolved = self.resolve_fn(&name);
+                if resolved.as_ref().is_some_and(|fq| self.generic_fn_templates.contains_key(fq)) {
+                    return Err(generic_err());
+                }
+                let resolved = resolved.unwrap_or_else(|| Path::root(&name));
+                CompileTarget::Fn(self.mk_ref(vec![name.clone()], resolved))
+            }
+            Some((type_part, method)) => {
+                let type_segs: Vec<String> = type_part.split("::").map(|s| s.to_string()).collect();
+                let type_fq = if type_segs.len() == 1 {
+                    self.resolve_bare_type(&type_segs[0])
+                } else {
+                    self.resolve_type_path(&type_segs)
+                }
+                .filter(|tp| self.reg.type_def(tp).is_some_and(|def| def.assoc.contains_key(method)));
+                match type_fq {
+                    // A genuine `type::method` — the type exists and has
+                    // this associated function/method.
+                    Some(type_fq) => {
+                        if self.generic_method_templates.contains_key(&(type_fq.clone(), method.to_string())) {
+                            return Err(generic_err());
+                        }
+                        CompileTarget::Method { type_name: type_fq, method: method.to_string(), home: self.ns.clone() }
+                    }
+                    // Not a type::method — a module-qualified free function
+                    // instead (e.g. `(compile m::inc)`), or genuinely nothing
+                    // at all (`(compile bogus::x)`).
+                    None => {
+                        let full_segs: Vec<String> = name.split("::").map(|s| s.to_string()).collect();
+                        let resolved = self.resolve_fn_path(&full_segs);
+                        if resolved.as_ref().is_some_and(|fq| self.generic_fn_templates.contains_key(fq)) {
+                            return Err(generic_err());
+                        }
+                        let resolved = resolved.unwrap_or_else(|| Path::from_segments(full_segs.clone()));
+                        CompileTarget::Fn(self.mk_ref(full_segs, resolved))
+                    }
+                }
+            }
+        };
+        Ok(Typed { loc: None, expr: Expr::CompileFn(target), ty: Type::Bool })
     }
 
     /// `(quote datum)`: `datum` as a literal `Sexpr` value, unevaluated. See
@@ -4294,7 +4382,7 @@ impl Checker {
                                 )
                             })?;
                             return Ok(Typed { loc: None,
-                                expr: Expr::Call(append_fq, vec![spliced, rest]),
+                                expr: Expr::Call(self.mk_ref(vec!["sexpr-append".to_string()], append_fq), vec![spliced, rest]),
                                 ty: sexpr_ty,
                             });
                         }
@@ -4454,7 +4542,7 @@ impl Checker {
                 return Err(Error::TypeError(format!("setf: cannot assign to constant `{}`", name)));
             }
             let value = self.check_at(heap, interp, env, args[1], Some(&vi.ty), value_loc)?;
-            return Ok(Typed { loc: None, expr: Expr::SetGlobal(path, Box::new(value)), ty: vi.ty });
+            return Ok(Typed { loc: None, expr: Expr::SetGlobal(self.mk_ref(vec![name.clone()], path), Box::new(value)), ty: vi.ty });
         }
         Err(Error::TypeError(format!("setf: unbound variable: {}", name)))
     }
@@ -4482,7 +4570,7 @@ impl Checker {
         let recv = if let Some(t) = env.get(recv_name) {
             Typed { loc: None, expr: Expr::Var(recv_name.clone()), ty: t.clone() }
         } else if let Some((path, vi)) = self.resolve_global(recv_name) {
-            Typed { loc: None, expr: Expr::Global(path), ty: vi.ty }
+            Typed { loc: None, expr: Expr::Global(self.mk_ref(vec![recv_name.clone()], path)), ty: vi.ty }
         } else {
             return Err(Error::TypeError(format!("setf: unbound variable: {}", recv_name)));
         };
@@ -4565,7 +4653,7 @@ impl Checker {
         if let Some(loc) = def_loc {
             self.reg.def_locs.vars.insert(fq_name.clone(), loc);
         }
-        Ok(TopLevel::Defvar { name: fq_name, ty, value, mutable })
+        Ok(TopLevel::Defvar { name: fq_name, ty, value, mutable, public })
     }
 
     /// `(loop body...)`: an infinite loop, exited via `break`/`return`. Its
@@ -4688,6 +4776,7 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
+        written: &[String],
         name: &Path,
         args: &[Value],
         arg_locs: &[Option<Loc>],
@@ -4853,13 +4942,25 @@ impl Checker {
         // very call with the types concrete. Builtin generic free functions
         // (no template) keep their runtime-dispatched call as-is.
         let mut call_path = name.clone();
+        let mut specialized = false;
         if !sig.type_params.is_empty() && self.generic_fn_templates.contains_key(name) {
             let targs: Vec<Type> = sig.type_params.iter().map(|p| subst[p.as_str()].clone()).collect();
             if !targs.iter().any(|t| self.type_is_open(t)) {
                 call_path = self.request_fn_specialization(name, targs);
+                specialized = true;
             }
         }
-        Ok(Typed { loc: None, expr: Expr::Call(call_path, typed), ty: subst_apply(&sig.ret, &subst) })
+        // A monomorphized specialization has no "as written" source form of
+        // its own (see `Self::fn_ref_node`'s identical case) — resolve it by
+        // its own mangled identity directly rather than re-searching for the
+        // unspecialized generic template under the original bare/qualified
+        // name.
+        let r = if specialized {
+            Ref::synthetic(call_path)
+        } else {
+            self.mk_ref(written.to_vec(), call_path)
+        };
+        Ok(Typed { loc: None, expr: Expr::Call(r, typed), ty: subst_apply(&sig.ret, &subst) })
     }
 
     /// Call-site `where`-bound validation shared by [`Self::check_call`]
