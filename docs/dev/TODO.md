@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-07-19 / ブランチ: `main`
+最終更新: 2026-07-22 / ブランチ: `main`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離、
@@ -11,22 +11,13 @@
 
 ## 残っている作業
 
-### 1. `symbol-sexpr-redesign.md` Phase 7（ドキュメント整備）— 要確認
+2026-07-21 時点で行われていたモジュール可視性の祖先チェーン方式への再設計・Interpのスコープ
+ツリー全面移行・それに伴う重複コード整理（[implementation-log.md](implementation-log.md) 参照）は
+いずれも全テストgreenで `main` にマージ済み。[symbol-sexpr-redesign.md](symbol-sexpr-redesign.md)
+の Phase 7（ドキュメント整備）も `docs/functions.md`/`docs/syntax.md`/`docs/dev/language-design.md`
+との突き合わせを完了し、完了扱いにした（2026-07-22）。
 
-[symbol-sexpr-redesign.md](symbol-sexpr-redesign.md) 上は「残るは Phase 7（ドキュメント整備）のみ」
-という記載のままだが、実際に `docs/functions.md`/`docs/dev/language-design.md` を確認すると
-`gensym` の型表記（`()→Symbol`）等 Phase 7 で直すはずだった箇所はすでに反映済みに見える。
-記載自体が古い可能性が高い。次にこのドキュメントに触るときは:
-
-- Phase 7 で挙げられている項目を1つずつ現状の `docs/functions.md`/`docs/syntax.md`/
-  `docs/dev/language-design.md` と突き合わせ、すでに反映済みなら Phase 7 を完了扱いにする
-- 本当に抜けている箇所があれば列挙して反映する
-
-### 2. 次の作業候補は未定
-
-2026-07-19 時点で `docs/dev/TODO.md` に記載されていた実装作業（クロージャ表現統一、
-interp クロージャ完全削除、既知の制限7項目の解消など）はすべて完了し `main` にマージ済み
-（[implementation-log.md](implementation-log.md) 参照）。次に着手する機能・改善は未指定。
+現時点で着手中・積み残しの実装作業はなし。次に着手する機能・改善は未指定。
 
 ---
 

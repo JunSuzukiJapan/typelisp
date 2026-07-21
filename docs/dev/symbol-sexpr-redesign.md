@@ -1,18 +1,22 @@
-# Symbol型導入と Sexpr の裏方化（型システム再設計）— 進行中
+# Symbol型導入と Sexpr の裏方化（型システム再設計）— 完了
 
-最終更新: 2026-07-11 / ブランチ: `main`（作業ブランチ `feature/symbol-type` は main へマージ済み）
+最終更新: 2026-07-22 / ブランチ: `main`（作業ブランチ `feature/symbol-type` は main へマージ済み）
 
 > **2026-07-10 追記**: Phase 5 の `match`-on-`Sexpr` fence は、`(read)` ビルトイン導入準備のため
 > 再解禁された（詳細は Phase 5 節末尾の「Phase 5 方針転換」を参照）。Sexpr は user-facing の
 > `match` 対象として復帰したが、`sexpr-*` アクセサ層自体は撤去していない。
 
-このドキュメントは複数フェーズにわたる型システム再設計の**進捗と残作業**を記録する。
+このドキュメントは複数フェーズにわたる型システム再設計の**進捗**を記録する。
 Phase 0〜3・Phase 4a（コレクションコンビネータの generic `Iter` 化）・**Phase 4b（`cons`/`car`/`cdr` の
 `cons<T,U>` 付け替え）**・**Phase 5（`match` の enum 専用 fence＋ユーザー面 Sexpr リスト操作の撤去）**まで完了。
 Phase 4b と Phase 5 は元々一体だったが、リスク分離のため Phase 5 を先行実施した（Commit 1＝Phase 5、Commit 2＝Phase 4b）。
 **Phase 6.5（ユーザー面リスト/ペア走査 API の `cons<T,U>`/`Vector<T>`/`Iter` 上での再設計）と
 Phase 6.6（その残ギャップ解消＝impl メソッドの `where` 節＋compile の `equals`/`less` 対応）も完了**。
-残るは **Phase 7**（ドキュメント整備）。`defenum`（ユーザー多variant sum型）は本再設計とは別に
+**Phase 7（ドキュメント整備）も完了を確認**（2026-07-22、`docs/dev/TODO.md`からの棚卸しで
+`docs/functions.md`/`docs/syntax.md`/`docs/dev/language-design.md`を突き合わせ——`gensym`の型表記
+`()→Symbol`、`Symbol`独立プリミティブ型としての記載、`Vector<T>`への一本化、`cons`/`car`/`cdr`の
+`cons<T,U>`化、`match`のenum専用化、`Sexpr`が内部island層である旨、いずれも既に反映済みだった。
+下記「Phase 7」節参照）。`defenum`（ユーザー多variant sum型）は本再設計とは別に
 2026-07-09実装済み（[implementation-log.md](implementation-log.md)参照）。値レベル `&rest`/`apply`
 （当初の Phase 6「`&rest` → `Vector<T>`」計画は破棄）は本再設計とは無関係な既知の制限として
 2026-07-08に一度削除されたが、2026-07-15に別件（`docs/dev/TODO.md`の残作業棚卸し）で再導入した
@@ -455,9 +459,13 @@ equals/less/member/sort/ネスト/Eq 未実装エラー6本）、compile_test（
 compile＋未 compile エラー5本）、typelisp-rt（rt_str_lt 1本）。
 検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
 
-### Phase 7 — ドキュメント＆メモリ更新
+### Phase 7 — ドキュメント＆メモリ更新【✅ 完了 / 確認: 2026-07-22】
 - `docs/functions.md`（§5/§6/§12/§14）・`docs/syntax.md`・`docs/dev/language-design.md`: Symbol、Vector ベースのコレクション、
-  cons<T,U>、match enum 専用、Sexpr=内部島 を反映。**Phase 0 時点では未更新**（`gensym` の型表記等は要修正）。
+  cons<T,U>、match enum 専用、Sexpr=内部島 を反映。2026-07-22時点で全項目確認済み——`functions.md:279`の
+  `gensym`は`()→Symbol`、`functions.md:97-105`で`Symbol`が`Sexpr`と別の独立プリミティブ型と明記、
+  `functions.md:201-`で`Vector<T>`への一本化、`functions.md:58-`で`cons<T,U>`化、`language-design.md`
+  各所で`Sexpr`が内部island層である旨、いずれも反映済みだった（本節作成時点＝Phase 0では未更新だったが、
+  以降のPhase進行中に随時追記されていたため、着手時点では既に完了扱いにできる状態だった）。
 - メモリ: 本再設計の要点を記録（[[typelisp-sexpr-rtvalue-unification]] の続きとして）。
 
 ---

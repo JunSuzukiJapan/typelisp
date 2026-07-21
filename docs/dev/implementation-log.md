@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-07-19 / ブランチ: `main`
+最終更新: 2026-07-21 / ブランチ: `main`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -4144,3 +4144,39 @@ builtinのassoc関数（`Option::some`等）が「no such function」/「unresol
   `a_private_root_function_is_visible_from_inside_a_submodule`へ改名・反転。
 - 検証: `scripts/test-serial.sh`（`--lib`+全integration testバイナリ、`--test-threads=1`）
   全green（`ALL TESTS PASSED (serial)`）。
+
+---
+
+## Interpのフラットテーブルをモジュールスコープツリーへ全面移行（2026-07-21）
+
+上記の可視性再設計はチェッカー（静的解決）側の話だったが、実行時（`Interp`）側は依然として
+チェッカーが解決した完全修飾`Path`をキーとする単一のフラット`HashMap`
+（`fns`/`methods`/`globals`/`compiled`/`compiled_methods`/`struct_types`/`enum_defs`）に
+フラット化されていた。branch `feature/scope-tree-interp`でこれを廃し、チェッカーの
+`Namespace`木を模した実行時`ModuleScope`ツリー（`src/eval/scope.rs`新設、335行）へ置換。
+
+- `Expr::Call`/`Global`/`FnRef`/`SetGlobal`は`Ref { written, home, resolved }`を持つ形へ変更
+  （`FASL_FORMAT_VERSION`を7→9へbump、`Expr`/`TopLevel`の形状変更2回分）。`Interp`自身は
+  `resolved`（チェック時点のキャッシュ）を無条件には信用せず、`written`+`home`から祖先チェーン
+  探索/直接descentを実行時に独立して再実行する（祖先チェーン探索が失敗した場合のみ`resolved`へ
+  フォールバック——`use`エイリアスなど実行時ツリー上では再解決不能なケース向け）。
+- `(compile name)`/`(compile type::method)`もこの`Ref`機構に統一。旧実装は「builtinの`Call`に
+  文字列を渡す」という偽装をしており、かつモジュールを無視して型のローカル名だけで木全体を
+  線形探索していたため、呼び出し元自身のモジュールに定義された関数へのbare名参照が
+  （root にしか無いという理由で）そもそも解決できないバグがあった。専用ノード
+  `Expr::CompileFn(CompileTarget)`を新設し、checker側の解決結果
+  （`resolve_fn`/`resolve_fn_path`/`resolve_bare_type`+assoc存在確認）をそのまま運ぶ形に修正。
+- 検証: 全1255テストgreen（51バイナリ）。
+
+続けて同日中に、この移行に伴う重複コードを整理（branch `feature/scope-tree-interp`内、
+挙動変更なし・全1256テストgreen）:
+
+- `qualified_fn_name(p)`ヘルパーを削除——`Path::Display`の`.to_string()`と完全に重複していたため
+  6箇所すべてを`.to_string()`へ置換。
+- `CallEdge::Method`のノード名生成/`compile_function`の`Method`分岐/エラーメッセージ2箇所が
+  各々`format!("{}::{}", type_name, method)`を独自に組み立てていたのを、既存の共有ヘルパー
+  `method_link_name`へ統一。
+- `Checker::check_compile`: 単純名解決（`resolve_fn`）とtype::methodでなかった場合の修飾名
+  フォールバック（`resolve_fn_path`）が「ジェネリックチェック+プレースホルダ`Path`+`mk_ref`」と
+  いう同一パターンをほぼ複製していたのを共通クロージャ`fn_target`へ統合
+  （`Path::root(name)`と`Path::from_segments(vec![name])`が等価であることを確認した上で統一）。
