@@ -4242,15 +4242,21 @@ impl Checker {
                 name
             ))
         };
-        let target = match name.rsplit_once("::") {
-            None => {
-                let resolved = self.resolve_fn(&name);
-                if resolved.as_ref().is_some_and(|fq| self.generic_fn_templates.contains_key(fq)) {
-                    return Err(generic_err());
-                }
-                let resolved = resolved.unwrap_or_else(|| Path::root(&name));
-                CompileTarget::Fn(self.mk_ref(vec![name.clone()], resolved))
+        // Shared by both places that build a `CompileTarget::Fn`: a bare name
+        // (`resolve_fn`) and a module-qualified one that turned out not to
+        // name a `type::method` (`resolve_fn_path`) — same generic check,
+        // same "no resolution -> best-effort placeholder `Path`, deferring
+        // to a runtime `NoSuchFunction`" fallback (see this function's own
+        // doc comment for why that's deliberate).
+        let fn_target = |written: Vec<String>, resolved: Option<Path>| -> Result<CompileTarget, Error> {
+            if resolved.as_ref().is_some_and(|fq| self.generic_fn_templates.contains_key(fq)) {
+                return Err(generic_err());
             }
+            let resolved = resolved.unwrap_or_else(|| Path::from_segments(written.clone()));
+            Ok(CompileTarget::Fn(self.mk_ref(written, resolved)))
+        };
+        let target = match name.rsplit_once("::") {
+            None => fn_target(vec![name.clone()], self.resolve_fn(&name))?,
             Some((type_part, method)) => {
                 let type_segs: Vec<String> = type_part.split("::").map(|s| s.to_string()).collect();
                 let type_fq = if type_segs.len() == 1 {
@@ -4274,11 +4280,7 @@ impl Checker {
                     None => {
                         let full_segs: Vec<String> = name.split("::").map(|s| s.to_string()).collect();
                         let resolved = self.resolve_fn_path(&full_segs);
-                        if resolved.as_ref().is_some_and(|fq| self.generic_fn_templates.contains_key(fq)) {
-                            return Err(generic_err());
-                        }
-                        let resolved = resolved.unwrap_or_else(|| Path::from_segments(full_segs.clone()));
-                        CompileTarget::Fn(self.mk_ref(full_segs, resolved))
+                        fn_target(full_segs, resolved)?
                     }
                 }
             }

@@ -194,21 +194,10 @@ impl CallEdge {
     /// [`Interp::method_key`] already resolve back.
     fn node_name(&self) -> String {
         match self {
-            CallEdge::Fn(p) => qualified_fn_name(p),
-            CallEdge::Method(p, m) => format!("{}::{}", p, m),
+            CallEdge::Fn(p) => p.to_string(),
+            CallEdge::Method(p, m) => method_link_name(p, m),
         }
     }
-}
-
-/// The compile-graph node identity for a top-level function `Path`: its full
-/// `::`-joined name (`m::inc`), collapsing to the bare local for a root
-/// function (`inc`). Inverse of [`fn_path_from_node_name`]. Keeps a
-/// module-qualified closure target distinct from a same-named root function
-/// throughout the SCC machinery (interp-closure removal) — without it, both
-/// mangled to `tl_inc` and the wrong body was linked / the compiled entry
-/// stored under a colliding key.
-fn qualified_fn_name(p: &Path) -> String {
-    p.segments().join("::")
 }
 
 /// Parse a [`CallEdge::Fn`] node name back to its `Path` — `"m::inc"` ->
@@ -532,7 +521,7 @@ impl Interp {
         for p in &call_targets {
             if !self.root.fn_compiled(p) {
                 // The SCC machinery keys on a node name that is the callee's
-                // full `::`-joined path (`qualified_fn_name`), so a
+                // full `::`-joined path (`Path`'s own `Display`), so a
                 // module-qualified `defun` (`m::inc`) is transitively compiled
                 // and stored/linked under a name distinct from a same-named
                 // root function — the old "module-qualified is out of reach"
@@ -632,7 +621,7 @@ impl Interp {
             let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
             let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("closure_ctor")));
             for p in call_targets {
-                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(&qualified_fn_name(p)));
+                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(&p.to_string()));
             }
             for (p, m) in assoc_targets {
                 declare_external_function(&module, &crate::compile::ast_bridge::user_method_symbol_name(p, m));
@@ -652,7 +641,7 @@ impl Interp {
         for p in call_targets {
             let f = self.root.get_fn(p).expect("checked already-compiled above");
             let addr = f.compiled.borrow().as_ref().expect("checked already-compiled above").address();
-            externals.push((crate::compile::ast_bridge::user_symbol_name(&qualified_fn_name(p)), addr));
+            externals.push((crate::compile::ast_bridge::user_symbol_name(&p.to_string()), addr));
         }
         for (p, m) in assoc_targets {
             let f = self.root.get_method(p, m).expect("checked already-compiled above");
@@ -1287,7 +1276,7 @@ impl Interp {
                         let recv_ty = args.first().map(|a| &a.ty);
                         match eval_builtin_method(self, heap, type_name, method, recv_ty, &argv, &t.ty) {
                             Some(result) => result,
-                            None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
+                            None => Err(EvalError::NoSuchFunction(method_link_name(type_name, method))),
                         }
                     }
                 }
@@ -1392,7 +1381,7 @@ impl Interp {
                         let recv_ty = args.first().map(|a| &a.ty);
                         match eval_builtin_method(self, heap, &type_name, &method, recv_ty, &argv, &t.ty) {
                             Some(r) => r,
-                            None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
+                            None => Err(EvalError::NoSuchFunction(method_link_name(&type_name, &method))),
                         }
                     }
                     _ => Err(EvalError::Internal("apply of a non-function value".into())),
@@ -2369,13 +2358,13 @@ impl Interp {
         let (name, already_compiled) = match target {
             CompileTarget::Fn(r) => {
                 self.resolve_fn_ref(r).ok_or_else(|| EvalError::NoSuchFunction(r.written.join("::")))?;
-                (qualified_fn_name(&r.resolved), self.root.fn_compiled(&r.resolved))
+                (r.resolved.to_string(), self.root.fn_compiled(&r.resolved))
             }
             CompileTarget::Method { type_name, method, home } => {
                 self.root
                     .resolve_method(home, type_name, method)
-                    .ok_or_else(|| EvalError::NoSuchFunction(format!("{}::{}", type_name, method)))?;
-                (format!("{}::{}", type_name, method), self.root.method_compiled(type_name, method))
+                    .ok_or_else(|| EvalError::NoSuchFunction(method_link_name(type_name, method)))?;
+                (method_link_name(type_name, method), self.root.method_compiled(type_name, method))
             }
         };
         if already_compiled {
@@ -2617,7 +2606,7 @@ impl Interp {
                 declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(member));
             }
             for target in &call_targets {
-                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(&qualified_fn_name(target)));
+                declare_external_function(&module, &crate::compile::ast_bridge::user_symbol_name(&target.to_string()));
             }
             for (type_name, method) in &method_targets {
                 declare_external_function(&module, &crate::compile::ast_bridge::user_method_symbol_name(type_name, method));
@@ -2638,7 +2627,7 @@ impl Interp {
             .map(|p| {
                 let f = self.root.get_fn(p).expect("Self::compute_sccs's finish order guarantees this is already compiled");
                 let addr = f.compiled.borrow().as_ref().expect("Self::compute_sccs's finish order guarantees this is already compiled").address();
-                (crate::compile::ast_bridge::user_symbol_name(&qualified_fn_name(p)), addr)
+                (crate::compile::ast_bridge::user_symbol_name(&p.to_string()), addr)
             })
             .collect();
         externals.extend(method_targets.iter().map(|(type_name, method)| {
@@ -3958,15 +3947,20 @@ fn declare_external_function(module: &Rc<RefCell<Module<'static>>>, name: &str) 
     module.borrow_mut().add_function(name, compiled_fn_type(), None);
 }
 
-/// The LLVM-visible name a method's own compiled function is declared/
-/// looked-up under: `type_name`'s full `::`-joined path, `"::"`, `method` —
-/// exactly the literal string a standalone `(compile "type-path::method")`
-/// call uses as its `internal_name` ([`Interp::compile_function`]'s own
+/// The single canonical `"type-path::method"` string for a method — `Path`'s
+/// own `Display` for `type_name` (its full `::`-joined path, never just its
+/// local segment — see [`Interp::method_key`]'s doc comment for why), `"::"`,
+/// then `method`. This is the LLVM-visible name a method's own compiled
+/// function is declared/looked-up under — exactly the literal string a
+/// standalone `(compile "type-path::method")` call uses as its
+/// `internal_name` ([`Interp::compile_function`]'s own
 /// `self.add_compiled_function(heap, module.clone(), name, name)` call,
-/// where `name` is that literal user-typed string), so every caller of this
-/// helper agrees with that name without re-deriving it. Shared by
-/// [`Interp::compile_function`] (forward-declaring/wiring a callee method)
-/// and `compiler.rs`'s `compile-assoc` (looking the same name back up via
+/// where `name` is that literal user-typed string) — but also every other
+/// place this crate needs the same "which method" identity as plain text: a
+/// `NoSuchFunction` error, [`CallEdge::Method`]'s own SCC graph node name.
+/// One shared helper keeps all of them in lockstep rather than each
+/// re-deriving the same format independently. Also relied on by
+/// `compiler.rs`'s `compile-assoc` (looking the same name back up via
 /// `get-function` — see that function's doc comment).
 fn method_link_name(type_name: &Path, method: &str) -> String {
     format!("{}::{}", type_name, method)
