@@ -955,24 +955,39 @@ impl Checker {
         }
     }
 
-    /// Whether `item_ns` is the same module as the current namespace (i.e.
-    /// same-module access; no cross-module visibility check needed).
-    fn same_module(&self, item_ns: &[String]) -> bool {
-        item_ns == self.ns.as_slice()
+    /// The current namespace's ancestor chain, nearest first, ending at root:
+    /// `self.ns`, `self.ns[..len-1]`, ..., `[]`. The module-tree analogue of
+    /// walking parent lexical-scope frames — every bare-name resolver walks
+    /// this instead of only checking "current module or literal root", so a
+    /// submodule sees not just its own definitions but every enclosing
+    /// module's too (including root's, however deeply nested the caller is).
+    fn ns_ancestors(&self) -> impl Iterator<Item = &[String]> {
+        (0..=self.ns.len()).rev().map(move |k| &self.ns[..k])
+    }
+
+    /// Whether `item_ns` (a definition's owning module) is visible from the
+    /// current namespace without needing `pub` — Rust-style module privacy:
+    /// the current module IS `item_ns`, or is nested inside it (a
+    /// descendant). Replaces the old exact-equality `same_module` check;
+    /// root (`item_ns == []`) is always an ancestor, so this also subsumes
+    /// the former "literal root caller" special case.
+    fn in_scope(&self, item_ns: &[String]) -> bool {
+        self.ns.len() >= item_ns.len() && self.ns[..item_ns.len()] == *item_ns
     }
 
     /// Whether an associated function/method `af` of `type_fq` is reachable
-    /// from the current namespace: public, or declared in the same module —
-    /// mirrors `resolve_fn_path`'s cross-module `public` check. Used at every
-    /// call site that looks up `def.assoc` directly (`try_field_access`,
-    /// `check_field_set`, `check_path_call`'s static-member branch,
-    /// `try_instance_method`, `check_instance_method`) so a private member —
-    /// including a `defstruct` field whose accessor wasn't declared
-    /// `pub` — is treated as absent rather than merely forbidden, matching
-    /// how a private free function or constructor "doesn't resolve" instead
-    /// of erroring with a privacy-specific message.
+    /// from the current namespace: public, or in scope (declared in the
+    /// same module or an ancestor of it) — mirrors `resolve_fn_path`'s
+    /// cross-module `public` check. Used at every call site that looks up
+    /// `def.assoc` directly (`try_field_access`, `check_field_set`,
+    /// `check_path_call`'s static-member branch, `try_instance_method`,
+    /// `check_instance_method`) so a private member — including a
+    /// `defstruct` field whose accessor wasn't declared `pub` — is treated
+    /// as absent rather than merely forbidden, matching how a private free
+    /// function or constructor "doesn't resolve" instead of erroring with a
+    /// privacy-specific message.
     fn assoc_visible(&self, type_fq: &Path, af: &AssocFn) -> bool {
-        af.sig.public || self.same_module(type_fq.parent())
+        af.sig.public || self.in_scope(type_fq.parent())
     }
 
     /// Locate a child-module `path`, resolving it relative to the current
@@ -1039,19 +1054,21 @@ impl Checker {
         self.reg.root.aliases.get(name).cloned()
     }
 
-    /// Resolve a bare free-function name to its absolute [`Path`].
+    /// Resolve a bare free-function name to its absolute [`Path`], walking
+    /// the current namespace's ancestor chain (see [`Self::ns_ancestors`]) —
+    /// a name found anywhere on that chain is in scope without needing
+    /// `pub`, exactly like a same-module reference.
     fn resolve_fn(&self, name: &str) -> Option<Path> {
         if let Some(path) = self.lookup_alias(name) {
             return self.resolve_fn_path(&path);
         }
-        // Same module — always accessible.
-        if self.cur_ns().fns.contains_key(name) {
-            return Some(self.fq(name));
-        }
-        // Root namespace — cross-module if we are inside a submodule.
-        if let Some(sig) = self.reg.root.fns.get(name) {
-            if sig.public || self.ns.is_empty() {
-                return Some(Path::root(name));
+        for prefix in self.ns_ancestors() {
+            if let Some(m) = self.reg.root.module(prefix) {
+                if m.fns.contains_key(name) {
+                    let mut segs = prefix.to_vec();
+                    segs.push(name.to_string());
+                    return Some(Path::from_segments(segs));
+                }
             }
         }
         None
@@ -1065,7 +1082,7 @@ impl Checker {
         let (mods, last) = segs.split_at(segs.len() - 1);
         let (abs, m) = self.find_module(mods)?;
         if let Some(sig) = m.fns.get(&last[0]) {
-            if !sig.public && !self.same_module(&abs) {
+            if !sig.public && !self.in_scope(&abs) {
                 return None;
             }
             let mut full = abs;
@@ -1076,16 +1093,17 @@ impl Checker {
     }
 
     /// Resolve a bare macro name to its absolute [`Path`], fixed arity, and
-    /// whether it's variadic (`&rest`) (current namespace then root — same
-    /// priority as [`Self::resolve_fn`], but without `use`-alias support,
-    /// which `defmacro` doesn't have yet).
+    /// whether it's variadic (`&rest`) — walks the ancestor chain like
+    /// [`Self::resolve_fn`] (without `use`-alias support, which `defmacro`
+    /// doesn't have yet).
     fn resolve_macro(&self, name: &str) -> Option<(Path, usize, bool)> {
-        if let Some(def) = self.cur_ns().macros.get(name) {
-            return Some((self.fq(name), def.arity, def.rest));
-        }
-        if let Some(def) = self.reg.root.macros.get(name) {
-            if def.public || self.ns.is_empty() {
-                return Some((Path::root(name), def.arity, def.rest));
+        for prefix in self.ns_ancestors() {
+            if let Some(m) = self.reg.root.module(prefix) {
+                if let Some(def) = m.macros.get(name) {
+                    let mut segs = prefix.to_vec();
+                    segs.push(name.to_string());
+                    return Some((Path::from_segments(segs), def.arity, def.rest));
+                }
             }
         }
         None
@@ -1095,7 +1113,7 @@ impl Checker {
     /// absolute [`Path`], fixed arity, and whether it's variadic (`&rest`) —
     /// the path-qualified counterpart of [`Self::resolve_macro`], mirroring
     /// [`Self::resolve_fn_path`]'s module lookup and visibility rule (public
-    /// unless called from the defining module itself).
+    /// unless the caller is in scope of the defining module).
     fn resolve_macro_path(&self, segs: &[String]) -> Option<(Path, usize, bool)> {
         if segs.is_empty() {
             return None;
@@ -1103,7 +1121,7 @@ impl Checker {
         let (mods, last) = segs.split_at(segs.len() - 1);
         let (abs, m) = self.find_module(mods)?;
         let def = m.macros.get(&last[0])?;
-        if !def.public && !self.same_module(&abs) {
+        if !def.public && !self.in_scope(&abs) {
             return None;
         }
         let mut full = abs;
@@ -1201,23 +1219,16 @@ impl Checker {
     }
 
     /// Resolve a bare constructor name to its `(type path, variant index)`,
-    /// searching the current namespace then root.
+    /// walking the ancestor chain (see [`Self::ns_ancestors`]) — every ctor
+    /// found this way is in scope by construction, so no separate `public`
+    /// check is needed (mirrors [`Self::resolve_fn`]).
     fn resolve_ctor(&self, name: &str) -> Option<(Path, usize)> {
-        // Same module — always accessible.
-        if let Some(hit) = self.cur_ns().ctors.get(name) {
-            return Some(hit.clone());
-        }
-        // Root — check type visibility for cross-module access.
-        if let Some(hit) = self.reg.root.ctors.get(name) {
-            if !self.ns.is_empty() {
-                let (type_path, _) = hit;
-                if let Some(def) = self.reg.type_def(type_path) {
-                    if !def.public {
-                        return None;
-                    }
+        for prefix in self.ns_ancestors() {
+            if let Some(m) = self.reg.root.module(prefix) {
+                if let Some(hit) = m.ctors.get(name) {
+                    return Some(hit.clone());
                 }
             }
-            return Some(hit.clone());
         }
         None
     }
@@ -1300,15 +1311,38 @@ impl Checker {
         )
     }
 
+    /// Resolve a bare (unqualified) type name by walking the ancestor chain
+    /// (see [`Self::ns_ancestors`]) — shared by [`Self::resolve_type_name`]'s
+    /// simple-path case and [`Self::resolve_type_path`]'s no-module-qualifier
+    /// case (`Type::member` written with a bare `Type`, e.g. `Option::some`,
+    /// which reaches here via an empty `mods` prefix and needs exactly the
+    /// same lookup a type annotation would use).
+    fn resolve_bare_type(&self, name: &str) -> Option<Path> {
+        for prefix in self.ns_ancestors() {
+            if let Some(m) = self.reg.root.module(prefix) {
+                if let Some(def) = m.types.get(name) {
+                    return Some(def.name.clone());
+                }
+            }
+        }
+        None
+    }
+
     /// Resolve a `module::...::Type` segment path to the type's [`Path`].
     fn resolve_type_path(&self, segs: &[String]) -> Option<Path> {
         if segs.is_empty() {
             return None;
         }
         let (mods, local) = segs.split_at(segs.len() - 1);
+        if mods.is_empty() {
+            // No module qualifier — `find_module(&[])` would just hand back
+            // the current namespace itself (its loop never runs), missing
+            // every ancestor including root; walk the chain instead.
+            return self.resolve_bare_type(&local[0]);
+        }
         let (abs, m) = self.find_module(mods)?;
         if let Some(def) = m.types.get(&local[0]) {
-            if !def.public && !self.same_module(&abs) {
+            if !def.public && !self.in_scope(&abs) {
                 return None;
             }
             return Some(def.name.clone());
@@ -1327,33 +1361,27 @@ impl Checker {
                     return tp;
                 }
             }
-            if let Some(def) = self.cur_ns().types.get(name) {
-                return def.name.clone();
-            }
-            // Root types: check public if cross-module.
-            if let Some(def) = self.reg.root.types.get(name) {
-                if def.public || self.ns.is_empty() {
-                    return def.name.clone();
-                }
+            if let Some(tp) = self.resolve_bare_type(name) {
+                return tp;
             }
             return path.clone();
         }
         self.resolve_type_path(path.segments()).unwrap_or_else(|| path.clone())
     }
 
-    /// Resolve a bare global variable/constant name to its `(path, info)`.
+    /// Resolve a bare global variable/constant name to its `(path, info)`,
+    /// walking the ancestor chain like [`Self::resolve_fn`].
     fn resolve_global(&self, name: &str) -> Option<(Path, VarInfo)> {
         if let Some(p) = self.lookup_alias(name) {
             return self.resolve_global_path(&p);
         }
-        // Same module — always accessible.
-        if let Some(vi) = self.cur_ns().vars.get(name) {
-            return Some((self.fq(name), vi.clone()));
-        }
-        // Root — check public for cross-module access.
-        if let Some(vi) = self.reg.root.vars.get(name) {
-            if vi.public || self.ns.is_empty() {
-                return Some((Path::root(name), vi.clone()));
+        for prefix in self.ns_ancestors() {
+            if let Some(m) = self.reg.root.module(prefix) {
+                if let Some(vi) = m.vars.get(name) {
+                    let mut segs = prefix.to_vec();
+                    segs.push(name.to_string());
+                    return Some((Path::from_segments(segs), vi.clone()));
+                }
             }
         }
         None
@@ -1367,7 +1395,7 @@ impl Checker {
         let (mods, last) = segs.split_at(segs.len() - 1);
         let (abs, m) = self.find_module(mods)?;
         if let Some(vi) = m.vars.get(&last[0]) {
-            if !vi.public && !self.same_module(&abs) {
+            if !vi.public && !self.in_scope(&abs) {
                 return None;
             }
             let mut full = abs;

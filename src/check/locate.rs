@@ -391,81 +391,63 @@ pub struct CompletionCandidate {
 }
 
 /// Every bare name visible for completion while checking module
-/// `module_path`: that module's own definitions, plus the root namespace's
-/// *public* ones (root's own, if `module_path` is already empty) — the same
-/// two-namespace search order `Checker::resolve_fn`/`resolve_global`/etc. use
-/// at name-resolution time, just enumerated instead of looked up by one name.
-/// Best-effort like the rest of this module: a `use`-imported bare name
-/// (`Namespace::aliases`/`mod_aliases`/`static_uses`) is only offered when
-/// `module_path` is the name's own module — a root-level `use` alias isn't
-/// re-checked for visibility here the way `resolve_ctor` checks the owning
-/// type's `public` flag, so it's simply left out of the cross-module case
-/// rather than risking a false positive.
+/// `module_path`: that module's own definitions, plus every ancestor
+/// module's (root's included) — the same ancestor-chain walk
+/// `Checker::resolve_fn`/`resolve_global`/etc. use at name-resolution time
+/// (see `Checker::ns_ancestors`), just enumerated instead of looked up by
+/// one name. A name found on this chain is in scope without needing `pub`,
+/// exactly like at check time, so every table is offered in full at every
+/// level. Best-effort like the rest of this module: a `use`-imported bare
+/// name (`Namespace::aliases`/`mod_aliases`/`static_uses`) is only offered
+/// from its own defining module, same as before.
 pub fn completion_candidates(reg: &Registry, module_path: &[String]) -> Vec<CompletionCandidate> {
     let mut out = Vec::new();
-    if let Some(ns) = reg.root.module(module_path) {
-        push_namespace(ns, &mut out, false);
-    }
-    if !module_path.is_empty() {
-        push_namespace(&reg.root, &mut out, true);
+    for k in (0..=module_path.len()).rev() {
+        if let Some(ns) = reg.root.module(&module_path[..k]) {
+            push_namespace(ns, &mut out);
+        }
     }
     out
 }
 
-/// Push every name in `ns` into `out`. `public_only` gates the four tables
-/// that carry a `public` flag (fns/macros/types/vars/traits); constructor and
-/// `use`-alias tables are only ever pushed when `public_only` is false (see
-/// [`completion_candidates`]'s doc comment), and child module names are
-/// always offered regardless (a module itself has no visibility flag today).
-fn push_namespace(ns: &crate::Namespace, out: &mut Vec<CompletionCandidate>, public_only: bool) {
+/// Push every name in `ns` into `out`.
+fn push_namespace(ns: &crate::Namespace, out: &mut Vec<CompletionCandidate>) {
     for (name, sig) in &ns.fns {
-        if !public_only || sig.public {
-            out.push(CompletionCandidate {
-                name: name.clone(),
-                kind: CompletionKind::Function,
-                detail: format!("({:?}) -> {:?}", sig.params, sig.ret),
-            });
-        }
+        out.push(CompletionCandidate {
+            name: name.clone(),
+            kind: CompletionKind::Function,
+            detail: format!("({:?}) -> {:?}", sig.params, sig.ret),
+        });
     }
-    for (name, def) in &ns.macros {
-        if !public_only || def.public {
-            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Macro, detail: "macro".to_string() });
-        }
+    for name in ns.macros.keys() {
+        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Macro, detail: "macro".to_string() });
     }
-    for (name, def) in &ns.types {
-        if !public_only || def.public {
-            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Type, detail: "type".to_string() });
-        }
+    for name in ns.types.keys() {
+        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Type, detail: "type".to_string() });
     }
     for (name, vi) in &ns.vars {
-        if !public_only || vi.public {
-            out.push(CompletionCandidate {
-                name: name.clone(),
-                kind: CompletionKind::Variable,
-                detail: format!("{:?}", vi.ty),
-            });
-        }
+        out.push(CompletionCandidate {
+            name: name.clone(),
+            kind: CompletionKind::Variable,
+            detail: format!("{:?}", vi.ty),
+        });
     }
-    for (name, def) in &ns.traits {
-        if !public_only || def.public {
-            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Trait, detail: "trait".to_string() });
-        }
+    for name in ns.traits.keys() {
+        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Trait, detail: "trait".to_string() });
     }
     for name in ns.modules.keys() {
         out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Module, detail: "module".to_string() });
     }
-    if !public_only {
-        for name in ns.ctors.keys() {
-            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Function, detail: "constructor".to_string() });
-        }
-        for name in ns.aliases.keys() {
-            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Function, detail: "use".to_string() });
-        }
-        for name in ns.mod_aliases.keys() {
-            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Module, detail: "use".to_string() });
-        }
-        for name in ns.static_uses.keys() {
-            out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Method, detail: "use".to_string() });
-        }
+    for name in ns.ctors.keys() {
+        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Function, detail: "constructor".to_string() });
+    }
+    for name in ns.aliases.keys() {
+        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Function, detail: "use".to_string() });
+    }
+    for name in ns.mod_aliases.keys() {
+        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Module, detail: "use".to_string() });
+    }
+    for name in ns.static_uses.keys() {
+        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Method, detail: "use".to_string() });
     }
 }

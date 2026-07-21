@@ -391,3 +391,78 @@ fn use_inside_a_nested_module_still_resolves_against_the_files_directory() {
     );
     assert_eq!(result, Ok(Some(RtValue::Int(5))));
 }
+
+// ---- prelude/builtin visibility from a bare entry file -----------------
+//
+// `typl <file>` wraps its entry file in a module named after the file
+// (`module_segs_for`) while the prelude and Rust builtins live at the root
+// namespace, all non-`pub`. Bare-name/assoc-fn resolution used to only check
+// "current module or literal root" — root was never reachable from *inside*
+// a submodule, so every prelude/builtin call from a standalone file failed
+// with "no such function". Fixed by walking the full ancestor chain
+// (`Checker::ns_ancestors`/`in_scope`) instead — root is always an ancestor.
+
+#[test]
+fn bare_prelude_fn_is_reachable_from_a_wrapped_entry_file() {
+    // `not` is a plain (non-pub) `defun` in the prelude, at root. `main.typl`
+    // is wrapped into module `main` — `not` must still resolve there.
+    let result = run_project("prelude-not", &[("main.typl", "(not false)")], "main.typl");
+    assert_eq!(result, Ok(Some(RtValue::Bool(true))));
+}
+
+#[test]
+fn bare_prelude_fn_and_struct_field_accessor_are_reachable_from_a_wrapped_entry_file() {
+    // `cons` (a non-pub free function) builds a `cons-cell<A,B>`, and `car`
+    // (a non-pub `defstruct` field accessor) reads it back — the former
+    // exercises `resolve_fn`'s ancestor-chain walk, the latter
+    // `assoc_visible`'s root-is-always-in-scope case.
+    let result = run_project("prelude-cons", &[("main.typl", "(car (cons 1 2))")], "main.typl");
+    assert_eq!(result, Ok(Some(RtValue::Int(1))));
+}
+
+#[test]
+fn builtin_option_ctor_and_method_are_reachable_from_a_wrapped_entry_file() {
+    // `Option::some` is a builtin enum constructor (`Registry::with_builtins`,
+    // never `pub`), and `unwrap` is a `defmethod` in the prelude dispatched
+    // through the receiver's type — both live at root.
+    let result = run_project("prelude-option", &[("main.typl", "(unwrap (Option::some 5))")], "main.typl");
+    assert_eq!(result, Ok(Some(RtValue::Int(5))));
+}
+
+#[test]
+fn a_grandchild_module_sees_a_non_pub_ancestors_definitions() {
+    // Rust-style module privacy: a private item is visible to its defining
+    // module and every descendant, not just call sites in the exact same
+    // module. `a::b` (nested two levels under the file module `main`) calls
+    // a non-pub helper defined directly in `a`.
+    let result = run_project(
+        "nested-ancestor-privacy",
+        &[(
+            "main.typl",
+            "(module a \
+               (defun helper () i32 42) \
+               (module b (pub defun call-it () i32 (helper)))) \
+             (a::b::call-it)",
+        )],
+        "main.typl",
+    );
+    assert_eq!(result, Ok(Some(RtValue::Int(42))));
+}
+
+#[test]
+fn sibling_modules_still_cannot_see_each_others_private_items() {
+    // Regression guard: the ancestor-chain relaxation must not leak private
+    // items sideways between modules that aren't in an ancestor/descendant
+    // relationship with each other.
+    let result = run_project(
+        "sibling-privacy-regression",
+        &[(
+            "main.typl",
+            "(module a (defun hidden () i32 1)) \
+             (module b (pub defun call-it () i32 (a::hidden))) \
+             (b::call-it)",
+        )],
+        "main.typl",
+    );
+    assert!(result.is_err(), "sibling module `b` must not see `a`'s private `hidden`");
+}

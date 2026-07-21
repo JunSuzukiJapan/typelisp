@@ -101,10 +101,13 @@ fn a_public_root_function_is_visible_from_inside_a_submodule() {
 }
 
 #[test]
-fn a_private_root_function_is_not_visible_from_inside_a_submodule() {
+fn a_private_root_function_is_visible_from_inside_a_submodule() {
+    // Root is always an ancestor of every submodule (Rust-style module
+    // privacy — see `Checker::ns_ancestors`/`in_scope`), so a non-`pub`
+    // root-level function is offered inside `m` too, not just `pub` ones.
     let chk = check("(defun helper () i32 1)\n(module m (defun main () i32 1))\n");
     let inside = completion_candidates(chk.registry(), &["m".to_string()]);
-    assert!(!has(CompletionKind::Function, &inside, "helper"));
+    assert!(has(CompletionKind::Function, &inside, "helper"));
     assert!(has(CompletionKind::Function, &inside, "main"));
 }
 

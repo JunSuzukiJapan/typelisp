@@ -3758,12 +3758,15 @@ branch `feature/closure-unification`→（Stage 8以降）`feature/interp-closur
 
 - 検証: `scripts/with-llvm-env.sh scripts/test-serial.sh`全green（45バイナリ、`--lib`含む）。
 
-**standalone `typl <file>`のprelude非可視は仕様**（本計画中の変更のバグではない）:
-entry fileは`module_segs_for`で必ずファイル名モジュールに包まれ、`resolve_fn`
-（`checker.rs:1052-1055`）は非pub root fnをサブモジュールから見せない
-（[[typelisp-visibility-pub]]と同じ設計）。preludeの`abs`等は非pubなので裸の`.typl`ファイルから
-呼ぶと「no such function」になるが、これは意図された可視性セマンティクスであり検証は
-REPL（root namespace）かテストハーネスで行うべき、という混同注意点。
+**standalone `typl <file>`のprelude非可視は仕様、という以下の記述は誤りだった**（2026-07-21に
+撤回・修正 — 末尾「モジュール可視性を祖先チェーン方式へ再設計（2026-07-21）」参照）。当時は
+「entry fileは`module_segs_for`で必ずファイル名モジュールに包まれ、`resolve_fn`
+（`checker.rs:1052-1055`）は非pub root fnをサブモジュールから見せない設計であり、preludeの
+`abs`等は非pubなので裸の`.typl`ファイルから呼ぶと`no such function`になるのは意図された可視性
+セマンティクスだ」と診断したが、これは「同一モジュールか literal root からの呼び出しかしか
+見ない」という場当たり的な2段階チェックの副作用に過ぎず、そもそも多段ネストしたモジュール間の
+祖先アクセスも一切考慮していない設計上の欠陥だった。ユーザー指摘を受けて撤廃し、Rust方式の
+（祖先モジュールの非pubアイテムは子孫モジュールから常に見える）祖先チェーン解決へ作り直した。
 
 Stage 8cで`jit_closure`/`jit_closure_from_result`（`interp.rs:685`/`700`）は「フォールバック
 無し」に確定した——`JitDecline::Gap`もBenign（native tier型 / コンパイラ島未ロード、以前の
@@ -4095,3 +4098,49 @@ passthroughに変更。`interp.rs`側: `call_compiled`の引数エンコード�
 を5へbump）、続けてenum値（`Option`/`Result`/ユーザー`defenum`）をdefstructと同じGCヒープ
 オブジェクト（`BoxedObj::Enum`）に統一。詳細は上記4番および[[typelisp-defenum-global-compile]]/
 [[typelisp-enum-heap-unification]]を参照。
+
+---
+
+## モジュール可視性を祖先チェーン方式へ再設計（2026-07-21）
+
+`typl <file>`（`typelisp.toml`なしの単体ファイル実行）でprelude関数（`not`等、全て非pub）や
+builtinのassoc関数（`Option::some`等）が「no such function」/「unresolved path」で呼べない、
+という報告を再現・調査したところ、当初は「entry fileが`module_segs_for`でファイル名モジュールに
+包まれ、preludeはrootに非pubで登録されるため、`resolve_fn`の`sig.public || self.ns.is_empty()`
+判定に弾かれる、意図された可視性仕様」と診断した（上記の訂正済み旧記述）。ユーザー指摘により、
+この2段階（「同一モジュールか」「literal rootからの呼び出しか」）チェック自体が場当たり的で、
+多段ネストしたモジュール間の祖先アクセス（`(module a (module b ...))`で`b`から`a`の非pub
+アイテムを見る、というRustと同じ意味論）を一切考慮していない設計上の欠陥だと判明し、全面的に
+作り直した。
+
+- **新設計**: `Checker::ns_ancestors`（`self.ns`から1段ずつ`pop`しrootまでの祖先チェーンを
+  返すイテレータ）と`Checker::in_scope`（対象アイテムの所属モジュールが現在の名前空間自身か
+  祖先かを判定、旧`same_module`の一般化）。素の名前解決系（`resolve_fn`/`resolve_macro`/
+  `resolve_ctor`/`resolve_global`/型名解決の`resolve_bare_type`——`resolve_type_name`と
+  `resolve_type_path`のモジュール修飾なしケースで共有）は`ns_ancestors()`を歩く形に、修飾
+  パス解決系（`resolve_fn_path`/`resolve_macro_path`/`resolve_type_path`/`resolve_global_path`）
+  と`assoc_visible`（メソッド/assoc関数、defstructフィールドアクセサ含む）は`same_module`を
+  `in_scope`に置換。既存の`resolve_trait_name`（`ns.pop()`ループでrootまで歩く実装）が既に
+  この方式の先例だった。
+- **副産物のバグ修正**: `resolve_type_path`は`mods`が空（モジュール修飾なしの`Type::member`、
+  例: `Option::some`）のとき`find_module(&[])`が常に「現在の名前空間自身」を返してしまい
+  （空パスなら`Namespace::module`のループが回らずSome(self)）、`pub`判定に到達する前に
+  rootの型テーブルへ到達する経路自体が無かった。`mods.is_empty()`のケースを`resolve_bare_type`
+  へ委譲することで解消（型注釈としての`Option<i32>`と`Option::some`の`Option`部分が同じ
+  ロジックで解決されるようになった）。
+- **LSP補完** (`src/check/locate.rs`の`completion_candidates`/`push_namespace`) も同じ
+  「現在の名前空間 + literal rootのみpublic_only」という2段パターンを実装しており同根の問題を
+  抱えていたため、同じ祖先チェーン方式へ揃えた（`public_only`引数は不要になり削除）。
+- **格納構造は変更していない**——`Registry`/`Namespace`の木構造や`Interp::fns: HashMap<Path,
+  FnDef>`という実行時ディスパッチテーブル自体は元々「フラットな1テーブル」ではなく（前者は
+  ツリー、後者はcheck時点で完全修飾済みPathへ解決された後のO(1)実行用インデックスで可視性判定
+  とは無関係のレイヤー）、直したのは解決アルゴリズム（探索ロジック）の側だけ。
+- 回帰確認: 兄弟モジュール間の非pubプライバシー（`tests/namespace_test.rs`の既存テスト群、
+  `tests/macro_use_test.rs::cross_module_macro_call_respects_visibility`）は引き続き拒否される
+  ことを確認済み。`tests/module_file_test.rs`に新規テスト5件
+  （`bare_prelude_fn_is_reachable_from_a_wrapped_entry_file`ほか、祖先アクセスの新規許可・
+  兄弟間拒否の回帰確認を含む）、`tests/lsp_completion_test.rs`の
+  `a_private_root_function_is_not_visible_from_inside_a_submodule`は新仕様に合わせて
+  `a_private_root_function_is_visible_from_inside_a_submodule`へ改名・反転。
+- 検証: `scripts/test-serial.sh`（`--lib`+全integration testバイナリ、`--test-threads=1`）
+  全green（`ALL TESTS PASSED (serial)`）。
