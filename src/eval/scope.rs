@@ -227,35 +227,6 @@ impl ModuleScope {
         self.find(type_name.parent())?.methods.get(&(type_name.local().to_string(), method.to_string())).cloned()
     }
 
-    /// Finds a registered method by the owning type's *local* name alone,
-    /// searching the whole tree — the direct replacement for the old
-    /// `Interp::methods.keys().find(|(p,m)| p.local() == type_name && ...)`
-    /// full-table scan `Interp::method_key` did over the single flat
-    /// `methods` map. A real receiver type is never module-qualified in
-    /// this language (see that method's own doc comment), so matching by
-    /// local name alone can't collide across two different types sharing a
-    /// method name — this is a mechanical port of the old lookup's exact
-    /// semantics onto the distributed tree, not a scope-aware search.
-    pub(crate) fn find_method_by_local(&self, type_local: &str, method: &str) -> Option<Path> {
-        self.find_method_by_local_at(&[], type_local, method)
-    }
-
-    fn find_method_by_local_at(&self, prefix: &[String], type_local: &str, method: &str) -> Option<Path> {
-        if self.methods.contains_key(&(type_local.to_string(), method.to_string())) {
-            let mut segs = prefix.to_vec();
-            segs.push(type_local.to_string());
-            return Some(Path::from_segments(segs));
-        }
-        for (name, child) in &self.children {
-            let mut segs = prefix.to_vec();
-            segs.push(name.clone());
-            if let Some(found) = child.find_method_by_local_at(&segs, type_local, method) {
-                return Some(found);
-            }
-        }
-        None
-    }
-
     /// Whether `path`'s `FnDef` already has a JIT/AOT-compiled form — the
     /// direct replacement for the old `Interp::compiled: HashMap<Path, _>`'s
     /// `contains_key` check (see [`super::interp::FnDef::compiled`]'s doc

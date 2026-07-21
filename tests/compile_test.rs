@@ -2404,6 +2404,42 @@ fn compile_bare_name_prefers_the_callers_own_module_over_a_same_named_sibling() 
     assert_eq!(v, RtValue::Int(1));
 }
 
+/// The `defmethod`/`defstruct`-accessor counterpart of the sibling test
+/// above, at the LLVM mangled-symbol level rather than the scope-tree
+/// resolution level: two sibling modules each `defstruct` their own `box`
+/// with a field accessor also named `n`, and — the part that actually
+/// exercises the mangled *symbol* rather than just the interpreter's own
+/// (already type-correct) dispatch — `sum-both`'s own body calls *both*
+/// same-named accessors as external `Expr::Assoc` targets from within one
+/// compiled function. Before this fix, a method's mangled LLVM symbol
+/// (`user_method_symbol_name`) and every internal SCC bookkeeping key
+/// derived from it (`Interp::method_key`, `CallEdge::Method`'s node name)
+/// were built from the receiver type's *local* name only (`tl_box::n` for
+/// *both* structs) — so `compiler.rs`'s `get-function "tl_box::n"` inside
+/// `sum-both`'s own module would resolve to the *same* declared value for
+/// both calls, and whichever real address `Interp::compile_scc` wired last
+/// via `add_global_mapping` would silently win for both — reading `x::n`
+/// would return `y`'s field (or vice versa) instead of its own.
+#[test]
+fn compile_a_same_named_method_in_two_sibling_modules_does_not_alias_the_others_llvm_symbol() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (module a (pub defstruct box (pub n i64)))
+        (module b (pub defstruct box (pub n i64)))
+        (defun make-a () a::box (a::box::new 100))
+        (defun make-b () b::box (b::box::new 200))
+        (compile make-a)
+        (compile make-b)
+        (compile a::box::n)
+        (compile b::box::n)
+        (defun sum-both ((x a::box) (y b::box)) i64 (+ x::n y::n))
+        (compile sum-both)
+        (sum-both (make-a) (make-b))
+        "#,
+    );
+    assert_eq!(v, RtValue::Int(300));
+}
+
 /// `(compile "name")`/`(compile "type::method")` — a string literal, not an
 /// unevaluated symbol or `::`-path — is a type error caught at check time,
 /// before the compiler ever runs (see `Checker::check_compile`'s doc

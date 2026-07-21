@@ -178,12 +178,16 @@ pub(crate) fn user_symbol_name(logical_name: &str) -> String {
 
 /// A user-defined method's own LLVM symbol name — the `Expr::Assoc`
 /// counterpart of [`user_symbol_name`]. `compiler.rs`'s `compile-assoc-user`
-/// mangles `type-name`/`method` back into this exact same `tl_type::method`
-/// string (its own `(append "tl_" (append type-name (append "::" method)))`)
-/// before its `get-function` lookup, so this must stay in lockstep with
-/// that — see [`crate::compile::USER_SYMBOL_PREFIX`]'s doc comment.
+/// mangles `type-name`/`method` back into this exact same
+/// `tl_type::path::method` string (its own `(append "tl_" (append type-name
+/// (append "::" method)))`, where `type-name` is whatever full `::`-joined
+/// path [`ast_to_sexpr_scoped`]'s `Expr::Assoc`/`Expr::MethodRef` arms
+/// embedded — never just the type's local segment, or two same-named types
+/// in different modules would mangle to the same symbol) before its
+/// `get-function` lookup, so this must stay in lockstep with that — see
+/// [`crate::compile::USER_SYMBOL_PREFIX`]'s doc comment.
 pub(crate) fn user_method_symbol_name(type_name: &Path, method: &str) -> String {
-    format!("{}{}::{}", crate::compile::USER_SYMBOL_PREFIX, type_name.local(), method)
+    format!("{}{}::{}", crate::compile::USER_SYMBOL_PREFIX, type_name, method)
 }
 
 /// Builds a `(str (int c0) (int c1) ...)` node for a compile-time-known
@@ -1035,13 +1039,16 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // plain text, so they're translated as `Str`s like `Expr::Str`
         // (rather than e.g. interned symbols) — there's no reason for the
         // compiler body to treat them differently from any other string.
-        // `type_name` is encoded by its *local* (unqualified) segment —
-        // matching `Interp::method_key`'s own "drop qualification, match
-        // local name only" convention — since `compiler.rs`'s
-        // `compile-assoc` mangles it back into a `type-name::method`
-        // lookup name that must agree with the literal string a standalone
-        // `(compile "type-name::method")` call used as that method's own
-        // LLVM function name (see `compile-assoc`'s doc comment). Arguments
+        // `type_name` is encoded by its full `::`-joined path (`Path`'s own
+        // `Display`) — matching `Interp::method_key`'s "full type path,
+        // method is always the last segment" convention — since
+        // `compiler.rs`'s `compile-assoc` mangles it back into a
+        // `type-path::method` lookup name that must agree with the literal
+        // string a standalone `(compile "type-path::method")` call used as
+        // that method's own LLVM function name (see `compile-assoc`'s doc
+        // comment). Using only the local segment here would let two
+        // same-named types in different modules collide on one mangled
+        // symbol. Arguments
         // are tagged via [`tagged_ast_list_to_sexpr`] rather than the
         // untagged [`ast_list_to_sexpr`]: unlike the built-in `i64`/`i32`
         // arithmetic operands (always plain `i64`s), a user-defined
@@ -1086,7 +1093,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
                 }
                 return result;
             }
-            let type_name_v = heap.alloc_string(type_name.local().to_string());
+            let type_name_v = heap.alloc_string(type_name.to_string());
             heap.push_root(type_name_v);
             let method_v = heap.alloc_string(method.clone());
             heap.push_root(method_v);
@@ -1510,7 +1517,7 @@ fn translate_methodref(heap: &mut Heap, type_name: &Path, method: &str, ty: &Typ
         _ => return unsupported(heap, "MethodRef"),
     };
 
-    let type_name_v = heap.alloc_string(type_name.local().to_string());
+    let type_name_v = heap.alloc_string(type_name.to_string());
     heap.push_root(type_name_v);
     let method_v = heap.alloc_string(method.to_string());
     heap.push_root(method_v);

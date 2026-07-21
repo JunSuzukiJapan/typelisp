@@ -187,14 +187,15 @@ enum CallEdge {
 
 impl CallEdge {
     /// The node identity [`Interp::compute_sccs`]'s graph traversal keys on
-    /// — a bare `defun` name, or `"type::method"` for a `defmethod`, exactly
-    /// the string shape [`Interp::compiled_fn_body`]/[`Interp::method_key`]
-    /// already resolve back (`compile_function_rec`'s pre-Stage-5 `mname`
-    /// convention, kept unchanged).
+    /// — a bare `defun` name, or `"type-path::method"` (the type's full
+    /// `::`-joined path, never just its local segment — see
+    /// [`Interp::method_key`]'s doc comment for why) for a `defmethod`,
+    /// exactly the string shape [`Interp::compiled_fn_body`]/
+    /// [`Interp::method_key`] already resolve back.
     fn node_name(&self) -> String {
         match self {
             CallEdge::Fn(p) => qualified_fn_name(p),
-            CallEdge::Method(p, m) => format!("{}::{}", p.local(), m),
+            CallEdge::Method(p, m) => format!("{}::{}", p, m),
         }
     }
 }
@@ -573,7 +574,7 @@ impl Interp {
                 // `(compile "type::method")` resolves via `Self::method_key`.
                 let target = CompileTarget::Method { type_name: p.clone(), method: m.clone(), home: p.parent().to_vec() };
                 self.compile_function(heap, &target)
-                    .map_err(|e| JitDecline::Gap(format!("transitive compile of method target \"{}::{}\" failed: {}", p.local(), m, e)))?;
+                    .map_err(|e| JitDecline::Gap(format!("transitive compile of method target \"{}::{}\" failed: {}", p, m, e)))?;
             }
         }
 
@@ -1938,23 +1939,27 @@ impl Interp {
             || matches!(ty, Type::Named(p, _) if is_sexpr_type(p) || matches!(self.root.find_type(p), Some(scope::TypeEntry::Struct)) || self.is_enum_path(p))
     }
 
-    /// Finds the registered `(Path, String)` key for a `"type::method"`
+    /// Finds the registered `(Path, String)` key for a `"type-path::method"`
     /// name — `None` for a plain name (no `"::"`) or a method that isn't
-    /// registered. The match is purely textual on `name`'s `"::"` split,
-    /// then by `Path::local()` alone (discarding any module qualification) —
-    /// matching `compile-call`'s own "discard qualification, look up by
-    /// local name" treatment of a *caller's* method/function references. A
-    /// real receiver type is never module-qualified in this language
-    /// (`defmethod` always registers under the type's own resolved `Path`,
-    /// and `Checker::check_defmethod` requires that type to already be
-    /// registered), so matching by local name alone can't collide across
-    /// two different types sharing a method name. Shared by
+    /// registered. `name`'s *last* `"::"`-separated segment is always the
+    /// method; everything before it is the type's own full `::`-joined
+    /// path (`rsplit_once`, not `split_once` — a module-qualified type has
+    /// more than one segment of its own before the method). Resolved by
+    /// direct descent ([`scope::ModuleScope::get_method`]) against that
+    /// full path, not a whole-tree scan by local type name alone — two
+    /// different types in different modules sharing both a local name and
+    /// a method name must never collide on one key (this is also why
+    /// `ast_bridge.rs`'s `Expr::Assoc`/`Expr::MethodRef` translation and
+    /// `user_method_symbol_name`'s mangled LLVM symbol both embed the type's
+    /// full path too, not just its local segment). Shared by
     /// [`Self::resolve_fn_def`] (the lookup) and [`Self::compile_function`]
     /// (which `(compile name)` for a method) — both need the exact same
     /// `(Path, String)` key.
     fn method_key(&self, name: &str) -> Option<(Path, String)> {
-        let (type_name, method) = name.split_once("::")?;
-        self.root.find_method_by_local(type_name, method).map(|p| (p, method.to_string()))
+        let (type_part, method) = name.rsplit_once("::")?;
+        let type_path = Path::from_segments(type_part.split("::").map(|s| s.to_string()).collect());
+        self.root.get_method(&type_path, method)?;
+        Some((type_path, method.to_string()))
     }
 
     /// Resolves a `(compile name)` argument against either the scope tree's
@@ -2370,7 +2375,7 @@ impl Interp {
                 self.root
                     .resolve_method(home, type_name, method)
                     .ok_or_else(|| EvalError::NoSuchFunction(format!("{}::{}", type_name, method)))?;
-                (format!("{}::{}", type_name.local(), method), self.root.method_compiled(type_name, method))
+                (format!("{}::{}", type_name, method), self.root.method_compiled(type_name, method))
             }
         };
         if already_compiled {
@@ -3954,8 +3959,8 @@ fn declare_external_function(module: &Rc<RefCell<Module<'static>>>, name: &str) 
 }
 
 /// The LLVM-visible name a method's own compiled function is declared/
-/// looked-up under: `type_name`'s *local* segment, `"::"`, `method` —
-/// exactly the literal string a standalone `(compile "type-name::method")`
+/// looked-up under: `type_name`'s full `::`-joined path, `"::"`, `method` —
+/// exactly the literal string a standalone `(compile "type-path::method")`
 /// call uses as its `internal_name` ([`Interp::compile_function`]'s own
 /// `self.add_compiled_function(heap, module.clone(), name, name)` call,
 /// where `name` is that literal user-typed string), so every caller of this
@@ -3964,7 +3969,7 @@ fn declare_external_function(module: &Rc<RefCell<Module<'static>>>, name: &str) 
 /// and `compiler.rs`'s `compile-assoc` (looking the same name back up via
 /// `get-function` — see that function's doc comment).
 fn method_link_name(type_name: &Path, method: &str) -> String {
-    format!("{}::{}", type_name.local(), method)
+    format!("{}::{}", type_name, method)
 }
 
 /// True for the handful of builtins `compiler.rs`'s `compile-call` rewrites to
