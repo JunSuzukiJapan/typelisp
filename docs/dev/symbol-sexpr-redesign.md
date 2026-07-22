@@ -264,9 +264,12 @@ eliminator として使えるようにした。ユーザー向けに実行時に
 - **compile 側の穴埋め**: `float`/`bignum`/`ratio` は `TAG_BOXED` を共有し 3bit タグだけでは区別できないため、
   `typelisp-rt` に `rt_box_kind`（0=非該当・1=float・2=bignum・3=ratio）を新設し、
   `compiler.rs::compile-sexpr-tag-test` の該当 3 variant をタグ判定から `rt_box_kind` 呼び出しへ変更。
-  `bignum`/`ratio` の**ペイロード**（`compile-sexpr-field`）は `rt_bignum_*`/`rt_ratio_*` 未実装のため
+  ~~`bignum`/`ratio` の**ペイロード**（`compile-sexpr-field`）は `rt_bignum_*`/`rt_ratio_*` 未実装のため
   引き続き明示 panic（`(bignum _)`/`(ratio _)` のワイルドカードでの tag-only 分岐は compile 可能）。
-  同様に `sym` のペイロード抽出（`Symbol` 型は compile 表現なし）も明示 panic のまま。
+  同様に `sym` のペイロード抽出（`Symbol` 型は compile 表現なし）も明示 panic のまま。~~
+  **→ 2026-07-15 解消**（`compiler.rs::compile-sexpr-field`の`sym`(5)/`bignum`(8)/`ratio`(9)/`path`(10)
+  各分岐は現在いずれもpanicせず、既にタグ付き済みの値をそのままpassthroughする——bignum/ratioの
+  compile対応・quoted data内のSym/Pathのcompile対応が同日中に解消したため）。
 - **潜在バグの発見と修正**: `compile-ctor-subpatterns` の「サブパターンが `pat-wild` か」判定が
   `(eq (sexpr-sym-name ...) "pat-wild")` という**識別子比較**で書かれており、文字列内容比較のつもりが
   常に false になっていた（`eq` は CL 同様ポインタ同一性、内容比較は `equal`）。このため `(sym _)`/
