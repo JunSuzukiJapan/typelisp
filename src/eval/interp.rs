@@ -533,7 +533,7 @@ impl Interp {
         let assoc_targets: Vec<(Path, String)> = crate::compile::ast_bridge::collect_assoc_targets(t)
             .into_iter()
             .filter(|key| {
-                if key.0.local() == "vector" && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push") {
+                if key.0.local() == "vector" && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push" | "pop") {
                     return false;
                 }
                 if key.0.local() == "hashtable"
@@ -2408,14 +2408,14 @@ impl Interp {
             .filter(|key| method_key.as_ref() != Some(key))
             .filter(|key| {
                 // `Vector<T>`'s field-backed builtin methods (`new`/`get`/
-                // `set`/`len`/`push`) are lowered to a `vector-op` node
+                // `set`/`len`/`push`/`pop`) are lowered to a `vector-op` node
                 // (`ast_bridge::translate_vector_method` -> `rt_struct_*`),
                 // not a method call, so — like the native primitive methods
                 // below — they are never a real call target. `vector::iter`
                 // is deliberately excluded from this list: it is a genuine
                 // prelude `defmethod` (`vector-iter::new`) and must be
                 // `compile`d like any other method.
-                if key.0.local() == "vector" && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push") {
+                if key.0.local() == "vector" && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push" | "pop") {
                     return false;
                 }
                 // `HashTable<K,V>`'s builtin methods lowered to a `hashtable-op`
@@ -3062,7 +3062,7 @@ fn option_payload_ty(ret_ty: &Type) -> Result<Type, EvalError> {
     match ret_ty {
         Type::Named(p, args) if *p == Path::root("option") && args.len() == 1 => Ok(args[0].clone()),
         other => Err(EvalError::Internal(format!(
-            "expected an Option<V> return type at a HashTable get/remove site, got {:?}",
+            "expected an Option<V> return type at a HashTable get/remove or Vector pop site, got {:?}",
             other
         ))),
     }
@@ -3582,6 +3582,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "get" => Some(vector_get(heap, args, ret_ty)),
             "set" => Some(vector_set(heap, args)),
             "len" => Some(vector_len(heap, args)),
+            "pop" => Some(vector_pop(heap, args, ret_ty)),
             _ => None,
         };
     }
@@ -4121,7 +4122,7 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 95] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 96] {
     use crate::compile::runtime::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
@@ -4135,7 +4136,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 95] {
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
         rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_int, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
-        rt_struct_new, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
+        rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
     };
     [
         // The one main-crate entry: the generic `llvm-*`/native-scope
@@ -4184,6 +4185,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 95] {
         ("rt_struct_field_set", rt_struct_field_set as usize),
         ("rt_struct_field_count", rt_struct_field_count as usize),
         ("rt_struct_push_field", rt_struct_push_field as usize),
+        ("rt_struct_pop_field", rt_struct_pop_field as usize),
         ("rt_closure_new", rt_closure_new as usize),
         ("rt_closure_fnptr", rt_closure_fnptr as usize),
         ("rt_closure_env_len", rt_closure_env_len as usize),
@@ -5302,6 +5304,19 @@ fn vector_set(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
 fn vector_len(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let id = expect_struct_box(&args[0])?;
     Ok(RtValue::Int(heap.struct_field_count(id) as i64))
+}
+
+/// Unlike [`vector_get`]/[`vector_set`] (which panic out of range), `pop`
+/// returns `Option<T>` — an empty vector is a legitimate `None`, not a
+/// bounds violation — the same shape [`hashtable_remove`] uses for its own
+/// "might not be there" result. `ret_ty` is the call site's checked
+/// `Option<T>` return type; [`option_payload_ty`] extracts `T` for
+/// [`decode_field_typed`]'s type-directed decode of the popped element.
+fn vector_pop(heap: &mut Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    let val_ty = option_payload_ty(ret_ty)?;
+    let popped = heap.struct_pop_field(id).map(|v| decode_field_typed(heap, v, &val_ty));
+    Ok(option_value(heap, popped))
 }
 
 // The native (`RtValue::Scope`) halves of the six scope builtin methods —

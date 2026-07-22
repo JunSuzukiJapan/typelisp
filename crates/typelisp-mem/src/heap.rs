@@ -581,6 +581,22 @@ impl Heap {
         }
     }
 
+    /// Removes and returns the last field of a boxed struct, shrinking its
+    /// field count by one — `Vector<T>::pop`'s primitive, the inverse of
+    /// [`struct_push_field`](Self::struct_push_field). Unlike
+    /// [`struct_field`](Self::struct_field)'s out-of-range panic, an empty
+    /// vector is a legitimate outcome here (`None`), not an invariant
+    /// violation — `pop` returns `Option<T>` (matching `HashTable<K,V>`'s
+    /// `remove`, and `Vec::pop`'s own idiomatic Rust signature), unlike
+    /// `get`/`set`'s "out of range panics" convention. Panics only if `id`
+    /// doesn't hold a `BoxedObj::Struct` at all.
+    pub fn struct_pop_field(&mut self, id: BoxId) -> Option<Value> {
+        match self.box_slots[id.0 as usize].as_mut() {
+            Some(BoxedObj::Struct { payload: StructPayload::Fields(fields), .. }) => fields.pop(),
+            _ => panic!("BoxId does not hold a Struct"),
+        }
+    }
+
     /// True if `id` holds a `BoxedObj::Struct` with a `StructPayload::Fields`
     /// payload (a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance) —
     /// deliberately narrower than "any `Struct`" now that [`StructPayload`]

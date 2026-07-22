@@ -3407,15 +3407,20 @@ pub const SOURCE: &str = r#"
                        ;; struct (tagged `Sexpr`), so its elements cross the
                        ;; `BoxedObj::Struct` boundary tagged and need the same
                        ;; `compile-tag-struct-field` (encode, `push`/`set`) /
-                       ;; `compile-sexpr-field` (decode, `get`) `compile-field-
-                       ;; set`/`compile-field-get` use for a fixed-arity field
-                       ;; — the sole difference being a *runtime* index
-                       ;; (compiled from `idx-form`, already a raw `i64`)
-                       ;; rather than a compile-time-constant field offset.
-                       ;; `len`/`push` are the two new primitives:
-                       ;; `rt_struct_field_count` (raw element count) and
-                       ;; `rt_struct_push_field` (grow by one). An out-of-range
-                       ;; `get`/`set` index aborts inside `rt_struct_field_get`/
+                       ;; `compile-sexpr-field` (decode, `get`/`pop`)
+                       ;; `compile-field-set`/`compile-field-get` use for a
+                       ;; fixed-arity field — the sole difference being a
+                       ;; *runtime* index (compiled from `idx-form`, already a
+                       ;; raw `i64`) rather than a compile-time-constant field
+                       ;; offset (`pop`, like `len`/`push`, has no index at
+                       ;; all — it always targets the last field). `len`/
+                       ;; `push`/`pop` are the three no-index primitives:
+                       ;; `rt_struct_field_count` (raw element count),
+                       ;; `rt_struct_push_field` (grow by one), and
+                       ;; `rt_struct_pop_field` (shrink by one, returning the
+                       ;; removed element — the mem layer panics if the
+                       ;; vector is already empty). An out-of-range `get`/
+                       ;; `set` index aborts inside `rt_struct_field_get`/
                        ;; `_set` (the mem-layer bounds panic across the
                        ;; `extern "C"` boundary), matching compiled code's
                        ;; "abort, don't unwind" convention (`rt_panic`) — the
@@ -3424,7 +3429,7 @@ pub const SOURCE: &str = r#"
                        ;; No extra GC-rooting beyond what `compile-field-set`
                        ;; already relies on: the receiver flows in as an
                        ;; ordinary (env-rooted) value, and `rt_struct_push_
-                       ;; field` allocates nothing.
+                       ;; field`/`rt_struct_pop_field` allocate nothing.
                        (compile-vector-op ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
                          (let ((method (sexpr-str (sexpr-car (sexpr-cdr e)))))
                            (let ((kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
@@ -3439,32 +3444,96 @@ pub const SOURCE: &str = r#"
                                      (let ((args-ptr (alloca-args builder 1)))
                                        (store-arg builder args-ptr 0 v)
                                        (build-call builder (get-function m "rt_struct_field_count") args-ptr 1))
-                                     (if (equal method "push")
-                                         (let ((x-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
-                                           (let ((x (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base x-form)))
-                                             (let ((tagged-x (compile-tag-struct-field builder m x kind)))
-                                               (let ((args-ptr (alloca-args builder 2)))
-                                                 (store-arg builder args-ptr 0 v)
-                                                 (store-arg builder args-ptr 1 tagged-x)
-                                                 (let ((ignored (build-call builder (get-function m "rt_struct_push_field") args-ptr 2)))
-                                                   (const-i64 builder 0))))))
-                                         (let ((idx-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
-                                           (let ((idx (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base idx-form)))
-                                             (if (equal method "get")
-                                                 (let ((args-ptr (alloca-args builder 2)))
-                                                   (store-arg builder args-ptr 0 v)
-                                                   (store-arg builder args-ptr 1 idx)
-                                                   (let ((raw (build-call builder (get-function m "rt_struct_field_get") args-ptr 2)))
-                                                     (compile-sexpr-field builder m raw kind 0)))
-                                                 (let ((x-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
-                                                   (let ((x (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base x-form)))
-                                                     (let ((tagged-x (compile-tag-struct-field builder m x kind)))
-                                                       (let ((args-ptr (alloca-args builder 3)))
-                                                         (store-arg builder args-ptr 0 v)
-                                                         (store-arg builder args-ptr 1 idx)
-                                                         (store-arg builder args-ptr 2 tagged-x)
-                                                         (let ((ignored (build-call builder (get-function m "rt_struct_field_set") args-ptr 3)))
-                                                           (const-i64 builder 0)))))))))))))))))
+                                     (if (equal method "pop")
+                                         ;; `pop` returns `Option<T>`: an empty
+                                         ;; vector is `None`, not a bounds
+                                         ;; panic (unlike `get`/`set`) — so
+                                         ;; this needs real control flow,
+                                         ;; following `compile-hashtable-op`'s
+                                         ;; `get`/`remove` "alloca a merge
+                                         ;; slot, branch, store each arm's
+                                         ;; result, load after the merge
+                                         ;; block" shape. `rt_struct_field_
+                                         ;; count` is checked first (`= 0` -> a
+                                         ;; compile-time-known `None`), then
+                                         ;; only the confirmed-nonempty branch
+                                         ;; calls `rt_struct_pop_field` — safe
+                                         ;; with no race, single-threaded
+                                         ;; compiled code can't shrink the
+                                         ;; vector between the two calls. The
+                                         ;; popped value is already a properly
+                                         ;; tagged `Sexpr` (`push`'s own
+                                         ;; `compile-tag-struct-field` call
+                                         ;; tagged it going in), so it flows
+                                         ;; into `Some` via `rt_data_new`
+                                         ;; unchanged — no `compile-sexpr-
+                                         ;; field` decode step, exactly as
+                                         ;; `compile-hashtable-op`'s `get`/
+                                         ;; `remove` pass their own raw looked-
+                                         ;; up value straight through.
+                                         ;; `option-name-form` is the node's
+                                         ;; one trailing operand
+                                         ;; (`translate_vector_method`'s
+                                         ;; `pop`-only addition), in the same
+                                         ;; slot `get`/`set`'s `idx-form`
+                                         ;; would occupy.
+                                         (let ((option-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+                                           (let ((option-name-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base option-name-form)))
+                                             (let ((args-ptr (alloca-args builder 1)))
+                                               (store-arg builder args-ptr 0 v)
+                                               (let ((count (build-call builder (get-function m "rt_struct_field_count") args-ptr 1)))
+                                                 (let ((empty (build-icmp-eq builder count (const-i64 builder 0))))
+                                                   (let ((then-block (append-block cur-fn "vec-pop-empty")))
+                                                     (let ((else-block (append-block cur-fn "vec-pop-nonempty")))
+                                                       (let ((merge-block (append-block cur-fn "vec-pop-merge")))
+                                                         (let ((slot (alloca-args builder 1)))
+                                                           (build-cond-br builder empty then-block else-block)
+                                                           (position-at-end builder then-block)
+                                                           (let ((none-args (alloca-args builder 2)))
+                                                             (store-arg builder none-args 0 option-name-v)
+                                                             (store-arg builder none-args 1 (const-i64 builder 1))
+                                                             (let ((none-box (build-call builder (get-function m "rt_data_new") none-args 2)))
+                                                               (push-permanent-sexpr-root builder m none-box)
+                                                               (let ((ignored (store-arg builder slot 0 none-box)))
+                                                                 (build-br builder merge-block))))
+                                                           (position-at-end builder else-block)
+                                                           (let ((raw (build-call builder (get-function m "rt_struct_pop_field") args-ptr 1)))
+                                                             (let ((some-args (alloca-args builder 3)))
+                                                               (store-arg builder some-args 0 option-name-v)
+                                                               (store-arg builder some-args 1 (const-i64 builder 0))
+                                                               (store-arg builder some-args 2 raw)
+                                                               (let ((some-box (build-call builder (get-function m "rt_data_new") some-args 3)))
+                                                                 (push-permanent-sexpr-root builder m some-box)
+                                                                 (let ((ignored (store-arg builder slot 0 some-box)))
+                                                                   (build-br builder merge-block)))))
+                                                           (position-at-end builder merge-block)
+                                                           (load-raw builder slot 0))))))))))
+                                       (if (equal method "push")
+                                             (let ((x-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+                                               (let ((x (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base x-form)))
+                                                 (let ((tagged-x (compile-tag-struct-field builder m x kind)))
+                                                   (let ((args-ptr (alloca-args builder 2)))
+                                                     (store-arg builder args-ptr 0 v)
+                                                     (store-arg builder args-ptr 1 tagged-x)
+                                                     (let ((ignored (build-call builder (get-function m "rt_struct_push_field") args-ptr 2)))
+                                                       (const-i64 builder 0))))))
+                                             (let ((idx-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+                                               (let ((idx (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base idx-form)))
+                                                 (if (equal method "get")
+                                                     (let ((args-ptr (alloca-args builder 2)))
+                                                       (store-arg builder args-ptr 0 v)
+                                                       (store-arg builder args-ptr 1 idx)
+                                                       (let ((raw (build-call builder (get-function m "rt_struct_field_get") args-ptr 2)))
+                                                         (compile-sexpr-field builder m raw kind 0)))
+                                                     (let ((x-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
+                                                       (let ((x (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base x-form)))
+                                                         (let ((tagged-x (compile-tag-struct-field builder m x kind)))
+                                                           (let ((args-ptr (alloca-args builder 3)))
+                                                             (store-arg builder args-ptr 0 v)
+                                                             (store-arg builder args-ptr 1 idx)
+                                                             (store-arg builder args-ptr 2 tagged-x)
+                                                             (let ((ignored (build-call builder (get-function m "rt_struct_field_set") args-ptr 3)))
+                                                               (const-i64 builder 0))))))))))))))))))
                        ;; `(hashtable-op method key-kind val-kind ht-form
                        ;; ...)` — a `HashTable<K,V>` builtin (`ast_bridge`'s
                        ;; `translate_hashtable_method`), lowered to the

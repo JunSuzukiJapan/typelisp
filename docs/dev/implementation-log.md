@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-07-21 / ブランチ: `main`
+最終更新: 2026-07-22 / ブランチ: `main`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -4180,3 +4180,45 @@ builtinのassoc関数（`Option::some`等）が「no such function」/「unresol
   フォールバック（`resolve_fn_path`）が「ジェネリックチェック+プレースホルダ`Path`+`mk_ref`」と
   いう同一パターンをほぼ複製していたのを共通クロージャ`fn_target`へ統合
   （`Path::root(name)`と`Path::from_segments(vec![name])`が等価であることを確認した上で統一）。
+
+---
+
+## `Vector<T>::pop`実装 + `functions.md`の記載整理（2026-07-22）
+
+`docs/functions.md`のVector<T>節に残っていた「`pop`/`map`/`filter`/リスト変換などは未実装」という
+注記を精査したところ、`map`/`filter`は既にPhase 6.5の`Iter`ジェネリック関数として実装済み（注記が
+古いだけ）、`pop`とリスト変換だけが実際に未実装と判明。リスト変換（`Vector<T>`⇔`Sexpr`リスト）は
+言語仕様上不可能——`cons`は`cons<T,U>`という異種ペア型で`(cons 1 "hello")`の型は
+`cons<i32, cons<str, null>>`（1つめと2つめの要素の型が異なる）であり、`Sexpr`のリストはこの異種
+入れ子`cons`連鎖である一方`Vector<T>`は単一要素型`T`のみのコレクションなので、汎用変換関数は
+型パラメータでは表現できない——という理由を`functions.md`に明記した上で対象外を確定。
+
+`pop`はHashTable::get/removeと同じ「空/未検出はNone、範囲外ではpanicしない」設計
+（`Option<T>`返し）で新規実装。`Vec::pop`のRust標準シグネチャとも一致し、旧（2026-06-23に全面
+削除済みの）`Vector<T>`初回実装が残していた`pop(Vector<t>)->Option<t>`という仕様（当時のcatalog
+記載）とも合致する。
+
+- **mem層**: `Heap::struct_pop_field`（`crates/typelisp-mem/src/heap.rs`）— 最後のフィールドを
+  popし`Option<Value>`で返す（空は`None`、Structでない場合のみpanic）。
+- **rt層**: `rt_struct_pop_field`（`crates/typelisp-rt/src/lib.rs`）— コンパイル済みコード用、
+  空で呼ばれたら`fatal`（呼び出し側が`rt_struct_field_count`で事前チェック済みという前提、
+  `rt_hashtable_get_raw`/`_remove_raw`と同じ規約）。
+- **checker**: `registry.rs`の`vector_def`に`pop: Vector<t> -> Option<t>`を追加。
+- **interp**: `vector_pop`が`hashtable_remove`と同型（`option_payload_ty`+`option_value`で
+  `Option`値を構築）。
+- **compile（JIT/AOT）**: `ast_bridge.rs`の`translate_vector_method`が`pop`のときだけ
+  `option-type-name-form`（`(str "option")`）を`vector-op`ノードの末尾に追加
+  （`HashTable::get`/`remove`の`option_type_name_form`と同じ役割）。`compiler.rs`の
+  `compile-vector-op`に`pop`分岐を新設——`rt_struct_field_count`で空判定→空なら`None`を
+  `rt_data_new`で構築、非空なら`rt_struct_pop_field`で取り出した値（既にタグ付き`Sexpr`、
+  `push`が書き込んだ表現そのもの）をそのまま`Some`へ、`compile-hashtable-op`の`get`/`remove`と
+  全く同じ「alloca+分岐+merge」パターンで実装。
+- **自己ホストcompiler.rsの括弧デバッグ**: 深くネストした`(if ...)`の中間にケースを1つ挿入する
+  際、閉じ括弧の数を手で数え違えて`if`が正しい引数数（cond/then/else）を持たなくなるヒーゼンバグを
+  誘発した——単純な深さ集計（開き括弧-閉じ括弧の総数が0に戻るか）だけでは検出できず（合計は
+  合っていても木の形が壊れうる）、実際にRust側で簡易S式パーサを書いて`(if ...)`ノードの子要素数を
+  検証して特定。`scripts/regen-compiler-island.sh`（`compiler.rs`のSOURCEを変更したら必須、
+  さもないと`island bitcode is stale`でテストがpanicする）も要実行。
+- テスト: `tests/vector_test.rs`に3件（`Some`/`None`両方、`len`減少）、`tests/compile_test.rs`に
+  3件（JIT経由、空/非空、`len`減少）追加。`typelisp-rt`単体テストにも`rt_struct_pop_field`の
+  round-trip 1件追加。`scripts/test-serial.sh`全体green。

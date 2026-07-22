@@ -209,9 +209,19 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 | `get` | `(get v i)` | `(Vector<T>,i32)→T` | `i` 番目を読む。範囲外は panic |
 | `set` | `(set v i x)` | `(Vector<T>,i32,T)→Unit` | `i` 番目を書き換える。範囲外は panic |
 | `len` | `(len v)` | `Vector<T>→i32` | 要素数 |
+| `pop` | `(pop v)` | `Vector<T>→Option<T>` | 末尾を取り除いて返す。空なら `None`（`get`/`set` と異なり範囲外でも panic しない） |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter` を実装するカーソルを作る（ライブラリ定義） |
 
-`pop`/`map`/`filter`/リスト変換などは未実装。
+`map`/`filter` は§6（`Iter` トレイト上のジェネリック関数）で実装済み——`(map (iter v) f)` のように
+`Vector<T>` を `iter` でカーソル化して渡す。
+
+**`Vector<T>` ↔ `Sexpr` リストの相互変換は言語仕様上できない（意図的に対象外）**: `cons` は
+`cons<T,U>` という異種ペア型であり、`(cons 1 "hello")` の型は `cons<i32, cons<str, null>>` になる
+——1つめの要素の型は `i32`、2つめの要素の型は `cons<str, null>` で異なる。`Sexpr` のリストは
+この異種の入れ子 `cons` 連鎖（各要素ごとに型が変わりうる）であり、`Vector<T>` のような単一の要素型
+`T` だけからなるコレクションとは表現が根本的に異なるため、両者を汎用的に変換する
+`to-list`/`from-list` のような関数は書けない（型パラメータ`T`だけでは`Sexpr`側の入れ子構造を
+静的に表現できない）。
 
 ## 11. `HashTable<K,V>`
 

@@ -93,6 +93,40 @@ fn set_out_of_bounds_panics() {
 }
 
 #[test]
+fn pop_removes_and_returns_some_of_the_last_element() {
+    let src = "(defun make-v () Vector<i32> (Vector::new))
+               (defun f () i32
+                 (let ((v (make-v)))
+                   (push v 1)
+                   (push v 2)
+                   (push v 3)
+                   (match (pop v) ((Some x) x) ((None) -1))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Int(3));
+}
+
+#[test]
+fn pop_shrinks_len_by_one() {
+    let src = "(defun make-v () Vector<i32> (Vector::new))
+               (let ((v (make-v)))
+                 (push v 1)
+                 (push v 2)
+                 (pop v)
+                 (len v))";
+    assert_eq!(eval_ok(src), RtValue::Int(1));
+}
+
+#[test]
+fn pop_on_an_empty_vector_returns_none() {
+    let src = "(defun make-v () Vector<i32> (Vector::new))
+               (defun f () i32
+                 (let ((v (make-v)))
+                   (match (pop v) ((Some x) x) ((None) -1))))
+               (f)";
+    assert_eq!(eval_ok(src), RtValue::Int(-1));
+}
+
+#[test]
 fn pushing_a_mismatched_element_type_is_a_type_error() {
     let src = "(defun make-v () Vector<i32> (Vector::new))
                (let ((v (make-v))) (push v \"oops\"))";

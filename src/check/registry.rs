@@ -811,6 +811,10 @@ fn vector_def() -> AdtDef {
         "len".to_string(),
         AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty()], ret: Type::I32, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
     );
+    assoc.insert(
+        "pop".to_string(),
+        AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![vector_ty()], ret: option_of(tvar("t")), public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true },
+    );
     AdtDef {
         name: Path::root("vector"),
         params: vec!["t".to_string()],

@@ -3917,6 +3917,66 @@ fn compile_dispatches_vector_len_to_native_code() {
     assert_eq!(v, RtValue::Int(3), "three pushes -> length 3");
 }
 
+/// `pop` returns `Option<T>` (unlike `get`, an empty vector is `None`, not a
+/// bounds panic) — `rt_struct_field_count` gates a runtime branch between
+/// building `Some` (via `rt_struct_pop_field` + `rt_data_new`) and `None`,
+/// mirroring `HashTable::get`/`remove`'s own compiled `Option` construction.
+#[test]
+fn compile_dispatches_vector_pop_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun f () i64
+          (let ((v (the Vector<i64> (Vector::new))))
+            (push v 10)
+            (push v 20)
+            (push v 30)
+            (match (pop v) ((Some x) x) ((None) -1))))
+        (compile f)
+        (f)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(30), "pop returns Some of the last-pushed element");
+}
+
+/// `pop` shrinks `len` by one, observable through a subsequent compiled
+/// `len` call.
+#[test]
+fn compile_dispatches_vector_pop_shrinks_len_to_native_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun f () i64
+          (let ((v (the Vector<i64> (Vector::new))))
+            (push v 10)
+            (push v 20)
+            (match (pop v) ((Some x) x) ((None) -1))
+            (as i64 (len v))))
+        (compile f)
+        (f)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(1), "one pop after two pushes -> length 1");
+}
+
+/// Popping an empty vector returns `None` in compiled code too, not a
+/// bounds panic — the `rt_struct_field_count == 0` branch of
+/// `compile-vector-op`'s "pop" arm.
+#[test]
+fn compile_dispatches_vector_pop_of_an_empty_vector_returns_none() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun f () i64
+          (let ((v (the Vector<i64> (Vector::new))))
+            (match (pop v) ((Some x) x) ((None) -1))))
+        (compile f)
+        (f)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(-1), "popping an empty vector is None");
+}
+
 /// A passthrough (kind `6`) element type: a `Vector<string>` stores each
 /// element as an already-tagged `Sexpr`, so `push`/`get` neither tag nor
 /// untag (`compile-tag-struct-field`/`compile-sexpr-field`'s kind-`6`

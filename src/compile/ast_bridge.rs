@@ -643,12 +643,12 @@ fn global_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) 
 /// normal compiled method, so it stays on the `assoc` path. `HashTable<K,V>`
 /// shares the `new`/`get`/`set` names but a different `type_name`, so the
 /// `type_name.local() == "vector"` guard at the call site keeps them apart.
-const VECTOR_BUILTIN_METHODS: [&str; 5] = ["new", "get", "set", "len", "push"];
+const VECTOR_BUILTIN_METHODS: [&str; 6] = ["new", "get", "set", "len", "push", "pop"];
 
 /// The element `kind` ([`struct_field_kind`]) for a `Vector<T>` method call:
 /// `T` from the receiver's `Vector<T>` type (`args[0]`), or `0` for `new`
 /// (no receiver — an empty struct has no element to tag). Uniform across
-/// `get`/`set`/`len`/`push` since every one either reads or writes a `T`.
+/// `get`/`set`/`len`/`push`/`pop` since every one either reads or writes a `T`.
 fn vector_element_kind(args: &[Typed], structs: &HashSet<Path>, enums: &HashSet<Path>) -> i64 {
     match args.first().map(|a| &a.ty) {
         Some(Type::Named(p, targs)) if p.local() == "vector" => {
@@ -659,25 +659,36 @@ fn vector_element_kind(args: &[Typed], structs: &HashSet<Path>, enums: &HashSet<
 }
 
 /// A `Vector<T>` builtin method call -> a dedicated `(vector-op method kind
-/// arg-form...)` node, lowered directly to `rt_struct_new` (`new`) /
-/// `rt_struct_field_count` (`len`) / `rt_struct_field_get` (`get`) /
-/// `rt_struct_field_set` (`set`) / `rt_struct_push_field` (`push`) in
-/// `compiler.rs`'s `compile-vector-op`, because none of these has a compiled
-/// `defmethod` body. `kind` is `T`'s [`struct_field_kind`]: the element
-/// crosses the `BoxedObj::Struct` boundary tagged, so `compile-vector-op`
-/// tags (`push`/`set`) and untags (`get`) it with `compile-tag-struct-field`/
-/// `compile-sexpr-field`, exactly as `field-get`/`field-set` do for a
-/// fixed-arity field. `new` carries a `(str "vector")` type-name form
-/// ([`str_literal_form`]) — the sole "argument" it needs, reusing
-/// `compile-construct-boxed-struct`'s empty-field path — while the others
-/// translate their receiver/index/value operands as plain value forms
-/// ([`ast_list_to_sexpr`]); the one header `kind` covers the sole field that
-/// crosses the boundary, so no per-arg `(kind . form)` pairing is needed.
+/// arg-form... [option-type-name-form])` node, lowered directly to
+/// `rt_struct_new` (`new`) / `rt_struct_field_count` (`len`) /
+/// `rt_struct_field_get` (`get`) / `rt_struct_field_set` (`set`) /
+/// `rt_struct_push_field` (`push`) / `rt_struct_field_count`+
+/// `rt_struct_pop_field` (`pop`) in `compiler.rs`'s `compile-vector-op`,
+/// because none of these has a compiled `defmethod` body. `kind` is `T`'s
+/// [`struct_field_kind`]: the element crosses the `BoxedObj::Struct` boundary
+/// tagged, so `compile-vector-op` tags (`push`/`set`) and untags (`get`) it
+/// with `compile-tag-struct-field`/`compile-sexpr-field`, exactly as
+/// `field-get`/`field-set` do for a fixed-arity field. `new` carries a
+/// `(str "vector")` type-name form ([`str_literal_form`]) — the sole
+/// "argument" it needs, reusing `compile-construct-boxed-struct`'s
+/// empty-field path — while the others translate their receiver/index/value
+/// operands as plain value forms ([`ast_list_to_sexpr`]); the one header
+/// `kind` covers the sole field that crosses the boundary, so no per-arg
+/// `(kind . form)` pairing is needed. `pop` is the odd one out: unlike
+/// `get`, it returns `Option<T>` (an empty vector is `None`, not a bounds
+/// panic — see [`Heap::struct_pop_field`](crate::mem::Heap::struct_pop_field)),
+/// so its node carries one extra trailing `option-type-name-form` (a
+/// `(str "option")` literal, same role as
+/// [`translate_hashtable_method`]'s for `get`/`remove`) that
+/// `compile-vector-op` needs to build the `Some`/`None` result via
+/// `rt_data_new` — the popped field flows into `Some` *without* a
+/// `compile-sexpr-field` decode step, exactly as `HashTable::get`/`remove`'s
+/// raw looked-up value does (an enum field is always stored pre-tagged).
 fn translate_vector_method(heap: &mut Heap, method: &str, kind: i64, args: &[Typed], cx: Ctx) -> Result<Value, Error> {
     let kind_v = Value::Int(kind);
     let method_v = heap.alloc_string(method.to_string());
     heap.push_root(method_v);
-    let forms = if method == "new" {
+    let mut forms = if method == "new" {
         // `new` has no runtime operands; its lone "form" is the `"vector"`
         // type-name literal `compile-construct-boxed-struct` feeds
         // `rt_struct_new` (an empty field list builds an empty vector).
@@ -700,6 +711,21 @@ fn translate_vector_method(heap: &mut Heap, method: &str, kind: i64, args: &[Typ
             }
         }
     };
+    if method == "pop" {
+        match str_literal_form(heap, "option") {
+            Ok(form) => {
+                heap.push_root(form);
+                forms.push(form);
+            }
+            Err(e) => {
+                for _ in 0..forms.len() {
+                    heap.pop_root();
+                }
+                heap.pop_root(); // method_v
+                return Err(e);
+            }
+        }
+    }
     let mut items = vec![method_v, kind_v];
     items.extend(forms.iter().copied());
     let result = tagged(heap, "vector-op", &items);
@@ -1057,7 +1083,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // call's arguments already get.
         Expr::Assoc { type_name, method, instance, args, .. } => {
             // `Vector<T>`'s field-backed builtin methods (`new`/`get`/`set`/
-            // `len`/`push`) have no compiled `defmethod` body; lower them to a
+            // `len`/`push`/`pop`) have no compiled `defmethod` body; lower them to a
             // dedicated `vector-op` node carrying the element kind (see
             // `translate_vector_method`). Guarded by `type_name` so
             // `HashTable::get`/`set`/`new` (a different type, different

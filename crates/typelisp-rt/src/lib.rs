@@ -1576,6 +1576,40 @@ pub unsafe extern "C" fn rt_struct_push_field(args: *const i64, argc: u32) -> i6
     0
 }
 
+/// `(rt-struct-pop-field! s)` for compiled code — removes and returns the
+/// last field of boxed struct `args[0]` (a tagged `Sexpr`), shrinking its
+/// field count by one. `Vector<T>::pop`'s primitive, the inverse of
+/// [`rt_struct_push_field`]. Only ever called after the compiled caller's
+/// own `rt_struct_field_count` check confirmed at least one field present
+/// (`compiler.rs`'s `compile-vector-op` "pop" branch) — mirrors
+/// [`rt_hashtable_remove_raw`]'s "caller already checked
+/// `rt_hashtable_contains`" precondition, since `pop`, like `remove`,
+/// returns `Option<T>` (`None` on empty is a legitimate outcome the checked
+/// branch builds directly, never by calling this). Fatal if `args[0]` isn't
+/// a boxed struct, or if it turns out empty anyway (an internal-invariant
+/// trap, the same convention [`rt_hashtable_get_raw`]'s "key not present"
+/// fatal follows).
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// decoding to a `Value::Boxed` struct; a `Heap` must already be registered
+/// on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_struct_pop_field(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_struct_pop_field: expected 1 argument");
+    }
+    let id = match decode(*args) {
+        Value::Boxed(id) => id,
+        _ => fatal("rt_struct_pop_field: first argument is not a boxed Sexpr"),
+    };
+    match active_heap().struct_pop_field(id) {
+        Some(v) => encode(v),
+        None => fatal("rt_struct_pop_field: vector is empty (caller must check rt_struct_field_count first)"),
+    }
+}
+
 // ---- Iter-compile plan, Stage C: `HashTable<K,V>` primitives ------------
 //
 // A `HashTable<K,V>` is a `BoxedObj::Struct` with a `StructPayload::Map`
@@ -2634,7 +2668,7 @@ mod tests {
         rt_str_new, rt_str_ref, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw,
         rt_hashtable_keys, rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_data_field, rt_data_new, rt_data_variant,
         rt_cell_get, rt_cell_new, rt_cell_set, rt_closure_env_get, rt_closure_env_len, rt_closure_fnptr, rt_closure_new,
-        rt_struct_field_count, rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_struct_push_field, set_active_heap,
+        rt_struct_field_count, rt_struct_field_get, rt_struct_field_set, rt_struct_new, rt_struct_pop_field, rt_struct_push_field, set_active_heap,
     };
 
     #[test]
@@ -3364,6 +3398,27 @@ mod tests {
         assert_eq!(unsafe { rt_struct_field_count([tagged].as_ptr(), 1) }, 2, "grew from 0 to 2");
         assert_eq!(decode(unsafe { rt_struct_field_get([tagged, 0].as_ptr(), 2) }), Value::Int(7));
         assert_eq!(decode(unsafe { rt_struct_field_get([tagged, 1].as_ptr(), 2) }), Value::Int(8), "second push lands at index 1");
+    }
+
+    #[test]
+    fn rt_struct_pop_field_shrinks_the_struct_and_returns_the_last_element() {
+        let mut heap = Heap::with_capacity(8);
+        set_active_heap(&mut heap as *mut Heap);
+
+        let tagged = unsafe { rt_struct_new([make_str("vector")].as_ptr(), 1) };
+        unsafe { rt_struct_push_field([tagged, encode(Value::Int(7))].as_ptr(), 2) };
+        unsafe { rt_struct_push_field([tagged, encode(Value::Int(8))].as_ptr(), 2) };
+
+        assert_eq!(decode(unsafe { rt_struct_pop_field([tagged].as_ptr(), 1) }), Value::Int(8), "pop returns the last-pushed element");
+        assert_eq!(unsafe { rt_struct_field_count([tagged].as_ptr(), 1) }, 1, "shrank from 2 to 1");
+        assert_eq!(decode(unsafe { rt_struct_pop_field([tagged].as_ptr(), 1) }), Value::Int(7));
+        assert_eq!(unsafe { rt_struct_field_count([tagged].as_ptr(), 1) }, 0, "empty after popping both elements");
+        // Popping past empty aborts the process (panicking across an `extern
+        // "C"` boundary can't unwind — the same "abort, don't unwind"
+        // convention every other `rt_*` bounds violation follows, see
+        // `compiler.rs`'s `compile-vector-op` doc comment), so it isn't
+        // exercised here with `#[should_panic]`; [`Heap::struct_pop_field`]'s
+        // own doc comment covers the emptiness check.
     }
 
     /// A struct field that itself holds a cons must survive a GC the same
