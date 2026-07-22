@@ -6,22 +6,37 @@
 //! conversions with `i32`/`i64`/`f64`.
 
 extern crate typelisp;
-use typelisp::{Checker, EvalError, Heap, Interp, Reader, RtValue};
+use std::cell::RefCell;
+use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
+
+// `abs`/`signum`/`gcd`/`lcm`/`rem`/`expt` (and `f64`/`ratio` `mod`/`rem`) are
+// `prelude.rs` methods, not registry builtins, so the prelude must be loaded.
+// Shared per-thread (prelude load reused) exactly as `prelude_test` does.
+thread_local! {
+    static CTX: RefCell<Option<(Heap, Checker, Interp)>> = const { RefCell::new(None) };
+}
 
 fn run(src: &str) -> Result<RtValue, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    let mut last = RtValue::Unit;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
+    CTX.with(|cell| {
+        let mut opt = cell.borrow_mut();
+        let (h, chk, interp) = opt.get_or_insert_with(|| {
+            let mut h = Heap::with_capacity(1 << 16);
+            let mut chk = Checker::new();
+            let mut interp = Interp::new();
+            load_prelude(&mut h, &mut chk, &mut interp);
+            (h, chk, interp)
+        });
+        let r = Reader::new();
+        let vs = r.read_all(h, src).expect("read failed");
+        let mut last = RtValue::Unit;
+        for v in vs {
+            let tl = chk.check_form(h, &*interp, v).expect("check failed");
+            if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
+                last = val;
+            }
         }
-    }
-    Ok(last)
+        Ok(last)
+    })
 }
 
 fn eval_ok(src: &str) -> RtValue {

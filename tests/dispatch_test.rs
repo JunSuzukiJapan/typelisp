@@ -90,7 +90,7 @@ fn integer_literal_still_gets_the_free_functions_exact_parameter_width() {
 
 #[test]
 fn an_undefined_name_with_no_method_or_free_function_is_still_a_clean_error() {
-    let mut h = Heap::with_capacity(4096);
+    let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -108,7 +108,7 @@ fn unbound_variable_in_first_argument_position_still_surfaces_the_real_error() {
     // and returns `None` (deferring to the free-function path), rather than
     // propagating it directly — this confirms the real error still surfaces
     // from there instead of being masked as `NoSuchFunction`.
-    let mut h = Heap::with_capacity(4096);
+    let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let mut chk = Checker::new();
     let mut interp = Interp::new();

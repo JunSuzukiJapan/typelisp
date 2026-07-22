@@ -3313,7 +3313,6 @@ const SEXPR_PATH: usize = 10;
 /// (`registry::int_assoc`) — shared by both widths since `RtValue::Int`
 /// represents every integer type uniformly as `i64`.
 fn eval_int_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
-    use num_integer::Integer;
     let (a, b) = match (args.first(), args.get(1)) {
         (Some(RtValue::Int(a)), Some(RtValue::Int(b))) => (*a, *b),
         _ => return Some(Err(EvalError::Internal(format!("{}: expected two integers", name)))),
@@ -3338,26 +3337,6 @@ fn eval_int_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Eval
             let r = a.checked_rem(b).unwrap_or(0);
             RtValue::Int(if r != 0 && (r < 0) != (b < 0) { r + b } else { r })
         }
-        "rem" => {
-            if b == 0 {
-                return Some(Err(EvalError::Panic("rem by zero".into())));
-            }
-            // CL `rem`: truncated remainder, result takes the sign of the
-            // dividend (`-7 rem 3 = -1`). `i64::MIN % -1` is 0 (see `mod`).
-            RtValue::Int(a.checked_rem(b).unwrap_or(0))
-        }
-        // `gcd`/`lcm` (CL, integer-only) via Euclid (`num_integer`), mirroring
-        // the `i32` free-function helpers in `prelude.rs` and `bignum`'s own
-        // `gcd`/`lcm`. `gcd` is always non-negative; guard `lcm(0,0)` (whose
-        // `gcd` is 0, a division) — CL and the prelude both give 0 there.
-        "gcd" => RtValue::Int(a.gcd(&b)),
-        "lcm" => {
-            if a == 0 || b == 0 {
-                RtValue::Int(0)
-            } else {
-                RtValue::Int(a.lcm(&b))
-            }
-        }
         "<" => RtValue::Bool(a < b),
         "<=" => RtValue::Bool(a <= b),
         ">" => RtValue::Bool(a > b),
@@ -3367,26 +3346,6 @@ fn eval_int_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Eval
         _ => unreachable!(),
     };
     Some(Ok(v))
-}
-
-/// `abs`/`signum` (CL, all numbers) for `i32`/`i64` — mirroring the `i32`
-/// free-function helpers in `prelude.rs` and `bignum`'s own methods, but
-/// available on both integer widths (a `defmethod` receiver resolves before
-/// the same-named free function, so `(abs x)` picks these). `abs` uses
-/// `wrapping_abs` so `i64::MIN` folds to itself rather than trapping, matching
-/// the prelude's `(- 0 x)` two's-complement wrap.
-fn int_abs(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    match args.first() {
-        Some(RtValue::Int(n)) => Ok(RtValue::Int(n.wrapping_abs())),
-        _ => Err(EvalError::Internal("abs: expected an integer".into())),
-    }
-}
-
-fn int_signum(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    match args.first() {
-        Some(RtValue::Int(n)) => Ok(RtValue::Int(n.signum())),
-        _ => Err(EvalError::Internal("signum: expected an integer".into())),
-    }
 }
 
 fn expect_float(v: &RtValue) -> Result<f64, EvalError> {
@@ -3449,9 +3408,10 @@ fn try_int_to_char(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalErr
 }
 
 /// Evaluate a built-in `f64` arithmetic/comparison instance method
-/// (`registry::float_assoc`). Unlike [`eval_int_builtin`], `/`/`mod` never
-/// panic on a zero divisor — IEEE-754 division yields `inf`/`NaN` instead,
-/// the natural float semantics (no "can't express nonzero" gap to plug).
+/// (`registry::float_assoc`). Unlike [`eval_int_builtin`], `/` never panics on
+/// a zero divisor — IEEE-754 division yields `inf`/`NaN` instead, the natural
+/// float semantics (no "can't express nonzero" gap to plug). `mod`/`rem` are
+/// defined in `prelude.rs` as typelisp methods (`a - b*floor|truncate(a/b)`).
 fn eval_float_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
     let (a, b) = match (args.first(), args.get(1)) {
         (Some(RtValue::Float(a)), Some(RtValue::Float(b))) => (*a, *b),
@@ -3462,7 +3422,6 @@ fn eval_float_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Ev
         "-" => RtValue::Float(a - b),
         "*" => RtValue::Float(a * b),
         "/" => RtValue::Float(a / b),
-        "mod" => RtValue::Float(a % b),
         "<" => RtValue::Bool(a < b),
         "<=" => RtValue::Bool(a <= b),
         ">" => RtValue::Bool(a > b),
@@ -3482,22 +3441,6 @@ fn float_expt(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Float(expect_float(&args[0])?.powf(expect_float(&args[1])?)))
 }
 
-/// `signum` for `f64` following CL (`(signum x)` = `(if (zerop x) x (/ x (abs
-/// x)))`): a float result `1.0`/`-1.0`, and — unlike Rust's `f64::signum`,
-/// which returns `±1.0` for zero and never `0.0` — CL returns the zero itself
-/// for `±0.0` (and `NaN` for `NaN`), which the `else` branch preserves.
-fn float_signum(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let x = expect_float(&args[0])?;
-    let s = if x > 0.0 {
-        1.0
-    } else if x < 0.0 {
-        -1.0
-    } else {
-        x
-    };
-    Ok(RtValue::Float(s))
-}
-
 fn expect_bignum(v: &RtValue) -> Result<Rc<BigInt>, EvalError> {
     match v {
         RtValue::Bignum(n) => Ok(n.clone()),
@@ -3513,34 +3456,14 @@ fn expect_ratio(v: &RtValue) -> Result<Rc<BigRational>, EvalError> {
 }
 
 /// Evaluate a built-in `bignum` arithmetic/comparison instance method
-/// (`registry::bignum_assoc`). `bignum` is CL's arbitrary-precision integer,
-/// so it carries the full integer operation set: `/` truncates toward zero
-/// and `mod`/`rem` follow CL (`mod` floored — sign of the divisor; `rem`
-/// truncated — sign of the dividend), each panicking on a zero divisor (the
-/// type system can't express "nonzero", the same precedent as `car`/`cdr` on
-/// a non-`Cons` `Sexpr`). `abs`/`signum` are unary; `gcd`/`lcm` (Euclid, via
-/// `num_integer`) and `expt` (non-negative exponent only — a negative one
-/// would be a `ratio`, which this `bignum`-typed method can't return) are
-/// binary. `abs`/`gcd`/`lcm`/`signum` mirror the `i32` free-function helpers
-/// in `prelude.rs`.
+/// (`registry::bignum_assoc`). Core integer operations: `+ - * /` (`/`
+/// truncates toward zero) and `mod` (floored, CL — sign of the divisor), each
+/// panicking on a zero divisor (the type system can't express "nonzero", the
+/// same precedent as `car`/`cdr` on a non-`Cons` `Sexpr`). The rest of the CL
+/// integer catalog (`rem`/`abs`/`signum`/`gcd`/`lcm`/`expt`) lives in
+/// `prelude.rs` as typelisp methods built from these.
 fn eval_bignum_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
     use num_integer::Integer;
-    use num_traits::Signed;
-    // Unary ops (`abs`/`signum`) take a single operand — handle them before
-    // the two-argument extraction the binary ops need.
-    if matches!(name, "abs" | "signum") {
-        let a = match args.first().map(expect_bignum) {
-            Some(Ok(a)) => a,
-            Some(Err(e)) => return Some(Err(e)),
-            None => return Some(Err(EvalError::Internal(format!("{}: expected a bignum", name)))),
-        };
-        let v = match name {
-            "abs" => RtValue::Bignum(Rc::new(a.abs())),
-            "signum" => RtValue::Bignum(Rc::new(a.signum())),
-            _ => unreachable!(),
-        };
-        return Some(Ok(v));
-    }
     let (a, b) = match (args.first(), args.get(1)) {
         (Some(a), Some(b)) => match (expect_bignum(a), expect_bignum(b)) {
             (Ok(a), Ok(b)) => (a, b),
@@ -3565,35 +3488,6 @@ fn eval_bignum_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, E
             // CL `mod`: floored remainder (sign of the divisor).
             RtValue::Bignum(Rc::new(a.mod_floor(&b)))
         }
-        "rem" => {
-            if b.is_zero() {
-                return Some(Err(EvalError::Panic("rem by zero".into())));
-            }
-            // CL `rem`: truncated remainder (sign of the dividend).
-            RtValue::Bignum(Rc::new(&*a % &*b))
-        }
-        "gcd" => RtValue::Bignum(Rc::new(a.gcd(&b))),
-        "lcm" => {
-            // `num_integer::lcm` divides by `gcd`, so guard `lcm(0,0)` (whose
-            // `gcd` is 0) — CL and `prelude.rs`'s `i32` `lcm` both give 0 when
-            // either operand is 0.
-            if a.is_zero() || b.is_zero() {
-                RtValue::Bignum(Rc::new(BigInt::from(0)))
-            } else {
-                RtValue::Bignum(Rc::new(a.lcm(&b)))
-            }
-        }
-        "expt" => {
-            if b.is_negative() {
-                return Some(Err(EvalError::Panic(
-                    "expt: negative exponent has no bignum result (it would be a ratio)".into(),
-                )));
-            }
-            match b.to_usize() {
-                Some(exp) => RtValue::Bignum(Rc::new(num_traits::pow::pow((*a).clone(), exp))),
-                None => return Some(Err(EvalError::Panic("expt: exponent too large".into()))),
-            }
-        }
         "<" => RtValue::Bool(*a < *b),
         "<=" => RtValue::Bool(*a <= *b),
         ">" => RtValue::Bool(*a > *b),
@@ -3606,12 +3500,10 @@ fn eval_bignum_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, E
 }
 
 /// Evaluate a built-in `ratio` arithmetic/comparison instance method
-/// (`registry::ratio_assoc`). No `mod`/`rem` — those stay on the integer
-/// types here. `/` panics on a zero divisor, same precedent as every other
-/// numeric type. `expt` raises a `ratio` to an integer-valued exponent
-/// (negative allowed — the reciprocal, unlike `bignum`'s non-negative-only
-/// `expt`); a non-integer exponent would give an irrational (float) result a
-/// `ratio` can't hold, so it panics.
+/// (`registry::ratio_assoc`). Core operations: `+ - * /` (`/` panics on a zero
+/// divisor). CL's `mod`/`rem`/`expt`/`abs`/`signum` on rationals live in
+/// `prelude.rs` as typelisp methods built from these plus the
+/// `ratio->bignum`/`bignum->ratio` truncation pair.
 fn eval_ratio_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
     let (a, b) = match (args.first(), args.get(1)) {
         (Some(a), Some(b)) => match (expect_ratio(a), expect_ratio(b)) {
@@ -3630,21 +3522,6 @@ fn eval_ratio_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Ev
             }
             RtValue::Ratio(Rc::new(&*a / &*b))
         }
-        "expt" => {
-            if !b.is_integer() {
-                return Some(Err(EvalError::Panic(
-                    "expt: ratio exponent must be integer-valued".into(),
-                )));
-            }
-            let exp = match b.to_integer().to_i32() {
-                Some(e) => e,
-                None => return Some(Err(EvalError::Panic("expt: exponent too large".into()))),
-            };
-            if a.is_zero() && exp < 0 {
-                return Some(Err(EvalError::Panic("divide by zero".into())));
-            }
-            RtValue::Ratio(Rc::new(a.pow(exp)))
-        }
         "<" => RtValue::Bool(*a < *b),
         "<=" => RtValue::Bool(*a <= *b),
         ">" => RtValue::Bool(*a > *b),
@@ -3654,21 +3531,6 @@ fn eval_ratio_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Ev
         _ => unreachable!(),
     };
     Some(Ok(v))
-}
-
-/// `abs`/`signum` (CL, all numbers) for `ratio`. `abs` is the same reduced
-/// rational with a non-negative numerator; `signum` returns `1`/`-1`/`0` as a
-/// `ratio` (kept `ratio`-typed for a uniform `ratio -> ratio` signature,
-/// rather than CL's exact-rational-returns-integer detail). Both via
-/// `num_traits::Signed`.
-fn ratio_abs(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    use num_traits::Signed;
-    Ok(RtValue::Ratio(Rc::new(expect_ratio(&args[0])?.abs())))
-}
-
-fn ratio_signum(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    use num_traits::Signed;
-    Ok(RtValue::Ratio(Rc::new(expect_ratio(&args[0])?.signum())))
 }
 
 /// `int->bignum` (`registry::int_assoc`): always-exact widening.
@@ -4022,11 +3884,9 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("i32") || *type_name == Path::root("i64") {
         return match method {
-            "+" | "-" | "*" | "/" | "mod" | "rem" | "gcd" | "lcm" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
                 eval_int_builtin(method, args)
             }
-            "abs" => Some(int_abs(args)),
-            "signum" => Some(int_signum(args)),
             // `eq`/`eql`/`equal`/`equalp` are all registered as aliases for
             // `=` (see `registry::int_assoc`'s doc comment for why every one
             // of these four is meaningful to register even though none can
@@ -4044,13 +3904,11 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("f64") {
         return match method {
-            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
                 eval_float_builtin(method, args)
             }
             "eq" | "eql" | "equal" | "equalp" => eval_float_builtin("=", args),
             "expt" => Some(float_expt(args)),
-            "abs" => Some(float_unary(args, f64::abs)),
-            "signum" => Some(float_signum(args)),
             "sqrt" => Some(float_unary(args, f64::sqrt)),
             "floor" => Some(float_unary(args, f64::floor)),
             "ceiling" => Some(float_unary(args, f64::ceil)),
@@ -4066,8 +3924,9 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("bignum") {
         return match method {
-            "+" | "-" | "*" | "/" | "mod" | "rem" | "<" | "<=" | ">" | ">=" | "=" | "/="
-            | "abs" | "signum" | "gcd" | "lcm" | "expt" => eval_bignum_builtin(method, args),
+            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+                eval_bignum_builtin(method, args)
+            }
             "eq" | "eql" | "equal" | "equalp" => eval_bignum_builtin("=", args),
             "bignum->int" => Some(bignum_to_int(args)),
             "try-bignum->int" => Some(try_bignum_to_int(heap, args)),
@@ -4080,11 +3939,9 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("ratio") {
         return match method {
-            "+" | "-" | "*" | "/" | "expt" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
                 eval_ratio_builtin(method, args)
             }
-            "abs" => Some(ratio_abs(args)),
-            "signum" => Some(ratio_signum(args)),
             "eq" | "eql" | "equal" | "equalp" => eval_ratio_builtin("=", args),
             "ratio->bignum" => Some(ratio_to_bignum(args)),
             "ratio->float" => Some(ratio_to_float(args)),
@@ -4404,7 +4261,7 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
         ),
         "f64" => matches!(
             method,
-            "+" | "-" | "*" | "/" | "mod" | "expt" | "sqrt" | "floor" | "ceiling" | "round" | "truncate"
+            "+" | "-" | "*" | "/" | "expt" | "sqrt" | "floor" | "ceiling" | "round" | "truncate"
                 | "float->int" | "float->bignum" | "float->ratio"
                 | "<" | "<=" | ">" | ">=" | "=" | "/=" | "eq" | "eql" | "equal" | "equalp"
         ),

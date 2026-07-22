@@ -17,7 +17,7 @@
 | `+` `-` `*` `/` | `(op a b)` | `(T,T)→T` | 四則演算。`/` はゼロ方向切り捨て・ゼロ除算で panic |
 | `mod` | `(mod a b)` | `(T,T)→T` | 剰余（CL の `mod`、**床除算**＝符号は除数側。`(mod -7 3)`→`2`）。ゼロ除算で panic |
 | `rem` | `(rem a b)` | `(T,T)→T` | 剰余（CL の `rem`、**切り捨て除算**＝符号は被除数側。`(rem -7 3)`→`-1`）。ゼロ除算で panic |
-| `abs` | `(abs x)` | `T→T` | 絶対値（`i64` の最小値は 2 の補数で自身に折り返す） |
+| `abs` | `(abs x)` | `T→T` | 絶対値（`prelude.rs` のメソッド） |
 | `signum` | `(signum x)` | `T→T` | 符号（`1`/`-1`/`0`） |
 | `gcd` | `(gcd a b)` | `(T,T)→T` | 最大公約数 |
 | `lcm` | `(lcm a b)` | `(T,T)→T` | 最小公倍数（どちらかが0なら0） |
@@ -38,7 +38,9 @@
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `+` `-` `*` `/` `mod` | `(op a b)` | `(f64,f64)→f64` | IEEE-754。ゼロ除算は panic せず `inf`/`NaN` |
+| `+` `-` `*` `/` | `(op a b)` | `(f64,f64)→f64` | IEEE-754。ゼロ除算は panic せず `inf`/`NaN` |
+| `mod` | `(mod a b)` | `(f64,f64)→f64` | 床除算の剰余（CL 準拠、符号は除数側。`a - b*floor(a/b)`） |
+| `rem` | `(rem a b)` | `(f64,f64)→f64` | 切り捨て除算の剰余（CL 準拠、符号は被除数側。`a - b*truncate(a/b)`） |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(f64,f64)→bool` | 比較 |
 | `eq` `eql` `equal` `equalp` | `(op a b)` | `(f64,f64)→bool` | いずれも `=` と同じ |
 | `expt` | `(expt a b)` | `(f64,f64)→f64` | 冪乗 |
@@ -75,11 +77,13 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 | `bignum->ratio` | `(bignum->ratio x)` | `bignum→ratio` | `ratio` への拡大変換（正確） |
 | `print` `println` | `(op x)` | `bignum→Unit` | 標準出力へ書く（§15） |
 
-**`ratio`**（`mod`/`rem` はなし——整数型専用。`/` はゼロ除算で panic）:
+**`ratio`**（`/` はゼロ除算で panic）:
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `+` `-` `*` `/` | `(op a b)` | `(ratio,ratio)→ratio` | 四則（結果は常に既約） |
+| `mod` | `(mod a b)` | `(ratio,ratio)→ratio` | 床除算の剰余（CL 準拠、符号は除数側） |
+| `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | 切り捨て除算の剰余（CL 準拠、符号は被除数側） |
 | `abs` | `(abs x)` | `ratio→ratio` | 絶対値 |
 | `signum` | `(signum x)` | `ratio→ratio` | 符号（`1`/`-1`/`0` を `ratio` で返す） |
 | `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | 冪乗。指数は整数値の `ratio` のみ（非整数なら panic）。負指数は逆数 |
@@ -94,10 +98,11 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 `i32`/`i64`/`f64` からの入口は `int->bignum`/`int->ratio`（§1）と `float->bignum`/`float->ratio`
 （§2）。`bignum`/`ratio` は `i32` 等とは独立した別型で、混在した算術には明示変換が必要。
 
-> **compile（§9）対応範囲**: `bignum` の四則・`mod`・比較・変換は JIT/AOT でネイティブ化されるが、
-> `rem` および `abs`/`signum`/`gcd`/`lcm`/`expt`（`bignum`/`i64`/`f64`/`ratio` に今回追加した分）
-> は現状インタプリタ専用（`(compile ...)` すると unsupported エラー）。整数 `mod` の床除算化は
-> インタプリタ・コンパイル両経路で一致する。
+> **実装と compile 対応**: `abs`/`signum`/`rem`/`gcd`/`lcm`/`expt`（および `f64`/`ratio` の
+> `mod`）は Rust ビルトインではなく `prelude.rs` の**typelisp メソッド**として各型のプリミティブ演算
+> （`/`・`mod`・`floor`/`truncate`・`ratio->bignum` 等）から組み立てられている。したがって JIT/AOT
+> でも通常の関数として**コンパイル可能**で、インタプリタと結果が一致する（専用の `rt_*` シムや
+> compiler.rs 分岐は不要）。整数 `mod` と各型の四則・比較・変換はネイティブ命令へ直接ローワリングされる。
 
 ## 3. 論理・真偽値
 
@@ -110,17 +115,16 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 
 ## 4. 数値ヘルパー
 
-`abs`/`gcd`/`lcm`/`signum` は `i32` の自由関数（`prelude.rs`）としても定義されているが、
-各数値型のメソッドとしても提供される（§1 の `i32`/`i64`、§2 の `f64`＝`abs`/`signum` のみ、
-§2.5 の `bignum`/`ratio`＝`abs`/`signum`。`gcd`/`lcm` は CL に従い整数型のみ）。裸名呼び出しは
-メソッドが自由関数より先に解決されるため、`(abs x)` はレシーバ `x` の型に応じたメソッドになる。
+`abs`/`signum`（全数値型）・`gcd`/`lcm`（整数型のみ）・`rem`（`f64` 含む全実数型）・`expt`
+（`bignum`/`f64`/`ratio`）は、各数値型のメソッドとして `prelude.rs` に typelisp で定義されている
+（レシーバ型で解決。`(abs x)` は `x` の型に応じたメソッド）。詳細と型は各型の節（§1・§2・§2.5）を
+参照。整数の `expt` は無い（`bignum` 昇格が無くオーバーフローするため、`(int->bignum x)` 経由で
+`bignum` の `expt` を使う）。
+
+`random` のみレシーバを持たない自由関数として残る。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `abs` | `(abs x)` | `i32→i32` | 絶対値（自由関数版。メソッド版は各型の節を参照） |
-| `gcd` | `(gcd a b)` | `(i32,i32)→i32` | 最大公約数 |
-| `lcm` | `(lcm a b)` | `(i32,i32)→i32` | 最小公倍数（どちらかが0なら0） |
-| `signum` | `(signum x)` | `i32→i32` | 符号（`1`/`-1`/`0`） |
 | `random` | `(random n)` | `i32→i32` | `0` 以上 `n` 未満の乱数（自由関数、レシーバなし） |
 
 ## 5. `cons`/`car`/`cdr`（ジェネリックなペア）と `Sexpr`

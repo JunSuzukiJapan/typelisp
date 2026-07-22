@@ -4332,54 +4332,84 @@ fn compile_dispatches_i32_floored_mod_and_agrees_with_the_interpreter() {
     assert_eq!(compiled, interpreted, "compiled floored mod agrees with the interpreter");
 }
 
-/// `mod` on `f64` lowers to `build-frem` (`a % b`, matching the interpreter's
-/// `eval_float_builtin`). LLVM lowers an `frem` instruction to a call to the
-/// C `fmod` symbol — every user-defined `defun`/`defmethod`'s own LLVM
-/// symbol name gets a `tl_` prefix (`crate::compile::USER_SYMBOL_PREFIX`,
-/// `ast_bridge::user_symbol_name`) specifically so a user function literally
-/// named `fmod` can never collide with it; see
-/// `compile_of_a_user_function_literally_named_fmod_does_not_collide_with_libms_fmod`
-/// below for the regression this prefix exists to prevent (a real footgun
-/// before it: an infinite `frem`->`fmod`->`frem` recursion).
+/// `mod`/`rem` on `f64` are CL-conformant (`mod` floored, `rem` truncated) and
+/// — unlike the earlier truncating `build-frem` lowering — are `prelude.rs`
+/// methods (`a - b*floor|truncate(a/b)`) compiled the normal way. This locks
+/// the compiled path to the interpreter for a negative dividend, where floored
+/// and truncated diverge.
 #[test]
-fn compile_dispatches_f64_mod() {
-    let v = run_with_compiler_and_prelude(
-        r#"
-        (defun float-rem ((a f64) (b f64)) f64 (mod a b))
-        (compile float-rem)
-        (float-rem 7.5 2.0)
-        "#,
-    )
-    .expect("eval failed");
-    match v {
-        RtValue::Float(f) => assert!((f - 1.5).abs() < 1e-9, "7.5 mod 2.0 = 1.5, got {}", f),
-        other => panic!("expected an f64, got {:?}", other),
+fn compile_dispatches_f64_mod_and_rem_floored_vs_truncated() {
+    let src = "(defun m ((a f64) (b f64)) f64 (mod a b)) (defun r ((a f64) (b f64)) f64 (rem a b))";
+    let call_m = "(m (- 0.0 5.5) 2.0)";
+    let call_r = "(r (- 0.0 5.5) 2.0)";
+    let im = run_with_compiler_and_prelude(&format!("{src}\n{call_m}")).expect("interp m");
+    let cm = run_with_compiler_and_prelude(&format!("{src}\n(compile m)\n{call_m}")).expect("compiled m");
+    let ir = run_with_compiler_and_prelude(&format!("{src}\n{call_r}")).expect("interp r");
+    let cr = run_with_compiler_and_prelude(&format!("{src}\n(compile r)\n{call_r}")).expect("compiled r");
+    match (im, cm) {
+        (RtValue::Float(i), RtValue::Float(c)) => {
+            assert!((i - 0.5).abs() < 1e-9, "-5.5 mod 2.0 = 0.5 (floored), got {}", i);
+            assert!((i - c).abs() < 1e-12, "compiled f64 mod agrees with interp");
+        }
+        other => panic!("expected floats, got {:?}", other),
+    }
+    match (ir, cr) {
+        (RtValue::Float(i), RtValue::Float(c)) => {
+            assert!((i - (-1.5)).abs() < 1e-9, "-5.5 rem 2.0 = -1.5 (truncated), got {}", i);
+            assert!((i - c).abs() < 1e-12, "compiled f64 rem agrees with interp");
+        }
+        other => panic!("expected floats, got {:?}", other),
     }
 }
 
-/// The regression `compile_dispatches_f64_mod`'s doc comment names: a user
-/// `defun` literally named `fmod` used to infinitely recurse once compiled
-/// (LLVM lowers `float-rem`'s `frem` instruction to a call to the C `fmod`
-/// symbol, and the JIT's symbol resolver bound that call to this same-named
-/// compiled typelisp function instead of libm). The `tl_` symbol prefix
-/// (`USER_SYMBOL_PREFIX`) means `fmod`'s own LLVM symbol is `tl_fmod`, never
-/// bare `fmod`, so the two can no longer collide — both compile and run
-/// correctly, and can even call each other.
+/// The CL numeric helpers (`abs`/`signum`/`gcd`/`lcm`/`rem`/`expt`) are
+/// `prelude.rs` methods, not native-lowered builtins, so `(compile f)` where
+/// `f` uses them compiles the method bodies the normal (transitive) way. Each
+/// compiled result must match the interpreter across the numeric types.
 #[test]
-fn compile_of_a_user_function_literally_named_fmod_does_not_collide_with_libms_fmod() {
+fn compile_dispatches_numeric_helpers_and_agrees_with_the_interpreter() {
+    let cases = [
+        ("(defun f ((x i32)) i32 (abs x))", "(f -7)"),
+        ("(defun f ((a i32) (b i32)) i32 (gcd a b))", "(f -12 18)"),
+        ("(defun f ((a i32) (b i32)) i32 (lcm a b))", "(f 4 6)"),
+        ("(defun f ((a i32) (b i32)) i32 (rem a b))", "(f -7 3)"),
+        ("(defun f ((x i64)) i64 (signum x))", "(f -9000000000)"),
+        ("(defun f ((a bignum) (b bignum)) bignum (gcd a b))", "(f (int->bignum 48) (int->bignum 36))"),
+        ("(defun f ((a bignum) (b bignum)) bignum (expt a b))", "(f (int->bignum 2) (int->bignum 64))"),
+        ("(defun f ((a ratio) (b ratio)) ratio (mod a b))", "(f -7/2 3/2)"),
+        ("(defun f ((a ratio) (b ratio)) ratio (expt a b))", "(f 2/3 (int->ratio 3))"),
+    ];
+    for (src, call) in cases {
+        let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).unwrap_or_else(|e| panic!("interp {call}: {e:?}"));
+        let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile f)\n{call}")).unwrap_or_else(|e| panic!("compiled {call}: {e:?}"));
+        assert_eq!(compiled, interpreted, "compiled {call} agrees with the interpreter");
+    }
+}
+
+/// A user `defun` whose name matches a libm symbol that an LLVM float
+/// intrinsic lowers to (here `pow`, which `expt`'s `build-fpow` emits) must
+/// not collide with libm once compiled: the `tl_` symbol prefix
+/// (`USER_SYMBOL_PREFIX`, `ast_bridge::user_symbol_name`) means the user
+/// `pow`'s own symbol is `tl_pow`, never bare `pow`, so the JIT's resolver
+/// binds `expt`'s lowered `pow` call to libm and the user `pow` to its own
+/// body. (This regression previously fired via `mod`->`frem`->`fmod`; `mod` no
+/// longer lowers to `frem`, but the same protection covers every libm-named
+/// intrinsic target.)
+#[test]
+fn compile_of_a_user_function_named_like_a_libm_symbol_does_not_collide() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun fmod ((a i32) (b i32)) i32 (+ a b))
-        (defun float-rem ((a f64) (b f64)) f64 (mod a b))
-        (compile fmod)
-        (compile float-rem)
-        (+ (fmod 3 4) (float->int (float-rem 7.5 2.0)))
+        (defun pow ((a i32) (b i32)) i32 (+ a b))
+        (defun fexpt ((a f64) (b f64)) f64 (expt a b))
+        (compile pow)
+        (compile fexpt)
+        (+ (pow 3 4) (float->int (fexpt 2.0 3.0)))
         "#,
     )
     .expect("eval failed");
-    // fmod(3,4) = 3+4 = 7 (the user's own definition, not libm's);
-    // float->int(7.5 mod 2.0) = float->int(1.5) = 1; 7+1 = 8.
-    assert_eq!(v, RtValue::Int(8));
+    // pow(3,4) = 3+4 = 7 (the user's own definition, not libm's);
+    // float->int(2.0 ** 3.0) = float->int(8.0) = 8; 7+8 = 15.
+    assert_eq!(v, RtValue::Int(15));
 }
 
 /// Float comparisons lower to `build-fcmp-*` (ordered `<`/`<=`/`>`/`>=`/`=`,

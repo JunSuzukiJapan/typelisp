@@ -138,20 +138,15 @@ fn arithmetic() {
     assert_eq!(eval_ok("(mod 17 5)"), RtValue::Int(2));
 }
 
-/// CL `mod` is floored (result takes the sign of the divisor); CL `rem` is
-/// truncated (result takes the sign of the dividend). They agree only when
-/// the operands share a sign.
+/// CL `mod` is floored — the result takes the sign of the divisor. (`mod` is a
+/// registry builtin, available without the prelude; `rem` — a `prelude.rs`
+/// method — is covered in `numeric_test`/`bignum_ratio_test`, which load it.)
 #[test]
-fn mod_is_floored_and_rem_is_truncated() {
+fn mod_is_floored() {
     assert_eq!(eval_ok("(mod -7 3)"), RtValue::Int(2));
-    assert_eq!(eval_ok("(rem -7 3)"), RtValue::Int(-1));
     assert_eq!(eval_ok("(mod 7 -3)"), RtValue::Int(-2));
-    assert_eq!(eval_ok("(rem 7 -3)"), RtValue::Int(1));
     assert_eq!(eval_ok("(mod -7 -3)"), RtValue::Int(-1));
-    assert_eq!(eval_ok("(rem -7 -3)"), RtValue::Int(-1));
-    // Agree when signs match (and the previous `(mod 17 5)` positive case).
     assert_eq!(eval_ok("(mod 7 3)"), RtValue::Int(1));
-    assert_eq!(eval_ok("(rem 7 3)"), RtValue::Int(1));
 }
 
 #[test]
@@ -543,7 +538,7 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
     // free the previous iteration's garbage before it can allocate again. If
     // `kept` weren't tracked as a GC root, one of those collections would
     // eventually reclaim and corrupt it instead of the garbage.
-    let mut src_heap = Heap::with_capacity(4096);
+    let mut src_heap = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let src = "(let ((kept (cons (Int 1) (Nil)))) \
                  (dotimes (i 50) (cons (Int 2) (Nil))) \

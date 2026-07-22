@@ -285,18 +285,98 @@ pub const SOURCE: &str = r#"
 (defun flip<A,B,C> ((f (fn (A B) C))) (fn (B A) C)
   (lambda ((y B) (x A)) C (f x y)))
 
-;; Remaining numeric helpers (roadmap step 7c, catalog §2.2f): `gcd`/`lcm` via
-;; Euclid's algorithm, `signum` via comparisons. Not generic — `<`/`mod` are
-;; `i32` instance methods resolved at check time from a *concrete* receiver
-;; type, so a generic `defun`'s unresolved type variable `T` can't reach them
-;; (no trait-bound mechanism exists to require "T has `<`"); i32-only is the
-;; same scope the catalog gives these.
-(defun abs ((x i32)) i32 (if (< x 0) (- 0 x) x))
-(defun gcd-pos ((a i32) (b i32)) i32 (if (= b 0) a (gcd-pos b (mod a b))))
-(defun gcd ((a i32) (b i32)) i32 (gcd-pos (abs a) (abs b)))
-(defun lcm ((a i32) (b i32)) i32
-  (if (or (= a 0) (= b 0)) 0 (/ (abs (* a b)) (gcd a b))))
-(defun signum ((x i32)) i32 (if (> x 0) 1 (if (< x 0) -1 0)))
+;; CL's numeric catalog beyond the primitive machine operations
+;; (`+`/`-`/`*`/`/`/`mod`/comparisons/conversions, which are Rust builtins in
+;; `registry.rs`): `abs`/`signum` (all numbers), `rem` (all reals), `gcd`/`lcm`
+;; (integers only), and `expt` (all numbers). Written here as ordinary typelisp
+;; *methods* — not Rust builtins — so they compile through the normal function
+;; path (`(compile f)` where `f` uses them) instead of needing a native-lowered
+;; `rt_*` shim per operation. `defmethod` dispatches on the receiver type, so
+;; the same `abs`/`signum`/... name overloads across `i32`/`i64`/`bignum`/`f64`/
+;; `ratio`; each is built only from that type's primitives. `mod`/`rem` follow
+;; CL: `mod` is floored (integer `mod` is a builtin; `f64`/`ratio` `mod` here
+;; is `a - b*floor(a/b)`), `rem` truncated (`a - b*truncate(a/b)`, i.e.
+;; `a - b*(a/b)` where `/` already truncates toward zero for integers).
+;;
+;; Two checker quirks shape how these are spelled: (1) a binary op dispatches on
+;; its *first* argument's type, and a bare integer literal there defaults to
+;; `i32`, so integer negation must be `(* self -1)` (receiver-first), never
+;; `(- 0 self)`. (2) A bare literal in tail position doesn't adopt an
+;; `i64`/`bignum`/`ratio` result type, so `signum` uses CL's own
+;; `(if (zerop x) x (/ x (abs x)))` (which also gives `f64` the CL result: the
+;; zero itself for `0.0`, not Rust's `1.0`) and `lcm`'s zero case uses
+;; `(- self self)` — both carry the receiver's type without a bare literal.
+
+;; --- i32 ---
+(defmethod abs ((self i32)) i32 (if (< self 0) (* self -1) self))
+(defmethod signum ((self i32)) i32 (if (= self 0) self (/ self (abs self))))
+(defmethod rem ((self i32) (b i32)) i32 (- self (* b (/ self b))))
+(defmethod gcd ((self i32) (b i32)) i32 (if (= b 0) (abs self) (gcd b (mod self b))))
+(defmethod lcm ((self i32) (b i32)) i32
+  (if (or (= self 0) (= b 0)) (- self self) (/ (abs (* self b)) (gcd self b))))
+
+;; --- i64 ---
+(defmethod abs ((self i64)) i64 (if (< self 0) (* self -1) self))
+(defmethod signum ((self i64)) i64 (if (= self 0) self (/ self (abs self))))
+(defmethod rem ((self i64) (b i64)) i64 (- self (* b (/ self b))))
+(defmethod gcd ((self i64) (b i64)) i64 (if (= b 0) (abs self) (gcd b (mod self b))))
+(defmethod lcm ((self i64) (b i64)) i64
+  (if (or (= self 0) (= b 0)) (- self self) (/ (abs (* self b)) (gcd self b))))
+
+;; --- f64 --- (`mod`/`rem` via the quotient identity)
+(defmethod abs ((self f64)) f64 (if (< self 0.0) (* self -1.0) self))
+(defmethod signum ((self f64)) f64 (if (= self 0.0) self (/ self (abs self))))
+(defmethod mod ((self f64) (b f64)) f64 (- self (* b (floor (/ self b)))))
+(defmethod rem ((self f64) (b f64)) f64 (- self (* b (truncate (/ self b)))))
+
+;; --- bignum --- (negation is `(- (int->bignum 0) self)`: the first operand is
+;; a typed `bignum`, so it dispatches correctly, unlike a bare `0`. `expt` is
+;; non-negative-exponent only — a negative one would be a `ratio`, which a
+;; `bignum`-returning method can't hold)
+(defmethod abs ((self bignum)) bignum
+  (if (< self (int->bignum 0)) (- (int->bignum 0) self) self))
+(defmethod signum ((self bignum)) bignum
+  (if (= self (int->bignum 0)) self (/ self (abs self))))
+(defmethod rem ((self bignum) (b bignum)) bignum (- self (* b (/ self b))))
+(defmethod gcd ((self bignum) (b bignum)) bignum
+  (if (= b (int->bignum 0)) (abs self) (gcd b (mod self b))))
+(defmethod lcm ((self bignum) (b bignum)) bignum
+  (if (or (= self (int->bignum 0)) (= b (int->bignum 0))) (int->bignum 0)
+      (/ (abs (* self b)) (gcd self b))))
+;; Exponentiation by squaring (log-depth recursion — a linear `e`-deep
+;; recursion overflows the interpreter's tree-walking stack for large `e`).
+(defmethod expt ((self bignum) (e bignum)) bignum
+  (if (< e (int->bignum 0))
+      (panic "expt: negative exponent has no bignum result (it would be a ratio)")
+      (if (= e (int->bignum 0)) (int->bignum 1)
+          (if (= (mod e (int->bignum 2)) (int->bignum 0))
+              (let ((h (expt self (/ e (int->bignum 2))))) (* h h))
+              (* self (expt self (- e (int->bignum 1))))))))
+
+;; --- ratio --- (`ratio->bignum` truncates toward zero, so `(bignum->ratio
+;; (ratio->bignum q))` is `truncate(q)`; `rem` uses it directly, `mod` adjusts
+;; the remainder by `b` when their signs differ, i.e. floored)
+(defmethod abs ((self ratio)) ratio
+  (if (< self (int->ratio 0)) (- (int->ratio 0) self) self))
+(defmethod signum ((self ratio)) ratio
+  (if (= self (int->ratio 0)) self (/ self (abs self))))
+(defmethod rem ((self ratio) (b ratio)) ratio
+  (- self (* b (bignum->ratio (ratio->bignum (/ self b))))))
+(defmethod mod ((self ratio) (b ratio)) ratio
+  (let ((r (rem self b)))
+    (if (or (and (< r (int->ratio 0)) (> b (int->ratio 0)))
+            (and (> r (int->ratio 0)) (< b (int->ratio 0))))
+        (+ r b)
+        r)))
+(defun ratio-expt-int ((base ratio) (n bignum)) ratio
+  (if (< n (int->bignum 0))
+      (ratio-expt-int (/ (int->ratio 1) base) (- (int->bignum 0) n))
+      (if (= n (int->bignum 0)) (int->ratio 1)
+          (* base (ratio-expt-int base (- n (int->bignum 1)))))))
+(defmethod expt ((self ratio) (e ratio)) ratio
+  (if (= e (bignum->ratio (ratio->bignum e)))
+      (ratio-expt-int self (ratio->bignum e))
+      (panic "expt: ratio exponent must be integer-valued")))
 
 ;; `sort`/`insert-sorted`/`member`/`assoc`/`every`/`any` (user-facing `Sexpr`
 ;; list operations) were removed with the rest of the `Sexpr` list surface

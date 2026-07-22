@@ -797,8 +797,8 @@ pub const SOURCE: &str = r#"
   (if (equal method "char->int") true
   false)))))))))))
 
-;; `f64`'s natively-compilable methods: arithmetic (`+`/`-`/`*`/`/`/`mod`)
-;; lowers to LLVM float instructions (`build-fadd`/... — each `bitcast`s the
+;; `f64`'s natively-compilable methods: arithmetic (`+`/`-`/`*`/`/`) lowers to
+;; LLVM float instructions (`build-fadd`/... — each `bitcast`s the
 ;; `i64`-carried `f64` bits to `double` and back internally), comparisons
 ;; (`<`/`<=`/`>`/`>=`/`=`/`/=` and the `eq`/`eql`/`equal`/`equalp` aliases) to
 ;; `build-fcmp-*`. `expt` and the unary `sqrt`/`floor`/`ceiling`/`round`/
@@ -807,12 +807,16 @@ pub const SOURCE: &str = r#"
 ;; (`build-fptosi`) — all native, same as the arithmetic ops. `float->bignum`/
 ;; `float->ratio` are unary too (`rt_float_to_bignum`/`rt_float_to_ratio`),
 ;; now that `bignum`/`ratio` have a compiled representation.
+;;
+;; `mod`/`rem` are deliberately NOT native: CL `mod` is floored and `rem`
+;; truncated, so they're ordinary `prelude.rs` methods (`a - b*floor|trunc(a/b)`)
+;; compiled the normal way. (The `build-frem` arm in the dispatch below is now
+;; unreachable for `mod` and left only as a no-op.)
 (defun float-native-method? ((method string)) bool
   (if (equal method "+") true
   (if (equal method "-") true
   (if (equal method "*") true
   (if (equal method "/") true
-  (if (equal method "mod") true
   (if (equal method "expt") true
   (if (equal method "sqrt") true
   (if (equal method "floor") true
@@ -832,7 +836,7 @@ pub const SOURCE: &str = r#"
   (if (equal method "eql") true
   (if (equal method "equal") true
   (if (equal method "equalp") true
-  false)))))))))))))))))))))))))
+  false))))))))))))))))))))))))
 
 ;; Emits `rt_str_lt(x, y)` (strict lexicographic less-than, an `i64` 0/1). The
 ;; four string comparison operators all derive from it: `<`=lt(a,b),
