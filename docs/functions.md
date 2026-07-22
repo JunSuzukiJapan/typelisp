@@ -307,3 +307,19 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 `print`/`println`は呼び出しのたびに即座に`flush`する（パイプ経由でも`read-line`の前にプロンプトが
 確実に見えるようにするため）。数値と文字列を混在させて表示するには複数回`print`/`println`を呼ぶ
 （例: `(print "answer: ") (println 42)`）——CL の `format` 相当の書式指定子は未実装。
+
+## 16. 解析 (`parse-int` / `parse-float` / `read`)
+
+いずれも実行時の（プログラム自身は制御できない）テキストを扱うため、失敗時は panic ではなく
+`Result<_, Error>` の `Err` を返す。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `parse-int` | `(parse-int s)` | `string→Result<i32,Error>` | 10進整数（`+`/`-`前置可）。Rust の `str::parse::<i32>` と同じ受理範囲 |
+| `parse-float` | `(parse-float s)` | `string→Result<f64,Error>` | 浮動小数点数。Rust の `str::parse::<f64>` と同じ受理範囲（`inf`/`nan`含む） |
+| `read` | `(read s)` | `string→Result<Sexpr,Error>` | `s` から `Sexpr` を1つ読む（`typl`/REPL がソーステキストを読むのと同じ reader を使う）。不完全な括弧・文字列などは `Err` |
+
+`eval`（`Sexpr` を実行時に評価する組み込み）は未実装。`Interp` は型チェック済みの AST を実行するだけの
+コンポーネントで、チェッカー（`Checker`）への参照を持たないため、`read` で得た `Sexpr` を実行時に
+チェック＋評価する `eval` を実装するには両者を跨ぐ新しい経路が要る——`print`/`println`/`read-line`/
+`parse-int`/`parse-float`/`read` のような「既存コンポーネントをラップするだけ」の追加とは規模が違う。

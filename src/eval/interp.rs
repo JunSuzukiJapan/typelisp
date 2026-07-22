@@ -2752,6 +2752,9 @@ impl Interp {
             }
             "random" => Some(eval_random(args)),
             "read-line" => Some(eval_read_line(heap)),
+            "parse-int" => Some(eval_parse_int(heap, args)),
+            "parse-float" => Some(eval_parse_float(heap, args)),
+            "read" => Some(eval_read(heap, args)),
             // `equal`/`equalp` on `Sexpr`: structural equality builtins (the
             // free-function `Sexpr` overloads; the per-scalar-type `equal`
             // *methods* — `string`/`char`/`int`/... — are dispatched separately
@@ -3585,6 +3588,44 @@ fn eval_read_line(heap: &mut Heap) -> Result<RtValue, EvalError> {
         }
         Err(e) => Err(EvalError::Panic(format!("read-line: {}", e))),
     }
+}
+
+/// `parse-int` (`registry.rs`'s free-function entry): a decimal `i32`
+/// literal (optional leading `+`/`-`, no surrounding whitespace — plain
+/// `str::parse`), `Err` on anything else rather than a panic (unlike the
+/// reader's own integer literals, this reads *untrusted* runtime text).
+fn eval_parse_int(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let s = expect_str(&args[0])?;
+    Ok(match s.parse::<i32>() {
+        Ok(n) => result_ok(heap, RtValue::Int(n as i64)),
+        Err(_) => result_err(heap, format!("parse-int: invalid integer literal: {:?}", s)),
+    })
+}
+
+/// `parse-float` (`registry.rs`'s free-function entry): an `f64` literal via
+/// `str::parse` (accepts everything Rust's own `FromStr for f64` does,
+/// including `inf`/`nan`), `Err` on anything else.
+fn eval_parse_float(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let s = expect_str(&args[0])?;
+    Ok(match s.parse::<f64>() {
+        Ok(f) => result_ok(heap, RtValue::Float(f)),
+        Err(_) => result_err(heap, format!("parse-float: invalid float literal: {:?}", s)),
+    })
+}
+
+/// `read` (`registry.rs`'s free-function entry): parses exactly one `Sexpr`
+/// form from `s` via the ordinary reader (`crate::read::Reader::read`) —
+/// the same pipeline `typl`/the REPL use for source text, just callable at
+/// runtime on a string value instead of a file/stdin. `Err` (not a panic)
+/// on malformed input, e.g. an unterminated list or string — this reads
+/// data the running program doesn't control.
+fn eval_read(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let s = expect_str(&args[0])?.to_string();
+    let reader = crate::read::Reader::new();
+    Ok(match reader.read(heap, &s) {
+        Ok(v) => result_ok(heap, RtValue::Sexpr(v)),
+        Err(e) => result_err(heap, format!("read: {}", e)),
+    })
 }
 
 /// Built-in (Rust-implemented) instance/static methods for nominal types that
@@ -5122,6 +5163,19 @@ fn option_value(heap: &mut Heap, v: Option<RtValue>) -> RtValue {
         None => (1, vec![]),
     };
     build_enum_value(heap, Path::root("option"), variant, fields)
+}
+
+/// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
+fn result_ok(heap: &mut Heap, v: RtValue) -> RtValue {
+    build_enum_value(heap, Path::root("result"), 0, vec![v])
+}
+
+/// `Err(error(msg))` — wraps `msg` in the built-in `error` type's own single
+/// `error(string)` variant (`registry::error_def`) before wrapping *that* in
+/// `Result`'s `err` variant, matching `error`'s only constructor.
+fn result_err(heap: &mut Heap, msg: String) -> RtValue {
+    let err_val = build_enum_value(heap, Path::root("error"), 0, vec![RtValue::Str(msg.into())]);
+    build_enum_value(heap, Path::root("result"), 1, vec![err_val])
 }
 
 /// Rejects a `HashTable<K,V>` key argument before it ever reaches

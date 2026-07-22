@@ -12,14 +12,9 @@
       (setf i (+ i 1)))
     i))
 
-;; parse-int は組み込みに未実装のためここで自前実装(符号なし、不正入力は0扱い)。
+;; 不正な id 文字列は -1 (どの todo にもマッチしない id) として扱う。
 (defun str->int ((s string)) i32
-  (let ((n (length s)) (i 0) (v 0))
-    (while (< i n)
-      (when (digitp (ref s i))
-        (setf v (+ (* v 10) (- (char->int (ref s i)) (char->int #\0)))))
-      (setf i (+ i 1)))
-    v))
+  (unwrap-or (parse-int s) -1))
 
 (defun print-todo ((td todo-item)) ()
   (if (done td) (print "[x] ") (print "[ ] "))

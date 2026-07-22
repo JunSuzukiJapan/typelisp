@@ -396,6 +396,16 @@ impl Registry {
         // (a REPL-style CLI) needs to detect end-of-input as ordinary data,
         // not an error. No receiver, like `random`/`gensym`.
         root.fns.insert("read-line".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: option_of(Type::Str), public: true, builtin: true, bounds: HashMap::new() });
+        // `parse-int`/`parse-float`: untrusted-text numeric parsing
+        // (`docs/language-design.md` §4.1's planned conversion catalog) —
+        // `Result`, not a panic, since the input is runtime text the caller
+        // doesn't control (unlike a source literal, which the reader/checker
+        // already validate before this code ever runs).
+        root.fns.insert("parse-int".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(Type::I32, error_ty()), public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("parse-float".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(Type::F64, error_ty()), public: true, builtin: true, bounds: HashMap::new() });
+        // `read`: parses one `Sexpr` form from a string via the same reader
+        // `typl`/the REPL use for source text (`crate::read::Reader::read`).
+        root.fns.insert("read".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(sexpr(), error_ty()), public: true, builtin: true, bounds: HashMap::new() });
         // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr` builtins:
         // the Symbol/Sexpr redesign (Phase 4b) repurposes `cons`/`car`/`cdr` to
         // the generic `cons<T,U>` pair (`prelude.rs`'s free `cons` +
@@ -679,6 +689,17 @@ fn hashtable_ty() -> Type {
 
 fn option_of(t: Type) -> Type {
     Type::Named(Path::root("option"), vec![t])
+}
+
+/// The built-in `error` type (`error_def`'s single `error(string)` variant) —
+/// the default `E` in `Result<T, Error>` for every fallible Rust builtin
+/// below (`parse-int`/`parse-float`/`read`/`eval`).
+fn error_ty() -> Type {
+    Type::Named(Path::root("error"), vec![])
+}
+
+fn result_of(t: Type, e: Type) -> Type {
+    Type::Named(Path::root("result"), vec![t, e])
 }
 
 /// `HashTable<K, V>`: a builtin (Rust-implemented) mutable hash map, with no

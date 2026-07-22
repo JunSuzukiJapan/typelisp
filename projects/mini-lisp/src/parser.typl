@@ -15,26 +15,6 @@
     (setf c::pos (+ (pos c) 1))
     tok))
 
-(defun digit-char? ((ch char)) bool (digitp ch))
-
-(defun numeric? ((s string)) bool
-  (let ((n (length s)) (ok (> (length s) 0)))
-    (dotimes (i n)
-      (let ((ch (ref s i)))
-        (when (not (or (digit-char? ch) (and (= i 0) (equal ch #\-))))
-          (setf ok false))))
-    ok))
-
-(defun str->int ((s string)) i32
-  (let ((n (length s)) (i 0) (neg false) (v 0))
-    (when (and (> n 0) (equal (ref s 0) #\-))
-      (setf neg true)
-      (setf i 1))
-    (while (< i n)
-      (setf v (+ (* v 10) (- (char->int (ref s i)) (char->int #\0))))
-      (setf i (+ i 1)))
-    (if neg (- 0 v) v)))
-
 (pub defun parse-expr ((c cursor)) lexpr
   (let ((tok (advance c)))
     (if (equal tok "(")
@@ -64,7 +44,8 @@
                  (advance c)
                  (binop head a b))))
             (else (panic (append "parse error: unknown form `" (append head "`"))))))
-        (if (numeric? tok) (lit (str->int tok)) (var tok)))))
+        (let ((n (parse-int tok)))
+          (if (is-ok n) (lit (unwrap n)) (var tok))))))
 
 (pub defun parse ((toks Vector<string>)) lexpr
   (parse-expr (cursor::new toks 0)))
