@@ -438,6 +438,7 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "num-bigint",
+ "num-integer",
  "num-rational",
  "num-traits",
  "once_cell",
@@ -462,6 +463,7 @@ name = "typelisp-rt"
 version = "0.1.0"
 dependencies = [
  "num-bigint",
+ "num-integer",
  "num-rational",
  "num-traits",
  "typelisp-mem",

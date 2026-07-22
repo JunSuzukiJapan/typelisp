@@ -103,7 +103,10 @@ fn bignum_subtraction_and_multiplication() {
 }
 
 #[test]
-fn bignum_truncating_division_and_mod() {
+fn bignum_truncating_division_and_mod_on_positive_operands() {
+    // `/` truncates toward zero; `mod`/`rem` agree for positive operands (the
+    // sign-sensitive floored-vs-truncated distinction is exercised separately
+    // in `bignum_mod_is_floored_and_rem_is_truncated`).
     let d = "(defun d ((a bignum) (b bignum)) bignum (/ a b)) (d 100000000000000000007 100000000000000000000)";
     let m = "(defun m ((a bignum) (b bignum)) bignum (mod a b)) (m 100000000000000000007 100000000000000000000)";
     assert_bignum(eval_ok(d), "1");
@@ -121,6 +124,55 @@ fn bignum_comparison() {
     let src = "(defun f ((a bignum) (b bignum)) bool (< a b)) \
                (f 99999999999999999999 100000000000000000000)";
     assert_eq!(eval_ok(src), RtValue::Bool(true));
+}
+
+#[test]
+fn bignum_mod_is_floored_and_rem_is_truncated() {
+    // CL: `mod` takes the sign of the divisor, `rem` the sign of the dividend.
+    // `(mod -7 3) = 2`, `(rem -7 3) = -1`; `(mod 7 -3) = -2`, `(rem 7 -3) = 1`.
+    let m = |a: i32, b: i32| format!("(defun f ((a bignum) (b bignum)) bignum (mod a b)) (f (int->bignum {a}) (int->bignum {b}))");
+    let r = |a: i32, b: i32| format!("(defun f ((a bignum) (b bignum)) bignum (rem a b)) (f (int->bignum {a}) (int->bignum {b}))");
+    assert_bignum(eval_ok(&m(-7, 3)), "2");
+    assert_bignum(eval_ok(&r(-7, 3)), "-1");
+    assert_bignum(eval_ok(&m(7, -3)), "-2");
+    assert_bignum(eval_ok(&r(7, -3)), "1");
+}
+
+#[test]
+fn bignum_abs_and_signum() {
+    let a = "(defun f ((x bignum)) bignum (abs x)) (f -99999999999999999999)";
+    let s = "(defun f ((x bignum)) bignum (signum x)) (f -99999999999999999999)";
+    assert_bignum(eval_ok(a), "99999999999999999999");
+    assert_bignum(eval_ok(s), "-1");
+}
+
+#[test]
+fn bignum_gcd_and_lcm() {
+    let g = "(defun f ((a bignum) (b bignum)) bignum (gcd a b)) (f (int->bignum 12) (int->bignum 18))";
+    let l = "(defun f ((a bignum) (b bignum)) bignum (lcm a b)) (f (int->bignum 4) (int->bignum 6))";
+    assert_bignum(eval_ok(g), "6");
+    assert_bignum(eval_ok(l), "12");
+}
+
+#[test]
+fn bignum_lcm_with_a_zero_operand_is_zero() {
+    // `num_integer::lcm` would divide by `gcd(0,5) = 5`... but `lcm(0,0)`'s
+    // `gcd` is 0, so the zero guard (matching CL and the `i32` prelude `lcm`)
+    // returns 0 whenever either operand is 0.
+    let l = "(defun f ((a bignum) (b bignum)) bignum (lcm a b)) (f (int->bignum 0) (int->bignum 0))";
+    assert_bignum(eval_ok(l), "0");
+}
+
+#[test]
+fn bignum_expt_produces_a_large_exact_result() {
+    let e = "(defun f ((a bignum) (b bignum)) bignum (expt a b)) (f (int->bignum 2) (int->bignum 100))";
+    assert_bignum(eval_ok(e), "1267650600228229401496703205376");
+}
+
+#[test]
+fn bignum_expt_with_a_negative_exponent_panics() {
+    let e = "(defun f ((a bignum) (b bignum)) bignum (expt a b)) (f (int->bignum 2) (int->bignum -1))";
+    assert!(matches!(run(e), Err(EvalError::Panic(_))));
 }
 
 // ---- ratio arithmetic/comparison --------------------------------------------

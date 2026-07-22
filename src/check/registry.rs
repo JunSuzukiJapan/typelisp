@@ -1296,17 +1296,18 @@ fn char_assoc() -> HashMap<String, AssocFn> {
 }
 
 /// Built-in arithmetic/comparison instance methods for an integer type
-/// (`i32`/`i64`): `+ - * / mod` (binary, same-type) and `< <= > >= = /=`
-/// (binary, `Bool`-valued). `/`/`mod` panic on a zero divisor at runtime
-/// (`crate::eval::interp::eval_int_builtin`) — the type system can't express
-/// "nonzero", the same precedent as `car`/`cdr` on a non-`Cons` `Sexpr`.
-/// Shared by both integer widths since the operation set and panic policy
-/// are identical; only the receiver/param `Type` differs.
+/// (`i32`/`i64`): `+ - * / mod rem` (binary, same-type) and `< <= > >= = /=`
+/// (binary, `Bool`-valued). `mod` is floored (CL, sign of the divisor) and
+/// `rem` truncated (CL, sign of the dividend); `/`/`mod`/`rem` panic on a
+/// zero divisor at runtime (`crate::eval::interp::eval_int_builtin`) — the
+/// type system can't express "nonzero", the same precedent as `car`/`cdr` on
+/// a non-`Cons` `Sexpr`. Shared by both integer widths since the operation
+/// set and panic policy are identical; only the receiver/param `Type` differs.
 fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
     let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
-    for op in ["+", "-", "*", "/", "mod"] {
+    for op in ["+", "-", "*", "/", "mod", "rem"] {
         m.insert(op.to_string(), binop());
     }
     for op in ["<", "<=", ">", ">=", "=", "/="] {
@@ -1402,18 +1403,30 @@ fn float_assoc() -> HashMap<String, AssocFn> {
 }
 
 /// Built-in arithmetic/comparison instance methods for `bignum` (CL's
-/// bignum: an arbitrary-precision integer). Same operation set as
-/// [`int_assoc`] (`/`/`mod` truncate toward zero and panic on a zero
-/// divisor — CL's `truncate`/`rem`, not `floor`/`mod`), plus conversions
-/// to/from `i32`/`i64` (narrowing; panics if the value doesn't fit — same
-/// precedent as `int_assoc`'s `int->char`), `f64` (both directions), and
-/// `ratio` (widening, exact).
+/// bignum: an arbitrary-precision integer). Same core operation set as
+/// [`int_assoc`] (`/` truncates toward zero; `mod` is floored and `rem`
+/// truncated per CL; all panic on a zero divisor), plus the integer helpers
+/// `abs`/`signum`/`gcd`/`lcm`/`expt` (mirroring `prelude.rs`'s `i32`
+/// free-function helpers) and conversions to/from `i32`/`i64` (narrowing;
+/// panics if the value doesn't fit — same precedent as `int_assoc`'s
+/// `int->char`), `f64` (both directions), and `ratio` (widening, exact).
 fn bignum_assoc() -> HashMap<String, AssocFn> {
     let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum, Type::Bignum], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum, Type::Bignum], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
+    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
-    for op in ["+", "-", "*", "/", "mod"] {
+    // `mod` is floored (CL, sign of the divisor), `rem` truncated (CL, sign of
+    // the dividend) — see `eval_bignum_builtin`. `gcd`/`lcm`/`expt` round out
+    // the integer catalog (`expt` panics on a negative exponent — it would be
+    // a `ratio`, which a `bignum`-returning method can't express).
+    for op in ["+", "-", "*", "/", "mod", "rem", "gcd", "lcm", "expt"] {
         m.insert(op.to_string(), binop());
+    }
+    // `abs`/`signum` are unary (`bignum -> bignum`), mirroring the `i32`
+    // free-function helpers in `prelude.rs` but registered as methods so
+    // `(abs big)` dispatches on the `bignum` receiver.
+    for op in ["abs", "signum"] {
+        m.insert(op.to_string(), unary());
     }
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());

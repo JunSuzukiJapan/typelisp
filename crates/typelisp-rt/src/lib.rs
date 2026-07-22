@@ -639,6 +639,7 @@ pub unsafe extern "C" fn rt_box_kind(args: *const i64, argc: u32) -> i64 {
 // by zero, which traps at the machine level instead.
 
 use num_bigint::{BigInt, BigUint, Sign};
+use num_integer::Integer;
 use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive};
 
@@ -796,8 +797,10 @@ pub unsafe extern "C" fn rt_bignum_div(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().alloc_bignum(a / b))
 }
 
-/// `bignum::mod` for compiled code — truncating remainder (CL `rem`, not
-/// `mod`), matching `int_assoc`'s own `mod`. Fatal on a zero divisor.
+/// `bignum::mod` for compiled code — floored remainder (CL `mod`; result
+/// takes the sign of the divisor), matching the interpreter's
+/// `eval_bignum_builtin` and `int_assoc`'s own floored `mod`. Fatal on a zero
+/// divisor.
 ///
 /// # Safety
 ///
@@ -808,7 +811,7 @@ pub unsafe extern "C" fn rt_bignum_mod(args: *const i64, argc: u32) -> i64 {
     if b.sign() == Sign::NoSign {
         fatal("rt_bignum_mod: division by zero");
     }
-    encode(active_heap().alloc_bignum(a % b))
+    encode(active_heap().alloc_bignum(a.mod_floor(&b)))
 }
 
 /// Three-way comparison (`-1`/`0`/`1`) for compiled code — the single
@@ -2201,9 +2204,13 @@ pub unsafe extern "C" fn rt_i64_div(args: *const i64, argc: u32) -> i64 {
     }
 }
 
-/// Signed integer remainder `a % b` — the compiled-code half of `i64`/`i32`
-/// `mod`, the `srem` companion of [`rt_i64_div`]. Same zero-/overflow-trap
-/// handling (`checked_rem`) and raw-`i64` operand convention.
+/// Floored remainder `a mod b` (CL `mod`) — the compiled-code half of
+/// `i64`/`i32` `mod`, matching the interpreter's `eval_int_builtin`. The
+/// result takes the sign of the divisor `b` (unlike `srem`/`rem`, which take
+/// the sign of the dividend), so `-7 mod 3 = 2`. Same zero-trap handling as
+/// [`rt_i64_div`]; `i64::MIN % -1` is mathematically `0` (`checked_rem`
+/// returns `None` on that overflow case, treated as the exact `0` here).
+/// Raw-`i64` operand convention.
 ///
 /// # Safety
 ///
@@ -2213,9 +2220,15 @@ pub unsafe extern "C" fn rt_i64_mod(args: *const i64, argc: u32) -> i64 {
     if argc < 2 {
         fatal("rt_i64_mod: expected 2 arguments");
     }
-    match (*args).checked_rem(*args.add(1)) {
-        Some(r) => r,
-        None => fatal("mod by zero"),
+    let (a, b) = (*args, *args.add(1));
+    if b == 0 {
+        fatal("mod by zero");
+    }
+    let r = a.checked_rem(b).unwrap_or(0);
+    if r != 0 && (r < 0) != (b < 0) {
+        r + b
+    } else {
+        r
     }
 }
 

@@ -3331,7 +3331,19 @@ fn eval_int_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Eval
             if b == 0 {
                 return Some(Err(EvalError::Panic("mod by zero".into())));
             }
-            RtValue::Int(a % b)
+            // CL `mod`: floored remainder, result takes the sign of the
+            // divisor (`-7 mod 3 = 2`). `i64::MIN % -1` is mathematically 0
+            // (`checked_rem` returns `None` on that overflow case).
+            let r = a.checked_rem(b).unwrap_or(0);
+            RtValue::Int(if r != 0 && (r < 0) != (b < 0) { r + b } else { r })
+        }
+        "rem" => {
+            if b == 0 {
+                return Some(Err(EvalError::Panic("rem by zero".into())));
+            }
+            // CL `rem`: truncated remainder, result takes the sign of the
+            // dividend (`-7 rem 3 = -1`). `i64::MIN % -1` is 0 (see `mod`).
+            RtValue::Int(a.checked_rem(b).unwrap_or(0))
         }
         "<" => RtValue::Bool(a < b),
         "<=" => RtValue::Bool(a <= b),
@@ -3452,12 +3464,34 @@ fn expect_ratio(v: &RtValue) -> Result<Rc<BigRational>, EvalError> {
 }
 
 /// Evaluate a built-in `bignum` arithmetic/comparison instance method
-/// (`registry::bignum_assoc`). Same operation set/panic policy as
-/// [`eval_int_builtin`]: `/`/`mod` truncate toward zero (`BigInt`'s `Div`/
-/// `Rem` impls already do, matching Rust's `i64` semantics) and panic on a
-/// zero divisor — the type system can't express "nonzero", the same
-/// precedent as `car`/`cdr` on a non-`Cons` `Sexpr`.
+/// (`registry::bignum_assoc`). `bignum` is CL's arbitrary-precision integer,
+/// so it carries the full integer operation set: `/` truncates toward zero
+/// and `mod`/`rem` follow CL (`mod` floored — sign of the divisor; `rem`
+/// truncated — sign of the dividend), each panicking on a zero divisor (the
+/// type system can't express "nonzero", the same precedent as `car`/`cdr` on
+/// a non-`Cons` `Sexpr`). `abs`/`signum` are unary; `gcd`/`lcm` (Euclid, via
+/// `num_integer`) and `expt` (non-negative exponent only — a negative one
+/// would be a `ratio`, which this `bignum`-typed method can't return) are
+/// binary. `abs`/`gcd`/`lcm`/`signum` mirror the `i32` free-function helpers
+/// in `prelude.rs`.
 fn eval_bignum_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+    use num_integer::Integer;
+    use num_traits::Signed;
+    // Unary ops (`abs`/`signum`) take a single operand — handle them before
+    // the two-argument extraction the binary ops need.
+    if matches!(name, "abs" | "signum") {
+        let a = match args.first().map(expect_bignum) {
+            Some(Ok(a)) => a,
+            Some(Err(e)) => return Some(Err(e)),
+            None => return Some(Err(EvalError::Internal(format!("{}: expected a bignum", name)))),
+        };
+        let v = match name {
+            "abs" => RtValue::Bignum(Rc::new(a.abs())),
+            "signum" => RtValue::Bignum(Rc::new(a.signum())),
+            _ => unreachable!(),
+        };
+        return Some(Ok(v));
+    }
     let (a, b) = match (args.first(), args.get(1)) {
         (Some(a), Some(b)) => match (expect_bignum(a), expect_bignum(b)) {
             (Ok(a), Ok(b)) => (a, b),
@@ -3479,7 +3513,37 @@ fn eval_bignum_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, E
             if b.is_zero() {
                 return Some(Err(EvalError::Panic("mod by zero".into())));
             }
+            // CL `mod`: floored remainder (sign of the divisor).
+            RtValue::Bignum(Rc::new(a.mod_floor(&b)))
+        }
+        "rem" => {
+            if b.is_zero() {
+                return Some(Err(EvalError::Panic("rem by zero".into())));
+            }
+            // CL `rem`: truncated remainder (sign of the dividend).
             RtValue::Bignum(Rc::new(&*a % &*b))
+        }
+        "gcd" => RtValue::Bignum(Rc::new(a.gcd(&b))),
+        "lcm" => {
+            // `num_integer::lcm` divides by `gcd`, so guard `lcm(0,0)` (whose
+            // `gcd` is 0) — CL and `prelude.rs`'s `i32` `lcm` both give 0 when
+            // either operand is 0.
+            if a.is_zero() || b.is_zero() {
+                RtValue::Bignum(Rc::new(BigInt::from(0)))
+            } else {
+                RtValue::Bignum(Rc::new(a.lcm(&b)))
+            }
+        }
+        "expt" => {
+            if b.is_negative() {
+                return Some(Err(EvalError::Panic(
+                    "expt: negative exponent has no bignum result (it would be a ratio)".into(),
+                )));
+            }
+            match b.to_usize() {
+                Some(exp) => RtValue::Bignum(Rc::new(num_traits::pow::pow((*a).clone(), exp))),
+                None => return Some(Err(EvalError::Panic("expt: exponent too large".into()))),
+            }
         }
         "<" => RtValue::Bool(*a < *b),
         "<=" => RtValue::Bool(*a <= *b),
@@ -3876,7 +3940,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("i32") || *type_name == Path::root("i64") {
         return match method {
-            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+            "+" | "-" | "*" | "/" | "mod" | "rem" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
                 eval_int_builtin(method, args)
             }
             // `eq`/`eql`/`equal`/`equalp` are all registered as aliases for
@@ -3916,9 +3980,8 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("bignum") {
         return match method {
-            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
-                eval_bignum_builtin(method, args)
-            }
+            "+" | "-" | "*" | "/" | "mod" | "rem" | "<" | "<=" | ">" | ">=" | "=" | "/="
+            | "abs" | "signum" | "gcd" | "lcm" | "expt" => eval_bignum_builtin(method, args),
             "eq" | "eql" | "equal" | "equalp" => eval_bignum_builtin("=", args),
             "bignum->int" => Some(bignum_to_int(args)),
             "try-bignum->int" => Some(try_bignum_to_int(heap, args)),

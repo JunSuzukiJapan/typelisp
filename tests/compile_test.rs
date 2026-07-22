@@ -4318,6 +4318,20 @@ fn compile_dispatches_f64_arithmetic() {
     }
 }
 
+/// `mod` on `i64`/`i32` is floored (CL, sign of the divisor) in both the
+/// interpreter (`eval_int_builtin`) and compiled code (`rt_i64_mod`) — this
+/// locks the two paths together for a negative dividend, where floored and
+/// truncated diverge (`-7 mod 3 = 2`, not `-1`).
+#[test]
+fn compile_dispatches_i32_floored_mod_and_agrees_with_the_interpreter() {
+    let src = "(defun m ((a i32) (b i32)) i32 (mod a b))";
+    let call = "(m -7 3)";
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile m)\n{call}")).expect("compiled failed");
+    assert_eq!(interpreted, RtValue::Int(2), "-7 mod 3 = 2 (floored)");
+    assert_eq!(compiled, interpreted, "compiled floored mod agrees with the interpreter");
+}
+
 /// `mod` on `f64` lowers to `build-frem` (`a % b`, matching the interpreter's
 /// `eval_float_builtin`). LLVM lowers an `frem` instruction to a call to the
 /// C `fmod` symbol — every user-defined `defun`/`defmethod`'s own LLVM

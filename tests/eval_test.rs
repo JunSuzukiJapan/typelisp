@@ -138,6 +138,22 @@ fn arithmetic() {
     assert_eq!(eval_ok("(mod 17 5)"), RtValue::Int(2));
 }
 
+/// CL `mod` is floored (result takes the sign of the divisor); CL `rem` is
+/// truncated (result takes the sign of the dividend). They agree only when
+/// the operands share a sign.
+#[test]
+fn mod_is_floored_and_rem_is_truncated() {
+    assert_eq!(eval_ok("(mod -7 3)"), RtValue::Int(2));
+    assert_eq!(eval_ok("(rem -7 3)"), RtValue::Int(-1));
+    assert_eq!(eval_ok("(mod 7 -3)"), RtValue::Int(-2));
+    assert_eq!(eval_ok("(rem 7 -3)"), RtValue::Int(1));
+    assert_eq!(eval_ok("(mod -7 -3)"), RtValue::Int(-1));
+    assert_eq!(eval_ok("(rem -7 -3)"), RtValue::Int(-1));
+    // Agree when signs match (and the previous `(mod 17 5)` positive case).
+    assert_eq!(eval_ok("(mod 7 3)"), RtValue::Int(1));
+    assert_eq!(eval_ok("(rem 7 3)"), RtValue::Int(1));
+}
+
 #[test]
 fn comparison() {
     assert_eq!(eval_ok("(< 1 2)"), RtValue::Bool(true));

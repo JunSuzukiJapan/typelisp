@@ -14,11 +14,18 @@
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `+` `-` `*` `/` `mod` | `(op a b)` | `(T,T)→T` | 四則演算。`/`/`mod` はゼロ除算で panic |
+| `+` `-` `*` `/` | `(op a b)` | `(T,T)→T` | 四則演算。`/` はゼロ方向切り捨て・ゼロ除算で panic |
+| `mod` | `(mod a b)` | `(T,T)→T` | 剰余（CL の `mod`、**床除算**＝符号は除数側。`(mod -7 3)`→`2`）。ゼロ除算で panic |
+| `rem` | `(rem a b)` | `(T,T)→T` | 剰余（CL の `rem`、**切り捨て除算**＝符号は被除数側。`(rem -7 3)`→`-1`）。ゼロ除算で panic |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(T,T)→bool` | 比較 |
 | `eq` `eql` `equal` `equalp` | `(op a b)` | `(T,T)→bool` | いずれも `=` と同じ（同型の数値に差はない） |
 | `int->float` | `(int->float x)` | `T→f64` | `f64` への拡大変換 |
+| `int->bignum` | `(int->bignum x)` | `T→bignum` | `bignum` への拡大変換（常に正確） |
+| `int->ratio` | `(int->ratio x)` | `T→ratio` | `ratio` への拡大変換（常に正確） |
 | `int->char` | `(int->char x)` | `T→char` | Unicode スカラ値として解釈。不正な値は panic |
+| `try-int->char` | `(try-int->char x)` | `T→Option<char>` | `int->char` の失敗を `None` で返す版 |
+
+これらの変換は `(as Type x)`/`(try-as Type x)` 特殊形（[syntax.md](syntax.md) 参照）の実体でもある。
 
 `i8` `i16` `isize` `u8` `u16` `u32` `u64` `usize` `f32` は `defmethod` の受け手として型登録は
 されているが、現時点では算術・比較を含め一切のメソッドを持たない。
@@ -33,6 +40,56 @@
 | `expt` | `(expt a b)` | `(f64,f64)→f64` | 冪乗 |
 | `sqrt` `floor` `ceiling` `round` `truncate` | `(op x)` | `f64→f64` | 単項演算 |
 | `float->int` | `(float->int x)` | `f64→i32` | ゼロ方向への切り捨てで `i32` へ変換 |
+| `float->bignum` | `(float->bignum x)` | `f64→bignum` | ゼロ方向への切り捨てで `bignum` へ変換 |
+| `float->ratio` | `(float->ratio x)` | `f64→ratio` | 正確な二進有理数として `ratio` へ変換（CL の `rational`） |
+
+## 2.5 多倍長数値（`bignum` / `ratio`）
+
+CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常に既約・正の分母で保たれる有理数。
+どちらもヒープ確保され、`i32`/`i64`/`f64` との暗黙変換はない（明示的な変換メソッドまたは
+`as`/`try-as` を使う）。整数/比リテラル構文は [syntax.md](syntax.md) を参照。
+
+**`bignum`**（CL の整数と同じ演算集合。`/` はゼロ方向切り捨て、除算・剰余系はゼロ除算で panic）:
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `+` `-` `*` `/` | `(op a b)` | `(bignum,bignum)→bignum` | 四則（`/` は切り捨て） |
+| `mod` | `(mod a b)` | `(bignum,bignum)→bignum` | 床除算の剰余（符号は除数側。§1 の `mod` と同じ） |
+| `rem` | `(rem a b)` | `(bignum,bignum)→bignum` | 切り捨て除算の剰余（符号は被除数側。§1 の `rem` と同じ） |
+| `abs` | `(abs x)` | `bignum→bignum` | 絶対値 |
+| `signum` | `(signum x)` | `bignum→bignum` | 符号（`1`/`-1`/`0`） |
+| `gcd` | `(gcd a b)` | `(bignum,bignum)→bignum` | 最大公約数 |
+| `lcm` | `(lcm a b)` | `(bignum,bignum)→bignum` | 最小公倍数（どちらかが0なら0） |
+| `expt` | `(expt a b)` | `(bignum,bignum)→bignum` | 冪乗。指数が負なら panic（結果が `ratio` になり `bignum` で表せないため） |
+| `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(bignum,bignum)→bool` | 比較 |
+| `eq` `eql` `equal` `equalp` | `(op a b)` | `(bignum,bignum)→bool` | いずれも `=` と同じ |
+| `bignum->int` | `(bignum->int x)` | `bignum→i32` | 縮小変換。`i64` に収まらなければ panic |
+| `try-bignum->int` | `(try-bignum->int x)` | `bignum→Option<i32>` | 収まらなければ `None` |
+| `bignum->float` | `(bignum->float x)` | `bignum→f64` | `f64` へ変換 |
+| `bignum->ratio` | `(bignum->ratio x)` | `bignum→ratio` | `ratio` への拡大変換（正確） |
+| `print` `println` | `(op x)` | `bignum→Unit` | 標準出力へ書く（§15） |
+
+**`ratio`**（`mod` はなし——CL も有理数の剰余を定義しない。`/` はゼロ除算で panic）:
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `+` `-` `*` `/` | `(op a b)` | `(ratio,ratio)→ratio` | 四則（結果は常に既約） |
+| `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | 比較 |
+| `eq` `eql` `equal` `equalp` | `(op a b)` | `(ratio,ratio)→bool` | いずれも `=` と同じ |
+| `numerator` | `(numerator x)` | `ratio→bignum` | 既約分子（CL と同名） |
+| `denominator` | `(denominator x)` | `ratio→bignum` | 既約分母（常に正） |
+| `ratio->bignum` | `(ratio->bignum x)` | `ratio→bignum` | 整数部（ゼロ方向切り捨て） |
+| `ratio->float` | `(ratio->float x)` | `ratio→f64` | `f64` へ変換 |
+| `print` `println` | `(op x)` | `ratio→Unit` | 標準出力へ書く（§15） |
+
+`i32`/`i64`/`f64` からの入口は `int->bignum`/`int->ratio`（§1）と `float->bignum`/`float->ratio`
+（§2）。`bignum`/`ratio` は `i32` 等とは独立した別型で、混在した算術には明示変換が必要。
+`abs`/`gcd`/`lcm`/`signum` は §4 の `i32` 版（自由関数）と同名だが、`bignum` 版はレシーバ型で解決される
+メソッド（`(abs big)` は `bignum` の `abs` に解決される）。
+
+> **compile（§9）対応範囲**: `bignum` の四則・`mod`・比較・変換は JIT/AOT でネイティブ化されるが、
+> `rem` および `abs`/`gcd`/`lcm`/`signum`/`expt` は現状インタプリタ専用（`(compile ...)` すると
+> unsupported エラー）。整数 `mod` の床除算化はインタプリタ・コンパイル両経路で一致する。
 
 ## 3. 論理・真偽値
 
@@ -81,6 +138,13 @@ Symbol/Sexpr 再設計 Phase 4b 以降、`cons`/`car`/`cdr` は `Sexpr` 専用�
 | `sexpr-consp` | `(sexpr-consp s)` | `Sexpr→bool` | `Cons` かどうか |
 | `sexpr-null` | `(sexpr-null s)` | `Sexpr→bool` | `Nil` かどうか |
 | `sexpr-atom` | `(sexpr-atom s)` | `Sexpr→bool` | `Cons` でないか |
+| `sexpr-symp` | `(sexpr-symp s)` | `Sexpr→bool` | `Sym`（シンボル）かどうか |
+| `sexpr-int` | `(sexpr-int s)` | `Sexpr→i64` | `Int` の中身を取り出す。`Int` でなければ panic |
+| `sexpr-float` | `(sexpr-float s)` | `Sexpr→f64` | `Float` の中身。型違いは panic |
+| `sexpr-char` | `(sexpr-char s)` | `Sexpr→char` | `Char` の中身。型違いは panic |
+| `sexpr-bool` | `(sexpr-bool s)` | `Sexpr→bool` | `Bool` の中身。型違いは panic |
+| `sexpr-str` | `(sexpr-str s)` | `Sexpr→string` | `Str` の中身。型違いは panic |
+| `sexpr-sym-name` | `(sexpr-sym-name s)` | `Sexpr→string` | `Sym` の名前。型違いは panic |
 | `eq` `eql` | `(op a b)` | `(Sexpr,Sexpr)→bool` | 同一性比較（`Cons`/`Str` はポインタ、それ以外は値） |
 
 ## 6. シーケンス操作（`Iter` 上のライブラリ関数）
