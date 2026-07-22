@@ -308,18 +308,43 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 確実に見えるようにするため）。数値と文字列を混在させて表示するには複数回`print`/`println`を呼ぶ
 （例: `(print "answer: ") (println 42)`）——CL の `format` 相当の書式指定子は未実装。
 
-## 16. 解析 (`parse-int` / `parse-float` / `read`)
+## 16. 解析・評価 (`parse-int` / `parse-float` / `read` / `eval`)
 
-いずれも実行時の（プログラム自身は制御できない）テキストを扱うため、失敗時は panic ではなく
-`Result<_, Error>` の `Err` を返す。
+いずれも実行時の（プログラム自身は制御できない）テキスト・データを扱うため、失敗時は panic では
+なく `Result<_, Error>` の `Err` を返す。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `parse-int` | `(parse-int s)` | `string→Result<i32,Error>` | 10進整数（`+`/`-`前置可）。Rust の `str::parse::<i32>` と同じ受理範囲 |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,Error>` | 浮動小数点数。Rust の `str::parse::<f64>` と同じ受理範囲（`inf`/`nan`含む） |
 | `read` | `(read s)` | `string→Result<Sexpr,Error>` | `s` から `Sexpr` を1つ読む（`typl`/REPL がソーステキストを読むのと同じ reader を使う）。不完全な括弧・文字列などは `Err` |
+| `eval` | `(eval form)` | `Sexpr→Result<Sexpr,Error>` | `form` を実行時に型チェックして評価する。CL の `eval` に準拠 |
 
-`eval`（`Sexpr` を実行時に評価する組み込み）は未実装。`Interp` は型チェック済みの AST を実行するだけの
-コンポーネントで、チェッカー（`Checker`）への参照を持たないため、`read` で得た `Sexpr` を実行時に
-チェック＋評価する `eval` を実装するには両者を跨ぐ新しい経路が要る——`print`/`println`/`read-line`/
-`parse-int`/`parse-float`/`read` のような「既存コンポーネントをラップするだけ」の追加とは規模が違う。
+### `eval` の意味論（Common Lisp 準拠）
+
+CLHS の `eval` に準拠する: **現在の大域環境**（グローバルの関数・変数・型・マクロ。実行時に
+追加された定義も含む）で、かつ **null 字句環境**（呼び出し元の `let`/`lambda` のローカル束縛は
+見えない）で評価する。式でも定義（`defun`/`defvar`/`defstruct`/`defenum`/`defmacro`）でも評価
+でき、定義は即座かつ永続的にグローバル環境へ登録される。
+
+```lisp
+(eval (unwrap (read "(+ 40 2)")))                 ; => (ok 42)
+(defvar (x i32) 10)
+(eval (unwrap (read "(+ x 5)")))                  ; => (ok 15)  ; グローバル x が見える
+(eval (unwrap (read "(defun sq ((n i32)) i32 (* n n))")))  ; => (ok sq)  ; 定義名を返す
+(eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; 直前の定義が見える
+```
+
+- **戻り値**: 式なら評価結果を `Sexpr` として、定義なら定義名シンボルを返す（CL と同じ）。
+  結果を `println` 等で表示するには `Sexpr` を `match`（`(int n)`/`(str s)`/…）で分解する。
+- **静的型ゆえの差異（重要）**: CL は結果の実値（動的型）を返すが typelisp は戻り型を一律
+  `Result<Sexpr,Error>` にするしかない。また **静的に書いたコードは、実行時に `eval` が定義する
+  名前を前方参照できない**——チェッカーは全トップレベルフォームを実行前に検査するので、
+  ファイル中に直接書いた `(sq 9)` は `sq` を定義する `eval` より前に検査され「未定義」になる。
+  ただし **後続の `eval` からは見える**（その `eval` の型チェックは実行時、定義後に走るため）。
+  REPL は1行ずつ検査・実行するので、`eval` で定義した名前を次の行から直接呼べる。
+- **エラーの扱い**: チェッカーが静的に弾ける型エラー・構文エラーは `Err` を返す（パニックしない）。
+  評価したコード内の**実行時パニック**（ゼロ除算等）は、直接書いたコードと同様にそのまま伝播する
+  （CL の condition system は typelisp に無いため、これが最も近い挙動）。
+- **名前空間**: `typl file.typl` 実行時、`eval` はそのスクリプトのファイル由来モジュール名前空間で
+  評価される（スクリプト自身のグローバルが見える）。REPL はルート名前空間で評価する。

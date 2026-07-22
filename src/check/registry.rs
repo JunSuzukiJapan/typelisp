@@ -406,6 +406,12 @@ impl Registry {
         // `read`: parses one `Sexpr` form from a string via the same reader
         // `typl`/the REPL use for source text (`crate::read::Reader::read`).
         root.fns.insert("read".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(sexpr(), error_ty()), public: true, builtin: true, bounds: HashMap::new() });
+        // `eval`: type-checks and runs a runtime `Sexpr` against the current
+        // global environment, CL-style (`Interp::eval_form`). Sees all globals
+        // but not the caller's lexical locals; a definition form registers
+        // immediately. Result is a `Sexpr` (the value, or a definition's name
+        // symbol); malformed/ill-typed input is `Err`, not a panic.
+        root.fns.insert("eval".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: result_of(sexpr(), error_ty()), public: true, builtin: true, bounds: HashMap::new() });
         // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr` builtins:
         // the Symbol/Sexpr redesign (Phase 4b) repurposes `cons`/`car`/`cdr` to
         // the generic `cons<T,U>` pair (`prelude.rs`'s free `cons` +

@@ -586,6 +586,18 @@ impl Checker {
         self.recover = on;
     }
 
+    /// Set the namespace that subsequent `check_form`/`check_form_at` calls
+    /// treat as "current". Used by the CLI's `run_file` to place a runtime
+    /// `(eval ...)` in the script's own file-derived module (so the script's
+    /// module-scoped globals/functions resolve from an eval'd form, and
+    /// eval-defined names register there too), matching how those forms were
+    /// checked at load time. The REPL leaves this at the root (`[]`), where it
+    /// checks its own input, so REPL `eval` resolves against the root
+    /// environment unchanged.
+    pub fn set_current_ns(&mut self, ns: Vec<String>) {
+        self.ns = ns;
+    }
+
     /// Drains and returns every error accumulated at a recovery boundary while
     /// `recover` was set (see [`Self::errors`]). Each already carries its own
     /// source location. Empty unless `recover` is enabled.

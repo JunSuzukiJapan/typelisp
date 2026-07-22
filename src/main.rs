@@ -5,7 +5,9 @@
 //! (Ctrl+P/Ctrl+N to move through history, Ctrl+R to search it, etc. — all
 //! `rustyline`'s default `EditMode::Emacs` bindings, matching bash/readline).
 
+use std::cell::RefCell;
 use std::path::{Path as FsPath, PathBuf};
+use std::rc::Rc;
 
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
@@ -168,7 +170,7 @@ fn run_file(file: &str) -> i32 {
     let file = PathBuf::from(file);
     let dir = file.parent().filter(|p| !p.as_os_str().is_empty()).map(FsPath::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     let src_root = find_src_root(&dir).unwrap_or(dir);
-    let mut loader = Loader::new(src_root);
+    let mut loader = Loader::new(src_root.clone());
 
     let result = loader.load_entry(&mut heap, &reader, &mut checker, &mut interp, &file);
     for w in checker.take_warnings() {
@@ -178,6 +180,25 @@ fn run_file(file: &str) -> i32 {
         eprintln!("error: {}", e);
         return 1;
     }
+    // Place a runtime `(eval ...)` in the script's own file-derived module, so
+    // the script's module-scoped globals/functions resolve from an eval'd form
+    // (and eval-defined names register there) — the load phase checked the
+    // file's forms in this same module, but left the checker at the root. A
+    // path that can't derive a module (shouldn't happen — the load above
+    // already used it) falls back to the root.
+    let entry_ns = typelisp::project::module_segs_for(&file, &src_root).unwrap_or_default();
+    checker.set_current_ns(entry_ns);
+    // Hand the interpreter a shared handle to the now-fully-loaded checker so
+    // any top-level `(eval ...)` in the queued forms can type-check the code
+    // it's given against this program's own global environment
+    // (`Interp::eval_form`). Done here, after all load/check-phase uses of
+    // `checker` are finished and `checker` is moved into the `RefCell` — the
+    // exec loop below holds no checker borrow, so `eval`'s own
+    // `borrow_mut()` never conflicts. `run_file` never touches `checker`
+    // again, so moving it in is free (unlike the REPL, which keeps checking
+    // after — see `try_run_pending`).
+    let checker = Rc::new(RefCell::new(checker));
+    interp.set_checker(Rc::clone(&checker));
     // All read roots are popped by now (the loader's per-file discipline), so
     // executing the queued forms — including heap-touching `defvar`
     // initializers and top-level expressions — is safe.
@@ -193,14 +214,22 @@ fn run_file(file: &str) -> i32 {
 fn repl() -> rustyline::Result<()> {
     let mut heap = Heap::with_capacity(1 << 16);
     let reader = Reader::new();
-    let mut checker = Checker::new();
-    checker.set_redef_policy(parse_redef_policy());
+    // The checker lives behind a shared `RefCell` so the interpreter can reach
+    // it to type-check a runtime `(eval ...)` form (`Interp::eval_form`), while
+    // the REPL keeps checking each new line through the same cell. Every
+    // per-line use borrows it only during the check phase, releasing before
+    // the exec phase — see `try_run_pending`'s borrow discipline.
+    let checker = Rc::new(RefCell::new(Checker::new()));
+    checker.borrow_mut().set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
-    typelisp::prelude::load_cached(&mut heap, &mut checker, &mut interp);
+    typelisp::prelude::load_cached(&mut heap, &mut *checker.borrow_mut(), &mut interp);
     // The compiler island is always loaded (interp-closure removal Stage 5),
     // as native AOT code, so a closure typed at the REPL is JIT-compiled at
     // definition time rather than falling back to an interpreted closure.
-    typelisp::load_compiler_aot(&mut heap, &mut checker, &mut interp);
+    typelisp::load_compiler_aot(&mut heap, &mut *checker.borrow_mut(), &mut interp);
+    // Wire the interpreter to the checker now that loading is done, so
+    // `(eval ...)` at the REPL type-checks against the live environment.
+    interp.set_checker(Rc::clone(&checker));
     // `use` in the REPL resolves files against the current directory (or the
     // project root if a manifest is found above it).
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -222,7 +251,7 @@ fn repl() -> rustyline::Result<()> {
                 let _ = rl.add_history_entry(line.as_str());
                 pending.push_str(&line);
                 pending.push('\n');
-                try_run_pending(&mut heap, &reader, &mut checker, &mut interp, &mut loader, &mut pending);
+                try_run_pending(&mut heap, &reader, &checker, &mut interp, &mut loader, &mut pending);
             }
             Err(ReadlineError::Interrupted) => {
                 pending.clear();
@@ -291,7 +320,7 @@ fn history_path() -> PathBuf {
 fn try_run_pending(
     heap: &mut Heap,
     reader: &Reader,
-    checker: &mut Checker,
+    checker: &RefCell<Checker>,
     interp: &mut Interp,
     loader: &mut Loader,
     pending: &mut String,
@@ -317,11 +346,11 @@ fn try_run_pending(
     // pops its own read roots strictly above this batch's, so the root-stack
     // discipline below is undisturbed.
     let form_values: Vec<Value> = forms.iter().map(|(v, _)| *v).collect();
-    if let Err(e) = loader.load_uses_in(heap, reader, checker, interp, &form_values) {
+    if let Err(e) = loader.load_uses_in(heap, reader, &mut checker.borrow_mut(), interp, &form_values) {
         while heap.root_count() > mark {
             heap.pop_root();
         }
-        for w in checker.take_warnings() {
+        for w in checker.borrow_mut().take_warnings() {
             eprintln!("{}", w);
         }
         eprintln!("error: {}", e);
@@ -332,15 +361,25 @@ fn try_run_pending(
     let mut checked = Vec::with_capacity(forms.len());
     let mut check_err = None;
     for (v, loc) in forms {
-        let result = checker.check_form_at(heap, &*interp, v, Some(loc));
-        for w in checker.take_warnings() {
+        // Borrow the checker only for the check itself (`result` owns the
+        // `TopLevel`), so the borrow is released before any `interp.exec`
+        // below — a `defmacro`'s immediate exec, or the batch exec further
+        // down, must be free to let a runtime `(eval ...)` re-borrow the
+        // checker (`Interp::eval_form`).
+        let result = checker.borrow_mut().check_form_at(heap, &*interp, v, Some(loc));
+        for w in checker.borrow_mut().take_warnings() {
             eprintln!("{}", w);
         }
         match result {
             // `(load "path")` loads inline, fasl-preferred, into the current
             // (root) environment — resolved relative to the process cwd.
+            // (A `(load)`ed file whose *own* top-level contains `(eval ...)`
+            // is the one corner this borrow doesn't cover — `load_file_flat`
+            // execs inline while this `borrow_mut` is held; an ordinary
+            // module/fasl load never top-level-`eval`s, so it doesn't arise
+            // in practice.)
             Ok(TopLevel::Load { path }) => {
-                if let Err(e) = load_file_flat(heap, reader, checker, interp, FsPath::new("."), &path) {
+                if let Err(e) = load_file_flat(heap, reader, &mut checker.borrow_mut(), interp, FsPath::new("."), &path) {
                     check_err = Some(e);
                     break;
                 }
@@ -377,7 +416,7 @@ fn try_run_pending(
 
     for tl in checked {
         match interp.exec(heap, tl) {
-            Ok(Some(v)) => println!("{}", format_value(heap, checker.registry(), &v)),
+            Ok(Some(v)) => println!("{}", format_value(heap, checker.borrow().registry(), &v)),
             Ok(None) => {}
             Err(e) => {
                 eprintln!("error: {}", e);
