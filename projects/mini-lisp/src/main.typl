@@ -1,0 +1,18 @@
+;; ミニLisp REPL。define した変数はセッションを通じて環境に残る。
+(use lexer::tokenize)
+(use parser::parse)
+(use eval::eval)
+
+(defun repl () ()
+  (let ((env (the HashTable<string,i32> (HashTable::new))))
+    (loop
+      (print "lisp> ")
+      (let ((line (read-line)))
+        (match line
+          ((none) (println "") (break))
+          ((some s)
+           (if (equal s "")
+               (break)
+               (println (eval (parse (tokenize s)) env)))))))))
+
+(repl)

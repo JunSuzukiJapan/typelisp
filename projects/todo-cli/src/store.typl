@@ -1,0 +1,26 @@
+;; ToDo の保存領域。HashTable<i32,todo-item> で id 引き。
+(use model::todo-item)
+(use model::make-todo)
+
+(defvar (store HashTable<i32,todo-item>) (HashTable::new))
+(defvar (next-id i32) 1)
+
+(pub defun add-todo ((text string)) i32
+  (let ((tid next-id))
+    (set store tid (make-todo tid text false))
+    (setf next-id (+ next-id 1))
+    tid))
+
+(pub defun complete-todo ((tid i32)) bool
+  (match (get store tid)
+    ((some td) (setf td::done true) true)
+    ((none) false)))
+
+(pub defun remove-todo ((tid i32)) bool
+  (is-some (remove store tid)))
+
+(pub defun all-ids () Vector<i32>
+  (sort (iter (keys store))))
+
+(pub defun find-todo ((tid i32)) Option<todo-item>
+  (get store tid))

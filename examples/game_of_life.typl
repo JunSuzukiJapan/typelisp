@@ -1,0 +1,59 @@
+;; ライフゲーム (Conway's Game of Life)。盤面は Vector<Vector<bool>>、
+;; グライダーを数世代分コンソールに描画する。
+(defstruct board
+  (cells Vector<Vector<bool>>)
+  (w i32)
+  (h i32))
+
+(defun make-board ((w i32) (h i32)) board
+  (let ((cells (the Vector<Vector<bool>> (Vector::new))))
+    (dotimes (y h)
+      (let ((row (the Vector<bool> (Vector::new))))
+        (dotimes (x w)
+          (push row false))
+        (push cells row)))
+    (board::new cells w h)))
+
+(defun cell-at ((b board) (x i32) (y i32)) bool
+  (if (or (< x 0) (< y 0) (>= x (w b)) (>= y (h b)))
+      false
+      (get (get (cells b) y) x)))
+
+(defun set-cell ((b board) (x i32) (y i32) (v bool)) ()
+  (set (get (cells b) y) x v))
+
+(defun live-neighbors ((b board) (x i32) (y i32)) i32
+  (let ((count 0))
+    (dotimes (dy 3)
+      (dotimes (dx 3)
+        (let ((nx (+ x (- dx 1))) (ny (+ y (- dy 1))))
+          (when (and (not (and (= dx 1) (= dy 1))) (cell-at b nx ny))
+            (setf count (+ count 1))))))
+    count))
+
+(defun step ((b board)) board
+  (let ((next (make-board (w b) (h b))))
+    (dotimes (y (h b))
+      (dotimes (x (w b))
+        (let ((n (live-neighbors b x y)) (alive (cell-at b x y)))
+          (set-cell next x y (or (= n 3) (and alive (= n 2)))))))
+    next))
+
+(defun print-board ((b board)) ()
+  (dotimes (y (h b))
+    (dotimes (x (w b))
+      (if (cell-at b x y) (print "#") (print ".")))
+    (println ""))
+  (println "----------"))
+
+;; 5x5 の盤にグライダーを置いて4世代進める。
+(let ((b (make-board 6 6)))
+  (set-cell b 1 0 true)
+  (set-cell b 2 1 true)
+  (set-cell b 0 2 true)
+  (set-cell b 1 2 true)
+  (set-cell b 2 2 true)
+  (print-board b)
+  (dotimes (i 4)
+    (setf b (step b))
+    (print-board b)))

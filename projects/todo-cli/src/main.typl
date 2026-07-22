@@ -1,0 +1,67 @@
+;; ToDo CLI。add/list/done/remove/help/quit をコマンドとして受け付ける。
+(use model::todo-item)
+(use store::add-todo)
+(use store::complete-todo)
+(use store::remove-todo)
+(use store::all-ids)
+(use store::find-todo)
+
+(defun find-space ((s string)) i32
+  (let ((n (length s)) (i 0))
+    (while (and (< i n) (not (equal (ref s i) #\Space)))
+      (setf i (+ i 1)))
+    i))
+
+;; parse-int は組み込みに未実装のためここで自前実装(符号なし、不正入力は0扱い)。
+(defun str->int ((s string)) i32
+  (let ((n (length s)) (i 0) (v 0))
+    (while (< i n)
+      (when (digitp (ref s i))
+        (setf v (+ (* v 10) (- (char->int (ref s i)) (char->int #\0)))))
+      (setf i (+ i 1)))
+    v))
+
+(defun print-todo ((td todo-item)) ()
+  (if (done td) (print "[x] ") (print "[ ] "))
+  (print (id td))
+  (print ": ")
+  (println (text td)))
+
+(defun cmd-list () ()
+  (let ((ids (all-ids)))
+    (if (= (len ids) 0)
+        (println "(no todos)")
+        (doiter (tid (iter ids))
+          (print-todo (unwrap (find-todo tid)))))))
+
+(defun handle ((line string)) bool
+  (let ((sp (find-space line)))
+    (let ((cmd (substring line 0 sp))
+          (rest (if (< sp (length line)) (substring line (+ sp 1) (length line)) "")))
+      (cond
+        ((equal cmd "add")
+         (let ((tid (add-todo rest))) (print "added #") (println tid))
+         true)
+        ((equal cmd "list") (cmd-list) true)
+        ((equal cmd "done")
+         (if (complete-todo (str->int rest)) (println "marked done") (println "no such id"))
+         true)
+        ((equal cmd "remove")
+         (if (remove-todo (str->int rest)) (println "removed") (println "no such id"))
+         true)
+        ((equal cmd "help")
+         (println "commands: add <text> / list / done <id> / remove <id> / quit")
+         true)
+        ((equal cmd "quit") false)
+        (else (println "unknown command (try `help`)") true)))))
+
+(defun repl () ()
+  (println "todo-cli. type `help` for commands.")
+  (loop
+    (print "> ")
+    (let ((line (read-line)))
+      (match line
+        ((none) (println "") (break))
+        ((some s) (if (not (handle s)) (break) ()))))))
+
+(repl)

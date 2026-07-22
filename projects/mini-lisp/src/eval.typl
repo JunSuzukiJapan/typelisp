@@ -1,0 +1,29 @@
+;; 構文木 (lexpr) の評価。env は変数名 -> 値 の環境(セッション全体で使い回し、
+;; define で書き加えていく)。
+(use ast::lexpr)
+
+(pub defun eval ((e lexpr) (env HashTable<string,i32>)) i32
+  (match e
+    ((lit v) v)
+    ((var name) (unwrap (get env name)))
+    ((binop op a b)
+     (let ((x (eval a env)))
+       (let ((y (eval b env)))
+         (cond
+           ((equal op "+") (+ x y))
+           ((equal op "-") (- x y))
+           ((equal op "*") (* x y))
+           ((equal op "/") (/ x y))
+           ((equal op "<") (if (< x y) 1 0))
+           ((equal op ">") (if (> x y) 1 0))
+           ((equal op "=") (if (= x y) 1 0))
+           (else (panic (append "unknown operator: " op)))))))
+    ((iff test then els) (if (/= (eval test env) 0) (eval then env) (eval els env)))
+    ((def name val)
+     (let ((v (eval val env)))
+       (set env name v)
+       v))
+    ((begin es)
+     (let ((result 0))
+       (doiter (sub (iter es)) (setf result (eval sub env)))
+       result))))

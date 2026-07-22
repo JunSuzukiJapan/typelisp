@@ -1,0 +1,19 @@
+;; 字句解析: ソース文字列を "(" / ")" / それ以外のトークン(記号・数値)に分割する。
+;; typelisp 本体の read/Sexpr は使わず、文字列そのままを自前で走査する。
+(pub defun tokenize ((s string)) Vector<string>
+  (let ((toks (the Vector<string> (Vector::new))) (n (length s)) (i 0))
+    (while (< i n)
+      (let ((c (ref s i)))
+        (cond
+          ((equal c #\Space) (setf i (+ i 1)) ())
+          ((equal c #\() (push toks "(") (setf i (+ i 1)) ())
+          ((equal c #\)) (push toks ")") (setf i (+ i 1)) ())
+          (else
+           (let ((start i))
+             (while (and (< i n)
+                         (not (equal (ref s i) #\Space))
+                         (not (equal (ref s i) #\())
+                         (not (equal (ref s i) #\))))
+               (setf i (+ i 1)))
+             (push toks (substring s start i)))))))
+    toks))

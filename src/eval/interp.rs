@@ -18,6 +18,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::rc::{Rc, Weak};
 
 use inkwell::basic_block::BasicBlock;
@@ -2750,6 +2751,7 @@ impl Interp {
                 )
             }
             "random" => Some(eval_random(args)),
+            "read-line" => Some(eval_read_line(heap)),
             // `equal`/`equalp` on `Sexpr`: structural equality builtins (the
             // free-function `Sexpr` overloads; the per-scalar-type `equal`
             // *methods* — `string`/`char`/`int`/... — are dispatched separately
@@ -3540,6 +3542,51 @@ fn eval_random(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Int((next_random_u64() % n as u64) as i64))
 }
 
+/// Shared tail of every scalar `print`/`println` method (`registry.rs`'s
+/// per-type `"print"`/`"println"` entries): writes `text` to stdout, with a
+/// trailing newline iff `newline`, and flushes immediately — a script's
+/// stdout isn't a terminal when piped (e.g. into `read-line` at the far end
+/// of a pipe, or a test harness), so it isn't line-buffered there, and a
+/// prompt printed via `print` (no newline) must still be visible before the
+/// process blocks on `read-line`.
+/// `f64` display for `print`/`println` — an integral finite value prints
+/// with an explicit `.0` (matching `main.rs`'s REPL-echo `format_float`), so
+/// `(println 1.0)` doesn't come out indistinguishable from `(println 1)`.
+fn format_float_for_print(f: f64) -> String {
+    if f.is_finite() && f == f.trunc() {
+        format!("{:.1}", f)
+    } else {
+        f.to_string()
+    }
+}
+
+fn write_stdout(text: &str, newline: bool) -> Result<RtValue, EvalError> {
+    let mut out = std::io::stdout();
+    let write_result = if newline { writeln!(out, "{}", text) } else { write!(out, "{}", text) };
+    write_result.and_then(|()| out.flush()).map(|()| RtValue::Unit).map_err(|e| EvalError::Panic(format!("print: {}", e)))
+}
+
+/// `read-line` (`registry.rs`'s free-function entry): one line from stdin,
+/// sans the trailing newline (and a trailing `\r`, for CRLF input). `None`
+/// at EOF (`read_line` returning `Ok(0)`) rather than an error — a script
+/// polling stdin in a loop needs to see end-of-input as ordinary data.
+fn eval_read_line(heap: &mut Heap) -> Result<RtValue, EvalError> {
+    let mut line = String::new();
+    match std::io::stdin().read_line(&mut line) {
+        Ok(0) => Ok(option_value(heap, None)),
+        Ok(_) => {
+            if line.ends_with('\n') {
+                line.pop();
+                if line.ends_with('\r') {
+                    line.pop();
+                }
+            }
+            Ok(option_value(heap, Some(RtValue::Str(line.into()))))
+        }
+        Err(e) => Err(EvalError::Panic(format!("read-line: {}", e))),
+    }
+}
+
 /// Built-in (Rust-implemented) instance/static methods for nominal types that
 /// have no `defmethod` body to run — currently `HashTable<K,V>`
 /// (`crate::check::registry`'s `hashtable_def`).
@@ -3651,6 +3698,8 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "eq" | "eql" => Some(string_identity_eq(args)),
             "equal" => Some(string_content_eq(args)),
             "equalp" => Some(string_content_eqp(args)),
+            "print" => Some(expect_str(&args[0]).and_then(|s| write_stdout(s, false))),
+            "println" => Some(expect_str(&args[0]).and_then(|s| write_stdout(s, true))),
             _ => None,
         };
     }
@@ -3668,6 +3717,8 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "eq" | "eql" | "equal" => Some(char_eq(args)),
             "equalp" => Some(char_eqp(args)),
             "char->int" => Some(char_to_int(args)),
+            "print" => Some(expect_char(&args[0]).and_then(|c| write_stdout(&c.to_string(), false))),
+            "println" => Some(expect_char(&args[0]).and_then(|c| write_stdout(&c.to_string(), true))),
             _ => None,
         };
     }
@@ -3686,6 +3737,8 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "try-int->char" => Some(try_int_to_char(heap, args)),
             "int->bignum" => Some(int_to_bignum(args)),
             "int->ratio" => Some(int_to_ratio(args)),
+            "print" => Some(rt_i64(&args[0]).and_then(|n| write_stdout(&n.to_string(), false))),
+            "println" => Some(rt_i64(&args[0]).and_then(|n| write_stdout(&n.to_string(), true))),
             _ => None,
         };
     }
@@ -3704,6 +3757,8 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "float->int" => Some(float_to_int(args)),
             "float->bignum" => Some(float_to_bignum(args)),
             "float->ratio" => Some(float_to_ratio(args)),
+            "print" => Some(rt_f64(&args[0]).and_then(|f| write_stdout(&format_float_for_print(f), false))),
+            "println" => Some(rt_f64(&args[0]).and_then(|f| write_stdout(&format_float_for_print(f), true))),
             _ => None,
         };
     }
@@ -3717,6 +3772,8 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "try-bignum->int" => Some(try_bignum_to_int(heap, args)),
             "bignum->float" => Some(bignum_to_float(args)),
             "bignum->ratio" => Some(bignum_to_ratio(args)),
+            "print" => Some(expect_bignum(&args[0]).and_then(|n| write_stdout(&n.to_string(), false))),
+            "println" => Some(expect_bignum(&args[0]).and_then(|n| write_stdout(&n.to_string(), true))),
             _ => None,
         };
     }
@@ -3730,12 +3787,16 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "ratio->float" => Some(ratio_to_float(args)),
             "numerator" => Some(ratio_numerator(args)),
             "denominator" => Some(ratio_denominator(args)),
+            "print" => Some(expect_ratio(&args[0]).and_then(|r| write_stdout(&format!("{}/{}", r.numer(), r.denom()), false))),
+            "println" => Some(expect_ratio(&args[0]).and_then(|r| write_stdout(&format!("{}/{}", r.numer(), r.denom()), true))),
             _ => None,
         };
     }
     if *type_name == Path::root("bool") {
         return match method {
             "eq" | "eql" | "equal" | "equalp" => Some(bool_eq(args)),
+            "print" => Some(expect_bool(&args[0]).and_then(|b| write_stdout(&b.to_string(), false))),
+            "println" => Some(expect_bool(&args[0]).and_then(|b| write_stdout(&b.to_string(), true))),
             _ => None,
         };
     }

@@ -1,0 +1,35 @@
+;; 字句解析: 数式の文字列を Vector<token> に切り出す。
+(pub defenum token
+  (tnum i32)
+  (tplus)
+  (tminus)
+  (tstar)
+  (tslash)
+  (tlparen)
+  (trparen))
+
+(use token)
+
+(defun digit-value ((c char)) i32
+  (- (char->int c) (char->int #\0)))
+
+(pub defun tokenize ((s string)) Vector<token>
+  (let ((toks (the Vector<token> (Vector::new))) (n (length s)) (i 0))
+    (while (< i n)
+      (let ((c (ref s i)))
+        (cond
+          ((equal c #\Space) (setf i (+ i 1)) ())
+          ((equal c #\+) (push toks (tplus)) (setf i (+ i 1)) ())
+          ((equal c #\-) (push toks (tminus)) (setf i (+ i 1)) ())
+          ((equal c #\*) (push toks (tstar)) (setf i (+ i 1)) ())
+          ((equal c #\/) (push toks (tslash)) (setf i (+ i 1)) ())
+          ((equal c #\() (push toks (tlparen)) (setf i (+ i 1)) ())
+          ((equal c #\)) (push toks (trparen)) (setf i (+ i 1)) ())
+          ((digitp c)
+           (let ((v 0))
+             (while (and (< i n) (digitp (ref s i)))
+               (setf v (+ (* v 10) (digit-value (ref s i))))
+               (setf i (+ i 1)))
+             (push toks (tnum v))))
+          (else (panic (append "tokenize: unexpected character " (substring s i (+ i 1))))))))
+    toks))

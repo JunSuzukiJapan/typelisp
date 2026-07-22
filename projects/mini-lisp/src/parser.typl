@@ -1,0 +1,70 @@
+;; 構文解析: token 列 (Vector<string>) から lexpr の木を組み立てる。
+;; 入れ子の丸括弧は parse-expr 自身の再帰呼び出しでそのまま処理できるので
+;; (defun の前方参照不可を回避するための labels は不要)。
+(use ast::lexpr)
+
+(pub defstruct cursor
+  (toks Vector<string>)
+  (pos i32))
+
+(defun peek ((c cursor)) string
+  (if (>= (pos c) (len (toks c))) ")" (get (toks c) (pos c))))
+
+(defun advance ((c cursor)) string
+  (let ((tok (peek c)))
+    (setf c::pos (+ (pos c) 1))
+    tok))
+
+(defun digit-char? ((ch char)) bool (digitp ch))
+
+(defun numeric? ((s string)) bool
+  (let ((n (length s)) (ok (> (length s) 0)))
+    (dotimes (i n)
+      (let ((ch (ref s i)))
+        (when (not (or (digit-char? ch) (and (= i 0) (equal ch #\-))))
+          (setf ok false))))
+    ok))
+
+(defun str->int ((s string)) i32
+  (let ((n (length s)) (i 0) (neg false) (v 0))
+    (when (and (> n 0) (equal (ref s 0) #\-))
+      (setf neg true)
+      (setf i 1))
+    (while (< i n)
+      (setf v (+ (* v 10) (- (char->int (ref s i)) (char->int #\0))))
+      (setf i (+ i 1)))
+    (if neg (- 0 v) v)))
+
+(pub defun parse-expr ((c cursor)) lexpr
+  (let ((tok (advance c)))
+    (if (equal tok "(")
+        (let ((head (advance c)))
+          (cond
+            ((equal head "if")
+             (let ((test (parse-expr c)))
+               (let ((then (parse-expr c)))
+                 (let ((els (parse-expr c)))
+                   (advance c)
+                   (iff test then els)))))
+            ((equal head "define")
+             (let ((name (advance c)))
+               (let ((val (parse-expr c)))
+                 (advance c)
+                 (def name val))))
+            ((equal head "begin")
+             (let ((es (the Vector<lexpr> (Vector::new))))
+               (while (not (equal (peek c) ")"))
+                 (push es (parse-expr c)))
+               (advance c)
+               (begin es)))
+            ((or (equal head "+") (equal head "-") (equal head "*") (equal head "/")
+                 (equal head "<") (equal head ">") (equal head "="))
+             (let ((a (parse-expr c)))
+               (let ((b (parse-expr c)))
+                 (advance c)
+                 (binop head a b))))
+            (else (panic (append "parse error: unknown form `" (append head "`"))))))
+        (if (numeric? tok) (lit (str->int tok)) (var tok)))))
+
+(pub defun parse ((toks Vector<string>)) lexpr
+  (parse-expr (cursor::new toks 0)))

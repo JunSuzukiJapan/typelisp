@@ -1,0 +1,42 @@
+;; 迷路の最短経路探索 (幅優先探索)。盤面は文字列の Vector（'#' が壁、'.' が通路）、
+;; HashTable<i32,i32> をキュー代わりの Vector と組み合わせた距離テーブルとして使う。
+;; 座標 (x, y) は y*width+x の1次元インデックス(id)にエンコードする。
+
+(defun idx ((x i32) (y i32) (w i32)) i32 (+ (* y w) x))
+
+(defun in-bounds ((x i32) (y i32) (w i32) (h i32)) bool
+  (and (>= x 0) (>= y 0) (< x w) (< y h)))
+
+(defun wall? ((rows Vector<string>) (x i32) (y i32)) bool
+  (equal (ref (get rows y) x) #\#))
+
+(defun bfs ((rows Vector<string>) (w i32) (h i32) (sx i32) (sy i32) (gx i32) (gy i32)) i32
+  (let ((dist (the HashTable<i32,i32> (HashTable::new)))
+        (queue (the Vector<i32> (Vector::new)))
+        (head 0))
+    (set dist (idx sx sy w) 0)
+    (push queue (idx sx sy w))
+    (while (< head (len queue))
+      (let ((cur (get queue head)))
+        (setf head (+ head 1))
+        (let ((cx (mod cur w)) (cy (/ cur w)) (d (unwrap (get dist cur))))
+          (dotimes (dir 4)
+            (let ((nx (+ cx (cond ((= dir 0) -1) ((= dir 1) 1) (else 0))))
+                  (ny (+ cy (cond ((= dir 2) -1) ((= dir 3) 1) (else 0)))))
+              (when (and (in-bounds nx ny w h) (not (wall? rows nx ny)) (is-none (get dist (idx nx ny w))))
+                (set dist (idx nx ny w) (+ d 1))
+                (push queue (idx nx ny w))))))))
+    (unwrap-or (get dist (idx gx gy w)) -1)))
+
+(let ((rows (the Vector<string> (Vector::new))))
+  (push rows "S.#....")
+  (push rows "..#.##.")
+  (push rows "..#..#.")
+  (push rows ".....#.")
+  (push rows "###.#..")
+  (push rows "....#.G")
+  (let ((w (length (get rows 0))) (h (len rows)))
+    (let ((d (bfs rows w h 0 0 6 5)))
+      (if (>= d 0)
+          (progn (print "shortest path length: ") (println d))
+          (println "unreachable")))))

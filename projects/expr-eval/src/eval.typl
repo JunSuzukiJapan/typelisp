@@ -1,0 +1,10 @@
+;; 構文木 (expr) の評価。
+(use parser::expr)
+
+(pub defun eval ((e expr)) i32
+  (match e
+    ((num v) v)
+    ((add a b) (+ (eval a) (eval b)))
+    ((sub a b) (- (eval a) (eval b)))
+    ((mul a b) (* (eval a) (eval b)))
+    ((div a b) (/ (eval a) (eval b)))))

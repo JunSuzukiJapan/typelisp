@@ -1,0 +1,49 @@
+;; 二分探索木 (BST)。defenum で再帰的な木構造を表現し、match で insert/contains/
+;; 中順巡回を実装する。
+(defenum tree
+  (leaf)
+  (node i32 tree tree))
+
+(use tree)
+
+(defun insert ((t tree) (x i32)) tree
+  (match t
+    ((leaf) (node x (leaf) (leaf)))
+    ((node v l r)
+     (cond
+       ((< x v) (node v (insert l x) r))
+       ((> x v) (node v l (insert r x)))
+       (else t)))))
+
+(defun contains ((t tree) (x i32)) bool
+  (match t
+    ((leaf) false)
+    ((node v l r)
+     (cond
+       ((= x v) true)
+       ((< x v) (contains l x))
+       (else (contains r x))))))
+
+(defun inorder-print ((t tree)) ()
+  (match t
+    ((leaf) ())
+    ((node v l r)
+     (inorder-print l)
+     (print v)
+     (print " ")
+     (inorder-print r))))
+
+(defun build ((xs Vector<i32>)) tree
+  (let ((t (the tree (leaf))))
+    (doiter (x (iter xs))
+      (setf t (insert t x)))
+    t))
+
+(let ((xs (the Vector<i32> (Vector::new))))
+  (push xs 5) (push xs 3) (push xs 8) (push xs 1) (push xs 4)
+  (push xs 7) (push xs 9) (push xs 2) (push xs 6)
+  (let ((t (build xs)))
+    (inorder-print t)
+    (println "")
+    (println (contains t 7))
+    (println (contains t 42))))

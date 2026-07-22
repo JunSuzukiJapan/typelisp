@@ -1,0 +1,63 @@
+;; 構文解析: token 列から四則演算+丸括弧の構文木 (expr) を作る
+;; (再帰下降・演算子優先順位法)。
+(use lexer::token)
+
+(pub defenum expr
+  (num i32)
+  (add expr expr)
+  (sub expr expr)
+  (mul expr expr)
+  (div expr expr))
+
+(use expr)
+
+;; カーソル: token列上の現在位置。フィールドは defstruct のセッターで進める。
+(pub defstruct cursor
+  (toks Vector<token>)
+  (pos i32))
+
+(defun at-end ((c cursor)) bool
+  (>= (pos c) (len (toks c))))
+
+;; 末尾に達したら「これ以上演算子は続かない」ことを示す番兵として trparen を返す
+;; (factor は末尾で peek を呼ばないので、演算子ループの終了判定にしか使われない)。
+(defun peek ((c cursor)) token
+  (if (at-end c) (trparen) (get (toks c) (pos c))))
+
+(defun advance ((c cursor)) ()
+  (setf c::pos (+ (pos c) 1)))
+
+(defun tok-is-plus ((tk token)) bool (match tk ((tplus) true) (_ false)))
+(defun tok-is-minus ((tk token)) bool (match tk ((tminus) true) (_ false)))
+(defun tok-is-star ((tk token)) bool (match tk ((tstar) true) (_ false)))
+(defun tok-is-slash ((tk token)) bool (match tk ((tslash) true) (_ false)))
+
+;; parse-expr/parse-term/parse-factor は互いを呼び合う(丸括弧を挟んだ相互再帰)ので、
+;; トップレベル defun の前方参照不可(自己再帰のみ許可)を避けて labels でまとめる。
+(pub defun parse ((toks Vector<token>)) expr
+  (labels
+      ((parse-factor ((c cursor)) expr
+         (match (peek c)
+           ((tnum v) (advance c) (num v))
+           ((tlparen)
+            (advance c)
+            (let ((e (parse-expr c)))
+              (advance c)
+              e))
+           ((tminus) (advance c) (sub (num 0) (parse-factor c)))
+           (_ (panic "parse error: expected a number or `(`"))))
+       (parse-term ((c cursor)) expr
+         (let ((e (parse-factor c)))
+           (while (or (tok-is-star (peek c)) (tok-is-slash (peek c)))
+             (if (tok-is-star (peek c))
+                 (progn (advance c) (setf e (mul e (parse-factor c))))
+                 (progn (advance c) (setf e (div e (parse-factor c))))))
+           e))
+       (parse-expr ((c cursor)) expr
+         (let ((e (parse-term c)))
+           (while (or (tok-is-plus (peek c)) (tok-is-minus (peek c)))
+             (if (tok-is-plus (peek c))
+                 (progn (advance c) (setf e (add e (parse-term c))))
+                 (progn (advance c) (setf e (sub e (parse-term c))))))
+           e)))
+    (parse-expr (cursor::new toks 0))))

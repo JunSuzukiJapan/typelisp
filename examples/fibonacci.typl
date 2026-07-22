@@ -1,0 +1,12 @@
+;; フィボナッチ数列。再帰ではなく反復で計算する(labels による相互再帰の例は
+;; ミニLispインタプリタ側で扱うので、ここは単純なループに絞る)。
+(defun fib ((n i32)) i64
+  (let ((a (the i64 0)) (b (the i64 1)))
+    (dotimes (i n)
+      (let ((next (+ a b)))
+        (setf a b)
+        (setf b next)))
+    a))
+
+(dotimes (i 20)
+  (println (fib i)))

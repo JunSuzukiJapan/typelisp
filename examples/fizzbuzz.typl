@@ -1,0 +1,12 @@
+;; FizzBuzz: 1..n を表示し、3の倍数は "Fizz"、5の倍数は "Buzz"、
+;; どちらの倍数でもある数は "FizzBuzz" に置き換える。
+(defun fizzbuzz ((n i32)) ()
+  (dotimes (i n)
+    (let ((k (+ i 1)))
+      (cond
+        ((= (mod k 15) 0) (println "FizzBuzz"))
+        ((= (mod k 3) 0) (println "Fizz"))
+        ((= (mod k 5) 0) (println "Buzz"))
+        (else (println k))))))
+
+(fizzbuzz 20)

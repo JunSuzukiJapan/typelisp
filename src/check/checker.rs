@@ -2900,6 +2900,30 @@ impl Checker {
             return Err(Error::TypeError("defstruct: (defstruct name (field type)...)".into()));
         }
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
+
+        self.check_redef("type", &name, self.cur_ns().types.get(&name))?;
+        let type_fq = self.fq(&name);
+        // Pre-register a stub under `type_fq` *before* parsing field types, so
+        // a self-referential field (e.g. a linked-list-style `(next Vector<node>)`
+        // inside `node`'s own definition) resolves its bare `node` reference
+        // via `Self::canon`/`resolve_bare_type` to this struct's own
+        // qualified path, instead of `resolve_bare_type` finding nothing yet
+        // and `canon` falling back to an unqualified guess that could never
+        // match the real registration below. Overwritten with the fully
+        // parsed `AdtDef` once fields are known.
+        self.reg.root.module_mut(&self.ns).add_type(AdtDef {
+            name: type_fq.clone(),
+            params: type_params.clone(),
+            variants: Vec::new(),
+            assoc: HashMap::new(),
+            public,
+            builtin: false,
+            kind: AdtKind::Struct,
+            field_names: Vec::new(),
+            impls: Vec::new(),
+            trait_assoc: HashMap::new(),
+        });
+
         let fields = self.parse_struct_fields(heap, &parts[1..])?;
         if fields.is_empty() {
             return Err(Error::TypeError("defstruct: needs at least one field".into()));
@@ -2912,8 +2936,6 @@ impl Checker {
             }
         }
 
-        self.check_redef("type", &name, self.cur_ns().types.get(&name))?;
-        let type_fq = self.fq(&name);
         let recv_targs: Vec<Type> = type_params.iter().map(|p| Type::Named(Path::root(p), Vec::new())).collect();
         let recv_ty = Type::Named(type_fq.clone(), recv_targs);
 
@@ -3033,6 +3055,29 @@ impl Checker {
         }
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
 
+        self.check_redef("type", &name, self.cur_ns().types.get(&name))?;
+        let type_fq = self.fq(&name);
+        // Pre-register a stub under `type_fq` *before* parsing variant field
+        // types, so a self-referential field (e.g. `(node i32 tree tree)`
+        // inside `tree`'s own definition) resolves its bare `tree` reference
+        // via `Self::canon`/`resolve_bare_type` to this enum's own qualified
+        // path, instead of `resolve_bare_type` finding nothing yet and
+        // `canon` falling back to an unqualified guess that could never
+        // match the real registration below. Overwritten with the fully
+        // parsed `AdtDef` once variants are known.
+        self.reg.root.module_mut(&self.ns).add_type(AdtDef {
+            name: type_fq.clone(),
+            params: type_params.clone(),
+            variants: Vec::new(),
+            assoc: HashMap::new(),
+            public,
+            builtin: false,
+            kind: AdtKind::Sum,
+            field_names: Vec::new(),
+            impls: Vec::new(),
+            trait_assoc: HashMap::new(),
+        });
+
         let mut variants = Vec::new();
         for item in &parts[1..] {
             let (vname, field_vals): (String, Vec<Value>) = match *item {
@@ -3068,8 +3113,6 @@ impl Checker {
             }
         }
 
-        self.check_redef("type", &name, self.cur_ns().types.get(&name))?;
-        let type_fq = self.fq(&name);
         let def = AdtDef {
             name: type_fq.clone(),
             params: type_params.clone(),

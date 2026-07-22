@@ -1,0 +1,18 @@
+;; 四則演算+丸括弧の対話計算機。lexer -> parser -> eval の3段パイプラインを
+;; read-line で1行ずつ回す。空行またはEOFで終了する。
+(use lexer::tokenize)
+(use parser::parse)
+(use eval::eval)
+
+(defun repl () ()
+  (loop
+    (print "expr> ")
+    (let ((line (read-line)))
+      (match line
+        ((none) (println "") (break))
+        ((some s)
+         (if (equal s "")
+             (break)
+             (println (eval (parse (tokenize s))))))))))
+
+(repl)

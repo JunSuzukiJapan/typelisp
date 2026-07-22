@@ -53,8 +53,6 @@
 | `signum` | `(signum x)` | `i32→i32` | 符号（`1`/`-1`/`0`） |
 | `random` | `(random n)` | `i32→i32` | `0` 以上 `n` 未満の乱数（自由関数） |
 
-`min`/`max`/`evenp`/`oddp`/`zerop` などは未実装。
-
 ## 5. `cons`/`car`/`cdr`（ジェネリックなペア）と `Sexpr`
 
 Symbol/Sexpr 再設計 Phase 4b 以降、`cons`/`car`/`cdr` は `Sexpr` 専用ではなく**ジェネリックな
@@ -290,3 +288,22 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 | `exit` | `(exit code)` | `i32→!` | プロセスを終了する |
 
 `compile`/`compile-file` は [syntax.md](syntax.md) の「コンパイル」節を参照。
+
+## 15. 標準入出力 (I/O)
+
+`print`/`println` は `string`/`char`/`i32`/`i64`/`f64`/`bignum`/`ratio`/`bool` それぞれのインスタンス
+メソッド（`upcase`/`<` などと同じ、レシーバ型ごとの多重定義）。CL の `princ` 相当の人間可読な
+表示で、文字列をクォートしない（REPL がトップレベル式の戻り値を表示するときの reader 構文——
+`"..."` のようにクォートされる——とは別物）。`typl file.typl` によるスクリプト実行は
+[main.rs](../src/main.rs) の `run_file` の通り**トップレベル式の戻り値を出力しない**ため、
+プログラム自身が標準出力へ書くにはこれらを呼ぶ必要がある。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `print` | `(print x)` | `T→Unit` | 改行なしで標準出力へ書く（`T` は上記いずれか） |
+| `println` | `(println x)` | `T→Unit` | 改行付きで標準出力へ書く |
+| `read-line` | `(read-line)` | `()→Option<string>` | 標準入力から1行読む（末尾の改行/`\r`は除去）。EOFなら`None` |
+
+`print`/`println`は呼び出しのたびに即座に`flush`する（パイプ経由でも`read-line`の前にプロンプトが
+確実に見えるようにするため）。数値と文字列を混在させて表示するには複数回`print`/`println`を呼ぶ
+（例: `(print "answer: ") (println 42)`）——CL の `format` 相当の書式指定子は未実装。

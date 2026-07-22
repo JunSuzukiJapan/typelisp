@@ -391,6 +391,11 @@ impl Registry {
         // `random`: the only numeric builtin with no natural receiver to
         // dispatch on (like `gensym`), so it stays a free function.
         root.fns.insert("random".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::I32, public: true, builtin: true, bounds: HashMap::new() });
+        // `read-line`: reads one line from stdin, sans the trailing newline.
+        // `None` at EOF instead of a panic — a script polling stdin in a loop
+        // (a REPL-style CLI) needs to detect end-of-input as ordinary data,
+        // not an error. No receiver, like `random`/`gensym`.
+        root.fns.insert("read-line".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: option_of(Type::Str), public: true, builtin: true, bounds: HashMap::new() });
         // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr` builtins:
         // the Symbol/Sexpr redesign (Phase 4b) repurposes `cons`/`car`/`cdr` to
         // the generic `cons<T,U>` pair (`prelude.rs`'s free `cons` +
@@ -646,6 +651,8 @@ fn bool_assoc() -> HashMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), eq_fn());
     }
+    m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bool], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bool], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m
 }
 
@@ -1214,6 +1221,12 @@ fn string_assoc() -> HashMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), method(vec![Type::Str, Type::Str], Type::Bool));
     }
+    // `print`/`println`: write the string as-is to stdout, with/without a
+    // trailing newline (`crate::eval::interp::eval_builtin_method`'s
+    // `"string"` arm). No quoting — unlike `format_value`'s reader-syntax
+    // output for the REPL, this is for a program's own user-facing text.
+    m.insert("print".to_string(), method(vec![Type::Str], Type::Unit));
+    m.insert("println".to_string(), method(vec![Type::Str], Type::Unit));
     m
 }
 
@@ -1250,6 +1263,8 @@ fn char_assoc() -> HashMap<String, AssocFn> {
     // language-design.md` §4.1's planned conversion catalog) — the other
     // half is `int_assoc`'s `int->char`.
     m.insert("char->int".to_string(), method(vec![Type::Char], Type::I32));
+    m.insert("print".to_string(), method(vec![Type::Char], Type::Unit));
+    m.insert("println".to_string(), method(vec![Type::Char], Type::Unit));
     m
 }
 
@@ -1308,7 +1323,9 @@ fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
     // conversion catalog, extended for `bignum`/`ratio`) — always exact,
     // unlike `bignum->int`/`ratio->int`'s narrowing counterparts.
     m.insert("int->bignum".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
-    m.insert("int->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty], ret: Type::Ratio, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("int->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Ratio, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m
 }
 
@@ -1352,6 +1369,8 @@ fn float_assoc() -> HashMap<String, AssocFn> {
     // `rationalize`), via `num_rational::BigRational::from_float`.
     m.insert("float->bignum".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m.insert("float->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::Ratio, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m
 }
 
@@ -1389,6 +1408,8 @@ fn bignum_assoc() -> HashMap<String, AssocFn> {
     );
     m.insert("bignum->float".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::F64, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m.insert("bignum->ratio".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Ratio, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m
 }
 
@@ -1416,6 +1437,8 @@ fn ratio_assoc() -> HashMap<String, AssocFn> {
     m.insert("ratio->float".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::F64, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m.insert("numerator".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m.insert("denominator".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("print".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
+    m.insert("println".to_string(), AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true });
     m
 }
 
