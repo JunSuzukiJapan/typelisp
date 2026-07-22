@@ -1306,9 +1306,17 @@ fn char_assoc() -> HashMap<String, AssocFn> {
 fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
     let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
+    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
-    for op in ["+", "-", "*", "/", "mod", "rem"] {
+    // `gcd`/`lcm` (CL, integer-only) join the binary set alongside the `i32`
+    // free-function helpers in `prelude.rs`; registered as methods so both
+    // integer widths (not just the prelude's `i32`) get them.
+    for op in ["+", "-", "*", "/", "mod", "rem", "gcd", "lcm"] {
         m.insert(op.to_string(), binop());
+    }
+    // `abs`/`signum` (CL, all numbers), unary `T -> T`.
+    for op in ["abs", "signum"] {
+        m.insert(op.to_string(), unary());
     }
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
@@ -1374,7 +1382,8 @@ fn float_assoc() -> HashMap<String, AssocFn> {
         m.insert(op.to_string(), cmp());
     }
     m.insert("expt".to_string(), binop());
-    for op in ["sqrt", "floor", "ceiling", "round", "truncate"] {
+    // `abs`/`signum` (CL, all numbers) join the existing unary float family.
+    for op in ["sqrt", "floor", "ceiling", "round", "truncate", "abs", "signum"] {
         m.insert(op.to_string(), unary());
     }
     // See `int_assoc`'s eq/eql/equal/equalp comment — same alias-for-`=`
@@ -1455,17 +1464,25 @@ fn bignum_assoc() -> HashMap<String, AssocFn> {
 
 /// Built-in arithmetic/comparison instance methods for `ratio` (CL's ratio:
 /// an exact rational, always kept reduced with a positive denominator).
-/// `/` panics on a zero divisor like every other numeric type here; there is
-/// no `mod` (CL doesn't define a rational remainder either — `mod`/`rem`
-/// only apply to integers). `numerator`/`denominator` expose the reduced
+/// `/` panics on a zero divisor like every other numeric type here. There is
+/// no `mod`/`rem` (those stay on the integer types). `expt` (integer-valued
+/// exponent, see `eval_ratio_builtin`) and `abs`/`signum` round out CL's
+/// all-number operations. `numerator`/`denominator` expose the reduced
 /// components as `bignum` (CL's own accessors of the same names), the only
 /// way to inspect a `ratio`'s value beyond comparison/conversion.
 fn ratio_assoc() -> HashMap<String, AssocFn> {
     let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio, Type::Ratio], ret: Type::Ratio, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio, Type::Ratio], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
+    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio], ret: Type::Ratio, public: true, builtin: true, bounds: HashMap::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
-    for op in ["+", "-", "*", "/"] {
+    // `expt` (CL, all numbers) — integer-valued exponent only; see
+    // `eval_ratio_builtin`.
+    for op in ["+", "-", "*", "/", "expt"] {
         m.insert(op.to_string(), binop());
+    }
+    // `abs`/`signum` (CL, all numbers), unary `ratio -> ratio`.
+    for op in ["abs", "signum"] {
+        m.insert(op.to_string(), unary());
     }
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());

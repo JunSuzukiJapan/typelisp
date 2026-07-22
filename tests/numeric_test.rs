@@ -78,6 +78,32 @@ fn i64_divide_by_zero_panics() {
 }
 
 #[test]
+fn i64_mod_is_floored_and_rem_is_truncated() {
+    let m = "(defun f ((a i64) (b i64)) i64 (mod a b)) (f -7 3)";
+    let r = "(defun f ((a i64) (b i64)) i64 (rem a b)) (f -7 3)";
+    assert_eq!(eval_ok(m), RtValue::Int(2));
+    assert_eq!(eval_ok(r), RtValue::Int(-1));
+}
+
+#[test]
+fn i64_abs_and_signum() {
+    let a = "(defun f ((x i64)) i64 (abs x)) (f -9000000000)";
+    let s = "(defun f ((x i64)) i64 (signum x)) (f -9000000000)";
+    assert_eq!(eval_ok(a), RtValue::Int(9000000000));
+    assert_eq!(eval_ok(s), RtValue::Int(-1));
+}
+
+#[test]
+fn i64_gcd_and_lcm() {
+    let g = "(defun f ((a i64) (b i64)) i64 (gcd a b)) (f 12 18)";
+    let l = "(defun f ((a i64) (b i64)) i64 (lcm a b)) (f 4 6)";
+    let l0 = "(defun f ((a i64) (b i64)) i64 (lcm a b)) (f 0 5)";
+    assert_eq!(eval_ok(g), RtValue::Int(6));
+    assert_eq!(eval_ok(l), RtValue::Int(12));
+    assert_eq!(eval_ok(l0), RtValue::Int(0));
+}
+
+#[test]
 fn int_literal_adopts_i64_from_the_dispatched_operands_expected_type() {
     // A bare literal's default type is `i32`, but `+`'s `i64` instance
     // method expects `i64` for its second operand too — the literal `1`
@@ -157,6 +183,20 @@ fn f64_round() {
 fn f64_truncate() {
     let src = "(defun f ((a f64)) f64 (truncate a)) (f (- 0.0 1.7))";
     assert_close(eval_ok(src), -1.0);
+}
+
+#[test]
+fn f64_abs() {
+    let src = "(defun f ((a f64)) f64 (abs a)) (f (- 0.0 2.5))";
+    assert_close(eval_ok(src), 2.5);
+}
+
+#[test]
+fn f64_signum() {
+    assert_close(eval_ok("(defun f ((a f64)) f64 (signum a)) (f (- 0.0 2.5))"), -1.0);
+    assert_close(eval_ok("(defun f ((a f64)) f64 (signum a)) (f 2.5)"), 1.0);
+    // CL returns the zero itself for 0.0 (Rust's `f64::signum` would give 1.0).
+    assert_close(eval_ok("(defun f ((a f64)) f64 (signum a)) (f 0.0)"), 0.0);
 }
 
 // ---- operator as a first-class value -------------------------------------------

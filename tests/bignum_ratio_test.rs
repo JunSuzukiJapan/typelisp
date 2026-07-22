@@ -212,6 +212,26 @@ fn ratio_numerator_and_denominator() {
     assert_bignum(eval_ok(src), "3");
 }
 
+#[test]
+fn ratio_abs_and_signum() {
+    assert_ratio(eval_ok("(defun f ((r ratio)) ratio (abs r)) (f -3/4)"), "3", "4");
+    assert_ratio(eval_ok("(defun f ((r ratio)) ratio (signum r)) (f -3/4)"), "-1", "1");
+    assert_ratio(eval_ok("(defun f ((r ratio)) ratio (signum r)) (f 3/4)"), "1", "1");
+}
+
+#[test]
+fn ratio_expt_with_integer_exponent() {
+    // (expt 2/3 3) = 8/27; a negative exponent takes the reciprocal.
+    assert_ratio(eval_ok("(defun f ((a ratio) (b ratio)) ratio (expt a b)) (f 2/3 (int->ratio 3))"), "8", "27");
+    assert_ratio(eval_ok("(defun f ((a ratio) (b ratio)) ratio (expt a b)) (f 2/3 (int->ratio -2))"), "9", "4");
+}
+
+#[test]
+fn ratio_expt_with_a_non_integer_exponent_panics() {
+    let src = "(defun f ((a ratio) (b ratio)) ratio (expt a b)) (f 2/3 1/2)";
+    assert!(matches!(run(src), Err(EvalError::Panic(_))));
+}
+
 // ---- conversions --------------------------------------------------------------
 
 #[test]

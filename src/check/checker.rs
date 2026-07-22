@@ -5569,11 +5569,14 @@ fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'stati
         (I32, Ratio) | (I64, Ratio) => Some(("int->ratio", None)),
         (I32, Char) | (I64, Char) => Some(("int->char", Some("try-int->char"))),
         (F64, I32) => Some(("float->int", None)),
+        (F64, Bignum) => Some(("float->bignum", None)),
+        (F64, Ratio) => Some(("float->ratio", None)),
         (Char, I32) => Some(("char->int", None)),
         (Bignum, Ratio) => Some(("bignum->ratio", None)),
         (Bignum, F64) => Some(("bignum->float", None)),
         (Bignum, I32) => Some(("bignum->int", Some("try-bignum->int"))),
         (Ratio, F64) => Some(("ratio->float", None)),
+        (Ratio, Bignum) => Some(("ratio->bignum", None)),
         _ => None,
     }
 }

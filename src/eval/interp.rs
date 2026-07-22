@@ -3313,6 +3313,7 @@ const SEXPR_PATH: usize = 10;
 /// (`registry::int_assoc`) — shared by both widths since `RtValue::Int`
 /// represents every integer type uniformly as `i64`.
 fn eval_int_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+    use num_integer::Integer;
     let (a, b) = match (args.first(), args.get(1)) {
         (Some(RtValue::Int(a)), Some(RtValue::Int(b))) => (*a, *b),
         _ => return Some(Err(EvalError::Internal(format!("{}: expected two integers", name)))),
@@ -3345,6 +3346,18 @@ fn eval_int_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Eval
             // dividend (`-7 rem 3 = -1`). `i64::MIN % -1` is 0 (see `mod`).
             RtValue::Int(a.checked_rem(b).unwrap_or(0))
         }
+        // `gcd`/`lcm` (CL, integer-only) via Euclid (`num_integer`), mirroring
+        // the `i32` free-function helpers in `prelude.rs` and `bignum`'s own
+        // `gcd`/`lcm`. `gcd` is always non-negative; guard `lcm(0,0)` (whose
+        // `gcd` is 0, a division) — CL and the prelude both give 0 there.
+        "gcd" => RtValue::Int(a.gcd(&b)),
+        "lcm" => {
+            if a == 0 || b == 0 {
+                RtValue::Int(0)
+            } else {
+                RtValue::Int(a.lcm(&b))
+            }
+        }
         "<" => RtValue::Bool(a < b),
         "<=" => RtValue::Bool(a <= b),
         ">" => RtValue::Bool(a > b),
@@ -3354,6 +3367,26 @@ fn eval_int_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Eval
         _ => unreachable!(),
     };
     Some(Ok(v))
+}
+
+/// `abs`/`signum` (CL, all numbers) for `i32`/`i64` — mirroring the `i32`
+/// free-function helpers in `prelude.rs` and `bignum`'s own methods, but
+/// available on both integer widths (a `defmethod` receiver resolves before
+/// the same-named free function, so `(abs x)` picks these). `abs` uses
+/// `wrapping_abs` so `i64::MIN` folds to itself rather than trapping, matching
+/// the prelude's `(- 0 x)` two's-complement wrap.
+fn int_abs(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    match args.first() {
+        Some(RtValue::Int(n)) => Ok(RtValue::Int(n.wrapping_abs())),
+        _ => Err(EvalError::Internal("abs: expected an integer".into())),
+    }
+}
+
+fn int_signum(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    match args.first() {
+        Some(RtValue::Int(n)) => Ok(RtValue::Int(n.signum())),
+        _ => Err(EvalError::Internal("signum: expected an integer".into())),
+    }
 }
 
 fn expect_float(v: &RtValue) -> Result<f64, EvalError> {
@@ -3447,6 +3480,22 @@ fn float_unary(args: &[RtValue], f: fn(f64) -> f64) -> Result<RtValue, EvalError
 
 fn float_expt(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Float(expect_float(&args[0])?.powf(expect_float(&args[1])?)))
+}
+
+/// `signum` for `f64` following CL (`(signum x)` = `(if (zerop x) x (/ x (abs
+/// x)))`): a float result `1.0`/`-1.0`, and — unlike Rust's `f64::signum`,
+/// which returns `±1.0` for zero and never `0.0` — CL returns the zero itself
+/// for `±0.0` (and `NaN` for `NaN`), which the `else` branch preserves.
+fn float_signum(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let x = expect_float(&args[0])?;
+    let s = if x > 0.0 {
+        1.0
+    } else if x < 0.0 {
+        -1.0
+    } else {
+        x
+    };
+    Ok(RtValue::Float(s))
 }
 
 fn expect_bignum(v: &RtValue) -> Result<Rc<BigInt>, EvalError> {
@@ -3557,9 +3606,12 @@ fn eval_bignum_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, E
 }
 
 /// Evaluate a built-in `ratio` arithmetic/comparison instance method
-/// (`registry::ratio_assoc`). No `mod` — CL doesn't define a rational
-/// remainder either. `/` panics on a zero divisor, same precedent as every
-/// other numeric type here.
+/// (`registry::ratio_assoc`). No `mod`/`rem` — those stay on the integer
+/// types here. `/` panics on a zero divisor, same precedent as every other
+/// numeric type. `expt` raises a `ratio` to an integer-valued exponent
+/// (negative allowed — the reciprocal, unlike `bignum`'s non-negative-only
+/// `expt`); a non-integer exponent would give an irrational (float) result a
+/// `ratio` can't hold, so it panics.
 fn eval_ratio_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
     let (a, b) = match (args.first(), args.get(1)) {
         (Some(a), Some(b)) => match (expect_ratio(a), expect_ratio(b)) {
@@ -3578,6 +3630,21 @@ fn eval_ratio_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Ev
             }
             RtValue::Ratio(Rc::new(&*a / &*b))
         }
+        "expt" => {
+            if !b.is_integer() {
+                return Some(Err(EvalError::Panic(
+                    "expt: ratio exponent must be integer-valued".into(),
+                )));
+            }
+            let exp = match b.to_integer().to_i32() {
+                Some(e) => e,
+                None => return Some(Err(EvalError::Panic("expt: exponent too large".into()))),
+            };
+            if a.is_zero() && exp < 0 {
+                return Some(Err(EvalError::Panic("divide by zero".into())));
+            }
+            RtValue::Ratio(Rc::new(a.pow(exp)))
+        }
         "<" => RtValue::Bool(*a < *b),
         "<=" => RtValue::Bool(*a <= *b),
         ">" => RtValue::Bool(*a > *b),
@@ -3587,6 +3654,21 @@ fn eval_ratio_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Ev
         _ => unreachable!(),
     };
     Some(Ok(v))
+}
+
+/// `abs`/`signum` (CL, all numbers) for `ratio`. `abs` is the same reduced
+/// rational with a non-negative numerator; `signum` returns `1`/`-1`/`0` as a
+/// `ratio` (kept `ratio`-typed for a uniform `ratio -> ratio` signature,
+/// rather than CL's exact-rational-returns-integer detail). Both via
+/// `num_traits::Signed`.
+fn ratio_abs(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    use num_traits::Signed;
+    Ok(RtValue::Ratio(Rc::new(expect_ratio(&args[0])?.abs())))
+}
+
+fn ratio_signum(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    use num_traits::Signed;
+    Ok(RtValue::Ratio(Rc::new(expect_ratio(&args[0])?.signum())))
 }
 
 /// `int->bignum` (`registry::int_assoc`): always-exact widening.
@@ -3940,9 +4022,11 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("i32") || *type_name == Path::root("i64") {
         return match method {
-            "+" | "-" | "*" | "/" | "mod" | "rem" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+            "+" | "-" | "*" | "/" | "mod" | "rem" | "gcd" | "lcm" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
                 eval_int_builtin(method, args)
             }
+            "abs" => Some(int_abs(args)),
+            "signum" => Some(int_signum(args)),
             // `eq`/`eql`/`equal`/`equalp` are all registered as aliases for
             // `=` (see `registry::int_assoc`'s doc comment for why every one
             // of these four is meaningful to register even though none can
@@ -3965,6 +4049,8 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             }
             "eq" | "eql" | "equal" | "equalp" => eval_float_builtin("=", args),
             "expt" => Some(float_expt(args)),
+            "abs" => Some(float_unary(args, f64::abs)),
+            "signum" => Some(float_signum(args)),
             "sqrt" => Some(float_unary(args, f64::sqrt)),
             "floor" => Some(float_unary(args, f64::floor)),
             "ceiling" => Some(float_unary(args, f64::ceil)),
@@ -3994,9 +4080,11 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("ratio") {
         return match method {
-            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+            "+" | "-" | "*" | "/" | "expt" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
                 eval_ratio_builtin(method, args)
             }
+            "abs" => Some(ratio_abs(args)),
+            "signum" => Some(ratio_signum(args)),
             "eq" | "eql" | "equal" | "equalp" => eval_ratio_builtin("=", args),
             "ratio->bignum" => Some(ratio_to_bignum(args)),
             "ratio->float" => Some(ratio_to_float(args)),

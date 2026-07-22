@@ -155,6 +155,23 @@ fn as_widens_ratio_to_f64() {
     }
 }
 
+#[test]
+fn as_converts_f64_to_bignum_and_ratio() {
+    // `float->bignum` truncates toward zero (like `float->int`); `float->ratio`
+    // is exact. Both methods already existed — `as` now reaches them.
+    assert_bignum(eval_ok("(as bignum 3.9)"), "3");
+    assert_bignum(eval_ok("(as bignum (- 0.0 3.9))"), "-3");
+    assert_ratio(eval_ok("(as ratio 0.5)"), "1", "2");
+}
+
+#[test]
+fn as_narrows_ratio_to_bignum_by_truncating() {
+    // `ratio->bignum` truncates toward zero, consistent with `float->int`.
+    assert_bignum(eval_ok("(as bignum 2/3)"), "0");
+    assert_bignum(eval_ok("(as bignum 7/2)"), "3");
+    assert_bignum(eval_ok("(as bignum -7/2)"), "-3");
+}
+
 // ---- total conversion: char <-> int -------------------------------------------
 
 #[test]
@@ -222,11 +239,12 @@ fn try_as_returns_some_narrowing_an_in_range_bignum_to_int() {
 // ---- excluded pairs and out-of-domain types (check-time errors) --------------
 
 #[test]
-fn ratio_to_int_and_ratio_to_bignum_are_not_covered_by_as() {
+fn ratio_to_int_is_not_covered_by_as() {
+    // `ratio->bignum`/`ratio->float` exist (and `as` reaches them), but there
+    // is no direct `ratio->int` method, so `(as i32 2/3)` stays excluded —
+    // route through `bignum` (`(as i32 (as bignum 2/3))`) instead.
     let err = check("(as i32 2/3)").expect_err("ratio->int should be excluded");
     assert!(format!("{:?}", err).contains("no conversion"), "unexpected error: {:?}", err);
-    let err2 = check("(as bignum 2/3)").expect_err("ratio->bignum should be excluded");
-    assert!(format!("{:?}", err2).contains("no conversion"), "unexpected error: {:?}", err2);
 }
 
 #[test]
