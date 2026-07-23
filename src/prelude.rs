@@ -198,10 +198,40 @@ pub const SOURCE: &str = r#"
     `(let ((,var 0) (,limit ,count-expr))
        (while (< ,var ,limit) ,@body (setf ,var (+ ,var 1))))))
 
-;; `dolist` (iterating a `Sexpr` list in user code) was removed with the rest
-;; of the user-facing `Sexpr` list surface (Symbol/Sexpr redesign Phase 5).
-;; `doiter` over `Vector<T>`/any `Iter` is the homogeneous-collection loop; a
-;; `Sexpr`/`cons<T,U>` traversal API is to be redesigned later.
+;; `dolist`: walk a `Sexpr` cons list, binding `var` to each element (each a
+;; `Sexpr`). Unlike `doiter` — which iterates a *homogeneous* `Vector<T>`/any
+;; `Iter` and yields a single static `Item` type — `dolist`'s element is the
+;; heterogeneous `Sexpr` itself, so the loop body dispatches on its shape with
+;; an ordinary `match` (`(match var ((cons a d) ...) ((sym s) ...) ...)`);
+;; `dolist` deliberately does *not* fuse that `match` in, keeping iteration and
+;; per-element pattern dispatch orthogonal (the body is a plain `progn`, so it
+;; can also just use `var` without matching). `spec` is `(var list-form)` or
+;; `(var list-form result-form)`; like `dotimes`/`doiter`, `gensym` gives the
+;; cursor a fresh name so `list-form` is evaluated exactly once and the binding
+;; can't collide with a same-named variable at the use site. `var` is bound to
+;; `(sexpr-car cursor)` inside the loop, so `Checker::check` infers its type
+;; (`Sexpr`) with no annotation, exactly as `doiter`/`dotimes` rely on — no
+;; checker special form. The optional `result-form` becomes the whole
+;; construct's value (default `()`/`Unit`); unlike CL it is evaluated *outside*
+;; `var`'s scope (CL binds `var` to nil there), which is cleaner here since a
+;; result form references an accumulator, never the exhausted `var`. An
+;; improper/dotted list stops at the first non-`cons` cdr (the `sexpr-consp`
+;; guard), never erroring. The absent-`result-form` default is spelled `(Nil)`
+;; (a `Sexpr`), not `()`: this macro body itself type-checks, and the `if`'s
+;; other branch (`sexpr-car`) is `Sexpr`, so a bare `()` there would be `Unit`
+;; and mismatch — the spliced `(Nil)` still surfaces as `()`/`Unit` in the
+;; final `let`'s tail position (the same two-faced `()` `when`/`unless` use).
+(defmacro dolist (spec &rest body)
+  (let ((var (sexpr-car spec))
+        (list-expr (sexpr-car (sexpr-cdr spec)))
+        (rest-spec (sexpr-cdr (sexpr-cdr spec)))
+        (cursor (gensym)))
+    (let ((result (if (sexpr-null rest-spec) (Nil) (sexpr-car rest-spec))))
+      `(let ((,cursor ,list-expr))
+         (while (sexpr-consp ,cursor)
+           (let ((,var (sexpr-car ,cursor))) ,@body)
+           (setf ,cursor (sexpr-cdr ,cursor)))
+         ,result))))
 
 ;; `when`/`unless`: single-armed `if`. The taken side ends in a trailing
 ;; `()` (after `body`, not instead of it) so its value is always `Unit`,

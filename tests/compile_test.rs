@@ -1732,6 +1732,39 @@ fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
     }
 }
 
+/// `dolist` (`prelude.rs`) desugars to the same `loop`/`break`/`setf` core as
+/// `while`/`dotimes` (hence the identical `(compile not)`-first requirement,
+/// since it too goes through `while`), *plus* a `match` on the `Sexpr` element
+/// and `sexpr-consp`/`sexpr-car`/`sexpr-cdr` walking — all already compilable
+/// (`Sexpr` `match` support, plus the `sexpr-*` `rt_*` shims
+/// `is_rt_builtin_name` recognizes). So a `dolist`-using function compiles with
+/// no `dolist`-specific machinery: this sums the `(int n)` elements of a
+/// `Sexpr` list argument entirely in native code (the quoted list is built by
+/// the tree-walking interpreter and handed to the compiled function), asserting
+/// the real total — not just that compilation succeeded — so a "compiles but
+/// walks the list wrong" bug can't hide. The `result-form` (`acc`) is the whole
+/// `dolist`'s value, and the `(_ ())` arm keeps every `match` arm at `Unit`
+/// (`setf` yields the assigned value, not `Unit`).
+#[test]
+fn compile_dispatches_a_dolist_summing_a_sexpr_list() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun sum-list-ints ((lst Sexpr)) i64
+          (let ((acc (the i64 0)))
+            (dolist (x lst acc)
+              (match x ((int n) (setf acc (+ acc n)) ()) (_ ())))))
+        (compile not)
+        (compile sum-list-ints)
+        (sum-list-ints (quote (1 2 3 4 5)))
+        "#,
+    )
+    .expect("eval failed");
+    match v {
+        RtValue::Int(n) => assert_eq!(n, 15),
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
 /// `build-shl`/`build-ashr` round-trip a `Sexpr::Int` fixnum through the
 /// planned tagged representation (`docs/TODO.md`'s tag table: tag `000`,
 /// payload in the upper 61 bits) — *arithmetic*, not logical, right shift,

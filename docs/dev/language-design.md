@@ -25,7 +25,11 @@
   `sexpr-consp`/`sexpr-null`/`sexpr-atom`（内部 island 層、§4.1）。裸の `cons`/`car`/`cdr` は
   Symbol/Sexpr 再設計 Phase 4b で汎用 `cons-cell<A,B>`（`defstruct`）のフィールドアクセサへ
   付け替えられており、`Sexpr` 専用ではない。`list` は `Sexpr` の `Cons`/`Nil` へ脱糖する。
-  `dolist` は `doiter`（§3、Iter トレイト経由の反復）へ統合され削除済み。
+  `dolist`（`(dolist (var list-form [result-form]) body...)`）は cons セル（`Sexpr`）
+  リスト専用の反復——各要素は異種の `Sexpr` なので body 側で `match` により形状分岐する
+  （`doiter` のような単一 `Item` 型ではない）。`match` を融合せず反復と分岐を直交させる方針
+  （body は素の `progn`）。`prelude.rs` の `defmacro`（`let`+`while`+`sexpr-*` で `Cons` を辿る、
+  §3 末尾 `doiter` と同型の薄いマクロ）。
   `()` は期待型が `Sexpr` のとき `Nil` に、`Option<T>` のとき `None` になる（`Unit` はその他の文脈）。
   実行時は `Nil` を `Value::Empty` で符号化（`Cons` と対等な variant、`Option` ラッパーではない）。
   これは言語レベルで禁止した「真偽値としての `nil`」とは別物（あくまで read データ内の空リスト表現）。
@@ -186,7 +190,7 @@
 | 定義 | `defun` `defvar` `defconstant` `defmethod` `defmacro` `defstruct` `defenum` `module` `use` `lambda` `deftrait` `impl` | 引数・戻り型・グローバルの型は明示（`defvar`/`defconstant`は`(defvar (name Type) value)`で型必須、2026-07-03に型なし形式を削除。局所束縛`let`のみ推論可。`defmacro` は全パラメータ・戻りが `Sexpr` 固定なので型注釈なし、末尾 `&rest name` で可変長対応）。ジェネリック定義形（`defun`/`defstruct`/`defenum`）の型パラメータは名前に山括弧で書く（`name<T,U>`）。`defstruct`（ユーザ定義product型）は再設計後に実装済み。`defenum`（ユーザ定義直和型、`match`/`if-let`対応）を追加。`deftrait`/`impl`（trait機構、§5.1）は2026-06-30実装 |
 | 束縛 | `let` `let*` | |
 | 制御 | `if` `when` `unless` `cond` `case` `match` `if-let` `while-let` `and` `or` `progn` `the` | `and`/`or` は短絡のため特殊形。`the` は型注釈 |
-| 反復 | `loop` `while` `until` `dotimes` `do` `doiter` | `dolist` は `doiter` へ統合され削除済み |
+| 反復 | `loop` `while` `until` `dotimes` `do` `doiter` `dolist` | `doiter` は `Iter` トレイト経由で任意コレクション。`dolist` は cons セル（`Sexpr`）リスト専用で body 側 `match` により要素形状で分岐 |
 | マクロ/引用 | `quote` `quasiquote` (`` ` ``) `unquote` (`,`) `,@` | `quote`/`quasiquote` の戻り型は常に `Sexpr`。`,@`（unquote-splicing）は2026-06-19実装済み |
 | その他 | `setf` `break` `return` `panic` `unreachable` `todo` | `break`/`return`/`panic`/`unreachable`/`todo` は戻り型 `!`（§7） |
 
@@ -232,8 +236,13 @@
 到達すれば `EvalError::Panic`（`definition-time JIT failed: ...`）になる。捕獲変数への `setf` は共有セル
 （CL 的、書き換えは同一セルを指す全クロージャから見える）——値のスナップショットではない。**`dotimes`** `(dotimes (var count) body...)` は `let`+`while`+`setf` への脱糖。
 **`list`** `(list e1 ... en)` は `(Cons e1 (Cons e2 (... (Nil))))` への脱糖（`(list)` は `(Nil)`）。**`dolist`**
-（`let`+`while`+`match` で `Sexpr` の `Cons`/`Nil` を辿る特殊形だった）は削除済み——`Iter` トレイト
-経由で任意のコレクションを辿れる `doiter`（本節末尾）に統合された。
+`(dolist (var list-form [result-form]) body...)` は cons セル（`Sexpr`）リスト専用の反復——
+`var` を各要素（`sexpr-car`、型は `Sexpr`）に束縛し `body` を実行、`cdr` が cons でなくなったら停止する
+（不完全/ドットリストはエラーにせず途中で止まる）。各要素は異種の `Sexpr` なので `body` 側で `match`
+により形状分岐する（`doiter` の単一 `Item` 型とは対照的）——`dolist` は `match` を融合せず反復と
+分岐を直交させる（`body` は素の `progn`）。任意の `result-form` が全体の値（既定 `()`/`Unit`）で、CL と違い
+`var` のスコープ外で評価される。`prelude.rs` の `defmacro`（`dotimes`/`doiter` と同型、`gensym` で
+`list-form` を一度だけ評価）。
 **`loop`** `(loop body...)` は無限ループ。**`break`/`return`** は CL 流：どちらも**直近のループのみ**を脱出する
 （関数の早期 return ではない。`lambda` 境界は越えられない＝クロージャの中から外側のループへ break/return できない）。
 `break` は値を取らず（常に `Unit` で脱出）、`return` は `(return)`／`(return value)` で値任意。`while`/`dotimes`/
