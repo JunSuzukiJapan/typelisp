@@ -22,26 +22,8 @@ CL同等カタログ・可視性・trait機構・compile（普通に書けるコ
 [functions.md](../functions.md) に「将来課題」として散在していた未実装項目を、以下に**着手候補の
 TODO として正式に格上げ**する（2026-07-23、この一覧化で棚卸し）。優先度は目安であり、着手順は未確定。
 
-### ~~T1. `format` の書式指定子~~（2026-07-23 完了）
-
-CL 準拠 `format` と、書式ディレクティブを解釈する `print`/`println` を実装済み。詳細は
-[functions.md](../functions.md) §15 を参照。
-
-- `(format dest control args...)`（`dest`: `true`=CL の `t` で標準出力+文字列返し／`false`=CL の
-  `nil` で文字列返しのみ）、`(print control args...)`／`(println control args...)`。旧来の単一値
-  `princ` メソッド（`(println x)`）は廃止し、**第1引数を制御文字列とする書式指定に統一**した
-  （ユーザ選択「常に書式(format委譲)」）。既存の examples/projects は全て新形式へ書き換え済み。
-- **ディレクティブは CL をほぼ網羅**（2026-07-23 拡張）: `~a ~s ~w`／`~d ~b ~o ~x ~r`／`~p ~c`／
-  `~f ~e ~g ~$`／`~% ~& ~| ~~ ~t ~<改行>`／制御構造 `~( ~[ ~{ ~< ~? ~* ~^ ~;`。プレフィックス
-  パラメータ（整数/`'c`/`v`/`#`）と `:`/`@` 修飾子も対応。未対応は `~/name/`（実行時関数解決機構が
-  format の呼出規約に合わない）と pretty-printer 系 `~i`/`~_`（no-op）のみ。詳細は §15 の表。
-- 実装は3層: 可変長引数を各自の型のまま `Sexpr` へ包んでリスト化する特殊形
-  `Checker::check_format`/`check_print_like`（`check_list_lit` と同系統。`&rest` は単一要素型
-  なので使えない）、書式エンジン専用モジュール [src/eval/format.rs](../../src/eval/format.rs)（制御文字列を
-  `Node` 木にパース→引数 `Vec<Value>` に対し解釈。`~a`/`~s` の値描画は GCヒープ+enum 変種名解決を要する
-  Rust 専用処理、[[typelisp-rust-builtin-policy]] の例外条件）、内部ビルトイン
-  `format-rt`/`print-rt`/`println-rt`。`Interp::run_format` は enum 変種名表を渡す薄いラッパ。
-  `compile` 対象外（旧 `print`/`println` も非対応だった）。tests/format_test.rs 37件。
+完了した項目（T1「`format` の書式指定子」、T5「`--heap-cells N`」）は
+[implementation-log.md](implementation-log.md) 末尾へ移設した（2026-07-23）。
 
 ### T2. `defmacro` の構造化ラムダリスト `&optional` / `&key`（優先度: 中）
 
@@ -69,19 +51,12 @@ CL 準拠 `format` と、書式ディレクティブを解釈する `print`/`pri
 - 静的型・単型化を前提とした現在の設計への影響が大きく、設計判断（表現・GC・compile対応）を
   要する重い項目。優先度は最も低い。
 
-### ~~T5. `--heap-cells N`（cons アリーナ容量指定オプション）~~ → 2026-07-23 実装完了
+### T5. pretty printer（CL の Lisp Pretty Printer 相当）（優先度: 低）
 
-`typl --heap-cells N`（`--heap-cells=N` 形も可）で cons 固定アリーナの容量（既定 65536）を
-起動時に指定できるようにした。`main.rs` の `parse_heap_cells` が全 run モード（`run`/REPL/
-`compile-module`）共通のグローバルフラグとして先頭でパースし、各経路の `Heap::with_capacity`
-へ渡す。不正値・0・値なしはロード前に `exit 1` で弾く。`tests/heap_cells_test.rs`（引数解析の
-out-of-process テスト）、docs は [language-design.md](language-design.md) §2 / [syntax.md](../syntax.md) を更新。
-
-### T6. pretty printer（CL の Lisp Pretty Printer 相当）（優先度: 低）
-
-CL は ANSI 標準の pretty printer を持つ（CLHS 22.2、元は R. Waters の XP）。`format` の
-T1 実装ではこの系統のディレクティブを未対応（no-op / 近似）にしてある。**pretty printer 本体を
-別タスクとして切り出す**（2026-07-23、`~i`/`~_` 等の議論で棚卸し）。
+CL は ANSI 標準の pretty printer を持つ（CLHS 22.2、元は R. Waters の XP）。`format` 実装
+（[implementation-log.md](implementation-log.md)、2026-07-23）ではこの系統のディレクティブを未対応
+（no-op / 近似）にしてある。**pretty printer 本体を別タスクとして切り出す**（2026-07-23、`~i`/`~_`
+等の議論で棚卸し）。
 
 未対応で、この項目で扱う範囲:
 - 特殊変数 `*print-pretty*` / `*print-right-margin*` / `*print-miser-width*` / `*print-pprint-dispatch*`
@@ -93,7 +68,7 @@ T1 実装ではこの系統のディレクティブを未対応（no-op / 近似
 
 - 重い理由: format 単体でなく**印字系全体**に、行幅追跡・インデントスタック・条件改行判断を持つ出力
   ストリーム層が要る。静的型・`*print-*` 変数の持ち方（動的変数機構の要否）とも絡む。優先度は低。
-- 関連: [[typelisp-format-directives]]（T1 実装。未対応分の一覧はここと docs/functions.md §15）。
+- 関連: [[typelisp-format-directives]]（`format` 実装。未対応分の一覧はここと docs/functions.md §15）。
 
 ### 意図的に「やらない」もの（TODO ではない）
 

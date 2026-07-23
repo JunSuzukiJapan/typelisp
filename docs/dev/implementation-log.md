@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-07-22 / ブランチ: `main`
+最終更新: 2026-07-23 / ブランチ: `main`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -4222,3 +4222,41 @@ builtinのassoc関数（`Option::some`等）が「no such function」/「unresol
 - テスト: `tests/vector_test.rs`に3件（`Some`/`None`両方、`len`減少）、`tests/compile_test.rs`に
   3件（JIT経由、空/非空、`len`減少）追加。`typelisp-rt`単体テストにも`rt_struct_pop_field`の
   round-trip 1件追加。`scripts/test-serial.sh`全体green。
+
+## `--heap-cells N`（cons アリーナ容量指定オプション）（2026-07-23、旧 TODO T5）
+
+`typl --heap-cells N`（`--heap-cells=N` 形も可）で cons 固定アリーナの容量（既定 65536）を
+起動時に指定できるようにした。`main.rs` の `parse_heap_cells` が全 run モード（`run`/REPL/
+`compile-module`）共通のグローバルフラグとして先頭でパースし、各経路の `Heap::with_capacity`
+へ渡す。不正値・0・値なしはロード前に `exit 1` で弾く。`tests/heap_cells_test.rs`（引数解析の
+out-of-process テスト）、docs は [language-design.md](language-design.md) §2 / [syntax.md](../syntax.md) を更新。
+
+## `format` の書式指定子 + `print`/`println` の書式指定統一（2026-07-23、旧 TODO T1）
+
+CL 準拠 `format` と、書式ディレクティブを解釈する `print`/`println` を実装。詳細は
+[functions.md](../functions.md) §15 を参照。
+
+- **API**: `(format dest control args...)`（`dest`: `true`=CL の `t` で標準出力+文字列返し／`false`=CL の
+  `nil` で文字列返しのみ）、`(print control args...)`／`(println control args...)`。旧来の単一値
+  `princ` メソッド（`(println x)`）は廃止し、**第1引数を制御文字列とする書式指定に統一**した
+  （ユーザ選択「常に書式(format委譲)」）。既存の examples/projects は全て新形式へ書き換え。
+- **ディレクティブは CL をほぼ網羅**（同日、最小サブセット `~a ~s ~d ~% ~~` から全面拡張）:
+  `~a ~s ~w`／`~d ~b ~o ~x ~r`（英語基数・序数・ローマ数字）／`~p ~c`／`~f ~e ~g ~$`／
+  `~% ~& ~| ~~ ~t ~<改行>`／制御構造 `~(~) ~[~;~] ~{~}~^ ~<~;~> ~? ~*`。プレフィックス
+  パラメータ（整数/`'c`/`v`/`#`）と `:`/`@` 修飾子も対応。`~d` 等の非整数引数は `~a` 相当で表示
+  （CL準拠。最初の版はエラーにしていたのを変更）。未対応は `~/name/`（実行時関数解決機構が format の
+  呼出規約に合わない）と pretty-printer 系 `~i`/`~_`（no-op）のみ→ pretty printer 本体は
+  [TODO.md](TODO.md) の T6 として別タスク化。
+- **実装3層**: (1) 可変長引数を各自の型のまま `Sexpr` へ包んでリスト化する特殊形
+  `Checker::check_format`/`check_print_like`（`check_list_lit` と同系統。`&rest` は単一要素型
+  なので使えず、`cons_hetero_sexpr` が各要素を `wrap_rest_elem`/`sexpr_ctor_for` で包む。対象は
+  i32/i64/f64/bignum/ratio/char/bool/string/Sexpr、それ以外は型エラー）、(2) 書式エンジン専用
+  モジュール [src/eval/format.rs](../../src/eval/format.rs)（制御文字列を `Node` 木にパース——block 系
+  `~[ ~{ ~< ~(` の入れ子と clause 分割 `~;` を再帰下降で処理——→引数を `Vec<Value>` 化して `~*` 等の
+  カーソル移動に対応→`State` が解釈。値描画 `render_value` は GCヒープ走査+enum 変種名解決を要する
+  Rust 専用処理で `main.rs` の `format_sexpr`（REPL echo）の姉妹、standard/aesthetic フラグで
+  文字列/文字のクォート有無を切替）、(3) 内部ビルトイン `format-rt`/`print-rt`/`println-rt`
+  （`eval_builtin`。synthetic `Ref` 経由でディスパッチ）。`Interp::run_format` は enum 変種名表
+  （`collect_struct_and_enum_types`）を渡す薄いラッパ。
+- `compile` 対象外（旧 `print`/`println` も非対応だった）。`tests/format_test.rs` 37件。
+  `is_builtin_form_head` にも format/print/println を追加。`scripts/test-serial.sh` 全体green。
