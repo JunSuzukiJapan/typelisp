@@ -47,6 +47,14 @@
 //! local bindings, including inside non-catchall `match` arms via the
 //! checker's error-recovery mode — see `Checker::set_recover`).
 
+// Documents are keyed by `lsp_types::Uri`, which clippy flags as a "mutable
+// key type" because it contains an interior-mutability cell — a lazily
+// populated hash cache (`Cell<NonZero<u32>>`), *not* state that participates
+// in `Eq`/`Hash`. The key's observable identity is immutable, so using it as
+// a `HashMap`/`HashSet` key is sound; the lint is a false positive for this
+// upstream type and there is no more-natural document key to switch to.
+#![allow(clippy::mutable_key_type)]
+
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;

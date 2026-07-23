@@ -2552,7 +2552,7 @@ thread_local! {
     /// `ACTIVE_HEAP` is (module doc comment); unlike `ACTIVE_HEAP`, nothing
     /// re-points this automatically on every call, so [`reset_global_table`]
     /// must be called whenever a fresh `Heap` begins its lifetime.
-    static GLOBAL_INDEX: RefCell<Vec<usize>> = RefCell::new(Vec::new());
+    static GLOBAL_INDEX: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Clears this thread's global-id table. Must be called whenever a fresh

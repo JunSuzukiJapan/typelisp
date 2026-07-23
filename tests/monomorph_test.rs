@@ -397,7 +397,7 @@ fn the_erased_generic_body_is_not_registered_in_the_interpreter() {
     let r = Reader::new();
     let vs = r.read_all(&mut h, "(defun identity<T> ((x T)) T x) (compile identity)").expect("read failed");
     let mut chk = Checker::new();
-    let mut interp = Interp::new();
+    let interp = Interp::new();
     let mut failed = false;
     for v in vs {
         match chk.check_form(&mut h, &interp, v) {

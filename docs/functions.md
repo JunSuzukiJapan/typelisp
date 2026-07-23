@@ -387,7 +387,8 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 
 `print`/`println`は呼び出しのたびに即座に`flush`する（パイプ経由でも`read-line`の前にプロンプトが
 確実に見えるようにするため）。数値と文字列を混在させて表示するには複数回`print`/`println`を呼ぶ
-（例: `(print "answer: ") (println 42)`）——CL の `format` 相当の書式指定子は未実装。
+（例: `(print "answer: ") (println 42)`）——CL の `format` 相当の書式指定子は未実装
+（着手候補として [dev/TODO.md](dev/TODO.md) の T1 に格上げ済み）。
 
 ## 16. 解析・評価 (`parse-int` / `parse-float` / `read` / `eval`)
 

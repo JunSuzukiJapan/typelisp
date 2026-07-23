@@ -14,7 +14,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
-    let mut interp = Interp::new();
+    let interp = Interp::new();
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");

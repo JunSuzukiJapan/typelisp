@@ -222,11 +222,11 @@ fn repl() -> rustyline::Result<()> {
     let checker = Rc::new(RefCell::new(Checker::new()));
     checker.borrow_mut().set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
-    typelisp::prelude::load_cached(&mut heap, &mut *checker.borrow_mut(), &mut interp);
+    typelisp::prelude::load_cached(&mut heap, &mut checker.borrow_mut(), &mut interp);
     // The compiler island is always loaded (interp-closure removal Stage 5),
     // as native AOT code, so a closure typed at the REPL is JIT-compiled at
     // definition time rather than falling back to an interpreted closure.
-    typelisp::load_compiler_aot(&mut heap, &mut *checker.borrow_mut(), &mut interp);
+    typelisp::load_compiler_aot(&mut heap, &mut checker.borrow_mut(), &mut interp);
     // Wire the interpreter to the checker now that loading is done, so
     // `(eval ...)` at the REPL type-checks against the live environment.
     interp.set_checker(Rc::clone(&checker));

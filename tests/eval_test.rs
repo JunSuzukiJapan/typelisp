@@ -408,7 +408,7 @@ fn eval_sexpr(src: &str) -> (Heap, Value) {
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
-    let mut interp = Interp::new();
+    let interp = Interp::new();
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
@@ -933,7 +933,7 @@ fn runtime_error_carries_source_location() {
     let src = "(defun risky ((n i32)) i32\n  (panic \"boom\"))\n(risky 5)";
     let vs = r.read_all_in(&mut h, "prog.typl", src).expect("read failed");
     let mut chk = Checker::new();
-    let mut interp = Interp::new();
+    let interp = Interp::new();
     let mut err = None;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");

@@ -201,6 +201,20 @@ pub enum TopLevel {
 /// returned by [`Checker::parse_params_rest`] alongside the fixed params.
 type RestParam = (String, Type, Option<Loc>);
 
+/// The variables a pattern binds: each `(name, type, name's source position)`,
+/// as returned by [`Checker::check_pattern`]/[`Checker::check_ctor_pattern`].
+/// The `Loc` lets a later reference in a `match` arm body resolve
+/// goto-definition back to the binding site.
+type PatternBindings = Vec<(String, Type, Option<Loc>)>;
+
+/// The generic templates [`Checker::export_templates`] hands to the fasl
+/// serializer: free functions and (type-name-qualified) methods, each paired
+/// with its heap-independent [`crate::fasl`] representation.
+type ExportedTemplates = (
+    Vec<(Path, crate::fasl::FnTemplateRepr)>,
+    Vec<(Path, String, crate::fasl::MethodTemplateRepr)>,
+);
+
 /// A lexical environment mapping variable names to their types.
 #[derive(Clone)]
 struct Env {
@@ -854,13 +868,7 @@ impl Checker {
     /// [`crate::fasl`] representation — the serialize-side half of the fasl
     /// round trip (templates are the only checker state whose data lives on
     /// the GC heap; see [`FnTemplate`]/[`MethodTemplate`]).
-    pub fn export_templates(
-        &self,
-        heap: &Heap,
-    ) -> Result<
-        (Vec<(Path, crate::fasl::FnTemplateRepr)>, Vec<(Path, String, crate::fasl::MethodTemplateRepr)>),
-        Error,
-    > {
+    pub fn export_templates(&self, heap: &Heap) -> Result<ExportedTemplates, Error> {
         let mut fns = Vec::new();
         for (path, t) in &self.generic_fn_templates {
             let parts = t.parts.iter().map(|v| crate::fasl::value_to_owned(heap, *v)).collect::<Result<_, _>>()?;
@@ -3793,6 +3801,12 @@ impl Checker {
 
     /// A `::`-qualified call: a module-qualified macro, free function, or
     /// `Type::method` static associated function.
+    // Cohesive checker entry point: `heap`/`interp`/`env`/`arg_locs`/`expected`
+    // are the invariant type-checking context threaded through every such
+    // method. Bundling them into a struct would have to carry `&mut Heap`
+    // alongside shared borrows and would ripple through the whole checker for
+    // no readability gain, so the arg count stays as-is.
+    #[allow(clippy::too_many_arguments)]
     fn check_path_call(
         &self,
         heap: &mut Heap,
@@ -4528,6 +4542,8 @@ impl Checker {
         self.let_star_rec(heap, interp, env, &binds, &args[1..], &arg_locs[1..], expected)
     }
 
+    // Same invariant checking context as `check_path_call` — see its comment.
+    #[allow(clippy::too_many_arguments)]
     fn let_star_rec(
         &self,
         heap: &mut Heap,
@@ -4828,6 +4844,8 @@ impl Checker {
         Ok(acc)
     }
 
+    // Same invariant checking context as `check_path_call` — see its comment.
+    #[allow(clippy::too_many_arguments)]
     fn check_call(
         &self,
         heap: &mut Heap,
@@ -5137,6 +5155,8 @@ impl Checker {
 
     /// `ctor` is `(type path, variant index)` — the same pair [`Self::resolve_ctor`]
     /// returns, bundled into one parameter to keep the arity down.
+    // Same invariant checking context as `check_path_call` — see its comment.
+    #[allow(clippy::too_many_arguments)]
     fn check_construct(
         &self,
         heap: &mut Heap,
@@ -5351,7 +5371,7 @@ impl Checker {
         expected: &Type,
         v: Value,
         loc: Option<Loc>,
-    ) -> Result<(Pattern, Vec<(String, Type, Option<Loc>)>), Error> {
+    ) -> Result<(Pattern, PatternBindings), Error> {
         match v {
             Value::Symbol(id) => {
                 let name = heap.symbol_name(id);
@@ -5386,7 +5406,7 @@ impl Checker {
         heap: &Heap,
         expected: &Type,
         v: Value,
-    ) -> Result<(Pattern, Vec<(String, Type, Option<Loc>)>), Error> {
+    ) -> Result<(Pattern, PatternBindings), Error> {
         // `list_to_vec_locs` so each field sub-pattern keeps its own recorded
         // position — a bound name's `Loc` is what goto-definition on a later
         // reference resolves to (see `check_pattern`'s doc comment).

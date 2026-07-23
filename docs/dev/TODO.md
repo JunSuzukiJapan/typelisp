@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-07-22 / ブランチ: `main`
+最終更新: 2026-07-23 / ブランチ: `main`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離、
@@ -17,7 +17,67 @@
 の Phase 7（ドキュメント整備）も `docs/functions.md`/`docs/syntax.md`/`docs/dev/language-design.md`
 との突き合わせを完了し、完了扱いにした（2026-07-22）。
 
-現時点で着手中・積み残しの実装作業はなし。次に着手する機能・改善は未指定。
+CL同等カタログ・可視性・trait機構・compile（普通に書けるコードから到達する範囲）は実装済みで、
+**進行中の作業はない**。ただし [language-design.md](language-design.md) §8「当面の範囲外」／§7.4／
+[functions.md](../functions.md) に「将来課題」として散在していた未実装項目を、以下に**着手候補の
+TODO として正式に格上げ**する（2026-07-23、この一覧化で棚卸し）。優先度は目安であり、着手順は未確定。
+
+### T1. `format` の書式指定子（優先度: 中）
+
+CL の `format` 相当。`print`/`println` は実装済みだが、`~a`（aesthetic）/`~s`（standard）/
+`~d`（decimal）/`~%`（改行）/`~~` 等の**書式ディレクティブは未実装**
+（[functions.md](../functions.md) の `print`/`println` 節に明記）。
+
+- 現実的に最初に着手しやすい候補。既に出力基盤（`print`/`println`）があり影響範囲が限定的。
+- スコープ判断が必要: 完全な CL `format` は膨大（`~{...~}` の反復・`~[...~]` の条件・桁揃え等）。
+  まず `~a`/`~s`/`~d`/`~%`/`~~` の**最小サブセット**から始め、必要に応じて拡張する方針を推奨。
+- 実装場所の検討: 書式文字列は実行時に解釈するため、Rust組み込みにするか typelisp（prelude）側で
+  書くかは [[typelisp-rust-builtin-policy]] の方針（Rust専用処理でなければ typelisp で書く）に照らす。
+  書式文字列のパースと分岐は typelisp で書ける見込み。
+
+### T2. `defmacro` の構造化ラムダリスト `&optional` / `&key`（優先度: 中）
+
+現状 `defmacro` のラムダリストは `&rest` のみ対応（`&rest` は 2026-07-15 に再導入済み）。
+`&optional`（省略可能引数＋デフォルト値）と `&key`（キーワード引数）は
+[language-design.md](language-design.md) §8 で対象外扱いのまま。
+
+- マクロ展開時のみの機能なので型システムへの波及は小さいが、デフォルト値式の評価タイミングと
+  `&rest` との併用順序（CL のラムダリスト規約）を仕様として固める必要がある。
+
+### T3. ユーザ定義エラー型（優先度: 中〜低）
+
+現状エラー型は組み込み汎用 `Error` のみで、既定は `Result<T, Error>`
+（[language-design.md](language-design.md) §7.4）。trait機構（`deftrait`/`impl`/`where`）は
+実装済みだが、**ユーザ定義エラー型をこの機構で扱えるように拡張する作業自体は未着手**。
+
+- `defstruct`/`defenum` で定義した型をエラーとして `Result<T, MyError>` に載せられるようにする。
+- 動的ディスパッチ（T4）と関連: 複数のエラー型を一様に扱う場面では vtable 相当が絡む可能性がある。
+
+### T4. 動的ディスパッチ（vtable / `dyn Trait` 相当）（優先度: 低）
+
+静的 trait 機構（単型化ベース）は実装済み（§5.1）。実行時に型が決まる動的ディスパッチ
+（[language-design.md](language-design.md) §8）は未実装。
+
+- 静的型・単型化を前提とした現在の設計への影響が大きく、設計判断（表現・GC・compile対応）を
+  要する重い項目。優先度は最も低い。
+
+### T5. `--heap-cells N`（cons アリーナ容量指定オプション）（優先度: 低）
+
+cons セルは起動時確保・再確保しない固定アリーナ（生ポインタ安定のため）。容量を CLI で
+指定する `--heap-cells N` は [language-design.md](language-design.md) §2 で「将来」と記載のまま未実装
+（`heap_cells`/`heap-cells` は現状ソースに存在しない）。
+
+- 小さな機能だが、アリーナ確保箇所（`crates/typelisp-mem`）と CLI 引数解析（`src/bin`）の
+  両方に手を入れる必要がある。
+
+### 意図的に「やらない」もの（TODO ではない）
+
+以下は将来課題ではなく**設計判断で対象外**と確定済み。混同しないこと。
+
+- **`Sexpr` への `Iter<Item>` trait 実装**: 要素型が固定されないリストにジェネリックな
+  `Iter<Item>` を被せるのは型システム上不適切というユーザー判断（[language-design.md](language-design.md)
+  §5末尾、[[typelisp-typechecking-is-not-design-soundness]]）。一度実装したが撤回済み。
+- **`?`/`try` 構文**、および `!`/`?` の命名接尾辞: CL に倣い非採用（§7.3）。
 
 ---
 

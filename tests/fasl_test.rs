@@ -14,9 +14,8 @@ fn read_one(heap: &mut Heap, src: &str) -> Value {
     let r = Reader::new();
     let mut vs = r.read_all(heap, src).expect("read failed");
     assert_eq!(vs.len(), 1, "expected exactly one form");
-    let v = vs.pop().unwrap();
     // read_all leaves its results rooted; keep it that way for the test.
-    v
+    vs.pop().unwrap()
 }
 
 /// Structural equality across *different* heaps: the rebuilt value must
@@ -127,7 +126,7 @@ fn prelude_fasl() -> Fasl {
     // (taken before load) diffs to exactly the prelude's own definitions.
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
-    let mut interp = Interp::new();
+    let interp = Interp::new();
     let mark = registry_mark(&chk);
 
     // Reproduce `load_prelude` but keeping the checked TopLevels for capture.

@@ -14,7 +14,7 @@ fn run_with_capacity(src: &str, capacity: usize) -> Result<(RtValue, Heap), Eval
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
-    let mut interp = Interp::new();
+    let interp = Interp::new();
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
@@ -291,7 +291,7 @@ fn macro_arity_mismatch_is_a_type_error() {
         .read_all(&mut h, "(defmacro double (x) `(+ ,x ,x)) (double 1 2)")
         .expect("read failed");
     let mut chk = Checker::new();
-    let mut interp = Interp::new();
+    let interp = Interp::new();
     let mut last_err = None;
     for v in vs {
         match chk.check_form(&mut h, &interp, v) {
@@ -408,7 +408,7 @@ fn rest_macro_too_few_fixed_args_is_a_type_error() {
         .read_all(&mut h, "(defmacro capture (a &rest rest) rest) (capture)")
         .expect("read failed");
     let mut chk = Checker::new();
-    let mut interp = Interp::new();
+    let interp = Interp::new();
     let mut last_err = None;
     for v in vs {
         match chk.check_form(&mut h, &interp, v) {

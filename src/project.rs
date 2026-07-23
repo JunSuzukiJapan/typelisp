@@ -322,6 +322,11 @@ impl Loader {
     /// Read, scan, check, and queue one file's worth of source under module
     /// path `segs`. See the module doc comment for the root-stack discipline
     /// this follows.
+    // `heap`/`reader`/`checker`/`interp` are the invariant loading context
+    // threaded through every load step; `file`/`src`/`segs` identify the one
+    // file. Bundling the context would carry several independent `&mut`
+    // borrows in one struct and ripple through the loader for no clarity gain.
+    #[allow(clippy::too_many_arguments)]
     fn load_source(
         &mut self,
         heap: &mut Heap,
@@ -341,6 +346,8 @@ impl Loader {
         result
     }
 
+    // Same invariant loading context as `load_source` — see its comment.
+    #[allow(clippy::too_many_arguments)]
     fn load_source_inner(
         &mut self,
         heap: &mut Heap,

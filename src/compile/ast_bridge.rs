@@ -2082,6 +2082,10 @@ fn translate_indirect_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], cx:
 /// by the caller (the same convention [`tagged`]'s own `items` slice
 /// elements rely on) and remains the caller's to pop afterward; this
 /// function only roots/pops what it itself allocates.
+// The captured-name/cell-name/scope arguments are the cohesive set a lambda
+// translation needs; splitting them into a struct would only relocate the
+// same data behind an extra indirection.
+#[allow(clippy::too_many_arguments)]
 fn build_lambda_tag(
     heap: &mut Heap,
     name: &str,

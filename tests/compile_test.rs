@@ -16,7 +16,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
-    let mut interp = Interp::new();
+    let interp = Interp::new();
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
@@ -4380,8 +4380,8 @@ fn compile_dispatches_numeric_helpers_and_agrees_with_the_interpreter() {
         ("(defun f ((a ratio) (b ratio)) ratio (expt a b))", "(f 2/3 (int->ratio 3))"),
     ];
     for (src, call) in cases {
-        let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).unwrap_or_else(|e| panic!("interp {call}: {e:?}"));
-        let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile f)\n{call}")).unwrap_or_else(|e| panic!("compiled {call}: {e:?}"));
+        let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).unwrap_or_else(|e| panic!("interp {}: {:?}", call, e));
+        let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile f)\n{call}")).unwrap_or_else(|e| panic!("compiled {}: {:?}", call, e));
         assert_eq!(compiled, interpreted, "compiled {call} agrees with the interpreter");
     }
 }

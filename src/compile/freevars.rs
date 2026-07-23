@@ -214,11 +214,16 @@ fn walk(typed: &Typed, bound: &HashSet<String>, siblings: &HashSet<String>, seen
                 walk_body(&arm.body, &inner, siblings, seen, order);
             }
         }
-        // `typed.ty` here is `Set`'s own expression type (always `Unit`),
-        // not the assigned name's type — a real mismatch, but inconsequential:
-        // `ast_bridge.rs` rejects `Expr::Set` as `unsupported` outright, so a
-        // `labels`/`lambda` body containing one can never reach actual IR
-        // generation regardless of what this records for it.
+        // `typed.ty` here is the *target variable's* type, not `Set`'s own
+        // expression type — `Checker::check_setf` builds the `Expr::Set` node
+        // with `ty` taken from `env.get(&name)` (see `translate_set`'s doc
+        // comment in `ast_bridge.rs`), so recording it as `name`'s type here
+        // is exactly right. That matters because `ast_bridge.rs` does
+        // translate `Expr::Set` for real, and `tagged_sym_list` feeds each
+        // captured name's recorded type through `binding_kind`/
+        // `struct_field_kind` to pick its closure-env slot's kind tag — a
+        // name captured *only* on a `set`'s left-hand side still gets the
+        // correct kind from this.
         Expr::Set(name, value) => {
             note(name, &typed.ty, bound, siblings, seen, order);
             walk(value, bound, siblings, seen, order);
