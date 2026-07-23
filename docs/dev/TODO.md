@@ -77,6 +77,24 @@ CL 準拠 `format` と、書式ディレクティブを解釈する `print`/`pri
 へ渡す。不正値・0・値なしはロード前に `exit 1` で弾く。`tests/heap_cells_test.rs`（引数解析の
 out-of-process テスト）、docs は [language-design.md](language-design.md) §2 / [syntax.md](../syntax.md) を更新。
 
+### T6. pretty printer（CL の Lisp Pretty Printer 相当）（優先度: 低）
+
+CL は ANSI 標準の pretty printer を持つ（CLHS 22.2、元は R. Waters の XP）。`format` の
+T1 実装ではこの系統のディレクティブを未対応（no-op / 近似）にしてある。**pretty printer 本体を
+別タスクとして切り出す**（2026-07-23、`~i`/`~_` 等の議論で棚卸し）。
+
+未対応で、この項目で扱う範囲:
+- 特殊変数 `*print-pretty*` / `*print-right-margin*` / `*print-miser-width*` / `*print-pprint-dispatch*`
+- 関数 `pprint` / `pprint-fill` / `pprint-linear` / `pprint-tabular` / `pprint-logical-block` /
+  `pprint-newline` / `pprint-indent` / `pprint-tab` / `set-pprint-dispatch`
+- `format` ディレクティブの pretty 連動分: `~w`（現状は単なる `prin1` に寄せてある）、`~_`（条件改行）、
+  `~i`（インデント。現状 no-op）、`~<...~:>`（閉じに `:` が付く**論理ブロック**用法。現状の桁揃え
+  `~<...~>` とは別物）、`~:t`（論理ブロック内タブ）
+
+- 重い理由: format 単体でなく**印字系全体**に、行幅追跡・インデントスタック・条件改行判断を持つ出力
+  ストリーム層が要る。静的型・`*print-*` 変数の持ち方（動的変数機構の要否）とも絡む。優先度は低。
+- 関連: [[typelisp-format-directives]]（T1 実装。未対応分の一覧はここと docs/functions.md §15）。
+
 ### 意図的に「やらない」もの（TODO ではない）
 
 以下は将来課題ではなく**設計判断で対象外**と確定済み。混同しないこと。
