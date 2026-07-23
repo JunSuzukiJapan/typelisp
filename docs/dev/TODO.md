@@ -77,6 +77,10 @@ CL は ANSI 標準の pretty printer を持つ（CLHS 22.2、元は R. Waters �
 - **`Sexpr` への `Iter<Item>` trait 実装**: 要素型が固定されないリストにジェネリックな
   `Iter<Item>` を被せるのは型システム上不適切というユーザー判断（[language-design.md](language-design.md)
   §5末尾、[[typelisp-typechecking-is-not-design-soundness]]）。一度実装したが撤回済み。
+  なお、cons セルのリストを走査する反復手段としては **`dolist` マクロが別途ある**
+  （`src/prelude.rs` の `defmacro dolist`）。`Iter` トレイトを介さず、`consp`/`car`/`cdr` で
+  直接歩いて各要素を束縛する（要素は動的に `Sexpr`。使う側が `match` で具体型に分解する）ので、
+  上記の「ジェネリックな `Iter<Item>` を被せない」方針と両立している。
 - **`?`/`try` 構文**、および `!`/`?` の命名接尾辞: CL に倣い非採用（§7.3）。
 
 ---
