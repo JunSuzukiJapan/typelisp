@@ -19,20 +19,72 @@ use typelisp::*;
 const PROMPT_PRIMARY: &str = "typl> ";
 const PROMPT_CONTINUE: &str = "...   ";
 
+/// Default cons-arena capacity (cells), used when `--heap-cells` is absent.
+/// The arena is fixed-size — sized up front, never grown (see
+/// `typelisp_mem::Heap`'s module doc / `Error::HeapExhausted`); this is the
+/// same `1 << 16` the runtime paths have always allocated.
+const DEFAULT_HEAP_CELLS: usize = 1 << 16;
+
 fn main() -> rustyline::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // A global `--heap-cells N` (or `--heap-cells=N`) sizes the fixed cons
+    // arena every run mode below allocates; strip it (and its value) first so
+    // neither the subcommand dispatch nor the file-name search below trips
+    // over its numeric argument.
+    let (heap_cells, args) = parse_heap_cells(args);
     // `typl compile-module <file.typl> [-o out.fasl]` — precompile a source
     // file to a fasl (see `crate::fasl` / `compile_module`), for
     // fasl-preferred `(load)`.
     if args.first().map(String::as_str) == Some("compile-module") {
-        std::process::exit(compile_module(&args[1..]));
+        std::process::exit(compile_module(&args[1..], heap_cells));
     }
     // Otherwise the first non-flag argument names a source file to run;
     // with none, start the REPL.
     if let Some(file) = args.iter().find(|a| !a.starts_with("--")) {
-        std::process::exit(run_file(file));
+        std::process::exit(run_file(file, heap_cells));
     }
-    repl()
+    repl(heap_cells)
+}
+
+/// Parses a global `--heap-cells N` / `--heap-cells=N` flag out of `args`,
+/// returning the requested cons-arena capacity (defaulting to
+/// [`DEFAULT_HEAP_CELLS`]) and the remaining arguments with the flag and its
+/// value removed. Exits the process with a diagnostic on a missing or invalid
+/// value — the flag sizes a one-shot allocation, so a typo is better caught
+/// before any work than silently ignored. A later occurrence wins.
+fn parse_heap_cells(args: Vec<String>) -> (usize, Vec<String>) {
+    let mut capacity = DEFAULT_HEAP_CELLS;
+    let mut rest = Vec::with_capacity(args.len());
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        if a == "--heap-cells" {
+            match it.next() {
+                Some(v) => capacity = parse_heap_cells_value(&v),
+                None => {
+                    eprintln!("--heap-cells: needs a positive integer (number of cons cells)");
+                    std::process::exit(1);
+                }
+            }
+        } else if let Some(v) = a.strip_prefix("--heap-cells=") {
+            capacity = parse_heap_cells_value(v);
+        } else {
+            rest.push(a);
+        }
+    }
+    (capacity, rest)
+}
+
+/// Parses the value half of `--heap-cells`; exits with a diagnostic if it is
+/// not a positive integer (zero is rejected — an empty arena exhausts on the
+/// first `cons`, so it is never a useful request).
+fn parse_heap_cells_value(v: &str) -> usize {
+    match v.parse::<usize>() {
+        Ok(n) if n > 0 => n,
+        _ => {
+            eprintln!("--heap-cells: `{}` is not a positive integer", v);
+            std::process::exit(1);
+        }
+    }
 }
 
 /// `compile-module <file.typl> [-o <out.fasl>]`: checks `file` against a
@@ -40,7 +92,7 @@ fn main() -> rustyline::Result<()> {
 /// Does *not* run the file's top-level expressions (only registrations are
 /// captured — a `TopLevel::Expr` in the source is a compile error, since a
 /// fasl is a module of definitions, not a script). Returns an exit code.
-fn compile_module(args: &[String]) -> i32 {
+fn compile_module(args: &[String], heap_cells: usize) -> i32 {
     let mut input: Option<&str> = None;
     let mut output: Option<String> = None;
     let mut it = args.iter();
@@ -78,7 +130,7 @@ fn compile_module(args: &[String]) -> i32 {
         }
     };
 
-    let mut heap = Heap::with_capacity(1 << 16);
+    let mut heap = Heap::with_capacity(heap_cells);
     let reader = Reader::new();
     let mut checker = Checker::new();
     checker.set_redef_policy(parse_redef_policy());
@@ -155,8 +207,8 @@ fn compile_module(args: &[String]) -> i32 {
 /// Load and execute `file` (and, transitively, whatever its `use`s pull in).
 /// Returns the process exit code. Top-level expression results are not
 /// printed — printing is the REPL's affordance; a script prints via `print`.
-fn run_file(file: &str) -> i32 {
-    let mut heap = Heap::with_capacity(1 << 16);
+fn run_file(file: &str, heap_cells: usize) -> i32 {
+    let mut heap = Heap::with_capacity(heap_cells);
     let reader = Reader::new();
     let mut checker = Checker::new();
     checker.set_redef_policy(parse_redef_policy());
@@ -211,8 +263,8 @@ fn run_file(file: &str) -> i32 {
     0
 }
 
-fn repl() -> rustyline::Result<()> {
-    let mut heap = Heap::with_capacity(1 << 16);
+fn repl(heap_cells: usize) -> rustyline::Result<()> {
+    let mut heap = Heap::with_capacity(heap_cells);
     let reader = Reader::new();
     // The checker lives behind a shared `RefCell` so the interpreter can reach
     // it to type-check a runtime `(eval ...)` form (`Interp::eval_form`), while

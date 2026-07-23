@@ -61,14 +61,13 @@ CL の `format` 相当。`print`/`println` は実装済みだが、`~a`（aesthe
 - 静的型・単型化を前提とした現在の設計への影響が大きく、設計判断（表現・GC・compile対応）を
   要する重い項目。優先度は最も低い。
 
-### T5. `--heap-cells N`（cons アリーナ容量指定オプション）（優先度: 低）
+### ~~T5. `--heap-cells N`（cons アリーナ容量指定オプション）~~ → 2026-07-23 実装完了
 
-cons セルは起動時確保・再確保しない固定アリーナ（生ポインタ安定のため）。容量を CLI で
-指定する `--heap-cells N` は [language-design.md](language-design.md) §2 で「将来」と記載のまま未実装
-（`heap_cells`/`heap-cells` は現状ソースに存在しない）。
-
-- 小さな機能だが、アリーナ確保箇所（`crates/typelisp-mem`）と CLI 引数解析（`src/bin`）の
-  両方に手を入れる必要がある。
+`typl --heap-cells N`（`--heap-cells=N` 形も可）で cons 固定アリーナの容量（既定 65536）を
+起動時に指定できるようにした。`main.rs` の `parse_heap_cells` が全 run モード（`run`/REPL/
+`compile-module`）共通のグローバルフラグとして先頭でパースし、各経路の `Heap::with_capacity`
+へ渡す。不正値・0・値なしはロード前に `exit 1` で弾く。`tests/heap_cells_test.rs`（引数解析の
+out-of-process テスト）、docs は [language-design.md](language-design.md) §2 / [syntax.md](../syntax.md) を更新。
 
 ### 意図的に「やらない」もの（TODO ではない）
 

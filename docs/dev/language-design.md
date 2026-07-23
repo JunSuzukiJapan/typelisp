@@ -52,7 +52,7 @@
 
 ## 1. メモリモデル / GC
 
-- cons セルは**固定アリーナ**（起動時に確保、再確保しない＝生ポインタが安定）。将来 `--heap-cells N` で容量指定。
+- cons セルは**固定アリーナ**（起動時に確保、再確保しない＝生ポインタが安定）。既定は 65536（`1 << 16`）セルで、`typl --heap-cells N` で起動時に容量を指定できる（`run`/REPL/`compile-module` 共通のグローバルフラグ、`--heap-cells=N` 形も可。`main.rs` の `parse_heap_cells`）。
 - 割当はフリーリストから。空なら GC、それでも空なら **`Error::HeapExhausted`（成長しない）**。
 - **mark-sweep GC**（反復マーク＝深い構造でもスタック溢れなし、循環回収）。ルート集合 `push_root`/`pop_root`。
 - **生ポインタは `ConsRef` に隠蔽、公開 API は安全**。

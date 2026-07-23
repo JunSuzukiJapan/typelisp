@@ -191,6 +191,9 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - **循環参照はエラー**: `circular module dependency: a -> b -> a` の形で連鎖が報告される。
 - **実行**: `typl <file.typl>` でファイルを実行できる（引数なしなら REPL）。REPL の `use` も
   同じ規約でファイルを解決する。
+- **cons アリーナ容量**: `typl --heap-cells N` で cons セルの固定アリーナ容量を指定できる（既定
+  65536。`--heap-cells=N` 形も可、`run`/REPL/`compile-module` 共通）。アリーナは起動時確保・
+  再成長しないため、大量のリスト処理で `heap exhausted` になる場合はここで増やす。
 
 ### load — コンパイル済み優先ロード（fasl）
 
