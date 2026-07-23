@@ -31,14 +31,17 @@ CL 準拠 `format` と、書式ディレクティブを解釈する `print`/`pri
   `nil` で文字列返しのみ）、`(print control args...)`／`(println control args...)`。旧来の単一値
   `princ` メソッド（`(println x)`）は廃止し、**第1引数を制御文字列とする書式指定に統一**した
   （ユーザ選択「常に書式(format委譲)」）。既存の examples/projects は全て新形式へ書き換え済み。
-- ディレクティブは最小サブセット `~a`/`~s`/`~d`/`~%`/`~~`（大文字小文字非区別）。`~{...~}` 反復・
-  `~[...~]` 条件・桁揃え・`~c`/`~&` 等は将来課題（同 §15 の表を拡張する形で追加可能）。
+- **ディレクティブは CL をほぼ網羅**（2026-07-23 拡張）: `~a ~s ~w`／`~d ~b ~o ~x ~r`／`~p ~c`／
+  `~f ~e ~g ~$`／`~% ~& ~| ~~ ~t ~<改行>`／制御構造 `~( ~[ ~{ ~< ~? ~* ~^ ~;`。プレフィックス
+  パラメータ（整数/`'c`/`v`/`#`）と `:`/`@` 修飾子も対応。未対応は `~/name/`（実行時関数解決機構が
+  format の呼出規約に合わない）と pretty-printer 系 `~i`/`~_`（no-op）のみ。詳細は §15 の表。
 - 実装は3層: 可変長引数を各自の型のまま `Sexpr` へ包んでリスト化する特殊形
   `Checker::check_format`/`check_print_like`（`check_list_lit` と同系統。`&rest` は単一要素型
-  なので使えない）、書式展開エンジン `Interp::run_format`（`~a`/`~s` の値描画は GCヒープ+enum
-  変種名解決を要する Rust 専用処理なので `render_sexpr_value` に集約、[[typelisp-rust-builtin-policy]]
-  の例外条件に該当）、内部ビルトイン `format-rt`/`print-rt`/`println-rt`。`compile` 対象外
-  （旧 `print`/`println` も非対応だった）。
+  なので使えない）、書式エンジン専用モジュール [src/eval/format.rs](../../src/eval/format.rs)（制御文字列を
+  `Node` 木にパース→引数 `Vec<Value>` に対し解釈。`~a`/`~s` の値描画は GCヒープ+enum 変種名解決を要する
+  Rust 専用処理、[[typelisp-rust-builtin-policy]] の例外条件）、内部ビルトイン
+  `format-rt`/`print-rt`/`println-rt`。`Interp::run_format` は enum 変種名表を渡す薄いラッパ。
+  `compile` 対象外（旧 `print`/`println` も非対応だった）。tests/format_test.rs 37件。
 
 ### T2. `defmacro` の構造化ラムダリスト `&optional` / `&key`（優先度: 中）
 

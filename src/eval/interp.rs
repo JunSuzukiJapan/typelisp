@@ -2977,65 +2977,17 @@ impl Interp {
     }
 
     /// The CL-style `format` directive engine shared by the `format-rt`/
-    /// `print-rt`/`println-rt` builtins (see `Self::eval_builtin`). Interprets
-    /// `control` a character at a time, appending literal text verbatim and,
-    /// at each `~` directive, either emitting fixed text (`~%` newline, `~~`
-    /// tilde) or consuming and rendering the next element of the `args` list.
-    ///
-    /// Supported directives (the minimal CL subset — `docs/functions.md` §15):
-    /// `~a` aesthetic (CL `princ`: strings unquoted, chars bare), `~s`
-    /// standard (CL `prin1`: strings quoted, chars `#\`), `~d` decimal integer,
-    /// `~%` newline, `~~` a literal tilde. Directive letters are
-    /// case-insensitive (`~A` == `~a`). Extra arguments are ignored (as in CL);
-    /// too few is a recoverable panic, as is an unknown directive.
+    /// `print-rt`/`println-rt` builtins (see `Self::eval_builtin`). The engine
+    /// itself lives in [`crate::eval::format`] (parser + interpreter + value
+    /// renderer); this only supplies the enum-variant-name table it needs (for
+    /// any boxed enum nested inside a `Sexpr` argument) and adapts its `String`
+    /// errors into recoverable `EvalError::Panic`s.
     ///
     /// `args` is a proper `Sexpr` list whose elements were wrapped into their
-    /// `Sexpr` encodings by the checker (`Checker::cons_hetero_sexpr`), so
-    /// every element is a `mem::Value` renderable by `render_sexpr_value`.
+    /// `Sexpr` encodings by the checker (`Checker::cons_hetero_sexpr`).
     fn run_format(&self, heap: &Heap, control: &str, args: Value) -> Result<String, EvalError> {
-        // Variant *names* for any boxed enum that might appear nested inside a
-        // `Sexpr` argument (rare — see `render_sexpr_value`). Collected once.
         let (_, enums) = self.root.borrow().collect_struct_and_enum_types();
-        let mut out = String::new();
-        let mut rest = args;
-        let chars: Vec<char> = control.chars().collect();
-        let mut i = 0;
-        while i < chars.len() {
-            let c = chars[i];
-            if c != '~' {
-                out.push(c);
-                i += 1;
-                continue;
-            }
-            i += 1;
-            if i >= chars.len() {
-                return Err(EvalError::Panic("format: control string ends with a lone ~".to_string()));
-            }
-            let directive = chars[i].to_ascii_lowercase();
-            i += 1;
-            match directive {
-                '~' => out.push('~'),
-                '%' => out.push('\n'),
-                'a' => render_sexpr_value(heap, &enums, format_pop_arg(heap, &mut rest)?, false, &mut out),
-                's' => render_sexpr_value(heap, &enums, format_pop_arg(heap, &mut rest)?, true, &mut out),
-                'd' => {
-                    let v = format_pop_arg(heap, &mut rest)?;
-                    match v {
-                        Value::Int(n) => out.push_str(&n.to_string()),
-                        Value::Boxed(id) if heap.is_bignum(id) => out.push_str(&heap.bignum_value(id).to_string()),
-                        _ => {
-                            return Err(EvalError::Panic(
-                                "format: the ~d directive requires an integer argument".to_string(),
-                            ))
-                        }
-                    }
-                }
-                other => {
-                    return Err(EvalError::Panic(format!("format: unknown directive ~{}", other)));
-                }
-            }
-        }
-        Ok(out)
+        crate::eval::format::run(heap, &enums, control, args).map_err(EvalError::Panic)
     }
 
     /// The `eval` builtin: type-check `arg` (a runtime `Sexpr`) against the
@@ -3783,137 +3735,6 @@ fn format_float_for_print(f: f64) -> String {
         format!("{:.1}", f)
     } else {
         f.to_string()
-    }
-}
-
-/// Pops the next argument off a `format` argument list (`Self::run_format`):
-/// returns the `car` and advances `*rest` to the `cdr`. A non-cons `*rest`
-/// (usually `()`, the list's tail) means the control string asked for more
-/// arguments than were supplied — a recoverable panic, matching CL's error.
-fn format_pop_arg(heap: &Heap, rest: &mut Value) -> Result<Value, EvalError> {
-    match *rest {
-        Value::Cons(_) => {
-            // Safe: just matched as `Cons`, so neither accessor can fail.
-            let car = heap.car(*rest).expect("cons car");
-            *rest = heap.cdr(*rest).expect("cons cdr");
-            Ok(car)
-        }
-        _ => Err(EvalError::Panic("format: ran out of arguments for the control string".to_string())),
-    }
-}
-
-/// Renders one `Sexpr` `mem::Value` into `out` for `format`'s `~a`/`~s`
-/// directives — the runtime-library counterpart of `crate::main`'s
-/// `format_sexpr` (the REPL's value echo). `standard` selects CL `prin1`
-/// (reader syntax: strings quoted, chars `#\c`) over CL `princ` (human text:
-/// strings and chars bare); the flag threads through nested lists so
-/// `(princ '("a"))` prints `(a)` while `(prin1 '("a"))` prints `("a")`.
-///
-/// In practice `format` arguments are the scalars `Checker::sexpr_ctor_for`
-/// admits (`int`/`float`/`bignum`/`ratio`/`char`/`bool`/`str`/`sym`) plus
-/// whole `Sexpr` values (lists/symbols from `quote`); a live boxed struct or
-/// enum essentially never reaches here (there is no way to place one inside a
-/// `Sexpr` a program builds), so those arms are defensive, mirroring
-/// `format_sexpr`'s own boxed cases.
-fn render_sexpr_value(
-    heap: &Heap,
-    enums: &std::collections::HashMap<Path, EnumDef>,
-    v: Value,
-    standard: bool,
-    out: &mut String,
-) {
-    match v {
-        Value::Empty => out.push_str("()"),
-        Value::Int(n) => out.push_str(&n.to_string()),
-        Value::Bool(b) => out.push_str(&b.to_string()),
-        Value::Char(c) => {
-            if standard {
-                out.push_str("#\\");
-            }
-            out.push(c);
-        }
-        Value::Str(id) => {
-            if standard {
-                out.push_str(&format!("{:?}", heap.string(id)));
-            } else {
-                out.push_str(heap.string(id));
-            }
-        }
-        Value::Symbol(id) => out.push_str(heap.symbol_name(id)),
-        Value::Path(id) => {
-            let segs: Vec<&str> = heap.path_segments(id).iter().map(|s| heap.symbol_name(*s)).collect();
-            out.push_str(&segs.join("::"));
-        }
-        Value::Boxed(id) if heap.is_bignum(id) => out.push_str(&heap.bignum_value(id).to_string()),
-        Value::Boxed(id) if heap.is_ratio(id) => {
-            let r = heap.ratio_value(id);
-            out.push_str(&format!("{}/{}", r.numer(), r.denom()));
-        }
-        Value::Boxed(id) if heap.is_struct(id) => {
-            out.push_str(&format!("#<{}", heap.struct_type_name(id)));
-            for i in 0..heap.struct_field_count(id) {
-                out.push(' ');
-                render_sexpr_value(heap, enums, heap.struct_field(id, i), standard, out);
-            }
-            out.push('>');
-        }
-        Value::Boxed(id) if heap.is_enum(id) => {
-            let type_path =
-                Path::from_segments(heap.enum_type_name(id).split("::").map(|s| s.to_string()).collect());
-            let variant = heap.enum_variant(id);
-            let name = enums
-                .get(&type_path)
-                .and_then(|d| d.variants.get(variant))
-                .map(|v| v.name.clone())
-                .unwrap_or_else(|| "<unknown-variant>".to_string());
-            if heap.enum_field_count(id) == 0 {
-                out.push_str(&name);
-            } else {
-                out.push('(');
-                out.push_str(&name);
-                for i in 0..heap.enum_field_count(id) {
-                    out.push(' ');
-                    render_sexpr_value(heap, enums, heap.enum_field(id, i), standard, out);
-                }
-                out.push(')');
-            }
-        }
-        Value::Boxed(id) if heap.is_hashtable(id) => {
-            out.push_str(&format!("#<hashtable count={}>", heap.hashtable_count(id)))
-        }
-        Value::Boxed(id) if heap.is_scope(id) => {
-            out.push_str(&format!("#<scope depth={}>", heap.scope_frame_count(id)))
-        }
-        Value::Boxed(id) if heap.is_compiled_closure(id) => out.push_str("#<closure>"),
-        // The remaining boxed case is `Sexpr::Float` (`main`'s `format_sexpr`
-        // treats it as the fallthrough too).
-        Value::Boxed(id) => out.push_str(&format_float_for_print(heap.float_value(id))),
-        Value::Cons(_) => {
-            out.push('(');
-            let mut cur = v;
-            let mut first = true;
-            loop {
-                match cur {
-                    Value::Cons(_) => {
-                        if !first {
-                            out.push(' ');
-                        }
-                        first = false;
-                        let car = heap.car(cur).expect("cons car");
-                        render_sexpr_value(heap, enums, car, standard, out);
-                        cur = heap.cdr(cur).expect("cons cdr");
-                    }
-                    Value::Empty => break,
-                    // Improper list: `(a . b)` dotted tail.
-                    other => {
-                        out.push_str(" . ");
-                        render_sexpr_value(heap, enums, other, standard, out);
-                        break;
-                    }
-                }
-            }
-            out.push(')');
-        }
     }
 }
 

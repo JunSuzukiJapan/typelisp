@@ -3,6 +3,7 @@
 //! for the runtime value representation.
 
 mod value;
+pub(crate) mod format;
 pub(crate) mod interp;
 pub(crate) mod scope;
 

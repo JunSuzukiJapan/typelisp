@@ -101,9 +101,165 @@ fn unknown_directive_is_an_error() {
 }
 
 #[test]
-fn decimal_on_a_non_integer_is_an_error() {
-    let err = run(r#"(format false "~d" "nope")"#).unwrap_err();
-    assert!(format!("{:?}", err).contains("~d"), "got {:?}", err);
+fn decimal_on_a_non_integer_falls_back_to_aesthetic() {
+    // CL's rule: a non-integer ~D argument is printed in ~A form.
+    assert_eq!(fmt(r#"(format false "~d" "nope")"#), "nope");
+}
+
+// ---- padding / justification -------------------------------------------------
+
+#[test]
+fn mincol_padding_left_and_right() {
+    assert_eq!(fmt(r#"(format false "[~10a]" "hi")"#), "[hi        ]");
+    assert_eq!(fmt(r#"(format false "[~10@a]" "hi")"#), "[        hi]");
+}
+
+#[test]
+fn decimal_width_and_pad_char() {
+    assert_eq!(fmt(r#"(format false "[~5d]" 42)"#), "[   42]");
+    assert_eq!(fmt(r#"(format false "[~5,'0d]" 42)"#), "[00042]");
+}
+
+#[test]
+fn decimal_commas_and_sign() {
+    assert_eq!(fmt(r#"(format false "~:d" 1234567)"#), "1,234,567");
+    assert_eq!(fmt(r#"(format false "~@d" 42)"#), "+42");
+    assert_eq!(fmt(r#"(format false "~:d" -1234)"#), "-1,234");
+}
+
+#[test]
+fn justification_spreads_segments() {
+    assert_eq!(fmt(r#"(format false "[~20<~a~;~a~;~a~>]" "L" "M" "R")"#), "[L         M        R]");
+}
+
+// ---- radix -------------------------------------------------------------------
+
+#[test]
+fn binary_octal_hex() {
+    assert_eq!(fmt(r#"(format false "~b ~o ~x" 255 255 255)"#), "11111111 377 ff");
+}
+
+#[test]
+fn radix_parameter_and_roman() {
+    assert_eq!(fmt(r#"(format false "~7r" 100)"#), "202");
+    assert_eq!(fmt(r#"(format false "~@r" 2024)"#), "MMXXIV");
+}
+
+#[test]
+fn english_cardinal_and_ordinal() {
+    assert_eq!(fmt(r#"(format false "~r" 42)"#), "forty-two");
+    assert_eq!(fmt(r#"(format false "~:r" 21)"#), "twenty-first");
+    assert_eq!(fmt(r#"(format false "~r" 1000000)"#), "one million");
+    assert_eq!(fmt(r#"(format false "~:r" 100)"#), "one hundredth");
+}
+
+// ---- ~C, ~P ------------------------------------------------------------------
+
+#[test]
+fn character_directive_variants() {
+    assert_eq!(fmt(r#"(format false "~c|~:c|~@c" #\A #\Space #\A)"#), "A|Space|#\\A");
+}
+
+#[test]
+fn plural_directive() {
+    assert_eq!(fmt(r#"(format false "~d cat~p" 1 1)"#), "1 cat");
+    assert_eq!(fmt(r#"(format false "~d cat~p" 3 3)"#), "3 cats");
+    assert_eq!(fmt(r#"(format false "~d bab~:@p" 2 2)"#), "2 babies");
+}
+
+// ---- floats ------------------------------------------------------------------
+
+#[test]
+fn fixed_and_dollar_floats() {
+    assert_eq!(fmt(r#"(format false "~,2f" 3.14159)"#), "3.14");
+    assert_eq!(fmt(r#"(format false "~$" 9.5)"#), "9.50");
+    assert_eq!(fmt(r#"(format false "~,3f" 2)"#), "2.000");
+}
+
+// ---- case conversion ---------------------------------------------------------
+
+#[test]
+fn case_conversion_all_four() {
+    assert_eq!(fmt(r#"(format false "~(HELLO World~)")"#), "hello world");
+    assert_eq!(fmt(r#"(format false "~:(hello world~)")"#), "Hello World");
+    assert_eq!(fmt(r#"(format false "~@(hello world~)")"#), "Hello world");
+    assert_eq!(fmt(r#"(format false "~:@(hello~)")"#), "HELLO");
+}
+
+// ---- conditional -------------------------------------------------------------
+
+#[test]
+fn conditional_by_index() {
+    assert_eq!(fmt(r#"(format false "~[zero~;one~;two~]" 1)"#), "one");
+}
+
+#[test]
+fn conditional_default_clause() {
+    assert_eq!(fmt(r#"(format false "~[a~;b~:;other~]" 9)"#), "other");
+}
+
+#[test]
+fn conditional_boolean_and_at() {
+    assert_eq!(fmt(r#"(format false "~:[no~;yes~]" true)"#), "yes");
+    assert_eq!(fmt(r#"(format false "~:[no~;yes~]" false)"#), "no");
+    assert_eq!(fmt(r#"(format false "x~@[=~d~]" 7)"#), "x=7");
+    assert_eq!(fmt(r#"(format false "x~@[=~d~]" false)"#), "x");
+}
+
+// ---- iteration ---------------------------------------------------------------
+
+#[test]
+fn iteration_over_a_list() {
+    assert_eq!(fmt(r#"(format false "~{[~a]~}" '(1 2 3))"#), "[1][2][3]");
+}
+
+#[test]
+fn iteration_with_escape_separator() {
+    assert_eq!(fmt(r#"(format false "~{~a~^, ~}" '(a b c))"#), "a, b, c");
+    assert_eq!(fmt(r#"(format false "~{~a~^, ~}" '())"#), "");
+}
+
+#[test]
+fn iteration_over_remaining_args() {
+    assert_eq!(fmt(r#"(format false "~@{~a ~}" 1 2 3)"#), "1 2 3 ");
+}
+
+#[test]
+fn nested_iteration_over_sublists() {
+    assert_eq!(fmt(r#"(format false "~:{(~a ~a)~}" '((1 2) (3 4)))"#), "(1 2)(3 4)");
+}
+
+// ---- skip / indirection ------------------------------------------------------
+
+#[test]
+fn skip_directive() {
+    assert_eq!(fmt(r#"(format false "~a ~* ~a" 1 2 3)"#), "1  3");
+}
+
+#[test]
+fn indirection_directive() {
+    assert_eq!(fmt(r#"(format false "~?" "~d-~d" '(4 5))"#), "4-5");
+    assert_eq!(fmt(r#"(format false "~@?" "~d-~d" 4 5)"#), "4-5");
+}
+
+// ---- newline family ----------------------------------------------------------
+
+#[test]
+fn repeated_tilde_and_newlines() {
+    assert_eq!(fmt(r#"(format false "~3~")"#), "~~~");
+    assert_eq!(fmt(r#"(format false "a~2%b")"#), "a\n\nb");
+}
+
+#[test]
+fn fresh_line_only_breaks_when_needed() {
+    // already at beginning-of-line: ~& emits nothing
+    assert_eq!(fmt(r#"(format false "~&x")"#), "x");
+    assert_eq!(fmt(r#"(format false "x~&y")"#), "x\ny");
+}
+
+#[test]
+fn v_parameter_reads_width_from_args() {
+    assert_eq!(fmt(r#"(format false "[~v,'*d]" 6 42)"#), "[****42]");
 }
 
 #[test]
