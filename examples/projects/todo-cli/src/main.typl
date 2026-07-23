@@ -18,9 +18,9 @@
 
 (defun print-todo ((td todo-item)) ()
   (if (done td) (print "[x] ") (print "[ ] "))
-  (print (id td))
+  (print "~a" (id td))
   (print ": ")
-  (println (text td)))
+  (println "~a" (text td)))
 
 (defun cmd-list () ()
   (let ((ids (all-ids)))
@@ -35,7 +35,7 @@
           (rest (if (< sp (length line)) (substring line (+ sp 1) (length line)) "")))
       (cond
         ((equal cmd "add")
-         (let ((tid (add-todo rest))) (print "added #") (println tid))
+         (let ((tid (add-todo rest))) (print "added #") (println "~a" tid))
          true)
         ((equal cmd "list") (cmd-list) true)
         ((equal cmd "done")

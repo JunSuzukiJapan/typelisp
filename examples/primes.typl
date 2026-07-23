@@ -19,6 +19,6 @@
     result))
 
 (doiter (p (iter (sieve 100)))
-  (print p)
+  (print "~d" p)
   (print " "))
 (println "")

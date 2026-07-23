@@ -13,6 +13,6 @@
           ((some s)
            (if (equal s "")
                (break)
-               (println (eval (parse (tokenize s)) env)))))))))
+               (println "~a" (eval (parse (tokenize s)) env)))))))))
 
 (repl)

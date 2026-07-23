@@ -22,18 +22,23 @@ CL同等カタログ・可視性・trait機構・compile（普通に書けるコ
 [functions.md](../functions.md) に「将来課題」として散在していた未実装項目を、以下に**着手候補の
 TODO として正式に格上げ**する（2026-07-23、この一覧化で棚卸し）。優先度は目安であり、着手順は未確定。
 
-### T1. `format` の書式指定子（優先度: 中）
+### ~~T1. `format` の書式指定子~~（2026-07-23 完了）
 
-CL の `format` 相当。`print`/`println` は実装済みだが、`~a`（aesthetic）/`~s`（standard）/
-`~d`（decimal）/`~%`（改行）/`~~` 等の**書式ディレクティブは未実装**
-（[functions.md](../functions.md) の `print`/`println` 節に明記）。
+CL 準拠 `format` と、書式ディレクティブを解釈する `print`/`println` を実装済み。詳細は
+[functions.md](../functions.md) §15 を参照。
 
-- 現実的に最初に着手しやすい候補。既に出力基盤（`print`/`println`）があり影響範囲が限定的。
-- スコープ判断が必要: 完全な CL `format` は膨大（`~{...~}` の反復・`~[...~]` の条件・桁揃え等）。
-  まず `~a`/`~s`/`~d`/`~%`/`~~` の**最小サブセット**から始め、必要に応じて拡張する方針を推奨。
-- 実装場所の検討: 書式文字列は実行時に解釈するため、Rust組み込みにするか typelisp（prelude）側で
-  書くかは [[typelisp-rust-builtin-policy]] の方針（Rust専用処理でなければ typelisp で書く）に照らす。
-  書式文字列のパースと分岐は typelisp で書ける見込み。
+- `(format dest control args...)`（`dest`: `true`=CL の `t` で標準出力+文字列返し／`false`=CL の
+  `nil` で文字列返しのみ）、`(print control args...)`／`(println control args...)`。旧来の単一値
+  `princ` メソッド（`(println x)`）は廃止し、**第1引数を制御文字列とする書式指定に統一**した
+  （ユーザ選択「常に書式(format委譲)」）。既存の examples/projects は全て新形式へ書き換え済み。
+- ディレクティブは最小サブセット `~a`/`~s`/`~d`/`~%`/`~~`（大文字小文字非区別）。`~{...~}` 反復・
+  `~[...~]` 条件・桁揃え・`~c`/`~&` 等は将来課題（同 §15 の表を拡張する形で追加可能）。
+- 実装は3層: 可変長引数を各自の型のまま `Sexpr` へ包んでリスト化する特殊形
+  `Checker::check_format`/`check_print_like`（`check_list_lit` と同系統。`&rest` は単一要素型
+  なので使えない）、書式展開エンジン `Interp::run_format`（`~a`/`~s` の値描画は GCヒープ+enum
+  変種名解決を要する Rust 専用処理なので `render_sexpr_value` に集約、[[typelisp-rust-builtin-policy]]
+  の例外条件に該当）、内部ビルトイン `format-rt`/`print-rt`/`println-rt`。`compile` 対象外
+  （旧 `print`/`println` も非対応だった）。
 
 ### T2. `defmacro` の構造化ラムダリスト `&optional` / `&key`（優先度: 中）
 

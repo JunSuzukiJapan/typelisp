@@ -29,7 +29,7 @@
     ((leaf) ())
     ((node v l r)
      (inorder-print l)
-     (print v)
+     (print "~a" v)
      (print " ")
      (inorder-print r))))
 
@@ -45,5 +45,5 @@
   (let ((t (build xs)))
     (inorder-print t)
     (println "")
-    (println (contains t 7))
-    (println (contains t 42))))
+    (println "~a" (contains t 7))
+    (println "~a" (contains t 42))))

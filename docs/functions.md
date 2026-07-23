@@ -397,23 +397,47 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 
 ## 15. 標準入出力 (I/O)
 
-`print`/`println` は `string`/`char`/`i32`/`i64`/`f64`/`bignum`/`ratio`/`bool` それぞれのインスタンス
-メソッド（`upcase`/`<` などと同じ、レシーバ型ごとの多重定義）。CL の `princ` 相当の人間可読な
-表示で、文字列をクォートしない（REPL がトップレベル式の戻り値を表示するときの reader 構文——
-`"..."` のようにクォートされる——とは別物）。`typl file.typl` によるスクリプト実行は
-[main.rs](../src/main.rs) の `run_file` の通り**トップレベル式の戻り値を出力しない**ため、
-プログラム自身が標準出力へ書くにはこれらを呼ぶ必要がある。
+`print`/`println`/`format` はいずれも**書式指定子（CL の `format` ディレクティブ）を解釈する特殊形**。
+第1引数（`format` は第2引数）が**制御文字列**で、以降の可変長引数を各ディレクティブが順に消費する。
+`(list ...)` と同じく、可変長引数は各自の型のまま `Sexpr` へ包まれてから渡る（`i32`/`i64`/`f64`/
+`bignum`/`ratio`/`char`/`bool`/`string`/`Sexpr` が対象。これ以外の型——ユーザ定義 struct/enum など——を
+直接渡すと型エラー）。`typl file.typl` によるスクリプト実行は [main.rs](../src/main.rs) の `run_file`
+の通り**トップレベル式の戻り値を出力しない**ため、プログラム自身が標準出力へ書くにはこれらを呼ぶ必要がある。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `print` | `(print x)` | `T→Unit` | 改行なしで標準出力へ書く（`T` は上記いずれか） |
-| `println` | `(println x)` | `T→Unit` | 改行付きで標準出力へ書く |
+| `print` | `(print control args...)` | `(string, ...)→Unit` | 制御文字列を書式展開し、改行なしで標準出力へ書く |
+| `println` | `(println control args...)` | `(string, ...)→Unit` | 同上、末尾に改行を付ける |
+| `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL の `format` 相当。展開した文字列を返す。`dest` が `true`（CL の `t`）なら加えて標準出力へも書く／`false`（CL の `nil`）なら書かず文字列を返すだけ |
 | `read-line` | `(read-line)` | `()→Option<string>` | 標準入力から1行読む（末尾の改行/`\r`は除去）。EOFなら`None` |
 
-`print`/`println`は呼び出しのたびに即座に`flush`する（パイプ経由でも`read-line`の前にプロンプトが
-確実に見えるようにするため）。数値と文字列を混在させて表示するには複数回`print`/`println`を呼ぶ
-（例: `(print "answer: ") (println 42)`）——CL の `format` 相当の書式指定子は未実装
-（着手候補として [dev/TODO.md](dev/TODO.md) の T1 に格上げ済み）。
+### 書式ディレクティブ（最小サブセット）
+
+| ディレクティブ | 引数 | 意味 |
+|---|---|---|
+| `~a` | 1つ消費 | aesthetic 表示（CL `princ`。文字列はクォートせず、文字はそのまま） |
+| `~s` | 1つ消費 | standard 表示（CL `prin1`。文字列は `"..."`、文字は `#\c` の reader 構文） |
+| `~d` | 1つ消費 | 10進整数（`i32`/`i64`/`bignum` のみ。非整数はエラー） |
+| `~%` | なし | 改行を1つ出力 |
+| `~~` | なし | リテラルの `~` を出力 |
+
+ディレクティブ文字は大文字小文字を区別しない（`~A` は `~a` と同じ）。引数が余れば無視し（CL と同じ）、
+足りなければ実行時エラー。未知のディレクティブも実行時エラー。`~a`/`~s` はリスト等の入れ子でも表示方針が
+伝播する（例: `(princ) の (a 1)` に対し `(prin1) の ("a" 1)`）。
+
+```lisp
+(println "~a + ~a = ~d" 1 2 3)        ; => 1 + 2 = 3
+(println "name: ~a" "Alice")          ; => name: Alice
+(print "loading")                     ; 引数なしの純粋な文字列出力も可
+(let ((s (format false "id=~d" 42)))  ; 出力せず文字列だけ得る
+  (println "~a" s))                   ; => id=42
+```
+
+`print`/`println`/`format` は呼び出しのたびに即座に `flush` する（パイプ経由でも `read-line` の前に
+プロンプトが確実に見えるようにするため）。書式展開エンジンは [interp.rs](../src/eval/interp.rs) の
+`Interp::run_format`（GCヒープ上の `Sexpr` 値の描画は Rust 専用処理のため組み込み）、可変長引数を
+`Sexpr` リストへまとめる特殊形は [checker.rs](../src/check/checker.rs) の `check_format`/
+`check_print_like`。コンパイル（`compile`）対象ではない（旧 `print`/`println` も未対応だった）。
 
 ## 16. 解析・評価 (`parse-int` / `parse-float` / `read` / `eval`)
 

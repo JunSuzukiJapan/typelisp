@@ -38,5 +38,5 @@
   (let ((w (length (get rows 0))) (h (len rows)))
     (let ((d (bfs rows w h 0 0 6 5)))
       (if (>= d 0)
-          (progn (print "shortest path length: ") (println d))
+          (progn (print "shortest path length: ") (println "~d" d))
           (println "unreachable")))))

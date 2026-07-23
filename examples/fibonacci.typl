@@ -9,4 +9,4 @@
     a))
 
 (dotimes (i 20)
-  (println (fib i)))
+  (println "~d" (fib i)))

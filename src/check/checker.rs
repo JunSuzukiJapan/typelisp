@@ -1183,7 +1183,7 @@ impl Checker {
             // expression special forms (`check_list`)
             "if" | "let" | "let*" | "progn" | "setf" | "loop" | "break" | "return" | "list"
                 | "lambda" | "labels" | "match" | "panic" | "the" | "as" | "try-as" | "compile"
-                | "quote" | "quasiquote"
+                | "quote" | "quasiquote" | "format" | "print" | "println"
                 // top-level forms (`check_form_dispatch`)
                 | "pub" | "defun" | "defvar" | "defconstant" | "defmacro" | "module"
                 | "defmethod" | "defstruct" | "defenum" | "deftrait" | "impl" | "use" | "load"
@@ -3488,6 +3488,9 @@ impl Checker {
             "break" => return self.check_break(args),
             "return" => return self.check_return(heap, interp, env, args, arg_locs),
             "list" => return self.check_list_lit(heap, interp, env, args, arg_locs),
+            "format" => return self.check_format(heap, interp, env, args, arg_locs),
+            "print" => return self.check_print_like(heap, interp, env, "print-rt", Type::Unit, args, arg_locs),
+            "println" => return self.check_print_like(heap, interp, env, "println-rt", Type::Unit, args, arg_locs),
             "lambda" => return self.check_lambda(heap, interp, env, args, arg_locs),
             "labels" => return self.check_labels(heap, interp, env, args, arg_locs, expected),
             "apply" => return self.check_apply_form(heap, interp, env, args, arg_locs),
@@ -4842,6 +4845,96 @@ impl Checker {
             };
         }
         Ok(acc)
+    }
+
+    /// Collects a heterogeneous run of already-checked expressions into one
+    /// `Sexpr` list — the `&rest`-free counterpart of [`Self::cons_rest_list`]
+    /// used by the `format`/`print`/`println` special forms, whose trailing
+    /// arguments each keep their *own* natural type rather than sharing one
+    /// declared element type. Every element is wrapped into its `Sexpr`
+    /// encoding by [`Self::wrap_rest_elem`] against its own inferred type (so a
+    /// value whose type has no `Sexpr` encoding is the same clear `TypeError`
+    /// a bad `&rest` element gets), then `sexpr-cons`-ed together back-to-front.
+    fn cons_hetero_sexpr(&self, items: Vec<Typed>) -> Result<Typed, Error> {
+        let cons_path = Path::root("sexpr-cons");
+        items.into_iter().rev().try_fold(
+            Typed { loc: None, expr: Expr::Quote(QuotedSexpr::Nil), ty: sexpr_ty() },
+            |acc, item| {
+                let item = self.wrap_rest_elem(&item.ty.clone(), item)?;
+                Ok(Typed { loc: None, expr: Expr::Call(Ref::synthetic(cons_path.clone()), vec![item, acc]), ty: sexpr_ty() })
+            },
+        )
+    }
+
+    /// The `(format dest control &rest args)` special form — CL's `format`
+    /// adapted to typelisp's `bool` (`dest` is `true` for CL's `t`, writing to
+    /// stdout, or `false` for CL's `nil`, only building the string). The
+    /// control string's directives are interpreted at runtime by
+    /// `Interp::run_format`; here we only type the fixed arguments (`dest:
+    /// bool`, `control: string`) and collect the variadic tail into one
+    /// `Sexpr` list, then lower to the internal `format-rt` builtin. Always
+    /// returns the built `string` (statically) — it is additionally written to
+    /// stdout when `dest` is `true`, but a single return type keeps the static
+    /// system simple, and the string is useful to a `false` caller.
+    fn check_format(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Typed, Error> {
+        if args.len() < 2 {
+            return Err(Error::TypeError(
+                "format: expected at least a destination (bool) and a control string".to_string(),
+            ));
+        }
+        let dest = self.check_at(heap, interp, env, args[0], Some(&Type::Bool), nth_loc(arg_locs, 0))?;
+        let control = self.check_at(heap, interp, env, args[1], Some(&Type::Str), nth_loc(arg_locs, 1))?;
+        let mut items = Vec::new();
+        for (i, &a) in args[2..].iter().enumerate() {
+            items.push(self.check_at(heap, interp, env, a, None, nth_loc(arg_locs, 2 + i))?);
+        }
+        let list = self.cons_hetero_sexpr(items)?;
+        Ok(Typed {
+            loc: None,
+            expr: Expr::Call(Ref::synthetic(Path::root("format-rt")), vec![dest, control, list]),
+            ty: Type::Str,
+        })
+    }
+
+    /// The `(print control &rest args)` / `(println control &rest args)`
+    /// special forms — thin front-ends over the same directive engine as
+    /// [`Self::check_format`], always writing to stdout (`println` with a
+    /// trailing newline). Lowers to the `print-rt`/`println-rt` builtin (per
+    /// `builtin`) and yields `unit`.
+    fn check_print_like(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        builtin: &str,
+        ret: Type,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Typed, Error> {
+        if args.is_empty() {
+            return Err(Error::TypeError(format!(
+                "{}: expected at least a control string",
+                if builtin == "println-rt" { "println" } else { "print" }
+            )));
+        }
+        let control = self.check_at(heap, interp, env, args[0], Some(&Type::Str), nth_loc(arg_locs, 0))?;
+        let mut items = Vec::new();
+        for (i, &a) in args[1..].iter().enumerate() {
+            items.push(self.check_at(heap, interp, env, a, None, nth_loc(arg_locs, 1 + i))?);
+        }
+        let list = self.cons_hetero_sexpr(items)?;
+        Ok(Typed {
+            loc: None,
+            expr: Expr::Call(Ref::synthetic(Path::root(builtin)), vec![control, list]),
+            ty: ret,
+        })
     }
 
     // Same invariant checking context as `check_path_call` — see its comment.

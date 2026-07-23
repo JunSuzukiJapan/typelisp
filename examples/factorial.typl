@@ -7,6 +7,6 @@
 
 (dotimes (i 15)
   (let ((n (+ i 1)))
-    (print n)
+    (print "~d" n)
     (print "! = ")
-    (println (factorial n))))
+    (println "~d" (factorial n))))
