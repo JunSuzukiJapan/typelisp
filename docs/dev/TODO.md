@@ -50,21 +50,68 @@ TODO として正式に格上げ**する（2026-07-23、この一覧化で棚卸
 
 - 静的型・単型化を前提とした現在の設計への影響が大きく、設計判断（表現・GC・compile対応）を
   要する重い項目。優先度は最も低い。
+- T5 の pretty printer の Tier2/3（`pprint-logical-block` 等の公開・`set-pprint-dispatch`）は
+  この T4 を前提にする（2026-07-23 結論。理由は下記 T5 参照）。
 
 ### T5. pretty printer（CL の Lisp Pretty Printer 相当）（優先度: 低）
 
-CL は ANSI 標準の pretty printer を持つ（CLHS 22.2、元は R. Waters の XP）。`format` 実装
-（[implementation-log.md](implementation-log.md)、2026-07-23）ではこの系統のディレクティブを未対応
-（no-op / 近似）にしてある。**pretty printer 本体を別タスクとして切り出す**（2026-07-23、`~i`/`~_`
-等の議論で棚卸し）。
+CL は ANSI 標準の pretty printer を持つ（CLHS 22.2、実体は R. Waters の XP アルゴリズム
+= "XP: A Common Lisp Pretty Printing System", MIT AI Memo 1102a, 1989。SBCL の
+`src/code/pprint.lisp` 等が同系統）。`format` 実装（[implementation-log.md](implementation-log.md)、
+2026-07-23）ではこの系統のディレクティブを未対応（no-op / 近似）にしてある。**pretty printer 本体を
+別タスクとして切り出す**（2026-07-23、`~i`/`~_` 等の議論で棚卸し）。
 
-未対応で、この項目で扱う範囲:
-- 特殊変数 `*print-pretty*` / `*print-right-margin*` / `*print-miser-width*` / `*print-pprint-dispatch*`
-- 関数 `pprint` / `pprint-fill` / `pprint-linear` / `pprint-tabular` / `pprint-logical-block` /
-  `pprint-newline` / `pprint-indent` / `pprint-tab` / `set-pprint-dispatch`
-- `format` ディレクティブの pretty 連動分: `~w`（現状は単なる `prin1` に寄せてある）、`~_`（条件改行）、
-  `~i`（インデント。現状 no-op）、`~<...~:>`（閉じに `:` が付く**論理ブロック**用法。現状の桁揃え
-  `~<...~>` とは別物）、`~:t`（論理ブロック内タブ）
+#### CL の実装の要点（調査メモ、2026-07-23）
+
+「木を組んでレイアウトを後計算」ではなく、**本物の出力ストリームをラップした pretty-stream に書き込みを
+バッファしながら、有界の先読みで改行を確定する1パスのストリーム方式**（線形時間・行幅程度の有界メモリ）。
+
+- pretty-stream の状態: 未確定文字バッファ、その先頭桁、開いている論理ブロックのスタック
+  （各ブロックが prefix / per-line-prefix / suffix / インデント量を保持）、バッファ位置に紐づく
+  **命令キュー**（`block-start` / `block-end` / `newline`〈`:linear`/`:fill`/`:miser`/`:mandatory`〉/
+  `indentation`〈`:block`/`:current`〉/ `tab`）。`newline` と `block-start` は共通の section-start
+  として `depth` と後埋めの前方ポインタ `section-end` を持つ。
+- 中心のトリック: 条件改行の場で改行可否は決められない（そのセクションが行に収まるか未確定）。
+  セクション末尾が来る前にバッファ長が右マージンを超えたら**折る**、セクション末尾が先に来たら**折らない**。
+  先読みは現セクション末尾までで足りるのでバッファは行幅で頭打ち。
+- 改行種別: `:linear`=囲みセクション全体が収まらなければ折る（同一セクションで揃う）／`:fill`=次の
+  部分区間が収まらない時だけ折る（語詰め）／`:miser`=miser モード（右マージンから
+  `*print-miser-width*` 以内で行が始まった時）だけ折る／`:mandatory`=常に折る。
+- `write`/`print` は `*print-pretty*` が真のとき整形経路に入り、**`*print-pprint-dispatch*`** を引いて
+  オブジェクト型に対応する整形関数を呼ぶ（既定にリスト用・`quote`/`let`/`defun` 等の特殊形専用の
+  整形関数が登録済み）。`set-pprint-dispatch` でユーザが登録＝**実行時型→任意関数の動的ディスパッチ**。
+- CL では `format` の pretty 系ディレクティブは `pprint-*` API のシンタックスシュガー
+  （`~<...~:>`→`pprint-logical-block`、`~_`→`pprint-newline`、`~I`→`pprint-indent`、
+  `~:T`→`pprint-tab`、`~W`→`write`）。実体はすべて XP の pretty-stream に落ちる。
+
+#### 段階分け（2026-07-23 の議論で確定した着手方針）
+
+未対応項目を、typelisp への収まりの良さで3段に分ける:
+
+- **Tier1（ストリーム値型を新設せず format 経由で提供。単独で着手可、これを土台にする）**
+  - 特殊変数 `*print-pretty*` / `*print-right-margin*` / `*print-miser-width*` を prelude の `defvar`
+    グローバルとして持ち、`setf` で変更・`run_format` で読む（typelisp に CL の `let` 動的束縛は無いので、
+    動的束縛ではなくグローバル代入で代替する）。
+  - `format` の pretty 連動ディレクティブ: `~_`（条件改行。`~:_`=fill/`~@_`=miser/`~:@_`=mandatory/
+    素=linear）、`~i`（インデント。`~n:i`=current）、`~<...~:>`（**論理ブロック**用法。閉じに `:` が付く。
+    現状の桁揃え `~<...~>` とは別物として分岐）、`~:t`（論理ブロック内タブ）、`~w`（`*print-pretty*` 準拠。
+    現状は単なる `prin1`）。
+  - 関数 `pprint` / `pprint-fill` / `pprint-linear` / `pprint-tabular`（S式を既定レイアウトで整形出力）。
+  - format は既にインメモリ `String` を構築する方式なので、XP のストリーム層を厳密再現せず、構築中の
+    バッファ上で同じ先読み判定を回す簡略版で同等結果を出せる（ストリーム値をユーザに露出しない範囲）。
+
+- **Tier2/3（T4 動的ディスパッチ導入後に着手する。← 2026-07-23 結論）**
+  - `pprint-logical-block` / `pprint-newline` / `pprint-indent` / `pprint-tab`
+    （+ `pprint-pop` / `pprint-exit-if-list-exhausted`）をユーザ呼び出し可能な関数として公開。
+  - `set-pprint-dispatch` / `*print-pprint-dispatch*`。
+  - **T4 を前提にする理由**: CL でこれらが自然に効くのは (a) CL がもともと第一級ストリームを至る所で
+    持ち、(b) 動的ディスパッチがあるから。typelisp は現状どちらも無い——公開するには言語に無い新概念
+    「可変 pretty ストリーム値型」を新設せねばならず（過去に `Vector`/`RtValue` 専用バリアントを
+    「ユーザ定義型と同様に扱うべき」で作り直した方針とも衝突しうる）、最大の見返り（ユーザ定義型の独自
+    プリンタが `print`/`write` で**自動選択**される）は `set-pprint-dispatch`＝実行時型→任意関数の
+    動的ディスパッチ、すなわち上記 T4 そのものを要する。
+    T4 抜きで公開しても「ユーザが自分の型を手動整形するとき明示的に呼ぶ」に留まり中途半端になるため、
+    T4 と一緒に扱う。
 
 - 重い理由: format 単体でなく**印字系全体**に、行幅追跡・インデントスタック・条件改行判断を持つ出力
   ストリーム層が要る。静的型・`*print-*` 変数の持ち方（動的変数機構の要否）とも絡む。優先度は低。
