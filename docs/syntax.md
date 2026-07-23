@@ -157,6 +157,11 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 `impl` によって各メソッドは `TargetType` の通常の `defmethod` として登録される。ジェネリック関数の
 `where` 節でトレイト境界として参照する（§ defun 参照）。
 
+`prelude.rs` は標準トレイト **`Iter`**（`next`／関連型 `Item`。`doiter`／シーケンス関数の基盤）・
+**`Eq`**（`equals`／`not-equals`）・**`Ord`**（`less`／`less-equal`／`greater`／`greater-equal`）を
+提供し、主要なスカラ型と `cons-cell<A,B>` に実装済み（詳細は [functions.md](functions.md) §12・§12.1）。
+自前のコレクション型に `Iter` を `impl` すれば `doiter`（§5）や `map`／`filter`／`sort` 等がそのまま使える。
+
 ### module / use — 名前空間
 
 ```lisp

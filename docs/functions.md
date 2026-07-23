@@ -121,6 +121,9 @@ CL 準拠の任意精度数値型。`bignum` は多倍長整数、`ratio` は常
 参照。整数の `expt` は無い（`bignum` 昇格が無くオーバーフローするため、`(int->bignum x)` 経由で
 `bignum` の `expt` を使う）。
 
+（`ratio-expt-int` も `prelude.rs` に `defun` として存在するが、これは `ratio` の `expt` が整数乗を
+計算するための内部ヘルパーであり、通常は `(expt r n)` を使う。）
+
 `random` のみレシーバを持たない自由関数として残る。
 
 | 名前 | 形式 | 型 | 説明 |
@@ -163,6 +166,16 @@ Symbol/Sexpr 再設計 Phase 4b 以降、`cons`/`car`/`cdr` は `Sexpr` 専用�
 | `sexpr-str` | `(sexpr-str s)` | `Sexpr→string` | `Str` の中身。型違いは panic |
 | `sexpr-sym-name` | `(sexpr-sym-name s)` | `Sexpr→string` | `Sym` の名前。型違いは panic |
 | `eq` `eql` | `(op a b)` | `(Sexpr,Sexpr)→bool` | 同一性比較（`Cons`/`Str` はポインタ、それ以外は値） |
+
+上の `sexpr-*` アクセサは Rust 組み込み。これらの上に、`Sexpr` リスト全体を扱う次の2つが
+`prelude.rs` に typelisp の `defun` として定義されている（`defmacro` の本体で引数の `Sexpr`
+フォーム列を組み立て・変換するマクロ作者向け。`,@`（unquote-splicing）は内部で `sexpr-append`
+へ展開される）:
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `sexpr-append` | `(sexpr-append a b)` | `(Sexpr,Sexpr)→Sexpr` | 2つの `Sexpr` リストを連結（非破壊） |
+| `sexpr-map` | `(sexpr-map f lst)` | `((fn (Sexpr) Sexpr),Sexpr)→Sexpr` | `Sexpr` リストの各要素へ `f` を適用した新しい `Sexpr` リスト（`map`（§6）は `Iter` 用でマクロ引数リストは回せないため、その代替） |
 
 ## 6. シーケンス操作（`Iter` 上のライブラリ関数）
 
@@ -345,6 +358,18 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
                (greater ((self Self) (other Self)) bool)
                (greater-equal ((self Self) (other Self)) bool))
 ```
+
+各トレイトメソッドはそのまま関数として呼べる（`where (Eq A)`/`(Ord A)` 境界内、または実装済みの
+具体型に対して）:
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `equals` | `(equals a b)` | `(A,A)→bool` where `Eq A` | 等しいか（Rust の `==`） |
+| `not-equals` | `(not-equals a b)` | `(A,A)→bool` where `Eq A` | 等しくないか（`!=`） |
+| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
+| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
+| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
+| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
 `Eq` 実装済み: `i32` `i64` `f64` `bool` `char` `string` `symbol` および `cons-cell<A,B>`（要素が
 `Eq` なら再帰的に）。`Ord` 実装済み: `i32` `i64` `f64` `char` `string` および `cons-cell<A,B>`
