@@ -31,7 +31,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
-use crate::{BoxId, CompileTarget, Expr, Heap, Loc, MacroExpander, Path, Pattern, QuotedSexpr, Ref, SymId, TopLevel, Type, Typed, Value};
+use crate::{BoxId, CompileTarget, Expr, Heap, Loc, MacroExpander, MacroLambda, Path, Pattern, QuotedSexpr, Ref, SymId, TopLevel, Type, Typed, Value};
 
 use super::scope;
 use super::value::{EvalError, NativeScope, RtValue, Slot, SlotKind};
@@ -52,6 +52,13 @@ pub(crate) struct FnDef {
     /// [`Interp::expand_macro`]); always `false` for `defun`/`defmethod`,
     /// which `apply` calls 1:1 regardless.
     pub(crate) rest: bool,
+    /// The `&optional`/`&key` structure of a `defmacro`'s lambda list —
+    /// `Some` only for a macro (its default-value bodies and keyword names,
+    /// consumed by [`Interp::bind_macro_args`]), `None` for `defun`/
+    /// `defmethod`, which bind their arguments 1:1 with no defaults. `params`
+    /// still lists every binding name in order; this only adds how the
+    /// non-required regions are filled.
+    pub(crate) lambda: Option<MacroLambda>,
     /// `(parameter types, return type)`, parallel to `params` — `None` for a
     /// `defmacro` (every parameter and the implicit return are always
     /// `Sexpr`, see `check::registry::MacroDef`'s doc comment) since a macro
@@ -935,7 +942,7 @@ impl Interp {
                 }
                 let (names, types): (Vec<String>, Vec<Type>) = params.into_iter().unzip();
                 let kinds = types.iter().map(|ty| self.heap_repr_kind(ty)).collect();
-                let def = FnDef { params: names, kinds, body, rest: false, sig: Some((types, ret)), public, compiled: RefCell::new(None) };
+                let def = FnDef { params: names, kinds, body, rest: false, lambda: None, sig: Some((types, ret)), public, compiled: RefCell::new(None) };
                 self.root.borrow_mut().get_or_create(name.parent()).fns.insert(name.local().to_string(), Rc::new(def));
                 Ok(None)
             }
@@ -957,18 +964,18 @@ impl Interp {
                     types.push(t);
                 }
                 let kinds = types.iter().map(|ty| self.heap_repr_kind(ty)).collect();
-                let def = FnDef { params: names, kinds, body, rest: false, sig: Some((types, ret)), public, compiled: RefCell::new(None) };
+                let def = FnDef { params: names, kinds, body, rest: false, lambda: None, sig: Some((types, ret)), public, compiled: RefCell::new(None) };
                 self.root.borrow_mut().get_or_create(type_name.parent()).methods.insert((type_name.local().to_string(), method), Rc::new(def));
                 Ok(None)
             }
-            TopLevel::Defmacro { name, params, body, rest, public } => {
+            TopLevel::Defmacro { name, params, body, rest, lambda, public } => {
                 // A macro's body is callable exactly like a `defun`'s — see
                 // `MacroExpander`/`Self::expand_macro` — so it's stored in
                 // the very same `fns` table; no separate macro table exists.
                 // Every macro parameter is `Sexpr` by definition, hence all
                 // `Heap` slots.
                 let kinds = vec![SlotKind::Heap; params.len()];
-                let def = FnDef { params, kinds, body, rest, sig: None, public, compiled: RefCell::new(None) };
+                let def = FnDef { params, kinds, body, rest, lambda: Some(lambda), sig: None, public, compiled: RefCell::new(None) };
                 self.root.borrow_mut().get_or_create(name.parent()).fns.insert(name.local().to_string(), Rc::new(def));
                 Ok(None)
             }
@@ -2703,25 +2710,170 @@ impl Interp {
     /// last parameter. Each element is already rooted by the caller (it's in
     /// `raw_args`, individually pushed in `Self::expand_macro`); only the
     /// growing `list` accumulator needs protecting around each `cons` call.
-    fn bind_macro_args(
-        &self,
-        heap: &mut Heap,
-        f: &FnDef,
-        raw_args: &[Value],
-        fixed: usize,
-    ) -> Result<Vec<RtValue>, EvalError> {
-        let mut argv: Vec<RtValue> = raw_args[..fixed].iter().map(|v| RtValue::Sexpr(*v)).collect();
-        if f.rest {
-            let mut list = Value::Empty;
-            for v in raw_args[fixed..].iter().rev() {
-                heap.push_root(list);
-                let consed = heap.cons(*v, list);
-                heap.pop_root();
-                list = consed.map_err(|e| EvalError::Panic(e.to_string()))?;
-            }
-            argv.push(RtValue::Sexpr(list));
+    /// Bind a macro call's raw (unevaluated) argument forms to its parameters,
+    /// producing one `RtValue::Sexpr` per parameter in `f.params` order —
+    /// required, then `&optional`, then `&rest`, then `&key` — ready for
+    /// [`Self::apply`]. Omitted `&optional`/`&key` arguments evaluate their
+    /// default-value body (in an environment holding the params already bound,
+    /// CL-style); an empty body binds `nil` (`Sexpr::Nil`).
+    ///
+    /// GC safety: every value built here (a `&rest` list, an evaluated
+    /// default) is stashed in a live `Slot::Heap` cell as it is produced, and
+    /// each cell is an implicit heap root (`Heap::alloc_cell`) for as long as
+    /// the returned `env` lives. Those cells also form the environment the
+    /// next default is evaluated in, so an earlier bound param is protected
+    /// across a later default's allocations. The caller drops `env` only after
+    /// `apply` has consumed `argv` (and `apply`'s own cell allocations can
+    /// never trigger a collection — see `Self::slot`), so the raw `argv`
+    /// pointers stay valid in the gap between.
+    fn bind_macro_args(&self, heap: &mut Heap, f: &FnDef, raw_args: &[Value]) -> Result<Vec<RtValue>, EvalError> {
+        let lambda = f
+            .lambda
+            .as_ref()
+            .ok_or_else(|| EvalError::Internal("bind_macro_args on a non-macro FnDef".into()))?;
+        let n_req = lambda.required;
+        let n_opt = lambda.optionals.len();
+        if raw_args.len() < n_req {
+            return Err(EvalError::Panic(format!("expected at least {} argument(s), got {}", n_req, raw_args.len())));
         }
+
+        // Fast path — the overwhelmingly common macro shape: only required
+        // params, optionally a trailing `&rest`, with no `&optional`/`&key`
+        // defaults to evaluate. No default eval means no allocation that could
+        // trigger a GC after the (already-rooted) raw args are placed, so the
+        // protective per-param Heap-cell environment the general path builds is
+        // unnecessary here (`&rest` list aside, which `build_sexpr_list` roots
+        // internally). This keeps `while`/`dotimes`/`cond`/... — expanded en
+        // masse during checking — allocation-free, exactly as before this
+        // feature.
+        if n_opt == 0 && lambda.keys.is_empty() {
+            let mut argv: Vec<RtValue> = raw_args[..n_req].iter().map(|v| RtValue::Sexpr(*v)).collect();
+            if f.rest {
+                let list = self.build_sexpr_list(heap, &raw_args[n_req..])?;
+                argv.push(RtValue::Sexpr(list));
+            } else if raw_args.len() > n_req {
+                return Err(EvalError::Panic(format!("expected {} argument(s), got {}", n_req, raw_args.len())));
+            }
+            return Ok(argv);
+        }
+
+        // The positional region is `required + optional`; `&rest`/`&key`
+        // arguments (if any) begin right after however many of those slots the
+        // call actually filled.
+        let n_pos = n_req + n_opt;
+        let pos_end = raw_args.len().min(n_pos);
+
+        let mut argv: Vec<RtValue> = Vec::with_capacity(f.params.len());
+        let mut env: Env = Vec::with_capacity(f.params.len());
+        let mut pi = 0usize; // index into `f.params`
+        // A closure would borrow `self`/`heap` mutably twice, so bind inline.
+        macro_rules! bind {
+            ($v:expr) => {{
+                let v = RtValue::Sexpr($v);
+                let s = self.slot(heap, SlotKind::Heap, v.clone())?;
+                env.push((f.params[pi].clone(), s));
+                argv.push(v);
+                pi += 1;
+            }};
+        }
+
+        // required
+        for &a in &raw_args[..n_req] {
+            bind!(a);
+        }
+        // &optional — filled positionally, else its default (or nil)
+        for (oi, default) in lambda.optionals.iter().enumerate() {
+            let arg_idx = n_req + oi;
+            let v = if arg_idx < pos_end {
+                raw_args[arg_idx]
+            } else {
+                self.eval_macro_default(heap, default, &env)?
+            };
+            bind!(v);
+        }
+        // The trailing region past the positional args: a `&rest` list and/or
+        // a `&key` plist both read from it (CL binds `&rest` to the whole tail
+        // even when `&key` is also present).
+        let tail = &raw_args[pos_end..];
+        if f.rest {
+            let list = self.build_sexpr_list(heap, tail)?;
+            bind!(list);
+        }
+        if !lambda.keys.is_empty() {
+            let supplied = self.parse_keyword_args(heap, tail, &lambda.keys)?;
+            for (kname, default) in &lambda.keys {
+                let v = match supplied.get(kname) {
+                    Some(val) => *val,
+                    None => self.eval_macro_default(heap, default, &env)?,
+                };
+                bind!(v);
+            }
+        } else if !f.rest && !tail.is_empty() {
+            return Err(EvalError::Panic(format!("expected at most {} argument(s), got {}", n_pos, raw_args.len())));
+        }
+
         Ok(argv)
+    }
+
+    /// Evaluate an `&optional`/`&key` default-value body to the `Sexpr` value
+    /// bound when the argument is omitted — an empty body means `nil`
+    /// (`Sexpr::Nil`). Evaluated in `env`, which holds the params bound before
+    /// this one (see [`Self::bind_macro_args`]).
+    fn eval_macro_default(&self, heap: &mut Heap, default: &[Typed], env: &Env) -> Result<Value, EvalError> {
+        if default.is_empty() {
+            return Ok(Value::Empty);
+        }
+        match self.eval_seq(heap, default, env)? {
+            RtValue::Sexpr(v) => Ok(v),
+            other => Err(EvalError::Internal(format!("macro default did not evaluate to a Sexpr: {:?}", other))),
+        }
+    }
+
+    /// Build a fresh `Sexpr` list from `items`, rooting the growing tail
+    /// across each `cons` (which may collect). The shared tail-builder for a
+    /// macro's `&rest` parameter.
+    fn build_sexpr_list(&self, heap: &mut Heap, items: &[Value]) -> Result<Value, EvalError> {
+        let mut list = Value::Empty;
+        for v in items.iter().rev() {
+            heap.push_root(list);
+            let consed = heap.cons(*v, list);
+            heap.pop_root();
+            list = consed.map_err(|e| EvalError::Panic(e.to_string()))?;
+        }
+        Ok(list)
+    }
+
+    /// Parse a macro call's trailing arguments as a `&key` plist — pairs of
+    /// `(:name, value)` — returning each supplied param name mapped to its
+    /// value form. A keyword must be a symbol `:name` matching one of the
+    /// declared keys; the plist must have even length; a duplicate keeps the
+    /// first value (CL). Unknown keywords and odd length are errors.
+    fn parse_keyword_args(
+        &self,
+        heap: &Heap,
+        tail: &[Value],
+        keys: &[(String, Vec<Typed>)],
+    ) -> Result<HashMap<String, Value>, EvalError> {
+        if tail.len() % 2 != 0 {
+            return Err(EvalError::Panic("odd number of &key arguments (each key needs a value)".into()));
+        }
+        let mut map: HashMap<String, Value> = HashMap::new();
+        let mut i = 0;
+        while i < tail.len() {
+            let name = match tail[i] {
+                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                _ => return Err(EvalError::Panic("&key argument name must be a keyword symbol like :name".into())),
+            };
+            let stripped = name
+                .strip_prefix(':')
+                .ok_or_else(|| EvalError::Panic(format!("expected a keyword like :name, got `{}`", name)))?;
+            if !keys.iter().any(|(k, _)| k == stripped) {
+                return Err(EvalError::Panic(format!("unknown &key argument `:{}`", stripped)));
+            }
+            map.entry(stripped.to_string()).or_insert(tail[i + 1]);
+            i += 2;
+        }
+        Ok(map)
     }
 
     /// Evaluate each argument in turn, returning the values alongside the
@@ -3096,18 +3248,6 @@ impl MacroExpander for Interp {
     /// trusts its own `rooted` count to know how much to pop.
     fn expand_macro(&self, heap: &mut Heap, path: &Path, raw_args: Vec<Value>) -> Result<Value, String> {
         let f = self.root.borrow().get_fn(path).ok_or_else(|| format!("no such macro: {}", path))?;
-        let fixed = if f.rest { f.params.len() - 1 } else { f.params.len() };
-        if f.rest {
-            if raw_args.len() < fixed {
-                return Err(format!("expected at least {} argument(s), got {}", fixed, raw_args.len()));
-            }
-        } else if f.params.len() != raw_args.len() {
-            return Err(format!(
-                "expected {} argument(s), got {}",
-                f.params.len(),
-                raw_args.len()
-            ));
-        }
         for v in &raw_args {
             heap.push_root(*v);
         }
@@ -3120,7 +3260,12 @@ impl MacroExpander for Interp {
         // closure over a non-tier type is the only behavior change — it now
         // JITs (or hard-declines *Gap*) instead of silently interpreting —
         // and no such macro exists (macro bodies close over ordinary types).
-        let result = match self.bind_macro_args(heap, &f, &raw_args, fixed) {
+        //
+        // `bind_macro_args` validates arity and binds every parameter
+        // (defaulting omitted `&optional`/`&key` args); the call-site checker
+        // has already range-checked the raw count (`Checker::check_macro_arity`),
+        // so any error here is a keyword/plist detail it deliberately deferred.
+        let result = match self.bind_macro_args(heap, &f, &raw_args) {
             Ok(argv) => self.apply(heap, &f, argv),
             Err(e) => Err(e),
         };
@@ -6530,6 +6675,7 @@ mod scc_tests {
                 kinds: vec![],
                 body: vec![Typed::new(Expr::Call(crate::check::ast::Ref::synthetic(Path::root("b")), vec![]), Type::I64)],
                 rest: false,
+                lambda: None,
                 sig: Some((vec![], Type::I64)),
                 public: true,
                 compiled: RefCell::new(None),
@@ -6542,6 +6688,7 @@ mod scc_tests {
                 kinds: vec![],
                 body: vec![Typed::new(Expr::Call(crate::check::ast::Ref::synthetic(Path::root("a")), vec![]), Type::I64)],
                 rest: false,
+                lambda: None,
                 sig: Some((vec![], Type::I64)),
                 public: true,
                 compiled: RefCell::new(None),

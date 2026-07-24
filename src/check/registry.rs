@@ -78,12 +78,23 @@ pub struct AssocFn {
 /// per-parameter type to record — see `Checker::check_defmacro`).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MacroDef {
-    /// The number of fixed (non-`&rest`) parameters.
-    pub arity: usize,
-    /// Whether the parameter list ends in `&rest name` — a call then needs
-    /// only *at least* `arity` arguments, with the trailing ones collected
-    /// into a single `Sexpr` list bound to the last parameter.
+    /// The number of leading required parameters — the call's minimum argument
+    /// count. (`&optional`/`&rest`/`&key` params past this prefix are all
+    /// omittable; see [`crate::MacroLambda`].)
+    pub required: usize,
+    /// The number of `&optional` parameters (each omittable, filled
+    /// positionally after the required ones). Together with `required` this
+    /// bounds a plain call's arg count (`required..=required+optional`) when
+    /// there is neither `&rest` nor `&key`.
+    pub optional: usize,
+    /// Whether the parameter list ends in `&rest name` — the trailing
+    /// positional arguments (past `required + optional`) are collected into a
+    /// single `Sexpr` list bound to that parameter.
     pub rest: bool,
+    /// The `&key` parameter names (bare, no leading colon), empty when the
+    /// lambda list has no `&key` section. A call supplies one as `:name value`
+    /// in its trailing arguments.
+    pub keys: Vec<String>,
     /// Visible outside its defining module.
     pub public: bool,
     /// See [`FnSig::builtin`]. Always `false` today — `with_builtins`

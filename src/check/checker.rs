@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{parse_type, prim_type_path, Error, Heap, Loc, Path, Type, Value};
 use crate::name_lexer::{NameLexer, NameTok};
 
-use super::ast::{Arm, CompileTarget, Expr, Pattern, QuotedSexpr, Ref, Typed};
+use super::ast::{Arm, CompileTarget, Expr, MacroLambda, Pattern, QuotedSexpr, Ref, Typed};
 use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Registry, TraitBound, TraitDef, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
@@ -154,9 +154,12 @@ pub enum TopLevel {
     /// A `defmacro`: a compile-time, `Sexpr`-to-`Sexpr` code transformer.
     /// Stored as an ordinary callable body — calling it (at macro-expansion
     /// time, via [`MacroExpander`]) is identical to calling a `defun`. `params`
-    /// includes the `&rest` parameter's name last (with the `&rest` marker
-    /// itself dropped) when `rest` is true; see [`Checker::check_defmacro`].
-    Defmacro { name: Path, params: Vec<String>, body: Vec<Typed>, rest: bool, public: bool },
+    /// lists every binding name in order: required, then `&optional`, then the
+    /// `&rest` name (when `rest` is true), then `&key` names — the `&optional`/
+    /// `&rest`/`&key` markers themselves dropped. `lambda` describes how the
+    /// non-required regions are filled at expansion time (default-value bodies,
+    /// keyword matching); see [`Checker::check_defmacro`] and [`MacroLambda`].
+    Defmacro { name: Path, params: Vec<String>, body: Vec<Typed>, rest: bool, lambda: MacroLambda, public: bool },
     /// A `defvar`/`defconstant`: a global variable (`mutable`) or constant.
     Defvar { name: Path, ty: Type, value: Typed, mutable: bool, public: bool },
     /// A `module`: a namespace and its checked body forms.
@@ -200,6 +203,25 @@ pub enum TopLevel {
 /// A `&rest` parameter's `(name, elem-type, name's source position)`, as
 /// returned by [`Checker::parse_params_rest`] alongside the fixed params.
 type RestParam = (String, Type, Option<Loc>);
+
+/// The call-site arity shape of a macro, derived from its [`MacroDef`] by
+/// [`Checker::resolve_macro`]/[`resolve_macro_path`](Checker::resolve_macro_path)
+/// and consumed by [`Checker::check_macro_arity`]. Carries only what a raw
+/// argument *count* can be judged against — the `&key` names themselves aren't
+/// needed here (keyword validation happens in `Interp::expand_macro`).
+#[derive(Clone, Copy)]
+struct MacroShape {
+    required: usize,
+    optional: usize,
+    rest: bool,
+    has_keys: bool,
+}
+
+impl MacroShape {
+    fn of(def: &MacroDef) -> MacroShape {
+        MacroShape { required: def.required, optional: def.optional, rest: def.rest, has_keys: !def.keys.is_empty() }
+    }
+}
 
 /// The variables a pattern binds: each `(name, type, name's source position)`,
 /// as returned by [`Checker::check_pattern`]/[`Checker::check_ctor_pattern`].
@@ -1133,17 +1155,17 @@ impl Checker {
         None
     }
 
-    /// Resolve a bare macro name to its absolute [`Path`], fixed arity, and
-    /// whether it's variadic (`&rest`) — walks the ancestor chain like
+    /// Resolve a bare macro name to its absolute [`Path`] and the call-site
+    /// arity shape ([`MacroShape`]) — walks the ancestor chain like
     /// [`Self::resolve_fn`] (without `use`-alias support, which `defmacro`
     /// doesn't have yet).
-    fn resolve_macro(&self, name: &str) -> Option<(Path, usize, bool)> {
+    fn resolve_macro(&self, name: &str) -> Option<(Path, MacroShape)> {
         for prefix in self.ns_ancestors() {
             if let Some(m) = self.reg.root.module(prefix) {
                 if let Some(def) = m.macros.get(name) {
                     let mut segs = prefix.to_vec();
                     segs.push(name.to_string());
-                    return Some((Path::from_segments(segs), def.arity, def.rest));
+                    return Some((Path::from_segments(segs), MacroShape::of(def)));
                 }
             }
         }
@@ -1151,11 +1173,11 @@ impl Checker {
     }
 
     /// Resolve a module-qualified macro name (`mod::macro-name`) to its
-    /// absolute [`Path`], fixed arity, and whether it's variadic (`&rest`) —
-    /// the path-qualified counterpart of [`Self::resolve_macro`], mirroring
+    /// absolute [`Path`] and call-site arity shape ([`MacroShape`]) — the
+    /// path-qualified counterpart of [`Self::resolve_macro`], mirroring
     /// [`Self::resolve_fn_path`]'s module lookup and visibility rule (public
     /// unless the caller is in scope of the defining module).
-    fn resolve_macro_path(&self, segs: &[String]) -> Option<(Path, usize, bool)> {
+    fn resolve_macro_path(&self, segs: &[String]) -> Option<(Path, MacroShape)> {
         if segs.is_empty() {
             return None;
         }
@@ -1167,7 +1189,7 @@ impl Checker {
         }
         let mut full = abs;
         full.push(last[0].clone());
-        Some((Path::from_segments(full), def.arity, def.rest))
+        Some((Path::from_segments(full), MacroShape::of(def)))
     }
 
     /// Heads with built-in meaning — the expression special forms matched in
@@ -1211,14 +1233,14 @@ impl Checker {
             return Ok(None);
         }
         let elems = heap.list_to_vec(v)?;
-        let (macro_path, arity, rest, display) = match elems.first() {
+        let (macro_path, shape, display) = match elems.first() {
             Some(Value::Symbol(id)) => {
                 let head = heap.symbol_name(*id).to_string();
                 if Self::is_builtin_form_head(&head) {
                     return Ok(None);
                 }
                 match self.resolve_macro(&head) {
-                    Some((p, arity, rest)) => (p, arity, rest, head),
+                    Some((p, shape)) => (p, shape, head),
                     None => return Ok(None),
                 }
             }
@@ -1226,35 +1248,49 @@ impl Checker {
                 let segs: Vec<String> =
                     heap.path_segments(*pid).iter().map(|s| heap.symbol_name(*s).to_string()).collect();
                 match self.resolve_macro_path(&segs) {
-                    Some((p, arity, rest)) => (p, arity, rest, segs.join("::")),
+                    Some((p, shape)) => (p, shape, segs.join("::")),
                     None => return Ok(None),
                 }
             }
             _ => return Ok(None),
         };
         let args = &elems[1..];
-        Self::check_macro_arity(&display, arity, rest, args.len())?;
+        Self::check_macro_arity(&display, shape, args.len())?;
         let expanded = interp
             .expand_macro(heap, &macro_path, args.to_vec())
             .map_err(|e| Error::TypeError(format!("macro `{}`: {}", display, e)))?;
         Ok(Some(expanded))
     }
 
-    /// The arity check shared by every macro-expansion site (a `&rest` macro
-    /// takes at least `arity` arguments, a fixed one exactly `arity`).
-    fn check_macro_arity(head: &str, arity: usize, rest: bool, got: usize) -> Result<(), Error> {
-        if rest {
-            if got < arity {
-                return Err(Error::TypeError(format!(
-                    "macro `{}` expects at least {} argument(s), got {}",
-                    head, arity, got
-                )));
-            }
-        } else if got != arity {
+    /// The arity check shared by every macro-expansion site. Only the bounds a
+    /// call site can judge from raw argument *count* are checked here; the
+    /// finer validation that needs to parse the argument forms (an unknown
+    /// `&key` keyword, an odd `&key` plist) is left to `Interp::expand_macro`,
+    /// whose error is surfaced the same way (`macro `name`: ...`).
+    ///
+    /// - A minimum of `required` args always applies.
+    /// - With neither `&rest` nor `&key`, the maximum is `required + optional`
+    ///   (exact when there are no `&optional` params — the plain-macro case,
+    ///   preserving the original exact-arity message).
+    /// - With `&rest` or `&key`, there is no call-site upper bound (the
+    ///   trailing args are a `&rest` list and/or a keyword plist).
+    fn check_macro_arity(head: &str, shape: MacroShape, got: usize) -> Result<(), Error> {
+        let MacroShape { required, optional, rest, has_keys } = shape;
+        if got < required {
             return Err(Error::TypeError(format!(
-                "macro `{}` expects {} argument(s), got {}",
-                head, arity, got
+                "macro `{}` expects at least {} argument(s), got {}",
+                head, required, got
             )));
+        }
+        if !rest && !has_keys {
+            let max = required + optional;
+            if got > max {
+                return Err(Error::TypeError(if optional == 0 {
+                    format!("macro `{}` expects {} argument(s), got {}", head, required, got)
+                } else {
+                    format!("macro `{}` expects {} to {} argument(s), got {}", head, required, max, got)
+                }));
+            }
         }
         Ok(())
     }
@@ -2250,47 +2286,193 @@ impl Checker {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("defmacro: name must be a symbol".into())),
         };
+        // Parse the CL-style lambda list into its four ordered regions:
+        // `required &optional opt... &rest r &key key...`. An `&optional`/
+        // `&key` item is either a bare `name` (default `nil`) or a
+        // `(name default-form)` pair; a required or `&rest` item is always a
+        // bare name. The markers must appear in this order and at most once
+        // each (enforced via the running section rank below).
         let param_vals = heap.list_to_vec(parts[1])?;
-        let mut names = Vec::new();
-        for p in &param_vals {
-            match p {
-                Value::Symbol(id) => names.push(heap.symbol_name(*id).to_string()),
-                _ => return Err(Error::TypeError("defmacro: parameter must be a name".into())),
-            }
-        }
-        // `&rest name` collects every argument from that point on into a
-        // single `Sexpr` list bound to `name`; it must be the last two
-        // lambda-list items (CL-style, but `&rest` only — no `&optional`/`&key`).
-        let (params, rest) = match names.iter().position(|n| n == "&rest") {
-            Some(i) => {
-                if i + 2 != names.len() {
-                    return Err(Error::TypeError(
-                        "defmacro: &rest must be followed by exactly one parameter name, as the last item in the parameter list".into(),
-                    ));
-                }
-                names.remove(i); // drop the `&rest` marker, keeping the rest-param name in place
-                (names, true)
-            }
-            None => (names, false),
-        };
-        let arity = if rest { params.len() - 1 } else { params.len() };
-        let fq_name = self.fq(&name);
+        let (required_names, optionals, rest_name, key_specs) =
+            self.parse_macro_lambda_list(heap, &param_vals)?;
+        let rest = rest_name.is_some();
 
+        // `params` lists every binding name in expansion order — required,
+        // then optional, then `&rest`, then key — mirroring how
+        // `Interp::bind_macro_args` fills them (see `TopLevel::Defmacro`).
+        let mut params: Vec<String> = required_names.clone();
+        params.extend(optionals.iter().map(|(n, _)| n.clone()));
+        if let Some(r) = &rest_name {
+            params.push(r.clone());
+        }
+        params.extend(key_specs.iter().map(|(n, _)| n.clone()));
+
+        let fq_name = self.fq(&name);
         self.check_redef("macro", &name, self.cur_ns().macros.get(&name))?;
-        self.reg
-            .root
-            .module_mut(&self.ns)
-            .macros
-            .insert(name, MacroDef { arity, rest, public, builtin: false });
+        self.reg.root.module_mut(&self.ns).macros.insert(
+            name,
+            MacroDef {
+                required: required_names.len(),
+                optional: optionals.len(),
+                rest,
+                keys: key_specs.iter().map(|(n, _)| n.clone()).collect(),
+                public,
+                builtin: false,
+            },
+        );
         if let Some(loc) = def_loc {
             self.reg.def_locs.macros.insert(fq_name.clone(), loc);
         }
 
+        // Every parameter — and the macro's implicit result — is `Sexpr`. A
+        // default-value form is checked against `Sexpr` in an environment
+        // holding exactly the params bound *before* it (CL: an optional/key
+        // default may reference earlier params, never later ones), which is
+        // also the order `bind_macro_args` evaluates them in.
         let sexpr_ty = Type::Named(Path::root("sexpr"), vec![]);
-        let env = Env::new().extended(params.iter().map(|p| (p.clone(), sexpr_ty.clone())).collect());
+        let mut bindings: Vec<(String, Type)> =
+            required_names.iter().map(|n| (n.clone(), sexpr_ty.clone())).collect();
+
+        let mut opt_defaults: Vec<Vec<Typed>> = Vec::with_capacity(optionals.len());
+        for (n, default) in &optionals {
+            let checked = self.check_macro_default(heap, interp, &bindings, *default, &sexpr_ty)?;
+            opt_defaults.push(checked);
+            bindings.push((n.clone(), sexpr_ty.clone()));
+        }
+        if let Some(r) = &rest_name {
+            bindings.push((r.clone(), sexpr_ty.clone()));
+        }
+        let mut key_defaults: Vec<(String, Vec<Typed>)> = Vec::with_capacity(key_specs.len());
+        for (n, default) in &key_specs {
+            let checked = self.check_macro_default(heap, interp, &bindings, *default, &sexpr_ty)?;
+            key_defaults.push((n.clone(), checked));
+            bindings.push((n.clone(), sexpr_ty.clone()));
+        }
+
+        let env = Env::new().extended(bindings);
         let body_locs = parts_locs.get(2..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[2..], body_locs, Some(&sexpr_ty))?;
-        Ok(TopLevel::Defmacro { name: fq_name, params, body, rest, public })
+        let lambda = MacroLambda { required: required_names.len(), optionals: opt_defaults, keys: key_defaults };
+        Ok(TopLevel::Defmacro { name: fq_name, params, body, rest, lambda, public })
+    }
+
+    /// Check one `&optional`/`&key` default-value form (or none) against
+    /// `Sexpr`, in an environment holding the params bound before it. Returns
+    /// the checked body as a `Vec<Typed>` — a single-element vector for a
+    /// supplied default, or empty for "no default" (binds `nil` at expansion).
+    fn check_macro_default(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        bindings: &[(String, Type)],
+        default: Option<Value>,
+        sexpr_ty: &Type,
+    ) -> Result<Vec<Typed>, Error> {
+        match default {
+            None => Ok(Vec::new()),
+            Some(form) => {
+                let env = Env::new().extended(bindings.to_vec());
+                let typed = self.check(heap, interp, &env, form, Some(sexpr_ty))?;
+                Ok(vec![typed])
+            }
+        }
+    }
+
+    /// Parse a `defmacro` lambda list into `(required names, optionals,
+    /// &rest name, key specs)`, where each optional/key spec is
+    /// `(name, default-form)` with `default-form` `None` for a bare name and
+    /// `Some(form)` for a `(name form)` pair. Enforces the CL section order
+    /// (`required &optional &rest &key`), each marker at most once, and that
+    /// `&rest` names exactly one parameter. See [`Self::check_defmacro`].
+    #[allow(clippy::type_complexity)]
+    fn parse_macro_lambda_list(
+        &self,
+        heap: &Heap,
+        param_vals: &[Value],
+    ) -> Result<(Vec<String>, Vec<(String, Option<Value>)>, Option<String>, Vec<(String, Option<Value>)>), Error> {
+        // Section rank: required=0, &optional=1, &rest=2, &key=3. A marker may
+        // only advance the rank forward, so each appears at most once and in
+        // order.
+        let mut rank = 0u8;
+        let mut required_names: Vec<String> = Vec::new();
+        let mut optionals: Vec<(String, Option<Value>)> = Vec::new();
+        let mut rest_name: Option<String> = None;
+        let mut keys: Vec<(String, Option<Value>)> = Vec::new();
+
+        for p in param_vals {
+            if let Value::Symbol(id) = p {
+                match heap.symbol_name(*id) {
+                    "&optional" => {
+                        if rank >= 1 {
+                            return Err(Error::TypeError("defmacro: &optional must precede &rest and &key, and appear once".into()));
+                        }
+                        rank = 1;
+                        continue;
+                    }
+                    "&rest" => {
+                        if rank >= 2 {
+                            return Err(Error::TypeError("defmacro: &rest must precede &key, and appear once".into()));
+                        }
+                        rank = 2;
+                        continue;
+                    }
+                    "&key" => {
+                        if rank >= 3 {
+                            return Err(Error::TypeError("defmacro: &key may appear only once".into()));
+                        }
+                        rank = 3;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            match rank {
+                0 => required_names.push(Self::macro_param_name(heap, *p, "required")?),
+                1 => optionals.push(Self::macro_opt_key_spec(heap, *p, "&optional")?),
+                2 => {
+                    if rest_name.is_some() {
+                        return Err(Error::TypeError("defmacro: &rest takes exactly one parameter name".into()));
+                    }
+                    rest_name = Some(Self::macro_param_name(heap, *p, "&rest")?);
+                }
+                _ => keys.push(Self::macro_opt_key_spec(heap, *p, "&key")?),
+            }
+        }
+        if rank == 2 && rest_name.is_none() {
+            return Err(Error::TypeError("defmacro: &rest must be followed by exactly one parameter name".into()));
+        }
+        Ok((required_names, optionals, rest_name, keys))
+    }
+
+    /// A bare-symbol lambda-list parameter name (`required`/`&rest`).
+    fn macro_param_name(heap: &Heap, v: Value, section: &str) -> Result<String, Error> {
+        match v {
+            Value::Symbol(id) => Ok(heap.symbol_name(id).to_string()),
+            _ => Err(Error::TypeError(format!("defmacro: {} parameter must be a name", section))),
+        }
+    }
+
+    /// An `&optional`/`&key` item: either a bare `name` (no default) or a
+    /// `(name default-form)` pair. Returns `(name, Some(form)|None)`.
+    fn macro_opt_key_spec(heap: &Heap, v: Value, section: &str) -> Result<(String, Option<Value>), Error> {
+        match v {
+            Value::Symbol(id) => Ok((heap.symbol_name(id).to_string(), None)),
+            Value::Cons(_) => {
+                let items = heap.list_to_vec(v)?;
+                if items.is_empty() || items.len() > 2 {
+                    return Err(Error::TypeError(format!(
+                        "defmacro: {} parameter must be `name` or `(name default)`",
+                        section
+                    )));
+                }
+                let name = Self::macro_param_name(heap, items[0], section)?;
+                Ok((name, items.get(1).copied()))
+            }
+            _ => Err(Error::TypeError(format!(
+                "defmacro: {} parameter must be `name` or `(name default)`",
+                section
+            ))),
+        }
     }
 
     /// Parse a `((name type)...)` parameter list (types canonicalized to FQ)
@@ -3579,8 +3761,8 @@ impl Checker {
         // local-variable-as-callee (matching how a constructor/free-function
         // call is resolved below), since a macro is a purely compile-time
         // name with no runtime value to shadow or be shadowed by.
-        if let Some((macro_path, arity, rest)) = self.resolve_macro(&head) {
-            Self::check_macro_arity(&head, arity, rest, args.len())?;
+        if let Some((macro_path, shape)) = self.resolve_macro(&head) {
+            Self::check_macro_arity(&head, shape, args.len())?;
             let expanded = interp
                 .expand_macro(heap, &macro_path, args.to_vec())
                 .map_err(|e| Error::TypeError(format!("macro `{}`: {}", head, e)))?;
@@ -3873,9 +4055,9 @@ impl Checker {
         // purely compile-time name, resolved before any runtime call shape;
         // `resolve_macro_path` is the `::`-qualified counterpart of the
         // bare-name `resolve_macro` that branch uses).
-        if let Some((macro_path, arity, rest)) = self.resolve_macro_path(segs) {
+        if let Some((macro_path, shape)) = self.resolve_macro_path(segs) {
             let display = segs.join("::");
-            Self::check_macro_arity(&display, arity, rest, args.len())?;
+            Self::check_macro_arity(&display, shape, args.len())?;
             let expanded = interp
                 .expand_macro(heap, &macro_path, args.to_vec())
                 .map_err(|e| Error::TypeError(format!("macro `{}`: {}", display, e)))?;

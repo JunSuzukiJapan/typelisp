@@ -48,6 +48,33 @@ impl PartialEq for Typed {
 /// parameters, and checked body.
 pub type LabelDef = (String, Vec<(String, Type)>, Vec<Typed>);
 
+/// The `&optional`/`&key` structure of a `defmacro` lambda list, beyond its
+/// leading required params (and any single trailing `&rest`, whose presence is
+/// tracked separately by the `rest` flag on `TopLevel::Defmacro`/`FnDef`).
+///
+/// `params` (on those nodes) lists every binding name in order — required,
+/// then optional, then the `&rest` name if present, then key names — and this
+/// struct describes how each region past the required prefix is filled at
+/// macro-expansion time (`Interp::bind_macro_args`): an omitted `&optional`/
+/// `&key` argument binds its default-value body, evaluated then in an
+/// environment where the earlier params are already bound (an empty body binds
+/// `nil`, i.e. `Sexpr::Nil`). A plain fixed-or-`&rest` macro carries a
+/// `required` equal to its fixed-param count with both `optionals` and `keys`
+/// empty (the common case).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MacroLambda {
+    /// Number of leading required (positional, non-defaulted) params — the
+    /// call's minimum argument count.
+    pub required: usize,
+    /// Default-value body for each `&optional` param, in order. An empty
+    /// `Vec` means the param defaults to `nil` when its argument is omitted.
+    pub optionals: Vec<Vec<Typed>>,
+    /// Each `&key` param's `(name, default-value body)`, in order — matched at
+    /// the call site by the keyword symbol `:name`; an omitted key binds its
+    /// default body (empty = `nil`).
+    pub keys: Vec<(String, Vec<Typed>)>,
+}
+
 /// A reference to a free function or global variable — everything both
 /// `Interp` and the compile pipeline need to resolve one, kept as two
 /// independent halves rather than a single collapsed `Path`:

@@ -390,7 +390,13 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// cache serialized before either change would fail to deserialize the new
 /// shape (or worse, misroute an old same-shape `Ctor` as a downcast) —
 /// 2026-07-24.
-pub const FASL_FORMAT_VERSION: u32 = 10;
+///
+/// 11: `defmacro` lambda lists gained `&optional`/`&key`. `MacroDef` (the
+/// serialized macro-registry entry) replaced its single `arity`/`rest` with
+/// `required`/`optional`/`rest`/`keys`, and `TopLevel::Defmacro` gained a
+/// `MacroLambda` (the checked default-value bodies + key names). A stale cache
+/// under the old shapes would fail to deserialize — 2026-07-24.
+pub const FASL_FORMAT_VERSION: u32 = 11;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.

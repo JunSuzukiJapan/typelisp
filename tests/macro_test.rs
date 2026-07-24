@@ -566,3 +566,129 @@ fn cond_with_no_matching_clause_and_no_else_is_unit() {
     let (v, _) = eval_ok_with_prelude("(cond ((= 1 2) ()))");
     assert_eq!(v, RtValue::Unit);
 }
+
+// ---- Phase F: defmacro &optional / &key (TODO T2) ---------------------------
+
+/// Read → check → exec a program, returning the first check/eval error's
+/// message (or `Ok(())` if it all succeeded) — for asserting on the exact
+/// arity/keyword diagnostics a malformed macro call produces.
+fn run_expect_err(src: &str) -> Result<(), String> {
+    let mut h = Heap::with_capacity(1 << 16);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    for v in vs {
+        match chk.check_form(&mut h, &interp, v) {
+            Ok(tl) => {
+                if let Err(e) = interp.exec(&mut h, tl) {
+                    return Err(e.to_string());
+                }
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn optional_arg_supplied_and_omitted() {
+    // `by` defaults to `1` when omitted, else takes the call argument.
+    let (v, h) = eval_ok("(defmacro pair (x &optional (by 1)) `(quote (,x ,by))) (pair 10)");
+    assert_eq!(as_sexpr_string(v, &h), "(10 1)");
+    let (v, h) = eval_ok("(defmacro pair (x &optional (by 1)) `(quote (,x ,by))) (pair 10 5)");
+    assert_eq!(as_sexpr_string(v, &h), "(10 5)");
+}
+
+#[test]
+fn optional_without_default_binds_nil() {
+    // A bare `&optional y` (no default form) binds the empty list when omitted.
+    let (v, h) = eval_ok("(defmacro pair (x &optional y) `(quote (,x ,y))) (pair 1)");
+    assert_eq!(as_sexpr_string(v, &h), "(1 ())");
+    let (v, h) = eval_ok("(defmacro pair (x &optional y) `(quote (,x ,y))) (pair 1 2)");
+    assert_eq!(as_sexpr_string(v, &h), "(1 2)");
+}
+
+#[test]
+fn optional_default_may_reference_earlier_param() {
+    // CL: an `&optional` default form is evaluated with the earlier params
+    // bound, so `(y x)` copies `x` when `y` is omitted.
+    let (v, h) = eval_ok("(defmacro dup (x &optional (y x)) `(quote (,x ,y))) (dup 4)");
+    assert_eq!(as_sexpr_string(v, &h), "(4 4)");
+    let (v, h) = eval_ok("(defmacro dup (x &optional (y x)) `(quote (,x ,y))) (dup 4 5)");
+    assert_eq!(as_sexpr_string(v, &h), "(4 5)");
+}
+
+#[test]
+fn keyword_args_match_by_name_in_any_order() {
+    let prog = "(defmacro make (&key (a 0) (b 9)) `(quote (,a ,b)))";
+    assert_eq!(as_sexpr_string_of(&format!("{prog} (make)")), "(0 9)");
+    assert_eq!(as_sexpr_string_of(&format!("{prog} (make :a 7)")), "(7 9)");
+    assert_eq!(as_sexpr_string_of(&format!("{prog} (make :b 3 :a 7)")), "(7 3)");
+}
+
+/// Convenience: eval a program and render its final `Sexpr` result.
+fn as_sexpr_string_of(src: &str) -> String {
+    let (v, h) = eval_ok(src);
+    as_sexpr_string(v, &h)
+}
+
+#[test]
+fn required_optional_and_rest_combine() {
+    let prog = "(defmacro combo (a &optional (b 2) &rest cs) `(quote (,a ,b ,cs)))";
+    assert_eq!(as_sexpr_string_of(&format!("{prog} (combo 1)")), "(1 2 ())");
+    assert_eq!(as_sexpr_string_of(&format!("{prog} (combo 1 20)")), "(1 20 ())");
+    assert_eq!(as_sexpr_string_of(&format!("{prog} (combo 1 20 30 40)")), "(1 20 (30 40))");
+}
+
+#[test]
+fn too_few_args_reports_required_minimum() {
+    let e = run_expect_err("(defmacro m (a &optional b) `(quote ,a)) (m)").unwrap_err();
+    assert!(e.contains("at least 1"), "got: {e}");
+}
+
+#[test]
+fn too_many_args_reports_the_optional_range() {
+    let e = run_expect_err("(defmacro m (a &optional b) `(quote ,a)) (m 1 2 3)").unwrap_err();
+    assert!(e.contains("1 to 2"), "got: {e}");
+}
+
+#[test]
+fn unknown_keyword_is_rejected() {
+    let e = run_expect_err("(defmacro m (&key (a 0)) `(quote ,a)) (m :zzz 1)").unwrap_err();
+    assert!(e.contains("unknown &key argument") && e.contains(":zzz"), "got: {e}");
+}
+
+#[test]
+fn odd_keyword_plist_is_rejected() {
+    let e = run_expect_err("(defmacro m (&key (a 0)) `(quote ,a)) (m :a)").unwrap_err();
+    assert!(e.contains("odd number of &key arguments"), "got: {e}");
+}
+
+#[test]
+fn markers_must_appear_in_order() {
+    // `&optional` after `&rest` is a malformed lambda list.
+    assert!(run_expect_err("(defmacro bad (a &rest r &optional b) `(quote ,a)) (bad 1)").is_err());
+    // `&key` twice.
+    assert!(run_expect_err("(defmacro bad (&key a &key b) `(quote ,a)) (bad)").is_err());
+}
+
+#[test]
+fn optional_default_construction_survives_gc_pressure() {
+    // Each expansion evaluates the `&optional` default (a fresh `list` cons)
+    // under a tight heap, forcing a GC mid-bind that must not reclaim the
+    // partially-built binding environment (`Interp::bind_macro_args`' Heap
+    // cells) — the `&optional`/`&key` analogue of
+    // `rest_arg_list_construction_survives_gc_pressure`.
+    let (v, h) = run_with_capacity_and_prelude(
+        "(defmacro deflt (&optional (xs (quote (a b c)))) `(quote ,xs))
+         (defun build () Sexpr (deflt))
+         (let ((last (quote ())))
+           (dotimes (i 500)
+             (setf last (build)))
+           last)",
+        96,
+    )
+    .expect("eval failed");
+    assert_eq!(as_sexpr_string(v, &h), "(a b c)");
+}

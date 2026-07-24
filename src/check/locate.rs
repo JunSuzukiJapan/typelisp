@@ -54,7 +54,19 @@ fn visit_top_level<'a>(
     best: &mut Nearest<'a>,
 ) {
     match tl {
-        TopLevel::Defun { body, .. } | TopLevel::Defmethod { body, .. } | TopLevel::Defmacro { body, .. } => {
+        TopLevel::Defun { body, .. } | TopLevel::Defmethod { body, .. } => {
+            for t in body {
+                visit_typed(t, file, cursor, depth, best);
+            }
+        }
+        TopLevel::Defmacro { body, lambda, .. } => {
+            // `&optional`/`&key` default-value forms are checked expressions
+            // too, so goto/hover can land inside them.
+            for d in lambda.optionals.iter().chain(lambda.keys.iter().map(|(_, d)| d)) {
+                for t in d {
+                    visit_typed(t, file, cursor, depth, best);
+                }
+            }
             for t in body {
                 visit_typed(t, file, cursor, depth, best);
             }
@@ -250,9 +262,14 @@ fn scope_top_level(tl: &TopLevel, target: *const Typed, scope: &mut Vec<String>)
             scope.extend(params.iter().map(|(n, _)| n.clone()));
             body.iter().any(|t| scope_typed(t, target, scope))
         }
-        TopLevel::Defmacro { params, body, .. } => {
+        TopLevel::Defmacro { params, body, lambda, .. } => {
             scope.extend(params.iter().cloned());
-            body.iter().any(|t| scope_typed(t, target, scope))
+            lambda
+                .optionals
+                .iter()
+                .chain(lambda.keys.iter().map(|(_, d)| d))
+                .any(|d| d.iter().any(|t| scope_typed(t, target, scope)))
+                || body.iter().any(|t| scope_typed(t, target, scope))
         }
         TopLevel::Defvar { value, .. } => scope_typed(value, target, scope),
         TopLevel::Module { body, .. } => body.iter().any(|tl| scope_top_level(tl, target, scope)),

@@ -4260,3 +4260,30 @@ CL 準拠 `format` と、書式ディレクティブを解釈する `print`/`pri
   （`collect_struct_and_enum_types`）を渡す薄いラッパ。
 - `compile` 対象外（旧 `print`/`println` も非対応だった）。`tests/format_test.rs` 37件。
   `is_builtin_form_head` にも format/print/println を追加。`scripts/test-serial.sh` 全体green。
+
+## `defmacro` の `&optional`/`&key` 対応（2026-07-24、旧 TODO T2）
+
+`defmacro` のラムダリストを CL 流の構造化ラムダリストへ拡張。従来は `&rest` のみ対応だったが、
+`&optional`（デフォルト値付き省略可能引数）と `&key`（キーワード引数）を追加。順序は
+`必須 &optional opt... &rest r &key key...`（各マーカー高々1回・この順序でのみ）。
+
+- **構文**: `&optional`/`&key` の項は `name` または `(name デフォルト式)`。デフォルト式は
+  **展開時に評価**され（`bind_macro_args`）、CL 同様に**先に束縛済みのパラメータを参照できる**
+  （`(defmacro dup (x &optional (y x)) ...)` が動く）。デフォルトを書かなければ `()`=`Sexpr::Nil`。
+  `&key` は呼び出し側 `:name 値`（順不同）。キーワードはシンボル名が `:` で始まる素のシンボル
+  （typelisp に専用キーワード型は無く、リーダは `:b` を名前 `:b` のシンボルとして読む）。
+- **表現**: 共有型 [`MacroLambda`](../../src/check/ast.rs)（`required`/`optionals: Vec<Vec<Typed>>`/
+  `keys: Vec<(String, Vec<Typed>)>`）を新設し `TopLevel::Defmacro` と `FnDef` に持たせた。`params`
+  は従来通り全束縛名を順に並べたフラット列（`apply` 用）で、`MacroLambda` は必須以降の各領域の
+  埋め方（デフォルト式・キーワード名）だけを足す。`FnDef.rest: bool` は据え置き（`&rest` 有無）。
+- **アリティ検査の分担**: 呼び出し側チェッカ（`Checker::check_macro_arity`、`MacroShape` 経由）は
+  生の引数**個数**で判る範囲だけ検査（最小=`required`、`&rest`/`&key` 無しなら最大=`required+optional`。
+  `optional==0` の素マクロは従来通り「厳密 N 個」メッセージ）。`:key` 個別検査（未知キーワード・
+  奇数個の `:key` 列）は引数フォームのパースが要るので `Interp::expand_macro`/`bind_macro_args` に委譲。
+- **GC**: `bind_macro_args` は各パラメータ値を生成した端から `Slot::Heap` セル（`alloc_cell` の
+  暗黙ルート）に入れて保護しつつ、そのセル列をデフォルト式評価用の環境として再利用する
+  （後続デフォルトの `cons` による GC から先行束縛を守る）。`apply` のセル確保は GC を誘発しない
+  ので、`env` 破棄～`apply` 消費の隙間でも `argv` の生ポインタは有効。
+- **MacroDef**（`check::registry`）は `arity`/`rest` → `required`/`optional`/`rest`/`keys` に変更、
+  FASL は v10→**v11** へ bump。`tests/macro_test.rs` に §Phase F（11件）追加。LSP の `locate` は
+  デフォルト式（`Typed`）も走査対象に含めた。

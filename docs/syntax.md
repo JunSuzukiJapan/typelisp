@@ -240,12 +240,18 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 ### defmacro — マクロ定義
 
 ```lisp
-(defmacro name (p1 p2 ... &rest rest-name) body...)
+(defmacro name (必須... &optional opt... &rest rest-name &key key...) body...)
 ```
 
 - 全パラメータ・戻り値は常に `Sexpr` 固定なので型注釈は書かない。
 - CL 流の非衛生的マクロ（`gensym` で衝突を避けるのはマクロ作者の責任）。
-- 末尾 `&rest name` で可変長引数（複数フォームをまとめて1つの `Sexpr` リストとして受け取る）に対応。
+- ラムダリストは CL 流に `必須 &optional &rest &key` の順（各マーカーは高々1回、この順序でのみ）。
+  - `&optional` … 省略可能引数。`name` または `(name デフォルト式)`。デフォルト式は展開時に評価され
+    （先に束縛済みのパラメータを参照できる）、省略時に束縛される（デフォルトを書かなければ `()` = `nil`）。
+  - `&rest name` … 残りの位置引数を1つの `Sexpr` リストとしてまとめて受け取る。
+  - `&key` … キーワード引数。`name` または `(name デフォルト式)`。呼び出し側は `:name 値` で渡す
+    （順不同）。省略時はデフォルト式（無ければ `nil`）。未知のキーワードや奇数個の `:key` 列はエラー。
+- 例: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`。
 
 ## 4. 束縛・条件分岐
 

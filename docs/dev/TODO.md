@@ -22,17 +22,9 @@ CL同等カタログ・可視性・trait機構・compile（普通に書けるコ
 [functions.md](../functions.md) に「将来課題」として散在していた未実装項目を、以下に**着手候補の
 TODO として正式に格上げ**する（2026-07-23、この一覧化で棚卸し）。優先度は目安であり、着手順は未確定。
 
-完了した項目（T1「`format` の書式指定子」、T5「`--heap-cells N`」）は
-[implementation-log.md](implementation-log.md) 末尾へ移設した（2026-07-23）。
-
-### T2. `defmacro` の構造化ラムダリスト `&optional` / `&key`（優先度: 中）
-
-現状 `defmacro` のラムダリストは `&rest` のみ対応（`&rest` は 2026-07-15 に再導入済み）。
-`&optional`（省略可能引数＋デフォルト値）と `&key`（キーワード引数）は
-[language-design.md](language-design.md) §8 で対象外扱いのまま。
-
-- マクロ展開時のみの機能なので型システムへの波及は小さいが、デフォルト値式の評価タイミングと
-  `&rest` との併用順序（CL のラムダリスト規約）を仕様として固める必要がある。
+完了した項目（T1「`format` の書式指定子」、T2「`defmacro` の `&optional`/`&key`」、
+T5「`--heap-cells N`」）は [implementation-log.md](implementation-log.md) 末尾へ移設した
+（T1/T5 は 2026-07-23、T2 は 2026-07-24）。
 
 ### T3. ユーザ定義エラー型（優先度: 中〜低）
 

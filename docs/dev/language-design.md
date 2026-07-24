@@ -485,8 +485,9 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   （`deftrait`/`impl`/`where`境界）は2026-06-30実装済み**——§5.1参照。
 - 関数カタログ（§4）の実装本体は eval（step4）以降。**§4の実装状況は現時点でほぼ完了**——残る
   未実装項目は[functions.md](../functions.md)参照。
-- `defmacro` の構造化ラムダリスト（`&rest` のみ実装済み、`&optional`/`&key` は対象外）、マクロの
-  `use`-alias 解決。**`,@`（unquote-splicing）は2026-06-19実装済み**（commit `853bbdb`）。
+- `defmacro` の構造化ラムダリスト（`&rest`/`&optional`/`&key` すべて実装済み——2026-07-24。
+  デフォルト式は展開時評価・先行パラメータ参照可、`&key` は `:name 値`）、マクロの
+  `use`-alias 解決（こちらは未実装）。**`,@`（unquote-splicing）は2026-06-19実装済み**（commit `853bbdb`）。
 - `defun`/`lambda` の**型付き** `&rest`／`apply` 特殊形は実装済み（2026-06-23に一度実装、
   2026-07-08に「Phase 6『&rest→Vector<T>』計画の破棄」に巻き込まれて削除されたのち、
   2026-07-15に**再導入**——削除自体はSexprベースの`&rest`設計そのものの欠陥ではなく、破棄済みの
