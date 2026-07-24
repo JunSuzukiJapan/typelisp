@@ -36,6 +36,21 @@
 - **`Symbol` は `Sexpr` とは別の独立したプリミティブ型**（`Sexpr` の `Sym` 構成子とは別物）。
   `Sexpr` が要求される文脈へは暗黙変換されるが、逆方向（`Sexpr`→`Symbol`）の自動変換はない。
   `gensym`/`symbol->string`/`string->symbol`（§4.1）はこの `Symbol` 型を使う。
+- **`Sexpr` はユーザ定義 ADT インスタンスも保持できる**（2026-07-24、CL の cons が任意のオブジェクトを
+  保持できる仕様——`(list (make-point ..) 42)` は正当で `#S(POINT :X 1 :Y 2)` と印字される——へ
+  合わせる決定。プリティプリンタ設計議論（TODO T5）中に確定）。対象はヒープ表現（`is_heap_repr`）の
+  登録済み ADT——`defstruct`/`defenum`/`Vector<T>`/`HashTable<K,V>`/`cons-cell<K,V>`/`Option`/`Result`。
+  実行時表現は既に統一済み（`RtValue::Sexpr(Value::Boxed(_))`）なので挿入は透明な retype（実行時
+  コストゼロ）。スカラ（`i32`/`f64`/`bignum`/`ratio`/`char`/`bool`/`string`）も `Symbol` 同様に暗黙
+  `Sexpr` 化されるが、こちらは実表現が異なるため対応する `Sexpr` コンストラクタで実際にラップされる
+  （`&rest`/`format` 引数と同じ変換）。ネイティブ表現のジェネリック実体化（`Option<llvm-value>` 等）
+  は対象外（`Sexpr` の表現を持たないため従来通り型エラー）。`match` 側は `Sexpr` スクルーティニーに
+  対する **downcast パターン**（型名先頭のフィールド分解 `(point x y)`／裸または修飾の enum 変種名
+  `(red)`/`(color::red)`／丸ごと束縛 `(the point p)`）で取り出す——構文の詳細は
+  [syntax.md](../syntax.md) の `match` 節。ランタイムテストは boxed オブジェクトの `type_name` 文字列
+  比較（+ enum は variant index）で、downcast パターンは `Sexpr` 本来の11変種の網羅性カバレッジには
+  数えない。`equal` は CL 同様 struct/enum に対し同一性（`eq`）のまま、`equalp` はスロットごとの
+  再帰比較に拡張。
 - **大文字小文字は区別しない**（シンボルは小文字に正規化してインターン）。
 - **Rust 相互運用はしない**（`&args[1]`, `env::args().collect()` 等は対象外）。
 - **構成子パターンは S 式形** `(Some v)` / `(Cons a d)`。

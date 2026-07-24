@@ -366,6 +366,7 @@ fn pattern_bind_names(pat: &Pattern, scope: &mut Vec<String>) {
                 pattern_bind_names(sub, scope);
             }
         }
+        Pattern::TypeTest(_, inner) => pattern_bind_names(inner, scope),
         Pattern::Wildcard | Pattern::Int(_) | Pattern::Bool(_) | Pattern::Char(_) => {}
     }
 }

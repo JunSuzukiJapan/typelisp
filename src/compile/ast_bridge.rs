@@ -2392,7 +2392,7 @@ fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern, cx: Ctx) -> Result<Value, Er
         Pattern::Int(n) => tagged(heap, "pat-lit", &[Value::Int(*n)]),
         Pattern::Bool(b) => tagged(heap, "pat-lit", &[Value::Int(if *b { 1 } else { 0 })]),
         Pattern::Char(c) => tagged(heap, "pat-lit", &[Value::Int(*c as i64)]),
-        Pattern::Ctor { type_name, variant, args, field_types, .. } => {
+        Pattern::Ctor { type_name, variant, args, field_types, downcast, .. } => {
             // How *this* constructor's own type is represented, so
             // `compile-pattern-test` picks the right tag test (or, for a
             // boxed struct, no test at all — a `defstruct` always has
@@ -2435,12 +2435,58 @@ fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern, cx: Ctx) -> Result<Value, Er
                 }
             };
             heap.push_root(kinds_list);
-            // `scrut-kind`/`field-kinds` appended last so existing
-            // `(pat-ctor variant subpats)` field indices (and their tests)
-            // stay valid.
-            let result = tagged(heap, "pat-ctor", &[Value::Int(*variant as i64), list, Value::Int(kind), kinds_list]);
+            // `downcast`/`type-name-form`: the Sexpr-user-ADT design plan's
+            // §4 addition, appended last (like `scrut-kind`/`field-kinds`
+            // before them) so existing `(pat-ctor variant subpats scrut-kind
+            // field-kinds)` field indices stay valid. `type-name-form` is
+            // `translate_construct`'s own `(str (int c)...)` literal shape
+            // (`str_literal_form`, the *local* name — `type_name.local()`,
+            // matching `rt_struct_new`/`rt_data_new`'s own `type-name-form`
+            // convention there, not the fully qualified `Path`) — only ever
+            // compiled (`compiler.rs`'s `compile-sexpr-instance-test`) when
+            // `downcast` is true; `Value::Empty` otherwise, mirroring
+            // `translate_construct`'s own `is_sexpr` placeholder. Only
+            // meaningful for `MATCH_KIND_STRUCT`/`MATCH_KIND_BOX` — a
+            // downcast is never encoded against `Sexpr`'s own built-in
+            // variants (`Checker::check_ctor_pattern`'s downcast dispatch
+            // never resolves to the `sexpr` path).
+            let type_name_form =
+                if *downcast { str_literal_form(heap, type_name.local())? } else { Value::Empty };
+            heap.push_root(type_name_form);
+            let result = tagged(
+                heap,
+                "pat-ctor",
+                &[Value::Int(*variant as i64), list, Value::Int(kind), kinds_list, Value::Bool(*downcast), type_name_form],
+            );
+            heap.pop_root(); // type_name_form
             heap.pop_root(); // kinds_list
             heap.pop_root(); // list
+            result
+        }
+        Pattern::TypeTest(ty, inner) => {
+            // `(pat-typetest type-name-form inner-pattern)` — `Checker::
+            // check_type_test_pattern`'s `(the Type pattern)`, a whole-value
+            // Sexpr downcast. `ty` is guaranteed `is_heap_repr` (checked at
+            // check time), so it's always `Type::Named` here; its ADT path's
+            // *local* name is compiled the same way a downcast `Ctor`'s is
+            // (see the `Pattern::Ctor` arm's doc comment just above).
+            let name = match ty {
+                Type::Named(p, _) => p.local(),
+                _ => unreachable!("Checker::check_type_test_pattern only ever produces a Type::Named"),
+            };
+            let type_name_form = str_literal_form(heap, name)?;
+            heap.push_root(type_name_form);
+            let inner_v = match pattern_to_sexpr(heap, inner, cx) {
+                Ok(v) => v,
+                Err(e) => {
+                    heap.pop_root(); // type_name_form
+                    return Err(e);
+                }
+            };
+            heap.push_root(inner_v);
+            let result = tagged(heap, "pat-typetest", &[type_name_form, inner_v]);
+            heap.pop_root(); // inner_v
+            heap.pop_root(); // type_name_form
             result
         }
     }
@@ -3893,7 +3939,7 @@ mod tests {
         let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
         let arms = vec![
             Arm {
-                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, Pattern::Wildcard], sexpr_fields: vec![true, true], field_types: vec![] },
+                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, Pattern::Wildcard], sexpr_fields: vec![true, true], field_types: vec![], downcast: false },
                 body: vec![typed(Expr::Bool(true), Type::Bool)],
             },
             Arm { pat: Pattern::Wildcard, body: vec![typed(Expr::Bool(false), Type::Bool)] },
@@ -3965,6 +4011,7 @@ mod tests {
                 args: vec![Pattern::Bind("a".to_string(), false), Pattern::Bind("b".to_string(), false)],
                 sexpr_fields: vec![false, false],
                 field_types: vec![Type::I64, Type::I64],
+                downcast: false,
             },
             body: vec![typed(Expr::Var("a".to_string()), Type::I64)],
         }];
@@ -3988,7 +4035,7 @@ mod tests {
         let mut heap = Heap::with_capacity(1 << 10);
         let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
         let arms = vec![Arm {
-            pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Bind("h".to_string(), true), Pattern::Wildcard], sexpr_fields: vec![true, true], field_types: vec![] },
+            pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Bind("h".to_string(), true), Pattern::Wildcard], sexpr_fields: vec![true, true], field_types: vec![], downcast: false },
             body: vec![typed(Expr::Var("h".to_string()), sexpr_ty())],
         }];
         let v = ast_to_sexpr(&mut heap, &typed(Expr::Match(Box::new(scrut), arms), sexpr_ty())).unwrap();
@@ -4009,10 +4056,10 @@ mod tests {
     fn translates_a_nested_ctor_subpattern() {
         let mut heap = Heap::with_capacity(1 << 10);
         let scrut = typed(Expr::Var("s".to_string()), sexpr_ty());
-        let inner_nil = Pattern::Ctor { type_name: Path::root("sexpr"), variant: 0, args: vec![], sexpr_fields: vec![], field_types: vec![] };
+        let inner_nil = Pattern::Ctor { type_name: Path::root("sexpr"), variant: 0, args: vec![], sexpr_fields: vec![], field_types: vec![], downcast: false };
         let arms = vec![
             Arm {
-                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, inner_nil], sexpr_fields: vec![true, true], field_types: vec![] },
+                pat: Pattern::Ctor { type_name: Path::root("sexpr"), variant: 7, args: vec![Pattern::Wildcard, inner_nil], sexpr_fields: vec![true, true], field_types: vec![], downcast: false },
                 body: vec![typed(Expr::Bool(true), Type::Bool)],
             },
             Arm { pat: Pattern::Wildcard, body: vec![typed(Expr::Bool(false), Type::Bool)] },

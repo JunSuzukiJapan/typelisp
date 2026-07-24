@@ -380,6 +380,7 @@ fn collect_pattern_bindings(pat: &Pattern, bound: &mut HashSet<String>) {
                 collect_pattern_bindings(a, bound);
             }
         }
+        Pattern::TypeTest(_, inner) => collect_pattern_bindings(inner, bound),
     }
 }
 

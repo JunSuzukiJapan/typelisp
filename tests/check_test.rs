@@ -500,11 +500,18 @@ fn apply_with_the_wrong_number_of_fixed_arguments_is_a_type_error() {
 }
 
 #[test]
-fn apply_with_a_non_sexpr_rest_argument_is_a_type_error() {
-    assert!(matches!(
-        program("(apply (lambda ((a i32) &rest (xs i32)) i32 a) 1 2)"),
-        Err(Error::TypeError(_))
-    ));
+fn apply_auto_wraps_a_scalar_rest_list_argument_into_sexpr() {
+    // Was a `TypeError` before the Sexpr-user-ADT design plan
+    // (`~/.claude/plans/async-conjuring-hanrahan.md`): `apply`'s trailing
+    // "rest list" argument is checked against `expected = Sexpr`
+    // (`Checker::check_apply_form`), which now goes through the same
+    // scalar-auto-wrap fallback `(list 1 2)` does (`Checker::check_inner`'s
+    // expected-type reconciliation, not scoped to `list`/`&rest` alone) —
+    // `2` auto-wraps to `Sexpr::Int(2)`, same CL-conformant relaxation.
+    // (A non-list shape there — as here — is still rejected, just at
+    // *runtime*, the same way CL's own `apply` signals a runtime condition
+    // for a malformed trailing list rather than a compile-time error.)
+    assert_eq!(ty("(apply (lambda ((a i32) &rest (xs i32)) i32 a) 1 2)"), Type::I32);
 }
 
 // ---- cons / car / cdr / list / dolist ----------------------------------------
@@ -517,8 +524,15 @@ fn sexpr_car_and_cdr_yield_sexpr() {
 }
 
 #[test]
-fn sexpr_car_argument_must_be_sexpr() {
-    assert_type_error("(sexpr-car 1)");
+fn sexpr_car_auto_wraps_a_scalar_argument_into_sexpr() {
+    // Was a `TypeError` before the Sexpr-user-ADT design plan — `1` now
+    // auto-wraps to `Sexpr::Int(1)` wherever `Sexpr` is expected (see
+    // `list_elements_are_auto_wrapped_into_sexpr` below). `sexpr-car`'s own
+    // "must be a `Cons`" requirement is still enforced, just at *runtime*
+    // now (a `Sexpr::Int` isn't a cons) — the same CL-conformant shift
+    // `apply_auto_wraps_a_scalar_rest_list_argument_into_sexpr` documents.
+    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
+    assert_eq!(ty("(sexpr-car 1)"), sexpr);
 }
 
 #[test]
@@ -537,8 +551,16 @@ fn list_builds_sexpr_cons_chain() {
 }
 
 #[test]
-fn list_elements_must_be_sexpr() {
-    assert_type_error("(list 1 2)");
+fn list_elements_are_auto_wrapped_into_sexpr() {
+    // Was a `TypeError` before the Sexpr-user-ADT design plan
+    // (`~/.claude/plans/async-conjuring-hanrahan.md`, `tests/
+    // sexpr_user_adt_test.rs` has the fuller coverage): `check_list_lit`
+    // checks each element against `expected = Sexpr`, and a scalar with a
+    // `Sexpr` encoding (`i32`/`i64`/`f64`/.../`Str`) now auto-wraps through
+    // its constructor there — `(list 1 2)` mirrors CL's `(list 1 2)`
+    // instead of demanding the caller pre-wrap every element by hand.
+    let sexpr = Type::Named(Path::root("sexpr"), vec![]);
+    assert_eq!(ty("(list 1 2)"), sexpr);
 }
 
 // `dolist` (iterating a `Sexpr` list) was removed — Symbol/Sexpr redesign

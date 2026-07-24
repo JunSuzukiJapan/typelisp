@@ -382,7 +382,15 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// an unqualified, module-blind search. A stale cache holding the old
 /// `Expr::Call`-shaped node would fail to deserialize (or, worse, silently
 /// keep the old module-blind resolution) — 2026-07-21.
-pub const FASL_FORMAT_VERSION: u32 = 9;
+///
+/// 10: `Pattern` gained a `TypeTest(Type, Box<Pattern>)` variant (the Sexpr-
+/// user-ADT design plan's `(the Type pattern)` downcast) and `Pattern::Ctor`
+/// is no longer guaranteed same-ADT as its match's scrutinee (a Sexpr-
+/// downcast `Ctor`'s `type_name` now names the downcast target). A stale
+/// cache serialized before either change would fail to deserialize the new
+/// shape (or worse, misroute an old same-shape `Ctor` as a downcast) —
+/// 2026-07-24.
+pub const FASL_FORMAT_VERSION: u32 = 10;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.

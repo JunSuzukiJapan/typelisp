@@ -1322,6 +1322,14 @@ impl Checker {
         if *elem_ty == sexpr_ty() {
             return Ok(e);
         }
+        // A heap-repr ADT (`defstruct`/`defenum`/`Vector<T>`/`HashTable<K,V>`)
+        // needs no `sexpr_ctor_for` wrap — same transparent retype as
+        // `check_inner`'s expected-type fallback, see its doc comment for why
+        // this is runtime-cost-free. This is what lets `(println "~a" my-
+        // struct)`/`(list p ...&rest)` accept a user ADT argument.
+        if self.is_heap_repr(elem_ty) {
+            return Ok(Typed { loc: e.loc, expr: e.expr, ty: sexpr_ty() });
+        }
         let ctor = sexpr_ctor_for(elem_ty).ok_or_else(|| {
             Error::TypeError(format!(
                 "&rest: element type {:?} has no Sexpr encoding (use one of i32/i64/f64/bool/char/string/Sexpr)",
@@ -3427,6 +3435,46 @@ impl Checker {
                 if *e == sexpr_ty() && typed.ty == Type::Symbol {
                     return Ok(Typed { loc: typed.loc, expr: typed.expr, ty: sexpr_ty() });
                 }
+                // A user ADT instance (`defstruct`/`defenum`, `Vector<T>`,
+                // `HashTable<K,V>`, `cons-cell<K,V>`) is a valid `Sexpr` datum
+                // wherever a `Sexpr` is expected — the CL-conformant "cons
+                // cells hold arbitrary objects" behavior the pretty-printer
+                // design discussion (TODO T5) decided this codebase should
+                // have. Exactly like the `Symbol` case just above, its
+                // runtime representation needs no conversion: every
+                // `is_heap_repr` type's instantiation already evaluates to
+                // `RtValue::Sexpr(Value::Boxed(_))` (`Expr::Construct`'s
+                // mutable/enum arms in `Interp::eval`; `rt_struct_new`/
+                // `rt_data_new` in compiled code — see `is_heap_repr`'s doc
+                // comment for the two-tier "tagged Sexpr" unification this
+                // relies on). A native-repr instantiation (e.g. `Option<llvm-
+                // value>`) is excluded by `is_heap_repr` itself and stays a
+                // type error, since it has no `Sexpr` encoding at all.
+                if *e == sexpr_ty() && self.is_heap_repr(&typed.ty) {
+                    return Ok(Typed { loc: typed.loc, expr: typed.expr, ty: sexpr_ty() });
+                }
+                // A scalar (`i32`/`f64`/`bignum`/`ratio`/`char`/`bool`/`Str`)
+                // has no shared runtime shape with `Sexpr`, so — unlike the
+                // two retypes above — this one inserts a real `Sexpr`
+                // constructor call (`sexpr_ctor_for`), the same wrap
+                // `wrap_rest_elem` applies to `&rest`/`format` elements. This
+                // is what lets `(list 1 2)` / `(list p 42)` mix freely, the
+                // CL-conformant behavior the same design discussion settled
+                // on. `Symbol` is excluded here (handled by the retype
+                // above, not a wrap) even though `sexpr_ctor_for` also
+                // covers it, since that branch already returned.
+                if *e == sexpr_ty() {
+                    if let Some(ctor) = sexpr_ctor_for(&typed.ty) {
+                        let (type_name, variant) =
+                            self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
+                        let loc = typed.loc.clone();
+                        return Ok(Typed {
+                            loc,
+                            expr: Expr::Construct { type_name, variant, args: vec![typed], mutable: false },
+                            ty: sexpr_ty(),
+                        });
+                    }
+                }
                 return Err(Error::TypeError(format!(
                     "type mismatch: expected {:?}, found {:?}",
                     e, typed.ty
@@ -5391,7 +5439,14 @@ impl Checker {
             let (pat, binds) =
                 recover_arm!(self.check_pattern(heap, &scrut.ty, parts[0], parts_locs[0].1.clone()));
             match &pat {
-                Pattern::Ctor { variant, .. } => {
+                // A Sexpr-downcast `Ctor` pattern's `type_name` names the
+                // *downcast target* (a user struct/enum), not the
+                // scrutinee's own ADT — it must not count toward this
+                // match's exhaustiveness over `adt_name`'s variants (design
+                // plan's "網羅性" rule). Restricting to a same-ADT `type_name`
+                // covers both the ordinary case (always same-ADT) and this
+                // one in a single guard.
+                Pattern::Ctor { type_name, variant, .. } if *type_name == adt_name => {
                     covered.insert(*variant);
                 }
                 Pattern::Wildcard | Pattern::Bind(..) => catchall = true,
@@ -5505,6 +5560,33 @@ impl Checker {
         // reference resolves to (see `check_pattern`'s doc comment).
         let parts_locs = heap.list_to_vec_locs(v)?;
         let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
+        if parts.is_empty() {
+            return Err(Error::TypeError("pattern: empty list".into()));
+        }
+
+        // Sexpr downcast patterns (design plan's "出す" section — the CL-
+        // conformant counterpart of Stage 1's "入れる" retype/wrap). Only
+        // attempted against a `Sexpr` scrutinee, and only for a head that
+        // isn't one of `Sexpr`'s own eleven built-in variant names, so
+        // `(int n)`/`(cons a d)`/... keep meaning exactly what they always
+        // have.
+        if *expected == sexpr_ty() {
+            if let Value::Symbol(id) = parts[0] {
+                if heap.symbol_name(id) == "the" {
+                    return self.check_type_test_pattern(heap, &parts, &parts_locs);
+                }
+            }
+            const BUILTIN_SEXPR_CTORS: &[&str] =
+                &["nil", "int", "float", "char", "bool", "sym", "str", "cons", "bignum", "ratio", "path"];
+            let is_builtin_head =
+                matches!(parts[0], Value::Symbol(id) if BUILTIN_SEXPR_CTORS.contains(&heap.symbol_name(id)));
+            if !is_builtin_head {
+                if let Some((adt_name, targs, variant)) = self.resolve_sexpr_downcast_ctor(heap, parts[0])? {
+                    return self.check_ctor_pattern_fields(heap, adt_name, targs, variant, &parts, &parts_locs, true);
+                }
+            }
+        }
+
         let ctor = match parts[0] {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("pattern: constructor must be a symbol".into())),
@@ -5516,14 +5598,120 @@ impl Checker {
         let variant = def.variants.iter().position(|vr| vr.name == ctor).ok_or_else(|| {
             Error::TypeError(format!("`{}` is not a constructor of `{}`", ctor, adt_name))
         })?;
-        let subst: HashMap<String, Type> =
-            def.params.iter().cloned().zip(targs.iter().cloned()).collect();
+        self.check_ctor_pattern_fields(heap, adt_name, targs, variant, &parts, &parts_locs, false)
+    }
+
+    /// Resolve a Sexpr-downcast pattern's head to `(adt path, type args,
+    /// variant index)`: a registered `defstruct` type's bare name
+    /// (field-destructuring, its sole `new` variant, index 0 — e.g. `(point
+    /// x y)`), a bare enum variant name (resolved exactly like a bare
+    /// constructor *expression* is — [`Self::resolve_ctor`], in scope only
+    /// after `(use EnumType)`), or a `::`-qualified enum variant (`(color::
+    /// red)`, the escape hatch for a bare-name collision between two
+    /// visible enums — `Self::resolve_type_path` on the prefix, the variant
+    /// name as the last segment). `None` means the head names neither,
+    /// letting the caller fall through to the ordinary (non-downcast)
+    /// "not a constructor of Sexpr" error.
+    fn resolve_sexpr_downcast_ctor(&self, heap: &Heap, head: Value) -> Result<Option<(Path, Vec<Type>, usize)>, Error> {
+        let no_generics = |name: &Path, def: &AdtDef| -> Result<(), Error> {
+            if def.params.is_empty() {
+                Ok(())
+            } else {
+                Err(Error::TypeError(format!(
+                    "pattern: `{}` is generic — a downcast pattern can't infer its type arguments; \
+                     use `(the {}<...> p)` for a whole-value bind instead",
+                    name, name
+                )))
+            }
+        };
+        match head {
+            Value::Symbol(id) => {
+                let name = heap.symbol_name(id);
+                if let Some(type_fq) = self.resolve_bare_type(name) {
+                    if let Some(def) = self.reg.type_def(&type_fq) {
+                        if def.kind == AdtKind::Struct {
+                            no_generics(&type_fq, def)?;
+                            return Ok(Some((type_fq, Vec::new(), 0)));
+                        }
+                    }
+                }
+                if let Some((adt, idx)) = self.resolve_ctor(name) {
+                    if adt != Path::root("sexpr") {
+                        let def = self.reg.type_def(&adt).expect("resolved ctor's type is registered");
+                        no_generics(&adt, def)?;
+                        return Ok(Some((adt, Vec::new(), idx)));
+                    }
+                }
+                Ok(None)
+            }
+            Value::Path(pid) => {
+                let segs: Vec<String> =
+                    heap.path_segments(pid).iter().map(|s| heap.symbol_name(*s).to_string()).collect();
+                if segs.len() < 2 {
+                    return Ok(None);
+                }
+                let (type_segs, member) = segs.split_at(segs.len() - 1);
+                if let Some(type_fq) = self.resolve_type_path(type_segs) {
+                    if let Some(def) = self.reg.type_def(&type_fq) {
+                        if let Some(idx) = def.variants.iter().position(|vr| vr.name == member[0]) {
+                            no_generics(&type_fq, def)?;
+                            return Ok(Some((type_fq, Vec::new(), idx)));
+                        }
+                    }
+                }
+                Ok(None)
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// `(the Type pattern)` — a whole-value Sexpr downcast that binds (or
+    /// further destructures) the matched value at its own declared `Type`
+    /// rather than field-by-field, preserving a mutable struct's identity
+    /// and the only way to pull a `Vector<T>`/`HashTable<K,V>` back out of a
+    /// `Sexpr` (see [`Pattern::TypeTest`]'s doc comment).
+    fn check_type_test_pattern(
+        &self,
+        heap: &Heap,
+        parts: &[Value],
+        parts_locs: &[(Value, Option<Loc>)],
+    ) -> Result<(Pattern, PatternBindings), Error> {
+        if parts.len() != 3 {
+            return Err(Error::TypeError("pattern: (the Type pattern)".into()));
+        }
+        let ty = self.canon(&parse_type(heap, parts[1])?);
+        if !self.is_heap_repr(&ty) {
+            return Err(Error::TypeError(format!(
+                "pattern: `{:?}` has no Sexpr representation, cannot downcast with `the`",
+                ty
+            )));
+        }
+        let (pat, binds) = self.check_pattern(heap, &ty, parts[2], parts_locs[2].1.clone())?;
+        Ok((Pattern::TypeTest(ty, Box::new(pat)), binds))
+    }
+
+    /// Shared tail of [`Self::check_ctor_pattern`]: given a resolved `(adt
+    /// path, type args, variant index)` — whether from the ordinary
+    /// same-type ctor lookup or a Sexpr-downcast resolution — validates the
+    /// field count and type-checks each field sub-pattern.
+    fn check_ctor_pattern_fields(
+        &self,
+        heap: &Heap,
+        adt_name: Path,
+        targs: Vec<Type>,
+        variant: usize,
+        parts: &[Value],
+        parts_locs: &[(Value, Option<Loc>)],
+        downcast: bool,
+    ) -> Result<(Pattern, PatternBindings), Error> {
+        let def = self.reg.type_def(&adt_name).expect("adt exists").clone();
+        let subst: HashMap<String, Type> = def.params.iter().cloned().zip(targs.iter().cloned()).collect();
 
         let fields = &def.variants[variant].fields;
         if parts.len() - 1 != fields.len() {
             return Err(Error::TypeError(format!(
                 "pattern `{}`: expected {} field(s), got {}",
-                ctor,
+                def.variants[variant].name,
                 fields.len(),
                 parts.len() - 1
             )));
@@ -5547,7 +5735,7 @@ impl Checker {
             sub_pats.push(p);
             binds.extend(b);
         }
-        Ok((Pattern::Ctor { type_name: adt_name, variant, args: sub_pats, sexpr_fields, field_types }, binds))
+        Ok((Pattern::Ctor { type_name: adt_name, variant, args: sub_pats, sexpr_fields, field_types, downcast }, binds))
     }
 
     // ---- helpers ----------------------------------------------------------

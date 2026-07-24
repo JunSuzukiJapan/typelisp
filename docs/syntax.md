@@ -282,6 +282,26 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - 整数リテラル / `true`/`false` / 文字リテラル — リテラルパターン
 - `(Ctor sub-pattern...)` — コンストラクタパターン（`Some x` `None` `Cons a d` `Ok v` など）
 
+`Sexpr` スクルーティニーに対しては、上記の組み込み11変種パターンに加えて **downcast パターン**
+（ユーザ定義 ADT インスタンスの取り出し）が書ける — `(list p 42)` のように `Sexpr` へ暗黙変換された
+`defstruct`（§3）/`defenum`（§3）インスタンスを `match` で取り戻す構文:
+
+- `(TypeName sub-pattern...)` — **型名**を先頭に置くフィールド分解（struct 専用、`defstruct` は変種が
+  常に1つなので変種名でなく型名で書く）。例: `(defstruct point (x f64) (y f64))` に対し `(point x y)`。
+- 裸の変種名 `(VariantName sub-pattern...)` — `defenum` の変種抽出。`(use EnumType)` 済みで可視な
+  bare 名として解決される（`resolve_ctor` と同じ可視性規則）。例: `(defenum color (red) (blue))` の
+  `(use color)` 後に `(red)` `(blue)`。可視な複数 enum で変種名が衝突する場合は曖昧エラーになるため、
+  修飾形 `(EnumType::VariantName ...)` でも書ける（`use` 不要）。
+- `(the Type pattern)` — 型全体でのdowncast（丸ごと束縛）。フィールド分解せず、値をそのまま
+  `pattern` へ渡す。可変な struct の同一性を保ったまま取り出せる唯一の書き方であり、`Vector<T>`/
+  `HashTable<K,V>` を `Sexpr` から取り出す唯一の手段でもある（両者はフィールド分解形を持たない）。
+  例: `(the point p)` の後で `(setf p::x 9)` すればリスト内の元インスタンスにも反映される。
+
+downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本来の11変種のカバレッジには数えない
+（downcast パターンだけを並べた `match` は `_` で閉じる必要がある）。ジェネリックな ADT
+（`defstruct point<T> ...` など）は downcast パターンの型引数を推論できないため、フィールド分解形
+（`(point ...)`)/裸変種形は使えず、`(the point<i32> p)` のように `the` で明示する。
+
 ```lisp
 (if-let (pattern val) then els)     ; val が pattern にマッチすれば then（束縛あり）、失敗なら els。defmacro
 (while-let (pattern val) body...)   ; val（毎回再評価される）が pattern にマッチする間ループ。defmacro
@@ -323,6 +343,11 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 ```lisp
 (setf place value)                  ; 変数への代入。place は変数名または var::field
 (list e1 e2 ... en)                 ; (cons e1 (cons e2 (... (Nil)))) への展開。0引数なら Nil
+                                     ; 各要素は Sexpr へ暗黙変換される（CL のcons同様、任意の値を
+                                     ; 保持できる）: スカラ(i32/f64/bignum/ratio/char/bool/string/
+                                     ; symbol)は対応する Sexpr コンストラクタでラップ、defstruct/
+                                     ; defenum/Vector<T>/HashTable<K,V> 等ヒープ表現ADTは無変換の
+                                     ; まま retype（実行時コストなし）。&rest/format引数も同様。
 (quote datum)                       ; 'datum と同義。評価せず Sexpr データとして返す
 (quasiquote template)               ; `template と同義。,/,@ でテンプレート内に式を埋め込む
 (panic message)                     ; message: string。回復不能なエラーで異常終了。型は !

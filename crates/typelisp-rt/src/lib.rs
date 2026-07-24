@@ -1293,6 +1293,56 @@ pub unsafe extern "C" fn rt_data_field(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().enum_field(id, idx as usize))
 }
 
+/// `(rt-sexpr-instance-test v type-name variant)` for compiled code's
+/// Sexpr-downcast pattern guard (`(point x y)`/`(color::red)`/`(the T p)`
+/// against a `Sexpr` scrutinee — `compiler.rs`'s `compile-sexpr-instance-
+/// test`, `ast_bridge::pattern_to_sexpr`'s `downcast`/`pat-typetest`
+/// encoding). Tests whether tagged `Sexpr` value `args[0]` is a boxed
+/// struct or enum whose own `type_name` matches the `Str` `args[1]`, and —
+/// for an enum — whose variant also matches the *raw* `args[2]` (`-1` skips
+/// the variant check, for a struct downcast or a `(the T p)` whole-enum
+/// bind, where any variant of `T` matches).
+///
+/// Unlike every other `rt_*` shim here, a mismatch is never fatal: a
+/// heterogeneous `Sexpr`'s runtime shape is only discoverable here — that's
+/// the entire reason this function exists, rather than the checker ruling
+/// out the mismatch the way it does for every ordinary (non-downcast)
+/// pattern. Returns a raw (untagged) `i64` boolean, matching
+/// [`rt_str_lt`]/every other `rt_*` predicate's convention (never a tagged
+/// `Sexpr::Bool`) — `compile-sexpr-instance-test` wraps it in its own
+/// `build-icmp-eq` against `1`, exactly like [`rt_box_kind`]'s callers do.
+///
+/// # Safety
+///
+/// `argc` must be `>= 3`, `args` must point to at least 3 valid `i64`s, and
+/// `args[1]` must decode to a `Value::Str`; a `Heap` must already be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_sexpr_instance_test(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_sexpr_instance_test: expected 3 arguments");
+    }
+    let v = decode(*args);
+    let type_name = match decode(*args.add(1)) {
+        Value::Str(id) => active_heap().string(id).to_string(),
+        _ => fatal("rt_sexpr_instance_test: second argument is not a Str"),
+    };
+    let variant = *args.add(2);
+    let id = match v {
+        Value::Boxed(id) => id,
+        _ => return 0,
+    };
+    let heap = active_heap();
+    let matches = if heap.is_struct(id) {
+        heap.struct_type_name(id) == type_name
+    } else if heap.is_enum(id) {
+        heap.enum_type_name(id) == type_name && (variant < 0 || heap.enum_variant(id) as i64 == variant)
+    } else {
+        false
+    };
+    matches as i64
+}
+
 // ---- compiled closures & binding cells — the heap-unified function value --
 //
 // `BoxedObj::CompiledClosure` (`typelisp-mem`) is the GC-heap flip of

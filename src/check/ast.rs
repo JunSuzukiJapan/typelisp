@@ -345,5 +345,34 @@ pub enum Pattern {
         /// (int/float/char/bool/passthrough), which `sexpr_fields`'s single
         /// bit can't express.
         field_types: Vec<Type>,
+        /// Whether this `Ctor` pattern is a Sexpr-downcast (`Checker::
+        /// resolve_sexpr_downcast_ctor`/`check_ctor_pattern_fields`) rather
+        /// than an ordinary same-ADT pattern. Both shapes look identical
+        /// otherwise — same `type_name`/`variant`/fields — the only
+        /// difference is whether the checker already *knew* the scrutinee
+        /// was exactly `type_name` (ordinary — the ten-thousand pre-existing
+        /// call sites, where `Interp::match_pattern`'s `type_name` guard is
+        /// a provably-redundant no-op) or discovered it inside a
+        /// heterogeneous `Sexpr` (downcast — where that guard, and the
+        /// compiled side's `rt_sexpr_instance_test` call
+        /// `ast_bridge::pattern_to_sexpr`/`compiler.rs`'s
+        /// `compile-pattern-test` emit only when this is `true`, is load-
+        /// bearing). Not recoverable from `type_name`/the enclosing scrutinee
+        /// type alone: nesting can mix ordinary and downcast patterns at
+        /// different depths (e.g. an ordinary struct match whose own
+        /// `Sexpr`-declared field is itself downcast-matched).
+        downcast: bool,
     },
+    /// `(the Type pattern)` against a `Sexpr` scrutinee — a whole-value
+    /// downcast extraction (`Checker::check_ctor_pattern`'s Sexpr-downcast
+    /// branch), the only way to pull a `Vector<T>`/`HashTable<K,V>` back out
+    /// of a heterogeneous `Sexpr` (they have no field-destructuring ctor
+    /// pattern shape) and the general form a `defstruct`/`defenum` downcast
+    /// can also use to keep a mutable box's identity rather than
+    /// destructuring its fields. Matched by comparing `Type`'s ADT `Path`
+    /// against the runtime box's own `type_name` string (`Interp::
+    /// match_pattern`'s new arm) — generic type arguments are not
+    /// runtime-checked (the heap box's `type_name` never encodes them, the
+    /// same erasure every other heap-repr ADT instance already has).
+    TypeTest(Type, Box<Pattern>),
 }

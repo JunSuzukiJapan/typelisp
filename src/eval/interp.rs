@@ -4399,7 +4399,7 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 96] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 97] {
     use crate::compile::runtime::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
@@ -4411,7 +4411,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 96] {
         rt_intern_path, rt_intern_symbol, rt_list_to_path, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_bignum, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
-        rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_int, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
+        rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_instance_test, rt_sexpr_int, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
     };
@@ -4473,6 +4473,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 96] {
         ("rt_data_new", rt_data_new as usize),
         ("rt_data_variant", rt_data_variant as usize),
         ("rt_data_field", rt_data_field as usize),
+        ("rt_sexpr_instance_test", rt_sexpr_instance_test as usize),
         ("rt_hashtable_new", rt_hashtable_new as usize),
         ("rt_hashtable_set", rt_hashtable_set as usize),
         ("rt_hashtable_count", rt_hashtable_count as usize),
@@ -6263,6 +6264,24 @@ fn sexpr_equalp_val(heap: &Heap, a: Value, b: Value) -> bool {
         }
         (Value::Str(i), Value::Str(j)) => heap.string(i).eq_ignore_ascii_case(heap.string(j)),
         (Value::Char(c), Value::Char(d)) => c.eq_ignore_ascii_case(&d),
+        // CL's `equalp` on a structure: same type, and every slot `equalp`
+        // (unlike `equal`, which is `eq` on structures — `eql_val`'s
+        // fallback `a == b`, a pointer-identity `BoxId` compare, is exactly
+        // that, so this recursive arm must come *before* it or it would
+        // never run). Design plan §3.
+        (Value::Boxed(ia), Value::Boxed(ib)) if heap.is_struct(ia) && heap.is_struct(ib) => {
+            heap.struct_type_name(ia) == heap.struct_type_name(ib)
+                && heap.struct_field_count(ia) == heap.struct_field_count(ib)
+                && (0..heap.struct_field_count(ia))
+                    .all(|i| sexpr_equalp_val(heap, heap.struct_field(ia, i), heap.struct_field(ib, i)))
+        }
+        (Value::Boxed(ia), Value::Boxed(ib)) if heap.is_enum(ia) && heap.is_enum(ib) => {
+            heap.enum_type_name(ia) == heap.enum_type_name(ib)
+                && heap.enum_variant(ia) == heap.enum_variant(ib)
+                && heap.enum_field_count(ia) == heap.enum_field_count(ib)
+                && (0..heap.enum_field_count(ia))
+                    .all(|i| sexpr_equalp_val(heap, heap.enum_field(ia, i), heap.enum_field(ib, i)))
+        }
         (a, b) => eql_val(heap, a, b),
     }
 }
@@ -6299,13 +6318,18 @@ fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(Str
             RtValue::Char(m) if m == c => Some(Vec::new()),
             _ => None,
         },
-        Pattern::Ctor { variant, args, sexpr_fields, .. } => match v {
+        Pattern::Ctor { type_name, variant, args, sexpr_fields, .. } => match v {
             // The native-repr fallback for an enum instantiated over a
             // type the heap cannot represent at all (`build_enum_value`'s
             // doc comment — `Option<llvm-value>` and friends). Matched by
             // recursing on each field directly, exactly like the pre-
             // unification code always did; no `sexpr_fields`/heap decode
             // needed since a native field is never `mem::Value`-encoded.
+            // No `type_name` guard needed: a native-repr instantiation can
+            // never reach a `Sexpr` scrutinee (`Checker::is_heap_repr`
+            // excludes it from Stage 1's retype), so this arm is only ever
+            // reached from an ordinarily-typed (non-`Sexpr`) match, where
+            // the checker already guarantees the scrutinee's exact ADT.
             RtValue::Data { variant: vv, fields, .. } if vv == variant && fields.len() == args.len() => {
                 let mut binds = Vec::new();
                 for (p, f) in args.iter().zip(fields.iter()) {
@@ -6321,9 +6345,19 @@ fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(Str
             // arm; a *matching-shape* enum whose variant differs also falls
             // through, where `match_sexpr_ctor`'s own guards all fail —
             // `None`, the same "try the next match arm" a wrong-variant
-            // `RtValue::Data` used to produce.
+            // `RtValue::Data` used to produce. The `type_name` string
+            // comparison is new (Sexpr-user-ADT design plan §2): once a
+            // heterogeneous `Sexpr` can hold *any* registered enum, a
+            // variant-index-and-field-count match alone could false-
+            // positive across two unrelated enums that happen to share a
+            // shape (e.g. two single-field-variant-0 enums) — this guard is
+            // a pure safety addition, a no-op for every pre-existing
+            // (non-`Sexpr`, checker-guaranteed) call site.
             RtValue::Sexpr(Value::Boxed(id))
-                if heap.is_enum(*id) && heap.enum_variant(*id) == *variant && heap.enum_field_count(*id) == args.len() =>
+                if heap.is_enum(*id)
+                    && heap.enum_type_name(*id) == type_name.to_string()
+                    && heap.enum_variant(*id) == *variant
+                    && heap.enum_field_count(*id) == args.len() =>
             {
                 let mut binds = Vec::new();
                 for (i, p) in args.iter().enumerate() {
@@ -6341,9 +6375,16 @@ fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(Str
             // `variant` always matches here — only the field count/pattern
             // shape can fail. Guarded on `heap.is_struct` first so a value
             // that's a genuine `Sexpr` datum (not a boxed struct) falls
-            // through to the `RtValue::Sexpr` arm below instead.
+            // through to the `RtValue::Sexpr` arm below instead. `type_name`
+            // guard: same rationale as the enum arm above — without it two
+            // unrelated structs with the same field count could false-
+            // match inside a heterogeneous `Sexpr` (design plan §2's
+            // `(point x y)` vs. an unrelated same-shape struct test).
             RtValue::Sexpr(Value::Boxed(id))
-                if heap.is_struct(*id) && *variant == 0 && heap.struct_field_count(*id) == args.len() =>
+                if heap.is_struct(*id)
+                    && heap.struct_type_name(*id) == type_name.to_string()
+                    && *variant == 0
+                    && heap.struct_field_count(*id) == args.len() =>
             {
                 let mut binds = Vec::new();
                 for (i, p) in args.iter().enumerate() {
@@ -6362,9 +6403,35 @@ fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(Str
                 }
                 Some(binds)
             }
-            RtValue::Sexpr(sv) => match_sexpr_ctor(heap, *variant, args, *sv),
+            // A downcast `Ctor` pattern's `type_name` names something other
+            // than `Sexpr` itself (`Checker::resolve_sexpr_downcast_ctor`),
+            // so a genuine `Sexpr` datum (`nil`/`cons`/`int`/...) must never
+            // fall through to `match_sexpr_ctor` — that function indexes by
+            // *bare* variant number, and a downcast pattern's `variant`
+            // (e.g. `0` for a struct's sole `new` variant, or an enum
+            // variant index) is meaningless there: `(point x y)` [variant
+            // 0] must not spuriously match `Sexpr::Nil` (also variant 0).
+            RtValue::Sexpr(sv) if *type_name == Path::root("sexpr") => match_sexpr_ctor(heap, *variant, args, *sv),
             _ => None,
         },
+        Pattern::TypeTest(ty, inner) => {
+            let want = match ty {
+                Type::Named(p, _) => p.to_string(),
+                _ => return None,
+            };
+            if want == "sexpr" {
+                return match_pattern(heap, inner, v);
+            }
+            match v {
+                RtValue::Sexpr(Value::Boxed(id)) if heap.is_struct(*id) && heap.struct_type_name(*id) == want => {
+                    match_pattern(heap, inner, v)
+                }
+                RtValue::Sexpr(Value::Boxed(id)) if heap.is_enum(*id) && heap.enum_type_name(*id) == want => {
+                    match_pattern(heap, inner, v)
+                }
+                _ => None,
+            }
+        }
     }
 }
 

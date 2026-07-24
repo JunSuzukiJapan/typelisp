@@ -397,11 +397,14 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 
 ## 15. 標準入出力 (I/O)
 
-`print`/`println`/`format` はいずれも**書式指定子（CL の `format` ディレクティブ）を解釈する特殊形**。
+`print`/`println`/`format` はいずれも**書式指定子（CL の `format` ディレクティブ)を解釈する特殊形**。
 第1引数（`format` は第2引数）が**制御文字列**で、以降の可変長引数を各ディレクティブが順に消費する。
-`(list ...)` と同じく、可変長引数は各自の型のまま `Sexpr` へ包まれてから渡る（`i32`/`i64`/`f64`/
-`bignum`/`ratio`/`char`/`bool`/`string`/`Sexpr` が対象。これ以外の型——ユーザ定義 struct/enum など——を
-直接渡すと型エラー）。`typl file.typl` によるスクリプト実行は [main.rs](../src/main.rs) の `run_file`
+`(list ...)` と同じく、可変長引数は各自の型のまま `Sexpr` へ包まれてから渡る——`i32`/`i64`/`f64`/
+`bignum`/`ratio`/`char`/`bool`/`string`/`Sexpr` はスカラ用の `Sexpr` コンストラクタでラップされ、
+ユーザ定義 `defstruct`/`defenum`/`Vector<T>`/`HashTable<K,V>` 等ヒープ表現の ADT インスタンスは
+無変換のまま `Sexpr` へ retype される（`(println "~a" my-struct)` はそのまま動く）。ネイティブ表現の
+ジェネリック実体化（`Option<llvm-value>` 等）だけは `Sexpr` の表現を持たないため型エラーのまま。
+`typl file.typl` によるスクリプト実行は [main.rs](../src/main.rs) の `run_file`
 の通り**トップレベル式の戻り値を出力しない**ため、プログラム自身が標準出力へ書くにはこれらを呼ぶ必要がある。
 
 | 名前 | 形式 | 型 | 説明 |

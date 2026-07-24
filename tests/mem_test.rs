@@ -195,6 +195,49 @@ fn shared_substructure_lives_until_all_owners_gone() {
     assert_accounting(&h);
 }
 
+// ---- a boxed struct reachable only through a cons cell -------------------
+//
+// Sexpr-user-ADT design plan, Stage 4: the same GC path `Value::Boxed`
+// float/bignum already exercised in a cons's car/cdr (no new tracing code —
+// `gc`'s mark phase already recurses into any `Value::Boxed` it finds
+// there), now exercised with a `BoxedObj::Struct` specifically, since a
+// `defstruct` instance can now sit inside an ordinary `Sexpr` list.
+
+#[test]
+fn a_struct_reachable_only_through_a_cons_car_survives_gc() {
+    let mut h = Heap::with_capacity(64);
+    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1), Value::Int(2)]);
+    let list = h.cons(s, Value::Empty).unwrap();
+    h.push_root(list);
+    // unrelated garbage, both cons cells and boxes
+    for i in 0..20 {
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap();
+    }
+    let _ = h.alloc_struct("garbage".to_string(), vec![Value::Int(0)]);
+    assert_eq!(h.box_count(), 2, "the rooted struct plus the unrooted garbage struct");
+    h.gc();
+    assert_eq!(h.box_count(), 1, "only the struct reachable through the rooted cons survives");
+    let Value::Boxed(id) = h.car(list).unwrap() else { panic!("expected the struct back") };
+    assert_eq!(h.struct_type_name(id), "point");
+    assert_eq!(h.struct_field(id, 0), Value::Int(1));
+    assert_eq!(h.struct_field(id, 1), Value::Int(2));
+    assert_accounting(&h);
+}
+
+#[test]
+fn a_struct_reachable_only_through_a_cons_car_is_reclaimed_once_unrooted() {
+    let mut h = Heap::with_capacity(64);
+    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1), Value::Int(2)]);
+    let list = h.cons(s, Value::Empty).unwrap();
+    h.push_root(list);
+    h.gc();
+    assert_eq!(h.box_count(), 1);
+    h.pop_root();
+    h.gc();
+    assert_eq!(h.box_count(), 0, "the struct dies once its only cons-cell owner is unrooted and collected");
+    assert_accounting(&h);
+}
+
 // ---- deep structures ----------------------------------------------------
 
 #[test]

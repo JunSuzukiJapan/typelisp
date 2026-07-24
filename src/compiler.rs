@@ -2862,7 +2862,7 @@ pub const SOURCE: &str = r#"
                        ;; each other" constraint this module's doc
                        ;; comment already explains for `compile-value`
                        ;; & co.).
-                       (compile-pattern-test ((builder llvm-builder) (env Scope<llvm-value>) (cur-fn llvm-function) (v llvm-value) (pat Sexpr) (fail-block llvm-basic-block)) ()
+                       (compile-pattern-test ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (v llvm-value) (pat Sexpr) (fail-block llvm-basic-block)) ()
                          (let ((s (sexpr-sym-name (sexpr-car pat))))
                             (if (equal s "pat-wild")
                                 ()
@@ -2883,14 +2883,69 @@ pub const SOURCE: &str = r#"
                                                 ;; only field extraction via `field-kinds`).
                                                 (let ((scrut-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))
                                                   (let ((field-kinds (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))
-                                                    (if (eq scrut-kind 2)
-                                                        ()
-                                                        (if (eq scrut-kind 1)
-                                                            (compile-pattern-guard builder cur-fn (compile-box-tag-test builder m v variant) fail-block)
-                                                            (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v variant) fail-block)))
-                                                    (compile-ctor-subpatterns builder env cur-fn v scrut-kind variant field-kinds subpats 0 fail-block)))))
-                                            (panic (append "compile-pattern-test: unsupported pattern tag " s)))))))
+                                                    ;; `downcast`/`type-name-form`
+                                                    ;; (Sexpr-user-ADT design plan
+                                                    ;; §4, `ast_bridge::
+                                                    ;; pattern_to_sexpr`'s trailing
+                                                    ;; two fields): a Sexpr-downcast
+                                                    ;; `pat-ctor` (the checker
+                                                    ;; discovered this struct/enum
+                                                    ;; *inside* a heterogeneous
+                                                    ;; `Sexpr`, not from the
+                                                    ;; scrutinee's own static type)
+                                                    ;; needs an instance test the
+                                                    ;; ordinary case never did --
+                                                    ;; `downcast` false is a total
+                                                    ;; no-op, exactly the pre-
+                                                    ;; existing scrut-kind 1/2
+                                                    ;; behavior below unchanged.
+                                                    (let ((downcast (sexpr-bool (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))))
+                                                      (let ((type-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr pat)))))))))
+                                                        (if (eq scrut-kind 2)
+                                                            (if downcast
+                                                                (compile-pattern-guard builder cur-fn (compile-sexpr-instance-test builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base v type-name-form -1) fail-block)
+                                                                ())
+                                                            (if (eq scrut-kind 1)
+                                                                (if downcast
+                                                                    (compile-pattern-guard builder cur-fn (compile-sexpr-instance-test builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base v type-name-form variant) fail-block)
+                                                                    (compile-pattern-guard builder cur-fn (compile-box-tag-test builder m v variant) fail-block))
+                                                                (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v variant) fail-block)))
+                                                        (compile-ctor-subpatterns builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base v scrut-kind variant field-kinds subpats 0 fail-block)))))))
+                                            (if (equal s "pat-typetest")
+                                                ;; `(pat-typetest type-name-form
+                                                ;; inner-pattern)` -- `(the Type
+                                                ;; pattern)`'s whole-value Sexpr
+                                                ;; downcast (`ast_bridge::
+                                                ;; pattern_to_sexpr`'s
+                                                ;; `Pattern::TypeTest` arm). No
+                                                ;; variant restriction (`-1`):
+                                                ;; matches any variant of an
+                                                ;; enum `Type`, the whole point
+                                                ;; of a type-only (not field-
+                                                ;; destructuring) downcast.
+                                                (let ((type-name-form (sexpr-car (sexpr-cdr pat))))
+                                                  (let ((inner (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))
+                                                    (compile-pattern-guard builder cur-fn (compile-sexpr-instance-test builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base v type-name-form -1) fail-block)
+                                                    (compile-pattern-test builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base v inner fail-block)))
+                                                (panic (append "compile-pattern-test: unsupported pattern tag " s))))))))
                            )
+                       ;; Compiles `type-name-form` (a compile-time-known
+                       ;; `(str (int c)...)` literal, `str_literal_form`'s
+                       ;; shape -- see `translate_construct`'s own
+                       ;; `type-name-form` doc comment) into a real runtime
+                       ;; `Sexpr::Str`, then calls `rt_sexpr_instance_test`
+                       ;; to test scrutinee `v` against it (and, when
+                       ;; `variant >= 0`, that variant too -- `-1` skips the
+                       ;; check, for a struct downcast or a `(the T p)`
+                       ;; whole-enum bind). The shared guard both a
+                       ;; downcast `pat-ctor` and a `pat-typetest` use.
+                       (compile-sexpr-instance-test ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (v llvm-value) (type-name-form Sexpr) (variant i64)) llvm-value
+                         (let ((name-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name-form)))
+                           (let ((args-ptr (alloca-args builder 3)))
+                             (store-arg builder args-ptr 0 v)
+                             (store-arg builder args-ptr 1 name-v)
+                             (store-arg builder args-ptr 2 (const-i64 builder variant))
+                             (build-icmp-eq builder (build-call builder (get-function m "rt_sexpr_instance_test") args-ptr 3) (const-i64 builder 1)))))
                        ;; Tests/extracts each of a `pat-ctor`'s
                        ;; sub-patterns in turn against variant `variant`'s
                        ;; fields (a boxed struct's `field-kinds` list --
@@ -2901,19 +2956,19 @@ pub const SOURCE: &str = r#"
                        ;; reason to call `compile-sexpr-field`/
                        ;; `compile-struct-field` -- and for `cons`, no
                        ;; reason to emit an `rt_car`/`rt_cdr` call either).
-                       (compile-ctor-subpatterns ((builder llvm-builder) (env Scope<llvm-value>) (cur-fn llvm-function) (v llvm-value) (scrut-kind i64) (variant i64) (field-kinds Sexpr) (subpats Sexpr) (idx i32) (fail-block llvm-basic-block)) ()
+                       (compile-ctor-subpatterns ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (v llvm-value) (scrut-kind i64) (variant i64) (field-kinds Sexpr) (subpats Sexpr) (idx i32) (fail-block llvm-basic-block)) ()
                          (if (sexpr-consp subpats)
                              (let ((p (sexpr-car subpats)) (rest (sexpr-cdr subpats)))
                               (let ((rest-kinds (if (eq scrut-kind 0) field-kinds (sexpr-cdr field-kinds))))
                                (if (equal (sexpr-sym-name (sexpr-car p)) "pat-wild")
-                                (compile-ctor-subpatterns builder env cur-fn v scrut-kind variant rest-kinds rest (+ idx 1) fail-block)
+                                (compile-ctor-subpatterns builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base v scrut-kind variant rest-kinds rest (+ idx 1) fail-block)
                                 (let ((field-v (if (eq scrut-kind 2)
                                                     (compile-struct-field builder m v (sexpr-int (sexpr-car field-kinds)) idx)
                                                     (if (eq scrut-kind 1)
                                                         (compile-box-field builder m v (sexpr-int (sexpr-car field-kinds)) idx)
                                                         (compile-sexpr-field builder m v variant idx)))))
-                                  (compile-pattern-test builder env cur-fn field-v p fail-block)
-                                  (compile-ctor-subpatterns builder env cur-fn v scrut-kind variant rest-kinds rest (+ idx 1) fail-block)))))
+                                  (compile-pattern-test builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base field-v p fail-block)
+                                  (compile-ctor-subpatterns builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base v scrut-kind variant rest-kinds rest (+ idx 1) fail-block)))))
                              ()))
                        ;; `(match is-fn scrutinee-form ((pattern-form .
                        ;; body-form)...) scrut-kind)` -- `Expr::Match`
@@ -3042,7 +3097,7 @@ pub const SOURCE: &str = r#"
                               (let ((body-form (sexpr-cdr arm)))
                                 (push-frame env)
                                 (let ((next-block (append-block cur-fn "match-next")))
-                                  (compile-pattern-test builder env cur-fn scrut-v pat next-block)
+                                  (compile-pattern-test builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base scrut-v pat next-block)
                                   (let ((body-v (compile-if-branch builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base is-fn body-form)))
                                     (pop-frame env)
                                     (if (block-terminated? builder)
