@@ -393,6 +393,46 @@ impl Interp {
         Slot::Native(s)
     }
 
+    /// Intern a vtable id for every trait object `body` boxes, so the
+    /// translator can bake each one in as a constant. The compiled-tier
+    /// counterpart of `promote_global`'s pre-pass, and idempotent for the
+    /// same reason: the ids are interned by (type, trait) pair, so a body
+    /// compiled after already running interpreted reuses the very ids its
+    /// `Expr::DynBox` evaluations assigned.
+    fn intern_dyn_vtables(&self, body: &Typed) {
+        for (key, trait_path, slots) in crate::compile::ast_bridge::collect_dyn_boxes(body) {
+            self.vtable_id_for(&key, &trait_path, &slots);
+        }
+    }
+
+    /// Publish every interned vtable to the compiled tier, resolving each
+    /// slot to its method's current native entry point. Called after each
+    /// SCC finishes so a table whose targets have just been compiled becomes
+    /// callable; re-publishing tables that were already complete is
+    /// harmless, and is what keeps a vtable correct when one of its methods
+    /// is compiled *later* than the function that boxes for it.
+    ///
+    /// A slot whose method has no compiled form yet is published as 0, which
+    /// `rt_vtable_slot` refuses to call. Compiled code can only reach a slot
+    /// through a boxing site, and `ast_bridge::collect_calls` puts every one
+    /// of a boxing site's slots into the call graph — so a live 0 would mean
+    /// that contract was broken, not that user code did something unusual.
+    fn publish_vtables(&self) {
+        for (id, slots) in self.vtables.borrow().iter().enumerate() {
+            let addrs: Vec<usize> = slots
+                .iter()
+                .map(|(type_name, method)| {
+                    self.root
+                        .borrow()
+                        .get_method(type_name, method)
+                        .and_then(|f| f.compiled.borrow().as_ref().map(|c| c.address()))
+                        .unwrap_or(0)
+                })
+                .collect();
+            crate::compile::runtime::vtable_define(id as u32, addrs);
+        }
+    }
+
     /// The vtable id for boxing a `concrete_key`-typed value as
     /// `trait_path` — interning the (type, trait) pair so repeated boxing
     /// reuses one table. The sole source of vtable ids; the compiled tier's
@@ -2292,7 +2332,12 @@ impl Interp {
         for target in crate::compile::ast_bridge::collect_global_targets(body) {
             self.promote_global(heap, &target)?;
         }
+        // Every trait object this body boxes needs its vtable id before
+        // translation starts, for the same reason a global needs its slot:
+        // `ast_to_sexpr` bakes the id into the emitted IR as a constant.
+        self.intern_dyn_vtables(body);
         let compiled_globals = self.compiled_globals.borrow();
+        let vtable_ids = self.vtable_ids.borrow();
         // `ast_bridge` is deliberately `Registry`-free, so hand it the
         // struct/enum classification as a plain flattened snapshot of the
         // scope tree. Collected fresh per compilation — compiling is rare
@@ -2326,7 +2371,8 @@ impl Interp {
         };
         heap.push_root(param_list);
         let body_sexpr =
-            match crate::compile::ast_bridge::ast_to_sexpr(heap, body, &struct_types, &enum_types, &compiled_globals, &cell_names) {
+            match crate::compile::ast_bridge::ast_to_sexpr(heap, body, &struct_types, &enum_types, &compiled_globals, &cell_names, &vtable_ids)
+            {
                 Ok(v) => v,
                 Err(e) => {
                     heap.pop_root(); // param_list
@@ -2419,7 +2465,9 @@ impl Interp {
         for target in crate::compile::ast_bridge::collect_global_targets(value) {
             self.promote_global(heap, &target)?;
         }
+        self.intern_dyn_vtables(value);
         let compiled_globals = self.compiled_globals.borrow();
+        let vtable_ids = self.vtable_ids.borrow();
         // See `add_compiled_function`'s own copy of this for why the
         // struct/enum classification crosses as a per-compilation snapshot.
         let (struct_types, enum_defs) = self.root.borrow().collect_struct_and_enum_types();
@@ -2431,7 +2479,14 @@ impl Interp {
         };
         heap.push_root(param_list);
         let body_sexpr =
-            match crate::compile::ast_bridge::ast_to_sexpr_for_global_init(heap, value, &struct_types, &enum_types, &compiled_globals) {
+            match crate::compile::ast_bridge::ast_to_sexpr_for_global_init(
+                heap,
+                value,
+                &struct_types,
+                &enum_types,
+                &compiled_globals,
+                &vtable_ids,
+            ) {
                 Ok(v) => v,
                 Err(e) => {
                     heap.pop_root(); // param_list
@@ -2822,6 +2877,10 @@ impl Interp {
                 }
             }
         }
+        // After the addresses above are in place, never before: a method
+        // that lands in some vtable's slot may well be a member of *this*
+        // SCC, so its entry point only exists as of the loop just above.
+        self.publish_vtables();
         Ok(())
     }
 
@@ -4377,6 +4436,7 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-call-with-env" => Some(llvm_builder_build_call_with_env(args)),
             "build-make-closure" => Some(llvm_builder_build_make_closure(args)),
             "build-closure-apply" => Some(llvm_builder_build_closure_apply(args)),
+            "build-dyn-call" => Some(llvm_builder_build_dyn_call(args)),
             "load-raw" => Some(llvm_builder_load_raw(args)),
             "build-icmp-lt" => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
             "build-icmp-le" => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
@@ -4666,7 +4726,7 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 97] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 102] {
     use crate::compile::runtime::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
@@ -4681,6 +4741,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 97] {
         rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_instance_test, rt_sexpr_int, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
+        rt_dyn_new, rt_dyn_value, rt_dyn_vtable, rt_vtable_set, rt_vtable_slot,
     };
     [
         // The one main-crate entry: the generic `llvm-*`/native-scope
@@ -4691,6 +4752,17 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 97] {
         // `compile-file` output never emits a call to it — an unreferenced
         // declaration emits no symbol for the linker to miss).
         ("rt_llvm_call", rt_llvm_call as usize),
+        // Trait objects and vtables (TODO T4): `rt_dyn_new` boxes,
+        // `rt_dyn_vtable`/`rt_dyn_value` decode, and `rt_vtable_slot` reads
+        // the native entry point a `:dyn` call site then calls indirectly
+        // (`compiler.rs`'s `compile-dyn-*`). `rt_vtable_set` fills a table
+        // from AOT startup; the JIT fills tables Rust-side instead
+        // (`Interp::publish_vtables`), so nothing emits a call to it there.
+        ("rt_dyn_new", rt_dyn_new as usize),
+        ("rt_dyn_vtable", rt_dyn_vtable as usize),
+        ("rt_dyn_value", rt_dyn_value as usize),
+        ("rt_vtable_slot", rt_vtable_slot as usize),
+        ("rt_vtable_set", rt_vtable_set as usize),
         ("rt_car", rt_car as usize),
         ("rt_cdr", rt_cdr as usize),
         ("rt_cons", rt_cons as usize),
@@ -5241,6 +5313,42 @@ fn llvm_builder_build_call(args: &[RtValue]) -> Result<RtValue, EvalError> {
     match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => Ok(RtValue::LlvmValue(v)),
         inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-call: callee produced no value".into())),
+    }
+}
+
+/// Dynamic dispatch through a trait object's vtable (TODO T4): calls the
+/// raw function pointer `args[1]` — which the island has just read out with
+/// `rt_vtable_slot` — under the ordinary `compiled_fn_type` ABI, passing the
+/// argument array exactly as [`llvm_builder_build_call`] does.
+///
+/// The stripped-down sibling of [`llvm_builder_build_closure_apply`]: both
+/// call a callee that is only a runtime value, but a vtable slot carries no
+/// captured environment, so none of that function's env-copying loop or
+/// fixed 64-slot scratch buffer is needed — just an `inttoptr` and an
+/// indirect call.
+fn llvm_builder_build_dyn_call(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let fn_ptr_int = expect_llvm_value(&args[1])?.into_int_value();
+    let args_ptr = expect_llvm_value(&args[2])?;
+    let argc = match &args[3] {
+        RtValue::Int(n) => *n as u64,
+        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    };
+    let ctx = crate::compile::llvm_context();
+    let b = builder.borrow();
+    let ptr_ty = ctx.ptr_type(AddressSpace::default());
+    let fn_ptr = b
+        .build_int_to_ptr(fn_ptr_int, ptr_ty, "dyn_fn_ptr")
+        .map_err(|e| EvalError::Internal(format!("build-dyn-call: {}", e)))?;
+    let argc_val = ctx.i32_type().const_int(argc, false);
+    let call = b
+        .build_indirect_call(compiled_fn_type(), fn_ptr, &[args_ptr.into(), argc_val.into()], "dyn_call_result")
+        .map_err(|e| EvalError::Internal(format!("build-dyn-call: {}", e)))?;
+    match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => Ok(RtValue::LlvmValue(v)),
+        inkwell::values::ValueKind::Instruction(_) => {
+            Err(EvalError::Internal("build-dyn-call: callee produced no value".into()))
+        }
     }
 }
 

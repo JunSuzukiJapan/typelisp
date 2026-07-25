@@ -86,6 +86,13 @@ struct Ctx<'a> {
     /// `compile-set`'s own doc comment — so there is nothing to share).
     /// [`translate_lambda`] is the only place that reads this.
     visible_siblings: &'a HashSet<String>,
+    /// `(concrete type key, trait path)` -> vtable id, for every trait
+    /// object this translation boxes (`Expr::DynBox`). Interned by
+    /// `Interp::vtable_id_for` *before* translation starts — the id is a
+    /// baked-in constant in the emitted IR (`(dyn-new id ...)`), so there is
+    /// nothing to resolve lazily mid-translation, exactly like
+    /// [`Ctx::globals`].
+    vtables: &'a HashMap<(String, Path), u32>,
 }
 
 /// The bare name set of a typed name list — [`tagged_sym_list`]'s "every
@@ -942,10 +949,20 @@ pub fn ast_to_sexpr(
     enums: &HashSet<Path>,
     globals: &HashMap<Path, usize>,
     cell_names: &HashSet<String>,
+    vtables: &HashMap<(String, Path), u32>,
 ) -> Result<Value, Error> {
     let direct = HashSet::new();
     let no_siblings = HashSet::new();
-    let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals, cell_names, visible_siblings: &no_siblings };
+    let cx = Ctx {
+        direct: &direct,
+        outer_captured: &[],
+        structs,
+        enums,
+        globals,
+        cell_names,
+        visible_siblings: &no_siblings,
+        vtables,
+    };
     ast_to_sexpr_scoped(heap, typed, cx)
 }
 
@@ -968,11 +985,21 @@ pub fn ast_to_sexpr_for_global_init(
     structs: &HashSet<Path>,
     enums: &HashSet<Path>,
     globals: &HashMap<Path, usize>,
+    vtables: &HashMap<(String, Path), u32>,
 ) -> Result<Value, Error> {
     let direct = HashSet::new();
     let no_cells = HashSet::new();
     let no_siblings = HashSet::new();
-    let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals, cell_names: &no_cells, visible_siblings: &no_siblings };
+    let cx = Ctx {
+        direct: &direct,
+        outer_captured: &[],
+        structs,
+        enums,
+        globals,
+        cell_names: &no_cells,
+        visible_siblings: &no_siblings,
+        vtables,
+    };
     let kind = Value::Int(global_field_kind(&value.ty, structs, enums));
     let form = ast_to_sexpr_scoped(heap, value, cx)?;
     heap.push_root(form);
@@ -1162,7 +1189,9 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         Expr::If(cond, then, els) => translate_if(heap, cond, then, els, &typed.ty, cx),
         Expr::Let(binds, body) => translate_let(heap, binds, body, cx),
         Expr::Call(r, args) => translate_call(heap, &r.resolved, args, cx),
-        Expr::Lambda { params, body } => translate_lambda(heap, params, body, cx.structs, cx.enums, cx.globals, cx.visible_siblings),
+        Expr::Lambda { params, body } => {
+            translate_lambda(heap, params, body, cx.structs, cx.enums, cx.globals, cx.visible_siblings, cx.vtables)
+        }
         Expr::Labels { defs, body } => translate_labels(heap, defs, body, cx),
         Expr::Apply(callee, args) => translate_apply(heap, callee, args, cx),
         Expr::Construct { type_name, variant, args, mutable } => translate_construct(heap, type_name, &typed.ty, *variant, args, *mutable, cx),
@@ -1182,9 +1211,11 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // unreachable from any compilable source. The old dispatch-chain
         // lowering it used to have is gone.
         Expr::TraitCall { .. } => unsupported(heap, "TraitCall"),
-        Expr::DynBox { .. } => unsupported(heap, "DynBox"),
-        Expr::DynCall { .. } => unsupported(heap, "DynCall"),
-        Expr::DynValue(_) => unsupported(heap, "DynValue"),
+        Expr::DynBox { concrete_key, trait_path, value, .. } => {
+            translate_dyn_new(heap, concrete_key, trait_path, value, cx)
+        }
+        Expr::DynCall { slot, args, .. } => translate_dyn_call(heap, *slot, args, cx),
+        Expr::DynValue(inner) => translate_dyn_value(heap, inner, cx),
         // `(compile name)` is an interpreter-only reflective action (it JIT-
         // compiles a target against the *running* `Interp`'s own heap/scope
         // tree) — it has no meaning inside code that is itself being
@@ -2084,6 +2115,64 @@ fn translate_indirect_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], cx:
     result
 }
 
+/// `(dyn-new vtable-id (kind . value-form))` — box a concrete value as a
+/// trait object (`Expr::DynBox`). The vtable id is a constant here: the
+/// checker resolved the table's contents and `Interp::vtable_id_for` interned
+/// the (type, trait) pair before translation began (see [`Ctx::vtables`]), so
+/// the emitted code just hands the number to `rt_dyn_new`.
+fn translate_dyn_new(
+    heap: &mut Heap,
+    concrete_key: &str,
+    trait_path: &Path,
+    value: &Typed,
+    cx: Ctx,
+) -> Result<Value, Error> {
+    let key = (concrete_key.to_string(), trait_path.clone());
+    let id = *cx.vtables.get(&key).ok_or_else(|| {
+        Error::TypeError(format!(
+            "compile: no vtable id interned for `{}` as `:dyn {}` (Interp::intern_dyn_vtables should have run first)",
+            concrete_key, trait_path
+        ))
+    })?;
+    let pairs = tagged_ast_list_to_sexpr(heap, std::slice::from_ref(value), cx)?;
+    let mut items = vec![Value::Int(id as i64)];
+    items.extend(pairs.iter().copied());
+    let result = tagged(heap, "dyn-new", &items);
+    for _ in 0..pairs.len() {
+        heap.pop_root();
+    }
+    result
+}
+
+/// `(dyn-call slot (kind . recv-form) (kind . arg-form)...)` — a method call
+/// through a trait object's vtable. The slot is a compile-time constant (the
+/// method's position in `TraitDef::method_order`), so the emitted code reads
+/// the receiver's vtable id, indexes that slot, and calls the resulting
+/// function pointer indirectly — no lookup by name or type at run time.
+fn translate_dyn_call(heap: &mut Heap, slot: usize, args: &[Typed], cx: Ctx) -> Result<Value, Error> {
+    let pairs = tagged_ast_list_to_sexpr(heap, args, cx)?;
+    let mut items = vec![Value::Int(slot as i64)];
+    items.extend(pairs.iter().copied());
+    let result = tagged(heap, "dyn-call", &items);
+    for _ in 0..pairs.len() {
+        heap.pop_root();
+    }
+    result
+}
+
+/// `(dyn-value (kind . form))` — unwrap a trait object to the concrete value
+/// inside (`Expr::DynValue`), which the checker synthesizes wherever a `:dyn`
+/// value flows somewhere that wants the plain heap value: a `match`
+/// scrutinee, a `Sexpr` position, a built-in `Sexpr` method's receiver.
+fn translate_dyn_value(heap: &mut Heap, inner: &Typed, cx: Ctx) -> Result<Value, Error> {
+    let pairs = tagged_ast_list_to_sexpr(heap, std::slice::from_ref(inner), cx)?;
+    let result = tagged(heap, "dyn-value", &pairs);
+    for _ in 0..pairs.len() {
+        heap.pop_root();
+    }
+    result
+}
+
 /// Builds `(lambda name-str (captured-sym...) (param-sym...)
 /// single-body-form)` — the tagged shape both a real escaping `Expr::Lambda`
 /// ([`translate_lambda`]) and a synthesized `Expr::FnRef` forwarding wrapper
@@ -2170,6 +2259,7 @@ fn translate_lambda(
     enums: &HashSet<Path>,
     globals: &HashMap<Path, usize>,
     visible_siblings: &HashSet<String>,
+    vtables: &HashMap<(String, Path), u32>,
 ) -> Result<Value, Error> {
     let captured_names = lambda_free_vars(params, body);
     // This lambda's own `cell_names`: every name it captures unioned with its
@@ -2200,7 +2290,16 @@ fn translate_lambda(
     // `visible_siblings` is passed through *unchanged* though (unlike
     // `direct`) — see that field's own doc comment.
     let direct = HashSet::new();
-    let cx = Ctx { direct: &direct, outer_captured: &[], structs, enums, globals, cell_names: &cell_names, visible_siblings };
+    let cx = Ctx {
+        direct: &direct,
+        outer_captured: &[],
+        structs,
+        enums,
+        globals,
+        cell_names: &cell_names,
+        visible_siblings,
+        vtables,
+    };
     let body_one = single_body_expr(body);
     let body_v = ast_to_sexpr_scoped(heap, &body_one, cx)?;
     heap.push_root(body_v);
@@ -2829,6 +2928,9 @@ struct CallTargets {
     calls: Vec<Path>,
     methods: Vec<(Path, String)>,
     globals: Vec<Path>,
+    /// Every distinct trait object boxed, as `(concrete type key, trait
+    /// path, vtable slots)` — see [`collect_dyn_boxes`].
+    dyn_boxes: Vec<(String, Path, Vec<(Path, String)>)>,
 }
 
 /// Collects every distinct top-level [`Path`] an `Expr::Call`/`Expr::FnRef`
@@ -2883,6 +2985,17 @@ pub fn collect_global_targets(typed: &Typed) -> Vec<Path> {
     targets.globals
 }
 
+/// Every trait object this body boxes, as `(concrete type key, trait path,
+/// vtable slots)` — the `Expr::DynBox` counterpart of
+/// [`collect_global_targets`], and needed for the same reason: the emitted
+/// IR names a vtable by a *constant* id, so every one must be interned
+/// (`Interp::vtable_id_for`) before translation starts.
+pub fn collect_dyn_boxes(typed: &Typed) -> Vec<(String, Path, Vec<(Path, String)>)> {
+    let mut targets = CallTargets::default();
+    collect_calls(typed, &mut targets);
+    targets.dyn_boxes
+}
+
 fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
     match &typed.expr {
         Expr::Call(r, args) => {
@@ -2916,6 +3029,30 @@ fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
                 collect_calls(a, targets);
             }
         }
+        // Boxing a trait object is what pulls its whole vtable into the call
+        // graph: the *call* through it (`DynCall`) has no statically known
+        // target, but every target it could reach is right here in `slots`.
+        // Registering them as ordinary method targets is what makes
+        // `compute_sccs`'s finish-order contract guarantee they are already
+        // compiled — and have addresses to put in the table — by the time
+        // this boxing function's own SCC is compiled.
+        Expr::DynBox { concrete_key, trait_path, slots, value } => {
+            for key in slots {
+                if !targets.methods.contains(key) {
+                    targets.methods.push(key.clone());
+                }
+            }
+            if !targets.dyn_boxes.iter().any(|(k, t, _)| k == concrete_key && t == trait_path) {
+                targets.dyn_boxes.push((concrete_key.clone(), trait_path.clone(), slots.clone()));
+            }
+            collect_calls(value, targets);
+        }
+        Expr::DynCall { args, .. } => {
+            for a in args {
+                collect_calls(a, targets);
+            }
+        }
+        Expr::DynValue(inner) => collect_calls(inner, targets),
         // Covers both an escaping `lambda` value's own body and an
         // immediately-invoked lambda literal's body (the latter reached via
         // the `Apply` arm above recursing into its `callee`, which is this

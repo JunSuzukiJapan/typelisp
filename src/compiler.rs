@@ -1265,7 +1265,13 @@ pub const SOURCE: &str = r#"
                                                                                                                                 (compile-vector-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
                                                                                                                                 (if (equal s "hashtable-op")
                                                                                                                                     (compile-hashtable-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                                    (panic (append "compile-value: unsupported tag " s)))))))))))))))))))))))))))))))))))))
+                                                                                                                                (if (equal s "dyn-new")
+                                                                                                                                    (compile-dyn-new builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
+                                                                                                                                (if (equal s "dyn-call")
+                                                                                                                                    (compile-dyn-call builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
+                                                                                                                                (if (equal s "dyn-value")
+                                                                                                                                    (compile-dyn-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
+                                                                                                                                    (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))))))))))))))))
                            )
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -2000,6 +2006,70 @@ pub const SOURCE: &str = r#"
                                    (let ((result (build-call builder (get-function m "rt_llvm_call") args-ptr argc)))
                                      (pop-sexpr-roots builder m sexpr-roots)
                                      result)))))))
+                       ;; `(dyn-new vtable-id (kind . value-form))` — box a
+                       ;; concrete value as a trait object (`Expr::DynBox`,
+                       ;; TODO T4). The vtable id is a translate-time
+                       ;; constant (`ast_bridge::translate_dyn_new`), so this
+                       ;; is just `rt_dyn_new(id, value)`. Argument handling
+                       ;; is `compile-llvm-op`'s: slot 0 holds the raw
+                       ;; constant, `compile-call-args` fills the rest and
+                       ;; roots the tagged-`Sexpr` ones across the
+                       ;; allocation `rt_dyn_new` itself performs.
+                       (compile-dyn-new ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((vtable-id (sexpr-int (sexpr-car (sexpr-cdr e)))))
+                           (let ((arg-forms (sexpr-cdr (sexpr-cdr e))))
+                             (let ((args-ptr (alloca-args builder 2)))
+                               (store-arg builder args-ptr 0 (const-i64 builder vtable-id))
+                               (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr arg-forms 1)))
+                                 (let ((result (build-call builder (get-function m "rt_dyn_new") args-ptr 2)))
+                                   (pop-sexpr-roots builder m sexpr-roots)
+                                   result))))))
+                       ;; `(dyn-value (kind . form))` — unwrap a trait object
+                       ;; to the concrete value inside (`Expr::DynValue`).
+                       (compile-dyn-value ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((arg-forms (sexpr-cdr e)))
+                           (let ((args-ptr (alloca-args builder 1)))
+                             (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr arg-forms 0)))
+                               (let ((result (build-call builder (get-function m "rt_dyn_value") args-ptr 1)))
+                                 (pop-sexpr-roots builder m sexpr-roots)
+                                 result)))))
+                       ;; `(dyn-call slot (kind . recv-form) (kind . arg-form)...)`
+                       ;; — the dynamic dispatch itself (`Expr::DynCall`).
+                       ;; The slot is a translate-time constant, so this is
+                       ;; three steps and no search: read the receiver's
+                       ;; vtable id (`rt_dyn_vtable`), index that slot for a
+                       ;; native entry point (`rt_vtable_slot`), and call it
+                       ;; indirectly (`build-dyn-call`, the env-less sibling
+                       ;; of `build-closure-apply`).
+                       ;;
+                       ;; The callee is an ordinary compiled method and
+                       ;; expects the *concrete* receiver, so slot 0 of the
+                       ;; argument array holds `rt_dyn_value` of the box
+                       ;; rather than the box itself — the same value a
+                       ;; static `compile-assoc-user` call would have passed.
+                       ;; The box stays rooted across the whole sequence
+                       ;; (`compile-call-args` pushed it as a `kind = 2`
+                       ;; argument), which is what keeps the unwrapped
+                       ;; concrete value alive too.
+                       (compile-dyn-call ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         (let ((slot (sexpr-int (sexpr-car (sexpr-cdr e)))))
+                           (let ((arg-forms (sexpr-cdr (sexpr-cdr e))))
+                             (let ((argc (sexpr-list-length arg-forms)))
+                               (let ((args-ptr (alloca-args builder argc)))
+                                 (let ((sexpr-roots (compile-call-args builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr arg-forms 0)))
+                                   (let ((recv (load-raw builder args-ptr 0)))
+                                     (let ((vt-ptr (alloca-args builder 1)))
+                                       (store-arg builder vt-ptr 0 recv)
+                                       (let ((vtable-id (build-call builder (get-function m "rt_dyn_vtable") vt-ptr 1)))
+                                         (let ((inner (build-call builder (get-function m "rt_dyn_value") vt-ptr 1)))
+                                           (store-arg builder args-ptr 0 inner)
+                                           (let ((slot-ptr (alloca-args builder 2)))
+                                             (store-arg builder slot-ptr 0 vtable-id)
+                                             (store-arg builder slot-ptr 1 (const-i64 builder slot))
+                                             (let ((fn-ptr (build-call builder (get-function m "rt_vtable_slot") slot-ptr 2)))
+                                               (let ((result (build-dyn-call builder fn-ptr args-ptr argc)))
+                                                 (pop-sexpr-roots builder m sexpr-roots)
+                                                 result)))))))))))))
                        ;; Fills a previously-`alloca-args`'d array, one
                        ;; compiled argument per slot, exactly as before —
                        ;; each `forms` element is a `(kind . arg-form)` pair

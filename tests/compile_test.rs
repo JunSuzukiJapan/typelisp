@@ -4753,3 +4753,97 @@ fn compile_dispatches_sexpr_accessors_and_agrees_with_the_interpreter() {
         assert_eq!(compiled, interpreted, "compiled `{def}` agrees with the interpreter");
     }
 }
+
+// ---- dynamic dispatch through a trait object's vtable (TODO T4) ---------
+
+/// The compiled counterpart of `tests/dyn_dispatch_test.rs`: one `(draw d)`
+/// call site in a *native* body, reaching two different implementations
+/// through the vtable. `compile` is only asked for the boxing function —
+/// `ast_bridge::collect_calls`' `DynBox` arm pulls both `impl` methods into
+/// the call graph, so `compute_sccs` compiles them first and their addresses
+/// are in the table by the time this runs.
+#[test]
+fn compile_dispatches_a_trait_object_call_through_its_vtable() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (deftrait Drawable (draw ((self Self)) i32))
+        (defstruct circle (r i32))
+        (defstruct square (side i32))
+        (impl Drawable circle (draw ((self Self)) i32 1))
+        (impl Drawable square (draw ((self Self)) i32 2))
+        (defun render ((d :dyn Drawable)) i32 (draw d))
+        (defun both () i32 (+ (* 10 (render (circle::new 3))) (render (square::new 4))))
+        (compile both)
+        (both)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(12));
+}
+
+/// Slot numbering must survive into native code: `deftrait` order decides
+/// which vtable entry each method occupies, so a second method has to reach
+/// its own implementation and not the first one's.
+#[test]
+fn compile_indexes_the_right_vtable_slot_for_each_method() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (deftrait Shape
+          (draw ((self Self)) i32)
+          (sides ((self Self)) i32))
+        (defstruct tri (n i32))
+        (impl Shape tri
+          (draw ((self Self)) i32 7)
+          (sides ((self Self)) i32 3))
+        (defun outline ((s :dyn Shape)) i32 (sides s))
+        (defun paint ((s :dyn Shape)) i32 (draw s))
+        (defun both () i32 (+ (* 10 (paint (tri::new 1))) (outline (tri::new 1))))
+        (compile both)
+        (both)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(73));
+}
+
+/// A method argument and a boxed return value cross the vtable boundary
+/// under the ordinary compiled-call ABI.
+#[test]
+fn compile_passes_arguments_through_a_trait_object_call() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (deftrait Scaler (scale ((self Self) (k i32)) i32))
+        (defstruct fixed (n i32))
+        (impl Scaler fixed (scale ((self Self) (k i32)) i32 (* self::n k)))
+        (defun apply-scale ((s :dyn Scaler) (k i32)) i32 (scale s k))
+        (defun go () i32 (apply-scale (fixed::new 6) 7))
+        (compile go)
+        (go)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(42));
+}
+
+/// Compiled and interpreted tiers must agree, including on the `match`
+/// downcast that unwraps the box back to a concrete type.
+#[test]
+fn compile_and_interpret_agree_on_a_trait_object_match() {
+    let src = r#"
+        (deftrait Drawable (draw ((self Self)) i32))
+        (defstruct circle (r i32))
+        (defstruct square (side i32))
+        (impl Drawable circle (draw ((self Self)) i32 1))
+        (impl Drawable square (draw ((self Self)) i32 2))
+        (defun area ((d :dyn Drawable)) i32
+          (match d
+            ((circle r) (* 100 r))
+            ((the square s) s::side)
+            (_ 0)))
+        (defun go () i32 (+ (area (circle::new 3)) (area (square::new 4))))
+        "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src} (go)")).expect("eval failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src} (compile go) (go)")).expect("eval failed");
+    assert_eq!(interpreted, RtValue::Int(304));
+    assert_eq!(compiled, interpreted);
+}
