@@ -599,3 +599,91 @@ fn jit_and_aot_agree_on_a_defenum_global_read_and_write() {
 
     assert_eq!(jit_value, aot_exit_code);
 }
+
+// ---- user types and methods (AOT prerequisite for trait objects) --------
+
+/// AOT used to reject anything that wasn't a `defun`/`defvar`/`defenum`, so
+/// a `defstruct` with methods could not appear in a compiled file at all —
+/// `Checker::check_defstruct`/`check_defmethod` return `TopLevel` shapes the
+/// item loop had no arm for. Both now compile like any other body.
+#[test]
+fn compiles_a_defstruct_with_a_method() {
+    assert_eq!(
+        compile_and_run(
+            "struct_method",
+            r#"
+            (defstruct point (x i32) (y i32))
+            (defmethod norm ((self point)) i32 (+ (* self::x self::x) (* self::y self::y)))
+            (defun main () i64 (as i64 (norm (point::new 3 4))))
+            "#
+        ),
+        25
+    );
+}
+
+/// An `impl` block returns a `TopLevel::Module` grouping its methods, which
+/// the item loop now flattens like any other module.
+#[test]
+fn compiles_an_impl_block() {
+    assert_eq!(
+        compile_and_run(
+            "impl_block",
+            r#"
+            (deftrait Counted (count ((self Self)) i32))
+            (defstruct box-a (n i32))
+            (impl Counted box-a (count ((self Self)) i32 self::n))
+            (defun main () i64 (as i64 (count (box-a::new 9))))
+            "#
+        ),
+        9
+    );
+}
+
+// ---- dynamic dispatch (TODO T4) ----------------------------------------
+
+/// The AOT tier of the same test `compile_test.rs` runs for the JIT: one
+/// call site, two implementations, dispatched through the vtable. The table
+/// is filled at process startup by `rt_vtable_set` calls whose function
+/// pointers are `ptrtoint` constants the linker resolves.
+#[test]
+fn compiles_and_runs_dynamic_dispatch_through_a_trait_object() {
+    assert_eq!(
+        compile_and_run(
+            "dyn_dispatch",
+            r#"
+            (deftrait Drawable (draw ((self Self)) i32))
+            (defstruct circle (r i32))
+            (defstruct square (side i32))
+            (impl Drawable circle (draw ((self Self)) i32 1))
+            (impl Drawable square (draw ((self Self)) i32 2))
+            (defun render ((d :dyn Drawable)) i32 (draw d))
+            (defun main () i64
+              (as i64 (+ (* 10 (render (circle::new 3))) (render (square::new 4)))))
+            "#
+        ),
+        12
+    );
+}
+
+/// Slot numbering (`deftrait` order) must hold in a linked executable too.
+#[test]
+fn compiles_and_runs_a_multi_slot_vtable() {
+    assert_eq!(
+        compile_and_run(
+            "dyn_slots",
+            r#"
+            (deftrait Shape
+              (draw ((self Self)) i32)
+              (sides ((self Self)) i32))
+            (defstruct tri (n i32))
+            (impl Shape tri
+              (draw ((self Self)) i32 7)
+              (sides ((self Self)) i32 3))
+            (defun paint ((s :dyn Shape)) i32 (draw s))
+            (defun outline ((s :dyn Shape)) i32 (sides s))
+            (defun main () i64 (as i64 (+ (* 10 (paint (tri::new 1))) (outline (tri::new 1)))))
+            "#
+        ),
+        73
+    );
+}

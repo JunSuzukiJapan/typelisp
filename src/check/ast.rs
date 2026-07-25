@@ -273,6 +273,16 @@ pub enum Expr {
         trait_path: Path,
         method: String,
         slot: usize,
+        /// Every implementation this call could reach: `(owning type,
+        /// method)` for each type that implements `trait_path`, as of when
+        /// this call was checked. Not used to *dispatch* — that is the
+        /// vtable's job, and the whole point is that the target is unknown
+        /// until run time — but to tell the compiler what bodies must exist
+        /// natively before this call site can run natively
+        /// (`ast_bridge::collect_calls`). Without it, compiling a function
+        /// that only *dispatches* (the boxing happening in interpreted code
+        /// at the call site) would leave every vtable slot it reads empty.
+        impl_targets: Vec<(Path, String)>,
         args: Vec<Typed>,
     },
     /// Unwrap a trait object to the concrete value inside, typed as `Sexpr`.

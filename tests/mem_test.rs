@@ -1193,3 +1193,57 @@ fn a_shared_frame_survives_the_death_of_one_of_its_scopes() {
     assert_eq!(h.box_count(), 2, "b and its private frame go; a and the shared frame stay");
     assert_eq!(h.scope_get(aid, "via-b"), Some(Value::Int(7)), "the shared frame kept the clone's write");
 }
+
+// ---- trait objects (`BoxedObj::Dyn`, TODO T4) --------------------------
+//
+// A trait object is a fat box pairing a vtable identifier with the concrete
+// value it dispatches for. The vtable lives outside the heap and holds no
+// heap values, so the collector's whole job here is the one nested `value`.
+
+#[test]
+fn a_dyn_box_keeps_the_value_it_wraps_alive() {
+    let mut h = Heap::with_capacity(64);
+    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1), Value::Int(2)]);
+    let d = h.alloc_dyn(7, s);
+    h.push_root(d);
+    let _ = h.alloc_struct("garbage".to_string(), vec![Value::Int(0)]);
+    assert_eq!(h.box_count(), 3, "the struct, its dyn box, and the unrooted garbage");
+    h.gc();
+    assert_eq!(h.box_count(), 2, "the dyn box and the struct it wraps both survive");
+    let Value::Boxed(id) = d else { panic!("expected a boxed dyn value") };
+    assert!(h.is_dyn(id));
+    assert!(!h.is_struct(id), "boxing must not make the wrapper look like the struct inside");
+    assert_eq!(h.dyn_vtable_id(id), 7);
+    let Value::Boxed(inner) = h.dyn_value(id) else { panic!("expected the struct back") };
+    assert_eq!(h.struct_type_name(inner), "point");
+    assert_eq!(h.struct_field(inner, 1), Value::Int(2));
+    assert_accounting(&h);
+}
+
+#[test]
+fn a_dyn_box_and_its_value_are_reclaimed_together_once_unrooted() {
+    let mut h = Heap::with_capacity(64);
+    let s = h.alloc_struct("point".to_string(), vec![Value::Int(1), Value::Int(2)]);
+    let d = h.alloc_dyn(0, s);
+    h.push_root(d);
+    h.gc();
+    assert_eq!(h.box_count(), 2);
+    h.pop_root();
+    h.gc();
+    assert_eq!(h.box_count(), 0);
+    assert_accounting(&h);
+}
+
+#[test]
+fn a_dyn_box_reachable_only_through_a_cons_car_survives_gc() {
+    let mut h = Heap::with_capacity(64);
+    let s = h.alloc_struct("point".to_string(), vec![Value::Int(3), Value::Int(4)]);
+    let d = h.alloc_dyn(2, s);
+    let list = h.cons(d, Value::Empty).unwrap();
+    h.push_root(list);
+    h.gc();
+    assert_eq!(h.box_count(), 2, "the dyn box and its struct survive through the cons");
+    let Value::Boxed(id) = h.car(list).unwrap() else { panic!("expected the dyn box back") };
+    assert_eq!(h.dyn_vtable_id(id), 2);
+    assert_accounting(&h);
+}

@@ -4847,3 +4847,74 @@ fn compile_and_interpret_agree_on_a_trait_object_match() {
     assert_eq!(interpreted, RtValue::Int(304));
     assert_eq!(compiled, interpreted);
 }
+
+/// Compiling *only* the dispatching function — the boxing happens in
+/// interpreted code at the call site — must still work. Nothing in
+/// `render`'s own body names `circle::draw`, so the vtable's targets have to
+/// be reached some other way than the ordinary call graph.
+#[test]
+fn compile_dispatches_when_only_the_dispatching_function_is_compiled() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (deftrait Drawable (draw ((self Self)) i32))
+        (defstruct circle (r i32))
+        (defstruct square (side i32))
+        (impl Drawable circle (draw ((self Self)) i32 1))
+        (impl Drawable square (draw ((self Self)) i32 2))
+        (defun render ((d :dyn Drawable)) i32 (draw d))
+        (compile render)
+        (+ (* 10 (render (circle::new 3))) (render (square::new 4)))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(12));
+}
+
+/// An `impl` added *after* the dispatching function was compiled: its method
+/// isn't in that call site's `impl_targets` snapshot, so nothing pulled it
+/// into native code. Dispatch must still reach it.
+#[test]
+fn compile_dispatches_to_an_impl_added_after_the_call_site_was_compiled() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (deftrait Drawable (draw ((self Self)) i32))
+        (defstruct circle (r i32))
+        (impl Drawable circle (draw ((self Self)) i32 1))
+        (defun render ((d :dyn Drawable)) i32 (draw d))
+        (compile render)
+        (defstruct square (side i32))
+        (impl Drawable square (draw ((self Self)) i32 2))
+        (+ (* 10 (render (circle::new 3))) (render (square::new 4)))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(12));
+}
+
+/// A trait whose implementations have *generic* owners (prelude's `Iter`,
+/// implemented by `vector-iter<T>`): the call site's `impl_targets` skips
+/// those, because a generic owner's method has no code until it is
+/// specialized — and which specialization is only known where a concrete
+/// instantiation is boxed. That box is what has to pull it in.
+#[test]
+fn compile_dispatches_a_trait_object_whose_impl_owner_is_generic() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun total ((it :dyn Iter<i32>)) i32
+          (let ((n 0))
+            (loop
+              (match (next it)
+                ((Some x) (setf n (+ n x)))
+                (_ (break))))
+            n))
+        (defun make-v () Vector<i32> (Vector::new))
+        (compile total)
+        (let ((v (make-v)))
+          (push v 10)
+          (push v 32)
+          (total (iter v)))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(42));
+}

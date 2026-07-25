@@ -2843,6 +2843,25 @@ impl Checker {
             .map(|td| td.name.clone())
     }
 
+    /// Every implementation of `trait_path`'s `method` currently registered,
+    /// as `(owning type, method name)` — what a compiled `:dyn` call site
+    /// needs compiled before it can run (see `Expr::DynCall::impl_targets`).
+    ///
+    /// Generic owners are skipped: their method has no code until it is
+    /// specialized, and a specialization is only named once a concrete
+    /// instantiation is boxed — which is exactly where `Expr::DynBox`'s own
+    /// slots (already monomorphized by `dyn_vtable_slots`) pull it in.
+    fn dyn_impl_targets(&self, trait_path: &Path, method: &str) -> Vec<(Path, String)> {
+        self.reg
+            .trait_impls(trait_path)
+            .into_iter()
+            .filter(|ty| {
+                self.reg.type_def(ty).is_some_and(|d| d.params.is_empty() && d.assoc.contains_key(method))
+            })
+            .map(|ty| (ty, method.to_string()))
+            .collect()
+    }
+
     /// Whether the built-in `Sexpr` type has a visible instance method named
     /// `method` — how a trait-object receiver decides between dispatching
     /// through its vtable and falling back to the `Sexpr` catalog.
@@ -2938,6 +2957,7 @@ impl Checker {
                 trait_path: trait_path.clone(),
                 method: method.to_string(),
                 slot,
+                impl_targets: self.dyn_impl_targets(trait_path, method),
                 args: typed,
             },
             ty: ret,

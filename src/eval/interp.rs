@@ -215,6 +215,19 @@ pub struct Interp {
     /// since `Type` has no `Hash` — the same substitution
     /// [`Self::jit_ctor_cache`] makes.
     vtable_ids: RefCell<HashMap<(String, Path), u32>>,
+    /// Traits some *compiled* body dispatches on (an `Expr::DynCall` in a
+    /// function that has been through `translate_and_compile`).
+    ///
+    /// A compiled `:dyn` call site reads a raw function pointer out of the
+    /// vtable, so every implementation it could reach has to be compiled
+    /// too. `Expr::DynCall::impl_targets` covers the ones that existed when
+    /// the call site was checked; this set covers the rest, by telling
+    /// `Expr::DynBox`'s evaluation that boxing for *this* trait now has a
+    /// native consumer, so a slot method still lacking a compiled form must
+    /// be compiled before the box escapes. Empty for any program that never
+    /// compiles a dynamic dispatch — which is why boxing does not simply
+    /// compile its slots unconditionally.
+    dyn_dispatch_compiled: RefCell<HashSet<Path>>,
 }
 
 /// One outgoing edge of the top-level compile call graph
@@ -350,6 +363,7 @@ impl Interp {
             jit_ctor_cache: RefCell::new(HashMap::new()),
             vtables: RefCell::new(Vec::new()),
             vtable_ids: RefCell::new(HashMap::new()),
+            dyn_dispatch_compiled: RefCell::new(HashSet::new()),
             jit_ctor_counter: Cell::new(0),
         }
     }
@@ -418,19 +432,35 @@ impl Interp {
     /// of a boxing site's slots into the call graph — so a live 0 would mean
     /// that contract was broken, not that user code did something unusual.
     fn publish_vtables(&self) {
-        for (id, slots) in self.vtables.borrow().iter().enumerate() {
-            let addrs: Vec<usize> = slots
-                .iter()
-                .map(|(type_name, method)| {
-                    self.root
-                        .borrow()
-                        .get_method(type_name, method)
-                        .and_then(|f| f.compiled.borrow().as_ref().map(|c| c.address()))
-                        .unwrap_or(0)
-                })
-                .collect();
-            crate::compile::runtime::vtable_define(id as u32, addrs);
+        for id in 0..self.vtables.borrow().len() {
+            self.publish_vtable(id as u32);
         }
+    }
+
+    /// [`Self::publish_vtables`] for one table.
+    fn publish_vtable(&self, id: u32) {
+        let slots = match self.vtables.borrow().get(id as usize) {
+            Some(s) => s.clone(),
+            None => return,
+        };
+        let addrs: Vec<usize> = slots
+            .iter()
+            .map(|(type_name, method)| {
+                self.root
+                    .borrow()
+                    .get_method(type_name, method)
+                    .and_then(|f| f.compiled.borrow().as_ref().map(|c| c.address()))
+                    .unwrap_or(0)
+            })
+            .collect();
+        crate::compile::runtime::vtable_define(id, addrs);
+    }
+
+    /// Every vtable interned so far, as `(id, slots)` — for a code generator
+    /// that has to emit the table itself rather than patch it in from JIT
+    /// addresses (`compile::aot::build_main_wrapper`).
+    pub(crate) fn vtable_descriptors(&self) -> Vec<(u32, Vec<(Path, String)>)> {
+        self.vtables.borrow().iter().cloned().enumerate().map(|(i, s)| (i as u32, s)).collect()
     }
 
     /// The vtable id for boxing a `concrete_key`-typed value as
@@ -1433,6 +1463,36 @@ impl Interp {
                     )));
                 };
                 let id = self.vtable_id_for(concrete_key, trait_path, slots);
+                // If some compiled body dispatches on this trait, the box may
+                // be about to reach it, and a native call site can only read
+                // a *native* entry point out of the table — so any slot still
+                // interpreted has to be compiled now. Reached only by an
+                // `impl` that did not exist when that call site was checked
+                // (otherwise `Expr::DynCall::impl_targets` already pulled it
+                // in); an ordinary program never gets here at all.
+                // Bound to a local so the `RefCell` borrow is definitely
+                // released before `compile_function` below — which reaches
+                // `translate_and_compile`, and that borrows this same cell
+                // mutably.
+                let has_native_dispatcher = self.dyn_dispatch_compiled.borrow().contains(trait_path);
+                if has_native_dispatcher {
+                    for (type_name, method) in slots {
+                        if !self.root.borrow().method_compiled(type_name, method) {
+                            let target = CompileTarget::Method {
+                                type_name: type_name.clone(),
+                                method: method.clone(),
+                                home: type_name.parent().to_vec(),
+                            };
+                            self.compile_function(heap, &target)?;
+                        }
+                    }
+                }
+                // Publish to the compiled tier on every boxing, not just
+                // after a compilation: the value may be about to cross into
+                // *already*-compiled code that dispatches on it, and this is
+                // the only point where such a box comes into existence
+                // without any compilation having just happened.
+                self.publish_vtable(id);
                 // `v` is anchored across the allocation: `alloc_dyn` can
                 // trigger a collection, and nothing else references `v` yet.
                 let slot = self.native_slot(RtValue::Sexpr(v));
@@ -1440,7 +1500,7 @@ impl Interp {
                 drop(slot);
                 Ok(RtValue::Sexpr(boxed))
             }
-            Expr::DynCall { trait_path, method, slot, args } => {
+            Expr::DynCall { trait_path, method, slot, args, .. } => {
                 let (argv, _slots) = self.eval_args(heap, args, env)?;
                 // The receiver is the fat box; the callee sees the concrete
                 // value, so it is an ordinary method body with an ordinary
@@ -2336,6 +2396,9 @@ impl Interp {
         // translation starts, for the same reason a global needs its slot:
         // `ast_to_sexpr` bakes the id into the emitted IR as a constant.
         self.intern_dyn_vtables(body);
+        for trait_path in crate::compile::ast_bridge::collect_dyn_dispatch_traits(body) {
+            self.dyn_dispatch_compiled.borrow_mut().insert(trait_path);
+        }
         let compiled_globals = self.compiled_globals.borrow();
         let vtable_ids = self.vtable_ids.borrow();
         // `ast_bridge` is deliberately `Registry`-free, so hand it the

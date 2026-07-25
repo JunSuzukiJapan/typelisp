@@ -2931,6 +2931,8 @@ struct CallTargets {
     /// Every distinct trait object boxed, as `(concrete type key, trait
     /// path, vtable slots)` — see [`collect_dyn_boxes`].
     dyn_boxes: Vec<(String, Path, Vec<(Path, String)>)>,
+    /// Every distinct trait dispatched on — see [`collect_dyn_dispatch_traits`].
+    dyn_traits: Vec<Path>,
 }
 
 /// Collects every distinct top-level [`Path`] an `Expr::Call`/`Expr::FnRef`
@@ -2996,6 +2998,15 @@ pub fn collect_dyn_boxes(typed: &Typed) -> Vec<(String, Path, Vec<(Path, String)
     targets.dyn_boxes
 }
 
+/// Every trait this body dispatches dynamically on (`Expr::DynCall`) — see
+/// `Interp::dyn_dispatch_compiled` for what compiling such a body implies
+/// for the implementations it can reach.
+pub fn collect_dyn_dispatch_traits(typed: &Typed) -> Vec<Path> {
+    let mut targets = CallTargets::default();
+    collect_calls(typed, &mut targets);
+    targets.dyn_traits
+}
+
 fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
     match &typed.expr {
         Expr::Call(r, args) => {
@@ -3047,7 +3058,19 @@ fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
             }
             collect_calls(value, targets);
         }
-        Expr::DynCall { args, .. } => {
+        // The call itself has no static target, but every implementation it
+        // could dispatch to must exist natively before it can run natively —
+        // and unlike `DynBox` (which is often in *interpreted* calling code),
+        // this node is right here in the body being compiled.
+        Expr::DynCall { trait_path, impl_targets, args, .. } => {
+            if !targets.dyn_traits.contains(trait_path) {
+                targets.dyn_traits.push(trait_path.clone());
+            }
+            for key in impl_targets {
+                if !targets.methods.contains(key) {
+                    targets.methods.push(key.clone());
+                }
+            }
             for a in args {
                 collect_calls(a, targets);
             }
@@ -3176,7 +3199,7 @@ mod tests {
     /// care (nested-struct field classification, `Global`/`SetGlobal`)
     /// calls `super::ast_to_sexpr` with real ones instead.
     fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
-        super::ast_to_sexpr(heap, typed, &HashSet::new(), &HashSet::new(), &HashMap::new(), &HashSet::new())
+        super::ast_to_sexpr(heap, typed, &HashSet::new(), &HashSet::new(), &HashMap::new(), &HashSet::new(), &HashMap::new())
     }
 
     /// Unpacks a tagged-list `Value` into (tag name, field values), asserting
@@ -4148,7 +4171,8 @@ mod tests {
         let direct = HashSet::new();
         let enums = HashSet::new();
         let cell_names = HashSet::new();
-        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals, cell_names: &cell_names, visible_siblings: &HashSet::new() };
+        let vtables = HashMap::new();
+        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals, cell_names: &cell_names, visible_siblings: &HashSet::new(), vtables: &vtables };
 
         let point_ty = Type::Named(point.clone(), vec![]);
         let scrut = typed(Expr::Var("p".to_string()), point_ty.clone());
@@ -4239,7 +4263,8 @@ mod tests {
             let enums = HashSet::new();
             let globals = HashMap::new();
             let cell_names = HashSet::new();
-        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals, cell_names: &cell_names, visible_siblings: &HashSet::new() };
+        let vtables = HashMap::new();
+        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals, cell_names: &cell_names, visible_siblings: &HashSet::new(), vtables: &vtables };
             let v = pattern_to_sexpr(heap, pat, cx).unwrap();
             let (tag, fields) = untag(heap, v);
             assert_eq!(tag, "pat-lit");
