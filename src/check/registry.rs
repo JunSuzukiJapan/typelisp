@@ -194,6 +194,12 @@ pub struct TraitDef {
     /// signature's `params`/`ret` may mention `Self` and `assoc_types` as
     /// type variables (`Type::Named(Path::root("self"), [])` etc.).
     pub methods: HashMap<String, FnSig>,
+    /// The method names in `deftrait` source order — the sole authority for
+    /// vtable slot numbering (`Checker::dyn_vtable_slots`). `methods` is a
+    /// `HashMap`, whose iteration order is not stable across runs, so it must
+    /// never be used to lay out a table that a compiled call site indexes by
+    /// a baked-in constant. Always the same length as `methods`.
+    pub method_order: Vec<String>,
     /// Visible outside its defining module.
     pub public: bool,
     pub builtin: bool,
@@ -539,6 +545,36 @@ impl Registry {
     /// Mutable lookup of a `deftrait` by its fully-qualified [`Path`].
     pub fn trait_def_mut(&mut self, path: &Path) -> Option<&mut TraitDef> {
         self.root.module_mut(path.parent()).traits.get_mut(path.local())
+    }
+
+    /// Every type that has an `impl` for `trait_path` — the reverse of
+    /// [`AdtDef::impls`], which only answers the forward question ("does
+    /// *this* type implement it?"). Needed by trait objects (`Type::Dyn`):
+    /// building a vtable per (concrete type, trait) pair means enumerating
+    /// the pairs, and compiling a `:dyn` call site means knowing every
+    /// method body that could end up in one (`ast_bridge::collect_calls`).
+    ///
+    /// Sorted, because the namespace tree is walked through `HashMap`s whose
+    /// iteration order varies between runs — an unsorted result would make
+    /// diagnostics and generated-code ordering nondeterministic.
+    pub fn trait_impls(&self, trait_path: &Path) -> Vec<Path> {
+        let mut out = Vec::new();
+        collect_trait_impls(&self.root, trait_path, &mut out);
+        out.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+        out
+    }
+}
+
+/// Depth-first walk of the module tree collecting types whose `impls` list
+/// contains `trait_path` — [`Registry::trait_impls`]'s recursion.
+fn collect_trait_impls(ns: &Namespace, trait_path: &Path, out: &mut Vec<Path>) {
+    for def in ns.types.values() {
+        if def.impls.contains(trait_path) {
+            out.push(def.name.clone());
+        }
+    }
+    for child in ns.modules.values() {
+        collect_trait_impls(child, trait_path, out);
     }
 }
 

@@ -196,6 +196,25 @@ pub struct Interp {
     /// ...) — never reused, so two constructors can never collide even
     /// across separate throwaway modules.
     jit_ctor_counter: Cell<u64>,
+    /// Trait-object vtables, interpreter tier: `vtable_id` -> the call
+    /// targets for the trait's methods, in slot order (`Expr::DynBox`'s
+    /// `slots`, which the checker laid out from `TraitDef::method_order`).
+    /// Entries are `(owning type path, method name)` — resolved through the
+    /// scope tree at call time, so a method that gets `compile`d later is
+    /// picked up automatically, exactly as for a static `Expr::Assoc`.
+    ///
+    /// The compiled tier keeps a parallel table of raw function pointers in
+    /// `typelisp_rt`, indexed by the same ids (which [`Self::vtable_id_for`]
+    /// is the sole source of). Neither table holds heap values, so a vtable
+    /// needs no GC root — `BoxedObj::Dyn`'s own `value` is all the collector
+    /// ever has to trace.
+    vtables: RefCell<Vec<Vec<(Path, String)>>>,
+    /// `(concrete type key, trait path)` -> `vtable_id`, so the same pair
+    /// interns to one id however many times it is boxed. The key's first
+    /// half is `mangle_type`'s rendering (`Expr::DynBox::concrete_key`),
+    /// since `Type` has no `Hash` — the same substitution
+    /// [`Self::jit_ctor_cache`] makes.
+    vtable_ids: RefCell<HashMap<(String, Path), u32>>,
 }
 
 /// One outgoing edge of the top-level compile call graph
@@ -304,6 +323,10 @@ impl Interp {
         // permanent-root position in a `Heap` that no longer exists. See
         // `typelisp_rt::reset_global_table`'s doc comment.
         crate::compile::runtime::reset_global_table();
+        // Same reasoning for the compiled tier's vtable table: ids are
+        // per-`Interp`, so a stale entry from an earlier pair on this thread
+        // must not survive into this one.
+        crate::compile::runtime::reset_vtable_table();
         // `vector` is registered directly in `Registry::with_builtins`
         // (`registry::vector_def`) with `AdtKind::Struct`, so its
         // `Expr::Construct` sites already get `mutable = true`
@@ -325,6 +348,8 @@ impl Interp {
             compiled_globals: RefCell::new(HashMap::new()),
             jit_graveyard: RefCell::new(Vec::new()),
             jit_ctor_cache: RefCell::new(HashMap::new()),
+            vtables: RefCell::new(Vec::new()),
+            vtable_ids: RefCell::new(HashMap::new()),
             jit_ctor_counter: Cell::new(0),
         }
     }
@@ -367,6 +392,27 @@ impl Interp {
         self.slots.borrow_mut().push(Rc::downgrade(&s));
         Slot::Native(s)
     }
+
+    /// The vtable id for boxing a `concrete_key`-typed value as
+    /// `trait_path` — interning the (type, trait) pair so repeated boxing
+    /// reuses one table. The sole source of vtable ids; the compiled tier's
+    /// parallel table (`typelisp_rt`) is keyed by the same numbers.
+    ///
+    /// `slots` comes from the checker (`Expr::DynBox`), already in
+    /// `TraitDef::method_order` order and already monomorphized, so this only
+    /// records it.
+    pub(crate) fn vtable_id_for(&self, concrete_key: &str, trait_path: &Path, slots: &[(Path, String)]) -> u32 {
+        let key = (concrete_key.to_string(), trait_path.clone());
+        if let Some(&id) = self.vtable_ids.borrow().get(&key) {
+            return id;
+        }
+        let mut tables = self.vtables.borrow_mut();
+        let id = tables.len() as u32;
+        tables.push(slots.to_vec());
+        self.vtable_ids.borrow_mut().insert(key, id);
+        id
+    }
+
 
     /// A `Slot::TypedCell` — closure unification Stage 7's promotion of an
     /// otherwise-`Native` binding to a GC heap cell because
@@ -1337,6 +1383,76 @@ impl Interp {
                     "TraitCall `{}` reached the evaluator — an erased generic body executed",
                     method
                 )))
+            }
+            Expr::DynBox { concrete_key, trait_path, slots, value } => {
+                let inner = self.eval(heap, value, env)?;
+                let RtValue::Sexpr(v) = inner else {
+                    return Err(EvalError::Internal(format!(
+                        "DynBox of `{}`: expected a heap-represented value, got {:?}",
+                        concrete_key, inner
+                    )));
+                };
+                let id = self.vtable_id_for(concrete_key, trait_path, slots);
+                // `v` is anchored across the allocation: `alloc_dyn` can
+                // trigger a collection, and nothing else references `v` yet.
+                let slot = self.native_slot(RtValue::Sexpr(v));
+                let boxed = heap.alloc_dyn(id, v);
+                drop(slot);
+                Ok(RtValue::Sexpr(boxed))
+            }
+            Expr::DynCall { trait_path, method, slot, args } => {
+                let (argv, _slots) = self.eval_args(heap, args, env)?;
+                // The receiver is the fat box; the callee sees the concrete
+                // value, so it is an ordinary method body with an ordinary
+                // receiver — nothing about it knows it was reached dynamically.
+                let (vtable_id, inner) = match argv.first() {
+                    Some(RtValue::Sexpr(Value::Boxed(id))) if heap.is_dyn(*id) => {
+                        (heap.dyn_vtable_id(*id), heap.dyn_value(*id))
+                    }
+                    other => {
+                        return Err(EvalError::Internal(format!(
+                            "DynCall `{}::{}`: receiver is not a trait object ({:?})",
+                            trait_path, method, other
+                        )))
+                    }
+                };
+                let target = self
+                    .vtables
+                    .borrow()
+                    .get(vtable_id as usize)
+                    .and_then(|s| s.get(*slot))
+                    .cloned();
+                let Some((type_name, target_method)) = target else {
+                    return Err(EvalError::Internal(format!(
+                        "DynCall `{}::{}`: vtable {} has no slot {}",
+                        trait_path, method, vtable_id, slot
+                    )));
+                };
+                let mut argv = argv;
+                argv[0] = RtValue::Sexpr(inner);
+                // Visibility was settled where the value was boxed
+                // (`Checker::dyn_vtable_slots` went through the `impl`), so
+                // this is the direct lookup, not `resolve_method`'s
+                // `home`-relative one.
+                let f = self.root.borrow().get_method(&type_name, &target_method);
+                match f {
+                    Some(f) => {
+                        let compiled = f.compiled.borrow().clone();
+                        if let Some(compiled) = compiled {
+                            let ret_ty = &f.sig.as_ref().expect("a compiled method always has a type signature").1;
+                            return self.call_compiled(heap, &compiled, &argv, ret_ty);
+                        }
+                        self.apply(heap, &f, argv)
+                    }
+                    None => Err(EvalError::NoSuchFunction(method_link_name(&type_name, &target_method))),
+                }
+            }
+            Expr::DynValue(inner) => {
+                let v = self.eval(heap, inner, env)?;
+                match v {
+                    RtValue::Sexpr(Value::Boxed(id)) if heap.is_dyn(id) => Ok(RtValue::Sexpr(heap.dyn_value(id))),
+                    other => Err(EvalError::Internal(format!("DynValue: not a trait object ({:?})", other))),
+                }
             }
             Expr::Construct { type_name, variant, args, mutable } => {
                 if is_sexpr_type(type_name) {

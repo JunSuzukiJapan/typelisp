@@ -241,6 +241,47 @@ pub enum Expr {
         method: String,
         args: Vec<Typed>,
     },
+    /// Box a concrete value as a trait object (`Type::Dyn`) — inserted where
+    /// a value of a concrete type reaches a `:dyn Trait` expectation
+    /// (`Checker::check_inner`'s expectation reconciliation, the same place
+    /// the `Sexpr` widenings live) or by an explicit `(as :dyn Trait e)`.
+    ///
+    /// Carries the vtable's *contents*, not its identity: `slots` is the
+    /// trait's methods resolved to concrete call targets in
+    /// `TraitDef::method_order` order (already monomorphized, see
+    /// `Checker::dyn_vtable_slots`), and `concrete_key` is `mangle_type`'s
+    /// rendering of the boxed type, which together with `trait_path` names
+    /// the (type, trait) pair one vtable belongs to. The numeric vtable id is
+    /// interned by `Interp` at exec/translate time rather than baked in here,
+    /// so a tree that round-trips through a `fasl` (whose ids would be from
+    /// another process's numbering) stays valid.
+    DynBox {
+        concrete_key: String,
+        trait_path: Path,
+        slots: Vec<(Path, String)>,
+        value: Box<Typed>,
+    },
+    /// A method call through a trait object: `args[0]` is the `Type::Dyn`
+    /// receiver, `slot` its index into that trait's vtable. Unlike
+    /// [`Expr::Assoc`] the callee is *not* statically known — this is the one
+    /// call node whose target is chosen at run time — but the slot number is,
+    /// so dispatch is an array index plus an indirect call, with no lookup by
+    /// name or type. (Not [`Expr::TraitCall`]: that node is the erased-generic
+    /// diagnostic trap, and reviving its removed by-type-name dispatch chain
+    /// is exactly what a vtable exists to avoid.)
+    DynCall {
+        trait_path: Path,
+        method: String,
+        slot: usize,
+        args: Vec<Typed>,
+    },
+    /// Unwrap a trait object to the concrete value inside, typed as `Sexpr`.
+    /// Synthesized only by `Checker::check_match` for a `:dyn`-typed
+    /// scrutinee, so that `match`ing a trait object back down to concrete
+    /// types reuses the existing `Sexpr` downcast patterns
+    /// (`check_ctor_pattern`'s downcast branch / `Pattern::TypeTest`)
+    /// unchanged rather than growing a second runtime type test.
+    DynValue(Box<Typed>),
     /// A data-type constructor application, e.g. `(Some x)` / `(Cons a d)`.
     Construct {
         /// The nominal type's fully-qualified [`Path`], e.g. `option`, `sexpr`.

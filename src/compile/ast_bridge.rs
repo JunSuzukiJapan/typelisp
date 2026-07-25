@@ -1182,6 +1182,9 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // unreachable from any compilable source. The old dispatch-chain
         // lowering it used to have is gone.
         Expr::TraitCall { .. } => unsupported(heap, "TraitCall"),
+        Expr::DynBox { .. } => unsupported(heap, "DynBox"),
+        Expr::DynCall { .. } => unsupported(heap, "DynCall"),
+        Expr::DynValue(_) => unsupported(heap, "DynValue"),
         // `(compile name)` is an interpreter-only reflective action (it JIT-
         // compiles a target against the *running* `Interp`'s own heap/scope
         // tree) — it has no meaning inside code that is itself being

@@ -2720,6 +2720,154 @@ pub unsafe extern "C" fn rt_global_set(args: *const i64, argc: u32) -> i64 {
     tagged
 }
 
+// ===========================================================================
+// Trait objects and vtables (TODO T4)
+// ===========================================================================
+//
+// A trait object is a `BoxedObj::Dyn` fat box: a vtable id plus the concrete
+// value. The vtable itself lives *outside* the heap, here — one table per
+// (concrete type, trait) pair, holding raw native function pointers in the
+// trait's declared method order (`TraitDef::method_order`). A call site knows
+// its slot statically, so dispatch is `rt_dyn_vtable` -> `rt_vtable_slot` ->
+// an indirect call through the ordinary `compiled_fn_type` ABI, with no
+// lookup by name or type at run time. Ids are assigned by the interpreter
+// (`Interp::vtable_id_for`), which keeps its own parallel table of
+// `(type, method)` identities for tree-walking calls.
+
+thread_local! {
+    /// vtable id -> slot -> native entry point (`compiled_fn_type`:
+    /// `i64 f(i64* args, i32 argc)`), or 0 for a slot never filled in.
+    /// `thread_local!` for the same cross-test-isolation reason
+    /// [`GLOBAL_INDEX`] is, and reset by the same `Interp::new` hook.
+    static VTABLES: RefCell<Vec<Vec<usize>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Clears this thread's vtable table — the trait-object counterpart of
+/// [`reset_global_table`], called from `Interp::new` for the same reason:
+/// vtable ids are per-`Interp`, so a stale table from an earlier one on a
+/// reused `cargo test` worker thread would answer with function pointers
+/// into a JIT module that has since been dropped.
+pub fn reset_vtable_table() {
+    VTABLES.with(|t| t.borrow_mut().clear());
+}
+
+/// Installs (or replaces) vtable `id`'s slots. Called from the interpreter
+/// once a compilation unit's function addresses are final
+/// (`Interp::compile_scc`) and from AOT startup; a slot holding 0 means "not
+/// compiled", which [`rt_vtable_slot`] refuses to call.
+pub fn vtable_define(id: u32, slots: Vec<usize>) {
+    VTABLES.with(|t| {
+        let mut t = t.borrow_mut();
+        if t.len() <= id as usize {
+            t.resize(id as usize + 1, Vec::new());
+        }
+        t[id as usize] = slots;
+    });
+}
+
+/// Boxes `args[1]` (a tagged value) as a trait object dispatching through
+/// vtable `args[0]`.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s; a
+/// `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_dyn_new(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_dyn_new: expected 2 arguments (the vtable id and the value)");
+    }
+    let vtable_id = *args as u32;
+    let value = decode(*args.add(1));
+    encode(active_heap().alloc_dyn(vtable_id, value))
+}
+
+/// The vtable id of the trait object `args[0]`, as a raw `i64`.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1`, `args[0]` must be a tagged `BoxedObj::Dyn`, and a
+/// `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_dyn_vtable(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_dyn_vtable: expected 1 argument");
+    }
+    match decode(*args) {
+        Value::Boxed(id) if active_heap().is_dyn(id) => active_heap().dyn_vtable_id(id) as i64,
+        _ => fatal("rt_dyn_vtable: not a trait object"),
+    }
+}
+
+/// The concrete value inside the trait object `args[0]`, tagged.
+///
+/// # Safety
+///
+/// Same as [`rt_dyn_vtable`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_dyn_value(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_dyn_value: expected 1 argument");
+    }
+    match decode(*args) {
+        Value::Boxed(id) if active_heap().is_dyn(id) => encode(active_heap().dyn_value(id)),
+        _ => fatal("rt_dyn_value: not a trait object"),
+    }
+}
+
+/// Slot `args[1]` of vtable `args[0]`: the raw native entry point a `:dyn`
+/// call site then calls indirectly. An unfilled slot aborts rather than
+/// jumping to null — reaching one means a method that a boxing site pulled
+/// into the call graph was not compiled, which is a compiler bug, not
+/// anything user code can provoke.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_vtable_slot(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_vtable_slot: expected 2 arguments (the vtable id and the slot)");
+    }
+    let id = *args as usize;
+    let slot = *args.add(1) as usize;
+    let ptr = VTABLES.with(|t| t.borrow().get(id).and_then(|s| s.get(slot).copied()).unwrap_or(0));
+    if ptr == 0 {
+        fatal("rt_vtable_slot: vtable slot is empty — a dyn dispatch target was not compiled");
+    }
+    ptr as i64
+}
+
+/// Sets slot `args[1]` of vtable `args[0]` to the native entry point
+/// `args[2]`, extending the table as needed. Used by AOT startup, where the
+/// pointers are `ptrtoint` constants the linker resolves; the JIT fills
+/// tables through [`vtable_define`] instead.
+///
+/// # Safety
+///
+/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_vtable_set(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_vtable_set: expected 3 arguments (the vtable id, the slot and the function pointer)");
+    }
+    let id = *args as usize;
+    let slot = *args.add(1) as usize;
+    let ptr = *args.add(2) as usize;
+    VTABLES.with(|t| {
+        let mut t = t.borrow_mut();
+        if t.len() <= id {
+            t.resize(id + 1, Vec::new());
+        }
+        let slots = &mut t[id];
+        if slots.len() <= slot {
+            slots.resize(slot + 1, 0);
+        }
+        slots[slot] = ptr;
+    });
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use typelisp_mem::{Heap, PathId, StrId, SymId, Value};

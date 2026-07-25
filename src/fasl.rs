@@ -396,7 +396,15 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// `required`/`optional`/`rest`/`keys`, and `TopLevel::Defmacro` gained a
 /// `MacroLambda` (the checked default-value bodies + key names). A stale cache
 /// under the old shapes would fail to deserialize — 2026-07-24.
-pub const FASL_FORMAT_VERSION: u32 = 11;
+///
+/// 12: dynamic dispatch (TODO T4). `Type` gained `Dyn(Path, Vec<Type>)`,
+/// `Expr` gained `SymLit`/`DynBox`/`DynCall`/`DynValue`, and `TraitDef`
+/// gained `method_order` (the vtable slot layout). Every one of those is
+/// serialized as part of a namespace delta or a checked top-level form, so a
+/// stale cache would fail to deserialize the new shapes — and a `TraitDef`
+/// read back without `method_order` would have no slot numbering at all —
+/// 2026-07-25.
+pub const FASL_FORMAT_VERSION: u32 = 12;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.

@@ -2630,6 +2630,8 @@ impl Checker {
         };
         let mut assoc_types = Vec::new();
         let mut methods = HashMap::new();
+        // Source order, kept alongside `methods` for vtable slot numbering.
+        let mut method_order: Vec<String> = Vec::new();
         for item in &parts[1..] {
             let elems = heap.list_to_vec(*item)?;
             let head = match elems.first() {
@@ -2661,6 +2663,13 @@ impl Checker {
                 builtin: false,
                 bounds: HashMap::new(),
             };
+            // `method_order` is the vtable layout, so it must stay in step
+            // with `methods` — a duplicated name would silently give the
+            // trait two slots for one entry.
+            if methods.contains_key(&head) {
+                return Err(Error::TypeError(format!("deftrait: duplicate method `{}`", head)));
+            }
+            method_order.push(head.clone());
             methods.insert(head, sig);
         }
         let fq_name = self.fq(&name);
@@ -2669,7 +2678,7 @@ impl Checker {
             .root
             .module_mut(&self.ns)
             .traits
-            .insert(name, TraitDef { name: fq_name.clone(), assoc_types, methods, public, builtin: false });
+            .insert(name, TraitDef { name: fq_name.clone(), assoc_types, methods, method_order, public, builtin: false });
         if let Some(loc) = def_loc {
             self.reg.def_locs.traits.insert(fq_name.clone(), loc);
         }
@@ -2832,6 +2841,280 @@ impl Checker {
             .module(p.parent())
             .and_then(|m| m.traits.get(p.local()))
             .map(|td| td.name.clone())
+    }
+
+    /// Wrap an already-checked concrete value as `:dyn trait_path<pins...>`,
+    /// laying out the vtable it will dispatch through. The shared
+    /// implementation of the implicit widening (`check_inner`'s expectation
+    /// reconciliation) and the explicit `(as :dyn Trait e)`.
+    fn coerce_to_dyn(&self, value: Typed, trait_path: &Path, pins: &[Type]) -> Result<Typed, Error> {
+        // Re-boxing a trait object is not a coercion. Same-trait/same-pins
+        // never reaches here (the types compare equal); a *different* trait
+        // would be an upcast, which needs a second vtable that the source
+        // box's contents can't supply — the concrete type is gone by then.
+        if let Type::Dyn(from, from_pins) = &value.ty {
+            return Err(Error::TypeError(format!(
+                "cannot convert `{}` to `{}` — trait upcasting is not supported; box the concrete value as `:dyn {}` instead",
+                mangle_type(&Type::Dyn(from.clone(), from_pins.clone())),
+                mangle_type(&Type::Dyn(trait_path.clone(), pins.to_vec())),
+                trait_path
+            )));
+        }
+        let slots = self.dyn_vtable_slots(&value.ty, trait_path, pins)?;
+        let concrete_key = mangle_type(&value.ty);
+        let loc = value.loc.clone();
+        Ok(Typed {
+            loc,
+            expr: Expr::DynBox {
+                concrete_key,
+                trait_path: trait_path.clone(),
+                slots,
+                value: Box::new(value),
+            },
+            ty: Type::Dyn(trait_path.clone(), pins.to_vec()),
+        })
+    }
+
+    /// Check `(method dyn-receiver args...)` — a call through a trait
+    /// object. The receiver's static type names the trait, so the method is
+    /// looked up in the `TraitDef` (not in any concrete type's `assoc`
+    /// table), and its position in `method_order` *is* the vtable slot.
+    /// Returns `None` when `method` isn't one of the trait's, so the caller
+    /// can report that with the receiver's type in hand.
+    fn check_dyn_call(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        receiver: Typed,
+        trait_path: &Path,
+        pins: &[Type],
+        method: &str,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Typed, Error> {
+        let assoc_subst = self.dyn_assoc_subst(trait_path, pins)?;
+        let tdef = self.check_object_safe(trait_path)?;
+        let Some(slot) = tdef.method_order.iter().position(|n| n == method) else {
+            return Err(Error::TypeError(format!(
+                "`{}` is not a method of `{}` — a `:dyn {}` value can only call the trait's own methods",
+                method, trait_path, trait_path
+            )));
+        };
+        let sig = &tdef.methods[method];
+        let want = sig.params.len() - 1; // minus the receiver
+        if args.len() != want {
+            return Err(Error::TypeError(format!(
+                "{}::{}: expected {} argument(s), got {}",
+                trait_path,
+                method,
+                want,
+                args.len()
+            )));
+        }
+        // The pins resolve the trait template's associated-type variables in
+        // both directions: parameter types to check arguments against, and
+        // the return type.
+        let expected_params: Vec<Type> =
+            sig.params[1..].iter().map(|t| subst_apply(t, &assoc_subst)).collect();
+        let ret = subst_apply(&sig.ret, &assoc_subst);
+        let mut typed = vec![receiver];
+        for (i, (arg, pty)) in args.iter().zip(expected_params.iter()).enumerate() {
+            typed.push(self.check_at(heap, interp, env, *arg, Some(pty), nth_loc(arg_locs, i))?);
+        }
+        Ok(Typed {
+            loc: None,
+            expr: Expr::DynCall {
+                trait_path: trait_path.clone(),
+                method: method.to_string(),
+                slot,
+                args: typed,
+            },
+            ty: ret,
+        })
+    }
+
+    /// Whether trait `trait_path` can be used as a trait object (`:dyn
+    /// Trait`) at all — "object safety", checked once per `:dyn` type that
+    /// actually gets built (coercion / `(as :dyn T e)` / a `:dyn` receiver
+    /// call), never at `deftrait` time: a trait is allowed to have methods
+    /// that only make sense statically, as long as nobody asks for a trait
+    /// object of it.
+    ///
+    /// Every rule here is one form of "this method has no single entry point
+    /// that fits one vtable slot, uniformly across all implementations", and
+    /// each message says which. Returns the `TraitDef` so callers that need
+    /// it next (slot layout, method lookup) don't re-fetch it.
+    fn check_object_safe(&self, trait_path: &Path) -> Result<&TraitDef, Error> {
+        let Some(tdef) = self.reg.trait_def(trait_path) else {
+            return Err(Error::TypeError(format!("dyn: unknown trait `{}`", trait_path)));
+        };
+        if tdef.method_order.is_empty() {
+            return Err(Error::TypeError(format!(
+                "dyn {}: the trait declares no methods, so a trait object of it could not be called",
+                trait_path
+            )));
+        }
+        for m in &tdef.method_order {
+            let sig = &tdef.methods[m];
+            match sig.params.first() {
+                Some(t) if is_self_tvar(t) => {}
+                _ => {
+                    return Err(Error::TypeError(format!(
+                        "dyn {}: method `{}` has no `self` receiver — a static associated function has no value to dispatch on",
+                        trait_path, m
+                    )))
+                }
+            }
+            if sig.params[1..].iter().any(mentions_self) || mentions_self(&sig.ret) {
+                return Err(Error::TypeError(format!(
+                    "dyn {}: method `{}` mentions `Self` outside the receiver position, so its signature differs per implementation and cannot share one vtable slot",
+                    trait_path, m
+                )));
+            }
+            if !sig.type_params.is_empty() {
+                return Err(Error::TypeError(format!(
+                    "dyn {}: method `{}` is generic — a vtable slot holds one compiled entry point, so there is nothing to specialize at the call site",
+                    trait_path, m
+                )));
+            }
+            if sig.rest.is_some() {
+                return Err(Error::TypeError(format!(
+                    "dyn {}: method `{}` is variadic, which has no single vtable entry point",
+                    trait_path, m
+                )));
+            }
+        }
+        Ok(tdef)
+    }
+
+    /// Check that a `:dyn Trait<pins...>` type pins exactly the trait's
+    /// associated types, and return the name->type map that resolves them in
+    /// a method signature. Positional, in `TraitDef::assoc_types` declaration
+    /// order — `:dyn Iter<i32>` is `Iter` with `Item = i32`.
+    fn dyn_assoc_subst(&self, trait_path: &Path, pins: &[Type]) -> Result<HashMap<String, Type>, Error> {
+        let tdef = self.check_object_safe(trait_path)?;
+        if pins.len() != tdef.assoc_types.len() {
+            return Err(Error::TypeError(format!(
+                "dyn {}: expected {} associated-type argument(s) ({}), got {} — write `:dyn {}<{}>`",
+                trait_path,
+                tdef.assoc_types.len(),
+                tdef.assoc_types.join(", "),
+                pins.len(),
+                trait_path,
+                tdef.assoc_types.join(",")
+            )));
+        }
+        Ok(tdef.assoc_types.iter().cloned().zip(pins.iter().cloned()).collect())
+    }
+
+    /// Lay out the vtable for boxing a `concrete` value as `:dyn
+    /// trait_path<pins...>`: the call targets for the trait's methods, in
+    /// `TraitDef::method_order` (i.e. slot) order.
+    ///
+    /// This is also where a trait object is *admitted*: the concrete type
+    /// must implement the trait, have a heap representation to box, and bind
+    /// the associated types the pins claim. A generic owner's methods are
+    /// requested for specialization here (`request_method_specialization`),
+    /// so the name recorded in the slot is the monomorphized one — the
+    /// "generics are specialized before code generation" rule, applied to
+    /// dynamic dispatch.
+    fn dyn_vtable_slots(
+        &self,
+        concrete: &Type,
+        trait_path: &Path,
+        pins: &[Type],
+    ) -> Result<Vec<(Path, String)>, Error> {
+        self.dyn_assoc_subst(trait_path, pins)?;
+        let tdef = self.check_object_safe(trait_path)?;
+        let (type_fq, targs) = match concrete {
+            Type::Named(n, args) => (n.clone(), args.clone()),
+            other => match prim_type_path(other) {
+                Some(p) => (p, Vec::new()),
+                None => {
+                    return Err(Error::TypeError(format!(
+                        "`{}` cannot be used as `:dyn {}`: it is not a nominal type",
+                        mangle_type(concrete),
+                        trait_path
+                    )))
+                }
+            },
+        };
+        let Some(def) = self.reg.type_def(&type_fq) else {
+            return Err(Error::TypeError(format!("dyn {}: unknown type `{}`", trait_path, type_fq)));
+        };
+        if !def.impls.contains(trait_path) {
+            return Err(Error::TypeError(format!(
+                "`{}` does not implement `{}`, so it cannot be used as `:dyn {}`",
+                type_fq, trait_path, trait_path
+            )));
+        }
+        // The fat box holds one `Value`, so the concrete value must have a
+        // heap representation. This excludes the primitives even though they
+        // can carry `impl`s (`impl Eq i32`) — hence a per-*type* rule rather
+        // than a per-trait one: `:dyn Eq` is fine for a `defstruct`.
+        if !self.is_heap_repr(concrete) {
+            return Err(Error::TypeError(format!(
+                "`{}` has no heap representation (its values are not `Sexpr`-encodable), so it cannot be boxed as `:dyn {}`",
+                mangle_type(concrete),
+                trait_path
+            )));
+        }
+        // What this `impl` actually binds each associated type to, with the
+        // owner's own type parameters resolved for *this* instantiation.
+        for (name, pin) in tdef.assoc_types.iter().zip(pins.iter()) {
+            match resolve_trait_assoc_type(def, trait_path, name, &targs) {
+                Some(actual) if actual == *pin => {}
+                Some(actual) => {
+                    return Err(Error::TypeError(format!(
+                        "`{}` implements `{}` with `{} = {}`, but `:dyn {}` requires `{} = {}`",
+                        type_fq,
+                        trait_path,
+                        name,
+                        mangle_type(&actual),
+                        trait_path,
+                        name,
+                        mangle_type(pin)
+                    )))
+                }
+                None => {
+                    return Err(Error::TypeError(format!(
+                        "`{}`'s `impl {}` does not bind the associated type `{}`",
+                        type_fq, trait_path, name
+                    )))
+                }
+            }
+        }
+        let subst: HashMap<String, Type> = def.params.iter().cloned().zip(targs.iter().cloned()).collect();
+        let mut slots = Vec::with_capacity(tdef.method_order.len());
+        for m in &tdef.method_order {
+            if !def.assoc.contains_key(m) {
+                return Err(Error::TypeError(format!(
+                    "`{}`'s `impl {}` is missing method `{}`",
+                    type_fq, trait_path, m
+                )));
+            }
+            // Monomorphization, trait-object side: a generic owner's method
+            // body is only code-generated once specialized, so the slot must
+            // name the specialization — the same rewrite `check_assoc_call`
+            // does for a static call.
+            let mut name = m.clone();
+            if !def.params.is_empty()
+                && self.generic_method_templates.contains_key(&(type_fq.clone(), m.clone()))
+            {
+                if targs.len() != def.params.len() || targs.iter().any(|t| self.type_is_open(t)) {
+                    return Err(Error::TypeError(format!(
+                        "`{}` is not fully concrete, so `:dyn {}`'s vtable cannot be laid out yet",
+                        mangle_type(concrete),
+                        trait_path
+                    )));
+                }
+                let args: Vec<Type> = def.params.iter().map(|p| subst[p.as_str()].clone()).collect();
+                name = self.request_method_specialization(&type_fq, m, args);
+            }
+            slots.push((type_fq.clone(), name));
+        }
+        Ok(slots)
     }
 
     /// Build a proper list `Value` from `items`, in order — the inverse of
@@ -3689,6 +3972,17 @@ impl Checker {
                 // on. `Symbol` is excluded here (handled by the retype
                 // above, not a wrap) even though `sexpr_ctor_for` also
                 // covers it, since that branch already returned.
+                // A concrete value reaching a `:dyn Trait` expectation is
+                // boxed as a trait object. Placed alongside the `Sexpr`
+                // widenings above because it is the same kind of rule — an
+                // implicit widening driven purely by the expectation — and
+                // so it inherits exactly their reach: wherever an expected
+                // type flows (arguments, fields, `defvar` initializers,
+                // return position, an annotated `let`), never a bare
+                // `(let ((x obj)) ...)`, which has no expectation at all.
+                if let Type::Dyn(trait_path, pins) = e {
+                    return self.coerce_to_dyn(typed, trait_path, pins);
+                }
                 if *e == sexpr_ty() {
                     if let Some(ctor) = sexpr_ctor_for(&typed.ty) {
                         let (type_name, variant) =
@@ -4193,6 +4487,16 @@ impl Checker {
         arg_locs: &[Option<Loc>],
     ) -> Option<Result<Typed, Error>> {
         let recv = self.check_at(heap, interp, env, *args.first()?, None, nth_loc(arg_locs, 0)).ok()?;
+        // A trait-object receiver dispatches through its vtable; the method
+        // comes from the trait, not from any concrete type's `assoc` table.
+        if let Type::Dyn(trait_path, pins) = recv.ty.clone() {
+            if self.reg.trait_def(&trait_path).is_some_and(|t| t.methods.contains_key(method)) {
+                return Some(self.check_dyn_call(
+                    heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..],
+                ));
+            }
+            return None;
+        }
         let type_fq = match &recv.ty {
             Type::Named(n, _) => Some(n.clone()),
             other => prim_type_path(other),
@@ -4229,6 +4533,15 @@ impl Checker {
     ) -> Result<Typed, Error> {
         if !args.is_empty() {
             let recv = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
+            // Trait-object receiver: dispatch through the vtable. Unlike
+            // `try_instance_method`'s peek, this is the reporting path, so an
+            // unknown method name produces `check_dyn_call`'s message naming
+            // the trait rather than a bare "no such function".
+            if let Type::Dyn(trait_path, pins) = recv.ty.clone() {
+                return self.check_dyn_call(
+                    heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..],
+                );
+            }
             let type_fq = match &recv.ty {
                 Type::Named(n, _) => Some(n.clone()),
                 other => prim_type_path(other),
@@ -4511,6 +4824,20 @@ impl Checker {
         if matches!((&src.ty, &target), (Type::I32, Type::I64) | (Type::I64, Type::I32)) {
             let relabeled = Typed { ty: target.clone(), ..src };
             return Ok(if try_variant { wrap_some(relabeled, target) } else { relabeled });
+        }
+        // Boxing as a trait object — the explicit spelling of the same
+        // widening the expectation-driven coercion performs. Never a
+        // `try-as`: whether a concrete type implements a trait is settled
+        // statically, so the conversion either always succeeds or is a type
+        // error, and an `Option` result would be misleading either way.
+        if let Type::Dyn(trait_path, pins) = &target {
+            if try_variant {
+                return Err(Error::TypeError(format!(
+                    "try-as: `{}` either always succeeds or is a type error (a type's trait impls are known statically) — use `as`",
+                    mangle_type(&target)
+                )));
+            }
+            return self.coerce_to_dyn(src, trait_path, pins);
         }
 
         let (panic_method, try_method) = as_conversion(&src.ty, &target).ok_or_else(|| {
@@ -6345,6 +6672,30 @@ pub(crate) fn subst_apply(t: &Type, subst: &HashMap<String, Type>) -> Type {
 /// the same `params`-zip `Checker::check_assoc_call` already does for method
 /// signatures. `None` if `def` has no recorded binding for that trait/name
 /// pair.
+/// Whether `t` is a trait signature template's `Self` type variable. Written
+/// `Self` in source; `parse_type_name` case-folds it, so it canonicalizes to
+/// the single-segment path `self` — there is no type by that name, so no real
+/// type can collide with it.
+fn is_self_tvar(t: &Type) -> bool {
+    matches!(t, Type::Named(p, args) if args.is_empty() && p.is_simple() && p.local() == "self")
+}
+
+/// Whether `t` mentions `Self` anywhere — [`is_self_tvar`] applied
+/// recursively, so `Option<Self>` and `(fn (Self) i32)` count too.
+fn mentions_self(t: &Type) -> bool {
+    if is_self_tvar(t) {
+        return true;
+    }
+    match t {
+        Type::Named(_, args) => args.iter().any(mentions_self),
+        Type::Dyn(_, pins) => pins.iter().any(mentions_self),
+        Type::Fn(ps, rest, r) => {
+            ps.iter().any(mentions_self) || matches!(rest, Some(t) if mentions_self(t)) || mentions_self(r)
+        }
+        _ => false,
+    }
+}
+
 fn resolve_trait_assoc_type(def: &AdtDef, trait_path: &Path, assoc_name: &str, concrete_args: &[Type]) -> Option<Type> {
     let raw = def.trait_assoc.get(trait_path)?.get(assoc_name)?;
     if concrete_args.len() == def.params.len() {
