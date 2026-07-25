@@ -4918,3 +4918,68 @@ fn compile_dispatches_a_trait_object_whose_impl_owner_is_generic() {
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(42));
 }
+
+// ---- user-defined error types (TODO T3) ---------------------------------
+
+/// A user error type as `Result`'s `E`, compiled: `Result<T, MyErr>` is an
+/// ordinary sum of a sum, so the native code has to build, match, and read a
+/// field out of a `defstruct` sitting in the `err` payload.
+#[test]
+fn compile_dispatches_a_result_carrying_a_user_error_type() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defstruct io-err (code i32))
+        (defun open-it ((ok bool)) Result<i32,io-err>
+          (if ok (result::ok 7) (result::err (io-err::new 42))))
+        (defun code ((ok bool)) i32
+          (match (open-it ok) ((Ok v) v) ((Err e) e::code)))
+        (compile code)
+        (+ (* 100 (code true)) (code false))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(742));
+}
+
+/// A *built-in* error type crossing into native code: `ParseIntError` is an
+/// ordinary single-variant sum like any user error type, so a compiled body
+/// must match it and call its prelude `Error` impl. (`parse-int` itself has
+/// no compiled implementation, so the value is produced interpreted and
+/// passed in — which is exactly how a built-in error reaches native code.)
+#[test]
+fn compile_dispatches_a_match_on_a_builtin_error_type() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun classify ((r Result<i32,ParseIntError>)) string
+          (match r ((Ok _) "ok") ((Err e) (message e))))
+        (compile classify)
+        (append (classify (parse-int "12")) (classify (parse-int "xy")))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Str("okparse-int: invalid integer literal: \"xy\"".into()));
+}
+
+/// The uniform-handling shape from `docs/dev/language-design.md` §7.4, in
+/// native code: two unrelated error types reaching one `(message e)` call
+/// site through the `Error` trait's vtable, with a built-in error
+/// (`ParseIntError`, whose `impl` lives in the prelude) as one of them.
+#[test]
+fn compile_dispatches_message_on_a_dyn_error() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defstruct app-err (why string))
+        (impl Error app-err
+          (message ((self Self)) string self::why)
+          (source ((self Self)) Option<:dyn Error> (option::none)))
+        (defun describe ((e :dyn Error)) string (message e))
+        (defun both () string
+          (append (describe (app-err::new "mine"))
+                  (describe (ParseIntError::ParseIntError "/builtin"))))
+        (compile both)
+        (both)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Str("mine/builtin".into()));
+}

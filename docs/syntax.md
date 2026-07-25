@@ -53,7 +53,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - **関数型**: `(fn (引数型...) 戻り値型)`。可変長引数を持つ関数型は
   `(fn (引数型... &rest 要素型) 戻り値型)`。
 - **ジェネリック型**: `Name<T1,T2,...>`（空白なしの1トークンとして読み取られ、内部で分解される）。
-  例: `Option<i32>` `Result<i32,Error>` `HashTable<string,i32>` `Vector<T>`。
+  例: `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`。
 - **修飾型名**: `module::Type` のように `::` で修飾できる。
 - **trait オブジェクト型**: `:dyn Trait`（空白区切りの2語で1つの型）。実行時に具象型が決まる値を
   表し、trait のメソッド呼び出しは vtable 経由の動的ディスパッチになる。関連型を持つ trait は
@@ -62,7 +62,11 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   具象値は期待位置で自動的に箱詰めされ、明示形は `(as :dyn Trait 式)`。
   `:dyn` を型位置以外に書くとエラー。詳細は [dev/language-design.md](dev/language-design.md) §5.2。
 - 組み込みジェネリック型: `Option<T>`（`Some(T)` / `None`）、`Result<T,E>`（`Ok(T)` / `Err(E)`）、
-  `Error`、`Sexpr`、`HashTable<K,V>`、`Vector<T>`。詳細は functions.md を参照。
+  `Sexpr`、`HashTable<K,V>`、`Vector<T>`。組み込みの具象エラー型は `ParseIntError` /
+  `ParseFloatError` / `ReadError` / `EvalError`（`Error` は型ではなく prelude のトレイト
+  ——`:dyn Error` として使う）。詳細は functions.md を参照。
+- **型とトレイトは同じ名前空間**（Rust と同じ）: 同一モジュール内で型（`defstruct`/`defenum`）と
+  トレイト（`deftrait`）に同じ名前は付けられない。
 
 ## 3. トップレベル定義
 

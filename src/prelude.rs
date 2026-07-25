@@ -816,6 +816,55 @@ pub const SOURCE: &str = r#"
   (greater-equal ((self Self) (other Self)) bool (where (Ord A) (Ord B))
     (not (less self other))))
 
+;; The `Error` trait — what every error type implements, modeled on Rust's
+;; `std::error::Error`. `Error` is a *trait*, never a type: there is no
+;; general-purpose concrete error value in this language. Each fallible
+;; built-in returns its own concrete type (`ParseIntError`/`ParseFloatError`/
+;; `ReadError`/`EvalError`, `registry::builtin_error_defs`), a user's error
+;; type is an ordinary `defstruct`/`defenum`, and code that must hold any of
+;; them uniformly writes `Result<T, :dyn Error>` — the counterpart of Rust's
+;; `Box<dyn Error>`. Types and traits share one name space per module
+;; (`Checker::check_type_trait_clash`), which is exactly why the concrete
+;; types could not also be called `Error`.
+;;
+;; `source` is Rust's `Error::source`: the error this one wraps, or `None` at
+;; the root of the chain. Its return type mentions a trait object of the very
+;; trait being declared, which is why `deftrait` pre-registers the trait
+;; before parsing its own method signatures.
+(deftrait Error
+  (message ((self Self)) string)
+  (source ((self Self)) Option<:dyn Error>))
+
+;; The built-in error types' impls. Each carries one message string in its
+;; single variant (type name and variant name coincide), and none of them
+;; wraps another error, so `source` is uniformly `None` — a built-in error is
+;; always the root cause. Nothing here is privileged: these read exactly like
+;; the impl a user writes for their own error type.
+(impl Error ParseIntError
+  (message ((self Self)) string (match self ((ParseIntError m) m)))
+  (source ((self Self)) Option<:dyn Error> (option::none)))
+(impl Error ParseFloatError
+  (message ((self Self)) string (match self ((ParseFloatError m) m)))
+  (source ((self Self)) Option<:dyn Error> (option::none)))
+(impl Error ReadError
+  (message ((self Self)) string (match self ((ReadError m) m)))
+  (source ((self Self)) Option<:dyn Error> (option::none)))
+(impl Error EvalError
+  (message ((self Self)) string (match self ((EvalError m) m)))
+  (source ((self Self)) Option<:dyn Error> (option::none)))
+
+;; Widen a `Result`'s concrete error type to `:dyn Error`, so results from
+;; different fallible operations can flow into one `Result<T, :dyn Error>` —
+;; what Rust's `?` does through `From` for `Box<dyn Error>`, spelled as an
+;; ordinary call since this language has no `?` (§7.3). The `(Error E)` bound
+;; is what admits the boxing while `E` is still open: the checker leaves an
+;; erased-generic placeholder here and lays out the real vtable when the call
+;; site's concrete `E` specializes this body (`Checker::coerce_to_dyn`).
+(defun as-dyn-error<T,E> ((r Result<T,E>)) Result<T, :dyn Error> (where (Error E))
+  (match r
+    ((ok v) (result::ok v))
+    ((err e) (result::err (as :dyn Error e)))))
+
 ;; Sequence operations over `Iter` (redesign Phase 6.5) — the typed rebuild
 ;; of the `Sexpr` list library removed in Phase 5 (`length`/`append`/`nth`/
 ;; `elt`/`take`/`subseq`/`last`/`butlast`/`member`/`every`/`any`/`sort`/

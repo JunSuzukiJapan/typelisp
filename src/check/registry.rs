@@ -331,16 +331,19 @@ pub struct Registry {
 
 impl Registry {
     /// A registry whose root namespace holds the built-in `Option`/`Result`/
-    /// `Error`/`Sexpr` types and the i32 arithmetic/comparison operators.
+    /// the concrete error types/`Sexpr` and the i32 arithmetic/comparison
+    /// operators.
     pub fn with_builtins() -> Registry {
         let mut root = Namespace::default();
         root.add_type(option_def());
         root.add_type(result_def());
-        root.add_type(error_def());
+        for def in builtin_error_defs() {
+            root.add_type(def);
+        }
         // `Sexpr` is the one type whose data constructors (`nil`/`int`/`str`/
         // ...) stay reachable as bare names without a `use` — so `(Int 5)`/
-        // `(Nil)` datum literals stay writable. `Option`/`Result`/`Error`
-        // constructors are `Type::ctor` (or `use`d) only — see
+        // `(Nil)` datum literals stay writable. `Option`/`Result`/the error
+        // types' constructors are `Type::ctor` (or `use`d) only — see
         // `Checker::check_use`. The one exception is the `cons` variant: its
         // bare name is removed here so `(cons a b)` resolves to the free
         // `cons<T,U>` pair function (Symbol/Sexpr redesign Phase 4b), not the
@@ -418,17 +421,17 @@ impl Registry {
         // `Result`, not a panic, since the input is runtime text the caller
         // doesn't control (unlike a source literal, which the reader/checker
         // already validate before this code ever runs).
-        root.fns.insert("parse-int".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(Type::I32, error_ty()), public: true, builtin: true, bounds: HashMap::new() });
-        root.fns.insert("parse-float".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(Type::F64, error_ty()), public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("parse-int".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(Type::I32, error_ty(PARSE_INT_ERROR)), public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("parse-float".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(Type::F64, error_ty(PARSE_FLOAT_ERROR)), public: true, builtin: true, bounds: HashMap::new() });
         // `read`: parses one `Sexpr` form from a string via the same reader
         // `typl`/the REPL use for source text (`crate::read::Reader::read`).
-        root.fns.insert("read".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(sexpr(), error_ty()), public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("read".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(sexpr(), error_ty(READ_ERROR)), public: true, builtin: true, bounds: HashMap::new() });
         // `eval`: type-checks and runs a runtime `Sexpr` against the current
         // global environment, CL-style (`Interp::eval_form`). Sees all globals
         // but not the caller's lexical locals; a definition form registers
         // immediately. Result is a `Sexpr` (the value, or a definition's name
         // symbol); malformed/ill-typed input is `Err`, not a panic.
-        root.fns.insert("eval".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: result_of(sexpr(), error_ty()), public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("eval".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: result_of(sexpr(), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: HashMap::new() });
         // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr` builtins:
         // the Symbol/Sexpr redesign (Phase 4b) repurposes `cons`/`car`/`cdr` to
         // the generic `cons<T,U>` pair (`prelude.rs`'s free `cons` +
@@ -612,19 +615,56 @@ fn result_def() -> AdtDef {
     }
 }
 
-/// The built-in generic error type carrying a message: `Error(String)`. This is
-/// the default `E` for fallible built-ins; user-defined error types come later.
-fn error_def() -> AdtDef {
-    AdtDef {
-        name: Path::root("error"),
-        params: vec![],
-        variants: vec![Variant { name: "error".to_string(), fields: vec![Type::Str] }],
-        assoc: HashMap::new(),
-        public: true,
-        builtin: true,
-        kind: AdtKind::Sum,
-        field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new(),
-    }
+/// The four concrete built-in error types, by (case-folded) type name — the
+/// one list every layer reads: [`builtin_error_defs`] registers them, the
+/// interpreter builds their values (`crate::eval::interp`'s `result_err`),
+/// and both the interpreter and `ast_bridge` classify a type as an enum by
+/// consulting [`is_builtin_error_type`]. Like `Option`/`Result` they must be
+/// recognizable by name outside the registry, since neither of those two
+/// layers holds a `Registry` to look a definition up in.
+pub const PARSE_INT_ERROR: &str = "parseinterror";
+pub const PARSE_FLOAT_ERROR: &str = "parsefloaterror";
+pub const READ_ERROR: &str = "readerror";
+pub const EVAL_ERROR: &str = "evalerror";
+pub const BUILTIN_ERROR_TYPES: [&str; 4] = [PARSE_INT_ERROR, PARSE_FLOAT_ERROR, READ_ERROR, EVAL_ERROR];
+
+/// Whether `p` names one of [`BUILTIN_ERROR_TYPES`].
+pub fn is_builtin_error_type(p: &Path) -> bool {
+    p.is_simple() && BUILTIN_ERROR_TYPES.contains(&p.local())
+}
+
+/// The concrete error type of every fallible built-in, one per failure
+/// source: `ParseIntError` (`parse-int`), `ParseFloatError` (`parse-float`),
+/// `ReadError` (`read`), `EvalError` (`eval`) — modeled on Rust's std, where
+/// `Error` is a *trait* and each operation returns its own concrete error
+/// (`ParseIntError`, `io::Error`, ...). `Error` is accordingly not a type in
+/// this language at all: it is the prelude trait these four implement
+/// (`src/prelude.rs`), so code that wants to hold any of them uniformly says
+/// `Result<T, :dyn Error>` — the counterpart of Rust's `Box<dyn Error>`.
+///
+/// Each is a single-variant sum carrying the message string, the same shape
+/// (and therefore the same heap representation, `match` destructuring, and
+/// trait-object boxing) a user's own `(defenum MyError (my-error string))`
+/// would have: nothing about a built-in error type is privileged.
+///
+/// Type name and variant name coincide, so `(match e ((ParseIntError m) m))`
+/// reads as one name — the reader case-folds both to `parseinterror`.
+/// [`crate::eval::interp`]'s `result_err` builds these values at run time and
+/// must agree with the variant order (a single variant, index 0).
+fn builtin_error_defs() -> Vec<AdtDef> {
+    BUILTIN_ERROR_TYPES
+        .iter()
+        .map(|&name| AdtDef {
+            name: Path::root(name),
+            params: vec![],
+            variants: vec![Variant { name: name.to_string(), fields: vec![Type::Str] }],
+            assoc: HashMap::new(),
+            public: true,
+            builtin: true,
+            kind: AdtKind::Sum,
+            field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new(),
+        })
+        .collect()
 }
 
 /// The built-in `Sexpr` sum type (the result type of `read`).
@@ -744,11 +784,11 @@ fn option_of(t: Type) -> Type {
     Type::Named(Path::root("option"), vec![t])
 }
 
-/// The built-in `error` type (`error_def`'s single `error(string)` variant) —
-/// the default `E` in `Result<T, Error>` for every fallible Rust builtin
-/// below (`parse-int`/`parse-float`/`read`/`eval`).
-fn error_ty() -> Type {
-    Type::Named(Path::root("error"), vec![])
+/// One of [`builtin_error_defs`]' concrete error types, as a `Type` — the
+/// `E` in the `Result<T, E>` returned by the fallible Rust builtin that
+/// raises it (`parse-int`/`parse-float`/`read`/`eval`).
+fn error_ty(name: &str) -> Type {
+    Type::Named(Path::root(name), vec![])
 }
 
 fn result_of(t: Type, e: Type) -> Type {

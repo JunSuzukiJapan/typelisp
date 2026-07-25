@@ -461,26 +461,26 @@ fn is_none_distinguishes_none_from_some() {
 
 #[test]
 fn result_unwrap_returns_the_ok_payload() {
-    let src = "(defun get-r () Result<i32,Error> (result::ok 7)) (unwrap (get-r))";
+    let src = "(defun get-r () Result<i32,ParseIntError> (result::ok 7)) (unwrap (get-r))";
     assert_eq!(eval_ok(src), RtValue::Int(7));
 }
 
 #[test]
 fn result_unwrap_panics_on_err() {
-    let src = r#"(defun get-r () Result<i32,Error> (result::err (error::error "boom"))) (unwrap (get-r))"#;
+    let src = r#"(defun get-r () Result<i32,ParseIntError> (result::err (ParseIntError::ParseIntError "boom"))) (unwrap (get-r))"#;
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 
 #[test]
 fn result_unwrap_or_returns_the_default_on_err() {
-    let src = r#"(defun get-r () Result<i32,Error> (result::err (error::error "boom"))) (unwrap-or (get-r) 99)"#;
+    let src = r#"(defun get-r () Result<i32,ParseIntError> (result::err (ParseIntError::ParseIntError "boom"))) (unwrap-or (get-r) 99)"#;
     assert_eq!(eval_ok(src), RtValue::Int(99));
 }
 
 #[test]
 fn result_is_ok_and_is_err() {
-    let ok_src = "(defun get-r () Result<i32,Error> (result::ok 7)) (is-ok (get-r))";
-    let err_src = r#"(defun get-r () Result<i32,Error> (result::err (error::error "x"))) (is-err (get-r))"#;
+    let ok_src = "(defun get-r () Result<i32,ParseIntError> (result::ok 7)) (is-ok (get-r))";
+    let err_src = r#"(defun get-r () Result<i32,ParseIntError> (result::err (ParseIntError::ParseIntError "x"))) (is-err (get-r))"#;
     eval_true(ok_src);
     eval_true(err_src);
 }
@@ -491,7 +491,7 @@ fn unwrap_resolves_to_the_correct_method_per_receiver_type() {
     // disambiguated by `Checker::check_instance_method` from each call's
     // receiver type, like any other type's instance methods.
     let src = r#"
-        (defun get-r () Result<i32,Error> (result::ok 3))
+        (defun get-r () Result<i32,ParseIntError> (result::ok 3))
         (+ (unwrap (option::some 4)) (unwrap (get-r)))
     "#;
     assert_eq!(eval_ok(src), RtValue::Int(7));

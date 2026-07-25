@@ -718,6 +718,31 @@ impl Checker {
         }
     }
 
+    /// Types and traits share one name space per module, as in Rust: a
+    /// `defstruct`/`defenum` and a `deftrait` in the same namespace may not
+    /// carry the same name, in either definition order. They live in
+    /// *separate* tables (`Namespace::types` / `Namespace::traits`, which is
+    /// why nothing stops them mechanically — a `Type::Dyn`'s head is resolved
+    /// against `traits`, a `Type::Named`'s against `types`), so this is the
+    /// one place the rule is enforced. Without it `Foo` in type position and
+    /// `:dyn Foo` would silently name two unrelated definitions.
+    ///
+    /// Called by both sides: `kind` is what is being defined now, and the
+    /// message points at the other table's occupant.
+    fn check_type_trait_clash(&self, kind: &str, name: &str) -> Result<(), Error> {
+        let (clashes, other) = match kind {
+            "trait" => (self.cur_ns().types.contains_key(name), "type"),
+            _ => (self.cur_ns().traits.contains_key(name), "trait"),
+        };
+        if clashes {
+            return Err(Error::TypeError(format!(
+                "cannot define {} `{}`: a {} of that name already exists here — types and traits share one name space (write them under different modules if both are needed)",
+                kind, name, other
+            )));
+        }
+        Ok(())
+    }
+
     /// Check one top-level form. Definition forms (`defun`/`module`/
     /// `defmethod`/`use`) register into the current namespace; anything else is
     /// checked as an expression.
@@ -1697,6 +1722,63 @@ impl Checker {
         }
     }
 
+    /// Parse a *written* type annotation into its canonical [`Type`] — the
+    /// single entry point every annotation site goes through (`defun`
+    /// parameters and return types, `defstruct`/`defenum` fields, `defvar`,
+    /// `the`/`as`, `deftrait`/`impl` signatures).
+    ///
+    /// Beyond `parse_type` + [`Self::canon`] it rejects one confusion the
+    /// shared type/trait name space (see [`Self::check_type_trait_clash`])
+    /// makes worth naming outright: a *trait* written where a type belongs,
+    /// e.g. `Result<i32, Error>` for the prelude's `Error` trait. Without
+    /// this the name would silently pass as an unresolved one (the same
+    /// treatment a generic's type variables get, which is why `canon` cannot
+    /// reject unknown names in general) and only surface much later as a
+    /// mismatch against a type nothing can ever inhabit.
+    fn parse_type_here(&self, heap: &Heap, v: Value) -> Result<Type, Error> {
+        let ty = self.canon(&parse_type(heap, v)?);
+        self.reject_trait_in_type_position(&ty)?;
+        Ok(ty)
+    }
+
+    /// [`Self::parse_type_here`]'s check, applied to every `Type::Named` head
+    /// inside `ty`: a name that resolves to no type but *does* name a trait
+    /// in scope is a trait object written without its `:dyn`.
+    fn reject_trait_in_type_position(&self, ty: &Type) -> Result<(), Error> {
+        match ty {
+            Type::Named(p, args) => {
+                if self.reg.type_def(p).is_none() && p.is_simple() {
+                    if let Ok(trait_path) = self.resolve_trait_name(p.local()) {
+                        return Err(Error::TypeError(format!(
+                            "`{}` is a trait, not a type — write `:dyn {}` for a trait object",
+                            trait_path.local(),
+                            trait_path.local()
+                        )));
+                    }
+                }
+                for a in args {
+                    self.reject_trait_in_type_position(a)?;
+                }
+            }
+            Type::Dyn(_, pins) => {
+                for p in pins {
+                    self.reject_trait_in_type_position(p)?;
+                }
+            }
+            Type::Fn(params, rest, ret) => {
+                for p in params {
+                    self.reject_trait_in_type_position(p)?;
+                }
+                if let Some(r) = rest {
+                    self.reject_trait_in_type_position(r)?;
+                }
+                self.reject_trait_in_type_position(ret)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// The lowercase segments of a module/use path (a symbol or a `Value::Path`).
     fn path_to_segs(&self, heap: &Heap, v: Value) -> Result<Vec<String>, Error> {
         match v {
@@ -1807,7 +1889,7 @@ impl Checker {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
         let (params, param_locs, rest) = self.parse_params_rest(heap, parts[1])?;
-        let ret = self.canon(&parse_type(heap, parts[2])?);
+        let ret = self.parse_type_here(heap, parts[2])?;
         let mut body_start = 3;
         let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
         if let Some(form) = parts.get(3) {
@@ -2231,8 +2313,14 @@ impl Checker {
                     "where: each bound must be (Trait type-param (AssocName Type)...)".into(),
                 ));
             }
+            // Resolved to the trait's fully-qualified path (not left as the
+            // written bare name) so a bound compares equal to the same trait
+            // reached any other way — `Type::Dyn`'s head, an `impl`'s trait,
+            // `TraitDef::name` — all of which are qualified. Inside a module
+            // (every file is one) a bare `err2` would otherwise be stored as
+            // root `err2` and match none of them.
             let trait_name = match parts[0] {
-                Value::Symbol(id) => Path::root(heap.symbol_name(id)),
+                Value::Symbol(id) => self.resolve_trait_name(heap.symbol_name(id))?,
                 _ => return Err(Error::TypeError("where: trait name must be a symbol".into())),
             };
             let tparam = match parts[1] {
@@ -2249,7 +2337,7 @@ impl Checker {
                     Value::Symbol(id) => heap.symbol_name(id).to_string(),
                     _ => return Err(Error::TypeError("where: associated type name must be a symbol".into())),
                 };
-                let aty = self.canon(&parse_type(heap, pin_parts[1])?);
+                let aty = self.parse_type_here(heap, pin_parts[1])?;
                 assoc.insert(aname, aty);
             }
             bounds.entry(tparam).or_default().push(TraitBound { trait_path: trait_name, assoc });
@@ -2572,7 +2660,7 @@ impl Checker {
                 Value::Symbol(id) => heap.symbol_name(id).to_string(),
                 _ => return Err(Error::TypeError("parameter name must be a symbol".into())),
             };
-            out.push((name, self.canon(&parse_type(heap, pair[1])?)));
+            out.push((name, self.parse_type_here(heap, pair[1])?));
             locs.push(pair_locs.first().and_then(|(_, l)| l.clone()));
         }
         Ok((out, locs))
@@ -2602,7 +2690,7 @@ impl Checker {
                 Value::Symbol(id) => heap.symbol_name(id).to_string(),
                 _ => return Err(Error::TypeError("defstruct: field name must be a symbol".into())),
             };
-            out.push((name, self.canon(&parse_type(heap, rest[1])?), public));
+            out.push((name, self.parse_type_here(heap, rest[1])?, public));
         }
         Ok(out)
     }
@@ -2628,6 +2716,27 @@ impl Checker {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("deftrait: name must be a symbol".into())),
         };
+        let fq_name = self.fq(&name);
+        self.check_redef("trait", &name, self.cur_ns().traits.get(&name))?;
+        self.check_type_trait_clash("trait", &name)?;
+        // Pre-register a stub under `fq_name` *before* parsing the method
+        // signatures, so a method that mentions a trait object of the very
+        // trait being defined (`(source ((self Self)) Option<:dyn Error>)` in
+        // the prelude's `Error`) resolves its own name through
+        // `Self::canon`/`resolve_trait_path`. Same device, same reason, as
+        // `check_defstruct`'s self-referential-field stub; overwritten with
+        // the fully parsed `TraitDef` below.
+        self.reg.root.module_mut(&self.ns).traits.insert(
+            name.clone(),
+            TraitDef {
+                name: fq_name.clone(),
+                assoc_types: Vec::new(),
+                methods: HashMap::new(),
+                method_order: Vec::new(),
+                public,
+                builtin: false,
+            },
+        );
         let mut assoc_types = Vec::new();
         let mut methods = HashMap::new();
         // Source order, kept alongside `methods` for vtable slot numbering.
@@ -2653,7 +2762,7 @@ impl Checker {
                 return Err(Error::TypeError("deftrait: method signature must be (name (params...) ret)".into()));
             }
             let (params, _param_locs) = self.parse_param_pairs(heap, &heap.list_to_vec(elems[1])?)?;
-            let ret = self.canon(&parse_type(heap, elems[2])?);
+            let ret = self.parse_type_here(heap, elems[2])?;
             let sig = FnSig {
                 type_params: vec![],
                 params: params.iter().map(|(_, t)| t.clone()).collect(),
@@ -2672,8 +2781,6 @@ impl Checker {
             method_order.push(head.clone());
             methods.insert(head, sig);
         }
-        let fq_name = self.fq(&name);
-        self.check_redef("trait", &name, self.cur_ns().traits.get(&name))?;
         self.reg
             .root
             .module_mut(&self.ns)
@@ -2712,7 +2819,7 @@ impl Checker {
             _ => return Err(Error::TypeError("impl: trait name must be a symbol".into())),
         };
         let trait_fq = self.resolve_trait_name(&trait_name)?;
-        let target_ty = self.canon(&parse_type(heap, parts[1])?);
+        let target_ty = self.parse_type_here(heap, parts[1])?;
         let target_fq = match &target_ty {
             Type::Named(n, _) => n.clone(),
             other => match prim_type_path(other) {
@@ -2754,7 +2861,7 @@ impl Checker {
                     Value::Symbol(id) => heap.symbol_name(id).to_string(),
                     _ => return Err(Error::TypeError("impl: associated type name must be a symbol".into())),
                 };
-                assoc_concrete.insert(aname.clone(), self.canon(&parse_type(heap, elems[2])?));
+                assoc_concrete.insert(aname.clone(), self.parse_type_here(heap, elems[2])?);
                 subst.insert(aname, elems[2]);
                 continue;
             }
@@ -2876,7 +2983,11 @@ impl Checker {
     /// laying out the vtable it will dispatch through. The shared
     /// implementation of the implicit widening (`check_inner`'s expectation
     /// reconciliation) and the explicit `(as :dyn Trait e)`.
-    fn coerce_to_dyn(&self, value: Typed, trait_path: &Path, pins: &[Type]) -> Result<Typed, Error> {
+    ///
+    /// `env` is consulted only for the erased-generic case: inside a generic
+    /// function's definition-time body check the value's type may still be a
+    /// `where`-bounded type variable, which has no vtable to lay out *yet*.
+    fn coerce_to_dyn(&self, env: &Env, value: Typed, trait_path: &Path, pins: &[Type]) -> Result<Typed, Error> {
         // Re-boxing a trait object is not a coercion. Same-trait/same-pins
         // never reaches here (the types compare equal); a *different* trait
         // would be an upcast, which needs a second vtable that the source
@@ -2888,6 +2999,28 @@ impl Checker {
                 mangle_type(&Type::Dyn(trait_path.clone(), pins.to_vec())),
                 trait_path
             )));
+        }
+        // Boxing a `where`-bounded type variable (`(defun f<E> ... (where (Error E))
+        // ... (as :dyn Error e))`): which vtable to build is only knowable once
+        // `E` is concrete, so the generic body — diagnostics-only, never
+        // executed — carries the same erased-generic placeholder a bounded
+        // method call leaves behind (`Expr::TraitCall`), and each
+        // specialization re-checks this site with `E` substituted, taking the
+        // real `dyn_vtable_slots` path below. The bound is what makes it
+        // admissible: every instantiation must implement the trait, so the
+        // conversion is guaranteed to be layable-out later (the pins, the
+        // heap-representation rule, and the associated-type bindings are all
+        // verified there, on the concrete type).
+        if let Type::Named(p, targs) = &value.ty {
+            let is_tvar = targs.is_empty() && p.is_simple() && self.reg.type_def(p).is_none();
+            if is_tvar && env.bounds.get(p.local()).is_some_and(|bs| bs.iter().any(|b| b.trait_path == *trait_path)) {
+                let loc = value.loc.clone();
+                return Ok(Typed {
+                    loc,
+                    expr: Expr::TraitCall { method: format!("as :dyn {}", trait_path), args: vec![value] },
+                    ty: Type::Dyn(trait_path.clone(), pins.to_vec()),
+                });
+            }
         }
         let slots = self.dyn_vtable_slots(&value.ty, trait_path, pins)?;
         let concrete_key = mangle_type(&value.ty);
@@ -3400,7 +3533,7 @@ impl Checker {
             Value::Symbol(_) | Value::Path(_) => (false, None, None, sig_list[0]),
             _ => return Err(Error::TypeError("defmethod: receiver must be (self Type) or a type name".into())),
         };
-        let recv_ty = self.canon(&parse_type(heap, type_expr)?);
+        let recv_ty = self.parse_type_here(heap, type_expr)?;
         let type_fq = match &recv_ty {
             Type::Named(n, _) => n.clone(),
             other => match prim_type_path(other) {
@@ -3412,7 +3545,7 @@ impl Checker {
             return Err(Error::TypeError(format!("defmethod: unknown type `{}`", type_fq)));
         }
         let (params, param_locs) = self.parse_param_pairs(heap, &sig_list[1..])?;
-        let ret = self.canon(&parse_type(heap, parts[2])?);
+        let ret = self.parse_type_here(heap, parts[2])?;
         // Optional `(where ...)` clause after the return type — identical
         // peek to `parse_defun_sig`'s.
         let mut body_start = 3;
@@ -3460,6 +3593,7 @@ impl Checker {
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
 
         self.check_redef("type", &name, self.cur_ns().types.get(&name))?;
+        self.check_type_trait_clash("type", &name)?;
         let type_fq = self.fq(&name);
         // Pre-register a stub under `type_fq` *before* parsing field types, so
         // a self-referential field (e.g. a linked-list-style `(next Vector<node>)`
@@ -3614,6 +3748,7 @@ impl Checker {
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
 
         self.check_redef("type", &name, self.cur_ns().types.get(&name))?;
+        self.check_type_trait_clash("type", &name)?;
         let type_fq = self.fq(&name);
         // Pre-register a stub under `type_fq` *before* parsing variant field
         // types, so a self-referential field (e.g. `(node i32 tree tree)`
@@ -3658,7 +3793,7 @@ impl Checker {
             };
             let fields = field_vals
                 .iter()
-                .map(|v| Ok(self.canon(&parse_type(heap, *v)?)))
+                .map(|v| Ok(self.parse_type_here(heap, *v)?))
                 .collect::<Result<Vec<Type>, Error>>()?;
             variants.push(Variant { name: vname, fields });
         }
@@ -4023,7 +4158,7 @@ impl Checker {
                 // return position, an annotated `let`), never a bare
                 // `(let ((x obj)) ...)`, which has no expectation at all.
                 if let Type::Dyn(trait_path, pins) = e {
-                    return self.coerce_to_dyn(typed, trait_path, pins);
+                    return self.coerce_to_dyn(env, typed, trait_path, pins);
                 }
                 if *e == sexpr_ty() {
                     if let Some(ctor) = sexpr_ctor_for(&typed.ty) {
@@ -4212,7 +4347,7 @@ impl Checker {
             return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
         }
         let (params, param_locs, rest) = self.parse_params_rest(heap, args[0])?;
-        let ret = self.canon(&parse_type(heap, args[1])?);
+        let ret = self.parse_type_here(heap, args[1])?;
         let fn_ty = Type::Fn(
             params.iter().map(|(_, t)| t.clone()).collect(),
             rest.as_ref().map(|(_, t, _)| Box::new(t.clone())),
@@ -4294,7 +4429,7 @@ impl Checker {
             };
             let name_loc = parts_locs.first().and_then(|(_, l)| l.clone());
             let (params, param_locs) = self.parse_params(heap, parts[1])?;
-            let ret = self.canon(&parse_type(heap, parts[2])?);
+            let ret = self.parse_type_here(heap, parts[2])?;
             let fn_ty = Type::Fn(params.iter().map(|(_, t)| t.clone()).collect(), None, Box::new(ret.clone()));
             sigs.push((name.clone(), fn_ty, name_loc));
             let body_locs = parts_locs[3..].iter().map(|(_, l)| l.clone()).collect();
@@ -4834,7 +4969,7 @@ impl Checker {
         if args.len() != 2 {
             return Err(Error::TypeError("the: (the Type expr)".into()));
         }
-        let ty = self.canon(&parse_type(heap, args[0])?);
+        let ty = self.parse_type_here(heap, args[0])?;
         self.check_at(heap, interp, env, args[1], Some(&ty), nth_loc(arg_locs, 1))
     }
 
@@ -4866,7 +5001,7 @@ impl Checker {
         if args.len() != 2 {
             return Err(Error::TypeError(format!("{}: ({} Type expr)", form_name, form_name)));
         }
-        let target = self.canon(&parse_type(heap, args[0])?);
+        let target = self.parse_type_here(heap, args[0])?;
         let src = self.check_at(heap, interp, env, args[1], None, nth_loc(arg_locs, 1))?;
 
         // Identity: same type, a no-op cast.
@@ -4895,7 +5030,7 @@ impl Checker {
                     mangle_type(&target)
                 )));
             }
-            return self.coerce_to_dyn(src, trait_path, pins);
+            return self.coerce_to_dyn(env, src, trait_path, pins);
         }
 
         let (panic_method, try_method) = as_conversion(&src.ty, &target).ok_or_else(|| {
@@ -5377,7 +5512,7 @@ impl Checker {
                     Value::Symbol(id) => heap.symbol_name(id).to_string(),
                     _ => return Err(Error::TypeError("defvar: name must be a symbol".into())),
                 };
-                (name, self.canon(&parse_type(heap, pair[1])?))
+                (name, self.parse_type_here(heap, pair[1])?)
             }
             Value::Symbol(id) => {
                 return Err(Error::TypeError(format!(
@@ -6314,7 +6449,7 @@ impl Checker {
         if parts.len() != 3 {
             return Err(Error::TypeError("pattern: (the Type pattern)".into()));
         }
-        let ty = self.canon(&parse_type(heap, parts[1])?);
+        let ty = self.parse_type_here(heap, parts[1])?;
         if !self.is_heap_repr(&ty) {
             return Err(Error::TypeError(format!(
                 "pattern: `{:?}` has no Sexpr representation, cannot downcast with `the`",

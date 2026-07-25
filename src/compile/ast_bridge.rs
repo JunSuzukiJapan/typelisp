@@ -483,7 +483,8 @@ fn llvm_assoc_key(type_name: &Path, instance: bool, args: &[Typed], node_ty: &Ty
     }
 }
 
-/// Whether `ty` is `Option`/`Result`/`Error`/a user `defenum` in `enums` —
+/// Whether `ty` is `Option`/`Result`/a built-in error type/a user `defenum`
+/// in `enums` —
 /// [`binding_kind`]'s enum test, split out since it also needs the
 /// `Option`/`Result` structural checks [`struct_field_kind`] inlines
 /// directly (no `Ctx` available at every `binding_kind` call site to reuse
@@ -492,7 +493,7 @@ fn is_enum_ty(ty: &Type, enums: &HashSet<Path>) -> bool {
     match ty {
         Type::Named(p, args) if p.local() == "option" && p.is_simple() && args.len() == 1 => true,
         Type::Named(p, args) if p.local() == "result" && p.is_simple() && args.len() == 2 => true,
-        Type::Named(p, _) if p.local() == "error" && p.is_simple() => true,
+        Type::Named(p, _) if crate::check::registry::is_builtin_error_type(p) => true,
         Type::Named(p, _) => enums.contains(p),
         _ => false,
     }

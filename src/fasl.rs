@@ -404,7 +404,15 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// stale cache would fail to deserialize the new shapes — and a `TraitDef`
 /// read back without `method_order` would have no slot numbering at all —
 /// 2026-07-25.
-pub const FASL_FORMAT_VERSION: u32 = 12;
+///
+/// 13: user-defined error types (TODO T3). The single built-in `Error` type
+/// is gone, replaced by one concrete type per fallible built-in
+/// (`ParseIntError`/`ParseFloatError`/`ReadError`/`EvalError`) plus the
+/// prelude `Error` *trait*; `where`-clause bounds now store the trait's
+/// fully-qualified path instead of the bare written name. A stale cache
+/// would hand back signatures naming a type that no longer exists and bounds
+/// that no longer compare equal to any trait — 2026-07-25.
+pub const FASL_FORMAT_VERSION: u32 = 13;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.

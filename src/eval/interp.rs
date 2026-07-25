@@ -31,6 +31,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
+use crate::check::registry::{is_builtin_error_type, EVAL_ERROR, PARSE_FLOAT_ERROR, PARSE_INT_ERROR, READ_ERROR};
 use crate::{BoxId, CompileTarget, Expr, Heap, Loc, MacroExpander, MacroLambda, Path, Pattern, QuotedSexpr, Ref, SymId, TopLevel, Type, Typed, Value};
 
 use super::scope;
@@ -859,7 +860,7 @@ impl Interp {
 
     /// Whether `p` names an enum type — one whose runtime value is
     /// *potentially* a boxed `BoxedObj::Enum`: the built-in
-    /// `Option`/`Result`/`Error`, or a user `defenum` recorded in
+    /// `Option`/`Result`/the concrete error types, or a user `defenum` recorded in
     /// [`Self::enum_defs`]. Whether a *given instantiation* actually is
     /// heap-repr (as opposed to falling back to native `RtValue::Data`) is
     /// [`Self::enum_fields_representable`]'s job, not this one — this just
@@ -867,7 +868,7 @@ impl Interp {
     /// checker's `Registry`-driven `AdtKind::Sum && !variants.is_empty()`
     /// test in `Checker::is_heap_repr_seen`.
     fn is_enum_path(&self, p: &Path) -> bool {
-        *p == option_path() || *p == result_path() || *p == Path::root("error") || matches!(self.root.borrow().find_type(p), Some(scope::TypeEntry::Enum(_)))
+        *p == option_path() || *p == result_path() || is_builtin_error_type(p) || matches!(self.root.borrow().find_type(p), Some(scope::TypeEntry::Enum(_)))
     }
 
     /// Whether every field of every variant of enum type `name` —
@@ -877,13 +878,13 @@ impl Interp {
     /// rationale (`Option<llvm-value>` and friends must classify `false`
     /// here). `option`/`result`'s field types are read straight off `args`
     /// (mirroring `data_variant_field_types`'s own dedicated arms, since
-    /// `Interp` holds no `Registry` to look them up in); `error`'s one
-    /// field is always `Str`, hence always representable; a user `defenum`
+    /// `Interp` holds no `Registry` to look them up in); a built-in error
+    /// type's one field is always `Str`, hence always representable; a user `defenum`
     /// looks up [`Self::enum_defs`] and substitutes `args` for its params,
     /// exactly as `Checker::enum_fields_representable` does with the
     /// checker's own registry-backed copy.
     fn enum_fields_representable(&self, name: &Path, args: &[Type], seen: &mut HashSet<Path>) -> bool {
-        if *name == Path::root("error") {
+        if is_builtin_error_type(name) {
             return true;
         }
         if !seen.insert(name.clone()) {
@@ -3416,7 +3417,7 @@ impl Interp {
     fn eval_form(&self, heap: &mut Heap, arg: &RtValue) -> Result<RtValue, EvalError> {
         let checker = match &self.checker {
             Some(c) => Rc::clone(c),
-            None => return Ok(result_err(heap, "eval: unavailable in this context (no checker handle)".to_string())),
+            None => return Ok(result_err(heap, EVAL_ERROR, "eval: unavailable in this context (no checker handle)".to_string())),
         };
         let form = match arg {
             RtValue::Sexpr(v) => *v,
@@ -3435,7 +3436,7 @@ impl Interp {
         }
         let tl = match checked {
             Ok(tl) => tl,
-            Err(e) => return Ok(result_err(heap, e.to_string())),
+            Err(e) => return Ok(result_err(heap, EVAL_ERROR, e.to_string())),
         };
         // Decide the CL-style return before `exec` consumes `tl`: a definition
         // returns its own name symbol; an expression returns its value below.
@@ -3455,7 +3456,7 @@ impl Interp {
                 Some(rt) => match rtvalue_to_sexpr(heap, &rt) {
                     Some(v) => v,
                     None => {
-                        return Ok(result_err(heap, "eval: result has no Sexpr representation".to_string()))
+                        return Ok(result_err(heap, EVAL_ERROR, "eval: result has no Sexpr representation".to_string()))
                     }
                 },
                 // `use`/`module`, or an empty body — nothing to hand back but `()`.
@@ -4162,7 +4163,7 @@ fn eval_parse_int(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalErro
     let s = expect_str(&args[0])?;
     Ok(match s.parse::<i32>() {
         Ok(n) => result_ok(heap, RtValue::Int(n as i64)),
-        Err(_) => result_err(heap, format!("parse-int: invalid integer literal: {:?}", s)),
+        Err(_) => result_err(heap, PARSE_INT_ERROR, format!("parse-int: invalid integer literal: {:?}", s)),
     })
 }
 
@@ -4173,7 +4174,7 @@ fn eval_parse_float(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalEr
     let s = expect_str(&args[0])?;
     Ok(match s.parse::<f64>() {
         Ok(f) => result_ok(heap, RtValue::Float(f)),
-        Err(_) => result_err(heap, format!("parse-float: invalid float literal: {:?}", s)),
+        Err(_) => result_err(heap, PARSE_FLOAT_ERROR, format!("parse-float: invalid float literal: {:?}", s)),
     })
 }
 
@@ -4188,7 +4189,7 @@ fn eval_read(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let reader = crate::read::Reader::new();
     Ok(match reader.read(heap, &s) {
         Ok(v) => result_ok(heap, RtValue::Sexpr(v)),
-        Err(e) => result_err(heap, format!("read: {}", e)),
+        Err(e) => result_err(heap, READ_ERROR, format!("read: {}", e)),
     })
 }
 
@@ -5784,11 +5785,15 @@ fn result_ok(heap: &mut Heap, v: RtValue) -> RtValue {
     build_enum_value(heap, Path::root("result"), 0, vec![v])
 }
 
-/// `Err(error(msg))` — wraps `msg` in the built-in `error` type's own single
-/// `error(string)` variant (`registry::error_def`) before wrapping *that* in
-/// `Result`'s `err` variant, matching `error`'s only constructor.
-fn result_err(heap: &mut Heap, msg: String) -> RtValue {
-    let err_val = build_enum_value(heap, Path::root("error"), 0, vec![RtValue::Str(msg.into())]);
+
+/// `Err(<ErrType>(msg))` — wraps `msg` in the concrete error type of the
+/// failing built-in (`registry::builtin_error_defs`: `parseinterror`,
+/// `parsefloaterror`, `readerror`, `evalerror`), whose single variant carries
+/// exactly that string, before wrapping *that* in `Result`'s `err` variant.
+/// `err_type` must name one of those four — its variant index is 0, the only
+/// one each has.
+fn result_err(heap: &mut Heap, err_type: &str, msg: String) -> RtValue {
+    let err_val = build_enum_value(heap, Path::root(err_type), 0, vec![RtValue::Str(msg.into())]);
     build_enum_value(heap, Path::root("result"), 1, vec![err_val])
 }
 

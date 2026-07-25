@@ -23,20 +23,9 @@ CL同等カタログ・可視性・trait機構・compile（普通に書けるコ
 TODO として正式に格上げ**する（2026-07-23、この一覧化で棚卸し）。優先度は目安であり、着手順は未確定。
 
 完了した項目（T1「`format` の書式指定子」、T2「`defmacro` の `&optional`/`&key`」、
-T4「動的ディスパッチ」、T5「`--heap-cells N`」）は
+T3「ユーザ定義エラー型」、T4「動的ディスパッチ」、T5「`--heap-cells N`」）は
 [implementation-log.md](implementation-log.md) 末尾へ移設した
-（T1/T5 は 2026-07-23、T2 は 2026-07-24、T4 は 2026-07-25）。
-
-### T3. ユーザ定義エラー型（優先度: 中〜低）
-
-現状エラー型は組み込み汎用 `Error` のみで、既定は `Result<T, Error>`
-（[language-design.md](language-design.md) §7.4）。trait機構（`deftrait`/`impl`/`where`）は
-実装済みだが、**ユーザ定義エラー型をこの機構で扱えるように拡張する作業自体は未着手**。
-
-- `defstruct`/`defenum` で定義した型をエラーとして `Result<T, MyError>` に載せられるようにする。
-- 複数のエラー型を一様に扱う場面では、2026-07-25 に実装した trait オブジェクト
-  `:dyn Trait`（[language-design.md](language-design.md) §5.2）がそのまま使える見込み
-  ——`Result<T, :dyn Error>` のような形。着手時にまずこれで足りるか確認すること。
+（T1/T5 は 2026-07-23、T2 は 2026-07-24、T3/T4 は 2026-07-25）。
 
 ### T5. pretty printer（CL の Lisp Pretty Printer 相当）（優先度: 低）
 

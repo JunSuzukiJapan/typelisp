@@ -143,8 +143,8 @@ fn bare_option_constructors_no_longer_resolve() {
 #[test]
 fn bare_result_and_error_constructors_no_longer_resolve() {
     assert!(program("(ok 1)").is_err());
-    assert!(program(r#"(err (error::error "x"))"#).is_err());
-    assert!(program(r#"(error "x")"#).is_err());
+    assert!(program(r#"(err (ParseIntError::ParseIntError "x"))"#).is_err());
+    assert!(program(r#"(ParseIntError "x")"#).is_err());
 }
 
 // ---- use Type: snapshotting a type's constructors/static methods bare -----

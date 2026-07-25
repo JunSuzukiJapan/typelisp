@@ -296,8 +296,8 @@
 | cons | `cons car cdr consp atom eq` | Symbol/Sexpr 再設計 Phase 4b で汎用 `cons-cell<A,B>`（`defstruct`）用に付け替え済み、`Sexpr` 専用ではない。`set-car`/`set-cdr` は完全撤去済み。`Sexpr` 専用操作は `sexpr-cons`/`sexpr-car`/`sexpr-cdr`/`sexpr-consp`/`sexpr-null`/`sexpr-atom`（内部 island 層） |
 | 変換 | `int->float float->int char->int int->char symbol->string string->symbol` | `symbol->string`/`string->symbol` は §0 の `Symbol` 型を扱う（`Sexpr` ではない） |
 | 文字列 | `string-length string-append string-ref substring string=` | |
-| 解析 | `parse-int parse-float` | `Result<_, Error>` |
-| IO | `print println princ format read read-line` | `read : (fn (String) Result<Sexpr, Error>)` |
+| 解析 | `parse-int parse-float` | `Result<_, ParseIntError>` / `Result<_, ParseFloatError>`（§7.4） |
+| IO | `print println princ format read read-line` | `read : (fn (String) Result<Sexpr, ReadError>)` |
 | 発散 | `panic unreachable todo exit` | 戻り型 `!`（§7） |
 | システム | `eval gc compile compile-file` | `compile`/`compile-file` は実装済み（§0、[src/compile/](../src/compile/)） |
 | マクロ | `gensym` | 引数なし、フレッシュな `Symbol` を返す。symbol は常に intern される仕様のため衝突耐性のみ（CL の unforgeable な未intern symbol ではない） |
@@ -556,10 +556,32 @@ trait オブジェクトは**ディスパッチ以外の意味を持たない**:
 - `!` という記号自体は **`Never` 型の表記**（§7.2、例 `(fn (i32) !)`）として構文上の意味を持つ。
   `?` は現時点で構文上の意味を持たない。いずれも命名規則上の接尾辞としては使わない。
 
-### 7.4 エラー型 E
-- 当面は**組み込み汎用 `Error`**（メッセージ等を保持）。既定は `Result<T, Error>`。
-- trait機構（`deftrait`/`impl`、§5.1）は実装済みだが、ユーザ定義エラー型をこの機構で扱えるように
-  拡張する作業自体はまだ行っていない（§8）。
+### 7.4 エラー型 E（2026-07-25 実装、TODO T3）
+**Rust の `std::error::Error` に倣う**——`Error` は**型ではなくトレイト**であり、汎用の
+「なんでも入るエラー値」は存在しない。
+
+- **具象エラー型は発生源ごと**: 組み込みの失敗する操作はそれぞれ自分の型を返す
+  （`parse-int`→`ParseIntError`、`parse-float`→`ParseFloatError`、`read`→`ReadError`、
+  `eval`→`EvalError`。[registry.rs](../../src/check/registry.rs) の `builtin_error_defs`）。
+  いずれもメッセージ文字列1つを持つ単一変種の直和型で、型名＝変種名。
+- **ユーザ定義型がそのまま E に載る**: `Result<T, MyError>` の `MyError` は `defstruct` でも
+  `defenum` でも良い。`Result<T,E>` の `E` は最初から任意の型を取れる総称パラメタなので、
+  ここに言語側の追加機構は要らない（`Error` の実装すら必須ではない）。
+- **`Error` トレイト**（prelude）: `message`（メッセージ）と `source`
+  （包んでいる原因、無ければ `None`。Rust の `Error::source`）の2メソッド。組み込みの4型も
+  ユーザ定義型とまったく同じ `impl` を prelude に書いてあるだけで、特別扱いは無い。
+- **複数のエラー型を一様に扱う**: trait オブジェクト `Result<T, :dyn Error>`（§5.2）を使う
+  ——Rust の `Box<dyn Error>` に相当。具象型からの広げ方は prelude の
+  `as-dyn-error`（`Result<T,E> → Result<T,:dyn Error>`、`E` に `(Error E)` 境界）。
+  `?` は導入しない方針（§7.3）なので、この変換は明示的に書く。
+- **型とトレイトは1つの名前空間を共有する**（Rust と同じ）。同一モジュール内で `defstruct`/
+  `defenum` とトレイトに同じ名前は付けられず（`Checker::check_type_trait_clash`）、型位置に
+  トレイト名を書けば「`Error` はトレイトである、`:dyn Error` と書け」と報告される。
+  組み込みの具象エラー型を `Error` と呼べないのはこの規則ゆえで、Rust と同じ結論
+  （`std` でも `Error` はトレイト、具象型は `ParseIntError`/`io::Error`）になっている。
+- **境界付き型変数の箱詰め**: ジェネリック関数の中で `(where (Error E))` の `E` を
+  `:dyn Error` へ箱詰めできる。vtable は `E` が具象化する単型化時に確定するので、
+  定義時の本体検査には消去済みプレースホルダ（`Expr::TraitCall`）が残るだけになる。
 
 ### 7.5 部分関数の失敗方針（Rust 流の混在）
 | 操作 | 方針 |
@@ -567,8 +589,8 @@ trait オブジェクトは**ディスパッチ以外の意味を持たない**:
 | `vector-ref`（範囲外） | panic |
 | `vector-get` | `Option<T>` |
 | `/` `mod`（ゼロ除算） | panic（Rust の整数除算に忠実） |
-| `parse-int` / `parse-float` | `Result<_, Error>` |
-| `read` | `Result<Sexpr, Error>` |
+| `parse-int` / `parse-float` | `Result<_, ParseIntError>` / `Result<_, ParseFloatError>` |
+| `read` | `Result<Sexpr, ReadError>` |
 | `unwrap`（None/Err） | panic |
 
 原則: プログラマエラー＝panic、予期される失敗＝Result、安全版＝Option。
@@ -587,9 +609,9 @@ trait オブジェクトは**ディスパッチ以外の意味を持たない**:
   ネストした構造体への`b::val`フィールドアクセスまで一貫して正しく型検査・評価されることを
   使い捨てテストで確認した。単なる「元々のTODO項目が古くから未検証のまま放置されていた」もの
   で、この過程で実際のバグは見つからなかった。
-- ユーザ定義エラー型。**静的trait機構（`deftrait`/`impl`/`where`境界）は2026-06-30実装済み**
-  ——§5.1参照。**動的ディスパッチ（trait オブジェクト `:dyn Trait`、vtable方式）も2026-07-25
-  実装済み**——§5.2参照（当初「実装しない」としていた方針からの転換）。
+- ~~ユーザ定義エラー型~~ **2026-07-25 実装済み（TODO T3）——§7.4参照**。前提だった静的trait機構
+  （`deftrait`/`impl`/`where`境界）は2026-06-30（§5.1）、動的ディスパッチ（trait オブジェクト
+  `:dyn Trait`、vtable方式）は2026-07-25（§5.2、当初「実装しない」としていた方針からの転換）。
 - 関数カタログ（§4）の実装本体は eval（step4）以降。**§4の実装状況は現時点でほぼ完了**——残る
   未実装項目は[functions.md](../functions.md)参照。
 - `defmacro` の構造化ラムダリスト（`&rest`/`&optional`/`&key` すべて実装済み——2026-07-24。

@@ -247,7 +247,8 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 ## 7. `Option<T>` / `Result<T,E>`
 
 構成子: `Option<T>` は `Some(T)` / `None`。`Result<T,E>` は `Ok(T)` / `Err(E)`。
-`Error` は組み込みの汎用エラー型（`Result` の既定の `E`）。
+`E` は任意の型でよい——組み込みの具象エラー型も、`defstruct`/`defenum` で書いた自前の型も
+そのまま載る（§7.1）。
 
 | 名前 | 形式 | Option | Result | 説明 |
 |---|---|---|---|---|
@@ -260,6 +261,60 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 
 構成子は `Option::some`/`Option::none`/`Result::ok`/`Result::err`（または `(use option)`/
 `(use result)` で裸名 `some`/`none`/`ok`/`err` も使用可能）。
+
+### 7.1 エラー型と `Error` トレイト
+
+Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイト**。エラーを表す具象型は
+用途ごとに分かれていて、いずれも `Error` を実装する。
+
+| 型 | 生成元 |
+|---|---|
+| `ParseIntError` | `parse-int` |
+| `ParseFloatError` | `parse-float` |
+| `ReadError` | `read` |
+| `EvalError` | `eval` |
+
+いずれも「メッセージ文字列を1つ持つ単一変種の直和型」で、型名と変種名が同じ
+（`(match e ((ParseIntError m) m))`、構成は `(ParseIntError::ParseIntError "...")`）。
+特別扱いは一切なく、自前のエラー型を `(defstruct my-err (...))` / `(defenum my-err ...)`
+で書いたときとまったく同じ扱いになる。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `message` | `(message e)` | `Self→string` | エラーメッセージ（`Error` トレイトのメソッド） |
+| `source` | `(source e)` | `Self→Option<:dyn Error>` | このエラーが包んでいる原因、無ければ `None`（Rust の `Error::source`） |
+| `as-dyn-error` | `(as-dyn-error r)` | `Result<T,E>→Result<T,:dyn Error>`（`E` は `Error` 実装） | 具象エラー型を trait オブジェクトへ広げる |
+
+自前のエラー型に `Error` を実装すれば、組み込みエラーと**同じ形で**扱える:
+
+```lisp
+(defstruct io-err (path string))
+(impl Error io-err
+  (message ((self Self)) string (append "io failed: " self::path))
+  (source ((self Self)) Option<:dyn Error> (option::none)))
+
+(defun open-it ((p string)) Result<i32, io-err>          ; 具象型をそのまま E に載せる
+  (if (equal p "") (result::err (io-err::new "<empty>")) (result::ok 3)))
+
+(defun describe ((e :dyn Error)) string (message e))     ; 種類を問わず一様に扱う
+(describe (io-err::new "/etc/app.conf"))
+(describe (ParseIntError::ParseIntError "boom"))
+```
+
+複数のエラー型を1つの `Result` に集める場合は `Result<T, :dyn Error>`（Rust の
+`Box<dyn Error>` 相当）を使い、具象エラーは `as-dyn-error` で広げる。typelisp には `?` が
+無い（[language-design.md](dev/language-design.md) §7.3）ので、この変換は明示的に書く:
+
+```lisp
+(defun run ((s string)) Result<i32, :dyn Error>
+  (match (as-dyn-error (parse-int s))            ; ParseIntError -> :dyn Error
+    ((ok n) (as-dyn-error (open-it (if (= n 0) "" "f"))))   ; io-err -> :dyn Error
+    ((err e) (result::err e))))
+```
+
+なお**型とトレイトは1つの名前空間を共有する**（Rust と同じ）。同じモジュール内で
+`defstruct`/`defenum` とトレイトに同じ名前は付けられず、型位置にトレイト名を書くと
+「`error` is a trait, not a type — write `:dyn error`」と報告される。
 
 ## 8. 文字列 (`string`)
 
@@ -484,14 +539,14 @@ Rust 専用処理）、`Interp::run_format` が enum 変種名表を渡して呼
 ## 16. 解析・評価 (`parse-int` / `parse-float` / `read` / `eval`)
 
 いずれも実行時の（プログラム自身は制御できない）テキスト・データを扱うため、失敗時は panic では
-なく `Result<_, Error>` の `Err` を返す。
+なく `Result` の `Err` を返す。エラー型は Rust の std に倣い**操作ごとの具象型**（§7.1）。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `parse-int` | `(parse-int s)` | `string→Result<i32,Error>` | 10進整数（`+`/`-`前置可）。Rust の `str::parse::<i32>` と同じ受理範囲 |
-| `parse-float` | `(parse-float s)` | `string→Result<f64,Error>` | 浮動小数点数。Rust の `str::parse::<f64>` と同じ受理範囲（`inf`/`nan`含む） |
-| `read` | `(read s)` | `string→Result<Sexpr,Error>` | `s` から `Sexpr` を1つ読む（`typl`/REPL がソーステキストを読むのと同じ reader を使う）。不完全な括弧・文字列などは `Err` |
-| `eval` | `(eval form)` | `Sexpr→Result<Sexpr,Error>` | `form` を実行時に型チェックして評価する。CL の `eval` に準拠 |
+| `parse-int` | `(parse-int s)` | `string→Result<i32,ParseIntError>` | 10進整数（`+`/`-`前置可）。Rust の `str::parse::<i32>` と同じ受理範囲 |
+| `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 浮動小数点数。Rust の `str::parse::<f64>` と同じ受理範囲（`inf`/`nan`含む） |
+| `read` | `(read s)` | `string→Result<Sexpr,ReadError>` | `s` から `Sexpr` を1つ読む（`typl`/REPL がソーステキストを読むのと同じ reader を使う）。不完全な括弧・文字列などは `Err` |
+| `eval` | `(eval form)` | `Sexpr→Result<Sexpr,EvalError>` | `form` を実行時に型チェックして評価する。CL の `eval` に準拠 |
 
 ### `eval` の意味論（Common Lisp 準拠）
 
@@ -511,7 +566,7 @@ CLHS の `eval` に準拠する: **現在の大域環境**（グローバルの�
 - **戻り値**: 式なら評価結果を `Sexpr` として、定義なら定義名シンボルを返す（CL と同じ）。
   結果を `println` 等で表示するには `Sexpr` を `match`（`(int n)`/`(str s)`/…）で分解する。
 - **静的型ゆえの差異（重要）**: CL は結果の実値（動的型）を返すが typelisp は戻り型を一律
-  `Result<Sexpr,Error>` にするしかない。また **静的に書いたコードは、実行時に `eval` が定義する
+  `Result<Sexpr,EvalError>` にするしかない。また **静的に書いたコードは、実行時に `eval` が定義する
   名前を前方参照できない**——チェッカーは全トップレベルフォームを実行前に検査するので、
   ファイル中に直接書いた `(sq 9)` は `sq` を定義する `eval` より前に検査され「未定義」になる。
   ただし **後続の `eval` からは見える**（その `eval` の型チェックは実行時、定義後に走るため）。

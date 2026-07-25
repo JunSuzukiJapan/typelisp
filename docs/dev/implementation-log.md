@@ -4384,3 +4384,71 @@ trait オブジェクトは**ディスパッチ以外の意味を持たない**�
   `defun`/`defvar`/`defenum` 以外を拒否していた）ので、その前提拡張も併せて行った。
 
 FASL は v11→**v12**。
+
+---
+
+## ユーザ定義エラー型 + `Error` トレイト（2026-07-25、旧 TODO T3）
+
+`Result<T,E>` の `E` にユーザ定義型を載せること自体は**着手前から動いていた**（`E` は最初から
+任意の型を取る総称パラメタで、`defstruct`/`defenum` の値も `match` もそのまま通る）。実際に
+欠けていたのは「**エラーであることを表す共通の interface**」と、それを持たない組み込みエラー型の
+特別扱いだった。作業前に現状を実測して確認した事実:
+
+- `Result<T, ユーザ定義型>` は動く。`Result<T, :dyn Trait>` も動く（具象値は期待型位置で自動箱詰め）。
+- 組み込みは汎用 `Error` 型（`error(string)` の単一変種）1つで、共通 interface は無い。
+
+### 設計判断: `Error` は型ではなくトレイト（Rust std に合わせる）
+
+ユーザー判断で**型とトレイトの同名共存を禁止**した（Rust では両者は同じ名前空間）。テーブルは
+別（`Namespace::types` / `Namespace::traits`）なので機構上は共存できてしまい、`Foo` と
+`:dyn Foo` が無関係な2つの定義を指す事故が起こり得る——`Checker::check_type_trait_clash` を
+両方向（`deftrait` 側と `defstruct`/`defenum` 側）に入れて禁止した。
+
+この禁止により「組み込み汎用型 `Error`」と「トレイト `Error`」は同居できない。Rust に寄せる
+選択として**トレイトに `Error` の名を与え、具象型は発生源ごとに分割**した（`std` でも `Error` は
+トレイト、具象型は `ParseIntError`/`io::Error`）:
+
+| 型 | 生成元 | Rust の対応物 |
+|---|---|---|
+| `ParseIntError` | `parse-int` | `std::num::ParseIntError` |
+| `ParseFloatError` | `parse-float` | `std::num::ParseFloatError` |
+| `ReadError` | `read` | （typelisp 固有） |
+| `EvalError` | `eval` | （typelisp 固有） |
+
+4型とも「メッセージ文字列1つを持つ単一変種の直和型・型名＝変種名」で、旧 `error` 型と同じ形。
+つまりヒープ表現・`match`・trait オブジェクト箱詰めの経路は既存のまま流用でき、**ユーザが
+`(defenum my-err (my-err string))` と書いたときと1バイトも変わらない**（`registry.rs` の
+`builtin_error_defs`、実行時生成は `interp.rs` の `result_err`）。
+
+prelude に `Error` トレイト（`message` / `source`）と4型の `impl`、および
+`as-dyn-error`（`Result<T,E>` → `Result<T,:dyn Error>`、`(where (Error E))`）を追加。
+`source` は Rust の `Error::source` と同じく原因の連鎖を返す。
+
+### 実装中に見つかった穴3つ（いずれも T3 の前提として修正）
+
+1. **`deftrait` が自分自身を参照できない**。`source` の戻り型 `Option<:dyn Error>` は宣言中の
+   トレイトを名指すが、メソッド署名は `TraitDef` 登録より前に解析されていたため
+   「`dyn: unknown trait`」になった。`check_defstruct` が自己参照フィールドのために既にやっていた
+   のと同じ**スタブ先行登録**で解決。
+2. **`where` 節のトレイト名が未解決のまま保存されていた**（`Path::root(書かれた名前)`）。ファイル＝
+   モジュールなので、モジュール内の `(where (Error E))` は `error` を root 直下と記録し、
+   `TraitDef::name`/`Type::Dyn` の完全修飾パスと永久に一致しなかった（潜在バグ）。
+   `resolve_trait_name` を通すよう修正。
+3. **境界付き型変数を `:dyn` に箱詰めできない**。`as-dyn-error` の本体そのもの。ジェネリック関数の
+   定義時本体検査では `E` はまだ型変数なので vtable を敷けない——`Expr::TraitCall`（消去済み
+   ジェネリック本体の診断専用ノード。実行されない）を置き、各単型化で `E` が具象化した本体を
+   再検査する際に本物の `dyn_vtable_slots` を通す形にした。境界があることが「後で必ず敷ける」
+   保証になっている。
+
+### 型位置にトレイト名を書いたときの診断
+
+`Result<T, Error>`（旧来の綴り）が**黙って通ってしまう**のを避ける必要があった——未解決の型名は
+ジェネリックの型変数と同じ扱いで通ってしまうため（`canon` は失敗できない）。全ての型注釈解析を
+`Checker::parse_type_here` に一本化し、「型として解決できないがトレイトとしては解決できる名前」を
+`` `error` is a trait, not a type — write `:dyn error` `` と報告するようにした。
+
+### 影響範囲
+
+`.typl` ソース中の `Error` 参照は 0 件、テストの typelisp ソース中12箇所と docs 15行のみ
+（`Error` は主に Rust 側 API 名として登場していたため）。FASL は v12→**v13**
+（消えた型を名指す署名・比較不能になる境界が古いキャッシュに残るため）。

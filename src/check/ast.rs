@@ -237,6 +237,12 @@ pub enum Expr {
     /// placeholder. Carries only what that trap and the `check`-time walk
     /// need (`method`/`args`); no `trait_name`/`impls` are retained, since
     /// the closed dispatch chain those once fed has been removed.
+    ///
+    /// A second site leaves the same placeholder for the same reason:
+    /// boxing a `where`-bounded type variable as a trait object
+    /// (`Checker::coerce_to_dyn`), whose vtable can only be laid out once the
+    /// variable is concrete. Such a node's `method` reads `as :dyn <trait>`
+    /// and its single argument is the value that would be boxed.
     TraitCall {
         method: String,
         args: Vec<Typed>,
