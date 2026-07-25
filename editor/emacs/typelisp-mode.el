@@ -112,6 +112,20 @@
     ;; capitalized name like `Space' is not mistaken for a type).
     ("#\\\\\\(?:[A-Za-z][A-Za-z0-9]*\\|.\\)" . font-lock-constant-face)
 
+    ;; `:dyn Trait' -- the trait-object type.  Claimed before the general
+    ;; keyword rule below (which would otherwise colour it as a constant):
+    ;; `:dyn' is a reserved keyword valid only in a type position, and
+    ;; highlighting it distinctly is the reason the language spells trait
+    ;; objects this way at all.  The trait name after it gets the type face.
+    (,(concat "\\_<\\(:dyn\\)\\_>[ \t\n]*\\(" typelisp--symbol-rx "\\)?")
+     (1 font-lock-keyword-face)
+     (2 font-lock-type-face nil t))
+
+    ;; Keywords: :name (CL-style self-evaluating symbols).  Not `::foo',
+    ;; which is the absolute-path syntax.
+    ("\\(?:^\\|[^:[:alnum:]_-]\\)\\(:[A-Za-z][A-Za-z0-9_?!*<>=/+-]*\\)"
+     1 font-lock-constant-face)
+
     ;; Definition forms binding a function/type name:  (defun NAME ...)
     (,(concat "(" (regexp-opt typelisp-definition-forms t)
               "\\_>[ \t\n]*(?[ \t\n]*\\(" typelisp--symbol-rx "\\)?")

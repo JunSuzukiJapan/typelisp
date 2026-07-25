@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-07-23 / ブランチ: `main`
+最終更新: 2026-07-25 / ブランチ: `main`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離、
@@ -23,8 +23,9 @@ CL同等カタログ・可視性・trait機構・compile（普通に書けるコ
 TODO として正式に格上げ**する（2026-07-23、この一覧化で棚卸し）。優先度は目安であり、着手順は未確定。
 
 完了した項目（T1「`format` の書式指定子」、T2「`defmacro` の `&optional`/`&key`」、
-T5「`--heap-cells N`」）は [implementation-log.md](implementation-log.md) 末尾へ移設した
-（T1/T5 は 2026-07-23、T2 は 2026-07-24）。
+T4「動的ディスパッチ」、T5「`--heap-cells N`」）は
+[implementation-log.md](implementation-log.md) 末尾へ移設した
+（T1/T5 は 2026-07-23、T2 は 2026-07-24、T4 は 2026-07-25）。
 
 ### T3. ユーザ定義エラー型（優先度: 中〜低）
 
@@ -33,17 +34,9 @@ T5「`--heap-cells N`」）は [implementation-log.md](implementation-log.md) �
 実装済みだが、**ユーザ定義エラー型をこの機構で扱えるように拡張する作業自体は未着手**。
 
 - `defstruct`/`defenum` で定義した型をエラーとして `Result<T, MyError>` に載せられるようにする。
-- 動的ディスパッチ（T4）と関連: 複数のエラー型を一様に扱う場面では vtable 相当が絡む可能性がある。
-
-### T4. 動的ディスパッチ（vtable / `dyn Trait` 相当）（優先度: 低）
-
-静的 trait 機構（単型化ベース）は実装済み（§5.1）。実行時に型が決まる動的ディスパッチ
-（[language-design.md](language-design.md) §8）は未実装。
-
-- 静的型・単型化を前提とした現在の設計への影響が大きく、設計判断（表現・GC・compile対応）を
-  要する重い項目。優先度は最も低い。
-- T5 の pretty printer の Tier2/3（`pprint-logical-block` 等の公開・`set-pprint-dispatch`）は
-  この T4 を前提にする（2026-07-23 結論。理由は下記 T5 参照）。
+- 複数のエラー型を一様に扱う場面では、2026-07-25 に実装した trait オブジェクト
+  `:dyn Trait`（[language-design.md](language-design.md) §5.2）がそのまま使える見込み
+  ——`Result<T, :dyn Error>` のような形。着手時にまずこれで足りるか確認すること。
 
 ### T5. pretty printer（CL の Lisp Pretty Printer 相当）（優先度: 低）
 
@@ -92,11 +85,11 @@ CL は ANSI 標準の pretty printer を持つ（CLHS 22.2、実体は R. Waters
   - format は既にインメモリ `String` を構築する方式なので、XP のストリーム層を厳密再現せず、構築中の
     バッファ上で同じ先読み判定を回す簡略版で同等結果を出せる（ストリーム値をユーザに露出しない範囲）。
 
-- **Tier2/3（T4 動的ディスパッチ導入後に着手する。← 2026-07-23 結論）**
+- **Tier2/3（前提だった T4 動的ディスパッチは 2026-07-25 に実装済み。着手可能になった）**
   - `pprint-logical-block` / `pprint-newline` / `pprint-indent` / `pprint-tab`
     （+ `pprint-pop` / `pprint-exit-if-list-exhausted`）をユーザ呼び出し可能な関数として公開。
   - `set-pprint-dispatch` / `*print-pprint-dispatch*`。
-  - **T4 を前提にする理由**: CL でこれらが自然に効くのは (a) CL がもともと第一級ストリームを至る所で
+  - **T4 を前提にしていた理由（当時の記録）**: CL でこれらが自然に効くのは (a) CL がもともと第一級ストリームを至る所で
     持ち、(b) 動的ディスパッチがあるから。typelisp は現状どちらも無い——公開するには言語に無い新概念
     「可変 pretty ストリーム値型」を新設せねばならず（過去に `Vector`/`RtValue` 専用バリアントを
     「ユーザ定義型と同様に扱うべき」で作り直した方針とも衝突しうる）、最大の見返り（ユーザ定義型の独自
@@ -104,6 +97,11 @@ CL は ANSI 標準の pretty printer を持つ（CLHS 22.2、実体は R. Waters
     動的ディスパッチ、すなわち上記 T4 そのものを要する。
     T4 抜きで公開しても「ユーザが自分の型を手動整形するとき明示的に呼ぶ」に留まり中途半端になるため、
     T4 と一緒に扱う。
+  - **2026-07-25 追記**: その T4 が実装され、`:dyn Trait`（vtable 方式の trait オブジェクト、
+    [language-design.md](language-design.md) §5.2）が使えるようになった。`set-pprint-dispatch`
+    に必要な「実行時型→関数の索引付きディスパッチ」は、整形関数を持つ trait を定義して
+    `HashTable<string, :dyn Printer>` 相当の登録表を引く形で組める見込み。残る前提は
+    「可変 pretty ストリーム値型」の新設だけになった。
   - **2026-07-24 追記**: 「Sexpr にユーザ定義型を入れる」プラン
     （`~/.claude/plans/async-conjuring-hanrahan.md`）の実装により、`defstruct`/`defenum` インスタンスは
     暗黙に `Sexpr` へ変換でき、`match` の downcast パターン（型名先頭/裸enum変種/`(the T p)`）で
@@ -165,5 +163,6 @@ LLVMバージョンを指す等でシャドウされていると、素の `cargo
 `compile`（LLVM JIT/AOT）機能は現状「今のフェーズが実際に使う AST ノードだけ本実装、それ以外は
 `ast_bridge` が `(unsupported "<Variant>")` を返しコンパイラ本体が明示的に panic する」設計
 （`ast_bridge.rs` 冒頭のdocコメント参照）。ユーザーが普通に書けるコードから実際に到達しうる
-`unsupported` は 2026-07-16 時点で解消済み——残る `Expr::TraitCall` は単型化後に到達不能な
+`unsupported` は 2026-07-16 時点で解消済み（2026-07-25 に追加した `Expr::DynBox`/`DynCall`/
+`DynValue` も同日中に本実装した）——残る `Expr::TraitCall` は単型化後に到達不能な
 診断専用ノードと確認済みで対象外（`tests/trait_test.rs` 参照）。

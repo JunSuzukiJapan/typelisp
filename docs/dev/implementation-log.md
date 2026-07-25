@@ -4287,3 +4287,89 @@ CL 準拠 `format` と、書式ディレクティブを解釈する `print`/`pri
 - **MacroDef**（`check::registry`）は `arity`/`rest` → `required`/`optional`/`rest`/`keys` に変更、
   FASL は v10→**v11** へ bump。`tests/macro_test.rs` に §Phase F（11件）追加。LSP の `locate` は
   デフォルト式（`Typed`）も走査対象に含めた。
+
+## 動的ディスパッチ（trait オブジェクト `:dyn Trait`、2026-07-25、旧 TODO T4）
+
+C++ の vtbl 方式による動的ディスパッチを、インタプリタ／JIT／AOT の3経路すべてで実装した。
+言語仕様としての説明は [language-design.md](language-design.md) §5.2、構文は
+[syntax.md](../syntax.md) §1・§2。ここには**設計判断の経緯**だけを残す。
+
+### なぜ vptr をオブジェクトでなく dyn 値の側に持つのか
+
+C++ は vptr をオブジェクト先頭に埋め込むが、typelisp では **fat box**
+`BoxedObj::Dyn { vtable_id, value }` を選び、vtable を **(具象型, trait) の組ごとに1本**とした。
+箱詰め地点では具象型も trait も静的に分かっているので組を選べる——結果、呼び出し側は
+「定数スロットを添字して間接呼び出し」という C++ とまったく同じ形になる。
+
+オブジェクト側に持たせなかった理由:
+
+1. **1つの型が複数 trait を実装できる**ので単一 vptr では足りない。`型ID → trait → vtable` の
+   2段引き（実質 Go/Java の itable）になり、呼び出しが O(1) の添字でなくなる。
+2. `BoxedObj::Struct`/`Enum`・`rt_struct_new`/`rt_data_new`・GC・`match` の実行時型テストを
+   一切変更せずに済む。`:dyn` を書かないコードの表現もコストも変わらない。
+
+代償は「箱詰めのたびに1確保」だが、これは明示的または期待型駆動の変換地点でしか起きない。
+
+### なぜ `Expr::TraitCall` を復活させず新ノードにしたか
+
+`Expr::TraitCall` はかつて実行時ディスパッチノードで、型IDハッシュの n分岐チェーンを引いていた
+（2026-07-01実装 → 2026-07-04削除、本ログ参照）。単型化導入後は診断専用に降格している。
+今回そこへ動的ディスパッチを戻すと、削除したばかりの「実装型を全部列挙して型名で分岐する」方式に
+逆戻りしかねないため、**別ノード `Expr::DynCall`** を新設した。TraitCall は診断専用のまま。
+実際、vtable 方式は旧方式の既知の制限（ジェネリック関数の check 後に追加された `impl` が
+コンパイル済み呼び出しから見えない）を原理的に持たない。
+
+### なぜ vtable_id を AST に焼かないか
+
+`Expr::DynBox` が持つのは vtable の**中身**（`concrete_key` / `trait_path` / `slots`）で、数値 id は
+`Interp::vtable_id_for` が exec／翻訳時に intern する。id は `Interp` ごとの通し番号なので、
+別プロセスで採番された id が fasl 経由で持ち込まれると無意味になるため。
+
+### スロット順の権威
+
+`TraitDef::methods` は `HashMap` で反復順が不定なので、コンパイル済みコードが定数で添字する表の
+レイアウトには使えない。`deftrait` の記述順を `TraitDef::method_order` として別に持ち、これを
+唯一の権威とした（重複メソッド名は `deftrait` 時にエラー）。
+
+### `:dyn Trait` を2語にしたことの波及
+
+表記はユーザー判断（エディタで確実に強調表示できること）。空白区切りの2語なので、リーダを2箇所で
+特別扱いする必要があった:
+
+- **datum 位置**: `:dyn X` を `(:dyn X)` に畳む（quote と同じ `read_wrapped_body` を再利用）。
+  これで引数ペア・戻り値型・`defstruct` フィールド等の「型は1 Value」という既存前提を崩さずに済み、
+  型位置の個別パーサを1つも触らずに済んだ。
+- **型引数の中**: `Vector<:dyn Drawable>` には datum 境界が無い（`Vector<...>` はシンボル1個の
+  名前文字列を `NameLexer` にかけて解釈する構造）。`read_atom` に `<>` 深度追跡を入れ、閉じるまで
+  空白込みで読むようにした。**投機的で、閉じなければ完全に巻き戻す**——この巻き戻しが、
+  `(< a b)` / `(string< a b)` / `(a<b c)` といった既存の綴りを1つも列挙せずに後方互換を保つ鍵。
+  改行・括弧・文字列・コメントに当たった時点で中断する。
+
+副産物として CL 相当のキーワード機構（`:foo` は自己評価する interned シンボル、`keywordp`）を
+導入した。表現は変えていない（従来どおり `Value::Symbol(":foo")`）ので、`defmacro` の `&key` が
+先頭コロンを文字列として剥がす既存実装はそのまま動く。CL と違いコロンは名前の一部
+（`(symbol->string :foo)` は `":foo"`）——パッケージ機構が無いため。
+
+### 箱の透過性という一貫した規則
+
+trait オブジェクトは**ディスパッチ以外の意味を持たない**、を全経路で貫いた: 印字は中身を出し、
+`eq`/`eql`/`equal`/`equalp` は箱を透かし、trait のメソッド以外の呼び出しは `Sexpr` メソッド
+カタログにフォールバックし、`Sexpr` に入れるときは箱を外す。特に**箱は暗黙に作られる**ので、
+箱の有無で `eq` の答えが変わってはならない、というのが決め手。`match` も箱を外してから既存の
+`Sexpr` downcast パターンに渡すので、言語の実行時型テストは依然として1種類だけ。
+
+### compile 対応
+
+- `ast_bridge` に `dyn-new`/`dyn-call`/`dyn-value` の3ノードを追加。`Expr::DynBox` は
+  `collect_calls` で **slots を丸ごとメソッドターゲットとして登録**する——これで
+  `compute_sccs` の finish-order 契約により、dyn 呼び出しに到達する時点で実装メソッドは
+  必ずコンパイル済みになる（箱詰め地点で静的に列挙できるのが効いている）。
+- 島側 `compile-dyn-call` は `rt_dyn_vtable` → `rt_vtable_slot` で生関数ポインタを取り、
+  新組み込み `build-dyn-call` が `build_indirect_call` する。クロージャ呼び出しと違い env が
+  無いので、`build-closure-apply` の 64スロット scratch とランタイムループは要らない。
+- vtable の充填は `compile_scc` の**末尾**（メンバのアドレス確定後）。SCC 内のメソッドが
+  スロットになり得るため。AOT では `ptrtoint` 定数で `rt_vtable_set` を起動時に呼ぶ。
+- AOT はそもそも `defstruct`/`defmethod`/`impl` をトップレベルに書けなかった（`compile-file` が
+  `defun`/`defvar`/`defenum` 以外を拒否していた）ので、その前提拡張も併せて行った。
+
+FASL は v11→**v12**。

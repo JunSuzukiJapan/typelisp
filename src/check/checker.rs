@@ -2843,6 +2843,16 @@ impl Checker {
             .map(|td| td.name.clone())
     }
 
+    /// Whether the built-in `Sexpr` type has a visible instance method named
+    /// `method` — how a trait-object receiver decides between dispatching
+    /// through its vtable and falling back to the `Sexpr` catalog.
+    fn sexpr_has_instance_method(&self, method: &str) -> bool {
+        self.reg
+            .type_def(&Path::root("sexpr"))
+            .and_then(|d| d.assoc.get(method))
+            .is_some_and(|af| af.instance)
+    }
+
     /// Wrap an already-checked concrete value as `:dyn trait_path<pins...>`,
     /// laying out the vtable it will dispatch through. The shared
     /// implementation of the implicit widening (`check_inner`'s expectation
@@ -3959,6 +3969,18 @@ impl Checker {
                 // relies on). A native-repr instantiation (e.g. `Option<llvm-
                 // value>`) is excluded by `is_heap_repr` itself and stays a
                 // type error, since it has no `Sexpr` encoding at all.
+                // A trait object reaching a `Sexpr` expectation is *unwrapped*
+                // rather than retyped: the fat box is a dispatch mechanism,
+                // and `Sexpr` data has no static trait to dispatch on (you
+                // get at it by `match`ing down to a concrete type, which
+                // works on the wrapped value directly). Keeping the box would
+                // put a second representation of every struct into `Sexpr`
+                // data that every runtime type test would then have to know
+                // about. Checked before the general `is_heap_repr` retype
+                // below, which would otherwise claim it.
+                if *e == sexpr_ty() && matches!(typed.ty, Type::Dyn(..)) {
+                    return Ok(Typed { loc: typed.loc.clone(), expr: Expr::DynValue(Box::new(typed)), ty: sexpr_ty() });
+                }
                 if *e == sexpr_ty() && self.is_heap_repr(&typed.ty) {
                     return Ok(Typed { loc: typed.loc, expr: typed.expr, ty: sexpr_ty() });
                 }
@@ -4486,16 +4508,20 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Option<Result<Typed, Error>> {
-        let recv = self.check_at(heap, interp, env, *args.first()?, None, nth_loc(arg_locs, 0)).ok()?;
-        // A trait-object receiver dispatches through its vtable; the method
-        // comes from the trait, not from any concrete type's `assoc` table.
+        let mut recv = self.check_at(heap, interp, env, *args.first()?, None, nth_loc(arg_locs, 0)).ok()?;
+        // A trait-object receiver dispatches its trait's own methods through
+        // the vtable, and everything else through the built-in `Sexpr`
+        // catalog — see `check_instance_method`'s fuller comment.
         if let Type::Dyn(trait_path, pins) = recv.ty.clone() {
             if self.reg.trait_def(&trait_path).is_some_and(|t| t.methods.contains_key(method)) {
                 return Some(self.check_dyn_call(
                     heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..],
                 ));
             }
-            return None;
+            if !self.sexpr_has_instance_method(method) {
+                return None;
+            }
+            recv = Typed { loc: recv.loc.clone(), expr: Expr::DynValue(Box::new(recv)), ty: sexpr_ty() };
         }
         let type_fq = match &recv.ty {
             Type::Named(n, _) => Some(n.clone()),
@@ -4532,15 +4558,27 @@ impl Checker {
         arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
         if !args.is_empty() {
-            let recv = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
-            // Trait-object receiver: dispatch through the vtable. Unlike
-            // `try_instance_method`'s peek, this is the reporting path, so an
-            // unknown method name produces `check_dyn_call`'s message naming
+            let mut recv = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
+            // Trait-object receiver: one of the trait's own methods dispatches
+            // through the vtable; anything else is the built-in `Sexpr`
+            // catalog (`eq`/`equal`/`print`/...), which applies to a trait
+            // object exactly as to the heap value it wraps — the same
+            // transparency printing and comparison have. Unlike
+            // `try_instance_method`'s peek this is the reporting path, so a
+            // name that is neither gets `check_dyn_call`'s message naming
             // the trait rather than a bare "no such function".
             if let Type::Dyn(trait_path, pins) = recv.ty.clone() {
-                return self.check_dyn_call(
-                    heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..],
-                );
+                if self.reg.trait_def(&trait_path).is_some_and(|t| t.methods.contains_key(method)) {
+                    return self.check_dyn_call(
+                        heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..],
+                    );
+                }
+                if !self.sexpr_has_instance_method(method) {
+                    return self.check_dyn_call(
+                        heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..],
+                    );
+                }
+                recv = Typed { loc: recv.loc.clone(), expr: Expr::DynValue(Box::new(recv)), ty: sexpr_ty() };
             }
             let type_fq = match &recv.ty {
                 Type::Named(n, _) => Some(n.clone()),
@@ -5944,7 +5982,18 @@ impl Checker {
         if args.is_empty() {
             return Err(Error::TypeError("match: (match expr arms...)".into()));
         }
-        let scrut = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
+        let mut scrut = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
+        // Matching a trait object back down to concrete types: unwrap the fat
+        // box to the `Sexpr` inside and let the existing `Sexpr` downcast
+        // patterns do the rest (`check_ctor_pattern`'s downcast branch and
+        // `(the T p)`), so there is exactly one runtime type test in the
+        // language rather than a second one just for `:dyn`. Correctly
+        // non-exhaustive, too: the set of implementing types is open, so a
+        // catch-all arm is required — which falls out of `Sexpr`'s own
+        // eleven-variant exhaustiveness rule with nothing added.
+        if let Type::Dyn(..) = scrut.ty {
+            scrut = Typed { loc: scrut.loc.clone(), expr: Expr::DynValue(Box::new(scrut)), ty: sexpr_ty() };
+        }
         let (adt_name, _) = self.expect_adt(&scrut.ty)?;
         // `match` covers every sum type, `Sexpr` included. Symbol/Sexpr
         // redesign Phase 5 fenced `Sexpr` off here (its structure was to be

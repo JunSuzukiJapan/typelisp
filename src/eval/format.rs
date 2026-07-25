@@ -1414,6 +1414,11 @@ pub(crate) fn render_value(
             out.push_str(&format!("#<scope depth={}>", heap.scope_frame_count(id)))
         }
         Value::Boxed(id) if heap.is_compiled_closure(id) => out.push_str("#<closure>"),
+        // A trait object prints as the value it wraps: the box is a dispatch
+        // mechanism, not part of the datum. (Must precede the float
+        // fall-through, which reads any other `Boxed` as an `f64` — see
+        // `float_of`'s matching negative guard.)
+        Value::Boxed(id) if heap.is_dyn(id) => render_value(heap, enums, heap.dyn_value(id), standard, out),
         Value::Boxed(id) => out.push_str(&trim_float(heap.float_value(id))),
         Value::Cons(_) => {
             out.push('(');

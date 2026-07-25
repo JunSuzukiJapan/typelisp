@@ -4288,7 +4288,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
         // `Sexpr::Sym`, so `eq`/`eql` reuse the `Sexpr` comparisons (interned
         // id identity — same name => same id => `eq`).
         return match method {
-            "eq" => Some(sexpr_eq(args)),
+            "eq" => Some(sexpr_eq(heap, args)),
             "eql" => Some(sexpr_eql(heap, args)),
             _ => None,
         };
@@ -4303,7 +4303,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             // are `prelude.rs` free functions (structural recursion via
             // `match`), not registered here, the same as `length`/`append`
             // for `Sexpr` lists.
-            "eq" => Some(sexpr_eq(args)),
+            "eq" => Some(sexpr_eq(heap, args)),
             "eql" => Some(sexpr_eql(heap, args)),
             _ => None,
         };
@@ -6423,8 +6423,10 @@ fn bool_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// `eq` on `Sexpr`: compares the underlying `mem::Value` directly (see
 /// `registry::sexpr_assoc`'s doc comment for why this matches CL's `eq`
 /// semantics — cons identity, scalar/symbol value equality).
-fn sexpr_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    Ok(RtValue::Bool(rt_sexpr(&args[0])? == rt_sexpr(&args[1])?))
+fn sexpr_eq(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let a = strip_dyn(heap, rt_sexpr(&args[0])?);
+    let b = strip_dyn(heap, rt_sexpr(&args[1])?);
+    Ok(RtValue::Bool(a == b))
 }
 
 /// `eql` on `Sexpr`: CL's `eql` is `eq` plus "two numbers of the same type
@@ -6449,11 +6451,26 @@ fn sexpr_eql(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Bool(eql_val(heap, a, b)))
 }
 
+/// The concrete value inside a trait object, or `v` unchanged. Comparison
+/// (like printing) sees straight through a `BoxedObj::Dyn`: the box is a
+/// dispatch mechanism, and — since it is usually created by an *implicit*
+/// coercion at a `:dyn` parameter — letting it change the answer of `eq`/
+/// `equal` would make an invisible conversion observable. Applied at the
+/// entry of `eql_val`/`sexpr_equal_val`/`sexpr_equalp_val`, so it covers
+/// nested positions through their recursion too.
+fn strip_dyn(heap: &Heap, v: Value) -> Value {
+    match v {
+        Value::Boxed(id) if heap.is_dyn(id) => heap.dyn_value(id),
+        other => other,
+    }
+}
+
 /// The scalar core of `eql` on two `Sexpr` payloads: `==` (plain `Value`
 /// identity/value equality) except two separately-boxed but equal `Float`s,
 /// which are `eql` by value — see [`sexpr_eql`]. Shared by [`sexpr_equal`]/
 /// [`sexpr_equalp`] as their atom-comparison base case.
 fn eql_val(heap: &Heap, a: Value, b: Value) -> bool {
+    let (a, b) = (strip_dyn(heap, a), strip_dyn(heap, b));
     if let (Value::Boxed(ia), Value::Boxed(ib)) = (a, b) {
         if heap.is_float(ia) && heap.is_float(ib) {
             return heap.float_value(ia) == heap.float_value(ib);
@@ -6479,6 +6496,7 @@ fn eql_val(heap: &Heap, a: Value, b: Value) -> bool {
 /// Phase 4b repurposes to a generic `cons<T,U>` pair). The self-hosting
 /// compiler (`compiler.rs`) still calls it from interpreted code.
 fn sexpr_equal_val(heap: &Heap, a: Value, b: Value) -> bool {
+    let (a, b) = (strip_dyn(heap, a), strip_dyn(heap, b));
     match (a, b) {
         (Value::Cons(_), Value::Cons(_)) => {
             let (Ok(ca), Ok(cb)) = (heap.car(a), heap.car(b)) else { return false };
@@ -6520,6 +6538,7 @@ fn numeric_as_ratio(heap: &Heap, v: Value) -> Option<BigRational> {
 /// same-type requirement. Same Phase 5 migration from a prelude
 /// `match`-based `defun` to a Rust builtin.
 fn sexpr_equalp_val(heap: &Heap, a: Value, b: Value) -> bool {
+    let (a, b) = (strip_dyn(heap, a), strip_dyn(heap, b));
     if let (Some(x), Some(y)) = (numeric_as_ratio(heap, a), numeric_as_ratio(heap, b)) {
         return x == y;
     }

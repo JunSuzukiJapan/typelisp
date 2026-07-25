@@ -194,6 +194,7 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 |---|---|---|---|
 | `symbol->string` | `(symbol->string s)` | `Symbol→string` | シンボル名を取り出す |
 | `string->symbol` | `(string->symbol s)` | `string→Symbol` | 文字列からシンボルを作る（intern） |
+| `keywordp` | `(keywordp s)` | `Symbol→bool` | キーワード（`:name`）か。コロンは名前の一部なので判定は先頭文字（[syntax.md](syntax.md) §1） |
 | `equal` | `(equal a b)` | `(Sexpr,Sexpr)→bool` | 構造的等価（`Cons` は再帰、`Str` は内容比較） |
 | `equalp` | `(equalp a b)` | `(Sexpr,Sexpr)→bool` | `equal` に加え大文字小文字無視・数値の型跨ぎ比較 |
 

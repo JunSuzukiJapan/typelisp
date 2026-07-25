@@ -21,6 +21,13 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   `#\Tab` `#\Return` `#\Page` `#\Nul`（`#\Null` も可）`#\Backspace`。名前は大文字小文字を区別しない。
 - **文字列**: `"..."`。エスケープは `\n` `\t` `\r` `\0` `\\` `\"`（それ以外の `\x` はそのまま `x`）。
 - **シンボル**: 英数字・記号を含む任意のトークン（`+` `<=` `my-func` など）。
+- **キーワード**: `:name` のようにコロンで始まるシンボル（CL 準拠）。自己評価する——束縛を探さず
+  それ自身の値になり、静的型は `symbol`。同名なら常に同一オブジェクト（`(eq :foo :FOO)` は真。
+  他のシンボル同様に小文字化される）。コロン自体は名前の一部で、`(symbol->string :foo)` は
+  `":foo"`（typelisp にはパッケージ機構が無いため、CL の `symbol-name` とは異なる）。
+  `:` 単独や `:a:b` のように追加のコロンを含むものは読み取りエラー。判定は `keywordp`。
+  先頭が `::` のものはキーワードではなく絶対パス（下記）。
+  なお `:dyn` は型位置専用の予約キーワードで、それ以外の場所に書くとエラーになる（§2 参照）。
 - **リスト**: `(a b c)`。ドット対 `(a . b)` も読み取り可能。
 - **空リスト `()`**: 文脈によって `Unit` 型の値、または `Sexpr` 型の `Nil` になる。
 - **quote/quasiquote/unquote**:
@@ -48,6 +55,12 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - **ジェネリック型**: `Name<T1,T2,...>`（空白なしの1トークンとして読み取られ、内部で分解される）。
   例: `Option<i32>` `Result<i32,Error>` `HashTable<string,i32>` `Vector<T>`。
 - **修飾型名**: `module::Type` のように `::` で修飾できる。
+- **trait オブジェクト型**: `:dyn Trait`（空白区切りの2語で1つの型）。実行時に具象型が決まる値を
+  表し、trait のメソッド呼び出しは vtable 経由の動的ディスパッチになる。関連型を持つ trait は
+  宣言順に位置指定で固定する（`:dyn Iter<i32>` は `Item` を `i32` に固定）。ジェネリック引数の
+  内側にも書ける: `Vector<:dyn Drawable>` `HashTable<string, :dyn Drawable>`。
+  具象値は期待位置で自動的に箱詰めされ、明示形は `(as :dyn Trait 式)`。
+  `:dyn` を型位置以外に書くとエラー。詳細は [dev/language-design.md](dev/language-design.md) §5.2。
 - 組み込みジェネリック型: `Option<T>`（`Some(T)` / `None`）、`Result<T,E>`（`Ok(T)` / `Err(E)`）、
   `Error`、`Sexpr`、`HashTable<K,V>`、`Vector<T>`。詳細は functions.md を参照。
 
@@ -161,6 +174,25 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 **`Eq`**（`equals`／`not-equals`）・**`Ord`**（`less`／`less-equal`／`greater`／`greater-equal`）を
 提供し、主要なスカラ型と `cons-cell<A,B>` に実装済み（詳細は [functions.md](functions.md) §12・§12.1）。
 自前のコレクション型に `Iter` を `impl` すれば `doiter`（§5）や `map`／`filter`／`sort` 等がそのまま使える。
+
+トレイトの呼び出しは既定で**静的**（レシーバの静的型で解決）。実行時に具象型が決まる値を扱いたい
+場合は trait オブジェクト型 `:dyn Trait`（§2）を使うと vtable 経由の動的ディスパッチになる:
+
+```lisp
+(deftrait Drawable (draw ((self Self)) string))
+(defstruct circle (r i32))
+(defstruct square (side i32))
+(impl Drawable circle (draw ((self Self)) string "circle"))
+(impl Drawable square (draw ((self Self)) string "square"))
+
+(defun render-all ((xs Vector<:dyn Drawable>)) ()
+  (doiter (d (iter xs)) (println "~a" (draw d))))   ; 1つの呼び出し地点、実装ごとの答え
+```
+
+`:dyn Trait` にできるのは「全メソッドが `self` レシーバを持ち、`Self` をレシーバ以外に使わず、
+メソッド自身がジェネリックでも可変長でもない」トレイトだけ。箱に入れられるのはヒープ表現を持つ型
+（`defstruct`/`defenum` 等）で、プリミティブ型は入れられない。詳細と設計理由は
+[dev/language-design.md](dev/language-design.md) §5.2。
 
 ### module / use — 名前空間
 
@@ -302,6 +334,18 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   `pattern` へ渡す。可変な struct の同一性を保ったまま取り出せる唯一の書き方であり、`Vector<T>`/
   `HashTable<K,V>` を `Sexpr` から取り出す唯一の手段でもある（両者はフィールド分解形を持たない）。
   例: `(the point p)` の後で `(setf p::x 9)` すればリスト内の元インスタンスにも反映される。
+
+**trait オブジェクト（`:dyn Trait`、§2）のスクルーティニー**にも同じ downcast パターンがそのまま
+使える——`match` は箱を外してから上の `Sexpr` パターン機構に渡すので、追加の構文はない。実装型の
+集合は開いているので網羅にはならず、`_` が必須:
+
+```lisp
+(defun area ((d :dyn Drawable)) i32
+  (match d
+    ((circle r) (* 3 (* r r)))     ; 型名先頭のフィールド分解
+    ((the square s) (* s::side s::side))
+    (_ 0)))
+```
 
 downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本来の11変種のカバレッジには数えない
 （downcast パターンだけを並べた `match` は `_` で閉じる必要がある）。ジェネリックな ADT
