@@ -1091,6 +1091,9 @@ impl Interp {
             Expr::Bool(b) => Ok(RtValue::Bool(*b)),
             Expr::Char(c) => Ok(RtValue::Char(*c)),
             Expr::Str(s) => Ok(RtValue::Str(s.as_str().into())),
+            // A keyword literal is its own interned symbol — the same carrier
+            // a `Sexpr::Sym` holds, so `(eq :foo :foo)` is true for free.
+            Expr::SymLit(name) => Ok(RtValue::Sexpr(heap.intern_symbol(name))),
             Expr::Unit => Ok(RtValue::Unit),
             Expr::Var(n) => env_get(env, n)
                 .map(|s| s.get(heap))

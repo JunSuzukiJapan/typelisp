@@ -152,6 +152,16 @@ pub enum Expr {
     Bool(bool),
     Char(char),
     Str(String),
+    /// A keyword literal (`:name`) — CL's self-evaluating symbol. Its static
+    /// type is the ordinary [`Type::Symbol`](crate::Type), and its runtime
+    /// value the interned `Value::Symbol` for the token *including* the
+    /// leading colon, so "same name -> same object" falls out of the heap's
+    /// existing symbol interning with no separate keyword table. Produced by
+    /// `Checker::check_inner`'s `Value::Symbol` case before any variable /
+    /// global / function lookup: a keyword can never name a binding. The
+    /// reader (`read::reader::validate_keyword`) has already rejected
+    /// malformed spellings (`:`, `:a:b`) by the time this is built.
+    SymLit(String),
     /// The unit value `()`.
     Unit,
     /// A reference to a bound (local) variable.

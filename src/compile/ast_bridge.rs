@@ -1022,6 +1022,11 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         // plan (`docs/implementation-log.md`). See [`str_literal_form`]'s doc
         // comment for why not a pre-allocated `Value::Str`.
         Expr::Str(s) => str_literal_form(heap, s),
+        // A keyword literal lowers exactly like a quoted symbol: the island's
+        // `compile-construct-sym` interns the name at runtime
+        // (`rt_intern_symbol`), which is the same value the interpreter's
+        // `Expr::SymLit` arm produces.
+        Expr::SymLit(name) => translate_quote(heap, &QuotedSexpr::Sym(name.clone())),
         Expr::Unit => tagged(heap, "unit", &[]),
         // Always `(var name)`, even when `name` is a currently in-scope
         // `labels` sibling/self (`direct.contains(name)`) — that only

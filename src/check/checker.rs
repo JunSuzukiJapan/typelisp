@@ -3557,7 +3557,16 @@ impl Checker {
             }
             Value::Symbol(id) => {
                 let name = heap.symbol_name(id);
-                if let Some(t) = env.get(name) {
+                // A keyword (`:name`) is self-evaluating (CL), so it is
+                // matched *before* every binding lookup below — it can never
+                // name a variable, global, function or method. `::foo` is the
+                // absolute-path syntax, not a keyword, and never reaches here
+                // as a `Value::Symbol` (the reader makes it a `Value::Path`);
+                // the `!starts_with("::")` guard keeps that distinction
+                // explicit alongside `read::reader::validate_keyword`'s.
+                if name.starts_with(':') && !name.starts_with("::") {
+                    Typed { loc: None, expr: Expr::SymLit(name.to_string()), ty: Type::Symbol }
+                } else if let Some(t) = env.get(name) {
                     Typed { loc: None, expr: Expr::Var(name.to_string()), ty: t.clone() }
                 } else if let Some((path, vi)) = self.resolve_global(name) {
                     Typed { loc: None, expr: Expr::Global(self.mk_ref(vec![name.to_string()], path)), ty: vi.ty }

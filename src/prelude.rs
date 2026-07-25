@@ -315,6 +315,16 @@ pub const SOURCE: &str = r#"
 (defun flip<A,B,C> ((f (fn (A B) C))) (fn (B A) C)
   (lambda ((y B) (x A)) C (f x y)))
 
+;; CL's `keywordp`: is this symbol a keyword (`:name`)? Written as a plain
+;; typelisp `defun` over `symbol->string` rather than a Rust builtin — the
+;; leading colon *is* part of the interned name (there is no separate keyword
+;; package/table, see `Expr::SymLit`), so the test is textual and needs no
+;; runtime support of its own. The reader has already rejected every
+;; malformed spelling, so a leading `:` is both necessary and sufficient.
+(defun keywordp ((s symbol)) bool
+  (let ((n (symbol->string s)))
+    (if (> (length n) 0) (eql (ref n 0) #\:) false)))
+
 ;; CL's numeric catalog beyond the primitive machine operations
 ;; (`+`/`-`/`*`/`/`/`mod`/comparisons/conversions, which are Rust builtins in
 ;; `registry.rs`): `abs`/`signum` (all numbers), `rem` (all reals), `gcd`/`lcm`

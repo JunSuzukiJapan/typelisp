@@ -143,6 +143,7 @@ fn expr_children(e: &Expr) -> Vec<&Typed> {
         | Expr::Bool(_)
         | Expr::Char(_)
         | Expr::Str(_)
+        | Expr::SymLit(_)
         | Expr::Unit
         | Expr::Var(_)
         | Expr::Global(_)

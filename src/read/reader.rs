@@ -523,6 +523,7 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
         cur.next();
     }
     // tok is non-empty: read_datum only dispatches here on a non-delimiter.
+    validate_keyword(&tok)?;
     if let Some(v) = parse_number(heap, &tok)? {
         return Ok(v);
     }
@@ -549,6 +550,31 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
             Ok(heap.intern_symbol(&tok))
         }
     }
+}
+
+/// Reject malformed keyword tokens. A keyword is a token starting with a
+/// single `:` (CL's self-evaluating `:name`, `Checker::check_inner`'s
+/// `Value::Symbol` case) — it carries no package/path structure, so any
+/// further `:` in it is a mistake rather than a path separator.
+///
+/// The leading-`::` exclusion is load-bearing: `::foo` is the *absolute path*
+/// syntax (`split_path_top_level` turns it into a `Value::Path` whose first
+/// segment is empty, "from root"), not a keyword. Only a lone leading `:`
+/// starts a keyword.
+fn validate_keyword(tok: &str) -> Result<(), Error> {
+    if !tok.starts_with(':') || tok.starts_with("::") {
+        return Ok(());
+    }
+    if tok.len() == 1 {
+        return Err(Error::ReadError("`:` alone is not a keyword — write `:name`".to_string()));
+    }
+    if tok[1..].contains(':') {
+        return Err(Error::ReadError(format!(
+            "`:` may not appear inside a keyword: `{}` (a keyword has no path segments)",
+            tok
+        )));
+    }
+    Ok(())
 }
 
 /// Split a token on `::` occurring at `<>` nesting depth 0, so that
