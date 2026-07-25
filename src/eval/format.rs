@@ -983,7 +983,7 @@ fn float_of(heap: &Heap, v: Value) -> Option<f64> {
         Value::Boxed(id) if heap.is_bignum(id) => heap.bignum_value(id).to_f64(),
         Value::Boxed(id) if heap.is_ratio(id) => heap.ratio_value(id).to_f64(),
         Value::Boxed(id) if !heap.is_struct(id) && !heap.is_enum(id) && !heap.is_hashtable(id)
-            && !heap.is_scope(id) && !heap.is_compiled_closure(id) =>
+            && !heap.is_scope(id) && !heap.is_compiled_closure(id) && !heap.is_dyn(id) =>
         {
             Some(heap.float_value(id))
         }

@@ -416,3 +416,60 @@ fn unquote_splicing_spans_both_prefix_chars() {
     // `unquote-splicing` covers the two prefix chars `,@`.
     assert_eq!(elem_spans(&h, splice), vec![(1, 3, 1, 5), (1, 5, 1, 7)]);
 }
+
+// ---- angle-bracket token extension (`:dyn` inside a generic argument) ----
+
+/// A generic argument may itself be a two-word `:dyn Trait` type, so
+/// `read_atom` keeps reading past whitespace while `<>` are unbalanced. The
+/// scan is speculative: anything that doesn't close on the same line, or that
+/// runs into a hard delimiter, rewinds to the ordinary short token.
+#[test]
+fn a_generic_type_token_may_contain_a_spaced_dyn_argument() {
+    roundtrip("vector<:dyn drawable>", "vector<:dyn drawable>");
+    roundtrip("hashtable<string, :dyn drawable>", "hashtable<string, :dyn drawable>");
+    roundtrip("vector<:dyn iter<i32>>", "vector<:dyn iter<i32>>");
+}
+
+#[test]
+fn a_leading_angle_bracket_is_still_the_comparison_operator() {
+    // `<` starts the token, so it never opens a bracket — otherwise `(< a b)`
+    // would swallow the rest of the form.
+    roundtrip("(< a b)", "(< a b)");
+    roundtrip("(<= a b)", "(<= a b)");
+    roundtrip("(> a b)", "(> a b)");
+}
+
+#[test]
+fn an_operator_name_ending_in_an_angle_bracket_still_reads_as_three_data() {
+    // `string<` opens a bracket that never closes; hitting `)` rewinds the
+    // speculative scan, leaving today's exact tokenization.
+    roundtrip("(string< a b)", "(string< a b)");
+    roundtrip("(string<= a b)", "(string<= a b)");
+    roundtrip("(a<b c)", "(a<b c)");
+}
+
+#[test]
+fn an_unbalanced_angle_bracket_rewinds_rather_than_swallowing_the_input() {
+    // No closing `>` before end of input / a newline: the token ends at the
+    // whitespace, exactly as before.
+    roundtrip("(f vector<a)", "(f vector<a)");
+    roundtrip("(f vector<\n i32>)", "(f vector< i32>)");
+}
+
+// ---- `:dyn Trait` joins into one datum ----------------------------------
+
+#[test]
+fn dyn_and_the_following_datum_read_as_one_two_element_list() {
+    // So every type position keeps its "a type is one `Value`" assumption:
+    // `(x :dyn drawable)` is still a 2-element parameter pair.
+    roundtrip(":dyn drawable", "(:dyn drawable)");
+    roundtrip("(x :dyn drawable)", "(x (:dyn drawable))");
+    roundtrip(":dyn iter<i32>", "(:dyn iter<i32>)");
+}
+
+#[test]
+fn a_dyn_with_nothing_after_it_is_a_read_error() {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::new();
+    assert!(r.read_all(&mut h, "(f :dyn)").is_err(), "`:dyn` at the end of a list must not read");
+}

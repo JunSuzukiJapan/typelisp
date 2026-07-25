@@ -683,6 +683,42 @@ impl Heap {
         }
     }
 
+    // ---- trait objects --------------------------------------------------------
+
+    /// Box `value` as a trait object dispatching through vtable `vtable_id` —
+    /// see [`BoxedObj::Dyn`]. Like `alloc_enum`, `vtable_id` is stored
+    /// uninterpreted: which table it names is the interpreter's/runtime's
+    /// business, this layer only carries the number.
+    pub fn alloc_dyn(&mut self, vtable_id: u32, value: Value) -> Value {
+        self.alloc_boxed(BoxedObj::Dyn { vtable_id, value })
+    }
+
+    /// True if `id` holds a `BoxedObj::Dyn`, for a caller decoding an unknown
+    /// `Value::Boxed` — note this is `false` for the *concrete* value inside,
+    /// so `is_struct`/`is_enum` stay unaffected by boxing.
+    pub fn is_dyn(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Dyn { .. }))
+    }
+
+    /// The vtable identifier of a trait object. Panics if `id` doesn't hold a
+    /// `BoxedObj::Dyn` — same internal-invariant-trap convention as
+    /// [`enum_variant`](Self::enum_variant).
+    pub fn dyn_vtable_id(&self, id: BoxId) -> u32 {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Dyn { vtable_id, .. }) => *vtable_id,
+            _ => panic!("BoxId does not hold a Dyn"),
+        }
+    }
+
+    /// The concrete value inside a trait object. Panics if `id` doesn't hold
+    /// a `BoxedObj::Dyn`.
+    pub fn dyn_value(&self, id: BoxId) -> Value {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Dyn { value, .. }) => *value,
+            _ => panic!("BoxId does not hold a Dyn"),
+        }
+    }
+
     // ---- cells ----------------------------------------------------------------
 
     /// Store a mutable variable slot holding `v`, returning an owning
@@ -1219,6 +1255,11 @@ impl Heap {
                     stack.push(v);
                 }
             }
+            // A live trait object keeps the concrete value it wraps live.
+            // `vtable_id` names a table outside the heap whose entries are
+            // method identities and raw function pointers, so there is
+            // nothing else here to trace (see [`BoxedObj::Dyn`]).
+            BoxedObj::Dyn { value, .. } => stack.push(*value),
             BoxedObj::Struct { payload: StructPayload::Map(map), .. } => {
                 for (k, &v) in map {
                     if let MemHashKey::Str(id) = k {

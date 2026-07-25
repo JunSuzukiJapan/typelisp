@@ -241,6 +241,25 @@ pub(crate) enum BoxedObj {
     /// exact raw word it stored (`rt_closure_env_get` re-encodes masked
     /// slots and unwraps unmasked ones).
     CompiledClosure { fn_ptr: usize, env: Vec<Value>, sexpr_mask: u64 },
+    /// A trait object (`:dyn Trait`, TODO T4): a vtable identifier alongside
+    /// the concrete value it dispatches for.
+    ///
+    /// This is the C++ vtbl scheme with the vptr moved off the *object* and
+    /// onto the *reference* — one vtable per (concrete type, trait) pair,
+    /// chosen where the value is boxed (both are statically known there), so
+    /// a call site indexes a constant slot and jumps. Keeping the pointer
+    /// here rather than in [`Struct`]/[`Enum`] is what lets every existing
+    /// `defstruct`/`defenum` value be used as a trait object with no change
+    /// to its own layout, its allocation path (`rt_struct_new`/`rt_data_new`),
+    /// or the cost of code that never mentions `:dyn` — and it sidesteps the
+    /// one-vptr-per-object limit, since a type may implement many traits.
+    ///
+    /// `vtable_id` indexes tables held *outside* the heap (the interpreter's
+    /// `Interp::vtables` and compiled code's `typelisp_rt` vtable registry),
+    /// whose entries are method identities and raw function pointers — never
+    /// heap values. So the mark phase has exactly one thing to trace here:
+    /// `value`.
+    Dyn { vtable_id: u32, value: Value },
 }
 
 /// A `HashTable<K,V>` key at the mem layer — the runtime encoding of a

@@ -1679,6 +1679,15 @@ impl Checker {
                     args.iter().map(|a| self.canon(a)).collect(),
                 )
             }
+            // A trait object's head names a *trait*, which lives in
+            // `Namespace::traits` rather than `types` — so it resolves
+            // through `resolve_trait_name`, not `resolve_type_name`. An
+            // unknown name is left as written for `check_object_safe` to
+            // report; `canon` itself never fails.
+            Type::Dyn(trait_path, pins) => Type::Dyn(
+                self.resolve_trait_path(trait_path).unwrap_or_else(|| trait_path.clone()),
+                pins.iter().map(|p| self.canon(p)).collect(),
+            ),
             Type::Fn(ps, rest, r) => Type::Fn(
                 ps.iter().map(|p| self.canon(p)).collect(),
                 rest.as_ref().map(|t| Box::new(self.canon(t))),
@@ -2135,6 +2144,12 @@ impl Checker {
                 }
                 _ => false,
             },
+            // A trait object is always a `BoxedObj::Dyn` fat box, whatever
+            // the concrete value inside is — so it is heap-repr by
+            // construction. (Not covered by the `_` arm below, which would
+            // silently answer `false` and make every `Type::Dyn` unstorable
+            // in a `Sexpr`.)
+            Type::Dyn(..) => true,
             _ => false,
         }
     }
@@ -2183,6 +2198,9 @@ impl Checker {
                     || matches!(rest, Some(t) if self.type_is_open(t))
                     || self.type_is_open(r)
             }
+            // The trait head is a trait, never a type variable; only the
+            // associated-type pins can still be open.
+            Type::Dyn(_, pins) => pins.iter().any(|p| self.type_is_open(p)),
             _ => false,
         }
     }
@@ -2797,6 +2815,23 @@ impl Checker {
             ns.pop();
         }
         Err(Error::TypeError(format!("impl: unknown trait `{}`", name)))
+    }
+
+    /// [`Self::resolve_trait_name`] for a written [`Path`], returning `None`
+    /// instead of an error: a bare name searches the ancestor module chain
+    /// (the same walk), a qualified one is looked up in the named module.
+    /// Used by `canon` to normalize a [`Type::Dyn`]'s trait head, which must
+    /// not fail — an unresolvable trait is reported later, with a message
+    /// about the trait object rather than about an `impl`.
+    fn resolve_trait_path(&self, p: &Path) -> Option<Path> {
+        if p.is_simple() {
+            return self.resolve_trait_name(p.local()).ok();
+        }
+        self.reg
+            .root
+            .module(p.parent())
+            .and_then(|m| m.traits.get(p.local()))
+            .map(|td| td.name.clone())
     }
 
     /// Build a proper list `Value` from `items`, in order — the inverse of
@@ -3714,6 +3749,19 @@ impl Checker {
             }
         };
         match head.as_str() {
+            // The reader joins `:dyn Trait` into the list `(:dyn Trait)`
+            // wherever it appears, so a `:dyn` written outside a type
+            // position lands here as a call. Reject it by name rather than
+            // letting it fall through to "unknown function `:dyn`" — the
+            // point of spelling trait objects with a reserved keyword is
+            // that a misplaced one is diagnosed as such (and that an editor
+            // can highlight it unambiguously).
+            ":dyn" => {
+                return Err(Error::TypeError(
+                    "`:dyn` may only appear in a type position (a parameter/field/return type, or a type argument)"
+                        .to_string(),
+                ))
+            }
             "if" => return self.check_if(heap, interp, env, args, arg_locs, expected),
             "let" => return self.check_let(heap, interp, env, args, arg_locs, expected),
             "let*" => return self.check_let_star(heap, interp, env, args, arg_locs, expected),
@@ -6179,6 +6227,9 @@ fn type_has_param(t: &Type, params: &HashSet<String>) -> bool {
                 || matches!(rest, Some(t) if type_has_param(t, params))
                 || type_has_param(r, params)
         }
+        // Only the associated-type pins can mention a parameter — the head
+        // is a trait name, never a type variable.
+        Type::Dyn(_, pins) => pins.iter().any(|p| type_has_param(p, params)),
         _ => false,
     }
 }
@@ -6213,6 +6264,13 @@ fn mangle_type(t: &Type) -> String {
         Type::Named(p, args) if args.is_empty() => p.to_string(),
         Type::Named(p, args) => {
             format!("{}<{}>", p, args.iter().map(mangle_type).collect::<Vec<_>>().join(","))
+        }
+        // The space is load-bearing, the same way `mangled_method_name`'s is:
+        // the reader treats it as a token boundary outside `<>`, so no
+        // user-written name can ever collide with a mangled one.
+        Type::Dyn(p, pins) if pins.is_empty() => format!("dyn {}", p),
+        Type::Dyn(p, pins) => {
+            format!("dyn {}<{}>", p, pins.iter().map(mangle_type).collect::<Vec<_>>().join(","))
         }
         Type::Fn(ps, rest, r) => {
             let mut inner: Vec<String> = ps.iter().map(mangle_type).collect();
@@ -6273,6 +6331,9 @@ pub(crate) fn subst_apply(t: &Type, subst: &HashMap<String, Type>) -> Type {
             rest.as_ref().map(|t| Box::new(subst_apply(t, subst))),
             Box::new(subst_apply(r, subst)),
         ),
+        // Only the associated-type pins can mention a substitutable
+        // variable; the head names a trait.
+        Type::Dyn(p, pins) => Type::Dyn(p.clone(), pins.iter().map(|t| subst_apply(t, subst)).collect()),
         other => other.clone(),
     }
 }
@@ -6324,6 +6385,15 @@ fn unify(
     }
     match (tmpl, actual) {
         (Type::Named(n1, a1), Type::Named(n2, a2)) if n1 == n2 && a1.len() == a2.len() => {
+            for (t, a) in a1.iter().zip(a2.iter()) {
+                unify(params, t, a, subst)?;
+            }
+            Ok(())
+        }
+        // Two trait objects unify when they name the same trait and their
+        // associated-type pins unify pairwise — `:dyn Iter<T>` against
+        // `:dyn Iter<i32>` binds `T`.
+        (Type::Dyn(n1, a1), Type::Dyn(n2, a2)) if n1 == n2 && a1.len() == a2.len() => {
             for (t, a) in a1.iter().zip(a2.iter()) {
                 unify(params, t, a, subst)?;
             }

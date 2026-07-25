@@ -615,6 +615,9 @@ pub(crate) fn struct_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &Hash
         // `compile-sexpr-field` in `compiler.rs` for the kind-`6` encode/
         // decode this now routes a `Fn`-typed field through unchanged.
         Type::Fn(..) => 6,
+        // A trait object is a tagged `Sexpr` at a `BoxedObj::Dyn` fat box —
+        // the same passthrough kind as any other boxed value.
+        Type::Dyn(..) => 6,
         _ => 0,
     }
 }

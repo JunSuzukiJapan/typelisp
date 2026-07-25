@@ -734,6 +734,9 @@ impl Interp {
             Type::Named(p, _) if is_sexpr_type(p) || *p == Path::root("hashtable") || matches!(self.root.borrow().find_type(p), Some(scope::TypeEntry::Struct)) => true,
             Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => self.is_heap_repr_ty(&args[0], seen),
             Type::Named(p, args) if self.is_enum_path(p) => self.enum_fields_representable(p, args, seen),
+            // A trait object is a `BoxedObj::Dyn` fat box — the twin of
+            // `Checker::is_heap_repr_seen`'s `Type::Dyn` arm.
+            Type::Dyn(..) => true,
             _ => false,
         }
     }

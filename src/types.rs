@@ -136,6 +136,19 @@ pub enum Type {
     /// user structs, and (during checking) generic type variables (a
     /// single-segment [`Path`]).
     Named(Path, Vec<Type>),
+    /// A trait object `:dyn Trait` / `:dyn Trait<Pin,...>` — a value whose
+    /// concrete type is only known at run time, dispatched through a vtable
+    /// (TODO T4). The [`Path`] is the *trait*'s fully-qualified path (traits
+    /// live in `Namespace::traits`, a different table from types, so this is
+    /// deliberately not a `Named`); the `Vec<Type>` pins the trait's
+    /// associated types, positionally in `TraitDef::assoc_types` declaration
+    /// order — `:dyn Iter<i32>` is `Iter` with `Item = i32`, the counterpart
+    /// of Rust's `dyn Iterator<Item = i32>`.
+    ///
+    /// A `Dyn` is always heap-represented (`Checker::is_heap_repr`): its
+    /// runtime value is a `BoxedObj::Dyn` fat box holding the vtable id
+    /// alongside the concrete value.
+    Dyn(Path, Vec<Type>),
     /// A function type `(fn (params...) ret)`, or — when the second field is
     /// `Some` — a variadic function type `(fn (params... &rest elem) ret)`:
     /// every call-site argument from that point on must have type `elem`
@@ -202,7 +215,7 @@ pub fn prim_type_path(ty: &Type) -> Option<Path> {
         Type::Char => "char",
         Type::Str => "string",
         Type::Symbol => "symbol",
-        Type::Unit | Type::Never | Type::Named(..) | Type::Fn(..) => return None,
+        Type::Unit | Type::Never | Type::Named(..) | Type::Dyn(..) | Type::Fn(..) => return None,
     };
     Some(Path::root(name))
 }
@@ -224,8 +237,32 @@ pub fn parse_type(heap: &Heap, v: Value) -> Result<Type, Error> {
                 .join("::");
             Ok(parse_type_name(&name))
         }
+        // `(:dyn Trait)` — the reader's joined form of the two-word `:dyn
+        // Trait` spelling (`read::reader::read_datum`). Checked before
+        // `parse_fn_type` since both are lists.
+        Value::Cons(_) if is_dyn_form(heap, v) => parse_dyn_type(heap, v),
         Value::Cons(_) => parse_fn_type(heap, v),
         other => Err(Error::TypeError(format!("not a type expression: {:?}", other))),
+    }
+}
+
+/// Whether `v` is a `(:dyn ...)` list.
+pub fn is_dyn_form(heap: &Heap, v: Value) -> bool {
+    matches!(heap.car(v), Ok(Value::Symbol(id)) if heap.symbol_name(id) == ":dyn")
+}
+
+/// Parse the reader-joined `(:dyn Trait)` / `(:dyn Trait<Pin,...>)` form. The
+/// trait name is parsed with the ordinary type-name grammar, so a qualified
+/// and/or generic-looking spelling works; its "generic arguments" are the
+/// associated-type pins, not type arguments (see [`Type::Dyn`]).
+fn parse_dyn_type(heap: &Heap, v: Value) -> Result<Type, Error> {
+    let elems = heap.list_to_vec(v)?;
+    if elems.len() != 2 {
+        return Err(Error::TypeError("`:dyn` must be followed by exactly one trait name".to_string()));
+    }
+    match parse_type(heap, elems[1])? {
+        Type::Named(trait_path, pins) => Ok(Type::Dyn(trait_path, pins)),
+        other => Err(Error::TypeError(format!("`:dyn` must be followed by a trait name, found `{:?}`", other))),
     }
 }
 
@@ -293,6 +330,7 @@ fn parse_type_name(name: &str) -> Type {
 fn parse_qualified_generic<'a>(toks: &mut Peekable<NameLexer<'a>>) -> (Vec<String>, Vec<Type>) {
     let mut segs = Vec::new();
     loop {
+        skip_space(toks);
         if let Some(NameTok::Ident(s)) = toks.next() {
             segs.push(s.to_string());
         }
@@ -306,12 +344,13 @@ fn parse_qualified_generic<'a>(toks: &mut Peekable<NameLexer<'a>>) -> (Vec<Strin
     let mut args = Vec::new();
     if matches!(toks.peek(), Some(NameTok::Lt)) {
         toks.next(); // '<'
+        skip_space(toks);
         if matches!(toks.peek(), Some(NameTok::Gt)) {
             toks.next(); // empty argument list, e.g. `Foo<>`
         } else {
             loop {
-                let (a_segs, a_args) = parse_qualified_generic(toks);
-                args.push(named_or_primitive(a_segs, a_args));
+                args.push(parse_type_arg(toks));
+                skip_space(toks);
                 match toks.next() {
                     Some(NameTok::Comma) => continue,
                     _ => break, // '>' (or a malformed, premature end) closes the list
@@ -320,6 +359,31 @@ fn parse_qualified_generic<'a>(toks: &mut Peekable<NameLexer<'a>>) -> (Vec<Strin
         }
     }
     (segs, args)
+}
+
+/// Skip a run of spaces. Only a reader-extended token can contain one
+/// (`NameTok::Space`), but once one does, spaces may separate any two tokens
+/// in it — `hashtable<string, :dyn drawable>` has one after the comma and
+/// another after `:dyn`.
+fn skip_space<'a>(toks: &mut Peekable<NameLexer<'a>>) {
+    while matches!(toks.peek(), Some(NameTok::Space)) {
+        toks.next();
+    }
+}
+
+/// One generic argument. Almost always an ordinary qualified/generic type
+/// name, but `:dyn Trait` may appear here too — the nested spelling of the
+/// same trait-object type `parse_dyn_type` builds from the datum-level form,
+/// e.g. the element type of `Vector<:dyn Drawable>`.
+fn parse_type_arg<'a>(toks: &mut Peekable<NameLexer<'a>>) -> Type {
+    skip_space(toks);
+    if matches!(toks.peek(), Some(NameTok::Ident(s)) if *s == ":dyn") {
+        toks.next(); // `:dyn`
+        let (segs, pins) = parse_qualified_generic(toks);
+        return Type::Dyn(Path::from_segments(segs), pins);
+    }
+    let (segs, args) = parse_qualified_generic(toks);
+    named_or_primitive(segs, args)
 }
 
 /// A non-generic, single-segment name names a primitive; anything else is a

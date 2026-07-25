@@ -163,6 +163,17 @@ impl Cursor {
     fn loc(&self) -> Loc {
         Loc::new(Rc::clone(&self.file), self.line, self.col)
     }
+    /// Snapshot the full cursor state, for a speculative scan that may need to
+    /// be undone ([`read_atom`]'s angle-bracket extension). Line/column are
+    /// part of it so a rewind restores exact `Loc` reporting too.
+    fn mark(&self) -> (usize, u32, u32) {
+        (self.pos, self.line, self.col)
+    }
+    fn reset(&mut self, m: (usize, u32, u32)) {
+        self.pos = m.0;
+        self.line = m.1;
+        self.col = m.2;
+    }
 }
 
 // ----------------------------------------------------------------------
@@ -264,7 +275,27 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
         }
         Some('"') => read_string(cur, heap),
         Some('#') => read_hash(cur, heap),
-        Some(_) => read_atom(cur, heap),
+        Some(_) => {
+            let start = cur.loc();
+            let v = read_atom(cur, heap)?;
+            // `:dyn Trait` (the trait-object type, TODO T4) is written as two
+            // whitespace-separated words, so the reader joins them into the
+            // single datum `(:dyn Trait)` — exactly the treatment `'x` gets.
+            // Every type position (parameter/field pairs, return types, `(fn
+            // ...)` types) can then keep its "a type is one `Value`"
+            // assumption unchanged; `types::parse_type` recognizes the
+            // resulting list. Inside a generic argument the same spelling is
+            // handled a level down, by `extend_angle_token` + the type
+            // parser, since there is no datum boundary there at all.
+            if matches!(v, Value::Symbol(id) if heap.symbol_name(id) == ":dyn") {
+                skip_ws_comments(cur);
+                if matches!(cur.peek(), None | Some(')')) {
+                    return Err(Error::ReadError("`:dyn` must be followed by a trait name".to_string()));
+                }
+                return read_wrapped_body(cur, heap, ":dyn", start);
+            }
+            Ok(v)
+        }
     }
 }
 
@@ -515,12 +546,26 @@ fn read_char(cur: &mut Cursor) -> Result<Value, Error> {
 
 fn read_atom(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
     let mut tok = String::new();
+    // `<>` nesting, so an unterminated generic type token can be extended past
+    // the whitespace that would otherwise end it (see `extend_angle_token`).
+    // A `<` at the *start* of a token never opens a bracket: that's the
+    // comparison operator `<`/`<=`, not a generic argument list. A `>` at
+    // depth 0 likewise stays an ordinary character (`->`, `string>`).
+    let mut depth: i32 = 0;
     while let Some(c) = cur.peek() {
         if is_delimiter(c) {
             break;
         }
+        if c == '<' && !tok.is_empty() {
+            depth += 1;
+        } else if c == '>' && depth > 0 {
+            depth -= 1;
+        }
         tok.push(c);
         cur.next();
+    }
+    if depth > 0 {
+        extend_angle_token(cur, &mut tok, depth);
     }
     // tok is non-empty: read_datum only dispatches here on a non-delimiter.
     validate_keyword(&tok)?;
@@ -548,6 +593,44 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
                 return Ok(heap.intern_path(&segs));
             }
             Ok(heap.intern_symbol(&tok))
+        }
+    }
+}
+
+/// Continue a token whose `<...>` are still unbalanced, letting whitespace
+/// through so a multi-word type argument reads as the single symbol the type
+/// parser expects — `vector<:dyn drawable>` is one token, not the three
+/// (`vector<:dyn`, `drawable>`) plain whitespace-delimited tokenizing would
+/// give. `types::parse_qualified_generic` then re-splits it on the `NameTok::
+/// Space` its lexer now emits.
+///
+/// **Speculative, with full rewind.** If the brackets don't close before a
+/// newline or a hard delimiter (paren / string / quote / comment), both the
+/// cursor and the token are restored and the caller keeps the ordinary short
+/// token. That rewind is what keeps every pre-existing spelling reading
+/// exactly as before, without needing to enumerate the tokens that legally
+/// contain a `<`: `(string< a b)` starts an extension after `string<`, hits
+/// the `)`, and rewinds; so does `(a<b c)`. Only a genuine generic type
+/// token — balanced, on one line, with no parens inside — survives.
+fn extend_angle_token(cur: &mut Cursor, tok: &mut String, mut depth: i32) {
+    let mark = cur.mark();
+    let base_len = tok.len();
+    while depth > 0 {
+        match cur.peek() {
+            None | Some('\n') | Some('\r') | Some('(') | Some(')') | Some('"') | Some('\'') | Some('`') | Some(';') => {
+                cur.reset(mark);
+                tok.truncate(base_len);
+                return;
+            }
+            Some(c) => {
+                if c == '<' {
+                    depth += 1;
+                } else if c == '>' {
+                    depth -= 1;
+                }
+                tok.push(c);
+                cur.next();
+            }
         }
     }
 }
