@@ -644,25 +644,25 @@ fn required_optional_and_rest_combine() {
 #[test]
 fn too_few_args_reports_required_minimum() {
     let e = run_expect_err("(defmacro m (a &optional b) `(quote ,a)) (m)").unwrap_err();
-    assert!(e.contains("at least 1"), "got: {e}");
+    assert!(e.contains("at least 1"), "got: {}", e);
 }
 
 #[test]
 fn too_many_args_reports_the_optional_range() {
     let e = run_expect_err("(defmacro m (a &optional b) `(quote ,a)) (m 1 2 3)").unwrap_err();
-    assert!(e.contains("1 to 2"), "got: {e}");
+    assert!(e.contains("1 to 2"), "got: {}", e);
 }
 
 #[test]
 fn unknown_keyword_is_rejected() {
     let e = run_expect_err("(defmacro m (&key (a 0)) `(quote ,a)) (m :zzz 1)").unwrap_err();
-    assert!(e.contains("unknown &key argument") && e.contains(":zzz"), "got: {e}");
+    assert!(e.contains("unknown &key argument") && e.contains(":zzz"), "got: {}", e);
 }
 
 #[test]
 fn odd_keyword_plist_is_rejected() {
     let e = run_expect_err("(defmacro m (&key (a 0)) `(quote ,a)) (m :a)").unwrap_err();
-    assert!(e.contains("odd number of &key arguments"), "got: {e}");
+    assert!(e.contains("odd number of &key arguments"), "got: {}", e);
 }
 
 #[test]
