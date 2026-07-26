@@ -1,0 +1,52 @@
+;; ASCII キャンバスに図形を描くサンプル。シーンは Vector<:dyn Shape> なので、
+;; 描画ループのたった1つの (paint s cv) が具象型ごとの実装へ動的に振り分けられる。
+;; パースの失敗は種類の違うエラーが Result<T, :dyn Error> の1本にまとまって返る。
+;; このファイルには :dyn Shape という型名が一度も出てこない点にも注目 ── シーンの
+;; 型は parse-scene の戻り型から推論されるので、駆動側は図形の存在すら知らずに済む。
+(use canvas::make-canvas)
+(use canvas::render)
+(use shapes::parse-scene)
+(use shapes::draw-scene)
+(use shapes::list-scene)
+
+;; Error は prelude のトレイトなので、shapes の中身を知らなくてもここで使える。
+;; source をたどると bad-number が包んだ組み込みの ParseIntError まで届く。
+(defun explain ((e :dyn Error)) ()
+  (println "error: ~a" (message e))
+  (match (source e)
+    ((some inner) (println "  caused by: ~a" (message inner)))
+    ((none) ())))
+
+;; 文脈を足さず具象エラーを広げるだけなら prelude の as-dyn-error 一発で済む
+;; (文脈を足す例は shapes.typl の bad-number ── ParseIntError を自前の型で包む)。
+(defun canvas-width ((s string)) Result<i32, :dyn Error>
+  (as-dyn-error (parse-int s)))
+
+(defun lines-of ((a string) (b string) (c string)) Vector<string>
+  (let ((v (the Vector<string> (Vector::new))))
+    (push v a)
+    (push v b)
+    (push v c)
+    v))
+
+(defun run ((width string) (lines Vector<string>)) ()
+  (match (canvas-width width)
+    ((err e) (explain e))
+    ((ok w)
+     (match (parse-scene lines)
+       ((ok scene)
+        (let ((cv (make-canvas w 11)))
+          (draw-scene cv scene)
+          (render cv))
+        (println "shapes:")
+        (list-scene scene))
+       ((err e) (explain e))))))
+
+(run "24" (lines-of "rect 0 0 24 11" "circle 11 5 4" "hline 3 8 18"))
+
+;; 以下は失敗する入力。3つとも別々の具象エラー型だが、explain は :dyn Error を
+;; 1つ受け取るだけで、どれが来たかを知らずに扱える。
+(println "")
+(run "24" (lines-of "rect 0 0 24 11" "star 4 4" "hline 3 8 18"))
+(run "24" (lines-of "rect 0 0 24 11" "circle 11 x 4" "hline 3 8 18"))
+(run "24px" (lines-of "rect 0 0 24 11" "circle 11 5 4" "hline 3 8 18"))
