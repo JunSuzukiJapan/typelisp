@@ -971,6 +971,41 @@ pub const SOURCE: &str = r#"
     (doiter (p it)
       (if (equals (car p) k) (progn (setf result (Option::some p)) (break)) ()))
     result))
+
+;; ---------------------------------------------------------------------------
+;; Pretty-printer controls (CLHS 22.1.1 / 22.2 — the `*print-*` variables the
+;; pretty printer consults).
+;;
+;; CL makes these *special* variables, so a caller rebinds them with `let` for
+;; the extent of one printing operation. typelisp has no dynamic binding, so
+;; they are ordinary assignable globals instead: `(setf *print-pretty* true)`
+;; takes effect from the next `print`/`println`/`format` on and stays in
+;; effect. `Interp::pretty_opts` reads all three fresh at the start of every
+;; printing operation, so an assignment is picked up immediately.
+;;
+;; `*print-pretty*` is `false` by default (CL leaves the initial value
+;; implementation-defined): every existing program keeps its exact current
+;; output, and pretty printing is something a program opts into. `pprint` and
+;; friends pretty-print unconditionally, as CL's do.
+;;
+;; `*print-miser-width*` has no `nil` here — 0 (or less) is "miser style off",
+;; the same meaning CL gives `nil`. Likewise a `*print-right-margin*` of 0 or
+;; less means "no right margin", so nothing ever needs to break.
+;; `pprint-exit-if-list-exhausted` (CLHS): leave the enclosing
+;; `pprint-logical-block` when its list is used up. CL implements this as a
+;; non-local exit from the block; typelisp has no general escape, so it exits
+;; the enclosing `loop` instead — which is exactly where CL's own idiom always
+;; puts it:
+;;
+;;   (pprint-logical-block (xs :prefix "(" :suffix ")")
+;;     (loop (pprint-exit-if-list-exhausted)
+;;           (print "~w" (pprint-pop))
+;;           (if (pprint-list-exhausted) () (progn (print " ") (pprint-newline :fill)))))
+(pub defmacro pprint-exit-if-list-exhausted ()
+  `(if (pprint-list-exhausted) (break) ()))
+(pub defvar (*print-pretty* bool) false)
+(pub defvar (*print-right-margin* i64) 80)
+(pub defvar (*print-miser-width* i64) 0)
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,

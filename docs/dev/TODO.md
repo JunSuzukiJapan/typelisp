@@ -1,6 +1,6 @@
 # typelisp 開発 TODO / 引き継ぎ
 
-最終更新: 2026-07-25 / ブランチ: `main`
+最終更新: 2026-07-26 / ブランチ: `main`
 
 このドキュメントは**現在残っている作業のみ**を記録する。完了した実装の詳細な経緯・設計判断は
 [implementation-log.md](implementation-log.md) を参照（2026-06-27 にこちらから分離、
@@ -23,89 +23,50 @@ CL同等カタログ・可視性・trait機構・compile（普通に書けるコ
 TODO として正式に格上げ**する（2026-07-23、この一覧化で棚卸し）。優先度は目安であり、着手順は未確定。
 
 完了した項目（T1「`format` の書式指定子」、T2「`defmacro` の `&optional`/`&key`」、
-T3「ユーザ定義エラー型」、T4「動的ディスパッチ」、T5「`--heap-cells N`」）は
-[implementation-log.md](implementation-log.md) 末尾へ移設した
-（T1/T5 は 2026-07-23、T2 は 2026-07-24、T3/T4 は 2026-07-25）。
+T3「ユーザ定義エラー型」、T4「動的ディスパッチ」、T5「`--heap-cells N`」、
+T5「pretty printer」の Tier1/Tier2）は [implementation-log.md](implementation-log.md) 末尾へ移設した
+（T1/T5 は 2026-07-23、T2 は 2026-07-24、T3/T4 は 2026-07-25、pretty printer は 2026-07-26）。
 
-### T5. pretty printer（CL の Lisp Pretty Printer 相当）（優先度: 低）
+### T5-b. `set-pprint-dispatch` / `*print-pprint-dispatch*`（優先度: 低）
 
-CL は ANSI 標準の pretty printer を持つ（CLHS 22.2、実体は R. Waters の XP アルゴリズム
-= "XP: A Common Lisp Pretty Printing System", MIT AI Memo 1102a, 1989。SBCL の
-`src/code/pprint.lisp` 等が同系統）。`format` 実装（[implementation-log.md](implementation-log.md)、
-2026-07-23）ではこの系統のディレクティブを未対応（no-op / 近似）にしてある。**pretty printer 本体を
-別タスクとして切り出す**（2026-07-23、`~i`/`~_` 等の議論で棚卸し）。
+pretty printer 本体（T5 の Tier1/Tier2）は 2026-07-26 に実装済み
+（[implementation-log.md](implementation-log.md) 末尾、利用者向け仕様は
+[functions.md](../functions.md) §15.1）。`*print-pretty*`/`*print-right-margin*`/
+`*print-miser-width*`、`format` の `~_`/`~i`/`~:t`/`~<...~:>`、`pprint`/`pprint-fill`/
+`pprint-linear`/`pprint-tabular`、`pprint-logical-block`/`pprint-newline`/`pprint-indent`/
+`pprint-tab`/`pprint-pop`/`pprint-exit-if-list-exhausted` はすべて使える。
 
-#### CL の実装の要点（調査メモ、2026-07-23）
+**残っているのは Tier3 だけ**——「実行時の型ごとに整形関数を登録し、`print`/`write`/`~a` が
+呼び出し側の関与なしにそれを自動選択する」`set-pprint-dispatch` と、その登録表
+`*print-pprint-dispatch*`。
 
-「木を組んでレイアウトを後計算」ではなく、**本物の出力ストリームをラップした pretty-stream に書き込みを
-バッファしながら、有界の先読みで改行を確定する1パスのストリーム方式**（線形時間・行幅程度の有界メモリ）。
+#### 前提の再評価（2026-07-26、実装してみて分かったこと）
 
-- pretty-stream の状態: 未確定文字バッファ、その先頭桁、開いている論理ブロックのスタック
-  （各ブロックが prefix / per-line-prefix / suffix / インデント量を保持）、バッファ位置に紐づく
-  **命令キュー**（`block-start` / `block-end` / `newline`〈`:linear`/`:fill`/`:miser`/`:mandatory`〉/
-  `indentation`〈`:block`/`:current`〉/ `tab`）。`newline` と `block-start` は共通の section-start
-  として `depth` と後埋めの前方ポインタ `section-end` を持つ。
-- 中心のトリック: 条件改行の場で改行可否は決められない（そのセクションが行に収まるか未確定）。
-  セクション末尾が来る前にバッファ長が右マージンを超えたら**折る**、セクション末尾が先に来たら**折らない**。
-  先読みは現セクション末尾までで足りるのでバッファは行幅で頭打ち。
-- 改行種別: `:linear`=囲みセクション全体が収まらなければ折る（同一セクションで揃う）／`:fill`=次の
-  部分区間が収まらない時だけ折る（語詰め）／`:miser`=miser モード（右マージンから
-  `*print-miser-width*` 以内で行が始まった時）だけ折る／`:mandatory`=常に折る。
-- `write`/`print` は `*print-pretty*` が真のとき整形経路に入り、**`*print-pprint-dispatch*`** を引いて
-  オブジェクト型に対応する整形関数を呼ぶ（既定にリスト用・`quote`/`let`/`defun` 等の特殊形専用の
-  整形関数が登録済み）。`set-pprint-dispatch` でユーザが登録＝**実行時型→任意関数の動的ディスパッチ**。
-- CL では `format` の pretty 系ディレクティブは `pprint-*` API のシンタックスシュガー
-  （`~<...~:>`→`pprint-logical-block`、`~_`→`pprint-newline`、`~I`→`pprint-indent`、
-  `~:T`→`pprint-tab`、`~W`→`write`）。実体はすべて XP の pretty-stream に落ちる。
+以前このタスクは「前提は T4 動的ディスパッチ ＋ 可変 pretty ストリーム値型の新設」と記録していた。
+実際に作ってみると**どちらでもなかった**:
 
-#### 段階分け（2026-07-23 の議論で確定した着手方針）
+- T4（`:dyn Trait`）は 2026-07-25 に入ったが、登録表の索引付けに `:dyn` は要らない。
+  型名（`string`）→ 関数値の `HashTable` で足りる。
+- 「可変 pretty ストリーム値型」も要らなかった。開いている論理ブロックを**インタプリタの暗黙状態**に
+  する（GC ヒープと同じ扱い）ことで、新しい値型ゼロで Tier2 を実装できた。
 
-未対応項目を、typelisp への収まりの良さで3段に分ける:
+本当に残っている前提は次の3点:
 
-- **Tier1（ストリーム値型を新設せず format 経由で提供。単独で着手可、これを土台にする）**
-  - 特殊変数 `*print-pretty*` / `*print-right-margin*` / `*print-miser-width*` を prelude の `defvar`
-    グローバルとして持ち、`setf` で変更・`run_format` で読む（typelisp に CL の `let` 動的束縛は無いので、
-    動的束縛ではなくグローバル代入で代替する）。
-  - `format` の pretty 連動ディレクティブ: `~_`（条件改行。`~:_`=fill/`~@_`=miser/`~:@_`=mandatory/
-    素=linear）、`~i`（インデント。`~n:i`=current）、`~<...~:>`（**論理ブロック**用法。閉じに `:` が付く。
-    現状の桁揃え `~<...~>` とは別物として分岐）、`~:t`（論理ブロック内タブ）、`~w`（`*print-pretty*` 準拠。
-    現状は単なる `prin1`）。
-  - 関数 `pprint` / `pprint-fill` / `pprint-linear` / `pprint-tabular`（S式を既定レイアウトで整形出力）。
-  - format は既にインメモリ `String` を構築する方式なので、XP のストリーム層を厳密再現せず、構築中の
-    バッファ上で同じ先読み判定を回す簡略版で同等結果を出せる（ストリーム値をユーザに露出しない範囲）。
+1. レンダラ経路全体に `&mut Heap` を通すこと。現在 `format::build`/`render_value`/`pprint::render` は
+   `&Heap` で、ユーザ関数の呼び戻しには `&mut Heap` が要る（呼び出し元の
+   `Interp::eval_builtin` には既に `&mut Heap` があるので、機械的だが広い変更）。
+2. Rust から typelisp の関数値を呼ぶ橋。`Expr::Apply` の compiled-closure 経路
+   （`encode_crossing_args` → `call_closure_box` → `decode_compiled_return`）を、AST ノードから
+   切り離して再利用できる形にする必要がある。
+3. **呼び戻し中に宙に浮く `Value` の GC ルート保護**。これが本当の難所——レンダラは走査中のリスト要素を
+   Rust の `Vec<Value>` に保持しており（`pprint::list_items`）、そこからユーザコードを呼べば確保が
+   起きて回収されうる。印字経路は全プログラムが通るので、ここに微妙な GC バグを入れると影響が広い。
 
-- **Tier2/3（前提だった T4 動的ディスパッチは 2026-07-25 に実装済み。着手可能になった）**
-  - `pprint-logical-block` / `pprint-newline` / `pprint-indent` / `pprint-tab`
-    （+ `pprint-pop` / `pprint-exit-if-list-exhausted`）をユーザ呼び出し可能な関数として公開。
-  - `set-pprint-dispatch` / `*print-pprint-dispatch*`。
-  - **T4 を前提にしていた理由（当時の記録）**: CL でこれらが自然に効くのは (a) CL がもともと第一級ストリームを至る所で
-    持ち、(b) 動的ディスパッチがあるから。typelisp は現状どちらも無い——公開するには言語に無い新概念
-    「可変 pretty ストリーム値型」を新設せねばならず（過去に `Vector`/`RtValue` 専用バリアントを
-    「ユーザ定義型と同様に扱うべき」で作り直した方針とも衝突しうる）、最大の見返り（ユーザ定義型の独自
-    プリンタが `print`/`write` で**自動選択**される）は `set-pprint-dispatch`＝実行時型→任意関数の
-    動的ディスパッチ、すなわち上記 T4 そのものを要する。
-    T4 抜きで公開しても「ユーザが自分の型を手動整形するとき明示的に呼ぶ」に留まり中途半端になるため、
-    T4 と一緒に扱う。
-  - **2026-07-25 追記**: その T4 が実装され、`:dyn Trait`（vtable 方式の trait オブジェクト、
-    [language-design.md](language-design.md) §5.2）が使えるようになった。`set-pprint-dispatch`
-    に必要な「実行時型→関数の索引付きディスパッチ」は、整形関数を持つ trait を定義して
-    `HashTable<string, :dyn Printer>` 相当の登録表を引く形で組める見込み。残る前提は
-    「可変 pretty ストリーム値型」の新設だけになった。
-  - **2026-07-24 追記**: 「Sexpr にユーザ定義型を入れる」プラン
-    （`~/.claude/plans/async-conjuring-hanrahan.md`）の実装により、`defstruct`/`defenum` インスタンスは
-    暗黙に `Sexpr` へ変換でき、`match` の downcast パターン（型名先頭/裸enum変種/`(the T p)`）で
-    実行時型ごとの分岐がユーザコードから**手動で**書けるようになった。これは
-    `set-pprint-dispatch`＝**自動選択**（`print`/`write` が呼び出し側の関与なしに登録済み整形関数へ
-    振り分ける）とは別物——ユーザが自分の `pprint-my-type` 相当の関数内で `(match v ((point x y) ...)
-    ((circle r) ...) ...)` と手書きすれば型ごとの整形は今でも書けるが、`print`/`write` 自身が
-    その関数を"知って"呼び出す仕組み（＝実行時型→関数の索引付きディスパッチテーブル）は依然として
-    存在しない。したがって上記の T4 依存という結論そのものは変わらない——ただし「ユーザ定義型を
-    Sexpr に入れて match で分岐する」という土台コードは今回のプラン実装で先に揃ったので、T4 着手後の
-    `set-pprint-dispatch` 実装コストは軽減される見込み。
+3 を安全に片付ける設計（走査中の値をセル or ルートスタックへ退避する等）が決まってから着手すること。
+なお「ユーザ定義型ごとの整形を自分で書いて明示的に呼ぶ」だけなら、Sexpr への暗黙変換と `match` の
+downcast パターンで今でも書ける（自動選択でない、という点だけが違う）。
 
-- 重い理由: format 単体でなく**印字系全体**に、行幅追跡・インデントスタック・条件改行判断を持つ出力
-  ストリーム層が要る。静的型・`*print-*` 変数の持ち方（動的変数機構の要否）とも絡む。優先度は低。
-- 関連: [[typelisp-format-directives]]（`format` 実装。未対応分の一覧はここと docs/functions.md §15）。
+- 関連: [[typelisp-format-directives]]（`format` 実装）、[[typelisp-pretty-printer]]。
 
 ### 意図的に「やらない」もの（TODO ではない）
 

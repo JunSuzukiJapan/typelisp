@@ -34,6 +34,7 @@ use num_traits::{FromPrimitive, ToPrimitive, Zero};
 use crate::check::registry::{is_builtin_error_type, EVAL_ERROR, PARSE_FLOAT_ERROR, PARSE_INT_ERROR, READ_ERROR};
 use crate::{BoxId, CompileTarget, Expr, Heap, Loc, MacroExpander, MacroLambda, Path, Pattern, QuotedSexpr, Ref, SymId, TopLevel, Type, Typed, Value};
 
+use super::pprint;
 use super::scope;
 use super::value::{EvalError, NativeScope, RtValue, Slot, SlotKind};
 
@@ -126,6 +127,36 @@ enum Step {
     Exit(RtValue),
 }
 
+/// An in-progress pretty-printing session: what CL would call "the output
+/// stream is a pretty stream right now".
+///
+/// typelisp has no first-class streams, so instead of handing the user a
+/// pretty-stream *value* to thread through every call (a whole new mutable
+/// value type the language does not otherwise have — see `docs/dev/TODO.md`'s
+/// T5 notes on why that was the blocker), the session is implicit interpreter
+/// state, in exactly the way the GC heap already is. It is opened by the
+/// outermost `pprint-logical-block` and flushed to stdout when that block
+/// closes. While it is open, *every* printing operation — `print`, `println`,
+/// `(format true …)`, `pprint` — appends into it instead of going straight to
+/// stdout, so ordinary printing calls supply the block's content and the
+/// `pprint-newline`/`pprint-indent`/`pprint-tab` builtins supply its layout,
+/// which is exactly how the same code reads in CL.
+struct PrettySession {
+    /// The text and pretty-printer ops accumulated so far.
+    out: crate::eval::pprint::Out,
+    /// One entry per open logical block: a heap cell holding the still
+    /// unconsumed tail of the list that block was given, which `pprint-pop`
+    /// walks. A *cell* rather than a bare `Value` because a cell is a GC root
+    /// for as long as its `Rc` is alive (`Heap::alloc_cell`'s registry), so the
+    /// list survives whatever the block's body allocates — and is released
+    /// automatically when the block closes, unlike a permanent root.
+    lists: Vec<Rc<crate::mem::BoxId>>,
+    /// The layout parameters this session was opened with, read once so a
+    /// `setf` of `*print-right-margin*` inside a block cannot change the
+    /// margin halfway through laying one document out.
+    opts: crate::eval::pprint::Opts,
+}
+
 /// The interpreter state: a runtime mirror of the checker's module tree
 /// ([`scope::ModuleScope`], rooted here), holding every free function/
 /// macro/method/global/struct/enum by its own defining module and
@@ -197,6 +228,8 @@ pub struct Interp {
     /// ...) — never reused, so two constructors can never collide even
     /// across separate throwaway modules.
     jit_ctor_counter: Cell<u64>,
+    /// The open pretty-printing session, if any — see [`PrettySession`].
+    pretty: RefCell<Option<PrettySession>>,
     /// Trait-object vtables, interpreter tier: `vtable_id` -> the call
     /// targets for the trait's methods, in slot order (`Expr::DynBox`'s
     /// `slots`, which the checker laid out from `TraitDef::method_order`).
@@ -366,6 +399,7 @@ impl Interp {
             vtable_ids: RefCell::new(HashMap::new()),
             dyn_dispatch_compiled: RefCell::new(HashSet::new()),
             jit_ctor_counter: Cell::new(0),
+            pretty: RefCell::new(None),
         }
     }
 
@@ -1149,7 +1183,19 @@ impl Interp {
                 }
                 Ok(last)
             }
-            TopLevel::Expr(t) => Ok(Some(self.eval(heap, &t, &Env::new())?)),
+            TopLevel::Expr(t) => {
+                let v = self.eval(heap, &t, &Env::new());
+                // A `pprint-logical-block` is normally closed by the `progn`
+                // the special form lowers to, but a `break`/`return` that
+                // jumps out of the block (or an error unwinding past it)
+                // skips that close and would leave the session open — every
+                // later `print` silently buffered into a document nobody
+                // flushes. A top-level form is the widest a block can ever
+                // span, so closing any still-open one here is both the right
+                // boundary and a complete safety net.
+                self.flush_pretty()?;
+                Ok(Some(v?))
+            }
             // `(load ...)` is resolved and applied by the *driver* at check
             // time (`project::load_file_flat`), never reaching the
             // interpreter's exec phase — the driver consumes a `Load` inline
@@ -3207,11 +3253,16 @@ impl Interp {
                     Ok(v) => v,
                     Err(e) => return Some(Err(e)),
                 };
-                Some(self.run_format(heap, &control, list).and_then(|s| {
+                Some(self.build_format(heap, &control, list).and_then(|out| {
+                    // The string `format` returns is always the laid-out text.
+                    // Writing it to stdout, though, goes through `emit`, which
+                    // merges it into an open `pprint-logical-block` instead of
+                    // jumping the queue past that block's buffered output.
+                    let text = crate::eval::format::finish(out.clone(), &self.pretty_opts(heap));
                     if dest {
-                        write_stdout(&s, false)?;
+                        self.emit(heap, out, false)?;
                     }
-                    Ok(RtValue::Str(s.into()))
+                    Ok(RtValue::Str(text.into()))
                 }))
             }
             "print-rt" | "println-rt" => {
@@ -3224,8 +3275,154 @@ impl Interp {
                     Err(e) => return Some(Err(e)),
                 };
                 let newline = name == "println-rt";
-                Some(self.run_format(heap, &control, list).and_then(|s| write_stdout(&s, newline)))
+                Some(self.build_format(heap, &control, list).and_then(|out| self.emit(heap, out, newline)))
             }
+            // The runtime side of the `pprint`/`pprint-fill`/`pprint-linear`/
+            // `pprint-tabular` special forms (`Checker::check_pprint`), which
+            // pass the form's own name so one builtin serves all four:
+            // `args[0]` names the layout, `args[1]` is the `Sexpr`-wrapped
+            // object and `args[2]` is `pprint-tabular`'s column width.
+            //
+            // These pretty-print unconditionally (CL defines `pprint` as
+            // printing "as if `*print-pretty*` were true"), but still honor
+            // `*print-right-margin*`/`*print-miser-width*`. Following CLHS,
+            // `pprint` emits a newline *before* the object and none after,
+            // while the three layout-specific ones emit no newline at all.
+            "pprint-rt" => {
+                let form = match expect_str(&args[0]) {
+                    Ok(s) => s.to_string(),
+                    Err(e) => return Some(Err(e)),
+                };
+                let value = match rt_sexpr(&args[1]) {
+                    Ok(v) => v,
+                    Err(e) => return Some(Err(e)),
+                };
+                let colinc = match rt_i64(&args[2]) {
+                    Ok(n) => n,
+                    Err(e) => return Some(Err(e)),
+                };
+                use crate::eval::pprint::Style;
+                let style = match form.as_str() {
+                    "pprint-fill" => Style::Fill,
+                    "pprint-linear" => Style::Linear,
+                    // CL's `pprint-tabular` defaults its column width to 16;
+                    // `check_pprint` passes 0 when the caller omitted it.
+                    "pprint-tabular" => Style::Tabular(if colinc <= 0 { 16 } else { colinc }),
+                    _ => Style::Default,
+                };
+                let (_, enums) = self.root.borrow().collect_struct_and_enum_types();
+                let mut out = crate::eval::pprint::Out::new();
+                if form == "pprint" {
+                    out.push('\n');
+                }
+                // Unconditionally pretty: `render` always records the layout
+                // ops, and `emit`'s layout pass runs whenever any op is
+                // present — `*print-pretty*` only gates `~a`/`~s`/`~w`.
+                crate::eval::pprint::render(heap, &enums, value, true, style, &mut out);
+                Some(self.emit(heap, out, false))
+            }
+            // The user-callable pretty-printer API (CLHS 22.2.1's `pprint-*`
+            // operators). `pprint-block-start-rt`/`pprint-block-end-rt` are
+            // what the `pprint-logical-block` special form lowers to; the rest
+            // are ordinary builtins taking CL's keyword arguments as the
+            // self-evaluating symbols typelisp already has. Each is a no-op
+            // outside a logical block, as CL's are on a non-pretty stream.
+            "pprint-block-start-rt" => {
+                let obj = match rt_sexpr(&args[0]) {
+                    Ok(v) => v,
+                    Err(e) => return Some(Err(e)),
+                };
+                let prefix = match expect_str(&args[1]) {
+                    Ok(s) => s.to_string(),
+                    Err(e) => return Some(Err(e)),
+                };
+                let per_line = match expect_bool(&args[2]) {
+                    Ok(b) => b,
+                    Err(e) => return Some(Err(e)),
+                };
+                let suffix = match expect_str(&args[3]) {
+                    Ok(s) => s.to_string(),
+                    Err(e) => return Some(Err(e)),
+                };
+                self.pprint_block_start(heap, obj, &prefix, per_line, &suffix);
+                Some(Ok(RtValue::Unit))
+            }
+            "pprint-block-end-rt" => Some(self.pprint_block_end()),
+            "pprint-newline" => {
+                let kind = match pprint_keyword(heap, &args[0]) {
+                    Ok(k) => k,
+                    Err(e) => return Some(Err(e)),
+                };
+                use crate::eval::pprint::NewlineKind;
+                let kind = match kind {
+                    ":linear" => NewlineKind::Linear,
+                    ":fill" => NewlineKind::Fill,
+                    ":miser" => NewlineKind::Miser,
+                    ":mandatory" => NewlineKind::Mandatory,
+                    other => {
+                        return Some(Err(EvalError::Panic(format!(
+                            "pprint-newline: expected :linear, :fill, :miser or :mandatory, got {}",
+                            other
+                        ))))
+                    }
+                };
+                self.pprint_op(crate::eval::pprint::Op::Newline(kind));
+                Some(Ok(RtValue::Unit))
+            }
+            "pprint-indent" => {
+                let kind = match pprint_keyword(heap, &args[0]) {
+                    Ok(k) => k,
+                    Err(e) => return Some(Err(e)),
+                };
+                let n = match rt_i64(&args[1]) {
+                    Ok(n) => n,
+                    Err(e) => return Some(Err(e)),
+                };
+                use crate::eval::pprint::IndentKind;
+                let kind = match kind {
+                    ":block" => IndentKind::Block,
+                    ":current" => IndentKind::Current,
+                    other => {
+                        return Some(Err(EvalError::Panic(format!(
+                            "pprint-indent: expected :block or :current, got {}",
+                            other
+                        ))))
+                    }
+                };
+                self.pprint_op(crate::eval::pprint::Op::Indent(kind, n));
+                Some(Ok(RtValue::Unit))
+            }
+            "pprint-tab" => {
+                let kind = match pprint_keyword(heap, &args[0]) {
+                    Ok(k) => k,
+                    Err(e) => return Some(Err(e)),
+                };
+                let colnum = match rt_i64(&args[1]) {
+                    Ok(n) => n,
+                    Err(e) => return Some(Err(e)),
+                };
+                let colinc = match rt_i64(&args[2]) {
+                    Ok(n) => n,
+                    Err(e) => return Some(Err(e)),
+                };
+                use crate::eval::pprint::TabKind;
+                let kind = match kind {
+                    ":line" => TabKind::Line,
+                    ":section" => TabKind::Section,
+                    ":line-relative" => TabKind::LineRelative,
+                    ":section-relative" => TabKind::SectionRelative,
+                    other => {
+                        return Some(Err(EvalError::Panic(format!(
+                            "pprint-tab: expected :line, :section, :line-relative or :section-relative, got {}",
+                            other
+                        ))))
+                    }
+                };
+                self.pprint_op(crate::eval::pprint::Op::Tab { kind, colnum, colinc });
+                Some(Ok(RtValue::Unit))
+            }
+            "pprint-pop" => Some(Ok(RtValue::Sexpr(self.pprint_pop(heap)))),
+            "pprint-list-exhausted" => Some(Ok(RtValue::Bool(self.pprint_list_exhausted(heap)))),
             // `equal`/`equalp` on `Sexpr`: structural equality builtins (the
             // free-function `Sexpr` overloads; the per-scalar-type `equal`
             // *methods* — `string`/`char`/`int`/... — are dispatched separately
@@ -3373,18 +3570,173 @@ impl Interp {
         }
     }
 
-    /// The CL-style `format` directive engine shared by the `format-rt`/
-    /// `print-rt`/`println-rt` builtins (see `Self::eval_builtin`). The engine
-    /// itself lives in [`crate::eval::format`] (parser + interpreter + value
-    /// renderer); this only supplies the enum-variant-name table it needs (for
-    /// any boxed enum nested inside a `Sexpr` argument) and adapts its `String`
-    /// errors into recoverable `EvalError::Panic`s.
-    ///
-    /// `args` is a proper `Sexpr` list whose elements were wrapped into their
-    /// `Sexpr` encodings by the checker (`Checker::cons_hetero_sexpr`).
-    fn run_format(&self, heap: &Heap, control: &str, args: Value) -> Result<String, EvalError> {
+    /// Builds `control`'s output without committing it: the shared half of
+    /// `format-rt`/`print-rt`/`println-rt`. Kept separate from [`Self::emit`]
+    /// because a buffer that still carries pretty-printer ops must be merged
+    /// into an open [`PrettySession`] *un*-laid-out — laying it out early
+    /// would freeze line breaks chosen against the wrong starting column and
+    /// without the enclosing block's indentation.
+    fn build_format(&self, heap: &Heap, control: &str, args: Value) -> Result<pprint::Out, EvalError> {
         let (_, enums) = self.root.borrow().collect_struct_and_enum_types();
-        crate::eval::format::run(heap, &enums, control, args).map_err(EvalError::Panic)
+        let opts = self.pretty_opts(heap);
+        crate::eval::format::build(heap, &enums, control, args, &opts).map_err(EvalError::Panic)
+    }
+
+    /// Commits printed output: into the open [`PrettySession`] if there is
+    /// one, otherwise laid out and written straight to stdout.
+    fn emit(&self, heap: &Heap, mut out: pprint::Out, newline: bool) -> Result<RtValue, EvalError> {
+        if newline {
+            out.push('\n');
+        }
+        // `pretty_opts` itself reads `self.pretty`, so it must not run while
+        // this borrow is held.
+        let buffered = match self.pretty.borrow_mut().as_mut() {
+            Some(s) => {
+                s.out.append(out);
+                None
+            }
+            None => Some(out),
+        };
+        match buffered {
+            Some(out) => {
+                let opts = self.pretty_opts(heap);
+                write_stdout(&crate::eval::format::finish(out, &opts), false)
+            }
+            None => Ok(RtValue::Unit),
+        }
+    }
+
+    /// Opens a logical block, starting a [`PrettySession`] if this is the
+    /// outermost one. `obj` is the list `pprint-pop` walks (`()` when the
+    /// block iterates nothing).
+    pub(crate) fn pprint_block_start(
+        &self,
+        heap: &mut Heap,
+        obj: Value,
+        prefix: &str,
+        per_line: bool,
+        suffix: &str,
+    ) {
+        let opts = pprint::Opts { pretty: true, ..self.pretty_opts(heap) };
+        let cell = heap.alloc_cell(obj);
+        let mut session = self.pretty.borrow_mut();
+        let s = session.get_or_insert_with(|| PrettySession { out: pprint::Out::new(), lists: Vec::new(), opts });
+        s.out.op(pprint::Op::BlockStart {
+            prefix: prefix.to_string(),
+            per_line,
+            suffix: suffix.to_string(),
+        });
+        s.lists.push(cell);
+    }
+
+    /// Closes a logical block; closing the outermost one lays the whole
+    /// session out and writes it to stdout.
+    pub(crate) fn pprint_block_end(&self) -> Result<RtValue, EvalError> {
+        let finished = {
+            let mut session = self.pretty.borrow_mut();
+            let Some(s) = session.as_mut() else {
+                return Ok(RtValue::Unit);
+            };
+            s.out.op(pprint::Op::BlockEnd);
+            s.lists.pop();
+            if s.lists.is_empty() {
+                session.take()
+            } else {
+                None
+            }
+        };
+        match finished {
+            // `s.opts` was snapshotted with `pretty` forced on at block start:
+            // an explicit `pprint-logical-block` is a request to pretty-print,
+            // exactly as `pprint` is.
+            Some(s) => write_stdout(&crate::eval::format::finish(s.out, &s.opts), false),
+            None => Ok(RtValue::Unit),
+        }
+    }
+
+    /// Closes and writes out a pretty-printing session left open by a
+    /// non-local exit (see [`Self::exec`]). A no-op in the normal case, where
+    /// the matching `pprint-block-end-rt` already flushed it.
+    fn flush_pretty(&self) -> Result<(), EvalError> {
+        let Some(s) = self.pretty.borrow_mut().take() else {
+            return Ok(());
+        };
+        let opts = pprint::Opts { pretty: true, ..s.opts };
+        // `layout` closes whatever blocks are still open, emitting their
+        // suffixes, so the partial output is still well-formed.
+        write_stdout(&crate::eval::format::finish(s.out, &opts), false).map(|_| ())
+    }
+
+    /// Records a pretty-printer op on the open session. A no-op with no
+    /// session open, matching CL, where `pprint-newline` and friends do
+    /// nothing unless the stream really is a pretty stream.
+    fn pprint_op(&self, op: pprint::Op) {
+        if let Some(s) = self.pretty.borrow_mut().as_mut() {
+            s.out.op(op);
+        }
+    }
+
+    /// `pprint-pop`: the next element of the innermost open block's list, or
+    /// `()` when it is exhausted (`pprint-list-exhausted` is the predicate to
+    /// check first). Advances the stored tail in place.
+    fn pprint_pop(&self, heap: &mut Heap) -> Value {
+        let cell = match self.pretty.borrow().as_ref().and_then(|s| s.lists.last().cloned()) {
+            Some(c) => c,
+            None => return Value::Empty,
+        };
+        let rest = heap.cell_get(*cell);
+        let Ok(head) = heap.car(rest) else { return Value::Empty };
+        let tail = heap.cdr(rest).unwrap_or(Value::Empty);
+        heap.cell_set(*cell, tail);
+        head
+    }
+
+    /// `pprint-list-exhausted`: whether the innermost open block's list has
+    /// nothing left (also true when there is no open block at all).
+    fn pprint_list_exhausted(&self, heap: &Heap) -> bool {
+        match self.pretty.borrow().as_ref().and_then(|s| s.lists.last().cloned()) {
+            Some(cell) => !heap.cell_get(*cell).is_cons(),
+            None => true,
+        }
+    }
+
+    /// Reads the three pretty-printing globals the prelude defines —
+    /// `*print-pretty*`, `*print-right-margin*`, `*print-miser-width*` — into
+    /// the snapshot [`crate::eval::pprint`] works from.
+    ///
+    /// typelisp has no dynamic (`let`-rebindable) special variables, so these
+    /// are ordinary assignable globals read fresh on every printing operation:
+    /// `(setf *print-pretty* true)` takes effect from the next `print` on, and
+    /// stays in effect, which is the closest analogue of CL's
+    /// `(setf (symbol-value '*print-pretty*) t)` at top level. A margin of 0
+    /// or less means "no margin" (never break); a miser width of 0 or less
+    /// means miser style is off, standing in for CL's `nil`.
+    ///
+    /// A missing global (the prelude was not loaded — some unit tests build a
+    /// bare `Interp`) falls back to the defaults, i.e. pretty printing off.
+    pub(crate) fn pretty_opts(&self, heap: &Heap) -> crate::eval::pprint::Opts {
+        let root = self.root.borrow();
+        let read_int = |name: &str, default: i64| -> i64 {
+            match root.get_global(&crate::Path::root(name)).map(|s| s.get(heap)) {
+                Some(RtValue::Int(n)) => n,
+                _ => default,
+            }
+        };
+        // Inside a `pprint-logical-block` the "stream" *is* a pretty stream,
+        // so everything printed into it pretty-prints regardless of the
+        // global — the same thing CL's stream-type dispatch achieves.
+        let pretty = self.pretty.borrow().is_some()
+            || matches!(
+                root.get_global(&crate::Path::root("*print-pretty*")).map(|s| s.get(heap)),
+                Some(RtValue::Bool(true))
+            );
+        let margin = read_int("*print-right-margin*", crate::eval::pprint::DEFAULT_MARGIN as i64);
+        let miser = read_int("*print-miser-width*", 0);
+        crate::eval::pprint::Opts {
+            pretty,
+            margin: margin.max(0) as usize,
+            miser: (miser > 0).then_some(miser as usize),
+        }
     }
 
     /// The `eval` builtin: type-check `arg` (a runtime `Sexpr`) against the
@@ -4125,6 +4477,16 @@ fn format_float_for_print(f: f64) -> String {
         format!("{:.1}", f)
     } else {
         f.to_string()
+    }
+}
+
+/// Reads a `pprint-*` builtin's keyword argument (`:linear`, `:block`, …).
+/// Keywords are ordinary interned symbols whose name keeps the leading colon
+/// (`Expr::SymLit`), so this is just "the symbol's name".
+fn pprint_keyword<'a>(heap: &'a Heap, v: &RtValue) -> Result<&'a str, EvalError> {
+    match v {
+        RtValue::Sexpr(Value::Symbol(id)) => Ok(heap.symbol_name(*id)),
+        _ => Err(EvalError::Panic("expected a keyword argument such as :linear".into())),
     }
 }
 

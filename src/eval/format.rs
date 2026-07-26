@@ -15,15 +15,20 @@
 //!
 //! Implemented: `~A ~S ~W`, `~D ~B ~O ~X ~R`, `~P`, `~C`, `~F ~E ~G ~$`,
 //! `~% ~& ~| ~~`, `~( ~)`, `~[ ~; ~]`, `~{ ~} ~^`, `~< ~> ~T`, `~* ~?`, the
-//! ignored-`~newline`, plus the numeric/`'c`/`v`/`#` prefix parameters and the
-//! `:`/`@` modifiers each directive gives meaning to.
+//! ignored-`~newline`, the pretty-printer directives `~_ ~I ~:T` and the
+//! logical-block form of `~<…~:>`, plus the numeric/`'c`/`v`/`#` prefix
+//! parameters and the `:`/`@` modifiers each directive gives meaning to.
 //!
-//! Deliberately unsupported (return a clear error): the pretty-printer
-//! directives `~_ ~I ~:> ~W`-as-circle and `~/name/` function-call dispatch —
-//! typelisp has no pretty-printing stream nor a runtime function-by-name
-//! lookup with `format`'s calling convention. (`~W` is accepted as a plain
-//! `prin1`.) The `nil`-specific behavior of CL's `~:A`/`~@[` is adapted to
-//! typelisp's `false`, which has no `nil`.
+//! The pretty-printer directives (and the `*print-pretty*` path of
+//! `~A`/`~S`/`~W`) record [`Op`]s on the output buffer rather than emitting
+//! text directly; [`crate::eval::pprint`] turns the finished buffer into laid
+//! out text. With `*print-pretty*` false nothing records an op and the buffer
+//! is returned exactly as before.
+//!
+//! Deliberately unsupported (return a clear error): `~/name/` function-call
+//! dispatch — typelisp has no runtime function-by-name lookup with `format`'s
+//! calling convention. The `nil`-specific behavior of CL's `~:A`/`~@[` is
+//! adapted to typelisp's `false`, which has no `nil`.
 
 use std::collections::HashMap;
 
@@ -31,22 +36,36 @@ use crate::mem::{Heap, Value};
 use crate::Path;
 
 use super::interp::EnumDef;
+use super::pprint::{self, IndentKind, NewlineKind, Op, Opts, Out, Style, TabKind};
 
 /// Entry point: interpret `control` against the `Sexpr` argument list `args`,
-/// returning the produced text. Errors (bad directive, too few arguments, …)
-/// are `String`s the caller turns into a recoverable `EvalError::Panic`.
-pub(crate) fn run(
+/// returning the buffer it produced (text plus any pretty-printer ops — see
+/// [`finish`], which turns one into text). Errors (bad directive, too few
+/// arguments, …) are `String`s the caller turns into a recoverable
+/// `EvalError::Panic`.
+pub(crate) fn build(
     heap: &Heap,
     enums: &HashMap<Path, EnumDef>,
     control: &str,
     args: Value,
-) -> Result<String, String> {
+    opts: &Opts,
+) -> Result<Out, String> {
     let nodes = parse(control)?;
     let items = list_to_vec(heap, args);
-    let mut st = State { heap, enums, args: items, pos: 0 };
-    let mut out = String::new();
+    let mut st = State { heap, enums, args: items, pos: 0, opts: *opts };
+    let mut out = Out::new();
     st.interp_seq(&nodes, &mut out)?;
     Ok(out)
+}
+
+/// Turns a finished buffer into text: a buffer with no pretty-printer op in it
+/// is already the answer, so the layout pass only runs when one was recorded.
+pub(crate) fn finish(out: Out, opts: &Opts) -> String {
+    if out.is_plain() {
+        out.text
+    } else {
+        pprint::layout(&out, 0, opts)
+    }
 }
 
 /// Flattens a proper `Sexpr` list into its elements (an improper dotted tail is
@@ -98,6 +117,12 @@ enum Node {
     Iter { head: Head, body: Vec<Node>, close_colon: bool },
     /// `~<…~;…~>` — justification across segments.
     Just { head: Head, segments: Vec<Vec<Node>> },
+    /// `~<…~;…~:>` — a *logical block* (the closing directive carries `:`),
+    /// an entirely different directive from the justification above despite
+    /// the shared opener. `sep_at` records, per `~;` separator, whether it was
+    /// written `~@;` — which marks the preceding prefix segment as a
+    /// *per-line* prefix.
+    Block { head: Head, segments: Vec<Vec<Node>>, sep_at: Vec<bool> },
     /// `~^` — escape upward out of the nearest `~{`/`~<` (or the whole op).
     Escape { head: Head },
 }
@@ -206,19 +231,48 @@ fn parse_cond(chars: &[char], pos: &mut usize, head: Head) -> Result<Node, Strin
     Ok(Node::Cond { head, clauses, default })
 }
 
-/// `~<…~;…~>`: segments separated by `~;`.
+/// `~<…~;…~>`: segments separated by `~;`. A closing `~:>` (rather than `~>`)
+/// makes the whole directive a logical block instead of a justification.
 fn parse_just(chars: &[char], pos: &mut usize, head: Head) -> Result<Node, String> {
     let mut segments = Vec::new();
+    let mut sep_at = Vec::new();
     loop {
         let (body, stop) = parse_seq(chars, pos, &[';', '>'])?;
         segments.push(body);
         match stop {
-            Some(s) if s.ch == ';' => continue,
-            Some(s) if s.ch == '>' => break,
+            Some(s) if s.ch == ';' => {
+                sep_at.push(s.head.at);
+                continue;
+            }
+            Some(s) if s.ch == '>' => {
+                if s.head.colon {
+                    return Ok(Node::Block { head, segments, sep_at });
+                }
+                break;
+            }
             _ => return Err("format: unterminated ~<".to_string()),
         }
     }
     Ok(Node::Just { head, segments })
+}
+
+/// The literal text of a `~<…~:>` prefix/suffix segment. CL requires these to
+/// be literal (they are re-emitted at the start of every line of a per-line
+/// block, and their width is what the block indents past), so a directive
+/// inside one is an error rather than something to interpret per use.
+fn literal_segment(nodes: &[Node]) -> Result<String, String> {
+    let mut s = String::new();
+    for n in nodes {
+        match n {
+            Node::Text(t) => s.push_str(t),
+            _ => {
+                return Err(
+                    "format: the prefix/suffix segments of a ~<…~:> logical block must be literal text".to_string()
+                )
+            }
+        }
+    }
+    Ok(s)
 }
 
 /// Parses a directive header — its comma-separated prefix parameters followed
@@ -300,6 +354,11 @@ struct State<'a> {
     enums: &'a HashMap<Path, EnumDef>,
     args: Vec<Value>,
     pos: usize,
+    /// The `*print-pretty*`/`*print-right-margin*`/`*print-miser-width*`
+    /// snapshot this operation runs under. Only `pretty` is consulted here
+    /// (it gates whether a directive records an [`Op`] or falls back to its
+    /// non-pretty behavior); the margins are used by the layout pass.
+    opts: Opts,
 }
 
 impl State<'_> {
@@ -368,7 +427,7 @@ impl State<'_> {
         vals.get(idx).copied().flatten().unwrap_or(default)
     }
 
-    fn interp_seq(&mut self, nodes: &[Node], out: &mut String) -> Result<Flow, String> {
+    fn interp_seq(&mut self, nodes: &[Node], out: &mut Out) -> Result<Flow, String> {
         for node in nodes {
             match node {
                 Node::Text(t) => out.push_str(t),
@@ -378,12 +437,16 @@ impl State<'_> {
                     }
                 }
                 Node::Case { head, body } => {
-                    let mut inner = String::new();
+                    let mut inner = Out::new();
                     let flow = self.interp_seq(body, &mut inner)?;
-                    out.push_str(&apply_case(&inner, head.colon, head.at));
+                    apply_case(&mut inner, head.colon, head.at);
+                    out.append(inner);
                     if matches!(flow, Flow::Escape) {
                         return Ok(Flow::Escape);
                     }
+                }
+                Node::Block { head, segments, sep_at } => {
+                    self.interp_block(head, segments, sep_at, out)?;
                 }
                 Node::Cond { head, clauses, default } => {
                     if matches!(self.interp_cond(head, clauses, *default, out)?, Flow::Escape) {
@@ -423,7 +486,7 @@ impl State<'_> {
         head: &Head,
         clauses: &[Vec<Node>],
         default: Option<usize>,
-        out: &mut String,
+        out: &mut Out,
     ) -> Result<Flow, String> {
         if head.at {
             // `~@[`: if the next arg is logically true, process the single
@@ -484,14 +547,14 @@ impl State<'_> {
         head: &Head,
         body: &[Node],
         close_colon: bool,
-        out: &mut String,
+        out: &mut Out,
     ) -> Result<(), String> {
         let vals = self.resolve_params(&head.params, &[])?;
         let max = Self::int_param(&vals, 0, -1); // -1 = unbounded
 
         // The body may be empty (`~{~}`), meaning the *argument* supplies the
         // control string. Parsing it lazily per use keeps that rare case cheap.
-        let run_body = |st: &mut State, sublist: Vec<Value>, out: &mut String| -> Result<Flow, String> {
+        let run_body = |st: &mut State, sublist: Vec<Value>, out: &mut Out| -> Result<Flow, String> {
             if body.is_empty() {
                 return Err("format: ~{~} (empty-body indirection) needs a control-string argument; \
                             write the directives inside the braces instead"
@@ -571,7 +634,7 @@ impl State<'_> {
         body: &[Node],
         max: i64,
         close_colon: bool,
-        out: &mut String,
+        out: &mut Out,
     ) -> Result<usize, String> {
         if body.is_empty() {
             return Err("format: ~{~} with an empty body is unsupported".to_string());
@@ -605,7 +668,7 @@ impl State<'_> {
         Ok(consumed)
     }
 
-    fn interp_just(&mut self, head: &Head, segments: &[Vec<Node>], out: &mut String) -> Result<(), String> {
+    fn interp_just(&mut self, head: &Head, segments: &[Vec<Node>], out: &mut Out) -> Result<(), String> {
         let vals = self.resolve_params(&head.params, &[Some(0), Some(1), Some(0)])?;
         let mincol = Self::int_param(&vals, 0, 0).max(0) as usize;
         let colinc = Self::int_param(&vals, 1, 1).max(1) as usize;
@@ -614,20 +677,78 @@ impl State<'_> {
 
         // Interpret each segment (they share the argument cursor). A `~^` in a
         // segment stops processing the remaining segments.
-        let mut pieces: Vec<String> = Vec::new();
+        let mut pieces: Vec<Out> = Vec::new();
         for seg in segments {
-            let mut s = String::new();
+            let mut s = Out::new();
             let flow = self.interp_seq(seg, &mut s)?;
             pieces.push(s);
             if matches!(flow, Flow::Escape) {
                 break;
             }
         }
-        out.push_str(&justify(&pieces, mincol, colinc, minpad, padchar, head.colon, head.at));
+        out.append(justify(pieces, mincol, colinc, minpad, padchar, head.colon, head.at));
         Ok(())
     }
 
-    fn interp_dir(&mut self, head: &Head, ch: char, out: &mut String) -> Result<(), String> {
+    /// `~<…~;…~:>` — a logical block, not a justification (see [`Node::Block`]).
+    ///
+    /// The first segment, if the directive has more than one, is the block's
+    /// prefix and the last is its suffix; both must be literal text (CL
+    /// requires this too, since they are re-emitted at line starts). A prefix
+    /// terminated by `~@;` rather than `~;` is a *per-line* prefix. `~:<`
+    /// defaults the prefix/suffix to `(`/`)`, `~<` to empty. `~@<` runs the
+    /// body against the remaining arguments in place; otherwise the block
+    /// consumes one list argument that supplies them.
+    ///
+    /// With `*print-pretty*` false the block still runs — its prefix, body and
+    /// suffix are emitted — but records no ops, so nothing can break.
+    fn interp_block(
+        &mut self,
+        head: &Head,
+        segments: &[Vec<Node>],
+        sep_at: &[bool],
+        out: &mut Out,
+    ) -> Result<(), String> {
+        let (default_prefix, default_suffix) = if head.colon { ("(", ")") } else { ("", "") };
+        let (prefix, body, suffix, per_line) = match segments.len() {
+            0 | 1 => (default_prefix.to_string(), segments.first(), default_suffix.to_string(), false),
+            2 => (literal_segment(&segments[0])?, segments.get(1), default_suffix.to_string(), sep_at.first() == Some(&true)),
+            _ => (
+                literal_segment(&segments[0])?,
+                segments.get(1),
+                literal_segment(&segments[segments.len() - 1])?,
+                sep_at.first() == Some(&true),
+            ),
+        };
+        if self.opts.pretty {
+            out.op(Op::BlockStart { prefix: prefix.clone(), per_line, suffix: suffix.clone() });
+        } else {
+            out.push_str(&prefix);
+        }
+        if let Some(body) = body {
+            if head.at {
+                // `~@<`: the body consumes the remaining arguments in place.
+                self.interp_seq(body, out)?;
+            } else {
+                let list = self.next_arg()?;
+                let sublist = list_to_vec(self.heap, list);
+                let saved = std::mem::replace(&mut self.args, sublist);
+                let saved_pos = std::mem::replace(&mut self.pos, 0);
+                let r = self.interp_seq(body, out);
+                self.args = saved;
+                self.pos = saved_pos;
+                r?;
+            }
+        }
+        if self.opts.pretty {
+            out.op(Op::BlockEnd);
+        } else {
+            out.push_str(&suffix);
+        }
+        Ok(())
+    }
+
+    fn interp_dir(&mut self, head: &Head, ch: char, out: &mut Out) -> Result<(), String> {
         match ch {
             'a' | 's' | 'w' => {
                 let standard = ch != 'a';
@@ -637,9 +758,17 @@ impl State<'_> {
                 let minpad = Self::int_param(&vals, 2, 0).max(0) as usize;
                 let padchar = Self::char_param(&vals, 3, ' ');
                 let arg = self.next_arg()?;
-                let mut s = String::new();
-                render_value(self.heap, self.enums, arg, standard, &mut s);
-                out.push_str(&pad(&s, mincol, colinc, minpad, padchar, head.at));
+                // CL's `~A`/`~S`/`~W` all consult `*print-pretty*`. Padding
+                // parameters and pretty layout can't both hold (padding fixes
+                // a width the layout is free to change), so an explicitly
+                // padded directive keeps the flat rendering.
+                if self.opts.pretty && head.params.is_empty() {
+                    pprint::render(self.heap, self.enums, arg, standard, Style::Default, out);
+                } else {
+                    let mut s = String::new();
+                    render_value(self.heap, self.enums, arg, standard, &mut s);
+                    out.push_str(&pad(&s, mincol, colinc, minpad, padchar, head.at));
+                }
             }
             'd' | 'b' | 'o' | 'x' => {
                 let radix = match ch {
@@ -731,9 +860,29 @@ impl State<'_> {
                 }
             }
             '?' => self.emit_indirection(head, out)?,
-            'i' | '_' => {
-                // Pretty-printer indent / conditional-newline: no pretty-printing
-                // stream here, so these are no-ops (documented).
+            // `~_` — a conditional newline (CL's `pprint-newline`). Plain is
+            // `:linear`, `~:_` is `:fill`, `~@_` is `:miser`, `~:@_` is
+            // `:mandatory`. Like every pretty directive it is a no-op when
+            // `*print-pretty*` is false, exactly as CL's is.
+            '_' => {
+                if self.opts.pretty {
+                    out.op(Op::Newline(match (head.colon, head.at) {
+                        (false, false) => NewlineKind::Linear,
+                        (true, false) => NewlineKind::Fill,
+                        (false, true) => NewlineKind::Miser,
+                        (true, true) => NewlineKind::Mandatory,
+                    }));
+                }
+            }
+            // `~nI` — `pprint-indent`: set the enclosing logical block's
+            // indentation to `n` past the block's own column (`~n:I`: past the
+            // current output column).
+            'i' => {
+                let vals = self.resolve_params(&head.params, &[Some(0)])?;
+                let n = Self::int_param(&vals, 0, 0);
+                if self.opts.pretty {
+                    out.op(Op::Indent(if head.colon { IndentKind::Current } else { IndentKind::Block }, n));
+                }
             }
             '/' => {
                 return Err("format: ~/name/ function-call directives are not supported".to_string());
@@ -745,7 +894,7 @@ impl State<'_> {
         Ok(())
     }
 
-    fn emit_radix(&mut self, head: &Head, radix: u32, out: &mut String) -> Result<(), String> {
+    fn emit_radix(&mut self, head: &Head, radix: u32, out: &mut Out) -> Result<(), String> {
         let vals = self.resolve_params(&head.params, &[Some(0), None, None, Some(3)])?;
         let mincol = Self::int_param(&vals, 0, 0).max(0) as usize;
         let padchar = Self::char_param(&vals, 1, ' ');
@@ -781,7 +930,7 @@ impl State<'_> {
         }
     }
 
-    fn emit_r(&mut self, head: &Head, out: &mut String) -> Result<(), String> {
+    fn emit_r(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
         // `~nR` (a radix parameter present) behaves like `~D` in that radix.
         let has_radix = matches!(head.params.first(), Some(Param::Int(_) | Param::Arg | Param::Count));
         if has_radix {
@@ -815,7 +964,7 @@ impl State<'_> {
         Ok(())
     }
 
-    fn emit_f(&mut self, head: &Head, out: &mut String) -> Result<(), String> {
+    fn emit_f(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
         let vals = self.resolve_params(&head.params, &[None, None, Some(0), None, Some(' ' as i64)])?;
         let w = Self::int_param(&vals, 0, -1);
         let d = Self::int_param(&vals, 1, -1);
@@ -841,7 +990,7 @@ impl State<'_> {
         Ok(())
     }
 
-    fn emit_e(&mut self, head: &Head, out: &mut String) -> Result<(), String> {
+    fn emit_e(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
         // `~w,d,e,k,overflow,padchar,exptcharE`. A pragmatic scientific form.
         let vals = self.resolve_params(&head.params, &[None, None, None, Some(1), None, Some(' ' as i64), None])?;
         let w = Self::int_param(&vals, 0, -1);
@@ -867,7 +1016,7 @@ impl State<'_> {
         Ok(())
     }
 
-    fn emit_g(&mut self, head: &Head, out: &mut String) -> Result<(), String> {
+    fn emit_g(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
         // General: use fixed notation for moderate magnitudes, else scientific.
         let peeked = self.peek_arg();
         let use_e = matches!(peeked, Some(v) if float_of(self.heap, v).map(|f| {
@@ -881,7 +1030,7 @@ impl State<'_> {
         }
     }
 
-    fn emit_dollars(&mut self, head: &Head, out: &mut String) -> Result<(), String> {
+    fn emit_dollars(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
         let vals = self.resolve_params(&head.params, &[Some(2), Some(1), Some(0), Some(' ' as i64)])?;
         let d = Self::int_param(&vals, 0, 2).max(0) as usize;
         let n = Self::int_param(&vals, 1, 1).max(0) as usize;
@@ -910,11 +1059,28 @@ impl State<'_> {
         Ok(())
     }
 
-    fn emit_tab(&mut self, head: &Head, out: &mut String) -> Result<(), String> {
+    fn emit_tab(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
         let vals = self.resolve_params(&head.params, &[Some(1), Some(1)])?;
         let col = Self::int_param(&vals, 0, 1).max(0) as usize;
         let inc = Self::int_param(&vals, 1, 1).max(1) as usize;
-        let cur = current_column(out);
+        // Under the pretty printer the column a tab lands on isn't known until
+        // the layout pass has chosen the line breaks, so record the tab
+        // instead of padding here. `~:T`/`~:@T` measure from the enclosing
+        // logical block's own column rather than the start of the line.
+        if self.opts.pretty {
+            out.op(Op::Tab {
+                kind: match (head.colon, head.at) {
+                    (false, false) => TabKind::Line,
+                    (false, true) => TabKind::LineRelative,
+                    (true, false) => TabKind::Section,
+                    (true, true) => TabKind::SectionRelative,
+                },
+                colnum: col as i64,
+                colinc: inc as i64,
+            });
+            return Ok(());
+        }
+        let cur = current_column(&out.text);
         if head.colon || head.at {
             // Relative tab: at least `col` spaces, then round up to `inc`.
             let mut pad = col;
@@ -945,7 +1111,7 @@ impl State<'_> {
         Ok(())
     }
 
-    fn emit_indirection(&mut self, head: &Head, out: &mut String) -> Result<(), String> {
+    fn emit_indirection(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
         let control = match self.next_arg()? {
             Value::Str(id) => self.heap.string(id).to_string(),
             _ => return Err("format: ~? requires a control-string argument".to_string()),
@@ -1036,15 +1202,15 @@ fn pad(s: &str, mincol: usize, colinc: usize, minpad: usize, padchar: char, at: 
 /// `colinc` steps) with `minpad` between them. `colon` also pads before the
 /// first piece, `at` after the last.
 fn justify(
-    pieces: &[String],
+    pieces: Vec<Out>,
     mincol: usize,
     colinc: usize,
     minpad: usize,
     padchar: char,
     colon: bool,
     at: bool,
-) -> String {
-    let text_len: usize = pieces.iter().map(|p| p.chars().count()).sum();
+) -> Out {
+    let text_len: usize = pieces.iter().map(|p| p.text.chars().count()).sum();
     // Number of gaps that receive padding.
     let mut gaps = pieces.len().saturating_sub(1);
     if colon {
@@ -1055,7 +1221,10 @@ fn justify(
     }
     if gaps == 0 {
         // A single piece with no edge padding: just meet mincol on the right.
-        return pad(&pieces.join(""), mincol, colinc, 0, padchar, false);
+        let mut only = pieces.into_iter().next().unwrap_or_default();
+        let padding = pad("", mincol.saturating_sub(text_len), colinc, 0, padchar, false);
+        only.push_str(&padding);
+        return only;
     }
     let min_total = text_len + gaps * minpad;
     let mut total = min_total;
@@ -1069,15 +1238,16 @@ fn justify(
         let n = base + if i < extra { 1 } else { 0 };
         std::iter::repeat(padchar).take(n).collect()
     };
-    let mut out = String::new();
+    let mut out = Out::new();
     let mut gap_idx = 0;
     if colon {
         out.push_str(&gap_str(gap_idx));
         gap_idx += 1;
     }
-    for (i, p) in pieces.iter().enumerate() {
-        out.push_str(p);
-        if i + 1 < pieces.len() {
+    let count = pieces.len();
+    for (i, p) in pieces.into_iter().enumerate() {
+        out.append(p);
+        if i + 1 < count {
             out.push_str(&gap_str(gap_idx));
             gap_idx += 1;
         }
@@ -1124,42 +1294,45 @@ fn char_name(c: char) -> Option<&'static str> {
 }
 
 /// `~(…~)` case conversion. `:@` upcases, `:` capitalizes each word, `@`
-/// capitalizes the first word only, plain downcases.
-fn apply_case(s: &str, colon: bool, at: bool) -> String {
-    match (colon, at) {
+/// capitalizes the first word only, plain downcases. Applied through
+/// [`Out::map_text`] so any pretty-printer op recorded inside the `~(…~)` keeps
+/// pointing at the same place in the (possibly re-lengthened) text, and so the
+/// word-boundary state of the capitalizing forms carries across op anchors.
+fn apply_case(out: &mut Out, colon: bool, at: bool) {
+    // `state` is "a word may start here" for `:`, "no word has started yet"
+    // for `@`; the other two forms ignore it.
+    out.map_text(true, |s, state| match (colon, at) {
         (true, true) => s.to_uppercase(),
-        (true, false) => capitalize_words(s),
-        (false, true) => capitalize_first(s),
+        (true, false) => capitalize_words(s, state),
+        (false, true) => capitalize_first(s, state),
         (false, false) => s.to_lowercase(),
-    }
+    });
 }
 
-fn capitalize_words(s: &str) -> String {
+fn capitalize_words(s: &str, start_of_word: &mut bool) -> String {
     let mut out = String::with_capacity(s.len());
-    let mut start_of_word = true;
     for c in s.chars() {
         if c.is_alphanumeric() {
-            if start_of_word {
+            if *start_of_word {
                 out.extend(c.to_uppercase());
             } else {
                 out.extend(c.to_lowercase());
             }
-            start_of_word = false;
+            *start_of_word = false;
         } else {
             out.push(c);
-            start_of_word = true;
+            *start_of_word = true;
         }
     }
     out
 }
 
-fn capitalize_first(s: &str) -> String {
+fn capitalize_first(s: &str, pending: &mut bool) -> String {
     let mut out = String::with_capacity(s.len());
-    let mut done = false;
     for c in s.chars() {
-        if !done && c.is_alphanumeric() {
+        if *pending && c.is_alphanumeric() {
             out.extend(c.to_uppercase());
-            done = true;
+            *pending = false;
         } else {
             out.push(c);
         }

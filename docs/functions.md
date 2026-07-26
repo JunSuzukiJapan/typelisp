@@ -483,7 +483,7 @@ CL の `format` ディレクティブをほぼ網羅する。各ディレクテ�
 |---|---|---|
 | `~a` | `~mincol,colinc,minpad,padchar` / `@`=右詰め | aesthetic（CL `princ`。文字列クォートなし） |
 | `~s` | 同上 | standard（CL `prin1`。reader 構文） |
-| `~w` | — | `~s` と同義（pretty-print なしの `write`） |
+| `~w` | — | CL の `write`。`*print-pretty*` が真なら整形出力、偽なら `~s` と同義 |
 | `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=桁区切り, `@`=符号必須 | 10/2/8/16進整数（非整数は `~a` 相当で表示） |
 | `~r` | `~radix,...`（基数指定）または無指定 | 基数指定時はその進数。無指定で `~r`=英語基数、`~:r`=英語序数、`~@r`=ローマ数字、`~:@r`=旧ローマ |
 | `~p` | `:`=1つ戻る, `@`=y/ies | 複数形（`~p`→"s"、`~@p`→"y"/"ies"） |
@@ -500,7 +500,9 @@ CL の `format` ディレクティブをほぼ網羅する。各ディレクテ�
 | `~&` | fresh-line（行頭でなければ改行。`~n&`） |
 | `~\|` | 改ページ（form feed） |
 | `~~` | リテラルの `~`（`~n~` で n 個） |
-| `~t` | タブ（`~col,incT`。`:`/`@`=相対） |
+| `~t` | タブ（`~col,incT`。`:`/`@`=相対。pretty 時は `:`=論理ブロック起点の相対タブ） |
+| `~_` | 条件改行（pretty。素=`:linear` / `~:_`=`:fill` / `~@_`=`:miser` / `~:@_`=`:mandatory`） |
+| `~i` | インデント（pretty。`~ni`=ブロック起点+n / `~n:i`=現在桁+n） |
 | `~<改行>` | 改行を無視（`:`=空白保持, `@`=改行保持） |
 
 **制御構造**
@@ -511,12 +513,15 @@ CL の `format` ディレクティブをほぼ網羅する。各ディレクテ�
 | `~[...~;...~]` | 条件選択（整数で分岐。`~:;`=デフォルト節, `~:[偽~;真~]`=真偽, `~@[...~]`=非false時のみ） |
 | `~{...~}` | 反復（リスト引数を走査。`~:{`=部分リストごと, `~@{`=残り引数, `~^`=脱出, `~:}`=空でも1回） |
 | `~<...~;...~>` | 桁揃え（セグメントを `~mincol` 幅に分散。`:`/`@`=端の詰め） |
+| `~<...~;...~:>` | **論理ブロック**（閉じが `~:>`。上の桁揃えとは別物）。先頭セグメント=prefix、末尾=suffix（いずれもリテラル文字列のみ）。`~@;` 区切りなら prefix は**行頭 prefix**。`~:<` は prefix/suffix を `(`/`)` に既定。引数はリスト1つ（`~@<` は残り引数をその場で使う） |
 | `~?` | 間接（次の引数=制御文字列、その次=引数リスト。`~@?`=以降の引数を流用） |
 | `~*` | 引数スキップ（`~n*`=n個進む, `~:*`=戻る, `~@*`=絶対位置へ） |
 
-**未対応**（実行時エラー or no-op）: `~/name/`（関数呼び出しディレクティブ。実行時の関数名解決機構が
-`format` の呼出規約に合わない）、pretty-printer 系の `~i`/`~_`（pretty-print ストリームが無いため no-op）。
-CL の `~:a`/`~@[` の nil 特有挙動は typelisp の `false` に読み替える（nil は無い）。
+**未対応**（実行時エラー）: `~/name/`（関数呼び出しディレクティブ。実行時の関数名解決機構が
+`format` の呼出規約に合わない）。CL の `~:a`/`~@[` の nil 特有挙動は typelisp の `false` に読み替える
+（nil は無い）。pretty-printer 系ディレクティブ（`~_` `~i` `~:t` `~<...~:>`、および `~a`/`~s`/`~w` の
+整形経路）は `*print-pretty*` が偽のとき CL 同様すべて no-op——既定は偽なので、既存の出力は一切変わらない。
+詳細は下の §15.1。
 
 ```lisp
 (println "~a + ~a = ~d" 1 2 3)        ; => 1 + 2 = 3
@@ -535,6 +540,101 @@ CL の `~:a`/`~@[` の nil 特有挙動は typelisp の `false` に読み替え�
 Rust 専用処理）、`Interp::run_format` が enum 変種名表を渡して呼ぶ。可変長引数を `Sexpr` リストへまとめる
 特殊形は [checker.rs](../src/check/checker.rs) の `check_format`/`check_print_like`。コンパイル
 （`compile`）対象ではない（旧 `print`/`println` も未対応だった）。
+
+### 15.1 pretty printer（CLHS 22.2）
+
+CL の Lisp Pretty Printer 相当。**行幅に収まらない出力を、論理ブロックと条件改行の指定に従って
+折り返す**。実体は [pprint.rs](../src/eval/pprint.rs)。
+
+#### 制御変数
+
+CL では特殊変数（`let` で動的に束縛する）だが、typelisp に動的束縛は無いので**通常の代入可能な
+グローバル**（prelude の `defvar`）。`setf` した時点から以降のすべての印字に効く。
+
+| 変数 | 型 | 既定 | 意味 |
+|---|---|---|---|
+| `*print-pretty*` | `bool` | `false` | 真なら `~a`/`~s`/`~w` と pretty ディレクティブが整形経路に入る |
+| `*print-right-margin*` | `i64` | `80` | 右マージン（桁）。0 以下は「マージン無し＝折らない」 |
+| `*print-miser-width*` | `i64` | `0` | miser スタイルに入る幅。0 以下は CL の `nil`（miser 無効）に相当 |
+
+既定が `false` なのは、既存プログラムの出力を一切変えないため（CL でも初期値は処理系定義）。
+`pprint` 系と `pprint-logical-block` は `*print-pretty*` に関わらず常に整形する（CL の `pprint` の定義通り）。
+
+#### 既製レイアウト（特殊形）
+
+`print` と同じく特殊形なので、引数はどんな型でもよい（各自の型のまま `Sexpr` へ包まれる）。
+
+| 名前 | 形式 | 説明 |
+|---|---|---|
+| `pprint` | `(pprint x)` | 既定レイアウトで整形出力。CL 準拠で**先頭に改行**を出し、末尾には出さない |
+| `pprint-fill` | `(pprint-fill x)` | 1行に入るだけ詰める（語詰め）。改行は出さない |
+| `pprint-linear` | `(pprint-linear x)` | 全要素が1行に収まらなければ**1要素1行**。改行は出さない |
+| `pprint-tabular` | `(pprint-tabular x [colinc])` | `colinc` 桁の表形式（既定 16）。改行は出さない |
+
+既定レイアウト（`pprint` / `*print-pretty*` 下の `~a`）は、CL の既定 `*print-pprint-dispatch*` に倣って
+`(quote x)` を `'x` と略記し、`defun`/`let`/`if`/`lambda` 等のコード形は「頭部＋規定個数の引数を1行目、
+残りの本体を2桁字下げして1行ずつ」に整形する。それ以外のリストは fill（語詰め）。
+
+```lisp
+(setf *print-right-margin* 20)
+(pprint '(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15))
+;; =>
+;; (1 2 3 4 5 6 7 8 9
+;;  10 11 12 13 14 15)
+(pprint '(defun f (x) i64 (+ x 1) (* x 2)))
+;; =>
+;; (defun f (x) i64
+;;   (+ x 1)
+;;   (* x 2))
+```
+
+#### 論理ブロックを自分で組む
+
+| 名前 | 形式 | 説明 |
+|---|---|---|
+| `pprint-logical-block` | `(pprint-logical-block (obj :prefix p :per-line-prefix p :suffix s) body...)` | 論理ブロックを開く特殊形。`obj` は `pprint-pop` が辿るリスト（辿らないなら `()`）。`:prefix` と `:per-line-prefix` は排他（CL と同じ） |
+| `pprint-newline` | `(pprint-newline kind)` | 条件改行。`kind` は `:linear` / `:fill` / `:miser` / `:mandatory` |
+| `pprint-indent` | `(pprint-indent kind n)` | 字下げ。`kind` は `:block`（ブロック起点から）/ `:current`（現在桁から） |
+| `pprint-tab` | `(pprint-tab kind colnum colinc)` | タブ。`kind` は `:line` / `:section` / `:line-relative` / `:section-relative` |
+| `pprint-pop` | `(pprint-pop)` | ブロックのリストから次の要素を取る（尽きていれば `()`） |
+| `pprint-list-exhausted` | `(pprint-list-exhausted)` | リストが尽きたか |
+| `pprint-exit-if-list-exhausted` | `(pprint-exit-if-list-exhausted)` | 尽きていれば囲む `loop` を `break`（マクロ） |
+
+typelisp には第一級ストリームが無いので、**開いている論理ブロックは暗黙のインタプリタ状態**（GC ヒープと
+同じ扱い）。最も外側の `pprint-logical-block` が開始し、それが閉じたときに一括で整形して標準出力へ書く。
+開いている間は `print`/`println`/`(format true ...)`/`pprint` の出力もすべてそのブロックへ入るので、
+**内容は普通の `print` で書き、改行位置だけ `pprint-newline` 等で指定する**——CL のコードとほぼ同じ形になる。
+
+`pprint-exit-if-list-exhausted` は CL ではブロックからの非局所脱出だが、typelisp に汎用の脱出機構は
+無いので**囲む `loop` からの `break`** として実装している。CL 側の定型もつねに `loop` の中に書くので、
+実用上の書き味は変わらない。
+
+```lisp
+(setf *print-right-margin* 24)
+(pprint-logical-block ('(alpha beta gamma delta epsilon zeta) :prefix "(" :suffix ")")
+  (loop (pprint-exit-if-list-exhausted)
+        (print "~w" (pprint-pop))
+        (if (pprint-list-exhausted) () (progn (print " ") (pprint-newline :fill)))))
+;; =>
+;; (alpha beta gamma delta
+;;  epsilon zeta)
+```
+
+条件改行の判定規則（CLHS `pprint-newline`）:
+
+- `:mandatory` — つねに折る。
+- `:linear` — 囲む論理ブロックが1行に収まらなければ折る。ブロック単位の判定なので、**同一ブロックの
+  `:linear` はすべて一緒に折れる**（`pprint-linear` の「全部1行か1要素1行か」はこれ）。
+- `:fill` — (a) 次の区間が行の残りに収まらない、(b) 直前の区間が1行に収まらなかった、
+  (c) miser スタイルでブロックが1行に収まらない、のいずれかで折る。
+- `:miser` — miser スタイル（ブロックの開始桁が右マージンから `*print-miser-width*` 以内）のときだけ
+  `:linear` として働く。
+
+#### 未実装
+
+`set-pprint-dispatch` / `*print-pprint-dispatch*`（実行時の型ごとに整形関数を登録し、`print`/`~a` が
+自動選択する仕組み）は未実装。理由は [dev/TODO.md](dev/TODO.md) の T5 参照。ユーザ定義型ごとの整形は、
+自前の整形関数を書いて明示的に呼ぶ形で今でも書ける。
 
 ## 16. 解析・評価 (`parse-int` / `parse-float` / `read` / `eval`)
 

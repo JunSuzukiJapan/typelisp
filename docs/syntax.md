@@ -409,7 +409,19 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 (todo)                              ; (panic "todo") に展開。defmacro
 (as Type expr)                      ; 数値/文字の型変換。失敗しうる変換は失敗時に panic
 (try-as Type expr)                  ; as と同じだが結果を Option<Type> で返す（失敗は None）
+(print control args...)             ; 書式展開して標準出力へ（改行なし）
+(println control args...)           ; 同上（末尾に改行）
+(format dest control args...)       ; CL の format。展開結果の string を返す
+(pprint x)                          ; pretty printer で整形出力。CL 準拠で先頭に改行を出す
+(pprint-fill x)                     ; 語詰めレイアウト
+(pprint-linear x)                   ; 全部1行か1要素1行か
+(pprint-tabular x [colinc])         ; 表形式レイアウト（既定 16 桁）
+(pprint-logical-block (obj :prefix p :suffix s) body...)  ; 論理ブロックを自分で組む
 ```
+
+`print`/`println`/`format`/`pprint` 系は特殊形なので、可変長引数（`pprint` 系は1つの対象）は
+各自の型のまま `Sexpr` へ包まれて渡る——`(println "~a" my-struct)` がそのまま動くのはこのため。
+書式ディレクティブと pretty printer の詳細は [functions.md](functions.md) §15 / §15.1。
 
 `as`/`try-as` が扱えるのは数値・文字カタログのみ（`i32`/`i64`/`f64`/`bignum`/`ratio`/`char` 間）。
 同一型・`i32`↔`i64` は無変換。`i32`/`i64`→`char` と `bignum`→`i32`/`i64` は範囲外で失敗しうるため

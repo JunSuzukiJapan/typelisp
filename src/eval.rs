@@ -5,6 +5,7 @@
 mod value;
 pub(crate) mod format;
 pub(crate) mod interp;
+pub(crate) mod pprint;
 pub(crate) mod scope;
 
 pub use value::{EvalError, RtValue};

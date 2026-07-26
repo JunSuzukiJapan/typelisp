@@ -432,6 +432,22 @@ impl Registry {
         // immediately. Result is a `Sexpr` (the value, or a definition's name
         // symbol); malformed/ill-typed input is `Err`, not a panic.
         root.fns.insert("eval".to_string(), FnSig { type_params: vec![], rest: None, params: vec![sexpr()], ret: result_of(sexpr(), error_ty(EVAL_ERROR)), public: true, builtin: true, bounds: HashMap::new() });
+        // The pretty printer's user-callable layout operators (CLHS 22.2.1),
+        // minus the stream argument typelisp has no streams for. They act on
+        // the logical block the `pprint-logical-block` special form opened
+        // (`Interp`'s `PrettySession`) and are no-ops outside one, exactly as
+        // CL's are when the stream is not a pretty stream — which is why they
+        // are plain functions here and need no special-form treatment: their
+        // arguments are CL's own keywords, i.e. ordinary `Symbol` values.
+        //
+        // `pprint-pop` returns `()` once the block's list is exhausted;
+        // `pprint-list-exhausted` is the predicate to test first (the prelude
+        // macro `pprint-exit-if-list-exhausted` is the CL-spelled wrapper).
+        root.fns.insert("pprint-newline".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("pprint-indent".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol, Type::I64], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("pprint-tab".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Symbol, Type::I64, Type::I64], ret: Type::Unit, public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("pprint-pop".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: sexpr(), public: true, builtin: true, bounds: HashMap::new() });
+        root.fns.insert("pprint-list-exhausted".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new() });
         // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr` builtins:
         // the Symbol/Sexpr redesign (Phase 4b) repurposes `cons`/`car`/`cdr` to
         // the generic `cons<T,U>` pair (`prelude.rs`'s free `cons` +

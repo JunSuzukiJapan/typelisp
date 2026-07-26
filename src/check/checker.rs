@@ -1231,6 +1231,8 @@ impl Checker {
             "if" | "let" | "let*" | "progn" | "setf" | "loop" | "break" | "return" | "list"
                 | "lambda" | "labels" | "match" | "panic" | "the" | "as" | "try-as" | "compile"
                 | "quote" | "quasiquote" | "format" | "print" | "println"
+                | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
+                | "pprint-logical-block"
                 // top-level forms (`check_form_dispatch`)
                 | "pub" | "defun" | "defvar" | "defconstant" | "defmacro" | "module"
                 | "defmethod" | "defstruct" | "defenum" | "deftrait" | "impl" | "use" | "load"
@@ -4249,6 +4251,10 @@ impl Checker {
             "format" => return self.check_format(heap, interp, env, args, arg_locs),
             "print" => return self.check_print_like(heap, interp, env, "print-rt", Type::Unit, args, arg_locs),
             "println" => return self.check_print_like(heap, interp, env, "println-rt", Type::Unit, args, arg_locs),
+            "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular" => {
+                return self.check_pprint(heap, interp, env, head.as_str(), args, arg_locs)
+            }
+            "pprint-logical-block" => return self.check_pprint_logical_block(heap, interp, env, args, arg_locs),
             "lambda" => return self.check_lambda(heap, interp, env, args, arg_locs),
             "labels" => return self.check_labels(heap, interp, env, args, arg_locs, expected),
             "apply" => return self.check_apply_form(heap, interp, env, args, arg_locs),
@@ -5742,6 +5748,149 @@ impl Checker {
             expr: Expr::Call(Ref::synthetic(Path::root(builtin)), vec![control, list]),
             ty: ret,
         })
+    }
+
+    /// The `pprint` family — `(pprint x)`, `(pprint-fill x)`,
+    /// `(pprint-linear x)`, `(pprint-tabular x [colinc])` — CLHS 22.2.1's
+    /// four ready-made layouts, writing to stdout.
+    ///
+    /// These are special forms rather than `defun`s for the same reason
+    /// `print` is: the argument keeps its own natural type and is wrapped into
+    /// its `Sexpr` encoding here ([`Self::wrap_rest_elem`]), so `(pprint 42)`
+    /// and `(pprint my-struct)` both work without an implicit-coercion rule in
+    /// the type system. Unlike `~A`/`~S`, they pretty-print whatever
+    /// `*print-pretty*` says, matching CL — `pprint` is defined as printing
+    /// "as if `*print-pretty*` were true".
+    fn check_pprint(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        form: &str,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Typed, Error> {
+        let takes_colinc = form == "pprint-tabular";
+        let max = if takes_colinc { 2 } else { 1 };
+        if args.is_empty() || args.len() > max {
+            return Err(Error::TypeError(if takes_colinc {
+                "pprint-tabular: expected an object and an optional column width".to_string()
+            } else {
+                format!("{}: expected exactly one object to print", form)
+            }));
+        }
+        let value = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
+        let value = self.wrap_rest_elem(&value.ty.clone(), value)?;
+        // The column width is only meaningful to `pprint-tabular`; the other
+        // three take the default (1) so one builtin serves all four.
+        let colinc = match args.get(1) {
+            Some(a) => self.check_at(heap, interp, env, *a, Some(&Type::I64), nth_loc(arg_locs, 1))?,
+            None => Typed { loc: None, expr: Expr::Int(0), ty: Type::I64 },
+        };
+        Ok(Typed {
+            loc: None,
+            expr: Expr::Call(
+                Ref::synthetic(Path::root("pprint-rt")),
+                vec![
+                    Typed { loc: None, expr: Expr::Str(form.to_string()), ty: Type::Str },
+                    value,
+                    colinc,
+                ],
+            ),
+            ty: Type::Unit,
+        })
+    }
+
+    /// `(pprint-logical-block (obj :prefix "(" :suffix ")") body…)` — CLHS
+    /// `pprint-logical-block`, minus the stream argument typelisp has no
+    /// streams for.
+    ///
+    /// `obj` is the list `pprint-pop` walks (write `()` for a block that
+    /// iterates nothing). The options are CL's, as keywords: `:prefix`,
+    /// `:suffix`, `:per-line-prefix` (mutually exclusive with `:prefix`, as in
+    /// CL). Everything printed inside the body — by `print`, `(format true …)`
+    /// or `pprint` — becomes the block's content, and the `pprint-newline` /
+    /// `pprint-indent` / `pprint-tab` builtins place its line breaks; see
+    /// `Interp`'s `PrettySession` for how that implicit "current pretty
+    /// stream" works.
+    ///
+    /// A special form rather than a macro because the options are keyword
+    /// arguments over a nested spec list, and because the block must open
+    /// before and close after an arbitrary body sequence.
+    fn check_pprint_logical_block(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Typed, Error> {
+        if args.is_empty() {
+            return Err(Error::TypeError(
+                "pprint-logical-block: (pprint-logical-block (obj :prefix p :suffix s) body...)".into(),
+            ));
+        }
+        let spec = heap.list_to_vec(args[0])?;
+        let Some(&obj_form) = spec.first() else {
+            return Err(Error::TypeError(
+                "pprint-logical-block: the spec needs at least the object to iterate (write `()` for none)".into(),
+            ));
+        };
+        let obj = self.check_at(heap, interp, env, obj_form, Some(&sexpr_ty()), nth_loc(arg_locs, 0))?;
+        let str_lit = |s: &str| Typed { loc: None, expr: Expr::Str(s.to_string()), ty: Type::Str };
+        let mut prefix = str_lit("");
+        let mut suffix = str_lit("");
+        let mut per_line = false;
+        let mut opts = spec[1..].iter();
+        while let Some(&key) = opts.next() {
+            let name = match key {
+                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                _ => return Err(Error::TypeError("pprint-logical-block: expected a keyword option".into())),
+            };
+            let Some(&value) = opts.next() else {
+                return Err(Error::TypeError(format!("pprint-logical-block: {} needs a value", name)));
+            };
+            let value = self.check_at(heap, interp, env, value, Some(&Type::Str), None)?;
+            match name.as_str() {
+                ":prefix" => prefix = value,
+                ":per-line-prefix" => {
+                    prefix = value;
+                    per_line = true;
+                }
+                ":suffix" => suffix = value,
+                other => {
+                    return Err(Error::TypeError(format!(
+                        "pprint-logical-block: unknown option {} (expected :prefix, :per-line-prefix or :suffix)",
+                        other
+                    )))
+                }
+            }
+        }
+        // `(progn (open …) body… (close))`, represented the way `progn` is:
+        // a `let` with no bindings. The block's own value is `unit` — the body
+        // is run for its printing effect.
+        let mut seq = vec![Typed {
+            loc: None,
+            expr: Expr::Call(
+                Ref::synthetic(Path::root("pprint-block-start-rt")),
+                vec![
+                    obj,
+                    prefix,
+                    Typed { loc: None, expr: Expr::Bool(per_line), ty: Type::Bool },
+                    suffix,
+                ],
+            ),
+            ty: Type::Unit,
+        }];
+        for (i, &form) in args[1..].iter().enumerate() {
+            seq.push(self.check_at(heap, interp, env, form, None, nth_loc(arg_locs, 1 + i))?);
+        }
+        seq.push(Typed {
+            loc: None,
+            expr: Expr::Call(Ref::synthetic(Path::root("pprint-block-end-rt")), Vec::new()),
+            ty: Type::Unit,
+        });
+        Ok(Typed { loc: None, expr: Expr::Let(Vec::new(), seq), ty: Type::Unit })
     }
 
     // Same invariant checking context as `check_path_call` — see its comment.
