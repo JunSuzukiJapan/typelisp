@@ -23,50 +23,11 @@ CL同等カタログ・可視性・trait機構・compile（普通に書けるコ
 TODO として正式に格上げ**する（2026-07-23、この一覧化で棚卸し）。優先度は目安であり、着手順は未確定。
 
 完了した項目（T1「`format` の書式指定子」、T2「`defmacro` の `&optional`/`&key`」、
-T3「ユーザ定義エラー型」、T4「動的ディスパッチ」、T5「`--heap-cells N`」、
-T5「pretty printer」の Tier1/Tier2）は [implementation-log.md](implementation-log.md) 末尾へ移設した
-（T1/T5 は 2026-07-23、T2 は 2026-07-24、T3/T4 は 2026-07-25、pretty printer は 2026-07-26）。
+T3「ユーザ定義エラー型」、T4「動的ディスパッチ」、T5「`--heap-cells N`」、T5「pretty printer」、
+T5-b「型ごとの印字表現」）は [implementation-log.md](implementation-log.md) 末尾へ移設した
+（T1/T5 は 2026-07-23、T2 は 2026-07-24、T3/T4 は 2026-07-25、pretty printer と T5-b は 2026-07-26）。
 
-### T5-b. `set-pprint-dispatch` / `*print-pprint-dispatch*`（優先度: 低）
-
-pretty printer 本体（T5 の Tier1/Tier2）は 2026-07-26 に実装済み
-（[implementation-log.md](implementation-log.md) 末尾、利用者向け仕様は
-[functions.md](../functions.md) §15.1）。`*print-pretty*`/`*print-right-margin*`/
-`*print-miser-width*`、`format` の `~_`/`~i`/`~:t`/`~<...~:>`、`pprint`/`pprint-fill`/
-`pprint-linear`/`pprint-tabular`、`pprint-logical-block`/`pprint-newline`/`pprint-indent`/
-`pprint-tab`/`pprint-pop`/`pprint-exit-if-list-exhausted` はすべて使える。
-
-**残っているのは Tier3 だけ**——「実行時の型ごとに整形関数を登録し、`print`/`write`/`~a` が
-呼び出し側の関与なしにそれを自動選択する」`set-pprint-dispatch` と、その登録表
-`*print-pprint-dispatch*`。
-
-#### 前提の再評価（2026-07-26、実装してみて分かったこと）
-
-以前このタスクは「前提は T4 動的ディスパッチ ＋ 可変 pretty ストリーム値型の新設」と記録していた。
-実際に作ってみると**どちらでもなかった**:
-
-- T4（`:dyn Trait`）は 2026-07-25 に入ったが、登録表の索引付けに `:dyn` は要らない。
-  型名（`string`）→ 関数値の `HashTable` で足りる。
-- 「可変 pretty ストリーム値型」も要らなかった。開いている論理ブロックを**インタプリタの暗黙状態**に
-  する（GC ヒープと同じ扱い）ことで、新しい値型ゼロで Tier2 を実装できた。
-
-本当に残っている前提は次の3点:
-
-1. レンダラ経路全体に `&mut Heap` を通すこと。現在 `format::build`/`render_value`/`pprint::render` は
-   `&Heap` で、ユーザ関数の呼び戻しには `&mut Heap` が要る（呼び出し元の
-   `Interp::eval_builtin` には既に `&mut Heap` があるので、機械的だが広い変更）。
-2. Rust から typelisp の関数値を呼ぶ橋。`Expr::Apply` の compiled-closure 経路
-   （`encode_crossing_args` → `call_closure_box` → `decode_compiled_return`）を、AST ノードから
-   切り離して再利用できる形にする必要がある。
-3. **呼び戻し中に宙に浮く `Value` の GC ルート保護**。これが本当の難所——レンダラは走査中のリスト要素を
-   Rust の `Vec<Value>` に保持しており（`pprint::list_items`）、そこからユーザコードを呼べば確保が
-   起きて回収されうる。印字経路は全プログラムが通るので、ここに微妙な GC バグを入れると影響が広い。
-
-3 を安全に片付ける設計（走査中の値をセル or ルートスタックへ退避する等）が決まってから着手すること。
-なお「ユーザ定義型ごとの整形を自分で書いて明示的に呼ぶ」だけなら、Sexpr への暗黙変換と `match` の
-downcast パターンで今でも書ける（自動選択でない、という点だけが違う）。
-
-- 関連: [[typelisp-format-directives]]（`format` 実装）、[[typelisp-pretty-printer]]。
+**これで当初の T1〜T5 はすべて片付き、着手候補として格上げされた TODO は残っていない。**
 
 ### 意図的に「やらない」もの（TODO ではない）
 
@@ -80,6 +41,12 @@ downcast パターンで今でも書ける（自動選択でない、という�
   直接歩いて各要素を束縛する（要素は動的に `Sexpr`。使う側が `match` で具体型に分解する）ので、
   上記の「ジェネリックな `Iter<Item>` を被せない」方針と両立している。
 - **`?`/`try` 構文**、および `!`/`?` の命名接尾辞: CL に倣い非採用（§7.3）。
+- **`set-pprint-dispatch` / `*print-pprint-dispatch*`**: CL の「型指定子をキーにした実行時の
+  整形関数登録表」。文字列キーもプリンタのシグネチャも無検査で、「登録時点で分かっていた型を
+  捨ててから `match` で復元する」形になり、静的型付け言語には合わない——CL のもう一方の機構
+  である CLOS 総称関数 `print-object` に相当する **`print-object` トレイト**を 2026-07-26 に
+  採用してこちらを置き換えた（[functions.md](../functions.md) §15.2）。判断の経緯は
+  [implementation-log.md](implementation-log.md) 末尾。
 
 ---
 

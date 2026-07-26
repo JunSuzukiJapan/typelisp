@@ -4548,3 +4548,93 @@ T5 は「前提は T4 動的ディスパッチ、それが済めば残るは可�
 [pprint_test.rs](../../tests/pprint_test.rs) 25件（`format` のディレクティブは戻り値の文字列で、
 標準出力へ書く `pprint`/`pprint-logical-block` は `typl` バイナリを起動して stdout を読む）と、
 [pprint.rs](../../src/eval/pprint.rs) 内のレイアウト単体テスト10件。
+
+## `print-object` トレイト（型ごとの印字表現、2026-07-26、旧 TODO T5-b、branch `feature/print-object`）
+
+pretty printer の Tier3 として残していた `set-pprint-dispatch` を実装しようとして、
+**目標設定そのものがこの言語では間違っていた**と判明したので、`print-object` トレイトへ
+差し替えた。利用者向け仕様は [functions.md](../functions.md) §15.2。
+
+### なぜ `set-pprint-dispatch` を採らなかったか
+
+TODO には「実行時の**型名文字列 → 関数**の登録表」と書いてあった。着手前の議論で、
+ユーザーから「静的型付け言語なのだから呼び出し側の型は決まっているはず」という指摘があり、
+そこから2点が出た:
+
+1. **登録側が無検査**。`(set-pprint-dispatch "point" print-point)` の `"point"` も
+   `(fn (sexpr) string)` というシグネチャも、コンパイル時には何も検証されない。型名の
+   打ち間違いも、`point` 以外を受け取るプリンタの登録も通る。しかもプリンタ本体は `match` で
+   引数を downcast し直す——**登録時点で分かっていた型を、捨ててから復元している**。
+   この言語には「型ごとに実装を対応づける」機構が既にある（`deftrait`/`impl`、`AdtDef::impls`）。
+2. **CL でも別物が2つある**。`print-object`（CLOS の総称関数＝クラスごとのメソッド）と
+   `set-pprint-dispatch`（型指定子キーの表、pretty 時のみ）。trait/impl に対応するのは前者で、
+   そちらを採るほうが CL 準拠でもある。
+
+`set-pprint-dispatch` は「意図的にやらないもの」へ移した（[TODO.md](TODO.md)）。
+
+### 静的に決まるのは「登録」であって「選択」ではない
+
+差し替えの過程で一度、**checker が印字地点の静的型から impl を引いて呼び出しを事前に
+埋め込む**（実行時機構ゼロ）案を検討したが、これは成立しない:
+
+- どのディレクティブがどの引数を消費するかは**制御文字列の実行時の中身**で決まる
+  （`(format false s x)` の `s` は変数でもよい）ので、checker には `~a`（princ）と
+  `~s`（prin1）のどちらが問うているのか分からない。事前に文字列へ潰すと `~s` の
+  意味が失われる。
+- レンダラの中では分かる——`render_value(…, standard: bool, …)` の `standard` が
+  まさにその区別。これを CL の `*print-escape*` として `print-object` の第2引数に渡す。
+
+結果、CLOS と同じ構図に落ち着いた: **メソッドは型ごとに静的に定義・型検査され、選択は
+印字の瞬間に行われる**。
+
+### 実装
+
+- prelude に `(deftrait print-object (print-object ((self Self) (escape bool)) string))`。
+  トレイト名とメソッド名が同じでも通る（禁止されているのは*型*とトレイトの同名共存だけ）。
+  組み込み型への `impl` は入れていない——既存の出力を1バイトも変えないため。
+- **登録表は作らない**。`impl` はふつうの `defmethod` として `Interp` のモジュールツリーに
+  載るので、`root.get_method(&type_path, "print-object")` がそのまま索引になる。二重管理ゼロ。
+  拾った `FnDef::sig` が `([T, bool], string)` かを確認するのは、トレイト impl ではない
+  同名メソッドを誤って拾わないための安全弁。
+- 呼び出しは既存の `Interp::apply(heap, &FnDef, argv)`。当初 Tier3 の前提に挙げていた
+  「Rust→typelisp の呼び出し橋の新設」は不要だった（compiled-closure 経路の切り出しも不要）。
+- `format::build`/`render_value`/`pprint::render` を `&Heap` から `&mut Heap` へ。
+  `enums` と `Option<&Interp>` は `RenderCtx`（Copy）にまとめて引き回す。`interp: None` なら
+  ディスパッチしないので、単体テストや埋め込み用途は従来のまま。
+
+### GC ルート保護——**追加のルートは要らなかった**（実装中に判明、要注意）
+
+着手前はこれを最大の難所と見ていた。実際に書いたのも当初は「印字対象を入口で1回
+`push_root` し、`expand_macro` と同じ順序で解く」ヘルパーだった。**これは不要であり、
+しかも有害だった**:
+
+- **不要**: ビルトインの引数は `Interp::eval_args` が1つずつ `native_slot` として
+  登録しており、そのアンカーは `eval_builtin` の呼び出し全体にわたって生きている。
+  `sync_roots` は確保の直前にその生きたスロット集合からルートを組み直す。GC は非移動の
+  mark-sweep で `car`/`cdr` とボックス内の入れ子を辿るので、**最外の値1つのアンカーが
+  その全部分値を覆う**——レンダラが持つ中間の `Vec<Value>` の中身も全部その子孫。
+- **有害**: `format-rt` に入る時点で `self.rooted` は既に非ゼロ（引数リストは直前に
+  `sexpr-cons` で組まれ、そのビルトインが `sync_roots` を呼ぶ）。その上に `push_root`
+  すると、次の `sync_roots` が自分のバッチを**スタック先頭から** `rooted` 個 pop する際に
+  こちらのルートまで持っていく。`expand_macro` の doc コメントが書いている strict-LIFO
+  不変条件の違反そのもの。
+
+GC ストレステストは削除前も通っていた——`eval_args` のアンカーが実際の保護をしていたから
+であり、追加ルートは効いていなかった。**「念のため根を積む」がこのヒープでは安全側に倒れない**
+という教訓（`sync_roots` は自分のバッチが先頭にある前提で pop する）。`Interp::print_object` の
+doc コメントに理由を書き残した。
+
+### 再入ガード
+
+`(impl print-object point (... (format false "~a" self)))` は無限再帰する。印字中の値を
+`Interp::printing` に積み、同じ値が再び現れたら組み込み表現へフォールバックする。深さ制限では
+なく**値の同一性**で見るので、正当な自己参照構造の入れ子印字は妨げない。
+
+### テスト
+
+[pprint_test.rs](../../tests/pprint_test.rs) に8件追加（合計34件）。要は
+`a_print_object_that_conses_heavily_survives_collections` ——20000セルのアリーナで、
+プリンタ1回につき2000セル消費する impl を200回呼び、100行すべてが正しく出ることを確認する
+（`eval_args` のアンカーが効いていなければ壊れる）。ほかに `escape` の `~a`/`~s` 差、入れ子リストでの
+ディスパッチ、impl 無しの非回帰、同名だがトレイトでない `defmethod` の除外、再入ガード、
+pretty printer との合成。

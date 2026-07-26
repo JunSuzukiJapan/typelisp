@@ -630,11 +630,59 @@ typelisp には第一級ストリームが無いので、**開いている論理
 - `:miser` — miser スタイル（ブロックの開始桁が右マージンから `*print-miser-width*` 以内）のときだけ
   `:linear` として働く。
 
-#### 未実装
+### 15.2 `print-object`（型ごとの印字表現）
 
-`set-pprint-dispatch` / `*print-pprint-dispatch*`（実行時の型ごとに整形関数を登録し、`print`/`~a` が
-自動選択する仕組み）は未実装。理由は [dev/TODO.md](dev/TODO.md) の T5 参照。ユーザ定義型ごとの整形は、
-自前の整形関数を書いて明示的に呼ぶ形で今でも書ける。
+`impl print-object <型>` を書くと、`print`/`println`/`format`/`pprint` がその型の値を——
+**リストの中に入れ子で埋まっていても**——その実装で印字する。CL の CLOS 総称関数
+`print-object`（CLHS 22.1.4）に対応する。
+
+```lisp
+(deftrait print-object
+  (print-object ((self Self) (escape bool)) string))
+```
+
+| 引数 | 意味 |
+|---|---|
+| `self` | 印字する値 |
+| `escape` | CL の `*print-escape*`。`~s`/`prin1`/`pprint` で `true`（reader 構文）、`~a`/`princ` で `false`（人間向け）。気にしない実装は無視してよい |
+
+戻り値の `string` がそのまま出力に流れる。組み込み型には**一切実装を入れていない**ので、
+`impl` を書かない限り既存の出力（`#<point 1 2>` 形式）は1バイトも変わらない。
+
+```lisp
+(defstruct point (x i64) (y i64))
+(impl print-object point
+  (print-object ((self Self) (escape bool)) string
+    (if escape (format false "#S(point :x ~d :y ~d)" self::x self::y)
+               (format false "(~d,~d)" self::x self::y))))
+
+(println "~a" p)              ; => (1,2)
+(println "~s" p)              ; => #S(point :x 1 :y 2)
+(println "~a" (list p q))     ; => ((1,2) (3,4))   ← 入れ子でも効く
+```
+
+pretty printer とも合成される（§15.1）。`*print-pretty*` が真なら、実装が返した文字列を
+含むリストが右マージンで折り返される。
+
+#### 設計上の約束ごと
+
+- **登録は静的**。`impl` はふつうのメソッド定義として型検査されるので、型名の打ち間違いも
+  シグネチャ違いもコンパイルエラーになる。別建ての登録表は無い。
+- **選択は印字時**。どのディレクティブがどの引数を消費するかは制御文字列の実行時の中身で
+  決まるため、`~a` と `~s` の区別（＝`escape`）は印字の瞬間にしか分からない。CLOS が
+  `print-object` メソッドを「クラスごとに定義し、印字時に選択する」のと同じ。
+- **再入は組み込み表現へフォールバック**。実装が `(format false "~a" self)` と自分自身を
+  印字すると無限再帰になるので、印字中の値が再び現れたら組み込み表現に落とす。深さ制限では
+  なく値の同一性で見るので、正当な自己参照構造の入れ子印字は妨げない。
+- **ジェネリック型の実行時選択は不可**。`Vector<point>` の箱は実行時には要素型を持たない
+  （`vector` としか名乗らない）ので、`impl print-object Vector<T>` を実行時に選ぶことは
+  できない。ただし組み込みの `Vector` 描画が要素へ再帰し、各要素がそこでディスパッチされる
+  ので、見え方は揃う。
+- CL のもう一方の機構 `set-pprint-dispatch` / `*print-pprint-dispatch*`（型指定子をキーに
+  した実行時の登録表）は**採用しない**。文字列キーもプリンタのシグネチャも無検査で、
+  「登録時点で分かっていた型を捨ててから `match` で復元する」形になり、静的型付け言語には
+  合わない。経緯は [dev/TODO.md](dev/TODO.md) の T5-b と
+  [dev/implementation-log.md](dev/implementation-log.md)。
 
 ## 16. 解析・評価 (`parse-int` / `parse-float` / `read` / `eval`)
 

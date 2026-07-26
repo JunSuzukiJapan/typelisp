@@ -230,6 +230,9 @@ pub struct Interp {
     jit_ctor_counter: Cell<u64>,
     /// The open pretty-printing session, if any — see [`PrettySession`].
     pretty: RefCell<Option<PrettySession>>,
+    /// The values currently being rendered by their own `print-object`
+    /// method, innermost last — [`Self::print_object`]'s re-entry guard.
+    printing: RefCell<Vec<Value>>,
     /// Trait-object vtables, interpreter tier: `vtable_id` -> the call
     /// targets for the trait's methods, in slot order (`Expr::DynBox`'s
     /// `slots`, which the checker laid out from `TraitDef::method_order`).
@@ -400,6 +403,7 @@ impl Interp {
             dyn_dispatch_compiled: RefCell::new(HashSet::new()),
             jit_ctor_counter: Cell::new(0),
             pretty: RefCell::new(None),
+            printing: RefCell::new(Vec::new()),
         }
     }
 
@@ -3253,7 +3257,8 @@ impl Interp {
                     Ok(v) => v,
                     Err(e) => return Some(Err(e)),
                 };
-                Some(self.build_format(heap, &control, list).and_then(|out| {
+                Some((|| {
+                    let out = self.build_format(heap, &control, list)?;
                     // The string `format` returns is always the laid-out text.
                     // Writing it to stdout, though, goes through `emit`, which
                     // merges it into an open `pprint-logical-block` instead of
@@ -3263,7 +3268,7 @@ impl Interp {
                         self.emit(heap, out, false)?;
                     }
                     Ok(RtValue::Str(text.into()))
-                }))
+                })())
             }
             "print-rt" | "println-rt" => {
                 let control = match expect_str(&args[0]) {
@@ -3275,7 +3280,10 @@ impl Interp {
                     Err(e) => return Some(Err(e)),
                 };
                 let newline = name == "println-rt";
-                Some(self.build_format(heap, &control, list).and_then(|out| self.emit(heap, out, newline)))
+                Some((|| {
+                    let out = self.build_format(heap, &control, list)?;
+                    self.emit(heap, out, newline)
+                })())
             }
             // The runtime side of the `pprint`/`pprint-fill`/`pprint-linear`/
             // `pprint-tabular` special forms (`Checker::check_pprint`), which
@@ -3310,16 +3318,21 @@ impl Interp {
                     "pprint-tabular" => Style::Tabular(if colinc <= 0 { 16 } else { colinc }),
                     _ => Style::Default,
                 };
-                let (_, enums) = self.root.borrow().collect_struct_and_enum_types();
-                let mut out = crate::eval::pprint::Out::new();
-                if form == "pprint" {
-                    out.push('\n');
-                }
-                // Unconditionally pretty: `render` always records the layout
-                // ops, and `emit`'s layout pass runs whenever any op is
-                // present — `*print-pretty*` only gates `~a`/`~s`/`~w`.
-                crate::eval::pprint::render(heap, &enums, value, true, style, &mut out);
-                Some(self.emit(heap, out, false))
+                Some((|| {
+                    let (_, enums) = self.root.borrow().collect_struct_and_enum_types();
+                    let ctx = self.render_ctx(&enums);
+                    let mut out = crate::eval::pprint::Out::new();
+                    if form == "pprint" {
+                        out.push('\n');
+                    }
+                    // Unconditionally pretty: `render` always records the
+                    // layout ops, and `emit`'s layout pass runs whenever any
+                    // op is present — `*print-pretty*` only gates
+                    // `~a`/`~s`/`~w`.
+                    crate::eval::pprint::render(heap, ctx, value, true, style, &mut out)
+                        .map_err(EvalError::Panic)?;
+                    self.emit(heap, out, false)
+                })())
             }
             // The user-callable pretty-printer API (CLHS 22.2.1's `pprint-*`
             // operators). `pprint-block-start-rt`/`pprint-block-end-rt` are
@@ -3570,16 +3583,90 @@ impl Interp {
         }
     }
 
+    /// The `print-object` dispatch behind every `~a`/`~s`/`~w`/`pprint`
+    /// rendering (`crate::eval::format::render_value` calls this first).
+    /// `Ok(None)` means "no method applies, render `v` the built-in way".
+    ///
+    /// The *registration* is entirely static: writing `(impl print-object
+    /// point ...)` registers an ordinary method on `point`, so the lookup
+    /// here is just the module tree — there is no separate dispatch table to
+    /// keep in sync, and no way to register a printer under a type it isn't
+    /// for (the `impl` is type-checked like any other). What cannot be static
+    /// is the *selection*: which directive consumes which argument depends on
+    /// the control string's runtime contents, so only here — with `escape`
+    /// in hand (CL's `*print-escape*`: `~s` true, `~a` false) — is it known
+    /// what to ask the method for. That is the same split CLOS makes, where
+    /// `print-object` methods are defined per class but selected at print
+    /// time.
+    ///
+    /// The signature check is a safety net: it keeps an unrelated method that
+    /// merely happens to be named `print-object` (a plain `defmethod`, no
+    /// trait involved) from being mistaken for an implementation of it.
+    ///
+    /// GC: this runs user code, which conses, which can collect — but the
+    /// value being printed needs no rooting *here*. Every builtin's arguments
+    /// are already anchored for the whole call by `Self::eval_args`, which
+    /// registers each one as a `native_slot`; `sync_roots` rebuilds the heap's
+    /// root set from exactly those live slots before any allocation. Since
+    /// collection is a non-moving mark-sweep that traces `car`/`cdr` and boxed
+    /// nested values, that one anchor on the outermost value covers every part
+    /// of it, including the elements the renderers hold in intermediate
+    /// `Vec<Value>`s. Pushing an *additional* root here would in fact be
+    /// wrong: `sync_roots` pops its own batch off the top of the root stack,
+    /// so a root pushed above it is taken with it (the strict-LIFO invariant
+    /// `<Self as MacroExpander>::expand_macro` documents).
+    pub(crate) fn print_object(&self, heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String> {
+        let Value::Boxed(id) = v else { return Ok(None) };
+        let name = if heap.is_struct(id) {
+            heap.struct_type_name(id).to_string()
+        } else if heap.is_enum(id) {
+            heap.enum_type_name(id).to_string()
+        } else {
+            return Ok(None);
+        };
+        // A value already being printed by its own method is rendered the
+        // built-in way instead, so `(impl print-object point (... (format
+        // false "~a" self)))` degrades to `#<point 1 2>` rather than
+        // recursing forever. Keyed on the value, not a depth limit, so a
+        // genuinely nested self-referential structure still prints in full.
+        if self.printing.borrow().contains(&v) {
+            return Ok(None);
+        }
+        let type_path = Path::from_segments(name.split("::").map(|s| s.to_string()).collect());
+        let Some(f) = self.root.borrow().get_method(&type_path, "print-object") else {
+            return Ok(None);
+        };
+        match f.sig.as_ref() {
+            Some((params, ret)) if params.len() == 2 && params[1] == Type::Bool && *ret == Type::Str => {}
+            _ => return Ok(None),
+        }
+        self.printing.borrow_mut().push(v);
+        let result = self.apply(heap, &f, vec![RtValue::Sexpr(v), RtValue::Bool(escape)]);
+        self.printing.borrow_mut().pop();
+        match result.map_err(|e| e.to_string())? {
+            RtValue::Str(s) => Ok(Some(s.to_string())),
+            other => Err(format!("print-object on `{}` returned {:?}, not a string", type_path, other)),
+        }
+    }
+
+    /// The [`RenderCtx`](crate::eval::format::RenderCtx) a printing operation
+    /// runs under: the enum-variant name table plus this interpreter, so a
+    /// value's own `print-object` method can be dispatched to.
+    fn render_ctx<'a>(&'a self, enums: &'a HashMap<Path, EnumDef>) -> crate::eval::format::RenderCtx<'a> {
+        crate::eval::format::RenderCtx { enums, interp: Some(self) }
+    }
+
     /// Builds `control`'s output without committing it: the shared half of
     /// `format-rt`/`print-rt`/`println-rt`. Kept separate from [`Self::emit`]
     /// because a buffer that still carries pretty-printer ops must be merged
     /// into an open [`PrettySession`] *un*-laid-out — laying it out early
     /// would freeze line breaks chosen against the wrong starting column and
     /// without the enclosing block's indentation.
-    fn build_format(&self, heap: &Heap, control: &str, args: Value) -> Result<pprint::Out, EvalError> {
+    fn build_format(&self, heap: &mut Heap, control: &str, args: Value) -> Result<pprint::Out, EvalError> {
         let (_, enums) = self.root.borrow().collect_struct_and_enum_types();
         let opts = self.pretty_opts(heap);
-        crate::eval::format::build(heap, &enums, control, args, &opts).map_err(EvalError::Panic)
+        let ctx = self.render_ctx(&enums);
+        crate::eval::format::build(heap, ctx, control, args, &opts).map_err(EvalError::Panic)
     }
 
     /// Commits printed output: into the open [`PrettySession`] if there is

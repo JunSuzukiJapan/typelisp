@@ -991,6 +991,29 @@ pub const SOURCE: &str = r#"
 ;; `*print-miser-width*` has no `nil` here — 0 (or less) is "miser style off",
 ;; the same meaning CL gives `nil`. Likewise a `*print-right-margin*` of 0 or
 ;; less means "no right margin", so nothing ever needs to break.
+;; `print-object` (CLHS 22.1.4 / the CLOS generic function of the same name):
+;; a type's own printed representation. `print`/`println`/`format`/`pprint`
+;; consult it for every value they render whose type implements it — including
+;; values nested inside a list — so a `defstruct`/`defenum` prints the way its
+;; author decided rather than as the built-in `#<name field...>` fallback.
+;;
+;; CL has two separate mechanisms here and this is the one that fits a
+;; statically typed language: `print-object` is a *generic function*, so a
+;; class's method is written once, at the class, and type-checked there. (CL's
+;; other mechanism, `set-pprint-dispatch`, keys a runtime table by type
+;; *specifier* — an unchecked string here, forcing the printer to re-`match`
+;; the very type its registration already knew. See docs/dev/TODO.md's T5-b.)
+;;
+;; `escape` is CL's `*print-escape*`: true under `~s`/`prin1`/`pprint` (reader
+;; syntax), false under `~a`/`princ` (human-facing). A printer that doesn't
+;; care can ignore it — Rust's `Display` and `Debug` folded into one method.
+;;
+;; No built-in type implements this: every existing program's output stays
+;; byte-for-byte what it was, and a custom representation is something a type
+;; opts into.
+(deftrait print-object
+  (print-object ((self Self) (escape bool)) string))
+
 ;; `pprint-exit-if-list-exhausted` (CLHS): leave the enclosing
 ;; `pprint-logical-block` when its list is used up. CL implements this as a
 ;; non-local exit from the block; typelisp has no general escape, so it exits

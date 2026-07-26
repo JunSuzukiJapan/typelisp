@@ -44,18 +44,36 @@ use super::pprint::{self, IndentKind, NewlineKind, Op, Opts, Out, Style, TabKind
 /// arguments, …) are `String`s the caller turns into a recoverable
 /// `EvalError::Panic`.
 pub(crate) fn build(
-    heap: &Heap,
-    enums: &HashMap<Path, EnumDef>,
+    heap: &mut Heap,
+    ctx: RenderCtx<'_>,
     control: &str,
     args: Value,
     opts: &Opts,
 ) -> Result<Out, String> {
     let nodes = parse(control)?;
     let items = list_to_vec(heap, args);
-    let mut st = State { heap, enums, args: items, pos: 0, opts: *opts };
+    let mut st = State { heap, ctx, args: items, pos: 0, opts: *opts };
     let mut out = Out::new();
     st.interp_seq(&nodes, &mut out)?;
     Ok(out)
+}
+
+/// What the value renderers need besides the heap.
+///
+/// `enums` is the variant-name table `~a`/`~s` need for a boxed enum. `interp`
+/// is the running interpreter, present exactly when a *program* is printing
+/// (as opposed to a unit test or an embedder rendering a value directly): it
+/// is what lets a value whose type implements the `print-object` trait be
+/// rendered by its own method instead of the built-in `#<name field…>` form.
+/// With `interp: None` no dispatch is attempted and every value renders the
+/// built-in way.
+///
+/// Copyable (it is two references) so it can be threaded alongside the `&mut
+/// Heap` the dispatch needs without fighting the borrow checker.
+#[derive(Clone, Copy)]
+pub(crate) struct RenderCtx<'a> {
+    pub(crate) enums: &'a HashMap<Path, EnumDef>,
+    pub(crate) interp: Option<&'a super::interp::Interp>,
 }
 
 /// Turns a finished buffer into text: a buffer with no pretty-printer op in it
@@ -350,8 +368,8 @@ enum Flow {
 }
 
 struct State<'a> {
-    heap: &'a Heap,
-    enums: &'a HashMap<Path, EnumDef>,
+    heap: &'a mut Heap,
+    ctx: RenderCtx<'a>,
     args: Vec<Value>,
     pos: usize,
     /// The `*print-pretty*`/`*print-right-margin*`/`*print-miser-width*`
@@ -763,10 +781,10 @@ impl State<'_> {
                 // a width the layout is free to change), so an explicitly
                 // padded directive keeps the flat rendering.
                 if self.opts.pretty && head.params.is_empty() {
-                    pprint::render(self.heap, self.enums, arg, standard, Style::Default, out);
+                    pprint::render(self.heap, self.ctx, arg, standard, Style::Default, out)?;
                 } else {
                     let mut s = String::new();
-                    render_value(self.heap, self.enums, arg, standard, &mut s);
+                    render_value(self.heap, self.ctx, arg, standard, &mut s)?;
                     out.push_str(&pad(&s, mincol, colinc, minpad, padchar, head.at));
                 }
             }
@@ -906,7 +924,7 @@ impl State<'_> {
             None => {
                 // A non-integer prints in ~A form (CL's rule).
                 let mut s = String::new();
-                render_value(self.heap, self.enums, arg, false, &mut s);
+                render_value(self.heap, self.ctx, arg, false, &mut s)?;
                 out.push_str(&pad(&s, mincol, 1, 0, padchar, true));
                 return Ok(());
             }
@@ -1514,16 +1532,33 @@ fn roman(n: i64, old: bool) -> Result<String, String> {
 
 /// Renders one `Sexpr` [`Value`] into `out` for `~a`/`~s`. `standard` selects
 /// CL `prin1` (reader syntax: strings quoted, chars `#\c`) over CL `princ`
-/// (bare); the flag threads through nested lists. The runtime-library
-/// counterpart of `crate::main`'s `format_sexpr`; live boxed structs/enums are
-/// defensive (a program can't normally place one inside a `Sexpr`).
+/// (bare); the flag threads through nested lists — and is handed to a type's
+/// own `print-object` method as CL's `*print-escape*`.
+///
+/// Before any built-in representation is produced, `ctx.interp` (when present)
+/// is asked whether `v`'s runtime type implements the `print-object` trait; if
+/// it does, that method's string *is* the rendering. This is the whole of the
+/// "a user-defined type prints its own way, even nested inside a list"
+/// mechanism — it sits here rather than at the call site because only here is
+/// it known whether `~a` or `~s` is asking (`Interp::print_object`'s doc
+/// comment covers the rest).
+///
+/// `Err` is the user printer's own failure (a `panic` in its body, say),
+/// surfaced rather than swallowed; every built-in path is infallible.
 pub(crate) fn render_value(
-    heap: &Heap,
-    enums: &HashMap<Path, EnumDef>,
+    heap: &mut Heap,
+    ctx: RenderCtx<'_>,
     v: Value,
     standard: bool,
     out: &mut String,
-) {
+) -> Result<(), String> {
+    if let Some(interp) = ctx.interp {
+        if let Some(text) = interp.print_object(heap, v, standard)? {
+            out.push_str(&text);
+            return Ok(());
+        }
+    }
+    let enums = ctx.enums;
     match v {
         Value::Empty => out.push_str("()"),
         Value::Int(n) => out.push_str(&n.to_string()),
@@ -1555,7 +1590,11 @@ pub(crate) fn render_value(
             out.push_str(&format!("#<{}", heap.struct_type_name(id)));
             for i in 0..heap.struct_field_count(id) {
                 out.push(' ');
-                render_value(heap, enums, heap.struct_field(id, i), standard, out);
+                // Read the field out before the recursive call: `heap` is
+                // `&mut` here (the `print-object` dispatch needs it), so the
+                // read cannot stay borrowed across it.
+                let f = heap.struct_field(id, i);
+                render_value(heap, ctx, f, standard, out)?;
             }
             out.push('>');
         }
@@ -1575,7 +1614,8 @@ pub(crate) fn render_value(
                 out.push_str(&name);
                 for i in 0..heap.enum_field_count(id) {
                     out.push(' ');
-                    render_value(heap, enums, heap.enum_field(id, i), standard, out);
+                    let f = heap.enum_field(id, i);
+                    render_value(heap, ctx, f, standard, out)?;
                 }
                 out.push(')');
             }
@@ -1591,7 +1631,10 @@ pub(crate) fn render_value(
         // mechanism, not part of the datum. (Must precede the float
         // fall-through, which reads any other `Boxed` as an `f64` — see
         // `float_of`'s matching negative guard.)
-        Value::Boxed(id) if heap.is_dyn(id) => render_value(heap, enums, heap.dyn_value(id), standard, out),
+        Value::Boxed(id) if heap.is_dyn(id) => {
+            let inner = heap.dyn_value(id);
+            render_value(heap, ctx, inner, standard, out)?;
+        }
         Value::Boxed(id) => out.push_str(&trim_float(heap.float_value(id))),
         Value::Cons(_) => {
             out.push('(');
@@ -1604,13 +1647,14 @@ pub(crate) fn render_value(
                             out.push(' ');
                         }
                         first = false;
-                        render_value(heap, enums, heap.car(cur).expect("cons car"), standard, out);
+                        let head = heap.car(cur).expect("cons car");
+                        render_value(heap, ctx, head, standard, out)?;
                         cur = heap.cdr(cur).expect("cons cdr");
                     }
                     Value::Empty => break,
                     other => {
                         out.push_str(" . ");
-                        render_value(heap, enums, other, standard, out);
+                        render_value(heap, ctx, other, standard, out)?;
                         break;
                     }
                 }
@@ -1618,4 +1662,5 @@ pub(crate) fn render_value(
             out.push(')');
         }
     }
+    Ok(())
 }

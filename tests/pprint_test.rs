@@ -42,6 +42,12 @@ fn fmt(src: &str) -> String {
 /// Runs `src` through the `typl` binary and returns its stdout — the only way
 /// to observe the operators that print rather than return a string.
 fn stdout_of(src: &str) -> String {
+    stdout_of_with(&[], src)
+}
+
+/// [`stdout_of`] with extra `typl` flags (`--heap-cells`, to force collections
+/// during printing).
+fn stdout_of_with(flags: &[&str], src: &str) -> String {
     use std::io::Write;
     let dir = std::env::temp_dir().join(format!("typelisp-pprint-{}-{:?}", std::process::id(), std::thread::current().id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
@@ -50,7 +56,7 @@ fn stdout_of(src: &str) -> String {
     f.write_all(src.as_bytes()).expect("write source");
     drop(f);
     let exe = env!("CARGO_BIN_EXE_typl");
-    let out = std::process::Command::new(exe).arg(&path).output().expect("run typl");
+    let out = std::process::Command::new(exe).args(flags).arg(&path).output().expect("run typl");
     let _ = std::fs::remove_dir_all(&dir);
     assert!(
         out.status.success(),
@@ -363,4 +369,112 @@ fn a_break_out_of_a_block_still_flushes_what_it_printed() {
 fn pprint_newline_rejects_an_unknown_keyword() {
     let err = run(r#"(pprint-logical-block (()) (pprint-newline :sideways))"#).expect_err("should fail");
     assert!(format!("{:?}", err).contains(":linear"), "unexpected error: {:?}", err);
+}
+
+// ---------------------------------------------------------------------------
+// `print-object` — a type's own printed representation (TODO T5-b)
+// ---------------------------------------------------------------------------
+
+/// A `point` whose `print-object` renders differently under `~a` and `~s`, so
+/// one impl exercises both the dispatch and CL's `*print-escape*`.
+const POINT: &str = r##"
+(defstruct point (x i64) (y i64))
+(impl print-object point
+  (print-object ((self Self) (escape bool)) string
+    (if escape (format false "#S(point :x ~d :y ~d)" self::x self::y)
+               (format false "(~d,~d)" self::x self::y))))
+(defvar (p point) (point::new 1 2))
+(defvar (q point) (point::new 3 4))
+"##;
+
+#[test]
+fn a_type_with_a_print_object_impl_prints_its_own_way() {
+    assert_eq!(stdout_of(&format!(r#"{} (print "~a" p)"#, POINT)), "(1,2)");
+}
+
+#[test]
+fn the_escape_flag_distinguishes_aesthetic_from_standard() {
+    // `~a` is CL's `princ` (escape false), `~s` its `prin1` (escape true).
+    // Only the renderer knows which directive is asking — which is why the
+    // dispatch lives there rather than at the call site.
+    assert_eq!(
+        stdout_of(&format!(r#"{} (print "~a|~s" p p)"#, POINT)),
+        "(1,2)|#S(point :x 1 :y 2)"
+    );
+}
+
+#[test]
+fn a_nested_value_dispatches_too() {
+    // The element's static type is gone (a list is `Sexpr`), so this is the
+    // case that needs the runtime dispatch at all.
+    assert_eq!(stdout_of(&format!(r#"{} (print "~a" (list p q))"#, POINT)), "((1,2) (3,4))");
+}
+
+#[test]
+fn a_type_without_an_impl_keeps_the_built_in_representation() {
+    let out = stdout_of(r#"(defstruct plain (n i64)) (print "~a" (plain::new 7))"#);
+    assert!(out.ends_with("plain 7>"), "unexpected output: {}", out);
+}
+
+#[test]
+fn a_method_named_print_object_that_is_not_the_trait_is_ignored() {
+    // The signature check keeps an unrelated `defmethod` of the same name from
+    // being mistaken for an implementation of the trait.
+    let out = stdout_of(
+        r#"
+        (defstruct thing (n i64))
+        (defmethod print-object ((self thing)) i64 self::n)
+        (print "~a" (thing::new 7))
+    "#,
+    );
+    assert!(out.ends_with("thing 7>"), "unexpected output: {}", out);
+}
+
+#[test]
+fn a_print_object_that_prints_itself_falls_back_instead_of_looping() {
+    // The re-entry guard renders the inner occurrence the built-in way.
+    let out = stdout_of(
+        r#"
+        (defstruct loopy (n i64))
+        (impl print-object loopy
+          (print-object ((self Self) (escape bool)) string (format false "<~a>" self)))
+        (print "~a" (loopy::new 1))
+    "#,
+    );
+    assert!(out.starts_with("<#<") && out.ends_with("loopy 1>>"), "unexpected output: {}", out);
+}
+
+#[test]
+fn a_custom_representation_composes_with_the_pretty_printer() {
+    let out = stdout_of(&format!(
+        r#"{} (setf *print-pretty* true) (setf *print-right-margin* 12) (print "~a" (list p q p))"#,
+        POINT
+    ));
+    assert_eq!(out, "((1,2)\n (3,4) (1,2))");
+}
+
+#[test]
+fn a_print_object_that_conses_heavily_survives_collections() {
+    // The point of the whole GC-rooting design: user code now runs *inside*
+    // the renderer, so the value being printed must stay rooted across
+    // collections triggered by that code. The arena is small and each printer
+    // call conses thousands of cells, so this collects many times over.
+    let out = stdout_of_with(
+        &["--heap-cells", "20000"],
+        r#"
+        (defstruct heavy (n i64))
+        (impl print-object heavy
+          (print-object ((self Self) (escape bool)) string
+            (let ((acc "x"))
+              (dotimes (i 200)
+                (setf acc (format false "~a" (list 1 2 3 4 5 6 7 8 9 10))))
+              (format false "H~d" self::n))))
+        (dotimes (i 100)
+          (println "~a" (list (heavy::new (as i64 i)) (heavy::new (as i64 i)))))
+    "#,
+    );
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), 100, "unexpected line count: {:?}", &lines[..lines.len().min(5)]);
+    assert_eq!(lines[0], "(H0 H0)");
+    assert_eq!(lines[99], "(H99 H99)");
 }

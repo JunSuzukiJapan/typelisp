@@ -46,9 +46,8 @@
 use std::collections::HashMap;
 
 use crate::mem::{Heap, Value};
-use crate::Path;
 
-use super::interp::EnumDef;
+use super::format::RenderCtx;
 
 /// The kinds of conditional newline `pprint-newline` (and `~_`) can emit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -632,33 +631,35 @@ pub(crate) enum Style {
 /// `prin1` reader syntax), so the only difference pretty printing makes is
 /// where the line breaks fall.
 pub(crate) fn render(
-    heap: &Heap,
-    enums: &HashMap<Path, EnumDef>,
+    heap: &mut Heap,
+    ctx: RenderCtx<'_>,
     v: Value,
     standard: bool,
     style: Style,
     out: &mut Out,
-) {
+) -> Result<(), String> {
+    // Anything that is not a list has no layout of its own — including a
+    // struct/enum with a `print-object` method, whose own text is whatever
+    // that method returns (`render_value` performs the dispatch).
     if !matches!(v, Value::Cons(_)) {
         let mut s = String::new();
-        super::format::render_value(heap, enums, v, standard, &mut s);
+        super::format::render_value(heap, ctx, v, standard, &mut s)?;
         out.push_str(&s);
-        return;
+        return Ok(());
     }
     // `(quote x)` prints as `'x`, as CL's default dispatch table does.
     if let Some(inner) = quote_form(heap, v) {
         out.push('\'');
-        render(heap, enums, inner, standard, style, out);
-        return;
+        return render(heap, ctx, inner, standard, style, out);
     }
     let elems = list_items(heap, v);
     match style {
-        Style::Tabular(colinc) => render_tabular(heap, enums, &elems, standard, colinc, out),
-        Style::Linear => render_seq(heap, enums, &elems, standard, style, NewlineKind::Linear, out),
-        Style::Fill => render_seq(heap, enums, &elems, standard, style, NewlineKind::Fill, out),
+        Style::Tabular(colinc) => render_tabular(heap, ctx, &elems, standard, colinc, out),
+        Style::Linear => render_seq(heap, ctx, &elems, standard, style, NewlineKind::Linear, out),
+        Style::Fill => render_seq(heap, ctx, &elems, standard, style, NewlineKind::Fill, out),
         Style::Default => match code_style(heap, &elems) {
-            Some(distinguished) => render_code(heap, enums, &elems, standard, distinguished, out),
-            None => render_seq(heap, enums, &elems, standard, style, NewlineKind::Fill, out),
+            Some(distinguished) => render_code(heap, ctx, &elems, standard, distinguished, out),
+            None => render_seq(heap, ctx, &elems, standard, style, NewlineKind::Fill, out),
         },
     }
 }
@@ -696,39 +697,40 @@ type Items = (Vec<Value>, Option<Value>);
 /// `pprint-linear`/`pprint-fill`: `(e1 e2 …)` with a conditional newline of
 /// `kind` between elements.
 fn render_seq(
-    heap: &Heap,
-    enums: &HashMap<Path, EnumDef>,
+    heap: &mut Heap,
+    ctx: RenderCtx<'_>,
     (elems, tail): &Items,
     standard: bool,
     style: Style,
     kind: NewlineKind,
     out: &mut Out,
-) {
+) -> Result<(), String> {
     out.op(Op::BlockStart { prefix: "(".to_string(), per_line: false, suffix: ")".to_string() });
     for (i, e) in elems.iter().enumerate() {
         if i > 0 {
             out.push(' ');
             out.op(Op::Newline(kind));
         }
-        render(heap, enums, *e, standard, style, out);
+        render(heap, ctx, *e, standard, style, out)?;
     }
     if let Some(t) = tail {
         out.push_str(" . ");
-        render(heap, enums, *t, standard, style, out);
+        render(heap, ctx, *t, standard, style, out)?;
     }
     out.op(Op::BlockEnd);
+    Ok(())
 }
 
 /// `pprint-tabular`: elements laid out in columns `colinc` wide, wrapping when
 /// the next column would overflow.
 fn render_tabular(
-    heap: &Heap,
-    enums: &HashMap<Path, EnumDef>,
+    heap: &mut Heap,
+    ctx: RenderCtx<'_>,
     (elems, tail): &Items,
     standard: bool,
     colinc: i64,
     out: &mut Out,
-) {
+) -> Result<(), String> {
     let colinc = if colinc <= 0 { 1 } else { colinc };
     out.op(Op::BlockStart { prefix: "(".to_string(), per_line: false, suffix: ")".to_string() });
     for (i, e) in elems.iter().enumerate() {
@@ -737,13 +739,14 @@ fn render_tabular(
             out.op(Op::Newline(NewlineKind::Fill));
             out.op(Op::Tab { kind: TabKind::SectionRelative, colnum: 0, colinc });
         }
-        render(heap, enums, *e, standard, Style::Fill, out);
+        render(heap, ctx, *e, standard, Style::Fill, out)?;
     }
     if let Some(t) = tail {
         out.push_str(" . ");
-        render(heap, enums, *t, standard, Style::Fill, out);
+        render(heap, ctx, *t, standard, Style::Fill, out)?;
     }
     out.op(Op::BlockEnd);
+    Ok(())
 }
 
 /// How many arguments after the head of a code-shaped form stay on the head's
@@ -770,13 +773,13 @@ fn code_style(heap: &Heap, (elems, tail): &Items) -> Option<usize> {
 /// A code-shaped form: `(head d1 … dn` on one line, then the remaining
 /// subforms one per line indented two columns past the head's own column.
 fn render_code(
-    heap: &Heap,
-    enums: &HashMap<Path, EnumDef>,
+    heap: &mut Heap,
+    ctx: RenderCtx<'_>,
     (elems, _): &Items,
     standard: bool,
     distinguished: usize,
     out: &mut Out,
-) {
+) -> Result<(), String> {
     out.op(Op::BlockStart { prefix: "(".to_string(), per_line: false, suffix: ")".to_string() });
     // The body indents relative to the block, not to the (variable-width) head.
     out.op(Op::Indent(IndentKind::Block, 2));
@@ -787,9 +790,10 @@ fn render_code(
             // after them is one subform per line whenever the form is broken.
             out.op(Op::Newline(if i <= distinguished { NewlineKind::Fill } else { NewlineKind::Linear }));
         }
-        render(heap, enums, *e, standard, Style::Default, out);
+        render(heap, ctx, *e, standard, Style::Default, out)?;
     }
     out.op(Op::BlockEnd);
+    Ok(())
 }
 
 #[cfg(test)]
