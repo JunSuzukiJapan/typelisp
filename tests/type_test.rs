@@ -177,3 +177,113 @@ fn dyn_must_be_followed_by_a_trait_name() {
     let v = r.read(&mut h, ":dyn i32").expect("read failed");
     assert!(parse_type(&h, v).is_err(), "`:dyn i32` must not parse as a trait object");
 }
+
+// ---- recorded name spans (semantic highlighting) ------------------------
+//
+// `parse_type_spanned` reports where each written type/trait name sits, which
+// is what makes the LSP's type highlighting resolution-driven rather than a
+// text search (`src/check/semantic.rs`). A generic type is read as *one*
+// symbol token, so every name inside one is located by arithmetic within that
+// token -- the part worth pinning down here.
+
+/// Read `src` as a single datum with its span (the way the checker gets one
+/// for a type annotation) and return the names `parse_type_spanned` recorded,
+/// each as `(text at that span, 1-based start column)`.
+fn spans(src: &str) -> Vec<(String, u32)> {
+    let mut h = Heap::with_capacity(256);
+    let r = Reader::new();
+    let read = r.read_all_in_spanned(&mut h, "t.typl", src).expect("read failed");
+    let (v, loc) = read[0].clone();
+    let mut out = Vec::new();
+    typelisp::parse_type_spanned(&h, v, Some(&loc), &mut out).expect("parse failed");
+    let chars: Vec<char> = src.chars().collect();
+    out.iter()
+        .map(|s| {
+            let text: String =
+                chars[(s.loc.col - 1) as usize..(s.loc.end_col - 1) as usize].iter().collect();
+            (text, s.loc.col)
+        })
+        .collect()
+}
+
+#[test]
+fn a_plain_name_is_located_at_the_whole_token() {
+    assert_eq!(spans("rect"), vec![("rect".to_string(), 1)]);
+}
+
+#[test]
+fn a_primitive_records_no_name() {
+    // Primitives are not nominal types; both editors' grammars already colour
+    // them, so recording them would override a scope that was already right.
+    assert!(spans("i32").is_empty());
+    assert!(spans("(fn (i32) bool)").is_empty());
+}
+
+#[test]
+fn a_qualified_name_is_located_at_its_last_segment() {
+    // `geometry::point` -- the type is `point`, at column 11, not the whole
+    // token and not the module prefix.
+    assert_eq!(spans("geometry::point"), vec![("point".to_string(), 11)]);
+}
+
+#[test]
+fn a_generic_argument_is_located_inside_the_token() {
+    // One symbol token, two names: the head at column 1 and the argument at
+    // column 12, past `hashtable<i32,`.
+    assert_eq!(
+        spans("hashtable<i32,todo-item>"),
+        vec![("hashtable".to_string(), 1), ("todo-item".to_string(), 15)]
+    );
+}
+
+#[test]
+fn the_head_is_recorded_before_its_arguments() {
+    // The order matters: `parse_dyn_type` reinterprets the *first* recorded
+    // name as the trait, so an outer name must always precede what nests in it.
+    let found = spans("vector<pair<a-type,b-type>>");
+    let names: Vec<&str> = found.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, vec!["vector", "pair", "a-type", "b-type"]);
+}
+
+#[test]
+fn a_dyn_head_is_flagged_as_a_trait() {
+    let mut h = Heap::with_capacity(256);
+    let r = Reader::new();
+    let read = r.read_all_in_spanned(&mut h, "t.typl", ":dyn shape").expect("read failed");
+    let (v, loc) = read[0].clone();
+    let mut out = Vec::new();
+    typelisp::parse_type_spanned(&h, v, Some(&loc), &mut out).expect("parse failed");
+    assert_eq!(out.len(), 1);
+    assert!(out[0].dyn_head, "the `:dyn` head names a trait, not a type");
+    // Column 6: past `:dyn `, on the trait name itself.
+    assert_eq!(out[0].loc.col, 6);
+    assert_eq!(out[0].loc.end_col, 11);
+}
+
+#[test]
+fn a_nested_dyn_is_flagged_and_located_inside_its_token() {
+    // `vector<:dyn shape>` is a single token; the trait sits at column 13.
+    let mut h = Heap::with_capacity(256);
+    let r = Reader::new();
+    let read = r.read_all_in_spanned(&mut h, "t.typl", "vector<:dyn shape>").expect("read failed");
+    let (v, loc) = read[0].clone();
+    let mut out = Vec::new();
+    typelisp::parse_type_spanned(&h, v, Some(&loc), &mut out).expect("parse failed");
+    let dyn_heads: Vec<&typelisp::TypeNameSpan> = out.iter().filter(|s| s.dyn_head).collect();
+    assert_eq!(dyn_heads.len(), 1, "recorded: {:?}", out);
+    assert_eq!(dyn_heads[0].loc.col, 13);
+    assert_eq!(dyn_heads[0].loc.end_col, 18);
+}
+
+#[test]
+fn without_a_span_the_parse_still_succeeds_and_records_nothing() {
+    // The checker hands `None` wherever a form has no recorded position (a
+    // macro-synthesized annotation); parsing must not depend on it.
+    let mut h = Heap::with_capacity(256);
+    let r = Reader::new();
+    let v = r.read(&mut h, "vector<rect>").expect("read failed");
+    let mut out = Vec::new();
+    let ty = typelisp::parse_type_spanned(&h, v, None, &mut out).expect("parse failed");
+    assert_eq!(ty, Type::Named(Path::root("vector"), vec![Type::Named(Path::root("rect"), vec![])]));
+    assert!(out.is_empty());
+}

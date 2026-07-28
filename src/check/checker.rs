@@ -8,8 +8,11 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
-use crate::{parse_type, prim_type_path, Error, Heap, Loc, Path, Type, Value};
+use std::rc::Rc;
+
+use crate::{parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, Type, TypeNameSpan, Value};
 use crate::name_lexer::{NameLexer, NameTok};
+use super::semantic::{TypeKind, TypeUse};
 
 use super::ast::{Arm, CompileTarget, Expr, MacroLambda, Pattern, QuotedSexpr, Ref, Typed};
 use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Registry, TraitBound, TraitDef, VarInfo, Variant};
@@ -579,6 +582,13 @@ pub struct Checker {
     /// structured `Type::Named` argument. Non-empty only while
     /// [`Self::specialize_defun`] runs.
     type_var_bindings: HashMap<String, Type>,
+    /// Every occurrence of a user-defined type/trait name resolved so far,
+    /// with its exact source span — recorded wherever the checker's grammar
+    /// put a type name (annotations, definition headers, `Type::member`
+    /// heads, ctor patterns) and drained by [`Self::take_type_uses`] for the
+    /// LSP's semantic tokens. A `RefCell` for the same reason as
+    /// `loop_stack`/`warnings`: annotation parsing runs under `&self`.
+    type_uses: RefCell<Vec<TypeUse>>,
 }
 
 impl Checker {
@@ -598,6 +608,7 @@ impl Checker {
             spec_memo: RefCell::new(HashSet::new()),
             spec_pending: RefCell::new(Vec::new()),
             type_var_bindings: HashMap::new(),
+            type_uses: RefCell::new(Vec::new()),
         }
     }
 
@@ -639,6 +650,13 @@ impl Checker {
     /// source location. Empty unless `recover` is enabled.
     pub fn take_errors(&self) -> Vec<Error> {
         std::mem::take(&mut *self.errors.borrow_mut())
+    }
+
+    /// Drains and returns every user-defined type/trait name occurrence
+    /// recorded so far (see [`Self::type_uses`]) — the LSP turns these into
+    /// `textDocument/semanticTokens` (`crate::check::semantic`).
+    pub fn take_type_uses(&self) -> Vec<TypeUse> {
+        std::mem::take(&mut *self.type_uses.borrow_mut())
     }
 
     /// A `Never`-typed placeholder for a sub-expression that failed to check.
@@ -867,11 +885,11 @@ impl Checker {
                     "defmacro" => return self.check_defmacro(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     "module" => return self.check_module(heap, interp, &elems[1..]),
                     "defmethod" => return self.check_defmethod(heap, interp, &elems[1..], parts_locs, false, def_loc),
-                    "defstruct" => return self.check_defstruct(heap, &elems[1..], false, def_loc),
-                    "defenum" => return self.check_defenum(heap, &elems[1..], false, def_loc),
-                    "deftrait" => return self.check_deftrait(heap, &elems[1..], false, def_loc),
-                    "impl" => return self.check_impl(heap, interp, &elems[1..], false),
-                    "use" => return self.check_use(heap, &elems[1..]),
+                    "defstruct" => return self.check_defstruct(heap, &elems[1..], parts_locs, false, def_loc),
+                    "defenum" => return self.check_defenum(heap, &elems[1..], parts_locs, false, def_loc),
+                    "deftrait" => return self.check_deftrait(heap, &elems[1..], parts_locs, false, def_loc),
+                    "impl" => return self.check_impl(heap, interp, &elems[1..], parts_locs, false),
+                    "use" => return self.check_use(heap, &elems[1..], parts_locs),
                     "load" => return self.check_load(heap, &elems[1..]),
                     _ => {}
                 }
@@ -995,8 +1013,8 @@ impl Checker {
                 "defconstant" => return self.check_defvar(heap, interp, &parts[1..], false, true, def_loc),
                 "defmacro" => return self.check_defmacro(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 "defmethod" => return self.check_defmethod(heap, interp, &parts[1..], inner_locs, true, def_loc),
-                "defstruct" => return self.check_defstruct(heap, &parts[1..], true, def_loc),
-                "defenum" => return self.check_defenum(heap, &parts[1..], true, def_loc),
+                "defstruct" => return self.check_defstruct(heap, &parts[1..], inner_locs, true, def_loc),
+                "defenum" => return self.check_defenum(heap, &parts[1..], inner_locs, true, def_loc),
                 _ => {}
             }
         }
@@ -1737,13 +1755,132 @@ impl Checker {
     /// treatment a generic's type variables get, which is why `canon` cannot
     /// reject unknown names in general) and only surface much later as a
     /// mismatch against a type nothing can ever inhabit.
-    fn parse_type_here(&self, heap: &Heap, v: Value) -> Result<Type, Error> {
-        let ty = self.canon(&parse_type(heap, v)?);
+    ///
+    /// Being that single entry point is also what makes it the place to
+    /// record where types are *written*: every name parsed out of the
+    /// annotation that resolves to a user-defined type or trait is pushed to
+    /// [`Self::type_uses`], which the LSP turns into semantic tokens. `loc`
+    /// is the annotation's own source span, needed only for a bare-atom
+    /// annotation — a list form's elements carry their own recorded spans
+    /// (see [`parse_type_spanned`]) — and the recording is simply skipped
+    /// where no span is available.
+    fn parse_type_here_at(&self, heap: &Heap, v: Value, loc: Option<&Loc>) -> Result<Type, Error> {
+        let mut spans = Vec::new();
+        let ty = self.canon(&parse_type_spanned(heap, v, loc, &mut spans)?);
+        for span in &spans {
+            self.record_type_span(span);
+        }
         self.reject_trait_in_type_position(&ty)?;
         Ok(ty)
     }
 
-    /// [`Self::parse_type_here`]'s check, applied to every `Type::Named` head
+    /// Resolve one written name from an annotation and, when it names a
+    /// user-defined type or trait, record the occurrence. Uses the same
+    /// resolution [`Self::canon`] applies, so what gets recorded is exactly
+    /// what the annotation meant: a bound type variable is skipped, a
+    /// builtin (`Option`, `Vector`, ...) is left to the editors' grammars,
+    /// and a name that resolves to nothing (an unbound type variable of a
+    /// generic template) records nothing.
+    fn record_type_span(&self, span: &TypeNameSpan) {
+        if span.dyn_head {
+            if let Some(fq) = self.resolve_trait_path(&span.path) {
+                self.record_trait_use(&fq, span.loc.clone());
+            }
+            return;
+        }
+        if span.path.is_simple() && self.type_var_bindings.contains_key(span.path.local()) {
+            return;
+        }
+        let fq = self.resolve_type_name(&span.path);
+        self.record_type_use(&fq, span.loc.clone());
+    }
+
+    /// Record a resolved *type* name occurrence at `loc`, if `fq` names a
+    /// non-builtin type.
+    fn record_type_use(&self, fq: &Path, loc: Loc) {
+        if let Some(def) = self.reg.type_def(fq) {
+            if def.builtin {
+                return;
+            }
+            // `AdtKind::Struct` is produced only by `defstruct`; every
+            // `defenum` is a `Sum`.
+            let kind = match def.kind {
+                AdtKind::Struct => TypeKind::Struct,
+                _ => TypeKind::Enum,
+            };
+            self.type_uses.borrow_mut().push(TypeUse { path: fq.clone(), kind, loc });
+        }
+    }
+
+    /// Record a resolved *trait* name occurrence at `loc`, if `fq` names a
+    /// non-builtin trait.
+    fn record_trait_use(&self, fq: &Path, loc: Loc) {
+        if let Some(def) = self.reg.trait_def(fq) {
+            if def.builtin {
+                return;
+            }
+            self.type_uses.borrow_mut().push(TypeUse { path: fq.clone(), kind: TypeKind::Trait, loc });
+        }
+    }
+
+    /// Record the *type* segment of a written `::` path whose prefix resolved
+    /// to the type `fq` — `rect::new`/`mod::color::red`, where the type is the
+    /// second-to-last written segment (the last one names a member).
+    fn record_path_type_use(&self, segs: &[String], fq: &Path, head_loc: Option<&Loc>) {
+        if segs.len() < 2 {
+            return;
+        }
+        self.record_path_seg_use(segs, segs.len() - 2, fq, head_loc);
+    }
+
+    /// Record segment `idx` of a written `::` path as an occurrence of the
+    /// type `fq`. Its span is computed from `head_loc` (the whole token's
+    /// span) by walking the segments before it — a token never spans lines,
+    /// so only the columns move.
+    ///
+    /// `segs` are the *interned* (case-folded) segments, so the arithmetic
+    /// only lands on the right source columns when the whole reconstructed
+    /// path is as long as the token it was read from — which also confirms
+    /// the token really is a plain `a::b` path with nothing else in it.
+    /// Anything else records nothing rather than painting the wrong range.
+    fn record_path_seg_use(&self, segs: &[String], idx: usize, fq: &Path, head_loc: Option<&Loc>) {
+        let Some(base) = head_loc else { return };
+        if idx >= segs.len() {
+            return;
+        }
+        let written: u32 = segs.iter().map(|s| s.chars().count() as u32).sum::<u32>()
+            + 2 * (segs.len() as u32 - 1);
+        if written != base.end_col.saturating_sub(base.col) {
+            return;
+        }
+        let mut off = 0u32;
+        for s in &segs[..idx] {
+            off += s.chars().count() as u32 + 2; // the segment and its `::`
+        }
+        let col = base.col + off;
+        let len = segs[idx].chars().count() as u32;
+        let loc = Loc::new(Rc::clone(&base.file), base.line, col).with_end(base.line, col + len);
+        self.record_type_use(fq, loc);
+    }
+
+    /// Record a definition header's own name (`(defstruct rect ...)`'s
+    /// `rect`) as a type/trait occurrence. `name_len` is the name's length in
+    /// chars — the header token may continue with `<T,...>` type parameters,
+    /// which are not part of the name, so the name is a prefix of the token
+    /// and never longer than it. A `name_len` that does exceed the token
+    /// means the two disagree about the text (the same case-folding caveat
+    /// `types::SpanRec::record` documents); record nothing then.
+    fn record_def_name_use(&self, fq: &Path, kind: TypeKind, name_loc: Option<&Loc>, name_len: usize) {
+        let Some(base) = name_loc else { return };
+        if name_len as u32 > base.end_col.saturating_sub(base.col) {
+            return;
+        }
+        let loc = Loc::new(Rc::clone(&base.file), base.line, base.col)
+            .with_end(base.line, base.col + name_len as u32);
+        self.type_uses.borrow_mut().push(TypeUse { path: fq.clone(), kind, loc });
+    }
+
+    /// [`Self::parse_type_here_at`]'s check, applied to every `Type::Named` head
     /// inside `ty`: a name that resolves to no type but *does* name a trait
     /// in scope is a trait object written without its `:dyn`.
     fn reject_trait_in_type_position(&self, ty: &Type) -> Result<(), Error> {
@@ -1805,7 +1942,7 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
-        let (params, param_locs, rest, ret, bounds, body_start) = self.parse_defun_sig(heap, parts)?;
+        let (params, param_locs, rest, ret, bounds, body_start) = self.parse_defun_sig(heap, parts, parts_locs)?;
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
         let fq_name = self.fq(&name);
 
@@ -1885,13 +2022,14 @@ impl Checker {
         &self,
         heap: &Heap,
         parts: &[Value],
+        parts_locs: &[Option<Loc>],
     ) -> Result<(Vec<(String, Type)>, Vec<Option<Loc>>, Option<RestParam>, Type, HashMap<String, Vec<TraitBound>>, usize), Error>
     {
         if parts.len() < 3 {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
         let (params, param_locs, rest) = self.parse_params_rest(heap, parts[1])?;
-        let ret = self.parse_type_here(heap, parts[2])?;
+        let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
         let mut body_start = 3;
         let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
         if let Some(form) = parts.get(3) {
@@ -2092,7 +2230,7 @@ impl Checker {
         public: bool,
     ) -> Result<TopLevel, Error> {
         let MethodSig { instance, self_name, recv_ty, type_fq, params, ret, body_start, .. } =
-            self.parse_defmethod_sig(heap, parts)?;
+            self.parse_defmethod_sig(heap, parts, &[])?;
         let mut binds: Vec<(String, Type)> = Vec::new();
         if let Some(s) = &self_name {
             binds.push((s.clone(), recv_ty));
@@ -2181,7 +2319,7 @@ impl Checker {
         // the bounds branch), and the bounds' own validity was already
         // verified at the call site that requested this instantiation
         // (`check_call`'s where-clause validation).
-        let (params, _param_locs, rest, ret, _bounds, body_start) = self.parse_defun_sig(heap, &tmpl.parts)?;
+        let (params, _param_locs, rest, ret, _bounds, body_start) = self.parse_defun_sig(heap, &tmpl.parts, &[])?;
         let mut params = params;
         if let Some((rname, _, _)) = &rest {
             params.push((rname.clone(), sexpr_ty()));
@@ -2309,7 +2447,8 @@ impl Checker {
         let elems = heap.list_to_vec(v)?;
         let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
         for clause in &elems[1..] {
-            let parts = heap.list_to_vec(*clause)?;
+            let parts_locs = heap.list_to_vec_locs(*clause)?;
+            let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
             if parts.len() < 2 {
                 return Err(Error::TypeError(
                     "where: each bound must be (Trait type-param (AssocName Type)...)".into(),
@@ -2325,13 +2464,17 @@ impl Checker {
                 Value::Symbol(id) => self.resolve_trait_name(heap.symbol_name(id))?,
                 _ => return Err(Error::TypeError("where: trait name must be a symbol".into())),
             };
+            if let Some(l) = parts_locs[0].1.as_ref() {
+                self.record_trait_use(&trait_name, l.clone());
+            }
             let tparam = match parts[1] {
                 Value::Symbol(id) => heap.symbol_name(id).to_string(),
                 _ => return Err(Error::TypeError("where: type parameter must be a symbol".into())),
             };
             let mut assoc: HashMap<String, Type> = HashMap::new();
             for pin in &parts[2..] {
-                let pin_parts = heap.list_to_vec(*pin)?;
+                let pin_locs = heap.list_to_vec_locs(*pin)?;
+                let pin_parts: Vec<Value> = pin_locs.iter().map(|(v, _)| *v).collect();
                 if pin_parts.len() != 2 {
                     return Err(Error::TypeError("where: associated-type pin must be (AssocName Type)".into()));
                 }
@@ -2339,7 +2482,7 @@ impl Checker {
                     Value::Symbol(id) => heap.symbol_name(id).to_string(),
                     _ => return Err(Error::TypeError("where: associated type name must be a symbol".into())),
                 };
-                let aty = self.parse_type_here(heap, pin_parts[1])?;
+                let aty = self.parse_type_here_at(heap, pin_parts[1], pin_locs[1].1.as_ref())?;
                 assoc.insert(aname, aty);
             }
             bounds.entry(tparam).or_default().push(TraitBound { trait_path: trait_name, assoc });
@@ -2662,7 +2805,7 @@ impl Checker {
                 Value::Symbol(id) => heap.symbol_name(id).to_string(),
                 _ => return Err(Error::TypeError("parameter name must be a symbol".into())),
             };
-            out.push((name, self.parse_type_here(heap, pair[1])?));
+            out.push((name, self.parse_type_here_at(heap, pair[1], pair_locs.get(1).and_then(|(_, l)| l.as_ref()))?));
             locs.push(pair_locs.first().and_then(|(_, l)| l.clone()));
         }
         Ok((out, locs))
@@ -2680,10 +2823,11 @@ impl Checker {
     fn parse_struct_fields(&self, heap: &Heap, pairs: &[Value]) -> Result<Vec<(String, Type, bool)>, Error> {
         let mut out = Vec::new();
         for binding in pairs {
-            let elems = heap.list_to_vec(*binding)?;
-            let (public, rest) = match elems.first() {
-                Some(Value::Symbol(id)) if heap.symbol_name(*id) == "pub" => (true, &elems[1..]),
-                _ => (false, &elems[..]),
+            let elem_locs = heap.list_to_vec_locs(*binding)?;
+            let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
+            let (public, rest, rest_locs) = match elems.first() {
+                Some(Value::Symbol(id)) if heap.symbol_name(*id) == "pub" => (true, &elems[1..], &elem_locs[1..]),
+                _ => (false, &elems[..], &elem_locs[..]),
             };
             if rest.len() != 2 {
                 return Err(Error::TypeError("defstruct: field must be (name type) or (pub name type)".into()));
@@ -2692,7 +2836,7 @@ impl Checker {
                 Value::Symbol(id) => heap.symbol_name(id).to_string(),
                 _ => return Err(Error::TypeError("defstruct: field name must be a symbol".into())),
             };
-            out.push((name, self.parse_type_here(heap, rest[1])?, public));
+            out.push((name, self.parse_type_here_at(heap, rest[1], rest_locs[1].1.as_ref())?, public));
         }
         Ok(out)
     }
@@ -2708,7 +2852,14 @@ impl Checker {
     /// for some concrete implementing type. No type-checking happens here
     /// beyond parsing — a signature template's `Self`/associated-type
     /// variables aren't real types, so there's nothing to check yet.
-    fn check_deftrait(&mut self, heap: &Heap, parts: &[Value], public: bool, def_loc: Option<Loc>) -> Result<TopLevel, Error> {
+    fn check_deftrait(
+        &mut self,
+        heap: &Heap,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        public: bool,
+        def_loc: Option<Loc>,
+    ) -> Result<TopLevel, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError(
                 "deftrait: (deftrait Name (type AssocName)... (method (params...) ret)...)".into(),
@@ -2744,7 +2895,8 @@ impl Checker {
         // Source order, kept alongside `methods` for vtable slot numbering.
         let mut method_order: Vec<String> = Vec::new();
         for item in &parts[1..] {
-            let elems = heap.list_to_vec(*item)?;
+            let elem_locs = heap.list_to_vec_locs(*item)?;
+            let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
             let head = match elems.first() {
                 Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
                 _ => return Err(Error::TypeError("deftrait: item must start with a symbol".into())),
@@ -2764,7 +2916,7 @@ impl Checker {
                 return Err(Error::TypeError("deftrait: method signature must be (name (params...) ret)".into()));
             }
             let (params, _param_locs) = self.parse_param_pairs(heap, &heap.list_to_vec(elems[1])?)?;
-            let ret = self.parse_type_here(heap, elems[2])?;
+            let ret = self.parse_type_here_at(heap, elems[2], elem_locs[2].1.as_ref())?;
             let sig = FnSig {
                 type_params: vec![],
                 params: params.iter().map(|(_, t)| t.clone()).collect(),
@@ -2787,10 +2939,16 @@ impl Checker {
             .root
             .module_mut(&self.ns)
             .traits
-            .insert(name, TraitDef { name: fq_name.clone(), assoc_types, methods, method_order, public, builtin: false });
+            .insert(name.clone(), TraitDef { name: fq_name.clone(), assoc_types, methods, method_order, public, builtin: false });
         if let Some(loc) = def_loc {
             self.reg.def_locs.traits.insert(fq_name.clone(), loc);
         }
+        self.record_def_name_use(
+            &fq_name,
+            TypeKind::Trait,
+            parts_locs.first().and_then(|l| l.as_ref()),
+            name.chars().count(),
+        );
         Ok(TopLevel::Module { path: fq_name, body: vec![] })
     }
 
@@ -2812,7 +2970,7 @@ impl Checker {
     /// the one piece of metadata `Checker::check_instance_method`'s
     /// type-variable branch needs later, since by then the method itself is
     /// just one more entry in `TargetType`'s ordinary `assoc` table.
-    fn check_impl(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], public: bool) -> Result<TopLevel, Error> {
+    fn check_impl(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>], public: bool) -> Result<TopLevel, Error> {
         if parts.len() < 2 {
             return Err(Error::TypeError("impl: (impl TraitName TargetType (type AssocName Type)... (method ...)...)".into()));
         }
@@ -2821,7 +2979,10 @@ impl Checker {
             _ => return Err(Error::TypeError("impl: trait name must be a symbol".into())),
         };
         let trait_fq = self.resolve_trait_name(&trait_name)?;
-        let target_ty = self.parse_type_here(heap, parts[1])?;
+        if let Some(l) = parts_locs.first().and_then(|l| l.as_ref()) {
+            self.record_trait_use(&trait_fq, l.clone());
+        }
+        let target_ty = self.parse_type_here_at(heap, parts[1], parts_locs.get(1).and_then(|l| l.as_ref()))?;
         let target_fq = match &target_ty {
             Type::Named(n, _) => n.clone(),
             other => match prim_type_path(other) {
@@ -2850,7 +3011,8 @@ impl Checker {
 
         let mut method_forms: Vec<Value> = Vec::new();
         for item in &parts[2..] {
-            let elems = heap.list_to_vec(*item)?;
+            let elem_locs = heap.list_to_vec_locs(*item)?;
+            let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
             let head = match elems.first() {
                 Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
                 _ => return Err(Error::TypeError("impl: item must start with a symbol".into())),
@@ -2863,7 +3025,7 @@ impl Checker {
                     Value::Symbol(id) => heap.symbol_name(id).to_string(),
                     _ => return Err(Error::TypeError("impl: associated type name must be a symbol".into())),
                 };
-                assoc_concrete.insert(aname.clone(), self.parse_type_here(heap, elems[2])?);
+                assoc_concrete.insert(aname.clone(), self.parse_type_here_at(heap, elems[2], elem_locs[2].1.as_ref())?);
                 subst.insert(aname, elems[2]);
                 continue;
             }
@@ -2892,21 +3054,33 @@ impl Checker {
             if elems.len() < 3 {
                 return Err(Error::TypeError("impl: method must be (name (recv params...) ret body...)".into()));
             }
-            let recv_pairs = heap.list_to_vec(elems[1])?;
+            let recv_pairs_locs = heap.list_to_vec_locs(elems[1])?;
+            let recv_pairs: Vec<Value> = recv_pairs_locs.iter().map(|(v, _)| *v).collect();
             let mut new_recv_pairs = Vec::new();
-            for pair in &recv_pairs {
-                let p = heap.list_to_vec(*pair)?;
+            for (pair, pair_loc) in &recv_pairs_locs {
+                let p_locs = heap.list_to_vec_locs(*pair)?;
+                let p: Vec<Value> = p_locs.iter().map(|(v, _)| *v).collect();
                 if p.len() != 2 {
                     return Err(Error::TypeError("impl: receiver/parameter must be (name type)".into()));
                 }
                 let new_ty = Self::subst_value(heap, p[1], &subst)?;
-                new_recv_pairs.push(self.list_from_vec(heap, &[p[0], new_ty])?);
+                // Keep each slot's original span when substitution left it
+                // unchanged (the usual case for a concrete type annotation),
+                // so the rebuilt signature still records/locates like the
+                // written one; a substituted `Self` has no span of its own.
+                let ty_loc = if new_ty == p[1] { p_locs[1].1.clone() } else { None };
+                new_recv_pairs.push((
+                    self.list_from_vec_locs(heap, &[(p[0], p_locs[0].1.clone()), (new_ty, ty_loc)])?,
+                    pair_loc.clone(),
+                ));
             }
-            let new_recv_list = self.list_from_vec(heap, &new_recv_pairs)?;
+            let new_recv_list = self.list_from_vec_locs(heap, &new_recv_pairs)?;
+            let _ = recv_pairs;
             let new_ret = Self::subst_value(heap, elems[2], &subst)?;
+            let ret_loc = if new_ret == elems[2] { elems_locs[2].1.clone() } else { None };
             let mut new_elems = vec![elems[0], new_recv_list, new_ret];
             new_elems.extend_from_slice(&elems[3..]);
-            let mut new_elems_locs: Vec<Option<Loc>> = vec![None, None, None];
+            let mut new_elems_locs: Vec<Option<Loc>> = vec![None, None, ret_loc];
             new_elems_locs.extend(elems_locs[3..].iter().map(|(_, l)| l.clone()));
             let tl = self.check_defmethod(heap, interp, &new_elems, &new_elems_locs, public, method_loc)?;
             body.push(tl);
@@ -3285,10 +3459,17 @@ impl Checker {
     /// Build a proper list `Value` from `items`, in order — the inverse of
     /// `heap.list_to_vec`, used by `Checker::check_impl` to reassemble a
     /// receiver/parameter form after substituting just its type position.
-    fn list_from_vec(&self, heap: &mut Heap, items: &[Value]) -> Result<Value, Error> {
+    /// Build a list, tagging each spine cell with its element's source span
+    /// (`Heap::set_elem_loc`) — used by `check_impl`'s method-signature
+    /// rebuild so the elements carried over unchanged keep the positions
+    /// they were read with.
+    fn list_from_vec_locs(&self, heap: &mut Heap, items: &[(Value, Option<Loc>)]) -> Result<Value, Error> {
         let mut out = Value::Empty;
-        for item in items.iter().rev() {
+        for (item, loc) in items.iter().rev() {
             out = heap.cons(*item, out)?;
+            if let (Value::Cons(cr), Some(l)) = (out, loc) {
+                heap.set_elem_loc(cr, l.clone());
+            }
         }
         Ok(out)
     }
@@ -3422,7 +3603,7 @@ impl Checker {
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
         let MethodSig { method, instance, self_name, self_name_loc, recv_ty, type_fq, params, param_locs, ret, bounds, body_start } =
-            self.parse_defmethod_sig(heap, parts)?;
+            self.parse_defmethod_sig(heap, parts, parts_locs)?;
 
         // A method on a *generic* type whose receiver spells the owner's
         // type parameters out as bare type variables (`(self Option<U>)`) is
@@ -3503,7 +3684,7 @@ impl Checker {
     /// re-parsing a retained [`MethodTemplate::Form`] with
     /// `type_var_bindings` in effect so the receiver/parameter/return
     /// annotations come back concrete.
-    fn parse_defmethod_sig(&self, heap: &mut Heap, parts: &[Value]) -> Result<MethodSig, Error> {
+    fn parse_defmethod_sig(&self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<MethodSig, Error> {
         if parts.len() < 3 {
             return Err(Error::TypeError(
                 "defmethod: (defmethod name (receiver params...) ret body...)".into(),
@@ -3513,12 +3694,13 @@ impl Checker {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
             _ => return Err(Error::TypeError("defmethod: name must be a symbol".into())),
         };
-        let sig_list = heap.list_to_vec(parts[1])?;
+        let sig_list_locs = heap.list_to_vec_locs(parts[1])?;
+        let sig_list: Vec<Value> = sig_list_locs.iter().map(|(v, _)| *v).collect();
         if sig_list.is_empty() {
             return Err(Error::TypeError("defmethod: needs a receiver".into()));
         }
         // `(self T)` -> instance method; a bare type name -> static method.
-        let (instance, self_name, self_name_loc, type_expr) = match sig_list[0] {
+        let (instance, self_name, self_name_loc, type_expr, type_expr_loc) = match sig_list[0] {
             Value::Cons(_) => {
                 let recv_locs = heap.list_to_vec_locs(sig_list[0])?;
                 let recv: Vec<Value> = recv_locs.iter().map(|(v, _)| *v).collect();
@@ -3530,12 +3712,15 @@ impl Checker {
                     _ => return Err(Error::TypeError("defmethod: receiver name must be a symbol".into())),
                 };
                 let sname_loc = recv_locs.first().and_then(|(_, l)| l.clone());
-                (true, Some(sname), sname_loc, recv[1])
+                let ty_loc = recv_locs.get(1).and_then(|(_, l)| l.clone());
+                (true, Some(sname), sname_loc, recv[1], ty_loc)
             }
-            Value::Symbol(_) | Value::Path(_) => (false, None, None, sig_list[0]),
+            Value::Symbol(_) | Value::Path(_) => {
+                (false, None, None, sig_list[0], sig_list_locs.first().and_then(|(_, l)| l.clone()))
+            }
             _ => return Err(Error::TypeError("defmethod: receiver must be (self Type) or a type name".into())),
         };
-        let recv_ty = self.parse_type_here(heap, type_expr)?;
+        let recv_ty = self.parse_type_here_at(heap, type_expr, type_expr_loc.as_ref())?;
         let type_fq = match &recv_ty {
             Type::Named(n, _) => n.clone(),
             other => match prim_type_path(other) {
@@ -3547,7 +3732,7 @@ impl Checker {
             return Err(Error::TypeError(format!("defmethod: unknown type `{}`", type_fq)));
         }
         let (params, param_locs) = self.parse_param_pairs(heap, &sig_list[1..])?;
-        let ret = self.parse_type_here(heap, parts[2])?;
+        let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
         // Optional `(where ...)` clause after the return type — identical
         // peek to `parse_defun_sig`'s.
         let mut body_start = 3;
@@ -3588,7 +3773,7 @@ impl Checker {
     /// one `TopLevel::Module` — purely as a grouping device: `Interp::exec`'s
     /// `Module` arm just runs `body` in order and never reads `path`, so this
     /// carries none of an actual `(module ...)`'s namespace-nesting semantics.
-    fn check_defstruct(&mut self, heap: &Heap, parts: &[Value], public: bool, def_loc: Option<Loc>) -> Result<TopLevel, Error> {
+    fn check_defstruct(&mut self, heap: &Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevel, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("defstruct: (defstruct name (field type)...)".into()));
         }
@@ -3722,6 +3907,12 @@ impl Checker {
         if let Some(loc) = def_loc {
             self.reg.def_locs.types.insert(type_fq.clone(), loc);
         }
+        self.record_def_name_use(
+            &type_fq,
+            TypeKind::Struct,
+            parts_locs.first().and_then(|l| l.as_ref()),
+            name.chars().count(),
+        );
 
         let mut body = vec![TopLevel::Defstruct { name: type_fq.clone() }];
         body.extend(accessors);
@@ -3743,7 +3934,7 @@ impl Checker {
     /// accessors/setters are synthesized: an enum value is immutable and its
     /// fields are positional, so there's nothing to run at exec time either —
     /// hence a bare `TopLevel::Defenum` rather than a `Module` bundle.
-    fn check_defenum(&mut self, heap: &Heap, parts: &[Value], public: bool, def_loc: Option<Loc>) -> Result<TopLevel, Error> {
+    fn check_defenum(&mut self, heap: &Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevel, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("defenum: (defenum Name (Variant Type...)...)".into()));
         }
@@ -3775,14 +3966,14 @@ impl Checker {
 
         let mut variants = Vec::new();
         for item in &parts[1..] {
-            let (vname, field_vals): (String, Vec<Value>) = match *item {
+            let (vname, field_vals): (String, Vec<(Value, Option<Loc>)>) = match *item {
                 // A bare symbol is a nullary variant (e.g. `None`); the
                 // parenthesized `(None)` form is equally accepted below.
                 Value::Symbol(id) => (heap.symbol_name(id).to_string(), Vec::new()),
                 Value::Cons(_) => {
-                    let elems = heap.list_to_vec(*item)?;
+                    let elems = heap.list_to_vec_locs(*item)?;
                     let vname = match elems.first() {
-                        Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+                        Some((Value::Symbol(id), _)) => heap.symbol_name(*id).to_string(),
                         _ => return Err(Error::TypeError("defenum: variant name must be a symbol".into())),
                     };
                     (vname, elems[1..].to_vec())
@@ -3795,7 +3986,7 @@ impl Checker {
             };
             let fields = field_vals
                 .iter()
-                .map(|v| Ok(self.parse_type_here(heap, *v)?))
+                .map(|(v, l)| self.parse_type_here_at(heap, *v, l.as_ref()))
                 .collect::<Result<Vec<Type>, Error>>()?;
             variants.push(Variant { name: vname, fields });
         }
@@ -3824,6 +4015,12 @@ impl Checker {
         if let Some(loc) = def_loc {
             self.reg.def_locs.types.insert(type_fq.clone(), loc);
         }
+        self.record_def_name_use(
+            &type_fq,
+            TypeKind::Enum,
+            parts_locs.first().and_then(|l| l.as_ref()),
+            name.chars().count(),
+        );
         Ok(TopLevel::Defenum { name: type_fq, params: type_params, variants })
     }
 
@@ -3841,12 +4038,13 @@ impl Checker {
         }
     }
 
-    fn check_use(&mut self, heap: &Heap, parts: &[Value]) -> Result<TopLevel, Error> {
+    fn check_use(&mut self, heap: &Heap, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevel, Error> {
         if parts.len() != 1 {
             return Err(Error::TypeError("use: (use path)".into()));
         }
         let segs = self.path_to_segs(heap, parts[0])?;
         let bare = segs.last().cloned().unwrap();
+        let path_loc = parts_locs.first().and_then(|l| l.as_ref());
 
         // Try: free function.
         if let Some(target) = self.resolve_fn_path(&segs) {
@@ -3862,6 +4060,9 @@ impl Checker {
         // `check_path_call`, which already treats a variant and a
         // non-instance `assoc` entry as the same kind of "static member").
         if let Some(target) = self.resolve_type_path(&segs) {
+            // Unlike `rect::new`, a `use` path's *last* segment is the type
+            // itself — the import names it and nothing else.
+            self.record_path_seg_use(&segs, segs.len() - 1, &target, path_loc);
             self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
             let def = self.reg.type_def(&target).expect("resolved type exists").clone();
             for (i, v) in def.variants.iter().enumerate() {
@@ -4209,7 +4410,7 @@ impl Checker {
                 .iter()
                 .map(|s| heap.symbol_name(*s).to_string())
                 .collect();
-            return self.check_path_call(heap, interp, env, &segs, args, arg_locs, expected);
+            return self.check_path_call(heap, interp, env, &segs, nth_loc(&elem_locs, 0).as_ref(), args, arg_locs, expected);
         }
 
         // A non-symbol head (e.g. a `lambda` literal or any expression) is
@@ -4359,7 +4560,7 @@ impl Checker {
             return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
         }
         let (params, param_locs, rest) = self.parse_params_rest(heap, args[0])?;
-        let ret = self.parse_type_here(heap, args[1])?;
+        let ret = self.parse_type_here_at(heap, args[1], arg_locs.get(1).and_then(|l| l.as_ref()))?;
         let fn_ty = Type::Fn(
             params.iter().map(|(_, t)| t.clone()).collect(),
             rest.as_ref().map(|(_, t, _)| Box::new(t.clone())),
@@ -4441,7 +4642,7 @@ impl Checker {
             };
             let name_loc = parts_locs.first().and_then(|(_, l)| l.clone());
             let (params, param_locs) = self.parse_params(heap, parts[1])?;
-            let ret = self.parse_type_here(heap, parts[2])?;
+            let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|(_, l)| l.as_ref()))?;
             let fn_ty = Type::Fn(params.iter().map(|(_, t)| t.clone()).collect(), None, Box::new(ret.clone()));
             sigs.push((name.clone(), fn_ty, name_loc));
             let body_locs = parts_locs[3..].iter().map(|(_, l)| l.clone()).collect();
@@ -4586,6 +4787,7 @@ impl Checker {
         interp: &dyn MacroExpander,
         env: &Env,
         segs: &[String],
+        head_loc: Option<&Loc>,
         args: &[Value],
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
@@ -4617,6 +4819,10 @@ impl Checker {
             let (type_segs, member) = segs.split_at(segs.len() - 1);
             let member = &member[0];
             if let Some(type_fq) = self.resolve_type_path(type_segs) {
+                // The head token names this type in its second-to-last
+                // segment (`rect::new`, `mod::color::red`) — record that
+                // segment's span for semantic highlighting.
+                self.record_path_type_use(segs, &type_fq, head_loc);
                 let def = self.reg.type_def(&type_fq).expect("resolved type exists");
                 if let Some(variant) = def.variants.iter().position(|v| &v.name == member) {
                     return self.check_construct(heap, interp, env, (&type_fq, variant), args, arg_locs, expected);
@@ -4981,7 +5187,7 @@ impl Checker {
         if args.len() != 2 {
             return Err(Error::TypeError("the: (the Type expr)".into()));
         }
-        let ty = self.parse_type_here(heap, args[0])?;
+        let ty = self.parse_type_here_at(heap, args[0], arg_locs.first().and_then(|l| l.as_ref()))?;
         self.check_at(heap, interp, env, args[1], Some(&ty), nth_loc(arg_locs, 1))
     }
 
@@ -5013,7 +5219,7 @@ impl Checker {
         if args.len() != 2 {
             return Err(Error::TypeError(format!("{}: ({} Type expr)", form_name, form_name)));
         }
-        let target = self.parse_type_here(heap, args[0])?;
+        let target = self.parse_type_here_at(heap, args[0], arg_locs.first().and_then(|l| l.as_ref()))?;
         let src = self.check_at(heap, interp, env, args[1], None, nth_loc(arg_locs, 1))?;
 
         // Identity: same type, a no-op cast.
@@ -5516,7 +5722,8 @@ impl Checker {
         }
         let (name, ann) = match parts[0] {
             Value::Cons(_) => {
-                let pair = heap.list_to_vec(parts[0])?;
+                let pair_locs = heap.list_to_vec_locs(parts[0])?;
+                let pair: Vec<Value> = pair_locs.iter().map(|(v, _)| *v).collect();
                 if pair.len() != 2 {
                     return Err(Error::TypeError("defvar: name must be (name Type)".into()));
                 }
@@ -5524,7 +5731,7 @@ impl Checker {
                     Value::Symbol(id) => heap.symbol_name(id).to_string(),
                     _ => return Err(Error::TypeError("defvar: name must be a symbol".into())),
                 };
-                (name, self.parse_type_here(heap, pair[1])?)
+                (name, self.parse_type_here_at(heap, pair[1], pair_locs[1].1.as_ref())?)
             }
             Value::Symbol(id) => {
                 return Err(Error::TypeError(format!(
@@ -6506,7 +6713,7 @@ impl Checker {
             let is_builtin_head =
                 matches!(parts[0], Value::Symbol(id) if BUILTIN_SEXPR_CTORS.contains(&heap.symbol_name(id)));
             if !is_builtin_head {
-                if let Some((adt_name, targs, variant)) = self.resolve_sexpr_downcast_ctor(heap, parts[0])? {
+                if let Some((adt_name, targs, variant)) = self.resolve_sexpr_downcast_ctor(heap, parts[0], parts_locs[0].1.as_ref())? {
                     return self.check_ctor_pattern_fields(heap, adt_name, targs, variant, &parts, &parts_locs, true);
                 }
             }
@@ -6537,7 +6744,12 @@ impl Checker {
     /// name as the last segment). `None` means the head names neither,
     /// letting the caller fall through to the ordinary (non-downcast)
     /// "not a constructor of Sexpr" error.
-    fn resolve_sexpr_downcast_ctor(&self, heap: &Heap, head: Value) -> Result<Option<(Path, Vec<Type>, usize)>, Error> {
+    fn resolve_sexpr_downcast_ctor(
+        &self,
+        heap: &Heap,
+        head: Value,
+        head_loc: Option<&Loc>,
+    ) -> Result<Option<(Path, Vec<Type>, usize)>, Error> {
         let no_generics = |name: &Path, def: &AdtDef| -> Result<(), Error> {
             if def.params.is_empty() {
                 Ok(())
@@ -6556,6 +6768,11 @@ impl Checker {
                     if let Some(def) = self.reg.type_def(&type_fq) {
                         if def.kind == AdtKind::Struct {
                             no_generics(&type_fq, def)?;
+                            // The pattern head *is* the type name — its
+                            // element span covers exactly the token.
+                            if let Some(l) = head_loc {
+                                self.record_type_use(&type_fq, l.clone());
+                            }
                             return Ok(Some((type_fq, Vec::new(), 0)));
                         }
                     }
@@ -6580,6 +6797,9 @@ impl Checker {
                     if let Some(def) = self.reg.type_def(&type_fq) {
                         if let Some(idx) = def.variants.iter().position(|vr| vr.name == member[0]) {
                             no_generics(&type_fq, def)?;
+                            // `color::red` — the type sits in the token's
+                            // second-to-last segment.
+                            self.record_path_type_use(&segs, &type_fq, head_loc);
                             return Ok(Some((type_fq, Vec::new(), idx)));
                         }
                     }
@@ -6604,7 +6824,7 @@ impl Checker {
         if parts.len() != 3 {
             return Err(Error::TypeError("pattern: (the Type pattern)".into()));
         }
-        let ty = self.parse_type_here(heap, parts[1])?;
+        let ty = self.parse_type_here_at(heap, parts[1], parts_locs[1].1.as_ref())?;
         if !self.is_heap_repr(&ty) {
             return Err(Error::TypeError(format!(
                 "pattern: `{:?}` has no Sexpr representation, cannot downcast with `the`",

@@ -8,6 +8,7 @@ pub mod ast;
 pub mod registry;
 pub mod checker;
 pub mod locate;
+pub mod semantic;
 
 pub use ast::{Arm, CompileTarget, Expr, LabelDef, MacroLambda, Pattern, QuotedSexpr, Ref, Typed};
 pub use registry::{AdtDef, AdtKind, AssocFn, DefLocs, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};

@@ -46,6 +46,13 @@
 //! `check::locate::completion_candidates`/`completion_locals` (globals and
 //! local bindings, including inside non-catchall `match` arms via the
 //! checker's error-recovery mode — see `Checker::set_recover`).
+//!
+//! Semantic tokens come from the same `Analysis`. The checker records the
+//! source span of every user-defined type/trait name it *resolves*
+//! (`Checker::take_type_uses`, turned into tokens by `check::semantic`), so
+//! the highlighting covers a type imported through `use` — which no
+//! editor-side grammar can reach — and never fires on a function that merely
+//! shares a type's name, since no type was resolved at that position.
 
 // Documents are keyed by `lsp_types::Uri`, which clippy flags as a "mutable
 // key type" because it contains an interior-mutability cell — a lazily
@@ -67,13 +74,16 @@ use lsp_types::{
         DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument, Notification as _,
         PublishDiagnostics,
     },
-    request::{Completion, GotoDefinition, HoverRequest, Request as _},
+    request::{Completion, GotoDefinition, HoverRequest, Request as _, SemanticTokensFullRequest},
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse, Diagnostic,
     DiagnosticSeverity, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
     HoverProviderCapability, InitializeParams, Location, MarkedString, OneOf, Position, PublishDiagnosticsParams,
-    Range, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    Range, SemanticToken, SemanticTokenType, SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend,
+    SemanticTokensOptions, SemanticTokensParams, SemanticTokensServerCapabilities, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkDoneProgressOptions,
 };
 
+use typelisp::check::semantic::{encode, file_type_tokens, TypeKind, TypeToken};
 use typelisp::fasl::Fasl;
 use typelisp::project::{find_src_root, module_segs_for, Loader, ModuleCache};
 use typelisp::*;
@@ -89,12 +99,48 @@ fn main() {
     io_threads.join().expect("LSP I/O threads panicked");
 }
 
+/// The legend the server advertises, in the order `semantic_token_index` maps
+/// onto. All three are LSP *standard* token types, so every editor and theme
+/// already knows how to colour them without any typelisp-specific setup.
+const SEMANTIC_TOKEN_TYPES: [SemanticTokenType; 3] =
+    [SemanticTokenType::STRUCT, SemanticTokenType::ENUM, SemanticTokenType::INTERFACE];
+
+fn semantic_token_index(kind: TypeKind) -> u32 {
+    match kind {
+        TypeKind::Struct => 0,
+        TypeKind::Enum => 1,
+        // A trait is the nearest thing typelisp has to an interface.
+        TypeKind::Trait => 2,
+    }
+}
+
 fn run(connection: Connection) {
     let capabilities = ServerCapabilities {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
         completion_provider: Some(CompletionOptions { trigger_characters: Some(vec![":".to_string()]), ..Default::default() }),
+        // Type names are the one thing an editor's own grammar cannot
+        // resolve: a `defstruct`/`defenum`/`deftrait` name is usually
+        // lowercase, a use of one imported through `use` lives in another
+        // file entirely, and a function may share a type's name. Only the
+        // checker knows which occurrence is which, and it records exactly
+        // that while checking (`Checker::take_type_uses`).
+        semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+            SemanticTokensOptions {
+                work_done_progress_options: WorkDoneProgressOptions::default(),
+                legend: SemanticTokensLegend {
+                    token_types: SEMANTIC_TOKEN_TYPES.to_vec(),
+                    token_modifiers: Vec::new(),
+                },
+                // Whole-document only: the tokens are already computed and
+                // cached by the check the document's diagnostics needed
+                // anyway, so answering a range would just mean filtering the
+                // same list.
+                range: Some(false),
+                full: Some(SemanticTokensFullOptions::Bool(true)),
+            },
+        )),
         ..Default::default()
     };
     let init_params = connection
@@ -141,6 +187,8 @@ fn run(connection: Connection) {
                     handle_goto_definition(req.id, req.params, &analyses)
                 } else if req.method == Completion::METHOD {
                     handle_completion(req.id, req.params, &prelude, &module_cache, &docs)
+                } else if req.method == SemanticTokensFullRequest::METHOD {
+                    handle_semantic_tokens(req.id, req.params, &analyses)
                 } else {
                     // No other requests are handled; respond so a
                     // spec-compliant client doesn't hang waiting for a
@@ -353,7 +401,12 @@ fn diagnostics_for(
             Some(other) => vec![other],
             None => Vec::new(),
         };
-        Some(Analysis { file: file.to_string(), body, def_locs: checker.registry().def_locs.clone() })
+        Some(Analysis {
+            file: file.to_string(),
+            body,
+            def_locs: checker.registry().def_locs.clone(),
+            tokens: file_type_tokens(&checker.take_type_uses(), file),
+        })
     } else {
         None
     };
@@ -377,6 +430,51 @@ struct Analysis {
     file: String,
     body: Vec<TopLevel>,
     def_locs: DefLocs,
+    /// The semantic tokens of this document's last successful check: every
+    /// position where the checker *resolved* a user-defined type or trait
+    /// name, with its exact span (`Checker::take_type_uses` -> `semantic::
+    /// file_type_tokens`). Resolution-driven — a function sharing a type's
+    /// name can never appear here, and a type reached through `use` (which
+    /// no editor-side scan can see) always does.
+    tokens: Vec<TypeToken>,
+}
+
+/// `textDocument/semanticTokens/full`: every position where the last check
+/// resolved a user-defined type or trait name — so a `defstruct`/`defenum`/
+/// `deftrait` name reads as a type wherever it is *actually* used as one,
+/// including a type imported through `use` (which no editor-side grammar can
+/// resolve) and *never* at a same-named function's call sites (the checker
+/// resolved those as calls, so no token was recorded there).
+///
+/// Served from the cached [`Analysis`]: in recover mode a document with type
+/// errors still re-checks and refreshes its tokens on every change, so the
+/// spans track the buffer; only a document that currently fails the *reader*
+/// serves the spans of its last readable text.
+fn handle_semantic_tokens(
+    id: RequestId,
+    params: serde_json::Value,
+    analyses: &HashMap<Uri, Analysis>,
+) -> Response {
+    let result = (|| {
+        let p: SemanticTokensParams = serde_json::from_value(params).ok()?;
+        let uri = p.text_document.uri;
+        let analysis = analyses.get(&uri)?;
+        let data = encode(&analysis.tokens, semantic_token_index)
+            .chunks_exact(5)
+            .map(|c| SemanticToken {
+                delta_line: c[0],
+                delta_start: c[1],
+                length: c[2],
+                token_type: c[3],
+                token_modifiers_bitset: c[4],
+            })
+            .collect();
+        let result = SemanticTokens { result_id: None, data };
+        Some(serde_json::to_value(result).expect("SemanticTokens always serializes"))
+    })();
+    // A document with no analysis yet answers `null`, which the spec allows and
+    // clients read as "nothing to highlight" rather than an error.
+    Response { id, result, error: None }
 }
 
 /// `textDocument/hover`: the checked type of the smallest node

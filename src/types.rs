@@ -9,10 +9,10 @@
 //! Symbols are case-folded by the reader, so all type names are lowercase here.
 
 use std::fmt;
-use std::iter::Peekable;
+use std::rc::Rc;
 
 use crate::name_lexer::{NameLexer, NameTok};
-use crate::{Error, Heap, Value};
+use crate::{Error, Heap, Loc, Value};
 
 /// A structured, fully-qualified path identifying a type, free function, or
 /// module — a sequence of lowercase segments (e.g. `geo::point` is
@@ -220,28 +220,70 @@ pub fn prim_type_path(ty: &Type) -> Option<Path> {
     Some(Path::root(name))
 }
 
+/// One written type/trait *name* occurrence inside a type expression, with
+/// the exact source span of its final segment (the name proper — the module
+/// prefix of a qualified spelling and any `<...>` argument punctuation are
+/// not part of it). Produced by [`parse_type_spanned`]; consumed by the
+/// checker, which resolves each written path against the registry and — when
+/// it names a user-defined type or trait — records the span for the LSP's
+/// semantic tokens. This is what makes type highlighting *resolution*-driven:
+/// a function that shares a type's name can never be mistaken for it, because
+/// only positions the type grammar actually parsed are ever recorded.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TypeNameSpan {
+    /// The name as written (still relative — not resolved).
+    pub path: Path,
+    /// True when the name is a `:dyn` head, i.e. names a *trait*.
+    pub dyn_head: bool,
+    /// Span of the final segment.
+    pub loc: Loc,
+}
+
 /// Parse a type expression (a read `Value`) into a [`Type`].
 pub fn parse_type(heap: &Heap, v: Value) -> Result<Type, Error> {
+    parse_type_spanned(heap, v, None, &mut Vec::new())
+}
+
+/// [`parse_type`], additionally recording a [`TypeNameSpan`] for every
+/// nominal name it parses. `loc` is the span of `v` *itself* and is only
+/// needed when `v` is a bare atom (a symbol/path token has no heap identity,
+/// so its span must travel alongside it — the same rule as
+/// `Checker::check_form_at`'s `loc_hint`); a list form's elements carry their
+/// own recorded spans (`Heap::list_to_vec_locs`). With no span available the
+/// parse still succeeds — the names just go unrecorded.
+pub fn parse_type_spanned(
+    heap: &Heap,
+    v: Value,
+    loc: Option<&Loc>,
+    out: &mut Vec<TypeNameSpan>,
+) -> Result<Type, Error> {
     match v {
         Value::Empty => Ok(Type::Unit),
-        Value::Symbol(id) => Ok(parse_type_name(heap.symbol_name(id))),
+        Value::Symbol(id) => {
+            let name = heap.symbol_name(id);
+            Ok(parse_type_name_rec(name, loc, out))
+        }
         Value::Path(id) => {
             // A qualified type name like `geometry::Point`. Reconstruct the
-            // surface token so `parse_type_name` can split off any generics on
-            // the last segment; it yields a structured `Path`.
+            // surface token so the name parser can split off any generics on
+            // the last segment; it yields a structured `Path`. The rebuilt
+            // string is the source token again (the segments joined by the
+            // same `::` the reader split them on), which is what lets an
+            // offset within it name a source column — see `SpanRec::record`,
+            // which verifies that alignment before recording anything.
             let name = heap
                 .path_segments(id)
                 .iter()
                 .map(|s| heap.symbol_name(*s))
                 .collect::<Vec<_>>()
                 .join("::");
-            Ok(parse_type_name(&name))
+            Ok(parse_type_name_rec(&name, loc, out))
         }
         // `(:dyn Trait)` — the reader's joined form of the two-word `:dyn
         // Trait` spelling (`read::reader::read_datum`). Checked before
-        // `parse_fn_type` since both are lists.
-        Value::Cons(_) if is_dyn_form(heap, v) => parse_dyn_type(heap, v),
-        Value::Cons(_) => parse_fn_type(heap, v),
+        // the `(fn ...)` case since both are lists.
+        Value::Cons(_) if is_dyn_form(heap, v) => parse_dyn_type(heap, v, out),
+        Value::Cons(_) => parse_fn_type(heap, v, out),
         other => Err(Error::TypeError(format!("not a type expression: {:?}", other))),
     }
 }
@@ -255,13 +297,24 @@ pub fn is_dyn_form(heap: &Heap, v: Value) -> bool {
 /// trait name is parsed with the ordinary type-name grammar, so a qualified
 /// and/or generic-looking spelling works; its "generic arguments" are the
 /// associated-type pins, not type arguments (see [`Type::Dyn`]).
-fn parse_dyn_type(heap: &Heap, v: Value) -> Result<Type, Error> {
-    let elems = heap.list_to_vec(v)?;
+fn parse_dyn_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
+    let elems = heap.list_to_vec_locs(v)?;
     if elems.len() != 2 {
         return Err(Error::TypeError("`:dyn` must be followed by exactly one trait name".to_string()));
     }
-    match parse_type(heap, elems[1])? {
-        Type::Named(trait_path, pins) => Ok(Type::Dyn(trait_path, pins)),
+    // Parse into a scratch vector first: the recorder writes the trait head
+    // *before* any associated-type pins (see `parse_qualified_generic`), so
+    // its first entry — recorded as an ordinary `Named` head — is exactly the
+    // name the `:dyn` reinterprets as a trait.
+    let mut tmp = Vec::new();
+    match parse_type_spanned(heap, elems[1].0, elems[1].1.as_ref(), &mut tmp)? {
+        Type::Named(trait_path, pins) => {
+            if let Some(head) = tmp.first_mut() {
+                head.dyn_head = true;
+            }
+            out.extend(tmp);
+            Ok(Type::Dyn(trait_path, pins))
+        }
         other => Err(Error::TypeError(format!("`:dyn` must be followed by a trait name, found `{:?}`", other))),
     }
 }
@@ -269,31 +322,35 @@ fn parse_dyn_type(heap: &Heap, v: Value) -> Result<Type, Error> {
 /// Parse a `(fn (param-types...) ret-type)` list. The parameter-type list may
 /// end in `&rest elem-type` to write a variadic function type, mirroring
 /// `Checker::parse_params_rest`'s `defun`/`lambda` parameter syntax.
-fn parse_fn_type(heap: &Heap, v: Value) -> Result<Type, Error> {
-    let elems = heap.list_to_vec(v)?;
+fn parse_fn_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
+    let elems = heap.list_to_vec_locs(v)?;
     if elems.len() != 3 {
         return Err(Error::TypeError("fn type must be (fn (params) ret)".to_string()));
     }
-    match elems[0] {
+    match elems[0].0 {
         Value::Symbol(id) if heap.symbol_name(id) == "fn" => {}
         _ => return Err(Error::TypeError("expected fn type".to_string())),
     }
-    let (params, rest) = match elems[1] {
+    let (params, rest) = match elems[1].0 {
         Value::Empty => (Vec::new(), None),
-        Value::Cons(_) => parse_fn_params(heap, &heap.list_to_vec(elems[1])?)?,
+        Value::Cons(_) => parse_fn_params(heap, &heap.list_to_vec_locs(elems[1].0)?, out)?,
         _ => return Err(Error::TypeError("fn parameter list must be a list".to_string())),
     };
-    let ret = parse_type(heap, elems[2])?;
+    let ret = parse_type_spanned(heap, elems[2].0, elems[2].1.as_ref(), out)?;
     Ok(Type::Fn(params, rest, Box::new(ret)))
 }
 
 /// Split a `(fn ...)` type's parameter-type list into fixed types and an
 /// optional trailing `&rest elem-type` (the type of each variadic argument) —
 /// the type-expression counterpart of `Checker::parse_params_rest`.
-fn parse_fn_params(heap: &Heap, ps: &[Value]) -> Result<(Vec<Type>, Option<Box<Type>>), Error> {
+fn parse_fn_params(
+    heap: &Heap,
+    ps: &[(Value, Option<Loc>)],
+    out: &mut Vec<TypeNameSpan>,
+) -> Result<(Vec<Type>, Option<Box<Type>>), Error> {
     let rest_marker = ps
         .iter()
-        .position(|p| matches!(p, Value::Symbol(id) if heap.symbol_name(*id) == "&rest"));
+        .position(|(p, _)| matches!(p, Value::Symbol(id) if heap.symbol_name(*id) == "&rest"));
     match rest_marker {
         Some(i) => {
             if i + 2 != ps.len() {
@@ -301,23 +358,99 @@ fn parse_fn_params(heap: &Heap, ps: &[Value]) -> Result<(Vec<Type>, Option<Box<T
                     "fn type: &rest must be followed by exactly one type, as the last item in the parameter list".to_string(),
                 ));
             }
-            let params = ps[..i].iter().map(|p| parse_type(heap, *p)).collect::<Result<_, _>>()?;
-            let rest = parse_type(heap, ps[i + 1])?;
+            let params = ps[..i]
+                .iter()
+                .map(|(p, l)| parse_type_spanned(heap, *p, l.as_ref(), out))
+                .collect::<Result<_, _>>()?;
+            let rest = parse_type_spanned(heap, ps[i + 1].0, ps[i + 1].1.as_ref(), out)?;
             Ok((params, Some(Box::new(rest))))
         }
         None => {
-            let params = ps.iter().map(|p| parse_type(heap, *p)).collect::<Result<_, _>>()?;
+            let params = ps
+                .iter()
+                .map(|(p, l)| parse_type_spanned(heap, *p, l.as_ref(), out))
+                .collect::<Result<_, _>>()?;
             Ok((params, None))
         }
     }
 }
 
+/// The span recorder threaded through the token-level parse: `base` is where
+/// the token begins in the source, `name` the token text being lexed (so byte
+/// offsets from the lexer convert to char columns). Present only when the
+/// caller had a span for the token — parsing works identically without it.
+struct SpanRec<'a> {
+    name: &'a str,
+    base: &'a Loc,
+    out: &'a mut Vec<TypeNameSpan>,
+}
+
+impl SpanRec<'_> {
+    /// Record `segs` (a written path) whose final segment occupies bytes
+    /// `b0..b1` of the token. A token never spans lines
+    /// (`read::reader::extend_angle_token` refuses newlines), so the span
+    /// stays on `base`'s line and only the columns shift.
+    ///
+    /// `name` is the *interned* token, which `Heap::intern_symbol` has
+    /// case-folded; the offsets computed from it only name the right source
+    /// columns if folding preserved the character count. That holds for every
+    /// ASCII identifier, but not universally (`İ` lowercases to two
+    /// characters), so the two lengths are compared and a token where they
+    /// disagree records nothing rather than painting the wrong range.
+    fn record(&mut self, segs: &[String], dyn_head: bool, b0: usize, b1: usize) {
+        if self.name.chars().count() as u32 != self.base.end_col.saturating_sub(self.base.col) {
+            return;
+        }
+        let start = self.base.col + self.name[..b0].chars().count() as u32;
+        let len = self.name[b0..b1].chars().count() as u32;
+        self.out.push(TypeNameSpan {
+            path: Path::from_segments(segs.to_vec()),
+            dyn_head,
+            loc: Loc::new(Rc::clone(&self.base.file), self.base.line, start)
+                .with_end(self.base.line, start + len),
+        });
+    }
+}
+
+/// A [`NameLexer`] with one-token lookahead that also reports each token's
+/// byte range — [`Peekable`] would hide the underlying `pos()`, and the span
+/// recorder needs to know *where* an identifier sat inside the token.
+struct Toks<'a> {
+    lex: NameLexer<'a>,
+    peeked: Option<(NameTok<'a>, usize, usize)>,
+}
+
+impl<'a> Toks<'a> {
+    fn new(src: &'a str) -> Toks<'a> {
+        Toks { lex: NameLexer::new(src), peeked: None }
+    }
+    /// `(token, start_byte, end_byte)`. `NameLexer::pos()` is "just past the
+    /// most recent token", so reading it before and after `next()` brackets
+    /// the token exactly (the lexer skips nothing — even spaces are tokens).
+    fn next(&mut self) -> Option<(NameTok<'a>, usize, usize)> {
+        if let Some(t) = self.peeked.take() {
+            return Some(t);
+        }
+        let start = self.lex.pos();
+        let t = self.lex.next()?;
+        Some((t, start, self.lex.pos()))
+    }
+    fn peek(&mut self) -> Option<&NameTok<'a>> {
+        if self.peeked.is_none() {
+            self.peeked = self.next();
+        }
+        self.peeked.as_ref().map(|(t, _, _)| t)
+    }
+}
+
 /// Parse a type from a (case-folded) token, splitting generic arguments and
 /// `::` path segments into a structured [`Type`]/[`Path`]. This — and the
-/// reader — are the only places `::` strings are decoded.
-fn parse_type_name(name: &str) -> Type {
-    let mut toks = NameLexer::new(name).peekable();
-    let (segs, args) = parse_qualified_generic(&mut toks);
+/// reader — are the only places `::` strings are decoded. With `loc` present,
+/// every nominal name parsed out of the token is recorded into `out`.
+fn parse_type_name_rec(name: &str, loc: Option<&Loc>, out: &mut Vec<TypeNameSpan>) -> Type {
+    let mut toks = Toks::new(name);
+    let mut rec = loc.map(|base| SpanRec { name, base, out });
+    let (segs, args) = parse_qualified_generic(&mut toks, &mut rec, false);
     named_or_primitive(segs, args)
 }
 
@@ -327,12 +460,26 @@ fn parse_type_name(name: &str) -> Type {
 /// the final segment. `Vec<a::b>`'s inner `::` is never mistaken for a path
 /// separator because it is consumed while parsing the `<...>` argument, one
 /// recursive level down from the `::` chain that builds `segs` here.
-fn parse_qualified_generic<'a>(toks: &mut Peekable<NameLexer<'a>>) -> (Vec<String>, Vec<Type>) {
+///
+/// The head name is recorded *before* its arguments are parsed, so a
+/// recorded sequence always lists an outer name ahead of everything nested
+/// in it — `parse_dyn_type` relies on that ordering. A name that will
+/// resolve to a primitive (single segment, no arguments, in
+/// [`primitive_by_name`]) is not a nominal type and is not recorded.
+fn parse_qualified_generic<'a>(
+    toks: &mut Toks<'a>,
+    rec: &mut Option<SpanRec<'_>>,
+    dyn_head: bool,
+) -> (Vec<String>, Vec<Type>) {
     let mut segs = Vec::new();
+    // Byte range of the last identifier consumed — the final path segment,
+    // which is the part of the token a recorded span covers.
+    let mut last_range = None;
     loop {
         skip_space(toks);
-        if let Some(NameTok::Ident(s)) = toks.next() {
+        if let Some((NameTok::Ident(s), b0, b1)) = toks.next() {
             segs.push(s.to_string());
+            last_range = Some((b0, b1));
         }
         if matches!(toks.peek(), Some(NameTok::ColonColon)) {
             toks.next();
@@ -341,18 +488,26 @@ fn parse_qualified_generic<'a>(toks: &mut Peekable<NameLexer<'a>>) -> (Vec<Strin
         }
     }
 
+    let has_args = matches!(toks.peek(), Some(NameTok::Lt));
+    if let (Some(r), Some((b0, b1))) = (rec.as_mut(), last_range) {
+        let primitive = !has_args && segs.len() == 1 && primitive_by_name(&segs[0]).is_some();
+        if !segs.is_empty() && !primitive {
+            r.record(&segs, dyn_head, b0, b1);
+        }
+    }
+
     let mut args = Vec::new();
-    if matches!(toks.peek(), Some(NameTok::Lt)) {
+    if has_args {
         toks.next(); // '<'
         skip_space(toks);
         if matches!(toks.peek(), Some(NameTok::Gt)) {
             toks.next(); // empty argument list, e.g. `Foo<>`
         } else {
             loop {
-                args.push(parse_type_arg(toks));
+                args.push(parse_type_arg(toks, rec));
                 skip_space(toks);
                 match toks.next() {
-                    Some(NameTok::Comma) => continue,
+                    Some((NameTok::Comma, _, _)) => continue,
                     _ => break, // '>' (or a malformed, premature end) closes the list
                 }
             }
@@ -365,7 +520,7 @@ fn parse_qualified_generic<'a>(toks: &mut Peekable<NameLexer<'a>>) -> (Vec<Strin
 /// (`NameTok::Space`), but once one does, spaces may separate any two tokens
 /// in it — `hashtable<string, :dyn drawable>` has one after the comma and
 /// another after `:dyn`.
-fn skip_space<'a>(toks: &mut Peekable<NameLexer<'a>>) {
+fn skip_space(toks: &mut Toks<'_>) {
     while matches!(toks.peek(), Some(NameTok::Space)) {
         toks.next();
     }
@@ -375,42 +530,51 @@ fn skip_space<'a>(toks: &mut Peekable<NameLexer<'a>>) {
 /// name, but `:dyn Trait` may appear here too — the nested spelling of the
 /// same trait-object type `parse_dyn_type` builds from the datum-level form,
 /// e.g. the element type of `Vector<:dyn Drawable>`.
-fn parse_type_arg<'a>(toks: &mut Peekable<NameLexer<'a>>) -> Type {
+fn parse_type_arg<'a>(toks: &mut Toks<'a>, rec: &mut Option<SpanRec<'_>>) -> Type {
     skip_space(toks);
     if matches!(toks.peek(), Some(NameTok::Ident(s)) if *s == ":dyn") {
         toks.next(); // `:dyn`
-        let (segs, pins) = parse_qualified_generic(toks);
+        let (segs, pins) = parse_qualified_generic(toks, rec, true);
         return Type::Dyn(Path::from_segments(segs), pins);
     }
-    let (segs, args) = parse_qualified_generic(toks);
+    let (segs, args) = parse_qualified_generic(toks, rec, false);
     named_or_primitive(segs, args)
+}
+
+/// The primitive type a bare single-segment name denotes, if any — the one
+/// authoritative name table behind [`named_or_primitive`] and the span
+/// recorder's "is this a nominal name at all" test.
+fn primitive_by_name(name: &str) -> Option<Type> {
+    Some(match name {
+        "i8" => Type::I8,
+        "i16" => Type::I16,
+        "i32" => Type::I32,
+        "i64" => Type::I64,
+        "isize" => Type::Isize,
+        "u8" => Type::U8,
+        "u16" => Type::U16,
+        "u32" => Type::U32,
+        "u64" => Type::U64,
+        "usize" => Type::Usize,
+        "f32" => Type::F32,
+        "f64" => Type::F64,
+        "bignum" => Type::Bignum,
+        "ratio" => Type::Ratio,
+        "bool" => Type::Bool,
+        "char" => Type::Char,
+        "string" => Type::Str,
+        "symbol" => Type::Symbol,
+        "!" => Type::Never,
+        _ => return None,
+    })
 }
 
 /// A non-generic, single-segment name names a primitive; anything else is a
 /// nominal [`Type::Named`].
 fn named_or_primitive(segs: Vec<String>, args: Vec<Type>) -> Type {
     if args.is_empty() && segs.len() == 1 {
-        match segs[0].as_str() {
-            "i8" => return Type::I8,
-            "i16" => return Type::I16,
-            "i32" => return Type::I32,
-            "i64" => return Type::I64,
-            "isize" => return Type::Isize,
-            "u8" => return Type::U8,
-            "u16" => return Type::U16,
-            "u32" => return Type::U32,
-            "u64" => return Type::U64,
-            "usize" => return Type::Usize,
-            "f32" => return Type::F32,
-            "f64" => return Type::F64,
-            "bignum" => return Type::Bignum,
-            "ratio" => return Type::Ratio,
-            "bool" => return Type::Bool,
-            "char" => return Type::Char,
-            "string" => return Type::Str,
-            "symbol" => return Type::Symbol,
-            "!" => return Type::Never,
-            _ => {}
+        if let Some(t) = primitive_by_name(&segs[0]) {
+            return t;
         }
     }
     Type::Named(Path::from_segments(segs), args)
