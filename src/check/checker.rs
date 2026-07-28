@@ -4221,6 +4221,11 @@ impl Checker {
                 return self.check_apply(heap, interp, env, callee, args, arg_locs);
             }
         };
+        // SPECIAL-FORM DISPATCH BEGIN
+        // The arms below are the authoritative list of special forms. They have
+        // no runtime representation to enumerate, so `tests/editor_keyword_sync_test.rs`
+        // reads them out of this file between these two sentinels to check that
+        // both editor definitions know every one. Keep the sentinels in place.
         match head.as_str() {
             // The reader joins `:dyn Trait` into the list `(:dyn Trait)`
             // wherever it appears, so a `:dyn` written outside a type
@@ -4278,6 +4283,7 @@ impl Checker {
             }
             _ => {}
         }
+        // SPECIAL-FORM DISPATCH END
         // A local variable holding a function value is applied directly (locals
         // shadow free functions). Goes through `check_at` (not a hand-built
         // `Typed`) so this callee reference gets its own position — the same

@@ -1,0 +1,150 @@
+{
+  "name": "typelisp",
+  "displayName": "typelisp",
+  "description": "typelisp language support: syntax highlighting, Lisp indentation, outline, and the typl-lsp language server.",
+  "version": "0.1.0",
+  "publisher": "typelisp",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JunSuzukiJapan/typelisp.git",
+    "directory": "editor/vscode"
+  },
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/typelisp.toml"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "typelisp",
+        "aliases": [
+          "typelisp",
+          "TypeLisp"
+        ],
+        "extensions": [
+          ".typl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "typelisp",
+        "scopeName": "source.typelisp",
+        "path": "./syntaxes/typelisp.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "typelisp.runFile",
+        "title": "typelisp: Run File",
+        "category": "typelisp"
+      },
+      {
+        "command": "typelisp.compileModule",
+        "title": "typelisp: Compile File to fasl",
+        "category": "typelisp"
+      },
+      {
+        "command": "typelisp.repl",
+        "title": "typelisp: Start REPL",
+        "category": "typelisp"
+      },
+      {
+        "command": "typelisp.restartServer",
+        "title": "typelisp: Restart Language Server",
+        "category": "typelisp"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "typelisp.runFile",
+        "key": "ctrl+alt+r",
+        "when": "editorLangId == typelisp"
+      },
+      {
+        "command": "typelisp.compileModule",
+        "key": "ctrl+alt+k",
+        "when": "editorLangId == typelisp"
+      },
+      {
+        "command": "typelisp.repl",
+        "key": "ctrl+alt+z",
+        "when": "editorLangId == typelisp"
+      }
+    ],
+    "configuration": {
+      "title": "typelisp",
+      "properties": {
+        "typelisp.program": {
+          "type": "string",
+          "default": "typl",
+          "markdownDescription": "Path to the `typl` CLI, used by the Run / Compile / REPL commands. A bare name is looked up on `PATH`; a relative path is resolved against the workspace folder."
+        },
+        "typelisp.languageServer.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the `typl-lsp` language server. When empty, the extension looks for `target/release/typl-lsp` then `target/debug/typl-lsp` under each workspace folder, and finally `typl-lsp` on `PATH`."
+        },
+        "typelisp.languageServer.enable": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Connect to `typl-lsp` for diagnostics, hover, go-to-definition and completion. Turn off to use syntax highlighting, indentation and outline only \u2014 those are all provided by the extension itself and need no server."
+        },
+        "typelisp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace the JSON-RPC traffic between VS Code and typl-lsp."
+        }
+      }
+    },
+    "problemMatchers": [
+      {
+        "name": "typelisp",
+        "owner": "typelisp",
+        "source": "typelisp",
+        "fileLocation": [
+          "autoDetect",
+          "${workspaceFolder}"
+        ],
+        "pattern": {
+          "regexp": "^(?:error|(warning)): ([^:]+):(\\d+):(\\d+): (.*)$",
+          "severity": 1,
+          "file": 2,
+          "line": 3,
+          "column": 4,
+          "message": 5
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./",
+    "pretest": "npm run compile",
+    "test": "node --test \"out/test/*.test.js\"",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.91.0",
+    "typescript": "^5.4.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.0.0"
+  }
+}

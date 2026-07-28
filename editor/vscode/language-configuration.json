@@ -1,0 +1,50 @@
+// VS Code parses this file as JSONC, so comments are allowed here.
+{
+  "comments": {
+    "lineComment": ";",
+    "blockComment": ["#|", "|#"]
+  },
+
+  "brackets": [["(", ")"]],
+
+  "autoClosingPairs": [
+    { "open": "(", "close": ")" },
+    { "open": "\"", "close": "\"", "notIn": ["string", "comment"] },
+    { "open": "#|", "close": "|#" }
+  ],
+
+  "surroundingPairs": [
+    ["(", ")"],
+    ["\"", "\""]
+  ],
+
+  "colorizedBracketPairs": [["(", ")"]],
+
+  // A typelisp symbol is any token of alphanumerics and operator characters --
+  // `my-func`, `<=`, `is-some`, `int->bignum`, `*print-pretty*`, `point<T>`.
+  // The default word pattern would split every one of those into pieces, so
+  // double-click selection, word motion and rename all need this instead.
+  // `:` is included so a `::` path or a `:keyword` selects whole; the quote
+  // characters and `,` are excluded because they are reader syntax, not part
+  // of any name.
+  "wordPattern": "[^\\s()\\[\\]{}'`,;\"]+",
+
+  // Continue a `;;` comment block onto the next line, the way an editor does
+  // for `//` comments elsewhere. A lone `;` is deliberately excluded: it is
+  // overwhelmingly an end-of-line remark on a line of code, and continuing it
+  // would fight the user on every Enter.
+  "onEnterRules": [
+    {
+      "beforeText": "^\\s*;;+.*$",
+      "action": { "indent": "none", "appendText": ";; " }
+    }
+  ]
+
+  // No `indentationRules`: they are regexp-based and have no notion of the
+  // enclosing form's head, so they cannot express Lisp indentation and would
+  // only produce confidently-wrong guesses. Indentation comes from the
+  // formatting providers in `src/indent.ts` instead (format document/selection,
+  // and on-type for Enter and `)` when `editor.formatOnType` is on). With no
+  // rules here, VS Code's fallback on Enter is to carry over the previous
+  // line's indentation, which is a neutral starting point for Lisp.
+}

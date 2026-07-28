@@ -100,6 +100,9 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "int->bignum" "bignum->int" "try-bignum->int" "bignum->float"
     "float->bignum" "bignum->ratio" "ratio->bignum" "int->ratio"
     "float->ratio" "ratio->float" "numerator" "denominator"
+    ;; the prelude helper `expt' recurses through for a `ratio' base -- an
+    ;; ordinary root-namespace function, so it is callable and highlighted
+    "ratio-expt-int"
     "symbol->string" "string->symbol"
     ;; generic pair (cons-cell<A,B>); set-car/set-cdr were removed, mutate
     ;; via (setf p::car v)/(setf p::cdr v) instead
@@ -121,6 +124,9 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; Vector / HashTable methods
     "new" "push" "get" "set" "len" "iter" "pop" "clear" "keys" "values"
     "entries" "remove"
+    ;; the `Iter' trait's own method -- `iter' gets the cursor, `next' advances
+    ;; it (§12)
+    "next"
     ;; string / char methods
     "upcase" "downcase" "ref" "substring" "alphap" "digitp" "lt"
     ;; higher-order combinators

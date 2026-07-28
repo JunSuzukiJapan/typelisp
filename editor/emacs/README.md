@@ -1,6 +1,8 @@
 # typelisp-mode (Emacs)
 
 typelisp ソース（`.typl`）を編集するための Emacs メジャーモード。
+VS Code 版は [../vscode/](../vscode/README.md)。両者は同じキーワード表・同じインデント規則を
+持ち、そのことは `cargo test --test editor_keyword_sync_test` で機械的に検証されている（末尾参照）。
 
 ## 機能
 
@@ -99,5 +101,21 @@ cargo build --release --bin typl-lsp
   他の Lisp バッファのインデントを変えてしまうため。また typelisp の形は Emacs Lisp と
   同名でも形状が違う——`(defun NAME (PARAMS) RETTYPE ...)` はヘッダ要素が3つ、`if` は
   `else` 必須の3要素固定——ので、値も共有できない。
-  `examples/` 配下の 22 ファイルすべてが `indent-region` で1バイトも変化しないことを
-  確認済み。
+  `examples/` 配下の 22 ファイルすべてが、`indent-region` で1バイトも変化しないことと、
+  インデントを全部潰してから再インデントすると元に戻ることを確認済み（VS Code 版も同じ
+  22 ファイルで同じ基準を満たしている）。
+
+## エディタ定義のドリフト検出
+
+キーワード表は VS Code 版と二重管理になる。実装が進んだのにエディタ定義だけ古くなる事故
+（実際に一度起きた——`bignum`/`ratio`/`format`/`pprint` 系/組み込みエラー型が数か月抜けていた）
+を防ぐため、Rust 側にテストがある:
+
+```sh
+cargo test --test editor_keyword_sync_test
+```
+
+prelude を実際にロードしてレジストリを走査し、**どちらかのエディタが知らない名前**を報告する。
+特殊形は実行時表現を持たないので、`src/check/checker.rs` の
+`// SPECIAL-FORM DISPATCH BEGIN` / `END` の間から読み出す（このコメントは消さないこと）。
+失敗したら、報告された名前を**両方**のエディタ定義に追加する。

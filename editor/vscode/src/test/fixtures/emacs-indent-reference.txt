@@ -1,0 +1,175 @@
+# Reference indentation, produced by Emacs `typelisp-mode`.
+#
+# Captured by running `indent-region` over each input in a `typelisp-mode`
+# buffer, so the expected side is not a transcription of what the TypeScript
+# indenter happens to do -- it is what the other editor actually produces.
+# Regenerate by re-running that in Emacs if the shared indent rules change.
+
+=== let binding body
+--- input
+(defun f ((n i32)) i32
+(let ((a 1))
+(setf a 2)
+a))
+--- expected
+(defun f ((n i32)) i32
+  (let ((a 1))
+    (setf a 2)
+    a))
+
+=== if lines up both branches
+--- input
+(defun g ((x i32)) i32
+(if (< x 0)
+(- 0 x)
+x))
+--- expected
+(defun g ((x i32)) i32
+  (if (< x 0)
+      (- 0 x)
+      x))
+
+=== pub defun with match
+--- input
+(pub defun h ((x i32)) i32
+(match x
+(0 1)
+(_ 2)))
+--- expected
+(pub defun h ((x i32)) i32
+  (match x
+    (0 1)
+    (_ 2)))
+
+=== impl member body
+--- input
+(impl Shape rect
+(label ((self Self)) string
+(append "a"
+"b")))
+--- expected
+(impl Shape rect
+  (label ((self Self)) string
+    (append "a"
+            "b")))
+
+=== labels local function
+--- input
+(defun k () i32
+(labels
+((go ((n i32)) i32
+(if (= n 0)
+0
+(go (- n 1)))))
+(go 3)))
+--- expected
+(defun k () i32
+  (labels
+      ((go ((n i32)) i32
+         (if (= n 0)
+             0
+             (go (- n 1)))))
+    (go 3)))
+
+=== defstruct fields
+--- input
+(defstruct point
+(x f64)
+(y f64))
+--- expected
+(defstruct point
+  (x f64)
+  (y f64))
+
+=== module body
+--- input
+(module m
+(defun q () i32 1))
+--- expected
+(module m
+  (defun q () i32 1))
+
+=== dotimes body
+--- input
+(defun r () ()
+(dotimes (i 3)
+(println "~d" i)))
+--- expected
+(defun r () ()
+  (dotimes (i 3)
+    (println "~d" i)))
+
+=== cond with else
+--- input
+(defun s () ()
+(cond
+((< 1 2) ())
+(else ())))
+--- expected
+(defun s () ()
+  (cond
+    ((< 1 2) ())
+    (else ())))
+
+=== do stepping
+--- input
+(defun t2 () ()
+(do ((a 0 (+ a 1)))
+((= a 3) ())
+(println "~d" a)))
+--- expected
+(defun t2 () ()
+  (do ((a 0 (+ a 1)))
+      ((= a 3) ())
+    (println "~d" a)))
+
+=== quoted forms align with their prefix
+--- input
+(defun u () Sexpr
+(append '(1 2)
+'(3 4)))
+--- expected
+(defun u () Sexpr
+  (append '(1 2)
+          '(3 4)))
+
+=== pprint-logical-block
+--- input
+(defun v () ()
+(pprint-logical-block (o :prefix "[")
+(pprint-newline :fill)))
+--- expected
+(defun v () ()
+  (pprint-logical-block (o :prefix "[")
+    (pprint-newline :fill)))
+
+=== let* sequential bindings
+--- input
+(defun w () i32
+(let* ((a 1)
+(b 2))
+(+ a b)))
+--- expected
+(defun w () i32
+  (let* ((a 1)
+         (b 2))
+    (+ a b)))
+
+=== doiter body
+--- input
+(defun x2 ((v Vector<i32>)) ()
+(doiter (e (iter v))
+(println "~d" e)))
+--- expected
+(defun x2 ((v Vector<i32>)) ()
+  (doiter (e (iter v))
+    (println "~d" e)))
+
+=== defvar continuation
+--- input
+(defvar (*flag* bool)
+false)
+--- expected
+(defvar (*flag* bool)
+  false)
+

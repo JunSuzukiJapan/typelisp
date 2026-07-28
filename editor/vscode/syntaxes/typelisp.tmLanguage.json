@@ -1,0 +1,221 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "typelisp",
+  "scopeName": "source.typelisp",
+  "patterns": [
+    {
+      "include": "#char-literal"
+    },
+    {
+      "include": "#comment-block"
+    },
+    {
+      "include": "#comment-line"
+    },
+    {
+      "include": "#string"
+    },
+    {
+      "include": "#dyn-type"
+    },
+    {
+      "include": "#keyword-symbol"
+    },
+    {
+      "include": "#definition"
+    },
+    {
+      "include": "#type-definition"
+    },
+    {
+      "include": "#variable-definition"
+    },
+    {
+      "include": "#impl"
+    },
+    {
+      "include": "#declaration"
+    },
+    {
+      "include": "#lambda-list"
+    },
+    {
+      "include": "#special-form"
+    },
+    {
+      "include": "#clause"
+    },
+    {
+      "include": "#builtin-function"
+    },
+    {
+      "include": "#builtin-type"
+    },
+    {
+      "include": "#never-type"
+    },
+    {
+      "include": "#user-type"
+    },
+    {
+      "include": "#constant"
+    },
+    {
+      "include": "#number"
+    },
+    {
+      "include": "#global-variable"
+    }
+  ],
+  "repository": {
+    "char-literal": {
+      "match": "#\\\\(?:[A-Za-z][A-Za-z0-9]*|.)",
+      "name": "constant.character.typelisp"
+    },
+    "comment-block": {
+      "name": "comment.block.typelisp",
+      "begin": "#\\|",
+      "end": "\\|#",
+      "patterns": [
+        {
+          "include": "#comment-block"
+        }
+      ]
+    },
+    "comment-line": {
+      "name": "comment.line.semicolon.typelisp",
+      "begin": ";",
+      "end": "$"
+    },
+    "string": {
+      "name": "string.quoted.double.typelisp",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "match": "\\\\[ntr0\\\\\"]",
+          "name": "constant.character.escape.typelisp"
+        },
+        {
+          "match": "~(?:'.|[-+0-9,vV#:@])*(?:[\\]\\[a-zA-Z%&|~$_^<>{}();*?]|\\n)",
+          "name": "constant.other.placeholder.typelisp"
+        }
+      ]
+    },
+    "dyn-type": {
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:>])(:dyn)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:\\s+([A-Za-z][A-Za-z0-9_-]*))?",
+      "captures": {
+        "1": {
+          "name": "keyword.other.dyn.typelisp"
+        },
+        "2": {
+          "name": "entity.name.type.typelisp"
+        }
+      }
+    },
+    "keyword-symbol": {
+      "match": "(?<![-A-Za-z0-9_:]):[A-Za-z][A-Za-z0-9_?!*<>=/+-]*",
+      "name": "constant.other.symbol.typelisp"
+    },
+    "definition": {
+      "match": "\\(\\s*(?:(pub)\\s+)?(defmethod|defmacro|defun)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])\\s*\\(?\\s*([-A-Za-z0-9_?!*/+.%&^~:<>=]+)?",
+      "captures": {
+        "1": {
+          "name": "storage.modifier.typelisp"
+        },
+        "2": {
+          "name": "storage.type.function.typelisp"
+        },
+        "3": {
+          "name": "entity.name.function.typelisp"
+        }
+      }
+    },
+    "type-definition": {
+      "match": "\\(\\s*(?:(pub)\\s+)?(defstruct|deftrait|defenum)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])\\s*\\(?\\s*([-A-Za-z0-9_?!*/+.%&^~:<>=]+)?",
+      "captures": {
+        "1": {
+          "name": "storage.modifier.typelisp"
+        },
+        "2": {
+          "name": "storage.type.class.typelisp"
+        },
+        "3": {
+          "name": "entity.name.type.typelisp"
+        }
+      }
+    },
+    "variable-definition": {
+      "match": "\\(\\s*(?:(pub)\\s+)?(defconstant|defvar)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])\\s*\\(?\\s*([-A-Za-z0-9_?!*/+.%&^~:<>=]+)?",
+      "captures": {
+        "1": {
+          "name": "storage.modifier.typelisp"
+        },
+        "2": {
+          "name": "storage.type.typelisp"
+        },
+        "3": {
+          "name": "variable.other.definition.typelisp"
+        }
+      }
+    },
+    "impl": {
+      "match": "\\(\\s*(impl)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])\\s*([-A-Za-z0-9_?!*/+.%&^~:<>=]+)?(?:\\s+([-A-Za-z0-9_?!*/+.%&^~:<>=]+))?",
+      "captures": {
+        "1": {
+          "name": "keyword.control.impl.typelisp"
+        },
+        "2": {
+          "name": "entity.name.type.typelisp"
+        },
+        "3": {
+          "name": "entity.name.type.typelisp"
+        }
+      }
+    },
+    "declaration": {
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:module|where|impl|load|pub|use)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
+      "name": "keyword.control.declaration.typelisp"
+    },
+    "lambda-list": {
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:\\&optional|\\&rest|\\&key)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
+      "name": "storage.modifier.lambda-list.typelisp"
+    },
+    "special-form": {
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:pprint\\-logical\\-block|unquote\\-splicing|pprint\\-tabular|pprint\\-linear|pprint\\-fill|unreachable|quasiquote|while\\-let|compile|dotimes|println|unquote|doiter|dolist|format|if\\-let|labels|lambda|pprint|return|try\\-as|unless|apply|break|match|panic|print|progn|quote|until|while|case|cond|let\\*|list|loop|setf|todo|when|and|let|the|as|do|if|or)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
+      "name": "keyword.control.typelisp"
+    },
+    "clause": {
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:else)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
+      "name": "keyword.control.conditional.typelisp"
+    },
+    "builtin-function": {
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:pprint\\-exit\\-if\\-list\\-exhausted|pprint\\-list\\-exhausted|try\\-bignum\\->int|pprint\\-newline|sexpr\\-sym\\-name|string\\->symbol|symbol\\->string|bignum\\->float|bignum\\->ratio|float\\->bignum|greater\\-equal|pprint\\-indent|ratio\\->bignum|try\\-int\\->char|ratio\\-expt\\-int|as\\-dyn\\-error|compile\\-file|float\\->ratio|print\\-object|ratio\\->float|sexpr\\-append|bignum\\->int|denominator|int\\->bignum|parse\\-float|sexpr\\-consp|sexpr\\-float|float\\->int|int\\->float|int\\->ratio|less\\-equal|not\\-equals|pprint\\-pop|pprint\\-tab|sexpr\\-atom|sexpr\\-bool|sexpr\\-char|sexpr\\-cons|sexpr\\-null|sexpr\\-symp|char\\->int|int\\->char|numerator|parse\\-int|read\\-line|remove\\-if|sexpr\\-car|sexpr\\-cdr|sexpr\\-int|sexpr\\-map|sexpr\\-str|substring|unwrap\\-or|downcase|identity|keywordp|position|truncate|butlast|ceiling|compose|entries|greater|is\\-none|is\\-some|message|reverse|alphap|append|digitp|equalp|equals|filter|gensym|is\\-err|length|member|random|remove|signum|source|subseq|unwrap|upcase|values|assoc|clear|const|count|equal|every|floor|foldl|foldr|is\\-ok|round|cons|eval|exit|expt|find|flip|iter|keys|last|less|push|read|sort|sqrt|take|abs|any|car|cdr|elt|eql|gcd|get|lcm|len|map|mod|next|new|not|nth|pop|ref|rem|set|eq|lt)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
+      "name": "support.function.typelisp"
+    },
+    "builtin-type": {
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:>])(?:ParseFloatError|hashtable\\-iter|ParseIntError|vector\\-iter|EvalError|HashTable|ReadError|cons\\-cell|Option|Result|Vector|bignum|string|symbol|Error|Sexpr|isize|ratio|usize|Iter|Self|bool|char|Ord|f32|f64|i16|i32|i64|u16|u32|u64|Eq|i8|u8)(?![-A-Za-z0-9_?!*/+.%&^~:])",
+      "name": "support.type.typelisp"
+    },
+    "never-type": {
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])!(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
+      "name": "support.type.never.typelisp"
+    },
+    "user-type": {
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:>])[A-Z][A-Za-z0-9_]*",
+      "name": "entity.name.type.typelisp"
+    },
+    "constant": {
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:false|true)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
+      "name": "constant.language.typelisp"
+    },
+    "number": {
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])[-+]?(?:0[xX][0-9a-fA-F]+|[0-9]+/[0-9]+|[0-9]+\\.[0-9]+(?:[eE][-+]?[0-9]+)?|[0-9]+[eE][-+]?[0-9]+|[0-9]+)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
+      "name": "constant.numeric.typelisp"
+    },
+    "global-variable": {
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])\\*[A-Za-z0-9?!*<>=/+-]+\\*(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
+      "name": "variable.other.global.typelisp"
+    }
+  }
+}
