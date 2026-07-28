@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
-import { Definition, findDefinitions } from "../symbols";
+import { Definition, findDefinitions, findTypeReferences } from "../symbols";
 
 const REPO_ROOT = join(__dirname, "..", "..", "..", "..");
 
@@ -117,5 +117,91 @@ test("the scanner finds exactly the definitions a line-oriented count does", () 
     const text = readFileSync(join(REPO_ROOT, rel), "utf8");
     const expected = text.match(heads)?.length ?? 0;
     assert.equal(findDefinitions(text).length, expected, rel);
+  }
+});
+
+// ---------------------------------------------------------------- type uses
+
+test("uses of a lowercase user type are found, not just its definition", () => {
+  const src = [
+    "(defstruct rect (x i32))",
+    "(defun area ((r rect)) i32 r::x)",
+    "(defun mk () rect (rect::new 1))",
+  ].join("\n");
+  const refs = findTypeReferences(src);
+  assert.deepEqual(refs.map((r) => r.name), ["rect", "rect", "rect", "rect"]);
+  for (const r of refs) {
+    assert.equal(r.kind, "struct");
+    assert.equal(src.slice(r.start, r.end), "rect");
+  }
+});
+
+test("a type used as a generic argument is found", () => {
+  const src = [
+    "(pub defenum token (num i32))",
+    "(defvar (ts Vector<token>) (Vector::new))",
+    "(defvar (m HashTable<i32,token>) (HashTable::new))",
+  ].join("\n");
+  // Once at the definition, then inside each generic argument list -- the `<`
+  // and `,` before them must not block the match.
+  assert.equal(findTypeReferences(src).length, 3);
+  assert.ok(findTypeReferences(src).every((r) => r.kind === "enum"));
+});
+
+test("a name that merely contains a type name is not a use", () => {
+  const src = [
+    "(defstruct rect (x i32))",
+    ";; rect mentioned in a comment",
+    '(println "rect in a string")',
+    "(defun rectangle () i32 1)",
+    "(defun my-rect () i32 2)",
+    "(defun int->rect () i32 3)",
+  ].join("\n");
+  // Only the definition itself.
+  const refs = findTypeReferences(src);
+  assert.equal(refs.length, 1);
+  assert.equal(refs[0].start, src.indexOf("rect"));
+});
+
+test("traits and enums get their own kinds", () => {
+  const src = [
+    "(deftrait shape (label ((self Self)) string))",
+    "(defenum color (red))",
+    "(defstruct box (w i32))",
+    "(defun f ((s :dyn shape) (c color) (b box)) () ())",
+  ].join("\n");
+  const byName = new Map(findTypeReferences(src).map((r) => [r.name, r.kind]));
+  assert.equal(byName.get("shape"), "trait");
+  assert.equal(byName.get("color"), "enum");
+  assert.equal(byName.get("box"), "struct");
+});
+
+test("a generic header declares the bare name", () => {
+  const src = "(defstruct pair<A,B> (fst A) (snd B))\n(defun f ((p pair<i32,i32>)) i32 1)";
+  const refs = findTypeReferences(src);
+  assert.deepEqual(refs.map((r) => r.name), ["pair", "pair"]);
+});
+
+test("a file that defines no types yields nothing", () => {
+  assert.deepEqual(findTypeReferences("(defun f () i32 1)"), []);
+});
+
+test("the real corpus resolves its own type annotations", () => {
+  const file = join(REPO_ROOT, "examples", "projects", "shape-canvas", "src", "shapes.typl");
+  const text = readFileSync(file, "utf8");
+  const refs = findTypeReferences(text);
+  const names = new Set(refs.map((r) => r.name));
+  // The three shapes are defined here and used as `the`-pattern heads and in
+  // `impl` blocks; before semantic tokens none of those uses were coloured.
+  for (const expected of ["rect", "circle", "hline"]) {
+    assert.ok(names.has(expected), `${expected} not found`);
+    assert.ok(
+      refs.filter((r) => r.name === expected).length > 1,
+      `${expected} found only at its definition`,
+    );
+  }
+  // Every reported span must really be that name.
+  for (const r of refs) {
+    assert.equal(text.slice(r.start, r.end), r.name);
   }
 });

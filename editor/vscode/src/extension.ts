@@ -21,7 +21,7 @@ import {
 // dependency of their own, which is what lets `node --test` exercise them
 // directly; this module is the only place they meet the editor API.
 import { indentForLine, indentText } from "./indent";
-import { Definition, DefinitionKind, findDefinitions } from "./symbols";
+import { Definition, DefinitionKind, findDefinitions, findTypeReferences } from "./symbols";
 
 const LANGUAGE_ID = "typelisp";
 const CONFIG_SECTION = "typelisp";
@@ -42,6 +42,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.languages.registerDocumentRangeFormattingEditProvider(selector, rangeFormattingProvider),
     vscode.languages.registerOnTypeFormattingEditProvider(selector, onTypeFormattingProvider, "\n", ")"),
     vscode.languages.registerDocumentSymbolProvider(selector, documentSymbolProvider),
+    vscode.languages.registerDocumentSemanticTokensProvider(
+      selector,
+      semanticTokensProvider,
+      SEMANTIC_LEGEND,
+    ),
   );
 
   context.subscriptions.push(
@@ -190,6 +195,41 @@ const documentSymbolProvider: vscode.DocumentSymbolProvider = {
         selection,
       );
     });
+  },
+};
+
+// ---------------------------------------------------------------- type uses
+
+/**
+ * A `defstruct`/`defenum`/`deftrait` name is usually lowercase, so the grammar's
+ * Capitalized-name rule never sees its uses -- and a TextMate grammar cannot fix
+ * that, being line-local with no view of what the file declares elsewhere.
+ * Semantic tokens are the mechanism that can, so the type annotations in a
+ * statically-typed language finally get coloured like types.
+ *
+ * The three standard token types map onto the themes' existing colours, so this
+ * needs no theme support of its own.
+ */
+const SEMANTIC_TOKEN_TYPES = ["struct", "enum", "interface"] as const;
+const SEMANTIC_LEGEND = new vscode.SemanticTokensLegend([...SEMANTIC_TOKEN_TYPES]);
+
+const SEMANTIC_INDEX: Record<"struct" | "enum" | "trait", number> = {
+  struct: SEMANTIC_TOKEN_TYPES.indexOf("struct"),
+  enum: SEMANTIC_TOKEN_TYPES.indexOf("enum"),
+  // A trait is the nearest thing typelisp has to an interface, and that is the
+  // standard token type editors and themes already style.
+  trait: SEMANTIC_TOKEN_TYPES.indexOf("interface"),
+};
+
+const semanticTokensProvider: vscode.DocumentSemanticTokensProvider = {
+  provideDocumentSemanticTokens(document) {
+    const builder = new vscode.SemanticTokensBuilder(SEMANTIC_LEGEND);
+    const text = document.getText();
+    for (const ref of findTypeReferences(text)) {
+      const at = document.positionAt(ref.start);
+      builder.push(at.line, at.character, ref.name.length, SEMANTIC_INDEX[ref.kind]);
+    }
+    return builder.build();
   },
 };
 

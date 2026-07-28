@@ -16,6 +16,12 @@ VS Code 版は [../vscode/](../vscode/README.md)。両者は同じキーワー�
   - 組み込み関数（`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` など）
   - プリミティブ型（`bignum` / `ratio` を含む）・組み込み型・組み込みエラー型
     （`ParseIntError` など）・`Capitalized` なユーザ型・trait オブジェクト型 `:dyn Trait`
+  - **そのバッファが定義したユーザ型の使用箇所**。`defstruct`/`defenum`/`deftrait` の名前は
+    通常小文字（`rect` `todo-item` `board`）で `Capitalized` 規則では拾えないため、
+    バッファ内の型名を集めて使用箇所も色付けする。`(the circle c)` `(r rect)`
+    `Vector<token>` `HashTable<i32,todo-item>` `rect::new` に対応し、`rectangle` `my-rect`
+    `int->rect` やコメント・文字列中の同名は除外。`use` で他ファイルから来た型は
+    `typelisp.toml` のモジュール解決が必要（言語サーバの仕事）なので無着色のまま
   - リテラル（`true` `false`、数値リテラル（10進 / `0xff` / `1.5` / `1/3`）、
     文字リテラル `#\Space`、文字列、キーワード `:name`）
   - 文字列中の `format` 制御ディレクティブ（`~a` `~5,'0d` `~{...~}` など）

@@ -204,6 +204,67 @@ and the form's own head (docs/syntax.md §3).")
           "\\(?:[][a-zA-Z%&|~$_^<>{}();*?]\\|\n\\)")
   "Regexp matching a `format' control-string directive (docs/functions.md §15).")
 
+;;; Types this buffer defines -------------------------------------------------
+
+;; A `defstruct'/`defenum'/`deftrait' name is usually lowercase (`rect',
+;; `todo-item', `board'), so the Capitalized-name rule below cannot reach its
+;; *uses* -- only the definition site, which its own rule already covers. That
+;; left the odd result that in a statically-typed language the type annotations
+;; were the one thing not coloured. These two functions close that: the buffer's
+;; own type names are collected on demand and matched wherever they appear.
+;;
+;; Buffer-local by design. Resolving a type imported from another file would
+;; mean reimplementing `use`/`typelisp.toml` resolution here, which is the
+;; language server's job -- so a cross-file type stays uncoloured rather than
+;; being guessed at.
+
+(defvar-local typelisp--local-types nil
+  "Cache of `(TICK . REGEXP)' for the types this buffer defines.
+TICK is the `buffer-chars-modified-tick' the regexp was built at; REGEXP is nil
+when the buffer defines no types.")
+
+(defconst typelisp--type-adjacent "-A-Za-z0-9_?!*>=/+.%&^~:"
+  "Characters that must not precede a type name for it to be one.
+`<' and `,' are absent on purpose: a type does appear directly after them, as
+the argument of a generic (`Vector<lexpr>', `HashTable<i32,todo-item>'). `>' is
+present, which is what stops the `bignum' in `int->bignum' reading as a type.")
+
+(defun typelisp--scan-local-types ()
+  "Regexp matching the types defined in this buffer, or nil if there are none."
+  (let (names)
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward
+              (concat typelisp--pub-rx
+                      (regexp-opt typelisp-type-definition-forms t)
+                      "\\_>[ \t\n]*\\(" typelisp--symbol-rx "\\)")
+              nil t)
+        ;; A generic header is a single token, so `point<T>' defines `point'.
+        (push (car (split-string (match-string-no-properties 2) "<")) names)))
+    (when names
+      (concat
+       ;; Either a symbol boundary, or a `<' consumed so that a type used as a
+       ;; generic argument still matches -- `<' is a symbol constituent here, so
+       ;; `\\_<' alone would not fire inside `Vector<lexpr>'.
+       "\\(?:\\_<\\|<\\)\\(" (regexp-opt (delete-dups names)) "\\)"
+       ;; And a boundary, or one of the characters a type name may butt against:
+       ;; `<' opens its generic arguments, `:' starts `::method', `>' closes an
+       ;; enclosing generic. Requiring one of these is what keeps `rect' from
+       ;; matching inside `rectangle'.
+       "\\(?:\\_>\\|[<:>]\\)"))))
+
+(defun typelisp--local-type-regexp ()
+  "The cached regexp from `typelisp--scan-local-types', rebuilt when stale."
+  (let ((tick (buffer-chars-modified-tick)))
+    (unless (eq (car typelisp--local-types) tick)
+      (setq typelisp--local-types (cons tick (typelisp--scan-local-types))))
+    (cdr typelisp--local-types)))
+
+(defun typelisp--match-local-type (limit)
+  "Font-lock matcher for a use of a type this buffer defines, before LIMIT."
+  (let ((regexp (typelisp--local-type-regexp)))
+    (and regexp (re-search-forward regexp limit t))))
+
 (defun typelisp--match-format-directive (limit)
   "Move point to the next `format' directive inside a string, before LIMIT.
 A font-lock matcher function: the directive syntax is only meaningful inside
@@ -306,6 +367,11 @@ has already claimed it for `font-lock-string-face'."
 
     ;; The Never type `!' used as a type annotation
     ("\\_<!\\_>" . font-lock-type-face)
+
+    ;; Uses of a type this buffer defines, which is usually lowercase and so
+    ;; invisible to the Capitalized rule below.  After the builtin rules, so a
+    ;; user type sharing a builtin's name does not steal it.
+    (typelisp--match-local-type 1 font-lock-type-face)
 
     ;; User-defined types: CapitalizedName, optionally generic <...>
     ("\\_<\\([A-Z][A-Za-z0-9_]*\\)" 1 font-lock-type-face)

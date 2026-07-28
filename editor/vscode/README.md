@@ -19,6 +19,15 @@ Emacs 版は [../emacs/](../emacs/README.md)。両者は同じキーワード表
     キーワード `:name`、earmuff 付きグローバル `*print-pretty*`
   - **文字列中の `format` 制御ディレクティブ**（`~a` `~5,'0d` `~{...~}` `~^` など）
   - 行コメント `;` と**ネスト可能な**ブロックコメント `#| ... |#`
+- **そのファイルが定義したユーザ型の使用箇所**（semantic tokens）
+  - `defstruct` / `defenum` / `deftrait` の名前は通常小文字（`rect` `todo-item` `board`）なので
+    `Capitalized` 規則では拾えず、TextMate 文法は行単位でファイル全体を見られない。
+    semantic tokens なら見られるので、静的型付き言語なのに型注釈だけ色が付かない状態を解消した
+  - `(the circle c)` `(r rect)` `Vector<token>` `HashTable<i32,todo-item>` `rect::new` に対応。
+    `rectangle` `my-rect` `int->rect` やコメント・文字列中の同名は除外
+  - **ファイル内に閉じた解決**。`use` で他ファイルから来た型を解決するには `typelisp.toml` の
+    モジュール解決を再実装することになり、それは言語サーバの仕事なので、越境した型は
+    推測せず無着色にしている（Emacs 版も同じ線引き）
 - **Lisp インデント**（VS Code は Lisp のインデントを標準で持たないので拡張側で実装）
   - ドキュメント整形・選択範囲整形・入力時整形（Enter と `)`、`editor.formatOnType` 有効時）
 - **Outline / breadcrumbs / `Ctrl+Shift+O`**（関数・メソッド・マクロ・型・トレイト・
@@ -99,7 +108,7 @@ cargo build --release --bin typl-lsp
 ```sh
 npm run compile   # tsc
 npm run watch     # 監視ビルド
-npm test          # node --test（文法・インデント・シンボル・マニフェスト、39件）
+npm test          # node --test（文法・インデント・シンボル・型参照・マニフェスト、46件）
 ```
 
 テストは `vscode` モジュールを必要としない部分だけを対象にしている。そのために
@@ -118,8 +127,10 @@ npm test          # node --test（文法・インデント・シンボル・マ�
   `indent-region` を実際に走らせて採取した15ケースの参照出力。期待値が TS 実装の追認ではなく
   **もう一方のエディタが実際に出す結果**なので、移植の忠実さがそのまま検証される
   （`let*` `do` `doiter` `labels` `impl` `pprint-logical-block` quote 接頭辞などを含む）。
-- `src/test/symbols.test.ts` — Outline の内容。定義数は行頭の定義形を数える独立した方法と
-  完全一致することを要求する。
+- `src/test/symbols.test.ts` — Outline の内容と、ユーザ型の使用箇所検出。定義数は行頭の定義形を
+  数える独立した方法と完全一致することを要求する。型参照は `examples/` 全22ファイルで
+  Emacs 版と**同一の97箇所**を返すことを確認済み（両者の境界規則を意図的に揃えてある。
+  VS Code は lookbehind、Emacs は先行文字を1つ消費する形で同じ集合を表現）。
 - `src/test/manifest.test.ts` — `package.json` はコンパイラが検査しない唯一の部分なので、
   宣言済みコマンドと `registerCommand` の集合一致、キーバインドの参照先、コードが読む設定が
   宣言されているか、problem matcher が `typl` の実際の出力を解析できるかを検査する。
