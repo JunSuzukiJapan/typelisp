@@ -34,6 +34,18 @@
 (require 'comint)
 (require 'compile)
 
+;; `eglot' (and the `jsonrpc' library it is built on) is optional: the mode is
+;; fully usable without a language server, so these are declared rather than
+;; required.  Every call site is guarded by `fboundp' or by eglot having
+;; already loaded -- see the semantic-tokens section.
+(declare-function jsonrpc-async-request "jsonrpc")
+(declare-function eglot-current-server "eglot")
+(declare-function eglot--capabilities "eglot")
+(declare-function eglot-server-capabilities "eglot")
+(declare-function eglot-path-to-uri "eglot")
+(declare-function eglot--path-to-uri "eglot")
+(declare-function eglot--signal-textDocument/didChange "eglot")
+
 (defgroup typelisp nil
   "Major mode for editing typelisp code."
   :group 'languages
@@ -213,10 +225,12 @@ and the form's own head (docs/syntax.md §3).")
 ;; were the one thing not coloured. These two functions close that: the buffer's
 ;; own type names are collected on demand and matched wherever they appear.
 ;;
-;; Buffer-local by design. Resolving a type imported from another file would
-;; mean reimplementing `use`/`typelisp.toml` resolution here, which is the
-;; language server's job -- so a cross-file type stays uncoloured rather than
-;; being guessed at.
+;; This is the *fallback*, used when no language server is answering
+;; `textDocument/semanticTokens' for the buffer (see the semantic-tokens
+;; section below).  It is buffer-local and textual, so it has two limits the
+;; server does not: a type imported through `use' is invisible to it, and a
+;; function sharing a type's name is indistinguishable from the type.  When the
+;; server is connected these rules stand down entirely rather than competing.
 
 (defvar-local typelisp--local-types nil
   "Cache of `(TICK . REGEXP)' for the types this buffer defines.
@@ -261,9 +275,220 @@ present, which is what stops the `bignum' in `int->bignum' reading as a type.")
     (cdr typelisp--local-types)))
 
 (defun typelisp--match-local-type (limit)
-  "Font-lock matcher for a use of a type this buffer defines, before LIMIT."
-  (let ((regexp (typelisp--local-type-regexp)))
-    (and regexp (re-search-forward regexp limit t))))
+  "Font-lock matcher for a use of a type this buffer defines, before LIMIT.
+Stands down when a language server is colouring the buffer instead: the
+server's answer is resolution-driven and strictly better (see
+`typelisp-semantic-tokens-mode')."
+  (unless (typelisp--server-highlights-types-p)
+    (let ((regexp (typelisp--local-type-regexp)))
+      (and regexp (re-search-forward regexp limit t)))))
+
+;;; Semantic tokens (types resolved by the language server) -------------------
+
+;; `typl-lsp' answers `textDocument/semanticTokens/full' with every position
+;; where the *checker* resolved a user-defined type or trait name.  That is
+;; strictly more than the buffer scan above can produce -- it sees types
+;; imported through `use', and it never mistakes a same-named function for a
+;; type, because a token exists only where the type grammar actually ran.
+;;
+;; `lsp-mode' consumes that natively (`lsp-semantic-tokens-enable'), so this
+;; code is for `eglot', which does not implement semantic tokens at all --
+;; Emacs 29/30's `eglot.el' contains no code for the request.  Rather than
+;; leave eglot users on the weaker fallback, the mode issues the request itself
+;; over eglot's own JSON-RPC connection and draws the result with overlays.
+;; Overlays (not text properties) because they survive font-lock's
+;; refontification and move with the text on edit.
+
+(defcustom typelisp-semantic-tokens t
+  "Whether to colour type names using the language server's semantic tokens.
+Only takes effect in a buffer managed by `eglot'; `lsp-mode' has its own
+implementation and this one stands aside for it."
+  :type 'boolean
+  :group 'typelisp)
+
+(defcustom typelisp-semantic-tokens-idle-delay 0.6
+  "Seconds of idle time before re-requesting semantic tokens after an edit.
+Should stay above `eglot-send-changes-idle-time' so the server has been told
+about the edit before it is asked to describe the result."
+  :type 'number
+  :group 'typelisp)
+
+(defconst typelisp-semantic-token-faces
+  '(("struct" . font-lock-type-face)
+    ("enum" . font-lock-type-face)
+    ("interface" . font-lock-type-face))
+  "Face for each token type in the server's legend.
+The three names are LSP standard token types, chosen by the server precisely
+so no typelisp-specific theme support is needed; a `deftrait' maps onto
+`interface'.  Kept as an alist keyed by the legend *name* rather than by
+index, so a change to the server's legend order cannot silently mis-colour.")
+
+(defvar-local typelisp--semantic-overlays nil
+  "Overlays currently drawing server-reported type names in this buffer.")
+
+(defvar-local typelisp--semantic-timer nil
+  "Idle timer that will refresh this buffer's semantic tokens, if any.")
+
+(defvar-local typelisp--semantic-active nil
+  "Non-nil once the server has answered semantic tokens for this buffer.
+Read by `typelisp--server-highlights-types-p' to retire the buffer-local
+fallback rules, so the two never paint the same buffer.")
+
+(defun typelisp--server-highlights-types-p ()
+  "Whether a language server is colouring type names in this buffer.
+True for `lsp-mode' with semantic tokens enabled, and for this mode's own
+eglot client once it has received an answer."
+  (or typelisp--semantic-active
+      (and (bound-and-true-p lsp-mode)
+           (bound-and-true-p lsp-semantic-tokens-enable))))
+
+(defun typelisp--eglot-server ()
+  "The eglot server managing this buffer, or nil.
+Nil also when `lsp-mode' is in charge, which owns semantic tokens itself."
+  (and typelisp-semantic-tokens
+       (not (bound-and-true-p lsp-mode))
+       (fboundp 'eglot-current-server)
+       (eglot-current-server)))
+
+(defun typelisp--semantic-legend (server)
+  "The token-type legend SERVER advertised, as a list of strings.
+Read from the server's own `initialize' response so this client never has to
+assume an order; nil when the capability is absent or unreadable, in which
+case no tokens are drawn (guessing a legend would mis-colour silently)."
+  (let ((caps (cond ((fboundp 'eglot--capabilities) (eglot--capabilities server))
+                    ((fboundp 'eglot-server-capabilities) (eglot-server-capabilities server)))))
+    (let* ((provider (plist-get caps :semanticTokensProvider))
+           (legend (plist-get provider :legend))
+           (types (plist-get legend :tokenTypes)))
+      (and types (append types nil)))))
+
+(defun typelisp--semantic-uri ()
+  "This buffer's file as an LSP URI, or nil for a buffer with no file."
+  (when buffer-file-name
+    (cond ((fboundp 'eglot-path-to-uri) (eglot-path-to-uri buffer-file-name))
+          ((fboundp 'eglot--path-to-uri) (eglot--path-to-uri buffer-file-name))
+          (t (concat "file://" (expand-file-name buffer-file-name))))))
+
+(defun typelisp--semantic-clear ()
+  "Remove every overlay this buffer's semantic tokens created."
+  (mapc #'delete-overlay typelisp--semantic-overlays)
+  (setq typelisp--semantic-overlays nil))
+
+(defun typelisp--semantic-position (line character)
+  "Buffer position of 0-based LINE and CHARACTER.
+CHARACTER is treated as a count of characters rather than UTF-16 code units,
+matching how `typl-lsp' itself reads the field -- the two agree for everything
+outside the astral planes."
+  (save-excursion
+    (goto-char (point-min))
+    (forward-line line)
+    ;; Clamped to the line's end: a token computed from text the server saw
+    ;; can outrun a line the user has since shortened, and a position past the
+    ;; newline would put the overlay on the following line.
+    (min (+ (point) character) (line-end-position))))
+
+(defun typelisp--semantic-apply (data legend)
+  "Draw the tokens in DATA, decoded against LEGEND.
+DATA is the LSP wire format: five integers per token, with the line and (within
+a line) the column stored as deltas from the previous token."
+  (typelisp--semantic-clear)
+  (let ((was-active typelisp--semantic-active)
+        (line 0) (col 0) (i 0) (n (length data)))
+    (while (<= (+ i 5) n)
+      (let ((dl (aref data i))
+            (dc (aref data (+ i 1)))
+            (len (aref data (+ i 2)))
+            (type (aref data (+ i 3))))
+        (setq line (+ line dl))
+        (setq col (if (zerop dl) (+ col dc) dc))
+        (let* ((name (nth type legend))
+               (face (cdr (assoc name typelisp-semantic-token-faces))))
+          (when face
+            (let* ((start (typelisp--semantic-position line col))
+                   (end (min (+ start len) (point-max)))
+                   (ov (make-overlay start end nil t nil)))
+              (overlay-put ov 'face face)
+              (overlay-put ov 'typelisp-semantic t)
+              (push ov typelisp--semantic-overlays))))
+        (setq i (+ i 5))))
+    (setq typelisp--semantic-active t)
+    ;; Only on the first answer: that is when the fallback rules retire (see
+    ;; `typelisp--server-highlights-types-p'), so the buffer has to be
+    ;; repainted to drop whatever colour they had put on a non-type.  Doing it
+    ;; on every refresh would refontify the whole buffer after each edit for
+    ;; no change in what font-lock produces -- the overlays carry the tokens.
+    (unless was-active
+      (font-lock-flush))))
+
+(defun typelisp--semantic-refresh ()
+  "Ask the server for this buffer's semantic tokens and draw the answer."
+  (let ((server (typelisp--eglot-server))
+        (uri (typelisp--semantic-uri)))
+    (when (and server uri)
+      (let ((legend (typelisp--semantic-legend server))
+            (buffer (current-buffer)))
+        (when legend
+          ;; Flush pending edits first: eglot batches `didChange' on its own
+          ;; idle timer, and tokens computed from text the server has not seen
+          ;; would be placed at the wrong offsets.
+          (when (fboundp 'eglot--signal-textDocument/didChange)
+            (eglot--signal-textDocument/didChange))
+          (jsonrpc-async-request
+           server :textDocument/semanticTokens/full
+           (list :textDocument (list :uri uri))
+           :success-fn
+           (lambda (result)
+             (when (buffer-live-p buffer)
+               (with-current-buffer buffer
+                 (let ((data (plist-get result :data)))
+                   (when (vectorp data)
+                     (typelisp--semantic-apply data legend))))))
+           ;; A server that cannot answer (older build, request in flight
+           ;; during shutdown) simply leaves the buffer on the fallback rules.
+           :error-fn #'ignore
+           :timeout-fn #'ignore))))))
+
+(defun typelisp--semantic-schedule (&rest _)
+  "Queue a semantic-tokens refresh after `typelisp-semantic-tokens-idle-delay'."
+  (when (timerp typelisp--semantic-timer)
+    (cancel-timer typelisp--semantic-timer))
+  (setq typelisp--semantic-timer
+        (run-with-idle-timer typelisp-semantic-tokens-idle-delay nil
+                             #'typelisp--semantic-refresh-buffer
+                             (current-buffer))))
+
+(defun typelisp--semantic-refresh-buffer (buffer)
+  "Refresh semantic tokens in BUFFER, if it is still alive."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq typelisp--semantic-timer nil)
+      (typelisp--semantic-refresh))))
+
+(define-minor-mode typelisp-semantic-tokens-mode
+  "Colour type names from the language server's semantic tokens.
+Enabled automatically in a `typelisp-mode' buffer that eglot is managing; see
+`typelisp-semantic-tokens' to turn it off."
+  :lighter nil
+  (if typelisp-semantic-tokens-mode
+      (progn
+        (add-hook 'after-change-functions #'typelisp--semantic-schedule nil t)
+        (typelisp--semantic-refresh))
+    (remove-hook 'after-change-functions #'typelisp--semantic-schedule t)
+    (when (timerp typelisp--semantic-timer)
+      (cancel-timer typelisp--semantic-timer)
+      (setq typelisp--semantic-timer nil))
+    (typelisp--semantic-clear)
+    (setq typelisp--semantic-active nil)
+    (font-lock-flush)))
+
+(defun typelisp--maybe-enable-semantic-tokens ()
+  "Turn `typelisp-semantic-tokens-mode' on or off to follow eglot.
+Hung on `eglot-managed-mode-hook', which runs on both connect and disconnect."
+  (when (derived-mode-p 'typelisp-mode)
+    (typelisp-semantic-tokens-mode
+     (if (and typelisp-semantic-tokens (bound-and-true-p eglot--managed-mode)) 1 -1))))
+
+(add-hook 'eglot-managed-mode-hook #'typelisp--maybe-enable-semantic-tokens)
 
 (defun typelisp--match-format-directive (limit)
   "Move point to the next `format' directive inside a string, before LIMIT.

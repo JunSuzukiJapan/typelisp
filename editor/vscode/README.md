@@ -19,24 +19,24 @@ Emacs 版は [../emacs/](../emacs/README.md)。両者は同じキーワード表
     キーワード `:name`、earmuff 付きグローバル `*print-pretty*`
   - **文字列中の `format` 制御ディレクティブ**（`~a` `~5,'0d` `~{...~}` `~^` など）
   - 行コメント `;` と**ネスト可能な**ブロックコメント `#| ... |#`
-- **そのファイルが定義したユーザ型の使用箇所**（semantic tokens）
+- **ユーザ定義型の使用箇所**（semantic tokens）
   - `defstruct` / `defenum` / `deftrait` の名前は通常小文字（`rect` `todo-item` `board`）なので
     `Capitalized` 規則では拾えず、TextMate 文法は行単位でファイル全体を見られない。
     semantic tokens なら見られるので、静的型付き言語なのに型注釈だけ色が付かない状態を解消した
-  - `(the circle c)` `(r rect)` `Vector<token>` `HashTable<i32,todo-item>` `rect::new` に対応。
-    `rectangle` `my-rect` `int->rect` やコメント・文字列中の同名は除外
-  - **ファイル内に閉じた解決**。`use` で他ファイルから来た型を解決するには `typelisp.toml` の
-    モジュール解決を再実装することになり、それは言語サーバの仕事なので、越境した型は
-    推測せず無着色にしている（Emacs 版も同じ線引き）
+  - `typl-lsp` に接続していれば**チェッカが実際に型名として解決した位置**が返る。したがって
+    `use` で他ファイルから来た型も色が付き、型と同名の**関数**の呼び出し箇所には色が付かない
+    （そこはチェッカが関数として解決したので、そもそもトークンが記録されない）
+  - 未接続・未ビルドのときは拡張がファイル内に閉じて解決するテキスト走査のフォールバックに
+    切り替わる。こちらは越境した型を拾えず、型と同名の関数も区別できない近似
 - **Lisp インデント**（VS Code は Lisp のインデントを標準で持たないので拡張側で実装）
   - ドキュメント整形・選択範囲整形・入力時整形（Enter と `)`、`editor.formatOnType` 有効時）
 - **Outline / breadcrumbs / `Ctrl+Shift+O`**（関数・メソッド・マクロ・型・トレイト・
   `impl`・変数・モジュール）
-- **`typl-lsp` 連携**（診断・hover・定義ジャンプ・補完）
+- **`typl-lsp` 連携**（診断・hover・定義ジャンプ・補完・semantic tokens）
 - **`typl` CLI コマンド**（実行・fasl 化・REPL）
 
 言語サーバ以外はすべて拡張単体で動くので、`typl-lsp` をビルドしていないチェックアウトでも
-ハイライト・インデント・Outline は使える。
+ハイライト・インデント・Outline・（ファイル内に閉じた）型ハイライトは使える。
 
 ## インストール
 
@@ -127,10 +127,14 @@ npm test          # node --test（文法・インデント・シンボル・型�
   `indent-region` を実際に走らせて採取した15ケースの参照出力。期待値が TS 実装の追認ではなく
   **もう一方のエディタが実際に出す結果**なので、移植の忠実さがそのまま検証される
   （`let*` `do` `doiter` `labels` `impl` `pprint-logical-block` quote 接頭辞などを含む）。
-- `src/test/symbols.test.ts` — Outline の内容と、ユーザ型の使用箇所検出。定義数は行頭の定義形を
-  数える独立した方法と完全一致することを要求する。型参照は `examples/` 全22ファイルで
-  Emacs 版と**同一の97箇所**を返すことを確認済み（両者の境界規則を意図的に揃えてある。
-  VS Code は lookbehind、Emacs は先行文字を1つ消費する形で同じ集合を表現）。
+- `src/test/symbols.test.ts` — Outline の内容と、フォールバックの型参照検出。定義数は行頭の
+  定義形を数える独立した方法と完全一致することを要求する。型参照は `examples/` 全22ファイルで
+  Emacs 版のフォールバックと**同一の97箇所**を返すことを確認済み（両者の境界規則を意図的に
+  揃えてある。VS Code は lookbehind、Emacs は先行文字を1つ消費する形で同じ集合を表現）。
+- サーバ側の解決駆動トークン (`src/check/semantic.rs`) は
+  `cargo test --test lsp_semantic_test` と `scripts/lsp-semantic-smoke.py`
+  （実プロセスを stdio で駆動）が検証している。Emacs 側クライアントは
+  `scripts/emacs-semantic-smoke.el` が実 eglot 接続で検証する。
 - `src/test/manifest.test.ts` — `package.json` はコンパイラが検査しない唯一の部分なので、
   宣言済みコマンドと `registerCommand` の集合一致、キーバインドの参照先、コードが読む設定が
   宣言されているか、problem matcher が `typl` の実際の出力を解析できるかを検査する。
@@ -148,6 +152,10 @@ prelude を実際にロードしてレジストリを走査し、**どちらか�
 特殊形は実行時表現を持たないので、`src/check/checker.rs` の
 `// SPECIAL-FORM DISPATCH BEGIN` / `END` の間から読み出す（このコメントは消さないこと）。
 失敗したら、報告された名前を**両方**のエディタ定義に追加する。
+
+同じテストが semantic tokens の legend も照合する（`src/bin/lsp.rs` の
+`SEMANTIC_TOKEN_TYPES` と、両エディタが持つ対応表が名前・順序ともに一致すること）。
+ずれても実行時エラーにはならず全トークンの色が入れ替わるだけなので、機械的に固定してある。
 
 ## 備考
 

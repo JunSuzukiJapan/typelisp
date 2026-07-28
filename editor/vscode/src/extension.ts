@@ -207,6 +207,12 @@ const documentSymbolProvider: vscode.DocumentSymbolProvider = {
  * Semantic tokens are the mechanism that can, so the type annotations in a
  * statically-typed language finally get coloured like types.
  *
+ * This is the *fallback*, for a checkout where `typl-lsp` has not been built.
+ * Being a text scan of one document, it has two limits the server does not: a
+ * type imported through `use` is invisible to it, and a function sharing a
+ * type's name is indistinguishable from the type. Whenever the server is
+ * connected it answers instead (see `serverProvidesSemanticTokens`).
+ *
  * The three standard token types map onto the themes' existing colours, so this
  * needs no theme support of its own.
  */
@@ -221,8 +227,25 @@ const SEMANTIC_INDEX: Record<"struct" | "enum" | "trait", number> = {
   trait: SEMANTIC_TOKEN_TYPES.indexOf("interface"),
 };
 
+/**
+ * Whether the connected server answers `textDocument/semanticTokens` itself.
+ *
+ * When it does, it is strictly better informed: its tokens come from positions
+ * the *checker* resolved a type name at, so they cover types reached through
+ * `use` (which a document-local scan can never see) and never fire on a
+ * function that merely shares a type's name (which a text scan cannot tell
+ * apart). The local provider stands down rather than competing, and comes back
+ * automatically if the server is stopped or was never built.
+ */
+function serverProvidesSemanticTokens(): boolean {
+  return client?.initializeResult?.capabilities.semanticTokensProvider !== undefined;
+}
+
 const semanticTokensProvider: vscode.DocumentSemanticTokensProvider = {
   provideDocumentSemanticTokens(document) {
+    if (serverProvidesSemanticTokens()) {
+      return undefined;
+    }
     const builder = new vscode.SemanticTokensBuilder(SEMANTIC_LEGEND);
     const text = document.getText();
     for (const ref of findTypeReferences(text)) {

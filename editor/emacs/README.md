@@ -16,12 +16,10 @@ VS Code 版は [../vscode/](../vscode/README.md)。両者は同じキーワー�
   - 組み込み関数（`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` など）
   - プリミティブ型（`bignum` / `ratio` を含む）・組み込み型・組み込みエラー型
     （`ParseIntError` など）・`Capitalized` なユーザ型・trait オブジェクト型 `:dyn Trait`
-  - **そのバッファが定義したユーザ型の使用箇所**。`defstruct`/`defenum`/`deftrait` の名前は
-    通常小文字（`rect` `todo-item` `board`）で `Capitalized` 規則では拾えないため、
-    バッファ内の型名を集めて使用箇所も色付けする。`(the circle c)` `(r rect)`
-    `Vector<token>` `HashTable<i32,todo-item>` `rect::new` に対応し、`rectangle` `my-rect`
-    `int->rect` やコメント・文字列中の同名は除外。`use` で他ファイルから来た型は
-    `typelisp.toml` のモジュール解決が必要（言語サーバの仕事）なので無着色のまま
+  - **ユーザ定義型の使用箇所**（`defstruct`/`defenum`/`deftrait` の名前は通常小文字
+    （`rect` `todo-item` `board`）で `Capitalized` 規則では拾えない）。
+    `typl-lsp` に接続していればサーバの semantic tokens で着色する（`eglot` でも効く。
+    後述）。未接続時はバッファ内の型名を集めるフォールバックに切り替わる
   - リテラル（`true` `false`、数値リテラル（10進 / `0xff` / `1.5` / `1/3`）、
     文字リテラル `#\Space`、文字列、キーワード `:name`）
   - 文字列中の `format` 制御ディレクティブ（`~a` `~5,'0d` `~{...~}` など）
@@ -92,10 +90,36 @@ cargo build --release --bin typl-lsp
 ```
 
 診断（構文/型エラーと再定義 warning を `textDocument/publishDiagnostics` で通知）・hover・
-定義ジャンプ（goto-definition）・補完に対応（補完は `:` をトリガ文字に登録済み）。`use` に
-よるファイルをまたぐ参照は解決される（プロジェクトルートの `typelisp.toml` を上方探索、
+定義ジャンプ（goto-definition）・補完（`:` をトリガ文字に登録済み）・semantic tokens に対応。
+`use` によるファイルをまたぐ参照は解決される（プロジェクトルートの `typelisp.toml` を上方探索、
 詳細は `docs/syntax.md` の「ファイル↔モジュール対応」節）。開いているエディタバッファの
 未保存編集は依存ファイル・依存元双方の診断に即座に反映される。
+
+### 型名のハイライト（semantic tokens）
+
+サーバは `textDocument/semanticTokens` で、**チェッカが実際に型名として解決した位置**を
+報告する。テキスト照合ではないので、
+
+- `use` 経由で他ファイルから来た型も色が付く（バッファ内解決では原理的に届かない範囲）
+- 型と同名の**関数**の呼び出し箇所は色が付かない（そこはチェッカが関数として解決したので、
+  そもそもトークンが記録されない）
+
+クライアント側:
+
+- **`eglot`**: eglot 自体は semanticTokens に非対応（Emacs 29.3/30 同梱の `eglot.el` には
+  該当コードが1行も無い）。そこで **`typelisp-mode` が自前でリクエストを投げてオーバレイで
+  描画する**（`typelisp-semantic-tokens-mode`。eglot 接続時に自動で有効化）。
+  `scripts/emacs-semantic-smoke.el` が実際の eglot 接続で検証している
+- **`lsp-mode`**: native 対応（`lsp-semantic-tokens-enable` を `t` に）。この場合
+  `typelisp-mode` 側は手を出さない
+
+いずれのクライアントでもサーバが答えている間はバッファ内解決のフォールバックは退く
+（同じバッファを2つの規則が塗らないようにするため）。
+
+| 設定 | 既定 | 内容 |
+|---|---|---|
+| `typelisp-semantic-tokens` | `t` | eglot 利用時にサーバの semantic tokens で着色するか |
+| `typelisp-semantic-tokens-idle-delay` | `0.6` | 編集後に再リクエストするまでのアイドル秒数（`eglot-send-changes-idle-time` より大きくすること） |
 
 ## 備考
 
@@ -125,3 +149,7 @@ prelude を実際にロードしてレジストリを走査し、**どちらか�
 特殊形は実行時表現を持たないので、`src/check/checker.rs` の
 `// SPECIAL-FORM DISPATCH BEGIN` / `END` の間から読み出す（このコメントは消さないこと）。
 失敗したら、報告された名前を**両方**のエディタ定義に追加する。
+
+同じテストが semantic tokens の legend も照合する（`src/bin/lsp.rs` の
+`SEMANTIC_TOKEN_TYPES` と、両エディタが持つ対応表が名前・順序ともに一致すること）。
+ずれても実行時エラーにはならず全トークンの色が入れ替わるだけなので、機械的に固定してある。

@@ -439,6 +439,90 @@ fn the_two_editors_agree_with_each_other() {
     );
 }
 
+/// The token-type legend `src/bin/lsp.rs` advertises, read out of its
+/// `SEMANTIC_TOKEN_TYPES` constant in declaration order. `SemanticTokenType::
+/// STRUCT` and friends serialize as their lowercase name, which is what a
+/// client sees on the wire and what both editor definitions key on.
+fn lsp_semantic_legend() -> Vec<String> {
+    let src = std::fs::read_to_string(repo_root().join("src/bin/lsp.rs")).expect("lsp.rs is readable");
+    let decl = src
+        .find("const SEMANTIC_TOKEN_TYPES")
+        .expect("lsp.rs declares SEMANTIC_TOKEN_TYPES");
+    // Past the `=`, so the `[SemanticTokenType; 3]` type annotation's own
+    // brackets are not mistaken for the value's.
+    let eq = src[decl..].find('=').expect("legend constant has an initializer") + decl;
+    let body_start = src[eq..].find('[').expect("legend is an array literal") + eq;
+    let body_end = src[body_start..].find(']').expect("legend array is closed") + body_start;
+    src[body_start..body_end]
+        .split(',')
+        .filter_map(|item| item.trim().rsplit("::").next())
+        .filter(|name| !name.is_empty())
+        .map(|name| name.to_lowercase())
+        .collect()
+}
+
+#[test]
+fn both_editors_agree_with_the_servers_semantic_token_legend() {
+    // Each editor maps a token *type name* onto a face/colour. The VS Code
+    // extension additionally has to declare the legend in the same order the
+    // server does, since its own fallback provider shares that legend and the
+    // wire format indexes into it. A silent mismatch would mis-colour every
+    // token rather than fail loudly, so pin both here.
+    let legend = lsp_semantic_legend();
+    assert_eq!(
+        legend,
+        vec!["struct", "enum", "interface"],
+        "the server's legend changed; update both editor definitions and this expectation"
+    );
+
+    let el = std::fs::read_to_string(repo_root().join("editor/emacs/typelisp-mode.el"))
+        .expect("emacs mode is readable");
+    for name in &legend {
+        assert!(
+            el.contains(&format!("(\"{}\" . font-lock-", name)),
+            "the Emacs mode has no face for the `{}` semantic token type",
+            name
+        );
+    }
+
+    let ts = std::fs::read_to_string(repo_root().join("editor/vscode/src/extension.ts"))
+        .expect("extension source is readable");
+    let declared = ts
+        .split("const SEMANTIC_TOKEN_TYPES")
+        .nth(1)
+        .and_then(|rest| rest.split(']').next())
+        .expect("the extension declares SEMANTIC_TOKEN_TYPES");
+    let ts_legend: Vec<String> = string_literals_in_order(declared);
+    assert_eq!(
+        ts_legend, legend,
+        "the VS Code extension's legend does not match the server's, in order"
+    );
+}
+
+/// Every `"..."` literal in `text`, in source order (unlike
+/// [`string_literals`], which dedupes and sorts).
+fn string_literals_in_order(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '"' {
+            let start = i + 1;
+            let mut j = start;
+            while j < chars.len() && chars[j] != '"' {
+                j += 1;
+            }
+            if j < chars.len() {
+                out.push(chars[start..j].iter().collect());
+            }
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
 #[test]
 fn the_editor_definitions_exist_where_the_tests_expect_them() {
     // A cheap guard so that moving or renaming an editor file fails here rather
