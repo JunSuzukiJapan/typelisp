@@ -640,3 +640,27 @@ trait オブジェクトは**ディスパッチ以外の意味を持たない**:
   typelisp自身で書き、Rustは inkwell バインディング・AST ブリッジ（`src/compile/ast_bridge.rs`）・
   ランタイムシムのみを担う）で JIT（`compile`）/AOT（`compile-file`）とも実装済み。対応構文の
   範囲は段階的に拡張中——詳細な進捗は[implementation-log.md](implementation-log.md)参照。
+
+## 9. 採用しないと決めた機能（非採用）
+
+§8 が「まだ無いもの（将来やるかもしれないもの）」であるのに対し、ここは**やらないと確定した
+もの**。CL に同名の機能があることを理由に再検討する場合は、まず下記の判断根拠と衝突しないかを
+確認すること。2026-07-29 に [TODO.md](TODO.md) から移設した（TODO ではないため）。
+
+- **`Sexpr` への `Iter<Item>` trait 実装**: 要素型が固定されないリストにジェネリックな
+  `Iter<Item>` を被せるのは型システム上不適切というユーザー判断（§5 末尾、
+  [[typelisp-typechecking-is-not-design-soundness]]）。一度実装したが撤回済み。
+  なお、cons セルのリストを走査する反復手段としては **`dolist` マクロが別途ある**
+  （`src/prelude.rs` の `defmacro dolist`）。`Iter` トレイトを介さず `sexpr-consp`/`sexpr-car`/
+  `sexpr-cdr` で直接歩いて各要素を束縛する（要素は動的に `Sexpr`。使う側が `match` で具体型に
+  分解する）ので、上記の「ジェネリックな `Iter<Item>` を被せない」方針と両立している。
+- **`?`/`try` 構文**、および `!`/`?` の命名接尾辞: CL に倣い非採用（§7.3）。
+- **`set-pprint-dispatch` / `*print-pprint-dispatch*`**: CL の「型指定子をキーにした実行時の
+  整形関数登録表」。文字列キーもプリンタのシグネチャも無検査で、「登録時点で分かっていた型を
+  捨ててから `match` で復元する」形になり、静的型付け言語には合わない——CL のもう一方の機構
+  である CLOS 総称関数 `print-object` に相当する **`print-object` トレイト**を 2026-07-26 に
+  採用してこちらを置き換えた（[functions.md](../functions.md) §15.2）。判断の経緯は
+  [implementation-log.md](implementation-log.md) の `print-object` トレイトの節。
+
+CL 全体と突き合わせた「無いもの」の網羅リストは
+[cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md) にある。

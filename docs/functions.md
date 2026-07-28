@@ -681,8 +681,9 @@ pretty printer とも合成される（§15.1）。`*print-pretty*` が真なら
 - CL のもう一方の機構 `set-pprint-dispatch` / `*print-pprint-dispatch*`（型指定子をキーに
   した実行時の登録表）は**採用しない**。文字列キーもプリンタのシグネチャも無検査で、
   「登録時点で分かっていた型を捨ててから `match` で復元する」形になり、静的型付け言語には
-  合わない。経緯は [dev/TODO.md](dev/TODO.md) の T5-b と
-  [dev/implementation-log.md](dev/implementation-log.md)。
+  合わない。非採用の確定事項としては
+  [dev/language-design.md](dev/language-design.md) §9、経緯は
+  [dev/implementation-log.md](dev/implementation-log.md)（旧 TODO T5-b の節）。
 
 ## 16. 解析・評価 (`parse-int` / `parse-float` / `read` / `eval`)
 

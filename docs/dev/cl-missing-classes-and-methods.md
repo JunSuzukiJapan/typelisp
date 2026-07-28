@@ -77,7 +77,7 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 |---|---|---|
 | `cons` | ⚠️ | 2つある。汎用ペア `cons-cell<A,B>`（`defstruct`）と `Sexpr` の `Cons` 構成子。前者は静的な要素型を持ち、CL の「異種の入れ子」は `Sexpr` 側だけが担う |
 | `list` | ⛔ | 型としての `list` が無い。`Sexpr` のリストは「`Cons` 連鎖である `Sexpr` 値」であり、静的には長さも要素型も区別されない |
-| `sequence` | ⚠️ | 抽象型としては無い。代替は `Iter` トレイト（`Vector<T>`/`HashTable<K,V>` が実装）。**`Sexpr` のリストは意図的に `Iter` を実装しない**（TODO.md「意図的にやらないもの」） |
+| `sequence` | ⚠️ | 抽象型としては無い。代替は `Iter` トレイト（`Vector<T>`/`HashTable<K,V>` が実装）。**`Sexpr` のリストは意図的に `Iter` を実装しない**（language-design.md §9） |
 | `array` | ❌ | 多次元配列が無い。`Vector<T>` は1次元のみ |
 | `vector` | ⚠️ | `Vector<T>`（可変長・要素型が一様）。CL の `fill-pointer`/`adjustable` の概念は無い |
 | `simple-vector` / `simple-array` | ⛔ | simple 系のサブタイプ区分が無い |
@@ -418,7 +418,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `*print-pretty*` / `*print-right-margin*` / `*print-miser-width*` | ✅ | 通常のグローバル変数（(D5) のため動的束縛でなく `setf`） |
 | `*print-escape*` | ⚠️ | `print-object` の `escape` 引数としてのみ存在。変数としては無い |
 | `*print-base*` / `*print-radix*` / `*print-case*` / `*print-circle*` / `*print-length*` / `*print-level*` / `*print-lines*` / `*print-gensym*` / `*print-array*` / `*print-readably*` | ❌ | 特に **`*print-circle*`（循環構造の検出）と `*print-level*`/`*print-length*`（深さ・長さの打ち切り）** が無いのは、循環リストを印字すると停止しないことを意味する |
-| `set-pprint-dispatch` / `*print-pprint-dispatch*` / `copy-pprint-dispatch` | ⛔ | 採用しないと確定済み（TODO.md、`print-object` トレイトで置き換え） |
+| `set-pprint-dispatch` / `*print-pprint-dispatch*` / `copy-pprint-dispatch` | ⛔ | 採用しないと確定済み（language-design.md §9、`print-object` トレイトで置き換え） |
 | `write-byte` / `read-byte` | ❌ | バイナリ I/O |
 
 ### 2.20 リーダ（CLHS 23）
@@ -482,6 +482,6 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 空であり、この一覧は「CL と比べたときの残差はどこか」を測るための地図として作った。着手する
 場合は §3 の順序が費用対効果の目安になる（優先度は筆者の見立てで、確定した方針ではない）。
 
-⛔ の項目については、[language-design.md](language-design.md) §7・§8 と TODO.md の
-「意図的にやらないもの」が一次情報。CL に同名の機能があることを理由にこれらを再検討する場合は、
+⛔ の項目については、[language-design.md](language-design.md) §7・§8・§9（採用しないと決めた
+機能）が一次情報。CL に同名の機能があることを理由にこれらを再検討する場合は、
 まず (D1)〜(D5) のどれと衝突するかを確認すること。

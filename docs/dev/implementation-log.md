@@ -4570,7 +4570,8 @@ TODO には「実行時の**型名文字列 → 関数**の登録表」と書い
    `set-pprint-dispatch`（型指定子キーの表、pretty 時のみ）。trait/impl に対応するのは前者で、
    そちらを採るほうが CL 準拠でもある。
 
-`set-pprint-dispatch` は「意図的にやらないもの」へ移した（[TODO.md](TODO.md)）。
+`set-pprint-dispatch` は「意図的にやらないもの」へ移した（当時は TODO.md、2026-07-29 に
+[language-design.md](language-design.md) §9「採用しないと決めた機能」へ移設）。
 
 ### 静的に決まるのは「登録」であって「選択」ではない
 
