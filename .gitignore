@@ -1,2 +1,33 @@
 /target
 /.cargo
+
+# graphify (https://github.com/Graphify-Labs/graphify)
+#
+# graphify-out/ 自体はコミットする——本家が「チーム全員が同じ地図から始められる
+# ように」コミットを推奨しているため (graphifyy 0.9.27 README の "Team setup")。
+# 除外リストは出荷版 README の2行ではなく、その不備を指摘した issue #1867 と
+# 修正 PR #1866 の拡張版に従う (出荷版には .graphify_root などローカル専用
+# ファイルの記述が無く、そのままだとマシン固有の値をコミットしてしまう)。
+#
+# 本家の推奨ブロックは各行に行末コメントを付けた形で書かれているが、gitignore は
+# 行頭の `#` しかコメントにしないので、あのまま貼ると `cost.json        # local
+# only` というパターンになり1行も効かない (git check-ignore で確認)。
+# ここではコメントを行頭に出してある。
+
+# local only
+graphify-out/cost.json
+# personal Q&A annotations (graphify save-result)
+graphify-out/memory/
+# derived from memory/, local only
+graphify-out/reflections/
+# local metadata (paths, markers, incremental caches)
+# —— .graphify_root (絶対パス) と .graphify_python (venv パス) の両方を覆う
+graphify-out/.graphify_*
+# dated backup snapshots
+graphify-out/????-??-??/
+# 本家ではこの行だけコメントアウトされている ("optional: commit for speed,
+# skip to keep repo small")。skip を採るのは、106ファイル中75が /Users/... の
+# 絶対パスを含むため——上の各行が防いでいるのとまったく同じ問題。
+graphify-out/cache/
+# チームで community labels を共有するなら次行を有効化して .graphify_* から除外する:
+# !graphify-out/.graphify_labels.json
