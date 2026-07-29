@@ -417,7 +417,8 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `print-object` | ✅ | トレイト |
 | `*print-pretty*` / `*print-right-margin*` / `*print-miser-width*` | ✅ | 通常のグローバル変数（(D5) のため動的束縛でなく `setf`） |
 | `*print-escape*` | ⚠️ | `print-object` の `escape` 引数としてのみ存在。変数としては無い |
-| `*print-base*` / `*print-radix*` / `*print-case*` / `*print-circle*` / `*print-length*` / `*print-level*` / `*print-lines*` / `*print-gensym*` / `*print-array*` / `*print-readably*` | ❌ | 特に **`*print-circle*`（循環構造の検出）と `*print-level*`/`*print-length*`（深さ・長さの打ち切り）** が無いのは、循環リストを印字すると停止しないことを意味する |
+| `*print-circle*` / `*print-level*` / `*print-length*` | ✅ | 2026-07-29 実装（functions.md §15.3）。`*print-circle*` は共有・循環構造を `#n=`/`#n#` でラベル付けし、後の2つは `#`/`...` で打ち切る。CL の `nil`（無制限）は 0 以下で表す |
+| `*print-base*` / `*print-radix*` / `*print-case*` / `*print-lines*` / `*print-gensym*` / `*print-array*` / `*print-readably*` | ❌ | 基数・大文字小文字・行数などの制御 |
 | `set-pprint-dispatch` / `*print-pprint-dispatch*` / `copy-pprint-dispatch` | ⛔ | 採用しないと確定済み（language-design.md §9、`print-object` トレイトで置き換え） |
 | `write-byte` / `read-byte` | ❌ | バイナリ I/O |
 
@@ -473,8 +474,11 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 6. **述語や比較関数を引数に取れないコレクション API** — `sort` に比較関数を渡せず、
    `find`/`position`/`count` は述語版しかなく値版が無い。2 と合わせて解消すべき。
 7. **時間・乱数の再現性**（§2.21/§2.10）— `time` も `get-universal-time` も `random-state` も無い。
-8. **`*print-circle*` / `*print-level*` / `*print-length*`** — 循環構造を印字すると停止しない。
-   GC ヒープ上に循環を作れる以上、実害のあるバグになりうる。
+8. ~~**`*print-circle*` / `*print-level*` / `*print-length*`**~~ — **2026-07-29 実装済み**
+   （functions.md §15.3、[implementation-log.md](implementation-log.md) の該当節）。着手前は
+   「循環構造を印字するとプロセスが落ちる」状態だった——`defstruct` のフィールドを `setf` で
+   自分自身へ向けた値を `println` するとスタックオーバーフローで abort することを確認しており、
+   `*print-circle*` を真にすればラベル付き（`#1=…#1#`）で印字できるようになった。
 
 ## 4. このドキュメントの位置づけ
 

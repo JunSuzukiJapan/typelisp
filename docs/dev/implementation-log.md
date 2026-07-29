@@ -4728,3 +4728,139 @@ eglot が非対応なら**モード側が自分でリクエストを投げれば
 legend（`lsp.rs` の `SEMANTIC_TOKEN_TYPES` と両エディタの対応表）がずれても実行時エラーには
 ならず全トークンの色が入れ替わるだけなので、`editor_keyword_sync_test` に名前・順序の一致
 検査を追加した。
+
+## `*print-circle*` / `*print-level*` / `*print-length*`（印字量の制御、2026-07-29）
+
+CLHS 22.1.1 の「値のどこまでを印字するか」を決める3変数。
+[cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md) §3 の8番目として挙げていた
+項目で、ユーザ向け仕様は [functions.md](../functions.md) §15.3。
+
+### 着手前の状態は「落ちる」だった
+
+「循環構造を印字すると停止しない」と書いていたが、実際に確かめると**停止しないのではなく
+プロセスが死ぬ**:
+
+```lisp
+(defstruct node (val i64) (next Option<node>))
+(let ((a (node::new 1 (option::none))))
+  (setf a::next (option::some a))
+  (println "~a" a))
+;; thread 'main' has overflowed its stack
+;; fatal runtime error: stack overflow, aborting
+```
+
+`render_value` が `car`/フィールドを無条件に再帰で辿るため。typelisp で循環を作れる経路は
+**`defstruct` のフィールドを `setf` で自分自身に向けること**だけである（`Sexpr` の cons セルは
+`set-car`/`set-cdr` を撤去済みで作成後に書き換えられないので、リテラルのリストは循環しない）。
+逆に言えば、この経路がある以上は再現可能な実害だった。
+
+### 設計
+
+- **prelude のグローバル3つを追加**（`*print-circle*` `bool`、`*print-level*`/`*print-length*`
+  `i64`）。既存の `*print-pretty*` 等と同じく `Interp::print_limits` が印字のたびに読む。
+  CL の「無制限 = `nil`」は typelisp に `nil` が無いので **0 以下 = 無制限**（`*print-right-margin*`
+  と同じ既存の慣習）。既定は3つとも「制限なし」で、CL の初期値とも既存の出力とも一致する。
+- **`RenderCtx` に `Limits` を追加**。`enums`/`interp` と同じく印字経路全体を流れる。
+- **`*print-circle*` は2パス**。パス1（`scan_shared`）が値を走査して2回以上到達するノードを
+  記録し、パス2の描画時に最初の出現へ `#n=`、以降へ `#n#` を出す。パス1は**明示スタックの
+  反復**で書いた——再帰にすると、循環そのものと長いリストの両方で落ちるため。2回目に見た
+  ノードは印を付けて辿らないので循環でも必ず停止する。
+- **ラベルを振るのは「入れ子を持てるノード」だけ**（cons セル・`defstruct`/`defenum` の箱・
+  `:dyn` の箱）。float/bignum/ratio の箱も `Value::Boxed` だが中に値を持たないので、共有しても
+  ラベルは付けない（`#1=` が出ても情報が無くノイズになる）。ハッシュテーブルは
+  `#<hashtable count=N>` で中身を辿らないので同様に対象外。
+
+### プリティプリンタとの合流が本題だった
+
+素直に `render_value` だけへ実装すると穴が空く。`~a`/`~s`/`~w` は `*print-pretty*` が真だと
+**リストを `pprint::render` 側の走査に渡す**（レイアウトのため）ので、そちらにも同じ打ち切りと
+ラベル付けが要る。しかも `*print-circle*` のラベル番号は**1つの印字対象で通し**でなければ
+ならないので、2つの走査が別々に状態を持つわけにいかない。
+
+そこで `Renderer`（ラベル表＋採番カウンタ）を `format` 側に置き、`pprint::render` は入口で
+1つ作って内部の `render_at` へ `&mut Renderer` と `depth` を引き回す形にした。両者の合流点は
+`Renderer::pre`——ノードを見た瞬間に「`#n#` で終わり」「`#` で終わり」「`#n=` を前置して続行」の
+3択を返す。`pprint` 側は非リスト値を `Renderer::render` へ委譲するので、そこで `pre` が
+二重に走らないよう、リストの場合だけ自分で `pre` を呼ぶ。
+
+`*print-length*` で切った `...` は、**要素と同じ条件改行の上に置く**（`push_ellipsis`）。
+そうしないと折り返し時に `...` だけが行から溢れる。
+
+### 未対応（意図的）
+
+- **REPL のトップレベル値表示**（`src/main.rs` の `format_value`/`format_sexpr`）はこの3変数を
+  見ない。REPL の表示器は `print-object` も `*print-pretty*` も見ない独立の実装で、そちらに
+  合わせた。したがって循環値を REPL で**そのまま評価**するとやはり落ちる（`println` で印字する
+  ぶんには `*print-circle*` が効く）。
+- `Sexpr` のリスト自体が循環する経路は現状存在しないため、`pprint` 側の `list_items`（リストを
+  `Vec` へ平坦化する）には循環対策を入れていない。`set-car`/`set-cdr` 相当を将来入れるなら
+  ここも要対応。
+
+### テスト
+
+`tests/print_limits_test.rs`（23件）。深さ・長さの打ち切り、struct/enum フィールドへの適用、
+0 以下が無制限であること、共有と循環のラベル付け、引数ごとにラベルが 1 から振り直されること、
+`~s` 経路、`*print-pretty*` 経路、`println`/`pprint` 経路。循環を作るテストは
+`(defenum link (no-link) (to node))` + `(defstruct node (val i64) (next link))` を使う
+（`Option<node>` でも作れる。次の節で解消した「組み込み `option` の変種名が
+`<unknown-variant>` と表示される」問題を発見したのはこのテストを書いていたときだが、
+テスト自体をユーザ定義 `defenum` にしておけばその問題を踏まずに書けたので、
+そのまま残してある）。
+
+## 組み込み sum 型（`Option`/`Result`/エラー型）の変種名解決（2026-07-29）
+
+上の節のテストを書いている最中に見つけたバグ。`(println "~a" (option::some 1))` が
+`(some 1)` ではなく `(<unknown-variant> 1)` と表示される。
+
+### 原因
+
+印字器（`crate::eval::format::render_value` の boxed-enum アーム）が変種名を引く
+`enums: &HashMap<Path, EnumDef>` は、`Interp::exec` が `TopLevel::Defenum` を実行した
+ときにしか埋まらない（`Interp` のスコープツリー、`scope::TypeEntry::Enum`）。
+`Option`/`Result`/`ParseIntError` 等4種の組み込みエラー型は**チェッカ側の
+`Registry::with_builtins()`（src/check/registry.rs）で定義されるだけで exec されない**ため、
+このテーブルに一度も載らない。
+
+### 却下した最初の修正——参照時フォールバック
+
+最初は「印字時に `enums` で引けなければ registry 側の定義を直接引き直す」
+`registry::builtin_variant_name(path, index)` を実装した。しかしユーザーから
+「フォールバックを使いたくなるのは大抵バグ。参照時にごまかすのではなく、定義を1箇所に
+まとめ、登録も1箇所の関数からしかできないようにすべき」という指摘を受け、設計をやり直した。
+
+### 採用した修正——定義源1箇所・登録関数1箇所
+
+- **定義源**: `registry.rs` に `builtin_sum_defs() -> Vec<AdtDef>`（`option_def`/`result_def`/
+  `builtin_error_defs` をまとめるだけ）を新設。`Sexpr` は含めない——`Sexpr` の値は
+  `BoxedObj::Enum` にならず専用の `Value` バリアントで表現されるため、印字経路に乗ることが
+  そもそもない（`Interp::construct_sexpr` が `alloc_enum` を経由しないことをコード読解で確認）。
+  `Registry::with_builtins()` はこの1関数から `add_type` するだけになった
+  （旧: `option_def()`/`result_def()`/`builtin_error_defs()` を個別に呼んでいた）。
+- **登録関数**: `scope::ModuleScope::register_enum(&mut self, name, def)` を新設し、
+  「`TypeEntry::Enum` を挿入するのはこの関数のみ」にした。`TopLevel::Defenum` の exec
+  （旧: 3行のインライン `insert`）と、下記のシードの**両方**がここを通る。
+- **シード**: `Interp::new()` で、既存の `vector` 手動シード（`AdtKind::Struct` だが
+  `Defstruct` を exec しないので手で入れている、という既存の前例）の直後に、
+  `registry::builtin_sum_defs()` を回して `register_enum` を呼ぶループを追加。
+  組み込み4型+`Option`/`Result`が `Interp::new()` の時点でスコープツリーに載るので、
+  印字器の `enums` lookup は `defenum` と組み込み型を区別せず同じ1回の lookup で済む。
+- **名前ベースの特別扱いを削除**: シード前は `is_enum_path`/`enum_fields_representable`
+  （どちらも interp.rs）が `option_path()`/`result_path()`/`is_builtin_error_type` という
+  名前直書きの分岐を持っていた——これは「定義がスコープツリーに無いので名前で回避する」
+  という同じ種類のごまかしだったので、シード後は冗長になった分をまとめて削除し、
+  `find_type` によるツリー参照1本にした。`option_path`/`result_path` 関数自体も削除
+  （呼び出し元が無くなったため）。
+
+### 確認したこと
+
+- ルート名前空間での `(defenum option ...)` のような組み込み名の再定義は、`RedefPolicy` に
+  関係なくチェッカが常にエラーにする（`checker.rs` の `check_redef_outcome` が
+  `is_builtin` なら無条件で拒否）ので、シードが後から上書きされる経路は無い。
+- `compile`（LLVM JIT/AOT）側の `ast_bridge::is_enum_ty` は元々 `Option`/`Result`/エラー型を
+  名前で先に判定してから `enums.contains` にフォールバックする作りだったので、シードで
+  `enums` に6件増えても分類結果は変わらない（二重に守られていたのを一重にしただけ）。
+- prelude 無しで `Interp::new()` を使う既存の単体テスト群への影響は
+  「スコープツリーに6エントリ増える」だけで、挙動を観測しているテストは無い
+  （`function_names()` は `fns` のみを走査するため無関係）。
+
+`tests/format_test.rs` に `built_in_enum_values_print_their_variant_names` 等3件を追加。

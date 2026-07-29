@@ -335,9 +335,7 @@ impl Registry {
     /// operators.
     pub fn with_builtins() -> Registry {
         let mut root = Namespace::default();
-        root.add_type(option_def());
-        root.add_type(result_def());
-        for def in builtin_error_defs() {
+        for def in builtin_sum_defs() {
             root.add_type(def);
         }
         // `Sexpr` is the one type whose data constructors (`nil`/`int`/`str`/
@@ -629,6 +627,23 @@ fn result_def() -> AdtDef {
         kind: AdtKind::Sum,
         field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new(),
     }
+}
+
+/// THE built-in sum types whose values exist at runtime as `BoxedObj::Enum`:
+/// `Option`, `Result`, and the four concrete error types. This is the single
+/// source both [`Registry::with_builtins`] (the checker side) and
+/// `Interp::new` (which seeds its own runtime scope tree so a value's variant
+/// name is available to the printer — see that function's doc comment) read;
+/// neither defines its own copy.
+///
+/// `Sexpr` is deliberately absent: its values are never `BoxedObj::Enum` —
+/// they use the dedicated `Value` variants (`Value::Cons`, `Value::Symbol`,
+/// ...) instead (`Interp::construct_sexpr`), so it needs no entry here for
+/// the printer or anything else that walks this list.
+pub(crate) fn builtin_sum_defs() -> Vec<AdtDef> {
+    let mut defs = vec![option_def(), result_def()];
+    defs.extend(builtin_error_defs());
+    defs
 }
 
 /// The four concrete built-in error types, by (case-folded) type name — the

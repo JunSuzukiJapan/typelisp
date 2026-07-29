@@ -269,6 +269,34 @@ fn format_result_is_a_composable_string() {
 }
 
 #[test]
+fn built_in_enum_values_print_their_variant_names() {
+    // `Option`/`Result`/the error types are defined in the checker's registry
+    // rather than by a `defenum` the interpreter exec'd, so their names used
+    // to never reach the interpreter's own enum table and printed as
+    // `(<unknown-variant> 1)`. `Interp::new` now seeds that table from the
+    // same `registry::builtin_sum_defs` the checker registers from, so the
+    // renderer's lookup finds them without a second table to fall back to.
+    assert_eq!(fmt(r#"(format false "~a" (option::some 1))"#), "(some 1)");
+    assert_eq!(fmt(r#"(defun no-int () Option<i32> (option::none)) (format false "~a" (no-int))"#), "none");
+    assert_eq!(
+        fmt(r#"(defun okv () Result<i32,ParseIntError> (result::ok 7)) (format false "~a" (okv))"#),
+        "(ok 7)"
+    );
+}
+
+#[test]
+fn a_built_in_error_value_prints_its_type_name() {
+    // The message text is the builtin's own wording; only the shape matters.
+    let s = fmt(r#"(format false "~a" (parse-int "zz"))"#);
+    assert!(s.starts_with("(err (parseinterror "), "got {s}");
+}
+
+#[test]
+fn variant_names_resolve_inside_a_nested_structure() {
+    assert_eq!(fmt(r#"(format false "~a" (list (option::some 1) 2))"#), "((some 1) 2)");
+}
+
+#[test]
 fn a_bad_arg_type_is_a_static_type_error() {
     // an Option has no Sexpr encoding, so it can't be a format argument
     let src = r#"(defun f () string (format false "~a" (some 1)))"#;

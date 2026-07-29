@@ -1029,6 +1029,33 @@ pub const SOURCE: &str = r#"
 (pub defvar (*print-pretty* bool) false)
 (pub defvar (*print-right-margin* i64) 80)
 (pub defvar (*print-miser-width* i64) 0)
+
+;; The "what to print" controls (CLHS 22.1.1), read by `Interp::print_limits`
+;; on every printing operation just like the three above.
+;;
+;; `*print-level*`/`*print-length*` bound how much of a nested structure is
+;; shown: an object at `*print-level*` or deeper prints as `#`, and only the
+;; first `*print-length*` elements of a list (or fields of a `defstruct`/
+;; `defenum` value) print, the rest as `...`. CL spells "no limit" `nil`;
+;; here 0 or less means no limit, the same convention `*print-right-margin*`
+;; uses. Both default to unlimited, as CL's do.
+;;
+;; `*print-circle*` makes the printer walk the value first and label whatever
+;; it reaches twice: the first occurrence prints as `#n=<object>` and every
+;; later one as `#n#`. **This is what makes a circular structure printable at
+;; all** — with it false (CL's default, kept here so existing output is
+;; unchanged) printing a value that points back at itself recurses until the
+;; process dies. A structure can only become circular through `setf` of a
+;; field, e.g.
+;;
+;;   (defstruct node (val i64) (next Option<node>))
+;;   (let ((a (node::new 1 (option::none))))
+;;     (setf a::next (option::some a))
+;;     (setf *print-circle* true)
+;;     (println "~a" a))            ; => #1=#<node 1 (some #1#)>
+(pub defvar (*print-circle* bool) false)
+(pub defvar (*print-level* i64) 0)
+(pub defvar (*print-length* i64) 0)
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,

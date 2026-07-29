@@ -68,12 +68,39 @@ pub(crate) fn build(
 /// With `interp: None` no dispatch is attempted and every value renders the
 /// built-in way.
 ///
-/// Copyable (it is two references) so it can be threaded alongside the `&mut
-/// Heap` the dispatch needs without fighting the borrow checker.
+/// `limits` is the `*print-circle*`/`*print-level*`/`*print-length*` snapshot
+/// this printing operation runs under (see [`Limits`]).
+///
+/// Copyable (two references and three scalars) so it can be threaded alongside
+/// the `&mut Heap` the dispatch needs without fighting the borrow checker.
 #[derive(Clone, Copy)]
 pub(crate) struct RenderCtx<'a> {
     pub(crate) enums: &'a HashMap<Path, EnumDef>,
     pub(crate) interp: Option<&'a super::interp::Interp>,
+    pub(crate) limits: Limits,
+}
+
+/// The three CLHS 22.1.1 printer control variables that bound *what* a value
+/// renders as, as opposed to how it is laid out (that is [`Opts`]):
+/// `*print-circle*`, `*print-level*`, `*print-length*`.
+///
+/// CL spells "no limit" as `nil`; typelisp has no `nil`, so the prelude's
+/// globals are `i64`s where 0 or less means unlimited — the same convention
+/// `*print-right-margin*`/`*print-miser-width*` already use. [`Default`] is
+/// therefore "every limit off", which is both CL's initial state for
+/// `*print-level*`/`*print-length*` and what a bare `Interp` (no prelude
+/// loaded, as in some unit tests) must fall back to.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Limits {
+    /// `*print-circle*`: label shared and circular substructure with `#n=` /
+    /// `#n#` instead of following it forever.
+    pub(crate) circle: bool,
+    /// `*print-level*`: nested objects at this depth or deeper print as `#`.
+    /// The object handed to the printer is at depth 0.
+    pub(crate) level: Option<usize>,
+    /// `*print-length*`: at most this many elements/fields per list, struct or
+    /// enum; the rest collapse to `...`.
+    pub(crate) length: Option<usize>,
 }
 
 /// Turns a finished buffer into text: a buffer with no pretty-printer op in it
@@ -1545,6 +1572,12 @@ fn roman(n: i64, old: bool) -> Result<String, String> {
 ///
 /// `Err` is the user printer's own failure (a `panic` in its body, say),
 /// surfaced rather than swallowed; every built-in path is infallible.
+///
+/// `ctx.limits` bounds the walk: `*print-level*` cuts nesting off with `#`,
+/// `*print-length*` cuts element counts off with `...`, and `*print-circle*`
+/// labels shared/circular substructure (`#n=` / `#n#`) so a cycle terminates.
+/// The label numbering is per call — CL numbers per printed object, and each
+/// `~a`/`~s` argument is its own object.
 pub(crate) fn render_value(
     heap: &mut Heap,
     ctx: RenderCtx<'_>,
@@ -1552,115 +1585,365 @@ pub(crate) fn render_value(
     standard: bool,
     out: &mut String,
 ) -> Result<(), String> {
-    if let Some(interp) = ctx.interp {
-        if let Some(text) = interp.print_object(heap, v, standard)? {
-            out.push_str(&text);
-            return Ok(());
-        }
-    }
-    let enums = ctx.enums;
+    Renderer::new(heap, ctx, v).render(heap, ctx, v, standard, 0, out)
+}
+
+/// Per-node state for the `*print-circle*` passes: [`scan_shared`] records
+/// `Once` on first sight and `Repeated` on the second, then `render_value`
+/// drops the `Once`s. `Labeled` is assigned by [`Renderer::render`] when a
+/// repeated node is first *printed*, so `#n=` numbers appear in reading order.
+#[derive(Clone, Copy)]
+enum ShareState {
+    Once,
+    Repeated,
+    Labeled(u32),
+}
+
+/// Identity of a node that can contain other values, for the `*print-circle*`
+/// tables. Cons cells compare by cell address, boxed objects by slot id.
+///
+/// Floats/bignums/ratios are `Value::Boxed` too but hold no nested value, so
+/// they are deliberately *not* keys: two references to one float box are not
+/// interesting sharing, and labelling them `#1=` would be noise. Hash tables
+/// are excluded for the same practical reason — they render as
+/// `#<hashtable count=N>` without recursing, so they can neither cycle nor
+/// usefully be labelled.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum NodeKey {
+    Cons(usize),
+    Boxed(u32),
+}
+
+fn container_key(heap: &Heap, v: Value) -> Option<NodeKey> {
     match v {
-        Value::Empty => out.push_str("()"),
-        Value::Int(n) => out.push_str(&n.to_string()),
-        Value::Bool(b) => out.push_str(&b.to_string()),
-        Value::Char(c) => {
-            if standard {
-                out.push_str("#\\");
-            }
-            out.push(c);
+        Value::Cons(c) => Some(NodeKey::Cons(c.addr())),
+        Value::Boxed(id) if heap.is_struct(id) || heap.is_enum(id) || heap.is_dyn(id) => {
+            Some(NodeKey::Boxed(id.as_u32()))
         }
-        Value::Str(id) => {
-            if standard {
-                out.push_str(&format!("{:?}", heap.string(id)));
-            } else {
-                out.push_str(heap.string(id));
-            }
-        }
-        Value::Symbol(id) => out.push_str(heap.symbol_name(id)),
-        Value::Path(id) => {
-            let segs: Vec<&str> = heap.path_segments(id).iter().map(|s| heap.symbol_name(*s)).collect();
-            out.push_str(&segs.join("::"));
-        }
-        Value::Boxed(id) if heap.is_bignum(id) => out.push_str(&heap.bignum_value(id).to_string()),
-        Value::Boxed(id) if heap.is_ratio(id) => {
-            let r = heap.ratio_value(id);
-            out.push_str(&format!("{}/{}", r.numer(), r.denom()));
+        _ => None,
+    }
+}
+
+/// Appends the values `v` directly contains to `into` (nothing for a leaf).
+fn children_of(heap: &Heap, v: Value, into: &mut Vec<Value>) {
+    match v {
+        Value::Cons(_) => {
+            into.push(heap.car(v).expect("cons car"));
+            into.push(heap.cdr(v).expect("cons cdr"));
         }
         Value::Boxed(id) if heap.is_struct(id) => {
-            out.push_str(&format!("#<{}", heap.struct_type_name(id)));
-            for i in 0..heap.struct_field_count(id) {
-                out.push(' ');
-                // Read the field out before the recursive call: `heap` is
-                // `&mut` here (the `print-object` dispatch needs it), so the
-                // read cannot stay borrowed across it.
-                let f = heap.struct_field(id, i);
-                render_value(heap, ctx, f, standard, out)?;
-            }
-            out.push('>');
+            into.extend((0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)));
         }
         Value::Boxed(id) if heap.is_enum(id) => {
-            let type_path =
-                Path::from_segments(heap.enum_type_name(id).split("::").map(|s| s.to_string()).collect());
-            let variant = heap.enum_variant(id);
-            let name = enums
-                .get(&type_path)
-                .and_then(|d| d.variants.get(variant))
-                .map(|v| v.name.clone())
-                .unwrap_or_else(|| "<unknown-variant>".to_string());
-            if heap.enum_field_count(id) == 0 {
-                out.push_str(&name);
-            } else {
-                out.push('(');
-                out.push_str(&name);
-                for i in 0..heap.enum_field_count(id) {
+            into.extend((0..heap.enum_field_count(id)).map(|i| heap.enum_field(id, i)));
+        }
+        Value::Boxed(id) if heap.is_dyn(id) => into.push(heap.dyn_value(id)),
+        _ => {}
+    }
+}
+
+/// Pass 1 of `*print-circle*`: mark every container node as seen once or
+/// repeated. Iterative (an explicit work stack, not recursion) because the
+/// structure being scanned may be a very long list *or* already circular —
+/// a node seen a second time is marked and not descended into again, which is
+/// what makes the walk terminate on a cycle.
+fn scan_shared(heap: &Heap, root: Value, seen: &mut HashMap<NodeKey, ShareState>) {
+    let mut stack = vec![root];
+    let mut kids = Vec::new();
+    while let Some(v) = stack.pop() {
+        let Some(key) = container_key(heap, v) else { continue };
+        match seen.get_mut(&key) {
+            Some(state) => {
+                *state = ShareState::Repeated;
+                continue;
+            }
+            None => {
+                seen.insert(key, ShareState::Once);
+            }
+        }
+        kids.clear();
+        children_of(heap, v, &mut kids);
+        stack.extend(kids.iter().copied());
+    }
+}
+
+/// What [`Renderer::pre`] decided about a node, before any of it is printed.
+pub(crate) enum Pre {
+    /// Print this text and nothing else for the node: a `#n#` back-reference
+    /// or the `#` of a `*print-level*` cut-off.
+    Stop(String),
+    /// Print the node normally, prefixed by this text (a `#n=` label, or
+    /// empty).
+    Go(String),
+}
+
+/// The `*print-circle*` label table for one printing operation, empty (and
+/// therefore free) when `*print-circle*` is off.
+///
+/// Shared by both walkers over a value: this module's [`Renderer::render`] and
+/// [`crate::eval::pprint::render`], which lays lists out itself and calls back
+/// here for everything else. One [`Renderer`] must span the whole operation,
+/// or the two would hand out conflicting `#n=` numbers for the same node.
+pub(crate) struct Renderer {
+    shared: HashMap<NodeKey, ShareState>,
+    next_label: u32,
+}
+
+impl Renderer {
+    /// Scans `root` for shared substructure (only when `*print-circle*` is on)
+    /// and returns the renderer that will label it.
+    pub(crate) fn new(heap: &Heap, ctx: RenderCtx<'_>, root: Value) -> Renderer {
+        let mut shared = HashMap::new();
+        if ctx.limits.circle {
+            // Pass 1: find the nodes reached more than once. Only those get a
+            // label, so an acyclic value with no sharing prints exactly as it
+            // does with `*print-circle*` off.
+            scan_shared(heap, root, &mut shared);
+            shared.retain(|_, state| matches!(state, ShareState::Repeated));
+        }
+        Renderer { shared, next_label: 1 }
+    }
+
+    /// Decides what happens to `v` at nesting `depth`: a back-reference, a
+    /// level cut-off, or an ordinary rendering (possibly label-prefixed).
+    pub(crate) fn pre(&mut self, heap: &Heap, ctx: RenderCtx<'_>, v: Value, depth: usize) -> Pre {
+        let mut prefix = String::new();
+        if ctx.limits.circle {
+            if let Some(key) = container_key(heap, v) {
+                match self.shared.get(&key).copied() {
+                    Some(ShareState::Labeled(n)) => return Pre::Stop(format!("#{}#", n)),
+                    // Repeated but not yet printed: this occurrence is the
+                    // definition, so it carries the `#n=` label and the rest
+                    // of the object still prints normally below.
+                    Some(_) => {
+                        let n = self.next_label;
+                        self.next_label += 1;
+                        self.shared.insert(key, ShareState::Labeled(n));
+                        prefix = format!("#{}=", n);
+                    }
+                    None => {}
+                }
+            }
+        }
+        // `*print-level*` counts only objects with structure; an atom prints
+        // at any depth (CL prints `#` for "a nested object too deep", never
+        // for a number or a symbol). A `:dyn` box is transparent — it is a
+        // dispatch mechanism, not a level of the datum — so it is not a
+        // container for this purpose either.
+        let composite = matches!(v, Value::Cons(_))
+            || matches!(v, Value::Boxed(id) if heap.is_struct(id) || heap.is_enum(id));
+        match ctx.limits.level {
+            // The label is dropped along with the object it would have named:
+            // `#` says "something was here", and nothing can refer back to a
+            // node that never printed.
+            Some(limit) if composite && depth >= limit => Pre::Stop("#".to_string()),
+            _ => Pre::Go(prefix),
+        }
+    }
+
+    /// [`Self::pre`] for the callers that write into a `String`: returns true
+    /// when the node is finished (its `#n#`/`#` already written).
+    fn prologue(
+        &mut self,
+        heap: &Heap,
+        ctx: RenderCtx<'_>,
+        v: Value,
+        depth: usize,
+        out: &mut String,
+    ) -> bool {
+        match self.pre(heap, ctx, v, depth) {
+            Pre::Stop(text) => {
+                out.push_str(&text);
+                true
+            }
+            Pre::Go(prefix) => {
+                out.push_str(&prefix);
+                false
+            }
+        }
+    }
+
+    /// `*print-length*`: whether the element/field at index `printed` is past
+    /// the limit (the caller writes the `...`, since its separator differs).
+    pub(crate) fn length_reached(ctx: RenderCtx<'_>, printed: usize) -> bool {
+        matches!(ctx.limits.length, Some(limit) if printed >= limit)
+    }
+
+    /// Renders `v` at nesting `depth` the flat (non-pretty) way.
+    pub(crate) fn render(
+        &mut self,
+        heap: &mut Heap,
+        ctx: RenderCtx<'_>,
+        v: Value,
+        standard: bool,
+        depth: usize,
+        out: &mut String,
+    ) -> Result<(), String> {
+        if self.prologue(heap, ctx, v, depth, out) {
+            return Ok(());
+        }
+        if let Some(interp) = ctx.interp {
+            if let Some(text) = interp.print_object(heap, v, standard)? {
+                out.push_str(&text);
+                return Ok(());
+            }
+        }
+        self.render_builtin(heap, ctx, v, standard, depth, out)
+    }
+
+    fn render_builtin(
+        &mut self,
+        heap: &mut Heap,
+        ctx: RenderCtx<'_>,
+        v: Value,
+        standard: bool,
+        depth: usize,
+        out: &mut String,
+    ) -> Result<(), String> {
+        let enums = ctx.enums;
+        match v {
+            Value::Empty => out.push_str("()"),
+            Value::Int(n) => out.push_str(&n.to_string()),
+            Value::Bool(b) => out.push_str(&b.to_string()),
+            Value::Char(c) => {
+                if standard {
+                    out.push_str("#\\");
+                }
+                out.push(c);
+            }
+            Value::Str(id) => {
+                if standard {
+                    out.push_str(&format!("{:?}", heap.string(id)));
+                } else {
+                    out.push_str(heap.string(id));
+                }
+            }
+            Value::Symbol(id) => out.push_str(heap.symbol_name(id)),
+            Value::Path(id) => {
+                let segs: Vec<&str> = heap.path_segments(id).iter().map(|s| heap.symbol_name(*s)).collect();
+                out.push_str(&segs.join("::"));
+            }
+            Value::Boxed(id) if heap.is_bignum(id) => out.push_str(&heap.bignum_value(id).to_string()),
+            Value::Boxed(id) if heap.is_ratio(id) => {
+                let r = heap.ratio_value(id);
+                out.push_str(&format!("{}/{}", r.numer(), r.denom()));
+            }
+            Value::Boxed(id) if heap.is_struct(id) => {
+                out.push_str(&format!("#<{}", heap.struct_type_name(id)));
+                for i in 0..heap.struct_field_count(id) {
+                    if Self::length_reached(ctx, i) {
+                        out.push_str(" ...");
+                        break;
+                    }
                     out.push(' ');
-                    let f = heap.enum_field(id, i);
-                    render_value(heap, ctx, f, standard, out)?;
+                    // Read the field out before the recursive call: `heap` is
+                    // `&mut` here (the `print-object` dispatch needs it), so the
+                    // read cannot stay borrowed across it.
+                    let f = heap.struct_field(id, i);
+                    self.render(heap, ctx, f, standard, depth + 1, out)?;
+                }
+                out.push('>');
+            }
+            Value::Boxed(id) if heap.is_enum(id) => {
+                let type_path =
+                    Path::from_segments(heap.enum_type_name(id).split("::").map(|s| s.to_string()).collect());
+                let variant = heap.enum_variant(id);
+                // `enums` holds every `TypeEntry::Enum` in the interpreter's
+                // scope tree — a user `defenum`'s own exec, *and* the built-in
+                // sum types (`Option`/`Result`/the error types), which
+                // `Interp::new` seeds from `registry::builtin_sum_defs` up
+                // front (see that function's doc comment) precisely so this
+                // lookup never needs a second table to fall back to. Coming
+                // up empty here means the lookup itself is broken (a stale
+                // `Path`, an enum this table was never told about), not that
+                // the name lives somewhere else.
+                let name = enums
+                    .get(&type_path)
+                    .and_then(|d| d.variants.get(variant))
+                    .map(|v| v.name.clone())
+                    .unwrap_or_else(|| "<unknown-variant>".to_string());
+                if heap.enum_field_count(id) == 0 {
+                    out.push_str(&name);
+                } else {
+                    out.push('(');
+                    out.push_str(&name);
+                    for i in 0..heap.enum_field_count(id) {
+                        if Self::length_reached(ctx, i) {
+                            out.push_str(" ...");
+                            break;
+                        }
+                        out.push(' ');
+                        let f = heap.enum_field(id, i);
+                        self.render(heap, ctx, f, standard, depth + 1, out)?;
+                    }
+                    out.push(')');
+                }
+            }
+            Value::Boxed(id) if heap.is_hashtable(id) => {
+                out.push_str(&format!("#<hashtable count={}>", heap.hashtable_count(id)))
+            }
+            Value::Boxed(id) if heap.is_scope(id) => {
+                out.push_str(&format!("#<scope depth={}>", heap.scope_frame_count(id)))
+            }
+            Value::Boxed(id) if heap.is_compiled_closure(id) => out.push_str("#<closure>"),
+            // A trait object prints as the value it wraps: the box is a dispatch
+            // mechanism, not part of the datum. (Must precede the float
+            // fall-through, which reads any other `Boxed` as an `f64` — see
+            // `float_of`'s matching negative guard.) Not a level of its own
+            // either, hence `depth` rather than `depth + 1`.
+            Value::Boxed(id) if heap.is_dyn(id) => {
+                let inner = heap.dyn_value(id);
+                self.render(heap, ctx, inner, standard, depth, out)?;
+            }
+            Value::Boxed(id) => out.push_str(&trim_float(heap.float_value(id))),
+            Value::Cons(_) => {
+                out.push('(');
+                let mut cur = v;
+                let mut printed = 0usize;
+                loop {
+                    match cur {
+                        Value::Cons(_) => {
+                            // A later cell that is itself shared has to be
+                            // printed as a *tail* (`. #1=(...)` / `. #1#`)
+                            // rather than spliced into this list — that is
+                            // what stops a circular list, whose last cdr
+                            // points back at a cell already printed. The first
+                            // cell is skipped: `prologue` labelled it, and
+                            // re-entering here would loop.
+                            if printed > 0 && ctx.limits.circle && self.is_shared(heap, cur) {
+                                out.push_str(" . ");
+                                self.render(heap, ctx, cur, standard, depth, out)?;
+                                break;
+                            }
+                            if Self::length_reached(ctx, printed) {
+                                out.push_str(if printed == 0 { "..." } else { " ..." });
+                                break;
+                            }
+                            if printed > 0 {
+                                out.push(' ');
+                            }
+                            let head = heap.car(cur).expect("cons car");
+                            self.render(heap, ctx, head, standard, depth + 1, out)?;
+                            printed += 1;
+                            cur = heap.cdr(cur).expect("cons cdr");
+                        }
+                        Value::Empty => break,
+                        other => {
+                            out.push_str(" . ");
+                            self.render(heap, ctx, other, standard, depth + 1, out)?;
+                            break;
+                        }
+                    }
                 }
                 out.push(')');
             }
         }
-        Value::Boxed(id) if heap.is_hashtable(id) => {
-            out.push_str(&format!("#<hashtable count={}>", heap.hashtable_count(id)))
-        }
-        Value::Boxed(id) if heap.is_scope(id) => {
-            out.push_str(&format!("#<scope depth={}>", heap.scope_frame_count(id)))
-        }
-        Value::Boxed(id) if heap.is_compiled_closure(id) => out.push_str("#<closure>"),
-        // A trait object prints as the value it wraps: the box is a dispatch
-        // mechanism, not part of the datum. (Must precede the float
-        // fall-through, which reads any other `Boxed` as an `f64` — see
-        // `float_of`'s matching negative guard.)
-        Value::Boxed(id) if heap.is_dyn(id) => {
-            let inner = heap.dyn_value(id);
-            render_value(heap, ctx, inner, standard, out)?;
-        }
-        Value::Boxed(id) => out.push_str(&trim_float(heap.float_value(id))),
-        Value::Cons(_) => {
-            out.push('(');
-            let mut cur = v;
-            let mut first = true;
-            loop {
-                match cur {
-                    Value::Cons(_) => {
-                        if !first {
-                            out.push(' ');
-                        }
-                        first = false;
-                        let head = heap.car(cur).expect("cons car");
-                        render_value(heap, ctx, head, standard, out)?;
-                        cur = heap.cdr(cur).expect("cons cdr");
-                    }
-                    Value::Empty => break,
-                    other => {
-                        out.push_str(" . ");
-                        render_value(heap, ctx, other, standard, out)?;
-                        break;
-                    }
-                }
-            }
-            out.push(')');
-        }
+        Ok(())
     }
-    Ok(())
+
+    /// Whether `v` is one of the nodes [`scan_shared`] found more than once
+    /// (labelled already or not).
+    fn is_shared(&self, heap: &Heap, v: Value) -> bool {
+        container_key(heap, v).is_some_and(|k| self.shared.contains_key(&k))
+    }
 }

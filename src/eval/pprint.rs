@@ -47,7 +47,7 @@ use std::collections::HashMap;
 
 use crate::mem::{Heap, Value};
 
-use super::format::RenderCtx;
+use super::format::{Pre, RenderCtx, Renderer};
 
 /// The kinds of conditional newline `pprint-newline` (and `~_`) can emit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -638,28 +638,70 @@ pub(crate) fn render(
     style: Style,
     out: &mut Out,
 ) -> Result<(), String> {
+    let mut st = Renderer::new(heap, ctx, v);
+    render_at(heap, ctx, &mut st, v, standard, style, 0, out)
+}
+
+/// [`render`] one level in: `depth` feeds `*print-level*` and `st` carries the
+/// `*print-circle*` labels, both of which must span the whole object rather
+/// than restart per sublist — hence one shared [`Renderer`] threaded through
+/// instead of a fresh one per call.
+fn render_at(
+    heap: &mut Heap,
+    ctx: RenderCtx<'_>,
+    st: &mut Renderer,
+    v: Value,
+    standard: bool,
+    style: Style,
+    depth: usize,
+    out: &mut Out,
+) -> Result<(), String> {
     // Anything that is not a list has no layout of its own — including a
     // struct/enum with a `print-object` method, whose own text is whatever
-    // that method returns (`render_value` performs the dispatch).
+    // that method returns (`Renderer::render` performs the dispatch, and
+    // applies the limits to whatever it walks into).
     if !matches!(v, Value::Cons(_)) {
         let mut s = String::new();
-        super::format::render_value(heap, ctx, v, standard, &mut s)?;
+        st.render(heap, ctx, v, standard, depth, &mut s)?;
         out.push_str(&s);
         return Ok(());
+    }
+    match st.pre(heap, ctx, v, depth) {
+        Pre::Stop(text) => {
+            out.push_str(&text);
+            return Ok(());
+        }
+        Pre::Go(prefix) => out.push_str(&prefix),
     }
     // `(quote x)` prints as `'x`, as CL's default dispatch table does.
     if let Some(inner) = quote_form(heap, v) {
         out.push('\'');
-        return render(heap, ctx, inner, standard, style, out);
+        return render_at(heap, ctx, st, inner, standard, style, depth + 1, out);
     }
-    let elems = list_items(heap, v);
+    // `*print-length*` cuts the element list here, once, so every layout below
+    // sees the already-shortened list plus a flag for the trailing `...`.
+    // (A cut list has no dotted tail left to print, as in CL.)
+    let (mut elems, mut tail) = list_items(heap, v);
+    let mut cut = false;
+    if let Some(limit) = ctx.limits.length {
+        // Only the *elements* count against the limit — a dotted tail that is
+        // still within it prints as usual (`(1 2 . 3)` under a limit of 2),
+        // matching what `Renderer::render`'s flat cons loop does. A tail past
+        // the cut disappears with the elements it followed.
+        if elems.len() > limit {
+            elems.truncate(limit);
+            tail = None;
+            cut = true;
+        }
+    }
+    let items = (elems, tail);
     match style {
-        Style::Tabular(colinc) => render_tabular(heap, ctx, &elems, standard, colinc, out),
-        Style::Linear => render_seq(heap, ctx, &elems, standard, style, NewlineKind::Linear, out),
-        Style::Fill => render_seq(heap, ctx, &elems, standard, style, NewlineKind::Fill, out),
-        Style::Default => match code_style(heap, &elems) {
-            Some(distinguished) => render_code(heap, ctx, &elems, standard, distinguished, out),
-            None => render_seq(heap, ctx, &elems, standard, style, NewlineKind::Fill, out),
+        Style::Tabular(colinc) => render_tabular(heap, ctx, st, &items, standard, colinc, depth, cut, out),
+        Style::Linear => render_seq(heap, ctx, st, &items, standard, style, NewlineKind::Linear, depth, cut, out),
+        Style::Fill => render_seq(heap, ctx, st, &items, standard, style, NewlineKind::Fill, depth, cut, out),
+        Style::Default => match code_style(heap, &items) {
+            Some(distinguished) => render_code(heap, ctx, st, &items, standard, distinguished, depth, cut, out),
+            None => render_seq(heap, ctx, st, &items, standard, style, NewlineKind::Fill, depth, cut, out),
         },
     }
 }
@@ -696,13 +738,17 @@ type Items = (Vec<Value>, Option<Value>);
 
 /// `pprint-linear`/`pprint-fill`: `(e1 e2 …)` with a conditional newline of
 /// `kind` between elements.
+#[allow(clippy::too_many_arguments)]
 fn render_seq(
     heap: &mut Heap,
     ctx: RenderCtx<'_>,
+    st: &mut Renderer,
     (elems, tail): &Items,
     standard: bool,
     style: Style,
     kind: NewlineKind,
+    depth: usize,
+    cut: bool,
     out: &mut Out,
 ) -> Result<(), String> {
     out.op(Op::BlockStart { prefix: "(".to_string(), per_line: false, suffix: ")".to_string() });
@@ -711,24 +757,42 @@ fn render_seq(
             out.push(' ');
             out.op(Op::Newline(kind));
         }
-        render(heap, ctx, *e, standard, style, out)?;
+        render_at(heap, ctx, st, *e, standard, style, depth + 1, out)?;
     }
     if let Some(t) = tail {
         out.push_str(" . ");
-        render(heap, ctx, *t, standard, style, out)?;
+        render_at(heap, ctx, st, *t, standard, style, depth + 1, out)?;
     }
+    push_ellipsis(cut, !elems.is_empty(), kind, out);
     out.op(Op::BlockEnd);
     Ok(())
 }
 
+/// The `...` that stands for the elements `*print-length*` cut, on the same
+/// conditional-newline footing as a real element so it wraps with them.
+fn push_ellipsis(cut: bool, after_elems: bool, kind: NewlineKind, out: &mut Out) {
+    if !cut {
+        return;
+    }
+    if after_elems {
+        out.push(' ');
+        out.op(Op::Newline(kind));
+    }
+    out.push_str("...");
+}
+
 /// `pprint-tabular`: elements laid out in columns `colinc` wide, wrapping when
 /// the next column would overflow.
+#[allow(clippy::too_many_arguments)]
 fn render_tabular(
     heap: &mut Heap,
     ctx: RenderCtx<'_>,
+    st: &mut Renderer,
     (elems, tail): &Items,
     standard: bool,
     colinc: i64,
+    depth: usize,
+    cut: bool,
     out: &mut Out,
 ) -> Result<(), String> {
     let colinc = if colinc <= 0 { 1 } else { colinc };
@@ -739,12 +803,13 @@ fn render_tabular(
             out.op(Op::Newline(NewlineKind::Fill));
             out.op(Op::Tab { kind: TabKind::SectionRelative, colnum: 0, colinc });
         }
-        render(heap, ctx, *e, standard, Style::Fill, out)?;
+        render_at(heap, ctx, st, *e, standard, Style::Fill, depth + 1, out)?;
     }
     if let Some(t) = tail {
         out.push_str(" . ");
-        render(heap, ctx, *t, standard, Style::Fill, out)?;
+        render_at(heap, ctx, st, *t, standard, Style::Fill, depth + 1, out)?;
     }
+    push_ellipsis(cut, !elems.is_empty(), NewlineKind::Fill, out);
     out.op(Op::BlockEnd);
     Ok(())
 }
@@ -772,12 +837,16 @@ fn code_style(heap: &Heap, (elems, tail): &Items) -> Option<usize> {
 
 /// A code-shaped form: `(head d1 … dn` on one line, then the remaining
 /// subforms one per line indented two columns past the head's own column.
+#[allow(clippy::too_many_arguments)]
 fn render_code(
     heap: &mut Heap,
     ctx: RenderCtx<'_>,
+    st: &mut Renderer,
     (elems, _): &Items,
     standard: bool,
     distinguished: usize,
+    depth: usize,
+    cut: bool,
     out: &mut Out,
 ) -> Result<(), String> {
     out.op(Op::BlockStart { prefix: "(".to_string(), per_line: false, suffix: ")".to_string() });
@@ -790,8 +859,9 @@ fn render_code(
             // after them is one subform per line whenever the form is broken.
             out.op(Op::Newline(if i <= distinguished { NewlineKind::Fill } else { NewlineKind::Linear }));
         }
-        render(heap, ctx, *e, standard, Style::Default, out)?;
+        render_at(heap, ctx, st, *e, standard, Style::Default, depth + 1, out)?;
     }
+    push_ellipsis(cut, !elems.is_empty(), NewlineKind::Linear, out);
     out.op(Op::BlockEnd);
     Ok(())
 }

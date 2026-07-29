@@ -31,7 +31,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
-use crate::check::registry::{is_builtin_error_type, EVAL_ERROR, PARSE_FLOAT_ERROR, PARSE_INT_ERROR, READ_ERROR};
+use crate::check::registry::{EVAL_ERROR, PARSE_FLOAT_ERROR, PARSE_INT_ERROR, READ_ERROR};
 use crate::{BoxId, CompileTarget, Expr, Heap, Loc, MacroExpander, MacroLambda, Path, Pattern, QuotedSexpr, Ref, SymId, TopLevel, Type, Typed, Value};
 
 use super::pprint;
@@ -390,6 +390,19 @@ impl Interp {
         // `Expr::Construct`, so there is no construct site to affect.
         let mut root = scope::ModuleScope::default();
         root.types.insert("vector".to_string(), scope::TypeEntry::Struct);
+        // `Option`/`Result`/the four concrete error types are `AdtKind::Sum`
+        // registrations in `Registry::with_builtins`
+        // (`registry::builtin_sum_defs`, the single source both sides read)
+        // but — like `vector` above — never execute a `TopLevel::Defenum`, so
+        // nothing would otherwise put their variant names in this tree. That
+        // used to mean a printed `Option` came out as `(<unknown-variant> 1)`
+        // (`Self::render_ctx`'s `enums` table had no entry for it); seeding
+        // through the same `register_enum` a real `defenum` uses closes that
+        // gap by construction rather than papering over it at the print site.
+        for def in crate::check::registry::builtin_sum_defs() {
+            let name = def.name;
+            root.register_enum(&name, EnumDef { params: def.params, variants: def.variants });
+        }
         Interp {
             root: RefCell::new(root),
             checker: None,
@@ -898,15 +911,18 @@ impl Interp {
 
     /// Whether `p` names an enum type — one whose runtime value is
     /// *potentially* a boxed `BoxedObj::Enum`: the built-in
-    /// `Option`/`Result`/the concrete error types, or a user `defenum` recorded in
-    /// [`Self::enum_defs`]. Whether a *given instantiation* actually is
-    /// heap-repr (as opposed to falling back to native `RtValue::Data`) is
-    /// [`Self::enum_fields_representable`]'s job, not this one — this just
-    /// identifies the type family. The interpreter-side twin of the
-    /// checker's `Registry`-driven `AdtKind::Sum && !variants.is_empty()`
+    /// `Option`/`Result`/the concrete error types, or a user `defenum` — all
+    /// alike recorded as `TypeEntry::Enum` in the scope tree (`Self::new`
+    /// seeds the built-ins from `registry::builtin_sum_defs`, a `defenum`'s
+    /// own exec adds the rest — see `Self::exec`'s `TopLevel::Defenum` arm),
+    /// so one lookup covers every case. Whether a *given instantiation*
+    /// actually is heap-repr (as opposed to falling back to native
+    /// `RtValue::Data`) is [`Self::enum_fields_representable`]'s job, not this
+    /// one — this just identifies the type family. The interpreter-side twin
+    /// of the checker's `Registry`-driven `AdtKind::Sum && !variants.is_empty()`
     /// test in `Checker::is_heap_repr_seen`.
     fn is_enum_path(&self, p: &Path) -> bool {
-        *p == option_path() || *p == result_path() || is_builtin_error_type(p) || matches!(self.root.borrow().find_type(p), Some(scope::TypeEntry::Enum(_)))
+        matches!(self.root.borrow().find_type(p), Some(scope::TypeEntry::Enum(_)))
     }
 
     /// Whether every field of every variant of enum type `name` —
@@ -914,25 +930,17 @@ impl Interp {
     /// that boxes trivially, or recursively heap-repr) — see
     /// `Checker::enum_fields_representable`'s doc comment for the full
     /// rationale (`Option<llvm-value>` and friends must classify `false`
-    /// here). `option`/`result`'s field types are read straight off `args`
-    /// (mirroring `data_variant_field_types`'s own dedicated arms, since
-    /// `Interp` holds no `Registry` to look them up in); a built-in error
-    /// type's one field is always `Str`, hence always representable; a user `defenum`
-    /// looks up [`Self::enum_defs`] and substitutes `args` for its params,
-    /// exactly as `Checker::enum_fields_representable` does with the
-    /// checker's own registry-backed copy.
+    /// here). Every enum — built-in or user `defenum` alike — is looked up in
+    /// the scope tree and its field types built by substituting `args` for
+    /// its params, exactly as `Checker::enum_fields_representable` does with
+    /// the checker's own registry-backed copy; a built-in error type's one
+    /// field is always `Str` (no params to substitute), so it always comes
+    /// out representable without a special case.
     fn enum_fields_representable(&self, name: &Path, args: &[Type], seen: &mut HashSet<Path>) -> bool {
-        if is_builtin_error_type(name) {
-            return true;
-        }
         if !seen.insert(name.clone()) {
             return true;
         }
-        let field_types: Vec<Type> = if *name == option_path() && args.len() == 1 {
-            vec![args[0].clone()]
-        } else if *name == result_path() && args.len() == 2 {
-            args.to_vec()
-        } else if let Some(scope::TypeEntry::Enum(def)) = self.root.borrow().find_type(name) {
+        let field_types: Vec<Type> = if let Some(scope::TypeEntry::Enum(def)) = self.root.borrow().find_type(name) {
             let subst: HashMap<String, Type> = def.params.iter().cloned().zip(args.iter().cloned()).collect();
             def.variants
                 .iter()
@@ -1150,15 +1158,17 @@ impl Interp {
                 Ok(None)
             }
             // A `defenum` sum type is a check-time registration, like
-            // `Option`/`Result`. Unlike `Defstruct` it is *not* recorded as a
+            // `Option`/`Result` (which reach this same table a different way —
+            // see `Self::new`). Unlike `Defstruct` it is *not* recorded as a
             // `TypeEntry::Struct` (an enum instance is an immutable
             // `RtValue::Data`, never a boxed struct) — but its variants'
             // field types *are* recorded, as `TypeEntry::Enum`: the
             // compiled-global boundary needs them to decode a box back into a
-            // `RtValue::Data` (see `scope::TypeEntry`'s doc comment). The same
+            // `RtValue::Data` (see `scope::TypeEntry`'s doc comment), and the
+            // printer needs the variant names (`Self::render_ctx`). The same
             // one-exception pattern `Defstruct` follows.
             TopLevel::Defenum { name, params, variants } => {
-                self.root.borrow_mut().get_or_create(name.parent()).types.insert(name.local().to_string(), scope::TypeEntry::Enum(EnumDef { params, variants }));
+                self.root.borrow_mut().register_enum(&name, EnumDef { params, variants });
                 Ok(None)
             }
             TopLevel::Defvar { name, ty, value, public, .. } => {
@@ -3320,7 +3330,7 @@ impl Interp {
                 };
                 Some((|| {
                     let (_, enums) = self.root.borrow().collect_struct_and_enum_types();
-                    let ctx = self.render_ctx(&enums);
+                    let ctx = self.render_ctx(heap, &enums);
                     let mut out = crate::eval::pprint::Out::new();
                     if form == "pprint" {
                         out.push('\n');
@@ -3651,9 +3661,43 @@ impl Interp {
 
     /// The [`RenderCtx`](crate::eval::format::RenderCtx) a printing operation
     /// runs under: the enum-variant name table plus this interpreter, so a
-    /// value's own `print-object` method can be dispatched to.
-    fn render_ctx<'a>(&'a self, enums: &'a HashMap<Path, EnumDef>) -> crate::eval::format::RenderCtx<'a> {
-        crate::eval::format::RenderCtx { enums, interp: Some(self) }
+    /// value's own `print-object` method can be dispatched to, plus the
+    /// `*print-circle*`/`*print-level*`/`*print-length*` snapshot
+    /// ([`Self::print_limits`]).
+    fn render_ctx<'a>(
+        &'a self,
+        heap: &Heap,
+        enums: &'a HashMap<Path, EnumDef>,
+    ) -> crate::eval::format::RenderCtx<'a> {
+        crate::eval::format::RenderCtx { enums, interp: Some(self), limits: self.print_limits(heap) }
+    }
+
+    /// Reads the three "what to print" globals — `*print-circle*`,
+    /// `*print-level*`, `*print-length*` (CLHS 22.1.1) — the same way
+    /// [`Self::pretty_opts`] reads the three "how to lay it out" ones: fresh
+    /// on every printing operation, since typelisp has no dynamic binding.
+    ///
+    /// CL writes "no limit" as `nil`; the prelude's globals are `i64`s where 0
+    /// or less means unlimited, matching `*print-right-margin*`/
+    /// `*print-miser-width*`. A missing global (no prelude — some unit tests
+    /// build a bare `Interp`) means every limit is off, which is also CL's
+    /// initial state for all three.
+    pub(crate) fn print_limits(&self, heap: &Heap) -> crate::eval::format::Limits {
+        let root = self.root.borrow();
+        let read_limit = |name: &str| -> Option<usize> {
+            match root.get_global(&crate::Path::root(name)).map(|s| s.get(heap)) {
+                Some(RtValue::Int(n)) if n > 0 => Some(n as usize),
+                _ => None,
+            }
+        };
+        crate::eval::format::Limits {
+            circle: matches!(
+                root.get_global(&crate::Path::root("*print-circle*")).map(|s| s.get(heap)),
+                Some(RtValue::Bool(true))
+            ),
+            level: read_limit("*print-level*"),
+            length: read_limit("*print-length*"),
+        }
     }
 
     /// Builds `control`'s output without committing it: the shared half of
@@ -3665,7 +3709,7 @@ impl Interp {
     fn build_format(&self, heap: &mut Heap, control: &str, args: Value) -> Result<pprint::Out, EvalError> {
         let (_, enums) = self.root.borrow().collect_struct_and_enum_types();
         let opts = self.pretty_opts(heap);
-        let ctx = self.render_ctx(&enums);
+        let ctx = self.render_ctx(heap, &enums);
         crate::eval::format::build(heap, ctx, control, args, &opts).map_err(EvalError::Panic)
     }
 
@@ -6402,17 +6446,6 @@ pub(super) fn rtvalue_to_sexpr(heap: &mut Heap, v: &RtValue) -> Option<Value> {
         RtValue::Unit => Some(Value::Empty),
         _ => rtvalue_to_struct_field(heap, v).ok(),
     }
-}
-
-/// `Option`/`Result`'s fully-qualified [`Path`]s — [`Interp::enum_fields_representable`]
-/// reads these two structurally (their variants' field types are always
-/// exactly the type's own generic arguments, no registry lookup needed);
-/// a user `defenum` instead looks up [`Interp::enum_defs`].
-fn option_path() -> Path {
-    Path::root("option")
-}
-fn result_path() -> Path {
-    Path::root("result")
 }
 
 /// Decodes a `mem::Value` read out of a `BoxedObj::Struct` field (or

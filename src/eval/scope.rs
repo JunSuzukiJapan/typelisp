@@ -121,6 +121,18 @@ impl ModuleScope {
         ns
     }
 
+    /// THE registration point for a `TypeEntry::Enum` in this tree — the only
+    /// place that inserts one, so an enum's variant names live in exactly one
+    /// table no matter where the definition came from. Both a user
+    /// `defenum`'s exec (`Interp::exec`'s `TopLevel::Defenum` arm) and
+    /// `Interp::new`'s seeding of the built-in sum types
+    /// (`crate::check::registry::builtin_sum_defs` — `Option`/`Result`/the
+    /// error types, which are registered with the checker but never `exec`'d)
+    /// call this rather than inserting into `types` themselves.
+    pub(crate) fn register_enum(&mut self, name: &Path, def: EnumDef) {
+        self.get_or_create(name.parent()).types.insert(name.local().to_string(), TypeEntry::Enum(def));
+    }
+
     /// Resolve a `Call`/`FnRef` reference's `written` name segments from its
     /// lexical `home` module — the runtime re-derivation of
     /// `Checker::resolve_fn`/`resolve_fn_path` (checker.rs:1061-1093).

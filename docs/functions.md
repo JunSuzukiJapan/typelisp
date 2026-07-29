@@ -560,6 +560,10 @@ CL では特殊変数（`let` で動的に束縛する）だが、typelisp に�
 既定が `false` なのは、既存プログラムの出力を一切変えないため（CL でも初期値は処理系定義）。
 `pprint` 系と `pprint-logical-block` は `*print-pretty*` に関わらず常に整形する（CL の `pprint` の定義通り）。
 
+上の3つが「どう並べるか」を決めるのに対し、**「どこまで印字するか」**を決める CLHS 22.1.1 の
+制御変数が別に3つある。こちらは整形の有無に関係なく、`print`/`println`/`format`/`pprint` の
+すべてに効く（§15.3）。
+
 #### 既製レイアウト（特殊形）
 
 `print` と同じく特殊形なので、引数はどんな型でもよい（各自の型のまま `Sexpr` へ包まれる）。
@@ -684,6 +688,64 @@ pretty printer とも合成される（§15.1）。`*print-pretty*` が真なら
   合わない。非採用の確定事項としては
   [dev/language-design.md](dev/language-design.md) §9、経緯は
   [dev/implementation-log.md](dev/implementation-log.md)（旧 TODO T5-b の節）。
+
+### 15.3 印字量の制御（`*print-level*` / `*print-length*` / `*print-circle*`）
+
+CLHS 22.1.1 の「値のどこまでを印字するか」を決める制御変数。§15.1 の3つと同じく prelude の
+代入可能なグローバルで、`print`/`println`/`format`/`pprint` のすべてに——`*print-pretty*` の
+真偽にかかわらず——効く。
+
+| 変数 | 型 | 既定 | 意味 |
+|---|---|---|---|
+| `*print-level*` | `i64` | `0` | この深さ以上に入れ子になったオブジェクトを `#` で置き換える。印字対象そのものが深さ 0。0 以下は無制限 |
+| `*print-length*` | `i64` | `0` | リストの要素（`defstruct`/`defenum` 値のフィールドも）をこの個数まで印字し、残りを `...` にする。0 以下は無制限 |
+| `*print-circle*` | `bool` | `false` | 真なら、印字前に値を走査して**2回以上現れるオブジェクトにラベルを振る**。最初の出現が `#n=…`、以降が `#n#` |
+
+CL は「無制限」を `nil` で表すが typelisp に `nil` は無いので、`*print-right-margin*` 等と同じく
+**0 以下を無制限**とする。既定はすべて「制限なし／ラベルなし」で、CL の初期値とも既存の出力とも
+一致する。
+
+```lisp
+(setf *print-level* 2)
+(println "~a" '(1 (2 (3 (4)))))   ; => (1 (2 #))
+(setf *print-level* 0)
+
+(setf *print-length* 4)
+(println "~a" '(1 2 3 4 5 6))     ; => (1 2 3 4 ...)
+(setf *print-length* 0)
+```
+
+#### `*print-circle*` と循環構造
+
+**循環した構造を印字できるのはこの変数を真にしたときだけ**である。偽（既定）のまま自分自身を
+指す値を印字すると、プリンタは循環を辿り続けてプロセスが落ちる——これは CL でも同じ挙動
+（CLHS は `*print-circle*` が偽のときの循環構造の印字を未定義としている）。
+
+循環は「`defstruct` のフィールドを `setf` で自分自身に向ける」経路でのみ作れる（`Sexpr` の
+cons セルは作成後に書き換えられないので、`'(1 2 3)` のようなリストが循環することはない）:
+
+```lisp
+(defenum link (no-link) (to node))
+(defstruct node (val i64) (next link))
+
+(let ((a (node::new 1 (link::no-link))))
+  (setf a::next (link::to a))       ; a が a 自身を指す
+  (setf *print-circle* true)
+  (println "~a" a))                 ; => #1=#<node 1 (to #1#)>
+```
+
+ラベルは**1回の印字対象ごとに 1 から振り直す**（CL と同じ）。循環していなくても、同じ
+オブジェクトが2回現れれば `#1=`/`#1#` が付く——「この2つは同一のオブジェクトだ」という情報を
+出力に残すための CL の仕様どおりの挙動:
+
+```lisp
+(setf *print-circle* true)
+(let ((x '(1 2)))
+  (println "~a" (list x x)))        ; => (#1=(1 2) #1#)
+```
+
+共有が1つも無い値では**ラベルは一切現れない**ので、この変数を真にしたまま普段のコードを動かしても
+出力は変わらない。
 
 ## 16. 解析・評価 (`parse-int` / `parse-float` / `read` / `eval`)
 
