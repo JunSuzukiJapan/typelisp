@@ -200,6 +200,78 @@ fn f64_truncate() {
     assert_close(eval_ok(src), -1.0);
 }
 
+// ---- 2-argument floor/ceiling/round/truncate (`*-div`, quotient+remainder as
+// a `cons-cell`, standing in for CL's multiple values — see `prelude.rs`'s
+// comment just above `floor-div`) -----------------------------------------------
+
+#[test]
+fn i64_floor_div() {
+    // CL: (floor 7 2) => 3, 1 ; (floor -7 2) => -4, 1
+    assert_eq!(eval_ok("(car (floor-div 7 2))"), RtValue::Int(3));
+    assert_eq!(eval_ok("(cdr (floor-div 7 2))"), RtValue::Int(1));
+    assert_eq!(eval_ok("(car (floor-div -7 2))"), RtValue::Int(-4));
+    assert_eq!(eval_ok("(cdr (floor-div -7 2))"), RtValue::Int(1));
+}
+
+#[test]
+fn i64_ceiling_div() {
+    // CL: (ceiling 7 2) => 4, -1 ; (ceiling -7 2) => -3, -1 ; exact division
+    // carries no remainder.
+    assert_eq!(eval_ok("(car (ceiling-div 7 2))"), RtValue::Int(4));
+    assert_eq!(eval_ok("(cdr (ceiling-div 7 2))"), RtValue::Int(-1));
+    assert_eq!(eval_ok("(car (ceiling-div -7 2))"), RtValue::Int(-3));
+    assert_eq!(eval_ok("(cdr (ceiling-div -7 2))"), RtValue::Int(-1));
+    assert_eq!(eval_ok("(car (ceiling-div 6 2))"), RtValue::Int(3));
+    assert_eq!(eval_ok("(cdr (ceiling-div 6 2))"), RtValue::Int(0));
+}
+
+#[test]
+fn i64_truncate_div() {
+    // CL: (truncate -7 2) => -3, -1 (remainder's sign follows the dividend,
+    // unlike `floor-div`'s).
+    assert_eq!(eval_ok("(car (truncate-div -7 2))"), RtValue::Int(-3));
+    assert_eq!(eval_ok("(cdr (truncate-div -7 2))"), RtValue::Int(-1));
+}
+
+#[test]
+fn i64_round_div_ties_to_even() {
+    // CL round-half-to-even: (round 7 2) => 4, -1 (3.5 -> 4, even);
+    // (round 5 2) => 2, 1 (2.5 -> 2, even); (round 3 2) => 2, -1 (1.5 -> 2,
+    // even); (round -5 2) => -2, -1 (-2.5 -> -2, even).
+    assert_eq!(eval_ok("(car (round-div 7 2))"), RtValue::Int(4));
+    assert_eq!(eval_ok("(cdr (round-div 7 2))"), RtValue::Int(-1));
+    assert_eq!(eval_ok("(car (round-div 5 2))"), RtValue::Int(2));
+    assert_eq!(eval_ok("(cdr (round-div 5 2))"), RtValue::Int(1));
+    assert_eq!(eval_ok("(car (round-div 3 2))"), RtValue::Int(2));
+    assert_eq!(eval_ok("(cdr (round-div 3 2))"), RtValue::Int(-1));
+    assert_eq!(eval_ok("(car (round-div -5 2))"), RtValue::Int(-2));
+    assert_eq!(eval_ok("(cdr (round-div -5 2))"), RtValue::Int(-1));
+}
+
+#[test]
+fn f64_floor_div() {
+    assert_close(eval_ok("(car (floor-div 5.5 2.0))"), 2.0);
+    assert_close(eval_ok("(cdr (floor-div 5.5 2.0))"), 1.5);
+}
+
+#[test]
+fn f64_ceiling_div() {
+    assert_close(eval_ok("(car (ceiling-div 5.5 2.0))"), 3.0);
+    assert_close(eval_ok("(cdr (ceiling-div 5.5 2.0))"), -0.5);
+}
+
+#[test]
+fn f64_truncate_div() {
+    assert_close(eval_ok("(car (truncate-div (- 0.0 5.5) 2.0))"), -2.0);
+    assert_close(eval_ok("(cdr (truncate-div (- 0.0 5.5) 2.0))"), -1.5);
+}
+
+#[test]
+fn f64_round_div_ties_to_even() {
+    assert_close(eval_ok("(car (round-div 5.0 2.0))"), 2.0);
+    assert_close(eval_ok("(cdr (round-div 5.0 2.0))"), 1.0);
+}
+
 #[test]
 fn f64_abs() {
     let src = "(defun f ((a f64)) f64 (abs a)) (f (- 0.0 2.5))";

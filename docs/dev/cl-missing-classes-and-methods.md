@@ -257,7 +257,7 @@ typelisp で**最も数が多い欠落**がここ。以下はすべて ❌（実
 | `max` / `min` | ❌ | 無い（`if` で書くしかない）。使用頻度からして最優先級 |
 | `1+` / `1-` | ❌ | |
 | `abs` `signum` `gcd` `lcm` `mod` `rem` `expt` | ✅ | 型ごとのメソッド。ただし `gcd`/`lcm` は 2引数固定、整数の `expt` は無い（`bignum` 経由） |
-| `floor` `ceiling` `round` `truncate` | ⚠️ | **`f64` の1引数版だけ**で戻り値も `f64`。CL の「除数を取る2引数版」も「商と剰余の多値」も無い。整数版（`(floor 7 2)`）も無い |
+| `floor` `ceiling` `round` `truncate` | ⚠️ | 1引数版（`f64→f64`）はCL相当。~~除数を取る2引数版も商・剰余の多値も無い~~ → **2026-07-29 `floor-div`/`ceiling-div`/`round-div`/`truncate-div` として実装済み**（`i32`/`i64`/`f64`、商・剰余を`cons-cell`で返す。多値そのものは非採用、§3.4参照）。CL と同名の2引数オーバーロードにしなかったのは `defmethod` が受け手の型でのみ解決しアリティでは解決しないため |
 | `ffloor` `fceiling` `fround` `ftruncate` | ❌ | |
 | `sqrt` | ⚠️ | `f64` のみ。`isqrt` は無い |
 | `exp` `log` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | ❌ | **超越関数が1つも無い**。`pi` 定数も無い |
@@ -468,7 +468,8 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
    `incf`/`decf`/`push`/`pop`/`rotatef`/`(setf (gethash ...))` 等はこれが要る。
 4. **多値** — `floor` の商と剰余、`gethash` の存在フラグ、`read-from-string` の読み終わり位置など、
    CL の API 設計は多値を前提にしている箇所が多い。typelisp は `Option`/`cons-cell` で個別に
-   回避しているが、CL コードの移植では毎回書き換えが要る。
+   回避しているが、CL コードの移植では毎回書き換えが要る（`gethash` 相当は `get`→`Option<V>` で
+   解決済み、`floor` 相当は2026-07-29に `floor-div` 等→`cons-cell` で解決済み。§2.10 参照）。
 5. **数値ライブラリの基礎**（§2.10）— `max`/`min`/`zerop`/`evenp`/超越関数/ビット演算が無い。
    一つ一つは小さいが、数を数える程度のコードでも欠落に当たる。単純に prelude へ足せるものが多い。
 6. **述語や比較関数を引数に取れないコレクション API** — `sort` に比較関数を渡せず、

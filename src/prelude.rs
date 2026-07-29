@@ -692,6 +692,83 @@ pub const SOURCE: &str = r#"
 ;; pair. Mutate a pair field with `(setf p::car v)`.
 (defun cons<A,B> ((a A) (b B)) cons-cell<A,B> (cons-cell::new a b))
 
+;; CL's 2-argument `floor`/`ceiling`/`round`/`truncate` (`(floor 7 2) => 3,
+;; 1`): a division that reports both quotient and remainder. CL returns them
+;; as two values; typelisp has no multiple-value mechanism (`docs/dev/
+;; cl-missing-classes-and-methods.md` §3.4), but `cons`/`car`/`cdr` just
+;; above are already a *generic, statically-typed* pair (`cons-cell<A,B>`,
+;; not a homogeneous list), so the two results fit it directly with no new
+;; mechanism: `(car (floor-div x y))`/`(cdr (floor-div x y))`. Named `*-div`
+;; rather than reusing `floor` etc. outright because `defmethod` dispatches
+;; on receiver *type*, not arity — one name can't hold both the existing
+;; unary rounding method and a binary one on the same receiver type.
+;;
+;; Only `floor-div` touches a primitive directly (the already-floored `mod`
+;; builtin/method); the other three are built from it: `ceiling-div` bumps
+;; the quotient by one whenever the division isn't exact (the real quotient
+;; always lies in `[fq, fq+1)`, regardless of either operand's sign, so
+;; `fq+1` is always the correct other candidate); `round-div` picks whichever
+;; of `fq`/`fq+1` is nearer by comparing `|2*remainder|` to `|b|` (sign-
+;; agnostic since `floor-div`'s remainder always shares `b`'s sign), breaking
+;; an exact tie toward the even quotient (CL's round-half-to-even — unlike
+;; this file's unary `round`, whose tie-breaking rides on Rust's `f64::round`
+;; and isn't relied on here); `truncate-div` doesn't share `floor-div`'s
+;; helper since it needs the opposite (truncated) remainder, already
+;; available as `rem`.
+;; --- i32 ---
+(defmethod floor-div ((self i32) (b i32)) cons-cell<i32,i32>
+  (let ((r (mod self b))) (cons (/ (- self r) b) r)))
+(defmethod truncate-div ((self i32) (b i32)) cons-cell<i32,i32>
+  (cons (/ self b) (rem self b)))
+(defmethod ceiling-div ((self i32) (b i32)) cons-cell<i32,i32>
+  (let ((fd (floor-div self b)))
+    (if (= (cdr fd) 0) fd
+        (let ((q (+ (car fd) 1))) (cons q (- self (* q b)))))))
+(defmethod round-div ((self i32) (b i32)) cons-cell<i32,i32>
+  (let ((fd (floor-div self b)))
+    (let ((fq (car fd)) (fr (cdr fd)))
+      (let ((afr2 (abs (* fr 2))) (ab (abs b)))
+        (if (< afr2 ab) fd
+            (if (> afr2 ab) (let ((q (+ fq 1))) (cons q (- self (* q b))))
+                (if (= (mod fq 2) 0) fd
+                    (let ((q (+ fq 1))) (cons q (- self (* q b)))))))))))
+
+;; --- i64 ---
+(defmethod floor-div ((self i64) (b i64)) cons-cell<i64,i64>
+  (let ((r (mod self b))) (cons (/ (- self r) b) r)))
+(defmethod truncate-div ((self i64) (b i64)) cons-cell<i64,i64>
+  (cons (/ self b) (rem self b)))
+(defmethod ceiling-div ((self i64) (b i64)) cons-cell<i64,i64>
+  (let ((fd (floor-div self b)))
+    (if (= (cdr fd) 0) fd
+        (let ((q (+ (car fd) 1))) (cons q (- self (* q b)))))))
+(defmethod round-div ((self i64) (b i64)) cons-cell<i64,i64>
+  (let ((fd (floor-div self b)))
+    (let ((fq (car fd)) (fr (cdr fd)))
+      (let ((afr2 (abs (* fr 2))) (ab (abs b)))
+        (if (< afr2 ab) fd
+            (if (> afr2 ab) (let ((q (+ fq 1))) (cons q (- self (* q b))))
+                (if (= (mod fq 2) 0) fd
+                    (let ((q (+ fq 1))) (cons q (- self (* q b)))))))))))
+
+;; --- f64 ---
+(defmethod floor-div ((self f64) (b f64)) cons-cell<f64,f64>
+  (let ((r (mod self b))) (cons (/ (- self r) b) r)))
+(defmethod truncate-div ((self f64) (b f64)) cons-cell<f64,f64>
+  (cons (truncate (/ self b)) (rem self b)))
+(defmethod ceiling-div ((self f64) (b f64)) cons-cell<f64,f64>
+  (let ((fd (floor-div self b)))
+    (if (= (cdr fd) 0.0) fd
+        (let ((q (+ (car fd) 1.0))) (cons q (- self (* q b)))))))
+(defmethod round-div ((self f64) (b f64)) cons-cell<f64,f64>
+  (let ((fd (floor-div self b)))
+    (let ((fq (car fd)) (fr (cdr fd)))
+      (let ((afr2 (abs (* fr 2.0))) (ab (abs b)))
+        (if (< afr2 ab) fd
+            (if (> afr2 ab) (let ((q (+ fq 1.0))) (cons q (- self (* q b))))
+                (if (= (mod fq 2.0) 0.0) fd
+                    (let ((q (+ fq 1.0))) (cons q (- self (* q b)))))))))))
+
 ;; `Sexpr` deliberately has **no** `Iter` impl: `Iter`'s `Item` must be one
 ;; fixed type per impl (`vector-iter<T>`'s `Item` is `T`, `hashtable-
 ;; iter<K,V>`'s is `cons-cell<K,V>`, both parameters fixed once per

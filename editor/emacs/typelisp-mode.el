@@ -105,7 +105,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
 (defconst typelisp-builtin-functions
   '(;; numeric helpers (§4)
     "abs" "gcd" "lcm" "signum" "random" "expt" "sqrt" "floor" "ceiling"
-    "round" "truncate" "mod" "rem" "not"
+    "round" "truncate" "floor-div" "ceiling-div" "round-div" "truncate-div"
+    "mod" "rem" "not"
     ;; numeric / char conversions (§4, §2.5).  The `as'/`try-as' special
     ;; forms are sugar over exactly these.
     "int->float" "int->char" "try-int->char" "float->int" "char->int"
