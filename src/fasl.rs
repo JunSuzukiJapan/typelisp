@@ -412,7 +412,13 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// fully-qualified path instead of the bare written name. A stale cache
 /// would hand back signatures naming a type that no longer exists and bounds
 /// that no longer compare equal to any trait — 2026-07-25.
-pub const FASL_FORMAT_VERSION: u32 = 13;
+///
+/// 14: `defun` `&optional`/`&key` parameters. `FnSig` gained `optionals`/
+/// `keys: Vec<OptKeyParam>` (each parameter's declared type and checked
+/// default expression, if any). A stale cache would hand back a signature
+/// missing both fields, so every call to a function declaring either would
+/// wrongly be checked as ordinary fixed arity — 2026-07-29.
+pub const FASL_FORMAT_VERSION: u32 = 14;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.

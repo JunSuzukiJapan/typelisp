@@ -15,7 +15,7 @@ use crate::name_lexer::{NameLexer, NameTok};
 use super::semantic::{TypeKind, TypeUse};
 
 use super::ast::{Arm, CompileTarget, Expr, MacroLambda, Pattern, QuotedSexpr, Ref, Typed};
-use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, Registry, TraitBound, TraitDef, VarInfo, Variant};
+use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
 /// `raw_args` are the call's unevaluated argument forms (exactly as written —
@@ -1942,6 +1942,30 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
+        if parts.len() >= 2 && self.params_declare_opt_key(heap, parts[1])? {
+            return self.check_defun_opt_key(heap, interp, parts, parts_locs, public, def_loc);
+        }
+        self.check_defun_fixed(heap, interp, parts, parts_locs, public, def_loc)
+    }
+
+    /// The ordinary (no `&optional`/`&key`) `defun` path — every existing
+    /// fixed/`&rest`/generic `defun`, unchanged. Split out from
+    /// `Self::check_defun` so that path stays exactly as it was before
+    /// `&optional`/`&key` support existed; see `Self::check_defun_opt_key`
+    /// for the sibling that handles those two sections (deliberately a
+    /// separate, self-contained function rather than threading new
+    /// branches through generics/monomorphization — mirrors how
+    /// `Self::check_defmacro` is already its own function rather than a
+    /// branch of this one).
+    fn check_defun_fixed(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        public: bool,
+        def_loc: Option<Loc>,
+    ) -> Result<TopLevel, Error> {
         let (params, param_locs, rest, ret, bounds, body_start) = self.parse_defun_sig(heap, parts, parts_locs)?;
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
         let fq_name = self.fq(&name);
@@ -1974,6 +1998,8 @@ impl Checker {
             rest: rest.as_ref().map(|(_, t, _)| t.clone()),
             builtin: false,
             bounds: bounds.clone(),
+            optionals: Vec::new(),
+            keys: Vec::new(),
         };
         self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
         if let Some(loc) = def_loc {
@@ -2004,6 +2030,145 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
         Ok(TopLevel::Defun { name: fq_name, type_params, params, ret, body, public })
+    }
+
+    /// The `&optional`/`&key` `defun` path — `Self::check_defun` routes here
+    /// when `Self::params_declare_opt_key` sees either marker in the raw
+    /// parameter list. Deliberately narrower than `Self::check_defun_fixed`
+    /// in two ways, both surfaced as explicit errors rather than silently
+    /// falling back to some approximation:
+    ///
+    /// - No generic type parameters: combining `&optional`/`&key` argument
+    ///   substitution with monomorphization's `unify`/`subst` machinery is
+    ///   real complexity with no motivating use case in this codebase
+    ///   (`sort`'s `&key`, `make-hash-table`'s `:test`, a BOA constructor's
+    ///   `&optional` are all concretely typed).
+    /// - No `where` clause, for the same reason (bounds validation is
+    ///   `Self::check_call`'s generic-path machinery).
+    /// - A default-value expression sees *no* earlier parameter bound (not
+    ///   even an earlier `&optional`/`&key` one, and not a required one
+    ///   either) — checked in an empty `Env`, so it may reference only
+    ///   globals/other functions/literals. Real CL lets a later default
+    ///   reference an earlier parameter's actual argument value; supporting
+    ///   that here would require re-binding every parameter by name at each
+    ///   call site (a `let*` scaffold) — dropped for this first cut. A
+    ///   default that tries to reference an earlier parameter fails with an
+    ///   ordinary "unbound variable" `Error::TypeError`, not a wrong answer.
+    ///
+    /// See `Self::check_call_opt_key` for how a call site fills in whatever
+    /// this leaves out.
+    fn check_defun_opt_key(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        public: bool,
+        def_loc: Option<Loc>,
+    ) -> Result<TopLevel, Error> {
+        if parts.len() < 3 {
+            return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
+        }
+        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
+        if !type_params.is_empty() {
+            return Err(Error::TypeError(format!(
+                "defun {}: &optional/&key are not yet supported on generic functions",
+                name
+            )));
+        }
+        let fq_name = self.fq(&name);
+        let (required, required_locs, optionals_raw, rest, keys_raw) = self.parse_defun_params_full(heap, parts[1])?;
+        let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
+        let body_start = 3;
+        if let Some(form) = parts.get(3) {
+            if self.is_where_clause(heap, *form)? {
+                return Err(Error::TypeError(format!(
+                    "defun {}: &optional/&key are not yet supported together with a `where` clause",
+                    name
+                )));
+            }
+        }
+
+        self.check_redef("function", &name, self.cur_ns().fns.get(&name))?;
+
+        let mut optionals = Vec::with_capacity(optionals_raw.len());
+        for (pname, decl_ty, _loc, default_raw) in &optionals_raw {
+            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, default_raw.clone())?;
+            optionals.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
+        }
+        let mut keys = Vec::with_capacity(keys_raw.len());
+        for (pname, decl_ty, _loc, default_raw) in &keys_raw {
+            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, default_raw.clone())?;
+            keys.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
+        }
+
+        let sig = FnSig {
+            type_params: Vec::new(),
+            params: required.iter().map(|(_, t)| t.clone()).collect(),
+            ret: ret.clone(),
+            public,
+            rest: rest.as_ref().map(|(_, t, _)| t.clone()),
+            builtin: false,
+            bounds: HashMap::new(),
+            optionals: optionals.clone(),
+            keys: keys.clone(),
+        };
+        self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
+        if let Some(loc) = def_loc {
+            self.reg.def_locs.fns.insert(fq_name.clone(), loc);
+        }
+
+        // Runtime params, in declared order: required, then `&optional`
+        // (effective type — `decl_ty` when defaulted, `Option<decl_ty>`
+        // otherwise), then the `&rest` name (plain `Sexpr` list), then
+        // `&key` (same effective-type rule) — mirrors
+        // `TopLevel::Defmacro::params`'s own region order. `&key`/`&optional`
+        // never coexist (`Self::parse_defun_params_full` rejects that), so
+        // exactly one of the two loops below ever runs.
+        let mut params: Vec<(String, Type)> = required.clone();
+        let mut param_locs: Vec<Option<Loc>> = required_locs.clone();
+        for (o, (_, _, loc, _)) in optionals.iter().zip(optionals_raw.iter()) {
+            params.push((o.name.clone(), o.effective_ty()));
+            param_locs.push(loc.clone());
+        }
+        if let Some((rname, _, rloc)) = &rest {
+            params.push((rname.clone(), sexpr_ty()));
+            param_locs.push(rloc.clone());
+        }
+        for (k, (_, _, loc, _)) in keys.iter().zip(keys_raw.iter()) {
+            params.push((k.name.clone(), k.effective_ty()));
+            param_locs.push(loc.clone());
+        }
+
+        let binds: Vec<(String, Type, Option<Loc>)> =
+            params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
+        let env = Env::new().extended_with_locs(binds);
+        let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
+        Ok(TopLevel::Defun { name: fq_name, type_params: Vec::new(), params, ret, body, public })
+    }
+
+    /// Checks one `&optional`/`&key` default-value form (or none) for
+    /// `Self::check_defun_opt_key`, against the parameter's declared type,
+    /// in an environment with no other parameters bound — see that
+    /// method's doc comment for why. `None` in means "no default was
+    /// written"; `None` out means the same thing (`OptKeyParam::default`).
+    fn check_opt_key_default(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        _pname: &str,
+        decl_ty: &Type,
+        default_raw: Option<Value>,
+    ) -> Result<Option<Typed>, Error> {
+        match default_raw {
+            None => Ok(None),
+            Some(form) => {
+                let env = Env::new();
+                let typed = self.check(heap, interp, &env, form, Some(decl_ty))?;
+                Ok(Some(typed))
+            }
+        }
     }
 
     /// Parses a `defun` form's parameter list, return type, and optional
@@ -2811,6 +2976,142 @@ impl Checker {
         Ok((out, locs))
     }
 
+    /// Whether a `defun`/`lambda` raw parameter list declares an
+    /// `&optional` or `&key` section — `Checker::check_defun` uses this to
+    /// route to `Self::check_defun_opt_key` instead of the ordinary
+    /// fixed/`&rest`-only path; `Checker::check_lambda` uses it only to
+    /// reject the combination with a clear error (see that method).
+    fn params_declare_opt_key(&self, heap: &Heap, v: Value) -> Result<bool, Error> {
+        let elems = heap.list_to_vec(v)?;
+        Ok(elems.iter().any(|p| {
+            matches!(p, Value::Symbol(id) if matches!(heap.symbol_name(*id), "&optional" | "&key"))
+        }))
+    }
+
+    /// An `&optional`/`&key` item for `defun`: `(name type)` or `(name type
+    /// default-form)`. Returns `(name, type, name's loc, default raw form)` —
+    /// the default form is left unchecked (this is a `&Heap`-only parse
+    /// helper, like `Self::macro_opt_key_spec`); `Checker::check_defun_opt_key`
+    /// checks it afterwards.
+    fn parse_opt_key_spec(&self, heap: &Heap, v: Value, section: &str) -> Result<(String, Type, Option<Loc>, Option<Value>), Error> {
+        let items_locs = heap.list_to_vec_locs(v)?;
+        if items_locs.len() < 2 || items_locs.len() > 3 {
+            return Err(Error::TypeError(format!(
+                "defun: {} parameter must be `(name type)` or `(name type default)`",
+                section
+            )));
+        }
+        let name = match items_locs[0].0 {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            _ => return Err(Error::TypeError(format!("defun: {} parameter name must be a symbol", section))),
+        };
+        let name_loc = items_locs[0].1.clone();
+        let ty = self.parse_type_here_at(heap, items_locs[1].0, items_locs[1].1.as_ref())?;
+        let default = items_locs.get(2).map(|(v, _)| *v);
+        Ok((name, ty, name_loc, default))
+    }
+
+    /// The full `&optional`/`&rest`/`&key` breakdown of a `defun`'s
+    /// parameter list, beyond its leading required `(name type)` params —
+    /// see `Self::check_defun_opt_key`. Mirrors `Self::parse_macro_lambda_list`'s
+    /// CL section order (`required &optional &rest &key`), but (unlike
+    /// macros) `&key` may not combine with `&optional`/`&rest` in the same
+    /// list: CL's own well-known ambiguity between a positionally-filled
+    /// `&optional` and a label-matched `&key` argument when both sections
+    /// are present (which of the two consumes a given trailing argument
+    /// depends on its *value*, not just its position) — sidestepped
+    /// entirely by forbidding the combination, matching how every
+    /// motivating case (`sort`'s `&key`, a BOA constructor's `&optional`)
+    /// uses only one of the two.
+    #[allow(clippy::type_complexity)]
+    fn parse_defun_params_full(
+        &self,
+        heap: &Heap,
+        v: Value,
+    ) -> Result<
+        (
+            Vec<(String, Type)>,
+            Vec<Option<Loc>>,
+            Vec<(String, Type, Option<Loc>, Option<Value>)>,
+            Option<RestParam>,
+            Vec<(String, Type, Option<Loc>, Option<Value>)>,
+        ),
+        Error,
+    > {
+        let elems = heap.list_to_vec(v)?;
+        let mut rank = 0u8;
+        let mut required_raw: Vec<Value> = Vec::new();
+        let mut optionals_raw: Vec<Value> = Vec::new();
+        let mut rest_raw: Vec<Value> = Vec::new();
+        let mut keys_raw: Vec<Value> = Vec::new();
+        for p in &elems {
+            if let Value::Symbol(id) = p {
+                match heap.symbol_name(*id) {
+                    "&optional" => {
+                        if rank >= 1 {
+                            return Err(Error::TypeError("defun: &optional must precede &rest and &key, and appear once".into()));
+                        }
+                        rank = 1;
+                        continue;
+                    }
+                    "&rest" => {
+                        if rank >= 2 {
+                            return Err(Error::TypeError("defun: &rest must precede &key, and appear once".into()));
+                        }
+                        rank = 2;
+                        continue;
+                    }
+                    "&key" => {
+                        if rank >= 3 {
+                            return Err(Error::TypeError("defun: &key may appear only once".into()));
+                        }
+                        rank = 3;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            match rank {
+                0 => required_raw.push(*p),
+                1 => optionals_raw.push(*p),
+                2 => rest_raw.push(*p),
+                _ => keys_raw.push(*p),
+            }
+        }
+        if rank == 2 && rest_raw.is_empty() {
+            return Err(Error::TypeError("defun: &rest must be followed by exactly one parameter".into()));
+        }
+        if rest_raw.len() > 1 {
+            return Err(Error::TypeError(
+                "defun: &rest takes exactly one parameter, as the last item in the parameter list".into(),
+            ));
+        }
+        if !keys_raw.is_empty() && (!optionals_raw.is_empty() || !rest_raw.is_empty()) {
+            return Err(Error::TypeError(
+                "defun: &key cannot be combined with &optional/&rest in the same parameter list".into(),
+            ));
+        }
+
+        let (required, required_locs) = self.parse_param_pairs(heap, &required_raw)?;
+        let mut optionals = Vec::with_capacity(optionals_raw.len());
+        for p in optionals_raw {
+            optionals.push(self.parse_opt_key_spec(heap, p, "&optional")?);
+        }
+        let rest = match rest_raw.first() {
+            Some(r) => {
+                let (rp, rl) = self.parse_param_pairs(heap, std::slice::from_ref(r))?;
+                let (rname, rty) = rp.into_iter().next().expect("checked non-empty above");
+                Some((rname, rty, rl.into_iter().next().flatten()))
+            }
+            None => None,
+        };
+        let mut keys = Vec::with_capacity(keys_raw.len());
+        for p in keys_raw {
+            keys.push(self.parse_opt_key_spec(heap, p, "&key")?);
+        }
+        Ok((required, required_locs, optionals, rest, keys))
+    }
+
     /// Parse `defstruct` field bindings: `(name type)` or `(pub name type)`.
     /// Field visibility is independent of the struct's own `pub` — like every
     /// other `pub` in this language it's opt-in per item, never inherited
@@ -2925,6 +3226,8 @@ impl Checker {
                 rest: None,
                 builtin: false,
                 bounds: HashMap::new(),
+                optionals: Vec::new(),
+                keys: Vec::new(),
             };
             // `method_order` is the vtable layout, so it must stay in step
             // with `methods` — a duplicated name would silently give the
@@ -3651,7 +3954,17 @@ impl Checker {
             sig_params.push(recv_ty.clone());
         }
         sig_params.extend(params.iter().map(|(_, t)| t.clone()));
-        let sig = FnSig { type_params: vec![], params: sig_params, ret: ret.clone(), public, rest: None, builtin: false, bounds: bounds.clone() };
+        let sig = FnSig {
+            type_params: vec![],
+            params: sig_params,
+            ret: ret.clone(),
+            public,
+            rest: None,
+            builtin: false,
+            bounds: bounds.clone(),
+            optionals: Vec::new(),
+            keys: Vec::new(),
+        };
         self.check_redef("method", &method, self.reg.type_def(&type_fq).and_then(|d| d.assoc.get(&method)))?;
         if let Some(def) = self.reg.type_def_mut(&type_fq) {
             def.assoc.insert(method.clone(), AssocFn { sig, instance, builtin: false });
@@ -3830,6 +4143,8 @@ impl Checker {
                 rest: None,
                 builtin: false,
                 bounds: HashMap::new(),
+                optionals: Vec::new(),
+                keys: Vec::new(),
             };
             assoc.insert(field_name.clone(), AssocFn { sig: getter_sig, instance: true, builtin: false });
             let self_var = Typed { loc: None, expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
@@ -3856,6 +4171,8 @@ impl Checker {
                 rest: None,
                 builtin: false,
                 bounds: HashMap::new(),
+                optionals: Vec::new(),
+                keys: Vec::new(),
             };
             assoc.insert(setter_name.clone(), AssocFn { sig: setter_sig, instance: true, builtin: false });
             let self_var = Typed { loc: None, expr: Expr::Var("self".to_string()), ty: recv_ty.clone() };
@@ -4558,6 +4875,11 @@ impl Checker {
     ) -> Result<Typed, Error> {
         if args.len() < 2 {
             return Err(Error::TypeError("lambda: (lambda (params) ret body...)".into()));
+        }
+        if self.params_declare_opt_key(heap, args[0])? {
+            return Err(Error::TypeError(
+                "lambda: &optional/&key are not yet supported for lambda (only defun)".into(),
+            ));
         }
         let (params, param_locs, rest) = self.parse_params_rest(heap, args[0])?;
         let ret = self.parse_type_here_at(heap, args[1], arg_locs.get(1).and_then(|l| l.as_ref()))?;
@@ -6119,6 +6441,9 @@ impl Checker {
         arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
         let sig = self.reg.fn_sig(name).expect("caller checked presence").clone();
+        if !sig.optionals.is_empty() || !sig.keys.is_empty() {
+            return self.check_call_opt_key(heap, interp, env, written, name, &sig, args, arg_locs);
+        }
         let fixed = sig.params.len();
         match &sig.rest {
             None if args.len() != fixed => {
@@ -6298,6 +6623,142 @@ impl Checker {
             self.mk_ref(written.to_vec(), call_path)
         };
         Ok(Typed { loc: None, expr: Expr::Call(r, typed), ty: subst_apply(&sig.ret, &subst) })
+    }
+
+    /// [`Self::check_call`]'s `&optional`/`&key` path — routed to whenever
+    /// `sig.optionals`/`sig.keys` is non-empty, which (per
+    /// `Self::check_defun_opt_key`) also means `sig.type_params`/`sig.bounds`
+    /// are empty and at most one of `sig.optionals`/`sig.keys` is non-empty
+    /// (never both). Builds the same flat, fully-saturated
+    /// `Expr::Call(Ref, Vec<Typed>)` an ordinary fixed-arity call produces —
+    /// one actual argument per runtime parameter, in `TopLevel::Defun::
+    /// params` order — so nothing downstream (`Interp::apply`, the compile
+    /// pipeline's `ast_bridge`/self-hosted `compile-call`) needs to know
+    /// `&optional`/`&key` exist at all; an omitted argument is filled in
+    /// right here with either the parameter's checked default expression or
+    /// (no default) an `Option::none` at its type — see
+    /// `check::registry::OptKeyParam::effective_ty`.
+    #[allow(clippy::too_many_arguments)]
+    fn check_call_opt_key(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        written: &[String],
+        name: &Path,
+        sig: &FnSig,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Typed, Error> {
+        let required_n = sig.params.len();
+        if args.len() < required_n {
+            return Err(Error::TypeError(format!(
+                "{}: expected at least {} argument(s), got {}",
+                name,
+                required_n,
+                args.len()
+            )));
+        }
+        let mut typed = Vec::with_capacity(required_n + sig.optionals.len().max(sig.keys.len()));
+        for (i, (arg, pty)) in args[..required_n].iter().zip(sig.params.iter()).enumerate() {
+            typed.push(self.check_at(heap, interp, env, *arg, Some(pty), nth_loc(arg_locs, i))?);
+        }
+        let tail = &args[required_n..];
+        let tail_locs = arg_locs.get(required_n..).unwrap_or(&[]);
+
+        if !sig.keys.is_empty() {
+            // `&key`: every trailing argument is a `:name value` pair,
+            // matched by label — `Self::check_defun_opt_key`/
+            // `Self::parse_defun_params_full` guarantee `sig.rest` is `None`
+            // and `sig.optionals` is empty whenever `sig.keys` isn't.
+            if tail.len() % 2 != 0 {
+                return Err(Error::TypeError(format!(
+                    "{}: keyword arguments must be given as `:name value` pairs",
+                    name
+                )));
+            }
+            let mut supplied: HashMap<String, Typed> = HashMap::new();
+            let mut i = 0;
+            while i < tail.len() {
+                let kw_name = match tail[i] {
+                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    _ => {
+                        return Err(Error::TypeError(format!(
+                            "{}: expected a `:name` keyword, got a non-symbol",
+                            name
+                        )))
+                    }
+                };
+                let Some(kw_name) = kw_name.strip_prefix(':').map(|s| s.to_string()) else {
+                    return Err(Error::TypeError(format!(
+                        "{}: expected a `:name` keyword, got `{}`",
+                        name, kw_name
+                    )));
+                };
+                let Some(key) = sig.keys.iter().find(|k| k.name == kw_name) else {
+                    return Err(Error::TypeError(format!("{}: unknown keyword argument :{}", name, kw_name)));
+                };
+                if supplied.contains_key(&kw_name) {
+                    return Err(Error::TypeError(format!("{}: duplicate keyword argument :{}", name, kw_name)));
+                }
+                let val_loc = nth_loc(tail_locs, i + 1);
+                let checked = self.check_at(heap, interp, env, tail[i + 1], Some(&key.decl_ty), val_loc)?;
+                let final_val = if key.default.is_some() { checked } else { wrap_some(checked, key.decl_ty.clone()) };
+                supplied.insert(kw_name, final_val);
+                i += 2;
+            }
+            for key in &sig.keys {
+                let val = match supplied.remove(&key.name) {
+                    Some(v) => v,
+                    None => match &key.default {
+                        Some(d) => d.clone(),
+                        None => option_none(key.effective_ty()),
+                    },
+                };
+                typed.push(val);
+            }
+        } else {
+            // `&optional` (+ possibly `&rest`): filled strictly by position,
+            // left to right — CL's own rule, and the reason `&key` can't
+            // combine with it (see `Self::parse_defun_params_full`'s doc
+            // comment).
+            let opt_supplied_n = tail.len().min(sig.optionals.len());
+            for (i, opt) in sig.optionals.iter().enumerate() {
+                let val = if i < opt_supplied_n {
+                    let checked = self.check_at(heap, interp, env, tail[i], Some(&opt.decl_ty), nth_loc(tail_locs, i))?;
+                    if opt.default.is_some() { checked } else { wrap_some(checked, opt.decl_ty.clone()) }
+                } else {
+                    match &opt.default {
+                        Some(d) => d.clone(),
+                        None => option_none(opt.effective_ty()),
+                    }
+                };
+                typed.push(val);
+            }
+            let after_optionals = &tail[opt_supplied_n..];
+            let after_optionals_locs = tail_locs.get(opt_supplied_n..).unwrap_or(&[]);
+            match &sig.rest {
+                Some(elem_ty) => {
+                    let mut rest_typed = Vec::with_capacity(after_optionals.len());
+                    for (i, arg) in after_optionals.iter().enumerate() {
+                        rest_typed.push(self.check_at(heap, interp, env, *arg, Some(elem_ty), nth_loc(after_optionals_locs, i))?);
+                    }
+                    typed.push(self.cons_rest_list(elem_ty, rest_typed)?);
+                }
+                None if !after_optionals.is_empty() => {
+                    return Err(Error::TypeError(format!(
+                        "{}: expected at most {} argument(s), got {}",
+                        name,
+                        required_n + sig.optionals.len(),
+                        args.len()
+                    )));
+                }
+                None => {}
+            }
+        }
+
+        let r = self.mk_ref(written.to_vec(), name.clone());
+        Ok(Typed { loc: None, expr: Expr::Call(r, typed), ty: sig.ret.clone() })
     }
 
     /// Call-site `where`-bound validation shared by [`Self::check_call`]
@@ -7032,6 +7493,15 @@ fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'stati
 fn wrap_some(inner: Typed, target: Type) -> Typed {
     let ty = Type::Named(Path::root("option"), vec![target]);
     Typed { loc: None, expr: Expr::Construct { type_name: Path::root("option"), variant: 0, args: vec![inner], mutable: false }, ty }
+}
+
+/// `Option::none` as a `Typed`, already at `ty` (an `Option<_>` type) —
+/// `Checker::check_call_opt_key`'s filler for an omitted `&optional`/`&key`
+/// argument that has no default. `variant: 1` is `option`'s `none` variant
+/// (see `check::registry::option_def`), the CL-`nil` counterpart of
+/// `wrap_some`'s `variant: 0`.
+fn option_none(ty: Type) -> Typed {
+    Typed { loc: None, expr: Expr::Construct { type_name: Path::root("option"), variant: 1, args: Vec::new(), mutable: false }, ty }
 }
 
 /// Relabels an already-computed `Option<I32>` `Typed` (an `as_conversion`
