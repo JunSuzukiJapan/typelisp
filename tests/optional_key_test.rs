@@ -175,13 +175,115 @@ fn key_cannot_combine_with_optional_in_the_same_parameter_list() {
 }
 
 #[test]
-fn optional_is_rejected_on_a_generic_defun() {
-    let msg = check_err("(defun f<T> (&optional (a T)) T a)");
-    assert!(msg.contains("generic"), "unexpected message: {}", msg);
-}
-
-#[test]
 fn optional_is_rejected_on_lambda() {
     let msg = check_err("(defun caller () i32 (let ((g (lambda (&optional (a i32 1)) i32 a))) 0))");
     assert!(msg.contains("lambda"), "unexpected message: {}", msg);
+}
+
+// ---- generic defun + &optional/&key ----------------------------------------
+//
+// `Checker::check_defun_opt_key` and `Checker::check_call_opt_key` run the
+// same `unify`/`subst_apply`/`validate_where_bounds`/monomorphization
+// machinery `Checker::check_call` uses for an ordinary generic call,
+// restricted to what a call site can actually observe (required arguments,
+// plus whichever `&optional`/`&key` arguments it actually supplies — an
+// omitted one contributes nothing to inference). See that method's doc
+// comment, and `Checker::check_defun_opt_key`'s, for why a *defaulted*
+// `&optional`/`&key` parameter's declared type may never mention the
+// function's own type parameter.
+
+#[test]
+fn generic_key_infers_type_param_from_required_arg() {
+    // `T` appears only on the required parameter `x`; the omitted `&key`
+    // `y` (no default, so effectively `Option<T>`) must still resolve to
+    // `Option<i32>` from that inference, not stay abstract.
+    let src = "(defun f<T> ((x T) &key (y T)) T (unwrap-or y x)) (f 5)";
+    assert_eq!(eval_ok(src), RtValue::Int(5));
+}
+
+#[test]
+fn generic_key_infers_type_param_from_supplied_key_arg() {
+    // `T` appears *only* on the `&key` parameter `y` here — inference can
+    // only come from actually supplying it, not from `n` (plain `i32`).
+    let src = "(defun f<T> ((n i32) &key (y T)) i32 (+ n (if (is-some y) 1 0))) (f 10 :y 42)";
+    assert_eq!(eval_ok(src), RtValue::Int(11));
+}
+
+#[test]
+fn generic_key_uninferrable_type_param_is_a_type_error() {
+    // `T` appears only on the `&key` parameter `y` (unused in the body,
+    // which is allowed — a type parameter need not be referenced); the call
+    // omits `:y` entirely, so `T` cannot be inferred from anywhere.
+    let msg = check_err("(defun f<T> ((n i32) &key (y T)) i32 n) (f 10)");
+    assert!(msg.contains("cannot infer type parameter"), "unexpected message: {}", msg);
+}
+
+#[test]
+fn generic_optional_where_bound_is_validated() {
+    let prog = "
+        (deftrait eq2 (same ((self Self) (other Self)) bool))
+        (impl eq2 i32 (same ((self Self) (other Self)) bool (= self other)))
+        (defstruct no-eq (n i32))
+        (defun check-eq<T> ((a T) (b T) &optional (verbose bool false)) bool (where (eq2 T)) (same a b))
+    ";
+    assert_eq!(eval_ok(&format!("{} (check-eq 1 1)", prog)), RtValue::Bool(true));
+    assert_eq!(eval_ok(&format!("{} (check-eq 1 2)", prog)), RtValue::Bool(false));
+    let msg = check_err(&format!(
+        "{} (check-eq (no-eq::new 1) (no-eq::new 1))",
+        prog
+    ));
+    assert!(msg.contains("does not implement trait"), "unexpected message: {}", msg);
+}
+
+#[test]
+fn generic_key_default_referencing_type_param_is_rejected() {
+    // `x`'s declared type `Option<T>` mentions `f`'s own type parameter, and
+    // it has a default (`(option::none)`) — rejected by `Checker::
+    // check_defun_opt_key`'s `type_has_param` restriction (see the module's
+    // doc comment for why: a call site that omits `x` would splice this
+    // default's checked `Typed` node in verbatim, and its `.ty` would stay
+    // the abstract `Option<T>` instead of the call's concrete instantiation).
+    let msg = check_err("(defun f<T> (&key (x Option<T> (option::none))) Option<T> x)");
+    assert!(msg.contains("may not default"), "unexpected message: {}", msg);
+}
+
+#[test]
+fn generic_key_specialization_agrees_between_interp_and_compile() {
+    // The same generic `&key` function (`pick`), instantiated at two
+    // different concrete types in two independent programs — each proves
+    // `eval_ok_compiled` (which routes the defaulted `:use-a` value through
+    // the compile pipeline's `ast_bridge`) agrees with plain interpretation
+    // at *that* instantiation. This is the direct regression test for the
+    // compile-side `.ty` safety issue found while planning this feature
+    // (see `Checker::check_defun_opt_key`'s doc comment): `use-a`'s default
+    // (`bool true`, declared type independent of `T`) is checked exactly
+    // once, on the unspecialized signature, and spliced verbatim into every
+    // instantiation's call site — safe only because its type can never
+    // depend on `T`.
+    let prog_i32 = "
+        (defun pick<T> ((a T) (b T) &key (use-a bool true)) T (if use-a a b))
+        (defun run-i32 () i32 (pick 1 2))
+        %COMPILE%
+        (run-i32)
+    ";
+    assert_eq!(eval_ok_compiled(prog_i32, "run-i32"), RtValue::Int(1));
+
+    let prog_bool = "
+        (defun pick<T> ((a T) (b T) &key (use-a bool true)) T (if use-a a b))
+        (defun run-bool () bool (pick true false :use-a false))
+        %COMPILE%
+        (run-bool)
+    ";
+    assert_eq!(eval_ok_compiled(prog_bool, "run-bool"), RtValue::Bool(false));
+}
+
+#[test]
+fn generic_optional_self_recursive() {
+    // `rep` calls itself at the *same* type parameter (not a growing one),
+    // exercising `FnTemplate` retention for a generic `&optional` defun —
+    // the template must already be registered when the body is checked so
+    // the self-recursive call resolves instead of hitting `check_redef` or
+    // an unregistered-function error.
+    let src = "(defun rep<T> ((x T) &optional (n i32 3)) T (if (= n 0) x (rep x (- n 1)))) (rep 5)";
+    assert_eq!(eval_ok(src), RtValue::Int(5));
 }

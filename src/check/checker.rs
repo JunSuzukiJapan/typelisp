@@ -2034,17 +2034,26 @@ impl Checker {
 
     /// The `&optional`/`&key` `defun` path — `Self::check_defun` routes here
     /// when `Self::params_declare_opt_key` sees either marker in the raw
-    /// parameter list. Deliberately narrower than `Self::check_defun_fixed`
-    /// in two ways, both surfaced as explicit errors rather than silently
-    /// falling back to some approximation:
+    /// parameter list. Supports generic type parameters and a `where` clause
+    /// (`Self::check_call_opt_key` runs the same `unify`/`subst`/bounds
+    /// machinery `Self::check_call` does for an ordinary generic call), with
+    /// one deliberate restriction not present on the non-opt/key path: a
+    /// defaulted `&optional`/`&key` parameter's declared type may not
+    /// reference this function's own type parameters (see the
+    /// `type_has_param` check below) — a call site that omits such an
+    /// argument would splice the checked default `Typed` node in verbatim
+    /// (`Self::check_call_opt_key`, no re-checking against the call's
+    /// concrete types), and that node's `.ty` would then still name the
+    /// abstract type parameter instead of the instantiation's concrete type,
+    /// which downstream compile-side code (`ast_bridge`'s `binding_kind`)
+    /// reads to decide GC/boxing representation. A defaultless parameter
+    /// has no such node to splice (an `Option::none` is synthesized fresh at
+    /// the call site, already `subst_apply`-ed) so is unrestricted.
     ///
-    /// - No generic type parameters: combining `&optional`/`&key` argument
-    ///   substitution with monomorphization's `unify`/`subst` machinery is
-    ///   real complexity with no motivating use case in this codebase
-    ///   (`sort`'s `&key`, `make-hash-table`'s `:test`, a BOA constructor's
-    ///   `&optional` are all concretely typed).
-    /// - No `where` clause, for the same reason (bounds validation is
-    ///   `Self::check_call`'s generic-path machinery).
+    /// Otherwise deliberately narrower than `Self::check_defun_fixed` in one
+    /// way, surfaced as an explicit error rather than silently falling back
+    /// to some approximation:
+    ///
     /// - A default-value expression sees *no* earlier parameter bound (not
     ///   even an earlier `&optional`/`&key` one, and not a required one
     ///   either) — checked in an empty `Env`, so it may reference only
@@ -2070,46 +2079,70 @@ impl Checker {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
-        if !type_params.is_empty() {
-            return Err(Error::TypeError(format!(
-                "defun {}: &optional/&key are not yet supported on generic functions",
-                name
-            )));
-        }
         let fq_name = self.fq(&name);
         let (required, required_locs, optionals_raw, rest, keys_raw) = self.parse_defun_params_full(heap, parts[1])?;
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
-        let body_start = 3;
+        let mut body_start = 3;
+        let mut bounds: HashMap<String, Vec<TraitBound>> = HashMap::new();
         if let Some(form) = parts.get(3) {
             if self.is_where_clause(heap, *form)? {
-                return Err(Error::TypeError(format!(
-                    "defun {}: &optional/&key are not yet supported together with a `where` clause",
-                    name
-                )));
+                bounds = self.parse_where_clause(heap, *form)?;
+                body_start = 4;
             }
         }
 
         self.check_redef("function", &name, self.cur_ns().fns.get(&name))?;
 
+        // A generic `&optional`/`&key` defun additionally retains its raw
+        // source form for per-instantiation re-checking, exactly like
+        // `Self::check_defun_fixed` — registered before the default-value
+        // checks below (self-recursion in a default expression is no more
+        // supported than in a body, but consistency costs nothing) and
+        // before the body check, for the same self-recursion reason.
+        if !type_params.is_empty() {
+            for &p in parts {
+                heap.push_permanent_root(p);
+            }
+            self.generic_fn_templates.insert(
+                fq_name.clone(),
+                FnTemplate { parts: parts.to_vec(), ns: self.ns.clone(), type_params: type_params.clone() },
+            );
+        }
+
+        let type_param_set: HashSet<String> = type_params.iter().cloned().collect();
         let mut optionals = Vec::with_capacity(optionals_raw.len());
         for (pname, decl_ty, _loc, default_raw) in &optionals_raw {
             let default = self.check_opt_key_default(heap, interp, pname, decl_ty, default_raw.clone())?;
+            if default.is_some() && type_has_param(decl_ty, &type_param_set) {
+                return Err(Error::TypeError(format!(
+                    "defun {}: &optional parameter `{}` may not default when its type mentions the \
+                     function's own type parameter — declare it with no default (`Option<{:?}>`) instead",
+                    name, pname, decl_ty
+                )));
+            }
             optionals.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
         }
         let mut keys = Vec::with_capacity(keys_raw.len());
         for (pname, decl_ty, _loc, default_raw) in &keys_raw {
             let default = self.check_opt_key_default(heap, interp, pname, decl_ty, default_raw.clone())?;
+            if default.is_some() && type_has_param(decl_ty, &type_param_set) {
+                return Err(Error::TypeError(format!(
+                    "defun {}: &key parameter `{}` may not default when its type mentions the \
+                     function's own type parameter — declare it with no default (`Option<{:?}>`) instead",
+                    name, pname, decl_ty
+                )));
+            }
             keys.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
         }
 
         let sig = FnSig {
-            type_params: Vec::new(),
+            type_params: type_params.clone(),
             params: required.iter().map(|(_, t)| t.clone()).collect(),
             ret: ret.clone(),
             public,
             rest: rest.as_ref().map(|(_, t, _)| t.clone()),
             builtin: false,
-            bounds: HashMap::new(),
+            bounds: bounds.clone(),
             optionals: optionals.clone(),
             keys: keys.clone(),
         };
@@ -2142,10 +2175,10 @@ impl Checker {
 
         let binds: Vec<(String, Type, Option<Loc>)> =
             params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
-        let env = Env::new().extended_with_locs(binds);
+        let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
-        Ok(TopLevel::Defun { name: fq_name, type_params: Vec::new(), params, ret, body, public })
+        Ok(TopLevel::Defun { name: fq_name, type_params, params, ret, body, public })
     }
 
     /// Checks one `&optional`/`&key` default-value form (or none) for
@@ -2478,6 +2511,9 @@ impl Checker {
         mangled: &Path,
         public: bool,
     ) -> Result<TopLevel, Error> {
+        if self.params_declare_opt_key(heap, tmpl.parts[1])? {
+            return self.specialize_defun_body_opt_key(heap, interp, tmpl, mangled, public);
+        }
         // `bounds` deliberately dropped: the type variables are concrete
         // here, so method calls on them resolve directly against the real
         // receiver type (`check_instance_method`'s ordinary branch, never
@@ -2489,6 +2525,74 @@ impl Checker {
         if let Some((rname, _, _)) = &rest {
             params.push((rname.clone(), sexpr_ty()));
         }
+        let env = Env::new().extended(params.clone());
+        let (body, _) = self.check_seq(heap, interp, &env, &tmpl.parts[body_start..], &[], Some(&ret))?;
+        Ok(TopLevel::Defun { name: mangled.clone(), type_params: Vec::new(), params, ret, body, public })
+    }
+
+    /// [`Self::specialize_defun_body`]'s `&optional`/`&key` counterpart —
+    /// routed to whenever the retained template's parameter list declares
+    /// either section (`Self::params_declare_opt_key`). Re-parses the
+    /// retained source form (`Self::parse_defun_params_full`, plus the
+    /// return type and an optional `where` clause exactly as
+    /// `Self::check_defun_opt_key` does) with `Self::type_var_bindings` in
+    /// effect, so `Self::parse_type_here_at`/`canon` substitute the
+    /// template's type-parameter names for concrete types throughout —
+    /// required params, `&optional`/`&key` declared types, the return type,
+    /// and (via `Self::check_opt_key_default`) each default expression's
+    /// re-check, no code changes needed for any of that (mirrors
+    /// `Self::specialize_defun_body`'s own reliance on the same mechanism).
+    /// Every defaulted `&optional`/`&key` parameter's declared type is
+    /// already guaranteed concrete (`Self::check_defun_opt_key`'s
+    /// `type_has_param` restriction), so a default's freshly re-checked
+    /// `Typed` node here has a genuinely concrete `.ty` — see the module's
+    /// `check_defun_opt_key` doc comment for why that matters downstream.
+    ///
+    /// The signature is not registered on `self.reg` — like
+    /// `Self::specialize_defun_body`, nothing besides `Interp`/the compile
+    /// pipeline ever looks a specialization's `FnSig` up; `Self::check_call_opt_key`
+    /// already validated the call site against the *unspecialized* generic
+    /// signature before requesting this instantiation.
+    fn specialize_defun_body_opt_key(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        tmpl: &FnTemplate,
+        mangled: &Path,
+        public: bool,
+    ) -> Result<TopLevel, Error> {
+        let (required, _required_locs, optionals_raw, rest, keys_raw) =
+            self.parse_defun_params_full(heap, tmpl.parts[1])?;
+        let ret = self.parse_type_here_at(heap, tmpl.parts[2], None)?;
+        let mut body_start = 3;
+        if let Some(form) = tmpl.parts.get(3) {
+            if self.is_where_clause(heap, *form)? {
+                body_start = 4;
+            }
+        }
+
+        let mut optionals = Vec::with_capacity(optionals_raw.len());
+        for (pname, decl_ty, _loc, default_raw) in &optionals_raw {
+            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, default_raw.clone())?;
+            optionals.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
+        }
+        let mut keys = Vec::with_capacity(keys_raw.len());
+        for (pname, decl_ty, _loc, default_raw) in &keys_raw {
+            let default = self.check_opt_key_default(heap, interp, pname, decl_ty, default_raw.clone())?;
+            keys.push(OptKeyParam { name: pname.clone(), decl_ty: decl_ty.clone(), default });
+        }
+
+        let mut params: Vec<(String, Type)> = required.clone();
+        for o in &optionals {
+            params.push((o.name.clone(), o.effective_ty()));
+        }
+        if let Some((rname, _, _)) = &rest {
+            params.push((rname.clone(), sexpr_ty()));
+        }
+        for k in &keys {
+            params.push((k.name.clone(), k.effective_ty()));
+        }
+
         let env = Env::new().extended(params.clone());
         let (body, _) = self.check_seq(heap, interp, &env, &tmpl.parts[body_start..], &[], Some(&ret))?;
         Ok(TopLevel::Defun { name: mangled.clone(), type_params: Vec::new(), params, ret, body, public })
@@ -6626,18 +6730,32 @@ impl Checker {
     }
 
     /// [`Self::check_call`]'s `&optional`/`&key` path — routed to whenever
-    /// `sig.optionals`/`sig.keys` is non-empty, which (per
-    /// `Self::check_defun_opt_key`) also means `sig.type_params`/`sig.bounds`
-    /// are empty and at most one of `sig.optionals`/`sig.keys` is non-empty
-    /// (never both). Builds the same flat, fully-saturated
-    /// `Expr::Call(Ref, Vec<Typed>)` an ordinary fixed-arity call produces —
-    /// one actual argument per runtime parameter, in `TopLevel::Defun::
-    /// params` order — so nothing downstream (`Interp::apply`, the compile
-    /// pipeline's `ast_bridge`/self-hosted `compile-call`) needs to know
-    /// `&optional`/`&key` exist at all; an omitted argument is filled in
-    /// right here with either the parameter's checked default expression or
-    /// (no default) an `Option::none` at its type — see
-    /// `check::registry::OptKeyParam::effective_ty`.
+    /// `sig.optionals`/`sig.keys` is non-empty; at most one of the two is
+    /// non-empty (never both — `Self::parse_defun_params_full`). Builds the
+    /// same flat, fully-saturated `Expr::Call(Ref, Vec<Typed>)` an ordinary
+    /// fixed-arity call produces — one actual argument per runtime
+    /// parameter, in `TopLevel::Defun::params` order — so nothing
+    /// downstream (`Interp::apply`, the compile pipeline's `ast_bridge`/
+    /// self-hosted `compile-call`) needs to know `&optional`/`&key` exist at
+    /// all; an omitted argument is filled in right here with either the
+    /// parameter's checked default expression or (no default) an
+    /// `Option::none` at its type — see `check::registry::OptKeyParam::
+    /// effective_ty`.
+    ///
+    /// `sig.type_params`/`sig.bounds` may be non-empty (`Self::
+    /// check_defun_opt_key` now allows generics), in which case this runs
+    /// the same two-pass `unify`/`subst_apply` inference `Self::check_call`
+    /// does, restricted to what's actually observable: required arguments
+    /// (always) plus whichever `&optional`/`&key` arguments the call site
+    /// actually supplies (an omitted one contributes nothing — there is no
+    /// value to unify against). A type parameter that only ever appears in
+    /// an omitted argument is therefore uninferrable and rejected outright
+    /// (no attempt at partial/lazy inference) — see the module's
+    /// `check_defun_opt_key` doc comment for why a defaulted parameter's
+    /// declared type can never depend on one of these anyway; only a
+    /// defaultless (`Option<T>`-effective) parameter can, and omitting it
+    /// simply produces `Option::none` at the call's own resolved `T` (built
+    /// fresh here via `subst_apply`, never reusing a stale `Typed` node).
     #[allow(clippy::too_many_arguments)]
     fn check_call_opt_key(
         &self,
@@ -6659,12 +6777,27 @@ impl Checker {
                 args.len()
             )));
         }
+        let params: HashSet<String> = sig.type_params.iter().cloned().collect();
+        let mut subst: HashMap<String, Type> = HashMap::new();
+
         let mut typed = Vec::with_capacity(required_n + sig.optionals.len().max(sig.keys.len()));
         for (i, (arg, pty)) in args[..required_n].iter().zip(sig.params.iter()).enumerate() {
-            typed.push(self.check_at(heap, interp, env, *arg, Some(pty), nth_loc(arg_locs, i))?);
+            let st = subst_apply(pty, &subst);
+            let exp = if type_has_param(&st, &params) { None } else { Some(st) };
+            let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
+            unify(&params, pty, &ta.ty, &mut subst)?;
+            typed.push(ta);
         }
         let tail = &args[required_n..];
         let tail_locs = arg_locs.get(required_n..).unwrap_or(&[]);
+
+        // `supplied_keys`/`supplied_opts` hold pass 1's already-checked
+        // values (unify already applied) — pass 2 below only needs to fill
+        // in whatever they're missing, using the now-final `subst`.
+        let mut supplied_keys: HashMap<String, Typed> = HashMap::new();
+        let mut opt_supplied_n = 0usize;
+        let mut opt_supplied: Vec<Typed> = Vec::new();
+        let mut rest_typed: Vec<Typed> = Vec::new();
 
         if !sig.keys.is_empty() {
             // `&key`: every trailing argument is a `:name value` pair,
@@ -6677,7 +6810,6 @@ impl Checker {
                     name
                 )));
             }
-            let mut supplied: HashMap<String, Typed> = HashMap::new();
             let mut i = 0;
             while i < tail.len() {
                 let kw_name = match tail[i] {
@@ -6698,52 +6830,41 @@ impl Checker {
                 let Some(key) = sig.keys.iter().find(|k| k.name == kw_name) else {
                     return Err(Error::TypeError(format!("{}: unknown keyword argument :{}", name, kw_name)));
                 };
-                if supplied.contains_key(&kw_name) {
+                if supplied_keys.contains_key(&kw_name) {
                     return Err(Error::TypeError(format!("{}: duplicate keyword argument :{}", name, kw_name)));
                 }
                 let val_loc = nth_loc(tail_locs, i + 1);
-                let checked = self.check_at(heap, interp, env, tail[i + 1], Some(&key.decl_ty), val_loc)?;
-                let final_val = if key.default.is_some() { checked } else { wrap_some(checked, key.decl_ty.clone()) };
-                supplied.insert(kw_name, final_val);
+                let st = subst_apply(&key.decl_ty, &subst);
+                let exp = if type_has_param(&st, &params) { None } else { Some(st) };
+                let checked = self.check_at(heap, interp, env, tail[i + 1], exp.as_ref(), val_loc)?;
+                unify(&params, &key.decl_ty, &checked.ty, &mut subst)?;
+                supplied_keys.insert(kw_name, checked);
                 i += 2;
-            }
-            for key in &sig.keys {
-                let val = match supplied.remove(&key.name) {
-                    Some(v) => v,
-                    None => match &key.default {
-                        Some(d) => d.clone(),
-                        None => option_none(key.effective_ty()),
-                    },
-                };
-                typed.push(val);
             }
         } else {
             // `&optional` (+ possibly `&rest`): filled strictly by position,
             // left to right — CL's own rule, and the reason `&key` can't
             // combine with it (see `Self::parse_defun_params_full`'s doc
             // comment).
-            let opt_supplied_n = tail.len().min(sig.optionals.len());
-            for (i, opt) in sig.optionals.iter().enumerate() {
-                let val = if i < opt_supplied_n {
-                    let checked = self.check_at(heap, interp, env, tail[i], Some(&opt.decl_ty), nth_loc(tail_locs, i))?;
-                    if opt.default.is_some() { checked } else { wrap_some(checked, opt.decl_ty.clone()) }
-                } else {
-                    match &opt.default {
-                        Some(d) => d.clone(),
-                        None => option_none(opt.effective_ty()),
-                    }
-                };
-                typed.push(val);
+            opt_supplied_n = tail.len().min(sig.optionals.len());
+            for (i, opt) in sig.optionals.iter().enumerate().take(opt_supplied_n) {
+                let st = subst_apply(&opt.decl_ty, &subst);
+                let exp = if type_has_param(&st, &params) { None } else { Some(st) };
+                let checked = self.check_at(heap, interp, env, tail[i], exp.as_ref(), nth_loc(tail_locs, i))?;
+                unify(&params, &opt.decl_ty, &checked.ty, &mut subst)?;
+                opt_supplied.push(checked);
             }
             let after_optionals = &tail[opt_supplied_n..];
             let after_optionals_locs = tail_locs.get(opt_supplied_n..).unwrap_or(&[]);
             match &sig.rest {
                 Some(elem_ty) => {
-                    let mut rest_typed = Vec::with_capacity(after_optionals.len());
                     for (i, arg) in after_optionals.iter().enumerate() {
-                        rest_typed.push(self.check_at(heap, interp, env, *arg, Some(elem_ty), nth_loc(after_optionals_locs, i))?);
+                        let st = subst_apply(elem_ty, &subst);
+                        let exp = if type_has_param(&st, &params) { None } else { Some(st) };
+                        let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(after_optionals_locs, i))?;
+                        unify(&params, elem_ty, &ta.ty, &mut subst)?;
+                        rest_typed.push(ta);
                     }
-                    typed.push(self.cons_rest_list(elem_ty, rest_typed)?);
                 }
                 None if !after_optionals.is_empty() => {
                     return Err(Error::TypeError(format!(
@@ -6757,8 +6878,82 @@ impl Checker {
             }
         }
 
-        let r = self.mk_ref(written.to_vec(), name.clone());
-        Ok(Typed { loc: None, expr: Expr::Call(r, typed), ty: sig.ret.clone() })
+        for p in &sig.type_params {
+            if !subst.contains_key(p) {
+                return Err(Error::TypeError(format!(
+                    "cannot infer type parameter `{}` for `{}`",
+                    p, name
+                )));
+            }
+        }
+        self.validate_where_bounds(&name.to_string(), &sig.bounds, &subst, &env.bounds)?;
+
+        // Monomorphization — same as `Self::check_call`'s identical block.
+        let mut call_path = name.clone();
+        let mut specialized = false;
+        if !sig.type_params.is_empty() && self.generic_fn_templates.contains_key(name) {
+            let targs: Vec<Type> = sig.type_params.iter().map(|p| subst[p.as_str()].clone()).collect();
+            if !targs.iter().any(|t| self.type_is_open(t)) {
+                call_path = self.request_fn_specialization(name, targs);
+                specialized = true;
+            }
+        }
+
+        // Pass 2: fill in whatever pass 1 left out, now that `subst` is
+        // final — a default expression's `.ty` is already concrete (`Self::
+        // check_defun_opt_key`'s restriction), so it's spliced in verbatim;
+        // an omitted defaultless parameter's `Option::none` is built fresh
+        // at `subst_apply(effective_ty)`, never reusing any earlier node.
+        if !sig.keys.is_empty() {
+            let mut supplied = supplied_keys;
+            for key in &sig.keys {
+                let val = match supplied.remove(&key.name) {
+                    Some(checked) => {
+                        if key.default.is_some() {
+                            checked
+                        } else {
+                            let target = checked.ty.clone();
+                            wrap_some(checked, target)
+                        }
+                    }
+                    None => match &key.default {
+                        Some(d) => d.clone(),
+                        None => option_none(subst_apply(&key.effective_ty(), &subst)),
+                    },
+                };
+                typed.push(val);
+            }
+        } else {
+            let mut opt_supplied = opt_supplied.into_iter();
+            for (i, opt) in sig.optionals.iter().enumerate() {
+                let val = if i < opt_supplied_n {
+                    let checked = opt_supplied.next().expect("one checked value per supplied optional");
+                    if opt.default.is_some() {
+                        checked
+                    } else {
+                        let target = checked.ty.clone();
+                        wrap_some(checked, target)
+                    }
+                } else {
+                    match &opt.default {
+                        Some(d) => d.clone(),
+                        None => option_none(subst_apply(&opt.effective_ty(), &subst)),
+                    }
+                };
+                typed.push(val);
+            }
+            if let Some(elem_ty) = &sig.rest {
+                let resolved = subst_apply(elem_ty, &subst);
+                typed.push(self.cons_rest_list(&resolved, rest_typed)?);
+            }
+        }
+
+        let r = if specialized {
+            Ref::synthetic(call_path)
+        } else {
+            self.mk_ref(written.to_vec(), call_path)
+        };
+        Ok(Typed { loc: None, expr: Expr::Call(r, typed), ty: subst_apply(&sig.ret, &subst) })
     }
 
     /// Call-site `where`-bound validation shared by [`Self::check_call`]
