@@ -440,7 +440,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 |---|---|---|
 | `load` | ⚠️ | fasl（チェック済みモジュール）優先ロード。CL の「ソースを読んで順に評価」とは意味が違う |
 | `require` / `provide` / `*modules*` | ⚠️ | `module`/`use`＋ファイル↔モジュール対応が相当 |
-| `*features*` / `#+` / `#-` | ❌ | **条件付きコンパイルが無い** |
+| `*features*` / `#+` / `#-` | ⚠️ | 2026-07-30実装。`#+`/`#-`（`and`/`or`/`not`合成式込み）をリーダに追加。`*features*`はCLと違い**読み込み中に書き換え不可の固定集合**（全フォームを読んでからチェック/評価する既存アーキテクチャのため）。デフォルトはホストOS/アーキテクチャ＋`:typelisp`、`typl`の`--feature NAME`で追加可能 |
 | `compile-file-pathname` / `*compile-file-pathname*` / `*load-pathname*` 等 | ❌ | |
 | `time` / `get-internal-real-time` / `get-internal-run-time` / `internal-time-units-per-second` | ❌ | **時間の計測手段が無い**（ベンチマークが書けない） |
 | `get-universal-time` / `get-decoded-time` / `encode-universal-time` / `decode-universal-time` | ❌ | **日時が扱えない** |

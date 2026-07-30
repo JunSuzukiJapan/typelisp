@@ -17,6 +17,7 @@
 //! quote `'`, quasiquote `` ` ``, unquote `,`, unquote-splicing `,@`, and
 //! comments (`;` line, `#| ... |#` nested block).
 
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::rc::Rc;
 
@@ -26,7 +27,70 @@ use num_rational::BigRational;
 use crate::name_lexer::{NameLexer, NameTok};
 use crate::{Error, Heap, Loc, SymId, Value};
 
-pub struct Reader;
+/// The feature set consulted by `#+`/`#-` reader conditionals (CLHS 24.1.2 —
+/// the closest an s-expression reader has to a preprocessor). A feature is
+/// named by its keyword spelling (`:darwin`, `:unix`, `:my-flag`, ...);
+/// membership is checked case-insensitively, matching `Heap::intern_symbol`'s
+/// own folding.
+///
+/// Unlike CL's `*features*` — an ordinary mutable special variable a program
+/// can `push`/`pushnew` into mid-file, so a later top-level form sees an
+/// earlier one's change — typelisp reads every top-level form of a file
+/// before checking or evaluating *any* of them (see `Reader::read_all_in` and
+/// callers such as `project::Loader`), so there is no live global left for
+/// `#+`/`#-` to consult while reading is still in progress. The set is
+/// therefore fixed per `Reader` instance: seeded from the host platform by
+/// [`Features::host`] and extendable with caller-supplied names via
+/// [`Reader::with_features`] (the `typl` CLI's `--feature` flag).
+#[derive(Clone, Debug, Default)]
+pub struct Features(HashSet<String>);
+
+impl Features {
+    /// The default set: `:typelisp`, the host architecture, and the host OS
+    /// — following the CL convention of keyword-named implementation/
+    /// platform features (e.g. SBCL's `:unix` / `:darwin` / `:x86-64`).
+    pub fn host() -> Features {
+        let mut set = HashSet::new();
+        set.insert(":typelisp".to_string());
+        set.insert(format!(":{}", std::env::consts::ARCH));
+        match std::env::consts::OS {
+            "macos" => {
+                set.insert(":darwin".to_string());
+                set.insert(":macos".to_string());
+            }
+            other => {
+                set.insert(format!(":{}", other));
+            }
+        }
+        if cfg!(unix) {
+            set.insert(":unix".to_string());
+        }
+        if cfg!(windows) {
+            set.insert(":windows".to_string());
+        }
+        Features(set)
+    }
+
+    /// This feature set with `extra` names also present, each folded to
+    /// lowercase and given a leading `:` if it doesn't already have one —
+    /// callers may pass either `"my-feature"` or `":my-feature"`.
+    pub fn with(mut self, extra: impl IntoIterator<Item = String>) -> Features {
+        for name in extra {
+            let name = name.to_lowercase();
+            let name = if name.starts_with(':') { name } else { format!(":{}", name) };
+            self.0.insert(name);
+        }
+        self
+    }
+
+    fn has(&self, name: &str) -> bool {
+        self.0.contains(name)
+    }
+}
+
+pub struct Reader {
+    features: Features,
+}
 
 impl Default for Reader {
     fn default() -> Reader {
@@ -35,8 +99,18 @@ impl Default for Reader {
 }
 
 impl Reader {
+    /// A reader whose `#+`/`#-` conditionals see only the host platform's
+    /// default features (see [`Features::host`]). Use [`Reader::with_features`]
+    /// to also recognize caller-supplied feature names.
     pub fn new() -> Reader {
-        Reader
+        Reader { features: Features::host() }
+    }
+
+    /// A reader whose `#+`/`#-` conditionals also recognize `extra` feature
+    /// names, in addition to the host defaults — e.g. the `typl` CLI's
+    /// `--feature` flag.
+    pub fn with_features(extra: impl IntoIterator<Item = String>) -> Reader {
+        Reader { features: Features::host().with(extra) }
     }
 
     /// Read a single datum from `src`. Trailing input is ignored.
@@ -52,7 +126,7 @@ impl Reader {
     pub fn read_in(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Value, Error> {
         heap.clear_cons_locs();
         let mut cur = Cursor::new(file, src);
-        read_datum(&mut cur, heap).map_err(|e| e.at(cur.loc()))
+        read_datum(&mut cur, heap, &self.features).map_err(|e| e.at(cur.loc()))
     }
 
     /// Read every top-level datum from `src`.
@@ -100,11 +174,13 @@ impl Reader {
         let mut cur = Cursor::new(file, src);
         let mut out = Vec::new();
         loop {
-            skip_ws_comments(&mut cur);
+            if let Err(e) = skip_ws_comments(&mut cur, heap, &self.features) {
+                return Err(e.at(cur.loc()));
+            }
             if cur.at_end() {
                 break;
             }
-            let (v, loc) = match read_datum_spanned(&mut cur, heap) {
+            let (v, loc) = match read_datum_spanned(&mut cur, heap, &self.features) {
                 Ok(pair) => pair,
                 Err(e) => return Err(e.at(cur.loc())),
             };
@@ -207,7 +283,7 @@ fn is_delim_or_eof(c: Option<char>) -> bool {
 // Whitespace & comments
 // ----------------------------------------------------------------------
 
-fn skip_ws_comments(cur: &mut Cursor) {
+fn skip_ws_comments(cur: &mut Cursor, heap: &mut Heap, features: &Features) -> Result<(), Error> {
     loop {
         match cur.peek() {
             Some(c) if is_ws(c) => {
@@ -224,8 +300,107 @@ fn skip_ws_comments(cur: &mut Cursor) {
             Some('#') if cur.peek2() == Some('|') => {
                 skip_block_comment(cur);
             }
+            Some('#') if matches!(cur.peek2(), Some('+') | Some('-')) => {
+                skip_feature_conditional(cur, heap, features)?;
+            }
             _ => break,
         }
+    }
+    Ok(())
+}
+
+/// Handle one `#+feature-expr` / `#-feature-expr` reader conditional (CLHS
+/// 24.1.2). Consumes the dispatch character and the sign, then reads the
+/// feature expression as an ordinary datum and evaluates it against
+/// `features` ([`eval_feature_expr`]).
+///
+/// When the test holds — `#+` and the expression is present, or `#-` and it
+/// isn't — the guarded form is left untouched for the caller to read
+/// normally, so it gets exactly the `Loc` an unguarded form would. When the
+/// test fails, the guarded form is read (so parens stay balanced, nested
+/// `#+`/`#-` inside it still apply) and discarded — it never becomes part of
+/// any result, exactly as if it had been whitespace.
+fn skip_feature_conditional(cur: &mut Cursor, heap: &mut Heap, features: &Features) -> Result<(), Error> {
+    cur.next(); // '#'
+    let want_present = match cur.next() {
+        Some('+') => true,
+        Some('-') => false,
+        c => unreachable!("skip_ws_comments only dispatches here on #+/#-, got {:?}", c),
+    };
+    let expr = read_datum(cur, heap, features)?;
+    let present = eval_feature_expr(heap, features, expr)?;
+    if present != want_present {
+        read_datum(cur, heap, features)?; // test failed: read and discard the guarded form
+    }
+    Ok(())
+}
+
+/// Evaluate a `#+`/`#-` feature expression against `features`: a bare keyword
+/// (e.g. `:darwin`) tests membership; `(and e...)`, `(or e...)`, `(not e)`
+/// combine nested feature expressions the same way CL does (CLHS 24.1.2).
+/// `heap` is only read from (symbol names, `car`/`cdr`), never allocated
+/// into.
+fn eval_feature_expr(heap: &Heap, features: &Features, v: Value) -> Result<bool, Error> {
+    match v {
+        Value::Symbol(id) => {
+            let name = heap.symbol_name(id);
+            if !name.starts_with(':') {
+                return Err(Error::ReadError(format!(
+                    "feature expression must be a keyword (e.g. `:darwin`) or an `(and/or/not ...)` form, found `{}`",
+                    name
+                )));
+            }
+            Ok(features.has(name))
+        }
+        Value::Cons(_) => {
+            let op_sym = heap.car(v)?;
+            let Value::Symbol(op_id) = op_sym else {
+                return Err(Error::ReadError(
+                    "feature expression list must start with `and`, `or`, or `not`".to_string(),
+                ));
+            };
+            let op = heap.symbol_name(op_id).to_string();
+            let mut operands = Vec::new();
+            let mut rest = heap.cdr(v)?;
+            loop {
+                match rest {
+                    Value::Empty => break,
+                    Value::Cons(_) => {
+                        operands.push(heap.car(rest)?);
+                        rest = heap.cdr(rest)?;
+                    }
+                    _ => return Err(Error::ReadError("feature expression must be a proper list".to_string())),
+                }
+            }
+            match op.as_str() {
+                "and" => {
+                    for o in operands {
+                        if !eval_feature_expr(heap, features, o)? {
+                            return Ok(false);
+                        }
+                    }
+                    Ok(true)
+                }
+                "or" => {
+                    for o in operands {
+                        if eval_feature_expr(heap, features, o)? {
+                            return Ok(true);
+                        }
+                    }
+                    Ok(false)
+                }
+                "not" => {
+                    if operands.len() != 1 {
+                        return Err(Error::ReadError("`not` feature expression takes exactly one operand".to_string()));
+                    }
+                    Ok(!eval_feature_expr(heap, features, operands[0])?)
+                }
+                other => Err(Error::ReadError(format!("unknown feature expression operator: `{}`", other))),
+            }
+        }
+        _ => Err(Error::ReadError(
+            "feature expression must be a keyword (e.g. `:darwin`) or an `(and/or/not ...)` form".to_string(),
+        )),
     }
 }
 
@@ -255,22 +430,22 @@ fn skip_block_comment(cur: &mut Cursor) {
 // Datum dispatch
 // ----------------------------------------------------------------------
 
-fn read_datum(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
-    skip_ws_comments(cur);
+fn read_datum(cur: &mut Cursor, heap: &mut Heap, features: &Features) -> Result<Value, Error> {
+    skip_ws_comments(cur, heap, features)?;
     match cur.peek() {
         None => Err(Error::ReadError("unexpected end of input".to_string())),
-        Some('(') => read_list(cur, heap),
+        Some('(') => read_list(cur, heap, features),
         Some(')') => Err(Error::UnmatchedParen),
-        Some('\'') => read_wrapped(cur, heap, "quote"),
-        Some('`') => read_wrapped(cur, heap, "quasiquote"),
+        Some('\'') => read_wrapped(cur, heap, features, "quote"),
+        Some('`') => read_wrapped(cur, heap, features, "quasiquote"),
         Some(',') => {
             let start = cur.loc(); // before the prefix, like read_wrapped
             cur.next(); // the ','
             if cur.peek() == Some('@') {
                 cur.next(); // the '@'
-                read_wrapped_body(cur, heap, "unquote-splicing", start)
+                read_wrapped_body(cur, heap, features, "unquote-splicing", start)
             } else {
-                read_wrapped_body(cur, heap, "unquote", start)
+                read_wrapped_body(cur, heap, features, "unquote", start)
             }
         }
         Some('"') => read_string(cur, heap),
@@ -288,11 +463,11 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
             // handled a level down, by `extend_angle_token` + the type
             // parser, since there is no datum boundary there at all.
             if matches!(v, Value::Symbol(id) if heap.symbol_name(id) == ":dyn") {
-                skip_ws_comments(cur);
+                skip_ws_comments(cur, heap, features)?;
                 if matches!(cur.peek(), None | Some(')')) {
                     return Err(Error::ReadError("`:dyn` must be followed by a trait name".to_string()));
                 }
-                return read_wrapped_body(cur, heap, ":dyn", start);
+                return read_wrapped_body(cur, heap, features, ":dyn", start);
             }
             Ok(v)
         }
@@ -304,10 +479,10 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
 /// own leading skip is a no-op) and the end right after the datum's last
 /// character — no read function consumes trailing whitespace, so the cursor
 /// sits exactly past the datum when `read_datum` returns.
-fn read_datum_spanned(cur: &mut Cursor, heap: &mut Heap) -> Result<(Value, Loc), Error> {
-    skip_ws_comments(cur);
+fn read_datum_spanned(cur: &mut Cursor, heap: &mut Heap, features: &Features) -> Result<(Value, Loc), Error> {
+    skip_ws_comments(cur, heap, features)?;
     let start = cur.loc();
-    let v = read_datum(cur, heap)?;
+    let v = read_datum(cur, heap, features)?;
     Ok((v, start.with_end(cur.line, cur.col)))
 }
 
@@ -318,10 +493,10 @@ fn read_datum_spanned(cur: &mut Cursor, heap: &mut Heap) -> Result<(Value, Loc),
 /// 2-element list) to [`read_wrapped_body`] — `,@` needs to consume *two*
 /// prefix characters (`,` then `@`), so its caller in [`read_datum`] does
 /// that part itself and calls `read_wrapped_body` directly.
-fn read_wrapped(cur: &mut Cursor, heap: &mut Heap, head: &str) -> Result<Value, Error> {
+fn read_wrapped(cur: &mut Cursor, heap: &mut Heap, features: &Features, head: &str) -> Result<Value, Error> {
     let start = cur.loc(); // the prefix character — where the whole form begins
     cur.next(); // the prefix character
-    read_wrapped_body(cur, heap, head, start)
+    read_wrapped_body(cur, heap, features, head, start)
 }
 
 /// Read `datum` and build `(head datum)`, the shared tail of [`read_wrapped`]
@@ -331,9 +506,9 @@ fn read_wrapped(cur: &mut Cursor, heap: &mut Heap, head: &str) -> Result<Value, 
 /// head cell's `cons_loc` spans prefix through datum end, the `head` symbol's
 /// `elem_loc` covers the prefix character(s), and the datum's `elem_loc` its
 /// own span.
-fn read_wrapped_body(cur: &mut Cursor, heap: &mut Heap, head: &str, start: Loc) -> Result<Value, Error> {
+fn read_wrapped_body(cur: &mut Cursor, heap: &mut Heap, features: &Features, head: &str, start: Loc) -> Result<Value, Error> {
     let head_loc = start.clone().with_end(cur.line, cur.col); // the consumed prefix
-    let (d, d_loc) = read_datum_spanned(cur, heap)?;
+    let (d, d_loc) = read_datum_spanned(cur, heap, features)?;
     let form_loc = start.with_end(cur.line, cur.col);
     heap.push_root(d);
     let q = heap.intern_symbol(head); // symbols are permanent; no rooting needed
@@ -360,7 +535,7 @@ fn read_wrapped_body(cur: &mut Cursor, heap: &mut Heap, head: &str, start: Loc) 
 // Lists & dotted pairs
 // ----------------------------------------------------------------------
 
-fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
+fn read_list(cur: &mut Cursor, heap: &mut Heap, features: &Features) -> Result<Value, Error> {
     let open_loc = cur.loc(); // position of the '(' — the list form's location
     cur.next(); // '('
     let mark = heap.root_count();
@@ -372,7 +547,10 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
     let mut tail = Value::Empty;
 
     loop {
-        skip_ws_comments(cur);
+        if let Err(e) = skip_ws_comments(cur, heap, features) {
+            restore_roots(heap, mark);
+            return Err(e);
+        }
         match cur.peek() {
             None => {
                 restore_roots(heap, mark);
@@ -389,7 +567,7 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
                     restore_roots(heap, mark);
                     return Err(Error::ReadError("dotted pair has no car".to_string()));
                 }
-                let d = match read_datum(cur, heap) {
+                let d = match read_datum(cur, heap, features) {
                     Ok(d) => d,
                     Err(e) => {
                         restore_roots(heap, mark);
@@ -398,7 +576,10 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
                 };
                 heap.push_root(d);
                 tail = d;
-                skip_ws_comments(cur);
+                if let Err(e) = skip_ws_comments(cur, heap, features) {
+                    restore_roots(heap, mark);
+                    return Err(e);
+                }
                 if cur.peek() == Some(')') {
                     cur.next();
                 } else {
@@ -408,7 +589,7 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap) -> Result<Value, Error> {
                 break;
             }
             Some(_) => {
-                let (e, elem_loc) = match read_datum_spanned(cur, heap) {
+                let (e, elem_loc) = match read_datum_spanned(cur, heap, features) {
                     Ok(pair) => pair,
                     Err(err) => {
                         restore_roots(heap, mark);

@@ -473,3 +473,103 @@ fn a_dyn_with_nothing_after_it_is_a_read_error() {
     let r = Reader::new();
     assert!(r.read_all(&mut h, "(f :dyn)").is_err(), "`:dyn` at the end of a list must not read");
 }
+
+// ---------------------------------------------------------------------
+// `#+`/`#-` reader conditionals (CL-style conditional compilation)
+// ---------------------------------------------------------------------
+
+fn read_all_with(features: Vec<&str>, src: &str) -> (Heap, Vec<Value>) {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::with_features(features.into_iter().map(str::to_string));
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    (h, vs)
+}
+
+fn shown(h: &Heap, vs: &[Value]) -> Vec<String> {
+    vs.iter().map(|v| show(h, *v)).collect()
+}
+
+#[test]
+fn plus_feature_conditional_keeps_the_form_when_present() {
+    let (h, vs) = read_all_with(vec!["debug"], "(a) #+:debug (b) (c)");
+    assert_eq!(shown(&h, &vs), vec!["(a)", "(b)", "(c)"]);
+}
+
+#[test]
+fn plus_feature_conditional_drops_the_form_when_absent() {
+    let (h, vs) = read_all_with(vec![], "(a) #+:debug (b) (c)");
+    assert_eq!(shown(&h, &vs), vec!["(a)", "(c)"]);
+}
+
+#[test]
+fn minus_feature_conditional_inverts_the_test() {
+    let (h, vs) = read_all_with(vec!["debug"], "(a) #-:debug (b) (c)");
+    assert_eq!(shown(&h, &vs), vec!["(a)", "(c)"]);
+
+    let (h, vs) = read_all_with(vec![], "(a) #-:debug (b) (c)");
+    assert_eq!(shown(&h, &vs), vec!["(a)", "(b)", "(c)"]);
+}
+
+#[test]
+fn feature_expression_supports_and_or_not() {
+    let (h, vs) = read_all_with(vec!["a", "b"], "#+(and :a :b) (yes) #+(and :a :missing) (no)");
+    assert_eq!(shown(&h, &vs), vec!["(yes)"]);
+
+    let (h, vs) = read_all_with(vec!["a"], "#+(or :missing :a) (yes)");
+    assert_eq!(shown(&h, &vs), vec!["(yes)"]);
+
+    let (h, vs) = read_all_with(vec![], "#+(not :missing) (yes)");
+    assert_eq!(shown(&h, &vs), vec!["(yes)"]);
+}
+
+#[test]
+fn feature_conditional_as_a_list_element() {
+    let (h, vs) = read_all_with(vec![], "(a b #+:missing c d)");
+    assert_eq!(shown(&h, &vs), vec!["(a b d)"]);
+}
+
+#[test]
+fn feature_conditional_as_the_last_element_before_close_paren() {
+    let (h, vs) = read_all_with(vec![], "(a b #+:missing c)");
+    assert_eq!(shown(&h, &vs), vec!["(a b)"]);
+}
+
+#[test]
+fn dropping_a_conditional_form_still_requires_it_to_read_cleanly() {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::with_features(Vec::<String>::new());
+    // The unbalanced paren inside the discarded form must still surface as a
+    // read error — a failed `#+` doesn't degrade to "skip to end of line".
+    assert!(r.read_all(&mut h, "#+:missing (a (b) (a").is_err());
+}
+
+#[test]
+fn host_features_include_the_implementation_name() {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, "#+:typelisp (yes)").unwrap();
+    assert_eq!(shown(&h, &vs), vec!["(yes)"]);
+}
+
+#[test]
+fn feature_names_are_extended_not_replaced() {
+    // `with_features` adds to the host defaults rather than overriding them.
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::with_features(vec!["my-flag".to_string()]);
+    let vs = r.read_all(&mut h, "#+(and :typelisp :my-flag) (yes)").unwrap();
+    assert_eq!(shown(&h, &vs), vec!["(yes)"]);
+}
+
+#[test]
+fn unknown_feature_operator_is_a_read_error() {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::new();
+    assert!(r.read_all(&mut h, "#+(xor :a :b) (form)").is_err());
+}
+
+#[test]
+fn non_keyword_feature_expression_is_a_read_error() {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::new();
+    assert!(r.read_all(&mut h, "#+not-a-keyword (form)").is_err());
+}

@@ -32,18 +32,49 @@ fn main() -> rustyline::Result<()> {
     // neither the subcommand dispatch nor the file-name search below trips
     // over its numeric argument.
     let (heap_cells, args) = parse_heap_cells(args);
+    // A global, repeatable `--feature NAME` (or `--feature=NAME`) adds a
+    // `#+`/`#-` reader-conditional feature on top of the host platform
+    // defaults (see `Features::host`) — typelisp's equivalent of pushing onto
+    // CL's `*features*` before loading.
+    let (features, args) = parse_features(args);
     // `typl compile-module <file.typl> [-o out.fasl]` — precompile a source
     // file to a fasl (see `crate::fasl` / `compile_module`), for
     // fasl-preferred `(load)`.
     if args.first().map(String::as_str) == Some("compile-module") {
-        std::process::exit(compile_module(&args[1..], heap_cells));
+        std::process::exit(compile_module(&args[1..], heap_cells, features));
     }
     // Otherwise the first non-flag argument names a source file to run;
     // with none, start the REPL.
     if let Some(file) = args.iter().find(|a| !a.starts_with("--")) {
-        std::process::exit(run_file(file, heap_cells));
+        std::process::exit(run_file(file, heap_cells, features));
     }
-    repl(heap_cells)
+    repl(heap_cells, features)
+}
+
+/// Parses zero or more `--feature NAME` / `--feature=NAME` flags out of
+/// `args`, returning the accumulated feature names (in the order given) and
+/// the remaining arguments with every occurrence removed. A later duplicate
+/// of the same name is harmless — `Features::with` inserts into a set.
+fn parse_features(args: Vec<String>) -> (Vec<String>, Vec<String>) {
+    let mut features = Vec::new();
+    let mut rest = Vec::with_capacity(args.len());
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        if a == "--feature" {
+            match it.next() {
+                Some(v) => features.push(v),
+                None => {
+                    eprintln!("--feature: needs a feature name");
+                    std::process::exit(1);
+                }
+            }
+        } else if let Some(v) = a.strip_prefix("--feature=") {
+            features.push(v.to_string());
+        } else {
+            rest.push(a);
+        }
+    }
+    (features, rest)
 }
 
 /// Parses a global `--heap-cells N` / `--heap-cells=N` flag out of `args`,
@@ -92,7 +123,7 @@ fn parse_heap_cells_value(v: &str) -> usize {
 /// Does *not* run the file's top-level expressions (only registrations are
 /// captured — a `TopLevel::Expr` in the source is a compile error, since a
 /// fasl is a module of definitions, not a script). Returns an exit code.
-fn compile_module(args: &[String], heap_cells: usize) -> i32 {
+fn compile_module(args: &[String], heap_cells: usize, features: Vec<String>) -> i32 {
     let mut input: Option<&str> = None;
     let mut output: Option<String> = None;
     let mut it = args.iter();
@@ -131,7 +162,7 @@ fn compile_module(args: &[String], heap_cells: usize) -> i32 {
     };
 
     let mut heap = Heap::with_capacity(heap_cells);
-    let reader = Reader::new();
+    let reader = Reader::with_features(features);
     let mut checker = Checker::new();
     checker.set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
@@ -207,9 +238,9 @@ fn compile_module(args: &[String], heap_cells: usize) -> i32 {
 /// Load and execute `file` (and, transitively, whatever its `use`s pull in).
 /// Returns the process exit code. Top-level expression results are not
 /// printed — printing is the REPL's affordance; a script prints via `print`.
-fn run_file(file: &str, heap_cells: usize) -> i32 {
+fn run_file(file: &str, heap_cells: usize, features: Vec<String>) -> i32 {
     let mut heap = Heap::with_capacity(heap_cells);
-    let reader = Reader::new();
+    let reader = Reader::with_features(features);
     let mut checker = Checker::new();
     checker.set_redef_policy(parse_redef_policy());
     let mut interp = Interp::new();
@@ -263,9 +294,9 @@ fn run_file(file: &str, heap_cells: usize) -> i32 {
     0
 }
 
-fn repl(heap_cells: usize) -> rustyline::Result<()> {
+fn repl(heap_cells: usize, features: Vec<String>) -> rustyline::Result<()> {
     let mut heap = Heap::with_capacity(heap_cells);
-    let reader = Reader::new();
+    let reader = Reader::with_features(features);
     // The checker lives behind a shared `RefCell` so the interpreter can reach
     // it to type-check a runtime `(eval ...)` form (`Interp::eval_form`), while
     // the REPL keeps checking each new line through the same cell. Every
