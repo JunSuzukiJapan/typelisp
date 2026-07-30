@@ -78,7 +78,8 @@ take the same name.")
     ;; function values & application (§6)
     "lambda" "labels" "apply"
     ;; other special forms (§7)
-    "setf" "list" "quote" "quasiquote" "unquote" "unquote-splicing"
+    "setf" "incf" "decf" "rotatef" "shiftf"
+    "list" "quote" "quasiquote" "unquote" "unquote-splicing"
     "panic" "unreachable" "todo" "as" "try-as" "compile" "documentation"
     ;; formatted output — special forms so that each variadic argument keeps
     ;; its own type on the way into `Sexpr' (functions.md §15)

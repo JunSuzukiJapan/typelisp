@@ -416,7 +416,17 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 ## 7. その他の特殊形
 
 ```lisp
-(setf place value)                  ; 変数への代入。place は変数名または var::field
+(setf place value)                  ; place への代入。place は 変数名 / var::field /
+                                     ; (accessor recv key...) 形の呼び出し形。recv の静的な
+                                     ; 型が set-{accessor} というインスタンスメソッドを
+                                     ; 持てば成立（Vector<T>・HashTable<K,V> の get は
+                                     ; 例外的に set が対応、それ以外は set-アクセサ名）
+(incf place)  (incf place delta)    ; place += delta（省略時 delta=1）。結果は setf 同様
+(decf place)  (decf place delta)    ; place -= delta（省略時 delta=1）
+(rotatef place1 place2 ... placeN)  ; N個の place を巡回シフト（新place1=旧place2, ...,
+                                     ; 新placeN=旧place1）。各 place の部分式は1回だけ評価
+(shiftf place1 ... placeN newvalue) ; place2..N の値を左へシフトし、newvalue を placeN へ。
+                                     ; 戻り値は旧 place1 の値
 (list e1 e2 ... en)                 ; (cons e1 (cons e2 (... (Nil)))) への展開。0引数なら Nil
                                      ; 各要素は Sexpr へ暗黙変換される（CL のcons同様、任意の値を
                                      ; 保持できる）: スカラ(i32/f64/bignum/ratio/char/bool/string/

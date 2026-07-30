@@ -152,9 +152,11 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | CL | 状態 | 備考 |
 |---|---|---|
 | `values` / `values-list` / `multiple-value-bind` / `multiple-value-call` / `multiple-value-list` / `multiple-value-prog1` / `multiple-value-setq` / `nth-value` | ⛔ | **多値が無い**。`(values ...)` という名前は `HashTable` のメソッドとして別用途で使われている。複数の結果は `cons-cell` か `defstruct` で返す |
-| `setf` | ⚠️ | 実装済みだが **place は「変数」と「変数::フィールド」の2種のみ**。ユーザ定義の setf 展開子（`defsetf`/`define-setf-expander`）も無く、`(setf (aref a i) v)`/`(setf (gethash k h) v)`/`(setf (car x) v)` のような「関数呼び出し形の place」は書けない |
-| `psetf` / `psetq` / `setq` / `shiftf` / `rotatef` | ❌ | 上の place 機構が要る |
-| `incf` / `decf` / `push` / `pop` / `pushnew` / `remf` | ❌ | 同上（`push`/`pop` は `Vector<T>` のメソッドとして同名で存在するが、CL の place マクロとは別物） |
+| `setf` | ⚠️ | 実装済み。place は「変数」「変数::フィールド」に加え、**`(accessor recv key...)` 形の呼び出し形 place** も 2026-07-30 対応（`Checker::check_setf_call_place`）。CL の `defsetf`/`define-setf-expander`（実行時のグローバルな名前→名前の登録テーブル）に相当する仕組みは無いが不要——`recv` の静的な型はチェック時にすでに分かっているので、`変数::field`＝`field`/`set-field` と同じ規約をそのまま流用し、`recv` の型が `set-{accessor}` という名のインスタンスメソッドを持っていればそれを setter として使う。ユーザ定義型は `defmethod set-foo ...` を書くだけで任意のアクセサ名 `foo` を setf 可能にでき、しかも型ごとに独立（CL のグローバル1本の名前テーブルと違い、別の型が同じアクセサ名を別の setter に割り当てても衝突しない）。`Vector<T>`/`HashTable<K,V>` の `get`→`set`（`set-get` ではない）は既存 API 互換のための特例。CL の `(setf (gethash k h) v)`/`(setf (aref a i) v)` に相当するものはこれで書ける（例: `(setf (get h k) v)`）。`(setf (car x) v)` 相当は無い（`Sexpr` の cons セルは `p::car` フィールド place で書く） |
+| `psetf` / `psetq` / `setq` | ❌ | 上の place 機構はあるが、この3つ自体は未実装 |
+| `shiftf` / `rotatef` | ✅ | 2026-07-30 実装（`Checker::check_rotatef_shiftf`）。上記どの place 種でも使えるが、読み取り型と書き込み型が非対称な place（`HashTable<K,V>` の `get`→`Option<V>`／`set`→`V`）をまたぐ回転は型エラーになる（CL の untyped `gethash` と違い静的型があるため） |
+| `incf` / `decf` | ✅ | 2026-07-30 実装（`Checker::check_incf_decf`）。`delta` 省略時は `1` |
+| `push` / `pop` | ⚠️ | `Vector<T>` のメソッドとして存在（`(push vec item)`、受け手が先）。2026-07-30、`(push item vec)` という CL の引数順も同名のまま両立するようにした（`Checker::try_instance_method_swapped` — 通常の受け手優先解決が失敗した場合だけ引数を入れ替えて再試行する2引数汎用フォールバック）。`Vector<T>` は参照型（ヒープ上で直接変異）なので CL のような setf 展開は不要。`pushnew` / `remf` は未実装 |
 | `block` / `return-from` | ⚠️ | `return` はあるが **直近のループからしか脱出できない**。名前付きブロックも関数からの早期リターンも無い |
 | `tagbody` / `go` | ⛔ | goto |
 | `catch` / `throw` | ⛔ | (D3) |
@@ -464,8 +466,11 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 2. **関数の `&optional` / `&key`** — `defmacro` には実装済み（2026-07-24）だが `defun`/`lambda` は
    `&rest` のみ。このため CL のシーケンス API の `:key`/`:test`/`:start`/`:end`、
    `make-hash-table :test`、BOA コンストラクタなどが**構造的に書けない**。
-3. **汎用 place（`setf` 展開子）** — 現在の place は変数と `変数::field` の2つだけ。
-   `incf`/`decf`/`push`/`pop`/`rotatef`/`(setf (gethash ...))` 等はこれが要る。
+3. ~~**汎用 place（`setf` 展開子）**~~ — 2026-07-30 解消。place は変数・`変数::field` に加え
+   `(accessor recv key...)` 形の呼び出し形（`recv` の静的型が `set-{accessor}` を持てば任意の
+   アクセサ名で成立、ユーザ定義型も対象）に対応、`incf`/`decf`/`rotatef`/`shiftf`/
+   `(setf (get ...))` を実装（詳細は §2.3 の該当行）。`defsetf`/`define-setf-expander` の
+   ような実行時登録テーブルは意図的に作っていない——静的型を使えばそれ自体が要らない。
 4. **多値** — `floor` の商と剰余、`gethash` の存在フラグ、`read-from-string` の読み終わり位置など、
    CL の API 設計は多値を前提にしている箇所が多い。typelisp は `Option`/`cons-cell` で個別に
    回避しているが、CL コードの移植では毎回書き換えが要る（`gethash` 相当は `get`→`Option<V>` で

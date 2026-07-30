@@ -5,7 +5,7 @@
 //! integer type and a nullary `None` learns its type argument), while everything
 //! else synthesizes its own type and is reconciled against the expectation.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
 use std::rc::Rc;
@@ -593,6 +593,13 @@ pub struct Checker {
     /// LSP's semantic tokens. A `RefCell` for the same reason as
     /// `loop_stack`/`warnings`: annotation parsing runs under `&self`.
     type_uses: RefCell<Vec<TypeUse>>,
+    /// Monotonic counter for the synthetic temporary names `Self::place_dedup`
+    /// mints (e.g. `%place-tmp-3`) when desugaring `incf`/`decf`/`rotatef`/
+    /// `shiftf` over a call-form place. Prefixed with a character the reader
+    /// never produces in an identifier, so a temporary can never collide
+    /// with a name written in source — no uniqueness check needed beyond
+    /// incrementing this counter.
+    place_tmp_counter: Cell<u32>,
 }
 
 impl Checker {
@@ -613,6 +620,7 @@ impl Checker {
             spec_pending: RefCell::new(Vec::new()),
             type_var_bindings: HashMap::new(),
             type_uses: RefCell::new(Vec::new()),
+            place_tmp_counter: Cell::new(0),
         }
     }
 
@@ -1250,7 +1258,8 @@ impl Checker {
         matches!(
             name,
             // expression special forms (`check_list`)
-            "if" | "let" | "let*" | "progn" | "setf" | "loop" | "break" | "return" | "list"
+            "if" | "let" | "let*" | "progn" | "setf" | "incf" | "decf" | "rotatef" | "shiftf"
+                | "loop" | "break" | "return" | "list"
                 | "lambda" | "labels" | "match" | "panic" | "the" | "as" | "try-as" | "compile"
                 | "quote" | "quasiquote" | "format" | "print" | "println"
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
@@ -4953,6 +4962,10 @@ impl Checker {
                 return Ok(Typed { loc: None, expr: Expr::Let(Vec::new(), body), ty });
             }
             "setf" => return self.check_setf(heap, interp, env, args, arg_locs),
+            "incf" => return self.check_incf_decf(heap, interp, env, args, "+"),
+            "decf" => return self.check_incf_decf(heap, interp, env, args, "-"),
+            "rotatef" => return self.check_rotatef_shiftf(heap, interp, env, args, false),
+            "shiftf" => return self.check_rotatef_shiftf(heap, interp, env, args, true),
             "loop" => return self.check_loop(heap, interp, env, args, arg_locs),
             "break" => return self.check_break(args),
             "return" => return self.check_return(heap, interp, env, args, arg_locs),
@@ -5039,6 +5052,8 @@ impl Checker {
                 arg_locs,
             )
         } else if let Some(result) = self.try_instance_method(heap, interp, env, &head, args, arg_locs) {
+            result
+        } else if let Some(result) = self.try_instance_method_swapped(heap, interp, env, &head, args, arg_locs) {
             result
         } else if let Some(fq) = self.resolve_fn(&head) {
             self.check_call(heap, interp, env, std::slice::from_ref(&head), &fq, args, arg_locs)
@@ -6191,8 +6206,18 @@ impl Checker {
         Ok(Typed { loc: None, expr: Expr::Let(vec![(name, val)], vec![inner]), ty })
     }
 
-    /// `(setf var value)`: assign to a bound variable. The value must match the
-    /// variable's type; the expression evaluates to that value.
+    /// `(setf place value)`: three kinds of `place` are recognized — a bound
+    /// variable, `var::field` (`Self::check_field_set`), and a call-form
+    /// place `(accessor recv key...)` (`Self::check_setf_call_place`), this
+    /// project's stand-in for CL's `(setf (gethash k h) v)`/`(setf (aref a
+    /// i) v)`: `recv`'s statically-known type just needs an instance method
+    /// named `set-{accessor}` (the builtin containers' literal `get`/`set`
+    /// is a kept-for-compatibility special case — see that function's doc
+    /// comment for why no `defsetf`-style *registration* form is needed at
+    /// all here). For the variable/global case, the value must match the
+    /// variable's type; the expression evaluates to that value (the
+    /// call-form case instead evaluates to whatever the setter itself
+    /// returns — see `check_setf_call_place`'s doc comment).
     fn check_setf(
         &self,
         heap: &mut Heap,
@@ -6202,7 +6227,7 @@ impl Checker {
         arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
         if args.len() != 2 {
-            return Err(Error::TypeError("setf: (setf var value)".into()));
+            return Err(Error::TypeError("setf: (setf place value)".into()));
         }
         let value_loc = nth_loc(arg_locs, 1);
         if let Value::Path(pid) = args[0] {
@@ -6213,9 +6238,14 @@ impl Checker {
                 .collect();
             return self.check_field_set(heap, interp, env, &segs, args[1], value_loc);
         }
+        if let Value::Cons(_) = args[0] {
+            return self.check_setf_call_place(heap, interp, env, args[0], args[1]);
+        }
         let name = match args[0] {
             Value::Symbol(id) => heap.symbol_name(id).to_string(),
-            _ => return Err(Error::TypeError("setf: target must be a variable".into())),
+            _ => return Err(Error::TypeError(
+                "setf: target must be a variable, `var::field`, or a `(get recv key...)` call form".into(),
+            )),
         };
         if let Some(ty) = env.get(&name).cloned() {
             let value = self.check_at(heap, interp, env, args[1], Some(&ty), value_loc)?;
@@ -6279,6 +6309,292 @@ impl Checker {
             std::slice::from_ref(&value),
             &[value_loc],
         )
+    }
+
+    /// `(setf (accessor recv key...) value)`: this project's analogue of
+    /// CL's `(setf (gethash k h) v)`/`(setf (aref a i) v)` — a call-form
+    /// place. Unlike CL's `defsetf`/`define-setf-expander` (a *runtime*
+    /// name-to-name registry, needed because Lisp-2 function names carry no
+    /// type), no separate registration form or registry exists here: `recv`
+    /// is checked first (`Self::check_at`) to learn its *static* type, then
+    /// the setter is resolved the same way `Self::check_field_set` resolves
+    /// a struct field's setter — by looking for an instance method named
+    /// `set-{accessor}` on that type. Any user type opts in just by
+    /// defining that method (e.g. `defmethod get`/`defmethod set-get` for a
+    /// `foo` accessor's `set-foo`), and — since resolution is keyed by
+    /// `(type, name)` rather than by name alone — two unrelated types may
+    /// reuse the same accessor name with unrelated setters, something CL's
+    /// single global table cannot do. The `get`/`set` (not `set-get`) pair
+    /// both builtin containers (`Vector<T>`, `HashTable<K,V>`) already ship
+    /// is kept as a literal fallback for backward compatibility rather than
+    /// renaming their existing `set` method. The result is whatever the
+    /// setter itself returns (`Unit` for the two builtin containers) rather
+    /// than the newly stored value — the same `Unit`-typed shortfall
+    /// `Self::check_field_set`'s synthesized setter already has, kept for
+    /// consistency rather than giving the two call-form/field place kinds
+    /// different result-type rules.
+    fn check_setf_call_place(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        place: Value,
+        value: Value,
+    ) -> Result<Typed, Error> {
+        let items = heap
+            .list_to_vec(place)
+            .map_err(|_| Error::TypeError("setf: place must be a proper list".into()))?;
+        let Some((head, rest)) = items.split_first() else {
+            return Err(Error::TypeError("setf: empty place".into()));
+        };
+        let Value::Symbol(head_id) = *head else {
+            return Err(Error::TypeError("setf: place's head must be a function name".into()));
+        };
+        let accessor = heap.symbol_name(head_id).to_string();
+        let Some((recv_form, key_args)) = rest.split_first() else {
+            return Err(Error::TypeError(format!("setf: `({} ...)` place needs a receiver argument", accessor)));
+        };
+        let recv = self.check_at(heap, interp, env, *recv_form, None, None)?;
+        let Type::Named(type_fq, _) = &recv.ty else {
+            return Err(Error::TypeError(format!("setf: {:?} has no settable accessor `{}`", recv.ty, accessor)));
+        };
+        let type_fq = type_fq.clone();
+        let mut candidates = vec![format!("set-{}", accessor)];
+        if accessor == "get" {
+            candidates.push("set".to_string());
+        }
+        let setter = candidates.iter().find(|name| {
+            self.reg
+                .type_def(&type_fq)
+                .and_then(|d| d.assoc.get(name.as_str()))
+                .is_some_and(|af| af.instance && self.assoc_visible(&type_fq, af))
+        });
+        let Some(setter) = setter else {
+            let tried = candidates.iter().map(|s| format!("`{}`", s)).collect::<Vec<_>>().join(" or ");
+            return Err(Error::TypeError(format!("setf: `{}` has no setter for `{}` (looked for {})", type_fq, accessor, tried)));
+        };
+        let mut call_args: Vec<Value> = key_args.to_vec();
+        call_args.push(value);
+        let arg_locs = vec![None; call_args.len()];
+        self.check_assoc_call(
+            heap,
+            interp,
+            env,
+            AssocCall { type_fq: &type_fq, method: setter, receiver: Some(recv), expected: None },
+            &call_args,
+            &arg_locs,
+        )
+    }
+
+    /// Mints a synthetic name guaranteed never to collide with a
+    /// user-written identifier — prefixed with `%`, a character the reader
+    /// never produces inside a symbol token — for the temporaries
+    /// `Self::place_dedup` binds. Monotonic per-`Checker`, so nested/
+    /// repeated `incf`/`rotatef`/`shiftf` expansions within one checking run
+    /// never reuse a name.
+    fn gensym_place(&self) -> String {
+        let n = self.place_tmp_counter.get();
+        self.place_tmp_counter.set(n + 1);
+        format!("%place-tmp-{}", n)
+    }
+
+    /// Splits `place` into (a) a list of `(temp-name, subform)` bindings
+    /// that evaluate each of `place`'s own subexpressions exactly once, and
+    /// (b) a rewritten copy of `place` that reads only those temporaries.
+    /// A variable/`var::field` place has no subexpressions to duplicate (its
+    /// receiver, if any, is already required to be a bare bound name — see
+    /// `Checker::check_field_set`) so it comes back with an empty binding
+    /// list and itself unchanged; a call-form place `(get recv key...)`
+    /// binds `recv` and every `key` argument.
+    ///
+    /// This is what lets `Self::check_incf_decf`/`Self::check_rotatef_shiftf`
+    /// reference a call-form place *twice* — once to read its current value,
+    /// once to write the new one — without evaluating an impure `recv`/`key`
+    /// subform (e.g. `(get (next-table!) (compute-key!))`) more than once,
+    /// matching CL's `get-setf-expansion` guarantee.
+    fn place_dedup(&self, heap: &mut Heap, place: Value) -> Result<(Vec<(Value, Value)>, Value), Error> {
+        match place {
+            Value::Symbol(_) | Value::Path(_) => Ok((Vec::new(), place)),
+            Value::Cons(_) => {
+                let items = heap
+                    .list_to_vec(place)
+                    .map_err(|_| Error::TypeError("place: must be a proper list".into()))?;
+                let Some((head, rest)) = items.split_first() else {
+                    return Err(Error::TypeError("place: empty call form".into()));
+                };
+                let mut bindings = Vec::new();
+                let mut new_items = vec![*head];
+                for sub in rest {
+                    let tmp_sym = heap.intern_symbol(&self.gensym_place());
+                    bindings.push((tmp_sym, *sub));
+                    new_items.push(tmp_sym);
+                }
+                let pairs: Vec<(Value, Option<Loc>)> = new_items.into_iter().map(|v| (v, None)).collect();
+                let new_place = self.list_from_vec_locs(heap, &pairs)?;
+                Ok((bindings, new_place))
+            }
+            _ => Err(Error::TypeError(
+                "place: target must be a variable, `var::field`, or a `(get recv key...)` call form".into(),
+            )),
+        }
+    }
+
+    /// Wraps `body` in `(let* ((name0 val0) (name1 val1) ...) body)`, or
+    /// returns `body` unchanged when `bindings` is empty — the sequential-
+    /// binding counterpart `Self::place_dedup`'s temporaries need (a later
+    /// binding's `val` may itself reference the current place's own earlier
+    /// temporaries, e.g. `Self::check_rotatef_shiftf`'s value-reading
+    /// bindings reference the just-bound subform temporaries).
+    fn wrap_let_star(&self, heap: &mut Heap, bindings: Vec<(Value, Value)>, body: Value) -> Result<Value, Error> {
+        if bindings.is_empty() {
+            return Ok(body);
+        }
+        let mut binding_pairs = Vec::with_capacity(bindings.len());
+        for (name, val) in bindings {
+            let pair = self.list_from_vec_locs(heap, &[(name, None), (val, None)])?;
+            binding_pairs.push((pair, None));
+        }
+        let bindings_list = self.list_from_vec_locs(heap, &binding_pairs)?;
+        let let_star_sym = heap.intern_symbol("let*");
+        self.list_from_vec_locs(heap, &[(let_star_sym, None), (bindings_list, None), (body, None)])
+    }
+
+    /// `(incf place)` / `(incf place delta)` and `(decf place)` /
+    /// `(decf place delta)`: CL's increment/decrement-a-place macros.
+    /// Implemented directly against `Checker::check_setf`'s place
+    /// vocabulary rather than as a `prelude.rs` `defmacro` — `setf` is a
+    /// protected builtin form (`Self::is_builtin_form_head`) a `defmacro`
+    /// expansion could never call into otherwise. `delta` defaults to the
+    /// integer literal `1`; `Self::place_dedup` guarantees a call-form
+    /// place's subexpressions are evaluated exactly once even though the
+    /// expansion below reads `place` and then writes it.
+    fn check_incf_decf(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        op: &str,
+    ) -> Result<Typed, Error> {
+        let form_name = if op == "+" { "incf" } else { "decf" };
+        if args.is_empty() || args.len() > 2 {
+            return Err(Error::TypeError(format!("{}: ({} place) or ({} place delta)", form_name, form_name, form_name)));
+        }
+        let delta = args.get(1).copied().unwrap_or(Value::Int(1));
+        let (bindings, place) = self.place_dedup(heap, args[0])?;
+        let op_sym = heap.intern_symbol(op);
+        let value_form = self.list_from_vec_locs(heap, &[(op_sym, None), (place, None), (delta, None)])?;
+        let setf_sym = heap.intern_symbol("setf");
+        let setf_form = self.list_from_vec_locs(heap, &[(setf_sym, None), (place, None), (value_form, None)])?;
+        let expansion = self.wrap_let_star(heap, bindings, setf_form)?;
+        heap.push_root(expansion);
+        let result = self.check(heap, interp, env, expansion, None);
+        heap.pop_root();
+        result
+    }
+
+    /// `(rotatef place...)` / `(shiftf place... newvalue)`: CL's cyclic
+    /// place-rotation macros, sharing one implementation since `shiftf` is
+    /// `rotatef` with a final "place" that's an ordinary value expression
+    /// instead of a place, and with the first place's *old* value returned
+    /// instead of `()`. Each place is read into a fresh temporary (via
+    /// `Self::place_dedup` + one more temporary per place for its current
+    /// value) before any write happens, then written in rotated order —
+    /// exactly CL's "all subforms left-to-right, then all the assignments"
+    /// sequencing, so e.g. `(rotatef (get t 0) (get t 1))` on a two-element
+    /// vector swaps them correctly even though both places share the same
+    /// receiver `t`.
+    fn check_rotatef_shiftf(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        is_shift: bool,
+    ) -> Result<Typed, Error> {
+        let (place_args, newvalue): (&[Value], Option<Value>) = if is_shift {
+            let Some((last, rest)) = args.split_last() else {
+                return Err(Error::TypeError("shiftf: (shiftf place... newvalue)".into()));
+            };
+            if rest.is_empty() {
+                return Err(Error::TypeError("shiftf: (shiftf place... newvalue)".into()));
+            }
+            (rest, Some(*last))
+        } else {
+            (args, None)
+        };
+
+        let mut all_bindings: Vec<(Value, Value)> = Vec::new();
+        let mut places: Vec<Value> = Vec::new();
+        for p in place_args {
+            let (b, np) = self.place_dedup(heap, *p)?;
+            all_bindings.extend(b);
+            places.push(np);
+        }
+        let mut value_names: Vec<Value> = Vec::new();
+        for p in &places {
+            let name = heap.intern_symbol(&self.gensym_place());
+            all_bindings.push((name, *p));
+            value_names.push(name);
+        }
+        let nv_name = if let Some(nv) = newvalue {
+            let name = heap.intern_symbol(&self.gensym_place());
+            all_bindings.push((name, nv));
+            Some(name)
+        } else {
+            None
+        };
+
+        let n = places.len();
+        let setf_sym = heap.intern_symbol("setf");
+        let mut body_forms: Vec<Value> = Vec::with_capacity(n + 1);
+        for i in 0..n {
+            let target = if i + 1 < n {
+                value_names[i + 1]
+            } else if let Some(nvn) = nv_name {
+                nvn
+            } else {
+                value_names[0]
+            };
+            body_forms.push(self.list_from_vec_locs(heap, &[(setf_sym, None), (places[i], None), (target, None)])?);
+        }
+        body_forms.push(if is_shift { value_names.first().copied().unwrap_or(Value::Empty) } else { Value::Empty });
+
+        let progn_sym = heap.intern_symbol("progn");
+        let mut progn_items: Vec<(Value, Option<Loc>)> = vec![(progn_sym, None)];
+        progn_items.extend(body_forms.into_iter().map(|f| (f, None)));
+        let body = self.list_from_vec_locs(heap, &progn_items)?;
+        let expansion = self.wrap_let_star(heap, all_bindings, body)?;
+        heap.push_root(expansion);
+        let result = self.check(heap, interp, env, expansion, None);
+        heap.pop_root();
+        result
+    }
+
+    /// A same-named 2-argument instance method may be defined with the
+    /// receiver in *either* position — e.g. this project's own `Vector<T>`
+    /// method `push` takes the vector first (`(push vec item)`, the
+    /// "receiver first" convention every instance-method call in this
+    /// language otherwise uses — see `Self::try_instance_method`'s doc
+    /// comment), while `push` is also CL's place macro, item first
+    /// (`(push item place)`). Tried only after the receiver-first order has
+    /// already failed to resolve, so it never shadows the primary
+    /// convention when both would apply.
+    fn try_instance_method_swapped(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        method: &str,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Option<Result<Typed, Error>> {
+        if args.len() != 2 {
+            return None;
+        }
+        let swapped_args = [args[1], args[0]];
+        let swapped_locs = [nth_loc(arg_locs, 1), nth_loc(arg_locs, 0)];
+        self.try_instance_method(heap, interp, env, method, &swapped_args, &swapped_locs)
     }
 
     /// `(defvar (name Type) value)` / `(defconstant (name Type) value)`.

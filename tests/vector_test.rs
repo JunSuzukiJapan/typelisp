@@ -170,3 +170,45 @@ fn vector_of_sexpr_gets_elements_back_as_sexprs() {
                  (sexpr-int (get v 1)))";
     assert_eq!(eval_ok(src), RtValue::Int(42));
 }
+
+// ---- CL-order `push`/setf-able `(get ...)` place -----------------------------
+
+#[test]
+fn push_accepts_cl_argument_order_too() {
+    // `(push item place)`, CL's own argument order, resolves via
+    // `Checker::try_instance_method_swapped` once the receiver-first
+    // `(push vec item)` convention fails to match.
+    let src = "(defun make-v () Vector<i32> (Vector::new))
+               (let ((v (make-v)))
+                 (push 1 v)
+                 (push v 2)
+                 (push 3 v)
+                 (get v 2))";
+    assert_eq!(eval_ok(src), RtValue::Int(3));
+}
+
+#[test]
+fn setf_get_writes_through_a_vector_element() {
+    let src = "(defun make-v () Vector<i32> (Vector::new))
+               (let ((v (make-v)))
+                 (push v 1)
+                 (push v 2)
+                 (setf (get v 0) 99)
+                 (get v 0))";
+    assert_eq!(eval_ok(src), RtValue::Int(99));
+}
+
+#[test]
+fn incf_on_a_call_form_place_evaluates_the_index_exactly_once() {
+    // If `(incf (get v (progn (setf idx (+ idx 1)) idx)) 10)` evaluated the
+    // index subform twice, the read and the write would land on different
+    // indices (0 then 1) and `v[0]` would stay `10` — the double-eval bug
+    // `Checker::place_dedup` exists to prevent.
+    let src = "(defun make-v () Vector<i32> (Vector::new))
+               (let ((v (make-v)) (idx -1))
+                 (push v 10)
+                 (push v 20)
+                 (incf (get v (progn (setf idx (+ idx 1)) idx)) 10)
+                 (get v 0))";
+    assert_eq!(eval_ok(src), RtValue::Int(20));
+}

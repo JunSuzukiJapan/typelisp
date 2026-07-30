@@ -4941,3 +4941,77 @@ CL の `(documentation 'name 'function)` は型引数で名前空間の曖昧性
 
 editor/emacs・editor/vscode の特殊形一覧に `documentation` を追加（`tests/editor_keyword_sync_test.rs`
 のセンチネル間スキャンで自動的に検出される対象）。
+
+## 汎用 place 機構（`incf`/`decf`/`rotatef`/`shiftf`/呼び出し形 `setf`、2026-07-30）
+
+`docs/dev/cl-missing-classes-and-methods.md` §3 で最高優先の欠落機構として挙げられていた
+「place は変数と `変数::field` の2種のみ」を解消。CLHS 相当の `incf`/`decf`/`push`/`pop`/
+`rotatef`/`shiftf`/`(setf (gethash ...))` が書けない状態から、`defsetf` 相当の完全な拡張性は
+持たないまま実用範囲まで引き上げた。
+
+### place の3種類目: `(accessor recv key...)` 呼び出し形
+
+`Checker::check_setf`（`src/check/checker.rs`）の `args[0]` 分岐に、既存の `Value::Symbol`
+（変数）・`Value::Path`（`var::field`、`check_field_set`）に加え `Value::Cons`（呼び出し形）を
+追加。当初は `get`/`set` という命名規約1本をハードコードしていたが、レビューで「静的型を
+うまく使えないか」という指摘を受けて設計を変えた——CL の `defsetf`/`define-setf-expander` は
+Lisp-2 の**グローバルな関数名前空間**にアクセサ名→更新関数を登録する実行時テーブルだが、
+このプロジェクトの呼び出しは元々 `recv` の型ごとに解決される（`try_instance_method`）。
+`Checker::check_setf_call_place` は `recv`（呼び出し形の第1引数）をまず `check_at` で
+チェックしてその**静的型**を求め、`var::field` が `field`/`set-field` という規約で
+`check_field_set` から解決しているのと同じやり方で、その型が `set-{accessor}` という
+インスタンスメソッドを持てばそれを setter として使う。ユーザ定義型は `defmethod set-foo`
+を書くだけで任意のアクセサ名 `foo` を setf 可能にでき、しかも `(type, name)` で引くので
+別々の型が同じアクセサ名を無関係な setter に割り当てても衝突しない——CL のグローバル1本の
+テーブルにはできないことができる。`Vector<T>`/`HashTable<K,V>` が既に持つ `get`→`set`
+（`set-get` ではない）は既存 API 互換のための特例フォールバックとして残した。この設計だと
+`defsetf` のような**登録フォーム自体が要らない**——静的型が最初から分かっているので、CL の
+「実行時テーブルを引く」というステップがまるごと不要になる。
+
+### `incf`/`decf`/`rotatef`/`shiftf`: なぜ `defmacro` でなく checker 内蔵か
+
+`setf` は `is_builtin_form_head` で保護された組み込み特殊形（ユーザの `defmacro` で上書き
+不可）なので、`defmacro` 展開からは `setf` を呼べない。このため4つとも `prelude.rs` ではなく
+`Checker::check_incf_decf`/`Checker::check_rotatef_shiftf`（`src/check/checker.rs`）に実装し、
+`is_builtin_form_head`・`check_list` の SPECIAL-FORM DISPATCH に登録した。実装方式自体は
+defmacro と同じ「読み取り済み `Value` を組み立てて `self.check` に投げ直す」パターン
+（`heap.intern_symbol`/`heap.cons`/既存の `Checker::list_from_vec_locs`）で、新しい `Expr`
+バリアントは一切追加していない——`let*`/`setf`/`progn`/`+`/`-` の再帰展開だけで完結する。
+
+呼び出し形 place を2回（読み取り1回・書き込み1回）参照する必要がある（`incf`/`rotatef`/
+`shiftf` はどれも「今の値を読んでから書く」形）ため、`recv`/`key...` を毎回評価し直すと
+CL の `get-setf-expansion` が禁じている二重評価になる。`Checker::place_dedup` が
+`(get recv key...)` を一度だけ評価する `let*` 束縛（`%place-tmp-N`、リーダーが絶対に生成
+しない `%` プレフィックスなのでユーザコードと衝突しない）に分解し、`Checker::wrap_let_star`
+がそれを結果の式に被せる。変数・`var::field` place は束縛不要（`var::field` の受け手は
+`check_field_set` の制約で常に裸の変数名なので副作用の心配が無い）。
+
+`rotatef`/`shiftf` は共有の `Checker::check_rotatef_shiftf` に統合——`shiftf` は「最後の
+place が通常の値式になり、先頭 place の旧値を返す `rotatef`」として書ける。全 place の
+部分式を先に評価してから全代入を行う、という CLHS の逐次評価順序をそのまま守っている。
+
+### `push`/`pop`: 同名のまま両立させた引数順
+
+`push`/`pop` という名前は既に `Vector<T>` のインスタンスメソッド（`(push vec item)`、
+受け手が先）として prelude・examples 全体（15箇所以上）で使われており、CL の
+`(push item place)`（要素が先）は名前も一致するため単純に defmacro 化すると全既存呼び出しを
+壊す。ユーザの選択（「defmethod の仕組みを使えば両立できる」）に従い、`push` を型ベースで
+多重ディスパッチする一般的なフォールバックとして実装——`Checker::try_instance_method_swapped`
+が、通常の受け手優先解決（`try_instance_method`、`args[0]` の型でメソッド解決）が失敗した
+場合に限り、2引数呼び出しの引数を入れ替えてもう一度試す。`Vector<T>` は参照型（ヒープ上の
+struct を直接変異、`heap.struct_push_field`）なので、どちらの引数順で解決されても実行時の
+意味は同じ——CL のような setf 展開は元から不要。この仕組みは `push` に限定していない汎用の
+2引数フォールバックなので、他の同名衝突が将来起きても同じ経路で解決される。
+
+### テスト
+
+`tests/place_test.rs`（新規、19件）: `incf`/`decf`（delta 省略時1・戻り値・呼び出し形
+place の型不整合が正しく型エラーになること）、`rotatef`/`shiftf`（2/3変数・単一 place・
+0個の place・呼び出し形 place の二重評価回避）、呼び出し形 `setf`（`HashTable` 書き込み・
+setter が無いアクセサの拒否・変数でも `var::field` でも呼び出し形でもない place の拒否・
+`defstruct`＋手書き `defmethod at`/`set-at` によるユーザ定義アクセサ名での place 動作）を
+検証。`tests/vector_test.rs` に3件追加: CL の引数順 `push`、`Vector` 要素への呼び出し形
+`setf`、`incf` の呼び出し形 place がインデックス式を1回しか評価しないこと。
+
+editor/emacs・editor/vscode の特殊形一覧に `incf`/`decf`/`rotatef`/`shiftf` を追加
+（`tests/editor_keyword_sync_test.rs` のセンチネル間スキャンで自動検出される対象）。
