@@ -789,3 +789,51 @@ CLHS の `eval` に準拠する: **現在の大域環境**（グローバルの�
   （CL の condition system は typelisp に無いため、これが最も近い挙動）。
 - **名前空間**: `typl file.typl` 実行時、`eval` はそのスクリプトのファイル由来モジュール名前空間で
   評価される（スクリプト自身のグローバルが見える）。REPL はルート名前空間で評価する。
+
+## 17. docstring / `documentation`（Common Lisp 準拠）
+
+`defun`/`defmethod`（`impl` 内も含む）/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
+`deftrait` は docstring を持てる。位置は CL のそれぞれの規則にそのまま従う:
+
+| フォーム | docstring の位置 |
+|---|---|
+| `defun` / `defmethod` / `defmacro` | 本体の先頭（戻り値型・`where` 節の後）。ただし後ろに本体フォームが最低1つ続く場合のみ——単独の文字列は戻り値のまま |
+| `defvar` / `defconstant` | 初期値の**後ろ**: `(defvar (name Type) value "doc")` |
+| `defstruct` / `defenum` | 名前の**直後**、フィールド/バリアント列の前 |
+| `deftrait` | 名前の直後、アイテム列の前。トレイト全体に1つ（個々のメソッドの docstring は `impl` 側の `defmethod` が持つ） |
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `documentation` | `(documentation name)` | （特殊形。`name` は裸シンボルまたは `Type::method`）→`Option<string>` | `name` の docstring を返す |
+
+`documentation` は `quote`/`compile` と同様の特殊形（`name` を評価せず、未評価の名前として読む）。
+CL の `(documentation 'name 'function)` と異なり型引数を取らない代わりに、裸名を**変数→関数→型→
+トレイト→マクロ**の順（式として評価するときの裸識別子の優先順位と同じ）で解決する。`Type::method`
+の形なら関連メソッド/静的メソッドの docstring を引く。
+
+```lisp
+(defun square ((n i32)) i32
+  "Returns n squared."
+  (* n n))
+
+(unwrap-or (documentation square) "no docs")   ; => "Returns n squared."
+
+(defstruct point
+  "A 2D point."
+  (x i32)
+  (y i32))
+
+(unwrap-or (documentation point) "no docs")    ; => "A 2D point."
+```
+
+**check 時に定数へ畳み込まれる**: `documentation` はランタイムのルックアップを一切行わない
+（`Checker` は常にどの定義を指しているか静的に分かるため）。名前が何の定義にも解決できない場合は
+check 時のエラー（未定義変数参照などと同様）。解決はできたが docstring が無い場合のみ `Option::none`。
+
+**対象外**:
+- `(setf documentation)`（docstring の実行時書き換え）は無い。
+- モジュール修飾された自由名（`mod::name`。`Type::method` は対応）は非対応。
+- `deftrait` 内の個々のメソッド宣言（本体を持たないシグネチャ）は docstring を持てない。
+
+LSP のホバーにも統合されている: 定義済みの名前にカーソルを合わせると、型の下に docstring が
+表示される（`src/check/locate.rs` の `doc_for`/`hover_text`）。

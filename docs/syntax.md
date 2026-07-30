@@ -88,12 +88,21 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - トレイト境界を要求する場合は本体の直前に `where` 節を書く:
   `(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
   （`(AssocName ConcreteType)` による関連型の固定は省略可能）。
+- **docstring**: `where` 節（あれば）の直後、本体の先頭に文字列リテラルを置くと docstring になる
+  （CL 準拠）。ただし後ろに本体フォームが最低1つ続く場合のみ——単独の文字列は戻り値のままで
+  docstring とは区別されない: `(defun f () string "doc" "value")` は docstring 付きで `"value"` を
+  返すが、`(defun f () string "value")` は docstring なしで `"value"` を返す。
+  `(documentation name)` で取り出せる（§ documentation）。
 
 ### defvar / defconstant — グローバル変数
 
 ```lisp
 (defvar (name Type) init-expr)
 (defconstant (name Type) init-expr)
+
+; docstring 付き（CL の defvar/defparameter/defconstant と同じ順序: 値の後ろ）
+(defvar (name Type) init-expr "doc")
+(defconstant (name Type) init-expr "doc")
 ```
 
 型注釈は必須（初期化式から推論しない）。`defvar` は書き換え可能、`defconstant` は不可（`setf` でエラー）。
@@ -108,7 +117,9 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 (defmethod name (Type (arg Type2) ...) RetType body...)
 ```
 
-呼び出し側は `obj` の静的型からメソッドを解決する（単一・静的ディスパッチ）。
+呼び出し側は `obj` の静的型からメソッドを解決する（単一・静的ディスパッチ）。`defun` と同じ位置・
+同じ規則で docstring を置ける（`where` 節の直後、本体の先頭、後ろに本体フォームが続く場合のみ）。
+`impl` 内のメソッドも同様——`(documentation Type::method)` で取り出す。
 
 ### defstruct — 構造体（ユーザ定義型）
 
@@ -131,6 +142,9 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   - ゲッター `(field-name instance)`、糖衣構文 `instance::field-name`
   - セッター `(set-field-name instance value)`、糖衣構文 `(setf instance::field-name value)`
 - 構造体自体を `pub` にするには `(pub defstruct ...)` のように先頭に `pub` を付ける。
+- **docstring**: 名前の直後、フィールド列の前に文字列リテラルを置くと docstring になる
+  （`(defstruct Name "doc" (field Type)...)` — CL の `defstruct` と同じ位置）。フィールドは常に
+  `(name Type)` の形で裸の文字列にはなり得ないため曖昧性は無い。`(documentation Name)` で取り出す。
 
 ### defenum — 列挙型（直和型・ユーザ定義タグ付き共用体）
 
@@ -158,6 +172,8 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   ```
 - メソッド/関連関数は `defstruct` と同様に `defmethod`/`impl` で後付けする。
 - 列挙型自体を `pub` にするには `(pub defenum ...)` と書く。
+- **docstring**: `defstruct` と同じ位置・同じ規則——名前の直後、バリアント列の前
+  （`(defenum Name "doc" (Variant ...)...)`）。`(documentation Name)` で取り出す。
 
 ### deftrait / impl — トレイト機構
 
@@ -173,6 +189,11 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 
 `impl` によって各メソッドは `TargetType` の通常の `defmethod` として登録される。ジェネリック関数の
 `where` 節でトレイト境界として参照する（§ defun 参照）。
+
+**docstring**: `deftrait` は名前の直後、アイテム列の前に文字列リテラルを置くとトレイト全体に1つ
+docstring を持てる（`(deftrait Name "doc" (type ...) (method ...)...)`）。CL の `defgeneric` 同様、
+個々のメソッド宣言（本体を持たないシグネチャ）には docstring を持たせない——各メソッドの docstring
+は `impl` 側の `defmethod` 本体（§ defmethod）が持つ。
 
 `prelude.rs` は標準トレイト **`Iter`**（`next`／関連型 `Item`。`doiter`／シーケンス関数の基盤）・
 **`Eq`**（`equals`／`not-equals`）・**`Ord`**（`less`／`less-equal`／`greater`／`greater-equal`）を
@@ -404,6 +425,7 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
                                      ; まま retype（実行時コストなし）。&rest/format引数も同様。
 (quote datum)                       ; 'datum と同義。評価せず Sexpr データとして返す
 (quasiquote template)               ; `template と同義。,/,@ でテンプレート内に式を埋め込む
+(documentation name)                ; name（裸名または Type::method）の docstring を Option<string> で返す
 (panic message)                     ; message: string。回復不能なエラーで異常終了。型は !
 (unreachable)                       ; (panic "unreachable") に展開。defmacro
 (todo)                              ; (panic "todo") に展開。defmacro
@@ -428,6 +450,14 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 `as` は panic・`try-as` は `None`、それ以外（拡大変換や `float->int` 等の切り捨て）は常に成功する。
 内部的には対応する変換メソッド（functions.md の `int->char`/`int->bignum`/`bignum->int` 等）へ
 展開される糖衣構文。
+
+`documentation` は `quote`/`compile` と同様、`name` を評価せず未評価の裸シンボル/`::`パスとして
+読む特殊形。CL の `(documentation 'name 'function)` と違い型引数は取らない——`name` を変数→関数→型
+→トレイト→マクロの順（裸識別子を式として評価するときと同じ優先順位）で解決し、見つかった定義の
+docstring を返す（`(documentation Type::method)` はメソッド専用）。解決自体に失敗する（そんな名前の
+定義が無い）のは check 時のエラー、定義はあるが docstring が無い場合は `Option::none`。すべて check
+時に定数として畳み込まれる——実行時のルックアップは発生しない（checker は常にどこへ解決するか知って
+いるため）。モジュール修飾された自由名（`mod::name`、`Type::method` を除く）は現状非対応。
 
 ## 8. エラー処理の方針
 

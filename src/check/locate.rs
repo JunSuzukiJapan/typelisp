@@ -22,7 +22,7 @@
 //! form's end (or in macro-synthesized trees) resolving to *something*
 //! rather than nothing — `completion_locals` depends on that.
 
-use crate::{CompileTarget, DefLocs, Expr, Loc, Pattern, Registry, TopLevel, Typed};
+use crate::{CompileTarget, DefLocs, Docs, Expr, Loc, Pattern, Registry, TopLevel, Typed};
 
 /// The innermost candidates seen so far during [`locate_node`]'s walk: one
 /// among nodes whose span truly contains the cursor, one among nodes that
@@ -191,13 +191,38 @@ pub fn definition_target(node: &Typed, def_locs: &DefLocs) -> Option<Loc> {
     }
 }
 
-/// Hover text for `node`: its checked type. `Type` has no `Display` impl
-/// anywhere in this crate — every existing type-mismatch message already
-/// formats it with `{:?}` (e.g. `Checker::check`'s "type mismatch: expected
-/// {:?}, found {:?}") — so this matches that existing convention rather than
-/// introducing a pretty-printer.
-pub fn hover_text(node: &Typed) -> String {
-    format!("{:?}", node.ty)
+/// `node`'s docstring, if it's a reference to a documented definition —
+/// [`definition_target`]'s `Docs` counterpart, over the identical set of
+/// resolved-`Path`-carrying `Expr` variants (a `Var` local has no docstring
+/// of its own, so unlike `definition_target` there's no `DefLocs::local_refs`
+/// analog to fall back to there).
+pub fn doc_for<'a>(node: &Typed, docs: &'a Docs) -> Option<&'a str> {
+    match &node.expr {
+        Expr::Global(r) | Expr::SetGlobal(r, _) => docs.vars.get(&r.resolved),
+        Expr::FnRef(r) | Expr::Call(r, _) => docs.fns.get(&r.resolved),
+        Expr::MethodRef { type_name, method, .. } | Expr::Assoc { type_name, method, .. } => {
+            docs.methods.get(&(type_name.clone(), method.clone()))
+        }
+        Expr::Construct { type_name, .. } => docs.types.get(type_name),
+        Expr::CompileFn(CompileTarget::Fn(r)) => docs.fns.get(&r.resolved),
+        Expr::CompileFn(CompileTarget::Method { type_name, method, .. }) => docs.methods.get(&(type_name.clone(), method.clone())),
+        _ => None,
+    }
+    .map(|s| s.as_str())
+}
+
+/// Hover text for `node`: its checked type, plus its docstring (if any) —
+/// `doc_for`'s result appended below a blank line, the conventional LSP
+/// hover shape (signature/type first, prose after). `Type` has no `Display`
+/// impl anywhere in this crate — every existing type-mismatch message
+/// already formats it with `{:?}` (e.g. `Checker::check`'s "type mismatch:
+/// expected {:?}, found {:?}") — so this matches that existing convention
+/// rather than introducing a pretty-printer.
+pub fn hover_text(node: &Typed, docs: &Docs) -> String {
+    match doc_for(node, docs) {
+        Some(doc) => format!("{:?}\n\n{}", node.ty, doc),
+        None => format!("{:?}", node.ty),
+    }
 }
 
 /// Every local (`let`/`let*`/`lambda`/`labels` binding, or a `defun`/

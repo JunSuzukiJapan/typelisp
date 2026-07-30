@@ -405,6 +405,7 @@ fn diagnostics_for(
             file: file.to_string(),
             body,
             def_locs: checker.registry().def_locs.clone(),
+            docs: checker.registry().docs.clone(),
             tokens: file_type_tokens(&checker.take_type_uses(), file),
         })
     } else {
@@ -430,6 +431,9 @@ struct Analysis {
     file: String,
     body: Vec<TopLevel>,
     def_locs: DefLocs,
+    /// A snapshot of `Registry::docs` as of the same check — `hover_text`'s
+    /// docstring lookup, alongside `def_locs`.
+    docs: Docs,
     /// The semantic tokens of this document's last successful check: every
     /// position where the checker *resolved* a user-defined type or trait
     /// name, with its exact span (`Checker::take_type_uses` -> `semantic::
@@ -492,7 +496,7 @@ fn handle_hover(id: RequestId, params: serde_json::Value, analyses: &HashMap<Uri
         // the type applies to. A degenerate span (macro-synthesized node)
         // would highlight a stray single character — omit the range instead.
         let range = node.loc.as_ref().filter(|l| !l.is_degenerate()).map(loc_to_range);
-        let hover = Hover { contents: HoverContents::Scalar(MarkedString::String(hover_text(node))), range };
+        let hover = Hover { contents: HoverContents::Scalar(MarkedString::String(hover_text(node, &analysis.docs))), range };
         Some(serde_json::to_value(hover).expect("Hover always serializes"))
     })();
     Response { id, result, error: None }

@@ -222,6 +222,46 @@ fn fasl_loaded_prelude_diagnoses_type_errors_identically() {
     assert_eq!(format!("{:?}", src_err), format!("{:?}", fasl_err));
 }
 
+/// A docstring survives a fasl round trip: capture a small documented
+/// module on top of the fasl-loaded prelude (the same shape a dependent
+/// source file's own module fasl takes — `Checker::registry().docs`
+/// diffed via `registry_mark`, same as `def_locs`), reload it into a fresh
+/// environment built *entirely* from fasls (no source at all beyond the
+/// module's own defun body), and confirm `(documentation add)` still
+/// resolves — the scenario `FASL_FORMAT_VERSION` bump 15's doc comment
+/// warns a stale pre-15 cache would silently break.
+#[test]
+fn fasl_capture_preserves_docstrings_for_documentation() {
+    let prelude = prelude_fasl();
+
+    let (mut h, mut chk, interp) = fasl_loaded(&prelude);
+    let mark = registry_mark(&chk);
+    let src = r#"
+        (defun add ((x i32) (y i32)) i32
+          "Adds two integers."
+          (+ x y))
+    "#;
+    let r = Reader::new();
+    let forms = r.read_all(&mut h, src).expect("read");
+    let mut top_levels = Vec::new();
+    for v in forms {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check");
+        interp.exec(&mut h, tl.clone()).expect("exec");
+        top_levels.push(tl);
+    }
+    let module_fasl = Fasl::capture(&h, &chk, &mark, top_levels, source_hash(src)).expect("capture");
+    let bytes = module_fasl.to_bytes().expect("to_bytes");
+    let module_fasl = Fasl::from_bytes(&bytes).expect("from_bytes");
+
+    // A fresh environment assembled purely from fasls — prelude, then the
+    // module — with no source read at all.
+    let (mut fh, mut fc, mut fi) = fasl_loaded(&prelude);
+    module_fasl.load_into(&mut fh, &mut fc, &mut fi).expect("module load_into");
+
+    let result = eval_in(&mut fh, &mut fc, &mut fi, r#"(unwrap-or (documentation add) "none")"#).expect("eval");
+    assert_eq!(result, RtValue::Str("Adds two integers.".into()));
+}
+
 /// Completion candidates (prelude functions/macros) are the same set whether
 /// the prelude was loaded from source or a fasl — proving the `RegistryDelta`
 /// carries the full definition surface the LSP surfaces.

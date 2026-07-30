@@ -464,8 +464,12 @@ struct MethodSig {
     /// `(where (Eq A) (Eq B))` for its recursive field comparisons).
     bounds: HashMap<String, Vec<TraitBound>>,
     /// Index of the first body form in the `defmethod` parts: 4 when a
-    /// `where` clause is present, 3 otherwise.
+    /// `where` clause is present, 3 otherwise (plus 1 more if a leading
+    /// docstring was also consumed — see `doc`).
     body_start: usize,
+    /// A leading docstring right before the body, if present — same rule as
+    /// a free `defun`'s (`Checker::take_leading_docstring`).
+    doc: Option<String>,
 }
 
 /// The synthetic `TopLevel::Module` path under which `check_form` bundles
@@ -1966,7 +1970,7 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
-        let (params, param_locs, rest, ret, bounds, body_start) = self.parse_defun_sig(heap, parts, parts_locs)?;
+        let (params, param_locs, rest, ret, bounds, body_start, doc) = self.parse_defun_sig(heap, parts, parts_locs)?;
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
         let fq_name = self.fq(&name);
 
@@ -2004,6 +2008,9 @@ impl Checker {
         self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
         if let Some(loc) = def_loc {
             self.reg.def_locs.fns.insert(fq_name.clone(), loc);
+        }
+        if let Some(doc) = doc {
+            self.reg.docs.fns.insert(fq_name.clone(), doc);
         }
 
         // The body additionally sees the `&rest` parameter (if any) bound to
@@ -2090,6 +2097,10 @@ impl Checker {
                 body_start = 4;
             }
         }
+        let doc = self.take_leading_docstring(heap, parts, body_start);
+        if doc.is_some() {
+            body_start += 1;
+        }
 
         self.check_redef("function", &name, self.cur_ns().fns.get(&name))?;
 
@@ -2149,6 +2160,9 @@ impl Checker {
         self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
         if let Some(loc) = def_loc {
             self.reg.def_locs.fns.insert(fq_name.clone(), loc);
+        }
+        if let Some(doc) = doc {
+            self.reg.docs.fns.insert(fq_name.clone(), doc);
         }
 
         // Runtime params, in declared order: required, then `&optional`
@@ -2221,8 +2235,10 @@ impl Checker {
         heap: &Heap,
         parts: &[Value],
         parts_locs: &[Option<Loc>],
-    ) -> Result<(Vec<(String, Type)>, Vec<Option<Loc>>, Option<RestParam>, Type, HashMap<String, Vec<TraitBound>>, usize), Error>
-    {
+    ) -> Result<
+        (Vec<(String, Type)>, Vec<Option<Loc>>, Option<RestParam>, Type, HashMap<String, Vec<TraitBound>>, usize, Option<String>),
+        Error,
+    > {
         if parts.len() < 3 {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
@@ -2236,7 +2252,11 @@ impl Checker {
                 body_start = 4;
             }
         }
-        Ok((params, param_locs, rest, ret, bounds, body_start))
+        let doc = self.take_leading_docstring(heap, parts, body_start);
+        if doc.is_some() {
+            body_start += 1;
+        }
+        Ok((params, param_locs, rest, ret, bounds, body_start, doc))
     }
 
     // ---- monomorphization ---------------------------------------------------
@@ -2520,7 +2540,7 @@ impl Checker {
         // the bounds branch), and the bounds' own validity was already
         // verified at the call site that requested this instantiation
         // (`check_call`'s where-clause validation).
-        let (params, _param_locs, rest, ret, _bounds, body_start) = self.parse_defun_sig(heap, &tmpl.parts, &[])?;
+        let (params, _param_locs, rest, ret, _bounds, body_start, _doc) = self.parse_defun_sig(heap, &tmpl.parts, &[])?;
         let mut params = params;
         if let Some((rname, _, _)) = &rest {
             params.push((rname.clone(), sexpr_ty()));
@@ -2703,6 +2723,21 @@ impl Checker {
             && matches!(heap.list_to_vec(v)?.first(), Some(Value::Symbol(id)) if heap.symbol_name(*id) == "where"))
     }
 
+    /// Peeks `parts[at]` for a leading docstring — CL's rule for `defun`/
+    /// `defmacro`/`defmethod`: a string literal right before the body is a
+    /// docstring only when at least one more body form follows it, since a
+    /// *lone* trailing string is the function's return value, not
+    /// documentation, and the two are otherwise indistinguishable. Used by
+    /// `Self::parse_defun_sig`, `Self::check_defun_opt_key`,
+    /// `Self::parse_defmethod_sig` and `Self::check_defmacro`, each of which
+    /// bumps its own `body_start` by one when this returns `Some`.
+    fn take_leading_docstring(&self, heap: &Heap, parts: &[Value], at: usize) -> Option<String> {
+        match parts.get(at) {
+            Some(Value::Str(id)) if parts.len() > at + 1 => Some(heap.string(*id).to_string()),
+            _ => None,
+        }
+    }
+
     /// `(where (Trait1 T1 (Assoc1 Concrete1)...) (Trait2 T2)...)`: trait
     /// bounds on a generic `defun`'s type parameters, keyed by parameter
     /// name, each optionally pinning one or more of that trait's associated
@@ -2843,6 +2878,11 @@ impl Checker {
         if let Some(loc) = def_loc {
             self.reg.def_locs.macros.insert(fq_name.clone(), loc);
         }
+        let doc = self.take_leading_docstring(heap, parts, 2);
+        let body_start = if doc.is_some() { 3 } else { 2 };
+        if let Some(doc) = doc {
+            self.reg.docs.macros.insert(fq_name.clone(), doc);
+        }
 
         // Every parameter — and the macro's implicit result — is `Sexpr`. A
         // default-value form is checked against `Sexpr` in an environment
@@ -2870,8 +2910,8 @@ impl Checker {
         }
 
         let env = Env::new().extended(bindings);
-        let body_locs = parts_locs.get(2..).unwrap_or(&[]);
-        let (body, _) = self.check_seq(heap, interp, &env, &parts[2..], body_locs, Some(&sexpr_ty))?;
+        let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
+        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&sexpr_ty))?;
         let lambda = MacroLambda { required: required_names.len(), optionals: opt_defaults, keys: key_defaults };
         Ok(TopLevel::Defmacro { name: fq_name, params, body, rest, lambda, public })
     }
@@ -3275,6 +3315,15 @@ impl Checker {
             _ => return Err(Error::TypeError("deftrait: name must be a symbol".into())),
         };
         let fq_name = self.fq(&name);
+        // A leading docstring, right after the name and before the item
+        // list — one per trait (CL's `defgeneric` docstring lives on the
+        // generic function as a whole, not per method; individual `impl`
+        // methods get their own via `Checker::check_defmethod`'s leading
+        // docstring instead).
+        let (doc, item_start) = match parts.get(1) {
+            Some(Value::Str(id)) => (Some(heap.string(*id).to_string()), 2),
+            _ => (None, 1),
+        };
         self.check_redef("trait", &name, self.cur_ns().traits.get(&name))?;
         self.check_type_trait_clash("trait", &name)?;
         // Pre-register a stub under `fq_name` *before* parsing the method
@@ -3299,7 +3348,7 @@ impl Checker {
         let mut methods = HashMap::new();
         // Source order, kept alongside `methods` for vtable slot numbering.
         let mut method_order: Vec<String> = Vec::new();
-        for item in &parts[1..] {
+        for item in &parts[item_start..] {
             let elem_locs = heap.list_to_vec_locs(*item)?;
             let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
             let head = match elems.first() {
@@ -3349,6 +3398,9 @@ impl Checker {
             .insert(name.clone(), TraitDef { name: fq_name.clone(), assoc_types, methods, method_order, public, builtin: false });
         if let Some(loc) = def_loc {
             self.reg.def_locs.traits.insert(fq_name.clone(), loc);
+        }
+        if let Some(doc) = doc {
+            self.reg.docs.traits.insert(fq_name.clone(), doc);
         }
         self.record_def_name_use(
             &fq_name,
@@ -4009,7 +4061,7 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
-        let MethodSig { method, instance, self_name, self_name_loc, recv_ty, type_fq, params, param_locs, ret, bounds, body_start } =
+        let MethodSig { method, instance, self_name, self_name_loc, recv_ty, type_fq, params, param_locs, ret, bounds, body_start, doc } =
             self.parse_defmethod_sig(heap, parts, parts_locs)?;
 
         // A method on a *generic* type whose receiver spells the owner's
@@ -4075,6 +4127,9 @@ impl Checker {
         }
         if let Some(loc) = def_loc {
             self.reg.def_locs.methods.insert((type_fq.clone(), method.clone()), loc);
+        }
+        if let Some(doc) = doc {
+            self.reg.docs.methods.insert((type_fq.clone(), method.clone()), doc);
         }
 
         let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
@@ -4160,7 +4215,11 @@ impl Checker {
                 body_start = 4;
             }
         }
-        Ok(MethodSig { method, instance, self_name, self_name_loc, recv_ty, type_fq, params, param_locs, ret, bounds, body_start })
+        let doc = self.take_leading_docstring(heap, parts, body_start);
+        if doc.is_some() {
+            body_start += 1;
+        }
+        Ok(MethodSig { method, instance, self_name, self_name_loc, recv_ty, type_fq, params, param_locs, ret, bounds, body_start, doc })
     }
 
     /// `(defstruct Name (field Type)...)` — or, generically,
@@ -4195,6 +4254,15 @@ impl Checker {
             return Err(Error::TypeError("defstruct: (defstruct name (field type)...)".into()));
         }
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
+        // A leading docstring, right after the name and before the field
+        // list — CL's `(defstruct (name options) documentation slot...)`
+        // position. Unlike `defun`'s, unambiguous: a field is always a
+        // `(name Type)` pair, never a bare string, so no "followed by more
+        // forms" guard is needed.
+        let (doc, field_start) = match parts.get(1) {
+            Some(Value::Str(id)) => (Some(heap.string(*id).to_string()), 2),
+            _ => (None, 1),
+        };
 
         self.check_redef("type", &name, self.cur_ns().types.get(&name))?;
         self.check_type_trait_clash("type", &name)?;
@@ -4220,7 +4288,7 @@ impl Checker {
             trait_assoc: HashMap::new(),
         });
 
-        let fields = self.parse_struct_fields(heap, &parts[1..])?;
+        let fields = self.parse_struct_fields(heap, &parts[field_start..])?;
         if fields.is_empty() {
             return Err(Error::TypeError("defstruct: needs at least one field".into()));
         }
@@ -4328,6 +4396,9 @@ impl Checker {
         if let Some(loc) = def_loc {
             self.reg.def_locs.types.insert(type_fq.clone(), loc);
         }
+        if let Some(doc) = doc {
+            self.reg.docs.types.insert(type_fq.clone(), doc);
+        }
         self.record_def_name_use(
             &type_fq,
             TypeKind::Struct,
@@ -4360,6 +4431,14 @@ impl Checker {
             return Err(Error::TypeError("defenum: (defenum Name (Variant Type...)...)".into()));
         }
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
+        // A leading docstring, right after the name and before the variant
+        // list — same position/rule as `defstruct`'s (no ambiguity: a
+        // variant is always a symbol or a `(Name Type...)` list, never a
+        // bare string).
+        let (doc, variant_start) = match parts.get(1) {
+            Some(Value::Str(id)) => (Some(heap.string(*id).to_string()), 2),
+            _ => (None, 1),
+        };
 
         self.check_redef("type", &name, self.cur_ns().types.get(&name))?;
         self.check_type_trait_clash("type", &name)?;
@@ -4386,7 +4465,7 @@ impl Checker {
         });
 
         let mut variants = Vec::new();
-        for item in &parts[1..] {
+        for item in &parts[variant_start..] {
             let (vname, field_vals): (String, Vec<(Value, Option<Loc>)>) = match *item {
                 // A bare symbol is a nullary variant (e.g. `None`); the
                 // parenthesized `(None)` form is equally accepted below.
@@ -4435,6 +4514,9 @@ impl Checker {
         self.reg.root.module_mut(&self.ns).add_type(def);
         if let Some(loc) = def_loc {
             self.reg.def_locs.types.insert(type_fq.clone(), loc);
+        }
+        if let Some(doc) = doc {
+            self.reg.docs.types.insert(type_fq.clone(), doc);
         }
         self.record_def_name_use(
             &type_fq,
@@ -4891,6 +4973,7 @@ impl Checker {
             "as" => return self.check_as(heap, interp, env, args, arg_locs, false),
             "try-as" => return self.check_as(heap, interp, env, args, arg_locs, true),
             "compile" => return self.check_compile(heap, args),
+            "documentation" => return self.check_documentation(heap, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
             // Top-level-only forms reaching expression position (e.g. a
@@ -5811,6 +5894,80 @@ impl Checker {
         Ok(Typed { loc: None, expr: Expr::CompileFn(target), ty: Type::Bool })
     }
 
+    /// `(documentation name)` / `(documentation Type::method)`: like
+    /// `(compile ...)`, `name` is program structure, not runtime data, so it
+    /// reads as an unevaluated symbol or `::`-path — see `Self::check_compile`'s
+    /// doc comment, whose `name.rsplit_once("::")` dispatch this mirrors.
+    /// Resolved entirely at check time, since the checker always knows where
+    /// a name resolves (there's nothing left to look up at runtime): a bare
+    /// name is tried, in order, as a variable, a function, a type, a trait,
+    /// then a macro (first hit wins — the same var-before-fn-before-method
+    /// priority a bare identifier gets when checked as an ordinary
+    /// expression, `Self::check`'s `Value::Symbol` arm), and the result — a
+    /// docstring if the resolved definition has one, `none` if it doesn't —
+    /// is baked in directly as an `Option<Str>` constant. Resolving to
+    /// *nothing at all* is a check-time error, same as any other unbound
+    /// reference; unlike `(compile ...)`, there's no runtime fallback to
+    /// defer to, since this never produces a runtime lookup in the first
+    /// place. Module-qualified free names (`mod::name`, as opposed to
+    /// `Type::method`) are out of scope for now.
+    fn check_documentation(&self, heap: &Heap, args: &[Value]) -> Result<Typed, Error> {
+        if args.len() != 1 {
+            return Err(Error::TypeError("documentation: (documentation name) — expected exactly 1 argument".into()));
+        }
+        let name = match args[0] {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            Value::Path(pid) => heap
+                .path_segments(pid)
+                .iter()
+                .map(|s| heap.symbol_name(*s).to_string())
+                .collect::<Vec<_>>()
+                .join("::"),
+            _ => {
+                return Err(Error::TypeError(
+                    "documentation: expected a symbol or path naming a definition, e.g. (documentation foo) or (documentation point::x) — not a string".into(),
+                ))
+            }
+        };
+        let opt_str_ty = Type::Named(Path::root("option"), vec![Type::Str]);
+        let found = |doc: Option<&String>| match doc {
+            Some(d) => wrap_some(Typed { loc: None, expr: Expr::Str(d.clone()), ty: Type::Str }, Type::Str),
+            None => option_none(opt_str_ty.clone()),
+        };
+        match name.rsplit_once("::") {
+            None => {
+                if let Some((path, _)) = self.resolve_global(&name) {
+                    return Ok(found(self.reg.docs.vars.get(&path)));
+                }
+                if let Some(path) = self.resolve_fn(&name) {
+                    return Ok(found(self.reg.docs.fns.get(&path)));
+                }
+                if let Some(path) = self.resolve_bare_type(&name) {
+                    return Ok(found(self.reg.docs.types.get(&path)));
+                }
+                if let Ok(path) = self.resolve_trait_name(&name) {
+                    return Ok(found(self.reg.docs.traits.get(&path)));
+                }
+                if let Some((path, _)) = self.resolve_macro(&name) {
+                    return Ok(found(self.reg.docs.macros.get(&path)));
+                }
+                Err(Error::TypeError(format!("documentation: no definition named `{}`", name)))
+            }
+            Some((type_part, method)) => {
+                let type_segs: Vec<String> = type_part.split("::").map(|s| s.to_string()).collect();
+                let type_fq = if type_segs.len() == 1 { self.resolve_bare_type(&type_segs[0]) } else { self.resolve_type_path(&type_segs) }
+                    .filter(|tp| self.reg.type_def(tp).is_some_and(|def| def.assoc.contains_key(method)));
+                match type_fq {
+                    Some(type_fq) => Ok(found(self.reg.docs.methods.get(&(type_fq, method.to_string())))),
+                    None => Err(Error::TypeError(format!(
+                        "documentation: `{}` is not a known `Type::method` — module-qualified free names/types/traits/macros are not supported here",
+                        name
+                    ))),
+                }
+            }
+        }
+    }
+
     /// `(quote datum)`: `datum` as a literal `Sexpr` value, unevaluated. See
     /// [`Expr::Quote`] for why this converts to an owned [`QuotedSexpr`]
     /// rather than keeping the raw read `Value`.
@@ -6143,9 +6300,20 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
-        if parts.len() != 2 {
-            return Err(Error::TypeError("defvar/defconstant: (defvar (name Type) value)".into()));
+        if parts.len() != 2 && parts.len() != 3 {
+            return Err(Error::TypeError(
+                "defvar/defconstant: (defvar (name Type) value) or (defvar (name Type) value \"doc\")".into(),
+            ));
         }
+        // A trailing docstring — CL's `defvar`/`defparameter`/`defconstant`
+        // order (name, initial-value, documentation-string), not the
+        // leading position `defun`/`defmacro` use for theirs, since there's
+        // no body here to put it in front of.
+        let doc = match parts.get(2) {
+            None => None,
+            Some(Value::Str(id)) => Some(heap.string(*id).to_string()),
+            Some(_) => return Err(Error::TypeError("defvar/defconstant: third argument must be a docstring".into())),
+        };
         let (name, ann) = match parts[0] {
             Value::Cons(_) => {
                 let pair_locs = heap.list_to_vec_locs(parts[0])?;
@@ -6180,6 +6348,9 @@ impl Checker {
         let fq_name = self.fq(&name);
         if let Some(loc) = def_loc {
             self.reg.def_locs.vars.insert(fq_name.clone(), loc);
+        }
+        if let Some(doc) = doc {
+            self.reg.docs.vars.insert(fq_name.clone(), doc);
         }
         Ok(TopLevel::Defvar { name: fq_name, ty, value, mutable, public })
     }

@@ -11,9 +11,9 @@ pub mod locate;
 pub mod semantic;
 
 pub use ast::{Arm, CompileTarget, Expr, LabelDef, MacroLambda, Pattern, QuotedSexpr, Ref, Typed};
-pub use registry::{AdtDef, AdtKind, AssocFn, DefLocs, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};
+pub use registry::{AdtDef, AdtKind, AssocFn, DefLocs, Docs, FnSig, MacroDef, Namespace, Registry, VarInfo, Variant};
 pub use checker::{Checker, MacroExpander, RedefPolicy, TopLevel, MONO_BUNDLE_MODULE};
 pub use locate::{
-    completion_candidates, completion_locals, definition_target, hover_text, locate_node, CompletionCandidate,
+    completion_candidates, completion_locals, definition_target, doc_for, hover_text, locate_node, CompletionCandidate,
     CompletionKind,
 };

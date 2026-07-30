@@ -378,10 +378,30 @@ pub struct DefLocs {
     pub local_refs: HashMap<(u32, u32), Loc>,
 }
 
+/// Docstrings, keyed the same way [`DefLocs`] keys source locations — kept
+/// separate from `FnSig`/`AssocFn`/`AdtDef`/`VarInfo`/`TraitDef`/`MacroDef`
+/// for the identical reason `DefLocs` is (see its doc comment): those are
+/// constructed at ~150 call sites in [`Registry::with_builtins`] alone, none
+/// of which have (or need) a docstring. Only the checker's user-facing
+/// registration points (the same set that populates `DefLocs`) insert an
+/// entry here. Consulted by the `documentation` special form
+/// (`Checker::check_documentation`) and the LSP's hover
+/// (`check::locate::doc_for`).
+#[derive(Clone, Default)]
+pub struct Docs {
+    pub fns: HashMap<Path, String>,
+    pub methods: HashMap<(Path, String), String>,
+    pub types: HashMap<Path, String>,
+    pub vars: HashMap<Path, String>,
+    pub traits: HashMap<Path, String>,
+    pub macros: HashMap<Path, String>,
+}
+
 /// The checker's symbol table: a tree of namespaces rooted at [`Registry::root`].
 pub struct Registry {
     pub root: Namespace,
     pub def_locs: DefLocs,
+    pub docs: Docs,
 }
 
 impl Registry {
@@ -591,7 +611,7 @@ impl Registry {
             "compile-file".to_string(),
             FnSig { type_params: vec![], rest: None, params: vec![Type::Str, Type::Str], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() },
         );
-        Registry { root, def_locs: DefLocs::default() }
+        Registry { root, def_locs: DefLocs::default(), docs: Docs::default() }
     }
 
     /// Look up a type by its fully-qualified [`Path`] (e.g. `geo::point`).

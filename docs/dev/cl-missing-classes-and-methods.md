@@ -446,7 +446,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `get-universal-time` / `get-decoded-time` / `encode-universal-time` / `decode-universal-time` | ❌ | **日時が扱えない** |
 | `sleep` | ❌ | |
 | `room` / `ed` / `dribble` / `apropos` / `apropos-list` / `inspect` / `describe` | ❌ | 対話環境向け。REPL があるので `apropos`/`describe` は相性が良い |
-| `documentation` / `(setf documentation)` / docstring | ❌ | **docstring の仕組みが無い**（LSP の hover と相性が良いので効果は大きい） |
+| `documentation` / docstring | ✅ | 2026-07-30実装。`defun`/`defmethod`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftrait` が docstring を持てる（位置は各フォームの CL 規則通り）。`documentation` は名前を評価せず解決する特殊形（`quote`/`compile` と同様）で check 時に定数へ畳み込まれる。LSP hover にも統合済み。`(setf documentation)` は対象外（functions.md §17） |
 | `lisp-implementation-type` / `lisp-implementation-version` / `machine-type` / `machine-version` / `machine-instance` / `software-type` / `software-version` / `short-site-name` / `long-site-name` | ❌ | |
 | `user-homedir-pathname` | ❌ | パス名型が無い |
 | `trace` / `untrace` / `step` / `disassemble` | ❌ | |

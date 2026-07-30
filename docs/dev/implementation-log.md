@@ -4864,3 +4864,80 @@ CLHS 22.1.1 の「値のどこまでを印字するか」を決める3変数。
   （`function_names()` は `fns` のみを走査するため無関係）。
 
 `tests/format_test.rs` に `built_in_enum_values_print_their_variant_names` 等3件を追加。
+
+## Common Lisp 準拠 docstring + `documentation`（2026-07-30）
+
+`cl-missing-classes-and-methods.md` の既知ギャップ（§2.21「docstring の仕組みが無い」）を解消。
+計画: `~/.claude/plans/idempotent-sparking-horizon.md`。
+
+### 構文: フォームごとに CL の docstring 位置をそのまま踏襲
+
+- `defun`/`defmethod`（`impl` 内含む）/`defmacro`: 本体の先頭（戻り値型・`where` 節の後）。
+  CL 通り、後ろに本体フォームが最低1つ続く場合のみ docstring とみなす——単独の文字列は
+  戻り値のまま区別する（`Checker::take_leading_docstring`、`parts.len() > at + 1` のガード）。
+- `defvar`/`defconstant`: CL の `defvar`/`defparameter`/`defconstant` と同じで初期値の**後ろ**
+  （`(defvar (name Type) value "doc")`）。他フォームと位置が逆なのは CL 自体がそうだから。
+- `defstruct`/`defenum`/`deftrait`: 名前の直後、フィールド/バリアント/アイテム列の**前**。
+  これらは「本体」に相当するものが無く、フィールド等は常に構造化された形（裸の文字列になり
+  得ない）なので曖昧性ガードは不要——無条件で消費する。
+- `deftrait` はトレイト全体に1つだけ（CL の `defgeneric` が個々のメソッドでなく generic function
+  自体に docstring を持つのと同じモデル）。個々のメソッドの docstring は `impl` 側の
+  `defmethod` 本体が持つ（`check_impl` は各メソッド項目をそのまま `check_defmethod` に委譲する
+  ため、docstring 対応は追加コード無しで自動的に効く）。
+
+### 保存先: `Docs`（`DefLocs` と同型・同方針）
+
+`check::registry::DefLocs`（定義位置テーブル）が「`FnSig`/`AdtDef`/... に生やすと
+`Registry::with_builtins` の約150箇所を全部触ることになるので別テーブルに分離する」という
+設計だったので、docstring もそのまま同型の `Docs`（`fns`/`methods`/`types`/`vars`/`traits`/
+`macros`、すべて `Path`（メソッドのみ `(Path,String)`）キー）として追加。挿入は `def_locs` を
+挿入している箇所全部に1行ずつ足すだけで済んだ（`with_builtins` 側は無変更）。
+
+### `documentation`: ランタイム機構を一切増やさない check 時特殊形
+
+CL の `(documentation 'name 'function)` は型引数で名前空間の曖昧性を解くが、typelisp は
+「checker は常にどこへ解決するか知っている」という既存方針（`Checker::check_compile` が
+`(compile name)`/`(compile Type::method)` を未評価の名前として読み、`resolve_fn`/
+`resolve_bare_type` 等の既存解決ヘルパーで `CompileTarget` を直接組み立てているのと同じ発想）
+に沿い、`documentation` も **`quote`/`compile` と同じ「未評価の名前を受け取る特殊形」** として
+実装した。`check_documentation` は `check_compile` をほぼそのままなぞる形——`name.rsplit_once("::")`
+で裸名と `Type::method` を分岐し、裸名は変数→関数→型→トレイト→マクロの優先順位（`Checker::check`
+の `Value::Symbol` 腕が式として評価するときの優先順位と同じ）で `resolve_global`/`resolve_fn`/
+`resolve_bare_type`/`resolve_trait_name`/`resolve_macro` を順に試す。結果は `Docs` テーブルを
+引いて `Option<Str>` の**定数**（`wrap_some`/`option_none` — 既存のオプション構築ヘルパーをその
+まま再利用）として check 時に畳み込む。ランタイムの `Checker` ハンドルも新規 builtin 分派も
+一切不要——`compile`/`format` 等と違い、実行時に何かを引き直す理由が構造的に存在しない。
+
+解決に失敗した場合（そんな名前の定義が無い）は check 時のエラー。解決はできたが docstring が
+無い場合のみ `Option::none`。モジュール修飾された自由名（`mod::name`。`Type::method` は対応）は
+スコープ外とした。
+
+### FASL（バージョン15）
+
+`DefLocsRepr`/`RegistryDelta::def_locs`/`Fasl::capture`/`load_into` の docstring 版
+（`DocsRepr`/`RegistryDelta::docs`）を完全に対称な形で追加——`def_locs` の diff/mark 機構には
+乗らず丸ごとコピーする既存パターンをそのまま踏襲。`FASL_FORMAT_VERSION` を14→15に。この
+バンプは他の大半のバンプと違い「デシリアライズが失敗する」種類ではなく（新フィールドが単に
+無いだけ）、バンプ無しだと**古いキャッシュに依存したモジュール越しの `documentation` が
+黙って `none` を返す**（実行時フォールバックが無いため後から気づく手段が無い）という理由での
+バンプであることをコメントに明記した。
+
+### LSP hover 統合
+
+`check::locate::definition_target`（`Typed` ノード→参照先 `Path` を `DefLocs` で引く既存関数）
+と同じ添字を `Docs` に対して行う `doc_for` を追加し、`hover_text` が型の下に docstring を
+連結するよう拡張（`hover_text(node, docs)`）。`src/bin/lsp.rs` の `Analysis` に `docs: Docs`
+（`def_locs` と同様のスナップショット）を追加しただけで済んだ。
+
+### テスト
+
+`tests/docstring_test.rs`（新規、16件）: 各フォームの docstring 位置・`documentation` の解決
+優先順位・単独文字列本体が戻り値のまま残ること・`defvar` の3番目の引数が文字列でなければ
+エラーになること・未定義名を渡した場合のエラーを検証。`tests/fasl_test.rs` に
+`fasl_capture_preserves_docstrings_for_documentation`（prelude fasl の上に小さな documented
+モジュールをもう一段 capture/load_into し、ソースを一切読まない環境で `documentation` が
+正しい値を返すことを確認）を追加。`tests/lsp_locate_test.rs` は `hover_text`/`program` の
+シグネチャ変更に合わせて更新。
+
+editor/emacs・editor/vscode の特殊形一覧に `documentation` を追加（`tests/editor_keyword_sync_test.rs`
+のセンチネル間スキャンで自動的に検出される対象）。

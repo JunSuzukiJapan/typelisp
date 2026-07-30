@@ -79,7 +79,7 @@ take the same name.")
     "lambda" "labels" "apply"
     ;; other special forms (§7)
     "setf" "list" "quote" "quasiquote" "unquote" "unquote-splicing"
-    "panic" "unreachable" "todo" "as" "try-as" "compile"
+    "panic" "unreachable" "todo" "as" "try-as" "compile" "documentation"
     ;; formatted output — special forms so that each variadic argument keeps
     ;; its own type on the way into `Sexpr' (functions.md §15)
     "print" "println" "format"

@@ -272,11 +272,24 @@ pub struct DefLocsRepr {
     pub macros: Vec<(Path, Loc)>,
 }
 
+/// `Docs` as `Vec` pairs — see [`NamespaceDelta`] on why not the maps
+/// themselves.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DocsRepr {
+    pub fns: Vec<(Path, String)>,
+    pub methods: Vec<((Path, String), String)>,
+    pub types: Vec<(Path, String)>,
+    pub vars: Vec<(Path, String)>,
+    pub traits: Vec<(Path, String)>,
+    pub macros: Vec<(Path, String)>,
+}
+
 /// Everything the checker gained from loading one file.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RegistryDelta {
     pub namespaces: Vec<NamespaceDelta>,
     pub def_locs: DefLocsRepr,
+    pub docs: DocsRepr,
 }
 
 fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, out: &mut Vec<NamespaceDelta>) {
@@ -418,7 +431,20 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// default expression, if any). A stale cache would hand back a signature
 /// missing both fields, so every call to a function declaring either would
 /// wrongly be checked as ordinary fixed arity — 2026-07-29.
-pub const FASL_FORMAT_VERSION: u32 = 14;
+///
+/// 15: docstrings (CL-equivalent `documentation`). `RegistryDelta` gained a
+/// `docs: DocsRepr` table alongside `def_locs`, populated by every
+/// user-facing definition form that accepts a docstring (`defun`/
+/// `defmethod`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
+/// `deftrait`). Unlike most bumps here, a stale cache wouldn't actually fail
+/// to *deserialize* (the new field would just be missing from the old JSON,
+/// and `serde` would reject it as a missing struct field the same way any
+/// other shape mismatch is rejected) — but without the bump, `(documentation
+/// ...)` would silently return `none` for every definition a stale-cached
+/// dependency provides, since `documentation` resolves entirely at check
+/// time from whatever `Docs` table the dependency's fasl handed back — no
+/// runtime fallback exists to catch a missing docstring later — 2026-07-30.
+pub const FASL_FORMAT_VERSION: u32 = 15;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.
@@ -471,11 +497,20 @@ impl Fasl {
             traits: dl.traits.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
             macros: dl.macros.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         };
+        let dc = &checker.registry().docs;
+        let docs = DocsRepr {
+            fns: dc.fns.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            methods: dc.methods.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            types: dc.types.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            vars: dc.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            traits: dc.traits.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            macros: dc.macros.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        };
         let (fn_templates, method_templates) = checker.export_templates(heap)?;
         Ok(Fasl {
             format_version: FASL_FORMAT_VERSION,
             source_hash,
-            delta: RegistryDelta { namespaces, def_locs },
+            delta: RegistryDelta { namespaces, def_locs, docs },
             fn_templates,
             method_templates,
             top_levels,
@@ -508,6 +543,15 @@ impl Fasl {
             dl.vars.extend(self.delta.def_locs.vars.iter().cloned());
             dl.traits.extend(self.delta.def_locs.traits.iter().cloned());
             dl.macros.extend(self.delta.def_locs.macros.iter().cloned());
+        }
+        {
+            let dc = &mut checker.registry_mut().docs;
+            dc.fns.extend(self.delta.docs.fns.iter().cloned());
+            dc.methods.extend(self.delta.docs.methods.iter().cloned());
+            dc.types.extend(self.delta.docs.types.iter().cloned());
+            dc.vars.extend(self.delta.docs.vars.iter().cloned());
+            dc.traits.extend(self.delta.docs.traits.iter().cloned());
+            dc.macros.extend(self.delta.docs.macros.iter().cloned());
         }
         checker.install_templates(heap, &self.fn_templates, &self.method_templates)?;
         for tl in &self.top_levels {
