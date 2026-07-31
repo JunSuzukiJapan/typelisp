@@ -106,6 +106,25 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
         let hash_global = module.add_global(i64_ty, None, SOURCE_HASH_GLOBAL);
         hash_global.set_initializer(&i64_ty.const_int(source_hash(crate::compiler::SOURCE), false));
         hash_global.set_constant(true);
+        // Forward-declare *every* island function before compiling any body.
+        // The island's own `compile-call` resolves a call target with
+        // `(get-function m "tl_<callee>")`, which fails outright if the callee
+        // has no declaration yet — so compiling one at a time only works while
+        // the island's call graph happens to be a DAG in declaration order.
+        // It is not: since top-level `defun`s may reference each other freely
+        // (`Checker::predeclare_program`) the island is written as ~60 mutually
+        // recursive top-level functions rather than one `labels` block, and
+        // `compile-value` calls helpers declared below it. `add-function`
+        // reuses an existing declaration rather than adding a second one
+        // (`llvm_module_add_function`), so a body compiled later simply fills
+        // in the shell declared here. This is the same shape `Interp::
+        // compile_scc` already uses for a JIT'd cycle.
+        for name in &fn_names {
+            let sym = crate::compile::ast_bridge::user_symbol_name(name);
+            if module.get_function(&sym).is_none() {
+                module.add_function(&sym, fn_ty, None);
+            }
+        }
         Rc::new(RefCell::new(module))
     };
     // `add_compiled_function` locks `COMPILE_LOCK` per LLVM builtin call
