@@ -66,14 +66,14 @@ fn count_resolves_to_hashtable_instance_method_for_a_hashtable_receiver() {
 }
 
 #[test]
-fn count_resolves_to_the_free_generic_combinator_over_an_iterator() {
-    // `count` is both `HashTable<K,V>`'s instance method (above) and the free
-    // generic `Iter` combinator `(count it pred)`. A two-argument call whose
-    // first argument is an iterator (not a `HashTable`) has no matching
-    // instance method, so it falls back to the free generic function.
+fn count_if_resolves_to_the_free_generic_combinator_over_an_iterator() {
+    // `count` is `HashTable<K,V>`'s instance method (above); `count-if` is the
+    // free generic `Iter` combinator `(count-if it pred)`. A two-argument call
+    // whose first argument is an iterator (not a `HashTable`) has no matching
+    // instance method, so it resolves to the free generic function.
     let src = "(defun mkv () Vector<i32> \
                  (let ((v (the Vector<i32> (Vector::new)))) (push v 1) (push v 2) (push v 1) v)) \
-               (count (iter (mkv)) (lambda ((n i32)) bool (= n 1)))";
+               (count-if (iter (mkv)) (lambda ((n i32)) bool (= n 1)))";
     assert_eq!(eval_ok(src), RtValue::Int(2));
 }
 

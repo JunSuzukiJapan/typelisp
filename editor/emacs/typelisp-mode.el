@@ -127,10 +127,13 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "sexpr-char" "sexpr-bool" "sexpr-str" "sexpr-append" "sexpr-map"
     ;; equality
     "eq" "eql" "equal" "equalp"
-    ;; Iter-based sequence library (§6)
+    ;; Iter-based sequence library (§6).  `find'/`position'/`count' are CL's
+    ;; own item-based (`Eq'-bounded) versions; `find-if'/`position-if'/
+    ;; `count-if'/`remove-if' take a predicate instead.
     "length" "append" "nth" "elt" "take" "subseq" "last" "butlast"
     "member" "every" "any" "sort" "assoc" "map" "filter" "foldl" "foldr"
-    "reverse" "find" "position" "count" "remove-if"
+    "reverse" "find" "position" "count" "find-if" "position-if" "count-if"
+    "remove-if"
     ;; Option / Result methods (§7)
     "unwrap" "unwrap-or" "is-some" "is-none" "is-ok" "is-err"
     ;; `Error' trait methods and the concrete->trait-object widener (§7.1)
@@ -157,16 +160,25 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; parsing & evaluation (§16)
     "parse-int" "parse-float" "read" "eval"
     ;; macro / system
-    "gensym" "keywordp" "exit" "compile-file")
+    "gensym" "keywordp" "exit" "compile-file"
+    ;; random-state (CLHS 12.1.6).  `make-random-state-fresh'/
+    ;; `random-state-copy'/`random-state-next' are the native primitives
+    ;; `random'/`make-random-state'/`random-state-p' are built on.
+    "random-state-p" "make-random-state" "make-random-state-fresh"
+    "random-state-copy" "random-state-next"
+    ;; time (CLHS 25.1)
+    "time" "get-universal-time" "get-internal-real-time"
+    "internal-time-units-per-second")
   "Builtin functions and methods from the standard catalog (docs/functions.md).")
 
 (defconst typelisp-primitive-types
   '("i8" "i16" "i32" "i64" "isize" "u8" "u16" "u32" "u64" "usize"
-    "f32" "f64" "bignum" "ratio" "bool" "char" "string" "symbol")
+    "f32" "f64" "bignum" "ratio" "random-state" "bool" "char" "string" "symbol")
   "Primitive/scalar type names.
 Includes the heap-boxed arbitrary-precision `bignum' / `ratio', which are
 their own static types with no implicit conversion to or from the fixed-width
-numerics (docs/syntax.md §2).")
+numerics (docs/syntax.md §2), and the opaque mutable `random-state' PRNG
+stream (CLHS 12.1.6).")
 
 (defconst typelisp-builtin-types
   '(;; builtin generic/abstract types

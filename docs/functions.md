@@ -207,9 +207,9 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 | `map` | `(map it f)` | `(Iter<A>,(fn (A) U))→Vector<U>` | 写像 |
 | `filter` | `(filter it pred)` | `(Iter<A>,(fn (A) bool))→Vector<A>` | 条件を満たす要素のみ |
 | `remove-if` | `(remove-if it pred)` | `(Iter<A>,(fn (A) bool))→Vector<A>` | 条件を満たす要素を除く |
-| `find` | `(find it pred)` | `(Iter<A>,(fn (A) bool))→Option<A>` | 条件を満たす最初の要素 |
-| `position` | `(position it pred)` | `(Iter<A>,(fn (A) bool))→Option<i32>` | 条件を満たす最初の位置 |
-| `count` | `(count it pred)` | `(Iter<A>,(fn (A) bool))→i32` | 条件を満たす個数 |
+| `find-if` | `(find-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<A>` | 条件を満たす最初の要素 |
+| `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<i32>` | 条件を満たす最初の位置 |
+| `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→i32` | 条件を満たす個数 |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 全要素が条件を満たすか |
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | いずれかが条件を満たすか（CL の `some` 相当、`Some` 構成子との衝突回避名） |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | 左畳み込み |
@@ -234,7 +234,10 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | `x` と等しい要素があるか（CL と違い残りリストではなく `bool`） |
-| `sort` | `(sort it)` | `Iter<A>→Vector<A>` where `Ord A` | 昇順の挿入ソート（安定・非破壊） |
+| `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` where `Eq A` | `x` と等しい最初の要素（CL 本来の `find`。デフォルト `:test` の `eql` に相当） |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<i32>` where `Eq A` | `x` と等しい最初の位置 |
+| `count` | `(count x it)` | `(A,Iter<A>)→i32` where `Eq A` | `x` と等しい要素の個数 |
+| `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | CL 本来の `(sort sequence predicate)`。安定な非破壊挿入ソート。`cmp` は「第1引数が第2引数より真に前」で `true` |
 | `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | `car` が `k` と等しい最初のペア。値は `(cdr p)` で取り出す |
 
 `(list e1 e2 ... en)` は特殊形（`(cons e1 (cons e2 (... (Nil))))` へ展開、[syntax.md](syntax.md) 参照）。
@@ -242,9 +245,10 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 
 > **旧 API から削除された関数**（`docs/dev/symbol-sexpr-redesign.md` Phase 5 / 6.5）:
 > `consp` `null` `atom`（`Sexpr` 述語）、`nthcdr` `copy-list`（cons チェーン専用）、
-> `nconc` `nreverse`（破壊的操作）、`find-if` `count-if` `position-if` `remove-if-not`
-> （`find` / `count` / `position` / `filter` で代替）。`remove`（要素削除）は現在
-> `HashTable<K,V>` のメソッドとしてのみ存在（§11）。
+> `nconc` `nreverse`（破壊的操作）、`remove-if-not`。`find-if`/`count-if`/`position-if`
+> は一時 `find`/`count`/`position` に統合されていたが、CL 本来の項目ベース版
+> `find`/`count`/`position`（上表）を別途追加したのに伴い述語版の名前として復活した。
+> `remove`（要素削除）は現在 `HashTable<K,V>` のメソッドとしてのみ存在（§11）。
 
 ## 7. `Option<T>` / `Result<T,E>`
 

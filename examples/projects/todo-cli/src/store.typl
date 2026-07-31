@@ -20,7 +20,7 @@
   (is-some (remove store tid)))
 
 (pub defun all-ids () Vector<i32>
-  (sort (iter (keys store))))
+  (sort (iter (keys store)) (lambda ((a i32) (b i32)) bool (< a b))))
 
 (pub defun find-todo ((tid i32)) Option<todo-item>
   (get store tid))

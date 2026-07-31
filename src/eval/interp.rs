@@ -3214,8 +3214,10 @@ impl Interp {
     /// functions — see `eval_builtin_method` — so they don't appear here.
     /// `cons`/`car`/`cdr` operate on `Sexpr`; `car`/`cdr` of a non-`Cons`
     /// `Sexpr` — including `Nil` — panics. `gensym` returns a fresh
-    /// `Sexpr::Sym` each call. `random` has no natural receiver to dispatch
-    /// on, so it stays a free function too.)
+    /// `Sexpr::Sym` each call. `make-random-state-fresh`/`random-state-copy`/
+    /// `random-state-next` have no natural receiver to dispatch on, so they
+    /// stay free functions too — `random`/`make-random-state`/
+    /// `random-state-p` are ordinary prelude `defun`s built on top of them.)
     fn eval_builtin(&self, heap: &mut Heap, name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
         match name {
             // `(compile-file "source.typl" "output")`: AOT-compiles an
@@ -3238,7 +3240,11 @@ impl Interp {
                         .map_err(|e| EvalError::Panic(format!("compile-file: {}", e))),
                 )
             }
-            "random" => Some(eval_random(args)),
+            "make-random-state-fresh" => Some(eval_make_random_state_fresh(args)),
+            "random-state-copy" => Some(eval_random_state_copy(args)),
+            "random-state-next" => Some(eval_random_state_next(args)),
+            "get-universal-time" => Some(eval_get_universal_time(args)),
+            "get-internal-real-time" => Some(eval_get_internal_real_time(args)),
             "read-line" => Some(eval_read_line(heap)),
             "parse-int" => Some(eval_parse_int(heap, args)),
             "parse-float" => Some(eval_parse_float(heap, args)),
@@ -4556,41 +4562,90 @@ fn ratio_denominator(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Bignum(Rc::new(expect_ratio(&args[0])?.denom().clone())))
 }
 
-/// A small global xorshift64* generator backing `random`. Not
-/// cryptographically secure and not reseedable from typelisp — sufficient
-/// for an MVP `(random n)`, matching `gensym`'s "collision-resistant, not
-/// unforgeable" precedent for what a builtin without a real entropy/hygiene
-/// API can promise. Lazily seeded from the system clock on first use.
-/// Process-global (shared by every `Interp` instance and thread, e.g.
-/// parallel `cargo test` threads) rather than per-`Interp` — `Relaxed`
-/// atomics keep concurrent access memory-safe, at the cost of two threads
-/// occasionally racing to the same draw (no correctness issue for an MVP
-/// PRNG with no uniqueness guarantee to begin with).
-static RNG_STATE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-fn next_random_u64() -> u64 {
-    use std::sync::atomic::Ordering;
-    let mut x = RNG_STATE.load(Ordering::Relaxed);
-    if x == 0 {
-        x = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(1)
-            | 1;
-    }
+/// One step of a 64-bit xorshift generator (period `2^64 - 1` over the
+/// nonzero states — these exact shift/xor constants are a full-cycle
+/// permutation of them, so a nonzero seed can never reach `0`) — the
+/// bit-twiddling behind every `random-state` draw. Not cryptographically
+/// secure and not expressible in typelisp itself (no bitwise operators),
+/// matching `gensym`'s "collision-resistant, not unforgeable" precedent for
+/// what a builtin without a real entropy/hygiene API can promise.
+fn xorshift64_step(x: u64) -> u64 {
+    let mut x = x;
     x ^= x << 13;
     x ^= x >> 7;
     x ^= x << 17;
-    RNG_STATE.store(x, Ordering::Relaxed);
     x
 }
 
-fn eval_random(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let n = rt_i64(&args[0])?;
+/// A fresh entropy seed for `make-random-state-fresh` — `| 1` guarantees
+/// non-zero (the one fixed point `xorshift64_step` can't escape).
+fn fresh_random_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(1)
+        | 1
+}
+
+fn expect_random_state(v: &RtValue) -> Result<&Rc<Cell<u64>>, EvalError> {
+    match v {
+        RtValue::RandomState(s) => Ok(s),
+        other => Err(EvalError::Internal(format!("expected a random-state, got {:?}", other))),
+    }
+}
+
+/// `make-random-state-fresh`: a brand new, independently-seeded stream —
+/// every `(defvar *random-state* ...)` in the prelude gets one at load time,
+/// and it backs CL's `(make-random-state t)` case.
+fn eval_make_random_state_fresh(_args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::RandomState(Rc::new(Cell::new(fresh_random_seed()))))
+}
+
+/// `random-state-copy`: an independent stream starting from the same point
+/// `state` is at right now — CL's `(make-random-state state)` case. Later
+/// draws against the copy never affect `state` (or vice versa) — distinct
+/// `Rc`s over distinct `Cell`s, not a second handle to the same one.
+fn eval_random_state_copy(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let s = expect_random_state(&args[0])?;
+    Ok(RtValue::RandomState(Rc::new(Cell::new(s.get()))))
+}
+
+/// `random-state-next`: advances `state` one xorshift step and returns the
+/// draw reduced into `[0, bound)`. The prelude's `random` (an ordinary
+/// `&optional`-taking `defun`) is the only caller — this is the one place
+/// that actually touches a `random-state`'s seed.
+fn eval_random_state_next(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let s = expect_random_state(&args[0])?;
+    let n = rt_i64(&args[1])?;
     if n <= 0 {
         return Err(EvalError::Panic(format!("random: bound must be positive, got {}", n)));
     }
-    Ok(RtValue::Int((next_random_u64() % n as u64) as i64))
+    let next = xorshift64_step(s.get());
+    s.set(next);
+    Ok(RtValue::Int((next % n as u64) as i64))
+}
+
+/// `get-universal-time` (CLHS 25.1): seconds since 1900-01-01 00:00:00 UTC
+/// (CL's epoch) — the Unix epoch offset by the well-known 2208988800s
+/// between the two.
+fn eval_get_universal_time(_args: &[RtValue]) -> Result<RtValue, EvalError> {
+    const UNIX_TO_CL_EPOCH_SECS: i64 = 2_208_988_800;
+    let unix_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    Ok(RtValue::Int(unix_secs + UNIX_TO_CL_EPOCH_SECS))
+}
+
+/// `get-internal-real-time` (CLHS 25.1): elapsed `internal-time-units-per-
+/// second` (the prelude's `defvar`, 1_000_000 — i.e. microseconds) since an
+/// arbitrary reference point fixed at first call — a monotonic
+/// `std::time::Instant`, not wall-clock time, so `time`'s elapsed-time
+/// measurement can't go backwards under a clock adjustment.
+fn eval_get_internal_real_time(_args: &[RtValue]) -> Result<RtValue, EvalError> {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let start = START.get_or_init(std::time::Instant::now);
+    Ok(RtValue::Int(start.elapsed().as_micros() as i64))
 }
 
 /// Shared tail of every scalar `print`/`println` method (`registry.rs`'s

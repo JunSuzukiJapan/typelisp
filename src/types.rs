@@ -116,6 +116,12 @@ pub enum Type {
     /// positive denominator. Like `Bignum`, its own static type with
     /// explicit conversions (`int->ratio`/`ratio->float`/...).
     Ratio,
+    /// The `random-state` type (CL's `random-state`): an opaque, mutable PRNG
+    /// stream. Has no reader syntax and no arithmetic — only ever produced by
+    /// `make-random-state-fresh`/`random-state-copy` and consumed by
+    /// `random-state-next` (`crate::eval::interp`'s `RtValue::RandomState`
+    /// holds the actual `Rc<Cell<u64>>` seed).
+    RandomState,
     Bool,
     Char,
     /// The `String` type.
@@ -185,7 +191,7 @@ pub fn primitive_types() -> Vec<Type> {
     vec![
         Type::I8, Type::I16, Type::I32, Type::I64, Type::Isize,
         Type::U8, Type::U16, Type::U32, Type::U64, Type::Usize,
-        Type::F32, Type::F64, Type::Bignum, Type::Ratio,
+        Type::F32, Type::F64, Type::Bignum, Type::Ratio, Type::RandomState,
         Type::Bool, Type::Char, Type::Str, Type::Symbol,
     ]
 }
@@ -211,6 +217,7 @@ pub fn prim_type_path(ty: &Type) -> Option<Path> {
         Type::F64 => "f64",
         Type::Bignum => "bignum",
         Type::Ratio => "ratio",
+        Type::RandomState => "random-state",
         Type::Bool => "bool",
         Type::Char => "char",
         Type::Str => "string",
@@ -560,6 +567,7 @@ fn primitive_by_name(name: &str) -> Option<Type> {
         "f64" => Type::F64,
         "bignum" => Type::Bignum,
         "ratio" => Type::Ratio,
+        "random-state" => Type::RandomState,
         "bool" => Type::Bool,
         "char" => Type::Char,
         "string" => Type::Str,

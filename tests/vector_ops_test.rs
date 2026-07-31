@@ -173,61 +173,93 @@ fn reverse_flips_element_order() {
     assert_eq!(eval_ok(&src), RtValue::Int(321));
 }
 
-// ---- find -------------------------------------------------------------------
+// ---- find-if ------------------------------------------------------------------
 
 #[test]
-fn find_returns_the_first_match() {
+fn find_if_returns_the_first_match() {
     let src = format!(
         "{V123}
-         (match (find (iter v) (lambda ((x i32)) bool (> x 1)))
+         (match (find-if (iter v) (lambda ((x i32)) bool (> x 1)))
            ((some n) n) ((none) -1))"
     );
     assert_eq!(eval_ok(&src), RtValue::Int(2));
 }
 
 #[test]
-fn find_returns_none_when_no_element_matches() {
+fn find_if_returns_none_when_no_element_matches() {
     let src = format!(
         "{V123}
-         (match (find (iter v) (lambda ((x i32)) bool (> x 100)))
+         (match (find-if (iter v) (lambda ((x i32)) bool (> x 100)))
            ((some n) n) ((none) -1))"
     );
     assert_eq!(eval_ok(&src), RtValue::Int(-1));
 }
 
-// ---- position ---------------------------------------------------------------
+// ---- position-if ----------------------------------------------------------------
 
 #[test]
-fn position_returns_the_index_of_the_first_match() {
+fn position_if_returns_the_index_of_the_first_match() {
     let src = format!(
         "{V123}
-         (match (position (iter v) (lambda ((x i32)) bool (= x 3)))
+         (match (position-if (iter v) (lambda ((x i32)) bool (= x 3)))
            ((some i) i) ((none) -1))"
     );
+    assert_eq!(eval_ok(&src), RtValue::Int(2));
+}
+
+#[test]
+fn position_if_returns_none_when_absent() {
+    let src = format!(
+        "{V123}
+         (match (position-if (iter v) (lambda ((x i32)) bool (= x 99)))
+           ((some i) i) ((none) -1))"
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(-1));
+}
+
+// ---- count-if -------------------------------------------------------------------
+
+#[test]
+fn count_if_tallies_matching_elements() {
+    let src = format!(
+        "{V123}
+         (push v 4) (push v 5) (push v 6)
+         (count-if (iter v) (lambda ((x i32)) bool (= (mod x 2) 0)))"
+    );
+    // 2, 4, 6 are even -> 3
+    assert_eq!(eval_ok(&src), RtValue::Int(3));
+}
+
+// ---- find / position / count (item-based, CL's own `find`/`position`/`count`) ---
+
+#[test]
+fn find_returns_the_matching_element_by_equality() {
+    let src = format!("{V123} (match (find 2 (iter v)) ((some n) n) ((none) -1))");
+    assert_eq!(eval_ok(&src), RtValue::Int(2));
+}
+
+#[test]
+fn find_returns_none_when_absent() {
+    let src = format!("{V123} (match (find 99 (iter v)) ((some n) n) ((none) -1))");
+    assert_eq!(eval_ok(&src), RtValue::Int(-1));
+}
+
+#[test]
+fn position_returns_the_index_of_the_matching_element() {
+    let src = format!("{V123} (match (position 3 (iter v)) ((some i) i) ((none) -1))");
     assert_eq!(eval_ok(&src), RtValue::Int(2));
 }
 
 #[test]
 fn position_returns_none_when_absent() {
-    let src = format!(
-        "{V123}
-         (match (position (iter v) (lambda ((x i32)) bool (= x 99)))
-           ((some i) i) ((none) -1))"
-    );
+    let src = format!("{V123} (match (position 99 (iter v)) ((some i) i) ((none) -1))");
     assert_eq!(eval_ok(&src), RtValue::Int(-1));
 }
 
-// ---- count ------------------------------------------------------------------
-
 #[test]
-fn count_tallies_matching_elements() {
-    let src = format!(
-        "{V123}
-         (push v 4) (push v 5) (push v 6)
-         (count (iter v) (lambda ((x i32)) bool (= (mod x 2) 0)))"
-    );
-    // 2, 4, 6 are even -> 3
-    assert_eq!(eval_ok(&src), RtValue::Int(3));
+fn count_tallies_elements_equal_to_the_item() {
+    let src = format!("{V123} (push v 2) (count 2 (iter v))");
+    assert_eq!(eval_ok(&src), RtValue::Int(2));
 }
 
 // ---- append -----------------------------------------------------------------

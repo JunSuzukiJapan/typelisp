@@ -481,9 +481,33 @@ impl Registry {
                 field_names: Vec::new(), impls: Vec::new(), trait_assoc: HashMap::new(),
             });
         }
-        // `random`: the only numeric builtin with no natural receiver to
-        // dispatch on (like `gensym`), so it stays a free function.
-        root.fns.insert("random".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::I32], ret: Type::I32, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        // `random-state` (CL's `random-state`): a mutable PRNG stream, its
+        // actual bit-twiddling done in Rust (`interp::eval_random_state_next`
+        // — the fixed-width xorshift step isn't expressible in typelisp,
+        // which has no bitwise operators). None of these three has a natural
+        // receiver to dispatch on (like `gensym`/`random` before it), so all
+        // stay free functions. `random`/`make-random-state`/`random-state-p`
+        // are ordinary `defun`s in the prelude built on top of these — a
+        // `random-state` has nowhere else to hang an `&optional` parameter
+        // off of, since `check_call_opt_key` only resolves `&optional`/`&key`
+        // for a `defun`'s own `FnSig`, not an ad hoc native one.
+        root.fns.insert("make-random-state-fresh".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::RandomState, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("random-state-copy".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::RandomState], ret: Type::RandomState, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("random-state-next".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::RandomState, Type::I32], ret: Type::I32, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        // `get-universal-time`/`get-internal-real-time` (CLHS 25.1): wall-clock
+        // and monotonic-ish timers, respectively. `get-universal-time` counts
+        // seconds since 1900-01-01 UTC (CL's epoch, 2208988800s before the
+        // Unix epoch); `get-internal-real-time` counts
+        // `internal-time-units-per-second` (a prelude `defvar`, 1_000_000 —
+        // i.e. microseconds) since an arbitrary process-start reference point,
+        // matching CL's own "units are implementation-defined, only the ratio
+        // between two calls means anything" contract. Both `i64` — CL leaves
+        // the numeric type unspecified (a bignum in real implementations),
+        // but `get-universal-time`'s Unix-epoch-relative value already
+        // overflows `i32` today, so `i64` is the minimum that doesn't need
+        // `bignum` for the ordinary case.
+        root.fns.insert("get-universal-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::I64, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        root.fns.insert("get-internal-real-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::I64, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `read-line`: reads one line from stdin, sans the trailing newline.
         // `None` at EOF instead of a panic — a script polling stdin in a loop
         // (a REPL-style CLI) needs to detect end-of-input as ordinary data,

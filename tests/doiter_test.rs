@@ -169,13 +169,13 @@ fn a_where_pin_to_a_type_variable_is_inferred_from_the_iterator_alone() {
 
 #[test]
 fn generic_iter_combinators_work_over_a_hashtable() {
-    // The prelude's generic `count`/`map`/`foldl`/… take an *iterator*, so a
-    // single definition serves any `Iter` type — here `HashTable<K,V>`'s
+    // The prelude's generic `count-if`/`map`/`foldl`/… take an *iterator*, so
+    // a single definition serves any `Iter` type — here `HashTable<K,V>`'s
     // `hashtable-iter<K,V>` (Item = `cons-cell<K,V>`), not just `Vector<T>`.
     let src = "(defun make-h () HashTable<i32,i32> (HashTable::new))
                (let ((h (make-h)))
                  (set h 1 10) (set h 2 20) (set h 3 30)
-                 (count (iter h) (lambda ((p cons-cell<i32,i32>)) bool (> p::cdr 15))))";
+                 (count-if (iter h) (lambda ((p cons-cell<i32,i32>)) bool (> p::cdr 15))))";
     assert_eq!(eval_ok(src), RtValue::Int(2));
 }
 

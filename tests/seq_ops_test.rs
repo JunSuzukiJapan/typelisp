@@ -1,11 +1,13 @@
 //! Tests for the Phase 6.5 sequence library (`docs/dev/symbol-sexpr-redesign.md`)
 //! — the typed rebuild of the `Sexpr` list operations removed in Phase 5, as
 //! generic `Iter` `defun`s (`length`/`append`/`nth`/`elt`/`take`/`subseq`/
-//! `last`/`butlast`/`every`/`any`) plus the trait-bounded trio
-//! (`member`: `(where (Eq A))`, `sort`: `(where (Ord A))`, `assoc`:
-//! `(where (Iter I (Item cons-cell<K,V>)) (Eq K))`). Also covers the new
-//! `Eq`/`Ord` traits themselves: scalar impls, user-type impls, and the
-//! rejection of unimplemented element types at check time.
+//! `last`/`butlast`/`every`/`any`) plus the `Eq`-bounded pair
+//! (`member`: `(where (Eq A))`, `assoc`: `(where (Iter I (Item
+//! cons-cell<K,V>)) (Eq K))`) and `sort`, which — matching CL's own
+//! `(sort sequence predicate)` — takes an explicit comparator instead of an
+//! `Ord` bound. Also covers the `Eq`/`Ord` traits themselves: scalar impls,
+//! user-type impls, and the rejection of unimplemented element types at
+//! check time.
 
 extern crate typelisp;
 use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, RtValue, TopLevel};
@@ -233,14 +235,14 @@ fn every_and_any_report_over_real_elements() {
     assert_eq!(eval_ok(&src), RtValue::Int(1010));
 }
 
-// ---- sort (Ord) -------------------------------------------------------------
+// ---- sort (explicit comparator, CL's own `(sort sequence predicate)`) --------
 
 #[test]
 fn sort_orders_i32_ascending_without_mutating_the_input() {
     let src = "(defun make-v () Vector<i32> (Vector::new))
                (let ((v (make-v)))
                  (push v 3) (push v 1) (push v 2)
-                 (let ((out (sort (iter v))))
+                 (let ((out (sort (iter v) (lambda ((a i32) (b i32)) bool (< a b)))))
                    (+ (* (get v 0) 1000)
                       (+ (* (get out 0) 100) (+ (* (get out 1) 10) (get out 2))))))";
     // input head still 3 -> 3000; sorted (1 2 3) -> 123
@@ -248,41 +250,55 @@ fn sort_orders_i32_ascending_without_mutating_the_input() {
 }
 
 #[test]
+fn sort_orders_i32_descending_given_a_flipped_comparator() {
+    let src = "(defun make-v () Vector<i32> (Vector::new))
+               (let ((v (make-v)))
+                 (push v 3) (push v 1) (push v 2)
+                 (let ((out (sort (iter v) (lambda ((a i32) (b i32)) bool (> a b)))))
+                   (+ (* (get out 0) 100) (+ (* (get out 1) 10) (get out 2)))))";
+    // descending (3 2 1) -> 321
+    assert_eq!(eval_ok(src), RtValue::Int(321));
+}
+
+#[test]
 fn sort_orders_strings_lexicographically() {
     let src = "(defun make-v () Vector<string> (Vector::new))
                (let ((v (make-v)))
                  (push v \"pear\") (push v \"apple\") (push v \"fig\")
-                 (get (sort (iter v)) 0))";
+                 (get (sort (iter v) (lambda ((a string) (b string)) bool (< a b))) 0))";
     assert_eq!(eval_ok(src), RtValue::Str("apple".into()));
 }
 
 #[test]
 fn sort_of_an_empty_iterator_is_empty() {
-    let src = format!("{VEMPTY} (len (sort (iter v)))");
+    let src = format!("{VEMPTY} (len (sort (iter v) (lambda ((a i32) (b i32)) bool (< a b))))");
     assert_eq!(eval_ok(&src), RtValue::Int(0));
 }
 
 #[test]
-fn sort_over_an_element_type_without_ord_is_a_type_error() {
-    // `bool` gets `Eq` but deliberately no `Ord`.
+fn sort_works_over_a_type_with_no_ord_impl_given_an_explicit_comparator() {
+    // `sort` takes the comparator directly now (CL's own required
+    // `predicate` argument), so a type needs no `Ord` impl at all — `bool`
+    // gets `Eq` but deliberately no `Ord`.
     let src = "(defun make-v () Vector<bool> (Vector::new))
-               (sort (iter (make-v)))";
-    assert!(check(src).is_err());
+               (let ((v (make-v)))
+                 (push v true) (push v false)
+                 (get (sort (iter v) (lambda ((a bool) (b bool)) bool (if a false b))) 0))";
+    assert_eq!(eval_ok(src), RtValue::Bool(false));
 }
 
 #[test]
 fn sort_is_stable_for_equal_keys() {
     // `rec`s ordered by `k` only; the two `k`=1 records must keep their input
-    // order (`tag` 10 before 20) because the insertion shift uses strict
-    // `less`.
+    // order (`tag` 10 before 20) because the insertion shift uses a strict
+    // comparator.
     let src = "(defstruct rec (k i32) (tag i32))
-               (impl Ord rec (less ((self Self) (other Self)) bool (< self::k other::k)))
                (defun make-v () Vector<rec> (Vector::new))
                (let ((v (make-v)))
                  (push v (rec::new 2 99))
                  (push v (rec::new 1 10))
                  (push v (rec::new 1 20))
-                 (let ((out (sort (iter v))))
+                 (let ((out (sort (iter v) (lambda ((a rec) (b rec)) bool (< a::k b::k)))))
                    (let ((first (get out 0)) (second (get out 1)))
                      (+ (* first::tag 100) second::tag))))";
     assert_eq!(eval_ok(src), RtValue::Int(1020));
@@ -381,7 +397,7 @@ fn member_and_sort_work_over_a_vector_of_pairs() {
                  (push v (cons 2 0))
                  (push v (cons 1 5))
                  (push v (cons 1 3))
-                 (let ((sorted (sort (iter v))))
+                 (let ((sorted (sort (iter v) (lambda ((a cons-cell<i32,i32>) (b cons-cell<i32,i32>)) bool (less a b)))))
                    (let ((first (get sorted 0)))
                      (+ (if (member (cons 1 5) (iter v)) 1000 0)
                         (+ (if (member (cons 9 9) (iter v)) 100 0)

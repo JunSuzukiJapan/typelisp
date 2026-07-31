@@ -8313,6 +8313,7 @@ fn mangle_type(t: &Type) -> String {
         Type::F64 => "f64".into(),
         Type::Bignum => "bignum".into(),
         Type::Ratio => "ratio".into(),
+        Type::RandomState => "random-state".into(),
         Type::Bool => "bool".into(),
         Type::Char => "char".into(),
         Type::Str => "string".into(),

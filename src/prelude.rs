@@ -604,12 +604,14 @@ pub const SOURCE: &str = r#"
 ;; Results that are themselves collections materialize into a fresh `Vector`
 ;; (there is no generic "rebuild the original container" facility, and no
 ;; lazy iterator type); `foldr`/`reverse` first buffer the whole input into a
-;; `Vector` because an `Iter` is forward-only. Every element-comparing
-;; operation (`find`/`position`/`count`/`remove-if`) takes a predicate, not an
-;; element: `A` carries no `Eq`-style bound, so there is no generic equality —
-;; the predicate form mirrors CL's `-if` family. A freshly built result
-;; vector is pinned with `the`, since a bare `(Vector::new)` has nothing to
-;; infer its element type from.
+;; `Vector` because an `Iter` is forward-only. `find-if`/`position-if`/
+;; `count-if`/`remove-if` take a predicate, not an element: `A` carries no
+;; `Eq`-style bound here, so there is no generic equality available to them —
+;; matching CL's own `-if` family. The plain, `Eq`-bounded `find`/`position`/
+;; `count` (CL's own item-based versions, alongside `member`/`sort` below)
+;; live further down, past the scalar `Eq`/`Ord` impls they need. A freshly
+;; built result vector is pinned with `the`, since a bare `(Vector::new)` has
+;; nothing to infer its element type from.
 (defun map<I,A,U> ((it I) (f (fn (A) U))) Vector<U> (where (Iter I (Item A)))
   (let ((out (the Vector<U> (Vector::new))))
     (doiter (x it) (push out (f x)))
@@ -638,12 +640,12 @@ pub const SOURCE: &str = r#"
         (push out (get buf i))
         (setf i (- i 1)))
       out)))
-(defun find<I,A> ((it I) (pred (fn (A) bool))) Option<A> (where (Iter I (Item A)))
+(defun find-if<I,A> ((it I) (pred (fn (A) bool))) Option<A> (where (Iter I (Item A)))
   (let ((result (the Option<A> (Option::none))))
     (doiter (x it)
       (if (pred x) (progn (setf result (Option::some x)) (break)) ()))
     result))
-(defun position<I,A> ((it I) (pred (fn (A) bool))) Option<i32> (where (Iter I (Item A)))
+(defun position-if<I,A> ((it I) (pred (fn (A) bool))) Option<i32> (where (Iter I (Item A)))
   ;; `i` counts only the mismatches seen before the match, so it equals the
   ;; index of the first match. Both `if` branches are `Unit` (`(break)` is
   ;; `Never`; the mismatch branch ends in a trailing `()`) so the loop body
@@ -654,7 +656,7 @@ pub const SOURCE: &str = r#"
           (progn (setf result (Option::some i)) (break))
           (progn (setf i (+ i 1)) ())))
     result))
-(defun count<I,A> ((it I) (pred (fn (A) bool))) i32 (where (Iter I (Item A)))
+(defun count-if<I,A> ((it I) (pred (fn (A) bool))) i32 (where (Iter I (Item A)))
   ;; `when`, not a bare `(if (pred x) (setf n ...) ())`: `setf` evaluates to
   ;; the value it assigned (here `i32`), so an `if` whose other branch is `()`
   ;; would fail to unify (`i32` vs `Unit`); `when` wraps the `setf` in a
@@ -802,9 +804,12 @@ pub const SOURCE: &str = r#"
 (defmethod iter ((self HashTable<K,V>)) hashtable-iter<K,V> (hashtable-iter::new (entries self) 0))
 
 ;; `Eq`/`Ord` (redesign Phase 6.5): user-visible equality/ordering *traits*, so
-;; `member`/`assoc`/`sort` below can require `(where (Eq A))`/`(where (Ord A))`
-;; instead of taking a predicate (the way `find`/`position`/`count`/`remove-if`
-;; do — those keep their predicate form, mirroring CL's `-if` family).
+;; `member`/`assoc`/`find`/`position`/`count` below can require `(where (Eq A))`
+;; instead of taking a predicate — CL's own item-based searches, alongside
+;; `find-if`/`position-if`/`count-if`/`remove-if` above, which keep their
+;; predicate form. `sort` takes an explicit comparator (CL's own required
+;; `predicate` argument) instead of an `Ord` bound, so any strict-weak-order
+;; function works, not just a type's natural `Ord` impl.
 ;;
 ;; Modelled on Rust's `PartialEq`/`PartialOrd`, kept under the names `Eq`/`Ord`
 ;; (renaming would churn every `where (Ord T)`/`(Eq T)` bound below). `Eq` is
@@ -1007,15 +1012,36 @@ pub const SOURCE: &str = r#"
         (push out (get buf i))
         (setf i (+ i 1)))
       out)))
-;; `member`/`sort`/`assoc` require `Eq`/`Ord` (defined below with the scalar
-;; impls) instead of taking a predicate — the trait-bounded halves of the
-;; library. Predicate variants of the same searches already exist above
-;; (`find`/`position`/`count`).
+;; `member`/`assoc` require `Eq` (defined below with the scalar impls)
+;; instead of taking a predicate — the trait-bounded half of the library.
+;; Predicate variants of the same searches exist above (`find-if`/
+;; `position-if`/`count-if`), and item-based `find`/`position`/`count` (CL's
+;; own, `Eq`-bounded like `member`) exist right below `sort`.
 (defun member<I,A> ((x A) (it I)) bool (where (Iter I (Item A)) (Eq A))
   (let ((found false))
     (doiter (y it)
       (if (equals y x) (progn (setf found true) (break)) ()))
     found))
+;; CL's own item-based `find`/`position`/`count` (its default `:test` is
+;; `eql`; this language's one generic equality trait is `Eq`, so these bound
+;; on it like `member` does) — the counterparts of `find-if`/`position-if`/
+;; `count-if` above, which take a predicate instead.
+(defun find<I,A> ((x A) (it I)) Option<A> (where (Iter I (Item A)) (Eq A))
+  (let ((result (the Option<A> (Option::none))))
+    (doiter (y it)
+      (if (equals y x) (progn (setf result (Option::some y)) (break)) ()))
+    result))
+(defun position<I,A> ((x A) (it I)) Option<i32> (where (Iter I (Item A)) (Eq A))
+  (let ((i 0) (result (the Option<i32> (Option::none))))
+    (doiter (y it)
+      (if (equals y x)
+          (progn (setf result (Option::some i)) (break))
+          (progn (setf i (+ i 1)) ())))
+    result))
+(defun count<I,A> ((x A) (it I)) i32 (where (Iter I (Item A)) (Eq A))
+  (let ((n 0))
+    (doiter (y it) (when (equals y x) (setf n (+ n 1))))
+    n))
 (defun every<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
   (let ((result true))
     (doiter (x it)
@@ -1026,14 +1052,20 @@ pub const SOURCE: &str = r#"
     (doiter (x it)
       (if (pred x) (progn (setf result true) (break)) ()))
     result))
-;; Non-destructive insertion sort, stable: the inner shift uses strict
-;; `less`, so equal elements keep their input order. Ascending.
-(defun sort<I,A> ((it I)) Vector<A> (where (Iter I (Item A)) (Ord A))
+;; Non-destructive insertion sort, stable: the inner shift uses strict `cmp`,
+;; so equal elements (per `cmp`) keep their input order. CL's own `sort`
+;; signature — `predicate` is a required argument, not an `Ord` bound, so any
+;; strict-weak-order function works (`(lambda ((a i32) (b i32)) bool (< a
+;; b))` for ascending, `(flip ...)`-wrapped or reversed for descending, a
+;; key-projecting comparator, etc.) — matching CL's `(sort sequence
+;; predicate)` exactly (`predicate` returns true when its first argument
+;; belongs strictly before its second).
+(defun sort<I,A> ((it I) (cmp (fn (A A) bool))) Vector<A> (where (Iter I (Item A)))
   (let ((out (the Vector<A> (Vector::new))))
     (doiter (x it)
       (let ((j (len out)))
         (push out x)
-        (while (if (> j 0) (less x (get out (- j 1))) false)
+        (while (if (> j 0) (cmp x (get out (- j 1))) false)
           (set out j (get out (- j 1)))
           (setf j (- j 1)))
         (set out j x)))
@@ -1133,6 +1165,70 @@ pub const SOURCE: &str = r#"
 (pub defvar (*print-circle* bool) false)
 (pub defvar (*print-level* i64) 0)
 (pub defvar (*print-length* i64) 0)
+
+;; ---------------------------------------------------------------------------
+;; `random-state` (CLHS 12.1.6): a mutable PRNG stream. The actual
+;; bit-twiddling (a fixed-width xorshift step) lives in Rust — see
+;; `eval::interp::xorshift64_step` — since typelisp has no bitwise operators
+;; to write it in directly; `make-random-state-fresh`/`random-state-copy`/
+;; `random-state-next` (registered in `check::registry::Registry::
+;; with_builtins`) are the three native primitives everything below builds on.
+;;
+;; `*random-state*` is CL's own special variable holding the "current"
+;; default stream `random` draws from when no state is given; typelisp has no
+;; dynamic binding, so — like every other `*...*` global in this prelude —
+;; it's an ordinary assignable one instead, seeded fresh once at prelude load.
+(pub defvar (*random-state* random-state) (make-random-state-fresh))
+
+;; CL's `random`: `(random limit &optional random-state)`. Omitting the state
+;; draws from (and advances) `*random-state*`; passing one draws from (and
+;; advances) that instead.
+(pub defun random ((n i32) &optional (state random-state)) i32
+  (match state
+    ((some s) (random-state-next s n))
+    ((none) (random-state-next *random-state* n))))
+
+;; CL's `random-state-p`: always `true` for any argument that type-checks at
+;; all — unlike CL, a statically typed `random-state` parameter already rules
+;; out every non-`random-state` argument at compile time, so there is nothing
+;; left for this to test at run time. Kept only for the CL name/signature.
+(pub defun random-state-p ((x random-state)) bool true)
+
+;; CL's `make-random-state`: `(make-random-state &optional state)`. A
+;; deliberate simplification of CL's three-way `nil`/`t`/`random-state`
+;; argument (a static type can't express that union cleanly) — omitting the
+;; argument here means "fresh, entropy-seeded" (CL's `t` case, and the one
+;; that's actually useful in practice), not "copy of `*random-state*`" (CL's
+;; `nil` case); passing an explicit state still copies it, same as CL.
+(pub defun make-random-state (&optional (state random-state)) random-state
+  (match state
+    ((some s) (random-state-copy s))
+    ((none) (make-random-state-fresh))))
+
+;; ---------------------------------------------------------------------------
+;; Time (CLHS 25.1). `internal-time-units-per-second` is CL's own constant of
+;; that name — the unit `get-internal-real-time` counts in; the value is this
+;; implementation's choice (microseconds), not something CL fixes, matching
+;; every real CL implementation's own "implementation-defined granularity"
+;; latitude.
+(pub defvar (internal-time-units-per-second i64) 1000000)
+
+;; CL's `time` macro: run `form`, print how long it took to standard output,
+;; and return `form`'s own value unchanged — CL doesn't specify `time`'s
+;; report format either, so this prints one real-time-only line (no
+;; multiple-value `values`, no separate "run time" figure — CPU time needs an
+;; OS-specific call this codebase has no other use for; see docs/dev/
+;; cl-missing-classes-and-methods.md §3.4 for the standing "no multiple
+;; values" rule this also respects).
+(pub defmacro time (form)
+  (let ((t0 (gensym)) (result (gensym)))
+    `(let ((,t0 (get-internal-real-time)))
+       (let ((,result ,form))
+         (progn
+           (println "Real time: ~,3f seconds"
+                     (/ (int->float (- (get-internal-real-time) ,t0))
+                        (int->float internal-time-units-per-second)))
+           ,result)))))
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,
