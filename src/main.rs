@@ -181,6 +181,7 @@ fn compile_module(args: &[String], heap_cells: usize, features: Vec<String>) -> 
         }
     };
     let mut top_levels = Vec::new();
+    checker.predeclare_program(&mut heap, &forms.iter().map(|(v, _)| *v).collect::<Vec<_>>());
     for (v, loc) in forms {
         match checker.check_form_at(&mut heap, &interp, v, Some(loc)) {
             Ok(TopLevel::Expr(_)) => {

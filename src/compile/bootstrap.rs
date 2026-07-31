@@ -61,6 +61,7 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
     let forms = reader
         .read_all(&mut heap, crate::compiler::SOURCE)
         .map_err(|e| format!("island read failed: {}", e))?;
+    chk.predeclare_program(&mut heap, &forms);
     let mut fn_names: Vec<String> = Vec::new();
     for v in forms {
         let tl = chk.check_form(&mut heap, &interp, v).map_err(|e| format!("island check failed: {}", e))?;

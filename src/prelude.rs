@@ -34,9 +34,11 @@ use crate::{Checker, Heap, Interp, Reader};
 /// cells, never a separate homogeneous array type. Item-based predicates (`member`/
 /// `remove`/`count`/`position`) compare with `eq` (matching CL's default
 /// `eql` test); their `-if` counterparts take a `(fn (Sexpr) bool)` instead.
-/// Helper functions a later definition depends on are placed earlier in this
-/// string — `defun` (like `defmacro`) has no forward-reference support, only
-/// self-recursion (see `Checker::check_defun`'s doc comment).
+/// Helper functions a later definition depends on are still placed earlier in
+/// this string, but that is now convention rather than necessity: top-level
+/// `defun`s may reference each other in any order (`Checker::
+/// predeclare_program`, which every loader including this one runs first).
+/// `defmacro` is the exception and remains strictly define-before-use.
 ///
 /// `nconc`/`nreverse` are destructive (mutate existing cons cells via
 /// `set-car`/`set-cdr` instead of allocating new ones — see those functions'
@@ -1394,6 +1396,7 @@ pub const SOURCE: &str = r#"
 pub fn load(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
     let r = Reader::new();
     let forms = r.read_all(heap, SOURCE).expect("prelude: read failed");
+    chk.predeclare_program(heap, &forms);
     for v in forms {
         let tl = chk.check_form(heap, &*interp, v).expect("prelude: check failed");
         for w in chk.take_warnings() {
@@ -1443,6 +1446,7 @@ fn source_load_capturing(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp
     let mark = registry_mark(chk);
     let r = Reader::new();
     let forms = r.read_all(heap, SOURCE).expect("prelude: read failed");
+    chk.predeclare_program(heap, &forms);
     let mut top_levels = Vec::new();
     for v in forms {
         let tl = chk.check_form(heap, &*interp, v).expect("prelude: check failed");
