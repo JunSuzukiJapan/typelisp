@@ -268,6 +268,68 @@
 use crate::{Checker, Heap, Interp, Reader};
 
 pub const SOURCE: &str = r#"
+;; EXPERIMENT: island-local `cond`. Not the prelude's — the island must not
+;; reference prelude names (see this module's doc comment). Named `icond` to
+;; avoid colliding with the prelude's own `cond` when both are loaded.
+;;
+;; Deliberately written without quasiquote: `,@` expands to a call to
+;; `sexpr-append`, which is a *prelude* `defun` (prelude.rs), so a spliced
+;; expander would reintroduce exactly the prelude dependency this exists to
+;; avoid ("unquote-splicing (,@) requires the prelude's `sexpr-append` to be
+;; loaded"). `sexpr-cons`/`sexpr-car`/`sexpr-cdr`/`sexpr-null`/`list` are all
+;; builtins (`check::registry`), so this expander stays inside the builtin
+;; layer. It also creates no closure, which the bootstrap requires: expanding
+;; a macro whose expander builds one would need the island's own JIT, and the
+;; island is not installed until after this SOURCE is checked.
+;;
+;; Narrower than the prelude's `cond` in one way: every clause body is exactly
+;; *one* form (`(test expr)` / `(else expr)`), because a multi-form body is
+;; what would need the splice. Every dispatch arm here is a single call, so
+;; nothing needs more.
+;;
+;; The tree is built by an ordinary `defun` rather than by the macro
+;; re-expanding itself into `(icond <rest>)`. That distinction is load-bearing,
+;; not stylistic: a self-re-expanding `icond` leaves a *macro call* in each
+;; `if`'s else position, and `Checker::check_if`/`Interp::eval` can only
+;; loopify an else chain whose links are already `if` nodes — every link would
+;; instead cost a full expand-then-check recursion, and `compile-value`'s
+;; 37-arm dispatch overflowed the stack of an unrelated test that way (the
+;; same failure mode `compile-construct`'s doc comment records). Expanding
+;; once, into the whole nested `if` tree, keeps the checker on its existing
+;; iterative path; the recursion moves into `icond-build`, where it is plain
+;; interpreter recursion 37 frames deep and costs nothing.
+;; Written with `loop`/`setf` instead of the obvious recursion on `clauses`.
+;; The expander runs *interpreted* (it is called during the check of this very
+;; file, before the island exists), and an unoptimized `Interp::eval` frame is
+;; fat: recursing once per clause put `compile-value`'s 37-arm dispatch at
+;; ~8MB of stack where the hand-written `if` chain needed ~2MB, which
+;; overflows an ordinary `cargo test` thread even though
+;; `scripts/test-serial.sh`'s `RUST_MIN_STACK=32MB` hides it. Iterating keeps
+;; the expander's stack flat regardless of arm count.
+(defun icond-build ((clauses Sexpr)) Sexpr
+  (let ((rev (the Sexpr ())) (cur clauses))
+    (loop
+      (if (sexpr-null cur) (break) ())
+      (setf rev (sexpr-cons (sexpr-car cur) rev))
+      (setf cur (sexpr-cdr cur)))
+    ;; `rev` is innermost-clause-first, so folding it left builds the nested
+    ;; `if` from the inside out. An `else` clause contributes its body as the
+    ;; starting accumulator; without one the chain bottoms out at `()`.
+    (let ((acc (the Sexpr ())) (c rev))
+      (loop
+        (if (sexpr-null c) (break) ())
+        (let ((clause (sexpr-car c)))
+          (if (eq (sexpr-car clause) (quote else))
+              (setf acc (sexpr-car (sexpr-cdr clause)))
+              (setf acc (list (quote if)
+                              (sexpr-car clause)
+                              (sexpr-car (sexpr-cdr clause))
+                              acc))))
+        (setf c (sexpr-cdr c)))
+      acc)))
+
+(defmacro icond (&rest clauses) (icond-build clauses))
+
 ;; `sexpr-str`/`sexpr-bool`/`sexpr-sym-name`/`sexpr-int` — the island's typed
 ;; `Sexpr` field extractors — are now Rust builtins (`Interp::eval_builtin`,
 ;; registered in `check::registry`), not `match`-based typelisp defuns.
@@ -759,62 +821,63 @@ pub const SOURCE: &str = r#"
 ;; `compile-assoc-user`'s ordinary mangled-name call. (Chained `if`s: the
 ;; prelude's `or` macro isn't loaded under `run_with_compiler`.)
 (defun int-native-method? ((method string)) bool
-  (if (equal method "+") true
-  (if (equal method "-") true
-  (if (equal method "*") true
-  ;; `/`/`mod` lower to the `rt_i64_div`/`rt_i64_mod` shims (integer division
-  ;; can't be a bare LLVM instruction — `sdiv`/`srem` by zero is UB), not a
-  ;; straight instruction like the others, but they're still native here.
-  (if (equal method "/") true
-  (if (equal method "mod") true
-  (if (equal method "<") true
-  (if (equal method "<=") true
-  (if (equal method ">") true
-  (if (equal method ">=") true
-  (if (equal method "=") true
-  (if (equal method "eq") true
-  (if (equal method "/=") true
-  ;; `int->bignum`/`int->ratio`: always-exact widening into the two
-  ;; arbitrary-precision types (`rt_int_to_bignum`/`rt_int_to_ratio`) — unary,
-  ;; checked before `b2` the same way `float-native-method?`'s own unary
-  ;; conversions are.
-  (if (equal method "int->bignum") true
-  (if (equal method "int->ratio") true
-  ;; `max`/`min`: `icmp`+`select`, branch-free (`build-select`).
-  (if (equal method "max") true
-  (if (equal method "min") true
-  ;; `logand`/`logior`/`logxor`: bare LLVM instructions
-  ;; (`build-and`/`build-or`/`build-xor`), same as `+`/`-`/`*`.
-  (if (equal method "logand") true
-  (if (equal method "logior") true
-  (if (equal method "logxor") true
-  ;; `logtest`: `icmp ne (and a b), 0` — an `and` plus the existing
-  ;; `build-icmp-ne`, no shim needed.
-  (if (equal method "logtest") true
-  ;; `ash`/`logbitp`/`logcount`/`integer-length`: each has an edge case a
-  ;; bare LLVM instruction can't express safely (a variable shift/count past
-  ;; the operand's bit width is undefined behavior in LLVM, unlike this
-  ;; language's own clamped semantics — see `eval_int_builtin`'s doc
-  ;; comment), so all four lower to `rt_i64_*` shims instead, the same
-  ;; reasoning `/`/`mod` already use.
-  (if (equal method "ash") true
-  (if (equal method "logbitp") true
-  (if (equal method "logcount") true
-  (if (equal method "lognot") true
-  (equal method "integer-length"))))))))))))))))))))))))))
+  (icond
+         ((equal method "+") true)
+         ((equal method "-") true)
+         ((equal method "*") true)
+         ;; `/`/`mod` lower to the `rt_i64_div`/`rt_i64_mod` shims (integer division
+         ;; can't be a bare LLVM instruction — `sdiv`/`srem` by zero is UB), not a
+         ;; straight instruction like the others, but they're still native here.
+         ((equal method "/") true)
+         ((equal method "mod") true)
+         ((equal method "<") true)
+         ((equal method "<=") true)
+         ((equal method ">") true)
+         ((equal method ">=") true)
+         ((equal method "=") true)
+         ((equal method "eq") true)
+         ((equal method "/=") true)
+         ;; `int->bignum`/`int->ratio`: always-exact widening into the two
+         ;; arbitrary-precision types (`rt_int_to_bignum`/`rt_int_to_ratio`) — unary,
+         ;; checked before `b2` the same way `float-native-method?`'s own unary
+         ;; conversions are.
+         ((equal method "int->bignum") true)
+         ((equal method "int->ratio") true)
+         ;; `max`/`min`: `icmp`+`select`, branch-free (`build-select`).
+         ((equal method "max") true)
+         ((equal method "min") true)
+         ;; `logand`/`logior`/`logxor`: bare LLVM instructions
+         ;; (`build-and`/`build-or`/`build-xor`), same as `+`/`-`/`*`.
+         ((equal method "logand") true)
+         ((equal method "logior") true)
+         ((equal method "logxor") true)
+         ;; `logtest`: `icmp ne (and a b), 0` — an `and` plus the existing
+         ;; `build-icmp-ne`, no shim needed.
+         ((equal method "logtest") true)
+         ;; `ash`/`logbitp`/`logcount`/`integer-length`: each has an edge case a
+         ;; bare LLVM instruction can't express safely (a variable shift/count past
+         ;; the operand's bit width is undefined behavior in LLVM, unlike this
+         ;; language's own clamped semantics — see `eval_int_builtin`'s doc
+         ;; comment), so all four lower to `rt_i64_*` shims instead, the same
+         ;; reasoning `/`/`mod` already use.
+         ((equal method "ash") true)
+         ((equal method "logbitp") true)
+         ((equal method "logcount") true)
+         ((equal method "lognot") true)
+         (else (equal method "integer-length"))))
 
 (defun string-native-method? ((method string)) bool
-  (if (equal method "length") true
-  (if (equal method "ref") true
-  (if (equal method "eq") true
-  (if (equal method "equal") true
-  (if (equal method "equalp") true
-  (if (equal method "lt") true
-  (if (equal method "<") true
-  (if (equal method "<=") true
-  (if (equal method ">") true
-  (if (equal method ">=") true
-  (equal method "append"))))))))))))
+  (icond ((equal method "length") true)
+         ((equal method "ref")    true)
+         ((equal method "eq")     true)
+         ((equal method "equal")  true)
+         ((equal method "equalp") true)
+         ((equal method "lt")     true)
+         ((equal method "<")      true)
+         ((equal method "<=")     true)
+         ((equal method ">")      true)
+         ((equal method ">=")     true)
+         (else (equal method "append"))))
 
 ;; `char`'s natively-compilable methods: a compiled `char` is a raw `i64`
 ;; code point, so the content comparisons lower to the same integer `icmp`s
@@ -824,17 +887,18 @@ pub const SOURCE: &str = r#"
 ;; share width) — needed so the island's own `compile-char` (which calls
 ;; `(char->int (sexpr-char ...))`) is itself compilable.
 (defun char-native-method? ((method string)) bool
-  (if (equal method "eq") true
-  (if (equal method "eql") true
-  (if (equal method "equal") true
-  (if (equal method "equalp") true
-  (if (equal method "lt") true
-  (if (equal method "<") true
-  (if (equal method "<=") true
-  (if (equal method ">") true
-  (if (equal method ">=") true
-  (if (equal method "char->int") true
-  false)))))))))))
+  (icond
+         ((equal method "eq") true)
+         ((equal method "eql") true)
+         ((equal method "equal") true)
+         ((equal method "equalp") true)
+         ((equal method "lt") true)
+         ((equal method "<") true)
+         ((equal method "<=") true)
+         ((equal method ">") true)
+         ((equal method ">=") true)
+         ((equal method "char->int") true)
+         (else false)))
 
 ;; `f64`'s natively-compilable methods: arithmetic (`+`/`-`/`*`/`/`) lowers to
 ;; LLVM float instructions (`build-fadd`/... — each `bitcast`s the
@@ -852,54 +916,55 @@ pub const SOURCE: &str = r#"
 ;; compiled the normal way. (The `build-frem` arm in the dispatch below is now
 ;; unreachable for `mod` and left only as a no-op.)
 (defun float-native-method? ((method string)) bool
-  (if (equal method "+") true
-  (if (equal method "-") true
-  (if (equal method "*") true
-  (if (equal method "/") true
-  (if (equal method "expt") true
-  (if (equal method "sqrt") true
-  (if (equal method "floor") true
-  (if (equal method "ceiling") true
-  (if (equal method "round") true
-  (if (equal method "truncate") true
-  (if (equal method "float->int") true
-  (if (equal method "float->bignum") true
-  (if (equal method "float->ratio") true
-  (if (equal method "<") true
-  (if (equal method "<=") true
-  (if (equal method ">") true
-  (if (equal method ">=") true
-  (if (equal method "=") true
-  (if (equal method "/=") true
-  (if (equal method "eq") true
-  (if (equal method "eql") true
-  (if (equal method "equal") true
-  (if (equal method "equalp") true
-  ;; `max`/`min`: `llvm.maxnum.f64`/`llvm.minnum.f64` (`build-fmaxnum`/
-  ;; `build-fminnum`), same intrinsic-call shape as `expt`'s `llvm.pow.f64`.
-  (if (equal method "max") true
-  (if (equal method "min") true
-  ;; The transcendental family: `sin`/`cos`/`exp`/`log` have long-standing
-  ;; LLVM intrinsics (`build-fsin`/`build-fcos`/`build-fexp`/`build-flog`,
-  ;; same shape as `sqrt`). `tan`/`asin`/`acos`/`atan`/`sinh`/`cosh`/`tanh`/
-  ;; `asinh`/`acosh`/`atanh` have none in the LLVM version this project pins,
-  ;; so they lower to `rt_f64_*` shims instead — still native here, same
-  ;; reasoning `/`/`mod` already use for `i64`.
-  (if (equal method "sin") true
-  (if (equal method "cos") true
-  (if (equal method "tan") true
-  (if (equal method "asin") true
-  (if (equal method "acos") true
-  (if (equal method "atan") true
-  (if (equal method "sinh") true
-  (if (equal method "cosh") true
-  (if (equal method "tanh") true
-  (if (equal method "asinh") true
-  (if (equal method "acosh") true
-  (if (equal method "atanh") true
-  (if (equal method "exp") true
-  (if (equal method "log") true
-  false))))))))))))))))))))))))))))))))))))))))
+  (icond
+         ((equal method "+") true)
+         ((equal method "-") true)
+         ((equal method "*") true)
+         ((equal method "/") true)
+         ((equal method "expt") true)
+         ((equal method "sqrt") true)
+         ((equal method "floor") true)
+         ((equal method "ceiling") true)
+         ((equal method "round") true)
+         ((equal method "truncate") true)
+         ((equal method "float->int") true)
+         ((equal method "float->bignum") true)
+         ((equal method "float->ratio") true)
+         ((equal method "<") true)
+         ((equal method "<=") true)
+         ((equal method ">") true)
+         ((equal method ">=") true)
+         ((equal method "=") true)
+         ((equal method "/=") true)
+         ((equal method "eq") true)
+         ((equal method "eql") true)
+         ((equal method "equal") true)
+         ((equal method "equalp") true)
+         ;; `max`/`min`: `llvm.maxnum.f64`/`llvm.minnum.f64` (`build-fmaxnum`/
+         ;; `build-fminnum`), same intrinsic-call shape as `expt`'s `llvm.pow.f64`.
+         ((equal method "max") true)
+         ((equal method "min") true)
+         ;; The transcendental family: `sin`/`cos`/`exp`/`log` have long-standing
+         ;; LLVM intrinsics (`build-fsin`/`build-fcos`/`build-fexp`/`build-flog`,
+         ;; same shape as `sqrt`). `tan`/`asin`/`acos`/`atan`/`sinh`/`cosh`/`tanh`/
+         ;; `asinh`/`acosh`/`atanh` have none in the LLVM version this project pins,
+         ;; so they lower to `rt_f64_*` shims instead — still native here, same
+         ;; reasoning `/`/`mod` already use for `i64`.
+         ((equal method "sin") true)
+         ((equal method "cos") true)
+         ((equal method "tan") true)
+         ((equal method "asin") true)
+         ((equal method "acos") true)
+         ((equal method "atan") true)
+         ((equal method "sinh") true)
+         ((equal method "cosh") true)
+         ((equal method "tanh") true)
+         ((equal method "asinh") true)
+         ((equal method "acosh") true)
+         ((equal method "atanh") true)
+         ((equal method "exp") true)
+         ((equal method "log") true)
+         (else false)))
 
 ;; Emits `rt_str_lt(x, y)` (strict lexicographic less-than, an `i64` 0/1). The
 ;; four string comparison operators all derive from it: `<`=lt(a,b),
@@ -919,56 +984,58 @@ pub const SOURCE: &str = r#"
 ;; here). `bignum->int`/`try-bignum->int`/`bignum->float`/`bignum->ratio`
 ;; round out the conversions.
 (defun bignum-native-method? ((method string)) bool
-  (if (equal method "+") true
-  (if (equal method "-") true
-  (if (equal method "*") true
-  (if (equal method "/") true
-  (if (equal method "mod") true
-  (if (equal method "<") true
-  (if (equal method "<=") true
-  (if (equal method ">") true
-  (if (equal method ">=") true
-  (if (equal method "=") true
-  (if (equal method "/=") true
-  (if (equal method "eq") true
-  (if (equal method "eql") true
-  (if (equal method "equal") true
-  (if (equal method "equalp") true
-  (if (equal method "bignum->int") true
-  (if (equal method "try-bignum->int") true
-  (if (equal method "bignum->float") true
-  (if (equal method "bignum->ratio") true
-  ;; `max`/`min`: `rt_bignum_cmp` (already used by every comparison below)
-  ;; plus `build-select`, branch-free — no new runtime helper needed.
-  (if (equal method "max") true
-  (equal method "min"))))))))))))))))))))))
+  (icond
+         ((equal method "+") true)
+         ((equal method "-") true)
+         ((equal method "*") true)
+         ((equal method "/") true)
+         ((equal method "mod") true)
+         ((equal method "<") true)
+         ((equal method "<=") true)
+         ((equal method ">") true)
+         ((equal method ">=") true)
+         ((equal method "=") true)
+         ((equal method "/=") true)
+         ((equal method "eq") true)
+         ((equal method "eql") true)
+         ((equal method "equal") true)
+         ((equal method "equalp") true)
+         ((equal method "bignum->int") true)
+         ((equal method "try-bignum->int") true)
+         ((equal method "bignum->float") true)
+         ((equal method "bignum->ratio") true)
+         ;; `max`/`min`: `rt_bignum_cmp` (already used by every comparison below)
+         ;; plus `build-select`, branch-free — no new runtime helper needed.
+         ((equal method "max") true)
+         (else (equal method "min"))))
 
 ;; `ratio` (`registry::ratio_assoc`)'s natively-compilable methods — the
 ;; `ratio` counterpart of [`bignum-native-method?`] (no `mod`, CL doesn't
 ;; define a rational remainder), plus `ratio->bignum`/`ratio->float`/
 ;; `numerator`/`denominator`.
 (defun ratio-native-method? ((method string)) bool
-  (if (equal method "+") true
-  (if (equal method "-") true
-  (if (equal method "*") true
-  (if (equal method "/") true
-  (if (equal method "<") true
-  (if (equal method "<=") true
-  (if (equal method ">") true
-  (if (equal method ">=") true
-  (if (equal method "=") true
-  (if (equal method "/=") true
-  (if (equal method "eq") true
-  (if (equal method "eql") true
-  (if (equal method "equal") true
-  (if (equal method "equalp") true
-  (if (equal method "ratio->bignum") true
-  (if (equal method "ratio->float") true
-  (if (equal method "numerator") true
-  (if (equal method "denominator") true
-  ;; `max`/`min`: `rt_ratio_cmp` + `build-select`, same shape as `bignum`'s.
-  (if (equal method "max") true
-  (equal method "min")))))))))))))))))))))
+  (icond
+         ((equal method "+") true)
+         ((equal method "-") true)
+         ((equal method "*") true)
+         ((equal method "/") true)
+         ((equal method "<") true)
+         ((equal method "<=") true)
+         ((equal method ">") true)
+         ((equal method ">=") true)
+         ((equal method "=") true)
+         ((equal method "/=") true)
+         ((equal method "eq") true)
+         ((equal method "eql") true)
+         ((equal method "equal") true)
+         ((equal method "equalp") true)
+         ((equal method "ratio->bignum") true)
+         ((equal method "ratio->float") true)
+         ((equal method "numerator") true)
+         ((equal method "denominator") true)
+         ;; `max`/`min`: `rt_ratio_cmp` + `build-select`, same shape as `bignum`'s.
+         ((equal method "max") true)
+         (else (equal method "min"))))
 
 ;; Emits `rt_bignum_cmp(x, y)` (three-way `-1`/`0`/`1`, `BigInt::cmp`) — every
 ;; bignum comparison operator derives from it via a single `icmp` against
@@ -1266,82 +1333,72 @@ pub const SOURCE: &str = r#"
             (retain-bindings builder m env param-names)
             (let ((fn-env (new-fn-env)))
               (labels ((compile-value ((builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr)) llvm-value
+                         ;; The AST-tag dispatch. `icond` (this file's own
+                         ;; macro, defined at the top of SOURCE) rather than
+                         ;; the hand-nested `if` chain this used to be: the
+                         ;; expansion is literally the same `if` chain, so
+                         ;; nothing the checker, the interpreter or the
+                         ;; emitted IR sees changes — it trades 37 levels of
+                         ;; indentation for one flat clause list.
+                         ;;
+                         ;; Not the prelude's `cond`/`case`: this SOURCE may
+                         ;; reference only builtins and special forms (see the
+                         ;; module doc comment), and reaching for the prelude
+                         ;; here breaks every test that loads the island on
+                         ;; its own. See `icond`'s own comment for the two
+                         ;; constraints its definition works around.
+                         ;;
+                         ;; A hash table keyed by tag was considered and
+                         ;; rejected: the arms are *code*, not values, so a
+                         ;; table would mean building 37 heap `ClosureBox`es
+                         ;; per `compile-function` call and dispatching
+                         ;; indirectly through them — strictly worse than the
+                         ;; linear `equal` chain, which does not register at
+                         ;; all against the ~1.7s it takes to AOT-compile this
+                         ;; entire island. (Name lookup — the thing a hash
+                         ;; table *is* right for — already is one: `env`/
+                         ;; `fn-env` are `Scope<V>`, `String`-keyed `HashMap`
+                         ;; frames.)
                          (let ((s (sexpr-sym-name (sexpr-car e))))
-                            (if (equal s "int")
-                                (compile-int builder e)
-                                (if (equal s "char")
-                                    (compile-char builder e)
-                                (if (equal s "bool")
-                                    (compile-bool builder e)
-                                    (if (equal s "float")
-                                        (compile-float builder e)
-                                    (if (equal s "str")
-                                        (compile-str builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                    (if (equal s "bignum")
-                                        (compile-bignum-literal builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                    (if (equal s "ratio")
-                                        (compile-ratio-literal builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                    (if (equal s "unit")
-                                        (compile-unit builder)
-                                        (if (equal s "var")
-                                            (compile-var builder env fn-env captured e)
-                                            (if (equal s "cellvar")
-                                            (compile-cellvar builder env fn-env captured e)
-                                            (if (equal s "llvm-op")
-                                                (compile-llvm-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                            (if (equal s "assoc")
-                                                (compile-assoc builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                (if (equal s "apply")
-                                                    (compile-apply builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                    (if (equal s "labels")
-                                                        (compile-labels builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                        (if (equal s "call")
-                                                            (compile-call builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                            (if (equal s "lambda")
-                                                                (compile-lambda builder env fn-env captured e)
-                                                                (if (equal s "apply-indirect")
-                                                                    (compile-apply-indirect builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                    (if (equal s "if")
-                                                                        (compile-if builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                        (if (equal s "let")
-                                                                            (compile-let builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                            (if (equal s "loop")
-                                                                                (compile-loop builder env fn-env captured cur-fn e)
-                                                                                (if (equal s "break")
-                                                                                    (compile-break builder loop-exit loop-slot loop-root-base)
-                                                                                    (if (equal s "return")
-                                                                                        (compile-return builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                        (if (equal s "set")
-                                                                                            (compile-set builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                            (if (equal s "cellset")
-                                                                                            (compile-cellset builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                            (if (equal s "match")
-                                                                                                (compile-match builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                (if (equal s "construct")
-                                                                                                    (compile-construct builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                    (if (equal s "field-get")
-                                                                                                        (compile-field-get builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                        (if (equal s "field-set")
-                                                                                                            (compile-field-set builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                            (if (equal s "global")
-                                                                                                                (compile-global builder e)
-                                                                                                                (if (equal s "set-global")
-                                                                                                                    (compile-set-global builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                    (if (equal s "global-init")
-                                                                                                                        (compile-global-init builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                        (if (equal s "panic")
-                                                                                                                            (compile-panic builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                            (if (equal s "vector-op")
-                                                                                                                                (compile-vector-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                                (if (equal s "hashtable-op")
-                                                                                                                                    (compile-hashtable-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                                (if (equal s "dyn-new")
-                                                                                                                                    (compile-dyn-new builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                                (if (equal s "dyn-call")
-                                                                                                                                    (compile-dyn-call builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                                (if (equal s "dyn-value")
-                                                                                                                                    (compile-dyn-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e)
-                                                                                                                                    (panic (append "compile-value: unsupported tag " s))))))))))))))))))))))))))))))))))))))))
+                           (icond
+                             ((equal s "int")            (compile-int builder e))
+                             ((equal s "char")           (compile-char builder e))
+                             ((equal s "bool")           (compile-bool builder e))
+                             ((equal s "float")          (compile-float builder e))
+                             ((equal s "str")            (compile-str builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "bignum")         (compile-bignum-literal builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "ratio")          (compile-ratio-literal builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "unit")           (compile-unit builder))
+                             ((equal s "var")            (compile-var builder env fn-env captured e))
+                             ((equal s "cellvar")        (compile-cellvar builder env fn-env captured e))
+                             ((equal s "llvm-op")        (compile-llvm-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "assoc")          (compile-assoc builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "apply")          (compile-apply builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "labels")         (compile-labels builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "call")           (compile-call builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "lambda")         (compile-lambda builder env fn-env captured e))
+                             ((equal s "apply-indirect") (compile-apply-indirect builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "if")             (compile-if builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "let")            (compile-let builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "loop")           (compile-loop builder env fn-env captured cur-fn e))
+                             ((equal s "break")          (compile-break builder loop-exit loop-slot loop-root-base))
+                             ((equal s "return")         (compile-return builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "set")            (compile-set builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "cellset")        (compile-cellset builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "match")          (compile-match builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "construct")      (compile-construct builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "field-get")      (compile-field-get builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "field-set")      (compile-field-set builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "global")         (compile-global builder e))
+                             ((equal s "set-global")     (compile-set-global builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "global-init")    (compile-global-init builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "panic")          (compile-panic builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "vector-op")      (compile-vector-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "hashtable-op")   (compile-hashtable-op builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "dyn-new")        (compile-dyn-new builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "dyn-call")       (compile-dyn-call builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             ((equal s "dyn-value")      (compile-dyn-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+                             (else (panic (append "compile-value: unsupported tag " s)))))
                            )
                        ;; `(unit)` — `Expr::Unit`, represented (like every
                        ;; other compiled value) as a plain `i64`; `0`, the
@@ -1721,383 +1778,351 @@ pub const SOURCE: &str = r#"
                          (let ((type-name (sexpr-str (sexpr-car (sexpr-cdr e)))))
                            (let ((method (sexpr-str (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
                              (let ((rest (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
-                               (if (if (equal type-name "sexpr") (equal method "eq") false)
-                                   ;; `Sexpr` `eq`: CL identity on the raw tagged
-                                   ;; `i64` handles — interned symbols/`nil`/small
-                                   ;; atoms are handle-identical, so `icmp eq` on
-                                   ;; the operands *is* `eq`. It never dereferences
-                                   ;; either operand (the comparison is on the
-                                   ;; handle bits), so — unlike a call that reads
-                                   ;; through them — no `push-sexpr-root` is needed
-                                   ;; between compiling the two, same as the `char`
-                                   ;; branch's own `eq`. Structural `equal` is not
-                                   ;; here: it stays an ordinary prelude `defun`.
-                                   (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
-                                     (let ((b (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                                       (build-icmp-eq builder a b)))
-                               (if (if (equal type-name "string") (string-native-method? method) false)
-                                   (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
-                                     (if (equal method "length")
-                                         (let ((args-ptr (alloca-args builder 1)))
+                               (icond
+                                 ((if (equal type-name "sexpr") (equal method "eq") false)
+                                  (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+                                    (let ((b (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+                                      (build-icmp-eq builder a b))))
+                                 ((if (equal type-name "string") (string-native-method? method) false)
+                                  (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+                                    (if (equal method "length")
+                                        (let ((args-ptr (alloca-args builder 1)))
+                                          (store-arg builder args-ptr 0 a)
+                                          (build-call builder (get-function m "rt_str_length") args-ptr 1))
+                                        (let ((b (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+                                          (icond
+                                            ((equal method "ref")
+                                             (let ((args-ptr (alloca-args builder 2)))
+                                               (store-arg builder args-ptr 0 a)
+                                               (store-arg builder args-ptr 1 b)
+                                               (build-call builder (get-function m "rt_str_ref") args-ptr 2)))
+                                            ((if (equal method "eq") true (equal method "equal"))
+                                             ;; `eq` and `equal` share `rt_str_eq` (content
+                                             ;; comparison) — the compiled story predates the
+                                             ;; eq/eql/equal redesign's Rc-identity `eq`, and
+                                             ;; `equal` (the prelude's `impl Eq string` body)
+                                             ;; is the content comparison it implements.
+                                             (let ((args-ptr (alloca-args builder 2)))
+                                               (store-arg builder args-ptr 0 a)
+                                               (store-arg builder args-ptr 1 b)
+                                               (build-call builder (get-function m "rt_str_eq") args-ptr 2)))
+                                            ;; `equalp`: ASCII case-insensitive content equality
+                                            ;; (`rt_str_equalp`) — no in-place lowering, unlike
+                                            ;; `eq`/`equal`'s plain content compare above.
+                                            ((equal method "equalp")
+                                             (let ((args-ptr (alloca-args builder 2)))
+                                               (store-arg builder args-ptr 0 a)
+                                               (store-arg builder args-ptr 1 b)
+                                               (build-call builder (get-function m "rt_str_equalp") args-ptr 2)))
+                                            ;; `<`/`>`/`<=`/`>=` all derive from `rt_str_lt`
+                                            ;; (`str-lt-call`); `not` is `(icmp-eq v 0)`.
+                                            ((if (equal method "lt") true (equal method "<"))
+                                             (str-lt-call builder m a b))
+                                            ((equal method ">")
+                                             (str-lt-call builder m b a))
+                                            ((equal method "<=")
+                                             (build-icmp-eq builder (str-lt-call builder m b a) (const-i64 builder 0)))
+                                            ((equal method ">=")
+                                             (build-icmp-eq builder (str-lt-call builder m a b) (const-i64 builder 0)))
+                                            ((equal method "append")
+                                             (let ((args-ptr (alloca-args builder 2)))
+                                               (store-arg builder args-ptr 0 a)
+                                               (store-arg builder args-ptr 1 b)
+                                               (build-call builder (get-function m "rt_str_append") args-ptr 2)))
+                                            (else (panic (append "compile-assoc: unsupported str method " method))))))))
+                                 ((if (if (equal type-name "i64") true (equal type-name "i32")) (int-native-method? method) false)
+                                  (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+                                    ;; `int->bignum`/`int->ratio`: unary, checked before `b2`
+                                    ;; is read — same reason `float-native-method?`'s own
+                                    ;; unary conversions are checked first (there is no
+                                    ;; second argument form to compile for these).
+                                    (icond
+                                      ((equal method "int->bignum")
+                                       (let ((args-ptr (alloca-args builder 1)))
+                                         (store-arg builder args-ptr 0 a)
+                                         (build-call builder (get-function m "rt_int_to_bignum") args-ptr 1)))
+                                      ((equal method "int->ratio")
+                                       (let ((args-ptr (alloca-args builder 1)))
+                                         (store-arg builder args-ptr 0 a)
+                                         (build-call builder (get-function m "rt_int_to_ratio") args-ptr 1)))
+                                      ((equal method "logcount")
+                                       (int-unary-shim-call builder m "rt_i64_logcount" a))
+                                      ((equal method "integer-length")
+                                       (int-unary-shim-call builder m "rt_i64_integer_length" a))
+                                      ((equal method "lognot")
+                                       (build-xor builder a (const-i64 builder -1)))
+                                      (else (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+                                               (icond
+                                                 ((equal method "+")
+                                                  (build-add builder a b2))
+                                                 ((equal method "-")
+                                                  (build-sub builder a b2))
+                                                 ((equal method "*")
+                                                  (build-mul builder a b2))
+                                                 ;; `/` and `mod`: unlike `+`/`-`/`*`, integer
+                                                 ;; division can't be a bare LLVM instruction —
+                                                 ;; `sdiv`/`srem` by zero is UB — so both route
+                                                 ;; through `rt_i64_div`/`rt_i64_mod`, which
+                                                 ;; check the divisor (and `MIN/-1`) and abort
+                                                 ;; cleanly, matching the interpreter's panic.
+                                                 ((equal method "/")
+                                                  (let ((args-ptr (alloca-args builder 2)))
+                                                    (store-arg builder args-ptr 0 a)
+                                                    (store-arg builder args-ptr 1 b2)
+                                                    (build-call builder (get-function m "rt_i64_div") args-ptr 2)))
+                                                 ((equal method "mod")
+                                                  (let ((args-ptr (alloca-args builder 2)))
+                                                    (store-arg builder args-ptr 0 a)
+                                                    (store-arg builder args-ptr 1 b2)
+                                                    (build-call builder (get-function m "rt_i64_mod") args-ptr 2)))
+                                                 ((equal method "<")
+                                                  (build-icmp-lt builder a b2))
+                                                 ((equal method "<=")
+                                                  (build-icmp-le builder a b2))
+                                                 ((equal method ">")
+                                                  (build-icmp-gt builder a b2))
+                                                 ((equal method ">=")
+                                                  (build-icmp-ge builder a b2))
+                                                 ((if (equal method "=") true (equal method "eq"))
+                                                  (build-icmp-eq builder a b2))
+                                                 ((equal method "/=")
+                                                  (build-icmp-ne builder a b2))
+                                                 ((equal method "logand")
+                                                  (build-and builder a b2))
+                                                 ((equal method "logior")
+                                                  (build-or builder a b2))
+                                                 ((equal method "logxor")
+                                                  (build-xor builder a b2))
+                                                 ((equal method "logtest")
+                                                  (build-icmp-ne builder (build-and builder a b2) (const-i64 builder 0)))
+                                                 ((equal method "max")
+                                                  (build-select builder (build-icmp-gt builder a b2) a b2))
+                                                 ((equal method "min")
+                                                  (build-select builder (build-icmp-lt builder a b2) a b2))
+                                                 ((equal method "ash")
+                                                  (int-binop-shim-call builder m "rt_i64_ash" a b2))
+                                                 ((equal method "logbitp")
+                                                  (int-binop-shim-call builder m "rt_i64_logbitp" a b2))
+                                                 (else (panic (append "compile-assoc: unsupported method " method)))))))))
+                                 ((if (equal type-name "char") (char-native-method? method) false)
+                                  (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+                                    ;; `char->int` is unary (receiver only) and the
+                                    ;; identity at the compiled level — return the
+                                    ;; receiver's raw code point unchanged, before
+                                    ;; the binary branch below tries to read a
+                                    ;; (non-existent) second operand.
+                                    (if (equal method "char->int")
+                                        a
+                                    (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+                                      (icond
+                                        ((equal method "equalp")
+                                         (let ((args-ptr (alloca-args builder 2)))
                                            (store-arg builder args-ptr 0 a)
-                                           (build-call builder (get-function m "rt_str_length") args-ptr 1))
-                                         (let ((b (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                                           (if (equal method "ref")
-                                               (let ((args-ptr (alloca-args builder 2)))
-                                                 (store-arg builder args-ptr 0 a)
-                                                 (store-arg builder args-ptr 1 b)
-                                                 (build-call builder (get-function m "rt_str_ref") args-ptr 2))
-                                               (if (if (equal method "eq") true (equal method "equal"))
-                                                   ;; `eq` and `equal` share `rt_str_eq` (content
-                                                   ;; comparison) — the compiled story predates the
-                                                   ;; eq/eql/equal redesign's Rc-identity `eq`, and
-                                                   ;; `equal` (the prelude's `impl Eq string` body)
-                                                   ;; is the content comparison it implements.
-                                                   (let ((args-ptr (alloca-args builder 2)))
-                                                     (store-arg builder args-ptr 0 a)
-                                                     (store-arg builder args-ptr 1 b)
-                                                     (build-call builder (get-function m "rt_str_eq") args-ptr 2))
-                                                   ;; `equalp`: ASCII case-insensitive content equality
-                                                   ;; (`rt_str_equalp`) — no in-place lowering, unlike
-                                                   ;; `eq`/`equal`'s plain content compare above.
-                                                   (if (equal method "equalp")
-                                                       (let ((args-ptr (alloca-args builder 2)))
-                                                         (store-arg builder args-ptr 0 a)
-                                                         (store-arg builder args-ptr 1 b)
-                                                         (build-call builder (get-function m "rt_str_equalp") args-ptr 2))
-                                                   ;; `<`/`>`/`<=`/`>=` all derive from `rt_str_lt`
-                                                   ;; (`str-lt-call`); `not` is `(icmp-eq v 0)`.
-                                                   (if (if (equal method "lt") true (equal method "<"))
-                                                       (str-lt-call builder m a b)
-                                                       (if (equal method ">")
-                                                           (str-lt-call builder m b a)
-                                                           (if (equal method "<=")
-                                                               (build-icmp-eq builder (str-lt-call builder m b a) (const-i64 builder 0))
-                                                               (if (equal method ">=")
-                                                                   (build-icmp-eq builder (str-lt-call builder m a b) (const-i64 builder 0))
-                                                                   (if (equal method "append")
-                                                                       (let ((args-ptr (alloca-args builder 2)))
-                                                                         (store-arg builder args-ptr 0 a)
-                                                                         (store-arg builder args-ptr 1 b)
-                                                                         (build-call builder (get-function m "rt_str_append") args-ptr 2))
-                                                                       (panic (append "compile-assoc: unsupported str method " method)))))))))))))
-                                   (if (if (if (equal type-name "i64") true (equal type-name "i32")) (int-native-method? method) false)
-                                       (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
-                                         ;; `int->bignum`/`int->ratio`: unary, checked before `b2`
-                                         ;; is read — same reason `float-native-method?`'s own
-                                         ;; unary conversions are checked first (there is no
-                                         ;; second argument form to compile for these).
-                                         (if (equal method "int->bignum")
-                                             (let ((args-ptr (alloca-args builder 1)))
-                                               (store-arg builder args-ptr 0 a)
-                                               (build-call builder (get-function m "rt_int_to_bignum") args-ptr 1))
-                                         (if (equal method "int->ratio")
-                                             (let ((args-ptr (alloca-args builder 1)))
-                                               (store-arg builder args-ptr 0 a)
-                                               (build-call builder (get-function m "rt_int_to_ratio") args-ptr 1))
-                                         (if (equal method "logcount")
-                                             (int-unary-shim-call builder m "rt_i64_logcount" a)
-                                         (if (equal method "integer-length")
-                                             (int-unary-shim-call builder m "rt_i64_integer_length" a)
-                                         (if (equal method "lognot")
-                                             (build-xor builder a (const-i64 builder -1))
-                                         (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                                           (if (equal method "+")
-                                               (build-add builder a b2)
-                                               (if (equal method "-")
-                                                   (build-sub builder a b2)
-                                                   (if (equal method "*")
-                                                       (build-mul builder a b2)
-                                                       ;; `/` and `mod`: unlike `+`/`-`/`*`, integer
-                                                       ;; division can't be a bare LLVM instruction —
-                                                       ;; `sdiv`/`srem` by zero is UB — so both route
-                                                       ;; through `rt_i64_div`/`rt_i64_mod`, which
-                                                       ;; check the divisor (and `MIN/-1`) and abort
-                                                       ;; cleanly, matching the interpreter's panic.
-                                                       (if (equal method "/")
-                                                           (let ((args-ptr (alloca-args builder 2)))
-                                                             (store-arg builder args-ptr 0 a)
-                                                             (store-arg builder args-ptr 1 b2)
-                                                             (build-call builder (get-function m "rt_i64_div") args-ptr 2))
-                                                       (if (equal method "mod")
-                                                           (let ((args-ptr (alloca-args builder 2)))
-                                                             (store-arg builder args-ptr 0 a)
-                                                             (store-arg builder args-ptr 1 b2)
-                                                             (build-call builder (get-function m "rt_i64_mod") args-ptr 2))
-                                                       (if (equal method "<")
-                                                           (build-icmp-lt builder a b2)
-                                                           (if (equal method "<=")
-                                                               (build-icmp-le builder a b2)
-                                                               (if (equal method ">")
-                                                                   (build-icmp-gt builder a b2)
-                                                                   (if (equal method ">=")
-                                                                       (build-icmp-ge builder a b2)
-                                                                       (if (if (equal method "=") true (equal method "eq"))
-                                                                           (build-icmp-eq builder a b2)
-                                                                           (if (equal method "/=")
-                                                                               (build-icmp-ne builder a b2)
-                                                                               (if (equal method "logand")
-                                                                                   (build-and builder a b2)
-                                                                                   (if (equal method "logior")
-                                                                                       (build-or builder a b2)
-                                                                                       (if (equal method "logxor")
-                                                                                           (build-xor builder a b2)
-                                                                                           (if (equal method "logtest")
-                                                                                               (build-icmp-ne builder (build-and builder a b2) (const-i64 builder 0))
-                                                                                               (if (equal method "max")
-                                                                                                   (build-select builder (build-icmp-gt builder a b2) a b2)
-                                                                                                   (if (equal method "min")
-                                                                                                       (build-select builder (build-icmp-lt builder a b2) a b2)
-                                                                                                       (if (equal method "ash")
-                                                                                                           (int-binop-shim-call builder m "rt_i64_ash" a b2)
-                                                                                                           (if (equal method "logbitp")
-                                                                                                               (int-binop-shim-call builder m "rt_i64_logbitp" a b2)
-                                                                                                               (panic (append "compile-assoc: unsupported method " method))))))))))))))))))))))))))))
-                                       (if (if (equal type-name "char") (char-native-method? method) false)
-                                           ;; `char` receivers: raw `i64` code points in
-                                           ;; compiled code, so the comparisons lower to the
-                                           ;; same integer `icmp`s the int branch uses —
-                                           ;; `lt`/`<`/`<=`/`>`/`>=` and `eq`/`eql`/`equal` → eq.
-                                           ;; `equalp` alone folds case, so it calls the
-                                           ;; `rt_char_equalp` runtime helper (raw code-point
-                                           ;; args, matching this branch's own operands).
-                                           (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
-                                             ;; `char->int` is unary (receiver only) and the
-                                             ;; identity at the compiled level — return the
-                                             ;; receiver's raw code point unchanged, before
-                                             ;; the binary branch below tries to read a
-                                             ;; (non-existent) second operand.
-                                             (if (equal method "char->int")
-                                                 a
-                                             (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                                               (if (equal method "equalp")
-                                                   (let ((args-ptr (alloca-args builder 2)))
-                                                     (store-arg builder args-ptr 0 a)
-                                                     (store-arg builder args-ptr 1 b2)
-                                                     (build-call builder (get-function m "rt_char_equalp") args-ptr 2))
-                                               (if (if (equal method "lt") true (equal method "<"))
-                                                   (build-icmp-lt builder a b2)
-                                                   (if (equal method "<=")
-                                                       (build-icmp-le builder a b2)
-                                                       (if (equal method ">")
-                                                           (build-icmp-gt builder a b2)
-                                                           (if (equal method ">=")
-                                                               (build-icmp-ge builder a b2)
-                                                               (build-icmp-eq builder a b2)))))))))
-                                           ;; `f64` receivers: a compiled `f64` is
-                                           ;; its raw bits in an `i64`, so arithmetic
-                                           ;; lowers to `build-fadd`/... (each
-                                           ;; bitcasts to `double` and back) and
-                                           ;; comparisons to `build-fcmp-*`. `=` and
-                                           ;; its `eq`/`eql`/`equal`/`equalp` aliases
-                                           ;; all fold to the ordered `fcmp-eq`; `/=`
-                                           ;; to `fcmp-ne` (unordered, matching Rust
-                                           ;; `!=`); the arithmetic ops and `expt`
-                                           ;; (`build-fpow`, LLVM's `llvm.pow.f64`
-                                           ;; intrinsic) need a second operand `b2`;
-                                           ;; the unary transcendental/rounding family
-                                           ;; (`sqrt`/`floor`/`ceiling`/`round`/
-                                           ;; `truncate`, each its own LLVM intrinsic
-                                           ;; via `build-f*`), `float->int`
-                                           ;; (`build-fptosi`, the saturating
-                                           ;; `llvm.fptosi.sat` intrinsic — matches
-                                           ;; the interpreter's `as`-cast semantics
-                                           ;; on NaN/out-of-range input), and `float->bignum`/
-                                           ;; `float->ratio` (`rt_float_to_bignum`/
-                                           ;; `rt_float_to_ratio`, allocating heap
-                                           ;; calls — the one exception in this group
-                                           ;; that isn't a bare LLVM instruction) only
-                                           ;; need `a`, so they're checked first to
-                                           ;; avoid evaluating a nonexistent second
-                                           ;; argument form.
-                                           (if (if (equal type-name "f64") (float-native-method? method) false)
-                                               (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
-                                                 (if (equal method "sqrt")
-                                                     (build-fsqrt builder m a)
-                                                     (if (equal method "floor")
-                                                         (build-ffloor builder m a)
-                                                         (if (equal method "ceiling")
-                                                             (build-fceil builder m a)
-                                                             (if (equal method "round")
-                                                                 (build-fround builder m a)
-                                                                 (if (equal method "truncate")
-                                                                     (build-ftrunc builder m a)
-                                                                     (if (equal method "float->int")
-                                                                         (build-fptosi builder m a)
-                                                                         (if (equal method "float->bignum")
-                                                                             (let ((args-ptr (alloca-args builder 1)))
-                                                                               (store-arg builder args-ptr 0 a)
-                                                                               (build-call builder (get-function m "rt_float_to_bignum") args-ptr 1))
-                                                                         (if (equal method "float->ratio")
-                                                                             (let ((args-ptr (alloca-args builder 1)))
-                                                                               (store-arg builder args-ptr 0 a)
-                                                                               (build-call builder (get-function m "rt_float_to_ratio") args-ptr 1))
-                                                                         (if (equal method "sin")
-                                                                             (build-fsin builder m a)
-                                                                         (if (equal method "cos")
-                                                                             (build-fcos builder m a)
-                                                                         (if (equal method "exp")
-                                                                             (build-fexp builder m a)
-                                                                         (if (equal method "log")
-                                                                             (build-flog builder m a)
-                                                                         (if (equal method "tan")
-                                                                             (int-unary-shim-call builder m "rt_f64_tan" a)
-                                                                         (if (equal method "asin")
-                                                                             (int-unary-shim-call builder m "rt_f64_asin" a)
-                                                                         (if (equal method "acos")
-                                                                             (int-unary-shim-call builder m "rt_f64_acos" a)
-                                                                         (if (equal method "atan")
-                                                                             (int-unary-shim-call builder m "rt_f64_atan" a)
-                                                                         (if (equal method "sinh")
-                                                                             (int-unary-shim-call builder m "rt_f64_sinh" a)
-                                                                         (if (equal method "cosh")
-                                                                             (int-unary-shim-call builder m "rt_f64_cosh" a)
-                                                                         (if (equal method "tanh")
-                                                                             (int-unary-shim-call builder m "rt_f64_tanh" a)
-                                                                         (if (equal method "asinh")
-                                                                             (int-unary-shim-call builder m "rt_f64_asinh" a)
-                                                                         (if (equal method "acosh")
-                                                                             (int-unary-shim-call builder m "rt_f64_acosh" a)
-                                                                         (if (equal method "atanh")
-                                                                             (int-unary-shim-call builder m "rt_f64_atanh" a)
-                                                                         (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-                                                                           (if (equal method "+")
-                                                                               (build-fadd builder a b2)
-                                                                               (if (equal method "-")
-                                                                                   (build-fsub builder a b2)
-                                                                                   (if (equal method "*")
-                                                                                       (build-fmul builder a b2)
-                                                                                       (if (equal method "/")
-                                                                                           (build-fdiv builder a b2)
-                                                                                           (if (equal method "mod")
-                                                                                               (build-frem builder a b2)
-                                                                                               (if (equal method "expt")
-                                                                                                   (build-fpow builder m a b2)
-                                                                                                   (if (equal method "<")
-                                                                                                       (build-fcmp-lt builder a b2)
-                                                                                                       (if (equal method "<=")
-                                                                                                           (build-fcmp-le builder a b2)
-                                                                                                           (if (equal method ">")
-                                                                                                               (build-fcmp-gt builder a b2)
-                                                                                                               (if (equal method ">=")
-                                                                                                                   (build-fcmp-ge builder a b2)
-                                                                                                                   (if (equal method "/=")
-                                                                                                                       (build-fcmp-ne builder a b2)
-                                                                                                                       (if (equal method "max")
-                                                                                                                           (build-fmaxnum builder m a b2)
-                                                                                                                           (if (equal method "min")
-                                                                                                                               (build-fminnum builder m a b2)
-                                                                                                                               (build-fcmp-eq builder a b2))))))))))))))))))))))))))))))))))))))
-                                               (if (if (equal type-name "bignum") (bignum-native-method? method) false)
-    (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
-      (if (equal method "bignum->int")
-          (bignum-unary-call builder m "rt_bignum_to_int" a)
-      (if (equal method "bignum->float")
-          (bignum-unary-call builder m "rt_bignum_to_float" a)
-      (if (equal method "bignum->ratio")
-          (bignum-unary-call builder m "rt_bignum_to_ratio" a)
-      (if (equal method "try-bignum->int")
-          ;; `Option<i32>` result: real control flow (found/overflow), the
-          ;; same `compile-if`-shaped "alloca a merge slot, branch, store
-          ;; each arm's result, load after the merge block" `compile-hashtable-op`'s
-          ;; own `get`/`remove` case already uses — `rt_bignum_fits_i32`
-          ;; checked first, `rt_bignum_to_int_raw` only called once that
-          ;; confirms `1`. `Some`/`None` build a real `BoxedObj::Enum` via
-          ;; `rt_data_new` now (the enum-representation unification's
-          ;; compiler flip) — `compile-option-type-name` supplies the type
-          ;; name (no source-level `Option::some`/`none` call site exists
-          ;; here to derive one from) and the `i32` field is tagged via
-          ;; `compile-tag-struct-field` (kind `1`) first, `rt_data_new`'s
-          ;; contract being the same tagged-field one `rt_struct_new` has.
-          (let ((fits-args (alloca-args builder 1)))
-            (store-arg builder fits-args 0 a)
-            (let ((fits (build-call builder (get-function m "rt_bignum_fits_i32") fits-args 1)))
-              (let ((then-block (append-block cur-fn "bignum-fits")))
-                (let ((else-block (append-block cur-fn "bignum-overflow")))
-                  (let ((merge-block (append-block cur-fn "bignum-try-merge")))
-                    (let ((slot (alloca-args builder 1)))
-                      (build-cond-br builder fits then-block else-block)
-                      (position-at-end builder then-block)
-                      (let ((raw (build-call builder (get-function m "rt_bignum_to_int_raw") fits-args 1)))
-                        (let ((some-args (alloca-args builder 3)))
-                          (store-arg builder some-args 0 (compile-option-type-name builder m))
-                          (store-arg builder some-args 1 (const-i64 builder 0))
-                          (store-arg builder some-args 2 (compile-tag-struct-field builder m raw 1))
-                          (let ((some-box (build-call builder (get-function m "rt_data_new") some-args 3)))
-                            (push-permanent-sexpr-root builder m some-box)
-                            (let ((ignored (store-arg builder slot 0 some-box)))
-                              (build-br builder merge-block)))))
-                      (position-at-end builder else-block)
-                      (let ((none-args (alloca-args builder 2)))
-                        (store-arg builder none-args 0 (compile-option-type-name builder m))
-                        (store-arg builder none-args 1 (const-i64 builder 1))
-                        (let ((none-box (build-call builder (get-function m "rt_data_new") none-args 2)))
-                          (push-permanent-sexpr-root builder m none-box)
-                          (let ((ignored (store-arg builder slot 0 none-box)))
-                            (build-br builder merge-block))))
-                      (position-at-end builder merge-block)
-                      (load-raw builder slot 0)))))))
-          (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-            (if (equal method "+")
-                (bignum-binop-call builder m "rt_bignum_add" a b2)
-                (if (equal method "-")
-                    (bignum-binop-call builder m "rt_bignum_sub" a b2)
-                    (if (equal method "*")
-                        (bignum-binop-call builder m "rt_bignum_mul" a b2)
-                        (if (equal method "/")
-                            (bignum-binop-call builder m "rt_bignum_div" a b2)
-                            (if (equal method "mod")
-                                (bignum-binop-call builder m "rt_bignum_mod" a b2)
-                                (if (equal method "<")
-                                    (build-icmp-lt builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))
-                                    (if (equal method "<=")
-                                        (build-icmp-le builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))
-                                        (if (equal method ">")
-                                            (build-icmp-gt builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))
-                                            (if (equal method ">=")
-                                                (build-icmp-ge builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))
-                                                (if (equal method "/=")
-                                                    (build-icmp-ne builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))
-                                                    (if (equal method "max")
-                                                        (build-select builder (build-icmp-ge builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)) a b2)
-                                                        (if (equal method "min")
-                                                            (build-select builder (build-icmp-le builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)) a b2)
-                                                            (build-icmp-eq builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))))))))))))))))))))
-    (if (if (equal type-name "ratio") (ratio-native-method? method) false)
-        (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
-          (if (equal method "ratio->bignum")
-              (ratio-unary-call builder m "rt_ratio_to_bignum" a)
-          (if (equal method "ratio->float")
-              (ratio-unary-call builder m "rt_ratio_to_float" a)
-          (if (equal method "numerator")
-              (ratio-unary-call builder m "rt_ratio_numerator" a)
-          (if (equal method "denominator")
-              (ratio-unary-call builder m "rt_ratio_denominator" a)
-          (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
-            (if (equal method "+")
-                (ratio-binop-call builder m "rt_ratio_add" a b2)
-                (if (equal method "-")
-                    (ratio-binop-call builder m "rt_ratio_sub" a b2)
-                    (if (equal method "*")
-                        (ratio-binop-call builder m "rt_ratio_mul" a b2)
-                        (if (equal method "/")
-                            (ratio-binop-call builder m "rt_ratio_div" a b2)
-                            (if (equal method "<")
-                                (build-icmp-lt builder (ratio-cmp-call builder m a b2) (const-i64 builder 0))
-                                (if (equal method "<=")
-                                    (build-icmp-le builder (ratio-cmp-call builder m a b2) (const-i64 builder 0))
-                                    (if (equal method ">")
-                                        (build-icmp-gt builder (ratio-cmp-call builder m a b2) (const-i64 builder 0))
-                                        (if (equal method ">=")
-                                            (build-icmp-ge builder (ratio-cmp-call builder m a b2) (const-i64 builder 0))
-                                            (if (equal method "/=")
-                                                (build-icmp-ne builder (ratio-cmp-call builder m a b2) (const-i64 builder 0))
-                                                (if (equal method "max")
-                                                    (build-select builder (build-icmp-ge builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)) a b2)
-                                                    (if (equal method "min")
-                                                        (build-select builder (build-icmp-le builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)) a b2)
-                                                        (build-icmp-eq builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)))))))))))))))))))
-        (compile-assoc-user builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name method rest))))))))))))
+                                           (store-arg builder args-ptr 1 b2)
+                                           (build-call builder (get-function m "rt_char_equalp") args-ptr 2)))
+                                        ((if (equal method "lt") true (equal method "<"))
+                                         (build-icmp-lt builder a b2))
+                                        ((equal method "<=")
+                                         (build-icmp-le builder a b2))
+                                        ((equal method ">")
+                                         (build-icmp-gt builder a b2))
+                                        ((equal method ">=")
+                                         (build-icmp-ge builder a b2))
+                                        (else (build-icmp-eq builder a b2)))))))
+                                 ((if (equal type-name "f64") (float-native-method? method) false)
+                                  (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+                                    (icond
+                                      ((equal method "sqrt")
+                                       (build-fsqrt builder m a))
+                                      ((equal method "floor")
+                                       (build-ffloor builder m a))
+                                      ((equal method "ceiling")
+                                       (build-fceil builder m a))
+                                      ((equal method "round")
+                                       (build-fround builder m a))
+                                      ((equal method "truncate")
+                                       (build-ftrunc builder m a))
+                                      ((equal method "float->int")
+                                       (build-fptosi builder m a))
+                                      ((equal method "float->bignum")
+                                       (let ((args-ptr (alloca-args builder 1)))
+                                         (store-arg builder args-ptr 0 a)
+                                         (build-call builder (get-function m "rt_float_to_bignum") args-ptr 1)))
+                                      ((equal method "float->ratio")
+                                       (let ((args-ptr (alloca-args builder 1)))
+                                         (store-arg builder args-ptr 0 a)
+                                         (build-call builder (get-function m "rt_float_to_ratio") args-ptr 1)))
+                                      ((equal method "sin")
+                                       (build-fsin builder m a))
+                                      ((equal method "cos")
+                                       (build-fcos builder m a))
+                                      ((equal method "exp")
+                                       (build-fexp builder m a))
+                                      ((equal method "log")
+                                       (build-flog builder m a))
+                                      ((equal method "tan")
+                                       (int-unary-shim-call builder m "rt_f64_tan" a))
+                                      ((equal method "asin")
+                                       (int-unary-shim-call builder m "rt_f64_asin" a))
+                                      ((equal method "acos")
+                                       (int-unary-shim-call builder m "rt_f64_acos" a))
+                                      ((equal method "atan")
+                                       (int-unary-shim-call builder m "rt_f64_atan" a))
+                                      ((equal method "sinh")
+                                       (int-unary-shim-call builder m "rt_f64_sinh" a))
+                                      ((equal method "cosh")
+                                       (int-unary-shim-call builder m "rt_f64_cosh" a))
+                                      ((equal method "tanh")
+                                       (int-unary-shim-call builder m "rt_f64_tanh" a))
+                                      ((equal method "asinh")
+                                       (int-unary-shim-call builder m "rt_f64_asinh" a))
+                                      ((equal method "acosh")
+                                       (int-unary-shim-call builder m "rt_f64_acosh" a))
+                                      ((equal method "atanh")
+                                       (int-unary-shim-call builder m "rt_f64_atanh" a))
+                                      (else (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+                                               (icond
+                                                 ((equal method "+")
+                                                  (build-fadd builder a b2))
+                                                 ((equal method "-")
+                                                  (build-fsub builder a b2))
+                                                 ((equal method "*")
+                                                  (build-fmul builder a b2))
+                                                 ((equal method "/")
+                                                  (build-fdiv builder a b2))
+                                                 ((equal method "mod")
+                                                  (build-frem builder a b2))
+                                                 ((equal method "expt")
+                                                  (build-fpow builder m a b2))
+                                                 ((equal method "<")
+                                                  (build-fcmp-lt builder a b2))
+                                                 ((equal method "<=")
+                                                  (build-fcmp-le builder a b2))
+                                                 ((equal method ">")
+                                                  (build-fcmp-gt builder a b2))
+                                                 ((equal method ">=")
+                                                  (build-fcmp-ge builder a b2))
+                                                 ((equal method "/=")
+                                                  (build-fcmp-ne builder a b2))
+                                                 ((equal method "max")
+                                                  (build-fmaxnum builder m a b2))
+                                                 ((equal method "min")
+                                                  (build-fminnum builder m a b2))
+                                                 (else (build-fcmp-eq builder a b2))))))))
+                                 ((if (equal type-name "bignum") (bignum-native-method? method) false)
+                                  (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+                                    (icond
+                                      ((equal method "bignum->int")
+                                       (bignum-unary-call builder m "rt_bignum_to_int" a))
+                                      ((equal method "bignum->float")
+                                       (bignum-unary-call builder m "rt_bignum_to_float" a))
+                                      ((equal method "bignum->ratio")
+                                       (bignum-unary-call builder m "rt_bignum_to_ratio" a))
+                                      ((equal method "try-bignum->int")
+                                       ;; `Option<i32>` result: real control flow (found/overflow), the
+                                       ;; same `compile-if`-shaped "alloca a merge slot, branch, store
+                                       ;; each arm's result, load after the merge block" `compile-hashtable-op`'s
+                                       ;; own `get`/`remove` case already uses — `rt_bignum_fits_i32`
+                                       ;; checked first, `rt_bignum_to_int_raw` only called once that
+                                       ;; confirms `1`. `Some`/`None` build a real `BoxedObj::Enum` via
+                                       ;; `rt_data_new` now (the enum-representation unification's
+                                       ;; compiler flip) — `compile-option-type-name` supplies the type
+                                       ;; name (no source-level `Option::some`/`none` call site exists
+                                       ;; here to derive one from) and the `i32` field is tagged via
+                                       ;; `compile-tag-struct-field` (kind `1`) first, `rt_data_new`'s
+                                       ;; contract being the same tagged-field one `rt_struct_new` has.
+                                       (let ((fits-args (alloca-args builder 1)))
+                                         (store-arg builder fits-args 0 a)
+                                         (let ((fits (build-call builder (get-function m "rt_bignum_fits_i32") fits-args 1)))
+                                           (let ((then-block (append-block cur-fn "bignum-fits")))
+                                             (let ((else-block (append-block cur-fn "bignum-overflow")))
+                                               (let ((merge-block (append-block cur-fn "bignum-try-merge")))
+                                                 (let ((slot (alloca-args builder 1)))
+                                                   (build-cond-br builder fits then-block else-block)
+                                                   (position-at-end builder then-block)
+                                                   (let ((raw (build-call builder (get-function m "rt_bignum_to_int_raw") fits-args 1)))
+                                                     (let ((some-args (alloca-args builder 3)))
+                                                       (store-arg builder some-args 0 (compile-option-type-name builder m))
+                                                       (store-arg builder some-args 1 (const-i64 builder 0))
+                                                       (store-arg builder some-args 2 (compile-tag-struct-field builder m raw 1))
+                                                       (let ((some-box (build-call builder (get-function m "rt_data_new") some-args 3)))
+                                                         (push-permanent-sexpr-root builder m some-box)
+                                                         (let ((ignored (store-arg builder slot 0 some-box)))
+                                                           (build-br builder merge-block)))))
+                                                   (position-at-end builder else-block)
+                                                   (let ((none-args (alloca-args builder 2)))
+                                                     (store-arg builder none-args 0 (compile-option-type-name builder m))
+                                                     (store-arg builder none-args 1 (const-i64 builder 1))
+                                                     (let ((none-box (build-call builder (get-function m "rt_data_new") none-args 2)))
+                                                       (push-permanent-sexpr-root builder m none-box)
+                                                       (let ((ignored (store-arg builder slot 0 none-box)))
+                                                         (build-br builder merge-block))))
+                                                   (position-at-end builder merge-block)
+                                                   (load-raw builder slot 0))))))))
+                                      (else (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+                                               (icond
+                                                 ((equal method "+")
+                                                  (bignum-binop-call builder m "rt_bignum_add" a b2))
+                                                 ((equal method "-")
+                                                  (bignum-binop-call builder m "rt_bignum_sub" a b2))
+                                                 ((equal method "*")
+                                                  (bignum-binop-call builder m "rt_bignum_mul" a b2))
+                                                 ((equal method "/")
+                                                  (bignum-binop-call builder m "rt_bignum_div" a b2))
+                                                 ((equal method "mod")
+                                                  (bignum-binop-call builder m "rt_bignum_mod" a b2))
+                                                 ((equal method "<")
+                                                  (build-icmp-lt builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)))
+                                                 ((equal method "<=")
+                                                  (build-icmp-le builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)))
+                                                 ((equal method ">")
+                                                  (build-icmp-gt builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)))
+                                                 ((equal method ">=")
+                                                  (build-icmp-ge builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)))
+                                                 ((equal method "/=")
+                                                  (build-icmp-ne builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)))
+                                                 ((equal method "max")
+                                                  (build-select builder (build-icmp-ge builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)) a b2))
+                                                 ((equal method "min")
+                                                  (build-select builder (build-icmp-le builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)) a b2))
+                                                 (else (build-icmp-eq builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)))))))))
+                                 ((if (equal type-name "ratio") (ratio-native-method? method) false)
+                                  (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
+                                    (icond
+                                      ((equal method "ratio->bignum")
+                                       (ratio-unary-call builder m "rt_ratio_to_bignum" a))
+                                      ((equal method "ratio->float")
+                                       (ratio-unary-call builder m "rt_ratio_to_float" a))
+                                      ((equal method "numerator")
+                                       (ratio-unary-call builder m "rt_ratio_numerator" a))
+                                      ((equal method "denominator")
+                                       (ratio-unary-call builder m "rt_ratio_denominator" a))
+                                      (else (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
+                                               (icond
+                                                 ((equal method "+")
+                                                  (ratio-binop-call builder m "rt_ratio_add" a b2))
+                                                 ((equal method "-")
+                                                  (ratio-binop-call builder m "rt_ratio_sub" a b2))
+                                                 ((equal method "*")
+                                                  (ratio-binop-call builder m "rt_ratio_mul" a b2))
+                                                 ((equal method "/")
+                                                  (ratio-binop-call builder m "rt_ratio_div" a b2))
+                                                 ((equal method "<")
+                                                  (build-icmp-lt builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)))
+                                                 ((equal method "<=")
+                                                  (build-icmp-le builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)))
+                                                 ((equal method ">")
+                                                  (build-icmp-gt builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)))
+                                                 ((equal method ">=")
+                                                  (build-icmp-ge builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)))
+                                                 ((equal method "/=")
+                                                  (build-icmp-ne builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)))
+                                                 ((equal method "max")
+                                                  (build-select builder (build-icmp-ge builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)) a b2))
+                                                 ((equal method "min")
+                                                  (build-select builder (build-icmp-le builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)) a b2))
+                                                 (else (build-icmp-eq builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)))))))))
+                                 (else (compile-assoc-user builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name method rest)))))))
                        ;; The user-defined-method leg of `compile-assoc`'s
                        ;; dispatch (see its doc comment): call the callee
                        ;; under the mangled name `type-name::method`,
@@ -3701,100 +3726,101 @@ pub const SOURCE: &str = r#"
                                  (compile-construct-boxed-struct builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))) (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
                              (let ((v-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
                                (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base v-form)))
-                                 (if (equal method "len")
-                                     (let ((args-ptr (alloca-args builder 1)))
-                                       (store-arg builder args-ptr 0 v)
-                                       (build-call builder (get-function m "rt_struct_field_count") args-ptr 1))
-                                     (if (equal method "pop")
-                                         ;; `pop` returns `Option<T>`: an empty
-                                         ;; vector is `None`, not a bounds
-                                         ;; panic (unlike `get`/`set`) — so
-                                         ;; this needs real control flow,
-                                         ;; following `compile-hashtable-op`'s
-                                         ;; `get`/`remove` "alloca a merge
-                                         ;; slot, branch, store each arm's
-                                         ;; result, load after the merge
-                                         ;; block" shape. `rt_struct_field_
-                                         ;; count` is checked first (`= 0` -> a
-                                         ;; compile-time-known `None`), then
-                                         ;; only the confirmed-nonempty branch
-                                         ;; calls `rt_struct_pop_field` — safe
-                                         ;; with no race, single-threaded
-                                         ;; compiled code can't shrink the
-                                         ;; vector between the two calls. The
-                                         ;; popped value is already a properly
-                                         ;; tagged `Sexpr` (`push`'s own
-                                         ;; `compile-tag-struct-field` call
-                                         ;; tagged it going in), so it flows
-                                         ;; into `Some` via `rt_data_new`
-                                         ;; unchanged — no `compile-sexpr-
-                                         ;; field` decode step, exactly as
-                                         ;; `compile-hashtable-op`'s `get`/
-                                         ;; `remove` pass their own raw looked-
-                                         ;; up value straight through.
-                                         ;; `option-name-form` is the node's
-                                         ;; one trailing operand
-                                         ;; (`translate_vector_method`'s
-                                         ;; `pop`-only addition), in the same
-                                         ;; slot `get`/`set`'s `idx-form`
-                                         ;; would occupy.
-                                         (let ((option-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
-                                           (let ((option-name-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base option-name-form)))
-                                             (let ((args-ptr (alloca-args builder 1)))
-                                               (store-arg builder args-ptr 0 v)
-                                               (let ((count (build-call builder (get-function m "rt_struct_field_count") args-ptr 1)))
-                                                 (let ((empty (build-icmp-eq builder count (const-i64 builder 0))))
-                                                   (let ((then-block (append-block cur-fn "vec-pop-empty")))
-                                                     (let ((else-block (append-block cur-fn "vec-pop-nonempty")))
-                                                       (let ((merge-block (append-block cur-fn "vec-pop-merge")))
-                                                         (let ((slot (alloca-args builder 1)))
-                                                           (build-cond-br builder empty then-block else-block)
-                                                           (position-at-end builder then-block)
-                                                           (let ((none-args (alloca-args builder 2)))
-                                                             (store-arg builder none-args 0 option-name-v)
-                                                             (store-arg builder none-args 1 (const-i64 builder 1))
-                                                             (let ((none-box (build-call builder (get-function m "rt_data_new") none-args 2)))
-                                                               (push-permanent-sexpr-root builder m none-box)
-                                                               (let ((ignored (store-arg builder slot 0 none-box)))
-                                                                 (build-br builder merge-block))))
-                                                           (position-at-end builder else-block)
-                                                           (let ((raw (build-call builder (get-function m "rt_struct_pop_field") args-ptr 1)))
-                                                             (let ((some-args (alloca-args builder 3)))
-                                                               (store-arg builder some-args 0 option-name-v)
-                                                               (store-arg builder some-args 1 (const-i64 builder 0))
-                                                               (store-arg builder some-args 2 raw)
-                                                               (let ((some-box (build-call builder (get-function m "rt_data_new") some-args 3)))
-                                                                 (push-permanent-sexpr-root builder m some-box)
-                                                                 (let ((ignored (store-arg builder slot 0 some-box)))
-                                                                   (build-br builder merge-block)))))
-                                                           (position-at-end builder merge-block)
-                                                           (load-raw builder slot 0))))))))))
-                                       (if (equal method "push")
-                                             (let ((x-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
-                                               (let ((x (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base x-form)))
-                                                 (let ((tagged-x (compile-tag-struct-field builder m x kind)))
-                                                   (let ((args-ptr (alloca-args builder 2)))
-                                                     (store-arg builder args-ptr 0 v)
-                                                     (store-arg builder args-ptr 1 tagged-x)
-                                                     (let ((ignored (build-call builder (get-function m "rt_struct_push_field") args-ptr 2)))
-                                                       (const-i64 builder 0))))))
-                                             (let ((idx-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
-                                               (let ((idx (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base idx-form)))
-                                                 (if (equal method "get")
-                                                     (let ((args-ptr (alloca-args builder 2)))
-                                                       (store-arg builder args-ptr 0 v)
-                                                       (store-arg builder args-ptr 1 idx)
-                                                       (let ((raw (build-call builder (get-function m "rt_struct_field_get") args-ptr 2)))
-                                                         (compile-sexpr-field builder m raw kind 0)))
-                                                     (let ((x-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
-                                                       (let ((x (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base x-form)))
-                                                         (let ((tagged-x (compile-tag-struct-field builder m x kind)))
-                                                           (let ((args-ptr (alloca-args builder 3)))
-                                                             (store-arg builder args-ptr 0 v)
-                                                             (store-arg builder args-ptr 1 idx)
-                                                             (store-arg builder args-ptr 2 tagged-x)
-                                                             (let ((ignored (build-call builder (get-function m "rt_struct_field_set") args-ptr 3)))
-                                                               (const-i64 builder 0))))))))))))))))))
+                                 (icond
+                                   ((equal method "len")
+                                    (let ((args-ptr (alloca-args builder 1)))
+                                      (store-arg builder args-ptr 0 v)
+                                      (build-call builder (get-function m "rt_struct_field_count") args-ptr 1)))
+                                   ((equal method "pop")
+                                    ;; `pop` returns `Option<T>`: an empty
+                                    ;; vector is `None`, not a bounds
+                                    ;; panic (unlike `get`/`set`) — so
+                                    ;; this needs real control flow,
+                                    ;; following `compile-hashtable-op`'s
+                                    ;; `get`/`remove` "alloca a merge
+                                    ;; slot, branch, store each arm's
+                                    ;; result, load after the merge
+                                    ;; block" shape. `rt_struct_field_
+                                    ;; count` is checked first (`= 0` -> a
+                                    ;; compile-time-known `None`), then
+                                    ;; only the confirmed-nonempty branch
+                                    ;; calls `rt_struct_pop_field` — safe
+                                    ;; with no race, single-threaded
+                                    ;; compiled code can't shrink the
+                                    ;; vector between the two calls. The
+                                    ;; popped value is already a properly
+                                    ;; tagged `Sexpr` (`push`'s own
+                                    ;; `compile-tag-struct-field` call
+                                    ;; tagged it going in), so it flows
+                                    ;; into `Some` via `rt_data_new`
+                                    ;; unchanged — no `compile-sexpr-
+                                    ;; field` decode step, exactly as
+                                    ;; `compile-hashtable-op`'s `get`/
+                                    ;; `remove` pass their own raw looked-
+                                    ;; up value straight through.
+                                    ;; `option-name-form` is the node's
+                                    ;; one trailing operand
+                                    ;; (`translate_vector_method`'s
+                                    ;; `pop`-only addition), in the same
+                                    ;; slot `get`/`set`'s `idx-form`
+                                    ;; would occupy.
+                                    (let ((option-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+                                      (let ((option-name-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base option-name-form)))
+                                        (let ((args-ptr (alloca-args builder 1)))
+                                          (store-arg builder args-ptr 0 v)
+                                          (let ((count (build-call builder (get-function m "rt_struct_field_count") args-ptr 1)))
+                                            (let ((empty (build-icmp-eq builder count (const-i64 builder 0))))
+                                              (let ((then-block (append-block cur-fn "vec-pop-empty")))
+                                                (let ((else-block (append-block cur-fn "vec-pop-nonempty")))
+                                                  (let ((merge-block (append-block cur-fn "vec-pop-merge")))
+                                                    (let ((slot (alloca-args builder 1)))
+                                                      (build-cond-br builder empty then-block else-block)
+                                                      (position-at-end builder then-block)
+                                                      (let ((none-args (alloca-args builder 2)))
+                                                        (store-arg builder none-args 0 option-name-v)
+                                                        (store-arg builder none-args 1 (const-i64 builder 1))
+                                                        (let ((none-box (build-call builder (get-function m "rt_data_new") none-args 2)))
+                                                          (push-permanent-sexpr-root builder m none-box)
+                                                          (let ((ignored (store-arg builder slot 0 none-box)))
+                                                            (build-br builder merge-block))))
+                                                      (position-at-end builder else-block)
+                                                      (let ((raw (build-call builder (get-function m "rt_struct_pop_field") args-ptr 1)))
+                                                        (let ((some-args (alloca-args builder 3)))
+                                                          (store-arg builder some-args 0 option-name-v)
+                                                          (store-arg builder some-args 1 (const-i64 builder 0))
+                                                          (store-arg builder some-args 2 raw)
+                                                          (let ((some-box (build-call builder (get-function m "rt_data_new") some-args 3)))
+                                                            (push-permanent-sexpr-root builder m some-box)
+                                                            (let ((ignored (store-arg builder slot 0 some-box)))
+                                                              (build-br builder merge-block)))))
+                                                      (position-at-end builder merge-block)
+                                                      (load-raw builder slot 0)))))))))))
+                                   ((equal method "push")
+                                    (let ((x-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+                                      (let ((x (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base x-form)))
+                                        (let ((tagged-x (compile-tag-struct-field builder m x kind)))
+                                          (let ((args-ptr (alloca-args builder 2)))
+                                            (store-arg builder args-ptr 0 v)
+                                            (store-arg builder args-ptr 1 tagged-x)
+                                            (let ((ignored (build-call builder (get-function m "rt_struct_push_field") args-ptr 2)))
+                                              (const-i64 builder 0)))))))
+                                   (else (let ((idx-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+                                            (let ((idx (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base idx-form)))
+                                              (if (equal method "get")
+                                                  (let ((args-ptr (alloca-args builder 2)))
+                                                    (store-arg builder args-ptr 0 v)
+                                                    (store-arg builder args-ptr 1 idx)
+                                                    (let ((raw (build-call builder (get-function m "rt_struct_field_get") args-ptr 2)))
+                                                      (compile-sexpr-field builder m raw kind 0)))
+                                                  (let ((x-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
+                                                    (let ((x (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base x-form)))
+                                                      (let ((tagged-x (compile-tag-struct-field builder m x kind)))
+                                                        (let ((args-ptr (alloca-args builder 3)))
+                                                          (store-arg builder args-ptr 0 v)
+                                                          (store-arg builder args-ptr 1 idx)
+                                                          (store-arg builder args-ptr 2 tagged-x)
+                                                          (let ((ignored (build-call builder (get-function m "rt_struct_field_set") args-ptr 3)))
+                                                            (const-i64 builder 0)))))))))))))))))
                        ;; `(hashtable-op method key-kind val-kind ht-form
                        ;; ...)` — a `HashTable<K,V>` builtin (`ast_bridge`'s
                        ;; `translate_hashtable_method`), lowered to the
@@ -3825,102 +3851,103 @@ pub const SOURCE: &str = r#"
                                    (let ((option-type-name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
                                    (let ((ht-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))
                                      (let ((ht (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base ht-form)))
-                                       (if (equal method "set")
-                                           (let ((key-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
-                                             (let ((val-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))))
-                                               (let ((k (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base key-form)))
-                                                 (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base val-form)))
-                                                   (let ((tk (compile-tag-struct-field builder m k key-kind)))
-                                                     (let ((tv (compile-tag-struct-field builder m v val-kind)))
-                                                       (let ((args-ptr (alloca-args builder 3)))
-                                                         (store-arg builder args-ptr 0 ht)
-                                                         (store-arg builder args-ptr 1 tk)
-                                                         (store-arg builder args-ptr 2 tv)
-                                                         (let ((ignored (build-call builder (get-function m "rt_hashtable_set") args-ptr 3)))
-                                                           (const-i64 builder 0)))))))))
-                                           (if (if (equal method "get") true (equal method "remove"))
-                                               ;; `get`/`remove`: a runtime lookup whose found/not-found
-                                               ;; outcome decides *which sum-ADT variant* to build, so
-                                               ;; (unlike an ordinary `Option::some`/`none` source call,
-                                               ;; which `compile-construct-box` builds from a
-                                               ;; compile-time-known variant) this can't reuse that
-                                               ;; function directly — it needs real control flow. Follows
-                                               ;; `compile-if`'s own "alloca a merge slot, branch, store
-                                               ;; each arm's result, load after the merge block" shape
-                                               ;; (no `phi` builtin exists here) rather than a new one.
-                                               ;; `rt_hashtable_contains` is checked first (a `mem::Value`'s
-                                               ;; tag space has no free bit pattern to serve as a "not
-                                               ;; found" sentinel from a single value-returning call), then
-                                               ;; only the confirmed-present branch calls
-                                               ;; `rt_hashtable_get_raw`/`_remove_raw` — safe with no race,
-                                               ;; single-threaded compiled code can't remove the entry
-                                               ;; between the two calls. The found value, still tagged, is
-                                               ;; decoded into the `Option` box's own "verbatim compiled
-                                               ;; value" field convention via `compile-sexpr-field` — the
-                                               ;; exact same decode a `BoxedObj::Struct` field read already
-                                               ;; uses. `Some`/`None` build a real `BoxedObj::Enum` via
-                                               ;; `rt_data_new` now (the enum-representation unification's
-                                               ;; compiler flip) — `option-name-v` (compiled once, from
-                                               ;; `option-type-name-form`, before the branch so both arms
-                                               ;; can use the same SSA value) plus the raw variant index,
-                                               ;; so `Interp::call_compiled` decodes the result exactly as
-                                               ;; it already does for a source-level `Option::some`/`none`.
-                                               (let ((key-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
-                                                 (let ((k (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base key-form)))
-                                                   (let ((tk (compile-tag-struct-field builder m k key-kind)))
-                                                     (let ((option-name-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base option-type-name-form)))
-                                                     (let ((lookup-args (alloca-args builder 2)))
-                                                       (store-arg builder lookup-args 0 ht)
-                                                       (store-arg builder lookup-args 1 tk)
-                                                       (let ((found (build-call builder (get-function m "rt_hashtable_contains") lookup-args 2)))
-                                                         (let ((then-block (append-block cur-fn "ht-found")))
-                                                           (let ((else-block (append-block cur-fn "ht-not-found")))
-                                                             (let ((merge-block (append-block cur-fn "ht-merge")))
-                                                               (let ((slot (alloca-args builder 1)))
-                                                                 (build-cond-br builder found then-block else-block)
-                                                                 (position-at-end builder then-block)
-                                                                 (let ((raw-fn (if (equal method "get") "rt_hashtable_get_raw" "rt_hashtable_remove_raw")))
-                                                                   (let ((raw (build-call builder (get-function m raw-fn) lookup-args 2)))
-                                                                     ;; `raw` is already the properly tagged `Sexpr`
-                                                                     ;; the map stores (`set`'s own `compile-tag-
-                                                                     ;; struct-field` call tagged it going in) —
-                                                                     ;; `rt_data_new`'s field-value contract (like
-                                                                     ;; `rt_struct_new`'s) wants exactly that, not a
-                                                                     ;; decoded/untagged value, so this passes `raw`
-                                                                     ;; straight through with no `compile-sexpr-
-                                                                     ;; field` decode step.
-                                                                     (let ((some-args (alloca-args builder 3)))
-                                                                       (store-arg builder some-args 0 option-name-v)
-                                                                       (store-arg builder some-args 1 (const-i64 builder 0))
-                                                                       (store-arg builder some-args 2 raw)
-                                                                       (let ((some-box (build-call builder (get-function m "rt_data_new") some-args 3)))
-                                                                         (push-permanent-sexpr-root builder m some-box)
-                                                                         (let ((ignored (store-arg builder slot 0 some-box)))
-                                                                           (build-br builder merge-block))))))
-                                                                 (position-at-end builder else-block)
-                                                                 (let ((none-args (alloca-args builder 2)))
-                                                                   (store-arg builder none-args 0 option-name-v)
-                                                                   (store-arg builder none-args 1 (const-i64 builder 1))
-                                                                   (let ((none-box (build-call builder (get-function m "rt_data_new") none-args 2)))
-                                                                     (push-permanent-sexpr-root builder m none-box)
-                                                                     (let ((ignored (store-arg builder slot 0 none-box)))
-                                                                       (build-br builder merge-block))))
-                                                                 (position-at-end builder merge-block)
-                                                                 (load-raw builder slot 0)))))))))))
-                                           (if (equal method "count")
-                                               (let ((args-ptr (alloca-args builder 1)))
-                                                 (store-arg builder args-ptr 0 ht)
-                                                 (build-call builder (get-function m "rt_hashtable_count") args-ptr 1))
-                                               (if (equal method "clear")
-                                                   (let ((args-ptr (alloca-args builder 1)))
-                                                     (store-arg builder args-ptr 0 ht)
-                                                     (let ((ignored (build-call builder (get-function m "rt_hashtable_clear") args-ptr 1)))
-                                                       (const-i64 builder 0)))
-                                                   (let ((args-ptr (alloca-args builder 1)))
-                                                     (store-arg builder args-ptr 0 ht)
-                                                     (let ((result (build-call builder (get-function m (append "rt_hashtable_" method)) args-ptr 1)))
-                                                       (push-permanent-sexpr-root builder m result)
-                                                       result))))))))))))))
+                                       (icond
+                                         ((equal method "set")
+                                          (let ((key-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
+                                            (let ((val-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))))))
+                                              (let ((k (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base key-form)))
+                                                (let ((v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base val-form)))
+                                                  (let ((tk (compile-tag-struct-field builder m k key-kind)))
+                                                    (let ((tv (compile-tag-struct-field builder m v val-kind)))
+                                                      (let ((args-ptr (alloca-args builder 3)))
+                                                        (store-arg builder args-ptr 0 ht)
+                                                        (store-arg builder args-ptr 1 tk)
+                                                        (store-arg builder args-ptr 2 tv)
+                                                        (let ((ignored (build-call builder (get-function m "rt_hashtable_set") args-ptr 3)))
+                                                          (const-i64 builder 0))))))))))
+                                         ((if (equal method "get") true (equal method "remove"))
+                                          ;; `get`/`remove`: a runtime lookup whose found/not-found
+                                          ;; outcome decides *which sum-ADT variant* to build, so
+                                          ;; (unlike an ordinary `Option::some`/`none` source call,
+                                          ;; which `compile-construct-box` builds from a
+                                          ;; compile-time-known variant) this can't reuse that
+                                          ;; function directly — it needs real control flow. Follows
+                                          ;; `compile-if`'s own "alloca a merge slot, branch, store
+                                          ;; each arm's result, load after the merge block" shape
+                                          ;; (no `phi` builtin exists here) rather than a new one.
+                                          ;; `rt_hashtable_contains` is checked first (a `mem::Value`'s
+                                          ;; tag space has no free bit pattern to serve as a "not
+                                          ;; found" sentinel from a single value-returning call), then
+                                          ;; only the confirmed-present branch calls
+                                          ;; `rt_hashtable_get_raw`/`_remove_raw` — safe with no race,
+                                          ;; single-threaded compiled code can't remove the entry
+                                          ;; between the two calls. The found value, still tagged, is
+                                          ;; decoded into the `Option` box's own "verbatim compiled
+                                          ;; value" field convention via `compile-sexpr-field` — the
+                                          ;; exact same decode a `BoxedObj::Struct` field read already
+                                          ;; uses. `Some`/`None` build a real `BoxedObj::Enum` via
+                                          ;; `rt_data_new` now (the enum-representation unification's
+                                          ;; compiler flip) — `option-name-v` (compiled once, from
+                                          ;; `option-type-name-form`, before the branch so both arms
+                                          ;; can use the same SSA value) plus the raw variant index,
+                                          ;; so `Interp::call_compiled` decodes the result exactly as
+                                          ;; it already does for a source-level `Option::some`/`none`.
+                                          (let ((key-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))))
+                                            (let ((k (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base key-form)))
+                                              (let ((tk (compile-tag-struct-field builder m k key-kind)))
+                                                (let ((option-name-v (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base option-type-name-form)))
+                                                (let ((lookup-args (alloca-args builder 2)))
+                                                  (store-arg builder lookup-args 0 ht)
+                                                  (store-arg builder lookup-args 1 tk)
+                                                  (let ((found (build-call builder (get-function m "rt_hashtable_contains") lookup-args 2)))
+                                                    (let ((then-block (append-block cur-fn "ht-found")))
+                                                      (let ((else-block (append-block cur-fn "ht-not-found")))
+                                                        (let ((merge-block (append-block cur-fn "ht-merge")))
+                                                          (let ((slot (alloca-args builder 1)))
+                                                            (build-cond-br builder found then-block else-block)
+                                                            (position-at-end builder then-block)
+                                                            (let ((raw-fn (if (equal method "get") "rt_hashtable_get_raw" "rt_hashtable_remove_raw")))
+                                                              (let ((raw (build-call builder (get-function m raw-fn) lookup-args 2)))
+                                                                ;; `raw` is already the properly tagged `Sexpr`
+                                                                ;; the map stores (`set`'s own `compile-tag-
+                                                                ;; struct-field` call tagged it going in) —
+                                                                ;; `rt_data_new`'s field-value contract (like
+                                                                ;; `rt_struct_new`'s) wants exactly that, not a
+                                                                ;; decoded/untagged value, so this passes `raw`
+                                                                ;; straight through with no `compile-sexpr-
+                                                                ;; field` decode step.
+                                                                (let ((some-args (alloca-args builder 3)))
+                                                                  (store-arg builder some-args 0 option-name-v)
+                                                                  (store-arg builder some-args 1 (const-i64 builder 0))
+                                                                  (store-arg builder some-args 2 raw)
+                                                                  (let ((some-box (build-call builder (get-function m "rt_data_new") some-args 3)))
+                                                                    (push-permanent-sexpr-root builder m some-box)
+                                                                    (let ((ignored (store-arg builder slot 0 some-box)))
+                                                                      (build-br builder merge-block))))))
+                                                            (position-at-end builder else-block)
+                                                            (let ((none-args (alloca-args builder 2)))
+                                                              (store-arg builder none-args 0 option-name-v)
+                                                              (store-arg builder none-args 1 (const-i64 builder 1))
+                                                              (let ((none-box (build-call builder (get-function m "rt_data_new") none-args 2)))
+                                                                (push-permanent-sexpr-root builder m none-box)
+                                                                (let ((ignored (store-arg builder slot 0 none-box)))
+                                                                  (build-br builder merge-block))))
+                                                            (position-at-end builder merge-block)
+                                                            (load-raw builder slot 0))))))))))))
+                                         ((equal method "count")
+                                          (let ((args-ptr (alloca-args builder 1)))
+                                            (store-arg builder args-ptr 0 ht)
+                                            (build-call builder (get-function m "rt_hashtable_count") args-ptr 1)))
+                                         ((equal method "clear")
+                                          (let ((args-ptr (alloca-args builder 1)))
+                                            (store-arg builder args-ptr 0 ht)
+                                            (let ((ignored (build-call builder (get-function m "rt_hashtable_clear") args-ptr 1)))
+                                              (const-i64 builder 0))))
+                                         (else (let ((args-ptr (alloca-args builder 1)))
+                                                  (store-arg builder args-ptr 0 ht)
+                                                  (let ((result (build-call builder (get-function m (append "rt_hashtable_" method)) args-ptr 1)))
+                                                    (push-permanent-sexpr-root builder m result)
+                                                    result))))))))))))
                        ;; `(global id kind)` — `id` is `path`'s already-
                        ;; promoted compiled-global slot
                        ;; (`Interp::add_compiled_function`'s

@@ -41,8 +41,10 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
 /// `island_defun_list_is_exhaustive` guard below (which re-derives the list
 /// from the interpreter's own function table and fails if this misses one),
 /// so a future island edit that adds/removes a `defun` can't silently
-/// desync this test.
+/// desync this test. Island `defmacro`s go in [`ISLAND_MACROS`] instead —
+/// see its doc comment for why the two must not be merged.
 const ISLAND_DEFUNS: &[&str] = &[
+    "icond-build",
     "compile-sexpr-field",
     "compile-tag-struct-field",
     "bind-params",
@@ -87,6 +89,21 @@ const ISLAND_DEFUNS: &[&str] = &[
     "compile-option-type-name",
     "compile-function",
 ];
+
+/// Every top-level `defmacro` in `compiler.rs`'s `SOURCE`.
+///
+/// Kept separate from [`ISLAND_DEFUNS`] rather than merged into it, because
+/// the two lists are used for opposite things. A macro's body is stored in
+/// the very same `fns` table a `defun`'s is (`Interp::exec`'s `Defmacro`
+/// arm), so `island_defun_list_is_exhaustive` re-derives it alongside the
+/// `defun`s and has to account for it here — but it must stay *out* of
+/// `ISLAND_DEFUNS`, which `every_island_defun_compiles` feeds to
+/// `(compile ...)`: a macro has no type signature and is rejected outright
+/// (`compile: "icond" has no type signature (is it a defmacro?)`). Nothing is
+/// lost by not compiling one — a macro body only ever runs interpreted, at
+/// expansion time, which for the island is during the check of `SOURCE`
+/// itself, before any island bitcode exists to run it compiled.
+const ISLAND_MACROS: &[&str] = &["icond"];
 
 #[test]
 fn every_island_defun_compiles() {
@@ -133,8 +150,9 @@ fn island_defun_list_is_exhaustive() {
     let mut island: Vec<String> = all_fns.into_iter().filter(|n| !prelude_fns.contains(n)).collect();
     island.sort();
 
-    let mut expected: Vec<String> = ISLAND_DEFUNS.iter().map(|s| s.to_string()).collect();
+    let mut expected: Vec<String> =
+        ISLAND_DEFUNS.iter().chain(ISLAND_MACROS.iter()).map(|s| s.to_string()).collect();
     expected.sort();
 
-    assert_eq!(island, expected, "ISLAND_DEFUNS is out of sync with compiler.rs's SOURCE");
+    assert_eq!(island, expected, "ISLAND_DEFUNS/ISLAND_MACROS are out of sync with compiler.rs's SOURCE");
 }
