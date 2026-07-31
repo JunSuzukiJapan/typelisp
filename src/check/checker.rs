@@ -5051,10 +5051,19 @@ impl Checker {
                 args,
                 arg_locs,
             )
-        } else if args.len() > 2 && matches!(head.as_str(), "+" | "-" | "*" | "/" | "max" | "min") {
+        } else if args.len() <= 1
+            && matches!(
+                head.as_str(),
+                "+" | "-" | "*" | "/" | "max" | "min" | "logand" | "logior" | "logxor" | "<" | "<=" | ">" | ">=" | "=" | "/="
+            )
+        {
+            self.check_nullary_or_unary_numeric_op(heap, interp, env, &head, args, expected)
+        } else if args.len() > 2 && matches!(head.as_str(), "+" | "-" | "*" | "/" | "max" | "min" | "logand" | "logior" | "logxor") {
             self.check_variadic_arith(heap, interp, env, &head, args, expected)
         } else if args.len() > 2 && matches!(head.as_str(), "<" | "<=" | ">" | ">=" | "=" | "/=") {
             self.check_variadic_cmp(heap, interp, env, &head, args)
+        } else if head == "log" && args.len() == 2 {
+            self.check_log_with_base(heap, interp, env, args, expected)
         } else if let Some(result) = self.try_instance_method(heap, interp, env, &head, args, arg_locs) {
             result
         } else if let Some(result) = self.try_instance_method_swapped(heap, interp, env, &head, args, arg_locs) {
@@ -6639,6 +6648,143 @@ impl Checker {
         let expansion = self.wrap_let_star(heap, bindings, and_form)?;
         heap.push_root(expansion);
         let result = self.check(heap, interp, env, expansion, None);
+        heap.pop_root();
+        result
+    }
+
+    /// The 0-argument identity element for one of CL's variadic
+    /// arithmetic/bitwise operators: `(+) = 0`, `(*) = 1`, `(logior) =
+    /// (logxor) = 0`, `(logand) = -1` (all bits set — the identity for
+    /// AND). `value` is the caller-supplied integer form of that constant;
+    /// this just picks *which* numeric type's literal to build it as.
+    /// Follows `expected` when it names one of this language's five numeric
+    /// types, falling back to `i32` otherwise (a bare `Value::Int` — this
+    /// language's own default for a context-free integer literal, see
+    /// `Checker::int_lit_ty`) — there being no argument to infer a type from
+    /// is exactly the situation that fallback exists for. Builds a
+    /// heap-boxed float/bignum/ratio directly (`Heap::alloc_float`/
+    /// `alloc_bignum`/`alloc_ratio`) rather than a `(int->bignum 0)`-style
+    /// call form — the same representation the reader itself produces for a
+    /// literal, so `Self::check`'s existing `Value::Boxed` handling picks up
+    /// the right type with no special-casing needed here.
+    fn numeric_identity_literal(&self, heap: &mut Heap, expected: Option<&Type>, value: i64) -> Value {
+        match expected {
+            Some(Type::F64) => heap.alloc_float(value as f64),
+            Some(Type::Bignum) => heap.alloc_bignum(num_bigint::BigInt::from(value)),
+            Some(Type::Ratio) => heap.alloc_ratio(num_rational::BigRational::from_integer(num_bigint::BigInt::from(value))),
+            _ => Value::Int(value),
+        }
+    }
+
+    /// `(- x)` (negation) / `(/ x)` (reciprocal): CL's unary forms of the
+    /// otherwise-binary `-`/`/`. Neither can be spelled as `(- 0 x)`/`(/ 1
+    /// x)` directly — a bare `0`/`1` literal only ever resolves to `i32` (or
+    /// whatever `expected` says), never `bignum`/`ratio`, so that would
+    /// break for those two types exactly the way `docs/dev/cl-missing-
+    /// classes-and-methods.md`'s `abs`/`signum` note already documents for
+    /// binary-op receiver position. Binding `x` to a temporary and writing
+    /// `(- (- %t %t) %t)` / `(/ (/ %t %t) %t)` sidesteps the whole issue: `(-
+    /// %t %t)`/`(/ %t %t)` is `x`'s own `0`/`1` *of its own type*, with no
+    /// literal involved at all, so this works uniformly across all five
+    /// numeric types with no type inspection here. `%t` is bound via
+    /// `Self::gensym_place` so `x` (possibly impure) is evaluated exactly
+    /// once despite appearing three times in the expansion.
+    fn check_unary_negate_or_invert(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        op: &str,
+        x: Value,
+        expected: Option<&Type>,
+    ) -> Result<Typed, Error> {
+        let tmp = heap.intern_symbol(&self.gensym_place());
+        let op_sym = heap.intern_symbol(op);
+        let self_op_self = self.list_from_vec_locs(heap, &[(op_sym, None), (tmp, None), (tmp, None)])?;
+        let outer = self.list_from_vec_locs(heap, &[(op_sym, None), (self_op_self, None), (tmp, None)])?;
+        let expansion = self.wrap_let_star(heap, vec![(tmp, x)], outer)?;
+        heap.push_root(expansion);
+        let result = self.check(heap, interp, env, expansion, expected);
+        heap.pop_root();
+        result
+    }
+
+    /// `(op)` / `(op x)` for CL's normally-binary arithmetic/bitwise/
+    /// comparison operators — the 0- and 1-argument edge cases
+    /// `Self::check_variadic_arith`/`check_variadic_cmp` deliberately don't
+    /// cover (those two only ever see `args.len() > 2`). Dispatched from
+    /// `Self::check_list` for `args.len() <= 1`:
+    /// - `+`/`*`/`max`/`min`/`logand`/`logior`/`logxor` with one argument is
+    ///   CL's identity case — just that argument, unchanged.
+    /// - `+`/`logior`/`logxor`/`*`/`logand` with zero arguments is CL's
+    ///   defined identity element (`Self::numeric_identity_literal`); `-`,
+    ///   `/`, `max`, `min` and every comparison require at least one
+    ///   argument in CL and get a clear arity error here instead of falling
+    ///   through to a confusing "unbound variable"/instance-method-not-found
+    ///   message.
+    /// - `-`/`/` with one argument is negation/reciprocal
+    ///   (`Self::check_unary_negate_or_invert`).
+    /// - A comparison with one argument is trivially `true` in CL (nothing
+    ///   to compare against) but must still evaluate that argument once, for
+    ///   its side effects and so it gets type-checked — `(progn x true)`.
+    fn check_nullary_or_unary_numeric_op(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        op: &str,
+        args: &[Value],
+        expected: Option<&Type>,
+    ) -> Result<Typed, Error> {
+        let Some(&x) = args.first() else {
+            let value = match op {
+                "+" | "logior" | "logxor" => 0,
+                "*" => 1,
+                "logand" => -1,
+                _ => return Err(Error::TypeError(format!("{}: requires at least 1 argument", op))),
+            };
+            let lit = self.numeric_identity_literal(heap, expected, value);
+            return self.check(heap, interp, env, lit, expected);
+        };
+        match op {
+            "+" | "*" | "max" | "min" | "logand" | "logior" | "logxor" => self.check(heap, interp, env, x, expected),
+            "-" | "/" => self.check_unary_negate_or_invert(heap, interp, env, op, x, expected),
+            "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+                let progn_sym = heap.intern_symbol("progn");
+                let expansion = self.list_from_vec_locs(heap, &[(progn_sym, None), (x, None), (Value::Bool(true), None)])?;
+                heap.push_root(expansion);
+                let result = self.check(heap, interp, env, expansion, Some(&Type::Bool));
+                heap.pop_root();
+                result
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// CL's 2-argument `(log number base)`: the change-of-base identity
+    /// `(/ (log number) (log base))`. The 1-argument natural-log `log` is
+    /// the plain `f64` builtin (`registry::float_assoc`); `defmethod` can't
+    /// overload the same name by arity (only by receiver type — see
+    /// `docs/dev/cl-missing-classes-and-methods.md`'s `floor`/`floor-div`
+    /// note for the same constraint), so the 2-argument form is sugar
+    /// dispatched by arity here in the checker instead, exactly like
+    /// `Self::check_variadic_arith`. Each operand appears exactly once in
+    /// the rewritten form, so no let-bound temporaries are needed.
+    fn check_log_with_base(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        expected: Option<&Type>,
+    ) -> Result<Typed, Error> {
+        let log_sym = heap.intern_symbol("log");
+        let log_number = self.list_from_vec_locs(heap, &[(log_sym, None), (args[0], None)])?;
+        let log_base = self.list_from_vec_locs(heap, &[(log_sym, None), (args[1], None)])?;
+        let div_sym = heap.intern_symbol("/");
+        let expansion = self.list_from_vec_locs(heap, &[(div_sym, None), (log_number, None), (log_base, None)])?;
+        heap.push_root(expansion);
+        let result = self.check(heap, interp, env, expansion, expected);
         heap.pop_root();
         result
     }

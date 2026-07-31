@@ -1239,6 +1239,15 @@ pub(crate) fn llvm_builder_def() -> AdtDef {
     // `build-icmp-*`/`build-cond-br`.
     assoc.insert("build-and".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     assoc.insert("build-or".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    // `xor` (CL `logxor`, plus `lognot`'s `(xor n -1)` — a bare LLVM
+    // instruction like `build-and`/`build-or`).
+    assoc.insert("build-xor".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    // `(select cond then else)`: `max`/`min` (`i64`, `bignum`, `ratio`) all
+    // lower to this — see `llvm_builder_build_select`'s doc comment.
+    assoc.insert(
+        "build-select".to_string(),
+        assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true),
+    );
     assoc.insert("build-shl".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
     // Logical (unsigned) vs. arithmetic (sign-extending) right shift: the
     // tagged representation's payload bits must never be sign-extended back
@@ -1271,15 +1280,15 @@ pub(crate) fn llvm_builder_def() -> AdtDef {
     // `llvm_builder_build_float_unary_intrinsic`), so they take `llvm-module`
     // as a second argument the same way `build-make-closure`/
     // `build-closure-apply` do.
-    for name in ["build-fsqrt", "build-ffloor", "build-fceil", "build-fround", "build-ftrunc"] {
+    for name in ["build-fsqrt", "build-ffloor", "build-fceil", "build-fround", "build-ftrunc", "build-fsin", "build-fcos", "build-fexp", "build-flog"] {
         assoc.insert(name.to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty()], llvm_value_ty(), true));
     }
     // `expt` (`f64,f64->f64`): the binary counterpart of the unary
-    // transcendentals above, `llvm.pow.f64`.
-    assoc.insert(
-        "build-fpow".to_string(),
-        assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true),
-    );
+    // transcendentals above, `llvm.pow.f64`. `max`/`min` are the same shape
+    // (`llvm.maxnum.f64`/`llvm.minnum.f64`).
+    for name in ["build-fpow", "build-fmaxnum", "build-fminnum"] {
+        assoc.insert(name.to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), llvm_value_ty(), llvm_value_ty()], llvm_value_ty(), true));
+    }
     // `float->int` (`f64->i32`, narrowing, truncating toward zero): a single
     // `fptosi` instruction, no heap allocation and no module lookup needed —
     // unlike `float->bignum`/`float->ratio`, which stay non-native (see
@@ -1634,7 +1643,7 @@ fn float_assoc() -> HashMap<String, AssocFn> {
     // `exp`/`log`, alongside the existing root/rounding unaries.
     for op in [
         "sqrt", "floor", "ceiling", "round", "truncate", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh",
-        "tanh", "exp", "log",
+        "tanh", "asinh", "acosh", "atanh", "exp", "log",
     ] {
         m.insert(op.to_string(), unary());
     }
@@ -1675,12 +1684,19 @@ fn float_assoc() -> HashMap<String, AssocFn> {
 fn bignum_assoc() -> HashMap<String, AssocFn> {
     let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum, Type::Bignum], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum, Type::Bignum], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
-    for op in ["+", "-", "*", "/", "mod", "max", "min"] {
+    for op in ["+", "-", "*", "/", "mod", "max", "min", "logand", "logior", "logxor", "ash"] {
         m.insert(op.to_string(), binop());
     }
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
+    }
+    for op in ["logbitp", "logtest"] {
+        m.insert(op.to_string(), cmp());
+    }
+    for op in ["lognot", "logcount", "integer-length"] {
+        m.insert(op.to_string(), unary());
     }
     // See `int_assoc`'s eq/eql/equal/equalp comment — same alias-for-`=`
     // rationale (both operands are always `bignum` here, so `equalp`'s

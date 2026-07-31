@@ -256,14 +256,14 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `+` `-` `*` `/` `=` `/=` `<` `<=` `>` `>=` | ✅ | **2026-07-31 可変長化**。`Checker::check_variadic_arith`/`check_variadic_cmp`（`checker.rs`）が `(+ a b c)` を `(+ (+ a b) c)` に、`(< a b c)` を一時変数束縛＋`(and (< a b) (< b c))` に構文糖衣展開。0引数/1引数版（CL の `(+)=0`、`(- x)`の単項否定など）は未対応 |
-| `max` / `min` | ✅ | 型ごとの2引数ビルトイン + 上記の可変長糖衣展開で3引数以上にも対応 |
+| `+` `-` `*` `/` `=` `/=` `<` `<=` `>` `>=` | ✅ | **2026-07-31 可変長化+0/1引数対応**。`Checker::check_variadic_arith`/`check_variadic_cmp`（`checker.rs`）が `(+ a b c)` を `(+ (+ a b) c)` に、`(< a b c)` を一時変数束縛＋`(and (< a b) (< b c))` に構文糖衣展開。`Checker::check_nullary_or_unary_numeric_op` が CL の0/1引数版も実装: `(+)=0`、`(*)=1`、`(- x)`/`(/ x)`（単項否定・逆数、`(let ((%t x)) (- (- %t %t) %t))` 型のトリックでリテラル型変換問題を回避）、`(< x)=true` 等 |
+| `max` / `min` | ✅ | 型ごとの2引数ビルトイン(`icmp`+`select`、`bignum`/`ratio`は`rt_*_cmp`+`select`) + 可変長糖衣展開で3引数以上にも対応 |
 | `1+` / `1-` | ✅ | 型ごとの `defmethod`（`prelude.rs`） |
 | `abs` `signum` `gcd` `lcm` `mod` `rem` `expt` | ✅ | 型ごとのメソッド。ただし `gcd`/`lcm` は 2引数固定、整数の `expt` は無い（`bignum` 経由） |
 | `floor` `ceiling` `round` `truncate` | ⚠️ | 1引数版（`f64→f64`）はCL相当。~~除数を取る2引数版も商・剰余の多値も無い~~ → **2026-07-29 `floor-div`/`ceiling-div`/`round-div`/`truncate-div` として実装済み**（`i32`/`i64`/`f64`、商・剰余を`cons-cell`で返す。多値そのものは非採用、§3.4参照）。CL と同名の2引数オーバーロードにしなかったのは `defmethod` が受け手の型でのみ解決しアリティでは解決しないため |
 | `ffloor` `fceiling` `fround` `ftruncate` | ❌ | |
 | `sqrt` | ⚠️ | `f64` のみ。`isqrt` は無い |
-| `exp` `log` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` | ✅ | **2026-07-31実装**（`f64`、`registry.rs`/`interp.rs`）。`log` は自然対数のみ（CL の2引数版・底指定は無い）。`asinh`/`acosh`/`atanh` は未実装 |
+| `exp` `log` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | ✅ | **2026-07-31実装**（`f64`、`registry.rs`/`interp.rs`）。`log` は自然対数のみ（1引数）に加え、`(log number base)` の2引数版は `Checker::check_log_with_base` が `(/ (log number) (log base))` へアリティ展開して対応 |
 | `pi` | ✅ | **2026-07-31実装**。`f64` 定数（`prelude.rs` の `defconstant`） |
 | `float` `rational` `rationalize` | ⚠️ | `int->float`/`float->ratio` 等の個別変換はある。`rationalize`（近似有理数化）は無い |
 | `numerator` / `denominator` | ✅ | |
@@ -271,23 +271,31 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 | `float-sign` `float-digits` `float-precision` `decode-float` `integer-decode-float` `scale-float` `float-radix` | ❌ | 浮動小数点の内部表現へのアクセス |
 | `random` | ⚠️ | `(random n)` の `i32` 版のみ。`random-state` も `make-random-state` も `*random-state*` も無く、**シードを固定した再現可能な乱数が作れない** |
 
-**ビット演算** — 2026-07-31、基本セットを実装（`i32`/`i64` のみ、`registry.rs`/`interp.rs`）:
+**ビット演算** — 2026-07-31実装:
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `logand` `logior` `logxor` `lognot` `ash` `logbitp` `logcount` `logtest` `integer-length` | ✅ | `i32`/`i64` のみ。無限精度2の補数として実装（`RtValue::Int` が両方とも `i64` で統一表現されているため、幅による違いは無い） |
-| `logeqv` `lognand` `lognor` `logandc1` `logandc2` `logorc1` `logorc2` `byte` `byte-size` `byte-position` `ldb` `ldb-test` `dpb` `mask-field` `deposit-field` `boole` | ❌ | 未実装（使用頻度の低いロングテール） |
-| `bignum` のビット演算 | ❌ | `bignum`/`ratio` には未対応（任意精度ビット演算は別途設計が必要） |
+| `logand` `logior` `logxor` `lognot` `ash` `logbitp` `logcount` `logtest` `integer-length` | ✅ | `i32`/`i64`（`registry.rs`/`interp.rs`）+ `bignum`（`num-bigint`のネイティブビット演算+独自popcount/bit-length実装）。無限精度2の補数として実装。`ratio` には未対応（CL自体もビット演算は整数専用でratioには定義が無い） |
+| `logeqv` `lognand` `lognor` `logandc1` `logandc2` `logorc1` `logorc2` | ✅ | `i32`/`i64`/`bignum` の `defmethod`（`prelude.rs`、上記プリミティブから合成） |
+| `byte` `byte-size` `byte-position` `ldb` `ldb-test` `dpb` `mask-field` `deposit-field` | ✅ | `i32` のみ（`prelude.rs`）。バイト指定子は新規struct型を作らず既存の`cons-cell<i32,i32>`を流用 |
+| `boole` | ✅ | `i32` のみ。16個の `boole-*` 定数(`i32`コード、CLのキーワードの代わり)+ `defmethod`（`prelude.rs`） |
 
 **定数** — `pi` 以外は全滅（❌）:
 
 `most-positive-fixnum` `most-negative-fixnum` `most-positive-double-float` `least-positive-*`
 `double-float-epsilon` など
 
-**コンパイル(JIT/AOT)対応について**: 上記の新規実装はすべて**インタプリタ実行のみ**対応。`compiler.rs`
-の `*-native-method?`/`compile-assoc` には未登録なので、`compile`/`compile-file` でこれらを呼ぶ関数を
-コンパイルしようとすると `get-function: no function named "tl_f64::sin" ...` のような明確な panic になる
-（既存の `format`/`print`/`println` などコンパイル対象外の機能と同じ扱い）。
+**コンパイル(JIT/AOT)対応**: 2026-07-31、上記の新規実装すべてに `compile`/`compile-file` 対応を追加。
+`i32`/`i64` のビット演算・`max`/`min` はLLVM命令直結(`build-and`/`build-or`/`build-xor`/`build-select`)
+または `rt_i64_*` シム(`ash`/`logbitp`/`logcount`/`integer-length`、可変シフト量のUB回避のため)。`f64` の
+`sin`/`cos`/`exp`/`log`/`max`/`min` はLLVM intrinsic(`llvm.sin.f64`等、`build-fsin`等)、`tan`/`asin`/
+`acos`/`atan`/`sinh`/`cosh`/`tanh`/`asinh`/`acosh`/`atanh` はこのプロジェクトが固定するLLVMバージョンに
+intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` は既存の `rt_*_cmp` 三値比較 +
+`build-select`。可変長四則演算/比較・`log`の2引数版・0/1引数算術はチェッカー側の構文糖衣展開で常に2引数の
+`Expr::Assoc` に潰されるため、`compiler.rs`/`interp.rs`のいずれも無改修で動作する。`logeqv`系・
+`byte`/`ldb`/`dpb`/`boole`・述語(`zerop`等)は上記プリミティブから合成された通常の`defmethod`/`defun`な
+ので自動的にコンパイル可能（追加のcompiler.rs対応は不要）。`tests/compile_test.rs`に合意テスト
+(`compile_dispatches_f64_transcendental_functions_and_agrees_with_the_interpreter`等)を追加済み。
 
 ### 2.11 文字（CLHS 13）
 

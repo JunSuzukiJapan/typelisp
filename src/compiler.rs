@@ -734,6 +734,23 @@ pub const SOURCE: &str = r#"
 ;; `(Scope::new)`.
 (defun new-acc-table () Scope<llvm-value> (Scope::new))
 
+;; Shared two-operand `rt_i64_*` call shape (`ash`/`logbitp`, whose shift/
+;; index argument makes a bare LLVM instruction unsafe — see
+;; `int-native-method?`'s doc comment) — the `i64` counterpart of
+;; `bignum-binop-call`.
+(defun int-binop-shim-call ((builder llvm-builder) (m llvm-module) (fname string) (x llvm-value) (y llvm-value)) llvm-value
+  (let ((args-ptr (alloca-args builder 2)))
+    (store-arg builder args-ptr 0 x)
+    (store-arg builder args-ptr 1 y)
+    (build-call builder (get-function m fname) args-ptr 2)))
+
+;; Shared one-operand `rt_i64_*` call shape (`logcount`/`integer-length`) —
+;; the `i64` counterpart of `bignum-unary-call`.
+(defun int-unary-shim-call ((builder llvm-builder) (m llvm-module) (fname string) (x llvm-value)) llvm-value
+  (let ((args-ptr (alloca-args builder 1)))
+    (store-arg builder args-ptr 0 x)
+    (build-call builder (get-function m fname) args-ptr 1)))
+
 ;; `compile-assoc`'s native-method dispatch predicates: is `method` one of
 ;; the receiver-type methods that lower to LLVM instructions (i64/i32) or
 ;; `rt_str_*` primitive calls (string) rather than a real function call?
@@ -762,7 +779,29 @@ pub const SOURCE: &str = r#"
   ;; checked before `b2` the same way `float-native-method?`'s own unary
   ;; conversions are.
   (if (equal method "int->bignum") true
-  (equal method "int->ratio")))))))))))))))
+  (if (equal method "int->ratio") true
+  ;; `max`/`min`: `icmp`+`select`, branch-free (`build-select`).
+  (if (equal method "max") true
+  (if (equal method "min") true
+  ;; `logand`/`logior`/`logxor`: bare LLVM instructions
+  ;; (`build-and`/`build-or`/`build-xor`), same as `+`/`-`/`*`.
+  (if (equal method "logand") true
+  (if (equal method "logior") true
+  (if (equal method "logxor") true
+  ;; `logtest`: `icmp ne (and a b), 0` — an `and` plus the existing
+  ;; `build-icmp-ne`, no shim needed.
+  (if (equal method "logtest") true
+  ;; `ash`/`logbitp`/`logcount`/`integer-length`: each has an edge case a
+  ;; bare LLVM instruction can't express safely (a variable shift/count past
+  ;; the operand's bit width is undefined behavior in LLVM, unlike this
+  ;; language's own clamped semantics — see `eval_int_builtin`'s doc
+  ;; comment), so all four lower to `rt_i64_*` shims instead, the same
+  ;; reasoning `/`/`mod` already use.
+  (if (equal method "ash") true
+  (if (equal method "logbitp") true
+  (if (equal method "logcount") true
+  (if (equal method "lognot") true
+  (equal method "integer-length"))))))))))))))))))))))))))
 
 (defun string-native-method? ((method string)) bool
   (if (equal method "length") true
@@ -836,7 +875,31 @@ pub const SOURCE: &str = r#"
   (if (equal method "eql") true
   (if (equal method "equal") true
   (if (equal method "equalp") true
-  false))))))))))))))))))))))))
+  ;; `max`/`min`: `llvm.maxnum.f64`/`llvm.minnum.f64` (`build-fmaxnum`/
+  ;; `build-fminnum`), same intrinsic-call shape as `expt`'s `llvm.pow.f64`.
+  (if (equal method "max") true
+  (if (equal method "min") true
+  ;; The transcendental family: `sin`/`cos`/`exp`/`log` have long-standing
+  ;; LLVM intrinsics (`build-fsin`/`build-fcos`/`build-fexp`/`build-flog`,
+  ;; same shape as `sqrt`). `tan`/`asin`/`acos`/`atan`/`sinh`/`cosh`/`tanh`/
+  ;; `asinh`/`acosh`/`atanh` have none in the LLVM version this project pins,
+  ;; so they lower to `rt_f64_*` shims instead — still native here, same
+  ;; reasoning `/`/`mod` already use for `i64`.
+  (if (equal method "sin") true
+  (if (equal method "cos") true
+  (if (equal method "tan") true
+  (if (equal method "asin") true
+  (if (equal method "acos") true
+  (if (equal method "atan") true
+  (if (equal method "sinh") true
+  (if (equal method "cosh") true
+  (if (equal method "tanh") true
+  (if (equal method "asinh") true
+  (if (equal method "acosh") true
+  (if (equal method "atanh") true
+  (if (equal method "exp") true
+  (if (equal method "log") true
+  false))))))))))))))))))))))))))))))))))))))))
 
 ;; Emits `rt_str_lt(x, y)` (strict lexicographic less-than, an `i64` 0/1). The
 ;; four string comparison operators all derive from it: `<`=lt(a,b),
@@ -874,7 +937,11 @@ pub const SOURCE: &str = r#"
   (if (equal method "bignum->int") true
   (if (equal method "try-bignum->int") true
   (if (equal method "bignum->float") true
-  (equal method "bignum->ratio"))))))))))))))))))))
+  (if (equal method "bignum->ratio") true
+  ;; `max`/`min`: `rt_bignum_cmp` (already used by every comparison below)
+  ;; plus `build-select`, branch-free — no new runtime helper needed.
+  (if (equal method "max") true
+  (equal method "min"))))))))))))))))))))))
 
 ;; `ratio` (`registry::ratio_assoc`)'s natively-compilable methods — the
 ;; `ratio` counterpart of [`bignum-native-method?`] (no `mod`, CL doesn't
@@ -898,7 +965,10 @@ pub const SOURCE: &str = r#"
   (if (equal method "ratio->bignum") true
   (if (equal method "ratio->float") true
   (if (equal method "numerator") true
-  (equal method "denominator")))))))))))))))))))
+  (if (equal method "denominator") true
+  ;; `max`/`min`: `rt_ratio_cmp` + `build-select`, same shape as `bignum`'s.
+  (if (equal method "max") true
+  (equal method "min")))))))))))))))))))))
 
 ;; Emits `rt_bignum_cmp(x, y)` (three-way `-1`/`0`/`1`, `BigInt::cmp`) — every
 ;; bignum comparison operator derives from it via a single `icmp` against
@@ -1725,6 +1795,12 @@ pub const SOURCE: &str = r#"
                                              (let ((args-ptr (alloca-args builder 1)))
                                                (store-arg builder args-ptr 0 a)
                                                (build-call builder (get-function m "rt_int_to_ratio") args-ptr 1))
+                                         (if (equal method "logcount")
+                                             (int-unary-shim-call builder m "rt_i64_logcount" a)
+                                         (if (equal method "integer-length")
+                                             (int-unary-shim-call builder m "rt_i64_integer_length" a)
+                                         (if (equal method "lognot")
+                                             (build-xor builder a (const-i64 builder -1))
                                          (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
                                            (if (equal method "+")
                                                (build-add builder a b2)
@@ -1760,7 +1836,23 @@ pub const SOURCE: &str = r#"
                                                                            (build-icmp-eq builder a b2)
                                                                            (if (equal method "/=")
                                                                                (build-icmp-ne builder a b2)
-                                                                               (panic (append "compile-assoc: unsupported method " method)))))))))))))))))
+                                                                               (if (equal method "logand")
+                                                                                   (build-and builder a b2)
+                                                                                   (if (equal method "logior")
+                                                                                       (build-or builder a b2)
+                                                                                       (if (equal method "logxor")
+                                                                                           (build-xor builder a b2)
+                                                                                           (if (equal method "logtest")
+                                                                                               (build-icmp-ne builder (build-and builder a b2) (const-i64 builder 0))
+                                                                                               (if (equal method "max")
+                                                                                                   (build-select builder (build-icmp-gt builder a b2) a b2)
+                                                                                                   (if (equal method "min")
+                                                                                                       (build-select builder (build-icmp-lt builder a b2) a b2)
+                                                                                                       (if (equal method "ash")
+                                                                                                           (int-binop-shim-call builder m "rt_i64_ash" a b2)
+                                                                                                           (if (equal method "logbitp")
+                                                                                                               (int-binop-shim-call builder m "rt_i64_logbitp" a b2)
+                                                                                                               (panic (append "compile-assoc: unsupported method " method))))))))))))))))))))))))))))
                                        (if (if (equal type-name "char") (char-native-method? method) false)
                                            ;; `char` receivers: raw `i64` code points in
                                            ;; compiled code, so the comparisons lower to the
@@ -1840,6 +1932,34 @@ pub const SOURCE: &str = r#"
                                                                              (let ((args-ptr (alloca-args builder 1)))
                                                                                (store-arg builder args-ptr 0 a)
                                                                                (build-call builder (get-function m "rt_float_to_ratio") args-ptr 1))
+                                                                         (if (equal method "sin")
+                                                                             (build-fsin builder m a)
+                                                                         (if (equal method "cos")
+                                                                             (build-fcos builder m a)
+                                                                         (if (equal method "exp")
+                                                                             (build-fexp builder m a)
+                                                                         (if (equal method "log")
+                                                                             (build-flog builder m a)
+                                                                         (if (equal method "tan")
+                                                                             (int-unary-shim-call builder m "rt_f64_tan" a)
+                                                                         (if (equal method "asin")
+                                                                             (int-unary-shim-call builder m "rt_f64_asin" a)
+                                                                         (if (equal method "acos")
+                                                                             (int-unary-shim-call builder m "rt_f64_acos" a)
+                                                                         (if (equal method "atan")
+                                                                             (int-unary-shim-call builder m "rt_f64_atan" a)
+                                                                         (if (equal method "sinh")
+                                                                             (int-unary-shim-call builder m "rt_f64_sinh" a)
+                                                                         (if (equal method "cosh")
+                                                                             (int-unary-shim-call builder m "rt_f64_cosh" a)
+                                                                         (if (equal method "tanh")
+                                                                             (int-unary-shim-call builder m "rt_f64_tanh" a)
+                                                                         (if (equal method "asinh")
+                                                                             (int-unary-shim-call builder m "rt_f64_asinh" a)
+                                                                         (if (equal method "acosh")
+                                                                             (int-unary-shim-call builder m "rt_f64_acosh" a)
+                                                                         (if (equal method "atanh")
+                                                                             (int-unary-shim-call builder m "rt_f64_atanh" a)
                                                                          (let ((b2 (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car (sexpr-cdr rest))))))
                                                                            (if (equal method "+")
                                                                                (build-fadd builder a b2)
@@ -1863,7 +1983,11 @@ pub const SOURCE: &str = r#"
                                                                                                                    (build-fcmp-ge builder a b2)
                                                                                                                    (if (equal method "/=")
                                                                                                                        (build-fcmp-ne builder a b2)
-                                                                                                                       (build-fcmp-eq builder a b2))))))))))))))))))))))
+                                                                                                                       (if (equal method "max")
+                                                                                                                           (build-fmaxnum builder m a b2)
+                                                                                                                           (if (equal method "min")
+                                                                                                                               (build-fminnum builder m a b2)
+                                                                                                                               (build-fcmp-eq builder a b2))))))))))))))))))))))))))))))))))))))
                                                (if (if (equal type-name "bignum") (bignum-native-method? method) false)
     (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
       (if (equal method "bignum->int")
@@ -1934,7 +2058,11 @@ pub const SOURCE: &str = r#"
                                                 (build-icmp-ge builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))
                                                 (if (equal method "/=")
                                                     (build-icmp-ne builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))
-                                                    (build-icmp-eq builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))))))))))))))))))
+                                                    (if (equal method "max")
+                                                        (build-select builder (build-icmp-ge builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)) a b2)
+                                                        (if (equal method "min")
+                                                            (build-select builder (build-icmp-le builder (bignum-cmp-call builder m a b2) (const-i64 builder 0)) a b2)
+                                                            (build-icmp-eq builder (bignum-cmp-call builder m a b2) (const-i64 builder 0))))))))))))))))))))
     (if (if (equal type-name "ratio") (ratio-native-method? method) false)
         (let ((a (compile-value builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base (sexpr-cdr (sexpr-car rest)))))
           (if (equal method "ratio->bignum")
@@ -1964,7 +2092,11 @@ pub const SOURCE: &str = r#"
                                             (build-icmp-ge builder (ratio-cmp-call builder m a b2) (const-i64 builder 0))
                                             (if (equal method "/=")
                                                 (build-icmp-ne builder (ratio-cmp-call builder m a b2) (const-i64 builder 0))
-                                                (build-icmp-eq builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)))))))))))))))))
+                                                (if (equal method "max")
+                                                    (build-select builder (build-icmp-ge builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)) a b2)
+                                                    (if (equal method "min")
+                                                        (build-select builder (build-icmp-le builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)) a b2)
+                                                        (build-icmp-eq builder (ratio-cmp-call builder m a b2) (const-i64 builder 0)))))))))))))))))))
         (compile-assoc-user builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base type-name method rest))))))))))))
                        ;; The user-defined-method leg of `compile-assoc`'s
                        ;; dispatch (see its doc comment): call the callee

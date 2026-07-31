@@ -4460,9 +4460,58 @@ fn eval_bignum_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, E
         "/=" => RtValue::Bool(*a != *b),
         "max" => RtValue::Bignum(if a >= b { a } else { b }),
         "min" => RtValue::Bignum(if a <= b { a } else { b }),
+        "logand" => RtValue::Bignum(Rc::new(&*a & &*b)),
+        "logior" => RtValue::Bignum(Rc::new(&*a | &*b)),
+        "logxor" => RtValue::Bignum(Rc::new(&*a ^ &*b)),
+        // `(ash integer count)`: `a` is the integer (receiver), `b` the shift
+        // count. `BigInt`'s own `Shr` is already floor-based (arithmetic,
+        // sign-extending) like `i64`'s, so this mirrors `eval_int_builtin`'s
+        // `ash` with no width limit to clamp against. A shift count so large
+        // it doesn't fit `i64` is astronomically implausible for any bignum
+        // that fits in memory, so it's treated as "shift past every bit" —
+        // `0` left, sign-extended `-1`/`0` right.
+        "ash" => RtValue::Bignum(Rc::new(match b.to_i64() {
+            Some(count) if count >= 0 => &*a << (count as u64),
+            Some(count) => &*a >> ((-count) as u64),
+            None if b.sign() == num_bigint::Sign::Minus => if a.sign() == num_bigint::Sign::Minus { BigInt::from(-1) } else { BigInt::from(0) },
+            None => BigInt::from(0),
+        })),
+        "logbitp" => RtValue::Bool(match a.to_u64() {
+            Some(idx) => ((&*b >> idx) & BigInt::from(1)) == BigInt::from(1),
+            None => b.sign() == num_bigint::Sign::Minus,
+        }),
+        "logtest" => RtValue::Bool(!(&*a & &*b).is_zero()),
         _ => unreachable!(),
     };
     Some(Ok(v))
+}
+
+/// Unary `bignum` builtins (`lognot`/`logcount`/`integer-length`,
+/// `registry::bignum_assoc`) — CL §12.10's "infinite two's complement"
+/// reading, the arbitrary-precision counterpart of [`int_unary`].
+fn bignum_unary(args: &[RtValue], name: &str) -> Result<RtValue, EvalError> {
+    let a = expect_bignum(&args[0])?;
+    let v = match name {
+        "lognot" => RtValue::Bignum(Rc::new(!&*a)),
+        // A negative bignum's 1-bits are infinite (the sign extension), so
+        // CL counts its *0*-bits instead — the same identity
+        // `eval_int_builtin`'s `logcount` uses: `popcount(n) = popcount(!n)`
+        // for `n < 0`, and `!n` is nonnegative whenever `n` is negative.
+        "logcount" => {
+            let n = if a.sign() == num_bigint::Sign::Minus { !&*a } else { (*a).clone() };
+            let count: u64 = n.magnitude().to_u32_digits().iter().map(|d| d.count_ones() as u64).sum();
+            RtValue::Bignum(Rc::new(BigInt::from(count)))
+        }
+        // Bits needed excluding sign: `n`'s own magnitude bit-length when
+        // nonnegative, else `(-n-1)`'s (CL's own negative-integer-length
+        // identity — the same one `eval_int_builtin`'s `integer-length` uses).
+        "integer-length" => {
+            let bits = if a.sign() == num_bigint::Sign::Minus { (-(&*a) - 1u32).magnitude().bits() } else { a.magnitude().bits() };
+            RtValue::Bignum(Rc::new(BigInt::from(bits)))
+        }
+        _ => unreachable!(),
+    };
+    Ok(v)
 }
 
 /// Evaluate a built-in `ratio` arithmetic/comparison instance method
@@ -4954,6 +5003,9 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "sinh" => Some(float_unary(args, f64::sinh)),
             "cosh" => Some(float_unary(args, f64::cosh)),
             "tanh" => Some(float_unary(args, f64::tanh)),
+            "asinh" => Some(float_unary(args, f64::asinh)),
+            "acosh" => Some(float_unary(args, f64::acosh)),
+            "atanh" => Some(float_unary(args, f64::atanh)),
             "exp" => Some(float_unary(args, f64::exp)),
             "log" => Some(float_unary(args, f64::ln)),
             "float->int" => Some(float_to_int(args)),
@@ -4966,9 +5018,9 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("bignum") {
         return match method {
-            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
-                eval_bignum_builtin(method, args)
-            }
+            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" | "logand"
+            | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_bignum_builtin(method, args),
+            "lognot" | "logcount" | "integer-length" => Some(bignum_unary(args, method)),
             "eq" | "eql" | "equal" | "equalp" => eval_bignum_builtin("=", args),
             "bignum->int" => Some(bignum_to_int(args)),
             "try-bignum->int" => Some(try_bignum_to_int(heap, args)),
@@ -5068,6 +5120,8 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-mul" => Some(llvm_builder_build_int_op(args, "mul", Builder::build_int_mul)),
             "build-and" => Some(llvm_builder_build_int_op(args, "and", Builder::build_and)),
             "build-or" => Some(llvm_builder_build_int_op(args, "or", Builder::build_or)),
+            "build-xor" => Some(llvm_builder_build_int_op(args, "xor", Builder::build_xor)),
+            "build-select" => Some(llvm_builder_build_select(args)),
             "build-shl" => Some(llvm_builder_build_int_op(args, "shl", Builder::build_left_shift)),
             "build-lshr" => Some(llvm_builder_build_int_op(args, "lshr", |b, lhs, rhs, name| b.build_right_shift(lhs, rhs, false, name))),
             "build-ashr" => Some(llvm_builder_build_int_op(args, "ashr", |b, lhs, rhs, name| b.build_right_shift(lhs, rhs, true, name))),
@@ -5088,6 +5142,12 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
             "build-fround" => Some(llvm_builder_build_float_unary_intrinsic(args, "fround", "llvm.round.f64")),
             "build-ftrunc" => Some(llvm_builder_build_float_unary_intrinsic(args, "ftrunc", "llvm.trunc.f64")),
             "build-fpow" => Some(llvm_builder_build_fpow(args)),
+            "build-fmaxnum" => Some(llvm_builder_build_float_binary_intrinsic(args, "fmaxnum", "llvm.maxnum.f64")),
+            "build-fminnum" => Some(llvm_builder_build_float_binary_intrinsic(args, "fminnum", "llvm.minnum.f64")),
+            "build-fsin" => Some(llvm_builder_build_float_unary_intrinsic(args, "fsin", "llvm.sin.f64")),
+            "build-fcos" => Some(llvm_builder_build_float_unary_intrinsic(args, "fcos", "llvm.cos.f64")),
+            "build-fexp" => Some(llvm_builder_build_float_unary_intrinsic(args, "fexp", "llvm.exp.f64")),
+            "build-flog" => Some(llvm_builder_build_float_unary_intrinsic(args, "flog", "llvm.log.f64")),
             "build-fptosi" => Some(llvm_builder_build_fptosi(args)),
             "alloca-args" => Some(llvm_builder_alloca_args(args)),
             "store-arg" => Some(llvm_builder_store_arg(args)),
@@ -5293,6 +5353,8 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
         "i64" | "i32" => matches!(
             method,
             "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "eq" | "/=" | "int->bignum" | "int->ratio"
+                | "max" | "min" | "logand" | "logior" | "logxor" | "logtest" | "lognot" | "logcount" | "integer-length"
+                | "ash" | "logbitp"
         ),
         "string" => matches!(
             method,
@@ -5307,16 +5369,18 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
             "+" | "-" | "*" | "/" | "expt" | "sqrt" | "floor" | "ceiling" | "round" | "truncate"
                 | "float->int" | "float->bignum" | "float->ratio"
                 | "<" | "<=" | ">" | ">=" | "=" | "/=" | "eq" | "eql" | "equal" | "equalp"
+                | "max" | "min" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh"
+                | "asinh" | "acosh" | "atanh" | "exp" | "log"
         ),
         "bignum" => matches!(
             method,
             "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "eq" | "eql" | "equal" | "equalp"
-                | "bignum->int" | "try-bignum->int" | "bignum->float" | "bignum->ratio"
+                | "bignum->int" | "try-bignum->int" | "bignum->float" | "bignum->ratio" | "max" | "min"
         ),
         "ratio" => matches!(
             method,
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "eq" | "eql" | "equal" | "equalp"
-                | "ratio->bignum" | "ratio->float" | "numerator" | "denominator"
+                | "ratio->bignum" | "ratio->float" | "numerator" | "denominator" | "max" | "min"
         ),
         // `Sexpr` values are raw tagged `i64` handles in compiled code, and
         // interned symbols/`nil`/small atoms are handle-identical, so `eq`
@@ -5386,13 +5450,16 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 102] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 116] {
     use crate::compile::runtime::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
         rt_cell_get, rt_cell_new, rt_cell_set, rt_char_equalp, rt_closure_env_get, rt_closure_env_len, rt_closure_fnptr,
         rt_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_float_new, rt_float_to_bignum,
         rt_float_to_ratio, rt_float_value, rt_gensym, rt_global_get, rt_global_new, rt_global_set, rt_i64_div, rt_i64_mod,
+        rt_i64_ash, rt_i64_logbitp, rt_i64_logcount, rt_i64_integer_length,
+        rt_f64_tan, rt_f64_asin, rt_f64_acos, rt_f64_atan, rt_f64_sinh, rt_f64_cosh, rt_f64_tanh, rt_f64_asinh, rt_f64_acosh,
+        rt_f64_atanh,
         rt_hashtable_clear, rt_hashtable_contains, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_get_raw, rt_hashtable_keys,
         rt_hashtable_new, rt_hashtable_remove_raw, rt_hashtable_set, rt_hashtable_values, rt_int_to_bignum, rt_int_to_ratio,
         rt_intern_path, rt_intern_symbol, rt_list_to_path, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
@@ -5519,6 +5586,20 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 102] {
         ("rt_gensym", rt_gensym as usize),
         ("rt_i64_div", rt_i64_div as usize),
         ("rt_i64_mod", rt_i64_mod as usize),
+        ("rt_i64_ash", rt_i64_ash as usize),
+        ("rt_i64_logbitp", rt_i64_logbitp as usize),
+        ("rt_i64_logcount", rt_i64_logcount as usize),
+        ("rt_i64_integer_length", rt_i64_integer_length as usize),
+        ("rt_f64_tan", rt_f64_tan as usize),
+        ("rt_f64_asin", rt_f64_asin as usize),
+        ("rt_f64_acos", rt_f64_acos as usize),
+        ("rt_f64_atan", rt_f64_atan as usize),
+        ("rt_f64_sinh", rt_f64_sinh as usize),
+        ("rt_f64_cosh", rt_f64_cosh as usize),
+        ("rt_f64_tanh", rt_f64_tanh as usize),
+        ("rt_f64_asinh", rt_f64_asinh as usize),
+        ("rt_f64_acosh", rt_f64_acosh as usize),
+        ("rt_f64_atanh", rt_f64_atanh as usize),
     ]
 }
 
@@ -5771,7 +5852,13 @@ fn llvm_builder_build_float_unary_intrinsic(args: &[RtValue], name: &str, intrin
 /// [`llvm_builder_build_float_unary_intrinsic`], `llvm.pow.f64` — matches
 /// the interpreter's `f64::powf` (`float_expt`), both ultimately the
 /// platform libm `pow` either way.
-fn llvm_builder_build_fpow(args: &[RtValue]) -> Result<RtValue, EvalError> {
+/// Shared by `build-fpow`/`build-fmaxnum`/`build-fminnum` — every binary
+/// `f64` LLVM intrinsic this project uses. Each `i64`-carried operand is
+/// `bitcast`ed to `double`, the intrinsic (overloaded on its `f64` operand
+/// type, hence the `module` parameter — same reason
+/// [`llvm_builder_build_float_unary_intrinsic`] takes one) applied, and the
+/// `double` result `bitcast`ed back to `i64`.
+fn llvm_builder_build_float_binary_intrinsic(args: &[RtValue], name: &str, intrinsic_name: &str) -> Result<RtValue, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
     let a_bits = expect_llvm_value(&args[2])?.into_int_value();
@@ -5779,20 +5866,45 @@ fn llvm_builder_build_fpow(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let bld = builder.borrow();
     let ctx = crate::compile::llvm_context();
     let f64_ty = ctx.f64_type();
-    let err = |e: String| EvalError::Internal(format!("build-fpow: {}", e));
+    let err = |e: String| EvalError::Internal(format!("build-{}: {}", name, e));
     let a = bld.build_bit_cast(a_bits, f64_ty, "a_f").map_err(|e| err(e.to_string()))?.into_float_value();
     let b = bld.build_bit_cast(b_bits, f64_ty, "b_f").map_err(|e| err(e.to_string()))?.into_float_value();
-    let intrinsic = inkwell::intrinsics::Intrinsic::find("llvm.pow.f64").ok_or_else(|| err("no such LLVM intrinsic llvm.pow.f64".into()))?;
+    let intrinsic = inkwell::intrinsics::Intrinsic::find(intrinsic_name).ok_or_else(|| err(format!("no such LLVM intrinsic {}", intrinsic_name)))?;
     let decl = intrinsic
         .get_declaration(&module.borrow(), &[f64_ty.into()])
-        .ok_or_else(|| err("failed to declare llvm.pow.f64".into()))?;
-    let call = bld.build_call(decl, &[a.into(), b.into()], "fpow").map_err(|e| err(e.to_string()))?;
+        .ok_or_else(|| err(format!("failed to declare {}", intrinsic_name)))?;
+    let call = bld.build_call(decl, &[a.into(), b.into()], name).map_err(|e| err(e.to_string()))?;
     let result = match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => v.into_float_value(),
-        inkwell::values::ValueKind::Instruction(_) => return Err(err("llvm.pow.f64 produced no value".into())),
+        inkwell::values::ValueKind::Instruction(_) => return Err(err(format!("{} produced no value", intrinsic_name))),
     };
-    let bits = bld.build_bit_cast(result, ctx.i64_type(), "fpow_bits").map_err(|e| err(e.to_string()))?;
+    let bits = bld.build_bit_cast(result, ctx.i64_type(), name).map_err(|e| err(e.to_string()))?;
     Ok(RtValue::LlvmValue(bits))
+}
+
+fn llvm_builder_build_fpow(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    llvm_builder_build_float_binary_intrinsic(args, "fpow", "llvm.pow.f64")
+}
+
+/// `(select cond then else)`: CL's `max`/`min` (and `bignum`/`ratio`'s, via
+/// their own three-way `rt_*_cmp` comparator) all lower to this — an
+/// `icmp`+`select` pair, branch-free, rather than real control flow. `cond`
+/// is an ordinary `i64`-valued `llvm-value` (nonzero = true, the same
+/// convention [`llvm_builder_build_cond_br`]'s `cond` uses), narrowed to `i1`
+/// with an `icmp ne cond, 0` before `select` — which, unlike `br`, requires a
+/// genuine `i1` operand, not a widened `i64`.
+fn llvm_builder_build_select(args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let cond = expect_llvm_value(&args[1])?.into_int_value();
+    let then_v = expect_llvm_value(&args[2])?.into_int_value();
+    let else_v = expect_llvm_value(&args[3])?.into_int_value();
+    let bld = builder.borrow();
+    let err = |e: String| EvalError::Internal(format!("build-select: {}", e));
+    let ctx = crate::compile::llvm_context();
+    let zero = ctx.i64_type().const_zero();
+    let is_nonzero = bld.build_int_compare(inkwell::IntPredicate::NE, cond, zero, "select_cond").map_err(|e| err(e.to_string()))?;
+    let result = bld.build_select(is_nonzero, then_v, else_v, "select").map_err(|e| err(e.to_string()))?;
+    Ok(RtValue::LlvmValue(result.into_int_value().into()))
 }
 
 /// `float->int` (`f64->i32`, narrowing, truncating toward zero): `bitcast`

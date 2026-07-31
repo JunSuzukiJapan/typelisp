@@ -4488,6 +4488,82 @@ fn compile_dispatches_f64_transcendentals_and_agrees_with_the_interpreter() {
     }
 }
 
+/// The `f64` trigonometric/hyperbolic/exponential family added alongside
+/// `sqrt`/`floor`/etc: `sin`/`cos`/`exp`/`log` lower to LLVM intrinsics
+/// (`build-fsin`/...) like `sqrt` does; `tan`/`asin`/`acos`/`atan`/`sinh`/
+/// `cosh`/`tanh`/`asinh`/`acosh`/`atanh` have no LLVM intrinsic in the
+/// version this project pins, so they lower to `rt_f64_*` shims instead —
+/// this exercises both codegen paths in one compiled function.
+#[test]
+fn compile_dispatches_f64_transcendental_functions_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun combine ((x f64)) f64
+          (+ (sin x) (+ (cos x) (+ (tan x) (+ (asin x) (+ (acos x)
+             (+ (atan x) (+ (sinh x) (+ (cosh x) (+ (tanh x)
+                (+ (asinh x) (+ (acosh (+ x 1.0)) (+ (atanh x) (+ (exp x) (log (+ x 1.0))))))))))))))))
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(combine 0.5)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n(combine 0.5)")).expect("compiled failed");
+    match (interpreted, compiled) {
+        (RtValue::Float(i), RtValue::Float(c)) => assert!((i - c).abs() < 1e-9, "interpreted {} vs compiled {}", i, c),
+        other => panic!("expected two f64s, got {:?}", other),
+    }
+}
+
+/// `max`/`min` (`icmp`+`select`, branch-free) for every numeric type:
+/// `i32`/`i64` (bare `icmp`), `f64` (`llvm.maxnum.f64`/`llvm.minnum.f64`),
+/// and `bignum`/`ratio` (their three-way `rt_*_cmp` plus `select`).
+#[test]
+fn compile_dispatches_max_min_across_every_numeric_type_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun combine ((a i32) (b i32) (x f64) (y f64) (n bignum) (o bignum) (p ratio) (q ratio)) i32
+          (+ (max a b) (+ (min a b)
+             (+ (float->int (max x y)) (+ (float->int (min x y))
+                (+ (bignum->int (max n o)) (+ (bignum->int (min n o))
+                   (+ (bignum->int (ratio->bignum (max p q))) (bignum->int (ratio->bignum (min p q)))))))))))
+    "#;
+    let args = "3 7 1.0 5.0 (int->bignum 20) (int->bignum 9) (int->ratio 30) (int->ratio 11)";
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(combine {args})")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n(combine {args})")).expect("compiled failed");
+    assert_eq!(compiled, interpreted, "compiled max/min agree with the interpreter across every numeric type");
+}
+
+/// The bitwise catalog (`logand`/`logior`/`logxor`/`lognot`/`ash`/`logbitp`/
+/// `logcount`/`logtest`/`integer-length`) on `i32`: `logand`/`logior`/
+/// `logxor`/`lognot` are bare LLVM instructions, `ash`/`logbitp`/`logcount`/
+/// `integer-length` lower to `rt_i64_*` shims (a variable shift/count past
+/// the operand's bit width being undefined behavior in LLVM, unlike this
+/// language's clamped semantics), `logtest` composes `build-and` with an
+/// existing `build-icmp-ne`.
+#[test]
+fn compile_dispatches_i32_bitwise_operators_and_agrees_with_the_interpreter() {
+    let src = r#"
+        (defun combine ((a i32) (b i32)) i32
+          (+ (logand a b) (+ (logior a b) (+ (logxor a b) (+ (lognot a)
+             (+ (ash a 2) (+ (logcount a) (+ (integer-length a)
+                (+ (if (logbitp 1 a) 1 0) (if (logtest a b) 1 0))))))))))
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(combine 12 10)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n(combine 12 10)")).expect("compiled failed");
+    assert_eq!(compiled, interpreted, "compiled i32 bitwise operators agree with the interpreter");
+}
+
+/// CL's variadic sugar (`Checker::check_variadic_arith`/`check_variadic_cmp`,
+/// desugared at check time into nested 2-argument `Expr::Assoc` nodes) means
+/// `compile-assoc` never sees a 3-argument `+`/`<` call — this just confirms
+/// a function using the 3+-argument forms compiles and runs correctly.
+#[test]
+fn compile_dispatches_variadic_arithmetic_and_comparison_sugar() {
+    let src = r#"
+        (defun combine ((a i32) (b i32) (c i32)) bool
+          (if (< a b c) (= 6 (+ a b c)) false))
+    "#;
+    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(combine 1 2 3)")).expect("interpreted failed");
+    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n(combine 1 2 3)")).expect("compiled failed");
+    assert_eq!(compiled, interpreted, "compiled variadic +/< sugar agrees with the interpreter");
+    assert_eq!(compiled, RtValue::Bool(true));
+}
+
 /// `expt` (binary, `f64,f64->f64`) lowers to `build-fpow` (`llvm.pow.f64`).
 #[test]
 fn compile_dispatches_f64_expt_and_agrees_with_the_interpreter() {

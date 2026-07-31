@@ -2282,6 +2282,155 @@ pub unsafe extern "C" fn rt_i64_mod(args: *const i64, argc: u32) -> i64 {
     }
 }
 
+/// `(ash integer count)` — the compiled-code half of `i64`/`i32` `ash`,
+/// matching `eval_int_builtin`'s. Not a bare LLVM `shl`/`ashr` because both
+/// are undefined behavior once the shift amount reaches the operand's bit
+/// width, which `count >= 64`/`count <= -64` would hit directly; those are
+/// clamped here to their limiting value (`0` left, sign-smeared `-1`/`0`
+/// right) instead. `args[0]` is the integer, `args[1]` the count (receiver-
+/// first, CL's own argument order).
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_i64_ash(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_i64_ash: expected 2 arguments");
+    }
+    let (n, count) = (*args, *args.add(1));
+    if count >= 0 {
+        if count >= 64 {
+            0
+        } else {
+            n.wrapping_shl(count as u32)
+        }
+    } else if -count >= 64 {
+        if n < 0 {
+            -1
+        } else {
+            0
+        }
+    } else {
+        n >> (-count)
+    }
+}
+
+/// `(logbitp index integer)` — the compiled-code half, matching
+/// `eval_int_builtin`'s. Not a bare `lshr`+`and` because a variable shift by
+/// `index >= 64` is undefined behavior in LLVM; that case is handled
+/// directly (any bit position beyond the width just reads the sign).
+/// `args[0]` is the index (receiver-first), `args[1]` the integer.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_i64_logbitp(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_i64_logbitp: expected 2 arguments");
+    }
+    let (index, n) = (*args, *args.add(1));
+    let bit = if index >= 64 { (n < 0) as i64 } else { (n >> index) & 1 };
+    bit
+}
+
+/// `logcount` (population count of a nonnegative integer, or of the 0-bits
+/// of a negative one — CL's own "infinite two's complement" reading) — the
+/// compiled-code half, matching `eval_int_builtin`'s. Not a bare
+/// `llvm.ctpop.i64` call because the negative case first needs a conditional
+/// `lognot`, cheaper to express directly here than as extra IR at every call
+/// site.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_i64_logcount(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_i64_logcount: expected 1 argument");
+    }
+    let n = *args;
+    (if n >= 0 { n.count_ones() } else { (!n).count_ones() }) as i64
+}
+
+/// `integer-length` (bits needed, excluding sign) — the compiled-code half,
+/// matching `eval_int_builtin`'s: `n`'s own bit length when nonnegative,
+/// else `!n`'s (CL's negative-integer-length identity).
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+#[no_mangle]
+pub unsafe extern "C" fn rt_i64_integer_length(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_i64_integer_length: expected 1 argument");
+    }
+    let n = *args;
+    let m = if n >= 0 { n } else { !n };
+    (64 - m.leading_zeros()) as i64
+}
+
+/// Shared shape for the `f64` transcendental unaries that have no LLVM
+/// intrinsic in the LLVM version this project pins (`sin`/`cos`/`exp`/`log`
+/// do and go straight to LLVM IR in `compiler.rs` instead — see
+/// `llvm_builder_build_float_unary_intrinsic`): decode the raw bit-pattern
+/// argument, apply `f`, re-encode. `argc`/pointer validity is the caller's
+/// (`compiler.rs`'s `alloca-args`/`store-arg`) responsibility, same as every
+/// other `rt_*` shim here.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// (an `f64`'s raw bit pattern).
+unsafe fn rt_f64_unary(args: *const i64, argc: u32, name: &str, f: fn(f64) -> f64) -> i64 {
+    if argc < 1 {
+        fatal(&format!("{}: expected 1 argument", name));
+    }
+    f(f64::from_bits(*args as u64)).to_bits() as i64
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn rt_f64_tan(args: *const i64, argc: u32) -> i64 {
+    rt_f64_unary(args, argc, "rt_f64_tan", f64::tan)
+}
+#[no_mangle]
+pub unsafe extern "C" fn rt_f64_asin(args: *const i64, argc: u32) -> i64 {
+    rt_f64_unary(args, argc, "rt_f64_asin", f64::asin)
+}
+#[no_mangle]
+pub unsafe extern "C" fn rt_f64_acos(args: *const i64, argc: u32) -> i64 {
+    rt_f64_unary(args, argc, "rt_f64_acos", f64::acos)
+}
+#[no_mangle]
+pub unsafe extern "C" fn rt_f64_atan(args: *const i64, argc: u32) -> i64 {
+    rt_f64_unary(args, argc, "rt_f64_atan", f64::atan)
+}
+#[no_mangle]
+pub unsafe extern "C" fn rt_f64_sinh(args: *const i64, argc: u32) -> i64 {
+    rt_f64_unary(args, argc, "rt_f64_sinh", f64::sinh)
+}
+#[no_mangle]
+pub unsafe extern "C" fn rt_f64_cosh(args: *const i64, argc: u32) -> i64 {
+    rt_f64_unary(args, argc, "rt_f64_cosh", f64::cosh)
+}
+#[no_mangle]
+pub unsafe extern "C" fn rt_f64_tanh(args: *const i64, argc: u32) -> i64 {
+    rt_f64_unary(args, argc, "rt_f64_tanh", f64::tanh)
+}
+#[no_mangle]
+pub unsafe extern "C" fn rt_f64_asinh(args: *const i64, argc: u32) -> i64 {
+    rt_f64_unary(args, argc, "rt_f64_asinh", f64::asinh)
+}
+#[no_mangle]
+pub unsafe extern "C" fn rt_f64_acosh(args: *const i64, argc: u32) -> i64 {
+    rt_f64_unary(args, argc, "rt_f64_acosh", f64::acosh)
+}
+#[no_mangle]
+pub unsafe extern "C" fn rt_f64_atanh(args: *const i64, argc: u32) -> i64 {
+    rt_f64_unary(args, argc, "rt_f64_atanh", f64::atanh)
+}
+
 /// Interns `args[0..argc]` (each a tagged `Value::Symbol`, one per `::`
 /// segment, in order — `ast_bridge::translate_quote`'s `Path` arm builds
 /// each segment as its own `(str ...)` literal, so the compiled IR calls

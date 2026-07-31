@@ -113,10 +113,16 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; already covers them — see editor_keyword_sync_test.rs)
     "zerop" "plusp" "minusp" "evenp" "oddp" "max" "min"
     ;; transcendental functions (f64 only)
-    "sin" "cos" "tan" "asin" "acos" "atan" "sinh" "cosh" "tanh" "exp" "log"
-    ;; bitwise operators (i32/i64 only)
+    "sin" "cos" "tan" "asin" "acos" "atan" "sinh" "cosh" "tanh"
+    "asinh" "acosh" "atanh" "exp" "log"
+    ;; bitwise operators (i32/i64, plus bignum for the first nine)
     "logand" "logior" "logxor" "lognot" "ash" "logbitp" "logcount" "logtest"
     "integer-length"
+    ;; the rest of the bitwise catalog (i32/i64/bignum, built from the above)
+    "logeqv" "lognand" "lognor" "logandc1" "logandc2" "logorc1" "logorc2"
+    ;; byte-specifier mini-API (i32 only)
+    "byte" "byte-size" "byte-position" "ldb" "ldb-test" "dpb" "mask-field"
+    "deposit-field" "boole"
     ;; numeric / char conversions (§4, §2.5).  The `as'/`try-as' special
     ;; forms are sugar over exactly these.
     "int->float" "int->char" "try-int->char" "float->int" "char->int"
@@ -203,7 +209,12 @@ stream (CLHS 12.1.6).")
   "Builtin generic/abstract type names and traits.")
 
 (defconst typelisp-constants
-  '("true" "false" "pi")
+  '("true" "false" "pi"
+    ;; `boole`'s 16 op-code constants (`i32`, not keywords -- this language
+    ;; has no keyword-symbol type for CL's `boole-and` etc to be)
+    "boole-clr" "boole-set" "boole-1" "boole-2" "boole-c1" "boole-c2"
+    "boole-and" "boole-ior" "boole-xor" "boole-eqv" "boole-nand" "boole-nor"
+    "boole-andc1" "boole-andc2" "boole-orc1" "boole-orc2")
   "Literal constants.")
 
 ;;; Font lock ---------------------------------------------------------------

@@ -60,6 +60,8 @@ const ISLAND_DEFUNS: &[&str] = &[
     "new-env",
     "new-fn-env",
     "new-acc-table",
+    "int-binop-shim-call",
+    "int-unary-shim-call",
     "int-native-method?",
     "string-native-method?",
     "char-native-method?",

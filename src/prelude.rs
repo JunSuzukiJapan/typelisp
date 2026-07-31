@@ -469,6 +469,35 @@ pub const SOURCE: &str = r#"
 ;; language's only floating-point type).
 (defconstant (pi f64) 3.141592653589793 "The ratio of a circle's circumference to its diameter.")
 
+;; The rest of CL's bitwise catalog (CLHS 12.10), all defined in terms of the
+;; `logand`/`logior`/`logxor`/`lognot` primitives above (`registry.rs`) —
+;; these compile via the normal path (built from already-native ops), unlike
+;; the primitives themselves.
+;; --- i32 ---
+(defmethod logeqv ((self i32) (b i32)) i32 (lognot (logxor self b)))
+(defmethod lognand ((self i32) (b i32)) i32 (lognot (logand self b)))
+(defmethod lognor ((self i32) (b i32)) i32 (lognot (logior self b)))
+(defmethod logandc1 ((self i32) (b i32)) i32 (logand (lognot self) b))
+(defmethod logandc2 ((self i32) (b i32)) i32 (logand self (lognot b)))
+(defmethod logorc1 ((self i32) (b i32)) i32 (logior (lognot self) b))
+(defmethod logorc2 ((self i32) (b i32)) i32 (logior self (lognot b)))
+;; --- i64 ---
+(defmethod logeqv ((self i64) (b i64)) i64 (lognot (logxor self b)))
+(defmethod lognand ((self i64) (b i64)) i64 (lognot (logand self b)))
+(defmethod lognor ((self i64) (b i64)) i64 (lognot (logior self b)))
+(defmethod logandc1 ((self i64) (b i64)) i64 (logand (lognot self) b))
+(defmethod logandc2 ((self i64) (b i64)) i64 (logand self (lognot b)))
+(defmethod logorc1 ((self i64) (b i64)) i64 (logior (lognot self) b))
+(defmethod logorc2 ((self i64) (b i64)) i64 (logior self (lognot b)))
+;; --- bignum ---
+(defmethod logeqv ((self bignum) (b bignum)) bignum (lognot (logxor self b)))
+(defmethod lognand ((self bignum) (b bignum)) bignum (lognot (logand self b)))
+(defmethod lognor ((self bignum) (b bignum)) bignum (lognot (logior self b)))
+(defmethod logandc1 ((self bignum) (b bignum)) bignum (logand (lognot self) b))
+(defmethod logandc2 ((self bignum) (b bignum)) bignum (logand self (lognot b)))
+(defmethod logorc1 ((self bignum) (b bignum)) bignum (logior (lognot self) b))
+(defmethod logorc2 ((self bignum) (b bignum)) bignum (logior self (lognot b)))
+
 ;; `sort`/`insert-sorted`/`member`/`assoc`/`every`/`any` (user-facing `Sexpr`
 ;; list operations) were removed with the rest of the `Sexpr` list surface
 ;; (Symbol/Sexpr redesign Phase 5). The self-hosting compiler (`compiler.rs`)
@@ -821,6 +850,78 @@ pub const SOURCE: &str = r#"
             (if (> afr2 ab) (let ((q (+ fq 1.0))) (cons q (- self (* q b))))
                 (if (= (mod fq 2.0) 0.0) fd
                     (let ((q (+ fq 1.0))) (cons q (- self (* q b)))))))))))
+
+;; CL's byte-specifier mini-API (CLHS 22.1.3): `(byte size position)` builds
+;; an opaque specifier consumed by `ldb`/`dpb`/`mask-field`/`deposit-field`/
+;; `ldb-test`. No dedicated struct type is worth introducing for two `i32`s —
+;; `cons-cell<i32,i32>` (the generic pair already used throughout this file,
+;; e.g. `floor-div` above) *is* the byte specifier: `car` the size, `cdr` the
+;; position. `i32` only (like the rest of this file's bit-twiddling
+;; primitives) — a historical PDP-10-era API whose CL usage is overwhelmingly
+;; on fixnums.
+(defmethod byte-size ((self cons-cell<i32,i32>)) i32 (car self))
+(defmethod byte-position ((self cons-cell<i32,i32>)) i32 (cdr self))
+(defun byte ((size i32) (position i32)) cons-cell<i32,i32> (cons size position))
+;; `(ldb bytespec integer)`: extract the `size`-bit field starting at
+;; `position`, right-justified — `(logand (ash integer (- position)) (1-
+;; (ash 1 size)))`.
+(defmethod ldb ((self cons-cell<i32,i32>) (n i32)) i32
+  (logand (ash n (* -1 (byte-position self))) (1- (ash 1 (byte-size self)))))
+;; `(ldb-test bytespec integer)`: does that field have any 1 bits?
+(defmethod ldb-test ((self cons-cell<i32,i32>) (n i32)) bool (/= (ldb self n) 0))
+;; `(mask-field bytespec integer)`: like `ldb`, but left in place rather than
+;; right-justified — `(logand integer (ash (1- (ash 1 size)) position))`.
+(defmethod mask-field ((self cons-cell<i32,i32>) (n i32)) i32
+  (logand n (ash (1- (ash 1 (byte-size self))) (byte-position self))))
+;; `(dpb newbyte bytespec integer)`: deposit `newbyte`'s low `size` bits into
+;; that field of `integer`, leaving every other bit of `integer` untouched.
+(defmethod dpb ((newbyte i32) (self cons-cell<i32,i32>) (n i32)) i32
+  (let ((mask (ash (1- (ash 1 (byte-size self))) (byte-position self))))
+    (logior (logand n (lognot mask)) (logand (ash newbyte (byte-position self)) mask))))
+;; `(deposit-field newbyte bytespec integer)`: like `dpb`, but `newbyte` is
+;; already positioned (only its bits inside the field matter) rather than
+;; right-justified.
+(defmethod deposit-field ((newbyte i32) (self cons-cell<i32,i32>) (n i32)) i32
+  (let ((mask (ash (1- (ash 1 (byte-size self))) (byte-position self))))
+    (logior (logand n (lognot mask)) (logand newbyte mask))))
+
+;; `(boole op a b)`: CL's 16-way generic bitwise-op selector. `op` is one of
+;; the 16 `boole-*` constants below (an `i32` code, not a keyword — this
+;; language has no keyword-symbol type for CL's `boole-and` etc to be).
+(defconstant (boole-clr i32) 0 "boole: always 0.")
+(defconstant (boole-set i32) 1 "boole: always -1 (all bits set).")
+(defconstant (boole-1 i32) 2 "boole: a, unchanged.")
+(defconstant (boole-2 i32) 3 "boole: b, unchanged.")
+(defconstant (boole-c1 i32) 4 "boole: (lognot a).")
+(defconstant (boole-c2 i32) 5 "boole: (lognot b).")
+(defconstant (boole-and i32) 6 "boole: (logand a b).")
+(defconstant (boole-ior i32) 7 "boole: (logior a b).")
+(defconstant (boole-xor i32) 8 "boole: (logxor a b).")
+(defconstant (boole-eqv i32) 9 "boole: (logeqv a b).")
+(defconstant (boole-nand i32) 10 "boole: (lognand a b).")
+(defconstant (boole-nor i32) 11 "boole: (lognor a b).")
+(defconstant (boole-andc1 i32) 12 "boole: (logandc1 a b).")
+(defconstant (boole-andc2 i32) 13 "boole: (logandc2 a b).")
+(defconstant (boole-orc1 i32) 14 "boole: (logorc1 a b).")
+(defconstant (boole-orc2 i32) 15 "boole: (logorc2 a b).")
+(defmethod boole ((self i32) (a i32) (b i32)) i32
+  (if (= self boole-clr) 0
+  (if (= self boole-set) -1
+  (if (= self boole-1) a
+  (if (= self boole-2) b
+  (if (= self boole-c1) (lognot a)
+  (if (= self boole-c2) (lognot b)
+  (if (= self boole-and) (logand a b)
+  (if (= self boole-ior) (logior a b)
+  (if (= self boole-xor) (logxor a b)
+  (if (= self boole-eqv) (logeqv a b)
+  (if (= self boole-nand) (lognand a b)
+  (if (= self boole-nor) (lognor a b)
+  (if (= self boole-andc1) (logandc1 a b)
+  (if (= self boole-andc2) (logandc2 a b)
+  (if (= self boole-orc1) (logorc1 a b)
+  (if (= self boole-orc2) (logorc2 a b)
+      (panic "boole: unknown op code"))))))))))))))))))
 
 ;; `Sexpr` deliberately has **no** `Iter` impl: `Iter`'s `Item` must be one
 ;; fixed type per impl (`vector-iter<T>`'s `Item` is `T`, `hashtable-
