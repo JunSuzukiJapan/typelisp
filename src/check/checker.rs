@@ -5051,6 +5051,10 @@ impl Checker {
                 args,
                 arg_locs,
             )
+        } else if args.len() > 2 && matches!(head.as_str(), "+" | "-" | "*" | "/" | "max" | "min") {
+            self.check_variadic_arith(heap, interp, env, &head, args, expected)
+        } else if args.len() > 2 && matches!(head.as_str(), "<" | "<=" | ">" | ">=" | "=" | "/=") {
+            self.check_variadic_cmp(heap, interp, env, &head, args)
         } else if let Some(result) = self.try_instance_method(heap, interp, env, &head, args, arg_locs) {
             result
         } else if let Some(result) = self.try_instance_method_swapped(heap, interp, env, &head, args, arg_locs) {
@@ -6565,6 +6569,74 @@ impl Checker {
         progn_items.extend(body_forms.into_iter().map(|f| (f, None)));
         let body = self.list_from_vec_locs(heap, &progn_items)?;
         let expansion = self.wrap_let_star(heap, all_bindings, body)?;
+        heap.push_root(expansion);
+        let result = self.check(heap, interp, env, expansion, None);
+        heap.pop_root();
+        result
+    }
+
+    /// CL's variadic arithmetic operators (`+ - * / max min`): `(op a b c
+    /// ...)` with 3+ operands is sugar for the left fold `(op (op (op a b)
+    /// c) ...)`. Each operand appears exactly once in the rewritten form, so
+    /// unlike `Self::check_variadic_cmp` no let-bound temporaries are needed
+    /// to guard against double-evaluating an impure operand. Called only for
+    /// `args.len() > 2`; the plain 2-argument case goes through the existing
+    /// `Self::try_instance_method` builtin-method path unchanged.
+    fn check_variadic_arith(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        op: &str,
+        args: &[Value],
+        expected: Option<&Type>,
+    ) -> Result<Typed, Error> {
+        let op_sym = heap.intern_symbol(op);
+        let mut acc = args[0];
+        for next in &args[1..] {
+            acc = self.list_from_vec_locs(heap, &[(op_sym, None), (acc, None), (*next, None)])?;
+        }
+        heap.push_root(acc);
+        let result = self.check(heap, interp, env, acc, expected);
+        heap.pop_root();
+        result
+    }
+
+    /// CL's variadic comparison operators (`< <= > >= = /=`): `(op a b c
+    /// ...)` with 3+ operands means every adjacent pair compares true, e.g.
+    /// `(< a b c)` is `(and (< a b) (< b c))` — *not* a left fold, since `<`
+    /// doesn't return a value of the compared type to feed into the next
+    /// call. Because each operand would otherwise appear in two adjacent
+    /// comparisons, every operand is first bound to a fresh `let*` temporary
+    /// (`Self::gensym_place`) so an impure operand (e.g. `(< (f) (g) (h))`)
+    /// is still evaluated exactly once, left to right — matching CL's
+    /// evaluation-order guarantee for this case. Called only for
+    /// `args.len() > 2`.
+    fn check_variadic_cmp(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        op: &str,
+        args: &[Value],
+    ) -> Result<Typed, Error> {
+        let mut bindings: Vec<(Value, Value)> = Vec::with_capacity(args.len());
+        let mut names: Vec<Value> = Vec::with_capacity(args.len());
+        for a in args {
+            let name = heap.intern_symbol(&self.gensym_place());
+            bindings.push((name, *a));
+            names.push(name);
+        }
+        let op_sym = heap.intern_symbol(op);
+        let mut cmp_forms: Vec<(Value, Option<Loc>)> = Vec::with_capacity(names.len() - 1);
+        for w in names.windows(2) {
+            cmp_forms.push((self.list_from_vec_locs(heap, &[(op_sym, None), (w[0], None), (w[1], None)])?, None));
+        }
+        let and_sym = heap.intern_symbol("and");
+        let mut and_items: Vec<(Value, Option<Loc>)> = vec![(and_sym, None)];
+        and_items.extend(cmp_forms);
+        let and_form = self.list_from_vec_locs(heap, &and_items)?;
+        let expansion = self.wrap_let_star(heap, bindings, and_form)?;
         heap.push_root(expansion);
         let result = self.check(heap, interp, env, expansion, None);
         heap.pop_root();

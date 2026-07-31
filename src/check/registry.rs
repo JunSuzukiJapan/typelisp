@@ -1540,12 +1540,31 @@ fn char_assoc() -> HashMap<String, AssocFn> {
 fn int_assoc(ty: Type) -> HashMap<String, AssocFn> {
     let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone(), ty.clone()], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
+    let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![ty.clone()], ret: ty.clone(), public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
-    for op in ["+", "-", "*", "/", "mod"] {
+    // `max`/`min` (CL) and the bitwise operators (`logand`/`logior`/`logxor`,
+    // infinite-two's-complement per CL §12.10 since `RtValue::Int` is a
+    // uniform `i64` regardless of whether the static type is `i32`/`i64` —
+    // see `eval_int_builtin`'s doc comment) and `ash` (arithmetic shift,
+    // positive = left) are all same-type binary ops like `+`/`-`/`*`.
+    for op in ["+", "-", "*", "/", "mod", "max", "min", "logand", "logior", "logxor", "ash"] {
         m.insert(op.to_string(), binop());
     }
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
+    }
+    // `logbitp`/`logtest`: bitwise `Bool`-valued predicates, receiver-first
+    // like every other binary op here (`(logbitp index integer)`,
+    // `(logtest a b)`).
+    for op in ["logbitp", "logtest"] {
+        m.insert(op.to_string(), cmp());
+    }
+    // `lognot` (bitwise complement), `logcount` (population count of a
+    // nonnegative integer, or of the zero bits of a negative one — CL
+    // §12.10's "infinite precision" reading), `integer-length` (bits needed,
+    // excluding sign) are unary, same-type.
+    for op in ["lognot", "logcount", "integer-length"] {
+        m.insert(op.to_string(), unary());
     }
     // `eq`/`eql`/`equal`/`equalp` are all aliases for `=` here — a fixnum has
     // no separate identity to diverge from value, `eql` doesn't add anything
@@ -1603,14 +1622,20 @@ fn float_assoc() -> HashMap<String, AssocFn> {
     let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64, Type::F64], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let unary = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::F64], ret: Type::F64, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
-    for op in ["+", "-", "*", "/"] {
+    for op in ["+", "-", "*", "/", "max", "min"] {
         m.insert(op.to_string(), binop());
     }
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         m.insert(op.to_string(), cmp());
     }
     m.insert("expt".to_string(), binop());
-    for op in ["sqrt", "floor", "ceiling", "round", "truncate"] {
+    // The transcendental family (CL §12.10 — "not a single one exists" was
+    // the gap): trig, their inverses and hyperbolic counterparts, natural
+    // `exp`/`log`, alongside the existing root/rounding unaries.
+    for op in [
+        "sqrt", "floor", "ceiling", "round", "truncate", "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh",
+        "tanh", "exp", "log",
+    ] {
         m.insert(op.to_string(), unary());
     }
     // See `int_assoc`'s eq/eql/equal/equalp comment — same alias-for-`=`
@@ -1651,7 +1676,7 @@ fn bignum_assoc() -> HashMap<String, AssocFn> {
     let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum, Type::Bignum], ret: Type::Bignum, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Bignum, Type::Bignum], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
-    for op in ["+", "-", "*", "/", "mod"] {
+    for op in ["+", "-", "*", "/", "mod", "max", "min"] {
         m.insert(op.to_string(), binop());
     }
     for op in ["<", "<=", ">", ">=", "=", "/="] {
@@ -1691,7 +1716,7 @@ fn ratio_assoc() -> HashMap<String, AssocFn> {
     let binop = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio, Type::Ratio], ret: Type::Ratio, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let cmp = || AssocFn { sig: FnSig { type_params: vec![], rest: None, params: vec![Type::Ratio, Type::Ratio], ret: Type::Bool, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }, instance: true, builtin: true };
     let mut m = HashMap::new();
-    for op in ["+", "-", "*", "/"] {
+    for op in ["+", "-", "*", "/", "max", "min"] {
         m.insert(op.to_string(), binop());
     }
     for op in ["<", "<=", ">", ">=", "=", "/="] {

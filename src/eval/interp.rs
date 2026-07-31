@@ -4278,9 +4278,36 @@ fn eval_int_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Eval
         ">=" => RtValue::Bool(a >= b),
         "=" => RtValue::Bool(a == b),
         "/=" => RtValue::Bool(a != b),
+        "max" => RtValue::Int(a.max(b)),
+        "min" => RtValue::Int(a.min(b)),
+        "logand" => RtValue::Int(a & b),
+        "logior" => RtValue::Int(a | b),
+        "logxor" => RtValue::Int(a ^ b),
+        // `(ash integer count)`: positive `count` shifts left, negative
+        // shifts right (arithmetic — sign-extending), matching CL §12.10.
+        // Shifts by 64+ places are clamped rather than handed to Rust's `<<`/
+        // `>>` (which panic once the shift amount reaches the operand's bit
+        // width): the result at that point is just `0` (left) or the sign
+        // bit smeared across every bit (right).
+        "ash" => RtValue::Int(if b >= 0 {
+            if b >= 64 { 0 } else { a.wrapping_shl(b as u32) }
+        } else if -b >= 64 {
+            if a < 0 { -1 } else { 0 }
+        } else {
+            a >> (-b)
+        }),
+        "logbitp" => RtValue::Bool(if a >= 64 { b < 0 } else { (b >> a) & 1 == 1 }),
+        "logtest" => RtValue::Bool((a & b) != 0),
         _ => unreachable!(),
     };
     Some(Ok(v))
+}
+
+/// A unary `i32`/`i64` builtin (`lognot`/`logcount`/`integer-length`,
+/// `registry::int_assoc`) — the unary counterpart of [`eval_int_builtin`]'s
+/// binary ops, mirroring [`float_unary`] below.
+fn int_unary(args: &[RtValue], f: fn(i64) -> i64) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Int(f(rt_i64(&args[0])?)))
 }
 
 fn expect_float(v: &RtValue) -> Result<f64, EvalError> {
@@ -4363,6 +4390,8 @@ fn eval_float_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Ev
         ">=" => RtValue::Bool(a >= b),
         "=" => RtValue::Bool(a == b),
         "/=" => RtValue::Bool(a != b),
+        "max" => RtValue::Float(a.max(b)),
+        "min" => RtValue::Float(a.min(b)),
         _ => unreachable!(),
     };
     Some(Ok(v))
@@ -4429,6 +4458,8 @@ fn eval_bignum_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, E
         ">=" => RtValue::Bool(*a >= *b),
         "=" => RtValue::Bool(*a == *b),
         "/=" => RtValue::Bool(*a != *b),
+        "max" => RtValue::Bignum(if a >= b { a } else { b }),
+        "min" => RtValue::Bignum(if a <= b { a } else { b }),
         _ => unreachable!(),
     };
     Some(Ok(v))
@@ -4463,6 +4494,8 @@ fn eval_ratio_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, Ev
         ">=" => RtValue::Bool(*a >= *b),
         "=" => RtValue::Bool(*a == *b),
         "/=" => RtValue::Bool(*a != *b),
+        "max" => RtValue::Ratio(if a >= b { a } else { b }),
+        "min" => RtValue::Ratio(if a <= b { a } else { b }),
         _ => unreachable!(),
     };
     Some(Ok(v))
@@ -4878,9 +4911,13 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("i32") || *type_name == Path::root("i64") {
         return match method {
-            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
-                eval_int_builtin(method, args)
-            }
+            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" | "logand"
+            | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_int_builtin(method, args),
+            "lognot" => Some(int_unary(args, |n| !n)),
+            "logcount" => Some(int_unary(args, |n| if n >= 0 { n.count_ones() as i64 } else { (!n).count_ones() as i64 })),
+            "integer-length" => Some(int_unary(args, |n| {
+                if n >= 0 { (64 - n.leading_zeros()) as i64 } else { (64 - (!n).leading_zeros()) as i64 }
+            })),
             // `eq`/`eql`/`equal`/`equalp` are all registered as aliases for
             // `=` (see `registry::int_assoc`'s doc comment for why every one
             // of these four is meaningful to register even though none can
@@ -4898,7 +4935,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("f64") {
         return match method {
-            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_float_builtin(method, args)
             }
             "eq" | "eql" | "equal" | "equalp" => eval_float_builtin("=", args),
@@ -4908,6 +4945,17 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             "ceiling" => Some(float_unary(args, f64::ceil)),
             "round" => Some(float_unary(args, f64::round)),
             "truncate" => Some(float_unary(args, f64::trunc)),
+            "sin" => Some(float_unary(args, f64::sin)),
+            "cos" => Some(float_unary(args, f64::cos)),
+            "tan" => Some(float_unary(args, f64::tan)),
+            "asin" => Some(float_unary(args, f64::asin)),
+            "acos" => Some(float_unary(args, f64::acos)),
+            "atan" => Some(float_unary(args, f64::atan)),
+            "sinh" => Some(float_unary(args, f64::sinh)),
+            "cosh" => Some(float_unary(args, f64::cosh)),
+            "tanh" => Some(float_unary(args, f64::tanh)),
+            "exp" => Some(float_unary(args, f64::exp)),
+            "log" => Some(float_unary(args, f64::ln)),
             "float->int" => Some(float_to_int(args)),
             "float->bignum" => Some(float_to_bignum(args)),
             "float->ratio" => Some(float_to_ratio(args)),
@@ -4918,7 +4966,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("bignum") {
         return match method {
-            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_bignum_builtin(method, args)
             }
             "eq" | "eql" | "equal" | "equalp" => eval_bignum_builtin("=", args),
@@ -4933,7 +4981,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("ratio") {
         return match method {
-            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" => {
+            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_ratio_builtin(method, args)
             }
             "eq" | "eql" | "equal" | "equalp" => eval_ratio_builtin("=", args),

@@ -418,6 +418,57 @@ pub const SOURCE: &str = r#"
       (ratio-expt-int self (ratio->bignum e))
       (panic "expt: ratio exponent must be integer-valued")))
 
+;; CL's numeric predicates (`zerop`/`plusp`/`minusp`/`evenp`/`oddp`) and
+;; increment/decrement shorthands (`1+`/`1-`), built from the primitives
+;; above the same way `abs`/`signum`/`rem` are — per-type `defmethod`s rather
+;; than one generic definition, for the same reason (`defmethod` resolves by
+;; the receiver's exact type, not by a trait bound). `evenp`/`oddp` are
+;; integer-only (CL signals a type error on a non-integer; `i32`/`i64`/
+;; `bignum` here). See the `--- bignum ---`/`--- ratio ---` sections above
+;; for why their `0`/`1` literals are spelled `(int->bignum 0)`/`(int->ratio
+;; 1)` rather than bare `0`/`1`: a literal argument doesn't pick up the
+;; receiver's type on its own.
+;; --- i32 ---
+(defmethod zerop ((self i32)) bool (= self 0))
+(defmethod plusp ((self i32)) bool (> self 0))
+(defmethod minusp ((self i32)) bool (< self 0))
+(defmethod evenp ((self i32)) bool (= (mod self 2) 0))
+(defmethod oddp ((self i32)) bool (/= (mod self 2) 0))
+(defmethod 1+ ((self i32)) i32 (+ self 1))
+(defmethod 1- ((self i32)) i32 (- self 1))
+;; --- i64 ---
+(defmethod zerop ((self i64)) bool (= self 0))
+(defmethod plusp ((self i64)) bool (> self 0))
+(defmethod minusp ((self i64)) bool (< self 0))
+(defmethod evenp ((self i64)) bool (= (mod self 2) 0))
+(defmethod oddp ((self i64)) bool (/= (mod self 2) 0))
+(defmethod 1+ ((self i64)) i64 (+ self 1))
+(defmethod 1- ((self i64)) i64 (- self 1))
+;; --- f64 --- (no evenp/oddp: CL requires an integer argument)
+(defmethod zerop ((self f64)) bool (= self 0.0))
+(defmethod plusp ((self f64)) bool (> self 0.0))
+(defmethod minusp ((self f64)) bool (< self 0.0))
+(defmethod 1+ ((self f64)) f64 (+ self 1.0))
+(defmethod 1- ((self f64)) f64 (- self 1.0))
+;; --- bignum ---
+(defmethod zerop ((self bignum)) bool (= self (int->bignum 0)))
+(defmethod plusp ((self bignum)) bool (> self (int->bignum 0)))
+(defmethod minusp ((self bignum)) bool (< self (int->bignum 0)))
+(defmethod evenp ((self bignum)) bool (= (mod self (int->bignum 2)) (int->bignum 0)))
+(defmethod oddp ((self bignum)) bool (/= (mod self (int->bignum 2)) (int->bignum 0)))
+(defmethod 1+ ((self bignum)) bignum (+ self (int->bignum 1)))
+(defmethod 1- ((self bignum)) bignum (- self (int->bignum 1)))
+;; --- ratio --- (no evenp/oddp: CL requires an integer argument)
+(defmethod zerop ((self ratio)) bool (= self (int->ratio 0)))
+(defmethod plusp ((self ratio)) bool (> self (int->ratio 0)))
+(defmethod minusp ((self ratio)) bool (< self (int->ratio 0)))
+(defmethod 1+ ((self ratio)) ratio (+ self (int->ratio 1)))
+(defmethod 1- ((self ratio)) ratio (- self (int->ratio 1)))
+
+;; `pi`: CL's `long-float` circle-ratio constant, `f64`-valued here (this
+;; language's only floating-point type).
+(defconstant (pi f64) 3.141592653589793 "The ratio of a circle's circumference to its diameter.")
+
 ;; `sort`/`insert-sorted`/`member`/`assoc`/`every`/`any` (user-facing `Sexpr`
 ;; list operations) were removed with the rest of the `Sexpr` list surface
 ;; (Symbol/Sexpr redesign Phase 5). The self-hosting compiler (`compiler.rs`)

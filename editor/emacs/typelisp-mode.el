@@ -108,6 +108,15 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "abs" "gcd" "lcm" "signum" "random" "expt" "sqrt" "floor" "ceiling"
     "round" "truncate" "floor-div" "ceiling-div" "round-div" "truncate-div"
     "mod" "rem" "not"
+    ;; CL numeric predicates and max/min (`1+`/`1-` are punctuation-only
+    ;; names, like `+`/`-` themselves, so `is_excluded`/the operator pattern
+    ;; already covers them — see editor_keyword_sync_test.rs)
+    "zerop" "plusp" "minusp" "evenp" "oddp" "max" "min"
+    ;; transcendental functions (f64 only)
+    "sin" "cos" "tan" "asin" "acos" "atan" "sinh" "cosh" "tanh" "exp" "log"
+    ;; bitwise operators (i32/i64 only)
+    "logand" "logior" "logxor" "lognot" "ash" "logbitp" "logcount" "logtest"
+    "integer-length"
     ;; numeric / char conversions (§4, §2.5).  The `as'/`try-as' special
     ;; forms are sugar over exactly these.
     "int->float" "int->char" "try-int->char" "float->int" "char->int"
@@ -194,7 +203,7 @@ stream (CLHS 12.1.6).")
   "Builtin generic/abstract type names and traits.")
 
 (defconst typelisp-constants
-  '("true" "false")
+  '("true" "false" "pi")
   "Literal constants.")
 
 ;;; Font lock ---------------------------------------------------------------
