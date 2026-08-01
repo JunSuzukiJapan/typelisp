@@ -6344,10 +6344,6 @@ impl Checker {
             // dispatch here runs before the local-variable lookup further
             // down, so the guard has to be explicit — unlike `if`/`let`/
             // `format`, which `is_builtin_form_head` reserves outright.
-            "read" if env.get("read").is_none() => return self.check_read(heap, interp, env, args, arg_locs),
-            "make-synonym-stream" if env.get("make-synonym-stream").is_none() => {
-                return self.check_make_synonym_stream(heap, args)
-            }
             "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular" => {
                 return self.check_pprint(heap, interp, env, head.as_str(), args, arg_locs)
             }
@@ -8451,22 +8447,7 @@ impl Checker {
                 "format: expected at least a destination (bool) and a control string".to_string(),
             ));
         }
-        // The destination is checked with no expected type so its own static
-        // type can pick the lowering: `bool` is CL's `t`/`nil` (stdout or
-        // nothing), a `stream` is CL's stream destination. Checking it once,
-        // unexpectedly, and branching on the result is what keeps this from
-        // needing a union type or a second spelling of `format`.
-        let dest = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
-        let builtin = match dest.ty {
-            Type::Bool => "format-rt",
-            Type::Stream => "format-stream-rt",
-            ref other => {
-                return Err(Error::TypeError(format!(
-                    "format: destination must be a bool (t/nil) or a stream, found {}",
-                    mangle_type(other)
-                )))
-            }
-        };
+        let dest = self.check_at(heap, interp, env, args[0], Some(&Type::Bool), nth_loc(arg_locs, 0))?;
         let control = self.check_at(heap, interp, env, args[1], Some(&Type::Str), nth_loc(arg_locs, 1))?;
         let mut items = Vec::new();
         for (i, &a) in args[2..].iter().enumerate() {
@@ -8475,108 +8456,9 @@ impl Checker {
         let list = self.cons_hetero_sexpr(items)?;
         Ok(Typed {
             loc: None,
-            expr: Expr::Call(Ref::synthetic(Path::root(builtin)), vec![dest, control, list]),
+            expr: Expr::Call(Ref::synthetic(Path::root("format-rt")), vec![dest, control, list]),
             ty: Type::Str,
         })
-    }
-
-    /// The `(make-synonym-stream 'name)` form (CLHS 21.2): a stream that
-    /// forwards every operation to whatever the global variable `name` holds
-    /// *at the time of the operation*.
-    ///
-    /// A special form because the name must be resolved without being
-    /// evaluated — and resolved *here*, in the module the call was written
-    /// in, so `(make-synonym-stream '*log*)` finds that module's `*log*`
-    /// exactly as a written reference to it would. What reaches the runtime
-    /// is the fully-qualified path, which the resolver
-    /// (`Interp::stream_resolver`) can look up unambiguously with no notion
-    /// of a "current module" of its own. Checking the variable's type here
-    /// also turns "that global isn't a stream" into a compile-time error
-    /// rather than a failure on first use.
-    fn check_make_synonym_stream(&self, heap: &Heap, args: &[Value]) -> Result<Typed, Error> {
-        if args.len() != 1 {
-            return Err(Error::TypeError(
-                "make-synonym-stream: expected exactly one argument, a quoted global name — (make-synonym-stream '*standard-output*)".into(),
-            ));
-        }
-        // `'x` reads as `(quote x)`; the bare-symbol spelling is rejected
-        // rather than quietly accepted, since it would read as the variable's
-        // *value* everywhere else in the language.
-        let quoted = match heap.list_to_vec(args[0]) {
-            Ok(items) if items.len() == 2 && matches!(items[0], Value::Symbol(id) if heap.symbol_name(id) == "quote") => items[1],
-            _ => {
-                return Err(Error::TypeError(
-                    "make-synonym-stream: the name must be quoted — (make-synonym-stream '*standard-output*)".into(),
-                ))
-            }
-        };
-        let name = match quoted {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
-            Value::Path(pid) => heap.path_segments(pid).iter().map(|s| heap.symbol_name(*s).to_string()).collect::<Vec<_>>().join("::"),
-            _ => return Err(Error::TypeError("make-synonym-stream: expected a symbol naming a global variable".into())),
-        };
-        let Some((path, vi)) = self.resolve_global(&name) else {
-            return Err(Error::TypeError(format!("make-synonym-stream: no such global variable: {}", name)));
-        };
-        if vi.ty != Type::Stream {
-            return Err(Error::TypeError(format!(
-                "make-synonym-stream: {} is a {}, not a stream",
-                name,
-                mangle_type(&vi.ty)
-            )));
-        }
-        let target = Typed { loc: None, expr: Expr::Str(path.to_string()), ty: Type::Str };
-        Ok(Typed {
-            loc: None,
-            expr: Expr::Call(Ref::synthetic(Path::root("make-synonym-stream-rt")), vec![target]),
-            ty: Type::Stream,
-        })
-    }
-
-    /// The `(read)` / `(read stream)` / `(read string)` form — CL's `read`
-    /// and `read-from-string` under one name, chosen from the static type of
-    /// the argument (the same trick [`Self::check_format`] plays on its
-    /// destination). `(read)` reads from `*standard-input*`.
-    ///
-    /// A special form rather than two named functions because `(read s)` on a
-    /// string is this language's long-standing spelling and had to keep
-    /// working, while CL's `read` means "from a stream" — the argument's type
-    /// is exactly the information that distinguishes them, and the checker
-    /// already has it.
-    fn check_read(
-        &self,
-        heap: &mut Heap,
-        interp: &dyn MacroExpander,
-        env: &Env,
-        args: &[Value],
-        arg_locs: &[Option<Loc>],
-    ) -> Result<Typed, Error> {
-        if args.len() > 1 {
-            return Err(Error::TypeError("read: expected at most one argument (a stream or a string)".to_string()));
-        }
-        let ty = Type::Named(Path::root("result"), vec![sexpr_ty(), Type::Named(Path::root(crate::check::registry::READ_ERROR), vec![])]);
-        let Some(&arg) = args.first() else {
-            // No argument: CL's default, `*standard-input*` — an ordinary
-            // prelude global, resolved here exactly as a written reference to
-            // it would be.
-            let Some((path, vi)) = self.resolve_global("*standard-input*") else {
-                return Err(Error::TypeError("read: *standard-input* is not defined".to_string()));
-            };
-            let src = Typed { loc: None, expr: Expr::Global(self.mk_ref(vec!["*standard-input*".to_string()], path)), ty: vi.ty };
-            return Ok(Typed { loc: None, expr: Expr::Call(Ref::synthetic(Path::root("read-stream-rt")), vec![src]), ty });
-        };
-        let src = self.check_at(heap, interp, env, arg, None, nth_loc(arg_locs, 0))?;
-        let builtin = match src.ty {
-            Type::Str => "read-string-rt",
-            Type::Stream => "read-stream-rt",
-            ref other => {
-                return Err(Error::TypeError(format!(
-                    "read: expected a stream or a string, found {}",
-                    mangle_type(other)
-                )))
-            }
-        };
-        Ok(Typed { loc: None, expr: Expr::Call(Ref::synthetic(Path::root(builtin)), vec![src]), ty })
     }
 
     /// The `(print control &rest args)` / `(println control &rest args)`
@@ -8600,48 +8482,17 @@ impl Checker {
                 if builtin == "println-rt" { "println" } else { "print" }
             )));
         }
-        // An optional leading *stream* destination, CL-style
-        // (`(print obj stream)` — spelled here as `(print stream control
-        // args...)` so the control string keeps the fixed position every
-        // directive argument counts from). Distinguished from the control
-        // string by its static type, exactly like `format`'s destination.
-        let first = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
-        let to_stream = matches!(first.ty, Type::Stream);
-        let (dest, rest_from) = if to_stream { (Some(first.clone()), 1) } else { (None, 0) };
-        let control = match rest_from {
-            0 => {
-                if !matches!(first.ty, Type::Str) {
-                    return Err(Error::TypeError(format!(
-                        "{}: the control string must be a string, found {}",
-                        if builtin == "println-rt" { "println" } else { "print" },
-                        mangle_type(&first.ty)
-                    )));
-                }
-                first
-            }
-            _ => match args.get(1) {
-                Some(&a) => self.check_at(heap, interp, env, a, Some(&Type::Str), nth_loc(arg_locs, 1))?,
-                None => {
-                    return Err(Error::TypeError(format!(
-                        "{}: expected a control string after the stream",
-                        if builtin == "println-rt" { "println" } else { "print" }
-                    )))
-                }
-            },
-        };
-        let first_arg = rest_from + 1;
+        let control = self.check_at(heap, interp, env, args[0], Some(&Type::Str), nth_loc(arg_locs, 0))?;
         let mut items = Vec::new();
-        for (i, &a) in args[first_arg..].iter().enumerate() {
-            items.push(self.check_at(heap, interp, env, a, None, nth_loc(arg_locs, first_arg + i))?);
+        for (i, &a) in args[1..].iter().enumerate() {
+            items.push(self.check_at(heap, interp, env, a, None, nth_loc(arg_locs, 1 + i))?);
         }
         let list = self.cons_hetero_sexpr(items)?;
-        let (name, call_args) = match dest {
-            // Same directive engine, different sink — see
-            // `Interp::eval_builtin`'s `print-stream-rt` arm.
-            Some(d) => (format!("{}-stream-rt", builtin.trim_end_matches("-rt")), vec![d, control, list]),
-            None => (builtin.to_string(), vec![control, list]),
-        };
-        Ok(Typed { loc: None, expr: Expr::Call(Ref::synthetic(Path::root(&name)), call_args), ty: ret })
+        Ok(Typed {
+            loc: None,
+            expr: Expr::Call(Ref::synthetic(Path::root(builtin)), vec![control, list]),
+            ty: ret,
+        })
     }
 
     /// The `pprint` family — `(pprint x)`, `(pprint-fill x)`,
@@ -10103,7 +9954,6 @@ fn mangle_type(t: &Type) -> String {
         Type::Bignum => "bignum".into(),
         Type::Ratio => "ratio".into(),
         Type::RandomState => "random-state".into(),
-        Type::Stream => "stream".into(),
         Type::Bool => "bool".into(),
         Type::Char => "char".into(),
         Type::Str => "string".into(),

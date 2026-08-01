@@ -84,9 +84,6 @@ take the same name.")
     ;; formatted output — special forms so that each variadic argument keeps
     ;; its own type on the way into `Sexpr' (functions.md §15)
     "print" "println" "format"
-    ;; a special form because the global's name must be resolved, not
-    ;; evaluated, and in the module the call was written in (functions.md §18.5)
-    "make-synonym-stream"
     ;; pretty printer (functions.md §15.1)
     "pprint" "pprint-fill" "pprint-linear" "pprint-tabular"
     "pprint-logical-block")
@@ -173,34 +170,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "pprint-exit-if-list-exhausted" "pprint-list-exhausted"
     ;; the `print-object' trait method (§15.2)
     "print-object"
-    ;; streams & files (§18).  The `stream-*' primitives and the other
-    ;; plumbing each CL name wraps are deliberately absent -- see
-    ;; `STREAM_PRIMITIVES' in tests/editor_keyword_sync_test.rs.
-    "open" "close" "streamp" "input-stream-p" "output-stream-p"
-    "open-stream-p" "stream-element-type" "stream-namestring"
-    "standard-input-stream" "standard-output-stream" "error-output-stream"
-    "read-char" "read-line" "peek-char" "peek-char-skip-whitespace"
-    "peek-char-until" "unread-char" "read-char-no-hang" "listen"
-    "clear-input" "read-sequence" "read-string"
-    "write-string" "write-line" "write-char" "terpri" "fresh-line"
-    "finish-output" "force-output" "clear-output" "write-sequence"
-    "make-string-input-stream" "make-string-output-stream"
-    "get-output-stream-string" "make-broadcast-stream"
-    "make-concatenated-stream" "make-echo-stream" "make-two-way-stream"
-    "with-open-file" "with-open-stream" "with-input-from-string"
-    "with-output-to-string" "y-or-n-p" "yes-or-no-p"
-    ;; pathnames (§18.7) and files (§18.8)
-    "pathname" "parse-namestring" "namestring" "directory-namestring"
-    "file-namestring" "enough-namestring" "pathname-directory"
-    "pathname-name" "pathname-type" "pathname-host" "pathname-device"
-    "pathname-version" "make-pathname" "merge-pathnames" "wild-pathname-p"
-    "pathname-match-p"
-    "probe-file" "truename" "delete-file" "rename-file"
-    "ensure-directories-exist" "file-write-date" "file-author" "file-length"
-    "directory" "file-directory-p" "current-directory"
-    "read-file-string" "read-file-lines" "write-file-string"
-    ;; char -> one-character string, for building text a character at a time
-    "char->string"
+    ;; I/O (§15)
+    "read-line"
     ;; parsing & evaluation (§16)
     "parse-int" "parse-float" "read" "eval"
     ;; macro / system
@@ -217,14 +188,12 @@ function types; `&optional' and `&key' are `defmacro'-only.")
 
 (defconst typelisp-primitive-types
   '("i8" "i16" "i32" "i64" "isize" "u8" "u16" "u32" "u64" "usize"
-    "f32" "f64" "bignum" "ratio" "random-state" "stream" "bool" "char"
-    "string" "symbol")
+    "f32" "f64" "bignum" "ratio" "random-state" "bool" "char" "string" "symbol")
   "Primitive/scalar type names.
 Includes the heap-boxed arbitrary-precision `bignum' / `ratio', which are
 their own static types with no implicit conversion to or from the fixed-width
 numerics (docs/syntax.md §2), and the opaque mutable `random-state' PRNG
-stream (CLHS 12.1.6) and the opaque mutable `stream' (CLHS 21 -- one type
-for every CL stream class, since the kind lives in the value).")
+stream (CLHS 12.1.6).")
 
 (defconst typelisp-builtin-types
   '(;; builtin generic/abstract types
@@ -232,11 +201,9 @@ for every CL stream class, since the kind lives in the value).")
     ;; builtin concrete error types, one per fallible builtin (§7.1).  `Error'
     ;; itself is *not* a type -- it is the prelude trait these implement, used
     ;; as `:dyn Error'.
-    "ParseIntError" "ParseFloatError" "ReadError" "EvalError" "FileError"
+    "ParseIntError" "ParseFloatError" "ReadError" "EvalError"
     ;; builtin generic pair & iterator types (lowercase)
     "cons-cell" "vector-iter" "hashtable-iter"
-    ;; the pathname structure (§18.7)
-    "pathname"
     ;; builtin traits
     "Iter" "Eq" "Ord" "Error")
   "Builtin generic/abstract type names and traits.")

@@ -105,7 +105,7 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 |---|---|---|
 | `package` | ⚠️ | `module`/`use`/`pub` があるが、**パッケージは実行時オブジェクトではない**（値として取り回せない、`find-package` 等が無い） |
 | `pathname` / `logical-pathname` | ❌ | パス名の型が無い。ファイルパスは `string` |
-| `stream` および全サブクラス（`file-stream`/`string-stream`/`broadcast-stream`/`concatenated-stream`/`echo-stream`/`synonym-stream`/`two-way-stream`/`string-input-stream`/`string-output-stream`) | ⚠️ | **2026-08-01 実装**。ただしクラス階層ではなく**単一の `stream` 型**（種別は値が持つ）——静的型かつサブタイプ無しでは階層が `read-char` の受け取れる型を絞ってしまうため。§2.18 参照 |
+| `stream` および全サブクラス（`file-stream`/`string-stream`/`broadcast-stream`/`concatenated-stream`/`echo-stream`/`synonym-stream`/`two-way-stream`/`string-input-stream`/`string-output-stream`) | ❌ | **第一級ストリームが無い**。これが単体では最大の欠落で、§2.19〜§2.21 の関数群がまとめて落ちる |
 | `readtable` | ❌ | リーダマクロを登録する表が無い（リーダの構文は固定） |
 | `random-state` | ❌ | 乱数状態が値として無い（`random` は暗黙のグローバル状態を使う） |
 | `restart` | ⛔ | (D3) |
@@ -397,63 +397,32 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 
 ### 2.17 パス名（CLHS 19）・ファイル（CLHS 20）
 
-**2026-08-01 実装**（functions.md §18.7/§18.8）。詳細は [functions.md](../functions.md) の §18。
+**全滅（❌）**。パス名型もファイル操作も1つも無い。
 
-| CL | 状態 | 備考 |
-|---|---|---|
-| `pathname` / `parse-namestring` / `namestring` / `file-namestring` / `directory-namestring` / `enough-namestring` | ✅ | `pathname` は prelude の `defstruct`（`absolutep`/`dirs`/`base`/`ext`）。区切りは `/` |
-| `make-pathname` / `merge-pathnames` | ✅ | `make-pathname` の `:directory` は CL のリスト `(:relative "src")` ではなく**ディレクトリ名前文字列** `"src/"`。リスト形は毎回ヘテロなリテラルを書く必要があり、静的型では旨みが無い |
-| `pathname-directory` | ✅ | 戻り値は CL と同じ形の `Sexpr` リスト `(:absolute "usr" "local")` |
-| `pathname-name` / `pathname-type` | ✅ | `Option<string>`（CL の `nil` は `None`） |
-| `pathname-host` / `pathname-device` / `pathname-version` | ⚠️ | 常に `None`。CL は「ファイルシステムが提供しない要素は `nil`」を許す |
-| `probe-file` / `truename` / `delete-file` / `rename-file` / `directory` / `ensure-directories-exist` / `file-write-date` / `file-length` | ✅ | 引数は名前文字列（下記の designator 注記参照）。失敗は `Result<T,FileError>`／`Option<T>` の値 |
-| `file-author` | ⚠️ | 常に `None`。CL は「判らなければ `nil`」を許し、Rust std に移植可能な所有者取得 API が無い |
-| `wild-pathname-p` | ✅ | `*`/`?` を含むか。`directory` のワイルドカードもこの2つ（CL の `**` 再帰ワイルドカードは非対応） |
-| `translate-logical-pathname` / 論理パス名 / `#p"SYS:..."` | ⛔ | 非採用。この上にもう1階層の命名体系を作るもので、対象プラットフォームで使い道が無い |
+`pathname` `make-pathname` `merge-pathnames` `pathname-directory` `pathname-name`
+`pathname-type` `namestring` `parse-namestring` `truename` `probe-file` `directory`
+`ensure-directories-exist` `delete-file` `rename-file` `file-write-date` `file-author`
+`file-namestring` `enough-namestring` `wild-pathname-p` `translate-logical-pathname`
 
-**pathname designator が無い**のが CL との構造的な差: CL では文字列・pathname・ストリームが
-互いの代わりに使えるが、これは静的型で表せない和なので、**ファイル操作はすべて `string`（名前
-文字列）を取る**ことに統一した。`pathname` との往復は明示（`namestring`/`parse-namestring`）、
-ストリームからは `stream-namestring`。
-
-`file-directory-p`/`current-directory`/`read-file-string`/`read-file-lines`/`write-file-string`
-は CL に無い追加。前者2つは CL が pathname の形（name 要素の有無）で判断するものを実際の
-`stat` に置き換えたもの、後3つは「ファイルをまるごと読む／書く」の1行版。
+typelisp からファイルを読み書きする手段は**現時点で存在しない**（`load`/`compile-file` が
+処理系側でパスを受け取るのみ）。§2.19 のストリームと合わせて、実用プログラムを書くうえでの
+最大の穴。
 
 ### 2.18 ストリーム（CLHS 21）
 
-**2026-08-01 実装**（functions.md §18）。**`stream` 型は1つだけ**——CL のクラス階層
-（`file-stream`/`string-stream`/`two-way-stream`/…）は静的型かつサブタイプ無しの言語では
-`(read-char s)` が受け取れる型を1つに絞ってしまうため、**種別は値が持ち型は `stream` ひとつ**
-にした。CL でも「読めるストリームか」は実行時の質問（`input-stream-p`）で方向違いは実行時
-エラーなので、失うものは無い。
+**ほぼ全滅（❌）**。第一級ストリームが無いため。
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `read-line` / `read-char` / `peek-char` / `unread-char` / `read-char-no-hang` / `read-sequence` | ✅ | いずれも CL の省略可能ストリーム引数を取り、既定は `*standard-input*`。EOF は `None`（CL の `eof-error-p nil` 相当。CL 既定が欲しければ `(unwrap ...)`）。`peek-char` の3値 `peek-type` は和型が書けないので `peek-char`／`peek-char-skip-whitespace`／`peek-char-until` の3関数に分けた。`read-sequence` の対象はこの言語で唯一の可変長文字列列 `Vector<char>` |
-| `terpri` / `fresh-line` / `write-char` / `write-string` / `write-line` / `write-sequence` | ✅ | 既定は `*standard-output*`。戻り値は CL 通り |
-| `open` / `close` / `with-open-file` / `with-open-stream` | ✅ | `open` は `&key direction/if-exists/if-does-not-exist`（既定値は CL の規則そのまま）で `Result<stream,FileError>`。`with-open-file` は開けなければ panic（CL が `file-error` をシグナルするのに対応）。**`unwind-protect` が無いので `body` からの `break`/`return` は `close` を飛ばす**（ファイル自体は最後の参照が落ちれば解放される） |
-| `make-string-input-stream` / `make-string-output-stream` / `get-output-stream-string` / `with-input-from-string` / `with-output-to-string` | ✅ | `get-output-stream-string` は CL 通り**取り出すと空になる** |
-| `make-broadcast-stream` / `make-concatenated-stream` | ✅ | 可変長なので**マクロ**。`&rest` 末尾は `Sexpr` リストへ集約される仕様で、ネイティブ表現の `stream` は `Sexpr` になれないため |
-| `make-echo-stream` / `make-two-way-stream` | ✅ | |
-| `make-synonym-stream` | ✅ | 特殊形（`Checker::check_make_synonym_stream`）。名前を評価せず、**書かれたモジュールで**解決してから完全修飾パスを実行時へ渡す。対象が `stream` 型でなければ check エラー |
-| `finish-output` / `force-output` / `clear-output` / `clear-input` / `listen` | ✅ | 非同期層が無いので `finish-output` と `force-output` は同じ。`clear-output` が実際に取り消せるのは文字列出力ストリームのみ（CL も他は no-op を許す） |
-| `streamp` / `input-stream-p` / `output-stream-p` / `open-stream-p` / `stream-element-type` | ✅ | `streamp` は常に `true`（静的型が非ストリームを既に排除。`random-state-p` と同じ） |
-| `*standard-output*` / `*standard-input*` / `*error-output*` / `*trace-output*` / `*query-io*` / `*terminal-io*` / `*debug-io*` | ⚠️ | 全て実装。ただし**動的束縛ではなく代入可能なグローバル**（typelisp に動的束縛は無い）。CL の `(let ((*standard-output* s)) ...)` に相当するのは `setf`。`print`/`println`/`format t`/pretty printer はすべてこれを経由するので、差し替えれば出力を捕まえられる |
-| `y-or-n-p` / `yes-or-no-p` | ✅ | `*query-io*` で問い合わせ、理解できる答えが来るまで訊き直す |
-| `:element-type '(unsigned-byte 8)`（バイトストリーム）/ `read-byte` / `write-byte` | ⛔ | 非採用。全ストリームが文字ストリーム（`stream-element-type` は常に `"character"`）。バイト列を表す型（`Vector<u8>` の実用的な I/O 経路）自体がまだ無い |
-| `open` の `:direction :probe` | ⛔ | 非採用。`probe-file` が同じ質問に、使えないストリームを返さずに答える |
-| `stream-error` / `end-of-file` などのコンディション型 | ⛔ | (D3)。コンディション体系が無い。ファイルシステム由来の失敗は `Result<T,FileError>` の値、プログラムのバグ（出力ストリームから読む等）は panic |
-
-**`stream` はネイティブ表現**（`random-state` と同じ層）。OS リソースを持ち、かつ CL の
-ストリームは同一性の意味論を要求するため。結果として `Vector<stream>`/`HashTable<K,stream>`
-には入れられない（`Option<stream>`/`Result<stream,E>` は使える）。`format`/`print`/`println`/
-`read` はストリームを取れる——**引数の静的型で出力先／制御文字列、ストリーム／文字列を判別
-する**ので、CL の designator 的な柔軟さを型安全に再現できている。
-
-なお、ストリーム操作は `format`/`read`/`random` と同じく**インタプリタ専用**で、
-`compile`/`compile-file` の対象外（`stream` はコンパイル済みコードのタグ付き `i64` 表現に
-載らない）。
+| `read-line` | ⚠️ | **標準入力からのみ**。`Option<string>` を返す（EOF は `None`）。ストリーム引数は取れない |
+| `read-char` / `peek-char` / `unread-char` / `read-char-no-hang` / `terpri` / `fresh-line` / `write-char` / `write-string` / `write-line` / `read-sequence` / `write-sequence` | ❌ | |
+| `open` / `close` / `with-open-file` / `with-open-stream` | ❌ | |
+| `make-string-input-stream` / `make-string-output-stream` / `get-output-stream-string` / `with-input-from-string` / `with-output-to-string` | ❌ | 文字列ストリーム。`(format false ...)` が文字列出力の代わりを部分的に果たす |
+| `make-broadcast-stream` / `make-concatenated-stream` / `make-echo-stream` / `make-synonym-stream` / `make-two-way-stream` | ❌ | |
+| `finish-output` / `force-output` / `clear-output` / `clear-input` / `listen` | ⚠️ | `print`/`println`/`format` は**毎回自動 flush** するので `force-output` 相当は不要 |
+| `streamp` / `input-stream-p` / `output-stream-p` / `open-stream-p` / `stream-element-type` | ❌ | |
+| `*standard-output*` / `*standard-input*` / `*error-output*` / `*trace-output*` / `*query-io*` / `*terminal-io*` / `*debug-io*` | ⛔ | (D5)。**標準エラー出力へ書く手段が無い** |
+| `y-or-n-p` / `yes-or-no-p` | ❌ | |
 
 ### 2.19 プリンタ（CLHS 22）
 
@@ -461,7 +430,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `format` | ✅ | ディレクティブはほぼ全対応（`~/name/` のみ未対応）。出力先は `true`/`false` に加え **2026-08-01 から `stream` も渡せる**（引数の静的型で判別。§2.18） |
+| `format` | ✅ | ディレクティブはほぼ全対応（`~/name/` のみ未対応）。出力先は `true`/`false` のみで**ストリームを渡せない** |
 | `print` / `prin1` / `princ` / `write` / `write-to-string` / `prin1-to-string` / `princ-to-string` / `pprint` | ⚠️ | `print`/`println` は**制御文字列を取る format 系**であり CL の `print`（1引数、`~s` 相当）とは別物。`prin1`/`princ` 単体は無いが `~s`/`~a` で書ける。文字列化は `(format false ...)` |
 | pretty printer 一式 | ✅ | `pprint`/`pprint-fill`/`pprint-linear`/`pprint-tabular`/`pprint-logical-block`/`pprint-newline`/`pprint-indent`/`pprint-tab`/`pprint-pop`/`pprint-exit-if-list-exhausted` |
 | `print-object` | ✅ | トレイト |
@@ -476,7 +445,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `read` | ✅ | **2026-08-01 にストリーム対応**。`(read)`＝`*standard-input*`、`(read stream)`＝CL の `read`（続きから読む）、`(read string)`＝CL の `read-from-string`——引数の静的型で選ぶ特殊形（`Checker::check_read`）。戻り型は一律 `Result<Sexpr,ReadError>` |
+| `read` | ⚠️ | **文字列から1つ読む**（`(read s)` → `Result<Sexpr,ReadError>`）。ストリームからは読めない |
 | `read-from-string` | ⚠️ | 実質これが `read`。ただし読んだ位置（第2値）が返らない |
 | `read-preserving-whitespace` / `read-delimited-list` | ❌ | |
 | `readtable` 関連（`copy-readtable` / `set-macro-character` / `get-macro-character` / `set-dispatch-macro-character` / `make-dispatch-macro-character` / `readtable-case` / `*readtable*`） | ❌ | **リーダマクロが定義できない**。`#.`/`#+`/`#-` 等の読み込み時制御も無い |
@@ -509,11 +478,8 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 上の表は関数単位だが、実際には**1つの機構が無いために関数が束で落ちている**箇所がある。
 足すなら効果が大きい順に:
 
-1. ~~**ストリームとファイル I/O**（§2.17/§2.18）~~ — **2026-08-01 解消**。単一の `stream` 型
-   （CL のクラス階層ではなく種別を値が持つ形）＋ `pathname` の `defstruct` ＋ 名前文字列を通貨と
-   するファイル操作で、CLHS 19〜21章に対応した（functions.md §18）。残る意図的な非対応は
-   論理パス名・バイトストリーム・`:direction :probe` と、コンディション体系に依存する
-   `stream-error`/`end-of-file` の型階層のみ。
+1. **ストリームとファイル I/O**（§2.17/§2.18）— CLHS 3章ぶんが丸ごと落ちている。現状 typelisp が
+   触れる外界は「標準入力から1行」と「標準出力へ書く」だけで、ファイルを読むプログラムが書けない。
 2. **関数の `&optional` / `&key`** — `defmacro` には実装済み（2026-07-24）だが `defun`/`lambda` は
    `&rest` のみ。このため CL のシーケンス API の `:key`/`:test`/`:start`/`:end`、
    `make-hash-table :test`、BOA コンストラクタなどが**構造的に書けない**。

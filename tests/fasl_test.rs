@@ -130,9 +130,14 @@ fn prelude_fasl() -> Fasl {
     let mark = registry_mark(&chk);
 
     // Reproduce `load_prelude` but keeping the checked TopLevels for capture.
+    // `predeclare_program` is part of that: since the two-pass top level
+    // (2026-08-01), the prelude relies on forward references between its own
+    // `defun`s, so a loop that skips the pass is not "load_prelude" at all —
+    // it is a stricter checker that the real thing never runs under.
     let r = Reader::new();
     let src = typelisp::prelude::SOURCE;
     let forms = r.read_all(&mut h, src).expect("prelude read");
+    chk.predeclare_program(&mut h, &forms);
     let mut top_levels = Vec::new();
     for v in forms {
         let tl = chk.check_form(&mut h, &interp, v).expect("prelude check");

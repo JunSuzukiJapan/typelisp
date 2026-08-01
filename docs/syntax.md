@@ -47,10 +47,8 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   `f32` `f64` `bool` `char` `string`
 - **多倍長数値型**: `bignum`（任意精度整数）、`ratio`（既約な有理数）。CL 準拠でヒープ確保され、
   `i32`/`f64` 等との暗黙変換はない（`as`/`try-as` または変換メソッドで明示。functions.md 参照）。
-- **不透明な可変型**: `random-state`（PRNG ストリーム）、`stream`（ファイル／文字列／標準／合成
-  ストリーム。CL のクラス階層と違い**型は1つ**で種別は値が持つ。functions.md §18）。どちらも
-  ネイティブ表現なので `Vector<T>`/`HashTable<K,V>`/`Sexpr` には入れられない
-  （`Option<T>`/`Result<T,E>` には入る）。
+- **不透明な可変型**: `random-state`（PRNG の状態）。ネイティブ表現なので
+  `Vector<T>`/`HashTable<K,V>`/`Sexpr` には入れられない（`Option<T>`/`Result<T,E>` には入る）。
 - **Unit 型**: `()`
 - **Never 型**: `!`（`panic`/`unreachable`/`todo`/`return`しないループ 等、発散する式の型。
   任意の期待型に適合する）
@@ -497,12 +495,9 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 (todo)                              ; (panic "todo") に展開。defmacro
 (as Type expr)                      ; 数値/文字の型変換。失敗しうる変換は失敗時に panic
 (try-as Type expr)                  ; as と同じだが結果を Option<Type> で返す（失敗は None）
-(print [stream] control args...)    ; 書式展開して出力（改行なし）。出力先は省略時 *standard-output*
-(println [stream] control args...)  ; 同上（末尾に改行）
-(format dest control args...)       ; CL の format。dest は bool か stream。展開結果の string を返す
-(read)  (read stream)  (read s)     ; Sexpr を1つ読む。引数の静的型で CL の read（stream）と
-                                     ; read-from-string（string）を選ぶ。省略時は *standard-input*
-(make-synonym-stream 'var)          ; var を評価せず解決し、操作のたびにその値を見に行くストリーム
+(print control args...)             ; 書式展開して標準出力へ（改行なし）
+(println control args...)           ; 同上（末尾に改行）
+(format dest control args...)       ; CL の format。展開結果の string を返す
 (pprint x)                          ; pretty printer で整形出力。CL 準拠で先頭に改行を出す
 (pprint-fill x)                     ; 語詰めレイアウト
 (pprint-linear x)                   ; 全部1行か1要素1行か
@@ -513,12 +508,6 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 `print`/`println`/`format`/`pprint` 系は特殊形なので、可変長引数（`pprint` 系は1つの対象）は
 各自の型のまま `Sexpr` へ包まれて渡る——`(println "~a" my-struct)` がそのまま動くのはこのため。
 書式ディレクティブと pretty printer の詳細は [functions.md](functions.md) §15 / §15.1。
-
-`print`/`println`/`format`/`read` が**引数の静的型で振る舞いを選ぶ**のも特殊形だからこそで、
-CL の designator 的な柔軟さ（出力先が `t`/`nil`/ストリーム、入力元が文字列/ストリーム）を
-和型なしで再現している。`make-synonym-stream` が特殊形なのは、グローバルの名前を評価せずに
-**呼び出しが書かれたモジュールで**解決する必要があるため（`documentation` と同じ理由）。
-ストリーム全般は [functions.md](functions.md) §18。
 
 `as`/`try-as` が扱えるのは数値・文字カタログのみ（`i32`/`i64`/`f64`/`bignum`/`ratio`/`char` 間）。
 同一型・`i32`↔`i64` は無変換。`i32`/`i64`→`char` と `bignum`→`i32`/`i64` は範囲外で失敗しうるため

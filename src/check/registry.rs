@@ -595,7 +595,6 @@ impl Registry {
         // `bignum` for the ordinary case.
         root.fns.insert("get-universal-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::I64, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("get-internal-real-time".to_string(), FnSig { type_params: vec![], rest: None, params: vec![], ret: Type::I64, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        register_stream_builtins(&mut root);
         // `parse-int`/`parse-float`: untrusted-text numeric parsing
         // (`docs/language-design.md` §4.1's planned conversion catalog) —
         // `Result`, not a panic, since the input is runtime text the caller
@@ -603,17 +602,10 @@ impl Registry {
         // already validate before this code ever runs).
         root.fns.insert("parse-int".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(Type::I32, error_ty(PARSE_INT_ERROR)), public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
         root.fns.insert("parse-float".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(Type::F64, error_ty(PARSE_FLOAT_ERROR)), public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        // The two halves of CL's reader entry points, both parsing one
-        // `Sexpr` form with the same reader `typl`/the REPL use for source
-        // text (`crate::read::Reader::read`): from a string (CL's
-        // `read-from-string`) and from a stream (CL's `read`). Source code
-        // never names either directly — `read` is a checker-dispatched form
-        // (`Checker::check_read`) that picks between them from the static
-        // type of its argument, so `(read s)` means CL's `read` for a
-        // `stream` and CL's `read-from-string` for a `string`, and `(read)`
-        // means `*standard-input*`.
-        root.fns.insert("read-string-rt".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(sexpr(), error_ty(READ_ERROR)), public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
-        root.fns.insert("read-stream-rt".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Stream], ret: result_of(sexpr(), error_ty(READ_ERROR)), public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
+        // `read`: parses one `Sexpr` form out of a string with the same
+        // reader `typl`/the REPL use for source text
+        // (`crate::read::Reader::read`) — CL's `read-from-string`.
+        root.fns.insert("read".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(sexpr(), error_ty(READ_ERROR)), public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `eval`: type-checks and runs a runtime `Sexpr` against the current
         // global environment, CL-style (`Interp::eval_form`). Sees all globals
         // but not the caller's lexical locals; a definition form registers
@@ -886,16 +878,7 @@ pub const PARSE_INT_ERROR: &str = "parseinterror";
 pub const PARSE_FLOAT_ERROR: &str = "parsefloaterror";
 pub const READ_ERROR: &str = "readerror";
 pub const EVAL_ERROR: &str = "evalerror";
-/// CLHS's `file-error`, covering every failure the filesystem/stream layer
-/// can report: `open` on a missing file, `delete-file` on a read-only
-/// directory, a `truename` of something that isn't there, and the
-/// wrong-direction/closed-stream program errors that reach a `Result`-typed
-/// entry point. CL splits these across `file-error`/`stream-error`; one
-/// concrete type is enough here because the *message* is what a program can
-/// act on — dispatching on a condition *class* would need a condition
-/// system, which this language deliberately does not have.
-pub const FILE_ERROR: &str = "fileerror";
-pub const BUILTIN_ERROR_TYPES: [&str; 5] = [PARSE_INT_ERROR, PARSE_FLOAT_ERROR, READ_ERROR, EVAL_ERROR, FILE_ERROR];
+pub const BUILTIN_ERROR_TYPES: [&str; 4] = [PARSE_INT_ERROR, PARSE_FLOAT_ERROR, READ_ERROR, EVAL_ERROR];
 
 /// Whether `p` names one of [`BUILTIN_ERROR_TYPES`].
 pub fn is_builtin_error_type(p: &Path) -> bool {
@@ -904,8 +887,7 @@ pub fn is_builtin_error_type(p: &Path) -> bool {
 
 /// The concrete error type of every fallible built-in, one per failure
 /// source: `ParseIntError` (`parse-int`), `ParseFloatError` (`parse-float`),
-/// `ReadError` (`read`), `EvalError` (`eval`), `FileError` (`open` and every
-/// other stream/file operation) — modeled on Rust's std, where
+/// `ReadError` (`read`), `EvalError` (`eval`) — modeled on Rust's std, where
 /// `Error` is a *trait* and each operation returns its own concrete error
 /// (`ParseIntError`, `io::Error`, ...). `Error` is accordingly not a type in
 /// this language at all: it is the prelude trait these four implement
@@ -1052,147 +1034,6 @@ fn hashtable_ty() -> Type {
 
 fn option_of(t: Type) -> Type {
     Type::Named(Path::root("option"), vec![t])
-}
-
-fn vector_of(t: Type) -> Type {
-    Type::Named(Path::root("vector"), vec![t])
-}
-
-/// A built-in free function's signature — the shape every `root.fns` entry
-/// in [`register_stream_builtins`] has (no type parameters, no `&rest`, no
-/// `&optional`/`&key`, public). Spelled out once here instead of at each of
-/// the fifty-odd stream/file entries.
-fn native_fn(params: Vec<Type>, ret: Type) -> FnSig {
-    FnSig { type_params: vec![], rest: None, params, ret, public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() }
-}
-
-/// The Rust half of stream and file I/O (CLHS 19/20/21) — the operations
-/// that must touch the OS or the `RtValue::Stream` payload directly
-/// (`crate::eval::stream`). Everything CL-shaped is layered on top of these
-/// in the prelude: the `&optional`-stream argument conventions
-/// (`(write-string s)` vs `(write-string s stream)`), the `&key` argument
-/// parsing of `open`, the `with-open-file`/`with-output-to-string` macros,
-/// the variadic `make-broadcast-stream`/`make-concatenated-stream`, and the
-/// whole `pathname` layer, which is pure string manipulation and so has no
-/// business being written in Rust (`docs/dev/development.md`'s rule: Rust
-/// only for what typelisp cannot express).
-///
-/// Naming: an entry a program is expected to call by this exact name keeps
-/// its CL name (`get-output-stream-string`, `input-stream-p`); one that only
-/// exists to be wrapped carries a `-rt`/`stream-` prefix so the CL name
-/// stays free for the prelude's wrapper.
-fn register_stream_builtins(root: &mut Namespace) {
-    let stream = Type::Stream;
-    let file_err = error_ty(FILE_ERROR);
-    let mut f = |name: &str, params: Vec<Type>, ret: Type| {
-        root.fns.insert(name.to_string(), native_fn(params, ret));
-    };
-
-    // ---- the three standard streams ------------------------------------
-    // Constructors, not constants: the prelude's `*standard-output*`/
-    // `*standard-input*`/`*error-output*` globals are ordinary `defvar`s
-    // initialized by calling these, so a program can rebind them (CL's
-    // `(let ((*standard-output* s)) ...)` has no counterpart here — this
-    // language has no dynamic binding — but `setf` does the same job).
-    f("standard-input-stream", vec![], stream.clone());
-    f("standard-output-stream", vec![], stream.clone());
-    f("error-output-stream", vec![], stream.clone());
-
-    // ---- opening and closing --------------------------------------------
-    // `open-stream` is CL's `open` with its `&key` arguments already parsed
-    // into positional form by the prelude's wrapper: `input`/`output` are
-    // `:direction` split in two (`:io` is both true, CL's `:probe` is not
-    // offered — `probe-file` is the way to ask), and the two symbols are
-    // `:if-exists`/`:if-does-not-exist` keywords passed through unchanged
-    // so the error message can name what the caller actually wrote.
-    f("open-stream", vec![Type::Str, Type::Bool, Type::Bool, Type::Symbol, Type::Symbol], result_of(stream.clone(), file_err.clone()));
-    f("close-stream", vec![stream.clone()], Type::Bool);
-
-    // ---- input ----------------------------------------------------------
-    // All of these report end of file as `None`/`""` rather than an error:
-    // CL's `eof-error-p` defaults to true, but a `Result`/`Option` return is
-    // this language's whole convention for "the input ran out", and the
-    // erroring variants are trivially built on top (the prelude's
-    // `read-char-or-error`-free approach: a caller who wants a panic writes
-    // `(unwrap ...)`).
-    f("stream-read-char", vec![stream.clone()], option_of(Type::Char));
-    // `mode` is `peek-char`'s CL `peek-type` argument, flattened: 0 = `nil`
-    // (the very next character), 1 = `t` (skip whitespace first), 2 = a
-    // character (skip until `target`). `target` is ignored unless mode 2.
-    f("stream-peek-char", vec![stream.clone(), Type::I32, Type::Char], option_of(Type::Char));
-    f("stream-unread-char", vec![stream.clone(), Type::Char], Type::Unit);
-    f("stream-read-line", vec![stream.clone()], option_of(Type::Str));
-    // Up to `n` characters, stopping early at end of file — CL's
-    // `read-sequence` against a string, and (with a large `n`) the engine
-    // behind the prelude's `read-file-string`/`slurp`-style helper.
-    f("stream-read-chars", vec![stream.clone(), Type::I64], Type::Str);
-    f("stream-listen", vec![stream.clone()], Type::Bool);
-    f("stream-clear-input", vec![stream.clone()], Type::Unit);
-
-    // ---- output ---------------------------------------------------------
-    f("stream-write-string", vec![stream.clone(), Type::Str], Type::Unit);
-    f("stream-fresh-line", vec![stream.clone()], Type::Bool);
-    f("stream-finish-output", vec![stream.clone()], Type::Unit);
-    f("stream-clear-output", vec![stream.clone()], Type::Unit);
-
-    // ---- predicates and accessors ---------------------------------------
-    // `streamp` is *not* here: a `stream`-typed parameter already rules out
-    // every non-stream argument at check time, so the predicate could only
-    // ever return `true` — the prelude defines it as such, exactly like
-    // `random-state-p`.
-    f("input-stream-p", vec![stream.clone()], Type::Bool);
-    f("output-stream-p", vec![stream.clone()], Type::Bool);
-    f("open-stream-p", vec![stream.clone()], Type::Bool);
-    f("stream-element-type", vec![stream.clone()], Type::Str);
-    // The namestring a file stream was opened on — CL's `(pathname stream)`
-    // and `(truename stream)`. `None` for every non-file stream.
-    f("stream-namestring", vec![stream.clone()], option_of(Type::Str));
-
-    // ---- string streams --------------------------------------------------
-    f("make-string-input-stream-rt", vec![Type::Str], stream.clone());
-    f("make-string-output-stream", vec![], stream.clone());
-    f("get-output-stream-string", vec![stream.clone()], Type::Str);
-
-    // ---- composite streams ------------------------------------------------
-    // `make-broadcast-stream`/`make-concatenated-stream` are variadic in CL.
-    // A built-in cannot take `&rest stream` (a `&rest` tail is collected into
-    // a `Sexpr` list, and a `stream` has no `Sexpr` representation — it is a
-    // native-repr value, like `random-state`), so the empty constructor plus
-    // `composite-stream-add` is the primitive pair, and the prelude's
-    // `defmacro` of each CL name folds any number of components over it.
-    f("make-broadcast-stream-new", vec![], stream.clone());
-    f("make-concatenated-stream-new", vec![], stream.clone());
-    f("composite-stream-add", vec![stream.clone(), stream.clone()], stream.clone());
-    f("make-echo-stream", vec![stream.clone(), stream.clone()], stream.clone());
-    f("make-two-way-stream", vec![stream.clone(), stream.clone()], stream.clone());
-    // The argument is the *name* of a global variable, quoted at the call
-    // site (`(make-synonym-stream '*standard-output*)`) — the indirection is
-    // the point of a synonym stream, so it is resolved afresh on every
-    // operation, never captured here. Source never calls this directly:
-    // `make-synonym-stream` is a checker-dispatched form
-    // (`Checker::check_make_synonym_stream`) that resolves the quoted name
-    // against the *calling module* and passes the fully-qualified path
-    // through here — so `(make-synonym-stream '*log*)` finds a `*log*` in
-    // whatever module it was written in, the same way a written reference to
-    // it would, while the run-time lookup stays an unambiguous absolute path.
-    f("make-synonym-stream-rt", vec![Type::Str], stream.clone());
-
-    // ---- files (CLHS 20) --------------------------------------------------
-    // Namestrings in, namestrings out: the `pathname` structure itself is a
-    // prelude `defstruct` and never crosses this boundary.
-    f("probe-file-rt", vec![Type::Str], option_of(Type::Str));
-    f("truename-rt", vec![Type::Str], result_of(Type::Str, file_err.clone()));
-    f("delete-file-rt", vec![Type::Str], result_of(Type::Bool, file_err.clone()));
-    f("rename-file-rt", vec![Type::Str, Type::Str], result_of(Type::Str, file_err.clone()));
-    f("ensure-directories-exist-rt", vec![Type::Str], result_of(Type::Bool, file_err.clone()));
-    // One directory's entries, as full namestrings, sorted. `Vector<string>`
-    // rather than a `Sexpr` list so it is `doiter`-able and indexable with
-    // the ordinary collection API.
-    f("directory-entries", vec![Type::Str], result_of(vector_of(Type::Str), file_err.clone()));
-    f("file-write-date-rt", vec![Type::Str], result_of(Type::I64, file_err.clone()));
-    f("file-length-rt", vec![Type::Str], result_of(Type::I64, file_err.clone()));
-    f("file-directory-p", vec![Type::Str], Type::Bool);
-    f("current-directory", vec![], Type::Str);
 }
 
 /// One of [`builtin_error_defs`]' concrete error types, as a `Type` — the
@@ -1811,12 +1652,6 @@ fn char_assoc() -> HashMap<String, AssocFn> {
     // language-design.md` §4.1's planned conversion catalog) — the other
     // half is `int_assoc`'s `int->char`.
     m.insert("char->int".to_string(), method(vec![Type::Char], Type::I32));
-    // `char->string`: the one-character string. CL gets this from
-    // `string`/`coerce`, which are designator-polymorphic and so have no
-    // statically-typed counterpart; this is the piece of them that is
-    // actually needed (by `write-char`, and by any code building text a
-    // character at a time).
-    m.insert("char->string".to_string(), method(vec![Type::Char], Type::Str));
     m.insert("print".to_string(), method(vec![Type::Char], Type::Unit));
     m.insert("println".to_string(), method(vec![Type::Char], Type::Unit));
     m

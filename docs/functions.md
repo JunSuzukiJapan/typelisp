@@ -279,7 +279,6 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `ParseFloatError` | `parse-float` |
 | `ReadError` | `read` |
 | `EvalError` | `eval` |
-| `FileError` | `open` をはじめ、ストリーム／ファイル操作すべて（§18） |
 
 いずれも「メッセージ文字列を1つ持つ単一変種の直和型」で、型名と変種名が同じ
 （`(match e ((ParseIntError m) m))`、構成は `(ParseIntError::ParseIntError "...")`）。
@@ -479,15 +478,10 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `print` | `(print [stream] control args...)` | `([stream,] string, ...)→Unit` | 制御文字列を書式展開し、改行なしで書く。出力先は省略時 `*standard-output*` |
-| `println` | `(println [stream] control args...)` | `([stream,] string, ...)→Unit` | 同上、末尾に改行を付ける |
-| `format` | `(format dest control args...)` | `(bool\|stream, string, ...)→string` | CL の `format` 相当。展開した文字列を返す。`dest` が `true`（CL の `t`）なら加えて `*standard-output*` へも書く／`false`（CL の `nil`）なら書かず文字列を返すだけ／**`stream` ならそのストリームへ書く** |
-| `read-line` | `(read-line &optional stream)` | `(Option<stream>)→Option<string>` | 1行読む（末尾の改行/`\r`は除去）。EOFなら`None`。省略時は `*standard-input*` |
-
-**出力先はいずれも `*standard-output*` を経由する**（CL と同じ）。したがって
-`(setf *standard-output* (make-string-output-stream))` でプログラムの出力を丸ごと捕まえられる。
-`print`/`println` の第1引数がストリーム型なら出力先、文字列型なら制御文字列——**静的な型で
-判別する**ので曖昧さはない（`format` の `dest` も同様）。ストリーム全般は §18 を参照。
+| `print` | `(print control args...)` | `(string, ...)→Unit` | 制御文字列を書式展開し、改行なしで標準出力へ書く |
+| `println` | `(println control args...)` | `(string, ...)→Unit` | 同上、末尾に改行を付ける |
+| `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL の `format` 相当。展開した文字列を返す。`dest` が `true`（CL の `t`）なら加えて標準出力へも書く／`false`（CL の `nil`）なら書かず文字列を返すだけ |
+| `read-line` | `(read-line)` | `()→Option<string>` | 標準入力から1行読む（末尾の改行/`\r`は除去）。EOFなら`None` |
 
 ### 書式ディレクティブ
 
@@ -660,7 +654,7 @@ typelisp には第一級ストリームが無いので、**開いている論理
 `print-object`（CLHS 22.1.4）に対応する。
 
 ```lisp
-(deftrait print-object ()
+(deftrait print-object
   (print-object ((self Self) (escape bool)) string))
 ```
 
@@ -775,7 +769,7 @@ cons セルは作成後に書き換えられないので、`'(1 2 3)` のよう�
 |---|---|---|---|
 | `parse-int` | `(parse-int s)` | `string→Result<i32,ParseIntError>` | 10進整数（`+`/`-`前置可）。Rust の `str::parse::<i32>` と同じ受理範囲 |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 浮動小数点数。Rust の `str::parse::<f64>` と同じ受理範囲（`inf`/`nan`含む） |
-| `read` | `(read)` / `(read stream)` / `(read string)` | `→Result<Sexpr,ReadError>` | `Sexpr` を1つ読む（`typl`/REPL がソーステキストを読むのと同じ reader を使う）。不完全な括弧・文字列などは `Err`。**引数の静的型で CL の `read`（ストリーム、続きから読む）と `read-from-string`（文字列）を選ぶ**。引数省略時は `*standard-input*`、ストリームの終端は `Err` |
+| `read` | `(read s)` | `string→Result<Sexpr,ReadError>` | `s` から `Sexpr` を1つ読む（`typl`/REPL がソーステキストを読むのと同じ reader を使う）。不完全な括弧・文字列などは `Err` |
 | `eval` | `(eval form)` | `Sexpr→Result<Sexpr,EvalError>` | `form` を実行時に型チェックして評価する。CL の `eval` に準拠 |
 
 ### `eval` の意味論（Common Lisp 準拠）
@@ -857,209 +851,3 @@ check 時のエラー（未定義変数参照などと同様）。解決はで�
 
 LSP のホバーにも統合されている: 定義済みの名前にカーソルを合わせると、型の下に docstring が
 表示される（`src/check/locate.rs` の `doc_for`/`hover_text`）。
-
-## 18. ストリームとファイル I/O (`stream` / `pathname`)
-
-CLHS 19章（パス名）・20章（ファイル）・21章（ストリーム）に対応する。実装は
-[src/eval/stream.rs](../src/eval/stream.rs)（ネイティブ側）と
-[src/prelude.rs](../src/prelude.rs)（CL の名前・引数規約）に分かれる。
-
-### 18.0 設計上の前提（CL との差）
-
-- **`stream` 型は1つだけ**。CL はクラス階層（`file-stream` / `string-stream` /
-  `two-way-stream` / …）だが、typelisp は静的型でサブタイプが無いため、階層にすると
-  `(read-char s)` が `two-way-stream` を受け取れなくなる。そこで**種別は値が持ち、型は
-  `stream` ひとつ**にした。失うものは無い——CL でも「このストリームは読めるか」は実行時の
-  質問（`input-stream-p`）で、方向違いの使用は実行時エラーだから。
-- **ストリームはネイティブ表現**（`random-state` と同じ層）。OS リソースを持ち、かつ CL の
-  ストリームは同一性の意味論（同じストリームへの2つの参照は互いの読み位置・出力・`close` を
-  観測しなければならない）を要求するため。結果として **`Vector<stream>` や `HashTable<K,stream>`
-  には入れられない**（`Option<stream>` / `Result<stream,E>` は使える）。
-- **パス名の通貨は「名前文字列 (namestring)」**。CL の *pathname designator*（文字列でも
-  pathname でもストリームでもよい）は静的型では表せないので、ファイル操作はすべて `string` を
-  取る。`pathname` 構造体との変換は明示（`namestring` / `parse-namestring`）。
-- **失敗の扱い**: ファイルシステムの状態に起因する失敗（開けない・消せない・無い）は
-  `Result<T,FileError>` / `Option<T>` の**値**。プログラム自身のバグ（出力ストリームから読む、
-  閉じたストリームへ書く）は **panic**。`FileError` は `Error` トレイトを実装する具象型（§7.1）。
-- **未実装（意図的）**: 論理パス名（`translate-logical-pathname`、`#p"SYS:..."`）、
-  `:element-type`（バイトストリーム。全ストリームが文字ストリーム）、CL の `:probe` 方向
-  （`probe-file` で足りる）、`**` の再帰ワイルドカード。
-
-### 18.1 標準ストリーム
-
-| 名前 | 型 | 説明 |
-|---|---|---|
-| `*standard-input*` | `stream` | 既定の入力元。`read-char`/`read-line`/`read` が使う |
-| `*standard-output*` | `stream` | 既定の出力先。`print`/`println`/`format t`/pretty printer が使う |
-| `*error-output*` | `stream` | 標準エラー出力 |
-| `*trace-output*` | `stream` | CL に倣いエラー側 |
-| `*terminal-io*` / `*query-io*` / `*debug-io*` | `stream` | 入出力双方向ストリーム |
-
-typelisp に動的束縛は無いので、CL の `(let ((*standard-output* s)) ...)` に相当するのは
-`setf` による代入（他の `*...*` グローバルと同じ扱い）。
-
-### 18.2 開く・閉じる
-
-| 名前 | 形式 | 型 | 説明 |
-|---|---|---|---|
-| `open` | `(open ns &key direction if-exists if-does-not-exist)` | `→Result<stream,FileError>` | `:direction` は `:input`（既定）/`:output`/`:io`。`:if-exists` は `:supersede`（既定）/`:append`/`:overwrite`/`:error`。`:if-does-not-exist` の既定は CL と同じ規則 |
-| `close` | `(close s)` | `stream→bool` | 開いていたら閉じて `true`、既に閉じていたら `false`。合成ストリームは構成要素を閉じない |
-| `with-open-file` | `(with-open-file (var ns opts...) body...)` | マクロ | 開いて `body` を実行し閉じる。**開けなければ panic**（CL が `file-error` をシグナルするのに対応）。値として扱いたければ `open` を直接使う |
-| `with-open-stream` | `(with-open-stream (var form) body...)` | マクロ | 同上、既にあるストリーム式に対して |
-
-> `with-open-file` の閉じ処理は `unwind-protect` ではない（typelisp に非局所脱出は
-> `panic` と `break`/`return` しか無い）。**`body` から `break`/`return` すると `close` を飛ばす**。
-> ファイルそのものは最後の参照が落ちれば OS が閉じるが、出力の明示的な flush 点は失われる。
-
-### 18.3 入力
-
-いずれも CL の省略可能なストリーム引数を取り、省略時は `*standard-input*`。EOF は
-（CL の `eof-error-p nil` の挙動と同じく）`None`。CL 既定の「EOF でエラー」が欲しければ
-`(unwrap (read-char))` と書く。
-
-| 名前 | 形式 | 型 | 説明 |
-|---|---|---|---|
-| `read-char` | `(read-char &optional s)` | `→Option<char>` | 1文字 |
-| `peek-char` | `(peek-char &optional s)` | `→Option<char>` | 次の1文字を消費せずに覗く（CL の `peek-type` = `nil`） |
-| `peek-char-skip-whitespace` | `(peek-char-skip-whitespace &optional s)` | `→Option<char>` | CL の `peek-type` = `t`。空白は消費される |
-| `peek-char-until` | `(peek-char-until c &optional s)` | `→Option<char>` | CL の `peek-type` = 文字 |
-| `unread-char` | `(unread-char c &optional s)` | `→()` | 押し戻す |
-| `read-line` | `(read-line &optional s)` | `→Option<string>` | 1行（改行と直前の `\r` は除去） |
-| `read-char-no-hang` | `(read-char-no-hang &optional s)` | `→Option<char>` | 待たずに読めるときだけ |
-| `listen` | `(listen &optional s)` | `→bool` | 次の `read-char` がブロックしないか |
-| `clear-input` | `(clear-input &optional s)` | `→()` | 溜まっている入力を捨てる |
-| `read-sequence` | `(read-sequence seq &optional s)` | `(Vector<char>,…)→i32` | `seq` の既存要素を埋め、埋められなかった最初の添字を返す（CL と同じ） |
-| `read-string` | `(read-string n &optional s)` | `(i64,…)→string` | 最大 `n` 文字。CL には無いが「まとめて読む」の実体 |
-| `read` | `(read &optional s)` | `→Result<Sexpr,ReadError>` | §16 参照。ストリームからは1フォームずつ、続きから読む |
-
-### 18.4 出力
-
-省略時の出力先は `*standard-output*`。戻り値は CL に合わせてある（`write-` 族は書いた対象）。
-
-| 名前 | 形式 | 型 | 説明 |
-|---|---|---|---|
-| `write-string` | `(write-string text &optional s)` | `→string` | そのまま書く |
-| `write-line` | `(write-line text &optional s)` | `→string` | 末尾に改行 |
-| `write-char` | `(write-char c &optional s)` | `→char` | 1文字 |
-| `terpri` | `(terpri &optional s)` | `→()` | 無条件に改行 |
-| `fresh-line` | `(fresh-line &optional s)` | `→bool` | 行頭でなければ改行。書いたら `true` |
-| `finish-output` / `force-output` | `(finish-output &optional s)` | `→()` | flush。この実装に非同期層は無いので両者は同じ |
-| `clear-output` | `(clear-output &optional s)` | `→()` | 未書き出しの出力を捨てる（実際に取り消せるのは文字列出力ストリームのみ。CL も他は no-op を許す） |
-| `write-sequence` | `(write-sequence seq &optional s)` | `(Vector<char>,…)→Vector<char>` | 全要素を書く |
-
-`print`/`println`/`format` にストリームを渡す方法は §15 を参照。
-
-### 18.5 ストリームの種類
-
-| 名前 | 形式 | 型 | 説明 |
-|---|---|---|---|
-| `make-string-input-stream` | `(make-string-input-stream text &optional start end)` | `→stream` | 文字列を読む |
-| `make-string-output-stream` | `(make-string-output-stream)` | `→stream` | 文字列へ書き溜める |
-| `get-output-stream-string` | `(get-output-stream-string s)` | `stream→string` | 書き溜めた文字列を取り出す（CL 通り**取り出すと空になる**） |
-| `with-input-from-string` | `(with-input-from-string (var text) body...)` | マクロ | |
-| `with-output-to-string` | `(with-output-to-string (var) body...)` | マクロ | `body` の実行後、書かれた文字列を返す |
-| `make-broadcast-stream` | `(make-broadcast-stream s...)` | マクロ→`stream` | 書き込みを全構成要素へ複製 |
-| `make-concatenated-stream` | `(make-concatenated-stream s...)` | マクロ→`stream` | 各構成要素の EOF で次へ進む |
-| `make-echo-stream` | `(make-echo-stream in out)` | `→stream` | 読んだ文字を `out` にも書く |
-| `make-two-way-stream` | `(make-two-way-stream in out)` | `→stream` | 読みは `in`、書きは `out` |
-| `make-synonym-stream` | `(make-synonym-stream 'var)` | 特殊形→`stream` | 操作のたびにグローバル `var` を見に行く。名前は**評価されず**、書かれたモジュールで解決される（型が `stream` でなければ check エラー） |
-
-可変長の `make-broadcast-stream`/`make-concatenated-stream` が**マクロ**なのは、`&rest` の
-末尾が `Sexpr` リストへ集約される仕様で、ネイティブ表現の `stream` は `Sexpr` になれないため。
-マクロなら引数「フォーム」を畳み込むだけで済む。
-
-### 18.6 述語・属性
-
-| 名前 | 形式 | 型 | 説明 |
-|---|---|---|---|
-| `streamp` | `(streamp x)` | `stream→bool` | 常に `true`（静的型が既に非ストリームを排除している。`random-state-p` と同じ理由） |
-| `input-stream-p` / `output-stream-p` | `(input-stream-p s)` | `stream→bool` | 方向 |
-| `open-stream-p` | `(open-stream-p s)` | `stream→bool` | まだ開いているか |
-| `stream-element-type` | `(stream-element-type s)` | `stream→string` | 常に `"character"` |
-| `stream-namestring` | `(stream-namestring s)` | `stream→Option<string>` | ファイルストリームなら開いた名前（CL の `(pathname stream)`）。他は `None` |
-| `y-or-n-p` / `yes-or-no-p` | `(y-or-n-p prompt)` | `string→bool` | `*query-io*` で問い合わせる。理解できる答えが来るまで訊き直す |
-
-### 18.7 パス名（CLHS 19）
-
-```lisp
-(pub defstruct pathname (absolutep bool) (dirs Vector<string>)
-                        (base Option<string>) (ext Option<string>))
-```
-
-区切りは `/`。ホスト・デバイス・バージョンはモデル化しない（CL は「ファイルシステムが
-提供しない要素は `nil` でよい」と定めている）。
-
-| 名前 | 形式 | 型 | 説明 |
-|---|---|---|---|
-| `parse-namestring` | `(parse-namestring ns)` | `string→pathname` | 常に成功（失敗しうる名前文字列構文が無いため `Result` ではない） |
-| `pathname` | `(pathname ns)` | `string→pathname` | 同上（CL の名前） |
-| `namestring` | `(namestring p)` | `pathname→string` | 全体 |
-| `directory-namestring` | `(directory-namestring p)` | `pathname→string` | ディレクトリ部（末尾 `/` 付き） |
-| `file-namestring` | `(file-namestring p)` | `pathname→string` | `name.type` 部。ディレクトリなら `""` |
-| `enough-namestring` | `(enough-namestring p &optional defaults)` | `→string` | `defaults` からの相対で最短の名前 |
-| `pathname-directory` | `(pathname-directory p)` | `pathname→Sexpr` | CL と同じ形 `(:absolute "usr" "local")` |
-| `pathname-name` / `pathname-type` | `(pathname-name p)` | `pathname→Option<string>` | 拡張子を除いた名前 / 拡張子（CL の `nil` は `None`） |
-| `pathname-host` / `pathname-device` / `pathname-version` | | `pathname→Option<string>` | 常に `None` |
-| `make-pathname` | `(make-pathname &key directory name type defaults)` | `→pathname` | `:directory` は CL のリストではなく**ディレクトリ名前文字列** |
-| `merge-pathnames` | `(merge-pathnames p &optional defaults)` | `→pathname` | 欠けた要素を `defaults`（既定 `*default-pathname-defaults*`）から補う |
-| `wild-pathname-p` | `(wild-pathname-p p)` | `pathname→bool` | `*`/`?` を含むか |
-| `pathname-match-p` | `(pathname-match-p pattern name)` | `(string,string)→bool` | `*`（0文字以上）と `?`（1文字）のマッチ |
-| `*default-pathname-defaults*` | | `pathname` | プロセスの作業ディレクトリで初期化 |
-
-### 18.8 ファイル操作（CLHS 20）
-
-引数はいずれも名前文字列。`pathname` からは `(namestring p)` で変換する。
-
-| 名前 | 形式 | 型 | 説明 |
-|---|---|---|---|
-| `probe-file` | `(probe-file ns)` | `string→Option<string>` | 存在すれば truename、無ければ `None` |
-| `truename` | `(truename ns)` | `string→Result<string,FileError>` | 存在しなければ `Err`（`probe-file` との違いはそこだけ） |
-| `delete-file` | `(delete-file ns)` | `string→Result<bool,FileError>` | |
-| `rename-file` | `(rename-file from to)` | `→Result<string,FileError>` | 新しい名前を返す |
-| `ensure-directories-exist` | `(ensure-directories-exist ns)` | `string→Result<bool,FileError>` | `ns` の**ディレクトリ部**を作る（これから書くファイル名をそのまま渡せる） |
-| `file-write-date` | `(file-write-date ns)` | `string→Result<i64,FileError>` | `get-universal-time` と同じ紀元（1900-01-01 UTC） |
-| `file-author` | `(file-author ns)` | `string→Option<string>` | 常に `None`（CL は「判らなければ `nil`」を許す。Rust std に移植可能な所有者取得が無い） |
-| `file-length` | `(file-length s)` | `stream→Result<i64,FileError>` | **文字数**（全ストリームが文字ストリームなので、CL の「要素型の単位」がこれ） |
-| `directory` | `(directory pattern)` | `string→Result<Vector<string>,FileError>` | `pattern` のファイル部に `*`/`?` を使える。ファイル部が空（`/` 終わり）なら全項目 |
-| `file-directory-p` | `(file-directory-p ns)` | `string→bool` | ディレクトリか（CL には無い。CL は pathname の形で判断するがそれは移植性が低い） |
-| `current-directory` | `(current-directory)` | `()→string` | プロセスの作業ディレクトリ |
-
-### 18.9 まとめて読み書き（CL には無い便利関数）
-
-| 名前 | 形式 | 型 | 説明 |
-|---|---|---|---|
-| `read-file-string` | `(read-file-string ns)` | `string→Result<string,FileError>` | ファイル全体を1つの文字列で |
-| `read-file-lines` | `(read-file-lines ns)` | `string→Result<Vector<string>,FileError>` | 全行（改行なし） |
-| `write-file-string` | `(write-file-string ns text)` | `→Result<bool,FileError>` | 上書き保存 |
-
-### 18.10 例
-
-```lisp
-;; 行数を数える
-(match (read-file-lines "input.txt")
-  ((ok lines) (println "~a 行" (len lines)))
-  ((err e)    (println "読めません: ~a" (message e))))
-
-;; 追記
-(with-open-file (out "log.txt" :direction :output :if-exists :append
-                               :if-does-not-exist :create)
-  (format out "~a: ~a~%" (get-universal-time) "started"))
-
-;; 1文字ずつ処理する
-(with-open-file (in "input.txt")
-  (while-let ((some c) (read-char in))
-    (write-char (upcase c))))
-
-;; 出力を文字列に捕まえる
-(println "~s" (with-output-to-string (s) (format s "~{~a~^, ~}" (list 1 2 3))))
-
-;; ディレクトリ走査
-(doiter (f (iter (unwrap (directory "src/*.typl"))))
-  (println "~a" f))
-```
-
-### 18.11 コンパイル (`compile`/`compile-file`) 対象外
-
-ストリーム／ファイル操作は `format`/`print`/`read`/`parse-int`/`random` と同じく
-**インタプリタ専用**で、これらを呼ぶ関数は JIT/AOT コンパイルされない。`stream` は
-ネイティブ表現の値で、コンパイル済みコードのタグ付き `i64` 表現に載らないため。
