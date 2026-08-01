@@ -202,7 +202,7 @@
 
 | 分類 | 特殊形 | 備考 |
 |---|---|---|
-| 定義 | `defun` `defvar` `defconstant` `defmethod` `defmacro` `defstruct` `defenum` `module` `use` `lambda` `deftrait` `impl` | 引数・戻り型・グローバルの型は明示（`defvar`/`defconstant`は`(defvar (name Type) value)`で型必須、2026-07-03に型なし形式を削除。局所束縛`let`のみ推論可。`defmacro` は全パラメータ・戻りが `Sexpr` 固定なので型注釈なし、末尾 `&rest name` で可変長対応）。ジェネリック定義形（`defun`/`defstruct`/`defenum`）の型パラメータは名前に山括弧で書く（`name<T,U>`）。`defstruct`（ユーザ定義product型）は再設計後に実装済み。`defenum`（ユーザ定義直和型、`match`/`if-let`対応）を追加。`deftrait`/`impl`（trait機構、§5.1）は2026-06-30実装 |
+| 定義 | `defun` `defvar` `defconstant` `defmethod` `defmacro` `defstruct` `defenum` `module` `use` `lambda` `deftrait` `impl` | 引数・戻り型・グローバルの型は明示（`defvar`/`defconstant`は`(defvar (name Type) value)`で型必須、2026-07-03に型なし形式を削除。局所束縛`let`のみ推論可。`defmacro` は全パラメータ・戻りが `Sexpr` 固定なので型注釈なし、末尾 `&rest name` で可変長対応）。ジェネリック定義形（`defun`/`defstruct`/`defenum`）の型パラメータは名前に山括弧で書く（`name<T,U>`）。`defstruct`（ユーザ定義product型）は再設計後に実装済み。`defenum`（ユーザ定義直和型、`match`/`if-let`対応）を追加。`deftrait`/`impl`（trait機構、§5.1）は2026-06-30実装、2026-08-01にスーパトレイト・デフォルトメソッド本体・ブランケット実装（`impl<T>`、型パラメータを持つ唯一の**ヘッダ**）を追加 |
 | 束縛 | `let` `let*` | |
 | 制御 | `if` `when` `unless` `cond` `case` `match` `if-let` `while-let` `and` `or` `progn` `the` | `and`/`or` は短絡のため特殊形。`the` は型注釈 |
 | 反復 | `loop` `while` `until` `dotimes` `do` `doiter` `dolist` | `doiter` は `Iter` トレイト経由で任意コレクション。`dolist` は cons セル（`Sexpr`）リスト専用で body 側 `match` により要素形状で分岐 |
@@ -351,13 +351,33 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 `doiter`（§3末尾）が「Iterトレイトを実装した型すべてで使える」ことを要求したため2026-06-30に導入。
 `defmethod`の単一静的ディスパッチをそのまま再利用する設計（trait専用の新しいディスパッチ機構は作らない）。
 
-- **trait定義**: `(deftrait Name (type AssocName)... (method-name ((self Self) params...) Ret)...)`。
-  `Self`・宣言した関連型名は本体を持たないメソッドシグネチャの中で型変数として使える。
+- **trait定義**: `(deftrait Name (Super...) (type AssocName)... (method-name ((self Self) params...) Ret [body...])...)`。
+  `Self`・宣言した関連型名はメソッドシグネチャの中で型変数として使える。
   ```lisp
-  (deftrait Iter
+  (deftrait Iter ()
     (type Item)
     (next ((self Self)) Option<Item>))
   ```
+- **スーパトレイト**（2026-08-01追加）: 名前の直後の**必須**リスト。Rust の `trait Ord: Eq` は
+  仕様上 `trait Ord where Self: Eq` の糖衣なので、内部表現は `where` 境界と同じ `TraitBound` を
+  そのまま使い、型変数スロット（常に `Self`）だけ構文から省いている。要素は素の名前か
+  `(Trait (Assoc Type))`。スーパトレイトの関連型は**全てピン留め必須** —— そうしないと
+  `:dyn Sub<...>` のピンを鎖に沿って合成して継承メソッドのシグネチャを具体化できず、
+  `TraitDef::assoc_types` に継承分を足すことになって既存トレイトの `:dyn` ピン個数が変わる。
+  - **義務**: `impl Ord X` は `impl Eq X` が**先に**書かれていることを要求する（`check_supertrait_impls`）。
+    直接のスーパトレイトだけ見れば十分（親の impl が祖父を強制済み）。厳密な記述順の規則で
+    Rust より制限が強いが、REPL・逐次 `load`・fasl 復元のどれでも決定的に判定できる唯一の形。
+    その帰結として `AdtDef::impls` はスーパトレイトについて閉じるので、
+    `validate_where_bounds` の平坦な一覧走査は変更不要のまま済む。
+  - **同名衝突**: サブが親のメソッドを再宣言すること、2つの親から同名メソッドを継承することは
+    どちらもエラー。vtable のスロットは名前ごとに1つで、呼び出し側に曖昧性解消の構文が無いため。
+    ダイヤモンドは宣言元が一致するので合流して1スロットになる。
+- **デフォルトメソッド本体**（2026-08-01追加）: シグネチャの後ろに本体を書くと `TraitDef::defaults`
+  に**項目まるごと**（`OwnedForm` 列）で retain され、`check_impl` が省略メソッドを既存の
+  rebuild-and-check ループに流し込む。`AdtDef::assoc` には普通の `AssocFn` が入るので、
+  vtable・`Expr::DynCall`・AOT・島はどれも変更不要。本体はトレイトを書いたモジュールの
+  名前空間で再チェックする（`check_defmethod_in`）——ヘッダは `impl` 側の名前空間で
+  `Self` 置換済みなので、切り替えるのは本体だけ。
 - **trait実装**: `(impl TraitName TargetType (type AssocName ConcreteType)... (method-name (recv params...) Ret body...)...)`。
   `Self`/関連型名は`TargetType`/`(type ...)`の具体型へ構文木レベルで置換されてから`defmethod`相当の
   処理に通る——実装後、各メソッドは`TargetType`の通常の`assoc`テーブルに**普通の`defmethod`として**
@@ -404,6 +424,38 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   （要素型が固定されないリストにジェネリックな`Iter<Item>`を被せるのは型システム上不適切、という
   ユーザー判断）。
 
+- **impl レベル `where`**（2026-08-01追加）: `(impl Ord cons-cell<A,B> (where (Ord A) (Ord B)) ...)`。
+  各メソッドの `where` へ**構文的に**合流させる（`merge_where_clauses`）ので、
+  ジェネリック所有者が retain する `MethodTemplate::Form` にもそのまま入り、単型化側に
+  引数を追加で通す必要がない。
+- **impl の完全性・適合性検査**（2026-08-01追加、`check_impl_conformance`）: 従来 `check_impl` は
+  `TraitDef` を一切参照しておらず、メソッドの書き忘れは `:dyn` 化して `dyn_vtable_slots` に
+  到達するまで検出されなかった（シグネチャ違いに至っては検出されなかった）。宣言されていない
+  メソッド・重複・関連型の欠落・メソッドの欠落・シグネチャ不一致を `impl` の時点で弾く。
+  `Self` の比較には**パース済みの**対象型を使う——プリミティブは `Type::I32` であって
+  `Named("i32")` ではなく、両者は表示が同じでも等しくない。
+- **ブランケット実装**（2026-08-01追加）: `(impl<T> Clamp T (where (Ord T)) ...)`。
+  リーダは `impl<T>` を単一シンボルとして返す（`defstruct vector-iter<T>` の名前と同じ字句化）ので、
+  `check_form_dispatch` は `match` の前に `parse_generic_name_header` を通す。
+  対象が**裸の型変数**のときだけブランケットで、型構築子（`Vector<T>`）なら所有 `AdtDef` が1つに
+  定まるので従来の経路をそのまま通る。
+  - 宣言時は `Namespace::blanket_impls` に**保存するだけ**——`AdtDef` には何も登録せず、
+    メソッド本体も検査しない。対象が型変数である以上どの本体もジェネリックで、
+    具体型が要求する前に生成するのは単型化が避けているはずの先行展開そのものだから。
+  - 実体化は `SpecRequest::Blanket` として既存の単型化キューに乗り、`materialize_blanket_impl` が
+    保存した項目を live な `(impl Trait 具体型 ...)` に組み立て直して **`check_impl` に通す**。
+    「impl とは何か」の実装を二重に持たないので、完全性検査・スーパトレイト義務・
+    デフォルト本体・`Self` 置換がそのまま効く。
+  - 参照点は `type_implements` に集約（`validate_where_bounds` / `dyn_vtable_slots` /
+    `check_instance_method`）。明示 `impl` を先に見るので、明示があればそちらが勝つ。
+  - **コヒーレンス**: 1トレイトにつきブランケット実装は1つまで（構文的に判定、順序非依存）。
+    Rust の重なり解析より粗く、重ならないプログラムの一部を拒否する。明示 vs ブランケットの
+    重なりを Rust は硬いエラーにするが、ここでは明示優先の黙認とする——ブランケットが
+    ある型を覆うかは後から確立され得る境界に依存し、「重なるか」に単一時点の答えが無いため。
+  - 相互再帰的な境界（`impl<T> A T (where (B T))` + `impl<T> B T (where (A T))`）は
+    `BLANKET_BOUND_DEPTH` で打ち切る。
+  - **既知の制限**: 一度も使われないブランケット実装の本体は型検査されない（Rust は先行検査する）。
+
 ### 5.2 動的ディスパッチ（trait オブジェクト `:dyn Trait`）
 
 2026-07-25実装（TODO T4）。**C++ の vtbl と同じ「呼び出し側は定数スロットを添字して間接呼び出し
@@ -418,7 +470,7 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 閉じなければ完全に巻き戻すので既存の `(< a b)` 等は影響を受けない）。
 
 ```lisp
-(deftrait Drawable (draw ((self Self)) string))
+(deftrait Drawable () (draw ((self Self)) string))
 (defstruct circle (r i32))
 (impl Drawable circle (draw ((self Self)) string "circle"))
 
@@ -443,8 +495,11 @@ C++ のように vptr をオブジェクト自身に持たせ**ない**理由:
 - 既存の `defstruct`/`defenum` の箱・`rt_struct_new`/`rt_data_new`・GC を一切変更せずに済み、
   `:dyn` を書かないコードのコストが変わらない。
 
-vtable のスロット順は `deftrait` の記述順（`TraitDef::method_order`。`methods` は `HashMap` で
-反復順が不定なので使えない）。中身はコンパイル済みコードの生関数ポインタ（`compiled_fn_type` ABI）で、
+vtable のスロット順は `TraitDef::vtable_order` ——**継承したメソッドが先頭**、その後に自前の
+メソッドが `deftrait` の記述順で並ぶ（`methods` は `HashMap` で反復順が不定なので使えない）。
+継承分を先頭に置くのは装飾ではなく仕様: これにより「最左スーパトレイト鎖」上の任意の `X` について
+`X.vtable_order` は `Y.vtable_order` の**接頭辞**になり、`:dyn Y` の箱がそのまま `:dyn X` の
+箱として通用する（同じスロット番号が同じ実装を指す）。中身はコンパイル済みコードの生関数ポインタ（`compiled_fn_type` ABI）で、
 インタプリタ側は同じ id 空間の並列表に `(型Path, メソッド名)` を持ち、`FnDef.compiled` の有無で
 毎回ネイティブ／ツリーウォークを選ぶ——静的な `Expr::Assoc` とまったく同じ二段構え。
 vtable はヒープ値を持たないので GC ルート登録は不要で、コレクタが辿るのは箱の `value` だけ。
@@ -501,10 +556,30 @@ trait オブジェクトは**ディスパッチ以外の意味を持たない**:
 `:dyn` を一切コンパイルしないプログラムでは 3 の条件が常に偽なので、箱詰めが勝手にコンパイルを
 誘発することはない。
 
+#### スーパトレイトへの upcast（2026-08-01）
+
+`:dyn Sub` の値を `:dyn Super` を要求する場所へ渡せる。上の接頭辞性から、これは
+**型レベルの操作だけ**で済む——`coerce_to_dyn`/`upcast_dyn` が `Typed` の型を差し替え、式は
+一切触らない。インタプリタ・JIT・AOT・島のどれも無変更で正しく動く理由:
+
+- インタプリタの `Expr::DynCall` は `vtables[id][slot]` を引くだけで、`slot` は接頭辞同一。
+- `translate_dyn_call` はスロットを定数として焼くが、焼く値が同じ。
+- 島の `compile-dyn-call` に新しいタグが要らない（＝ `compiler_island.bc` の再生成が不要）。
+- AOT の `rt_vtable_set` は `vtable_descriptors()` をそのまま出力する。
+
+許すのは (1) 対象が推移的スーパトレイト閉包にある (2) ピンが鎖に沿って一致する
+(3) 双方の `vtable_order` が接頭辞関係にある、の3条件すべて。
+
 #### 対象外（v1）
 
-- **trait 間の upcast**（`:dyn A` → `:dyn B`）: 2本目の vtable が要るが、そのとき具象型は
-  もう分からない。具象値から改めて箱詰めすること。
+- **非最左スーパトレイトへの upcast**: `D(B,C)` の `:dyn D` を `:dyn C` にすること。`D` の vtable は
+  `[B の…, C の…, D 自身の…]` なので `C` のスロットは 0 始まりではなく、呼び出し側が焼いた定数が
+  別のエントリを指してしまう。実現には「vtable id → スーパトレイト → vtable id」の変換表を
+  インタプリタと `typelisp-rt` の両方に持たせ、島に `dyn-upcast` タグを足して bitcode を
+  再生成する必要がある。現状は**誤ディスパッチせずに型エラーで拒否**する。
+  （`:dyn B` への upcast は接頭辞なので通る。）
+- **無関係な trait への upcast**（`:dyn A` → `:dyn B`、継承関係なし）: 2本目の vtable が要るが、
+  そのとき具象型はもう分からない。具象値から改めて箱詰めすること。
 - **`Sexpr` から `:dyn T` への取り出し**（`(the :dyn T p)`）: 「その値がその trait を実装して
   いるか」の実行時判定には全実装型の型名照合が要り、2026-07-04 に削除した n分岐チェーン方式に
   逆戻りする。具象型に `match` すること。

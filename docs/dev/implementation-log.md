@@ -5015,3 +5015,270 @@ setter が無いアクセサの拒否・変数でも `var::field` でも呼び�
 
 editor/emacs・editor/vscode の特殊形一覧に `incf`/`decf`/`rotatef`/`shiftf` を追加
 （`tests/editor_keyword_sync_test.rs` のセンチネル間スキャンで自動検出される対象）。
+
+## ストリームとファイル I/O（CLHS 19/20/21、2026-08-01）
+
+`cl-missing-classes-and-methods.md` §3 が「効果が大きい順」の1位に挙げていた欠落
+——CLHS 3章ぶん（パス名・ファイル・ストリーム）が丸ごと無く、ファイルを読むプログラムが
+書けなかった——を解消した。ユーザ向けリファレンスは [functions.md](../functions.md) §18。
+
+### 設計判断1: CL のクラス階層を単一の `stream` 型に畳んだ
+
+CL のストリームはクラス階層（`stream` → `file-stream`/`string-stream`/`two-way-stream`/…）で、
+`read-char` が全部を受け取れるのは CL が動的型だから。typelisp は静的型で名前的型どうしの
+サブタイプが無いので、階層をそのまま持ち込むと **`(read-char s)` のシグネチャが受け取れる型を
+1つに固定してしまう**。全ストリーム関数を `:dyn Stream` で書き、呼ぶたびに手で widening する
+——という案は、CL コードの移植性でも読みやすさでも割に合わない。
+
+そこで**静的型は `stream` ひとつ、種別は値（`eval::stream::StreamKind`）が持つ**形にした。
+これは CL プログラムが実際に観測している性質と一致する: CL でも「このストリームは読めるか」は
+実行時の質問（`input-stream-p`）で、方向違いの使用は実行時の `stream-error` であって
+コンパイルエラーではない。静的型が買うもの（`i32` をストリーム位置に書けない）は残る。
+
+### 設計判断2: ネイティブ表現（`random-state` と同じ層）
+
+`RtValue::Stream(Rc<RefCell<StreamObj>>)`。GC ヒープに置かなかった理由は2つあり、どちらも
+決定的:
+
+1. OS リソース（`File`）を持つ。cons ヒープはこれをトレースも drop もできない。
+2. **CL のストリームは同一性の意味論**——1つのストリームへの2つの参照は、互いの読み位置・
+   バッファ済み出力・`close` を観測しなければならない。`Rc` 共有ならそうなるが、コピーする
+   表現では原理的に無理。
+
+代償は `Vector<stream>`/`HashTable<K,stream>`/`Sexpr` に入れられないこと（`Option<stream>`/
+`Result<stream,E>` はネイティブ表現の enum として通る）。これは `random-state`・
+`Option<llvm-value>` と同じ既存の層であって、新しい制約ではない。
+
+### 設計判断3: pathname designator を「名前文字列」に一本化
+
+CL の *pathname designator*（文字列・pathname・ストリームが互いの代わりに使える）は
+静的型では表せない和。ファイル操作はすべて `string`（名前文字列）を取ることに統一し、
+`pathname` 構造体との往復は明示（`namestring`/`parse-namestring`、ストリームからは
+`stream-namestring`）にした。`pathname` 自体は prelude の `defstruct` で、パス名の解析・
+合成は全部 typelisp で書いてある——Rust に置いたのは syscall を伴うものだけ
+（`development.md` の「Rust は typelisp で書けないものだけ」の方針）。
+
+`make-pathname` の `:directory` だけは CL のリスト形 `(:relative "src")` ではなく
+ディレクトリ名前文字列 `"src/"` にした。リスト形は呼び出しのたびにヘテロなリテラルを書く
+必要があり、静的型の言語では旨みが無い。読み出し側の `pathname-directory` は CL と同じ
+`(:absolute "usr" "local")` を `Sexpr` で返す。
+
+### 設計判断4: 失敗は「値」と「panic」に分けた
+
+- **ファイルシステムの状態**に起因する失敗（開けない・消せない・無い）→ `Result<T,FileError>`
+  または `Option<T>`。呼び出し側が本当に回復できる種類の失敗だから。
+- **プログラム自身のバグ**（出力ストリームから読む、閉じたストリームへ書く、
+  synonym stream の指す先がストリームでない）→ panic。範囲外の `(ref s i)` と同じ扱い。
+
+`FileError` は5つ目の組み込み具象エラー型（`registry::BUILTIN_ERROR_TYPES`）で、prelude で
+`Error` トレイトを実装する。CL は `file-error` と `stream-error` を分けるが、**型で分けても
+ディスパッチできる仕組み（コンディション体系）がこの言語には無い**ので、1つで足りる。
+
+### 設計判断5: `format`/`print`/`println`/`read` は引数の静的型で振る舞いを選ぶ
+
+これらは元々特殊形なので、**チェッカーが第1引数の静的型を見て低位化先を選べる**:
+
+- `(format t ...)` / `(format nil ...)` / `(format stream ...)` → `format-rt` か `format-stream-rt`
+- `(print control ...)` / `(print stream control ...)` → `print-rt` か `print-stream-rt`
+- `(read)` / `(read stream)` / `(read string)` → `read-stream-rt` か `read-string-rt`
+
+最後のものが効いた: typelisp の `(read "文字列")` は実は CL の `read-from-string` で、CL の
+`read`（ストリームから、続きから読む）は無かった。型で選ぶ形にしたので**既存の呼び出しを
+1つも壊さずに** CL の `read` を足せている。CL の designator の柔軟さを、和型なしで、
+静的に再現したことになる。
+
+`make-synonym-stream` も特殊形にした。グローバルの名前を**評価せず**、かつ**呼び出しが
+書かれたモジュールで**解決する必要があるため（`documentation` と同じ理由）。実行時へ渡すのは
+完全修飾パスなので、リゾルバ側は「現在のモジュール」という概念を持たなくて済む。最初は
+`Sexpr` を受ける普通の組み込みにしていたが、スクリプトファイルのグローバルがファイル由来の
+モジュールに入るため `Path::root(name)` では引けず、この形に変えた。
+
+### 設計判断6: 出力は `*standard-output*` を経由する
+
+`print`/`println`/`format t`/pretty printer の出力は `Interp::emit` から
+**`*standard-output*` が保持するストリームへ**書く（prelude 読み込み前だけプロセスの stdout に
+フォールバック）。CL と同じ経路にしたことで、`(setf *standard-output* (make-string-output-stream))`
+がプログラムの出力を丸ごと捕まえられる。typelisp に動的束縛は無いので、CL の
+`(let ((*standard-output* s)) ...)` に当たるのは `setf`。
+
+### 実装上の細かい判断
+
+- **可変長の合成ストリーム**（`make-broadcast-stream`/`make-concatenated-stream`）は
+  **マクロ**。`&rest` の末尾は `Sexpr` リストへ集約される仕様で、ネイティブ表現の `stream` は
+  `Sexpr` になれない。マクロなら引数「フォーム」を `composite-stream-add` で畳むだけで済む。
+- **`peek-char` の3値 `peek-type`**（`nil`/`t`/文字）は和型が書けないので
+  `peek-char`/`peek-char-skip-whitespace`/`peek-char-until` の3関数に分けた。
+- **`read-sequence`/`write-sequence`** の対象はこの言語で唯一の可変長文字シーケンス
+  `Vector<char>`。CL 同様「既存要素を埋め、埋まらなかった最初の添字を返す」。
+- **`close` は方向を覚える**（`StreamKind::Closed(Direction)`）。バッキングリソースは
+  `close` の時点で解放するが、閉じた出力ストリームが `input-stream-p` に `true` と答えるのは
+  ただの嘘なので、方向だけ残す。
+- **ストリームからの `read`** は `stream::read_datum_text` が「1データ分のテキスト」を
+  区切って取り出し、パースは通常のリーダーに任せる。ストリームは読み進めた分を巻き戻せない
+  ので、**どこでデータが終わるか**（ネスト深さ・文字列のエスケープ・`#\(` のような文字
+  リテラル・`;` と `#| |#` のコメント）だけは重複して知る必要がある——文法そのものを
+  二重に持つのは避けた。
+- **`with-open-file` は `unwind-protect` ではない**（この言語に非局所脱出は `panic` と
+  `break`/`return` しか無い）。body から `break`/`return` すると `close` を飛ばす。ファイル
+  自体は最後の参照が落ちれば OS が閉じるので漏れはしないが、明示的な flush 点は失われる。
+  docs にその旨を明記した。
+- **`file-author` は常に `None`**。CL は「判らなければ `nil`」を許しており、Rust std に移植
+  可能な所有者取得 API が無い。でっち上げた名前を返すより「判らない」と言う方がよい。
+- 副産物として **`char->string`**（`char` のメソッド）を追加。`write-char` が要り、CL の
+  `string`/`coerce` は designator 多相で静的型の対応物が作れないため、実際に必要な部分だけ。
+- `FASL_FORMAT_VERSION` を 16 へ。JSON 形式なので既存 fasl の読み出し自体は壊れないが、
+  キャッシュ済みモジュールを再構築する先の**レジストリの形**が変わる（`Type::Stream`・
+  `FileError`）ので、`rm` を誰かが思い出すのを待つより版で一掃する。
+
+### 意図的に実装していないもの
+
+論理パス名（`translate-logical-pathname`、`#p"SYS:..."`）、バイトストリーム
+（`:element-type '(unsigned-byte 8)`、`read-byte`/`write-byte`——バイト列を表す型の実用的な
+I/O 経路自体がまだ無い）、`open` の `:direction :probe`（`probe-file` が同じ質問に、使えない
+ストリームを返さずに答える）、`**` の再帰ワイルドカード、`stream-error`/`end-of-file` の
+コンディション型階層（コンディション体系が無い）。
+
+### テスト
+
+`tests/stream_io_test.rs`（新規、56件）: 文字列ストリーム、`peek`/`unread`、
+`read-line`/`read-sequence`、`fresh-line`/`terpri`、合成ストリーム5種（synonym の
+「変数を追う」性質と、非ストリームのグローバルを check 時に弾くことを含む）、述語一式と
+閉じたストリームの方向、`format`/`print`/`println`/`read` のストリーム対応と
+`*standard-output*` 差し替えによる出力捕捉、ファイルの往復・`:if-exists` 各種・`:direction :io`・
+`file-length`・glob・`probe`/`truename`/`rename`/`delete`、パス名の解析と合成、そして
+`Vector<stream>` への格納が（クラッシュではなく）明快な評価エラーになること。
+
+各ファイルテストは自分専用の一時ディレクトリを作り、drop で消す。出力テストは一切
+プロセスの stdout に触れない（文字列出力ストリームへ書いて読み返す）ので、並列でも安全。
+
+## トレイト機構を Rust 同等にする（2026-08-01）
+
+`deftrait` は 2026-06-30 の導入以来ほぼ手つかずで、Rust と比べてスーパトレイト・デフォルト
+メソッド本体・`impl` の完全性検査・トレイトメソッドの `where` 節・ブランケット実装・`:dyn` の
+アップキャストが全て欠けていた。実害は prelude に出ており、`Eq`/`Ord`/`Error` の16の `impl` が
+約30個の自明なメソッド本体を書き写していた（`prelude.rs` のコメントが「typelisp `deftrait` has
+no default method bodies, so each impl spells out every method」と明記していた）。
+
+### 構文: 継承リストは必須の位置スロット
+
+```lisp
+(deftrait Eq () ...)                        ; 継承なし
+(deftrait Ord (Eq) ...)                     ; Rust の trait Ord: Eq
+(deftrait CharSource ((Iter (Item char))) ...)  ; 関連型のピン留め
+```
+
+`(where (Eq Self))` 形（Rust の脱糖そのもの）や `(deftrait (Ord Eq) ...)` 形も検討したが、
+**トレイト名が `deftrait` 直後の symbol のまま**という性質を保つこの形を採った。Emacs/VSCode
+両方の型名着色正規表現・imenu・symbols 抽出が**無改修**で通る（ヘッダをリスト化する案はここが
+全部壊れる）。`Name<T>` ヘッダ統一の唯一の例外を作らずに済む点も同じ。
+
+代償は既存 `deftrait` 約45箇所への `()` 挿入で、これは機械的。
+
+内部表現は `where` 境界と同じ `TraitBound` を流用する——スーパトレイトは
+`trait Ord where Self: Eq` なので、型変数スロット（常に `Self`）だけ構文から省いた形にあたる。
+`parse_where_clause` のピン解析部を括り出して両方から呼ぶ。
+
+### vtable: 継承分を先頭に置くことが接頭辞性を生む
+
+`TraitDef::vtable_order` は「推移的に継承したメソッド（親の記述順）→ 自前のメソッド」。
+この順序が**アップキャストの実装コストを決めた**。最左スーパトレイト鎖上の `X` について
+`X.vtable_order` が `Y.vtable_order` の接頭辞になるので、`:dyn Y` の箱はそのまま `:dyn X` として
+通用する——`coerce_to_dyn` が `Typed` の型を差し替えるだけで、式には触らない。結果として
+インタプリタ・JIT・AOT・**島**のいずれも無改修（`compiler_island.bc` の再生成が不要）。
+
+非最左のスーパトレイト（`D(B,C)` の `C`）は接頭辞にならないので、現状は誤ディスパッチせずに
+型エラーで拒否する。実現には vtable id 変換表を `Interp` と `typelisp-rt` の両方に持たせ、
+島に `dyn-upcast` タグを足す必要がある（対象外として文書化）。
+
+ダイヤモンドは宣言元が一致するので合流して1スロット。別トレイト由来の同名メソッドの継承と、
+サブによる親メソッドの再宣言は、どちらもエラー（呼び出し側に曖昧性解消の構文が無い）。
+
+### デフォルト本体: 下流をゼロ変更で通す
+
+`TraitDef::defaults` にメソッド項目を**まるごと**（`OwnedForm` 列）retain し、`check_impl` が
+省略メソッドを**既存の rebuild-and-check ループ**に流す。`AdtDef::assoc` に普通の `AssocFn` が
+入るので、`dyn_vtable_slots`・`Expr::DynCall`・`publish_vtable`・AOT・島はどれも変更不要。
+「デフォルトとはユーザーが書かなかった `impl` 項目である」という一文がそのまま実装になる。
+
+3点だけ補強が要った:
+
+1. **名前空間**: 本体はトレイトを書いたモジュールで解決しなければならない（そのモジュールの
+   非公開関数を呼ぶデフォルトが成立するため）。`check_defmethod_in` を分け、**本体の
+   `check_seq` だけ** `enter_specialization` で ns を差し替える。ヘッダは `impl` 側の ns で
+   `Self` 置換済みなので動かせない。
+2. **impl レベル `where`**: `(impl Ord cons-cell<A,B> (where (Ord A) (Ord B)) ...)`。これが
+   無いと、合成されたデフォルト本体が `less` を呼んだ際に `A`/`B` が未解決のまま
+   `validate_where_bounds` の「呼び出し元の宣言済み境界を探す」経路に入り、境界を持たない
+   合成デフォルトが硬いエラーになる。**デフォルト本体より先に実装する必要があった。**
+   合流は構文的に行う（`merge_where_clauses`）ので、ジェネリック所有者が retain する
+   `MethodTemplate::Form` にもそのまま入り、単型化側に引数を足さずに済む。
+3. **メソッドの `where` 節の `Self` 置換**: `check_impl` は `elems[3..]` を素通ししていたので
+   `where` 内の `Self` が置換されていなかった。
+
+**docstring**: 本体を持つメソッドは持てる（`Docs::trait_methods`）。本体を持たないシグネチャは
+持てない——末尾の文字列はそれ自体がデフォルト本体の戻り値になり、両者を区別できないため。
+これは既存の CL 規則がそのまま効いた結果で、専用の禁止コードは要らなかった（一度書いた
+禁止分岐は到達不能と分かって削除した）。
+
+### impl の完全性・適合性検査
+
+従来 `check_impl` は `TraitDef` を**一切参照していなかった**。メソッドの書き忘れは `:dyn` 化して
+`dyn_vtable_slots` に到達するまで検出されず、シグネチャ違いに至っては検出されなかった
+（`tests/seq_ops_test.rs` の `(impl Eq point (equals ...))` が実際にこの穴に乗っていた——
+デフォルト本体が入った今は `not-equals` が埋まるので、そのまま通る）。
+
+`check_impl_conformance` で、未宣言メソッド・重複・関連型の欠落・メソッドの欠落・
+シグネチャ不一致を `impl` の時点で弾く。落とし穴: `Self` の比較には**パース済みの**対象型を
+使うこと。プリミティブは `Type::I32` であって `Named("i32")` ではなく、両者は `mangle_type` の
+表示が同じでも等しくない（最初に再構築したせいで prelude 全体が落ちた）。
+
+### スーパトレイト義務は「記述順」の規則
+
+`impl Ord X` は `impl Eq X` が**先に**書かれていることを要求する。Rust より制限が強いが、
+REPL・逐次 `load`・fasl 復元のどれでも決定的に判定できる唯一の形——遅延して解消する
+「プログラムの終わり」がどれにも無い。prelude は既にこの順だったので移行コストはゼロ。
+
+その帰結として `AdtDef::impls` はスーパトレイトについて閉じるので、`validate_where_bounds` の
+平坦な一覧走査は**変更不要**のまま済んだ。推移的にしたのは「型変数が未解決の枝」だけ
+（呼び出し側が `(where (Ord T))` しか宣言していないのに呼び出し先が `(Eq T)` を要求する場合）。
+
+### ブランケット実装
+
+`(impl<T> Clamp T (where (Ord T)) ...)`。リーダは `impl<T>` を単一シンボルとして返す
+（`defstruct vector-iter<T>` の名前と同じ字句化）ので、`check_form_dispatch` は `match` の前に
+`parse_generic_name_header` を通す。対象が**裸の型変数**のときだけブランケットで、
+型構築子（`Vector<T>`）なら所有 `AdtDef` が1つに定まるので従来の経路をそのまま通る。
+
+宣言時は `Namespace::blanket_impls` に**保存するだけ**——`AdtDef` に何も登録せず、メソッド本体も
+検査しない。対象が型変数である以上どの本体もジェネリックで、具体型が要求する前に生成するのは
+単型化が避けているはずの先行展開そのもの。実体化は `SpecRequest::Blanket` として既存の
+単型化キューに乗り、`materialize_blanket_impl` が保存した項目を live な
+`(impl Trait 具体型 ...)` に組み立て直して **`check_impl` に通す**——「impl とは何か」の実装を
+二重に持たないので、完全性検査・スーパトレイト義務・デフォルト本体・`Self` 置換がそのまま効く。
+
+参照点は `type_implements` に集約（`validate_where_bounds` / `dyn_vtable_slots` /
+`check_instance_method`）。`&self` のままで済むのは、**シグネチャが `TraitDef` 側から来る**ため
+（`AdtDef::assoc` の事前投入が要らない）。`dyn_vtable_slots` だけは例外的に、まだ登録されていない
+メソッド名をスロットに書く——スロットは名前でしかなく、解決は vtable 公開時だから。
+
+コヒーレンス規則（決定的だが Rust より粗い）:
+1. 1トレイトにつきブランケット実装は1つまで。構文的に判定、順序非依存。
+2. 明示 `impl` が常に勝つ。Rust は明示 vs ブランケットの重なりを硬いエラーにするが、
+   ブランケットがある型を覆うかは後から確立され得る境界に依存するので「重なるか」に
+   単一時点の答えが無い。
+3. 相互再帰的な境界は `BLANKET_BOUND_DEPTH` で打ち切る。
+
+既知の制限: 一度も使われないブランケット実装の本体は型検査されない（Rust は先行検査する）。
+
+### その他
+
+- `impl` のトレイト名に `::` パスを許可（従来は symbol のみで、他モジュールのトレイトを
+  実装できなかった）。落とし穴: `a::b` という名前の *symbol* はセグメント1個であって
+  `Value::Path` ではないので、実体化側は `OwnedForm::Path` で組み立てる必要がある。
+- fasl v17。`TraitDef` の新フィールド4つ・`Namespace::blanket_impls`・`Docs::trait_methods`。
+  併せて**トレイト差分が名前のみの比較**だったのを `TraitShape` 化した（`TypeShape` の前例に
+  倣う。`TraitDef` に `PartialEq` を derive すると `FnSig::optionals` →
+  `OptKeyParam::default: Option<Typed>` 経由で検査済み AST 全体に波及するため）。編集した
+  トレイトが古いキャッシュから配られる、ユーザーに見えるバグだった。
+- prelude: `Ord` が `Eq` を継承。`Eq` は `equals` のみ、`Ord` は `less` のみが実装必須になり、
+  スカラ16 impl と `Error` 5 impl から約30個のメソッド本体が消えた。

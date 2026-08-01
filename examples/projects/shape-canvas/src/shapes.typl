@@ -73,11 +73,11 @@
 
 ;; ---- パース: 種類の違うエラーを :dyn Error に集める ----------------------
 
-;; 知らないコマンド / 引数の個数違い。これ以上たどる原因は無い。
+;; 知らないコマンド / 引数の個数違い。これ以上たどる原因は無いので `source` は書かない
+;; ——Error トレイトのデフォルト実装が none を返す。
 (defstruct bad-command (detail string))
 (impl Error bad-command
-  (message ((self Self)) string (append "bad command: " self::detail))
-  (source ((self Self)) Option<:dyn Error> (option::none)))
+  (message ((self Self)) string (append "bad command: " self::detail)))
 
 ;; 整数のはずの引数が読めなかった。原因として組み込みの ParseIntError を包むので、
 ;; source をたどると下位のメッセージまで届く(Rust の Error::source と同じ)。

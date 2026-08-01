@@ -308,6 +308,35 @@ pub struct TraitDefault {
     pub ns: Vec<String>,
 }
 
+/// A blanket `impl` — one written over a bare type variable rather than a
+/// named type, so it covers *every* type satisfying its bounds:
+/// `(impl<T> Clamp T (where (Ord T)) ...)`, Rust's `impl<T: Ord> Clamp for T`.
+///
+/// Nothing is registered on any `AdtDef` when this is declared, and no method
+/// body is checked: a blanket impl generates code only when some concrete
+/// type actually reaches it, one materialization per type
+/// (`Checker::materialize_blanket_impl`, driven through the same
+/// `SpecRequest` queue monomorphization already uses). An `impl` written over
+/// a *constructor* (`impl Iter vector-iter<T>`) is not a blanket impl — it
+/// has a single owning `AdtDef` and takes the ordinary path.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct BlanketImpl {
+    pub trait_path: Path,
+    /// The type-variable name the impl abstracts over, as written (`t`).
+    pub target_var: String,
+    /// The impl-level `(where ...)`, keyed by type-parameter name — the
+    /// condition a candidate type must satisfy to be covered.
+    pub bounds: HashMap<String, Vec<TraitBound>>,
+    /// `(type AssocName Type)` items, as written; the type may mention
+    /// `target_var`, so it can only be parsed once the target is known.
+    pub assoc: Vec<(String, crate::fasl::OwnedForm)>,
+    /// Method items, as written — replayed per materialization.
+    pub methods: Vec<Vec<crate::fasl::OwnedForm>>,
+    /// The namespace the `impl` was written in, which its method bodies and
+    /// type annotations must be re-checked under.
+    pub ns: Vec<String>,
+}
+
 /// A namespace (module): a container of free functions, types, constructors,
 /// child modules, and `use` aliases. `Foo::Bar` is resolved by descending into
 /// the child module `Foo` and looking up `Bar` there. (Types are *not*
@@ -320,6 +349,11 @@ pub struct Namespace {
     pub fns: HashMap<String, FnSig>,
     /// `deftrait`s defined directly here, keyed by unqualified name.
     pub traits: HashMap<String, TraitDef>,
+    /// Blanket `impl`s declared directly here (`(impl<T> Clamp T (where (Ord
+    /// T)) ...)`) — kept in declaration order, which is not consulted for
+    /// resolution (at most one may cover any trait) but keeps diagnostics
+    /// and fasl output deterministic.
+    pub blanket_impls: Vec<BlanketImpl>,
     /// `defmacro`s defined directly here, keyed by unqualified name. Kept
     /// separate from `fns` so the checker's head-symbol dispatch can tell a
     /// macro call (expand, then re-check) from an ordinary function call.
@@ -743,6 +777,20 @@ impl Registry {
         }
         let odef = self.trait_def(owner)?;
         Some((odef, odef.methods.get(method)?))
+    }
+
+    /// The blanket `impl` covering `trait_path`, if one is declared anywhere
+    /// in the loaded tree. At most one may exist per trait
+    /// (`Checker::check_impl` rejects a second), which is what makes this
+    /// answer independent of module walk order.
+    pub fn blanket_impl(&self, trait_path: &Path) -> Option<&BlanketImpl> {
+        fn walk<'a>(ns: &'a Namespace, t: &Path) -> Option<&'a BlanketImpl> {
+            ns.blanket_impls
+                .iter()
+                .find(|b| b.trait_path == *t)
+                .or_else(|| ns.modules.values().find_map(|c| walk(c, t)))
+        }
+        walk(&self.root, trait_path)
     }
 
     /// Every type that has an `impl` for `trait_path` — the reverse of

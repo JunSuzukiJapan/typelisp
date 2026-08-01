@@ -77,7 +77,7 @@ const PATTERNS: Pattern[] = [
   // `(impl Trait Type ...)` -- both names identify the block, so both are shown.
   {
     kind: "impl",
-    regex: new RegExp(head("impl") + `\\s*(${SYMBOL}\\s+${SYMBOL})`, "gi"),
+    regex: new RegExp(head("impl(?:<[^>]*>)?") + `\\s*(${SYMBOL}\\s+${SYMBOL})`, "gi"),
   },
 ];
 

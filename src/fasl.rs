@@ -30,7 +30,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use serde::{Deserialize, Serialize};
 
-use crate::check::registry::{AdtDef, FnSig, MacroDef, Namespace, TraitDef, VarInfo};
+use crate::check::registry::{AdtDef, BlanketImpl, FnSig, MacroDef, Namespace, TraitDef, VarInfo};
 use crate::{Checker, Error, Heap, Interp, Loc, Path, TopLevel, Value};
 
 /// An owned, GC-heap-independent mirror of a *read form* (`Value`) — the
@@ -199,6 +199,9 @@ struct NamespaceKeys {
     aliases: HashSet<String>,
     mod_aliases: HashSet<String>,
     static_uses: HashSet<String>,
+    /// How many blanket impls the namespace already held — see
+    /// [`NamespaceDelta::blanket_impls`].
+    blanket_impls: usize,
 }
 
 /// The parts of an `AdtDef` the prelude can grow after the type is first
@@ -258,6 +261,7 @@ pub fn registry_mark(checker: &Checker) -> RegistryMark {
                 aliases: ns.aliases.keys().cloned().collect(),
                 mod_aliases: ns.mod_aliases.keys().cloned().collect(),
                 static_uses: ns.static_uses.keys().cloned().collect(),
+                blanket_impls: ns.blanket_impls.len(),
             },
         );
         for (name, child) in &ns.modules {
@@ -284,6 +288,10 @@ pub struct NamespaceDelta {
     pub aliases: Vec<(String, Vec<String>)>,
     pub mod_aliases: Vec<(String, Vec<String>)>,
     pub static_uses: Vec<(String, (Path, String))>,
+    /// Blanket `impl`s the file declared. Unlike every other entry here these
+    /// have no name to diff on, so the count at mark time stands in: a file
+    /// only ever *appends* to this list.
+    pub blanket_impls: Vec<BlanketImpl>,
 }
 
 /// `DefLocs` as `Vec` pairs — see [`NamespaceDelta`] on why not the maps
@@ -353,6 +361,7 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
             .filter(|(k, _)| !keys.static_uses.contains(*k))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
+        blanket_impls: ns.blanket_impls[keys.blanket_impls.min(ns.blanket_impls.len())..].to_vec(),
     };
     let nonempty = !(delta.fns.is_empty()
         && delta.traits.is_empty()
@@ -362,7 +371,8 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
         && delta.vars.is_empty()
         && delta.aliases.is_empty()
         && delta.mod_aliases.is_empty()
-        && delta.static_uses.is_empty());
+        && delta.static_uses.is_empty()
+        && delta.blanket_impls.is_empty());
     if nonempty {
         out.push(delta);
     }
@@ -485,13 +495,17 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// registry changes generally — so the bump invalidates every stale cache in
 /// one move rather than leaving it to a `rm` nobody remembers — 2026-08-01.
 ///
-/// 17: supertraits. `deftrait` gained a mandatory supertrait list right after
-/// the name, and `TraitDef` gained `supertraits`/`vtable_order`/
-/// `vtable_owner` — the last two being the trait-object slot layout, which
-/// compiled call sites index by a baked-in constant. A stale cache would hand
-/// back a `TraitDef` with no `vtable_order` at all, leaving every `:dyn` call
-/// on it unable to find a slot. This version also fixes the diff that decides
-/// whether a trait is re-captured at all: it compared *names* only (see
+/// 17: the trait system reaching Rust parity. `deftrait` gained a mandatory
+/// supertrait list right after the name, and `TraitDef` gained
+/// `supertraits`/`vtable_order`/`vtable_owner`/`defaults`. `vtable_order` is
+/// the trait-object slot layout, which compiled call sites index by a
+/// baked-in constant, so a stale cache would hand back a `TraitDef` with no
+/// layout at all and leave every `:dyn` call on it unable to find a slot;
+/// `defaults` carries method bodies that `check_impl` synthesizes from, so
+/// without them an `impl` relying on one would look incomplete. `Namespace`
+/// additionally gained `blanket_impls` and `Docs` gained `trait_methods`.
+/// This version also fixes the diff that decides whether a trait is
+/// re-captured at all: it compared *names* only (see
 /// [`NamespaceKeys::traits`]), so an edited trait kept serving its old
 /// definition out of cache — 2026-08-01.
 pub const FASL_FORMAT_VERSION: u32 = 17;
@@ -578,6 +592,7 @@ impl Fasl {
             let ns = checker.registry_mut().root.module_mut(&nd.path);
             ns.fns.extend(nd.fns.iter().cloned());
             ns.traits.extend(nd.traits.iter().cloned());
+            ns.blanket_impls.extend(nd.blanket_impls.iter().cloned());
             ns.macros.extend(nd.macros.iter().cloned());
             ns.types.extend(nd.types.iter().cloned());
             ns.ctors.extend(nd.ctors.iter().cloned());

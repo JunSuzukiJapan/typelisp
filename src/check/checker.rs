@@ -15,7 +15,7 @@ use crate::name_lexer::{NameLexer, NameTok};
 use super::semantic::{TypeKind, TypeUse};
 
 use super::ast::{Arm, CompileTarget, Expr, MacroLambda, Pattern, QuotedSexpr, Ref, Typed};
-use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, VarInfo, Variant};
+use super::registry::{AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
 /// `raw_args` are the call's unevaluated argument forms (exactly as written —
@@ -414,6 +414,9 @@ enum SpecRequest {
     /// A generic-owner associated method (`MethodTemplate`, keyed
     /// `(type_fq, base)`) at the owner's concrete type arguments `args`.
     Method { type_fq: Path, base: String, args: Vec<Type>, mangled: String },
+    /// A `BlanketImpl` at one concrete `target` type — the whole `impl`,
+    /// since a blanket's methods are only ever wanted together.
+    Blanket { trait_path: Path, target: Type },
 }
 
 /// A generic *type*'s associated method, retained for per-instantiation
@@ -486,6 +489,12 @@ pub const MONO_BUNDLE_MODULE: &str = "<monomorph specializations>";
 /// every instantiation is new. Ordinary programs instantiate a handful of
 /// generics per form; hitting this is a `TypeError`, not a hang.
 const SPECIALIZATION_BUDGET: usize = 512;
+
+/// How deep a blanket impl's own bounds may be chased before the search is
+/// declared non-terminating (`impl<T> A T (where (B T))` together with
+/// `impl<T> B T (where (A T))` would recur forever). Small on purpose:
+/// legitimate chains are one or two links.
+const BLANKET_BOUND_DEPTH: usize = 16;
 
 /// Opaque saved namespace context — see [`Checker::suspend_ns_context`].
 pub struct NsContext {
@@ -1051,6 +1060,22 @@ impl Checker {
             let elem_locs: Vec<Option<Loc>> = heap.list_to_vec_locs(v)?.into_iter().map(|(_, l)| l).collect();
             let parts_locs = &elem_locs[1..];
             if let Some(Value::Symbol(id)) = elems.first() {
+                // `impl<T>` lexes as a single symbol, exactly like `defstruct
+                // vector-iter<T>`'s name does, so the head has to be split
+                // before it can be matched. Only `impl` takes parameters on
+                // the *head*; every other definition form carries them on the
+                // name that follows.
+                let (head, head_params) = parse_generic_name_header(heap.symbol_name(*id))?;
+                if head == "impl" && !head_params.is_empty() {
+                    return self.check_impl_generic(
+                        heap,
+                        interp,
+                        &elems[1..],
+                        parts_locs,
+                        false,
+                        head_params,
+                    );
+                }
                 match heap.symbol_name(*id) {
                     "pub" => return self.check_pub(heap, interp, &elems[1..], parts_locs, def_loc),
                     "defun" => return self.check_defun(heap, interp, &elems[1..], parts_locs, false, def_loc),
@@ -2495,6 +2520,9 @@ impl Checker {
                 let last = match &req {
                     SpecRequest::Fn { mangled, .. } => mangled.to_string(),
                     SpecRequest::Method { type_fq, mangled, .. } => format!("{}::{}", type_fq, mangled),
+                    SpecRequest::Blanket { trait_path, target } => {
+                        format!("impl {} {}", trait_path, mangle_type(target))
+                    }
                 };
                 return Err(Error::TypeError(format!(
                     "monomorphization did not converge after {} instantiations (a polymorphically \
@@ -2503,10 +2531,13 @@ impl Checker {
                     SPECIALIZATION_BUDGET, last
                 )));
             }
-            out.push(match req {
-                SpecRequest::Fn { .. } => self.specialize_defun(heap, interp, &req)?,
-                SpecRequest::Method { .. } => self.specialize_method(heap, interp, &req)?,
-            });
+            match req {
+                SpecRequest::Fn { .. } => out.push(self.specialize_defun(heap, interp, &req)?),
+                SpecRequest::Method { .. } => out.push(self.specialize_method(heap, interp, &req)?),
+                SpecRequest::Blanket { trait_path, target } => {
+                    out.extend(self.materialize_blanket_impl(heap, interp, &trait_path, &target)?);
+                }
+            }
         }
         Ok(out)
     }
@@ -4195,9 +4226,6 @@ impl Checker {
         subst.insert("self".to_string(), target_ty.clone());
         for m in &tdef.method_order {
             let Some(af) = def.assoc.get(m) else {
-                if written.contains(m) {
-                    continue; // registered under a different owner; not ours to judge
-                }
                 return Err(Error::TypeError(format!(
                     "impl {} {}: missing method `{}` (`{}` declares no default body for it)",
                     trait_fq, target_fq, m, trait_fq
@@ -4238,6 +4266,391 @@ impl Checker {
             }
         }
         Ok(())
+    }
+
+    /// The trait a blanket impl would supply `method` from for a receiver of
+    /// type `ty`, if any — the trait must declare the method (its own or
+    /// inherited), have a blanket impl, and cover `ty`.
+    ///
+    /// Returns the trait path; the caller reads the signature template off it
+    /// and requests materialization.
+    fn blanket_method_owner(&self, ty: &Type, type_fq: &Path, method: &str) -> Option<Path> {
+        if self.reg.type_def(type_fq).is_none() {
+            return None; // a bare type variable — the bounds branch handles it
+        }
+        fn walk(ns: &Namespace, out: &mut Vec<Path>) {
+            out.extend(ns.blanket_impls.iter().map(|b| b.trait_path.clone()));
+            for c in ns.modules.values() {
+                walk(c, out);
+            }
+        }
+        let mut candidates = Vec::new();
+        walk(&self.reg.root, &mut candidates);
+        if candidates.is_empty() {
+            // The overwhelmingly common case: no blanket impl anywhere, so
+            // this is a plain "no such method" and the tree walk above is the
+            // only cost paid.
+            return None;
+        }
+        // Sorted so the trait picked for a method two blankets could supply
+        // does not depend on `HashMap` iteration order.
+        candidates.sort_by_key(|p| p.to_string());
+        let mut found: Option<Path> = None;
+        for tp in candidates {
+            let Some(tdef) = self.reg.trait_def(&tp) else { continue };
+            if !tdef.vtable_order.iter().any(|m| m == method) {
+                continue;
+            }
+            let tb = TraitBound { trait_path: tp.clone(), assoc: HashMap::new() };
+            if self.type_implements(ty, &tb, 0) {
+                found = Some(tp);
+                break;
+            }
+        }
+        found
+    }
+
+    /// Check a call to a method a blanket impl supplies, against the trait's
+    /// signature template with `Self` bound to the receiver's type.
+    ///
+    /// The definition does not exist yet — `type_implements` has queued it —
+    /// so this cannot go through `check_assoc_call`, which reads
+    /// `AdtDef::assoc`. It emits the same `Expr::Assoc` node that lookup
+    /// would have, naming the method the materialization will register.
+    #[allow(clippy::too_many_arguments)]
+    fn check_blanket_method_call(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        receiver: Typed,
+        type_fq: &Path,
+        trait_path: &Path,
+        method: &str,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Typed, Error> {
+        let tdef = self
+            .reg
+            .trait_def(trait_path)
+            .ok_or_else(|| Error::TypeError(format!("unknown trait `{}`", trait_path)))?;
+        let (_, sig) = self.reg.trait_method(tdef, method).ok_or_else(|| {
+            Error::TypeError(format!("`{}` is not a method of `{}`", method, trait_path))
+        })?;
+        let mut subst: HashMap<String, Type> = HashMap::new();
+        subst.insert("self".to_string(), receiver.ty.clone());
+        let want = sig.params.len() - 1;
+        if args.len() != want {
+            return Err(Error::TypeError(format!(
+                "{}::{}: expected {} argument(s), got {}",
+                trait_path,
+                method,
+                want,
+                args.len()
+            )));
+        }
+        let mut typed = vec![receiver];
+        for (i, (a, pty)) in args.iter().zip(sig.params[1..].iter()).enumerate() {
+            let expect = subst_apply(pty, &subst);
+            typed.push(self.check_at(heap, interp, env, *a, Some(&expect), nth_loc(arg_locs, i))?);
+        }
+        Ok(Typed {
+            loc: None,
+            expr: Expr::Assoc {
+                type_name: type_fq.clone(),
+                method: method.to_string(),
+                instance: true,
+                args: typed,
+                home: self.ns.clone(),
+            },
+            ty: subst_apply(&sig.ret, &subst),
+        })
+    }
+
+    /// Generate a blanket `impl` at one concrete target type.
+    ///
+    /// Rebuilds the stored items as a live `(impl Trait Target ...)` form and
+    /// runs it through [`Self::check_impl`] — the same path a written `impl`
+    /// takes, so completeness checking, the supertrait obligation, default
+    /// bodies and `Self` substitution all apply identically, and there is no
+    /// second implementation of "what an impl means" to drift from the first.
+    /// Runs under the blanket's own namespace, since its method bodies were
+    /// written there.
+    fn materialize_blanket_impl(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        trait_path: &Path,
+        target: &Type,
+    ) -> Result<Vec<TopLevel>, Error> {
+        let Some(b) = self.reg.blanket_impl(trait_path) else { return Ok(Vec::new()) };
+        let (target_var, ns) = (b.target_var.clone(), b.ns.clone());
+        let mut items: Vec<Vec<crate::fasl::OwnedForm>> = Vec::new();
+        for (aname, ty) in &b.assoc {
+            items.push(vec![
+                crate::fasl::OwnedForm::Sym("type".into()),
+                crate::fasl::OwnedForm::Sym(aname.clone()),
+                ty.clone(),
+            ]);
+        }
+        items.extend(b.methods.iter().cloned());
+
+        let target_written = Self::type_to_written_value(heap, target)?;
+        heap.push_permanent_root(target_written);
+        // `T` -> the target's written form, everywhere the items mention it.
+        // `check_impl` will then substitute `Self` on top, to the same type.
+        let mut subst: HashMap<String, Value> = HashMap::new();
+        subst.insert(target_var, target_written);
+
+        // As a `Value::Path` when qualified: a *symbol* spelled `a::b` is one
+        // segment, and `check_impl` would look for a trait of that literal
+        // name.
+        let segs: Vec<String> = trait_path.segments().to_vec();
+        let trait_v = crate::fasl::owned_to_value(
+            heap,
+            &if segs.len() > 1 {
+                crate::fasl::OwnedForm::Path(segs)
+            } else {
+                crate::fasl::OwnedForm::Sym(trait_path.local().to_string())
+            },
+        )?;
+        heap.push_permanent_root(trait_v);
+        let mut parts: Vec<Value> = vec![trait_v, target_written];
+        for item in &items {
+            let form = Self::owned_item_to_form(heap, item)?;
+            heap.push_permanent_root(form);
+            parts.push(Self::subst_value(heap, form, &subst)?);
+        }
+        for &p in &parts {
+            heap.push_permanent_root(p);
+        }
+        let locs: Vec<Option<Loc>> = vec![None; parts.len()];
+        let saved = self.enter_specialization(ns, self.type_var_bindings.clone());
+        let checked = self.check_impl(heap, interp, &parts, &locs, false);
+        let (sn, sl, sb) = saved;
+        self.exit_specialization(sn, sl, sb);
+        match checked? {
+            TopLevel::Module { body, .. } => Ok(body),
+            other => Ok(vec![other]),
+        }
+    }
+
+    /// Does `ty` implement `tb`'s trait, with `tb`'s associated-type pins?
+    ///
+    /// An explicit `impl` is consulted first (`AdtDef::impls`, which the
+    /// supertrait obligation keeps closed under inheritance), then the
+    /// trait's blanket impl if it has one and `ty` satisfies its bounds.
+    /// Answering via a blanket also *requests* the materialization, so the
+    /// definitions exist by the time the form that asked is executed.
+    ///
+    /// An explicit impl always wins over a blanket. Rust makes that overlap a
+    /// hard error; here it is a silent preference, because whether a blanket
+    /// covers a type depends on bounds that a later form can still establish,
+    /// so "do these overlap" has no answer at any single point in the file.
+    /// Preferring the explicit one is at least order-independent.
+    fn type_implements(&self, ty: &Type, tb: &TraitBound, depth: usize) -> bool {
+        // Cut polymorphic recursion (`impl<T> A T (where (B T))` plus
+        // `impl<T> B T (where (A T))`), which would otherwise ask the same
+        // question one wrapper deeper forever.
+        if depth > BLANKET_BOUND_DEPTH {
+            return false;
+        }
+        let type_fq = match ty {
+            Type::Named(n, _) => Some(n.clone()),
+            other => prim_type_path(other),
+        };
+        if let Some(def) = type_fq.as_ref().and_then(|p| self.reg.type_def(p)) {
+            if def.impls.contains(&tb.trait_path) {
+                return true;
+            }
+        }
+        let Some(blanket) = self.reg.blanket_impl(&tb.trait_path) else { return false };
+        // The blanket's own bounds, read at `ty`: every bound on the target
+        // variable must hold, recursively.
+        // No bound on the target variable means the blanket covers every
+        // type — `(impl<T> Show T)` with no `where` is Rust's `impl<T> Show
+        // for T`, which applies unconditionally.
+        let covered = blanket
+            .bounds
+            .get(&blanket.target_var)
+            .map(|bs| bs.iter().all(|b| self.type_implements(ty, b, depth + 1)))
+            .unwrap_or(true);
+        if !covered {
+            return false;
+        }
+        if let Some(fq) = type_fq {
+            self.request_blanket_materialization(&tb.trait_path, &fq, ty);
+        }
+        true
+    }
+
+    /// Queue a blanket impl's materialization at one concrete type, deduped
+    /// through the same `spec_memo` monomorphization uses.
+    fn request_blanket_materialization(&self, trait_path: &Path, type_fq: &Path, ty: &Type) {
+        let key = format!("blanket {} {}", trait_path, mangle_type(ty));
+        if self.spec_memo.borrow_mut().insert((type_fq.clone(), Some(key))) {
+            self.spec_pending.borrow_mut().push(SpecRequest::Blanket {
+                trait_path: trait_path.clone(),
+                target: ty.clone(),
+            });
+        }
+    }
+
+    /// Render a [`Type`] back as the source syntax that parses to it — the
+    /// substitution value for `Self` when an `impl`'s method items are
+    /// rebuilt.
+    ///
+    /// `check_impl` can use the target type *as written* because the user
+    /// wrote it; a blanket materialization has no written form to reuse, only
+    /// a resolved `Type`. `mangle_type` already produces exactly the type
+    /// grammar for nominal and primitive types (`a::b<c,d>` is one symbol
+    /// that `parse_type_name_rec` reads straight back), so this is that plus
+    /// the shapes with no single-token spelling.
+    fn type_to_written_value(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
+        match t {
+            Type::Unit => Ok(Value::Empty),
+            Type::Dyn(..) | Type::Fn(..) | Type::Never => Err(Error::TypeError(format!(
+                "`{}` cannot be the target of a blanket impl — it is not a nominal type",
+                mangle_type(t)
+            ))),
+            other => Ok(heap.intern_symbol(&mangle_type(other))),
+        }
+    }
+
+    /// `(impl<T> Trait Target ...)` — an `impl` whose head declares type
+    /// parameters.
+    ///
+    /// When `Target` is one of those parameters spelled bare, this is a
+    /// *blanket* impl and takes [`Self::check_blanket_impl`]. When it is a
+    /// type constructor applied to them (`(impl<T> Show Vector<T> ...)`),
+    /// there is a single owning `AdtDef` and the ordinary path already
+    /// handles it — the parameters are then only documentation, since
+    /// `check_defmethod` infers them from the receiver.
+    fn check_impl_generic(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        public: bool,
+        head_params: Vec<String>,
+    ) -> Result<TopLevel, Error> {
+        if parts.len() < 2 {
+            return Err(Error::TypeError(
+                "impl: (impl<T> TraitName Target (where ...) (method ...)...)".into(),
+            ));
+        }
+        let target_var = match parts[1] {
+            Value::Symbol(id) => {
+                let n = heap.symbol_name(id).to_string();
+                (head_params.contains(&n) && self.reg.type_def(&Path::root(&n)).is_none()).then_some(n)
+            }
+            _ => None,
+        };
+        match target_var {
+            Some(v) => self.check_blanket_impl(heap, parts, parts_locs, v, head_params),
+            None => self.check_impl(heap, interp, parts, parts_locs, public),
+        }
+    }
+
+    /// Record a blanket `impl` without checking or registering anything.
+    ///
+    /// This is the whole of the declaration-time work, and deliberately so:
+    /// the target is a type variable, so *every* method body it holds is
+    /// generic, and generating one before a concrete type asks for it would
+    /// be exactly the eager expansion monomorphization exists to avoid. The
+    /// bodies are replayed per covered type by
+    /// [`Self::materialize_blanket_impl`].
+    ///
+    /// The consequence, and a real difference from Rust: an unused blanket
+    /// impl's method bodies are never type-checked. Rust checks them once,
+    /// against the declared bounds; typelisp has no way to check a body whose
+    /// receiver type is unknown — the same reason a generic `defun`'s body is
+    /// only diagnosed through `Expr::TraitCall` placeholders.
+    fn check_blanket_impl(
+        &mut self,
+        heap: &mut Heap,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        target_var: String,
+        head_params: Vec<String>,
+    ) -> Result<TopLevel, Error> {
+        let segs = self
+            .path_to_segs(heap, parts[0])
+            .map_err(|_| Error::TypeError("impl: trait name must be a name or `::` path".into()))?;
+        let written = Path::from_segments(segs.clone());
+        let trait_fq = self
+            .resolve_trait_path(&written)
+            .ok_or_else(|| Error::TypeError(format!("impl: unknown trait `{}`", segs.join("::"))))?;
+        if let Some(l) = parts_locs.first().and_then(|l| l.as_ref()) {
+            self.record_trait_use(&trait_fq, l.clone());
+        }
+        // One blanket impl per trait. Coarser than Rust's overlap analysis —
+        // it rejects two blankets whose bounds could never both apply — but
+        // it is decidable without a whole-program view, which on-demand
+        // materialization is never going to have.
+        if let Some(prev) = self.reg.blanket_impl(&trait_fq) {
+            return Err(Error::TypeError(format!(
+                "impl<{}> {} {}: `{}` already has a blanket impl — a trait may have at most one, \
+                 since which of two applies to a given type could depend on bounds established later",
+                head_params.join(","),
+                trait_fq,
+                target_var,
+                prev.trait_path
+            )));
+        }
+        let mut at = 2;
+        let mut bounds = HashMap::new();
+        if let Some(f) = parts.get(2) {
+            if self.is_where_clause(heap, *f)? {
+                bounds = self.parse_where_clause(heap, *f)?;
+                at = 3;
+            }
+        }
+        for tp in bounds.keys() {
+            if !head_params.contains(tp) {
+                return Err(Error::TypeError(format!(
+                    "impl<{}> {}: `where` bounds `{}`, which is not one of the impl's type parameters",
+                    head_params.join(","),
+                    trait_fq,
+                    tp
+                )));
+            }
+        }
+        let mut assoc = Vec::new();
+        let mut methods = Vec::new();
+        for item in &parts[at..] {
+            let elems = heap.list_to_vec(*item)?;
+            let head = match elems.first() {
+                Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+                _ => return Err(Error::TypeError("impl: item must start with a symbol".into())),
+            };
+            let owned = elems
+                .iter()
+                .map(|v| crate::fasl::value_to_owned(heap, *v))
+                .collect::<Result<Vec<_>, Error>>()?;
+            if head == "type" {
+                if elems.len() != 3 {
+                    return Err(Error::TypeError("impl: (type AssocName Type)".into()));
+                }
+                let aname = match elems[1] {
+                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    _ => return Err(Error::TypeError("impl: associated type name must be a symbol".into())),
+                };
+                assoc.push((aname, owned[2].clone()));
+                continue;
+            }
+            methods.push(owned);
+        }
+        self.reg.root.module_mut(&self.ns).blanket_impls.push(BlanketImpl {
+            trait_path: trait_fq,
+            target_var,
+            bounds,
+            assoc,
+            methods,
+            ns: self.ns.clone(),
+        });
+        Ok(TopLevel::Module { path: self.fq("impl"), body: vec![] })
     }
 
     /// Rust's `impl Ord for X` requires `impl Eq for X`: implementing a trait
@@ -4745,7 +5158,13 @@ impl Checker {
         let Some(def) = self.reg.type_def(&type_fq) else {
             return Err(Error::TypeError(format!("dyn {}: unknown type `{}`", trait_path, type_fq)));
         };
-        if !def.impls.contains(trait_path) {
+        if !def.impls.contains(trait_path)
+            && !self.type_implements(
+                concrete,
+                &TraitBound { trait_path: trait_path.clone(), assoc: HashMap::new() },
+                0,
+            )
+        {
             return Err(Error::TypeError(format!(
                 "`{}` does not implement `{}`, so it cannot be used as `:dyn {}`",
                 type_fq, trait_path, trait_path
@@ -4796,10 +5215,21 @@ impl Checker {
         let mut slots = Vec::with_capacity(tdef.vtable_order.len());
         for (m, decl) in tdef.vtable_order.iter().zip(tdef.vtable_owner.iter()) {
             if !def.assoc.contains_key(m) {
-                return Err(Error::TypeError(format!(
-                    "`{}`'s `impl {}` is missing method `{}`",
-                    type_fq, decl, m
-                )));
+                // A blanket impl may be supplying it: `type_implements`
+                // above queued the materialization, whose `defmethod` is
+                // emitted ahead of this form, so the slot can name the
+                // method even though it is not registered *yet* — a slot is
+                // only a name, resolved when the vtable is published.
+                // `m` is declared by `decl`, so only `decl`'s blanket impl
+                // can be the one supplying it.
+                if self.reg.blanket_impl(decl).is_none() {
+                    return Err(Error::TypeError(format!(
+                        "`{}`'s `impl {}` is missing method `{}`",
+                        type_fq, decl, m
+                    )));
+                }
+                slots.push((type_fq.clone(), m.clone()));
+                continue;
             }
             // Monomorphization, trait-object side: a generic owner's method
             // body is only code-generated once specialized, so the slot must
@@ -6459,6 +6889,18 @@ impl Checker {
                             &arg_locs[1..],
                         );
                     }
+                }
+                // A method no `impl` put on the type, but a blanket impl
+                // provides. The signature comes from the `TraitDef` template
+                // with `Self` bound to the receiver — the definition itself
+                // is generated by the queued materialization, which
+                // `check_form_at` drains ahead of this form.
+                if let Some(t) =
+                    self.blanket_method_owner(&recv.ty, type_fq, method)
+                {
+                    return self.check_blanket_method_call(
+                        heap, interp, env, recv, type_fq, &t, method, &args[1..], &arg_locs[1..],
+                    );
                 }
                 // No concrete `AdtDef` named `type_fq` — it may be one of
                 // this function's own `where`-bounded type parameters
@@ -8863,7 +9305,10 @@ impl Checker {
                 ))
             })?;
             for tb in trait_bounds {
-                if !def.impls.contains(&tb.trait_path) {
+                // `type_implements` rather than a bare `def.impls` scan, so a
+                // blanket impl covering `concrete` counts (and gets queued for
+                // materialization).
+                if !self.type_implements(concrete, tb, 0) {
                     return Err(Error::TypeError(format!(
                         "{}: type {:?} does not implement trait {:?} required by `where` clause on type parameter `{}`",
                         name, concrete, tb.trait_path, tparam

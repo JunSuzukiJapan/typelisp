@@ -47,6 +47,10 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   `f32` `f64` `bool` `char` `string`
 - **多倍長数値型**: `bignum`（任意精度整数）、`ratio`（既約な有理数）。CL 準拠でヒープ確保され、
   `i32`/`f64` 等との暗黙変換はない（`as`/`try-as` または変換メソッドで明示。functions.md 参照）。
+- **不透明な可変型**: `random-state`（PRNG ストリーム）、`stream`（ファイル／文字列／標準／合成
+  ストリーム。CL のクラス階層と違い**型は1つ**で種別は値が持つ。functions.md §18）。どちらも
+  ネイティブ表現なので `Vector<T>`/`HashTable<K,V>`/`Sexpr` には入れられない
+  （`Option<T>`/`Result<T,E>` には入る）。
 - **Unit 型**: `()`
 - **Never 型**: `!`（`panic`/`unreachable`/`todo`/`return`しないループ 等、発散する式の型。
   任意の期待型に適合する）
@@ -60,10 +64,12 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   宣言順に位置指定で固定する（`:dyn Iter<i32>` は `Item` を `i32` に固定）。ジェネリック引数の
   内側にも書ける: `Vector<:dyn Drawable>` `HashTable<string, :dyn Drawable>`。
   具象値は期待位置で自動的に箱詰めされ、明示形は `(as :dyn Trait 式)`。
+  `:dyn Sub` の値はスーパトレイトの `:dyn Super` を要求する位置にもそのまま渡せる
+  （アップキャスト。`vtable` を作り直さない範囲に限られる — 制限は §5.2）。
   `:dyn` を型位置以外に書くとエラー。詳細は [dev/language-design.md](dev/language-design.md) §5.2。
 - 組み込みジェネリック型: `Option<T>`（`Some(T)` / `None`）、`Result<T,E>`（`Ok(T)` / `Err(E)`）、
   `Sexpr`、`HashTable<K,V>`、`Vector<T>`。組み込みの具象エラー型は `ParseIntError` /
-  `ParseFloatError` / `ReadError` / `EvalError`（`Error` は型ではなく prelude のトレイト
+  `ParseFloatError` / `ReadError` / `EvalError` / `FileError`（`Error` は型ではなく prelude のトレイト
   ——`:dyn Error` として使う）。詳細は functions.md を参照。
 - **型とトレイトは同じ名前空間**（Rust と同じ）: 同一モジュール内で型（`defstruct`/`defenum`）と
   トレイト（`deftrait`）に同じ名前は付けられない。
@@ -190,25 +196,62 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 ### deftrait / impl — トレイト機構
 
 ```lisp
-(deftrait TraitName
+(deftrait TraitName (SuperTrait...)      ; 継承リストは必須。無ければ ()
   (type AssocName)                       ; 関連型（複数可、省略可）
-  (method-name ((self Self) params...) RetType))  ; メソッドシグネチャ（本体なし）
+  (method-name ((self Self) params...) RetType)          ; 本体なし＝実装必須
+  (method-name ((self Self) params...) RetType body...)) ; 本体あり＝デフォルト実装
 
 (impl TraitName TargetType
+  (where (Trait A)...)                   ; impl 全体に効く境界（省略可）
   (type AssocName ConcreteType)          ; 関連型を具体化
   (method-name (recv params...) RetType body...))
 ```
 
 `impl` によって各メソッドは `TargetType` の通常の `defmethod` として登録される。ジェネリック関数の
-`where` 節でトレイト境界として参照する（§ defun 参照）。
+`where` 節でトレイト境界として参照する（§ defun 参照）。トレイト名には `m::Trait` のような
+`::` パスも書ける。
 
-**docstring**: `deftrait` は名前の直後、アイテム列の前に文字列リテラルを置くとトレイト全体に1つ
-docstring を持てる（`(deftrait Name "doc" (type ...) (method ...)...)`）。CL の `defgeneric` 同様、
-個々のメソッド宣言（本体を持たないシグネチャ）には docstring を持たせない——各メソッドの docstring
-は `impl` 側の `defmethod` 本体（§ defmethod）が持つ。
+**継承リスト（必須）**: トレイト名の直後に必ず書く。要素は素のトレイト名か、そのトレイトが
+関連型を持つ場合は `(Trait (Assoc Type))` の形で**全ての関連型をピン留めした**もの。
+
+```lisp
+(deftrait Eq () ...)                       ; 継承なし
+(deftrait Ord (Eq) ...)                    ; Rust の trait Ord: Eq
+(deftrait CharSource ((Iter (Item char)))  ; 関連型のピン留め
+  (rewind ((self Self)) ()))
+```
+
+継承の効果は3つ。(1) `impl Ord X` は `impl Eq X` を**先に**書くことを要求する（記述順の規則。
+REPL・逐次 `load`・fasl 復元のいずれでも決定的に判定できる唯一の形で、Rust より制限が強い）。
+(2) `(where (Ord T))` だけで `Eq` のメソッドも呼べる。(3) `:dyn Ord` から `Eq` のメソッドを呼べ、
+`:dyn Ord` の値をそのまま `:dyn Eq` を要求する場所に渡せる（アップキャスト）。
+サブトレイトが親と同名のメソッドを再宣言することと、2つの親から同名のメソッドを継承することは
+どちらもエラー（vtable のスロットは名前ごとに1つ）。ダイヤモンド継承は合流して1スロットになる。
+
+**デフォルト実装**: シグネチャの後ろに本体を書くと、その `impl` が省略したときに使われる。
+本体はトレイトを書いた**モジュールの名前空間**で解決されるので、そのモジュール内の非公開関数も
+呼べる。本体を持つメソッドは `where` 節と docstring も書ける。
+
+**ブランケット実装**: 対象を型変数にすると、境界を満たす全ての型に一括で実装できる。
+
+```lisp
+(deftrait Clamp (Ord)
+  (clamp ((self Self) (lo Self) (hi Self)) Self
+    (if (less self lo) lo (if (less hi self) hi self))))
+(impl<T> Clamp T (where (Ord T)))          ; 本体ゼロ — 全部デフォルト
+```
+
+コードは**具体型が実際に使うまで生成されない**（型ごとに1回、通常の単型化と同じ仕組み）。
+1つのトレイトにブランケット実装は1つまで。同じ型に明示 `impl` があればそちらが優先される。
+代償として、一度も使われないブランケット実装の本体は型検査されない（Rust は先行検査する）。
+
+**docstring**: `deftrait` は継承リストの直後、アイテム列の前に文字列リテラルを置くとトレイト全体に1つ
+docstring を持てる（`(deftrait Name () "doc" (type ...) (method ...)...)`）。本体を持たないシグネチャに
+docstring は書けない——末尾の文字列はそれ自体がデフォルト実装の戻り値になるので、両者を区別できない。
 
 `prelude.rs` は標準トレイト **`Iter`**（`next`／関連型 `Item`。`doiter`／シーケンス関数の基盤）・
-**`Eq`**（`equals`／`not-equals`）・**`Ord`**（`less`／`less-equal`／`greater`／`greater-equal`）を
+**`Eq`**（`equals`。`not-equals` はデフォルト実装）・**`Ord`**（`Eq` を継承。`less` のみ実装必須で
+`less-equal`／`greater`／`greater-equal` はデフォルト実装）を
 提供し、主要なスカラ型と `cons-cell<A,B>` に実装済み（詳細は [functions.md](functions.md) §12・§12.1）。
 自前のコレクション型に `Iter` を `impl` すれば `doiter`（§5）や `map`／`filter`／`sort` 等がそのまま使える。
 
@@ -216,7 +259,7 @@ docstring を持てる（`(deftrait Name "doc" (type ...) (method ...)...)`）�
 場合は trait オブジェクト型 `:dyn Trait`（§2）を使うと vtable 経由の動的ディスパッチになる:
 
 ```lisp
-(deftrait Drawable (draw ((self Self)) string))
+(deftrait Drawable () (draw ((self Self)) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
 (impl Drawable circle (draw ((self Self)) string "circle"))
@@ -227,7 +270,8 @@ docstring を持てる（`(deftrait Name "doc" (type ...) (method ...)...)`）�
 ```
 
 `:dyn Trait` にできるのは「全メソッドが `self` レシーバを持ち、`Self` をレシーバ以外に使わず、
-メソッド自身がジェネリックでも可変長でもない」トレイトだけ。箱に入れられるのはヒープ表現を持つ型
+メソッド自身がジェネリックでも可変長でもない」トレイトだけ（継承したメソッドも同じ条件を満たす
+必要がある）。箱に入れられるのはヒープ表現を持つ型
 （`defstruct`/`defenum` 等）で、プリミティブ型は入れられない。詳細と設計理由は
 [dev/language-design.md](dev/language-design.md) §5.2。
 
@@ -453,9 +497,12 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 (todo)                              ; (panic "todo") に展開。defmacro
 (as Type expr)                      ; 数値/文字の型変換。失敗しうる変換は失敗時に panic
 (try-as Type expr)                  ; as と同じだが結果を Option<Type> で返す（失敗は None）
-(print control args...)             ; 書式展開して標準出力へ（改行なし）
-(println control args...)           ; 同上（末尾に改行）
-(format dest control args...)       ; CL の format。展開結果の string を返す
+(print [stream] control args...)    ; 書式展開して出力（改行なし）。出力先は省略時 *standard-output*
+(println [stream] control args...)  ; 同上（末尾に改行）
+(format dest control args...)       ; CL の format。dest は bool か stream。展開結果の string を返す
+(read)  (read stream)  (read s)     ; Sexpr を1つ読む。引数の静的型で CL の read（stream）と
+                                     ; read-from-string（string）を選ぶ。省略時は *standard-input*
+(make-synonym-stream 'var)          ; var を評価せず解決し、操作のたびにその値を見に行くストリーム
 (pprint x)                          ; pretty printer で整形出力。CL 準拠で先頭に改行を出す
 (pprint-fill x)                     ; 語詰めレイアウト
 (pprint-linear x)                   ; 全部1行か1要素1行か
@@ -466,6 +513,12 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 `print`/`println`/`format`/`pprint` 系は特殊形なので、可変長引数（`pprint` 系は1つの対象）は
 各自の型のまま `Sexpr` へ包まれて渡る——`(println "~a" my-struct)` がそのまま動くのはこのため。
 書式ディレクティブと pretty printer の詳細は [functions.md](functions.md) §15 / §15.1。
+
+`print`/`println`/`format`/`read` が**引数の静的型で振る舞いを選ぶ**のも特殊形だからこそで、
+CL の designator 的な柔軟さ（出力先が `t`/`nil`/ストリーム、入力元が文字列/ストリーム）を
+和型なしで再現している。`make-synonym-stream` が特殊形なのは、グローバルの名前を評価せずに
+**呼び出しが書かれたモジュールで**解決する必要があるため（`documentation` と同じ理由）。
+ストリーム全般は [functions.md](functions.md) §18。
 
 `as`/`try-as` が扱えるのは数値・文字カタログのみ（`i32`/`i64`/`f64`/`bignum`/`ratio`/`char` 間）。
 同一型・`i32`↔`i64` は無変換。`i32`/`i64`→`char` と `bignum`→`i32`/`i64` は範囲外で失敗しうるため

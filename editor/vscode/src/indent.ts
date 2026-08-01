@@ -377,7 +377,13 @@ function headAt(s: Scan, form: Form): string | null {
   while (j < s.text.length && isSymbolChar(s.text[j])) {
     j++;
   }
-  return j > i ? s.text.slice(i, j).toLowerCase() : null;
+  if (j <= i) {
+    return null;
+  }
+  // `impl<T>` lexes as one symbol (`<`/`>` are symbol characters), but the
+  // head for indentation purposes is `impl` -- the type parameters no more
+  // change how the form indents than a `defun`'s do.
+  return s.text.slice(i, j).toLowerCase().replace(/<[^>]*>$/, "");
 }
 
 /**
