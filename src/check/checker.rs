@@ -15,7 +15,7 @@ use crate::name_lexer::{NameLexer, NameTok};
 use super::semantic::{TypeKind, TypeUse};
 
 use super::ast::{Arm, CompileTarget, Expr, MacroLambda, Pattern, QuotedSexpr, Ref, Typed};
-use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, VarInfo, Variant};
+use super::registry::{AdtDef, AdtKind, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
 /// `raw_args` are the call's unevaluated argument forms (exactly as written —
@@ -2952,23 +2952,214 @@ impl Checker {
                 Value::Symbol(id) => heap.symbol_name(id).to_string(),
                 _ => return Err(Error::TypeError("where: type parameter must be a symbol".into())),
             };
-            let mut assoc: HashMap<String, Type> = HashMap::new();
-            for pin in &parts[2..] {
-                let pin_locs = heap.list_to_vec_locs(*pin)?;
-                let pin_parts: Vec<Value> = pin_locs.iter().map(|(v, _)| *v).collect();
-                if pin_parts.len() != 2 {
-                    return Err(Error::TypeError("where: associated-type pin must be (AssocName Type)".into()));
-                }
-                let aname = match pin_parts[0] {
-                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
-                    _ => return Err(Error::TypeError("where: associated type name must be a symbol".into())),
-                };
-                let aty = self.parse_type_here_at(heap, pin_parts[1], pin_locs[1].1.as_ref())?;
-                assoc.insert(aname, aty);
-            }
+            let assoc = self.parse_trait_bound_pins(heap, &parts[2..], "where")?;
             bounds.entry(tparam).or_default().push(TraitBound { trait_path: trait_name, assoc });
         }
         Ok(bounds)
+    }
+
+    /// The `(AssocName Type)...` tail shared by a `where` bound and a
+    /// supertrait entry — the two spellings of one concept, so they parse
+    /// through one function. `what` names the enclosing form for diagnostics.
+    fn parse_trait_bound_pins(
+        &self,
+        heap: &Heap,
+        pins: &[Value],
+        what: &str,
+    ) -> Result<HashMap<String, Type>, Error> {
+        let mut assoc: HashMap<String, Type> = HashMap::new();
+        for pin in pins {
+            let pin_locs = heap.list_to_vec_locs(*pin)?;
+            let pin_parts: Vec<Value> = pin_locs.iter().map(|(v, _)| *v).collect();
+            if pin_parts.len() != 2 {
+                return Err(Error::TypeError(format!(
+                    "{}: associated-type pin must be (AssocName Type)",
+                    what
+                )));
+            }
+            let aname = match pin_parts[0] {
+                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                _ => {
+                    return Err(Error::TypeError(format!(
+                        "{}: associated type name must be a symbol",
+                        what
+                    )))
+                }
+            };
+            let aty = self.parse_type_here_at(heap, pin_parts[1], pin_locs[1].1.as_ref())?;
+            assoc.insert(aname, aty);
+        }
+        Ok(assoc)
+    }
+
+    /// `deftrait`'s mandatory supertrait slot: `()`, or a list whose elements
+    /// are each a bare trait name or `(Trait (Assoc Type)...)`. A supertrait
+    /// is Rust's `trait Sub where Self: Super`, so this is exactly a `where`
+    /// bound with the type-variable slot dropped.
+    ///
+    /// Every associated type of a supertrait must be pinned here. Without
+    /// that, a `:dyn Sub<...>`'s pins could not be composed down the chain to
+    /// give an inherited method's signature a concrete meaning, and
+    /// `TraitDef::assoc_types` would have to grow the inherited names —
+    /// changing `:dyn` pin arity for every existing trait. The pin's type may
+    /// reference `Sub`'s *own* associated types (`(deftrait Collection (type
+    /// Elem) ((Iter (Item Elem))) ...)`), which resolve when the `:dyn`'s own
+    /// pins are substituted.
+    fn parse_supertrait_list(
+        &self,
+        heap: &Heap,
+        name: &str,
+        v: Value,
+    ) -> Result<Vec<TraitBound>, Error> {
+        let elem_locs = heap.list_to_vec_locs(v).map_err(|_| {
+            Error::TypeError(format!(
+                "deftrait {}: the supertrait list must be a list — write `()` for none",
+                name
+            ))
+        })?;
+        let mut out: Vec<TraitBound> = Vec::new();
+        for (elem, loc) in &elem_locs {
+            // A bare symbol is the no-pins spelling; a list is `(Trait pins...)`.
+            let (head, head_loc, pins) = match elem {
+                Value::Symbol(_) => (*elem, loc.clone(), Vec::new()),
+                _ => {
+                    let parts_locs = heap.list_to_vec_locs(*elem)?;
+                    let Some((head, head_loc)) = parts_locs.first().cloned() else {
+                        return Err(Error::TypeError(format!(
+                            "deftrait {}: a supertrait must be a trait name or (Trait (Assoc Type)...)",
+                            name
+                        )));
+                    };
+                    let pins = parts_locs[1..].iter().map(|(v, _)| *v).collect();
+                    (head, head_loc, pins)
+                }
+            };
+            let trait_path = self.resolve_supertrait_name(heap, name, head, head_loc.as_ref())?;
+            let assoc = self.parse_trait_bound_pins(heap, &pins, "deftrait")?;
+            if let Some(sdef) = self.reg.trait_def(&trait_path) {
+                for a in &sdef.assoc_types {
+                    if !assoc.contains_key(a) {
+                        return Err(Error::TypeError(format!(
+                            "deftrait {}: supertrait `{}` has an associated type `{}`, which must be pinned here — \
+                             write `({} ({} <type>))`",
+                            name, trait_path, a, trait_path, a
+                        )));
+                    }
+                }
+            }
+            Self::push_supertrait(&mut out, name, trait_path, assoc)?;
+        }
+        Ok(out)
+    }
+
+    /// Resolve one supertrait name, with a diagnostic that points at the
+    /// mandatory-slot rule — the overwhelmingly likely mistake is a
+    /// pre-supertrait `(deftrait Name (method ...) ...)` whose first item got
+    /// read as the supertrait list.
+    fn resolve_supertrait_name(
+        &self,
+        heap: &Heap,
+        name: &str,
+        v: Value,
+        loc: Option<&Loc>,
+    ) -> Result<Path, Error> {
+        let written = match v {
+            Value::Symbol(id) => heap.symbol_name(id),
+            _ => {
+                return Err(Error::TypeError(format!(
+                    "deftrait {}: supertrait name must be a symbol",
+                    name
+                )))
+            }
+        };
+        let path = self.resolve_trait_name(written).map_err(|_| {
+            Error::TypeError(format!(
+                "deftrait {}: unknown supertrait `{}` — the form is (deftrait Name (Super...) items...), \
+                 so the list right after the name is the supertrait list (write `()` for none)",
+                name, written
+            ))
+        })?;
+        if let Some(l) = loc {
+            self.record_trait_use(&path, l.clone());
+        }
+        Ok(path)
+    }
+
+    /// Append a direct supertrait, rejecting a repeat of the same trait
+    /// (whose second set of pins could disagree with the first, leaving no
+    /// single substitution for its inherited methods).
+    fn push_supertrait(
+        out: &mut Vec<TraitBound>,
+        name: &str,
+        trait_path: Path,
+        assoc: HashMap<String, Type>,
+    ) -> Result<(), Error> {
+        if out.iter().any(|b| b.trait_path == trait_path) {
+            return Err(Error::TypeError(format!(
+                "deftrait {}: `{}` is listed as a supertrait twice",
+                name, trait_path
+            )));
+        }
+        out.push(TraitBound { trait_path, assoc });
+        Ok(())
+    }
+
+    /// Lay out the trait's vtable: every transitively inherited method first
+    /// (supertraits in written order, first occurrence wins), then the
+    /// trait's own methods. Each supertrait's `vtable_order` is already
+    /// transitive, so one pass over the direct supertraits suffices — no
+    /// fixpoint, and no cycle check, because a supertrait must already be
+    /// fully defined to have been resolvable at all.
+    ///
+    /// Returns the names and, in step, the trait that declares each.
+    fn linearize_vtable(
+        &self,
+        name: &str,
+        fq_name: &Path,
+        supertraits: &[TraitBound],
+        method_order: &[String],
+    ) -> Result<(Vec<String>, Vec<Path>), Error> {
+        let mut order: Vec<String> = Vec::new();
+        let mut owner: Vec<Path> = Vec::new();
+        for sup in supertraits {
+            let Some(sdef) = self.reg.trait_def(&sup.trait_path) else {
+                return Err(Error::TypeError(format!(
+                    "deftrait {}: unknown supertrait `{}`",
+                    name, sup.trait_path
+                )));
+            };
+            for (m, decl) in sdef.vtable_order.iter().zip(sdef.vtable_owner.iter()) {
+                match order.iter().position(|x| x == m) {
+                    // A diamond (`D(B,C)`, `B(A)`, `C(A)`): `A`'s methods
+                    // reach here twice, declared by `A` both times, so the
+                    // second visit is a no-op and `A` keeps one slot.
+                    Some(i) if &owner[i] == decl => {}
+                    Some(i) => {
+                        return Err(Error::TypeError(format!(
+                            "deftrait {}: method `{}` is inherited from both `{}` and `{}` — \
+                             a vtable has one slot per name",
+                            name, m, owner[i], decl
+                        )))
+                    }
+                    None => {
+                        order.push(m.clone());
+                        owner.push(decl.clone());
+                    }
+                }
+            }
+        }
+        for m in method_order {
+            if let Some(i) = order.iter().position(|x| x == m) {
+                return Err(Error::TypeError(format!(
+                    "deftrait {}: method `{}` is already inherited from `{}` — \
+                     redeclaring it would need a way to say which one a call means, and there is none",
+                    name, m, owner[i]
+                )));
+            }
+            order.push(m.clone());
+            owner.push(fq_name.clone());
+        }
+        Ok((order, owner))
     }
 
     /// `parts[0]` of a `defun` form: a bare symbol names an ordinary
@@ -3465,7 +3656,7 @@ impl Checker {
 
     // ---- deftrait / impl ---------------------------------------------------
 
-    /// `(deftrait Name (type AssocName)... (method-name ((self Self) params...) Ret)...)`:
+    /// `(deftrait Name (Super...) (type AssocName)... (method-name ((self Self) params...) Ret)...)`:
     /// declares a trait as a set of method signature *templates* (no
     /// bodies) — `Self` and any declared associated type name are usable as
     /// ordinary type variables in a signature, exactly like a generic
@@ -3474,6 +3665,14 @@ impl Checker {
     /// for some concrete implementing type. No type-checking happens here
     /// beyond parsing — a signature template's `Self`/associated-type
     /// variables aren't real types, so there's nothing to check yet.
+    ///
+    /// The supertrait list is a *mandatory* positional slot (write `()` for
+    /// none), which is what keeps the trait name the first symbol after
+    /// `deftrait` — both editors' type-name highlighting depends on that.
+    /// Each element is a bare trait name, or `(Trait (Assoc Type)...)` when
+    /// the supertrait has associated types to pin: exactly
+    /// `Checker::parse_where_clause`'s bound shape minus the type-variable
+    /// slot, since a supertrait's variable is always `Self`.
     fn check_deftrait(
         &mut self,
         heap: &Heap,
@@ -3482,9 +3681,11 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
-        if parts.is_empty() {
+        if parts.len() < 2 {
             return Err(Error::TypeError(
-                "deftrait: (deftrait Name (type AssocName)... (method (params...) ret)...)".into(),
+                "deftrait: (deftrait Name (Super...) (type AssocName)... (method (params...) ret)...) \
+                 — the supertrait list is required; write `()` for none"
+                    .into(),
             ));
         }
         let name = match parts[0] {
@@ -3492,17 +3693,21 @@ impl Checker {
             _ => return Err(Error::TypeError("deftrait: name must be a symbol".into())),
         };
         let fq_name = self.fq(&name);
-        // A leading docstring, right after the name and before the item
+        // A docstring, right after the supertrait list and before the item
         // list — one per trait (CL's `defgeneric` docstring lives on the
         // generic function as a whole, not per method; individual `impl`
         // methods get their own via `Checker::check_defmethod`'s leading
         // docstring instead).
-        let (doc, item_start) = match parts.get(1) {
-            Some(Value::Str(id)) => (Some(heap.string(*id).to_string()), 2),
-            _ => (None, 1),
+        let (doc, item_start) = match parts.get(2) {
+            Some(Value::Str(id)) => (Some(heap.string(*id).to_string()), 3),
+            _ => (None, 2),
         };
         self.check_redef("trait", &name, self.cur_ns().traits.get(&name))?;
         self.check_type_trait_clash("trait", &name)?;
+        // Parse the supertraits *before* the self-referential stub goes in,
+        // so `(deftrait Foo (Foo) ...)` fails on an unknown trait rather than
+        // resolving against the empty stub and silently self-inheriting.
+        let supertraits = self.parse_supertrait_list(heap, &name, parts[1])?;
         // Pre-register a stub under `fq_name` *before* parsing the method
         // signatures, so a method that mentions a trait object of the very
         // trait being defined (`(source ((self Self)) Option<:dyn Error>)` in
@@ -3519,12 +3724,17 @@ impl Checker {
                 method_order: Vec::new(),
                 public,
                 builtin: false,
+                supertraits: Vec::new(),
+                vtable_order: Vec::new(),
+                vtable_owner: Vec::new(),
+                defaults: HashMap::new(),
             },
         );
         let mut assoc_types = Vec::new();
         let mut methods = HashMap::new();
         // Source order, kept alongside `methods` for vtable slot numbering.
         let mut method_order: Vec<String> = Vec::new();
+        let mut defaults: HashMap<String, TraitDefault> = HashMap::new();
         for item in &parts[item_start..] {
             let elem_locs = heap.list_to_vec_locs(*item)?;
             let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
@@ -3543,11 +3753,31 @@ impl Checker {
                 assoc_types.push(aname);
                 continue;
             }
-            if elems.len() != 3 {
-                return Err(Error::TypeError("deftrait: method signature must be (name (params...) ret)".into()));
+            if elems.len() < 3 {
+                return Err(Error::TypeError(
+                    "deftrait: method must be (name (params...) ret) or (name (params...) ret body...)".into(),
+                ));
             }
             let (params, _param_locs) = self.parse_param_pairs(heap, &heap.list_to_vec(elems[1])?)?;
             let ret = self.parse_type_here_at(heap, elems[2], elem_locs[2].1.as_ref())?;
+            // `(name (params) ret [where] [doc] body...)`. Everything past
+            // `ret` is optional; with no body forms left this is an ordinary
+            // bodyless signature, exactly as before defaults existed.
+            let mut at = 3;
+            let mut bounds = HashMap::new();
+            if let Some(f) = elems.get(at) {
+                if self.is_where_clause(heap, *f)? {
+                    bounds = self.parse_where_clause(heap, *f)?;
+                    at += 1;
+                }
+            }
+            // The usual CL rule (`take_leading_docstring`): a string is a
+            // docstring only when a body form follows, since a lone trailing
+            // string is the default body's return value.
+            let mdoc = self.take_leading_docstring(heap, &elems, at);
+            if mdoc.is_some() {
+                at += 1;
+            }
             let sig = FnSig {
                 type_params: vec![],
                 params: params.iter().map(|(_, t)| t.clone()).collect(),
@@ -3555,7 +3785,7 @@ impl Checker {
                 public: true,
                 rest: None,
                 builtin: false,
-                bounds: HashMap::new(),
+                bounds,
                 optionals: Vec::new(),
                 keys: Vec::new(),
             };
@@ -3565,14 +3795,39 @@ impl Checker {
             if methods.contains_key(&head) {
                 return Err(Error::TypeError(format!("deftrait: duplicate method `{}`", head)));
             }
+            if at < elems.len() {
+                // A default body: retain the item verbatim for `check_impl`
+                // to replay. `elems` is the item minus its enclosing cell, so
+                // it round-trips through `list_from_vec`/`list_to_vec`.
+                let item = elems
+                    .iter()
+                    .map(|v| crate::fasl::value_to_owned(heap, *v))
+                    .collect::<Result<Vec<_>, _>>()?;
+                defaults.insert(head.clone(), TraitDefault { item, ns: self.ns.clone() });
+            }
+            if let Some(d) = mdoc {
+                self.reg.docs.trait_methods.insert((fq_name.clone(), head.clone()), d);
+            }
             method_order.push(head.clone());
             methods.insert(head, sig);
         }
-        self.reg
-            .root
-            .module_mut(&self.ns)
-            .traits
-            .insert(name.clone(), TraitDef { name: fq_name.clone(), assoc_types, methods, method_order, public, builtin: false });
+        let (vtable_order, vtable_owner) =
+            self.linearize_vtable(&name, &fq_name, &supertraits, &method_order)?;
+        self.reg.root.module_mut(&self.ns).traits.insert(
+            name.clone(),
+            TraitDef {
+                name: fq_name.clone(),
+                assoc_types,
+                methods,
+                method_order,
+                public,
+                builtin: false,
+                supertraits,
+                vtable_order,
+                vtable_owner,
+                defaults,
+            },
+        );
         if let Some(loc) = def_loc {
             self.reg.def_locs.traits.insert(fq_name.clone(), loc);
         }
@@ -3610,11 +3865,16 @@ impl Checker {
         if parts.len() < 2 {
             return Err(Error::TypeError("impl: (impl TraitName TargetType (type AssocName Type)... (method ...)...)".into()));
         }
-        let trait_name = match parts[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
-            _ => return Err(Error::TypeError("impl: trait name must be a symbol".into())),
-        };
-        let trait_fq = self.resolve_trait_name(&trait_name)?;
+        // A bare name searches the ancestor module chain; a `::` path names
+        // the module outright, which is the only way to implement a trait
+        // that lives somewhere other than an ancestor of the `impl`.
+        let segs = self
+            .path_to_segs(heap, parts[0])
+            .map_err(|_| Error::TypeError("impl: trait name must be a name or `::` path".into()))?;
+        let written = Path::from_segments(segs.clone());
+        let trait_fq = self.resolve_trait_path(&written).ok_or_else(|| {
+            Error::TypeError(format!("impl: unknown trait `{}`", segs.join("::")))
+        })?;
         if let Some(l) = parts_locs.first().and_then(|l| l.as_ref()) {
             self.record_trait_use(&trait_fq, l.clone());
         }
@@ -3645,8 +3905,24 @@ impl Checker {
         // re-parsing `subst`'s raw `Value`s.
         let mut assoc_concrete: HashMap<String, Type> = HashMap::new();
 
+        // An optional impl-level `(where ...)`, right after the target type:
+        // bounds that hold for *every* method of this `impl`, so the owner's
+        // type parameters are constrained once instead of on each method.
+        // Merged into each method's own clause below, textually, so the
+        // retained `MethodTemplate::Form` carries them into specialization
+        // too — a parameter would have to be threaded through
+        // `specialize_method_form` as well.
+        let mut item_start = 2;
+        let mut impl_where: Option<Value> = None;
+        if let Some(form) = parts.get(2) {
+            if self.is_where_clause(heap, *form)? {
+                impl_where = Some(*form);
+                item_start = 3;
+            }
+        }
+
         let mut method_forms: Vec<Value> = Vec::new();
-        for item in &parts[2..] {
+        for item in &parts[item_start..] {
             let elem_locs = heap.list_to_vec_locs(*item)?;
             let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
             let head = match elems.first() {
@@ -3668,8 +3944,44 @@ impl Checker {
             method_forms.push(*item);
         }
 
+        // Fill in every trait method this `impl` left out but the trait gave
+        // a default body. Appended *after* the written ones so a default that
+        // calls a sibling method (`(not-equals ... (not (equals self other)))`)
+        // finds the `impl`'s own `equals` already registered.
+        let written: Vec<String> = method_forms
+            .iter()
+            .map(|m| match heap.list_to_vec(*m)?.first() {
+                Some(Value::Symbol(id)) => Ok(heap.symbol_name(*id).to_string()),
+                _ => Err(Error::TypeError("impl: method name must be a symbol".into())),
+            })
+            .collect::<Result<_, Error>>()?;
+        let defaulted: Vec<(String, Vec<crate::fasl::OwnedForm>, Vec<String>)> = self
+            .reg
+            .trait_def(&trait_fq)
+            .map(|t| {
+                t.method_order
+                    .iter()
+                    .filter(|m| !written.contains(m))
+                    .filter_map(|m| {
+                        t.defaults.get(m).map(|d| (m.clone(), d.item.clone(), d.ns.clone()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut default_ns: Vec<Option<Vec<String>>> = vec![None; method_forms.len()];
+        for (_, item, ns) in &defaulted {
+            let form = Self::owned_item_to_form(heap, item)?;
+            // The written items are reachable from the enclosing top-level
+            // form, which the caller roots; a synthesized one has no such
+            // owner, and `check_defmethod` may retain it as a
+            // `MethodTemplate::Form` besides.
+            heap.push_permanent_root(form);
+            method_forms.push(form);
+            default_ns.push(Some(ns.clone()));
+        }
+
         let mut body = Vec::new();
-        for m in &method_forms {
+        for (mi, m) in method_forms.iter().enumerate() {
             // `(method-name (recv-list) ret body...)`. Substitution applies
             // only to *type* positions — each receiver/parameter's type
             // (never its bound *name*, which would collide with `subst`'s
@@ -3714,18 +4026,288 @@ impl Checker {
             let _ = recv_pairs;
             let new_ret = Self::subst_value(heap, elems[2], &subst)?;
             let ret_loc = if new_ret == elems[2] { elems_locs[2].1.clone() } else { None };
+            // The method's own `(where ...)`, if any, gets the `Self`
+            // substitution too — it is type syntax, unlike the body — and is
+            // merged with the impl-level clause into a single one.
+            let own_where = match elems.get(3) {
+                Some(f) if self.is_where_clause(heap, *f)? => Some(Self::subst_value(heap, *f, &subst)?),
+                _ => None,
+            };
+            let rest_start = if own_where.is_some() { 4 } else { 3 };
+            let merged = self.merge_where_clauses(heap, impl_where, own_where, &subst)?;
             let mut new_elems = vec![elems[0], new_recv_list, new_ret];
-            new_elems.extend_from_slice(&elems[3..]);
             let mut new_elems_locs: Vec<Option<Loc>> = vec![None, None, ret_loc];
-            new_elems_locs.extend(elems_locs[3..].iter().map(|(_, l)| l.clone()));
-            let tl = self.check_defmethod(heap, interp, &new_elems, &new_elems_locs, public, method_loc)?;
+            if let Some(w) = merged {
+                new_elems.push(w);
+                new_elems_locs.push(None);
+            }
+            new_elems.extend_from_slice(&elems[rest_start..]);
+            new_elems_locs.extend(elems_locs[rest_start..].iter().map(|(_, l)| l.clone()));
+            let tl = self.check_defmethod_in(
+                heap,
+                interp,
+                &new_elems,
+                &new_elems_locs,
+                public,
+                method_loc,
+                default_ns[mi].clone(),
+            )?;
             body.push(tl);
         }
+        self.check_impl_conformance(&trait_fq, &target_fq, &target_ty, &written, &assoc_concrete)?;
+        self.check_supertrait_impls(&trait_fq, &target_fq, &assoc_concrete)?;
         if let Some(def) = self.reg.type_def_mut(&target_fq) {
             def.impls.push(trait_fq.clone());
             def.trait_assoc.insert(trait_fq, assoc_concrete);
         }
         Ok(TopLevel::Module { path: target_fq, body })
+    }
+
+    /// Rebuild a retained [`TraitDefault::item`] as a live list.
+    ///
+    /// Every node allocates, and any allocation can collect, so each
+    /// converted element is rooted as it is produced and the partially built
+    /// spine is rooted across its own `cons` — the discipline the reader
+    /// follows for exactly the same reason. Roots are popped LIFO on both the
+    /// success and the error path.
+    fn owned_item_to_form(heap: &mut Heap, item: &[crate::fasl::OwnedForm]) -> Result<Value, Error> {
+        let mut vals: Vec<Value> = Vec::with_capacity(item.len());
+        for f in item {
+            match crate::fasl::owned_to_value(heap, f) {
+                Ok(v) => {
+                    heap.push_root(v);
+                    vals.push(v);
+                }
+                Err(e) => {
+                    for _ in 0..vals.len() {
+                        heap.pop_root();
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        let mut out = Ok(Value::Empty);
+        for v in vals.iter().rev() {
+            let Ok(tail) = out else { break };
+            heap.push_root(tail);
+            out = heap.cons(*v, tail);
+            heap.pop_root();
+        }
+        for _ in 0..vals.len() {
+            heap.pop_root();
+        }
+        out
+    }
+
+    /// Fuse an `impl`-level `(where ...)` and a method's own into the single
+    /// clause `Checker::parse_defmethod_sig` expects, impl-level bounds
+    /// first. `None` when neither is present, so a method with no bounds is
+    /// rebuilt exactly as before.
+    fn merge_where_clauses(
+        &self,
+        heap: &mut Heap,
+        impl_where: Option<Value>,
+        own_where: Option<Value>,
+        subst: &HashMap<String, Value>,
+    ) -> Result<Option<Value>, Error> {
+        if impl_where.is_none() && own_where.is_none() {
+            return Ok(None);
+        }
+        let mut items: Vec<(Value, Option<Loc>)> = Vec::new();
+        let mut push_bounds = |v: Value, heap: &mut Heap, subst: &HashMap<String, Value>| -> Result<(), Error> {
+            let elems = heap.list_to_vec_locs(v)?;
+            if items.is_empty() {
+                // Reuse the source clause's own `where` head symbol.
+                items.push((elems[0].0, elems[0].1.clone()));
+            }
+            for (b, l) in &elems[1..] {
+                items.push((Self::subst_value(heap, *b, subst)?, l.clone()));
+            }
+            Ok(())
+        };
+        if let Some(w) = impl_where {
+            push_bounds(w, heap, subst)?;
+        }
+        if let Some(w) = own_where {
+            // Already substituted by the caller; pass an empty map so a bound
+            // naming a variable called `self` isn't rewritten twice.
+            push_bounds(w, heap, &HashMap::new())?;
+        }
+        Ok(Some(self.list_from_vec_locs(heap, &items)?))
+    }
+
+    /// Verify that an `impl` actually implements its trait: every method
+    /// present (or defaulted), every associated type bound, no strays, and
+    /// each signature matching the trait's template.
+    ///
+    /// None of this existed before — `check_impl` never consulted the
+    /// `TraitDef` at all, so a missing method went unnoticed until someone
+    /// built a trait object of the type (`dyn_vtable_slots`), and a method
+    /// with the wrong signature was simply registered as written. Both are
+    /// caught here, at the `impl`, where the fix is.
+    ///
+    /// Only the trait's *own* methods are considered: a supertrait's are
+    /// supplied by that trait's own `impl`, whose presence
+    /// [`Self::check_supertrait_impls`] separately requires.
+    fn check_impl_conformance(
+        &self,
+        trait_fq: &Path,
+        target_fq: &Path,
+        target_ty: &Type,
+        written: &[String],
+        assoc_concrete: &HashMap<String, Type>,
+    ) -> Result<(), Error> {
+        let Some(tdef) = self.reg.trait_def(trait_fq) else { return Ok(()) };
+        for (i, m) in written.iter().enumerate() {
+            if !tdef.method_order.contains(m) {
+                let hint = if tdef.vtable_order.contains(m) {
+                    " — it is inherited, so it belongs to the supertrait's own `impl`"
+                } else {
+                    ""
+                };
+                return Err(Error::TypeError(format!(
+                    "impl {} {}: `{}` is not a method of `{}`{}",
+                    trait_fq, target_fq, m, trait_fq, hint
+                )));
+            }
+            if written[..i].contains(m) {
+                return Err(Error::TypeError(format!(
+                    "impl {} {}: method `{}` is given twice",
+                    trait_fq, target_fq, m
+                )));
+            }
+        }
+        for a in &tdef.assoc_types {
+            if !assoc_concrete.contains_key(a) {
+                return Err(Error::TypeError(format!(
+                    "impl {} {}: associated type `{}` is not bound — write `(type {} <type>)`",
+                    trait_fq, target_fq, a, a
+                )));
+            }
+        }
+        // `Self` and the associated types, as this `impl` binds them, so a
+        // template can be compared against what was actually registered.
+        let mut subst: HashMap<String, Type> = assoc_concrete.clone();
+        let Some(def) = self.reg.type_def(target_fq) else { return Ok(()) };
+        // The *parsed* target type, not one rebuilt from `target_fq`: a
+        // primitive target is `Type::I32`, never `Named("i32")`, and the two
+        // do not compare equal even though they print the same.
+        subst.insert("self".to_string(), target_ty.clone());
+        for m in &tdef.method_order {
+            let Some(af) = def.assoc.get(m) else {
+                if written.contains(m) {
+                    continue; // registered under a different owner; not ours to judge
+                }
+                return Err(Error::TypeError(format!(
+                    "impl {} {}: missing method `{}` (`{}` declares no default body for it)",
+                    trait_fq, target_fq, m, trait_fq
+                )));
+            };
+            let want = &tdef.methods[m];
+            let want_params: Vec<Type> = want.params.iter().map(|t| subst_apply(t, &subst)).collect();
+            let want_ret = subst_apply(&want.ret, &subst);
+            let want_instance = want.params.first().is_some_and(is_self_tvar);
+            let describe = |params: &[Type], ret: &Type| {
+                format!(
+                    "({}) {}",
+                    params.iter().map(mangle_type).collect::<Vec<_>>().join(" "),
+                    mangle_type(ret)
+                )
+            };
+            if af.instance != want_instance {
+                return Err(Error::TypeError(format!(
+                    "impl {} {}: method `{}` is {}, but `{}` declares it {}",
+                    trait_fq,
+                    target_fq,
+                    m,
+                    if af.instance { "an instance method" } else { "a static function" },
+                    trait_fq,
+                    if want_instance { "an instance method" } else { "a static function" }
+                )));
+            }
+            if af.sig.params != want_params || af.sig.ret != want_ret {
+                return Err(Error::TypeError(format!(
+                    "impl {} {}: method `{}` is `{}`, but `{}` declares `{}`",
+                    trait_fq,
+                    target_fq,
+                    m,
+                    describe(&af.sig.params, &af.sig.ret),
+                    trait_fq,
+                    describe(&want_params, &want_ret)
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Rust's `impl Ord for X` requires `impl Eq for X`: implementing a trait
+    /// obliges the type to implement every supertrait, with associated types
+    /// bound the way the supertrait entry pins them.
+    ///
+    /// Only the *direct* supertraits are checked — each one's own `impl`
+    /// already discharged its parents, so the closure follows by induction.
+    /// That is also what lets `Checker::validate_where_bounds` keep answering
+    /// "does this type implement `Eq`?" with a flat `AdtDef::impls` lookup:
+    /// the list is closed under supertraits.
+    ///
+    /// The rule is *textual precedence* — `impl Eq X` must be checked before
+    /// `impl Ord X`. Stricter than Rust, and deliberately so: it is the only
+    /// discharge point that is deterministic in the REPL, under incremental
+    /// `load`, and across a fasl capture boundary, none of which have an
+    /// end-of-program at which to settle deferred obligations.
+    fn check_supertrait_impls(
+        &self,
+        trait_fq: &Path,
+        target_fq: &Path,
+        assoc_concrete: &HashMap<String, Type>,
+    ) -> Result<(), Error> {
+        let Some(tdef) = self.reg.trait_def(trait_fq) else { return Ok(()) };
+        if tdef.supertraits.is_empty() {
+            return Ok(());
+        }
+        let Some(def) = self.reg.type_def(target_fq) else { return Ok(()) };
+        let targs: Vec<Type> = def.params.iter().map(|p| Type::Named(Path::root(p), vec![])).collect();
+        for sup in &tdef.supertraits {
+            if !def.impls.contains(&sup.trait_path) {
+                return Err(Error::TypeError(format!(
+                    "impl {} {}: `{}` requires `{}`, but `{}` has no `impl {}` — write it before this one",
+                    trait_fq, target_fq, trait_fq, sup.trait_path, target_fq, sup.trait_path
+                )));
+            }
+            // The supertrait entry pins its associated types, possibly in
+            // terms of *this* trait's — which this `impl` has just bound.
+            for (aname, pinned) in &sup.assoc {
+                let want = subst_apply(pinned, assoc_concrete);
+                if self.type_is_open(&want) {
+                    continue;
+                }
+                match resolve_trait_assoc_type(def, &sup.trait_path, aname, &targs) {
+                    Some(actual) if actual == want => {}
+                    Some(actual) if self.type_is_open(&actual) => {}
+                    Some(actual) => {
+                        return Err(Error::TypeError(format!(
+                            "impl {} {}: `{}` requires `{}`'s `{} = {}`, but `{}`'s `impl {}` binds it to `{}`",
+                            trait_fq,
+                            target_fq,
+                            trait_fq,
+                            sup.trait_path,
+                            aname,
+                            mangle_type(&want),
+                            target_fq,
+                            sup.trait_path,
+                            mangle_type(&actual)
+                        )))
+                    }
+                    None => {
+                        return Err(Error::TypeError(format!(
+                            "impl {} {}: `{}`'s `impl {}` does not bind the associated type `{}`",
+                            trait_fq, target_fq, target_fq, sup.trait_path, aname
+                        )))
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Resolve a `deftrait`-defined trait's bare name to its fully-qualified
@@ -3791,6 +4373,78 @@ impl Checker {
             .is_some_and(|af| af.instance)
     }
 
+    /// Convert a `:dyn from<from_pins>` value to `:dyn to<to_pins>`, which is
+    /// admissible exactly when `to` is a supertrait of `from` whose pins agree
+    /// and whose vtable layout is a prefix of `from`'s.
+    ///
+    /// The prefix condition holds for every trait on `from`'s *leftmost*
+    /// supertrait spine, because `Checker::linearize_vtable` emits the direct
+    /// supertraits' (already linearized) methods in written order before its
+    /// own. It fails for a second or later supertrait — `D(B,C)`'s vtable is
+    /// `[B's..., C's..., D's...]`, so `C`'s slots start at a nonzero offset
+    /// and a `:dyn C` call site's baked-in constant would index the wrong
+    /// entry. That case needs a real conversion (a per-supertrait vtable-id
+    /// mapping threaded through the interpreter, `typelisp-rt`, the island
+    /// and AOT) and is rejected here with a message that says so, rather than
+    /// silently mis-dispatching.
+    fn upcast_dyn(
+        &self,
+        value: Typed,
+        from: &Path,
+        from_pins: &[Type],
+        to: &Path,
+        to_pins: &[Type],
+    ) -> Result<Typed, Error> {
+        let from_ty = Type::Dyn(from.clone(), from_pins.to_vec());
+        let to_ty = Type::Dyn(to.clone(), to_pins.to_vec());
+        let mismatch = |why: &str| {
+            Error::TypeError(format!(
+                "cannot convert `{}` to `{}` — {}; box the concrete value as `:dyn {}` instead",
+                mangle_type(&from_ty),
+                mangle_type(&to_ty),
+                why,
+                to
+            ))
+        };
+        if !self.trait_inherits(from, to) {
+            return Err(mismatch(&format!("`{}` does not inherit `{}`", from, to)));
+        }
+        let fdef = self.check_object_safe(from)?;
+        let own = self.dyn_assoc_subst(from, from_pins)?;
+        // The target's pins must be what `from`'s pins imply for it — an
+        // upcast may not silently reinterpret an associated type.
+        let Some(implied) = self.trait_assoc_subst_for(fdef, &own, to) else {
+            return Err(mismatch(&format!("`{}` is not in `{}`'s supertrait chain", to, from)));
+        };
+        let tdef = self.check_object_safe(to)?;
+        for (name, want) in tdef.assoc_types.iter().zip(to_pins.iter()) {
+            match implied.get(name) {
+                Some(actual) if actual == want => {}
+                Some(actual) => {
+                    return Err(mismatch(&format!(
+                        "`{}` pins `{}`'s `{}` to `{}`, not `{}`",
+                        from,
+                        to,
+                        name,
+                        mangle_type(actual),
+                        mangle_type(want)
+                    )))
+                }
+                None => {
+                    return Err(mismatch(&format!("`{}`'s `{}` is not pinned by `{}`", to, name, from)))
+                }
+            }
+        }
+        if !fdef.vtable_order.starts_with(&tdef.vtable_order) {
+            return Err(mismatch(&format!(
+                "`{}` inherits `{}` other than through its first supertrait, so their vtable layouts \
+                 do not share a prefix and the conversion would need a new vtable",
+                from, to
+            )));
+        }
+        Ok(Typed { loc: value.loc.clone(), expr: value.expr, ty: to_ty })
+    }
+
     /// Wrap an already-checked concrete value as `:dyn trait_path<pins...>`,
     /// laying out the vtable it will dispatch through. The shared
     /// implementation of the implicit widening (`check_inner`'s expectation
@@ -3800,17 +4454,19 @@ impl Checker {
     /// function's definition-time body check the value's type may still be a
     /// `where`-bounded type variable, which has no vtable to lay out *yet*.
     fn coerce_to_dyn(&self, env: &Env, value: Typed, trait_path: &Path, pins: &[Type]) -> Result<Typed, Error> {
-        // Re-boxing a trait object is not a coercion. Same-trait/same-pins
-        // never reaches here (the types compare equal); a *different* trait
-        // would be an upcast, which needs a second vtable that the source
-        // box's contents can't supply — the concrete type is gone by then.
+        // Re-boxing a trait object. Same-trait/same-pins never reaches here
+        // (the types compare equal). A *supertrait* is an upcast, and along
+        // the leftmost supertrait spine it is free: inherited methods occupy
+        // the low slots of the subtrait's vtable in the supertrait's own
+        // order (`TraitDef::vtable_order`), so the box already *is* a valid
+        // `:dyn Super` — every slot the target can name holds the same entry
+        // at the same index. Retype it and keep the expression untouched;
+        // nothing below the checker learns that an upcast happened.
+        //
+        // Any other target needs a second vtable the source box cannot
+        // supply, because the concrete type is gone by then.
         if let Type::Dyn(from, from_pins) = &value.ty {
-            return Err(Error::TypeError(format!(
-                "cannot convert `{}` to `{}` — trait upcasting is not supported; box the concrete value as `:dyn {}` instead",
-                mangle_type(&Type::Dyn(from.clone(), from_pins.clone())),
-                mangle_type(&Type::Dyn(trait_path.clone(), pins.to_vec())),
-                trait_path
-            )));
+            return self.upcast_dyn(value.clone(), from, from_pins, trait_path, pins);
         }
         // Boxing a `where`-bounded type variable (`(defun f<E> ... (where (Error E))
         // ... (as :dyn Error e))`): which vtable to build is only knowable once
@@ -3867,15 +4523,30 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Typed, Error> {
-        let assoc_subst = self.dyn_assoc_subst(trait_path, pins)?;
+        let own_subst = self.dyn_assoc_subst(trait_path, pins)?;
         let tdef = self.check_object_safe(trait_path)?;
-        let Some(slot) = tdef.method_order.iter().position(|n| n == method) else {
+        let Some(slot) = tdef.vtable_order.iter().position(|n| n == method) else {
             return Err(Error::TypeError(format!(
-                "`{}` is not a method of `{}` — a `:dyn {}` value can only call the trait's own methods",
+                "`{}` is not a method of `{}` — a `:dyn {}` value can only call the trait's own or inherited methods",
                 method, trait_path, trait_path
             )));
         };
-        let sig = &tdef.methods[method];
+        let decl = &tdef.vtable_owner[slot];
+        let Some((_, sig)) = self.reg.trait_method(tdef, method) else {
+            return Err(Error::TypeError(format!(
+                "{}::{}: inherited from `{}`, which has no registered signature",
+                trait_path, method, decl
+            )));
+        };
+        // An inherited method's template is written in the *declaring*
+        // trait's associated types, so the pins have to be composed down to
+        // it before they can resolve anything.
+        let Some(assoc_subst) = self.trait_assoc_subst_for(tdef, &own_subst, decl) else {
+            return Err(Error::TypeError(format!(
+                "{}::{}: `{}` is not in `{}`'s supertrait chain",
+                trait_path, method, decl, trait_path
+            )));
+        };
         let want = sig.params.len() - 1; // minus the receiver
         if args.len() != want {
             return Err(Error::TypeError(format!(
@@ -3924,39 +4595,50 @@ impl Checker {
         let Some(tdef) = self.reg.trait_def(trait_path) else {
             return Err(Error::TypeError(format!("dyn: unknown trait `{}`", trait_path)));
         };
-        if tdef.method_order.is_empty() {
+        if tdef.vtable_order.is_empty() {
             return Err(Error::TypeError(format!(
                 "dyn {}: the trait declares no methods, so a trait object of it could not be called",
                 trait_path
             )));
         }
-        for m in &tdef.method_order {
-            let sig = &tdef.methods[m];
+        // Over the *linearized* order: an inherited method occupies a vtable
+        // slot just like an own one, so it has to clear the same bar. `where`
+        // names the declaring trait when it isn't `trait_path` itself, since
+        // that's where the offending signature has to be fixed.
+        for (m, decl) in tdef.vtable_order.iter().zip(tdef.vtable_owner.iter()) {
+            let Some((_, sig)) = self.reg.trait_method(tdef, m) else {
+                return Err(Error::TypeError(format!(
+                    "dyn {}: method `{}`, inherited from `{}`, has no registered signature",
+                    trait_path, m, decl
+                )));
+            };
+            let whose =
+                if decl == trait_path { String::new() } else { format!(" (inherited from `{}`)", decl) };
             match sig.params.first() {
                 Some(t) if is_self_tvar(t) => {}
                 _ => {
                     return Err(Error::TypeError(format!(
-                        "dyn {}: method `{}` has no `self` receiver — a static associated function has no value to dispatch on",
-                        trait_path, m
+                        "dyn {}: method `{}`{} has no `self` receiver — a static associated function has no value to dispatch on",
+                        trait_path, m, whose
                     )))
                 }
             }
             if sig.params[1..].iter().any(mentions_self) || mentions_self(&sig.ret) {
                 return Err(Error::TypeError(format!(
-                    "dyn {}: method `{}` mentions `Self` outside the receiver position, so its signature differs per implementation and cannot share one vtable slot",
-                    trait_path, m
+                    "dyn {}: method `{}`{} mentions `Self` outside the receiver position, so its signature differs per implementation and cannot share one vtable slot",
+                    trait_path, m, whose
                 )));
             }
             if !sig.type_params.is_empty() {
                 return Err(Error::TypeError(format!(
-                    "dyn {}: method `{}` is generic — a vtable slot holds one compiled entry point, so there is nothing to specialize at the call site",
-                    trait_path, m
+                    "dyn {}: method `{}`{} is generic — a vtable slot holds one compiled entry point, so there is nothing to specialize at the call site",
+                    trait_path, m, whose
                 )));
             }
             if sig.rest.is_some() {
                 return Err(Error::TypeError(format!(
-                    "dyn {}: method `{}` is variadic, which has no single vtable entry point",
-                    trait_path, m
+                    "dyn {}: method `{}`{} is variadic, which has no single vtable entry point",
+                    trait_path, m, whose
                 )));
             }
         }
@@ -3981,6 +4663,51 @@ impl Checker {
             )));
         }
         Ok(tdef.assoc_types.iter().cloned().zip(pins.iter().cloned()).collect())
+    }
+
+    /// Compose an associated-type substitution down the supertrait chain.
+    ///
+    /// `own` resolves `tdef`'s *own* associated types (from a `:dyn`'s pins,
+    /// or a `where` bound's). An inherited method's signature template is
+    /// written in terms of its *declaring* trait's associated types, so
+    /// checking a call to one needs that trait's substitution instead. A
+    /// supertrait entry pins every one of its associated types
+    /// (`Checker::parse_supertrait_list` enforces it), and those pins may
+    /// mention `tdef`'s own associated types — so descending one level means
+    /// applying `own` to the pins, and the result is the next level's `own`.
+    ///
+    /// Returns `None` when `target` is not in `tdef`'s supertrait closure.
+    /// Every consult point that resolves a possibly-inherited method goes
+    /// through here; writing the composition out four times would be four
+    /// subtly different bugs.
+    fn trait_assoc_subst_for(
+        &self,
+        tdef: &TraitDef,
+        own: &HashMap<String, Type>,
+        target: &Path,
+    ) -> Option<HashMap<String, Type>> {
+        if tdef.name == *target {
+            return Some(own.clone());
+        }
+        for sup in &tdef.supertraits {
+            let sdef = self.reg.trait_def(&sup.trait_path)?;
+            let next: HashMap<String, Type> =
+                sup.assoc.iter().map(|(k, v)| (k.clone(), subst_apply(v, own))).collect();
+            if let Some(found) = self.trait_assoc_subst_for(sdef, &next, target) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    /// Whether `sub` is `sup`, or inherits from it transitively — the
+    /// question `where`-bound discharge and `:dyn` upcasting both ask.
+    fn trait_inherits(&self, sub: &Path, sup: &Path) -> bool {
+        if sub == sup {
+            return true;
+        }
+        let Some(sdef) = self.reg.trait_def(sub) else { return false };
+        sdef.supertraits.iter().any(|b| self.trait_inherits(&b.trait_path, sup))
     }
 
     /// Lay out the vtable for boxing a `concrete` value as `:dyn
@@ -4061,12 +4788,17 @@ impl Checker {
             }
         }
         let subst: HashMap<String, Type> = def.params.iter().cloned().zip(targs.iter().cloned()).collect();
-        let mut slots = Vec::with_capacity(tdef.method_order.len());
-        for m in &tdef.method_order {
+        // Over the linearized order, so an inherited method gets its slot
+        // too. The supertrait obligation (`Checker::check_supertrait_impls`)
+        // guarantees `def` also has an `impl` of every supertrait, hence has
+        // those methods in `assoc` — the check below is what would catch it
+        // if that ever stopped holding.
+        let mut slots = Vec::with_capacity(tdef.vtable_order.len());
+        for (m, decl) in tdef.vtable_order.iter().zip(tdef.vtable_owner.iter()) {
             if !def.assoc.contains_key(m) {
                 return Err(Error::TypeError(format!(
                     "`{}`'s `impl {}` is missing method `{}`",
-                    type_fq, trait_path, m
+                    type_fq, decl, m
                 )));
             }
             // Monomorphization, trait-object side: a generic owner's method
@@ -4238,6 +4970,29 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevel, Error> {
+        self.check_defmethod_in(heap, interp, parts, parts_locs, public, def_loc, None)
+    }
+
+    /// [`Self::check_defmethod`], with the *body*'s namespace optionally
+    /// overridden — how `check_impl` replays a trait's default method body.
+    ///
+    /// Only the body moves: the header (receiver, parameters, return type)
+    /// has already had `Self` and the associated types substituted for the
+    /// `impl`'s concrete ones, in the `impl`'s own namespace, and re-parsing
+    /// it under the trait's would fail to resolve the target type. The body,
+    /// by contrast, was written inside the `deftrait` and must resolve the
+    /// helpers visible *there* — including that module's private ones.
+    #[allow(clippy::too_many_arguments)]
+    fn check_defmethod_in(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        public: bool,
+        def_loc: Option<Loc>,
+        body_ns: Option<Vec<String>>,
+    ) -> Result<TopLevel, Error> {
         let MethodSig { method, instance, self_name, self_name_loc, recv_ty, type_fq, params, param_locs, ret, bounds, body_start, doc } =
             self.parse_defmethod_sig(heap, parts, parts_locs)?;
 
@@ -4322,7 +5077,19 @@ impl Checker {
         // bodies.
         let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
-        let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret))?;
+        // `enter_specialization` with the *current* type-variable bindings
+        // carried over: only the namespace is meant to move, and a default
+        // replayed inside a generic owner's specialization still needs its
+        // bindings in effect.
+        let saved = body_ns.map(|ns| {
+            let bindings = self.type_var_bindings.clone();
+            self.enter_specialization(ns, bindings)
+        });
+        let checked = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&ret));
+        if let Some((sn, sl, sb)) = saved {
+            self.exit_specialization(sn, sl, sb);
+        }
+        let (body, _) = checked?;
         let type_params = if is_generic_template { written_vars } else { Vec::new() };
         Ok(TopLevel::Defmethod { type_name: type_fq, method, instance, self_name, params, ret, body, type_params, public })
     }
@@ -5141,6 +5908,16 @@ impl Checker {
             "format" => return self.check_format(heap, interp, env, args, arg_locs),
             "print" => return self.check_print_like(heap, interp, env, "print-rt", Type::Unit, args, arg_locs),
             "println" => return self.check_print_like(heap, interp, env, "println-rt", Type::Unit, args, arg_locs),
+            // These two are *shadowable* special forms: a local binding named
+            // `read` (a lambda called `(read)`, say) must keep winning, the
+            // way it did when `read` was an ordinary built-in function. The
+            // dispatch here runs before the local-variable lookup further
+            // down, so the guard has to be explicit — unlike `if`/`let`/
+            // `format`, which `is_builtin_form_head` reserves outright.
+            "read" if env.get("read").is_none() => return self.check_read(heap, interp, env, args, arg_locs),
+            "make-synonym-stream" if env.get("make-synonym-stream").is_none() => {
+                return self.check_make_synonym_stream(heap, args)
+            }
             "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular" => {
                 return self.check_pprint(heap, interp, env, head.as_str(), args, arg_locs)
             }
@@ -5646,7 +6423,11 @@ impl Checker {
             // name that is neither gets `check_dyn_call`'s message naming
             // the trait rather than a bare "no such function".
             if let Type::Dyn(trait_path, pins) = recv.ty.clone() {
-                if self.reg.trait_def(&trait_path).is_some_and(|t| t.methods.contains_key(method)) {
+                if self
+                    .reg
+                    .trait_def(&trait_path)
+                    .is_some_and(|t| t.vtable_order.iter().any(|m| m == method))
+                {
                     return self.check_dyn_call(
                         heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..],
                     );
@@ -5690,7 +6471,11 @@ impl Checker {
                 if let Some(bound_traits) = env.bounds.get(type_fq.local()) {
                     for tb in bound_traits {
                         let Some(tdef) = self.reg.trait_def(&tb.trait_path) else { continue };
-                        let Some(sig) = tdef.methods.get(method) else { continue };
+                        // Inherited methods included: bounding `T` by `Ord`
+                        // makes `Eq`'s `equals` callable on it, since `Ord`
+                        // obliges every implementor to implement `Eq` too.
+                        let Some((decl, sig)) = self.reg.trait_method(tdef, method) else { continue };
+                        let decl_path = decl.name.clone();
                         let want = sig.params.len() - 1;
                         if args.len() - 1 != want {
                             return Err(Error::TypeError(format!(
@@ -5711,7 +6496,17 @@ impl Checker {
                         // a no-op (returns `sig.ret` unchanged) when
                         // `tb.assoc` is empty, exactly matching pre-pin
                         // behavior.
-                        let ret_ty = subst_apply(&sig.ret, &tb.assoc);
+                        // ...and composed down the supertrait chain when the
+                        // method is an inherited one, since its template is
+                        // written in the declaring trait's associated types.
+                        let Some(assoc) = self.trait_assoc_subst_for(tdef, &tb.assoc, &decl_path)
+                        else {
+                            return Err(Error::TypeError(format!(
+                                "{}: `{}` declares `{}`, but is not in `{}`'s supertrait chain",
+                                method, decl_path, method, tb.trait_path
+                            )));
+                        };
+                        let ret_ty = subst_apply(&sig.ret, &assoc);
                         return Ok(Typed { loc: None,
                             expr: Expr::TraitCall { method: method.to_string(), args: typed_args },
                             ty: ret_ty,
@@ -7214,7 +8009,22 @@ impl Checker {
                 "format: expected at least a destination (bool) and a control string".to_string(),
             ));
         }
-        let dest = self.check_at(heap, interp, env, args[0], Some(&Type::Bool), nth_loc(arg_locs, 0))?;
+        // The destination is checked with no expected type so its own static
+        // type can pick the lowering: `bool` is CL's `t`/`nil` (stdout or
+        // nothing), a `stream` is CL's stream destination. Checking it once,
+        // unexpectedly, and branching on the result is what keeps this from
+        // needing a union type or a second spelling of `format`.
+        let dest = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
+        let builtin = match dest.ty {
+            Type::Bool => "format-rt",
+            Type::Stream => "format-stream-rt",
+            ref other => {
+                return Err(Error::TypeError(format!(
+                    "format: destination must be a bool (t/nil) or a stream, found {}",
+                    mangle_type(other)
+                )))
+            }
+        };
         let control = self.check_at(heap, interp, env, args[1], Some(&Type::Str), nth_loc(arg_locs, 1))?;
         let mut items = Vec::new();
         for (i, &a) in args[2..].iter().enumerate() {
@@ -7223,9 +8033,108 @@ impl Checker {
         let list = self.cons_hetero_sexpr(items)?;
         Ok(Typed {
             loc: None,
-            expr: Expr::Call(Ref::synthetic(Path::root("format-rt")), vec![dest, control, list]),
+            expr: Expr::Call(Ref::synthetic(Path::root(builtin)), vec![dest, control, list]),
             ty: Type::Str,
         })
+    }
+
+    /// The `(make-synonym-stream 'name)` form (CLHS 21.2): a stream that
+    /// forwards every operation to whatever the global variable `name` holds
+    /// *at the time of the operation*.
+    ///
+    /// A special form because the name must be resolved without being
+    /// evaluated — and resolved *here*, in the module the call was written
+    /// in, so `(make-synonym-stream '*log*)` finds that module's `*log*`
+    /// exactly as a written reference to it would. What reaches the runtime
+    /// is the fully-qualified path, which the resolver
+    /// (`Interp::stream_resolver`) can look up unambiguously with no notion
+    /// of a "current module" of its own. Checking the variable's type here
+    /// also turns "that global isn't a stream" into a compile-time error
+    /// rather than a failure on first use.
+    fn check_make_synonym_stream(&self, heap: &Heap, args: &[Value]) -> Result<Typed, Error> {
+        if args.len() != 1 {
+            return Err(Error::TypeError(
+                "make-synonym-stream: expected exactly one argument, a quoted global name — (make-synonym-stream '*standard-output*)".into(),
+            ));
+        }
+        // `'x` reads as `(quote x)`; the bare-symbol spelling is rejected
+        // rather than quietly accepted, since it would read as the variable's
+        // *value* everywhere else in the language.
+        let quoted = match heap.list_to_vec(args[0]) {
+            Ok(items) if items.len() == 2 && matches!(items[0], Value::Symbol(id) if heap.symbol_name(id) == "quote") => items[1],
+            _ => {
+                return Err(Error::TypeError(
+                    "make-synonym-stream: the name must be quoted — (make-synonym-stream '*standard-output*)".into(),
+                ))
+            }
+        };
+        let name = match quoted {
+            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            Value::Path(pid) => heap.path_segments(pid).iter().map(|s| heap.symbol_name(*s).to_string()).collect::<Vec<_>>().join("::"),
+            _ => return Err(Error::TypeError("make-synonym-stream: expected a symbol naming a global variable".into())),
+        };
+        let Some((path, vi)) = self.resolve_global(&name) else {
+            return Err(Error::TypeError(format!("make-synonym-stream: no such global variable: {}", name)));
+        };
+        if vi.ty != Type::Stream {
+            return Err(Error::TypeError(format!(
+                "make-synonym-stream: {} is a {}, not a stream",
+                name,
+                mangle_type(&vi.ty)
+            )));
+        }
+        let target = Typed { loc: None, expr: Expr::Str(path.to_string()), ty: Type::Str };
+        Ok(Typed {
+            loc: None,
+            expr: Expr::Call(Ref::synthetic(Path::root("make-synonym-stream-rt")), vec![target]),
+            ty: Type::Stream,
+        })
+    }
+
+    /// The `(read)` / `(read stream)` / `(read string)` form — CL's `read`
+    /// and `read-from-string` under one name, chosen from the static type of
+    /// the argument (the same trick [`Self::check_format`] plays on its
+    /// destination). `(read)` reads from `*standard-input*`.
+    ///
+    /// A special form rather than two named functions because `(read s)` on a
+    /// string is this language's long-standing spelling and had to keep
+    /// working, while CL's `read` means "from a stream" — the argument's type
+    /// is exactly the information that distinguishes them, and the checker
+    /// already has it.
+    fn check_read(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Typed, Error> {
+        if args.len() > 1 {
+            return Err(Error::TypeError("read: expected at most one argument (a stream or a string)".to_string()));
+        }
+        let ty = Type::Named(Path::root("result"), vec![sexpr_ty(), Type::Named(Path::root(crate::check::registry::READ_ERROR), vec![])]);
+        let Some(&arg) = args.first() else {
+            // No argument: CL's default, `*standard-input*` — an ordinary
+            // prelude global, resolved here exactly as a written reference to
+            // it would be.
+            let Some((path, vi)) = self.resolve_global("*standard-input*") else {
+                return Err(Error::TypeError("read: *standard-input* is not defined".to_string()));
+            };
+            let src = Typed { loc: None, expr: Expr::Global(self.mk_ref(vec!["*standard-input*".to_string()], path)), ty: vi.ty };
+            return Ok(Typed { loc: None, expr: Expr::Call(Ref::synthetic(Path::root("read-stream-rt")), vec![src]), ty });
+        };
+        let src = self.check_at(heap, interp, env, arg, None, nth_loc(arg_locs, 0))?;
+        let builtin = match src.ty {
+            Type::Str => "read-string-rt",
+            Type::Stream => "read-stream-rt",
+            ref other => {
+                return Err(Error::TypeError(format!(
+                    "read: expected a stream or a string, found {}",
+                    mangle_type(other)
+                )))
+            }
+        };
+        Ok(Typed { loc: None, expr: Expr::Call(Ref::synthetic(Path::root(builtin)), vec![src]), ty })
     }
 
     /// The `(print control &rest args)` / `(println control &rest args)`
@@ -7249,17 +8158,48 @@ impl Checker {
                 if builtin == "println-rt" { "println" } else { "print" }
             )));
         }
-        let control = self.check_at(heap, interp, env, args[0], Some(&Type::Str), nth_loc(arg_locs, 0))?;
+        // An optional leading *stream* destination, CL-style
+        // (`(print obj stream)` — spelled here as `(print stream control
+        // args...)` so the control string keeps the fixed position every
+        // directive argument counts from). Distinguished from the control
+        // string by its static type, exactly like `format`'s destination.
+        let first = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
+        let to_stream = matches!(first.ty, Type::Stream);
+        let (dest, rest_from) = if to_stream { (Some(first.clone()), 1) } else { (None, 0) };
+        let control = match rest_from {
+            0 => {
+                if !matches!(first.ty, Type::Str) {
+                    return Err(Error::TypeError(format!(
+                        "{}: the control string must be a string, found {}",
+                        if builtin == "println-rt" { "println" } else { "print" },
+                        mangle_type(&first.ty)
+                    )));
+                }
+                first
+            }
+            _ => match args.get(1) {
+                Some(&a) => self.check_at(heap, interp, env, a, Some(&Type::Str), nth_loc(arg_locs, 1))?,
+                None => {
+                    return Err(Error::TypeError(format!(
+                        "{}: expected a control string after the stream",
+                        if builtin == "println-rt" { "println" } else { "print" }
+                    )))
+                }
+            },
+        };
+        let first_arg = rest_from + 1;
         let mut items = Vec::new();
-        for (i, &a) in args[1..].iter().enumerate() {
-            items.push(self.check_at(heap, interp, env, a, None, nth_loc(arg_locs, 1 + i))?);
+        for (i, &a) in args[first_arg..].iter().enumerate() {
+            items.push(self.check_at(heap, interp, env, a, None, nth_loc(arg_locs, first_arg + i))?);
         }
         let list = self.cons_hetero_sexpr(items)?;
-        Ok(Typed {
-            loc: None,
-            expr: Expr::Call(Ref::synthetic(Path::root(builtin)), vec![control, list]),
-            ty: ret,
-        })
+        let (name, call_args) = match dest {
+            // Same directive engine, different sink — see
+            // `Interp::eval_builtin`'s `print-stream-rt` arm.
+            Some(d) => (format!("{}-stream-rt", builtin.trim_end_matches("-rt")), vec![d, control, list]),
+            None => (builtin.to_string(), vec![control, list]),
+        };
+        Ok(Typed { loc: None, expr: Expr::Call(Ref::synthetic(Path::root(&name)), call_args), ty: ret })
     }
 
     /// The `pprint` family — `(pprint x)`, `(pprint-fill x)`,
@@ -7875,10 +8815,28 @@ impl Checker {
                     let var_name = n.local();
                     let declared = caller_bounds.get(var_name);
                     for tb in trait_bounds {
+                        // A caller bound discharges this one when it names
+                        // the same trait *or a subtrait of it*: `(where (Ord
+                        // T))` already obliges `T` to implement `Eq`, so it
+                        // satisfies a callee's `(where (Eq T))`. The pins are
+                        // composed down the chain for the same reason
+                        // `check_dyn_call` composes them.
                         let satisfied = declared.is_some_and(|caller_tbs| {
                             caller_tbs.iter().any(|caller_tb| {
-                                caller_tb.trait_path == tb.trait_path
-                                    && tb.assoc.iter().all(|(k, v)| caller_tb.assoc.get(k) == Some(v))
+                                if !self.trait_inherits(&caller_tb.trait_path, &tb.trait_path) {
+                                    return false;
+                                }
+                                let Some(cdef) = self.reg.trait_def(&caller_tb.trait_path) else {
+                                    return false;
+                                };
+                                let Some(at) = self.trait_assoc_subst_for(
+                                    cdef,
+                                    &caller_tb.assoc,
+                                    &tb.trait_path,
+                                ) else {
+                                    return false;
+                                };
+                                tb.assoc.iter().all(|(k, v)| at.get(k) == Some(v))
                             })
                         });
                         if !satisfied {
@@ -8700,6 +9658,7 @@ fn mangle_type(t: &Type) -> String {
         Type::Bignum => "bignum".into(),
         Type::Ratio => "ratio".into(),
         Type::RandomState => "random-state".into(),
+        Type::Stream => "stream".into(),
         Type::Bool => "bool".into(),
         Type::Char => "char".into(),
         Type::Str => "string".into(),

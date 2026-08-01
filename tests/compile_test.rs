@@ -2680,7 +2680,7 @@ fn compile_dispatches_a_nested_labels_inner_sibling_that_boxes_an_outer_sibling_
 fn a_where_bounded_generic_specializes_and_dispatches_into_compiled_methods() {
     let v = run_with_compiler(
         r#"
-        (deftrait Counted (count ((self Self)) i32))
+        (deftrait Counted () (count ((self Self)) i32))
         (defstruct box-a (n i32))
         (impl Counted box-a (count ((self Self)) i32 self::n))
         (defun describe<T> ((it T)) i32 (where (Counted T)) (count it))
@@ -2704,7 +2704,7 @@ fn a_where_bounded_generic_specializes_and_dispatches_into_compiled_methods() {
 fn a_where_bounded_generic_specializes_per_impl_and_dispatches_into_compiled_methods() {
     let v = run_with_compiler(
         r#"
-        (deftrait Counted (count ((self Self)) i32))
+        (deftrait Counted () (count ((self Self)) i32))
         (defstruct box-a (n i32))
         (defstruct box-b (n i32))
         (impl Counted box-a (count ((self Self)) i32 self::n))
@@ -4842,7 +4842,7 @@ fn compile_dispatches_sexpr_accessors_and_agrees_with_the_interpreter() {
 fn compile_dispatches_a_trait_object_call_through_its_vtable() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait Drawable (draw ((self Self)) i32))
+        (deftrait Drawable () (draw ((self Self)) i32))
         (defstruct circle (r i32))
         (defstruct square (side i32))
         (impl Drawable circle (draw ((self Self)) i32 1))
@@ -4864,7 +4864,7 @@ fn compile_dispatches_a_trait_object_call_through_its_vtable() {
 fn compile_indexes_the_right_vtable_slot_for_each_method() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait Shape
+        (deftrait Shape ()
           (draw ((self Self)) i32)
           (sides ((self Self)) i32))
         (defstruct tri (n i32))
@@ -4882,13 +4882,44 @@ fn compile_indexes_the_right_vtable_slot_for_each_method() {
     assert_eq!(v, RtValue::Int(73));
 }
 
+/// The inherited half of the same contract: a supertrait's methods occupy
+/// the low slots of a subtrait's vtable, so a JIT'd call site indexing a
+/// baked-in constant must land on the inherited body, not a shifted one.
+#[test]
+fn compile_indexes_inherited_vtable_slots_before_the_subtraits_own() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (deftrait Base ()
+          (base-a ((self Self)) i32)
+          (base-b ((self Self)) i32))
+        (deftrait Sub (Base)
+          (sub-c ((self Self)) i32))
+        (defstruct tri (n i32))
+        (impl Base tri
+          (base-a ((self Self)) i32 1)
+          (base-b ((self Self)) i32 2))
+        (impl Sub tri
+          (sub-c ((self Self)) i32 3))
+        (defun pa ((s :dyn Sub)) i32 (base-a s))
+        (defun pb ((s :dyn Sub)) i32 (base-b s))
+        (defun pc ((s :dyn Sub)) i32 (sub-c s))
+        (defun all () i32
+          (+ (* 100 (pa (tri::new 0))) (+ (* 10 (pb (tri::new 0))) (pc (tri::new 0)))))
+        (compile all)
+        (all)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(123));
+}
+
 /// A method argument and a boxed return value cross the vtable boundary
 /// under the ordinary compiled-call ABI.
 #[test]
 fn compile_passes_arguments_through_a_trait_object_call() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait Scaler (scale ((self Self) (k i32)) i32))
+        (deftrait Scaler () (scale ((self Self) (k i32)) i32))
         (defstruct fixed (n i32))
         (impl Scaler fixed (scale ((self Self) (k i32)) i32 (* self::n k)))
         (defun apply-scale ((s :dyn Scaler) (k i32)) i32 (scale s k))
@@ -4906,7 +4937,7 @@ fn compile_passes_arguments_through_a_trait_object_call() {
 #[test]
 fn compile_and_interpret_agree_on_a_trait_object_match() {
     let src = r#"
-        (deftrait Drawable (draw ((self Self)) i32))
+        (deftrait Drawable () (draw ((self Self)) i32))
         (defstruct circle (r i32))
         (defstruct square (side i32))
         (impl Drawable circle (draw ((self Self)) i32 1))
@@ -4932,7 +4963,7 @@ fn compile_and_interpret_agree_on_a_trait_object_match() {
 fn compile_dispatches_when_only_the_dispatching_function_is_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait Drawable (draw ((self Self)) i32))
+        (deftrait Drawable () (draw ((self Self)) i32))
         (defstruct circle (r i32))
         (defstruct square (side i32))
         (impl Drawable circle (draw ((self Self)) i32 1))
@@ -4953,7 +4984,7 @@ fn compile_dispatches_when_only_the_dispatching_function_is_compiled() {
 fn compile_dispatches_to_an_impl_added_after_the_call_site_was_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (deftrait Drawable (draw ((self Self)) i32))
+        (deftrait Drawable () (draw ((self Self)) i32))
         (defstruct circle (r i32))
         (impl Drawable circle (draw ((self Self)) i32 1))
         (defun render ((d :dyn Drawable)) i32 (draw d))

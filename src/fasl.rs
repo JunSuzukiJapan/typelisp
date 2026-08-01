@@ -181,7 +181,11 @@ pub struct RegistryMark {
 #[derive(Default)]
 struct NamespaceKeys {
     fns: HashSet<String>,
-    traits: HashSet<String>,
+    /// Keyed by trait name -> the shape it had at mark time, for the same
+    /// reason [`Self::types`] is: a `deftrait` edited in place keeps its name,
+    /// so a name-only diff would leave the fasl serving the *old* trait —
+    /// stale supertraits, stale vtable layout, stale default bodies.
+    traits: HashMap<String, TraitShape>,
     macros: HashSet<String>,
     /// Keyed by type name -> the shape it had at mark time. A type is
     /// captured if it is new *or* its shape changed — the prelude adds
@@ -215,6 +219,28 @@ fn type_shape(def: &AdtDef) -> TypeShape {
     }
 }
 
+/// The parts of a `TraitDef` an edit can change without changing its name —
+/// see [`NamespaceKeys::traits`]. Deliberately *not* `PartialEq` on `TraitDef`
+/// itself: that would cascade through `FnSig::optionals` ->
+/// `OptKeyParam::default: Option<Typed>` and demand `PartialEq` across the
+/// whole checked AST.
+#[derive(Default, PartialEq)]
+struct TraitShape {
+    supertraits: Vec<String>,
+    assoc_types: Vec<String>,
+    method_order: Vec<String>,
+    vtable_order: Vec<String>,
+}
+
+fn trait_shape(def: &TraitDef) -> TraitShape {
+    TraitShape {
+        supertraits: def.supertraits.iter().map(|b| b.trait_path.to_string()).collect(),
+        assoc_types: def.assoc_types.clone(),
+        method_order: def.method_order.clone(),
+        vtable_order: def.vtable_order.clone(),
+    }
+}
+
 /// Takes a [`RegistryMark`] of `checker`'s current registry — call before
 /// loading the file whose definitions the fasl should capture.
 pub fn registry_mark(checker: &Checker) -> RegistryMark {
@@ -224,7 +250,7 @@ pub fn registry_mark(checker: &Checker) -> RegistryMark {
             path.clone(),
             NamespaceKeys {
                 fns: ns.fns.keys().cloned().collect(),
-                traits: ns.traits.keys().cloned().collect(),
+                traits: ns.traits.iter().map(|(k, d)| (k.clone(), trait_shape(d))).collect(),
                 macros: ns.macros.keys().cloned().collect(),
                 types: ns.types.iter().map(|(k, d)| (k.clone(), type_shape(d))).collect(),
                 ctors: ns.ctors.keys().cloned().collect(),
@@ -282,6 +308,7 @@ pub struct DocsRepr {
     pub vars: Vec<(Path, String)>,
     pub traits: Vec<(Path, String)>,
     pub macros: Vec<(Path, String)>,
+    pub trait_methods: Vec<((Path, String), String)>,
 }
 
 /// Everything the checker gained from loading one file.
@@ -298,7 +325,12 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
     let delta = NamespaceDelta {
         path: path.clone(),
         fns: ns.fns.iter().filter(|(k, _)| !keys.fns.contains(*k)).map(|(k, v)| (k.clone(), v.clone())).collect(),
-        traits: ns.traits.iter().filter(|(k, _)| !keys.traits.contains(*k)).map(|(k, v)| (k.clone(), v.clone())).collect(),
+        traits: ns
+            .traits
+            .iter()
+            .filter(|(k, v)| keys.traits.get(*k).map(|old| *old != trait_shape(v)).unwrap_or(true))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
         macros: ns.macros.iter().filter(|(k, _)| !keys.macros.contains(*k)).map(|(k, v)| (k.clone(), v.clone())).collect(),
         types: ns
             .types
@@ -444,7 +476,25 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// dependency provides, since `documentation` resolves entirely at check
 /// time from whatever `Docs` table the dependency's fasl handed back — no
 /// runtime fallback exists to catch a missing docstring later — 2026-07-30.
-pub const FASL_FORMAT_VERSION: u32 = 15;
+///
+/// Bumped to 16 for streams and files (CLHS 19/20/21): `Type` gained a
+/// `Stream` variant and the built-in error types gained `FileError`. Neither
+/// changes how an *existing* fasl deserializes (this format is JSON, so
+/// variants travel by name), but both change the registry a cached module is
+/// reconstructed against — the trap `docs/dev/development.md` records for
+/// registry changes generally — so the bump invalidates every stale cache in
+/// one move rather than leaving it to a `rm` nobody remembers — 2026-08-01.
+///
+/// 17: supertraits. `deftrait` gained a mandatory supertrait list right after
+/// the name, and `TraitDef` gained `supertraits`/`vtable_order`/
+/// `vtable_owner` — the last two being the trait-object slot layout, which
+/// compiled call sites index by a baked-in constant. A stale cache would hand
+/// back a `TraitDef` with no `vtable_order` at all, leaving every `:dyn` call
+/// on it unable to find a slot. This version also fixes the diff that decides
+/// whether a trait is re-captured at all: it compared *names* only (see
+/// [`NamespaceKeys::traits`]), so an edited trait kept serving its old
+/// definition out of cache — 2026-08-01.
+pub const FASL_FORMAT_VERSION: u32 = 17;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.
@@ -505,6 +555,7 @@ impl Fasl {
             vars: dc.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
             traits: dc.traits.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
             macros: dc.macros.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            trait_methods: dc.trait_methods.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         };
         let (fn_templates, method_templates) = checker.export_templates(heap)?;
         Ok(Fasl {
@@ -552,6 +603,7 @@ impl Fasl {
             dc.vars.extend(self.delta.docs.vars.iter().cloned());
             dc.traits.extend(self.delta.docs.traits.iter().cloned());
             dc.macros.extend(self.delta.docs.macros.iter().cloned());
+            dc.trait_methods.extend(self.delta.docs.trait_methods.iter().cloned());
         }
         checker.install_templates(heap, &self.fn_templates, &self.method_templates)?;
         for tl in &self.top_levels {

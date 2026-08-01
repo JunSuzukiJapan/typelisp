@@ -9,7 +9,7 @@
 ;; どんな図形が存在するかは呼び出し側にもキャンバスにも見えない。
 ;; 全メソッドが self レシーバを持ち Self をレシーバ以外に書いていないので、
 ;; このトレイトは :dyn 化できる(object safety)。
-(deftrait Shape
+(deftrait Shape ()
   (label ((self Self)) string)
   (paint ((self Self) (cv canvas)) ()))
 

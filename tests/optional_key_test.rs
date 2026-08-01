@@ -221,7 +221,7 @@ fn generic_key_uninferrable_type_param_is_a_type_error() {
 #[test]
 fn generic_optional_where_bound_is_validated() {
     let prog = "
-        (deftrait eq2 (same ((self Self) (other Self)) bool))
+        (deftrait eq2 () (same ((self Self) (other Self)) bool))
         (impl eq2 i32 (same ((self Self) (other Self)) bool (= self other)))
         (defstruct no-eq (n i32))
         (defun check-eq<T> ((a T) (b T) &optional (verbose bool false)) bool (where (eq2 T)) (same a b))

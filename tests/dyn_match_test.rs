@@ -32,7 +32,7 @@ fn eval_ok(src: &str) -> RtValue {
 }
 
 const SHAPES: &str = r#"
-(deftrait Drawable (draw ((self Self)) string))
+(deftrait Drawable () (draw ((self Self)) string))
 (defstruct circle (r i32))
 (defstruct square (side i32))
 (impl Drawable circle (draw ((self Self)) string "circle"))

@@ -37,7 +37,7 @@ fn eval_err(src: &str) -> String {
 
 /// Two shapes implementing one trait — the setup every test below builds on.
 const SHAPES: &str = r#"
-(deftrait Drawable
+(deftrait Drawable ()
   (draw ((self Self)) string)
   (sides ((self Self)) i32))
 (defstruct circle (r i32))
@@ -88,7 +88,7 @@ fn a_second_slot_dispatches_independently_of_the_first() {
 #[test]
 fn a_method_argument_and_return_value_cross_the_vtable() {
     let src = r#"
-        (deftrait Scaler (scale ((self Self) (k i32)) i32))
+        (deftrait Scaler () (scale ((self Self) (k i32)) i32))
         (defstruct fixed (n i32))
         (impl Scaler fixed (scale ((self Self) (k i32)) i32 (* self::n k)))
         (defun apply-scale ((s :dyn Scaler) (k i32)) i32 (scale s k))
@@ -194,7 +194,7 @@ fn a_primitive_cannot_be_boxed_even_when_it_implements_the_trait() {
     // per-trait one, which is what lets `:dyn Speak` still work for a
     // `defstruct` that implements the same trait.
     let src = r#"
-        (deftrait Speak (say ((self Self)) string))
+        (deftrait Speak () (say ((self Self)) string))
         (impl Speak i32 (say ((self Self)) string "int"))
         (defun hear ((s :dyn Speak)) string (say s))
         (hear 1)"#;
@@ -216,7 +216,7 @@ fn a_method_the_trait_does_not_declare_cannot_be_called_on_a_trait_object() {
 #[test]
 fn a_trait_with_a_static_method_is_not_object_safe() {
     let src = r#"
-        (deftrait Zeroed (zero ((n i32)) i32))
+        (deftrait Zeroed () (zero ((n i32)) i32))
         (defun f ((z :dyn Zeroed)) i32 0)
         (f 1)"#;
     let m = eval_err(src);
@@ -226,7 +226,7 @@ fn a_trait_with_a_static_method_is_not_object_safe() {
 #[test]
 fn a_method_returning_self_makes_a_trait_not_object_safe() {
     let src = r#"
-        (deftrait Cloneable (dup ((self Self)) Self))
+        (deftrait Cloneable () (dup ((self Self)) Self))
         (defstruct cell (n i32))
         (impl Cloneable cell (dup ((self Self)) Self (cell::new self::n)))
         (defun f ((c :dyn Cloneable)) i32 0)
@@ -242,17 +242,17 @@ fn an_unknown_trait_name_is_reported_as_such() {
 }
 
 #[test]
-fn trait_upcasting_is_rejected() {
+fn upcasting_to_a_non_supertrait_is_rejected() {
     let src = format!(
         "{SHAPES}
-         (deftrait Named (name ((self Self)) string))
+         (deftrait Named () (name ((self Self)) string))
          (impl Named circle (name ((self Self)) string \"c\"))
          (defun render ((d :dyn Drawable)) string (draw d))
          (defun relabel ((n :dyn Named)) string (render n))
          (relabel (circle::new 1))"
     );
     let m = eval_err(&src);
-    assert!(m.contains("trait upcasting is not supported"), "{}", m);
+    assert!(m.contains("does not inherit"), "{}", m);
 }
 
 // ---- `:dyn` outside a type position -------------------------------------
@@ -261,4 +261,162 @@ fn trait_upcasting_is_rejected() {
 fn dyn_in_a_value_position_is_a_type_error() {
     let m = eval_err("(defun f () i32 (:dyn Drawable))");
     assert!(m.contains("may only appear in a type position"), "{}", m);
+}
+
+// ---- supertraits through a trait object ---------------------------------
+
+/// A two-level trait chain, both levels implemented by two concrete types —
+/// enough to show that an inherited slot dispatches per implementation.
+const CHAIN: &str = r#"
+(deftrait Named ()
+  (name ((self Self)) string))
+(deftrait Greeter (Named)
+  (greeting ((self Self)) string))
+(defstruct dog (n i32))
+(defstruct cat (n i32))
+(impl Named dog (name ((self Self)) string "dog"))
+(impl Greeter dog (greeting ((self Self)) string "woof"))
+(impl Named cat (name ((self Self)) string "cat"))
+(impl Greeter cat (greeting ((self Self)) string "meow"))
+"#;
+
+#[test]
+fn a_dyn_subtrait_can_call_an_inherited_method() {
+    let src = format!(
+        "{CHAIN}
+         (defun describe ((g :dyn Greeter)) string (name g))
+         (describe (dog::new 1))"
+    );
+    assert_eq!(eval_ok(&src), RtValue::Str("dog".into()));
+}
+
+#[test]
+fn an_inherited_slot_dispatches_per_implementation() {
+    let src = format!(
+        "{CHAIN}
+         (defun describe ((g :dyn Greeter)) string
+           (append (name g) (append \":\" (greeting g))))
+         (append (describe (dog::new 1)) (append \"/\" (describe (cat::new 2))))"
+    );
+    assert_eq!(eval_ok(&src), RtValue::Str("dog:woof/cat:meow".into()));
+}
+
+#[test]
+fn inherited_slots_precede_the_subtraits_own() {
+    // The layout contract: `Named`'s methods occupy the low slots of
+    // `Greeter`'s vtable, in `Named`'s own order, before `Greeter`'s. If the
+    // two ever swapped, `name` would call `greeting`'s body and vice versa.
+    let src = format!(
+        "{CHAIN}
+         (defun who ((g :dyn Greeter)) string (name g))
+         (defun what ((x :dyn Greeter)) string (greeting x))
+         (append (who (cat::new 1)) (what (cat::new 1)))"
+    );
+    assert_eq!(eval_ok(&src), RtValue::Str("catmeow".into()));
+}
+
+#[test]
+fn a_method_of_neither_the_trait_nor_its_supertraits_is_rejected() {
+    let src = format!(
+        "{CHAIN}
+         (defun describe ((g :dyn Greeter)) string (nope g))
+         (describe (dog::new 1))"
+    );
+    let m = eval_err(&src);
+    assert!(m.contains("own or inherited methods"), "{}", m);
+}
+
+#[test]
+fn a_dyn_of_the_supertrait_still_sees_only_the_supertraits_methods() {
+    let src = format!(
+        "{CHAIN}
+         (defun describe ((n :dyn Named)) string (greeting n))
+         (describe (dog::new 1))"
+    );
+    let m = eval_err(&src);
+    assert!(m.contains("own or inherited methods"), "{}", m);
+}
+
+// ---- upcasting ----------------------------------------------------------
+
+#[test]
+fn a_dyn_subtrait_upcasts_to_its_supertrait() {
+    let src = format!(
+        "{CHAIN}
+         (defun label ((n :dyn Named)) string (name n))
+         (defun via ((g :dyn Greeter)) string (label g))
+         (append (via (dog::new 1)) (via (cat::new 2)))"
+    );
+    assert_eq!(eval_ok(&src), RtValue::Str("dogcat".into()));
+}
+
+#[test]
+fn an_upcast_value_still_dispatches_to_its_own_concrete_type() {
+    // The box is reused unchanged, so the vtable still belongs to the
+    // original concrete type — an upcast must not flatten to one impl.
+    let src = format!(
+        "{CHAIN}
+         (defun label ((n :dyn Named)) string (name n))
+         (defun via ((g :dyn Greeter)) string (append (label g) (greeting g)))
+         (append (via (dog::new 1)) (via (cat::new 2)))"
+    );
+    assert_eq!(eval_ok(&src), RtValue::Str("dogwoofcatmeow".into()));
+}
+
+#[test]
+fn an_explicit_as_upcasts_a_trait_object() {
+    let src = format!(
+        "{CHAIN}
+         (defun label ((n :dyn Named)) string (name n))
+         (defun via ((g :dyn Greeter)) string (label (as :dyn Named g)))
+         (via (dog::new 1))"
+    );
+    assert_eq!(eval_ok(&src), RtValue::Str("dog".into()));
+}
+
+#[test]
+fn downcasting_to_a_subtrait_is_rejected() {
+    let src = format!(
+        "{CHAIN}
+         (defun shout ((g :dyn Greeter)) string (greeting g))
+         (defun via ((n :dyn Named)) string (shout n))
+         (via (dog::new 1))"
+    );
+    let m = eval_err(&src);
+    assert!(m.contains("does not inherit"), "{}", m);
+}
+
+#[test]
+fn upcasting_to_a_non_first_supertrait_is_rejected_as_a_layout_mismatch() {
+    // `D(B,C)`: `C`'s slots sit after `B`'s in `D`'s vtable, so the layouts
+    // share no prefix and the conversion is not a retype.
+    let src = r#"
+        (deftrait B () (b-tag ((self Self)) i32))
+        (deftrait C () (c-tag ((self Self)) i32))
+        (deftrait D (B C) (d-tag ((self Self)) i32))
+        (defstruct cell (n i32))
+        (impl B cell (b-tag ((self Self)) i32 1))
+        (impl C cell (c-tag ((self Self)) i32 2))
+        (impl D cell (d-tag ((self Self)) i32 3))
+        (defun only-c ((c :dyn C)) i32 (c-tag c))
+        (defun via ((d :dyn D)) i32 (only-c d))
+        (via (cell::new 0))"#;
+    let m = eval_err(src);
+    assert!(m.contains("do not share a prefix"), "{}", m);
+}
+
+#[test]
+fn upcasting_to_the_first_supertrait_of_a_multi_supertrait_chain_works() {
+    let src = r#"
+        (deftrait B () (b-tag ((self Self)) i32))
+        (deftrait C () (c-tag ((self Self)) i32))
+        (deftrait D (B C) (d-tag ((self Self)) i32))
+        (defstruct cell (n i32))
+        (impl B cell (b-tag ((self Self)) i32 1))
+        (impl C cell (c-tag ((self Self)) i32 2))
+        (impl D cell (d-tag ((self Self)) i32 3))
+        (defun only-b ((b :dyn B)) i32 (b-tag b))
+        (defun via ((d :dyn D)) i32 (only-b d))
+        (via (cell::new 0))"#;
+    assert_eq!(eval_ok(src), RtValue::Int(1));
 }

@@ -629,7 +629,7 @@ fn compiles_an_impl_block() {
         compile_and_run(
             "impl_block",
             r#"
-            (deftrait Counted (count ((self Self)) i32))
+            (deftrait Counted () (count ((self Self)) i32))
             (defstruct box-a (n i32))
             (impl Counted box-a (count ((self Self)) i32 self::n))
             (defun main () i64 (as i64 (count (box-a::new 9))))
@@ -651,7 +651,7 @@ fn compiles_and_runs_dynamic_dispatch_through_a_trait_object() {
         compile_and_run(
             "dyn_dispatch",
             r#"
-            (deftrait Drawable (draw ((self Self)) i32))
+            (deftrait Drawable () (draw ((self Self)) i32))
             (defstruct circle (r i32))
             (defstruct square (side i32))
             (impl Drawable circle (draw ((self Self)) i32 1))
@@ -672,7 +672,7 @@ fn compiles_and_runs_a_multi_slot_vtable() {
         compile_and_run(
             "dyn_slots",
             r#"
-            (deftrait Shape
+            (deftrait Shape ()
               (draw ((self Self)) i32)
               (sides ((self Self)) i32))
             (defstruct tri (n i32))

@@ -297,15 +297,15 @@ fn a_type_may_not_take_a_traits_name() {
 fn a_trait_may_not_take_a_types_name() {
     // The other direction, on a bare checker so the names are free to start
     // with: whichever is defined second is the one rejected.
-    assert_type_error("(defstruct Thing (x i32)) (deftrait Thing (m ((self Self)) i32))");
-    assert_type_error("(deftrait Gadget (m ((self Self)) i32)) (defstruct Gadget (x i32))");
-    assert_type_error("(deftrait Widget (m ((self Self)) i32)) (defenum Widget (a))");
+    assert_type_error("(defstruct Thing (x i32)) (deftrait Thing () (m ((self Self)) i32))");
+    assert_type_error("(deftrait Gadget () (m ((self Self)) i32)) (defstruct Gadget (x i32))");
+    assert_type_error("(deftrait Widget () (m ((self Self)) i32)) (defenum Widget (a))");
 }
 
 #[test]
 fn a_type_and_a_trait_of_the_same_name_may_live_in_different_modules() {
     // The rule is per-namespace, like every other name in this language.
-    let src = "(module a (deftrait Same (m ((self Self)) i32))) \
+    let src = "(module a (deftrait Same () (m ((self Self)) i32))) \
                (module b (defstruct Same (x i32)))";
     assert!(program(src).is_ok());
 }

@@ -188,7 +188,7 @@ fn defstruct_without_docstring_has_no_documentation() {
 #[test]
 fn deftrait_docstring_is_returned_by_documentation() {
     let src = r#"
-        (deftrait describable
+        (deftrait describable ()
           "Types that can describe themselves."
           (describe ((self Self)) string))
         (unwrap-or (documentation describable) "none")
@@ -200,7 +200,7 @@ fn deftrait_docstring_is_returned_by_documentation() {
 fn defmethod_docstring_via_impl_is_returned_by_documentation() {
     let src = r#"
         (defstruct point (x i32) (y i32))
-        (deftrait describable
+        (deftrait describable ()
           (describe ((self Self)) string))
         (impl describable point
           (describe ((self point)) string
