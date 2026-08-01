@@ -605,6 +605,7 @@ impl Registry {
         // `read`: parses one `Sexpr` form out of a string with the same
         // reader `typl`/the REPL use for source text
         // (`crate::read::Reader::read`) — CL's `read-from-string`.
+        register_stream_builtins(&mut root);
         root.fns.insert("read".to_string(), FnSig { type_params: vec![], rest: None, params: vec![Type::Str], ret: result_of(sexpr(), error_ty(READ_ERROR)), public: true, builtin: true, bounds: HashMap::new(), optionals: Vec::new(), keys: Vec::new() });
         // `eval`: type-checks and runs a runtime `Sexpr` against the current
         // global environment, CL-style (`Interp::eval_form`). Sees all globals
@@ -878,7 +879,86 @@ pub const PARSE_INT_ERROR: &str = "parseinterror";
 pub const PARSE_FLOAT_ERROR: &str = "parsefloaterror";
 pub const READ_ERROR: &str = "readerror";
 pub const EVAL_ERROR: &str = "evalerror";
-pub const BUILTIN_ERROR_TYPES: [&str; 4] = [PARSE_INT_ERROR, PARSE_FLOAT_ERROR, READ_ERROR, EVAL_ERROR];
+/// CLHS's `file-error`, covering every failure the stream/file layer can
+/// report: `open` on a missing file, `delete-file` on a read-only directory,
+/// and the wrong-direction/closed-stream program errors that reach a
+/// `Result`-typed entry point. CL splits these across
+/// `file-error`/`stream-error`; one concrete type is enough here because the
+/// *message* is what a program can act on — dispatching on a condition
+/// *class* would need a condition system, which this language deliberately
+/// does not have.
+pub const FILE_ERROR: &str = "fileerror";
+pub const BUILTIN_ERROR_TYPES: [&str; 5] =
+    [PARSE_INT_ERROR, PARSE_FLOAT_ERROR, READ_ERROR, EVAL_ERROR, FILE_ERROR];
+
+/// The `stream-*` / `file-*` primitives (`eval::interp::Interp::
+/// eval_stream_builtin`). Deliberately minimal and untyped-looking: a stream
+/// is an opaque `i64` handle here, and the whole CL-shaped surface — the
+/// `Stream`/`InputStream`/`OutputStream` traits, the concrete stream types
+/// that wrap a handle in a `defstruct`, every composite stream, and the
+/// `with-...` macros — is written in `prelude.rs` on top of these.
+///
+/// Anything that can fail returns `Result<_, FileError>`; a missing file or a
+/// closed stream is something programs handle, not a bug.
+fn register_stream_builtins(root: &mut Namespace) {
+    let file_err = error_ty(FILE_ERROR);
+    let mut native = |name: &str, params: Vec<Type>, ret: Type| {
+        root.fns.insert(
+            name.to_string(),
+            FnSig {
+                type_params: vec![],
+                params,
+                ret,
+                public: true,
+                rest: None,
+                builtin: true,
+                bounds: HashMap::new(),
+                optionals: Vec::new(),
+                keys: Vec::new(),
+            },
+        );
+    };
+    let h = Type::I64;
+    let unit_or_err = result_of(Type::Unit, file_err.clone());
+
+    // Constructors. The three standard streams hand out a fresh handle per
+    // call; the prelude opens each exactly once, into a global.
+    native("stream-stdin", vec![], h.clone());
+    native("stream-stdout", vec![], h.clone());
+    native("stream-stderr", vec![], h.clone());
+    native("stream-string-input", vec![Type::Str], h.clone());
+    native("stream-string-output", vec![], h.clone());
+    // mode: 0 input, 1 output (truncate), 2 output (append).
+    native("stream-open-file", vec![Type::Str, h.clone()], result_of(h.clone(), file_err.clone()));
+
+    // Lifetime and interrogation.
+    native("stream-close", vec![h.clone()], unit_or_err.clone());
+    native("stream-open-p", vec![h.clone()], Type::Bool);
+    native("stream-input-p", vec![h.clone()], result_of(Type::Bool, file_err.clone()));
+    native("stream-output-p", vec![h.clone()], result_of(Type::Bool, file_err.clone()));
+
+    // Input. `stream-read-char` returns `Ok(none)` at end of input and `Err`
+    // only for a real failure, so end-of-input never has to be a panic.
+    native(
+        "stream-read-char",
+        vec![h.clone()],
+        result_of(option_of(Type::Char), file_err.clone()),
+    );
+    native("stream-unread-char", vec![h.clone(), Type::Char], unit_or_err.clone());
+    native("stream-listen", vec![h.clone()], result_of(Type::Bool, file_err.clone()));
+
+    // Output. Only whole strings cross this boundary — a per-character
+    // built-in call would dominate the cost of writing anything.
+    native("stream-write-string", vec![h.clone(), Type::Str], unit_or_err.clone());
+    native("stream-at-line-start", vec![h.clone()], result_of(Type::Bool, file_err.clone()));
+    native("stream-finish-output", vec![h.clone()], unit_or_err.clone());
+    native("stream-take-output-string", vec![h.clone()], result_of(Type::Str, file_err.clone()));
+
+    // Filesystem operations that need no open stream.
+    native("file-exists-p", vec![Type::Str], Type::Bool);
+    native("file-delete", vec![Type::Str], unit_or_err.clone());
+    native("file-rename", vec![Type::Str, Type::Str], unit_or_err);
+}
 
 /// Whether `p` names one of [`BUILTIN_ERROR_TYPES`].
 pub fn is_builtin_error_type(p: &Path) -> bool {
@@ -887,7 +967,8 @@ pub fn is_builtin_error_type(p: &Path) -> bool {
 
 /// The concrete error type of every fallible built-in, one per failure
 /// source: `ParseIntError` (`parse-int`), `ParseFloatError` (`parse-float`),
-/// `ReadError` (`read`), `EvalError` (`eval`) — modeled on Rust's std, where
+/// `ReadError` (`read`), `EvalError` (`eval`), `FileError` (every stream and
+/// file operation) — modeled on Rust's std, where
 /// `Error` is a *trait* and each operation returns its own concrete error
 /// (`ParseIntError`, `io::Error`, ...). `Error` is accordingly not a type in
 /// this language at all: it is the prelude trait these four implement
@@ -1651,6 +1732,10 @@ fn char_assoc() -> HashMap<String, AssocFn> {
     // `char->int`: a `char`'s Unicode scalar value as `i32` (`docs/
     // language-design.md` §4.1's planned conversion catalog) — the other
     // half is `int_assoc`'s `int->char`.
+    // `char->string`: the one-character string. CL reaches this through
+    // `string`, which is a designator-taking function this language has no
+    // room for; the explicit name says which direction the conversion goes.
+    m.insert("char->string".to_string(), method(vec![Type::Char], Type::Str));
     m.insert("char->int".to_string(), method(vec![Type::Char], Type::I32));
     m.insert("print".to_string(), method(vec![Type::Char], Type::Unit));
     m.insert("println".to_string(), method(vec![Type::Char], Type::Unit));

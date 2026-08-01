@@ -851,3 +851,124 @@ check 時のエラー（未定義変数参照などと同様）。解決はで�
 
 LSP のホバーにも統合されている: 定義済みの名前にカーソルを合わせると、型の下に docstring が
 表示される（`src/check/locate.rs` の `doc_for`/`hover_text`）。
+
+## 18. ストリームとファイル I/O
+
+CL がクラス階層で表すものを、ここでは**トレイト階層**で表す。方向（入力／出力）も要素型も
+**静的**に決まるので、「このストリームは読めるか」を実行時に尋ねる必要がない。
+
+```lisp
+(deftrait Stream ()             (open-stream-p ...) (close ...))
+(deftrait InputStream  (Stream) (type Item) (read-item ...))
+(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait CharInput  ((InputStream  (Item char))) ...)   ; 文字入力
+(deftrait CharOutput ((OutputStream (Item char))) ...)   ; 文字出力
+```
+
+文字を読む関数は `(where (CharInput S))` か `:dyn CharInput` を取れば、組み込み・ユーザ定義を
+問わずあらゆるストリーム型を受け付ける。
+
+### 18.1 メソッド（すべてトレイト経由）
+
+`CharInput` の全メソッドはデフォルト実装を持つ。実装側が書くのは `read-item` だけ。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `read-item` | `(read-item s)` | `(S)→Option<Item>` | 次の1要素。末尾なら `none`。**唯一の実装必須メソッド** |
+| `read-char` | `(read-char s)` | `(S)→Option<char>` | 次の1文字 |
+| `read-line` | `(read-line s)` | `(S)→Option<string>` | 次の改行まで（改行は消費して除去）。改行で終わらない最終行も返る |
+| `read-all` | `(read-all s)` | `(S)→string` | 残り全部 |
+
+`CharOutput` も同様に、実装側が書くのは `write-item` だけ。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `write-item` | `(write-item s x)` | `(S,Item)→()` | 1要素を書く。**唯一の実装必須メソッド** |
+| `write-char` | `(write-char s c)` | `(S,char)→()` | 1文字書く |
+| `write-string` | `(write-string s str)` | `(S,string)→()` | 文字列を書く |
+| `write-line` | `(write-line s str)` | `(S,string)→()` | 文字列＋改行 |
+| `terpri` | `(terpri s)` | `(S)→()` | 改行を1つ（CL の名前） |
+| `finish-output` | `(finish-output s)` | `(S)→()` | バッファを送り出す |
+
+`Stream` は全ストリーム共通:
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `open-stream-p` | `(open-stream-p s)` | `(S)→bool` | まだ開いているか |
+| `close` | `(close s)` | `(S)→()` | 閉じる。**GC では閉じられない**ので明示的に（または `with-open-file` で） |
+
+### 18.2 具象ストリーム型
+
+| 型 | 作り方 | 実装するトレイト |
+|---|---|---|
+| `file-stream` | `(open-file name direction)` / `open-input` / `open-output` | `CharInput` `CharOutput` |
+| `string-input-stream` | `(make-string-input-stream s)` | `CharInput` |
+| `string-output-stream` | `(make-string-output-stream)` | `CharOutput` |
+| `standard-stream` | `*standard-input*` `*standard-output*` `*error-output*` | `CharInput` `CharOutput` |
+
+`direction` は `direction-input` / `direction-output` / `direction-append` の3定数。
+`open-file` は開けなければ `Err(FileError)` を返す（存在しないファイルは普通の結果であって
+panic ではない）。
+
+`(get-output-stream-string s)` は `string-output-stream` に書かれた内容を返して空にする。
+CL 同様、`close` 後でも取り出せる。
+
+### 18.3 合成ストリーム
+
+いずれも**ただの `defstruct`** で、ネイティブ層の支援を必要としない。入れ子にもできる。
+
+| 名前 | 形式 | 説明 |
+|---|---|---|
+| `make-broadcast-stream` | `(make-broadcast-stream v)` | `Vector<:dyn CharOutput>` の全てへ書く |
+| `make-two-way-stream` | `(make-two-way-stream in out)` | `in` から読み `out` へ書く |
+| `make-echo-stream` | `(make-echo-stream in out)` | `in` から読み、読んだ文字を `out` にも書く |
+| `make-concatenated-stream` | `(make-concatenated-stream v)` | `Vector<:dyn CharInput>` を順に読み継ぐ |
+
+### 18.4 マクロ
+
+| 名前 | 形式 | 説明 |
+|---|---|---|
+| `with-open-file` | `(with-open-file (var name direction) body...)` | 開く→本体→閉じる。`Result<本体の値, FileError>` |
+| `with-input-from-string` | `(with-input-from-string (var s) body...)` | 文字列から読む |
+| `with-output-to-string` | `(with-output-to-string (var) body...)` | 書かれた内容を返す |
+
+### 18.5 ジェネリック関数とファイル操作
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | 全部転送 |
+| `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | 残り全行 |
+| `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | 1行ずつ書く |
+| `read-file-string` | `(read-file-string name)` | `(string)→Result<string,FileError>` | 全内容 |
+| `read-file-lines` | `(read-file-lines name)` | `(string)→Result<Vector<string>,FileError>` | 全行 |
+| `write-file-string` | `(write-file-string name text)` | `(string,string)→Result<bool,FileError>` | 書き出す |
+| `probe-file` | `(probe-file name)` | `(string)→bool` | 存在するか |
+| `delete-file` / `rename-file` | | `→Result<bool,FileError>` | 削除・改名 |
+
+### 18.6 自分の型をストリームにする
+
+`write-item` を1つ書けば、残りはデフォルト実装が付いてくる。合成ストリームにも入れられる。
+
+```lisp
+(defstruct counter (n i32))
+(impl Stream counter
+  (open-stream-p ((self Self)) bool true)
+  (close ((self Self)) () ()))
+(impl OutputStream counter
+  (type Item char)
+  (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
+(impl CharOutput counter)              ; 残り5メソッドは全部デフォルト
+
+(write-line (counter::new 0) "四文字")  ; write-line も terpri も動く
+```
+
+### 18.7 CL との違い
+
+- **クラス階層ではなくトレイト階層**。`input-stream-p` / `output-stream-p` は無い——方向は型が
+  持つので、実行時に尋ねる問いではない。
+- **pathname は無い**。ファイルは文字列で指す。
+- **`format` のストリーム宛は無い**。`(write-string s (format false "~a" x))` と書く。
+- **閉じるのは明示的**。GC はクローズしない（コレクタは cons アリーナ枯渇時にしか走らないので、
+  ファイナライザは予測できない時点で動くか一度も動かない）。`with-open-file` を使うのが安全。
+- ストリーム操作は `format`/`random` と同じく**インタプリタ専用**で、これらを呼ぶ関数は
+  JIT/AOT コンパイルされない。

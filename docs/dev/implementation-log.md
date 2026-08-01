@@ -5147,3 +5147,79 @@ REPL・逐次 `load`・fasl 復元のどれでも決定的に判定できる唯�
   トレイトが古いキャッシュから配られる、ユーザーに見えるバグだった。
 - prelude: `Ord` が `Eq` を継承。`Eq` は `equals` のみ、`Ord` は `less` のみが実装必須になり、
   スカラ16 impl と `Error` 5 impl から約30個のメソッド本体が消えた。
+
+## ストリーム/ファイル I/O をトレイトで再設計（2026-08-02）
+
+第1版（CL のクラス階層を単一 `stream` 型に畳んだもの）を撤去し、同日入った Rust 同等の
+トレイト機構の上で作り直した。撤去の判断と実測は `revert(streams)` コミットに、
+第1版そのものの設計は git 履歴（`11707b5`）に残っている。
+
+### 何が変わったか
+
+| | 第1版 | 再設計 |
+|---|---|---|
+| Rust バックエンド | 1129行（合成ストリーム5種を含む） | 約300行（葉のみ） |
+| `checker.rs` の特殊形 | `check_read`・format/print の型分岐 34行 | **0行** |
+| 合成ストリーム | `StreamKind` 変種 + 全ディスパッチ地点の分岐 | typelisp の `defstruct` 8〜12行ずつ |
+| ユーザ定義型がストリームになれるか | ✗ | ✓ |
+
+### トレイト階層
+
+```lisp
+(deftrait Stream ()             (open-stream-p ...) (close ...))
+(deftrait InputStream  (Stream) (type Item) (read-item ...))
+(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait CharInput  ((InputStream  (Item char))) ...全メソッドがデフォルト実装...)
+(deftrait CharOutput ((OutputStream (Item char))) ...全メソッドがデフォルト実装...)
+```
+
+**関連型をピン留めしたスーパトレイト**が設計の要。`Item` を `char` に固定した上でしか
+`read-line`／`write-string` のような文字前提のデフォルト本体は書けず、それができるので
+具象型が書くのは `read-item`／`write-item` 各1つだけになる。`Item` を `InputStream` 側で
+開いたままにしてあるのは、バイトストリームを足すときに並行の階層を作らずに済ませるため。
+
+### 実装表現: なぜ不透明な i64 ハンドルなのか
+
+具象ストリーム型は **heap 表現でなければならない**。`:dyn CharOutput` が箱詰めし、
+`Vector<:dyn CharOutput>` が格納するからで、`random-state` と同じネイティブ表現ではどちらも
+できない。GC ヒープの `BoxedObj` は typelisp-mem の `pub(crate)` なので、上位クレートで
+定義した `StreamObj` を入れる変種を足すこともできない。
+
+そこでストリームの**値**は `i64` を1つ持つ `defstruct` にし、OS リソースは `Interp` 上の
+`StreamTable` に置いた。フィールドは `pub` でないのでハンドルを typelisp 側から捏造できず、
+`BoxedObj`・GC・typelisp-mem を一切触らずに済む。スロットは**再利用しない**（閉じたハンドルは
+別のストリームに化けるより、無効なままの方が良い）。
+
+代償は、最後の参照が消えてもクローズされないこと。ただしこれは値型設計でも同じだった——
+コレクタは cons アリーナ枯渇時にしか走らないので、ファイナライザは予測できない時点で動くか
+一度も動かない。クローズは明示（`close`、または `with-open-file`）のままとした。
+
+### 合成ストリームが typelisp に降りた
+
+`broadcast-stream` の全実装が `Vector<:dyn CharOutput>` を持つ struct と `write-item` 1つ。
+第1版では `StreamKind::Broadcast` 変種と、read/write/close/listen 等**全てのディスパッチ地点**に
+分岐が要った。two-way / echo / concatenated も同様。入れ子（broadcast の中の broadcast）は
+何もしなくても効く——合成ストリームもまた `:dyn CharOutput` だから。
+
+`make-synonym-stream` は消滅した。第1版ではグローバル名を評価せず呼び出し元モジュールで
+解決する checker 特殊形が要ったが、間接参照が欲しければ普通の struct を1つ書けばよい。
+
+### 途中で判明した既存の穴（どちらも TODO.md に記録）
+
+- **型引数の中に `()` を書けない**。`Result<(), FileError>` は型名レキサが `(`/`)` を扱えず
+  `Path::from_segments` で **panic** する。第1版も避けていた（`Result<bool, E>` を使っていた）。
+- **`match` の腕から `Result` の誤差型が推論されない**。`(result::ok v)` 単独では `E` が決まらず、
+  期待型の無い `match` では兄弟の `err` 腕からも回復されない。戻り型を宣言した `io-ok`
+  ヘルパで固定した。
+
+### その他の落とし穴
+
+- `pub deftrait` は非対応（仕様）。prelude の既存トレイトも `pub` なしで、可視性は
+  `resolve_trait_name` が見ていないので実害は無い。
+- 文字列に `iter` は無い。`(ref s i)` と `(length s)` のインデックスループを使う。
+- `Vector` の要素数は `len`。ジェネリックな `length`（`Iter` 上の関数）は
+  `Vector<:dyn T>` に対して要素型を推論できない。
+- マクロ本体での分解は `sexpr-car`/`sexpr-cdr`（`car`/`cdr` は無い）。
+- `impl Error FileError` は `unwrap-io` より**前**に置く必要がある（メソッドは定義順）。
+- `char->string` を復活させた。第1版で入れて撤去時に外したが、`write-item` の実装で
+  1文字を文字列にする必要があり戻ってきた。

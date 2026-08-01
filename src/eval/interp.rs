@@ -245,6 +245,10 @@ pub struct Interp {
     /// is the sole source of). Neither table holds heap values, so a vtable
     /// needs no GC root — `BoxedObj::Dyn`'s own `value` is all the collector
     /// ever has to trace.
+    /// Open streams, addressed by the opaque `i64` handle a stream
+    /// `defstruct` holds. See `eval::stream` for why the OS resource lives
+    /// here rather than inside the value.
+    streams: RefCell<crate::eval::stream::StreamTable>,
     vtables: RefCell<Vec<Vec<(Path, String)>>>,
     /// `(concrete type key, trait path)` -> `vtable_id`, so the same pair
     /// interns to one id however many times it is boxed. The key's first
@@ -411,6 +415,7 @@ impl Interp {
             compiled_globals: RefCell::new(HashMap::new()),
             jit_graveyard: RefCell::new(Vec::new()),
             jit_ctor_cache: RefCell::new(HashMap::new()),
+            streams: RefCell::new(Default::default()),
             vtables: RefCell::new(Vec::new()),
             vtable_ids: RefCell::new(HashMap::new()),
             dyn_dispatch_compiled: RefCell::new(HashSet::new()),
@@ -3240,6 +3245,9 @@ impl Interp {
                         .map_err(|e| EvalError::Panic(format!("compile-file: {}", e))),
                 )
             }
+            name if name.starts_with("stream-") || name.starts_with("file-") => {
+                self.eval_stream_builtin(heap, name, args)
+            }
             "make-random-state-fresh" => Some(eval_make_random_state_fresh(args)),
             "random-state-copy" => Some(eval_random_state_copy(args)),
             "random-state-next" => Some(eval_random_state_next(args)),
@@ -4952,6 +4960,9 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
             // is case-insensitive (see `registry::char_assoc`'s doc comment).
             "eq" | "eql" | "equal" => Some(char_eq(args)),
             "equalp" => Some(char_eqp(args)),
+            "char->string" => {
+                Some(expect_char(&args[0]).map(|c| RtValue::Str(c.to_string().into())))
+            }
             "char->int" => Some(char_to_int(args)),
             "print" => Some(expect_char(&args[0]).and_then(|c| write_stdout(&c.to_string(), false))),
             "println" => Some(expect_char(&args[0]).and_then(|c| write_stdout(&c.to_string(), true))),
@@ -5363,6 +5374,7 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
         "char" => matches!(
             method,
             "eq" | "eql" | "equal" | "equalp" | "lt" | "<" | "<=" | ">" | ">=" | "char->int"
+                | "char->string"
         ),
         "f64" => matches!(
             method,
@@ -6475,6 +6487,124 @@ fn build_enum_value(heap: &mut Heap, type_name: Path, variant: usize, fields: Ve
         }
     }
     RtValue::Sexpr(heap.alloc_enum(type_name.to_string(), variant, mem_fields))
+}
+
+impl Interp {
+    /// The `stream-*` / `file-*` built-ins: thin wrappers over
+    /// [`crate::eval::stream::StreamTable`], which owns the OS resources.
+    ///
+    /// Every one of these is deliberately dumb. The CL-shaped surface —
+    /// `open`'s `&key` arguments, the `with-...` macros, `read-line`'s
+    /// end-of-input convention, and every composite stream — is written in
+    /// typelisp on top of the `Stream`/`InputStream`/`OutputStream` traits,
+    /// where a default method body can express it once for all
+    /// implementations. Nothing here knows those traits exist.
+    ///
+    /// Fallible operations return `Result<_, FileError>` rather than
+    /// panicking: a missing file or a closed stream is a condition programs
+    /// routinely handle, not a bug.
+    fn eval_stream_builtin(
+        &self,
+        heap: &mut Heap,
+        name: &str,
+        args: &[RtValue],
+    ) -> Option<Result<RtValue, EvalError>> {
+        use crate::check::registry::FILE_ERROR;
+        // Most arms yield a `StreamResult`; this keeps each to one line.
+        macro_rules! wrap {
+            ($e:expr, $ok:expr) => {
+                match $e {
+                    Ok(v) => Ok(result_ok(heap, $ok(v))),
+                    Err(m) => Ok(result_err(heap, FILE_ERROR, m)),
+                }
+            };
+        }
+        let mut t = self.streams.borrow_mut();
+        let h = |i: usize| -> Result<i64, EvalError> { rt_i64(&args[i]) };
+        Some(match name {
+            "stream-stdin" => Ok(RtValue::Int(t.stdin())),
+            "stream-stdout" => Ok(RtValue::Int(t.stdout())),
+            "stream-stderr" => Ok(RtValue::Int(t.stderr())),
+            "stream-string-input" => match expect_str(&args[0]) {
+                Ok(s) => Ok(RtValue::Int(t.string_input(&s))),
+                Err(e) => Err(e),
+            },
+            "stream-string-output" => Ok(RtValue::Int(t.string_output())),
+            "stream-open-file" => match (expect_str(&args[0]), h(1)) {
+                (Ok(p), Ok(mode)) => wrap!(t.open_file(&p, mode), |v: i64| RtValue::Int(v)),
+                (Err(e), _) | (_, Err(e)) => Err(e),
+            },
+            "stream-close" => match h(0) {
+                Ok(x) => wrap!(t.close(x), |_v: ()| RtValue::Unit),
+                Err(e) => Err(e),
+            },
+            "stream-open-p" => h(0).map(|x| RtValue::Bool(t.is_open(x))),
+            "stream-input-p" => match h(0) {
+                Ok(x) => wrap!(t.is_input(x), |v: bool| RtValue::Bool(v)),
+                Err(e) => Err(e),
+            },
+            "stream-output-p" => match h(0) {
+                Ok(x) => wrap!(t.is_output(x), |v: bool| RtValue::Bool(v)),
+                Err(e) => Err(e),
+            },
+            "stream-read-char" => match h(0) {
+                Ok(x) => match t.read_char(x) {
+                    Ok(c) => {
+                        let inner = option_value(heap, c.map(RtValue::Char));
+                        Ok(result_ok(heap, inner))
+                    }
+                    Err(m) => Ok(result_err(heap, FILE_ERROR, m)),
+                },
+                Err(e) => Err(e),
+            },
+            "stream-unread-char" => match (h(0), expect_char(&args[1])) {
+                (Ok(x), Ok(c)) => wrap!(t.unread_char(x, c), |_v: ()| RtValue::Unit),
+                (Err(e), _) | (_, Err(e)) => Err(e),
+            },
+            "stream-listen" => match h(0) {
+                Ok(x) => wrap!(t.listen(x), |v: bool| RtValue::Bool(v)),
+                Err(e) => Err(e),
+            },
+            "stream-write-string" => match (h(0), expect_str(&args[1])) {
+                (Ok(x), Ok(s)) => wrap!(t.write_str(x, &s), |_v: ()| RtValue::Unit),
+                (Err(e), _) | (_, Err(e)) => Err(e),
+            },
+            "stream-at-line-start" => match h(0) {
+                Ok(x) => wrap!(t.at_line_start(x), |v: bool| RtValue::Bool(v)),
+                Err(e) => Err(e),
+            },
+            "stream-finish-output" => match h(0) {
+                Ok(x) => wrap!(t.finish_output(x), |_v: ()| RtValue::Unit),
+                Err(e) => Err(e),
+            },
+            "stream-take-output-string" => match h(0) {
+                Ok(x) => match t.take_output_string(x) {
+                    Ok(s) => Ok(result_ok(heap, RtValue::Str(s.into()))),
+                    Err(m) => Ok(result_err(heap, FILE_ERROR, m)),
+                },
+                Err(e) => Err(e),
+            },
+            "file-exists-p" => match expect_str(&args[0]) {
+                Ok(p) => Ok(RtValue::Bool(std::path::Path::new(&*p).exists())),
+                Err(e) => Err(e),
+            },
+            "file-delete" => match expect_str(&args[0]) {
+                Ok(p) => Ok(match std::fs::remove_file(&*p) {
+                    Ok(()) => result_ok(heap, RtValue::Unit),
+                    Err(e) => result_err(heap, FILE_ERROR, format!("delete-file: {}: {}", p, e)),
+                }),
+                Err(e) => Err(e),
+            },
+            "file-rename" => match (expect_str(&args[0]), expect_str(&args[1])) {
+                (Ok(a), Ok(b)) => Ok(match std::fs::rename(&*a, &*b) {
+                    Ok(()) => result_ok(heap, RtValue::Unit),
+                    Err(e) => result_err(heap, FILE_ERROR, format!("rename-file: {}: {}", a, e)),
+                }),
+                (Err(e), _) | (_, Err(e)) => Err(e),
+            },
+            _ => return None,
+        })
+    }
 }
 
 /// `Some(v)`/`None`, matching `option_def`'s variant order (`some` = 0,

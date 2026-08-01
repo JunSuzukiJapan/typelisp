@@ -1389,6 +1389,419 @@ pub const SOURCE: &str = r#"
                         (int->float internal-time-units-per-second)))
            ,result)))))
 
+
+;; ---------------------------------------------------------------------------
+;; Streams (CLHS 21) and files (CLHS 20).
+;;
+;; Where CL has a class hierarchy this has a *trait* hierarchy, which is the
+;; same idea without needing subtyping: `Stream` for what every stream can do,
+;; `InputStream`/`OutputStream` for direction, and `CharInput`/`CharOutput`
+;; for the character-specific operations. A function that reads characters
+;; takes `(where (CharInput S))` or a `:dyn CharInput`, and every stream type
+;; -- built-in or user-defined -- fits.
+;;
+;; Two things this buys that a single `stream` type could not:
+;;
+;;   * Composite streams are ordinary structs *here*, not variants of a native
+;;     enum. `broadcast-stream` below is eight lines and needs no support from
+;;     Rust at all, because it just holds `Vector<:dyn CharOutput>`.
+;;   * User types are streams. Implement `CharOutput` for your own type and
+;;     every function below works on it.
+;;
+;; The native layer (`eval::stream`) knows only about leaf backends -- files,
+;; strings, the three standard streams -- addressed by an opaque `i64` handle.
+;; A concrete stream type is a struct holding one, and the field is not `pub`,
+;; so handles cannot be forged.
+;;
+;; NOTE: closing is explicit. A stream is not closed when it becomes garbage
+;; (the collector only runs when the cons arena fills, so a finalizer would
+;; fire unpredictably or never). Prefer `with-open-file`, which closes for you.
+
+(deftrait Stream ()
+  "What every stream can do, whatever it carries and whichever way it goes."
+  (open-stream-p ((self Self)) bool)
+  (close ((self Self)) ()))
+
+;; Direction. `Item` is left open so a byte stream can pin it to `i32` later
+;; without a parallel trait hierarchy; the character layers below pin it.
+(deftrait InputStream (Stream)
+  "A stream that yields items."
+  (type Item)
+  (read-item ((self Self)) Option<Item>
+    "The next item, or `none` at end of input."))
+
+(deftrait OutputStream (Stream)
+  "A stream that accepts items."
+  (type Item)
+  (write-item ((self Self) (x Item)) ()))
+
+;; The character layers. Pinning `Item` to `char` in the supertrait list is
+;; what lets these carry default bodies written in terms of characters --
+;; every method below is a default, so implementing `CharInput` for a type
+;; that already implements `InputStream` with `Item = char` costs one line.
+(deftrait CharInput ((InputStream (Item char)))
+  "A character input stream. Every method has a default body."
+  (read-char ((self Self)) Option<char>
+    "The next character, or `none` at end of input."
+    (read-item self))
+  (read-line ((self Self)) Option<string>
+    "Up to (and consuming) the next newline. `none` only at end of input, so
+     a final line with no newline is still returned."
+    (match (read-item self)
+      ((none) (option::none))
+      ((some first)
+       (let ((out "") (c first) (going true))
+         (while going
+           (if (equal c #\newline)
+               (progn (setf going false) ())
+               (progn
+                 (setf out (append out (char->string c)))
+                 (match (read-item self)
+                   ((none) (progn (setf going false) ()))
+                   ((some next) (progn (setf c next) ()))))))
+         (option::some out)))))
+  (read-all ((self Self)) string
+    "Everything left, as one string."
+    (let ((out ""))
+      (loop
+        (match (read-item self)
+          ((none) (break))
+          ((some c) (setf out (append out (char->string c))))))
+      out)))
+
+(deftrait CharOutput ((OutputStream (Item char)))
+  "A character output stream. Every method has a default body."
+  (write-char ((self Self) (c char)) ()
+    (write-item self c))
+  (write-string ((self Self) (s string)) ()
+    "Write every character of `s`."
+    (let ((i 0) (n (length s)))
+      (while (< i n)
+        (write-item self (ref s i))
+        (setf i (+ i 1)))))
+  (terpri ((self Self)) ()
+    "Write a newline. CL's name for it."
+    (write-item self #\newline))
+  (write-line ((self Self) (s string)) ()
+    "Write `s` followed by a newline."
+    (progn (write-string self s) (write-item self #\newline)))
+  (finish-output ((self Self)) ()
+    "Push buffered output to its destination. A no-op unless overridden."
+    ()))
+
+;; ---------------------------------------------------------------------------
+;; The native-backed stream types. Each is a struct around one handle; the
+;; field is deliberately not `pub`.
+
+(pub defstruct file-stream (h i64))
+(pub defstruct string-input-stream (h i64))
+(pub defstruct string-output-stream (h i64))
+(pub defstruct standard-stream (h i64))
+
+(impl Error FileError
+  (message ((self Self)) string (match self ((FileError m) m))))
+
+;; `unwrap-io` turns the native layer's `Result` into a panic, for the
+;; operations whose failure means the program is already broken (writing to a
+;; closed stream, a handle that is not what it claims). Operations whose
+;; failure is ordinary -- opening a file, deleting one -- return `Result` to
+;; the caller instead and never come through here.
+(defun unwrap-io<T> ((r Result<T, FileError>)) T
+  (match r
+    ((ok v) v)
+    ((err e) (panic (message e)))))
+
+(impl Stream file-stream
+  (open-stream-p ((self Self)) bool (stream-open-p self::h))
+  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+(impl InputStream file-stream
+  (type Item char)
+  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h))))
+(impl OutputStream file-stream
+  (type Item char)
+  (write-item ((self Self) (c char)) ()
+    (unwrap-io (stream-write-string self::h (char->string c)))))
+(impl CharInput file-stream)
+(impl CharOutput file-stream
+  ;; Overridden: one native call per string beats one per character, and this
+  ;; is the stream people write bulk output to.
+  (write-string ((self Self) (s string)) ()
+    (unwrap-io (stream-write-string self::h s)))
+  (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
+
+(impl Stream string-input-stream
+  (open-stream-p ((self Self)) bool (stream-open-p self::h))
+  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+(impl InputStream string-input-stream
+  (type Item char)
+  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h))))
+(impl CharInput string-input-stream)
+
+(impl Stream string-output-stream
+  (open-stream-p ((self Self)) bool (stream-open-p self::h))
+  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+(impl OutputStream string-output-stream
+  (type Item char)
+  (write-item ((self Self) (c char)) ()
+    (unwrap-io (stream-write-string self::h (char->string c)))))
+(impl CharOutput string-output-stream
+  (write-string ((self Self) (s string)) ()
+    (unwrap-io (stream-write-string self::h s))))
+
+(impl Stream standard-stream
+  (open-stream-p ((self Self)) bool (stream-open-p self::h))
+  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+(impl InputStream standard-stream
+  (type Item char)
+  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h))))
+(impl OutputStream standard-stream
+  (type Item char)
+  (write-item ((self Self) (c char)) ()
+    (unwrap-io (stream-write-string self::h (char->string c)))))
+(impl CharInput standard-stream)
+(impl CharOutput standard-stream
+  (write-string ((self Self) (s string)) ()
+    (unwrap-io (stream-write-string self::h s)))
+  (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
+
+;; CL's standard streams. Ordinary assignable globals, not dynamically bound
+;; specials (typelisp has no dynamic binding) -- `(setf *standard-output* s)`
+;; does globally what CL's `(let ((*standard-output* s)) ...)` does locally.
+(pub defvar (*standard-input*  standard-stream) (standard-stream::new (stream-stdin)))
+(pub defvar (*standard-output* standard-stream) (standard-stream::new (stream-stdout)))
+(pub defvar (*error-output*    standard-stream) (standard-stream::new (stream-stderr)))
+
+;; ---------------------------------------------------------------------------
+;; Composite streams. These are the whole argument for the trait design: each
+;; is a struct and one method, with no native support whatsoever.
+
+(pub defstruct broadcast-stream (parts Vector<:dyn CharOutput>))
+(impl Stream broadcast-stream
+  (open-stream-p ((self Self)) bool true)
+  (close ((self Self)) () (doiter (p (iter self::parts)) (close p))))
+(impl OutputStream broadcast-stream
+  (type Item char)
+  (write-item ((self Self) (c char)) ()
+    (doiter (p (iter self::parts)) (write-char p c))))
+(impl CharOutput broadcast-stream
+  (write-string ((self Self) (s string)) ()
+    (doiter (p (iter self::parts)) (write-string p s)))
+  (finish-output ((self Self)) ()
+    (doiter (p (iter self::parts)) (finish-output p))))
+
+(pub defstruct two-way-stream (in :dyn CharInput) (out :dyn CharOutput))
+(impl Stream two-way-stream
+  (open-stream-p ((self Self)) bool (open-stream-p self::in))
+  (close ((self Self)) () (progn (close self::in) (close self::out))))
+(impl InputStream two-way-stream
+  (type Item char)
+  (read-item ((self Self)) Option<char> (read-char self::in)))
+(impl OutputStream two-way-stream
+  (type Item char)
+  (write-item ((self Self) (c char)) () (write-char self::out c)))
+(impl CharInput two-way-stream)
+(impl CharOutput two-way-stream
+  (write-string ((self Self) (s string)) () (write-string self::out s))
+  (finish-output ((self Self)) () (finish-output self::out)))
+
+;; Reads from `in`, echoing every character actually read to `out`.
+(pub defstruct echo-stream (in :dyn CharInput) (out :dyn CharOutput))
+(impl Stream echo-stream
+  (open-stream-p ((self Self)) bool (open-stream-p self::in))
+  (close ((self Self)) () (progn (close self::in) (close self::out))))
+(impl InputStream echo-stream
+  (type Item char)
+  (read-item ((self Self)) Option<char>
+    (match (read-char self::in)
+      ((some c) (progn (write-char self::out c) (option::some c)))
+      ((none) (option::none)))))
+(impl CharInput echo-stream)
+
+;; Reads through the components in order; each one's end of input advances to
+;; the next rather than ending the stream.
+(pub defstruct concatenated-stream (parts Vector<:dyn CharInput>) (at i32))
+(impl Stream concatenated-stream
+  (open-stream-p ((self Self)) bool true)
+  (close ((self Self)) () (doiter (p (iter self::parts)) (close p))))
+(impl InputStream concatenated-stream
+  (type Item char)
+  (read-item ((self Self)) Option<char>
+    (let ((answer (the Option<char> (option::none))) (going true))
+      (while going
+        (if (>= self::at (len self::parts))
+            (progn (setf going false) ())
+            (match (read-char (get self::parts self::at))
+              ((some c) (progn (setf answer (option::some c)) (setf going false) ()))
+              ((none) (progn (setf self::at (+ self::at 1)) ())))))
+      answer)))
+(impl CharInput concatenated-stream)
+
+;; ---------------------------------------------------------------------------
+;; Constructors and the CL-shaped surface.
+
+(pub defun make-string-input-stream ((s string)) string-input-stream
+  "A stream that yields the characters of `s`."
+  (string-input-stream::new (stream-string-input s)))
+
+(pub defun make-string-output-stream () string-output-stream
+  "A stream that accumulates what is written to it; drain it with
+   `get-output-stream-string`."
+  (string-output-stream::new (stream-string-output)))
+
+(pub defun get-output-stream-string ((s string-output-stream)) string
+  "Everything written to `s` since the last call, clearing it."
+  (unwrap-io (stream-take-output-string s::h)))
+
+(pub defun make-broadcast-stream ((parts Vector<:dyn CharOutput>)) broadcast-stream
+  "A stream that writes to every component, in order."
+  (broadcast-stream::new parts))
+
+(pub defun make-two-way-stream ((in :dyn CharInput) (out :dyn CharOutput)) two-way-stream
+  (two-way-stream::new in out))
+
+(pub defun make-echo-stream ((in :dyn CharInput) (out :dyn CharOutput)) echo-stream
+  (echo-stream::new in out))
+
+(pub defun make-concatenated-stream ((parts Vector<:dyn CharInput>)) concatenated-stream
+  (concatenated-stream::new parts 0))
+
+;; `open`'s direction, as named constants rather than keywords: typelisp has
+;; no keyword arguments on a `defun` that a `&key` would make nicer here, and
+;; three constants read at least as well as `:direction :output`.
+(pub defconstant (direction-input i64) 0)
+(pub defconstant (direction-output i64) 1)
+(pub defconstant (direction-append i64) 2)
+
+(defun io-ok<T> ((v T)) Result<T, FileError>
+  "`(result::ok v)` with the error type pinned. Written as a function so the
+   declared return type supplies `FileError`: an `ok` arm on its own leaves
+   `E` open, and a `match` that has no expected type cannot recover it from
+   the sibling `err` arm."
+  (result::ok v))
+
+(pub defun open-file ((name string) (direction i64)) Result<file-stream, FileError>
+  "Open `name`, one of `direction-input` / `direction-output` /
+   `direction-append`. `Err` if the file cannot be opened -- a missing file is
+   an ordinary outcome, not a panic."
+  (match (stream-open-file name direction)
+    ((ok h) (io-ok (file-stream::new h)))
+    ((err e) (result::err e))))
+
+(pub defun open-input ((name string)) Result<file-stream, FileError>
+  (open-file name direction-input))
+
+(pub defun open-output ((name string)) Result<file-stream, FileError>
+  (open-file name direction-output))
+
+;; CL's `input-stream-p`/`output-stream-p` have no counterpart here, and do
+;; not need one: direction is part of the type. A value that can be read from
+;; implements `CharInput`, so the question is settled where the value is
+;; bound, not asked again at run time.
+
+;; `fresh-line`: a newline only if the stream is not already at the start of a
+;; line. Only the native-backed streams track a column, so this takes the
+;; concrete type rather than the trait.
+(pub defun fresh-line ((s file-stream)) ()
+  (if (unwrap-io (stream-at-line-start s::h)) () (write-char s #\newline)))
+
+;; ---------------------------------------------------------------------------
+;; Convenience over the traits. These are ordinary generic functions -- the
+;; point of the trait layer is that they need no cases.
+
+(pub defun write-lines<S,I> ((s S) (lines I)) () (where (CharOutput S) (Iter I (Item string)))
+  "Write each of `lines`, one per line."
+  (doiter (l lines) (write-line s l)))
+
+(pub defun copy-stream<I,O> ((from I) (to O)) () (where (CharInput I) (CharOutput O))
+  "Drain `from` into `to`."
+  (loop
+    (match (read-item from)
+      ((none) (break))
+      ((some c) (write-char to c)))))
+
+(pub defun read-lines<S> ((s S)) Vector<string> (where (CharInput S))
+  "Every remaining line of `s`."
+  (let ((out (the Vector<string> (Vector::new))))
+    (loop
+      (match (read-line s)
+        ((none) (break))
+        ((some l) (push out l))))
+    out))
+
+;; ---------------------------------------------------------------------------
+;; The `with-...` macros, which are the reason `close` rarely appears in user
+;; code. Each binds the stream, runs the body, then closes -- note the body's
+;; value is produced *before* the close, so `(with-open-file ...)` still
+;; returns something useful.
+
+(pub defmacro with-open-file (spec &rest body)
+  "`(with-open-file (var name direction) body...)` -- open, run the body, close.
+   Yields `Result<body-value, FileError>`: opening can fail, and the body's
+   value is produced before the close so it is still useful."
+  (let ((var (sexpr-car spec))
+        (name (sexpr-car (sexpr-cdr spec)))
+        (direction (sexpr-car (sexpr-cdr (sexpr-cdr spec))))
+        (s (gensym))
+        (e (gensym))
+        (result (gensym)))
+    `(match (open-file ,name ,direction)
+       ((ok ,s)
+        (let ((,var ,s))
+          (let ((,result (progn ,@body)))
+            (progn (close ,var) (io-ok ,result)))))
+       ((err ,e) (result::err ,e)))))
+
+(pub defmacro with-input-from-string (spec &rest body)
+  "`(with-input-from-string (var string) body...)`."
+  (let ((var (sexpr-car spec)) (text (sexpr-car (sexpr-cdr spec))))
+    `(let ((,var (make-string-input-stream ,text)))
+       (let ((r (progn ,@body)))
+         (progn (close ,var) r)))))
+
+(pub defmacro with-output-to-string (spec &rest body)
+  "`(with-output-to-string (var) body...)` -- returns everything written."
+  (let ((var (sexpr-car spec)))
+    `(let ((,var (make-string-output-stream)))
+       (progn ,@body (get-output-stream-string ,var)))))
+
+;; ---------------------------------------------------------------------------
+;; Whole-file convenience (CLHS 20 is otherwise mostly pathnames, which this
+;; language does not have -- a file is named by a string).
+
+(pub defun read-file-string ((name string)) Result<string, FileError>
+  "The entire contents of `name`."
+  (match (open-input name)
+    ((ok s) (let ((text (read-all s))) (progn (close s) (io-ok text))))
+    ((err e) (result::err e))))
+
+(pub defun read-file-lines ((name string)) Result<Vector<string>, FileError>
+  (match (open-input name)
+    ((ok s) (let ((ls (read-lines s))) (progn (close s) (io-ok ls))))
+    ((err e) (result::err e))))
+
+(pub defun write-file-string ((name string) (text string)) Result<bool, FileError>
+  "Write `text` to `name`, replacing it. `Ok(true)` on success -- the success
+   value is `bool` rather than `()` only because `Result<(), E>` cannot
+   currently be written (see docs/dev/TODO.md)."
+  (match (open-output name)
+    ((ok s) (progn (write-string s text) (close s) (io-ok true)))
+    ((err e) (result::err e))))
+
+(pub defun probe-file ((name string)) bool
+  "Whether `name` exists."
+  (file-exists-p name))
+
+(pub defun delete-file ((name string)) Result<bool, FileError>
+  (match (file-delete name)
+    ((ok _) (io-ok true))
+    ((err e) (result::err e))))
+
+(pub defun rename-file ((from string) (to string)) Result<bool, FileError>
+  (match (file-rename from to)
+    ((ok _) (io-ok true))
+    ((err e) (result::err e))))
+
+
 "#;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,

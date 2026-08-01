@@ -126,9 +126,20 @@ fn is_excluded(name: &str) -> bool {
     // user's own special variable gets the same treatment.
     let earmuffed = name.len() > 2 && name.starts_with('*') && name.ends_with('*');
 
+    // The native stream layer (`check::registry::register_stream_builtins`).
+    // These take an opaque `i64` handle and exist only for the prelude's
+    // trait implementations to call; a user writes `read-char`/`write-string`
+    // on a stream value and never names one of these.
+    let native_stream = name.starts_with("stream-") || name.starts_with("file-");
+    // Prelude-private helpers with no `pub`: `unwrap-io` turns a native
+    // `Result` into a panic, `io-ok` pins an error type.
+    const PRELUDE_PRIVATE: [&str; 2] = ["unwrap-io", "io-ok"];
+
     operator
         || type_param
         || earmuffed
+        || native_stream
+        || PRELUDE_PRIVATE.contains(&name)
         || name.ends_with("-rt")
         || ISLAND_PREFIXES.iter().any(|p| name.starts_with(p))
         || ISLAND_EXACT.contains(&name)
