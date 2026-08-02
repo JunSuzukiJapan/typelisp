@@ -1994,6 +1994,13 @@ impl Interp {
                 // above, so this only encodes.
                 RtValue::Sexpr(sv) => Ok(crate::compile::runtime::encode(*sv)),
                 RtValue::Int(n) => Ok(*n),
+                // `()` crosses as the plain `0` `compile-unit` compiles a
+                // `Unit`-typed body tail to — the exact inverse of the
+                // `Type::Unit` return decode below. A unit value carries no
+                // information, so the word is a placeholder the callee never
+                // reads; it just has to be the same placeholder both sides
+                // already agree on.
+                RtValue::Unit => Ok(0),
                 // The remaining scalar crossings, by the same encodings
                 // compiled code uses internally: `bool` and `char` are raw
                 // `i64`s (0/1 / code point); a string becomes a tagged heap
@@ -6466,7 +6473,7 @@ fn llvm_builder_build_ptr_to_int(args: &[RtValue]) -> Result<RtValue, EvalError>
 /// `rtvalue_to_struct_field` (the same representable set every other
 /// heap-boxed container already requires); for a field holding something
 /// the heap cannot represent at all (an LLVM handle, a native-repr
-/// `Scope<V>`, `Unit`, a `Builtin` function value — precisely
+/// `Scope<V>`, a `Builtin` function value — precisely
 /// `Option<llvm-value>`/`Option<llvm-basic-block>`/... the (typelisp-hosted)
 /// compiler body itself constructs throughout `compile-value` and friends),
 /// falls back to the native `RtValue::Data`, mirroring `Scope<V>`'s own
@@ -6757,8 +6764,21 @@ fn expect_struct_box(v: &RtValue) -> Result<BoxId, EvalError> {
 /// Stage 6b (a function value is a `Value::Boxed` closure box riding in
 /// `RtValue::Sexpr`, storable like any other boxed value), and heap-repr-`V`
 /// scopes at Stage 8, the same way.
+///
+/// `Unit` left that list when `()` gained a field representation: it stores
+/// as `Value::Empty`. The slot carries no information (a unit type has one
+/// value, already known statically from the declared type), so what it holds
+/// only has to be a word the GC can `decode` safely — and an immediate nil
+/// references nothing at all. This is the *one* encoding where the stored
+/// shape alone doesn't identify the type, so [`decode_field_typed`] reads
+/// `Unit` back off the declared type rather than from the value; see its
+/// doc comment. Making this representable is what keeps `Result<(), E>` a
+/// heap-repr enum instead of sending [`build_enum_value`] down its
+/// native-`RtValue::Data` fallback — which is what let a `()` payload cross
+/// into compiled code at all.
 pub(super) fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Value, EvalError> {
     match v {
+        RtValue::Unit => Ok(Value::Empty),
         RtValue::Int(n) => Ok(Value::Int(*n)),
         RtValue::Bool(b) => Ok(Value::Bool(*b)),
         RtValue::Char(c) => Ok(Value::Char(*c)),
@@ -6776,21 +6796,19 @@ pub(super) fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Va
 
 /// Convert an evaluated [`RtValue`] back into a `Sexpr`-side [`Value`], or
 /// `None` if it has no `Sexpr` representation — the shape `eval` needs to
-/// return its result (`Self::eval_form`). Everything
-/// [`rtvalue_to_struct_field`] handles converts identically (scalars box
-/// through the heap, an `RtValue::Sexpr` passes through), plus `Unit ->
-/// Value::Empty`: a form that produces no value (a `defvar` initializer's
-/// side effect, an empty `progn`) reads back as `()`/nil, whereas a *struct
-/// field* can never hold `Unit` so `rtvalue_to_struct_field` rejects it. The
-/// same non-representable set stays `None`: a native-repr `Data` enum
-/// (holding an LLVM handle/native `Scope`), a bare `Builtin` function value,
-/// a native `Scope<V>`, and the compiler-internal `Llvm*` handles have no
-/// `Sexpr` encoding.
+/// return its result (`Self::eval_form`). Exactly
+/// [`rtvalue_to_struct_field`]'s conversion: scalars box through the heap,
+/// an `RtValue::Sexpr` passes through, and `Unit` becomes `Value::Empty` —
+/// so a form that produces no value (a `defvar` initializer's side effect,
+/// an empty `progn`) reads back as `()`/nil. `Unit` used to need its own arm
+/// here because a struct field couldn't hold one; now that it can, the two
+/// agree by construction rather than by two copies of the same rule. The
+/// non-representable set stays `None`: a native-repr `Data` enum (holding an
+/// LLVM handle/native `Scope`), a bare `Builtin` function value, a native
+/// `Scope<V>`, and the compiler-internal `Llvm*` handles have no `Sexpr`
+/// encoding.
 pub(super) fn rtvalue_to_sexpr(heap: &mut Heap, v: &RtValue) -> Option<Value> {
-    match v {
-        RtValue::Unit => Some(Value::Empty),
-        _ => rtvalue_to_struct_field(heap, v).ok(),
-    }
+    rtvalue_to_struct_field(heap, v).ok()
 }
 
 /// Decodes a `mem::Value` read out of a `BoxedObj::Struct` field (or
@@ -6808,11 +6826,36 @@ pub(super) fn rtvalue_to_sexpr(heap: &mut Heap, v: &RtValue) -> Option<Value> {
 /// flip): it's a `Value::Boxed` at a `BoxedObj::Enum`, which
 /// [`decode_nonsexpr_field`]'s catch-all already turns into `RtValue::Sexpr`
 /// correctly, the same as any other boxed value.
+///
+/// `Unit` is the one slot whose stored shape is *not* injective: it holds a
+/// `Value::Empty` that a `Sexpr`-declared slot could equally hold as the
+/// datum `()`. It needs no shape test for that reason — a `()`-declared slot
+/// has exactly one possible value, so the declared type alone decides, which
+/// is precisely what this function is for.
 pub(super) fn decode_field_typed(heap: &Heap, v: Value, ty: &Type) -> RtValue {
-    if is_sexpr_ty(ty) {
+    if matches!(ty, Type::Unit) {
+        RtValue::Unit
+    } else if is_sexpr_ty(ty) {
         RtValue::Sexpr(v)
     } else {
         decode_nonsexpr_field(heap, v)
+    }
+}
+
+/// [`decode_field_typed`] over the two per-field facts a `Pattern::Ctor`
+/// bakes at check time instead of a live `Type`: `sexpr` is its
+/// `sexpr_fields` bit and `ty` its `field_types` entry. Shared by the boxed
+/// *enum* and boxed *struct* destructuring arms of [`match_pattern`], which
+/// decode a field identically and would otherwise drift apart.
+fn decode_ctor_field(heap: &Heap, raw: Value, sexpr: bool, ty: Option<&Type>) -> RtValue {
+    if sexpr {
+        RtValue::Sexpr(raw)
+    } else if matches!(ty, Some(Type::Unit)) {
+        // The one field type the runtime shape can't recover on its own —
+        // see `decode_field_typed`, whose rule this mirrors.
+        RtValue::Unit
+    } else {
+        decode_nonsexpr_field(heap, raw)
     }
 }
 
@@ -7607,7 +7650,7 @@ fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(Str
             RtValue::Char(m) if m == c => Some(Vec::new()),
             _ => None,
         },
-        Pattern::Ctor { type_name, variant, args, sexpr_fields, .. } => match v {
+        Pattern::Ctor { type_name, variant, args, sexpr_fields, field_types, .. } => match v {
             // The native-repr fallback for an enum instantiated over a
             // type the heap cannot represent at all (`build_enum_value`'s
             // doc comment — `Option<llvm-value>` and friends). Matched by
@@ -7651,11 +7694,7 @@ fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(Str
                 let mut binds = Vec::new();
                 for (i, p) in args.iter().enumerate() {
                     let raw = heap.enum_field(*id, i);
-                    let f = if sexpr_fields.get(i).copied().unwrap_or(false) {
-                        RtValue::Sexpr(raw)
-                    } else {
-                        decode_nonsexpr_field(heap, raw)
-                    };
+                    let f = decode_ctor_field(heap, raw, sexpr_fields.get(i).copied().unwrap_or(false), field_types.get(i));
                     binds.extend(match_pattern(heap, p, &f)?);
                 }
                 Some(binds)
@@ -7678,16 +7717,12 @@ fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(Str
                 let mut binds = Vec::new();
                 for (i, p) in args.iter().enumerate() {
                     let raw = heap.struct_field(*id, i);
-                    // `sexpr_fields` (baked at check time, exact now that
-                    // generic patterns are checked monomorphized) is the
-                    // "`Sexpr`-declared or not" bit `decode_field_typed`
-                    // reads off a `Type` — same type-directed decode, with
-                    // the bit precomputed per field.
-                    let f = if sexpr_fields.get(i).copied().unwrap_or(false) {
-                        RtValue::Sexpr(raw)
-                    } else {
-                        decode_nonsexpr_field(heap, raw)
-                    };
+                    // `sexpr_fields`/`field_types` (baked at check time,
+                    // exact now that generic patterns are checked
+                    // monomorphized) are what `decode_field_typed` reads off
+                    // a live `Type` — same type-directed decode, precomputed
+                    // per field.
+                    let f = decode_ctor_field(heap, raw, sexpr_fields.get(i).copied().unwrap_or(false), field_types.get(i));
                     binds.extend(match_pattern(heap, p, &f)?);
                 }
                 Some(binds)

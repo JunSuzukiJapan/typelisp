@@ -390,3 +390,39 @@ fn a_string_output_stream_can_still_be_drained_after_close() {
     );
     assert_eq!(str_of(v), "kept");
 }
+
+// ---- `Result<(), FileError>` --------------------------------------------
+//
+// The three effect-only file functions return `Ok(())`, not the meaningless
+// `Ok(true)` they carried while `Result<(), E>` was unwritable. Binding the
+// payload (rather than discarding it with `_`) is what pins the type down:
+// these would not compile against a `Result<bool, _>`.
+
+#[test]
+fn write_file_string_succeeds_with_a_unit_payload() {
+    let d = TmpDir::new("unitwrite");
+    let p = d.path("u.txt");
+    let v = eval_ok(&format!(
+        r#"(match (write-file-string "{p}" "contents")
+             ((ok u) (progn u (match (read-file-string "{p}") ((ok s) s) ((err e) (message e)))))
+             ((err e) (message e)))"#
+    ));
+    assert_eq!(str_of(v), "contents");
+}
+
+#[test]
+fn delete_and_rename_succeed_with_a_unit_payload() {
+    let d = TmpDir::new("unitdelete");
+    let from = d.path("from.txt");
+    let to = d.path("to.txt");
+    std::fs::write(&from, "x").unwrap();
+    let v = eval_ok(&format!(
+        r#"(match (rename-file "{from}" "{to}")
+             ((ok u) (progn u
+               (match (delete-file "{to}")
+                 ((ok u2) (progn u2 (format false "~a~a" (probe-file "{from}") (probe-file "{to}"))))
+                 ((err e) (message e)))))
+             ((err e) (message e)))"#
+    ));
+    assert_eq!(str_of(v), "falsefalse");
+}

@@ -420,3 +420,61 @@ fn match_on_a_struct_binds_a_sexpr_typed_field_as_a_sexpr() {
                  ((new c n) (+ (sexpr-int c) n)))";
     assert_eq!(eval_ok(src), RtValue::Int(10));
 }
+
+// ---- `()`-typed fields --------------------------------------------------
+//
+// A unit-typed slot is the one field encoding whose *stored shape* doesn't
+// identify it: it holds a `Value::Empty`, exactly what a `Sexpr`-declared
+// slot holding the datum `()` would. Both read paths therefore decide from
+// the declared type — the accessor via `decode_field_typed`, `match` via
+// `Pattern::Ctor::field_types` — and these tests pin that down by asserting
+// on `RtValue::Unit` itself, which a shape-driven decode would return as
+// `RtValue::Sexpr(Value::Empty)` instead.
+
+#[test]
+fn a_unit_typed_field_reads_back_as_unit() {
+    let src = "(defstruct holder (u ()) (k i64)) \
+               (let ((h (holder::new () 5))) h::u)";
+    assert_eq!(eval_ok(src), RtValue::Unit);
+}
+
+#[test]
+fn a_unit_typed_field_does_not_disturb_its_neighbours() {
+    let src = "(defstruct holder (u ()) (k i64)) \
+               (let ((h (holder::new () 5))) h::k)";
+    assert_eq!(eval_ok(src), RtValue::Int(5));
+}
+
+#[test]
+fn match_binds_a_unit_typed_field_as_unit() {
+    let src = "(defstruct holder (u ()) (k i64)) \
+               (match (holder::new () 3) ((new u n) u))";
+    assert_eq!(eval_ok(src), RtValue::Unit);
+}
+
+#[test]
+fn match_reads_the_fields_beside_a_unit_one_correctly() {
+    let src = "(defstruct holder (u ()) (k i64)) \
+               (match (holder::new () 3) ((new u n) n))";
+    assert_eq!(eval_ok(src), RtValue::Int(3));
+}
+
+#[test]
+fn a_unit_payload_keeps_an_enum_heap_representable() {
+    // The motivating case. Before `()` had a field encoding,
+    // `build_enum_value` couldn't convert the payload and fell back to the
+    // native `RtValue::Data` — which is what kept `Result<(), E>` from
+    // crossing into compiled code. A heap-repr enum is `RtValue::Sexpr`.
+    let src = "(defun f () Result<(), string> (result::ok ())) (f)";
+    assert!(
+        matches!(eval_ok(src), RtValue::Sexpr(Value::Boxed(_))),
+        "a `()` payload must not send the enum down the native-repr fallback"
+    );
+}
+
+#[test]
+fn a_unit_payload_matches_and_binds() {
+    let src = "(defun f () Result<(), string> (result::ok ())) \
+               (match (f) ((ok u) u) ((err _) ()))";
+    assert_eq!(eval_ok(src), RtValue::Unit);
+}

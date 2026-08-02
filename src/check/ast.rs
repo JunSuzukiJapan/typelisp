@@ -430,14 +430,17 @@ pub enum Pattern {
         sexpr_fields: Vec<bool>,
         /// Per-field: the same fully-instantiated `Type`
         /// `Checker::check_ctor_pattern` computes `sexpr_fields` from, kept
-        /// in full rather than reduced to a single bool. The interpreter
-        /// doesn't need this (its boxed-struct destructuring arm decodes by
-        /// runtime shape, `interp.rs`'s `decode_nonsexpr_field`), but
-        /// compiled code can't — a boxed-struct scrutinee's compiled
-        /// `match` (`ast_bridge::pattern_to_sexpr`'s struct-kind branch)
-        /// needs each field's own `ast_bridge::struct_field_kind`
+        /// in full rather than reduced to a single bool. Compiled code needs
+        /// the full type — a boxed-struct scrutinee's compiled `match`
+        /// (`ast_bridge::pattern_to_sexpr`'s struct-kind branch) needs each
+        /// field's own `ast_bridge::struct_field_kind`
         /// (int/float/char/bool/passthrough), which `sexpr_fields`'s single
-        /// bit can't express.
+        /// bit can't express. The interpreter decodes by runtime shape
+        /// (`interp.rs`'s `decode_nonsexpr_field`) and so mostly doesn't
+        /// consult this, with one exception: a `()`-typed field, whose
+        /// stored `Value::Empty` is indistinguishable from a `Sexpr` slot
+        /// holding the datum `()`. `interp.rs`'s `decode_ctor_field` reads
+        /// that one case off here.
         field_types: Vec<Type>,
         /// Whether this `Ctor` pattern is a Sexpr-downcast (`Checker::
         /// resolve_sexpr_downcast_ctor`/`check_ctor_pattern_fields`) rather

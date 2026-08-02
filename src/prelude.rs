@@ -1779,26 +1779,27 @@ pub const SOURCE: &str = r#"
     ((ok s) (let ((ls (read-lines s))) (progn (close s) (io-ok ls))))
     ((err e) (result::err e))))
 
-(pub defun write-file-string ((name string) (text string)) Result<bool, FileError>
-  "Write `text` to `name`, replacing it. `Ok(true)` on success -- the success
-   value is `bool` rather than `()` only because `Result<(), E>` cannot
-   currently be written (see docs/dev/TODO.md)."
+(pub defun write-file-string ((name string) (text string)) Result<(), FileError>
+  "Write `text` to `name`, replacing it. `Ok(())` on success -- the write is
+   done for its effect, so there is no value to carry back."
   (match (open-output name)
-    ((ok s) (progn (write-string s text) (close s) (io-ok true)))
+    ((ok s) (progn (write-string s text) (close s) (io-ok ())))
     ((err e) (result::err e))))
 
 (pub defun probe-file ((name string)) bool
   "Whether `name` exists."
   (file-exists-p name))
 
-(pub defun delete-file ((name string)) Result<bool, FileError>
+(pub defun delete-file ((name string)) Result<(), FileError>
+  "Remove `name`. `Ok(())` on success."
   (match (file-delete name)
-    ((ok _) (io-ok true))
+    ((ok _) (io-ok ()))
     ((err e) (result::err e))))
 
-(pub defun rename-file ((from string) (to string)) Result<bool, FileError>
+(pub defun rename-file ((from string) (to string)) Result<(), FileError>
+  "Rename `from` to `to`. `Ok(())` on success."
   (match (file-rename from to)
-    ((ok _) (io-ok true))
+    ((ok _) (io-ok ()))
     ((err e) (result::err e))))
 
 

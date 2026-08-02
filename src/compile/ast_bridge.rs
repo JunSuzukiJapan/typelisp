@@ -626,6 +626,22 @@ pub(crate) fn struct_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &Hash
         // A trait object is a tagged `Sexpr` at a `BoxedObj::Dyn` fat box —
         // the same passthrough kind as any other boxed value.
         Type::Dyn(..) => 6,
+        // The unit type `()`. The first kind past the `Sexpr` variant
+        // numbering this table otherwise reuses: `Unit` is not a `Sexpr`
+        // variant, so there is no existing number to borrow, and `nil`'s
+        // own `0` is taken by the "not representable" catch-all below.
+        //
+        // Its stored slot is the tagged `Value::Empty` word
+        // (`interp::rtvalue_to_struct_field`, so an interpreted and a
+        // compiled writer agree); the value it decodes back to is the plain
+        // `0` `compile-unit` produces. Both directions therefore *ignore*
+        // the word they are handed and emit a constant — a unit type has
+        // exactly one value, already known from the declared type, so the
+        // slot carries no information and only has to hold something the GC
+        // can `decode` safely (an immediate nil references nothing). See
+        // `compiler.rs`'s `compile-tag-struct-field`/`compile-sexpr-field`
+        // for the two constants.
+        Type::Unit => 11,
         _ => 0,
     }
 }

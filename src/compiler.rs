@@ -431,7 +431,20 @@ pub const SOURCE: &str = r#"
                                   (let ((args-ptr (alloca-args builder 1)))
                                     (store-arg builder args-ptr 0 v)
                                     (build-call builder (get-function m "rt_path_to_list") args-ptr 1))
-                                  (panic "compile-sexpr-field: field type is not representable in compiled code yet")))))))))))
+                                  ;; `unit`(11): never a real `Sexpr`
+                                  ;; variant -- this number only ever
+                                  ;; arrives as a *struct/enum field* kind
+                                  ;; (`ast_bridge::struct_field_kind`), the
+                                  ;; decode half of `compile-tag-struct-
+                                  ;; field`'s constant `6`. The stored word
+                                  ;; is discarded for the same reason it was
+                                  ;; ignored on the way in, and the result is
+                                  ;; the plain `0` every other `Unit`-typed
+                                  ;; value in compiled code already is
+                                  ;; (`compile-unit`).
+                                  (if (eq variant 11)
+                                      (const-i64 builder 0)
+                                      (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))))))))))
 
 ;; The encode-side mirror of `compile-sexpr-field`'s decode, over the exact
 ;; same `ast_bridge::struct_field_kind`/`Sexpr`-variant numbering (`1`=int
@@ -463,7 +476,20 @@ pub const SOURCE: &str = r#"
                   (build-or builder (build-shl builder (build-add builder v (const-i64 builder 1)) (const-i64 builder 3)) (const-i64 builder 6))
                   (if (eq kind 6)
                       v
-                      (panic "compile-tag-struct-field: field type is not representable in compiled code yet")))))))
+                      ;; `unit`(11): the slot holds a tagged `Value::Empty`
+                      ;; -- `(IMMEDIATE_NIL << 3) | TAG_IMMEDIATE`, i.e. the
+                      ;; constant `6` (`typelisp-rt`'s `encode`), the same
+                      ;; word `interp::rtvalue_to_struct_field` writes for a
+                      ;; `()` field so an interpreted and a compiled writer
+                      ;; produce identical boxes. `v` (the plain `0`
+                      ;; `compile-unit` produced) is deliberately discarded:
+                      ;; a unit type has one value, so the slot carries no
+                      ;; information and only has to hold a word the GC can
+                      ;; `decode` safely -- an immediate nil references
+                      ;; nothing. `compile-sexpr-field` above is the inverse.
+                      (if (eq kind 11)
+                          (const-i64 builder 6)
+                          (panic "compile-tag-struct-field: field type is not representable in compiled code yet"))))))))
 
 ;; `names` is now a list of `(name . kind)` pairs (`ast_bridge::tagged_sym_list`
 ;; — `kind` generalized from a plain `is-fn` `Bool` to a 3-way `Int` tag in

@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-07-23 / ブランチ: `main`
+最終更新: 2026-08-02 / ブランチ: `main`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -5223,3 +5223,93 @@ REPL・逐次 `load`・fasl 復元のどれでも決定的に判定できる唯�
 - `impl Error FileError` は `unwrap-io` より**前**に置く必要がある（メソッドは定義順）。
 - `char->string` を復活させた。第1版で入れて撤去時に外したが、`write-item` の実装で
   1文字を文字列にする必要があり戻ってきた。
+
+---
+
+## 型引数の `()` + `()` 型フィールドの compile 対応（2026-08-02）
+
+TODO.md にあった「型引数の中に `()` を書けない」を解消し、続けてその過程で表面化した
+「`()` 型のフィールドに compiled 表現が無い」も潰した。前者は読み取り／構文の話、
+後者は値表現の話で、原因も直し方も無関係。
+
+### 1. `Result<(), FileError>` が書けなかった理由は3層あった
+
+`(`/`)` はリーダーのデリミタなので、トークンの中に入る経路がそもそも1つしか無い——
+`extend_angle_token` の投機スキャン（山括弧が閉じるまで空白を越えて読み続ける、
+`vector<:dyn drawable>` のための仕組み）だ。そこが `(` を見た瞬間に巻き戻していた。
+
+- **リーダー**: 山括弧が開いている間に限り、隣接する `()` の2文字組だけを通す。
+  単独の `(` は従来どおり投機を打ち切って巻き戻す——これが `(a<b c)` や `(string< a b)`
+  の読み取りを一切変えないための条件。
+- **`NameLexer`**: `NameTok::Unit` を追加。ちょうど2文字の `()` のときだけ出す。
+  これが無いと `Ident("()")` になり、パス segment として `Path` に入ってしまう。
+- **`types::parse_type_arg`**: そのトークンを `Type::Unit` として返す。
+
+### 2. panic をエラーに
+
+`Result<`（未終端ジェネリック。リーダーの投機が巻き戻して短いトークンだけが残る）は
+`parse_qualified_generic` が segment 0 個で `Path::from_segments` に渡り、
+`debug_assert` を踏んでいた。空 segment をその場でエラーにし、
+`parse_type_name_rec` がトークン自身の `Loc` を貼るようにした（囲みのフォームではなく）。
+`parse_qualified_generic`/`parse_type_arg` が `Result` を返すようになった以外、
+呼び出し側の構造は変えていない。
+
+### 3. `()` 型フィールドは interp でも壊れていた
+
+パーサが直った直後に判明した。`(defstruct h (u ()))` は `rtvalue_to_struct_field` が
+`Unit` を拒否して internal error。`Result<(), E>` の方はエラーにならないが、
+`build_enum_value` が変換に失敗して **native-repr の `RtValue::Data` にフォールバック**
+していた——だから interp では動いて見えて、compiled 境界を渡ろうとすると壊れる。
+
+### 設計: 格納語と復号語が違う、唯一のフィールド種
+
+unit 型は値を1つしか持たない。**スロットは情報を運ばない**ので、置く語は
+「GC が `decode` して安全なもの」でさえあればよい。そこで:
+
+| | 語 | 理由 |
+|---|---|---|
+| 格納 | `Value::Empty`（タグ付き `6`） | immediate nil は何も参照しない。interp 側 `rtvalue_to_struct_field` と同じ語にすることで、インタプリタが作った箱とネイティブが作った箱が一致する |
+| 復号 | plain `0` | `compile-unit` が `Unit` 型の本体末尾に出すのと同じ表現 |
+
+encode/decode の**どちらも渡された語を捨てて定数を出す**。これが他のどの kind とも違う点。
+
+`ast_bridge::struct_field_kind` の kind は `Sexpr` の variant 番号を流用しているが、
+`Unit` は `Sexpr` の variant ではないので借りる番号が無く、`nil` の `0` は
+「表現不能」の catch-all が占有している。よって **11**（variant 番号の次）を新設した。
+
+副作用として `Interp::is_jit_tier_ty` が `struct_field_kind(ty) != 0` で判定しているため、
+`()` は**引数型・キャプチャ型としても**通るようになった。引数は
+`encode_crossing_args` が plain `0` を送る（`compile-unit` の表現と同じ）。
+`binding_kind` は `KIND_PLAIN` のままでよい——unit 値はヒープを指さないので GC ルート不要。
+
+### 復号だけが型駆動になる
+
+格納語 `Value::Empty` は、`Sexpr` 宣言のスロットが datum `()` を持っている場合と
+**区別が付かない**。フィールド復号で形から型を復元できない唯一のケース。ただし
+`()` 宣言のスロットは取り得る値が1つなので、宣言型だけで決まる——
+`decode_field_typed` はまさにそのための関数なので、そこに arm を1つ足せば済んだ。
+`match` の分解経路は `Pattern::Ctor::field_types`（check 時に焼き込み済み）を使う。
+enum と struct の2つの腕が同じ復号をしていたので `decode_ctor_field` に括り出した。
+
+### 変更点
+
+- `src/read/reader.rs` — `extend_angle_token` に `()` 組
+- `src/name_lexer.rs` — `NameTok::Unit`
+- `src/types.rs` — `parse_type_arg` の `Unit`、空 segment のエラー化
+- `src/compile/ast_bridge.rs` — `struct_field_kind` に `Type::Unit => 11`
+- `src/compiler.rs` — `compile-tag-struct-field`（定数 `6`）/ `compile-sexpr-field`（定数 `0`）
+- `src/eval/interp.rs` — `rtvalue_to_struct_field` / `decode_field_typed` /
+  `decode_ctor_field`（新設）/ `encode_crossing_args`
+- `src/compiler_island.bc` を再生成（`scripts/regen-compiler-island.sh`）
+
+### prelude の回避策を撤去
+
+`write-file-string`/`delete-file`/`rename-file` は `Result<bool, FileError>` を返し、
+成功時に意味の無い `true` を運んでいた——`Result<(), E>` が書けなかった当時の回避策。
+3つとも `Result<(), FileError>` に直した（`(io-ok ())`）。呼び出し側は
+`((ok _) ...)` で受けるか戻り値を捨てるかのどちらかなので、既存コードへの影響は無い。
+
+`with-open-file` マクロの `(io-ok ,result)` は元から body の型に対してジェネリックなので、
+body が `()` を返す形（`(with-open-file (s ...) (write-string s "hi"))`）は以前から
+インタプリタでは動いていた——ただし native-repr `RtValue::Data` として、である。
+今回それが heap-repr になり、compiled 境界も渡れるようになった。

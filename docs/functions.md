@@ -941,9 +941,9 @@ CL 同様、`close` 後でも取り出せる。
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | 1行ずつ書く |
 | `read-file-string` | `(read-file-string name)` | `(string)→Result<string,FileError>` | 全内容 |
 | `read-file-lines` | `(read-file-lines name)` | `(string)→Result<Vector<string>,FileError>` | 全行 |
-| `write-file-string` | `(write-file-string name text)` | `(string,string)→Result<bool,FileError>` | 書き出す |
+| `write-file-string` | `(write-file-string name text)` | `(string,string)→Result<(),FileError>` | 書き出す |
 | `probe-file` | `(probe-file name)` | `(string)→bool` | 存在するか |
-| `delete-file` / `rename-file` | | `→Result<bool,FileError>` | 削除・改名 |
+| `delete-file` / `rename-file` | | `→Result<(),FileError>` | 削除・改名 |
 
 ### 18.6 自分の型をストリームにする
 

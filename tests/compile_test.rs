@@ -5090,3 +5090,100 @@ fn compile_dispatches_message_on_a_dyn_error() {
     .expect("eval failed");
     assert_eq!(v, RtValue::Str("mine/builtin".into()));
 }
+
+// ---- `()`-typed fields cross the compiled boundary ----------------------
+//
+// `Type::Unit` used to be a *return-position-only* allowance: a body tail
+// compiled to a plain `0`, but a `()`-typed field had no encoding at all
+// (`ast_bridge::struct_field_kind` kind `0`), so `compile-tag-struct-field`
+// panicked outright. Kind `11` closes that: the slot stores the tagged
+// `Value::Empty` word an interpreted writer stores, and reads back as the
+// same plain `0` every other unit value in compiled code already is. The
+// tests below drive both halves through real native code.
+
+#[test]
+fn compile_round_trips_a_unit_typed_struct_field() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defstruct holder (u ()) (k i64))
+        (defun make ((n i64)) holder (holder::new () n))
+        (defun read-k ((h holder)) i64 h::k)
+        (compile make)
+        (compile read-k)
+        (read-k (make 7))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(7));
+}
+
+#[test]
+fn a_struct_built_by_compiled_code_reads_back_in_the_interpreter() {
+    // The encode side alone: the box is built natively (constant `6`) and
+    // then destructured by the *interpreter*, which only agrees if both
+    // writers picked the same word for the `()` slot.
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defstruct holder (u ()) (k i64))
+        (defun make ((n i64)) holder (holder::new () n))
+        (compile make)
+        (match (make 4) ((new u n) n))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(4));
+}
+
+#[test]
+fn compile_handles_a_result_with_a_unit_ok_payload() {
+    // The motivating case for the whole encoding — `Result<(), E>` is what
+    // the prelude's file-writing functions wanted and couldn't have.
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun check ((n i64)) Result<(), string>
+          (if (> n 0) (result::ok ()) (result::err "negative")))
+        (defun describe ((n i64)) string
+          (match (check n) ((ok _) "ok") ((err e) e)))
+        (compile check)
+        (compile describe)
+        (append (describe 1) (describe -1))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Str("oknegative".into()));
+}
+
+#[test]
+fn compile_accepts_a_unit_typed_parameter() {
+    // `struct_field_kind` also gates `Interp::is_jit_tier_ty`, so giving
+    // `()` a kind admits it as a parameter type too; it crosses as the
+    // plain `0` `encode_crossing_args` sends.
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun takes-unit ((u ()) (n i64)) i64 (progn u n))
+        (compile takes-unit)
+        (takes-unit () 9)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(9));
+}
+
+#[test]
+fn compile_round_trips_a_vector_of_units() {
+    // The same kind drives `Vector<T>`'s element encoding
+    // (`ast_bridge::vector_elem_kind`), not just `defstruct` fields.
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (defun two-units () i32
+          (let ((v (the Vector<()> (vector::new))))
+            (push v ())
+            (push v ())
+            (len v)))
+        (compile two-units)
+        (two-units)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(2));
+}
