@@ -798,6 +798,17 @@ fn extend_angle_token(cur: &mut Cursor, tok: &mut String, mut depth: i32) {
     let base_len = tok.len();
     while depth > 0 {
         match cur.peek() {
+            // `()` — the unit type as a generic argument, as in
+            // `result<(), file-error>`. The only paren spelling admitted
+            // here, and only as the adjacent pair: a lone paren still ends
+            // the speculation (and rewinds), which is what keeps `(a<b c)`
+            // and friends reading as before. `NameTok::Unit` picks the pair
+            // back out on the type-parser side.
+            Some('(') if cur.peek2() == Some(')') => {
+                tok.push_str("()");
+                cur.next();
+                cur.next();
+            }
             None | Some('\n') | Some('\r') | Some('(') | Some(')') | Some('"') | Some('\'') | Some('`') | Some(';') => {
                 cur.reset(mark);
                 tok.truncate(base_len);

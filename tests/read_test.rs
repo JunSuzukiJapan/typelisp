@@ -456,6 +456,24 @@ fn an_unbalanced_angle_bracket_rewinds_rather_than_swallowing_the_input() {
     roundtrip("(f vector<\n i32>)", "(f vector< i32>)");
 }
 
+#[test]
+fn a_generic_type_token_may_contain_a_unit_argument() {
+    // `()` — the unit type as a generic argument. The pair is the only paren
+    // spelling the extension admits, so `result<(), string>` is one token.
+    roundtrip("result<(), string>", "result<(), string>");
+    roundtrip("(defun f () result<(), string> 1)", "(defun f () result<(), string> 1)");
+    roundtrip("option<result<(),()>>", "option<result<(),()>>");
+}
+
+#[test]
+fn a_lone_paren_inside_an_angle_bracket_still_rewinds() {
+    // Only the adjacent `()` pair is let through; a single paren ends the
+    // speculation and the ordinary short token stands. Both of these keep
+    // reading exactly as they did before unit arguments were admitted.
+    roundtrip("(f a<b (g c))", "(f a<b (g c))");
+    roundtrip("(f a<b)", "(f a<b)");
+}
+
 // ---- `:dyn Trait` joins into one datum ----------------------------------
 
 #[test]

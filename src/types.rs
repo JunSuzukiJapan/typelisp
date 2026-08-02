@@ -268,7 +268,7 @@ pub fn parse_type_spanned(
         Value::Empty => Ok(Type::Unit),
         Value::Symbol(id) => {
             let name = heap.symbol_name(id);
-            Ok(parse_type_name_rec(name, loc, out))
+            parse_type_name_rec(name, loc, out)
         }
         Value::Path(id) => {
             // A qualified type name like `geometry::Point`. Reconstruct the
@@ -284,7 +284,7 @@ pub fn parse_type_spanned(
                 .map(|s| heap.symbol_name(*s))
                 .collect::<Vec<_>>()
                 .join("::");
-            Ok(parse_type_name_rec(&name, loc, out))
+            parse_type_name_rec(&name, loc, out)
         }
         // `(:dyn Trait)` — the reader's joined form of the two-word `:dyn
         // Trait` spelling (`read::reader::read_datum`). Checked before
@@ -423,13 +423,16 @@ impl SpanRec<'_> {
 /// byte range — [`Peekable`] would hide the underlying `pos()`, and the span
 /// recorder needs to know *where* an identifier sat inside the token.
 struct Toks<'a> {
+    /// The whole token being parsed, kept only so a parse error can quote the
+    /// spelling the user actually wrote.
+    src: &'a str,
     lex: NameLexer<'a>,
     peeked: Option<(NameTok<'a>, usize, usize)>,
 }
 
 impl<'a> Toks<'a> {
     fn new(src: &'a str) -> Toks<'a> {
-        Toks { lex: NameLexer::new(src), peeked: None }
+        Toks { src, lex: NameLexer::new(src), peeked: None }
     }
     /// `(token, start_byte, end_byte)`. `NameLexer::pos()` is "just past the
     /// most recent token", so reading it before and after `next()` brackets
@@ -453,12 +456,17 @@ impl<'a> Toks<'a> {
 /// Parse a type from a (case-folded) token, splitting generic arguments and
 /// `::` path segments into a structured [`Type`]/[`Path`]. This — and the
 /// reader — are the only places `::` strings are decoded. With `loc` present,
-/// every nominal name parsed out of the token is recorded into `out`.
-fn parse_type_name_rec(name: &str, loc: Option<&Loc>, out: &mut Vec<TypeNameSpan>) -> Type {
+/// every nominal name parsed out of the token is recorded into `out`, and a
+/// parse error is pinned to the token itself rather than to whatever enclosing
+/// form the caller would otherwise blame.
+fn parse_type_name_rec(name: &str, loc: Option<&Loc>, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
     let mut toks = Toks::new(name);
     let mut rec = loc.map(|base| SpanRec { name, base, out });
-    let (segs, args) = parse_qualified_generic(&mut toks, &mut rec, false);
-    named_or_primitive(segs, args)
+    let parsed = parse_qualified_generic(&mut toks, &mut rec, false).map(|(segs, args)| named_or_primitive(segs, args));
+    match (parsed, loc) {
+        (Err(e), Some(l)) => Err(e.at(l.clone())),
+        (other, _) => other,
+    }
 }
 
 /// Recursive-descent parse of `ident (:: ident)* (< args >)?` — the grammar
@@ -477,7 +485,7 @@ fn parse_qualified_generic<'a>(
     toks: &mut Toks<'a>,
     rec: &mut Option<SpanRec<'_>>,
     dyn_head: bool,
-) -> (Vec<String>, Vec<Type>) {
+) -> Result<(Vec<String>, Vec<Type>), Error> {
     let mut segs = Vec::new();
     // Byte range of the last identifier consumed — the final path segment,
     // which is the part of the token a recorded span covers.
@@ -494,11 +502,18 @@ fn parse_qualified_generic<'a>(
             break;
         }
     }
+    // Nothing name-shaped where a name was required. Reachable from ordinary
+    // source — `Result<` (an unterminated generic whose speculative extension
+    // the reader rewound) leaves an empty argument here — so it has to be a
+    // reported error, not the `Path::from_segments` assertion it used to trip.
+    if segs.is_empty() {
+        return Err(Error::TypeError(format!("malformed type name: `{}`", toks.src)));
+    }
 
     let has_args = matches!(toks.peek(), Some(NameTok::Lt));
     if let (Some(r), Some((b0, b1))) = (rec.as_mut(), last_range) {
         let primitive = !has_args && segs.len() == 1 && primitive_by_name(&segs[0]).is_some();
-        if !segs.is_empty() && !primitive {
+        if !primitive {
             r.record(&segs, dyn_head, b0, b1);
         }
     }
@@ -511,7 +526,7 @@ fn parse_qualified_generic<'a>(
             toks.next(); // empty argument list, e.g. `Foo<>`
         } else {
             loop {
-                args.push(parse_type_arg(toks, rec));
+                args.push(parse_type_arg(toks, rec)?);
                 skip_space(toks);
                 match toks.next() {
                     Some((NameTok::Comma, _, _)) => continue,
@@ -520,7 +535,7 @@ fn parse_qualified_generic<'a>(
             }
         }
     }
-    (segs, args)
+    Ok((segs, args))
 }
 
 /// Skip a run of spaces. Only a reader-extended token can contain one
@@ -534,18 +549,25 @@ fn skip_space(toks: &mut Toks<'_>) {
 }
 
 /// One generic argument. Almost always an ordinary qualified/generic type
-/// name, but `:dyn Trait` may appear here too — the nested spelling of the
+/// name, but two other spellings appear here: `()`, the unit type (as in
+/// `Result<(), FileError>`), and `:dyn Trait` — the nested spelling of the
 /// same trait-object type `parse_dyn_type` builds from the datum-level form,
 /// e.g. the element type of `Vector<:dyn Drawable>`.
-fn parse_type_arg<'a>(toks: &mut Toks<'a>, rec: &mut Option<SpanRec<'_>>) -> Type {
+fn parse_type_arg<'a>(toks: &mut Toks<'a>, rec: &mut Option<SpanRec<'_>>) -> Result<Type, Error> {
     skip_space(toks);
+    // `()` is the whole argument; it has no name to record and no arguments
+    // of its own, so it never reaches `parse_qualified_generic`.
+    if matches!(toks.peek(), Some(NameTok::Unit)) {
+        toks.next();
+        return Ok(Type::Unit);
+    }
     if matches!(toks.peek(), Some(NameTok::Ident(s)) if *s == ":dyn") {
         toks.next(); // `:dyn`
-        let (segs, pins) = parse_qualified_generic(toks, rec, true);
-        return Type::Dyn(Path::from_segments(segs), pins);
+        let (segs, pins) = parse_qualified_generic(toks, rec, true)?;
+        return Ok(Type::Dyn(Path::from_segments(segs), pins));
     }
-    let (segs, args) = parse_qualified_generic(toks, rec, false);
-    named_or_primitive(segs, args)
+    let (segs, args) = parse_qualified_generic(toks, rec, false)?;
+    Ok(named_or_primitive(segs, args))
 }
 
 /// The primitive type a bare single-segment name denotes, if any — the one

@@ -29,6 +29,53 @@ fn unit_type() {
 }
 
 #[test]
+fn unit_as_a_generic_argument() {
+    // `(`/`)` are reader delimiters, so getting `()` *inside* a type token
+    // takes both halves of the fix: `extend_angle_token` letting the pair
+    // through while the angle brackets are open, and `NameTok::Unit` picking
+    // it back out. Before that this spelling tripped an assertion in
+    // `Path::from_segments`.
+    let unit_string = vec![Type::Unit, Type::Str];
+    assert_eq!(parse("Result<(), String>"), Type::Named(Path::root("result"), unit_string.clone()));
+    // Without the space, and with the unit in trailing position too.
+    assert_eq!(parse("Result<(),String>"), Type::Named(Path::root("result"), unit_string));
+    assert_eq!(parse("Result<(),()>"), Type::Named(Path::root("result"), vec![Type::Unit, Type::Unit]));
+}
+
+#[test]
+fn unit_nested_inside_another_generic_argument() {
+    assert_eq!(
+        parse("Option<Result<(), String>>"),
+        Type::Named(
+            Path::root("option"),
+            vec![Type::Named(Path::root("result"), vec![Type::Unit, Type::Str])]
+        )
+    );
+}
+
+#[test]
+fn a_unit_argument_records_no_name() {
+    // `()` is not a nominal name, so — like a primitive — it contributes
+    // nothing to the semantic-token spans; the names around it still line up
+    // with their real columns (`file-error` starts past `result<(), `).
+    assert_eq!(
+        spans("result<(), file-error>"),
+        vec![("result".to_string(), 1), ("file-error".to_string(), 12)]
+    );
+}
+
+#[test]
+fn a_malformed_generic_is_an_error_not_a_panic() {
+    let mut h = Heap::with_capacity(256);
+    let r = Reader::new();
+    // An unterminated `<` — the reader's speculative extension rewinds and
+    // leaves the bare token `result<`, whose argument list has no name in it.
+    // This used to reach `Path::from_segments` with zero segments.
+    let v = r.read(&mut h, "Result<").expect("read failed");
+    assert!(parse_type(&h, v).is_err(), "`Result<` must be a reported type error");
+}
+
+#[test]
 fn generic_option_and_vec() {
     assert_eq!(parse("Option<i32>"), Type::Named(Path::root("option"), vec![Type::I32]));
     assert_eq!(parse("Vec<String>"), Type::Named(Path::root("vec"), vec![Type::Str]));
