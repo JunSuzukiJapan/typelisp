@@ -3395,7 +3395,6 @@ impl Interp {
             "random-state-next" => Some(eval_random_state_next(args)),
             "get-universal-time" => Some(eval_get_universal_time(args)),
             "get-internal-real-time" => Some(eval_get_internal_real_time(args)),
-            "read-line" => Some(eval_read_line(heap)),
             "parse-int" => Some(eval_parse_int(heap, args)),
             "parse-float" => Some(eval_parse_float(heap, args)),
             "read" => Some(eval_read(heap, args)),
@@ -4883,10 +4882,10 @@ fn eval_get_internal_real_time(_args: &[RtValue]) -> Result<RtValue, EvalError> 
 /// Shared tail of every scalar `print`/`println` method (`registry.rs`'s
 /// per-type `"print"`/`"println"` entries): writes `text` to stdout, with a
 /// trailing newline iff `newline`, and flushes immediately — a script's
-/// stdout isn't a terminal when piped (e.g. into `read-line` at the far end
-/// of a pipe, or a test harness), so it isn't line-buffered there, and a
-/// prompt printed via `print` (no newline) must still be visible before the
-/// process blocks on `read-line`.
+/// stdout isn't a terminal when piped (e.g. into a reader at the far end of a
+/// pipe, or a test harness), so it isn't line-buffered there, and a prompt
+/// printed via `print` (no newline) must still be visible before the process
+/// blocks reading stdin.
 /// `f64` display for `print`/`println` — an integral finite value prints
 /// with an explicit `.0` (matching `main.rs`'s REPL-echo `format_float`), so
 /// `(println 1.0)` doesn't come out indistinguishable from `(println 1)`.
@@ -4912,27 +4911,6 @@ fn write_stdout(text: &str, newline: bool) -> Result<RtValue, EvalError> {
     let mut out = std::io::stdout();
     let write_result = if newline { writeln!(out, "{}", text) } else { write!(out, "{}", text) };
     write_result.and_then(|()| out.flush()).map(|()| RtValue::Unit).map_err(|e| EvalError::Panic(format!("print: {}", e)))
-}
-
-/// `read-line` (`registry.rs`'s free-function entry): one line from stdin,
-/// sans the trailing newline (and a trailing `\r`, for CRLF input). `None`
-/// at EOF (`read_line` returning `Ok(0)`) rather than an error — a script
-/// polling stdin in a loop needs to see end-of-input as ordinary data.
-fn eval_read_line(heap: &mut Heap) -> Result<RtValue, EvalError> {
-    let mut line = String::new();
-    match std::io::stdin().read_line(&mut line) {
-        Ok(0) => Ok(option_value(heap, None)),
-        Ok(_) => {
-            if line.ends_with('\n') {
-                line.pop();
-                if line.ends_with('\r') {
-                    line.pop();
-                }
-            }
-            Ok(option_value(heap, Some(RtValue::Str(line.into()))))
-        }
-        Err(e) => Err(EvalError::Panic(format!("read-line: {}", e))),
-    }
 }
 
 /// `parse-int` (`registry.rs`'s free-function entry): a decimal `i32`

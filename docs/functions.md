@@ -481,7 +481,12 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 | `print` | `(print control args...)` | `(string, ...)→Unit` | 制御文字列を書式展開し、改行なしで標準出力へ書く |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | 同上、末尾に改行を付ける |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL の `format` 相当。展開した文字列を返す。`dest` が `true`（CL の `t`）なら加えて標準出力へも書く／`false`（CL の `nil`）なら書かず文字列を返すだけ |
-| `read-line` | `(read-line)` | `()→Option<string>` | 標準入力から1行読む（末尾の改行/`\r`は除去）。EOFなら`None` |
+
+**標準入力を読む**のは専用関数ではなく、標準ストリーム `*standard-input*` に対する
+`CharInput` のメソッド（§18.1）——`(read-line *standard-input*)` / `(read-char *standard-input*)` /
+`(read-all *standard-input*)`。標準出力・標準エラーも同様に `*standard-output*` /
+`*error-output*` があり、`(write-line *standard-output* s)` のように書ける（上の
+`print`/`println`/`format` は書式展開が要るときの近道で、常に標準出力へ書く）。
 
 ### 書式ディレクティブ
 
@@ -547,7 +552,7 @@ CL の `format` ディレクティブをほぼ網羅する。各ディレクテ�
   (println "~a" s))                   ; => id=42
 ```
 
-`print`/`println`/`format` は呼び出しのたびに即座に `flush` する（パイプ経由でも `read-line` の前に
+`print`/`println`/`format` は呼び出しのたびに即座に `flush` する（パイプ経由でも標準入力を読む前に
 プロンプトが確実に見えるようにするため）。書式エンジンは [format.rs](../src/eval/format.rs)（制御文字列を
 [`Node`] 木にパース→引数リストに対して解釈。`~a`/`~s` の値描画は GCヒープ走査＋enum 変種名解決が要る
 Rust 専用処理）、`Interp::run_format` が enum 変種名表を渡して呼ぶ。可変長引数を `Sexpr` リストへまとめる

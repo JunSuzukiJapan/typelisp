@@ -5529,3 +5529,32 @@ replay せず気づかれていない。コメントに落として解消した�
 `tests/check_test.rs` に4件（腕どうしの合流、具体型の兄弟からの受け取り、腕でない位置は
 従来どおり、型構成子が違う腕は従来どおり）、`tests/stream_test.rs` に1件
 （`with-open-file` を `let` に束縛する——`io-ok` を消して初めて通る形）。
+
+---
+
+## 孤児になっていた引数無し `read-line` の始末（2026-08-04）
+
+`(read-line)`（引数無し・標準入力）は 11707b5（ストリーム第1版）で `registry.rs` の
+自由関数エントリが削除され、`src/eval/interp.rs` の `eval_read_line` だけが残っていた。
+checker が名前を知らないので**到達不能な死にコード**。同じ名前は prelude の
+`CharInput::read-line`（引数1個）が引き継いでいる。
+
+放置されていたのは `examples/projects/` の3本（todo-cli / mini-lisp / expr-eval）が
+旧綴りのままだったせいで、3本とも check で落ちていた（`no such function: read-line`）。
+`docs/functions.md` §15 の表にも `(read-line)` が残っていた。
+
+標準入力への道を1本にする方針で始末した:
+
+- `eval_read_line` とディスパッチ分岐を削除。
+- サンプル3本を `(read-line *standard-input*)` に。標準ストリームは prelude の
+  `*standard-input*`（`standard-stream`、`CharInput` 実装済み）。
+- `docs/functions.md` §15 の行を削除し、代わりに「標準入力を読むのは `*standard-input*` に対する
+  `CharInput` のメソッド」と §18.1 への案内を書いた。
+
+`print`/`println`/`format` は書式展開の近道として標準出力側に残る（これらは flush まで面倒を
+見るので、プロンプトの可視性という別の役割がある）。読む側に同種の近道を残さないのは、
+`read-line` が**トレイトメソッドと名前を共有してしまう**ため——0引数と1引数で解決経路は
+分かれるので共存自体はできるが、同じ名前が2つの機構に属する状態は説明が増えるだけだった。
+
+副産物として、`examples/projects/expr-eval` が check を通るようになった結果、**別の既存バグ**が
+表に出た（`labels` の中で作った enum 値の変種タグが壊れる）。TODO.md に再現手順付きで記録した。

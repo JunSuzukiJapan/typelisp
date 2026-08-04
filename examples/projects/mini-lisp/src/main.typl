@@ -7,7 +7,7 @@
   (let ((env (the HashTable<string,i32> (HashTable::new))))
     (loop
       (print "lisp> ")
-      (let ((line (read-line)))
+      (let ((line (read-line *standard-input*)))
         (match line
           ((none) (println "") (break))
           ((some s)

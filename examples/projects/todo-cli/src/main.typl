@@ -54,7 +54,7 @@
   (println "todo-cli. type `help` for commands.")
   (loop
     (print "> ")
-    (let ((line (read-line)))
+    (let ((line (read-line *standard-input*)))
       (match line
         ((none) (println "") (break))
         ((some s) (if (not (handle s)) (break) ()))))))

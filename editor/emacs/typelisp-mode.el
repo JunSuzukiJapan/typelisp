@@ -111,7 +111,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "make-echo-stream" "make-string-input-stream" "make-string-output-stream" "make-two-way-stream"
     "open-file" "open-input" "open-output" "open-stream-p"
     "probe-file" "read-all" "read-char" "read-file-lines"
-    "read-file-string" "read-item" "read-lines" "rename-file"
+    "read-file-string" "read-item" "read-line" "read-lines" "rename-file"
     "terpri" "with-input-from-string" "with-open-file" "with-output-to-string"
     "write-char" "write-file-string" "write-item" "write-line"
     "write-lines" "write-string"
@@ -181,8 +181,6 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "pprint-exit-if-list-exhausted" "pprint-list-exhausted"
     ;; the `print-object' trait method (§15.2)
     "print-object"
-    ;; I/O (§15)
-    "read-line"
     ;; parsing & evaluation (§16)
     "parse-int" "parse-float" "read" "eval"
     ;; macro / system

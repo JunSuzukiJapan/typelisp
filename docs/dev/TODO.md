@@ -6,6 +6,22 @@
 
 ## 残っている作業
 
+- **`labels`/`lambda` の本体で作った enum 値の変種タグが壊れる**。5行で再現する:
+
+  ```lisp
+  (defenum expr (num i32) (add expr expr))
+  (use expr)
+  (defun mk () expr (labels ((f ((n i32)) expr (num n))) (f 5)))
+  (println "~a" (mk))                        ; => (<unknown-variant> 5)
+  (match (mk) ((num v) v) ((add a b) -1))    ; => internal error: no matching match arm
+  ```
+
+  同じ `(num n)` をトップレベル `defun` の直下で書けば正しい。ネストした関数の本体は
+  compile 経路(`compile_function_rec`)を通るので、compiled 側の construct が変種の
+  型IDを取り違えている疑いが濃い(`typelisp-interp-closure-removal` で直した
+  op-id/f64 リテラルのタグ切り詰めと同種)。**値が黙って壊れる**ので優先度は高い。
+  `examples/projects/expr-eval` はこれで実行時に落ちる(parser が `labels` の中で
+  構文木を組み立てるため)。2026-08-04 に発見、少なくとも 4a65d95 の時点で存在。
 - **ストリームの未実装分**。`fresh-line` は `file-stream` 専用（列位置を追うのは
   ネイティブ backed のストリームだけ）、`read` のストリーム版とストリーム宛 `format` は
   未提供（`(write-string s (format false ...))` で書ける）、pathname 層は無い
