@@ -87,7 +87,7 @@ fn collect_aot_item(
             // concrete) do. `Interp::exec` skips registering it for the same
             // reason, so asking for its body later would fail outright.
             if type_params.is_empty() {
-                let node = name.local().to_string();
+                let node = name.last_segment().to_string();
                 let symbol = crate::compile::ast_bridge::user_symbol_name(&node);
                 node_names.push((node, symbol));
             }

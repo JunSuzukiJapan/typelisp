@@ -63,8 +63,20 @@ impl Path {
         &self.0
     }
 
-    /// The final (unqualified) segment.
-    pub fn local(&self) -> &str {
+    /// The final segment on its own — **not** the type's identity.
+    ///
+    /// A type is identified by its *whole* path: `m::vector` and the built-in
+    /// `vector` are different types that share a last segment. Two bugs came
+    /// from forgetting that (see [`path_is_builtin`] and
+    /// `crate::type_key`), so this is deliberately named after what it
+    /// returns rather than "the local name". Legitimate uses are name-table
+    /// lookups paired with [`Path::parent`] (a module's tables are keyed by
+    /// last segment), type-*variable* names (single-segment by construction),
+    /// and display/derived names.
+    ///
+    /// To ask "is this the built-in `X`?" use [`path_is_builtin`]; to spell a
+    /// type's runtime identity use `crate::type_key::type_key_of`.
+    pub fn last_segment(&self) -> &str {
         self.0.last().expect("a path has at least one segment")
     }
 
@@ -86,11 +98,59 @@ impl Path {
     }
 }
 
+/// The `::`-joined form — **the** spelling of a type's identity. Everything
+/// that stores or compares a type by name (a heap value's type name, a
+/// registry key, an error message) uses this, never [`Path::last_segment`].
 impl fmt::Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.0.join("::"))
     }
 }
+
+/// Whether `p` is the built-in type `name`.
+///
+/// Every built-in (`vector`/`hashtable`/`option`/`result`/`llvm-*`/`scope`/the
+/// primitives) is registered at the *root* namespace
+/// (`Registry::with_builtins`), so a qualified path can never be one however
+/// its last segment reads — which is the whole point of the `is_simple` half.
+/// Redefining a built-in type name is rejected at the root
+/// (`Checker::check_redef`), but nothing stops `(module m (defstruct vector
+/// ...))`, and compiled code that recognized the built-in by last segment
+/// alone lowered *that* type's methods to `vector-op`, reading a user struct
+/// as if it were a `Vector` — silently wrong for `vector`, a `BoxId does not
+/// hold a HashTable` abort for `hashtable` (fixed 2026-08-04).
+pub fn path_is_builtin(p: &Path, name: &str) -> bool {
+    p.is_simple() && p.last_segment() == name
+}
+
+/// [`path_is_builtin`] against a set of names — for the "one of the natively
+/// lowered built-ins" tests, whose name lists live as consts below so every
+/// site reads the same list instead of spelling its own.
+pub fn path_is_builtin_any(p: &Path, names: &[&str]) -> bool {
+    p.is_simple() && names.contains(&p.last_segment())
+}
+
+/// The LLVM handle *types* (`crate::compile::ast_bridge::is_llvm_handle_ty`):
+/// values compiled code passes around as raw handles rather than heap boxes.
+/// A superset of [`LLVM_METHOD_RECEIVER_TYPES`] — `llvm-basic-block` and
+/// `llvm-value` are handles that carry no methods of their own.
+pub const LLVM_HANDLE_TYPES: [&str; 5] =
+    ["llvm-module", "llvm-function", "llvm-builder", "llvm-basic-block", "llvm-value"];
+
+/// The LLVM handle types that *have* methods, i.e. the receivers whose
+/// `Expr::Assoc` lowers to an `llvm-op` node (`llvm_assoc_key`) and is
+/// therefore never a real call target (`Interp::compile_scc`'s filters).
+/// Deliberately not [`LLVM_HANDLE_TYPES`]: the two lists answer different
+/// questions and used to differ only by accident.
+pub const LLVM_METHOD_RECEIVER_TYPES: [&str; 4] =
+    ["llvm-module", "llvm-function", "llvm-builder", "scope"];
+
+/// The primitive receivers whose built-in methods `compile-assoc` turns into
+/// LLVM instructions or `rt_*` calls rather than function calls
+/// (`Interp::is_native_lowered_primitive_method` says *which* methods; this
+/// says which receivers can have them).
+pub const NATIVE_LOWERED_PRIMITIVES: [&str; 8] =
+    ["i64", "i32", "char", "string", "f64", "bignum", "ratio", "sexpr"];
 
 #[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Type {

@@ -1829,7 +1829,8 @@ impl Renderer {
                 out.push_str(&format!("{}/{}", r.numer(), r.denom()));
             }
             Value::Boxed(id) if heap.is_struct(id) => {
-                out.push_str(&format!("#<{}", heap.struct_type_name(id)));
+                let key = crate::type_key::heap_type_path(heap, id).expect("a struct box has a type name");
+                out.push_str(&format!("#<{}", key));
                 for i in 0..heap.struct_field_count(id) {
                     if Self::length_reached(ctx, i) {
                         out.push_str(" ...");
@@ -1846,7 +1847,7 @@ impl Renderer {
             }
             Value::Boxed(id) if heap.is_enum(id) => {
                 let type_path =
-                    Path::from_segments(heap.enum_type_name(id).split("::").map(|s| s.to_string()).collect());
+                    crate::type_key::heap_type_path(heap, id).expect("an enum box has a type name");
                 let variant = heap.enum_variant(id);
                 // `enums` holds every `TypeEntry::Enum` in the interpreter's
                 // scope tree — a user `defenum`'s own exec, *and* the built-in

@@ -1745,7 +1745,7 @@ impl Checker {
     /// unchanged.
     fn resolve_type_name(&self, path: &Path) -> Path {
         if path.is_simple() {
-            let name = path.local();
+            let name = path.last_segment();
             if let Some(target) = self.lookup_alias(name) {
                 if let Some(tp) = self.resolve_type_path(&target) {
                     return tp;
@@ -1975,7 +1975,7 @@ impl Checker {
         match t {
             Type::Named(n, args) => {
                 if args.is_empty() && n.is_simple() {
-                    if let Some(bound) = self.type_var_bindings.get(n.local()) {
+                    if let Some(bound) = self.type_var_bindings.get(n.last_segment()) {
                         return bound.clone();
                     }
                 }
@@ -2048,7 +2048,7 @@ impl Checker {
             }
             return;
         }
-        if span.path.is_simple() && self.type_var_bindings.contains_key(span.path.local()) {
+        if span.path.is_simple() && self.type_var_bindings.contains_key(span.path.last_segment()) {
             return;
         }
         let fq = self.resolve_type_name(&span.path);
@@ -2147,11 +2147,11 @@ impl Checker {
         match ty {
             Type::Named(p, args) => {
                 if self.reg.type_def(p).is_none() && p.is_simple() {
-                    if let Ok(trait_path) = self.resolve_trait_name(p.local()) {
+                    if let Ok(trait_path) = self.resolve_trait_name(p.last_segment()) {
                         return Err(Error::TypeError(format!(
                             "`{}` is a trait, not a type — write `:dyn {}` for a trait object",
-                            trait_path.local(),
-                            trait_path.local()
+                            trait_path.last_segment(),
+                            trait_path.last_segment()
                         )));
                     }
                 }
@@ -4501,7 +4501,7 @@ impl Checker {
             &if segs.len() > 1 {
                 crate::fasl::OwnedForm::Path(segs)
             } else {
-                crate::fasl::OwnedForm::Sym(trait_path.local().to_string())
+                crate::fasl::OwnedForm::Sym(trait_path.last_segment().to_string())
             },
         )?;
         heap.push_permanent_root(trait_v);
@@ -5008,12 +5008,12 @@ impl Checker {
     /// about the trait object rather than about an `impl`.
     fn resolve_trait_path(&self, p: &Path) -> Option<Path> {
         if p.is_simple() {
-            return self.resolve_trait_name(p.local()).ok();
+            return self.resolve_trait_name(p.last_segment()).ok();
         }
         self.reg
             .root
             .module(p.parent())
-            .and_then(|m| m.traits.get(p.local()))
+            .and_then(|m| m.traits.get(p.last_segment()))
             .map(|td| td.name.clone())
     }
 
@@ -5227,7 +5227,7 @@ impl Checker {
         // verified there, on the concrete type).
         if let Type::Named(p, targs) = &value.ty {
             let is_tvar = targs.is_empty() && p.is_simple() && self.reg.type_def(p).is_none();
-            if is_tvar && env.bounds.get(p.local()).is_some_and(|bs| bs.iter().any(|b| b.trait_path == *trait_path)) {
+            if is_tvar && env.bounds.get(p.last_segment()).is_some_and(|bs| bs.iter().any(|b| b.trait_path == *trait_path)) {
                 let loc = value.loc.clone();
                 return Ok(Typed {
                     loc,
@@ -5779,7 +5779,7 @@ impl Checker {
                 .iter()
                 .filter_map(|t| match t {
                     Type::Named(n, a) if a.is_empty() && n.is_simple() && self.reg.type_def(n).is_none() => {
-                        Some(n.local().to_string())
+                        Some(n.last_segment().to_string())
                     }
                     _ => None,
                 })
@@ -7259,12 +7259,12 @@ impl Checker {
                 // No concrete `AdtDef` named `type_fq` — it may be one of
                 // this function's own `where`-bounded type parameters
                 // (`Env::bounds`, keyed by the lowercase type-variable name,
-                // exactly what `type_fq.local()` is for a bare `Type::Named`
+                // exactly what `type_fq.last_segment()` is for a bare `Type::Named`
                 // type variable like `t`). Search every trait it's bound to
                 // for a matching method; see `Expr::TraitCall`'s doc comment
                 // for why the implementing type is resolved at runtime
                 // instead of here.
-                if let Some(bound_traits) = env.bounds.get(type_fq.local()) {
+                if let Some(bound_traits) = env.bounds.get(type_fq.last_segment()) {
                     for tb in bound_traits {
                         let Some(tdef) = self.reg.trait_def(&tb.trait_path) else { continue };
                         // Inherited methods included: bounding `T` by `Ord`
@@ -9093,7 +9093,7 @@ impl Checker {
             // concrete together once the enclosing function is specialized).
             if let Type::Named(n, args) = &concrete {
                 if args.is_empty() && n.is_simple() && self.reg.type_def(n).is_none() {
-                    let var_name = n.local();
+                    let var_name = n.last_segment();
                     if let Some(caller_tbs) = env.bounds.get(var_name) {
                         for tb in trait_bounds {
                             let Some(caller_tb) =
@@ -9463,7 +9463,7 @@ impl Checker {
             let Some(concrete) = subst.get(tparam) else { continue };
             if let Type::Named(n, args) = concrete {
                 if args.is_empty() && n.is_simple() && self.reg.type_def(n).is_none() {
-                    let var_name = n.local();
+                    let var_name = n.last_segment();
                     let declared = caller_bounds.get(var_name);
                     for tb in trait_bounds {
                         // A caller bound discharges this one when it names
@@ -10443,7 +10443,7 @@ fn float_lit_ty(expected: Option<&Type>) -> Type {
 
 /// Whether `path` is a type variable in `params` (a single-segment name).
 fn is_param(path: &crate::Path, params: &HashSet<String>) -> bool {
-    path.is_simple() && params.contains(path.local())
+    path.is_simple() && params.contains(path.last_segment())
 }
 
 /// Whether `t` mentions any type parameter in `params`.
@@ -10521,7 +10521,7 @@ fn mangle_type(t: &Type) -> String {
 /// with a generated specialization in `Interp`'s function table.
 fn mangled_fn_path(base: &Path, args: &[Type]) -> Path {
     let mut segs = base.parent().to_vec();
-    segs.push(mangled_method_name(base.local(), args));
+    segs.push(mangled_method_name(base.last_segment(), args));
     Path::from_segments(segs)
 }
 
@@ -10550,7 +10550,7 @@ pub(crate) fn is_boxable_scalar(ty: &Type) -> bool {
 /// compiled global (`Interp::enum_defs`).
 pub(crate) fn subst_apply(t: &Type, subst: &HashMap<String, Type>) -> Type {
     match t {
-        Type::Named(n, args) if args.is_empty() && n.is_simple() => match subst.get(n.local()) {
+        Type::Named(n, args) if args.is_empty() && n.is_simple() => match subst.get(n.last_segment()) {
             Some(bound) => bound.clone(),
             None => t.clone(),
         },
@@ -10581,7 +10581,10 @@ pub(crate) fn subst_apply(t: &Type, subst: &HashMap<String, Type>) -> Type {
 /// the single-segment path `self` — there is no type by that name, so no real
 /// type can collide with it.
 fn is_self_tvar(t: &Type) -> bool {
-    matches!(t, Type::Named(p, args) if args.is_empty() && p.is_simple() && p.local() == "self")
+    // type-identity-ok: `Self` is a type *variable*, not a built-in type — a trait
+    // signature's `Self` parses to the single-segment `Type::Named` every type variable
+    // does, so `is_simple` here is the variable-ness test, not a built-in test.
+    matches!(t, Type::Named(p, args) if args.is_empty() && p.is_simple() && p.last_segment() == "self")
 }
 
 /// Whether `t` mentions `Self` anywhere — [`is_self_tvar`] applied
@@ -10624,7 +10627,7 @@ fn unify(
     }
     if let Type::Named(n, args) = tmpl {
         if args.is_empty() && is_param(n, params) {
-            let key = n.local().to_string();
+            let key = n.last_segment().to_string();
             return match subst.get(&key) {
                 Some(bound) if bound == actual => Ok(()),
                 Some(bound) => Err(Error::TypeError(format!(

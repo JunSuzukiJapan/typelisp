@@ -406,7 +406,7 @@ impl Namespace {
     /// calls [`Self::register_ctors`] (only done for `Sexpr`, the one
     /// exception — see `Registry::with_builtins`).
     pub fn add_type(&mut self, def: AdtDef) {
-        let local = def.name.local().to_string();
+        let local = def.name.last_segment().to_string();
         self.types.insert(local, def);
     }
 
@@ -724,27 +724,27 @@ impl Registry {
 
     /// Look up a type by its fully-qualified [`Path`] (e.g. `geo::point`).
     pub fn type_def(&self, path: &Path) -> Option<&AdtDef> {
-        self.root.module(path.parent())?.types.get(path.local())
+        self.root.module(path.parent())?.types.get(path.last_segment())
     }
 
     /// Mutable lookup of a type by its fully-qualified [`Path`].
     pub fn type_def_mut(&mut self, path: &Path) -> Option<&mut AdtDef> {
-        self.root.module_mut(path.parent()).types.get_mut(path.local())
+        self.root.module_mut(path.parent()).types.get_mut(path.last_segment())
     }
 
     /// Look up a free function by its fully-qualified [`Path`].
     pub fn fn_sig(&self, path: &Path) -> Option<&FnSig> {
-        self.root.module(path.parent())?.fns.get(path.local())
+        self.root.module(path.parent())?.fns.get(path.last_segment())
     }
 
     /// Look up a `deftrait` by its fully-qualified [`Path`].
     pub fn trait_def(&self, path: &Path) -> Option<&TraitDef> {
-        self.root.module(path.parent())?.traits.get(path.local())
+        self.root.module(path.parent())?.traits.get(path.last_segment())
     }
 
     /// Mutable lookup of a `deftrait` by its fully-qualified [`Path`].
     pub fn trait_def_mut(&mut self, path: &Path) -> Option<&mut TraitDef> {
-        self.root.module_mut(path.parent()).traits.get_mut(path.local())
+        self.root.module_mut(path.parent()).traits.get_mut(path.last_segment())
     }
 
     /// Resolve `method` against `tdef` *including inherited methods*,
@@ -962,7 +962,7 @@ fn register_stream_builtins(root: &mut Namespace) {
 
 /// Whether `p` names one of [`BUILTIN_ERROR_TYPES`].
 pub fn is_builtin_error_type(p: &Path) -> bool {
-    p.is_simple() && BUILTIN_ERROR_TYPES.contains(&p.local())
+    p.is_simple() && BUILTIN_ERROR_TYPES.contains(&p.last_segment())
 }
 
 /// The concrete error type of every fallible built-in, one per failure

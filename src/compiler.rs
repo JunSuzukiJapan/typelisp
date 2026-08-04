@@ -4216,7 +4216,7 @@ pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
             eprintln!("{}", w);
         }
         if let crate::TopLevel::Defun { name, .. } = &tl {
-            island_defuns.push(name.local().to_string());
+            island_defuns.push(name.last_segment().to_string());
         }
         interp.exec(heap, tl).expect("compiler: eval failed");
     }

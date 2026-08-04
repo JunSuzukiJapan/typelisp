@@ -583,7 +583,7 @@ fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
         Value::Boxed(id) if heap.is_struct(id) => {
             let parts: Vec<String> =
                 (0..heap.struct_field_count(id)).map(|i| format_sexpr(heap, reg, heap.struct_field(id, i))).collect();
-            format!("#<{} {}>", heap.struct_type_name(id), parts.join(" "))
+            format!("#<{} {}>", type_key::heap_type_path(heap, id).expect("a struct box has a type name"), parts.join(" "))
         }
         // An enum value prints as its variant name applied to its fields —
         // `(some 1)` / a bare `none` — the exact shape the old
@@ -591,9 +591,7 @@ fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
         // variant *index*; the variant's name lives only in the checker's
         // registry, looked up by re-parsing the stored `Path` string.
         Value::Boxed(id) if heap.is_enum(id) => {
-            let type_path = typelisp::Path::from_segments(
-                heap.enum_type_name(id).split("::").map(|s| s.to_string()).collect(),
-            );
+            let type_path = type_key::heap_type_path(heap, id).expect("an enum box has a type name");
             let variant = heap.enum_variant(id);
             let name = reg
                 .type_def(&type_path)

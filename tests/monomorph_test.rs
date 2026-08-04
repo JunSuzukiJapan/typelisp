@@ -74,7 +74,7 @@ fn an_instantiating_call_comes_back_bundled_with_its_specialization() {
         TopLevel::Defun { name, type_params, .. } => {
             assert!(type_params.is_empty(), "a specialization is fully concrete");
             assert!(
-                name.local().contains(' '),
+                name.last_segment().contains(' '),
                 "mangled names contain a space so no reader token can collide: {:?}",
                 name
             );

@@ -14,6 +14,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::freevars::{labels_free_vars, lambda_free_vars, names_captured_by_nested};
+use crate::type_key::type_key_of;
+use crate::types::{
+    path_is_builtin, path_is_builtin_any, LLVM_HANDLE_TYPES, LLVM_METHOD_RECEIVER_TYPES,
+};
 use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, QuotedSexpr, Type, Typed, Value};
 #[cfg(test)]
 use crate::Ref;
@@ -429,30 +433,12 @@ fn binding_kind(ty: &Type, enums: &HashSet<Path>) -> i64 {
 /// classification must still *exclude* these types
 /// (`Interp::is_jit_tier_ty`) — an interpreted `compile-function` run
 /// JIT-compiling its own `labels` siblings would recurse into itself.
-/// Whether `p` is the built-in type `name` — every built-in
-/// (`vector`/`hashtable`/`llvm-*`/`scope`/`option`/`result`) is registered at
-/// the *root* namespace (`Registry::with_builtins`), so a qualified path can
-/// never be one however its last segment reads.
-///
-/// The `is_simple` half is the whole point. Redefining a built-in type name
-/// is rejected at the root (`Checker::check_redef`), but nothing stops
-/// `(module m (defstruct vector ...))` — and a compiled body that identified
-/// the built-in by last segment alone then lowered `m::vector`'s own methods
-/// to `vector-op`, reading a user struct as if it were a `Vector` (silently
-/// wrong for `vector`, a `BoxId does not hold a HashTable` abort for
-/// `hashtable`). Same mistake, same shape, as compiled code writing a value's
-/// runtime type name unqualified: a type's identity is its whole path.
-pub(crate) fn is_builtin_type(p: &Path, name: &str) -> bool {
-    p.is_simple() && p.local() == name
-}
-
 pub(crate) fn is_llvm_handle_ty(ty: &Type) -> bool {
     match ty {
-        Type::Named(p, args) if p.is_simple() => match p.local() {
-            "llvm-module" | "llvm-function" | "llvm-builder" | "llvm-basic-block" | "llvm-value" => true,
-            "scope" => args.len() == 1 && is_llvm_handle_ty(&args[0]),
-            _ => false,
-        },
+        Type::Named(p, _) if path_is_builtin_any(p, &LLVM_HANDLE_TYPES) => true,
+        Type::Named(p, args) if path_is_builtin(p, "scope") => {
+            args.len() == 1 && is_llvm_handle_ty(&args[0])
+        }
         _ => false,
     }
 }
@@ -497,10 +483,10 @@ pub(crate) fn llvm_op_id(type_key: &str, method: &str) -> i64 {
 /// heap-repr `Scope<V>` (or any other `V`) falls through to the generic
 /// path unchanged.
 fn llvm_assoc_key(type_name: &Path, instance: bool, args: &[Typed], node_ty: &Type) -> Option<&'static str> {
-    if !type_name.is_simple() {
+    if !path_is_builtin_any(type_name, &LLVM_METHOD_RECEIVER_TYPES) {
         return None;
     }
-    match type_name.local() {
+    match type_name.last_segment() {
         "llvm-module" => Some("llvm-module"),
         "llvm-function" => Some("llvm-function"),
         "llvm-builder" => Some("llvm-builder"),
@@ -508,7 +494,7 @@ fn llvm_assoc_key(type_name: &Path, instance: bool, args: &[Typed], node_ty: &Ty
             let scope_ty = if instance { args.first().map(|a| &a.ty) } else { Some(node_ty) };
             match scope_ty {
                 Some(Type::Named(p, targs))
-                    if is_builtin_type(p, "scope") && targs.len() == 1 && is_llvm_handle_ty(&targs[0]) =>
+                    if path_is_builtin(p, "scope") && targs.len() == 1 && is_llvm_handle_ty(&targs[0]) =>
                 {
                     Some("native-scope")
                 }
@@ -527,8 +513,8 @@ fn llvm_assoc_key(type_name: &Path, instance: bool, args: &[Typed], node_ty: &Ty
 /// that function outright).
 fn is_enum_ty(ty: &Type, enums: &HashSet<Path>) -> bool {
     match ty {
-        Type::Named(p, args) if is_builtin_type(p, "option") && args.len() == 1 => true,
-        Type::Named(p, args) if is_builtin_type(p, "result") && args.len() == 2 => true,
+        Type::Named(p, args) if path_is_builtin(p, "option") && args.len() == 1 => true,
+        Type::Named(p, args) if path_is_builtin(p, "result") && args.len() == 2 => true,
         Type::Named(p, _) if crate::check::registry::is_builtin_error_type(p) => true,
         Type::Named(p, _) => enums.contains(p),
         _ => false,
@@ -705,7 +691,7 @@ fn global_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) 
 /// `iter`: that one is a real prelude `defmethod` (`vector-iter::new`), a
 /// normal compiled method, so it stays on the `assoc` path. `HashTable<K,V>`
 /// shares the `new`/`get`/`set` names but a different `type_name`, so the
-/// [`is_builtin_type`] guard at the call site keeps them apart.
+/// [`path_is_builtin`] guard at the call site keeps them apart.
 const VECTOR_BUILTIN_METHODS: [&str; 6] = ["new", "get", "set", "len", "push", "pop"];
 
 /// The element `kind` ([`struct_field_kind`]) for a `Vector<T>` method call:
@@ -714,7 +700,7 @@ const VECTOR_BUILTIN_METHODS: [&str; 6] = ["new", "get", "set", "len", "push", "
 /// `get`/`set`/`len`/`push`/`pop` since every one either reads or writes a `T`.
 fn vector_element_kind(args: &[Typed], structs: &HashSet<Path>, enums: &HashSet<Path>) -> i64 {
     match args.first().map(|a| &a.ty) {
-        Some(Type::Named(p, targs)) if is_builtin_type(p, "vector") => {
+        Some(Type::Named(p, targs)) if path_is_builtin(p, "vector") => {
             targs.first().map(|t| struct_field_kind(t, structs, enums)).unwrap_or(0)
         }
         _ => 0,
@@ -820,7 +806,7 @@ const HASHTABLE_BUILTIN_METHODS: [&str; 9] = ["new", "set", "get", "remove", "co
 fn hashtable_kv_kinds(args: &[Typed], ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> (i64, i64) {
     let ht_ty = args.first().map(|a| &a.ty).unwrap_or(ty);
     match ht_ty {
-        Type::Named(p, targs) if is_builtin_type(p, "hashtable") && targs.len() == 2 => {
+        Type::Named(p, targs) if path_is_builtin(p, "hashtable") && targs.len() == 2 => {
             (struct_field_kind(&targs[0], structs, enums), struct_field_kind(&targs[1], structs, enums))
         }
         _ => (0, 0),
@@ -1177,13 +1163,13 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
             // `HashTable::get`/`set`/`new` (a different type, different
             // runtime) and `Vector`'s own `iter` (a real prelude `defmethod`)
             // both stay on the generic `assoc` path below.
-            if is_builtin_type(type_name, "vector") && VECTOR_BUILTIN_METHODS.contains(&method.as_str()) {
+            if path_is_builtin(type_name, "vector") && VECTOR_BUILTIN_METHODS.contains(&method.as_str()) {
                 return translate_vector_method(heap, method, vector_element_kind(args, cx.structs, cx.enums), args, cx);
             }
             // `HashTable<K,V>`'s builtin methods (except the `Option`-returning
             // `get`/`remove` and the `iter` `defmethod`) lower to a
             // `hashtable-op` node — see `translate_hashtable_method`.
-            if is_builtin_type(type_name, "hashtable") && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
+            if path_is_builtin(type_name, "hashtable") && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
                 let (kk, vk) = hashtable_kv_kinds(args, &typed.ty, cx.structs, cx.enums);
                 return translate_hashtable_method(heap, method, kk, vk, args, cx);
             }
@@ -2433,7 +2419,7 @@ fn translate_fnref(heap: &mut Heap, path: &Path, ty: &Type, structs: &HashSet<Pa
     // See `translate_call`'s matching check: `sexpr-car`/`sexpr-cdr`/
     // `sexpr-cons` are never prefixed, and a module-qualified target mangles
     // by its full `::`-joined path so `m::inc` never collides with root `inc`.
-    let raw_name = path.local();
+    let raw_name = path.last_segment();
     let target_v = if crate::eval::interp::is_rt_builtin_name(raw_name) {
         heap.alloc_string(raw_name.to_string())
     } else {
@@ -2519,7 +2505,7 @@ fn translate_call(heap: &mut Heap, path: &Path, args: &[Typed], cx: Ctx) -> Resu
     // never go through `declare_external_function`/`user_symbol_name` at all
     // (`Interp::compile_scc` excludes them from `call_targets` for
     // the same reason), so prefixing them here would break that match.
-    let raw_name = path.local();
+    let raw_name = path.last_segment();
     let name_v = if crate::eval::interp::is_rt_builtin_name(raw_name) {
         heap.alloc_string(raw_name.to_string())
     } else {
@@ -2643,7 +2629,7 @@ fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern, cx: Ctx) -> Result<Value, Er
             // (`Checker::check_ctor_pattern`'s downcast dispatch never
             // resolves to the `sexpr` path).
             let type_name_form =
-                if *downcast { str_literal_form(heap, &type_name.to_string())? } else { Value::Empty };
+                if *downcast { str_literal_form(heap, &type_key_of(type_name))? } else { Value::Empty };
             heap.push_root(type_name_form);
             let result = tagged(
                 heap,
@@ -2663,7 +2649,7 @@ fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern, cx: Ctx) -> Result<Value, Er
             // compiled the same way a downcast `Ctor`'s is — fully qualified
             // (see the `Pattern::Ctor` arm's doc comment just above).
             let name = match ty {
-                Type::Named(p, _) => p.to_string(),
+                Type::Named(p, _) => type_key_of(p),
                 _ => unreachable!("Checker::check_type_test_pattern only ever produces a Type::Named"),
             };
             let type_name_form = str_literal_form(heap, &name)?;
@@ -2885,7 +2871,7 @@ fn translate_construct(
     // `mutable` struct construct needs it for `rt_struct_new`'s — see
     // `compiler.rs`'s `compile-construct-box` doc comment.
     let type_name_form =
-        if !is_sexpr { str_literal_form(heap, &type_name.to_string())? } else { Value::Empty };
+        if !is_sexpr { str_literal_form(heap, &type_key_of(type_name))? } else { Value::Empty };
     heap.push_root(type_name_form);
     // `mutable` and the general-ADT (enum) case now tag identically
     // (`struct_field_ast_list_to_sexpr`/`struct_field_kind`): every enum

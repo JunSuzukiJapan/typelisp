@@ -130,7 +130,7 @@ impl ModuleScope {
     /// error types, which are registered with the checker but never `exec`'d)
     /// call this rather than inserting into `types` themselves.
     pub(crate) fn register_enum(&mut self, name: &Path, def: EnumDef) {
-        self.get_or_create(name.parent()).types.insert(name.local().to_string(), TypeEntry::Enum(def));
+        self.get_or_create(name.parent()).types.insert(name.last_segment().to_string(), TypeEntry::Enum(def));
     }
 
     /// Resolve a `Call`/`FnRef` reference's `written` name segments from its
@@ -196,12 +196,12 @@ impl ModuleScope {
     /// An instance/static method lookup: `type_name` is already a fully
     /// resolved type identity (from static type inference, never searched),
     /// so this is always direct descent to `type_name.parent()` followed by
-    /// a `(type_name.local(), method)` lookup and a `pub`-or-`in_scope`
+    /// a `(type_name.last_segment(), method)` lookup and a `pub`-or-`in_scope`
     /// check against `home` — the runtime twin of `Checker::assoc_visible`
     /// (checker.rs:989-991).
     pub(crate) fn resolve_method(&self, home: &[String], type_name: &Path, method: &str) -> Option<Rc<FnDef>> {
         let ns = self.find(type_name.parent())?;
-        let f = ns.methods.get(&(type_name.local().to_string(), method.to_string()))?;
+        let f = ns.methods.get(&(type_name.last_segment().to_string(), method.to_string()))?;
         if !f.public && !in_scope(home, type_name.parent()) {
             return None;
         }
@@ -211,7 +211,7 @@ impl ModuleScope {
     /// A `defstruct`/`defenum`'s `TypeEntry`, found by direct descent to its
     /// own `Path` — no visibility check (see [`TypeEntry`]'s doc comment).
     pub(crate) fn find_type(&self, type_name: &Path) -> Option<&TypeEntry> {
-        self.find(type_name.parent())?.types.get(type_name.local())
+        self.find(type_name.parent())?.types.get(type_name.last_segment())
     }
 
     /// A free function/macro's own `FnDef`, found by direct descent to its
@@ -222,7 +222,7 @@ impl ModuleScope {
     /// search for: `MacroExpander::expand_macro`'s checker-driven lookup,
     /// and the JIT/SCC machinery's "is this already compiled" checks.
     pub(crate) fn get_fn(&self, path: &Path) -> Option<Rc<FnDef>> {
-        self.find(path.parent())?.fns.get(path.local()).cloned()
+        self.find(path.parent())?.fns.get(path.last_segment()).cloned()
     }
 
     /// A global's own `Slot`, found by direct descent to its already-fully-
@@ -231,12 +231,12 @@ impl ModuleScope {
     /// result, i.e. an already-resolved absolute path, never a bare name to
     /// search for).
     pub(crate) fn get_global(&self, path: &Path) -> Option<Slot> {
-        self.find(path.parent())?.globals.get(path.local()).map(|g| g.slot.clone())
+        self.find(path.parent())?.globals.get(path.last_segment()).map(|g| g.slot.clone())
     }
 
     /// [`Self::get_fn`]'s twin for a `(type, method)` pair.
     pub(crate) fn get_method(&self, type_name: &Path, method: &str) -> Option<Rc<FnDef>> {
-        self.find(type_name.parent())?.methods.get(&(type_name.local().to_string(), method.to_string())).cloned()
+        self.find(type_name.parent())?.methods.get(&(type_name.last_segment().to_string(), method.to_string())).cloned()
     }
 
     /// Whether `path`'s `FnDef` already has a JIT/AOT-compiled form — the

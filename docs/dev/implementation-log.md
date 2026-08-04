@@ -5629,3 +5629,77 @@ root では拒否されるが、**モジュールの中では通る**ので、`(
 
 組み込みの受け側は常に root なので、モジュールの中から本物の `Vector<i32>` を使う経路は
 従来どおり `vector-op` に落ちる（回帰テストで固定した）。
+
+---
+
+## 「型の identity」を書き間違えられない形にする（2026-08-04）
+
+同じ日に同じ原因のバグを 2 件踏んだ（`2dd5171` / `7aebfd2`）ので、個別の修正ではなく
+**書く時点で迷わない形**にした。原因はどちらも `Path::local()`（最終セグメント）を
+型の identity として使ったこと。片方は値の実行時型名として、もう片方は組み込み型の分類として。
+**同じ概念が 2 通りの綴りで書け、どちらも `String` なのでコンパイラも読み手も気付けない**のが
+本当の問題だった。
+
+### 打った手
+
+**1. `Path::local()` → `Path::last_segment()`（57 箇所）**。`local()` は「ローカルな名前」と
+読めてしまうが、返すのは「最後のセグメント」でしかない。改名すると
+`last_segment() == "vector"` と書いた瞬間に怪しいと見える。あわせて `Display` の doc に
+「**これが identity の綴り**」と書いた。合法な用法の大半は `parent()` + `last_segment()` の
+名前表引き（モジュールの表は最終セグメントで引く）で、改名後の方が読みやすい。
+
+**2. 組み込み判定を 1 対の関数と 3 本の const に集約**（`src/types.rs`）。
+`path_is_builtin(p, name)` / `path_is_builtin_any(p, names)` はどちらも `is_simple()` を含む。
+名前リストは意味ごとに別名で持つ——`LLVM_HANDLE_TYPES`（型としてのハンドル 5 種）と
+`LLVM_METHOD_RECEIVER_TYPES`（メソッドを持つ 4 種）は今まで「たまたま違う」状態だったので、
+名前を付けて違いを意図として固定した。`NATIVE_LOWERED_PRIMITIVES` も同様。
+
+この過程で、**同じ間違いが `src/eval/interp.rs` の compile 駆動側に 5 箇所残っている**のが
+見つかった（llvm ハンドル ×2、プリミティブ列 ×3）。`7aebfd2` は `ast_bridge` 側だけを締めて
+いたので、両者が食い違ったまま——ast_bridge が実メソッド呼び出しに落とすものを駆動側が
+「組み込みだから compile 不要」と判断する、シンボル欠落経路だった。同じ関数・同じリストを
+見せて解消。
+
+**3. 実行時 identity の綴りを 1 モジュールに**（`src/type_key.rs`）。書く
+（`type_key_of` / `alloc_typed_struct` / `alloc_typed_enum`）・比べる（`heap_type_is`）・
+読み戻す（`heap_type_path`）の 3 方向にそれぞれ 1 つだけ入口を置いた。`Heap::alloc_struct` /
+`alloc_enum` / `struct_type_name` / `enum_type_name` を直接呼ぶのはこのモジュールの中だけ。
+`crates/typelisp-rt` の shim（`rt_data_new` / `rt_sexpr_instance_test`）は compiled コードから
+文字列を受け取る境界なので対象外——その端は「`ast_bridge` が焼き込むリテラルが
+`type_key_of` の出力である」ことで担保する。
+
+**4. 監視テスト `tests/type_identity_guard_test.rs`**。`editor_keyword_sync_test` と同じ
+「ソースを読んで不変条件を縛る」方式で、`src/**.rs` を走査して 2 つを禁じる:
+
+- 最終セグメントと文字列リテラルの比較（→ `path_is_builtin` を使え）
+- `type_key.rs` の外での `alloc_struct` / `alloc_enum` / `*_type_name`（→ `type_key` を使え）
+
+例外は `// type-identity-ok: <理由>` を当該行か直上のコメント塊に書く。**理由を書かせるのが要**で、
+現在の例外は 6 箇所（root 組み込みをリテラルから組み立てる 4 箇所、`equalp` の「保存済みキー
+どうしの比較」2 箇所）と `is_self_tvar`（`Self` は型変数であって組み込み型ではない）。
+失敗メッセージには「どちらの問いを聞いているのか」の表を出して、反射的にマーカーを足す方向へ
+逃げないようにした。
+
+**5. 境界跨ぎ適合テスト**（`tests/compile_test.rs` 末尾）。`(module m ...)` の下で
+構築側（interp / compiled / `labels` 内）× 消費側（interp の `match` / compiled の `match` /
+compiled の downcast / 印字 / `equalp`）を回す 5 本。綴りの規約が将来変わっても、
+**このクラスのバグは振る舞いで捕まる**。
+
+### 実効性の確認
+
+手当てそのものが効くことを、壊して確かめた:
+
+| 壊した箇所 | 落ちるもの |
+|---|---|
+| `ast_bridge` の construct を `last_segment()` に戻す（＝`2dd5171` の再現） | 適合テスト **5 本すべて** |
+| `path_is_builtin` を素の比較に戻す（＝`7aebfd2` の再現） | 監視テスト規則 1（file:line 付き） |
+| `interp` の `alloc_enum` を直接呼びに戻す | 監視テスト規則 2（file:line 付き） |
+
+なお `type_key_of` 自体を壊すと**両側が対称に変わる**ので適合テストは印字の 1 本しか落ちない。
+「両側が同じ間違いをすれば気付けない」のは原理的な限界で、だから入口を 1 つにする（間違えようが
+ない）方を主にし、テストは非対称の検出に使う、という役割分担にしている。
+
+### 注意
+
+`local()` は消えたので、これより前のログ中の `Path::local()` という記述は
+`Path::last_segment()` と読み替えること。

@@ -112,7 +112,7 @@ impl Ref {
     /// bare-name ancestor-walk starting there still finds the same target
     /// as direct descent would.
     pub fn synthetic(resolved: Path) -> Ref {
-        let written = vec![resolved.local().to_string()];
+        let written = vec![resolved.last_segment().to_string()];
         let home = resolved.parent().to_vec();
         Ref { written, home, resolved }
     }

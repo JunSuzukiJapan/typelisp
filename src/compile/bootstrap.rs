@@ -69,7 +69,7 @@ pub fn build_island_bitcode() -> Result<Vec<u8>, String> {
             eprintln!("{}", w);
         }
         if let TopLevel::Defun { name, .. } = &tl {
-            fn_names.push(name.local().to_string());
+            fn_names.push(name.last_segment().to_string());
         }
         interp.exec(&mut heap, tl).map_err(|e| format!("island exec failed: {}", e))?;
     }

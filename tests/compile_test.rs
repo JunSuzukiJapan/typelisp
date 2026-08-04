@@ -5243,95 +5243,6 @@ fn compile_round_trips_a_vector_of_units() {
     assert_eq!(v, RtValue::Int(2));
 }
 
-// ---- an ADT's runtime type name is its *qualified* path -----------------
-//
-// A boxed struct/enum carries its type's name as a string
-// (`Heap::alloc_struct`/`alloc_enum`), and that string is the value's runtime
-// identity: `match_pattern`'s enum/struct arms, `rt_sexpr_instance_test`'s
-// downcast, `equalp`, the printer's variant-name lookup and `print-object`
-// dispatch all compare or resolve it. The interpreter writes
-// `Path::to_string` — the qualified path — so compiled code must too
-// (`ast_bridge::translate_construct` and the two downcast pattern sites).
-//
-// Every one of these needs a `(module ...)`: at the root namespace the local
-// name and the qualified path are the same string, which is exactly why the
-// disagreement went unnoticed for as long as it did.
-
-#[test]
-fn a_compiled_construct_in_a_module_is_matchable_by_the_interpreter() {
-    let v = run_with_compiler_and_prelude(
-        r#"
-        (module m
-          (pub defenum expr (num i32) (add expr expr))
-          (use expr)
-          (pub defun mk ((n i32)) expr (num n)))
-        (use m::expr)
-        (compile m::mk)
-        (match (m::mk 5) ((num v) v) ((add a b) -1))
-        "#,
-    )
-    .expect("eval failed");
-    assert_eq!(v, RtValue::Int(5));
-}
-
-#[test]
-fn a_nested_function_in_a_module_constructs_a_matchable_value() {
-    // The shape a user hits without ever typing `compile`: a `labels` body is
-    // always compiled, so a constructor called inside one took the compiled
-    // path while its `match` stayed interpreted.
-    let v = run_with_compiler_and_prelude(
-        r#"
-        (module m
-          (pub defenum expr (num i32) (add expr expr))
-          (use expr)
-          (pub defun mk ((n i32)) expr
-            (labels ((f ((k i32)) expr (num k))) (f n))))
-        (use m::expr)
-        (match (m::mk 7) ((num v) v) ((add a b) -1))
-        "#,
-    )
-    .expect("eval failed");
-    assert_eq!(v, RtValue::Int(7));
-}
-
-#[test]
-fn a_compiled_downcast_in_a_module_matches_an_interpreted_value() {
-    // The other direction: the value is built interpreted and the `(the T p)`
-    // downcast runs in compiled code, which used to silently fall through to
-    // the catch-all arm rather than fail loudly.
-    let v = run_with_compiler_and_prelude(
-        r#"
-        (module m
-          (pub defstruct pt (x i32) (y i32))
-          (pub defun peek ((s Sexpr)) i32
-            (match s ((the pt p) p::x) (_ -1))))
-        (compile m::peek)
-        (m::peek (m::pt::new 7 8))
-        "#,
-    )
-    .expect("eval failed");
-    assert_eq!(v, RtValue::Int(7));
-}
-
-#[test]
-fn a_compiled_construct_in_a_module_prints_and_compares_like_an_interpreted_one() {
-    // `equalp` and the printer read the same stored name, so a mismatch shows
-    // up as "two identical values are unequal" and `<unknown-variant>`.
-    let v = run_with_compiler_and_prelude(
-        r#"
-        (module m
-          (pub defenum expr (num i32) (add expr expr))
-          (use expr)
-          (pub defun mk ((n i32)) expr (num n))
-          (pub defun mk-interp ((n i32)) expr (num n)))
-        (compile m::mk)
-        (format false "~a|~a" (m::mk 5) (equalp (m::mk 5) (m::mk-interp 5)))
-        "#,
-    )
-    .expect("eval failed");
-    assert_eq!(expect_str(v), "(num 5)|true");
-}
-
 // ---- a built-in type is identified by its whole path, not its last segment --
 //
 // Every built-in lives at the root namespace, but nothing stops a module from
@@ -5395,4 +5306,123 @@ fn the_real_builtin_vector_still_lowers_from_inside_a_module() {
     )
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(42));
+}
+
+// ---- cross-boundary conformance: a value is the same value either side ----
+//
+// The behavioural net under `src/type_key.rs`'s invariant. A heap value's type
+// identity is a string, written by whichever side built it and read by
+// whichever side consumes it, so the two sides must agree — and on 2026-08-04
+// they did not (`ast_bridge` spelled `Path::last_segment`, the interpreter
+// `Path::to_string`), which made a compiled constructor's value unmatchable,
+// unprintable and unequal to its interpreted twin.
+//
+// Every case here lives in `(module m ...)`, and that is the point: at the
+// root namespace the two spellings are the same string, which is why 200-odd
+// compile tests missed the bug entirely. The matrix is build-site
+// (interpreted / compiled) × consume-site (interpreted `match`, compiled
+// `match`, compiled `(the T p)` downcast, printing, `equalp`), over both an
+// enum and a struct.
+
+/// A module defining the enum and struct the matrix works with, plus one
+/// builder and one consumer per side. `compile` is applied to exactly the
+/// functions whose name ends in `-c`, so a call names its own side.
+const CONFORMANCE_MODULE: &str = r#"
+(module m
+  (pub defenum expr (num i32) (add expr expr))
+  (use expr)
+  (pub defstruct pt (x i32) (y i32))
+
+  ;; builders — `-i` stays interpreted, `-c` gets compiled below
+  (pub defun enum-i ((n i32)) expr (num n))
+  (pub defun enum-c ((n i32)) expr (num n))
+  (pub defun struct-i ((n i32)) pt (pt::new n 0))
+  (pub defun struct-c ((n i32)) pt (pt::new n 0))
+  ;; a nested function is always compiled, whether or not anything asks
+  (pub defun enum-nested ((n i32)) expr (labels ((f ((k i32)) expr (num k))) (f n)))
+
+  ;; consumers
+  (pub defun take-enum-i ((e expr)) i32 (match e ((num v) v) ((add a b) -1)))
+  (pub defun take-enum-c ((e expr)) i32 (match e ((num v) v) ((add a b) -1)))
+  (pub defun downcast-c ((s Sexpr)) i32 (match s ((the pt p) p::x) (_ -1)))
+  (pub defun downcast-i ((s Sexpr)) i32 (match s ((the pt p) p::x) (_ -1))))
+(compile m::enum-c)
+(compile m::struct-c)
+(compile m::take-enum-c)
+(compile m::downcast-c)
+"#;
+
+/// Runs `expr` with [`CONFORMANCE_MODULE`] in scope, expecting an `i32`.
+fn conformance_int(expr: &str) -> i64 {
+    match run_with_compiler_and_prelude(&format!("{CONFORMANCE_MODULE}\n{expr}"))
+        .expect("eval failed")
+    {
+        RtValue::Int(n) => n,
+        other => panic!("expected an Int, got {:?}", other),
+    }
+}
+
+/// Runs `expr` with [`CONFORMANCE_MODULE`] in scope, expecting a string.
+fn conformance_str(expr: &str) -> String {
+    expect_str(
+        run_with_compiler_and_prelude(&format!("{CONFORMANCE_MODULE}\n{expr}")).expect("eval failed"),
+    )
+}
+
+#[test]
+fn an_enum_value_matches_whichever_side_built_it() {
+    // 3 builders × 2 `match` sites. Every cell must see `num 5`.
+    for build in ["m::enum-i", "m::enum-c", "m::enum-nested"] {
+        for take in ["m::take-enum-i", "m::take-enum-c"] {
+            let got = conformance_int(&format!("({take} ({build} 5))"));
+            assert_eq!(got, 5, "built by {build}, matched by {take}");
+        }
+    }
+}
+
+#[test]
+fn an_enum_value_matches_an_interpreted_inline_match_whichever_side_built_it() {
+    // The inline form too: `take-enum-*` is a *function* the checker sees
+    // whole, while this `match` sits at top level in the caller's own body.
+    for build in ["m::enum-i", "m::enum-c", "m::enum-nested"] {
+        let got = conformance_int(&format!(
+            "(use m::expr) (match ({build} 5) ((num v) v) ((add a b) -1))"
+        ));
+        assert_eq!(got, 5, "built by {build}");
+    }
+}
+
+#[test]
+fn a_struct_value_downcasts_whichever_side_built_it() {
+    // 2 builders × 2 downcast sites, over `Sexpr` — the `(the T p)` path,
+    // which fails *silently* (falls to the catch-all) when the keys disagree.
+    for build in ["m::struct-i", "m::struct-c"] {
+        for take in ["m::downcast-i", "m::downcast-c"] {
+            let got = conformance_int(&format!("({take} ({build} 7))"));
+            assert_eq!(got, 7, "built by {build}, downcast by {take}");
+        }
+    }
+}
+
+#[test]
+fn a_value_prints_the_same_whichever_side_built_it() {
+    // The printer resolves the variant name by parsing the stored key back
+    // into a `Path` and looking it up, so a wrong key reads
+    // `(<unknown-variant> 5)` / `#<pt ...>` instead of `#<m::pt ...>`.
+    for build in ["m::enum-i", "m::enum-c", "m::enum-nested"] {
+        assert_eq!(conformance_str(&format!("(format false \"~a\" ({build} 5))")), "(num 5)", "{build}");
+    }
+    for build in ["m::struct-i", "m::struct-c"] {
+        let got = conformance_str(&format!("(format false \"~a\" ({build} 7))"));
+        assert!(got.ends_with("m::pt 7 0>"), "built by {build}, printed as {got}");
+    }
+}
+
+#[test]
+fn two_values_of_one_type_are_equalp_across_the_boundary() {
+    // `equalp`'s "same type" is key equality, so a disagreement makes a value
+    // unequal to its own twin.
+    assert!(conformance_str("(format false \"~a\" (equalp (m::enum-i 5) (m::enum-c 5)))") == "true");
+    assert!(conformance_str("(format false \"~a\" (equalp (m::enum-c 5) (m::enum-nested 5)))") == "true");
+    assert!(conformance_str("(format false \"~a\" (equalp (m::struct-i 7) (m::struct-c 7)))") == "true");
 }

@@ -6,6 +6,7 @@ mod name_lexer;
 pub mod read;
 pub mod mem;
 pub mod types;
+pub mod type_key;
 pub mod check;
 pub mod eval;
 pub mod prelude;

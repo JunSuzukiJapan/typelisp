@@ -83,7 +83,7 @@ fn a_type_imported_from_another_file_is_highlighted() {
     // an editor-local scan cannot cover.
     let (uses, tokens, text) = analyze("examples/projects/todo-cli/src/store.typl");
     assert!(
-        uses.iter().any(|u| u.path.local() == "todo-item" && u.kind == TypeKind::Struct),
+        uses.iter().any(|u| u.path.last_segment() == "todo-item" && u.kind == TypeKind::Struct),
         "the imported type was never resolved as a use; recorded {:?}",
         uses.iter().map(|u| u.path.to_string()).collect::<Vec<_>>()
     );
@@ -149,8 +149,8 @@ fn a_file_defining_its_own_types_still_works() {
 #[test]
 fn trait_and_struct_kinds_are_reported() {
     let (uses, _, _) = analyze("examples/projects/shape-canvas/src/shapes.typl");
-    assert!(uses.iter().any(|u| u.path.local() == "shape" && u.kind == TypeKind::Trait));
-    assert!(uses.iter().any(|u| u.path.local() == "rect" && u.kind == TypeKind::Struct));
+    assert!(uses.iter().any(|u| u.path.last_segment() == "shape" && u.kind == TypeKind::Trait));
+    assert!(uses.iter().any(|u| u.path.last_segment() == "rect" && u.kind == TypeKind::Struct));
 }
 
 #[test]

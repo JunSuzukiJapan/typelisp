@@ -32,6 +32,10 @@ use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
 use crate::check::registry::{EVAL_ERROR, PARSE_FLOAT_ERROR, PARSE_INT_ERROR, READ_ERROR};
+use crate::type_key::{alloc_typed_enum, alloc_typed_struct, heap_type_is, heap_type_path};
+use crate::types::{
+    path_is_builtin, path_is_builtin_any, LLVM_METHOD_RECEIVER_TYPES, NATIVE_LOWERED_PRIMITIVES,
+};
 use crate::{BoxId, CompileTarget, Expr, Heap, Loc, MacroExpander, MacroLambda, Path, Pattern, QuotedSexpr, Ref, SymId, TopLevel, Type, Typed, Value};
 
 use super::pprint;
@@ -809,7 +813,7 @@ impl Interp {
         // here would reject perfectly JIT-able code.
         let call_targets: Vec<Path> = crate::compile::ast_bridge::collect_call_targets(t)
             .into_iter()
-            .filter(|p| !is_rt_builtin_name(p.local()))
+            .filter(|p| !is_rt_builtin_name(p.last_segment()))
             .collect();
         for p in &call_targets {
             if !self.root.borrow().fn_compiled(p) {
@@ -826,10 +830,10 @@ impl Interp {
         let assoc_targets: Vec<(Path, String)> = crate::compile::ast_bridge::collect_assoc_targets(t)
             .into_iter()
             .filter(|key| {
-                if crate::compile::ast_bridge::is_builtin_type(&key.0, "vector") && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push" | "pop") {
+                if path_is_builtin(&key.0, "vector") && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push" | "pop") {
                     return false;
                 }
-                if crate::compile::ast_bridge::is_builtin_type(&key.0, "hashtable")
+                if path_is_builtin(&key.0, "hashtable")
                     && matches!(key.1.as_str(), "new" | "set" | "get" | "remove" | "count" | "clear" | "keys" | "values" | "entries")
                 {
                     return false;
@@ -843,10 +847,11 @@ impl Interp {
                 // `call_graph_edges`' comment): it panics inside
                 // `compile-assoc-user`'s `get-function`, still at compile
                 // time.
-                if matches!(key.0.local(), "llvm-module" | "llvm-function" | "llvm-builder" | "scope") {
+                if path_is_builtin_any(&key.0, &LLVM_METHOD_RECEIVER_TYPES) {
                     return false;
                 }
-                self.root.borrow().has_method(&key.0, &key.1) || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64" | "bignum" | "ratio" | "sexpr")
+                self.root.borrow().has_method(&key.0, &key.1)
+                    || !path_is_builtin_any(&key.0, &NATIVE_LOWERED_PRIMITIVES)
             })
             .collect();
         for (p, m) in &assoc_targets {
@@ -1198,7 +1203,7 @@ impl Interp {
                 let (names, types): (Vec<String>, Vec<Type>) = params.into_iter().unzip();
                 let kinds = types.iter().map(|ty| self.heap_repr_kind(ty)).collect();
                 let def = FnDef { params: names, kinds, body, rest: false, lambda: None, sig: Some((types, ret)), public, compiled: RefCell::new(None) };
-                self.root.borrow_mut().get_or_create(name.parent()).fns.insert(name.local().to_string(), Rc::new(def));
+                self.root.borrow_mut().get_or_create(name.parent()).fns.insert(name.last_segment().to_string(), Rc::new(def));
                 Ok(None)
             }
             TopLevel::Defmethod { type_name, method, self_name, params, ret, body, type_params, public, .. } => {
@@ -1220,7 +1225,7 @@ impl Interp {
                 }
                 let kinds = types.iter().map(|ty| self.heap_repr_kind(ty)).collect();
                 let def = FnDef { params: names, kinds, body, rest: false, lambda: None, sig: Some((types, ret)), public, compiled: RefCell::new(None) };
-                self.root.borrow_mut().get_or_create(type_name.parent()).methods.insert((type_name.local().to_string(), method), Rc::new(def));
+                self.root.borrow_mut().get_or_create(type_name.parent()).methods.insert((type_name.last_segment().to_string(), method), Rc::new(def));
                 Ok(None)
             }
             TopLevel::Defmacro { name, params, body, rest, lambda, public } => {
@@ -1231,7 +1236,7 @@ impl Interp {
                 // `Heap` slots.
                 let kinds = vec![SlotKind::Heap; params.len()];
                 let def = FnDef { params, kinds, body, rest, lambda: Some(lambda), sig: None, public, compiled: RefCell::new(None) };
-                self.root.borrow_mut().get_or_create(name.parent()).fns.insert(name.local().to_string(), Rc::new(def));
+                self.root.borrow_mut().get_or_create(name.parent()).fns.insert(name.last_segment().to_string(), Rc::new(def));
                 Ok(None)
             }
             TopLevel::Use { .. } => Ok(None),
@@ -1243,7 +1248,7 @@ impl Interp {
             // Sexpr/RtValue unification plan, `docs/implementation-log.md`
             // — see `scope::TypeEntry`'s doc comment).
             TopLevel::Defstruct { name } => {
-                self.root.borrow_mut().get_or_create(name.parent()).types.insert(name.local().to_string(), scope::TypeEntry::Struct);
+                self.root.borrow_mut().get_or_create(name.parent()).types.insert(name.last_segment().to_string(), scope::TypeEntry::Struct);
                 Ok(None)
             }
             // A `defenum` sum type is a check-time registration, like
@@ -1264,7 +1269,7 @@ impl Interp {
                 let v = self.eval(heap, &value, &Env::new())?;
                 let kind = self.heap_repr_kind(&ty);
                 let slot = self.slot(heap, kind, v)?;
-                self.root.borrow_mut().get_or_create(name.parent()).globals.insert(name.local().to_string(), scope::GlobalDef { slot, public });
+                self.root.borrow_mut().get_or_create(name.parent()).globals.insert(name.last_segment().to_string(), scope::GlobalDef { slot, public });
                 Ok(None)
             }
             TopLevel::Module { path, body } => {
@@ -1400,7 +1405,7 @@ impl Interp {
                 // call sites since interp-closure removal Stage 8c).
                 Some(_) => self.jit_closure(heap, env, t, &[]),
                 // Otherwise a built-in operator (lives at the root, simple path).
-                None => Ok(RtValue::Builtin(r.resolved.local().to_string())),
+                None => Ok(RtValue::Builtin(r.resolved.last_segment().to_string())),
             },
             Expr::MethodRef { type_name, method, home, .. } => match self.root.borrow().resolve_method(home, type_name, method) {
                 Some(_) => self.jit_closure(heap, env, t, &[]),
@@ -1760,7 +1765,7 @@ impl Interp {
                         .iter()
                         .map(|f| rtvalue_to_struct_field(heap, f))
                         .collect::<Result<Vec<Value>, EvalError>>()?;
-                    Ok(RtValue::Sexpr(heap.alloc_struct(type_name.to_string(), mem_fields)))
+                    Ok(RtValue::Sexpr(alloc_typed_struct(heap, type_name, mem_fields)))
                 } else {
                     // An enum value (`Option`/`Result`/user `defenum`) — see
                     // `build_enum_value`'s doc comment for the heap/native
@@ -2886,7 +2891,7 @@ impl Interp {
         edges.extend(
             crate::compile::ast_bridge::collect_call_targets(&body)
                 .into_iter()
-                .filter(|p| *p != path && !is_rt_builtin_name(p.local()))
+                .filter(|p| *p != path && !is_rt_builtin_name(p.last_segment()))
                 .map(CallEdge::Fn),
         );
 
@@ -2902,7 +2907,7 @@ impl Interp {
                 // is deliberately excluded from this list: it is a genuine
                 // prelude `defmethod` (`vector-iter::new`) and must be
                 // `compile`d like any other method.
-                if crate::compile::ast_bridge::is_builtin_type(&key.0, "vector") && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push" | "pop") {
+                if path_is_builtin(&key.0, "vector") && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push" | "pop") {
                     return false;
                 }
                 // `HashTable<K,V>`'s builtin methods lowered to a `hashtable-op`
@@ -2910,7 +2915,7 @@ impl Interp {
                 // never a real call target. `iter` (a real `defmethod`) is
                 // deliberately absent so it's validated/transitively compiled
                 // normally.
-                if crate::compile::ast_bridge::is_builtin_type(&key.0, "hashtable")
+                if path_is_builtin(&key.0, "hashtable")
                     && matches!(key.1.as_str(), "new" | "set" | "get" | "remove" | "count" | "clear" | "keys" | "values" | "entries")
                 {
                     return false;
@@ -2922,7 +2927,7 @@ impl Interp {
                 // heap-repr `Scope<V>` method has no compiled lowering and
                 // panics inside `compile-assoc-user`'s `get-function`
                 // instead, per the convention in the next comment.
-                if matches!(key.0.local(), "llvm-module" | "llvm-function" | "llvm-builder" | "scope") {
+                if path_is_builtin_any(&key.0, &LLVM_METHOD_RECEIVER_TYPES) {
                     return false;
                 }
                 // A user-registered method is a real call target even on a
@@ -2941,8 +2946,8 @@ impl Interp {
                 // (interp-closure removal Stage 8a). `is_native_lowered_primitive_method`
                 // is the Rust twin of the island's `*-native-method?` list.
                 self.root.borrow().has_method(&key.0, &key.1)
-                    || !matches!(key.0.local(), "i64" | "i32" | "char" | "string" | "f64" | "bignum" | "ratio" | "sexpr")
-                    || !is_native_lowered_primitive_method(key.0.local(), &key.1)
+                    || !path_is_builtin_any(&key.0, &NATIVE_LOWERED_PRIMITIVES)
+                    || !is_native_lowered_primitive_method(key.0.last_segment(), &key.1)
             })
             .collect();
         for (type_name, method) in &method_targets {
@@ -3782,11 +3787,7 @@ impl Interp {
     /// `<Self as MacroExpander>::expand_macro` documents).
     pub(crate) fn print_object(&self, heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String> {
         let Value::Boxed(id) = v else { return Ok(None) };
-        let name = if heap.is_struct(id) {
-            heap.struct_type_name(id).to_string()
-        } else if heap.is_enum(id) {
-            heap.enum_type_name(id).to_string()
-        } else {
+        let Some(name) = heap_type_path(heap, id).map(|p| p.to_string()) else {
             return Ok(None);
         };
         // A value already being printed by its own method is rendered the
@@ -4083,7 +4084,7 @@ impl Interp {
             | TopLevel::Defvar { name, .. }
             | TopLevel::Defmacro { name, .. }
             | TopLevel::Defstruct { name }
-            | TopLevel::Defenum { name, .. } => Some(name.local().to_string()),
+            | TopLevel::Defenum { name, .. } => Some(name.last_segment().to_string()),
             TopLevel::Defmethod { method, .. } => Some(method.clone()),
             _ => None,
         };
@@ -4988,6 +4989,7 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
     }
     if *type_name == Path::root("vector") {
         return match method {
+            // type-identity-ok: the built-in `Vector`, a root name spelled in full
             "new" => Some(Ok(RtValue::Sexpr(heap.alloc_struct("vector".to_string(), Vec::new())))),
             "push" => Some(vector_push(heap, args)),
             "get" => Some(vector_get(heap, args, ret_ty)),
@@ -6611,7 +6613,7 @@ fn build_enum_value(heap: &mut Heap, type_name: Path, variant: usize, fields: Ve
             Err(_) => return RtValue::Data { type_name, variant, fields },
         }
     }
-    RtValue::Sexpr(heap.alloc_enum(type_name.to_string(), variant, mem_fields))
+    RtValue::Sexpr(alloc_typed_enum(heap, &type_name, variant, mem_fields))
 }
 
 impl Interp {
@@ -6820,6 +6822,7 @@ fn hashtable_clear(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalErr
 /// `hashtable_values`/`hashtable_entries`, whose fields come straight from
 /// `Heap::hashtable_pairs` and so need no `RtValue` round-trip.
 fn vector_of_raw(heap: &mut Heap, fields: Vec<Value>) -> RtValue {
+    // type-identity-ok: the built-in `Vector`, a root name spelled in full
     RtValue::Sexpr(heap.alloc_struct("vector".to_string(), fields))
 }
 
@@ -6847,6 +6850,7 @@ fn hashtable_entries(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalE
     let fields = heap
         .hashtable_pairs(id)
         .into_iter()
+        // type-identity-ok: the built-in `cons-cell`, a root name spelled in full
         .map(|(k, v)| heap.alloc_struct("cons-cell".to_string(), vec![k, v]))
         .collect();
     Ok(vector_of_raw(heap, fields))
@@ -7341,8 +7345,10 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         let boxed = match found {
             Some(v) => {
                 let h = llvm_handle_register(v);
+                // type-identity-ok: the built-in `Option`, a root name spelled in full
                 heap.alloc_enum("option".to_string(), 0, vec![Value::Int(h)])
             }
+            // type-identity-ok: the built-in `Option`, a root name spelled in full
             None => heap.alloc_enum("option".to_string(), 1, vec![]),
         };
         return crate::compile::runtime::encode(boxed);
@@ -7720,12 +7726,15 @@ fn sexpr_equalp_val(heap: &Heap, a: Value, b: Value) -> bool {
         // that, so this recursive arm must come *before* it or it would
         // never run). Design plan §3.
         (Value::Boxed(ia), Value::Boxed(ib)) if heap.is_struct(ia) && heap.is_struct(ib) => {
+            // type-identity-ok: two stored keys compared to each other — no
+            // `Path` to spell, and `equalp`'s "same type" is exactly key equality
             heap.struct_type_name(ia) == heap.struct_type_name(ib)
                 && heap.struct_field_count(ia) == heap.struct_field_count(ib)
                 && (0..heap.struct_field_count(ia))
                     .all(|i| sexpr_equalp_val(heap, heap.struct_field(ia, i), heap.struct_field(ib, i)))
         }
         (Value::Boxed(ia), Value::Boxed(ib)) if heap.is_enum(ia) && heap.is_enum(ib) => {
+            // type-identity-ok: two stored keys compared to each other (see the struct arm)
             heap.enum_type_name(ia) == heap.enum_type_name(ib)
                 && heap.enum_variant(ia) == heap.enum_variant(ib)
                 && heap.enum_field_count(ia) == heap.enum_field_count(ib)
@@ -7805,7 +7814,7 @@ fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(Str
             // (non-`Sexpr`, checker-guaranteed) call site.
             RtValue::Sexpr(Value::Boxed(id))
                 if heap.is_enum(*id)
-                    && heap.enum_type_name(*id) == type_name.to_string()
+                    && heap_type_is(heap, *id, type_name)
                     && heap.enum_variant(*id) == *variant
                     && heap.enum_field_count(*id) == args.len() =>
             {
@@ -7828,7 +7837,7 @@ fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(Str
             // `(point x y)` vs. an unrelated same-shape struct test).
             RtValue::Sexpr(Value::Boxed(id))
                 if heap.is_struct(*id)
-                    && heap.struct_type_name(*id) == type_name.to_string()
+                    && heap_type_is(heap, *id, type_name)
                     && *variant == 0
                     && heap.struct_field_count(*id) == args.len() =>
             {
@@ -7858,17 +7867,14 @@ fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(Str
         },
         Pattern::TypeTest(ty, inner) => {
             let want = match ty {
-                Type::Named(p, _) => p.to_string(),
+                Type::Named(p, _) => p.clone(),
                 _ => return None,
             };
-            if want == "sexpr" {
+            if path_is_builtin(&want, "sexpr") {
                 return match_pattern(heap, inner, v);
             }
             match v {
-                RtValue::Sexpr(Value::Boxed(id)) if heap.is_struct(*id) && heap.struct_type_name(*id) == want => {
-                    match_pattern(heap, inner, v)
-                }
-                RtValue::Sexpr(Value::Boxed(id)) if heap.is_enum(*id) && heap.enum_type_name(*id) == want => {
+                RtValue::Sexpr(Value::Boxed(id)) if heap_type_is(heap, *id, &want) => {
                     match_pattern(heap, inner, v)
                 }
                 _ => None,
