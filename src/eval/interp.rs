@@ -826,10 +826,10 @@ impl Interp {
         let assoc_targets: Vec<(Path, String)> = crate::compile::ast_bridge::collect_assoc_targets(t)
             .into_iter()
             .filter(|key| {
-                if key.0.local() == "vector" && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push" | "pop") {
+                if crate::compile::ast_bridge::is_builtin_type(&key.0, "vector") && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push" | "pop") {
                     return false;
                 }
-                if key.0.local() == "hashtable"
+                if crate::compile::ast_bridge::is_builtin_type(&key.0, "hashtable")
                     && matches!(key.1.as_str(), "new" | "set" | "get" | "remove" | "count" | "clear" | "keys" | "values" | "entries")
                 {
                     return false;
@@ -2902,7 +2902,7 @@ impl Interp {
                 // is deliberately excluded from this list: it is a genuine
                 // prelude `defmethod` (`vector-iter::new`) and must be
                 // `compile`d like any other method.
-                if key.0.local() == "vector" && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push" | "pop") {
+                if crate::compile::ast_bridge::is_builtin_type(&key.0, "vector") && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push" | "pop") {
                     return false;
                 }
                 // `HashTable<K,V>`'s builtin methods lowered to a `hashtable-op`
@@ -2910,7 +2910,7 @@ impl Interp {
                 // never a real call target. `iter` (a real `defmethod`) is
                 // deliberately absent so it's validated/transitively compiled
                 // normally.
-                if key.0.local() == "hashtable"
+                if crate::compile::ast_bridge::is_builtin_type(&key.0, "hashtable")
                     && matches!(key.1.as_str(), "new" | "set" | "get" | "remove" | "count" | "clear" | "keys" | "values" | "entries")
                 {
                     return false;

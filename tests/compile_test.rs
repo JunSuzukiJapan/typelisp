@@ -5331,3 +5331,68 @@ fn a_compiled_construct_in_a_module_prints_and_compares_like_an_interpreted_one(
     .expect("eval failed");
     assert_eq!(expect_str(v), "(num 5)|true");
 }
+
+// ---- a built-in type is identified by its whole path, not its last segment --
+//
+// Every built-in lives at the root namespace, but nothing stops a module from
+// defining `vector`/`hashtable` of its own (`Checker::check_redef` only
+// guards the root). Compiled code used to recognize the built-in by last
+// segment alone and lower the *user* type's methods to `vector-op`/
+// `hashtable-op` — reading a user struct as if it were the built-in.
+
+#[test]
+fn a_module_type_named_vector_keeps_its_own_methods_when_compiled() {
+    // Was: `1` — the built-in `len`, i.e. the struct's field count.
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (module m
+          (pub defstruct vector (a i32))
+          (pub defmethod len ((self vector)) i32 (* 100 self::a))
+          (pub defun call-len ((v vector)) i32 (len v)))
+        (compile m::call-len)
+        (m::call-len (m::vector::new 3))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(300));
+}
+
+#[test]
+fn a_module_type_named_hashtable_keeps_its_own_methods_when_compiled() {
+    // Was: a `BoxId does not hold a HashTable` abort — the compiled body
+    // called the built-in map runtime on a plain struct.
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (module m
+          (pub defstruct hashtable (a i32) (b i32))
+          (pub defmethod count ((self hashtable)) i32 (+ self::a self::b))
+          (pub defun call-count ((h hashtable)) i32 (count h)))
+        (compile m::call-count)
+        (m::call-count (m::hashtable::new 20 22))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(42));
+}
+
+#[test]
+fn the_real_builtin_vector_still_lowers_from_inside_a_module() {
+    // The other side of the same guard: a *use* inside a module still names
+    // the root `vector`, so its methods must keep lowering to `vector-op`.
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (module m
+          (pub defun total ((v Vector<i32>)) i32
+            (let ((sum 0) (i 0))
+              (while (< i (len v)) (setf sum (+ sum (get v i))) (setf i (+ i 1)))
+              sum)))
+        (compile m::total)
+        (let ((v (the Vector<i32> (vector::new))))
+          (push v 10)
+          (push v 32)
+          (m::total v))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(42));
+}

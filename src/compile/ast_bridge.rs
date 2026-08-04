@@ -429,6 +429,23 @@ fn binding_kind(ty: &Type, enums: &HashSet<Path>) -> i64 {
 /// classification must still *exclude* these types
 /// (`Interp::is_jit_tier_ty`) — an interpreted `compile-function` run
 /// JIT-compiling its own `labels` siblings would recurse into itself.
+/// Whether `p` is the built-in type `name` — every built-in
+/// (`vector`/`hashtable`/`llvm-*`/`scope`/`option`/`result`) is registered at
+/// the *root* namespace (`Registry::with_builtins`), so a qualified path can
+/// never be one however its last segment reads.
+///
+/// The `is_simple` half is the whole point. Redefining a built-in type name
+/// is rejected at the root (`Checker::check_redef`), but nothing stops
+/// `(module m (defstruct vector ...))` — and a compiled body that identified
+/// the built-in by last segment alone then lowered `m::vector`'s own methods
+/// to `vector-op`, reading a user struct as if it were a `Vector` (silently
+/// wrong for `vector`, a `BoxId does not hold a HashTable` abort for
+/// `hashtable`). Same mistake, same shape, as compiled code writing a value's
+/// runtime type name unqualified: a type's identity is its whole path.
+pub(crate) fn is_builtin_type(p: &Path, name: &str) -> bool {
+    p.is_simple() && p.local() == name
+}
+
 pub(crate) fn is_llvm_handle_ty(ty: &Type) -> bool {
     match ty {
         Type::Named(p, args) if p.is_simple() => match p.local() {
@@ -480,6 +497,9 @@ pub(crate) fn llvm_op_id(type_key: &str, method: &str) -> i64 {
 /// heap-repr `Scope<V>` (or any other `V`) falls through to the generic
 /// path unchanged.
 fn llvm_assoc_key(type_name: &Path, instance: bool, args: &[Typed], node_ty: &Type) -> Option<&'static str> {
+    if !type_name.is_simple() {
+        return None;
+    }
     match type_name.local() {
         "llvm-module" => Some("llvm-module"),
         "llvm-function" => Some("llvm-function"),
@@ -488,7 +508,7 @@ fn llvm_assoc_key(type_name: &Path, instance: bool, args: &[Typed], node_ty: &Ty
             let scope_ty = if instance { args.first().map(|a| &a.ty) } else { Some(node_ty) };
             match scope_ty {
                 Some(Type::Named(p, targs))
-                    if p.local() == "scope" && targs.len() == 1 && is_llvm_handle_ty(&targs[0]) =>
+                    if is_builtin_type(p, "scope") && targs.len() == 1 && is_llvm_handle_ty(&targs[0]) =>
                 {
                     Some("native-scope")
                 }
@@ -507,8 +527,8 @@ fn llvm_assoc_key(type_name: &Path, instance: bool, args: &[Typed], node_ty: &Ty
 /// that function outright).
 fn is_enum_ty(ty: &Type, enums: &HashSet<Path>) -> bool {
     match ty {
-        Type::Named(p, args) if p.local() == "option" && p.is_simple() && args.len() == 1 => true,
-        Type::Named(p, args) if p.local() == "result" && p.is_simple() && args.len() == 2 => true,
+        Type::Named(p, args) if is_builtin_type(p, "option") && args.len() == 1 => true,
+        Type::Named(p, args) if is_builtin_type(p, "result") && args.len() == 2 => true,
         Type::Named(p, _) if crate::check::registry::is_builtin_error_type(p) => true,
         Type::Named(p, _) => enums.contains(p),
         _ => false,
@@ -685,7 +705,7 @@ fn global_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) 
 /// `iter`: that one is a real prelude `defmethod` (`vector-iter::new`), a
 /// normal compiled method, so it stays on the `assoc` path. `HashTable<K,V>`
 /// shares the `new`/`get`/`set` names but a different `type_name`, so the
-/// `type_name.local() == "vector"` guard at the call site keeps them apart.
+/// [`is_builtin_type`] guard at the call site keeps them apart.
 const VECTOR_BUILTIN_METHODS: [&str; 6] = ["new", "get", "set", "len", "push", "pop"];
 
 /// The element `kind` ([`struct_field_kind`]) for a `Vector<T>` method call:
@@ -694,7 +714,7 @@ const VECTOR_BUILTIN_METHODS: [&str; 6] = ["new", "get", "set", "len", "push", "
 /// `get`/`set`/`len`/`push`/`pop` since every one either reads or writes a `T`.
 fn vector_element_kind(args: &[Typed], structs: &HashSet<Path>, enums: &HashSet<Path>) -> i64 {
     match args.first().map(|a| &a.ty) {
-        Some(Type::Named(p, targs)) if p.local() == "vector" => {
+        Some(Type::Named(p, targs)) if is_builtin_type(p, "vector") => {
             targs.first().map(|t| struct_field_kind(t, structs, enums)).unwrap_or(0)
         }
         _ => 0,
@@ -800,7 +820,7 @@ const HASHTABLE_BUILTIN_METHODS: [&str; 9] = ["new", "set", "get", "remove", "co
 fn hashtable_kv_kinds(args: &[Typed], ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> (i64, i64) {
     let ht_ty = args.first().map(|a| &a.ty).unwrap_or(ty);
     match ht_ty {
-        Type::Named(p, targs) if p.local() == "hashtable" && targs.len() == 2 => {
+        Type::Named(p, targs) if is_builtin_type(p, "hashtable") && targs.len() == 2 => {
             (struct_field_kind(&targs[0], structs, enums), struct_field_kind(&targs[1], structs, enums))
         }
         _ => (0, 0),
@@ -1157,13 +1177,13 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
             // `HashTable::get`/`set`/`new` (a different type, different
             // runtime) and `Vector`'s own `iter` (a real prelude `defmethod`)
             // both stay on the generic `assoc` path below.
-            if type_name.local() == "vector" && VECTOR_BUILTIN_METHODS.contains(&method.as_str()) {
+            if is_builtin_type(type_name, "vector") && VECTOR_BUILTIN_METHODS.contains(&method.as_str()) {
                 return translate_vector_method(heap, method, vector_element_kind(args, cx.structs, cx.enums), args, cx);
             }
             // `HashTable<K,V>`'s builtin methods (except the `Option`-returning
             // `get`/`remove` and the `iter` `defmethod`) lower to a
             // `hashtable-op` node — see `translate_hashtable_method`.
-            if type_name.local() == "hashtable" && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
+            if is_builtin_type(type_name, "hashtable") && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
                 let (kk, vk) = hashtable_kv_kinds(args, &typed.ty, cx.structs, cx.enums);
                 return translate_hashtable_method(heap, method, kk, vk, args, cx);
             }

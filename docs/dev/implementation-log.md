@@ -5608,18 +5608,24 @@ island（`compiler.rs`）と prelude は `module` を1つも持たない＝全�
 `(module m ...)` を張って書いた（`tests/compile_test.rs` 末尾）。修正を戻すと4件とも落ちる
 ことを確認済み。
 
-### 同族の2件目（未修正、TODO.md に記録）
+### 同族の2件目——組み込み型の*分類*も最終セグメントで見ていた
 
-追っている途中で見つかった。`ast_bridge` は組み込み型を `type_name.local() == "vector"` /
-`"hashtable"` で*分類*している箇所がある（メソッド呼び出しの `vector-op`/`hashtable-op`
-への振り替え、要素 kind の判定）。組み込み名の再定義は root では拒否されるが、
-**モジュールの中では通ってしまう**ので、`(module m (defstruct vector ...))` を書くと
-compiled 経路がユーザ型を組み込み Vector と誤認する。実測:
+追っている途中で見つかり、同じコミットで直した。`ast_bridge` は組み込み型を
+`type_name.local() == "vector"` / `"hashtable"` / `"llvm-*"` / `"scope"` で*分類*して
+専用ノード（`vector-op`/`hashtable-op`/`llvm-op`）へ振り替えている。組み込み名の再定義は
+root では拒否されるが、**モジュールの中では通る**ので、`(module m (defstruct vector ...))`
+を書くと compiled 経路だけがユーザ型を組み込みと誤認する:
 
-- `vector` を名乗るユーザ struct に `len` メソッド → interp は `300`、compiled は `1`
-  （組み込みの「フィールド数」を読んでいる）。**黙って違う値**。
-- `hashtable` の方は `BoxId does not hold a HashTable` で**プロセスが abort** する。
+- `vector` を名乗るユーザ struct の `len` → interp は `300`、compiled は `1`
+  （組み込みの「フィールド数」を読む）。**黙って違う値**。
+- `hashtable` の方は `BoxId does not hold a HashTable` で**プロセスが abort**。
 
-型名の identity（上の修正）とは別の機構なので今回は触っていない。直すなら分類側に
-`Path::is_simple()`（＝1セグメント＝root）を足すのが最小で、組み込みの受け側は常に
-root なので影響は無いはず。
+型名の identity（上）とは別の機構だが、間違いは同一——**型の identity は経路全体**であって
+最終セグメントではない。`is_builtin_type(p, name)`（`p.is_simple() && p.local() == name`）を
+1つ置いて、`ast_bridge` の6箇所と `interp.rs` の compile 駆動側4箇所を通した。駆動側も
+一緒に直すのが必須で、片方だけだと「ast_bridge は実メソッド呼び出しに落とすのに駆動側は
+組み込みだと思って compile しない」＝シンボル欠落になる。判定の形は既に同ファイルの
+`is_llvm_handle_ty`/`is_enum_ty` が `p.is_simple()` 付きで書いていた——揃っていなかっただけ。
+
+組み込みの受け側は常に root なので、モジュールの中から本物の `Vector<i32>` を使う経路は
+従来どおり `vector-op` に落ちる（回帰テストで固定した）。
