@@ -5558,3 +5558,68 @@ checker が名前を知らないので**到達不能な死にコード**。同�
 
 副産物として、`examples/projects/expr-eval` が check を通るようになった結果、**別の既存バグ**が
 表に出た（`labels` の中で作った enum 値の変種タグが壊れる）。TODO.md に再現手順付きで記録した。
+
+---
+
+## compiled 側が ADT の型名を修飾せずに書いていたバグ（2026-08-04）
+
+前項で `examples/projects/expr-eval` が実行時に落ちたのを追った結果。TODO.md には
+「`labels` の中で作った enum 値の変種タグが壊れる」と書いたが、`labels` は症状であって
+条件ではなかった。**非 root モジュールの ADT を compiled 経路で構築すると、値が持つ型名が
+修飾されない**。`labels`/`lambda` の本体は常に compile されるので、そこが目に付いただけ。
+
+### 値の実行時 identity は「型名の文字列」
+
+`BoxedObj::Struct`/`Enum` は型名を文字列で持つ（`Heap::alloc_struct`/`alloc_enum`）。
+これが値の実行時 identity で、次の全員がそれを比較・解決する:
+
+| 読む側 | 用途 |
+|---|---|
+| `match_pattern`（enum/struct 腕） | 別 ADT との偽陽性防止（Sexpr ユーザ ADT 計画 §2 で追加） |
+| `rt_sexpr_instance_test` | compiled 側の downcast（`(the T p)` / 型名先頭パターン） |
+| `sexpr_equalp_val` | `equalp` の「同じ型か」 |
+| `format.rs` / `main.rs` の印字 | 変種名の逆引き（`Path` にパースして registry を引く） |
+| `Interp::print_object` | `print-object` 実装の探索 |
+
+インタプリタは書く側も読む側も `Path::to_string()`（修飾済み）。ところが
+`ast_bridge` は3箇所とも `Path::local()`（最終セグメント）を書いていた
+（`translate_construct` / downcast `pat-ctor` / `pat-typetest`）。compiled 側どうしは
+一貫していたので閉じた世界では動き、**境界を跨いだ瞬間に壊れる**:
+
+- compiled で構築 → interp の `match`: `internal error: no matching match arm`
+- interp で構築 → compiled の downcast: **黙って**マッチせず catch-all へ
+- 印字: `(<unknown-variant> 5)` / `#<pt 1 2>`（`#<m::pt 1 2>` のはず）
+- `equalp`: 同じ型の値どうしが false
+- `print-object`: 実装が見つからず既定の描画に落ちる
+
+修正は `.local()` → `.to_string()` の3箇所。関数呼び出し側は同じ問題を既に解いていた
+（`translate_call`/`translate_fnref` は `m::inc` を `tl_m::inc` にマングルする。interp
+クロージャ削除のときに直した）——型名側が取り残されていた。
+
+island（`compiler.rs`）と prelude は `module` を1つも持たない＝全部 root なので、
+`local()` と `to_string()` が同じ文字列。**既存の bitcode は再生成不要**で、
+`compile-option-type-name` が焼き込む `"option"` もそのまま正しい。
+
+### なぜテストが1件も落ちなかったか
+
+`tests/` の全ソースは root 名前空間で checker に渡る。root では `local()` == `to_string()`
+なので、compile 系のテストは1件も再現しない。再現には `(module ...)` か
+（ファイル＝モジュールなので）プロジェクト構成が要る。回帰テストは4件とも
+`(module m ...)` を張って書いた（`tests/compile_test.rs` 末尾）。修正を戻すと4件とも落ちる
+ことを確認済み。
+
+### 同族の2件目（未修正、TODO.md に記録）
+
+追っている途中で見つかった。`ast_bridge` は組み込み型を `type_name.local() == "vector"` /
+`"hashtable"` で*分類*している箇所がある（メソッド呼び出しの `vector-op`/`hashtable-op`
+への振り替え、要素 kind の判定）。組み込み名の再定義は root では拒否されるが、
+**モジュールの中では通ってしまう**ので、`(module m (defstruct vector ...))` を書くと
+compiled 経路がユーザ型を組み込み Vector と誤認する。実測:
+
+- `vector` を名乗るユーザ struct に `len` メソッド → interp は `300`、compiled は `1`
+  （組み込みの「フィールド数」を読んでいる）。**黙って違う値**。
+- `hashtable` の方は `BoxId does not hold a HashTable` で**プロセスが abort** する。
+
+型名の identity（上の修正）とは別の機構なので今回は触っていない。直すなら分類側に
+`Path::is_simple()`（＝1セグメント＝root）を足すのが最小で、組み込みの受け側は常に
+root なので影響は無いはず。

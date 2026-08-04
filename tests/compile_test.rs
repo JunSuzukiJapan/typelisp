@@ -5242,3 +5242,92 @@ fn compile_round_trips_a_vector_of_units() {
     .expect("eval failed");
     assert_eq!(v, RtValue::Int(2));
 }
+
+// ---- an ADT's runtime type name is its *qualified* path -----------------
+//
+// A boxed struct/enum carries its type's name as a string
+// (`Heap::alloc_struct`/`alloc_enum`), and that string is the value's runtime
+// identity: `match_pattern`'s enum/struct arms, `rt_sexpr_instance_test`'s
+// downcast, `equalp`, the printer's variant-name lookup and `print-object`
+// dispatch all compare or resolve it. The interpreter writes
+// `Path::to_string` — the qualified path — so compiled code must too
+// (`ast_bridge::translate_construct` and the two downcast pattern sites).
+//
+// Every one of these needs a `(module ...)`: at the root namespace the local
+// name and the qualified path are the same string, which is exactly why the
+// disagreement went unnoticed for as long as it did.
+
+#[test]
+fn a_compiled_construct_in_a_module_is_matchable_by_the_interpreter() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (module m
+          (pub defenum expr (num i32) (add expr expr))
+          (use expr)
+          (pub defun mk ((n i32)) expr (num n)))
+        (use m::expr)
+        (compile m::mk)
+        (match (m::mk 5) ((num v) v) ((add a b) -1))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(5));
+}
+
+#[test]
+fn a_nested_function_in_a_module_constructs_a_matchable_value() {
+    // The shape a user hits without ever typing `compile`: a `labels` body is
+    // always compiled, so a constructor called inside one took the compiled
+    // path while its `match` stayed interpreted.
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (module m
+          (pub defenum expr (num i32) (add expr expr))
+          (use expr)
+          (pub defun mk ((n i32)) expr
+            (labels ((f ((k i32)) expr (num k))) (f n))))
+        (use m::expr)
+        (match (m::mk 7) ((num v) v) ((add a b) -1))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(7));
+}
+
+#[test]
+fn a_compiled_downcast_in_a_module_matches_an_interpreted_value() {
+    // The other direction: the value is built interpreted and the `(the T p)`
+    // downcast runs in compiled code, which used to silently fall through to
+    // the catch-all arm rather than fail loudly.
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (module m
+          (pub defstruct pt (x i32) (y i32))
+          (pub defun peek ((s Sexpr)) i32
+            (match s ((the pt p) p::x) (_ -1))))
+        (compile m::peek)
+        (m::peek (m::pt::new 7 8))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(7));
+}
+
+#[test]
+fn a_compiled_construct_in_a_module_prints_and_compares_like_an_interpreted_one() {
+    // `equalp` and the printer read the same stored name, so a mismatch shows
+    // up as "two identical values are unequal" and `<unknown-variant>`.
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (module m
+          (pub defenum expr (num i32) (add expr expr))
+          (use expr)
+          (pub defun mk ((n i32)) expr (num n))
+          (pub defun mk-interp ((n i32)) expr (num n)))
+        (compile m::mk)
+        (format false "~a|~a" (m::mk 5) (equalp (m::mk 5) (m::mk-interp 5)))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(expect_str(v), "(num 5)|true");
+}

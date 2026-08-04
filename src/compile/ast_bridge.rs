@@ -2611,18 +2611,19 @@ fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern, cx: Ctx) -> Result<Value, Er
             // before them) so existing `(pat-ctor variant subpats scrut-kind
             // field-kinds)` field indices stay valid. `type-name-form` is
             // `translate_construct`'s own `(str (int c)...)` literal shape
-            // (`str_literal_form`, the *local* name — `type_name.local()`,
-            // matching `rt_struct_new`/`rt_data_new`'s own `type-name-form`
-            // convention there, not the fully qualified `Path`) — only ever
-            // compiled (`compiler.rs`'s `compile-sexpr-instance-test`) when
-            // `downcast` is true; `Value::Empty` otherwise, mirroring
-            // `translate_construct`'s own `is_sexpr` placeholder. Only
-            // meaningful for `MATCH_KIND_STRUCT`/`MATCH_KIND_BOX` — a
-            // downcast is never encoded against `Sexpr`'s own built-in
-            // variants (`Checker::check_ctor_pattern`'s downcast dispatch
-            // never resolves to the `sexpr` path).
+            // (`str_literal_form` of the *fully qualified* `Path`, matching
+            // `rt_struct_new`/`rt_data_new`'s own `type-name-form` convention
+            // there — and, through it, the string the interpreter stores and
+            // compares) — only ever compiled (`compiler.rs`'s
+            // `compile-sexpr-instance-test`) when `downcast` is true;
+            // `Value::Empty` otherwise, mirroring `translate_construct`'s own
+            // `is_sexpr` placeholder. Only meaningful for
+            // `MATCH_KIND_STRUCT`/`MATCH_KIND_BOX` — a downcast is never
+            // encoded against `Sexpr`'s own built-in variants
+            // (`Checker::check_ctor_pattern`'s downcast dispatch never
+            // resolves to the `sexpr` path).
             let type_name_form =
-                if *downcast { str_literal_form(heap, type_name.local())? } else { Value::Empty };
+                if *downcast { str_literal_form(heap, &type_name.to_string())? } else { Value::Empty };
             heap.push_root(type_name_form);
             let result = tagged(
                 heap,
@@ -2638,14 +2639,14 @@ fn pattern_to_sexpr(heap: &mut Heap, pat: &Pattern, cx: Ctx) -> Result<Value, Er
             // `(pat-typetest type-name-form inner-pattern)` — `Checker::
             // check_type_test_pattern`'s `(the Type pattern)`, a whole-value
             // Sexpr downcast. `ty` is guaranteed `is_heap_repr` (checked at
-            // check time), so it's always `Type::Named` here; its ADT path's
-            // *local* name is compiled the same way a downcast `Ctor`'s is
+            // check time), so it's always `Type::Named` here; its ADT path is
+            // compiled the same way a downcast `Ctor`'s is — fully qualified
             // (see the `Pattern::Ctor` arm's doc comment just above).
             let name = match ty {
-                Type::Named(p, _) => p.local(),
+                Type::Named(p, _) => p.to_string(),
                 _ => unreachable!("Checker::check_type_test_pattern only ever produces a Type::Named"),
             };
-            let type_name_form = str_literal_form(heap, name)?;
+            let type_name_form = str_literal_form(heap, &name)?;
             heap.push_root(type_name_form);
             let inner_v = match pattern_to_sexpr(heap, inner, cx) {
                 Ok(v) => v,
@@ -2837,10 +2838,18 @@ fn translate_arms(heap: &mut Heap, arms: &[Arm], cx: Ctx) -> Result<Vec<Value>, 
 /// exact same tagged-`Sexpr` boundary a struct field does; there is no
 /// longer a distinct "general-ADT field" tagging scheme to keep separate.
 ///
-/// `type-name-str` ([`str_literal_form`]) is that type's own local name,
-/// built for both non-`Sexpr` branches now (an empty placeholder,
+/// `type-name-str` ([`str_literal_form`]) is that type's *fully qualified*
+/// path, built for both non-`Sexpr` branches now (an empty placeholder,
 /// `Value::Empty`, only for `is-sexpr`) — `rt_data_new`'s `args[0]` needs it
 /// exactly as `rt_struct_new`'s already did.
+///
+/// Qualified, not the local name, because this string is the runtime
+/// *identity* of the value's type: `Heap::alloc_enum`/`alloc_struct` store it
+/// verbatim, and the interpreter both writes it (`build_enum_value`) and
+/// tests it (`match_pattern`'s enum/struct arms) as `Path::to_string`. A
+/// value built by compiled code is matched by interpreted code and vice
+/// versa, so the two sides must agree on the spelling — see
+/// [`pattern_to_sexpr`]'s downcast arm for the other half of the agreement.
 fn translate_construct(
     heap: &mut Heap,
     type_name: &Path,
@@ -2855,7 +2864,8 @@ fn translate_construct(
     // own type name for `rt_data_new`'s `args[0]` too, exactly like a
     // `mutable` struct construct needs it for `rt_struct_new`'s — see
     // `compiler.rs`'s `compile-construct-box` doc comment.
-    let type_name_form = if !is_sexpr { str_literal_form(heap, type_name.local())? } else { Value::Empty };
+    let type_name_form =
+        if !is_sexpr { str_literal_form(heap, &type_name.to_string())? } else { Value::Empty };
     heap.push_root(type_name_form);
     // `mutable` and the general-ADT (enum) case now tag identically
     // (`struct_field_ast_list_to_sexpr`/`struct_field_kind`): every enum

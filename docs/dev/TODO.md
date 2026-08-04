@@ -6,22 +6,24 @@
 
 ## 残っている作業
 
-- **`labels`/`lambda` の本体で作った enum 値の変種タグが壊れる**。5行で再現する:
+- **モジュール内でユーザ型が組み込み `vector`/`hashtable` を名乗れてしまい、compiled 経路が
+  誤認する**。組み込み名の再定義は root では拒否されるが、`(module m (defstruct vector ...))`
+  は通る。`ast_bridge` はメソッド呼び出しの振り替えを `type_name.local() == "vector"` /
+  `"hashtable"` で判定しているので、compiled 側だけがユーザ型を組み込みと誤認する:
 
   ```lisp
-  (defenum expr (num i32) (add expr expr))
-  (use expr)
-  (defun mk () expr (labels ((f ((n i32)) expr (num n))) (f 5)))
-  (println "~a" (mk))                        ; => (<unknown-variant> 5)
-  (match (mk) ((num v) v) ((add a b) -1))    ; => internal error: no matching match arm
+  (module m
+    (pub defstruct vector (a i32))
+    (pub defmethod len ((self vector)) i32 (* 100 self::a))
+    (pub defun call-len ((v vector)) i32 (len v)))
+  (m::call-len (m::vector::new 3))            ; => 300
+  (compile m::call-len)
+  (m::call-len (m::vector::new 3))            ; => 1  (組み込みのフィールド数)
   ```
 
-  同じ `(num n)` をトップレベル `defun` の直下で書けば正しい。ネストした関数の本体は
-  compile 経路(`compile_function_rec`)を通るので、compiled 側の construct が変種の
-  型IDを取り違えている疑いが濃い(`typelisp-interp-closure-removal` で直した
-  op-id/f64 リテラルのタグ切り詰めと同種)。**値が黙って壊れる**ので優先度は高い。
-  `examples/projects/expr-eval` はこれで実行時に落ちる(parser が `labels` の中で
-  構文木を組み立てるため)。2026-08-04 に発見、少なくとも 4a65d95 の時点で存在。
+  `hashtable` を名乗った場合は `BoxId does not hold a HashTable` で**プロセスが abort** する。
+  最小の直し方は分類側に `Path::is_simple()`(=root) を足すこと(組み込みの受け側は常に root)。
+  そもそもモジュール内で組み込み型名を再定義させない、という直し方もある。2026-08-04 発見。
 - **ストリームの未実装分**。`fresh-line` は `file-stream` 専用（列位置を追うのは
   ネイティブ backed のストリームだけ）、`read` のストリーム版とストリーム宛 `format` は
   未提供（`(write-string s (format false ...))` で書ける）、pathname 層は無い
