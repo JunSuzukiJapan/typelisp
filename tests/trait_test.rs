@@ -536,6 +536,91 @@ fn a_trailing_string_on_a_bodyless_signature_is_a_default_body_not_a_docstring()
     assert_eq!(eval_ok(src), RtValue::Str("doc".into()));
 }
 
+// ---- default bodies are checked at the declaration -----------------------
+//
+// `Checker::precheck_trait_defaults`, the `deftrait` counterpart of the
+// blanket impl's declaration-time body check (tests/blanket_impl_test.rs).
+// Before it, a default body was only ever checked by an `impl` that inherited
+// it — so a default no `impl` omitted was never checked at all.
+
+#[test]
+fn an_unused_default_body_is_type_checked_at_the_deftrait() {
+    // No `impl` anywhere, so nothing ever replays this body. Its return type
+    // is still wrong, and Rust would say so at the `trait` too.
+    let m = check_err(
+        "(deftrait T ()
+           (n ((self Self)) i32)
+           (twice ((self Self)) i32 \"two\"))",
+    );
+    assert!(m.contains("expected I32") || m.contains("expected Str"), "{}", m);
+}
+
+#[test]
+fn an_unused_default_body_may_not_call_an_unknown_function() {
+    let m = check_err(
+        "(deftrait T ()
+           (n ((self Self)) i32)
+           (twice ((self Self)) i32 (triple self)))",
+    );
+    assert!(m.contains("no such function"), "{}", m);
+}
+
+#[test]
+fn a_default_body_may_call_a_sibling_method_on_self_at_the_declaration() {
+    // `Self: T` is what makes `(n self)` callable while `Self` is still a
+    // type variable — the bound the precheck puts in scope.
+    assert!(check(
+        "(deftrait T ()
+           (n ((self Self)) i32)
+           (twice ((self Self)) i32 (* 2 (n self))))"
+    )
+    .is_ok());
+}
+
+#[test]
+fn a_default_body_may_call_an_inherited_method_on_self() {
+    assert!(check(
+        "(deftrait Base () (n ((self Self)) i32))
+         (deftrait Sub (Base) (twice ((self Self)) i32 (* 2 (n self))))"
+    )
+    .is_ok());
+}
+
+#[test]
+fn a_default_body_is_checked_against_the_traits_associated_types() {
+    // `Item` stays a type variable, pinned to itself: a body returning what
+    // the sibling returns fits, and one returning an `i32` does not.
+    assert!(check(
+        "(deftrait Boxed ()
+           (type Item)
+           (unwrap ((self Self)) Item)
+           (unwrap-again ((self Self)) Item (unwrap self)))"
+    )
+    .is_ok());
+    let m = check_err(
+        "(deftrait Boxed ()
+           (type Item)
+           (unwrap ((self Self)) Item)
+           (unwrap-again ((self Self)) Item 1))",
+    );
+    assert!(m.contains("item"), "{}", m);
+}
+
+#[test]
+fn a_default_body_rejected_at_the_declaration_leaves_no_half_trait_behind() {
+    // The error escapes `check_deftrait` after the `TraitDef` is registered
+    // (the body needs the entry to resolve `self` calls against), so what a
+    // driver that keeps going sees must still be a coherent trait.
+    let m = check_err(
+        "(deftrait T ()
+           (n ((self Self)) i32)
+           (twice ((self Self)) i32 \"two\"))
+         (defstruct s (n i32))
+         (impl T s (n ((self Self)) i32 self::n))",
+    );
+    assert!(m.contains("expected I32") || m.contains("expected Str"), "{}", m);
+}
+
 // ---- impl conformance ----------------------------------------------------
 
 #[test]

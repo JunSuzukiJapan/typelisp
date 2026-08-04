@@ -6,14 +6,6 @@
 
 ## 残っている作業
 
-- **`deftrait` のデフォルトメソッド本体が、どの `impl` にも使われないと型検査されない**
-  （Rust は宣言時に先行検査する）。ブランケット実装の本体については 2026-08-04 に
-  `precheck_blanket_impl` で解消したが、デフォルト本体は `TraitDefault` に保存されるだけで、
-  `impl` が replay して初めて検査される。`Self` はトレイトのシグネチャ中では既に型変数
-  （`is_self_tvar`）なので、`Self: 自トレイト` を境界に置いて同じ検査を回せるはず。
-- **`match` の腕から `Result` の誤差型が推論されない**。`(result::ok v)` 単独では `E` が
-  決まらず、期待型の無い `match` では兄弟の `err` 腕からも回復されない。prelude は戻り型を
-  宣言した `io-ok` ヘルパで固定している。腕どうしを単一化すれば済むはず。
 - **ストリームの未実装分**。`fresh-line` は `file-stream` 専用（列位置を追うのは
   ネイティブ backed のストリームだけ）、`read` のストリーム版とストリーム宛 `format` は
   未提供（`(write-string s (format false ...))` で書ける）、pathname 層は無い

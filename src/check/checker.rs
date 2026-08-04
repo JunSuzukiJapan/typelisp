@@ -419,6 +419,19 @@ enum SpecRequest {
     Blanket { trait_path: Path, target: Type },
 }
 
+/// Everything a check records outside its returned [`Typed`] tree, captured
+/// so a speculative check can be undone — see [`Checker::check_mark`] /
+/// [`Checker::rollback_to`].
+struct CheckMark {
+    errors: usize,
+    warnings: usize,
+    type_uses: usize,
+    spec_pending: usize,
+    /// Restored wholesale rather than truncated: a set has no length to cut
+    /// back to, and it is small (one top-level form's instantiations).
+    spec_memo: HashSet<(Path, Option<String>)>,
+}
+
 /// A generic *type*'s associated method, retained for per-instantiation
 /// re-generation — the method-side counterpart of [`FnTemplate`]. A method
 /// is generic through its *owner* (`Option<T>`'s `unwrap`, a generic
@@ -620,6 +633,22 @@ pub struct Checker {
     /// with a name written in source — no uniqueness check needed beyond
     /// incrementing this counter.
     place_tmp_counter: Cell<u32>,
+    /// Set while [`Self::check_match`] *probes* an arm body that has no
+    /// expected type to offer it yet. A constructor call whose type argument
+    /// nothing determines — `(result::ok v)`, where no argument mentions
+    /// `E` — then yields [`Type::Never`] in that slot (an *inference hole*)
+    /// instead of failing, so the arm still reports the half of its type it
+    /// does know and its siblings can supply the rest ([`merge_holes`]).
+    /// Never set while the retained tree is built: every probed arm that made
+    /// a hole is re-checked with this clear, so a hole can only ever inform
+    /// an expectation, never survive into a `Typed` node.
+    infer_probe: Cell<bool>,
+    /// Holes ([`Self::infer_probe`]) made and still standing in the tree
+    /// checked so far. Snapshotted around each probe and restored when the
+    /// probed subtree is thrown away, so it counts holes in *retained* output
+    /// — which is what lets a `match` nested inside a probed arm settle its
+    /// own holes without forcing the outer arm to be re-checked as well.
+    probe_holes: Cell<u32>,
 }
 
 impl Checker {
@@ -642,6 +671,8 @@ impl Checker {
             type_uses: RefCell::new(Vec::new()),
             place_tmp_counter: Cell::new(0),
             predeclared: HashSet::new(),
+            infer_probe: Cell::new(false),
+            probe_holes: Cell::new(0),
         }
     }
 
@@ -733,6 +764,35 @@ impl Checker {
             None => e,
         };
         self.errors.borrow_mut().push(e);
+    }
+
+    /// Where the side tables a check writes to stand right now. Paired with
+    /// [`Self::rollback_to`] around a check whose result may be thrown away
+    /// ([`Self::check_match`]'s arm probe), so a discarded attempt leaves
+    /// behind neither a diagnostic, nor a duplicate semantic token, nor a
+    /// queued instantiation of a type only the discarded attempt believed in
+    /// (a probe can type a value as `Result<string, !>`, and that must not
+    /// reach [`Self::drain_specializations`] as something to generate).
+    ///
+    /// `local_refs` is the one table left alone: it is keyed by source
+    /// position, so a re-check simply writes the same entries again.
+    fn check_mark(&self) -> CheckMark {
+        CheckMark {
+            errors: self.errors.borrow().len(),
+            warnings: self.warnings.borrow().len(),
+            type_uses: self.type_uses.borrow().len(),
+            spec_pending: self.spec_pending.borrow().len(),
+            spec_memo: self.spec_memo.borrow().clone(),
+        }
+    }
+
+    /// Undo everything recorded since [`Self::check_mark`].
+    fn rollback_to(&self, mark: CheckMark) {
+        self.errors.borrow_mut().truncate(mark.errors);
+        self.warnings.borrow_mut().truncate(mark.warnings);
+        self.type_uses.borrow_mut().truncate(mark.type_uses);
+        self.spec_pending.borrow_mut().truncate(mark.spec_pending);
+        *self.spec_memo.borrow_mut() = mark.spec_memo;
     }
 
     /// The one place the warn/error/silent (and "never touch a builtin")
@@ -1086,7 +1146,7 @@ impl Checker {
                     "defmethod" => return self.check_defmethod(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     "defstruct" => return self.check_defstruct(heap, &elems[1..], parts_locs, false, def_loc),
                     "defenum" => return self.check_defenum(heap, &elems[1..], parts_locs, false, def_loc),
-                    "deftrait" => return self.check_deftrait(heap, &elems[1..], parts_locs, false, def_loc),
+                    "deftrait" => return self.check_deftrait(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     "impl" => return self.check_impl(heap, interp, &elems[1..], parts_locs, false),
                     "use" => return self.check_use(heap, &elems[1..], parts_locs),
                     "load" => return self.check_load(heap, &elems[1..]),
@@ -3693,9 +3753,11 @@ impl Checker {
     /// ordinary type variables in a signature, exactly like a generic
     /// `defstruct`'s own type parameters (`Checker::parse_struct_fields`).
     /// Registers a [`TraitDef`]; `Checker::check_impl` later supplies bodies
-    /// for some concrete implementing type. No type-checking happens here
-    /// beyond parsing — a signature template's `Self`/associated-type
-    /// variables aren't real types, so there's nothing to check yet.
+    /// for some concrete implementing type. A bodyless signature template is
+    /// not type-checked here beyond parsing — its `Self`/associated-type
+    /// variables aren't real types, so there's nothing to check yet — but a
+    /// method that *has* a default body has that body checked right away, by
+    /// [`Self::precheck_trait_defaults`].
     ///
     /// The supertrait list is a *mandatory* positional slot (write `()` for
     /// none), which is what keeps the trait name the first symbol after
@@ -3706,7 +3768,8 @@ impl Checker {
     /// slot, since a supertrait's variable is always `Self`.
     fn check_deftrait(
         &mut self,
-        heap: &Heap,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
         parts: &[Value],
         parts_locs: &[Option<Loc>],
         public: bool,
@@ -3766,6 +3829,10 @@ impl Checker {
         // Source order, kept alongside `methods` for vtable slot numbering.
         let mut method_order: Vec<String> = Vec::new();
         let mut defaults: HashMap<String, TraitDefault> = HashMap::new();
+        // The same items as live `Value`s, for the declaration-time body check
+        // below — which needs the written forms, not the `OwnedForm`s the
+        // registry keeps for `impl` to replay.
+        let mut default_written: Vec<(Vec<Value>, Vec<Option<Loc>>)> = Vec::new();
         for item in &parts[item_start..] {
             let elem_locs = heap.list_to_vec_locs(*item)?;
             let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
@@ -3835,6 +3902,8 @@ impl Checker {
                     .map(|v| crate::fasl::value_to_owned(heap, *v))
                     .collect::<Result<Vec<_>, _>>()?;
                 defaults.insert(head.clone(), TraitDefault { item, ns: self.ns.clone() });
+                default_written
+                    .push((elems.clone(), elem_locs.iter().map(|(_, l)| l.clone()).collect()));
             }
             if let Some(d) = mdoc {
                 self.reg.docs.trait_methods.insert((fq_name.clone(), head.clone()), d);
@@ -3844,6 +3913,7 @@ impl Checker {
         }
         let (vtable_order, vtable_owner) =
             self.linearize_vtable(&name, &fq_name, &supertraits, &method_order)?;
+        let assoc_names = assoc_types.clone();
         self.reg.root.module_mut(&self.ns).traits.insert(
             name.clone(),
             TraitDef {
@@ -3859,6 +3929,10 @@ impl Checker {
                 defaults,
             },
         );
+        // After the real `TraitDef` is in place, never before: a default body
+        // may call the trait's own (or an inherited) method on `self`, which
+        // resolves through the entry just registered.
+        self.precheck_trait_defaults(heap, interp, &fq_name, &assoc_names, &default_written)?;
         if let Some(loc) = def_loc {
             self.reg.def_locs.traits.insert(fq_name.clone(), loc);
         }
@@ -4763,6 +4837,70 @@ impl Checker {
                 heap.push_permanent_root(e);
             }
             bounds.entry(target_var.to_string()).or_default().push(self_bound.clone());
+            let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
+            if let Some(s) = &self_name {
+                binds.push((s.clone(), recv_ty.clone(), self_name_loc));
+            }
+            binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
+            let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
+            let body_locs = locs.get(body_start..).unwrap_or(&[]);
+            self.check_seq(heap, interp, &env, &elems[body_start..], body_locs, Some(&ret))?;
+        }
+        Ok(())
+    }
+
+    /// Type-check a `deftrait`'s default method bodies at its declaration,
+    /// with the receiver left abstract — what Rust does for a provided method
+    /// in a `trait` block, whose body is checked once against `Self: Trait`
+    /// whether or not any `impl` ever inherits it.
+    ///
+    /// This is [`Self::precheck_blanket_impl`] with the target variable fixed
+    /// to `Self`, and it works for the same reason: in a trait's signatures
+    /// `Self` is *already* a type variable ([`is_self_tvar`]), so the body
+    /// checks exactly the way a generic `defun`'s does — a method call on
+    /// `self` resolves through `Env::bounds` to a diagnostics-only
+    /// [`Expr::TraitCall`]. The one bound needed is `Self: this trait`, which
+    /// is what an implementor always satisfies; it covers the inherited
+    /// methods too, since `Registry::trait_method` searches the supertrait
+    /// chain.
+    ///
+    /// The trait's own associated types are pinned to themselves — `Item` is
+    /// the type variable `Item` — so a sibling call declared to return `Item`
+    /// agrees with a body that produces one, without either side knowing what
+    /// `Item` will be.
+    ///
+    /// Nothing checked here is kept, and nothing is registered: the body is
+    /// re-checked per `impl` that inherits it (`Checker::check_impl`'s
+    /// defaulted-method fill-in), where `Self` is concrete and the trait-call
+    /// placeholders resolve to real methods. This pass catches only what is
+    /// wrong for *every* implementor — but catches it at the `deftrait`,
+    /// where the fix is, instead of at whichever `impl` first omits the
+    /// method, or nowhere at all when none ever does.
+    fn precheck_trait_defaults(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        trait_fq: &Path,
+        assoc_types: &[String],
+        items: &[(Vec<Value>, Vec<Option<Loc>>)],
+    ) -> Result<(), Error> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        let pins = assoc_types
+            .iter()
+            .map(|a| (a.clone(), Type::Named(Path::root(a), vec![])))
+            .collect();
+        let self_bound = TraitBound { trait_path: trait_fq.clone(), assoc: pins };
+        for (elems, locs) in items {
+            let sig = self.parse_defmethod_sig_inner(heap, elems, locs, true)?;
+            let MethodSig {
+                self_name, self_name_loc, recv_ty, params, param_locs, ret, mut bounds, body_start, ..
+            } = sig;
+            // Keyed by the type variable's name, which for `Self` is `"self"`
+            // — what `is_self_tvar` matches and what `Type::Named`'s single
+            // segment holds once the reader has case-folded it.
+            bounds.entry("self".to_string()).or_default().push(self_bound.clone());
             let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
             if let Some(s) = &self_name {
                 binds.push((s.clone(), recv_ty.clone(), self_name_loc));
@@ -9469,6 +9607,19 @@ impl Checker {
         for p in &def.params {
             match subst.get(p) {
                 Some(t) => result_args.push(t.clone()),
+                // Nothing here determines `p`: no field mentions it and no
+                // expected type supplied it. `(result::ok v)` is the standard
+                // case — `Ok` carries a `T` and says nothing about `E`.
+                //
+                // Under a `match`-arm probe ([`Self::infer_probe`]) that is
+                // not yet an error: leave an inference hole for the arm's
+                // siblings to fill, and let `check_match` re-check this arm
+                // once they have. Anywhere else there is no second source of
+                // information, so it is exactly as fatal as it always was.
+                None if self.infer_probe.get() => {
+                    self.probe_holes.set(self.probe_holes.get() + 1);
+                    result_args.push(Type::Never);
+                }
                 None => {
                     return Err(Error::TypeError(format!(
                         "cannot infer type argument `{}` for `{}`",
@@ -9535,10 +9686,29 @@ impl Checker {
         // runtime shims for `path`'s list building).
         let total_variants = self.reg.type_def(&adt_name).expect("adt exists").variants.len();
 
-        let mut arms = Vec::new();
+        /// An arm held back by the probe (B4) for the second pass below: its
+        /// slot in `arms`, everything checking its body again needs, and the
+        /// pattern that check has already accepted.
+        struct Deferred {
+            slot: usize,
+            pat: Pattern,
+            binds: PatternBindings,
+            body: Vec<Value>,
+            body_locs: Vec<Option<Loc>>,
+            arm_loc: Option<Loc>,
+        }
+
+        // `Option` because a deferred arm's slot is filled by the second pass,
+        // and arm order is match semantics — first match wins.
+        let mut arms: Vec<Option<Arm>> = Vec::new();
         let mut covered: HashSet<usize> = HashSet::new();
         let mut catchall = false;
         let mut result_ty: Option<Type> = expected.cloned();
+        // What the arms *between them* know about the result type, holes and
+        // all — the expectation the second pass hands the deferred arms.
+        // `result_ty` stays the type of the arms actually retained.
+        let mut probe_ty: Option<Type> = expected.cloned();
+        let mut deferred: Vec<Deferred> = Vec::new();
         // Set (B2) when an arm is skipped in `recover` mode: a skipped arm's
         // variant coverage is unknown, so the exhaustiveness check (B1) below
         // must be suppressed for this `match` to avoid a spurious cascade.
@@ -9587,13 +9757,51 @@ impl Checker {
                 Pattern::Wildcard | Pattern::Bind(..) => catchall = true,
                 _ => {}
             }
-            let arm_env = env.extended_with_locs(binds);
+            let arm_env = env.extended_with_locs(binds.clone());
             // Diverging arms don't constrain the result type; concrete arms must
             // all agree (Never joins with anything).
             let arm_expected = result_ty.as_ref().and_then(non_never);
             let body_locs: Vec<Option<Loc>> = parts_locs[1..].iter().map(|(_, l)| l.clone()).collect();
-            let (body, body_ty) =
-                recover_arm!(self.check_seq(heap, interp, &arm_env, &parts[1..], &body_locs, arm_expected));
+            // Probe boundary (B4): with no result type agreed yet there is no
+            // expectation to hand this body, and a body that needs one —
+            // `(result::ok v)`, whose `E` only the sibling `(err e)` arm
+            // names — cannot type itself. So check it with inference holes
+            // allowed ([`Self::infer_probe`]), and if it made one (or failed
+            // outright, which a sibling's type may equally well fix), keep
+            // only what it revealed about the result type and hold the arm
+            // back for the second pass. Nothing the probe checked is
+            // retained: its diagnostics are rolled back and its body is
+            // discarded, so the arm is checked for real exactly once.
+            let probing = arm_expected.is_none();
+            let mark = self.check_mark();
+            let holes = self.probe_holes.get();
+            let outer_probe = self.infer_probe.replace(probing);
+            let checked = self.check_seq(heap, interp, &arm_env, &parts[1..], &body_locs, arm_expected);
+            self.infer_probe.set(outer_probe);
+            let settled = checked.is_ok()
+                && self.probe_holes.get() == holes
+                && self.errors.borrow().len() == mark.errors;
+            if probing && !settled {
+                self.rollback_to(mark);
+                self.probe_holes.set(holes);
+                if let Ok((_, ty)) = &checked {
+                    probe_ty = Some(match probe_ty {
+                        None => ty.clone(),
+                        Some(p) => merge_holes(&p, ty).unwrap_or(p),
+                    });
+                }
+                deferred.push(Deferred {
+                    slot: arms.len(),
+                    pat,
+                    binds,
+                    body: parts[1..].to_vec(),
+                    body_locs,
+                    arm_loc,
+                });
+                arms.push(None);
+                continue;
+            }
+            let (body, body_ty) = recover_arm!(checked);
             result_ty = Some(match result_ty {
                 None => body_ty,
                 // A body that disagrees with the other arms' type: record it in
@@ -9608,7 +9816,52 @@ impl Checker {
                     Err(e) => return Err(e),
                 },
             });
-            arms.push(Arm { pat, body });
+            if let Some(r) = &result_ty {
+                probe_ty = Some(match probe_ty {
+                    None => r.clone(),
+                    Some(p) => merge_holes(&p, r).unwrap_or(p),
+                });
+            }
+            arms.push(Some(Arm { pat, body }));
+        }
+
+        // Second pass, for the arms the probe held back (B4). By now the arms
+        // have pooled what each of them knew, and if nothing is missing from
+        // the pool it is the expectation the deferred body was short of. With
+        // nothing to offer, the body is re-checked exactly as it was checked
+        // the first time — unprobed, with no expectation — so what the user
+        // sees is the arm's own error, the same one this `match` reported
+        // before there was a second pass at all.
+        let pooled = probe_ty
+            .as_ref()
+            .and_then(non_never)
+            .filter(|t| !has_open_hole(t))
+            .cloned();
+        for d in deferred {
+            let arm_env = env.extended_with_locs(d.binds);
+            let checked =
+                self.check_seq(heap, interp, &arm_env, &d.body, &d.body_locs, pooled.as_ref());
+            let (body, body_ty) = match checked {
+                Ok(v) => v,
+                Err(e) if self.recover => {
+                    arm_recovered = true;
+                    self.push_recovered(e, d.arm_loc.clone());
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
+            result_ty = Some(match result_ty {
+                None => body_ty,
+                Some(r) => match join_types(&r, &body_ty) {
+                    Ok(joined) => joined,
+                    Err(e) if self.recover => {
+                        self.push_recovered(e, d.arm_loc.clone());
+                        r
+                    }
+                    Err(e) => return Err(e),
+                },
+            });
+            arms[d.slot] = Some(Arm { pat: d.pat, body });
         }
 
         // Exhaustiveness (B1): in `recover` mode a non-exhaustive `match`
@@ -9637,6 +9890,7 @@ impl Checker {
             None if self.recover => Type::Never,
             None => return Err(Error::TypeError("match: no arms".into())),
         };
+        let arms: Vec<Arm> = arms.into_iter().flatten().collect();
         Ok(Typed { loc: None, expr: Expr::Match(Box::new(scrut), arms), ty })
     }
 
@@ -10064,22 +10318,80 @@ fn non_never(t: &Type) -> Option<&Type> {
     }
 }
 
-/// Join two branch types: `Never` is absorbed by the other; otherwise the two
-/// must be equal.
+/// Join two branch types: [`merge_holes`], with a diagnostic when they don't
+/// merge. `Never` is absorbed by the other side, so a diverging branch never
+/// constrains the result.
 fn join_types(a: &Type, b: &Type) -> Result<Type, Error> {
-    if *a == Type::Never {
-        return Ok(b.clone());
-    }
-    if *b == Type::Never {
-        return Ok(a.clone());
-    }
+    merge_holes(a, b).ok_or_else(|| {
+        Error::TypeError(format!("branches have incompatible types: {:?} vs {:?}", a, b))
+    })
+}
+
+/// Fill each side's inference holes from the other, or `None` if they
+/// disagree on anything that is not a hole.
+///
+/// A hole is the [`Type::Never`] a probed `match` arm left where it could not
+/// infer a type argument (`Checker::infer_probe`): `(result::ok text)` probes
+/// to `Result<string, !>` and its sibling `(result::err e)` to
+/// `Result<!, FileError>`, and merging the two yields the
+/// `Result<string, FileError>` that neither arm knew on its own — the
+/// arm-to-arm unification a constraint solver would do, done structurally
+/// because holes come from exactly one place.
+///
+/// Merging *at the top level* is the older, narrower rule this generalizes:
+/// `!` is the bottom type, so a diverging branch takes the other's type.
+/// Applying it inside type arguments as well is the same subtyping one level
+/// down, and outside a probe it is reachable only from a written-out `!`
+/// argument (`Result<i32, !>`), where it is equally correct.
+fn merge_holes(a: &Type, b: &Type) -> Option<Type> {
     if a == b {
-        return Ok(a.clone());
+        return Some(a.clone());
     }
-    Err(Error::TypeError(format!(
-        "branches have incompatible types: {:?} vs {:?}",
-        a, b
-    )))
+    match (a, b) {
+        (Type::Never, t) | (t, Type::Never) => Some(t.clone()),
+        (Type::Named(pa, aa), Type::Named(pb, ba)) if pa == pb => {
+            merge_hole_lists(aa, ba).map(|args| Type::Named(pa.clone(), args))
+        }
+        (Type::Dyn(pa, aa), Type::Dyn(pb, ba)) if pa == pb => {
+            merge_hole_lists(aa, ba).map(|args| Type::Dyn(pa.clone(), args))
+        }
+        (Type::Fn(pa, ra, reta), Type::Fn(pb, rb, retb)) => {
+            let params = merge_hole_lists(pa, pb)?;
+            let rest = match (ra, rb) {
+                (None, None) => None,
+                (Some(x), Some(y)) => Some(Box::new(merge_holes(x, y)?)),
+                _ => return None,
+            };
+            Some(Type::Fn(params, rest, Box::new(merge_holes(reta, retb)?)))
+        }
+        _ => None,
+    }
+}
+
+/// [`merge_holes`] over two equal-length type lists.
+fn merge_hole_lists(a: &[Type], b: &[Type]) -> Option<Vec<Type>> {
+    (a.len() == b.len())
+        .then(|| a.iter().zip(b).map(|(x, y)| merge_holes(x, y)).collect::<Option<Vec<_>>>())
+        .flatten()
+}
+
+/// Whether `t` still carries an inference hole ([`merge_holes`]) — a
+/// [`Type::Never`] *nested* inside it. A bare `Never` is not a hole: that is
+/// an honestly diverging expression, which every caller here already handles
+/// through [`non_never`].
+fn has_open_hole(t: &Type) -> bool {
+    fn nested(t: &Type) -> bool {
+        *t == Type::Never || has_open_hole(t)
+    }
+    match t {
+        Type::Named(_, args) | Type::Dyn(_, args) => args.iter().any(nested),
+        Type::Fn(params, rest, ret) => {
+            params.iter().any(nested)
+                || rest.as_deref().is_some_and(nested)
+                || nested(ret)
+        }
+        _ => false,
+    }
 }
 
 /// `Sexpr` — the type a `&rest` parameter's collected arguments are bound as

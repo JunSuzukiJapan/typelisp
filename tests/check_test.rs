@@ -290,6 +290,67 @@ fn match_scrutinee_must_be_a_data_type() {
     assert_type_error("(match 1 (_ 0))");
 }
 
+// ---- match arms fill each other's inference holes ---------------------------
+//
+// `(result::ok v)` fixes `T` and says nothing about `E`; `(result::err e)`
+// does the reverse. Neither arm can type itself where the `match` has no
+// expected type, so the arms are probed, their partial types merged, and the
+// arms re-checked against the result (`Checker::check_match`'s B4).
+
+#[test]
+fn match_arms_pool_a_results_two_type_arguments() {
+    let src = "(defun f ((r Result<i32, string>)) i32 \
+                 (let ((out (match r \
+                              ((ok v) (result::ok v)) \
+                              ((err e) (result::err e))))) \
+                   (match out ((ok v) v) ((err e) 0))))";
+    assert!(matches!(program(src), Ok(TopLevel::Defun { .. })));
+}
+
+#[test]
+fn a_lone_unpinnable_arm_is_still_rejected() {
+    // Nothing here determines `E`: the other arm diverges, so the pool the
+    // second pass draws on is empty and the original error stands.
+    let src = "(defun f ((opt Option<i32>)) i32 \
+                 (let ((out (match opt \
+                              ((Some v) (result::ok v)) \
+                              ((None) (panic \"no\"))))) \
+                   0))";
+    assert!(matches!(program(src), Err(Error::TypeError(_))));
+}
+
+#[test]
+fn an_unpinnable_constructor_outside_a_match_is_still_rejected() {
+    // The hole is a `match`-arm device only — everywhere else an
+    // un-inferrable type argument is as fatal as it ever was.
+    assert_type_error("(let ((r (result::ok 1))) 0)");
+}
+
+#[test]
+fn a_probed_arm_takes_its_type_from_a_concrete_sibling() {
+    // The `err` arm needs nothing inferred, so the `ok` arm's missing `E`
+    // comes from an arm that is not itself a bare constructor.
+    let src = "(defun f ((r Result<i32, string>) (d Result<i32, string>)) i32 \
+                 (let ((out (match r \
+                              ((ok v) (result::ok v)) \
+                              ((err e) d)))) \
+                   0))";
+    assert!(matches!(program(src), Ok(TopLevel::Defun { .. })));
+}
+
+#[test]
+fn arms_of_different_shapes_are_still_rejected() {
+    // A hole is filled only by the *same* type constructor: `Option` and
+    // `Result` never merge, so neither arm ends up with an expectation and
+    // both report what they could not infer.
+    let src = "(defun f ((r Result<i32, string>)) i32 \
+                 (let ((out (match r \
+                              ((ok v) (result::ok v)) \
+                              ((err e) (option::none))))) \
+                   0))";
+    assert!(matches!(program(src), Err(Error::TypeError(_))));
+}
+
 // ---- if-let -----------------------------------------------------------------
 
 #[test]

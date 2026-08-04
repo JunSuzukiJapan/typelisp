@@ -1427,8 +1427,13 @@ pub const SOURCE: &str = r#"
 (deftrait InputStream (Stream)
   "A stream that yields items."
   (type Item)
-  (read-item ((self Self)) Option<Item>
-    "The next item, or `none` at end of input."))
+  ;; `read-item` yields the next item, or `none` at end of input. Said in a
+  ;; comment because a bodyless signature cannot carry a docstring: a trailing
+  ;; string *is* the default body (syntax.md §deftrait), and one typed
+  ;; `string` where `Option<Item>` is declared -- which is exactly what this
+  ;; docstring used to be, unnoticed until `deftrait` began checking its
+  ;; default bodies at the declaration.
+  (read-item ((self Self)) Option<Item>))
 
 (deftrait OutputStream (Stream)
   "A stream that accepts items."
@@ -1672,19 +1677,12 @@ pub const SOURCE: &str = r#"
 (pub defconstant (direction-output i64) 1)
 (pub defconstant (direction-append i64) 2)
 
-(defun io-ok<T> ((v T)) Result<T, FileError>
-  "`(result::ok v)` with the error type pinned. Written as a function so the
-   declared return type supplies `FileError`: an `ok` arm on its own leaves
-   `E` open, and a `match` that has no expected type cannot recover it from
-   the sibling `err` arm."
-  (result::ok v))
-
 (pub defun open-file ((name string) (direction i64)) Result<file-stream, FileError>
   "Open `name`, one of `direction-input` / `direction-output` /
    `direction-append`. `Err` if the file cannot be opened -- a missing file is
    an ordinary outcome, not a panic."
   (match (stream-open-file name direction)
-    ((ok h) (io-ok (file-stream::new h)))
+    ((ok h) (result::ok (file-stream::new h)))
     ((err e) (result::err e))))
 
 (pub defun open-input ((name string)) Result<file-stream, FileError>
@@ -1748,7 +1746,7 @@ pub const SOURCE: &str = r#"
        ((ok ,s)
         (let ((,var ,s))
           (let ((,result (progn ,@body)))
-            (progn (close ,var) (io-ok ,result)))))
+            (progn (close ,var) (result::ok ,result)))))
        ((err ,e) (result::err ,e)))))
 
 (pub defmacro with-input-from-string (spec &rest body)
@@ -1771,19 +1769,19 @@ pub const SOURCE: &str = r#"
 (pub defun read-file-string ((name string)) Result<string, FileError>
   "The entire contents of `name`."
   (match (open-input name)
-    ((ok s) (let ((text (read-all s))) (progn (close s) (io-ok text))))
+    ((ok s) (let ((text (read-all s))) (progn (close s) (result::ok text))))
     ((err e) (result::err e))))
 
 (pub defun read-file-lines ((name string)) Result<Vector<string>, FileError>
   (match (open-input name)
-    ((ok s) (let ((ls (read-lines s))) (progn (close s) (io-ok ls))))
+    ((ok s) (let ((ls (read-lines s))) (progn (close s) (result::ok ls))))
     ((err e) (result::err e))))
 
 (pub defun write-file-string ((name string) (text string)) Result<(), FileError>
   "Write `text` to `name`, replacing it. `Ok(())` on success -- the write is
    done for its effect, so there is no value to carry back."
   (match (open-output name)
-    ((ok s) (progn (write-string s text) (close s) (io-ok ())))
+    ((ok s) (progn (write-string s text) (close s) (result::ok ())))
     ((err e) (result::err e))))
 
 (pub defun probe-file ((name string)) bool
@@ -1793,13 +1791,13 @@ pub const SOURCE: &str = r#"
 (pub defun delete-file ((name string)) Result<(), FileError>
   "Remove `name`. `Ok(())` on success."
   (match (file-delete name)
-    ((ok _) (io-ok ()))
+    ((ok _) (result::ok ()))
     ((err e) (result::err e))))
 
 (pub defun rename-file ((from string) (to string)) Result<(), FileError>
   "Rename `from` to `to`. `Ok(())` on success."
   (match (file-rename from to)
-    ((ok _) (io-ok ()))
+    ((ok _) (result::ok ()))
     ((err e) (result::err e))))
 
 

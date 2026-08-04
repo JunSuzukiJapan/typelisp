@@ -329,6 +329,24 @@ fn with_open_file_closes_and_yields_the_bodys_value() {
 }
 
 #[test]
+fn with_open_file_types_itself_where_nothing_expects_a_type() {
+    // The expansion's `ok` arm is a bare `(result::ok ...)`, whose `FileError`
+    // only the sibling `err` arm knows. Bound to a `let` there is no expected
+    // type to supply it either, so this checks only because the two arms pool
+    // what they know (`Checker::check_match`'s probe) — before that, the
+    // prelude had to route the arm through an `io-ok` helper whose declared
+    // return type pinned `E`.
+    let d = TmpDir::new("withopenlet");
+    let p = d.path("c2.txt");
+    std::fs::write(&p, "data").unwrap();
+    let v = eval_ok(&format!(
+        r#"(let ((r (with-open-file (f "{p}" direction-input) (read-all f))))
+             (match r ((ok s) s) ((err e) (message e))))"#
+    ));
+    assert_eq!(str_of(v), "data");
+}
+
+#[test]
 fn opening_a_missing_file_is_an_error_value_not_a_panic() {
     let d = TmpDir::new("missing");
     let p = d.path("nope.txt");
