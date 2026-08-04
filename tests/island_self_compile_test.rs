@@ -106,6 +106,7 @@ const ISLAND_DEFUNS: &[&str] = &[
     "compile-assoc-user",
     "compile-llvm-op",
     "compile-dyn-new",
+    "compile-dyn-upcast",
     "compile-dyn-value",
     "compile-dyn-call",
     "compile-call-args",

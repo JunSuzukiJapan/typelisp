@@ -49,6 +49,7 @@ pub unsafe extern "C" fn rt_ping(args: *const i64, argc: u32) -> i64 {
 // ---- Stage 1: the active `Heap` ---------------------------------------
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 
 use typelisp_mem::Heap;
 
@@ -2889,15 +2890,33 @@ thread_local! {
     /// `thread_local!` for the same cross-test-isolation reason
     /// [`GLOBAL_INDEX`] is, and reset by the same `Interp::new` hook.
     static VTABLES: RefCell<Vec<Vec<usize>>> = const { RefCell::new(Vec::new()) };
+
+    /// `(vtable id, trait id)` -> the vtable id of the *same concrete type*
+    /// for that trait — the supertrait upcast table ([`rt_dyn_upcast`]).
+    /// Filled in by the interpreter from `Expr::DynBox::supers`
+    /// ([`upcast_define`]) and by AOT startup ([`rt_upcast_set`]), and reset
+    /// alongside [`VTABLES`], whose id space it is keyed by.
+    static UPCASTS: RefCell<HashMap<(u32, u32), u32>> = RefCell::new(HashMap::new());
 }
 
-/// Clears this thread's vtable table — the trait-object counterpart of
-/// [`reset_global_table`], called from `Interp::new` for the same reason:
-/// vtable ids are per-`Interp`, so a stale table from an earlier one on a
-/// reused `cargo test` worker thread would answer with function pointers
-/// into a JIT module that has since been dropped.
+/// Clears this thread's vtable and upcast tables — the trait-object
+/// counterpart of [`reset_global_table`], called from `Interp::new` for the
+/// same reason: vtable ids are per-`Interp`, so a stale table from an earlier
+/// one on a reused `cargo test` worker thread would answer with function
+/// pointers into a JIT module that has since been dropped.
 pub fn reset_vtable_table() {
     VTABLES.with(|t| t.borrow_mut().clear());
+    UPCASTS.with(|t| t.borrow_mut().clear());
+}
+
+/// Records that a trait object dispatching through vtable `from` becomes one
+/// dispatching through vtable `to` when upcast to the trait interned as
+/// `trait_id` — the compiled tier's copy of `Interp::dyn_upcasts`, published
+/// wherever the interpreter interns a boxing site's supertrait tables.
+pub fn upcast_define(from: u32, trait_id: u32, to: u32) {
+    UPCASTS.with(|t| {
+        t.borrow_mut().insert((from, trait_id), to);
+    });
 }
 
 /// Installs (or replaces) vtable `id`'s slots. Called from the interpreter
@@ -2985,6 +3004,68 @@ pub unsafe extern "C" fn rt_vtable_slot(args: *const i64, argc: u32) -> i64 {
         fatal("rt_vtable_slot: vtable slot is empty — a dyn dispatch target was not compiled");
     }
     ptr as i64
+}
+
+/// Upcasts the trait object `args[1]` to the supertrait interned as trait id
+/// `args[0]`, returning a fat box over the same concrete value dispatching
+/// through that supertrait's own vtable (`Expr::DynUpcast`). Emitted only
+/// where the layouts do *not* share a prefix — the leftmost-spine case is a
+/// checker-level retype that reaches no code at all.
+///
+/// A missing entry aborts rather than mis-dispatching: the mapping is
+/// registered wherever a box for this concrete type is created
+/// (`Expr::DynBox::supers`), and the checker only admits the conversion when
+/// the target is in the source's supertrait closure, so reaching one means
+/// the box came from somewhere that skipped registration — a compiler bug.
+///
+/// The source box stays rooted by the caller (a `kind = 2` argument), which
+/// is what keeps the concrete value alive across the allocation below.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2`, `args[1]` must be a tagged `BoxedObj::Dyn`, and a
+/// `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_dyn_upcast(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_dyn_upcast: expected 2 arguments (the target trait id and the trait object)");
+    }
+    let trait_id = *args as u32;
+    let value = decode(*args.add(1));
+    let Value::Boxed(id) = value else {
+        fatal("rt_dyn_upcast: not a trait object");
+    };
+    if !active_heap().is_dyn(id) {
+        fatal("rt_dyn_upcast: not a trait object");
+    }
+    let from = active_heap().dyn_vtable_id(id);
+    let to = UPCASTS.with(|t| t.borrow().get(&(from, trait_id)).copied());
+    let Some(to) = to else {
+        fatal("rt_dyn_upcast: no supertrait vtable registered for this trait object");
+    };
+    if to == from {
+        return encode(value);
+    }
+    let inner = active_heap().dyn_value(id);
+    encode(active_heap().alloc_dyn(to, inner))
+}
+
+/// Registers the upcast `(vtable args[0], trait id args[1]) -> vtable
+/// args[2]`. Used by AOT startup for the same reason [`rt_vtable_set`] is —
+/// the tables have to exist before `main` runs any user code, and there is
+/// no interpreter around to fill them; the JIT calls [`upcast_define`]
+/// Rust-side instead.
+///
+/// # Safety
+///
+/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_upcast_set(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_upcast_set: expected 3 arguments (the source vtable id, the trait id and the target vtable id)");
+    }
+    upcast_define(*args as u32, *args.add(1) as u32, *args.add(2) as u32);
+    0
 }
 
 /// Sets slot `args[1]` of vtable `args[0]` to the native entry point

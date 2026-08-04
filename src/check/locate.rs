@@ -127,6 +127,7 @@ fn expr_children(e: &Expr) -> Vec<&Typed> {
         Expr::TraitCall { args, .. } => args.iter().collect(),
         Expr::DynCall { args, .. } => args.iter().collect(),
         Expr::DynBox { value, .. } => vec![value.as_ref()],
+        Expr::DynUpcast { value, .. } => vec![value.as_ref()],
         Expr::DynValue(inner) => vec![inner.as_ref()],
         Expr::Construct { args, .. } => args.iter().collect(),
         Expr::FieldGet(e, _) => vec![e.as_ref()],

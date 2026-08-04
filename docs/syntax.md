@@ -65,8 +65,8 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   宣言順に位置指定で固定する（`:dyn Iter<i32>` は `Item` を `i32` に固定）。ジェネリック引数の
   内側にも書ける: `Vector<:dyn Drawable>` `HashTable<string, :dyn Drawable>`。
   具象値は期待位置で自動的に箱詰めされ、明示形は `(as :dyn Trait 式)`。
-  `:dyn Sub` の値はスーパトレイトの `:dyn Super` を要求する位置にもそのまま渡せる
-  （アップキャスト。`vtable` を作り直さない範囲に限られる — 制限は §5.2）。
+  `:dyn Sub` の値はスーパトレイト（推移的に継承しているものすべて）の `:dyn Super` を要求する
+  位置にもそのまま渡せる（アップキャスト）。継承関係の無いトレイトへは渡せない — 制限は §5.2。
   `:dyn` を型位置以外に書くとエラー。詳細は [dev/language-design.md](dev/language-design.md) §5.2。
 - 組み込みジェネリック型: `Option<T>`（`Some(T)` / `None`）、`Result<T,E>`（`Ok(T)` / `Err(E)`）、
   `Sexpr`、`HashTable<K,V>`、`Vector<T>`。組み込みの具象エラー型は `ParseIntError` /

@@ -86,13 +86,29 @@ struct Ctx<'a> {
     /// `compile-set`'s own doc comment — so there is nothing to share).
     /// [`translate_lambda`] is the only place that reads this.
     visible_siblings: &'a HashSet<String>,
+    /// The trait-object id tables this translation bakes constants out of —
+    /// see [`DynTables`].
+    dyn_tables: DynTables<'a>,
+}
+
+/// The two trait-object id tables a translation reads, interned by `Interp`
+/// *before* translation starts: both are baked into the emitted IR as
+/// constants (`(dyn-new id ...)`, `(dyn-upcast trait-id ...)`), so there is
+/// nothing to resolve lazily mid-translation, exactly like [`Ctx::globals`].
+///
+/// One parameter rather than two because every translation entry point and
+/// every nested-scope hand-off needs both, and they are interned together
+/// (`Interp::register_dyn_box`).
+#[derive(Clone, Copy)]
+pub struct DynTables<'a> {
     /// `(concrete type key, trait path)` -> vtable id, for every trait
-    /// object this translation boxes (`Expr::DynBox`). Interned by
-    /// `Interp::vtable_id_for` *before* translation starts — the id is a
-    /// baked-in constant in the emitted IR (`(dyn-new id ...)`), so there is
-    /// nothing to resolve lazily mid-translation, exactly like
-    /// [`Ctx::globals`].
-    vtables: &'a HashMap<(String, Path), u32>,
+    /// object this translation boxes (`Expr::DynBox`).
+    pub vtables: &'a HashMap<(String, Path), u32>,
+    /// Trait path -> trait id, for every supertrait this translation upcasts
+    /// to (`Expr::DynUpcast`). The upcast's *target vtable* is not here: it
+    /// depends on the value's concrete type and is looked up at run time
+    /// (`rt_dyn_upcast`).
+    pub trait_ids: &'a HashMap<Path, u32>,
 }
 
 /// The bare name set of a typed name list — [`tagged_sym_list`]'s "every
@@ -966,7 +982,7 @@ pub fn ast_to_sexpr(
     enums: &HashSet<Path>,
     globals: &HashMap<Path, usize>,
     cell_names: &HashSet<String>,
-    vtables: &HashMap<(String, Path), u32>,
+    dyn_tables: DynTables<'_>,
 ) -> Result<Value, Error> {
     let direct = HashSet::new();
     let no_siblings = HashSet::new();
@@ -978,7 +994,7 @@ pub fn ast_to_sexpr(
         globals,
         cell_names,
         visible_siblings: &no_siblings,
-        vtables,
+        dyn_tables,
     };
     ast_to_sexpr_scoped(heap, typed, cx)
 }
@@ -1002,7 +1018,7 @@ pub fn ast_to_sexpr_for_global_init(
     structs: &HashSet<Path>,
     enums: &HashSet<Path>,
     globals: &HashMap<Path, usize>,
-    vtables: &HashMap<(String, Path), u32>,
+    dyn_tables: DynTables<'_>,
 ) -> Result<Value, Error> {
     let direct = HashSet::new();
     let no_cells = HashSet::new();
@@ -1015,7 +1031,7 @@ pub fn ast_to_sexpr_for_global_init(
         globals,
         cell_names: &no_cells,
         visible_siblings: &no_siblings,
-        vtables,
+        dyn_tables,
     };
     let kind = Value::Int(global_field_kind(&value.ty, structs, enums));
     let form = ast_to_sexpr_scoped(heap, value, cx)?;
@@ -1207,7 +1223,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
         Expr::Let(binds, body) => translate_let(heap, binds, body, cx),
         Expr::Call(r, args) => translate_call(heap, &r.resolved, args, cx),
         Expr::Lambda { params, body } => {
-            translate_lambda(heap, params, body, cx.structs, cx.enums, cx.globals, cx.visible_siblings, cx.vtables)
+            translate_lambda(heap, params, body, cx.structs, cx.enums, cx.globals, cx.visible_siblings, cx.dyn_tables)
         }
         Expr::Labels { defs, body } => translate_labels(heap, defs, body, cx),
         Expr::Apply(callee, args) => translate_apply(heap, callee, args, cx),
@@ -1232,6 +1248,7 @@ fn ast_to_sexpr_scoped(heap: &mut Heap, typed: &Typed, cx: Ctx) -> Result<Value,
             translate_dyn_new(heap, concrete_key, trait_path, value, cx)
         }
         Expr::DynCall { slot, args, .. } => translate_dyn_call(heap, *slot, args, cx),
+        Expr::DynUpcast { to_trait, value } => translate_dyn_upcast(heap, to_trait, value, cx),
         Expr::DynValue(inner) => translate_dyn_value(heap, inner, cx),
         // `(compile name)` is an interpreter-only reflective action (it JIT-
         // compiles a target against the *running* `Interp`'s own heap/scope
@@ -2135,7 +2152,7 @@ fn translate_indirect_apply(heap: &mut Heap, callee: &Typed, args: &[Typed], cx:
 /// `(dyn-new vtable-id (kind . value-form))` — box a concrete value as a
 /// trait object (`Expr::DynBox`). The vtable id is a constant here: the
 /// checker resolved the table's contents and `Interp::vtable_id_for` interned
-/// the (type, trait) pair before translation began (see [`Ctx::vtables`]), so
+/// the (type, trait) pair before translation began (see [`DynTables::vtables`]), so
 /// the emitted code just hands the number to `rt_dyn_new`.
 fn translate_dyn_new(
     heap: &mut Heap,
@@ -2145,7 +2162,7 @@ fn translate_dyn_new(
     cx: Ctx,
 ) -> Result<Value, Error> {
     let key = (concrete_key.to_string(), trait_path.clone());
-    let id = *cx.vtables.get(&key).ok_or_else(|| {
+    let id = *cx.dyn_tables.vtables.get(&key).ok_or_else(|| {
         Error::TypeError(format!(
             "compile: no vtable id interned for `{}` as `:dyn {}` (Interp::intern_dyn_vtables should have run first)",
             concrete_key, trait_path
@@ -2155,6 +2172,33 @@ fn translate_dyn_new(
     let mut items = vec![Value::Int(id as i64)];
     items.extend(pairs.iter().copied());
     let result = tagged(heap, "dyn-new", &items);
+    for _ in 0..pairs.len() {
+        heap.pop_root();
+    }
+    result
+}
+
+/// `(dyn-upcast trait-id (kind . value-form))` — convert a trait object to a
+/// supertrait whose vtable layout is not a prefix of the source's
+/// (`Expr::DynUpcast`). Shaped exactly like [`translate_dyn_new`], and for
+/// the same reason: the constant in slot 0 identifies the target and
+/// `rt_dyn_upcast` does the rest.
+///
+/// The constant is the *trait* id, not a vtable id: which table the result
+/// dispatches through depends on the concrete type inside the box, which
+/// this site no longer knows. `rt_dyn_upcast` finds it from the box's own
+/// vtable id, using the mapping the boxing site registered.
+fn translate_dyn_upcast(heap: &mut Heap, to_trait: &Path, value: &Typed, cx: Ctx) -> Result<Value, Error> {
+    let id = *cx.dyn_tables.trait_ids.get(to_trait).ok_or_else(|| {
+        Error::TypeError(format!(
+            "compile: no trait id interned for `:dyn {}` (Interp::intern_dyn_vtables should have run first)",
+            to_trait
+        ))
+    })?;
+    let pairs = tagged_ast_list_to_sexpr(heap, std::slice::from_ref(value), cx)?;
+    let mut items = vec![Value::Int(id as i64)];
+    items.extend(pairs.iter().copied());
+    let result = tagged(heap, "dyn-upcast", &items);
     for _ in 0..pairs.len() {
         heap.pop_root();
     }
@@ -2276,7 +2320,7 @@ fn translate_lambda(
     enums: &HashSet<Path>,
     globals: &HashMap<Path, usize>,
     visible_siblings: &HashSet<String>,
-    vtables: &HashMap<(String, Path), u32>,
+    dyn_tables: DynTables<'_>,
 ) -> Result<Value, Error> {
     let captured_names = lambda_free_vars(params, body);
     // This lambda's own `cell_names`: every name it captures unioned with its
@@ -2315,7 +2359,7 @@ fn translate_lambda(
         globals,
         cell_names: &cell_names,
         visible_siblings,
-        vtables,
+        dyn_tables,
     };
     let body_one = single_body_expr(body);
     let body_v = ast_to_sexpr_scoped(heap, &body_one, cx)?;
@@ -2945,11 +2989,22 @@ struct CallTargets {
     calls: Vec<Path>,
     methods: Vec<(Path, String)>,
     globals: Vec<Path>,
-    /// Every distinct trait object boxed, as `(concrete type key, trait
-    /// path, vtable slots)` — see [`collect_dyn_boxes`].
-    dyn_boxes: Vec<(String, Path, Vec<(Path, String)>)>,
+    /// Every distinct trait object boxed — see [`collect_dyn_boxes`].
+    dyn_boxes: Vec<DynBoxSite>,
     /// Every distinct trait dispatched on — see [`collect_dyn_dispatch_traits`].
     dyn_traits: Vec<Path>,
+    /// Every distinct supertrait upcast to — see [`collect_dyn_upcasts`].
+    dyn_upcasts: Vec<Path>,
+}
+
+/// One trait-object boxing site, as [`collect_dyn_boxes`] reports it: the
+/// `Expr::DynBox` payload `Interp::register_dyn_box` needs to intern this
+/// site's vtable id (and its supertraits') before translation starts.
+pub struct DynBoxSite {
+    pub concrete_key: String,
+    pub trait_path: Path,
+    pub slots: Vec<(Path, String)>,
+    pub supers: Vec<(Path, Vec<(Path, String)>)>,
 }
 
 /// Collects every distinct top-level [`Path`] an `Expr::Call`/`Expr::FnRef`
@@ -3004,15 +3059,23 @@ pub fn collect_global_targets(typed: &Typed) -> Vec<Path> {
     targets.globals
 }
 
-/// Every trait object this body boxes, as `(concrete type key, trait path,
-/// vtable slots)` — the `Expr::DynBox` counterpart of
+/// Every trait object this body boxes — the `Expr::DynBox` counterpart of
 /// [`collect_global_targets`], and needed for the same reason: the emitted
 /// IR names a vtable by a *constant* id, so every one must be interned
-/// (`Interp::vtable_id_for`) before translation starts.
-pub fn collect_dyn_boxes(typed: &Typed) -> Vec<(String, Path, Vec<(Path, String)>)> {
+/// (`Interp::register_dyn_box`) before translation starts.
+pub fn collect_dyn_boxes(typed: &Typed) -> Vec<DynBoxSite> {
     let mut targets = CallTargets::default();
     collect_calls(typed, &mut targets);
     targets.dyn_boxes
+}
+
+/// Every supertrait this body upcasts a trait object to (`Expr::DynUpcast`)
+/// — interned for the same reason [`collect_dyn_boxes`] is: the emitted IR
+/// names the target trait by a constant id (`Interp::trait_id_for`).
+pub fn collect_dyn_upcasts(typed: &Typed) -> Vec<Path> {
+    let mut targets = CallTargets::default();
+    collect_calls(typed, &mut targets);
+    targets.dyn_upcasts
 }
 
 /// Every trait this body dispatches dynamically on (`Expr::DynCall`) — see
@@ -3064,14 +3127,30 @@ fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
         // `compute_sccs`'s finish-order contract guarantee they are already
         // compiled — and have addresses to put in the table — by the time
         // this boxing function's own SCC is compiled.
-        Expr::DynBox { concrete_key, trait_path, slots, value } => {
+        Expr::DynBox { concrete_key, trait_path, slots, supers, value } => {
             for key in slots {
                 if !targets.methods.contains(key) {
                     targets.methods.push(key.clone());
                 }
             }
-            if !targets.dyn_boxes.iter().any(|(k, t, _)| k == concrete_key && t == trait_path) {
-                targets.dyn_boxes.push((concrete_key.clone(), trait_path.clone(), slots.clone()));
+            if !targets.dyn_boxes.iter().any(|s| s.concrete_key == *concrete_key && s.trait_path == *trait_path) {
+                targets.dyn_boxes.push(DynBoxSite {
+                    concrete_key: concrete_key.clone(),
+                    trait_path: trait_path.clone(),
+                    slots: slots.clone(),
+                    supers: supers.clone(),
+                });
+            }
+            collect_calls(value, targets);
+        }
+        // The conversion itself calls nothing — it swaps the box's table for
+        // one the *boxing* site already registered, whose slots that site
+        // also already pulled into the call graph (they are the same entries
+        // under a subset of the names). Only the target trait's id has to be
+        // interned before translation.
+        Expr::DynUpcast { to_trait, value } => {
+            if !targets.dyn_upcasts.contains(to_trait) {
+                targets.dyn_upcasts.push(to_trait.clone());
             }
             collect_calls(value, targets);
         }
@@ -3216,7 +3295,17 @@ mod tests {
     /// care (nested-struct field classification, `Global`/`SetGlobal`)
     /// calls `super::ast_to_sexpr` with real ones instead.
     fn ast_to_sexpr(heap: &mut Heap, typed: &Typed) -> Result<Value, Error> {
-        super::ast_to_sexpr(heap, typed, &HashSet::new(), &HashSet::new(), &HashMap::new(), &HashSet::new(), &HashMap::new())
+        let vtables = HashMap::new();
+        let trait_ids = HashMap::new();
+        super::ast_to_sexpr(
+            heap,
+            typed,
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashMap::new(),
+            &HashSet::new(),
+            DynTables { vtables: &vtables, trait_ids: &trait_ids },
+        )
     }
 
     /// Unpacks a tagged-list `Value` into (tag name, field values), asserting
@@ -4189,7 +4278,9 @@ mod tests {
         let enums = HashSet::new();
         let cell_names = HashSet::new();
         let vtables = HashMap::new();
-        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals, cell_names: &cell_names, visible_siblings: &HashSet::new(), vtables: &vtables };
+        let trait_ids = HashMap::new();
+        let dyn_tables = DynTables { vtables: &vtables, trait_ids: &trait_ids };
+        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals, cell_names: &cell_names, visible_siblings: &HashSet::new(), dyn_tables };
 
         let point_ty = Type::Named(point.clone(), vec![]);
         let scrut = typed(Expr::Var("p".to_string()), point_ty.clone());
@@ -4281,7 +4372,9 @@ mod tests {
             let globals = HashMap::new();
             let cell_names = HashSet::new();
         let vtables = HashMap::new();
-        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals, cell_names: &cell_names, visible_siblings: &HashSet::new(), vtables: &vtables };
+        let trait_ids = HashMap::new();
+        let dyn_tables = DynTables { vtables: &vtables, trait_ids: &trait_ids };
+        let cx = Ctx { direct: &direct, outer_captured: &[], structs: &structs, enums: &enums, globals: &globals, cell_names: &cell_names, visible_siblings: &HashSet::new(), dyn_tables };
             let v = pattern_to_sexpr(heap, pat, cx).unwrap();
             let (tag, fields) = untag(heap, v);
             assert_eq!(tag, "pat-lit");

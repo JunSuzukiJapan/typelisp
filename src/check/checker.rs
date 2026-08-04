@@ -4787,19 +4787,22 @@ impl Checker {
     }
 
     /// Convert a `:dyn from<from_pins>` value to `:dyn to<to_pins>`, which is
-    /// admissible exactly when `to` is a supertrait of `from` whose pins agree
-    /// and whose vtable layout is a prefix of `from`'s.
+    /// admissible exactly when `to` is a supertrait of `from` whose pins agree.
     ///
-    /// The prefix condition holds for every trait on `from`'s *leftmost*
-    /// supertrait spine, because `Checker::linearize_vtable` emits the direct
-    /// supertraits' (already linearized) methods in written order before its
-    /// own. It fails for a second or later supertrait — `D(B,C)`'s vtable is
-    /// `[B's..., C's..., D's...]`, so `C`'s slots start at a nonzero offset
-    /// and a `:dyn C` call site's baked-in constant would index the wrong
-    /// entry. That case needs a real conversion (a per-supertrait vtable-id
-    /// mapping threaded through the interpreter, `typelisp-rt`, the island
-    /// and AOT) and is rejected here with a message that says so, rather than
-    /// silently mis-dispatching.
+    /// How much work that takes depends on the layouts. For every trait on
+    /// `from`'s *leftmost* supertrait spine, `to`'s `vtable_order` is a
+    /// prefix of `from`'s (`Checker::linearize_vtable` emits the direct
+    /// supertraits' already-linearized methods in written order before its
+    /// own), so the source box already *is* a valid `:dyn to` — every slot
+    /// the target can name holds the same entry at the same index — and the
+    /// conversion is a pure retype with no node inserted.
+    ///
+    /// For a second or later supertrait the prefix fails — `D(B,C)`'s vtable
+    /// is `[B's..., C's..., D's...]`, so `C`'s slots start at a nonzero
+    /// offset and a `:dyn C` call site's baked-in constant would index the
+    /// wrong entry. That case gets an [`Expr::DynUpcast`], which swaps the
+    /// box's table for the one `Expr::DynBox::supers` recorded for the same
+    /// concrete type.
     fn upcast_dyn(
         &self,
         value: Typed,
@@ -4848,14 +4851,84 @@ impl Checker {
                 }
             }
         }
-        if !fdef.vtable_order.starts_with(&tdef.vtable_order) {
-            return Err(mismatch(&format!(
-                "`{}` inherits `{}` other than through its first supertrait, so their vtable layouts \
-                 do not share a prefix and the conversion would need a new vtable",
-                from, to
-            )));
+        // Prefix layouts: the box is already a valid `:dyn to`, so nothing
+        // below the checker learns that an upcast happened.
+        if fdef.vtable_order.starts_with(&tdef.vtable_order) {
+            return Ok(Typed { loc: value.loc.clone(), expr: value.expr, ty: to_ty });
         }
-        Ok(Typed { loc: value.loc.clone(), expr: value.expr, ty: to_ty })
+        // Otherwise the target's slot numbering differs and the box has to
+        // be re-made around `to`'s own table for this concrete type. Which
+        // table that is depends on the value, not on this site, so the node
+        // only names the target trait and the swap is a runtime lookup on
+        // the box's vtable id.
+        let loc = value.loc.clone();
+        Ok(Typed {
+            loc,
+            expr: Expr::DynUpcast { to_trait: to.clone(), value: Box::new(value) },
+            ty: to_ty,
+        })
+    }
+
+    /// Every transitive supertrait of `trait_path`, nearest first, without
+    /// duplicates — the traits a `:dyn trait_path` value can be upcast to,
+    /// and hence the tables [`Expr::DynBox`] has to lay out alongside its
+    /// own (see that field's doc comment for why they are laid out at the
+    /// boxing site).
+    fn supertrait_closure(&self, trait_path: &Path) -> Vec<Path> {
+        let mut out: Vec<Path> = Vec::new();
+        let mut stack = vec![trait_path.clone()];
+        while let Some(p) = stack.pop() {
+            let Some(def) = self.reg.trait_def(&p) else { continue };
+            for sup in &def.supertraits {
+                if !out.contains(&sup.trait_path) {
+                    out.push(sup.trait_path.clone());
+                    stack.push(sup.trait_path.clone());
+                }
+            }
+        }
+        out
+    }
+
+    /// The supertrait vtables an [`Expr::DynBox`] carries: for each trait in
+    /// `trait_path`'s supertrait closure, the same concrete type's slot
+    /// table for *it*.
+    ///
+    /// Derived from `slots` by name rather than by re-running
+    /// `dyn_vtable_slots` per supertrait: a supertrait's `vtable_order` is a
+    /// sub-sequence of `trait_path`'s (linearization keeps one slot per
+    /// name), so the entry a supertrait's slot must hold is literally the
+    /// one `slots` already holds for that name. Deriving it cannot disagree
+    /// with the table the box itself dispatches through, and cannot fail on
+    /// a trait whose admission checks the boxed trait already passed.
+    fn dyn_super_vtables(
+        &self,
+        trait_path: &Path,
+        order: &[String],
+        slots: &[(Path, String)],
+    ) -> Vec<(Path, Vec<(Path, String)>)> {
+        let mut out = Vec::new();
+        for sup in self.supertrait_closure(trait_path) {
+            let Some(sdef) = self.reg.trait_def(&sup) else { continue };
+            let mut sup_slots = Vec::with_capacity(sdef.vtable_order.len());
+            for m in &sdef.vtable_order {
+                match order.iter().position(|x| x == m).and_then(|i| slots.get(i)) {
+                    Some(entry) => sup_slots.push(entry.clone()),
+                    // Unreachable while linearization is transitive: every
+                    // method of a supertrait is in the subtrait's own order.
+                    // Dropping the table rather than emitting a short one
+                    // keeps a wrong slot number from ever being callable —
+                    // the upcast then fails at the point of conversion.
+                    None => {
+                        sup_slots.clear();
+                        break;
+                    }
+                }
+            }
+            if !sup_slots.is_empty() {
+                out.push((sup, sup_slots));
+            }
+        }
+        out
     }
 
     /// Wrap an already-checked concrete value as `:dyn trait_path<pins...>`,
@@ -4904,6 +4977,12 @@ impl Checker {
             }
         }
         let slots = self.dyn_vtable_slots(&value.ty, trait_path, pins)?;
+        // The supertraits' tables, laid out here because this is the last
+        // point where both halves of a vtable's identity — the concrete type
+        // and the trait — are in hand. A later `Expr::DynUpcast` of this box
+        // only has the trait.
+        let order = &self.check_object_safe(trait_path)?.vtable_order;
+        let supers = self.dyn_super_vtables(trait_path, order, &slots);
         let concrete_key = mangle_type(&value.ty);
         let loc = value.loc.clone();
         Ok(Typed {
@@ -4912,6 +4991,7 @@ impl Checker {
                 concrete_key,
                 trait_path: trait_path.clone(),
                 slots,
+                supers,
                 value: Box::new(value),
             },
             ty: Type::Dyn(trait_path.clone(), pins.to_vec()),

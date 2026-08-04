@@ -4913,6 +4913,61 @@ fn compile_indexes_inherited_vtable_slots_before_the_subtraits_own() {
     assert_eq!(v, RtValue::Int(123));
 }
 
+/// Upcasting to a *non-leftmost* supertrait is the one conversion that
+/// cannot be a retype: `C`'s slots sit after `B`'s in `D`'s vtable, so the
+/// box is re-made around `C`'s own table (`rt_dyn_upcast`, the island's
+/// `compile-dyn-upcast` tag). Reusing `D`'s table would call `b-tag` — slot
+/// 0 there — and answer `1`.
+#[test]
+fn compile_upcasts_to_a_non_first_supertrait_through_the_conversion_table() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (deftrait B () (b-tag ((self Self)) i32))
+        (deftrait C () (c-tag ((self Self)) i32))
+        (deftrait D (B C) (d-tag ((self Self)) i32))
+        (defstruct cell (n i32))
+        (defstruct pair (n i32))
+        (impl B cell (b-tag ((self Self)) i32 1))
+        (impl C cell (c-tag ((self Self)) i32 2))
+        (impl D cell (d-tag ((self Self)) i32 3))
+        (impl B pair (b-tag ((self Self)) i32 4))
+        (impl C pair (c-tag ((self Self)) i32 5))
+        (impl D pair (d-tag ((self Self)) i32 6))
+        (defun only-c ((c :dyn C)) i32 (c-tag c))
+        (defun via ((d :dyn D)) i32 (only-c d))
+        (defun both () i32 (+ (* 10 (via (cell::new 0))) (via (pair::new 0))))
+        (compile both)
+        (both)
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(25));
+}
+
+/// The conversion has to work when the box is made *interpreted* and only
+/// the upcasting function is native: the mapping is published to the
+/// compiled tier at every boxing site, not only when something is compiled.
+#[test]
+fn compile_upcasts_a_trait_object_boxed_by_interpreted_code() {
+    let v = run_with_compiler_and_prelude(
+        r#"
+        (deftrait B () (b-tag ((self Self)) i32))
+        (deftrait C () (c-tag ((self Self)) i32))
+        (deftrait D (B C) (d-tag ((self Self)) i32))
+        (defstruct cell (n i32))
+        (impl B cell (b-tag ((self Self)) i32 1))
+        (impl C cell (c-tag ((self Self)) i32 2))
+        (impl D cell (d-tag ((self Self)) i32 3))
+        (defun only-c ((c :dyn C)) i32 (c-tag c))
+        (defun via ((d :dyn D)) i32 (only-c d))
+        (compile via)
+        (via (cell::new 0))
+        "#,
+    )
+    .expect("eval failed");
+    assert_eq!(v, RtValue::Int(2));
+}
+
 /// A method argument and a boxed return value cross the vtable boundary
 /// under the ordinary compiled-call ABI.
 #[test]

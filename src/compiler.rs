@@ -1421,6 +1421,7 @@ pub const SOURCE: &str = r#"
         ((equal s "hashtable-op")   (compile-hashtable-op m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
         ((equal s "dyn-new")        (compile-dyn-new m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
         ((equal s "dyn-call")       (compile-dyn-call m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
+        ((equal s "dyn-upcast")     (compile-dyn-upcast m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
         ((equal s "dyn-value")      (compile-dyn-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base e))
         (else (panic (append "compile-value: unsupported tag " s)))))
                            )
@@ -2221,6 +2222,29 @@ pub const SOURCE: &str = r#"
           (store-arg builder args-ptr 0 (const-i64 builder vtable-id))
           (let ((sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr arg-forms 1)))
             (let ((result (build-call builder (get-function m "rt_dyn_new") args-ptr 2)))
+              (pop-sexpr-roots builder m sexpr-roots)
+              result))))))
+
+;; `(dyn-upcast trait-id (kind . value-form))` —
+;; convert a trait object to a supertrait whose vtable
+;; layout is not a prefix of the source's
+;; (`Expr::DynUpcast`). Identical in shape to
+;; `compile-dyn-new`, and for the same reason: slot 0
+;; is a translate-time constant naming the target and
+;; `rt_dyn_upcast` does the rest (it looks the target
+;; *table* up from the box's own vtable id, which is
+;; the only thing that still knows the concrete type).
+;; The value argument is a `kind = 2` `Sexpr`, so
+;; `compile-call-args` roots it across the allocation
+;; `rt_dyn_upcast` performs — which is also what keeps
+;; the concrete value inside it alive.
+(defun compile-dyn-upcast ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Sexpr) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (loop-root-base Option<llvm-value>) (e Sexpr))llvm-value
+    (let ((trait-id (sexpr-int (sexpr-car (sexpr-cdr e)))))
+      (let ((arg-forms (sexpr-cdr (sexpr-cdr e))))
+        (let ((args-ptr (alloca-args builder 2)))
+          (store-arg builder args-ptr 0 (const-i64 builder trait-id))
+          (let ((sexpr-roots (compile-call-args m fn-name builder env fn-env captured cur-fn loop-exit loop-slot loop-root-base args-ptr arg-forms 1)))
+            (let ((result (build-call builder (get-function m "rt_dyn_upcast") args-ptr 2)))
               (pop-sexpr-roots builder m sexpr-roots)
               result))))))
 

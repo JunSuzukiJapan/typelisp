@@ -228,7 +228,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
 
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let module = module.borrow();
-    build_main_wrapper(ctx, &module, &global_init_names, &interp.vtable_descriptors())?;
+    build_main_wrapper(ctx, &module, &global_init_names, &interp.vtable_descriptors(), &interp.upcast_descriptors())?;
     module.verify().map_err(|e| format!("module failed verification: {}", e))?;
     write_executable(&module, output_path)
 }
@@ -255,11 +255,17 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
 /// JIT — which patches tables with addresses only known after each module is
 /// JIT'd (`Interp::publish_vtables`) — AOT needs no runtime discovery, no
 /// thunk, and no closure to carry a method's identity.
+///
+/// `upcasts` (from `Interp::upcast_descriptors`) is the same story for the
+/// supertrait conversion table `rt_dyn_upcast` reads: pure integers, so the
+/// startup sequence is three constants per entry and no symbol resolution
+/// at all.
 fn build_main_wrapper(
     ctx: &'static Context,
     module: &Module<'static>,
     global_init_names: &[String],
     vtables: &[(u32, Vec<(Path, String)>)],
+    upcasts: &[(u32, u32, u32)],
 ) -> Result<(), String> {
     let tl_main = module
         .get_function(ENTRY_POINT_INTERNAL_NAME)
@@ -315,6 +321,36 @@ fn build_main_wrapper(
                     .build_call(rt_vtable_set, &[args_ptr.into(), ctx.i32_type().const_int(3, false).into()], "vtable_set_result")
                     .map_err(|e| format!("failed to build rt_vtable_set call: {}", e))?;
             }
+        }
+    }
+    // The supertrait upcast table, for the same reason and at the same
+    // point: a `:dyn` upcast in `tl_main` reads it, and it is all constants.
+    if !upcasts.is_empty() {
+        let i64_ty = ctx.i64_type();
+        let rt_upcast_set = module
+            .get_function("rt_upcast_set")
+            .ok_or_else(|| "internal error: rt_upcast_set not declared in module".to_string())?;
+        let args_ptr = builder
+            .build_alloca(i64_ty.array_type(3), "upcast_set_args")
+            .map_err(|e| format!("failed to alloca upcast-set args: {}", e))?;
+        for (from, trait_id, to) in upcasts {
+            let set_args = [
+                i64_ty.const_int(*from as u64, false),
+                i64_ty.const_int(*trait_id as u64, false),
+                i64_ty.const_int(*to as u64, false),
+            ];
+            for (i, v) in set_args.iter().enumerate() {
+                let v = *v;
+                let p = unsafe {
+                    builder
+                        .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "upcast_set_arg_ptr")
+                        .map_err(|e| format!("failed to build upcast-set gep: {}", e))?
+                };
+                builder.build_store(p, v).map_err(|e| format!("failed to store upcast-set arg: {}", e))?;
+            }
+            builder
+                .build_call(rt_upcast_set, &[args_ptr.into(), ctx.i32_type().const_int(3, false).into()], "upcast_set_result")
+                .map_err(|e| format!("failed to build rt_upcast_set call: {}", e))?;
         }
     }
     // AOT's counterpart to the JIT path's `Interp::eval` calling
@@ -471,7 +507,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[]).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[]).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -510,7 +546,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[]).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[]).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

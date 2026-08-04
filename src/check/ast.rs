@@ -265,6 +265,37 @@ pub enum Expr {
         concrete_key: String,
         trait_path: Path,
         slots: Vec<(Path, String)>,
+        /// Every *transitive* supertrait of `trait_path`, each with the same
+        /// concrete type's slot table for it — the tables a later
+        /// [`Expr::DynUpcast`] of this box may have to switch to. Laid out
+        /// here rather than at the upcast site because that site no longer
+        /// knows the concrete type, which is half of a vtable's identity;
+        /// boxing is the last point where both halves are in hand.
+        ///
+        /// The whole closure is recorded, not just the non-prefix part: an
+        /// upcast chain can reach a trait whose layout is a prefix of some
+        /// intermediate's but not of this one's, and the tables are cheap
+        /// (one `(type, method)` list each, no heap values, no GC root).
+        supers: Vec<(Path, Vec<(Path, String)>)>,
+        value: Box<Typed>,
+    },
+    /// Convert a trait object to one of its *supertraits* whose vtable layout
+    /// is not a prefix of the source's — `D(B,C)`'s `:dyn D` to `:dyn C`,
+    /// where `C`'s slots start after `B`'s. The box is re-made around the
+    /// same concrete value with the supertrait's own table, so the target's
+    /// slot numbers mean what a `:dyn C` call site baked in.
+    ///
+    /// The leftmost-spine case never reaches here: there the layouts share a
+    /// prefix, so `Checker::upcast_dyn` just retypes the expression and no
+    /// node is inserted at all (see `TraitDef::vtable_order`).
+    ///
+    /// The conversion is a table lookup keyed by the *runtime* vtable id —
+    /// which is what makes it possible at all, since the concrete type is
+    /// gone by now: `Expr::DynBox`'s `supers` registered `(this box's id,
+    /// to_trait) -> that trait's id for the same concrete type`
+    /// (`Interp::register_dyn_box`, `typelisp_rt::upcast_define`).
+    DynUpcast {
+        to_trait: Path,
         value: Box<Typed>,
     },
     /// A method call through a trait object: `args[0]` is the `Type::Dyn`

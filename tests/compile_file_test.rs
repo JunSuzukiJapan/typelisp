@@ -665,6 +665,36 @@ fn compiles_and_runs_dynamic_dispatch_through_a_trait_object() {
     );
 }
 
+/// The supertrait conversion table has to reach a linked executable too:
+/// `rt_upcast_set` calls emitted alongside the `rt_vtable_set` ones, all
+/// constants. `2`/`5` are `c-tag`'s; slot 0 of `D`'s own table is `b-tag`,
+/// so a missing conversion would answer `14`.
+#[test]
+fn compiles_and_runs_an_upcast_to_a_non_first_supertrait() {
+    assert_eq!(
+        compile_and_run(
+            "dyn_upcast",
+            r#"
+            (deftrait B () (b-tag ((self Self)) i32))
+            (deftrait C () (c-tag ((self Self)) i32))
+            (deftrait D (B C) (d-tag ((self Self)) i32))
+            (defstruct cell (n i32))
+            (defstruct pair (n i32))
+            (impl B cell (b-tag ((self Self)) i32 1))
+            (impl C cell (c-tag ((self Self)) i32 2))
+            (impl D cell (d-tag ((self Self)) i32 3))
+            (impl B pair (b-tag ((self Self)) i32 4))
+            (impl C pair (c-tag ((self Self)) i32 5))
+            (impl D pair (d-tag ((self Self)) i32 6))
+            (defun only-c ((c :dyn C)) i32 (c-tag c))
+            (defun via ((d :dyn D)) i32 (only-c d))
+            (defun main () i64 (as i64 (+ (* 10 (via (cell::new 0))) (via (pair::new 0)))))
+            "#
+        ),
+        25
+    );
+}
+
 /// Slot numbering (`deftrait` order) must hold in a linked executable too.
 #[test]
 fn compiles_and_runs_a_multi_slot_vtable() {

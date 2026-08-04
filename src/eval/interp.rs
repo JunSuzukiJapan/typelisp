@@ -256,6 +256,21 @@ pub struct Interp {
     /// since `Type` has no `Hash` — the same substitution
     /// [`Self::jit_ctor_cache`] makes.
     vtable_ids: RefCell<HashMap<(String, Path), u32>>,
+    /// `(vtable id, trait id)` -> the vtable id the *same concrete type* uses
+    /// for that trait: the supertrait upcast table `Expr::DynUpcast` reads.
+    ///
+    /// Keyed by the runtime vtable id because that is all an upcast site has
+    /// — the concrete type, the other half of a vtable's identity, is gone by
+    /// then. Filled in at every boxing site from `Expr::DynBox::supers`
+    /// ([`Self::register_dyn_box`]), which is where both halves are still in
+    /// hand. The compiled tier keeps the same map under the same ids in
+    /// `typelisp_rt` (`upcast_define`).
+    dyn_upcasts: RefCell<HashMap<(u32, u32), u32>>,
+    /// Trait path -> a small integer, so an upcast site in *compiled* code
+    /// can name its target trait with a baked-in constant the way a boxing
+    /// site names its vtable ([`Self::vtable_id_for`]). Interpreted upcasts
+    /// go through the same ids, so both tiers agree by construction.
+    trait_ids: RefCell<HashMap<Path, u32>>,
     /// Traits some *compiled* body dispatches on (an `Expr::DynCall` in a
     /// function that has been through `translate_and_compile`).
     ///
@@ -418,6 +433,8 @@ impl Interp {
             streams: RefCell::new(Default::default()),
             vtables: RefCell::new(Vec::new()),
             vtable_ids: RefCell::new(HashMap::new()),
+            dyn_upcasts: RefCell::new(HashMap::new()),
+            trait_ids: RefCell::new(HashMap::new()),
             dyn_dispatch_compiled: RefCell::new(HashSet::new()),
             jit_ctor_counter: Cell::new(0),
             pretty: RefCell::new(None),
@@ -471,8 +488,15 @@ impl Interp {
     /// compiled after already running interpreted reuses the very ids its
     /// `Expr::DynBox` evaluations assigned.
     fn intern_dyn_vtables(&self, body: &Typed) {
-        for (key, trait_path, slots) in crate::compile::ast_bridge::collect_dyn_boxes(body) {
-            self.vtable_id_for(&key, &trait_path, &slots);
+        for site in crate::compile::ast_bridge::collect_dyn_boxes(body) {
+            self.register_dyn_box(&site.concrete_key, &site.trait_path, &site.slots, &site.supers);
+        }
+        // An upcast site names its target trait by a baked-in id, so the
+        // trait has to be interned before translation for the same reason a
+        // vtable does. Its *target table* needs no pre-pass: that was
+        // interned wherever the value was boxed.
+        for trait_path in crate::compile::ast_bridge::collect_dyn_upcasts(body) {
+            self.trait_id_for(&trait_path);
         }
     }
 
@@ -538,6 +562,66 @@ impl Interp {
         tables.push(slots.to_vec());
         self.vtable_ids.borrow_mut().insert(key, id);
         id
+    }
+
+    /// The id interning `trait_path` for upcast lookups — the trait half of
+    /// [`Self::dyn_upcasts`]'s key, and the constant a compiled
+    /// `Expr::DynUpcast` bakes in. Ids are dense and per-`Interp`, like
+    /// vtable ids; nothing outside this pair of tables reads them.
+    pub(crate) fn trait_id_for(&self, trait_path: &Path) -> u32 {
+        if let Some(&id) = self.trait_ids.borrow().get(trait_path) {
+            return id;
+        }
+        let mut ids = self.trait_ids.borrow_mut();
+        let id = ids.len() as u32;
+        ids.insert(trait_path.clone(), id);
+        id
+    }
+
+    /// Intern a boxing site's vtable *and* every supertrait table it carries
+    /// (`Expr::DynBox::supers`), recording how to get from any one of them to
+    /// any other. Returns the ids, the boxed trait's own first.
+    ///
+    /// Every pair is registered, not just (sub -> super): the entries only
+    /// ever say "the vtable *this same concrete type* uses for that trait",
+    /// which is true regardless of the direction the two traits are related
+    /// in, and a chain of upcasts can arrive at any of these tables before
+    /// asking for the next. Admissibility is the checker's business — an
+    /// entry nothing is allowed to ask for is simply never read.
+    fn register_dyn_box(
+        &self,
+        concrete_key: &str,
+        trait_path: &Path,
+        slots: &[(Path, String)],
+        supers: &[(Path, Vec<(Path, String)>)],
+    ) -> Vec<u32> {
+        let id = self.vtable_id_for(concrete_key, trait_path, slots);
+        if supers.is_empty() {
+            return vec![id];
+        }
+        let mut tables: Vec<(u32, u32)> = vec![(id, self.trait_id_for(trait_path))];
+        for (sup, sup_slots) in supers {
+            tables.push((self.vtable_id_for(concrete_key, sup, sup_slots), self.trait_id_for(sup)));
+        }
+        for &(from, _) in &tables {
+            for &(to, to_trait) in &tables {
+                self.dyn_upcasts.borrow_mut().insert((from, to_trait), to);
+                crate::compile::runtime::upcast_define(from, to_trait, to);
+            }
+        }
+        tables.into_iter().map(|(id, _)| id).collect()
+    }
+
+    /// Every upcast registered so far, as `(source vtable, trait id, target
+    /// vtable)` — [`Self::vtable_descriptors`]'s counterpart for the code
+    /// generator that has to emit the table itself instead of filling it in
+    /// from a running interpreter (`compile::aot::build_main_wrapper`).
+    /// Sorted so a rebuild of the same program emits the same startup code.
+    pub(crate) fn upcast_descriptors(&self) -> Vec<(u32, u32, u32)> {
+        let mut out: Vec<(u32, u32, u32)> =
+            self.dyn_upcasts.borrow().iter().map(|(&(from, t), &to)| (from, t, to)).collect();
+        out.sort_unstable();
+        out
     }
 
 
@@ -1520,7 +1604,7 @@ impl Interp {
                     method
                 )))
             }
-            Expr::DynBox { concrete_key, trait_path, slots, value } => {
+            Expr::DynBox { concrete_key, trait_path, slots, supers, value } => {
                 let inner = self.eval(heap, value, env)?;
                 let RtValue::Sexpr(v) = inner else {
                     return Err(EvalError::Internal(format!(
@@ -1528,7 +1612,11 @@ impl Interp {
                         concrete_key, inner
                     )));
                 };
-                let id = self.vtable_id_for(concrete_key, trait_path, slots);
+                // Interns this box's own table *and* the supertrait tables an
+                // `Expr::DynUpcast` of it may switch to — here, where the
+                // concrete type is still known.
+                let ids = self.register_dyn_box(concrete_key, trait_path, slots, supers);
+                let id = ids[0];
                 // If some compiled body dispatches on this trait, the box may
                 // be about to reach it, and a native call site can only read
                 // a *native* entry point out of the table — so any slot still
@@ -1558,11 +1646,54 @@ impl Interp {
                 // *already*-compiled code that dispatches on it, and this is
                 // the only point where such a box comes into existence
                 // without any compilation having just happened.
-                self.publish_vtable(id);
+                // The supertrait tables go out too: an upcast of this box may
+                // hand one of them to compiled code, which reads entry points
+                // from the compiled tier's copy and nowhere else.
+                for id in &ids {
+                    self.publish_vtable(*id);
+                }
                 // `v` is anchored across the allocation: `alloc_dyn` can
                 // trigger a collection, and nothing else references `v` yet.
                 let slot = self.native_slot(RtValue::Sexpr(v));
                 let boxed = heap.alloc_dyn(id, v);
+                drop(slot);
+                Ok(RtValue::Sexpr(boxed))
+            }
+            Expr::DynUpcast { to_trait, value } => {
+                let v = self.eval(heap, value, env)?;
+                let RtValue::Sexpr(Value::Boxed(id)) = v else {
+                    return Err(EvalError::Internal(format!(
+                        "DynUpcast to `{}`: not a trait object ({:?})",
+                        to_trait, v
+                    )));
+                };
+                if !heap.is_dyn(id) {
+                    return Err(EvalError::Internal(format!(
+                        "DynUpcast to `{}`: not a trait object ({:?})",
+                        to_trait, v
+                    )));
+                }
+                let from = heap.dyn_vtable_id(id);
+                let trait_id = self.trait_id_for(to_trait);
+                let to = self.dyn_upcasts.borrow().get(&(from, trait_id)).copied();
+                let Some(to) = to else {
+                    // The boxing site registers a table for every trait in
+                    // the closure the checker admits an upcast to, so a miss
+                    // is a compiler bug, not anything user code can provoke.
+                    return Err(EvalError::Internal(format!(
+                        "DynUpcast to `{}`: vtable {} has no supertrait table registered",
+                        to_trait, from
+                    )));
+                };
+                if to == from {
+                    return Ok(v);
+                }
+                let inner = heap.dyn_value(id);
+                self.publish_vtable(to);
+                // As in `DynBox`: `inner` is anchored across `alloc_dyn`,
+                // which can collect.
+                let slot = self.native_slot(RtValue::Sexpr(inner));
+                let boxed = heap.alloc_dyn(to, inner);
                 drop(slot);
                 Ok(RtValue::Sexpr(boxed))
             }
@@ -2474,6 +2605,8 @@ impl Interp {
         }
         let compiled_globals = self.compiled_globals.borrow();
         let vtable_ids = self.vtable_ids.borrow();
+        let trait_ids = self.trait_ids.borrow();
+        let dyn_tables = crate::compile::ast_bridge::DynTables { vtables: &vtable_ids, trait_ids: &trait_ids };
         // `ast_bridge` is deliberately `Registry`-free, so hand it the
         // struct/enum classification as a plain flattened snapshot of the
         // scope tree. Collected fresh per compilation — compiling is rare
@@ -2507,7 +2640,7 @@ impl Interp {
         };
         heap.push_root(param_list);
         let body_sexpr =
-            match crate::compile::ast_bridge::ast_to_sexpr(heap, body, &struct_types, &enum_types, &compiled_globals, &cell_names, &vtable_ids)
+            match crate::compile::ast_bridge::ast_to_sexpr(heap, body, &struct_types, &enum_types, &compiled_globals, &cell_names, dyn_tables)
             {
                 Ok(v) => v,
                 Err(e) => {
@@ -2604,6 +2737,8 @@ impl Interp {
         self.intern_dyn_vtables(value);
         let compiled_globals = self.compiled_globals.borrow();
         let vtable_ids = self.vtable_ids.borrow();
+        let trait_ids = self.trait_ids.borrow();
+        let dyn_tables = crate::compile::ast_bridge::DynTables { vtables: &vtable_ids, trait_ids: &trait_ids };
         // See `add_compiled_function`'s own copy of this for why the
         // struct/enum classification crosses as a per-compilation snapshot.
         let (struct_types, enum_defs) = self.root.borrow().collect_struct_and_enum_types();
@@ -2621,7 +2756,7 @@ impl Interp {
                 &struct_types,
                 &enum_types,
                 &compiled_globals,
-                &vtable_ids,
+                dyn_tables,
             ) {
                 Ok(v) => v,
                 Err(e) => {
@@ -5469,7 +5604,7 @@ pub(crate) fn is_native_lowered_primitive_method(type_local: &str, method: &str)
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 116] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 118] {
     use crate::compile::runtime::{
         rt_atom, rt_bignum_add, rt_bignum_cmp, rt_bignum_div, rt_bignum_fits_i32, rt_bignum_mod, rt_bignum_mul, rt_bignum_new,
         rt_bignum_sub, rt_bignum_to_float, rt_bignum_to_int, rt_bignum_to_int_raw, rt_bignum_to_ratio, rt_box_kind, rt_car, rt_cdr,
@@ -5487,7 +5622,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 116] {
         rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_instance_test, rt_sexpr_int, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
-        rt_dyn_new, rt_dyn_value, rt_dyn_vtable, rt_vtable_set, rt_vtable_slot,
+        rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set, rt_vtable_slot,
     };
     [
         // The one main-crate entry: the generic `llvm-*`/native-scope
@@ -5501,14 +5636,19 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 116] {
         // Trait objects and vtables (TODO T4): `rt_dyn_new` boxes,
         // `rt_dyn_vtable`/`rt_dyn_value` decode, and `rt_vtable_slot` reads
         // the native entry point a `:dyn` call site then calls indirectly
-        // (`compiler.rs`'s `compile-dyn-*`). `rt_vtable_set` fills a table
-        // from AOT startup; the JIT fills tables Rust-side instead
-        // (`Interp::publish_vtables`), so nothing emits a call to it there.
+        // (`compiler.rs`'s `compile-dyn-*`). `rt_dyn_upcast` swaps a box's
+        // table for a supertrait's when the two layouts share no prefix.
+        // `rt_vtable_set`/`rt_upcast_set` fill the two tables from AOT
+        // startup; the JIT fills them Rust-side instead
+        // (`Interp::publish_vtables`/`register_dyn_box`), so nothing emits a
+        // call to either there.
         ("rt_dyn_new", rt_dyn_new as usize),
         ("rt_dyn_vtable", rt_dyn_vtable as usize),
         ("rt_dyn_value", rt_dyn_value as usize),
+        ("rt_dyn_upcast", rt_dyn_upcast as usize),
         ("rt_vtable_slot", rt_vtable_slot as usize),
         ("rt_vtable_set", rt_vtable_set as usize),
+        ("rt_upcast_set", rt_upcast_set as usize),
         ("rt_car", rt_car as usize),
         ("rt_cdr", rt_cdr as usize),
         ("rt_cons", rt_cons as usize),

@@ -386,23 +386,125 @@ fn downcasting_to_a_subtrait_is_rejected() {
     assert!(m.contains("does not inherit"), "{}", m);
 }
 
+/// `D(B,C)`: `C`'s slots sit after `B`'s in `D`'s vtable, so the layouts
+/// share no prefix and the box has to be re-made around `C`'s own table —
+/// the one case `Expr::DynUpcast` exists for. Getting `2` (and not `1`)
+/// proves the swap happened: reusing `D`'s table would have called `b-tag`,
+/// which occupies slot 0 there.
+const DIAMOND: &str = r#"
+(deftrait B () (b-tag ((self Self)) i32))
+(deftrait C () (c-tag ((self Self)) i32))
+(deftrait D (B C) (d-tag ((self Self)) i32))
+(defstruct cell (n i32))
+(defstruct pair (n i32))
+(impl B cell (b-tag ((self Self)) i32 1))
+(impl C cell (c-tag ((self Self)) i32 2))
+(impl D cell (d-tag ((self Self)) i32 3))
+(impl B pair (b-tag ((self Self)) i32 4))
+(impl C pair (c-tag ((self Self)) i32 5))
+(impl D pair (d-tag ((self Self)) i32 6))
+"#;
+
 #[test]
-fn upcasting_to_a_non_first_supertrait_is_rejected_as_a_layout_mismatch() {
-    // `D(B,C)`: `C`'s slots sit after `B`'s in `D`'s vtable, so the layouts
-    // share no prefix and the conversion is not a retype.
+fn upcasting_to_a_non_first_supertrait_switches_to_that_supertraits_vtable() {
+    let src = format!(
+        "{DIAMOND}
+         (defun only-c ((c :dyn C)) i32 (c-tag c))
+         (defun via ((d :dyn D)) i32 (only-c d))
+         (via (cell::new 0))"
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(2));
+}
+
+#[test]
+fn a_non_first_supertrait_upcast_still_dispatches_per_concrete_type() {
+    // The swapped-in table belongs to the *same* concrete type, so two
+    // implementations must stay distinguishable after the conversion.
+    let src = format!(
+        "{DIAMOND}
+         (defun only-c ((c :dyn C)) i32 (c-tag c))
+         (defun via ((d :dyn D)) i32 (only-c d))
+         (+ (* 10 (via (cell::new 0))) (via (pair::new 0)))"
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(25));
+}
+
+#[test]
+fn an_explicit_as_upcasts_to_a_non_first_supertrait() {
+    let src = format!(
+        "{DIAMOND}
+         (defun only-c ((c :dyn C)) i32 (c-tag c))
+         (defun via ((d :dyn D)) i32 (only-c (as :dyn C d)))
+         (via (cell::new 0))"
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(2));
+}
+
+#[test]
+fn upcasting_twice_reaches_a_supertrait_of_the_supertrait() {
+    // `E(D)` boxed, upcast to `C` (non-prefix, a real conversion), then the
+    // result upcast again to `A` — which is not a prefix of `C` either, so
+    // the second conversion has to find a table registered for a box the
+    // *first* conversion produced.
     let src = r#"
+        (deftrait A () (a-tag ((self Self)) i32))
+        (deftrait X () (x-tag ((self Self)) i32))
         (deftrait B () (b-tag ((self Self)) i32))
-        (deftrait C () (c-tag ((self Self)) i32))
+        (deftrait C (X A) (c-tag ((self Self)) i32))
         (deftrait D (B C) (d-tag ((self Self)) i32))
         (defstruct cell (n i32))
-        (impl B cell (b-tag ((self Self)) i32 1))
-        (impl C cell (c-tag ((self Self)) i32 2))
-        (impl D cell (d-tag ((self Self)) i32 3))
-        (defun only-c ((c :dyn C)) i32 (c-tag c))
+        (impl A cell (a-tag ((self Self)) i32 1))
+        (impl X cell (x-tag ((self Self)) i32 2))
+        (impl B cell (b-tag ((self Self)) i32 3))
+        (impl C cell (c-tag ((self Self)) i32 4))
+        (impl D cell (d-tag ((self Self)) i32 5))
+        (defun only-a ((a :dyn A)) i32 (a-tag a))
+        (defun only-c ((c :dyn C)) i32 (only-a c))
         (defun via ((d :dyn D)) i32 (only-c d))
         (via (cell::new 0))"#;
-    let m = eval_err(src);
-    assert!(m.contains("do not share a prefix"), "{}", m);
+    assert_eq!(eval_ok(src), RtValue::Int(1));
+}
+
+#[test]
+fn upcasting_reaches_a_trait_that_is_a_prefix_of_the_source_but_not_of_the_step() {
+    // Why `Expr::DynBox::supers` records the *whole* supertrait closure and
+    // not only the traits whose layout is not a prefix of the boxed one.
+    // `B(A)` puts `A`'s methods at the front of `D`'s vtable, so `D -> A`
+    // alone would be a free retype — but the route taken is `D -> C -> A`,
+    // and `C(X,A)` has `X`'s methods first, so the second step is a real
+    // conversion asking for a table `D`'s own prefix test would have
+    // considered unnecessary.
+    let src = r#"
+        (deftrait A () (a-tag ((self Self)) i32))
+        (deftrait X () (x-tag ((self Self)) i32))
+        (deftrait B (A) (b-tag ((self Self)) i32))
+        (deftrait C (X A) (c-tag ((self Self)) i32))
+        (deftrait D (B C) (d-tag ((self Self)) i32))
+        (defstruct cell (n i32))
+        (impl A cell (a-tag ((self Self)) i32 1))
+        (impl X cell (x-tag ((self Self)) i32 2))
+        (impl B cell (b-tag ((self Self)) i32 3))
+        (impl C cell (c-tag ((self Self)) i32 4))
+        (impl D cell (d-tag ((self Self)) i32 5))
+        (defun only-a ((a :dyn A)) i32 (a-tag a))
+        (defun only-c ((c :dyn C)) i32 (only-a c))
+        (defun via ((d :dyn D)) i32 (only-c d))
+        (via (cell::new 0))"#;
+    assert_eq!(eval_ok(src), RtValue::Int(1));
+}
+
+#[test]
+fn an_upcast_box_is_still_a_trait_object_for_match() {
+    // Box transparency survives the conversion: the re-made box holds the
+    // same concrete value, so `match` still downcasts to it.
+    let src = format!(
+        "{DIAMOND}
+         (defun name-of ((c :dyn C)) i32
+           (match c ((cell _) 10) ((pair _) 20) (_ 0)))
+         (defun via ((d :dyn D)) i32 (name-of d))
+         (+ (via (cell::new 0)) (via (pair::new 0)))"
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(30));
 }
 
 #[test]

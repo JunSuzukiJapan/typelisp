@@ -196,7 +196,7 @@ fn walk(typed: &Typed, bound: &HashSet<String>, siblings: &HashSet<String>, seen
                 walk(a, bound, siblings, seen, order);
             }
         }
-        Expr::DynBox { value, .. } => walk(value, bound, siblings, seen, order),
+        Expr::DynBox { value, .. } | Expr::DynUpcast { value, .. } => walk(value, bound, siblings, seen, order),
         Expr::DynValue(inner) => walk(inner, bound, siblings, seen, order),
         Expr::Construct { args, .. } => {
             for a in args {
@@ -346,7 +346,7 @@ fn collect_nested_captures(typed: &Typed, out: &mut HashSet<String>) {
                 collect_nested_captures(a, out);
             }
         }
-        Expr::DynBox { value, .. } => collect_nested_captures(value, out),
+        Expr::DynBox { value, .. } | Expr::DynUpcast { value, .. } => collect_nested_captures(value, out),
         Expr::DynValue(inner) => collect_nested_captures(inner, out),
         Expr::FieldGet(inner, _) => collect_nested_captures(inner, out),
         Expr::FieldSet(inner, _, value) => {

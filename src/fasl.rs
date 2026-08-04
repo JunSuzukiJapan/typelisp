@@ -508,7 +508,13 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// re-captured at all: it compared *names* only (see
 /// [`NamespaceKeys::traits`]), so an edited trait kept serving its old
 /// definition out of cache — 2026-08-01.
-pub const FASL_FORMAT_VERSION: u32 = 17;
+/// 18: non-leftmost supertrait `:dyn` upcasting. `Expr` gained `DynUpcast`
+/// and `Expr::DynBox` gained `supers` (the supertrait vtables a boxing site
+/// lays out, which is what makes the conversion possible at all — see that
+/// field's doc comment). A cached `DynBox` from before this carries no
+/// `supers`, so an upcast of it would find no table registered and abort at
+/// the conversion — 2026-08-04.
+pub const FASL_FORMAT_VERSION: u32 = 18;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.
