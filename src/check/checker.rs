@@ -4013,67 +4013,8 @@ impl Checker {
 
         let mut body = Vec::new();
         for (mi, m) in method_forms.iter().enumerate() {
-            // `(method-name (recv-list) ret body...)`. Substitution applies
-            // only to *type* positions — each receiver/parameter's type
-            // (never its bound *name*, which would collide with `subst`'s
-            // `"self"` key: the receiver is conventionally also named
-            // `self`, a plain variable, completely unrelated to the `Self`
-            // *type* keyword even though both case-fold to the same
-            // string) — and the return type. The body is left untouched:
-            // it's executable code, not type syntax, so any `Self`/`Item`
-            // appearing there is an ordinary (if confusingly named)
-            // variable/function reference, not something to substitute.
             let method_loc = heap.cons_loc(*m);
-            // `list_to_vec_locs` so the body forms (`elems[3..]`, left
-            // untouched below — see this loop's doc comment) keep their
-            // original source position; the rebuilt name/receiver/return
-            // slots (`new_elems[0..3]`) have no natural location of their own.
-            let elems_locs = heap.list_to_vec_locs(*m)?;
-            let elems: Vec<Value> = elems_locs.iter().map(|(v, _)| *v).collect();
-            if elems.len() < 3 {
-                return Err(Error::TypeError("impl: method must be (name (recv params...) ret body...)".into()));
-            }
-            let recv_pairs_locs = heap.list_to_vec_locs(elems[1])?;
-            let recv_pairs: Vec<Value> = recv_pairs_locs.iter().map(|(v, _)| *v).collect();
-            let mut new_recv_pairs = Vec::new();
-            for (pair, pair_loc) in &recv_pairs_locs {
-                let p_locs = heap.list_to_vec_locs(*pair)?;
-                let p: Vec<Value> = p_locs.iter().map(|(v, _)| *v).collect();
-                if p.len() != 2 {
-                    return Err(Error::TypeError("impl: receiver/parameter must be (name type)".into()));
-                }
-                let new_ty = Self::subst_value(heap, p[1], &subst)?;
-                // Keep each slot's original span when substitution left it
-                // unchanged (the usual case for a concrete type annotation),
-                // so the rebuilt signature still records/locates like the
-                // written one; a substituted `Self` has no span of its own.
-                let ty_loc = if new_ty == p[1] { p_locs[1].1.clone() } else { None };
-                new_recv_pairs.push((
-                    self.list_from_vec_locs(heap, &[(p[0], p_locs[0].1.clone()), (new_ty, ty_loc)])?,
-                    pair_loc.clone(),
-                ));
-            }
-            let new_recv_list = self.list_from_vec_locs(heap, &new_recv_pairs)?;
-            let _ = recv_pairs;
-            let new_ret = Self::subst_value(heap, elems[2], &subst)?;
-            let ret_loc = if new_ret == elems[2] { elems_locs[2].1.clone() } else { None };
-            // The method's own `(where ...)`, if any, gets the `Self`
-            // substitution too — it is type syntax, unlike the body — and is
-            // merged with the impl-level clause into a single one.
-            let own_where = match elems.get(3) {
-                Some(f) if self.is_where_clause(heap, *f)? => Some(Self::subst_value(heap, *f, &subst)?),
-                _ => None,
-            };
-            let rest_start = if own_where.is_some() { 4 } else { 3 };
-            let merged = self.merge_where_clauses(heap, impl_where, own_where, &subst)?;
-            let mut new_elems = vec![elems[0], new_recv_list, new_ret];
-            let mut new_elems_locs: Vec<Option<Loc>> = vec![None, None, ret_loc];
-            if let Some(w) = merged {
-                new_elems.push(w);
-                new_elems_locs.push(None);
-            }
-            new_elems.extend_from_slice(&elems[rest_start..]);
-            new_elems_locs.extend(elems_locs[rest_start..].iter().map(|(_, l)| l.clone()));
+            let (new_elems, new_elems_locs) = self.subst_method_item(heap, *m, &subst, impl_where)?;
             let tl = self.check_defmethod_in(
                 heap,
                 interp,
@@ -4092,6 +4033,81 @@ impl Checker {
             def.trait_assoc.insert(trait_fq, assoc_concrete);
         }
         Ok(TopLevel::Module { path: target_fq, body })
+    }
+
+    /// Rewrite one `impl` method item's *type* positions through `subst`,
+    /// returning the rebuilt `(method-name (recv params...) ret (where ...)?
+    /// body...)` element list and its per-element locations — exactly the
+    /// shape [`Self::check_defmethod_in`] and [`Self::parse_defmethod_sig`]
+    /// consume.
+    ///
+    /// Substitution applies only to *type* positions — each receiver/
+    /// parameter's type (never its bound *name*, which would collide with
+    /// `subst`'s `"self"` key: the receiver is conventionally also named
+    /// `self`, a plain variable, completely unrelated to the `Self` *type*
+    /// keyword even though both case-fold to the same string), the return
+    /// type, and the method's own `(where ...)`, which is merged with the
+    /// impl-level clause into a single one. The body is left untouched: it's
+    /// executable code, not type syntax, so any `Self`/`Item` appearing there
+    /// is an ordinary (if confusingly named) variable/function reference, not
+    /// something to substitute.
+    ///
+    /// Shared by [`Self::check_impl`], where `subst` maps `Self` to the
+    /// concrete target type, and [`Self::precheck_blanket_impl`], where it
+    /// maps `Self` to the target *variable*.
+    fn subst_method_item(
+        &self,
+        heap: &mut Heap,
+        m: Value,
+        subst: &HashMap<String, Value>,
+        impl_where: Option<Value>,
+    ) -> Result<(Vec<Value>, Vec<Option<Loc>>), Error> {
+        // `list_to_vec_locs` so the body forms (`elems[3..]`, left untouched
+        // — see this method's doc comment) keep their original source
+        // position; the rebuilt name/receiver/return slots
+        // (`new_elems[0..3]`) have no natural location of their own.
+        let elems_locs = heap.list_to_vec_locs(m)?;
+        let elems: Vec<Value> = elems_locs.iter().map(|(v, _)| *v).collect();
+        if elems.len() < 3 {
+            return Err(Error::TypeError("impl: method must be (name (recv params...) ret body...)".into()));
+        }
+        let recv_pairs_locs = heap.list_to_vec_locs(elems[1])?;
+        let mut new_recv_pairs = Vec::new();
+        for (pair, pair_loc) in &recv_pairs_locs {
+            let p_locs = heap.list_to_vec_locs(*pair)?;
+            let p: Vec<Value> = p_locs.iter().map(|(v, _)| *v).collect();
+            if p.len() != 2 {
+                return Err(Error::TypeError("impl: receiver/parameter must be (name type)".into()));
+            }
+            let new_ty = Self::subst_value(heap, p[1], subst)?;
+            // Keep each slot's original span when substitution left it
+            // unchanged (the usual case for a concrete type annotation),
+            // so the rebuilt signature still records/locates like the
+            // written one; a substituted `Self` has no span of its own.
+            let ty_loc = if new_ty == p[1] { p_locs[1].1.clone() } else { None };
+            new_recv_pairs.push((
+                self.list_from_vec_locs(heap, &[(p[0], p_locs[0].1.clone()), (new_ty, ty_loc)])?,
+                pair_loc.clone(),
+            ));
+        }
+        let new_recv_list = self.list_from_vec_locs(heap, &new_recv_pairs)?;
+        let new_ret = Self::subst_value(heap, elems[2], subst)?;
+        let ret_loc = if new_ret == elems[2] { elems_locs[2].1.clone() } else { None };
+        let own_where = match elems.get(3) {
+            Some(f) if self.is_where_clause(heap, *f)? => Some(Self::subst_value(heap, *f, subst)?),
+            _ => None,
+        };
+        let rest_start = if own_where.is_some() { 4 } else { 3 };
+        let merged = self.merge_where_clauses(heap, impl_where, own_where, subst)?;
+        let mut new_elems = vec![elems[0], new_recv_list, new_ret];
+        let mut new_elems_locs: Vec<Option<Loc>> = vec![None, None, ret_loc];
+        if let Some(w) = merged {
+            new_elems.push(w);
+            new_elems_locs.push(None);
+        }
+        new_elems.extend_from_slice(&elems[rest_start..]);
+        new_elems_locs.extend(elems_locs[rest_start..].iter().map(|(_, l)| l.clone()));
+        Ok((new_elems, new_elems_locs))
     }
 
     /// Rebuild a retained [`TraitDefault::item`] as a live list.
@@ -4478,8 +4494,17 @@ impl Checker {
         if !covered {
             return false;
         }
+        // Only a *closed* type can be materialized at: an open one is some
+        // generic context's type variable (a blanket impl's own target, while
+        // `Self::precheck_blanket_impl` checks its bodies, or a generic
+        // `defun`'s parameter), and `check_impl` has no type to implement
+        // anything for. Answering "yes, covered" for it is still right — every
+        // concrete type it stands for is covered, and each of those requests
+        // its own materialization when it arrives.
         if let Some(fq) = type_fq {
-            self.request_blanket_materialization(&tb.trait_path, &fq, ty);
+            if !self.type_is_open(ty) {
+                self.request_blanket_materialization(&tb.trait_path, &fq, ty);
+            }
         }
         true
     }
@@ -4548,28 +4573,27 @@ impl Checker {
             _ => None,
         };
         match target_var {
-            Some(v) => self.check_blanket_impl(heap, parts, parts_locs, v, head_params),
+            Some(v) => self.check_blanket_impl(heap, interp, parts, parts_locs, v, head_params),
             None => self.check_impl(heap, interp, parts, parts_locs, public),
         }
     }
 
-    /// Record a blanket `impl` without checking or registering anything.
+    /// Record a blanket `impl`, registering nothing on any type.
     ///
-    /// This is the whole of the declaration-time work, and deliberately so:
-    /// the target is a type variable, so *every* method body it holds is
-    /// generic, and generating one before a concrete type asks for it would
-    /// be exactly the eager expansion monomorphization exists to avoid. The
-    /// bodies are replayed per covered type by
-    /// [`Self::materialize_blanket_impl`].
+    /// Nothing is *generated* here, and deliberately so: the target is a type
+    /// variable, so every method body it holds is generic, and generating one
+    /// before a concrete type asks for it would be exactly the eager
+    /// expansion monomorphization exists to avoid. The bodies are replayed
+    /// per covered type by [`Self::materialize_blanket_impl`].
     ///
-    /// The consequence, and a real difference from Rust: an unused blanket
-    /// impl's method bodies are never type-checked. Rust checks them once,
-    /// against the declared bounds; typelisp has no way to check a body whose
-    /// receiver type is unknown — the same reason a generic `defun`'s body is
-    /// only diagnosed through `Expr::TraitCall` placeholders.
+    /// They are nonetheless *checked* once here, abstractly, the way Rust
+    /// checks a blanket impl's bodies whether or not anything uses it — see
+    /// [`Self::precheck_blanket_impl`] for what that pass can and cannot
+    /// catch.
     fn check_blanket_impl(
         &mut self,
         heap: &mut Heap,
+        interp: &dyn MacroExpander,
         parts: &[Value],
         parts_locs: &[Option<Loc>],
         target_var: String,
@@ -4601,9 +4625,11 @@ impl Checker {
         }
         let mut at = 2;
         let mut bounds = HashMap::new();
+        let mut impl_where = None;
         if let Some(f) = parts.get(2) {
             if self.is_where_clause(heap, *f)? {
                 bounds = self.parse_where_clause(heap, *f)?;
+                impl_where = Some(*f);
                 at = 3;
             }
         }
@@ -4619,6 +4645,11 @@ impl Checker {
         }
         let mut assoc = Vec::new();
         let mut methods = Vec::new();
+        // The same items as live `Value`s, for the declaration-time body
+        // check below — which needs the written forms, not the `OwnedForm`s
+        // the registry keeps for later replay.
+        let mut assoc_written: Vec<(String, Value)> = Vec::new();
+        let mut method_forms: Vec<Value> = Vec::new();
         for item in &parts[at..] {
             let elems = heap.list_to_vec(*item)?;
             let head = match elems.first() {
@@ -4637,20 +4668,111 @@ impl Checker {
                     Value::Symbol(id) => heap.symbol_name(id).to_string(),
                     _ => return Err(Error::TypeError("impl: associated type name must be a symbol".into())),
                 };
+                assoc_written.push((aname.clone(), elems[2]));
                 assoc.push((aname, owned[2].clone()));
                 continue;
             }
+            method_forms.push(*item);
             methods.push(owned);
         }
+        // Registered *before* the bodies are checked, so a method that calls
+        // one of this very blanket's siblings on a covered type resolves —
+        // the same "signature first, body second" order every definition form
+        // here follows for self-recursion.
         self.reg.root.module_mut(&self.ns).blanket_impls.push(BlanketImpl {
-            trait_path: trait_fq,
-            target_var,
+            trait_path: trait_fq.clone(),
+            target_var: target_var.clone(),
             bounds,
             assoc,
             methods,
             ns: self.ns.clone(),
         });
+        self.precheck_blanket_impl(
+            heap,
+            interp,
+            &trait_fq,
+            &target_var,
+            impl_where,
+            &assoc_written,
+            &method_forms,
+        )?;
         Ok(TopLevel::Module { path: self.fq("impl"), body: vec![] })
+    }
+
+    /// Type-check a blanket `impl`'s method bodies at its declaration, with
+    /// the target left abstract — what Rust does for `impl<T: Ord> Clamp for
+    /// T { ... }`, whose bodies are checked once against the declared bounds
+    /// whether or not any type ever reaches the impl.
+    ///
+    /// The bodies are checked exactly the way a generic `defun`'s body is:
+    /// the target variable parses to an unresolved [`Type::Named`], and a
+    /// method call on it resolves through `Env::bounds` to a diagnostics-only
+    /// `Expr::TraitCall` ([`Self::check_instance_method`]'s bounds branch).
+    /// Two bound sets are in scope, matching what every materialization will
+    /// have: the impl's own `(where ...)` — already merged into each method's
+    /// clause by [`Self::subst_method_item`] — and the trait being
+    /// implemented, since inside `impl<T> Clamp T` the target *does* implement
+    /// `Clamp`, so a method may call its siblings on `self`.
+    ///
+    /// Nothing checked here is kept: the checked bodies are dropped and no
+    /// signature is registered anywhere (there is no type to register one
+    /// on). [`Self::materialize_blanket_impl`] re-checks each body per covered
+    /// type, where the target is concrete and the trait-call placeholders
+    /// resolve to real methods; this pass catches only what is wrong for
+    /// *every* target — but catches it at the impl, where the fix is, instead
+    /// of at whichever unrelated form first happens to use a covered type.
+    #[allow(clippy::too_many_arguments)]
+    fn precheck_blanket_impl(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        trait_fq: &Path,
+        target_var: &str,
+        impl_where: Option<Value>,
+        assoc: &[(String, Value)],
+        methods: &[Value],
+    ) -> Result<(), Error> {
+        if methods.is_empty() {
+            return Ok(());
+        }
+        // `Self` -> the target variable as written, and each associated type
+        // -> what this impl binds it to (which may itself mention the target
+        // variable) — the abstract counterpart of `check_impl`'s `subst`.
+        let mut subst: HashMap<String, Value> = HashMap::new();
+        subst.insert("self".to_string(), heap.intern_symbol(target_var));
+        let mut pins: HashMap<String, Type> = HashMap::new();
+        for (aname, written) in assoc {
+            subst.insert(aname.clone(), *written);
+            pins.insert(aname.clone(), self.parse_type_here_at(heap, *written, None)?);
+        }
+        let self_bound = TraitBound { trait_path: trait_fq.clone(), assoc: pins };
+        for m in methods {
+            let (elems, locs) = self.subst_method_item(heap, *m, &subst, impl_where)?;
+            let sig = self.parse_defmethod_sig_inner(heap, &elems, &locs, true)?;
+            let MethodSig { self_name, self_name_loc, recv_ty, params, param_locs, ret, mut bounds, body_start, .. } = sig;
+            // The rebuilt header slots (`elems[..body_start]`: the receiver
+            // list always, the return type and merged `where` when
+            // substitution changed them) are freshly allocated and reachable
+            // from nothing anyone else roots, while checking the body below
+            // allocates — macro expansion, at least. Rooted permanently, like
+            // the forms `materialize_blanket_impl` builds: the root stack is
+            // LIFO and a macro expansion runs the interpreter, whose
+            // `sync_roots` owns that stack. The body forms are the caller's
+            // to keep alive, exactly as in `check_impl`.
+            for &e in &elems[..body_start.min(elems.len())] {
+                heap.push_permanent_root(e);
+            }
+            bounds.entry(target_var.to_string()).or_default().push(self_bound.clone());
+            let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
+            if let Some(s) = &self_name {
+                binds.push((s.clone(), recv_ty.clone(), self_name_loc));
+            }
+            binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
+            let env = Env::new().with_bounds(bounds).extended_with_locs(binds);
+            let body_locs = locs.get(body_start..).unwrap_or(&[]);
+            self.check_seq(heap, interp, &env, &elems[body_start..], body_locs, Some(&ret))?;
+        }
+        Ok(())
     }
 
     /// Rust's `impl Ord for X` requires `impl Eq for X`: implementing a trait
@@ -5611,6 +5733,24 @@ impl Checker {
     /// `type_var_bindings` in effect so the receiver/parameter/return
     /// annotations come back concrete.
     fn parse_defmethod_sig(&self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<MethodSig, Error> {
+        self.parse_defmethod_sig_inner(heap, parts, parts_locs, false)
+    }
+
+    /// [`Self::parse_defmethod_sig`], with the "receiver must name a
+    /// registered type" rejection optionally lifted.
+    ///
+    /// `abstract_receiver` is set only by [`Self::precheck_blanket_impl`],
+    /// whose receiver *is* the blanket's target type variable and so names no
+    /// type by construction — `type_fq` then holds that variable's name, the
+    /// same unresolved single-segment [`Path`] a generic `defun`'s type
+    /// parameter parses to.
+    fn parse_defmethod_sig_inner(
+        &self,
+        heap: &mut Heap,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        abstract_receiver: bool,
+    ) -> Result<MethodSig, Error> {
         if parts.len() < 3 {
             return Err(Error::TypeError(
                 "defmethod: (defmethod name (receiver params...) ret body...)".into(),
@@ -5654,7 +5794,7 @@ impl Checker {
                 None => return Err(Error::TypeError("defmethod: receiver must be a data type".into())),
             },
         };
-        if self.reg.type_def(&type_fq).is_none() {
+        if !abstract_receiver && self.reg.type_def(&type_fq).is_none() {
             return Err(Error::TypeError(format!("defmethod: unknown type `{}`", type_fq)));
         }
         let (params, param_locs) = self.parse_param_pairs(heap, &sig_list[1..])?;

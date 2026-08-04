@@ -2,10 +2,14 @@
 //! Rust's `impl<T: Ord> Clamp for T`.
 //!
 //! The defining property is laziness: declaring one registers nothing on any
-//! type and checks no method body. A concrete type reaching the impl queues
+//! type and *generates* no method. A concrete type reaching the impl queues
 //! one materialization, which replays the stored items through the ordinary
 //! `check_impl` path. These tests pin both halves — that it works, and that
 //! nothing happens until it is asked for.
+//!
+//! The bodies are still type-*checked* once at the declaration, against the
+//! declared bounds with the target left abstract, exactly as Rust checks an
+//! unused blanket impl — see the group at the bottom.
 
 extern crate typelisp;
 use typelisp::{load_prelude, Checker, Heap, Interp, Reader, RtValue};
@@ -158,6 +162,111 @@ fn a_self_taking_method_still_makes_a_trait_not_object_safe() {
     let src = format!("{CLAMP} (defun peek ((c :dyn Clamp)) i32 1) (peek (cell::new 1))");
     let m = eval_err(&src);
     assert!(m.contains("mentions `Self` outside the receiver position"), "{}", m);
+}
+
+/// A trait whose blanket impl writes its method out, rather than inheriting a
+/// default body — the shape whose body the declaration-time pass checks.
+const DOUBLE: &str = "
+(deftrait Ranked () (rank ((self Self)) i32))
+(deftrait Doubled (Ranked) (doubled ((self Self)) i32))
+(defstruct cell (n i32))
+(impl Ranked cell (rank ((self Self)) i32 self::n))
+";
+
+#[test]
+fn an_unused_blanket_impls_body_is_type_checked() {
+    // Nothing ever reaches this impl, so nothing is ever materialized; the
+    // body's return type is still wrong, and Rust would say so too.
+    let src = format!(
+        "{DOUBLE}
+         (impl<T> Doubled T (where (Ranked T))
+           (doubled ((self Self)) i32 \"two\"))"
+    );
+    let m = eval_err(&src);
+    assert!(m.contains("TypeError"), "{}", m);
+}
+
+#[test]
+fn an_unused_blanket_impls_body_may_call_an_unknown_function() {
+    let src = format!(
+        "{DOUBLE}
+         (impl<T> Doubled T (where (Ranked T))
+           (doubled ((self Self)) i32 (triple self)))"
+    );
+    let m = eval_err(&src);
+    assert!(m.contains("NoSuchFunction") || m.contains("no such function"), "{}", m);
+}
+
+#[test]
+fn a_blanket_impls_body_may_use_its_declared_bounds() {
+    // `(rank self)` is only callable because of `(where (Ranked T))` — the
+    // abstract check resolves it through the bound, like a generic `defun`.
+    let src = format!(
+        "{DOUBLE}
+         (impl<T> Doubled T (where (Ranked T))
+           (doubled ((self Self)) i32 (* 2 (rank self))))
+         (doubled (cell::new 7))"
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(14));
+}
+
+#[test]
+fn a_blanket_impls_body_may_call_a_sibling_method_on_self() {
+    // `halved` is a method of the trait being implemented, so `Self: Doubled`
+    // has to be in scope for the abstract check the way it is in Rust.
+    let src = format!(
+        "{DOUBLE}
+         (deftrait Halved (Ranked)
+           (halved ((self Self)) i32)
+           (twice-halved ((self Self)) i32))
+         (impl<T> Halved T (where (Ranked T))
+           (halved ((self Self)) i32 (/ (rank self) 2))
+           (twice-halved ((self Self)) i32 (/ (halved self) 2)))
+         (twice-halved (cell::new 20))"
+    );
+    assert_eq!(eval_ok(&src), RtValue::Int(5));
+}
+
+#[test]
+fn a_blanket_impls_body_is_checked_against_its_associated_type_binding() {
+    // `Item` is this impl's `i32`, so the `i32`-returning body fits and the
+    // string one does not — the associated types are substituted for the
+    // abstract check exactly as they are for a materialization.
+    let boxed = format!(
+        "{DOUBLE}
+         (deftrait Boxed () (type Item) (unwrap ((self Self)) Item))"
+    );
+    let ok = format!(
+        "{boxed}
+         (impl<T> Boxed T (where (Ranked T))
+           (type Item i32)
+           (unwrap ((self Self)) Item (rank self)))"
+    );
+    assert_eq!(eval_ok(&ok), RtValue::Unit);
+    let bad = format!(
+        "{boxed}
+         (impl<T> Boxed T (where (Ranked T))
+           (type Item i32)
+           (unwrap ((self Self)) Item \"nope\"))"
+    );
+    let m = eval_err(&bad);
+    assert!(m.contains("TypeError"), "{}", m);
+}
+
+#[test]
+fn a_method_call_the_bounds_do_not_justify_is_rejected() {
+    // `Tagged` neither bounds `Ranked` nor inherits it, so `(rank self)` has
+    // no justification for *any* target — exactly what the abstract check is
+    // for. (With `(where (Ranked T))`, or with `Ranked` as a supertrait, the
+    // same body is fine: see the two tests above.)
+    let src = format!(
+        "{DOUBLE}
+         (deftrait Tagged () (tag ((self Self)) i32))
+         (impl<T> Tagged T
+           (tag ((self Self)) i32 (rank self)))"
+    );
+    let m = eval_err(&src);
+    assert!(m.contains("NoSuchFunction") || m.contains("no such function"), "{}", m);
 }
 
 #[test]
