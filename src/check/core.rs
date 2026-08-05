@@ -1,0 +1,237 @@
+//! The substrate for *core forms* — the cons-cell program representation the
+//! checker lowers to and the interpreter evaluates.
+//!
+//! A core form is an ordinary tagged proper list, `(tag field...)`, whose `tag`
+//! is an interned symbol: `(int 42)`, `(if C T E)`, `(call WRITTEN HOME PATH
+//! ARG...)`. There is no Rust AST — the program is cons cells from the reader
+//! all the way through evaluation, and the self-hosted compiler in
+//! `crate::compiler` pattern-matches this same shape. User data can never be
+//! confused for a node because it only ever appears under `(quote D)`.
+//!
+//! This module holds the parts that do not depend on the tag vocabulary: how a
+//! node is built without losing an intermediate to the collector, how one is
+//! read back, and how one is printed. The vocabulary itself lives with the
+//! checker that emits it.
+//!
+//! # Why the builders exist
+//!
+//! [`Heap::cons`](typelisp_mem::Heap::cons) collects whenever the free list is
+//! empty, so *every* allocation can free anything not currently rooted. Building
+//! a node means allocating once per field, which means each finished field has
+//! to stay rooted while its siblings are built. Done by hand that is a
+//! `push_root`/`pop_root` pair per field — `compile::ast_bridge` balances
+//! sixteen pops by hand in one function — and a single `?` on an error path
+//! skips them all.
+//!
+//! So callers do not cons directly. [`Items`] roots each field as it is
+//! produced, [`tagged`] assembles the node, and a [`RootScope`] unwinds both on
+//! every exit path including `?`. `tests/core_builder_guard_test.rs` enforces
+//! that the checker keeps to this.
+
+use typelisp_mem::{Error, Heap, Loc, RootScope, Value};
+
+/// Cons a proper list from `items`, in order.
+///
+/// Every partially-built tail is rooted across the next allocation, so this is
+/// safe with a collection at any point. `items` themselves must already be
+/// protected — build them with [`Items`], which does that.
+pub fn list(heap: &mut Heap, items: &[Value]) -> Result<Value, Error> {
+    let mut s = RootScope::new(heap);
+    let mut acc = Value::Empty;
+    for item in items.iter().rev() {
+        s.push_root(*item);
+        s.push_root(acc);
+        acc = s.cons(*item, acc)?;
+    }
+    Ok(acc)
+}
+
+/// Build the node `(tag field...)`. See [`list`] for the rooting contract.
+pub fn tagged(heap: &mut Heap, tag: &str, items: &[Value]) -> Result<Value, Error> {
+    let mut s = RootScope::new(heap);
+    let body = list(&mut s, items)?;
+    s.push_root(body);
+    let tag_sym = s.intern_symbol(tag);
+    s.push_root(tag_sym);
+    s.cons(tag_sym, body)
+}
+
+/// Build `(tag field...)` and record `loc` as the source position it came from,
+/// so a runtime error raised while evaluating this node can be placed.
+///
+/// The location goes in `Heap`'s `code_locs` table rather than the reader's
+/// `cons_locs`: a lowered node outlives the read batch it came from (it *is* a
+/// registered function body), and `cons_locs` is bulk-cleared per batch.
+pub fn tagged_at(heap: &mut Heap, tag: &str, items: &[Value], loc: Option<Loc>) -> Result<Value, Error> {
+    let node = tagged(heap, tag, items)?;
+    if let (Some(loc), Value::Cons(cr)) = (loc, node) {
+        heap.set_code_loc(cr, loc);
+    }
+    Ok(node)
+}
+
+/// A node's fields, each rooted from the moment it is added until the whole
+/// node is built.
+///
+/// This is the piece hand-written `push_root` pairs get wrong: a field built
+/// three allocations ago is just as collectible as one built now, so it is not
+/// enough to root the value being consed — every earlier sibling has to stay
+/// rooted too. Holding them here makes that automatic, and the [`RootScope`]
+/// inside unwinds them however the builder is left.
+///
+/// ```ignore
+/// let mut f = Items::new(heap);
+/// let c = check(f.heap(), cond)?;   f.push(c);
+/// let t = check(f.heap(), then)?;   f.push(t);
+/// f.finish("if")                    // roots released here
+/// ```
+pub struct Items<'h> {
+    scope: RootScope<'h>,
+    vals: Vec<Value>,
+}
+
+impl<'h> Items<'h> {
+    /// Start collecting fields on `heap`.
+    pub fn new(heap: &'h mut Heap) -> Items<'h> {
+        Items { scope: RootScope::new(heap), vals: Vec::new() }
+    }
+
+    /// The heap, for building the next field.
+    pub fn heap(&mut self) -> &mut Heap {
+        &mut self.scope
+    }
+
+    /// Add a finished field, keeping it alive until the node is built.
+    pub fn push(&mut self, v: Value) {
+        self.scope.push_root(v);
+        self.vals.push(v);
+    }
+
+    /// Add several finished fields in order.
+    pub fn extend(&mut self, vs: impl IntoIterator<Item = Value>) {
+        for v in vs {
+            self.push(v);
+        }
+    }
+
+    /// The fields collected so far.
+    pub fn as_slice(&self) -> &[Value] {
+        &self.vals
+    }
+
+    /// Build `(tag field...)` from the collected fields.
+    pub fn finish(mut self, tag: &str) -> Result<Value, Error> {
+        let vals = std::mem::take(&mut self.vals);
+        tagged(&mut self.scope, tag, &vals)
+    }
+
+    /// Build `(tag field...)` and record its source position — see
+    /// [`tagged_at`].
+    pub fn finish_at(mut self, tag: &str, loc: Option<Loc>) -> Result<Value, Error> {
+        let vals = std::mem::take(&mut self.vals);
+        tagged_at(&mut self.scope, tag, &vals, loc)
+    }
+
+    /// Build the fields as a bare proper list, with no tag — for a node's
+    /// sub-list (a parameter list, a `let`'s bindings, a `match`'s arms).
+    pub fn finish_list(mut self) -> Result<Value, Error> {
+        let vals = std::mem::take(&mut self.vals);
+        list(&mut self.scope, &vals)
+    }
+}
+
+// ---- reading a node back -------------------------------------------------
+
+/// A node's tag, or `None` if `form` is not a tagged list.
+pub fn op<'h>(heap: &'h Heap, form: Value) -> Option<&'h str> {
+    match heap.car(form).ok()? {
+        Value::Symbol(id) => Some(heap.symbol_name(id)),
+        _ => None,
+    }
+}
+
+/// A node's fields, in order (everything after the tag).
+pub fn fields(heap: &Heap, form: Value) -> Result<Vec<Value>, Error> {
+    heap.list_to_vec(heap.cdr(form)?)
+}
+
+/// A node's `i`th field (0-based, counting past the tag).
+pub fn field(heap: &Heap, form: Value, i: usize) -> Option<Value> {
+    let mut cur = heap.cdr(form).ok()?;
+    for _ in 0..i {
+        cur = heap.cdr(cur).ok()?;
+    }
+    heap.car(cur).ok()
+}
+
+// ---- printing ------------------------------------------------------------
+
+/// Render a core form as an s-expression.
+///
+/// Lowered code is data, so it can simply be printed — which is what makes the
+/// checker's output testable as text (`assert_eq!(print(&h, f), "(if (bool #t)
+/// (int 1) (int 2))")`) instead of by matching a Rust tree. Deliberately plain:
+/// no line breaks, no elision, no cycle handling — core forms are finite trees.
+pub fn print(heap: &Heap, form: Value) -> String {
+    let mut out = String::new();
+    write_form(heap, form, &mut out);
+    out
+}
+
+fn write_form(heap: &Heap, v: Value, out: &mut String) {
+    use std::fmt::Write;
+    match v {
+        Value::Empty => out.push_str("()"),
+        Value::Int(n) => {
+            let _ = write!(out, "{}", n);
+        }
+        Value::Bool(b) => out.push_str(if b { "#t" } else { "#f" }),
+        Value::Char(c) => {
+            let _ = write!(out, "#\\{}", c);
+        }
+        Value::Symbol(id) => out.push_str(heap.symbol_name(id)),
+        Value::Str(id) => {
+            let _ = write!(out, "{:?}", heap.string(id));
+        }
+        Value::Path(id) => {
+            let segs = heap.path_segments(id);
+            for (i, s) in segs.iter().enumerate() {
+                if i > 0 {
+                    out.push_str("::");
+                }
+                out.push_str(heap.symbol_name(*s));
+            }
+        }
+        Value::Cons(_) => {
+            out.push('(');
+            let mut cur = v;
+            let mut first = true;
+            loop {
+                match cur {
+                    Value::Cons(_) => {
+                        if !first {
+                            out.push(' ');
+                        }
+                        first = false;
+                        let (car, cdr) = match (heap.car(cur), heap.cdr(cur)) {
+                            (Ok(a), Ok(d)) => (a, d),
+                            _ => break,
+                        };
+                        write_form(heap, car, out);
+                        cur = cdr;
+                    }
+                    Value::Empty => break,
+                    other => {
+                        // Improper tail: core nodes are proper lists, so this
+                        // only shows up in a `(quote D)` datum or a bug.
+                        out.push_str(" . ");
+                        write_form(heap, other, out);
+                        break;
+                    }
+                }
+            }
+            out.push(')');
+        }
+        Value::Boxed(_) => out.push_str("#<boxed>"),
+    }
+}

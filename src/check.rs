@@ -5,6 +5,7 @@
 //! [`ast::Typed`] tree that the interpreter (step 4) walks.
 
 pub mod ast;
+pub mod core;
 pub mod registry;
 pub mod checker;
 pub mod locate;
