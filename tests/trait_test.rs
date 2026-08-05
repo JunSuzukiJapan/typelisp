@@ -536,6 +536,38 @@ fn a_trailing_string_on_a_bodyless_signature_is_a_default_body_not_a_docstring()
     assert_eq!(eval_ok(src), RtValue::Str("doc".into()));
 }
 
+// ---- a trait's methods are as visible as the trait ----------------------
+
+#[test]
+fn a_default_body_reaches_the_impls_own_methods_across_module_lines() {
+    // Regression: a default body is checked in the *trait's* namespace, so
+    // when the implementing type lives in a module the trait does not
+    // enclose, the sibling method it calls was invisible and the whole
+    // `impl` failed to check. Nothing about an `impl` is private —  `pub`
+    // cannot even be written on one.
+    let src = "
+        (deftrait Eq3 ()
+          (same ((self Self) (other Self)) bool)
+          (differs ((self Self) (other Self)) bool (if (same self other) false true)))
+        (module m
+          (pub defstruct point (x i32))
+          (impl Eq3 point (same ((self Self) (other Self)) bool (= self::x other::x))))
+        (differs (m::point::new 1) (m::point::new 2))";
+    assert_eq!(eval_ok(src), RtValue::Bool(true));
+}
+
+#[test]
+fn a_trait_method_is_callable_from_outside_the_implementing_module() {
+    let src = "
+        (deftrait Named ()
+          (label ((self Self)) string))
+        (module m
+          (pub defstruct tag (n i32))
+          (impl Named tag (label ((self Self)) string \"tag\")))
+        (label (m::tag::new 1))";
+    assert_eq!(eval_ok(src), RtValue::Str("tag".into()));
+}
+
 // ---- default bodies are checked at the declaration -----------------------
 //
 // `Checker::precheck_trait_defaults`, the `deftrait` counterpart of the

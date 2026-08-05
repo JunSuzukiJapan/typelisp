@@ -1,6 +1,6 @@
 # Common Lisp との差分 — 未実装のクラス（型）とメソッド（関数）の全リスト
 
-作成: 2026-07-29 / 対象ブランチ: `feature/vscode-extension`（`main` からの差分はエディタ関連のみ）
+作成: 2026-07-29 / 最終更新: 2026-08-05（§1.5・§2.17〜§2.20 をストリーム・パス名の実装後に更新）
 
 このドキュメントは **ANSI Common Lisp（CLHS）に存在して typelisp に無いもの** を、クラス（型）と
 メソッド（関数・マクロ・特殊形）に分けて網羅列挙する。「CL 同等の表現力のために何を足すか」を
@@ -104,8 +104,9 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | CL のクラス | typelisp | 備考 |
 |---|---|---|
 | `package` | ⚠️ | `module`/`use`/`pub` があるが、**パッケージは実行時オブジェクトではない**（値として取り回せない、`find-package` 等が無い） |
-| `pathname` / `logical-pathname` | ❌ | パス名の型が無い。ファイルパスは `string` |
-| `stream` および全サブクラス（`file-stream`/`string-stream`/`broadcast-stream`/`concatenated-stream`/`echo-stream`/`synonym-stream`/`two-way-stream`/`string-input-stream`/`string-output-stream`) | ❌ | **第一級ストリームが無い**。これが単体では最大の欠落で、§2.19〜§2.21 の関数群がまとめて落ちる |
+| `pathname` | ✅ | 2026-08-05。`defstruct pathname`＋パス名指定子トレイト `Pathish`（§2.17） |
+| `logical-pathname` | ⛔ | 論理パス名は採用しない |
+| `stream` および全サブクラス（`file-stream`/`string-stream`/`broadcast-stream`/`concatenated-stream`/`echo-stream`/`two-way-stream`/`string-input-stream`/`string-output-stream`) | ✅ | 2026-08-02。ただしクラス階層ではなく**トレイト階層**（§2.18）。`synonym-stream` のみ無し |
 | `readtable` | ❌ | リーダマクロを登録する表が無い（リーダの構文は固定） |
 | `random-state` | ❌ | 乱数状態が値として無い（`random` は暗黙のグローバル状態を使う） |
 | `restart` | ⛔ | (D3) |
@@ -397,31 +398,38 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 
 ### 2.17 パス名（CLHS 19）・ファイル（CLHS 20）
 
-**全滅（❌）**。パス名型もファイル操作も1つも無い。
-
-`pathname` `make-pathname` `merge-pathnames` `pathname-directory` `pathname-name`
-`pathname-type` `namestring` `parse-namestring` `truename` `probe-file` `directory`
-`ensure-directories-exist` `delete-file` `rename-file` `file-write-date` `file-author`
-`file-namestring` `enough-namestring` `wild-pathname-p` `translate-logical-pathname`
-
-typelisp からファイルを読み書きする手段は**現時点で存在しない**（`load`/`compile-file` が
-処理系側でパスを受け取るのみ）。§2.19 のストリームと合わせて、実用プログラムを書くうえでの
-最大の穴。
-
-### 2.18 ストリーム（CLHS 21）
-
-**ほぼ全滅（❌）**。第一級ストリームが無いため。
+2026-08-02（ストリーム/ファイル）と 2026-08-05（パス名）で実装済み。以下は残差
+（functions.md §18/§19）。
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `read-line` | ⚠️ | **標準入力からのみ**。`Option<string>` を返す（EOF は `None`）。ストリーム引数は取れない |
-| `read-char` / `peek-char` / `unread-char` / `read-char-no-hang` / `terpri` / `fresh-line` / `write-char` / `write-string` / `write-line` / `read-sequence` / `write-sequence` | ❌ | |
-| `open` / `close` / `with-open-file` / `with-open-stream` | ❌ | |
-| `make-string-input-stream` / `make-string-output-stream` / `get-output-stream-string` / `with-input-from-string` / `with-output-to-string` | ❌ | 文字列ストリーム。`(format false ...)` が文字列出力の代わりを部分的に果たす |
-| `make-broadcast-stream` / `make-concatenated-stream` / `make-echo-stream` / `make-synonym-stream` / `make-two-way-stream` | ❌ | |
-| `finish-output` / `force-output` / `clear-output` / `clear-input` / `listen` | ⚠️ | `print`/`println`/`format` は**毎回自動 flush** するので `force-output` 相当は不要 |
-| `streamp` / `input-stream-p` / `output-stream-p` / `open-stream-p` / `stream-element-type` | ❌ | |
-| `*standard-output*` / `*standard-input*` / `*error-output*` / `*trace-output*` / `*query-io*` / `*terminal-io*` / `*debug-io*` | ⛔ | (D5)。**標準エラー出力へ書く手段が無い** |
+| `pathname` / `make-pathname` / `merge-pathnames` / `namestring` / `parse-namestring` / `pathname-directory` / `pathname-name` / `pathname-type` / `file-namestring` / `enough-namestring` | ✅ | prelude で実装。CL の `pathname` 関数は型名と衝突するため `to-pathname` |
+| パス名指定子（文字列 or パス名） | ✅ | `Pathish` トレイト。ファイルを名指しする関数は全てこれをジェネリックに取る |
+| `directory-namestring` | ✅ | |
+| `probe-file` / `delete-file` / `rename-file` | ✅ | |
+| `truename` / `file-write-date` / `file-author` / `directory` / `ensure-directories-exist` | ❌ | ファイルシステムへの問い合わせ層。`probe-file` 以外は無い |
+| `wild-pathname-p` / `translate-logical-pathname` / `logical-pathname` | ⛔ | ワイルドカードも論理パス名も採用しない（この処理系が走らないファイルシステム向けの機能） |
+| ホスト・デバイス・バージョン成分 | ⛔ | 同上。区切りは `/` 固定 |
+
+### 2.18 ストリーム（CLHS 21）
+
+2026-08-02 にトレイト階層として実装済み（functions.md §18）。クラス階層ではなくトレイト階層
+なので、CL のクラス判定関数群は「型が答える問い」に置き換わっている。
+
+| CL | 状態 | 備考 |
+|---|---|---|
+| `read-line` / `read-char` / `peek-char` / `unread-char` / `terpri` / `fresh-line` / `write-char` / `write-string` / `write-line` | ✅ | `CharInput`/`PeekInput`/`CharOutput` のメソッド。標準入出力も `*standard-input*` 等のストリーム値として同じメソッドで扱う |
+| `open` / `close` / `with-open-file` / `with-open-stream` | ✅ | `open-file`（`Result` を返す）/ `close` / `with-open-file` |
+| `make-string-input-stream` / `make-string-output-stream` / `get-output-stream-string` / `with-input-from-string` / `with-output-to-string` | ✅ | |
+| `make-broadcast-stream` / `make-concatenated-stream` / `make-echo-stream` / `make-two-way-stream` | ✅ | いずれも合成ストリーム＝ただの `defstruct`（ネイティブ層の支援なし） |
+| `make-synonym-stream` | ❌ | シンボルを介した間接参照が要る（動的束縛が無いので意味が薄い） |
+| `finish-output` / `force-output` | ✅ | `finish-output`（`print`/`println`/`format` は毎回自動 flush する） |
+| `clear-output` / `clear-input` / `listen` / `read-char-no-hang` | ❌ | ネイティブ層に `listen` はあるが typelisp へは未公開 |
+| `read-sequence` / `write-sequence` | ❌ | 一括転送は `copy-stream`/`read-all`/`write-lines` で代替 |
+| `streamp` / `input-stream-p` / `output-stream-p` / `stream-element-type` | ⛔ | 方向も要素型も型が持つ（実行時に尋ねる問いではない） |
+| `open-stream-p` | ✅ | `Stream` トレイトのメソッド |
+| `*standard-output*` / `*standard-input*` / `*error-output*` | ✅ | ただし代入可能なグローバル（(D5) のため動的束縛ではない） |
+| `*trace-output*` / `*query-io*` / `*terminal-io*` / `*debug-io*` | ⛔ | (D5) |
 | `y-or-n-p` / `yes-or-no-p` | ❌ | |
 
 ### 2.19 プリンタ（CLHS 22）
@@ -430,7 +438,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `format` | ✅ | ディレクティブはほぼ全対応（`~/name/` のみ未対応）。出力先は `true`/`false` のみで**ストリームを渡せない** |
+| `format` | ✅ | ディレクティブはほぼ全対応（`~/name/` のみ未対応）。出力先は `true`/`false`／`CharOutput` を実装したストリーム（2026-08-05） |
 | `print` / `prin1` / `princ` / `write` / `write-to-string` / `prin1-to-string` / `princ-to-string` / `pprint` | ⚠️ | `print`/`println` は**制御文字列を取る format 系**であり CL の `print`（1引数、`~s` 相当）とは別物。`prin1`/`princ` 単体は無いが `~s`/`~a` で書ける。文字列化は `(format false ...)` |
 | pretty printer 一式 | ✅ | `pprint`/`pprint-fill`/`pprint-linear`/`pprint-tabular`/`pprint-logical-block`/`pprint-newline`/`pprint-indent`/`pprint-tab`/`pprint-pop`/`pprint-exit-if-list-exhausted` |
 | `print-object` | ✅ | トレイト |
@@ -445,8 +453,8 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `read` | ⚠️ | **文字列から1つ読む**（`(read s)` → `Result<Sexpr,ReadError>`）。ストリームからは読めない |
-| `read-from-string` | ⚠️ | 実質これが `read`。ただし読んだ位置（第2値）が返らない |
+| `read` | ✅ | ストリームからは `read-sexpr`（`PeekInput` を取り `Result<Option<Sexpr>,ReadError>` を返す。入力末尾は `Ok(none)`）。2026-08-05 |
+| `read-from-string` | ⚠️ | これが `(read s)`。ただし読んだ位置（第2値）が返らない |
 | `read-preserving-whitespace` / `read-delimited-list` | ❌ | |
 | `readtable` 関連（`copy-readtable` / `set-macro-character` / `get-macro-character` / `set-dispatch-macro-character` / `make-dispatch-macro-character` / `readtable-case` / `*readtable*`） | ❌ | **リーダマクロが定義できない**。`#.`/`#+`/`#-` 等の読み込み時制御も無い |
 | `*read-base*` / `*read-default-float-format*` / `*read-suppress*` / `*read-eval*` | ⛔ | (D5) |
@@ -467,7 +475,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `room` / `ed` / `dribble` / `apropos` / `apropos-list` / `inspect` / `describe` | ❌ | 対話環境向け。REPL があるので `apropos`/`describe` は相性が良い |
 | `documentation` / docstring | ✅ | 2026-07-30実装。`defun`/`defmethod`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftrait` が docstring を持てる（位置は各フォームの CL 規則通り）。`documentation` は名前を評価せず解決する特殊形（`quote`/`compile` と同様）で check 時に定数へ畳み込まれる。LSP hover にも統合済み。`(setf documentation)` は対象外（functions.md §17） |
 | `lisp-implementation-type` / `lisp-implementation-version` / `machine-type` / `machine-version` / `machine-instance` / `software-type` / `software-version` / `short-site-name` / `long-site-name` | ❌ | |
-| `user-homedir-pathname` | ❌ | パス名型が無い |
+| `user-homedir-pathname` | ❌ | 環境変数を読む手段が無い（パス名型そのものは §2.17 で実装済み） |
 | `trace` / `untrace` / `step` / `disassemble` | ❌ | |
 | コマンドライン引数の取得 | ❌ | CL 標準にも無いが、`typl file.typl` でスクリプトを書く以上ほぼ必須 |
 

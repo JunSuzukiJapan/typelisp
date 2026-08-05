@@ -1,6 +1,6 @@
 # typelisp 言語設計（確定仕様）
 
-最終更新: 2026-08-04 / ブランチ: `main`
+最終更新: 2026-08-05 / ブランチ: `main`
 
 このドキュメントは、設計で**確定した言語仕様**を後から見返せるよう記録するもの。
 現在の残作業は [TODO.md](TODO.md)、完了した実装の経緯は [implementation-log.md](implementation-log.md) を参照。
@@ -768,6 +768,14 @@ supers は「接頭辞にならない相手だけ」ではなく**閉包すべ�
   である CLOS 総称関数 `print-object` に相当する **`print-object` トレイト**を 2026-07-26 に
   採用してこちらを置き換えた（[functions.md](../functions.md) §15.2）。判断の経緯は
   [implementation-log.md](implementation-log.md) の `print-object` トレイトの節。
+
+- **ワイルドカードパス名・論理パス名（`logical-pathname`）、およびパス名のホスト/デバイス/
+  バージョン成分**: 2026-08-05 のパス名層で採用しないと確定（[functions.md](../functions.md) §19）。
+  いずれも CL が対応した「複数のファイルシステム世代」のための機能で、この処理系が走る環境には
+  対応物が無い。パス名は `/` 区切りのディレクトリ成分・名前・型だけを持つ。
+- **`input-stream-p` / `output-stream-p` / `stream-element-type`**: ストリームの方向も要素型も
+  **型が持つ**（`CharInput`/`CharOutput` はトレイト）ので、実行時に尋ねる問いにならない
+  （[functions.md](../functions.md) §18.7）。
 
 CL 全体と突き合わせた「無いもの」の網羅リストは
 [cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md) にある。

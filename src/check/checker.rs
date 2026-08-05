@@ -1127,14 +1127,7 @@ impl Checker {
                 // name that follows.
                 let (head, head_params) = parse_generic_name_header(heap.symbol_name(*id))?;
                 if head == "impl" && !head_params.is_empty() {
-                    return self.check_impl_generic(
-                        heap,
-                        interp,
-                        &elems[1..],
-                        parts_locs,
-                        false,
-                        head_params,
-                    );
+                    return self.check_impl_generic(heap, interp, &elems[1..], parts_locs, head_params);
                 }
                 match heap.symbol_name(*id) {
                     "pub" => return self.check_pub(heap, interp, &elems[1..], parts_locs, def_loc),
@@ -1147,7 +1140,7 @@ impl Checker {
                     "defstruct" => return self.check_defstruct(heap, &elems[1..], parts_locs, false, def_loc),
                     "defenum" => return self.check_defenum(heap, &elems[1..], parts_locs, false, def_loc),
                     "deftrait" => return self.check_deftrait(heap, interp, &elems[1..], parts_locs, false, def_loc),
-                    "impl" => return self.check_impl(heap, interp, &elems[1..], parts_locs, false),
+                    "impl" => return self.check_impl(heap, interp, &elems[1..], parts_locs),
                     "use" => return self.check_use(heap, &elems[1..], parts_locs),
                     "load" => return self.check_load(heap, &elems[1..]),
                     _ => {}
@@ -3966,7 +3959,18 @@ impl Checker {
     /// the one piece of metadata `Checker::check_instance_method`'s
     /// type-variable branch needs later, since by then the method itself is
     /// just one more entry in `TargetType`'s ordinary `assoc` table.
-    fn check_impl(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>], public: bool) -> Result<TopLevel, Error> {
+    ///
+    /// Every method registered here is **public**, and there is no way to ask
+    /// for anything else: `pub` may not be attached to an `impl`
+    /// (`docs/syntax.md` §pub), so a private trait impl is not something a
+    /// program can express — and Rust, whose visibility rules this follows,
+    /// has no such thing either (a trait's methods are callable wherever the
+    /// value is). Registering them privately instead made a trait method
+    /// unusable from outside its type's module, including from the trait's
+    /// *own* default bodies, which are checked in the trait's namespace
+    /// (`Checker::check_defmethod_in`'s `body_ns`) and so stood outside the
+    /// implementing module by construction.
+    fn check_impl(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevel, Error> {
         if parts.len() < 2 {
             return Err(Error::TypeError("impl: (impl TraitName TargetType (type AssocName Type)... (method ...)...)".into()));
         }
@@ -4094,7 +4098,7 @@ impl Checker {
                 interp,
                 &new_elems,
                 &new_elems_locs,
-                public,
+                true, // see this function's doc comment
                 method_loc,
                 default_ns[mi].clone(),
             )?;
@@ -4516,7 +4520,7 @@ impl Checker {
         }
         let locs: Vec<Option<Loc>> = vec![None; parts.len()];
         let saved = self.enter_specialization(ns, self.type_var_bindings.clone());
-        let checked = self.check_impl(heap, interp, &parts, &locs, false);
+        let checked = self.check_impl(heap, interp, &parts, &locs);
         let (sn, sl, sb) = saved;
         self.exit_specialization(sn, sl, sb);
         match checked? {
@@ -4631,7 +4635,6 @@ impl Checker {
         interp: &dyn MacroExpander,
         parts: &[Value],
         parts_locs: &[Option<Loc>],
-        public: bool,
         head_params: Vec<String>,
     ) -> Result<TopLevel, Error> {
         if parts.len() < 2 {
@@ -4648,7 +4651,7 @@ impl Checker {
         };
         match target_var {
             Some(v) => self.check_blanket_impl(heap, interp, parts, parts_locs, v, head_params),
-            None => self.check_impl(heap, interp, parts, parts_locs, public),
+            None => self.check_impl(heap, interp, parts, parts_locs),
         }
     }
 
@@ -8788,10 +8791,14 @@ impl Checker {
     /// control string's directives are interpreted at runtime by
     /// `Interp::run_format`; here we only type the fixed arguments (`dest:
     /// bool`, `control: string`) and collect the variadic tail into one
-    /// `Sexpr` list, then lower to the internal `format-rt` builtin. Always
-    /// returns the built `string` (statically) — it is additionally written to
-    /// stdout when `dest` is `true`, but a single return type keeps the static
-    /// system simple, and the string is useful to a `false` caller.
+    /// `Sexpr` list, then lower to the internal `format-rt` builtin. With a
+    /// `bool` destination it always returns the built `string` (statically) —
+    /// it is additionally written to stdout when `dest` is `true`, but a
+    /// single return type keeps the static system simple, and the string is
+    /// useful to a `false` caller.
+    ///
+    /// A destination of any *other* type is CL's stream destination, handled
+    /// by [`Self::check_format_to_stream`].
     fn check_format(
         &self,
         heap: &mut Heap,
@@ -8802,10 +8809,18 @@ impl Checker {
     ) -> Result<Typed, Error> {
         if args.len() < 2 {
             return Err(Error::TypeError(
-                "format: expected at least a destination (bool) and a control string".to_string(),
+                "format: expected at least a destination (bool or a `CharOutput` stream) and a control string"
+                    .to_string(),
             ));
         }
-        let dest = self.check_at(heap, interp, env, args[0], Some(&Type::Bool), nth_loc(arg_locs, 0))?;
+        // The destination decides which of the two lowerings applies, so it is
+        // typed with nothing expected of it first. `true`/`false` (and any
+        // other `bool`) keep the string-building lowering below; anything else
+        // is a stream.
+        let dest = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
+        if dest.ty != Type::Bool {
+            return self.check_format_to_stream(heap, interp, env, &dest.ty, args, arg_locs);
+        }
         let control = self.check_at(heap, interp, env, args[1], Some(&Type::Str), nth_loc(arg_locs, 1))?;
         let mut items = Vec::new();
         for (i, &a) in args[2..].iter().enumerate() {
@@ -8817,6 +8832,75 @@ impl Checker {
             expr: Expr::Call(Ref::synthetic(Path::root("format-rt")), vec![dest, control, list]),
             ty: Type::Str,
         })
+    }
+
+    /// `(format stream control args…)` — CL's stream destination.
+    ///
+    /// Lowered by rewriting the whole form to
+    /// `(write-string stream (format false control args…))` and checking
+    /// *that*, rather than by building the call here: `write-string` is a
+    /// `CharOutput` method, and how it resolves depends on the receiver
+    /// (a concrete stream type, a `:dyn CharOutput`, or a bound type
+    /// variable inside a `(where (CharOutput S))` function). Handing the
+    /// rewritten form back to [`Self::check`] is what lets all three work
+    /// without this special form knowing anything about trait dispatch.
+    ///
+    /// The value is `write-string`'s, i.e. `()` — unlike the `bool`-destination
+    /// form, which yields the built string. CL agrees (`(format stream …)`
+    /// returns `nil`), and the alternative would mean naming a temporary to
+    /// avoid formatting twice.
+    ///
+    /// The destination is checked twice as a result — once above to learn its
+    /// type, once again inside the rewritten form. Checking is free of runtime
+    /// effect, and the rewrite is what keeps this to a dozen lines.
+    fn check_format_to_stream(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        dest_ty: &Type,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Typed, Error> {
+        // A destination that is neither `bool` nor a stream is a mistake worth
+        // naming as one, rather than reporting as a missing `write-string`
+        // method. Only asked of a type that is definitely concrete: a bound
+        // type variable is spelled `Named` too (with no registry entry), and
+        // whether *it* implements `CharOutput` is settled by its `where`
+        // clause where the call resolves, not here.
+        let concrete =
+            prim_type_path(dest_ty).is_some() || matches!(dest_ty, Type::Named(p, _) if self.reg.type_def(p).is_some());
+        if concrete
+            // Lowercase: symbol names are interned case-folded, so that is how
+            // the prelude's `CharOutput` is spelled in the registry.
+            && !self.type_implements(dest_ty, &TraitBound { trait_path: Path::root("charoutput"), assoc: HashMap::new() }, 0)
+        {
+            return Err(Error::TypeError(format!(
+                "format: the destination must be `true` (stdout), `false` (build the string only), \
+                 or a stream implementing `CharOutput` — found `{:?}`",
+                dest_ty
+            )));
+        }
+        // `(format false control args…)`, as source: the same special form,
+        // one destination over.
+        let mut inner: Vec<(Value, Option<Loc>)> =
+            vec![(heap.intern_symbol("format"), None), (Value::Bool(false), None)];
+        for (i, &a) in args[1..].iter().enumerate() {
+            inner.push((a, nth_loc(arg_locs, 1 + i)));
+        }
+        let inner = self.list_from_vec_locs(heap, &inner)?;
+        heap.push_root(inner);
+        let write_string = heap.intern_symbol("write-string");
+        let form =
+            self.list_from_vec_locs(heap, &[(write_string, None), (args[0], nth_loc(arg_locs, 0)), (inner, None)]);
+        let result = form.and_then(|form| {
+            heap.push_root(form);
+            let r = self.check(heap, interp, env, form, None);
+            heap.pop_root();
+            r
+        });
+        heap.pop_root();
+        result
     }
 
     /// The `(print control &rest args)` / `(println control &rest args)`

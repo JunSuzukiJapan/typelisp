@@ -1,15 +1,12 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-08-04 / ブランチ: `main`
+最終更新: 2026-08-05 / ブランチ: `main`
 
 このドキュメントは**現在残っている作業のみ**を記録する。
 
 ## 残っている作業
 
-- **ストリームの未実装分**。`fresh-line` は `file-stream` 専用（列位置を追うのは
-  ネイティブ backed のストリームだけ）、`read` のストリーム版とストリーム宛 `format` は
-  未提供（`(write-string s (format false ...))` で書ける）、pathname 層は無い
-  （ファイルは文字列で指す）。
+（無し）
 
 作業を始めるときはここに項目を足し、終わったら（経緯・設計判断を
 [implementation-log.md](implementation-log.md) へ書いたうえで）ここから消す。

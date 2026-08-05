@@ -105,16 +105,21 @@ function types; `&optional' and `&key' are `defmacro'-only.")
 
 (defconst typelisp-builtin-functions
   '(;; streams and files (functions.md §18)
-    "char->string" "close" "copy-stream" "delete-file"
+    "at-line-start" "char->string" "close" "copy-stream" "delete-file"
     "direction-append" "direction-input" "direction-output" "finish-output"
     "fresh-line" "get-output-stream-string" "make-broadcast-stream" "make-concatenated-stream"
-    "make-echo-stream" "make-string-input-stream" "make-string-output-stream" "make-two-way-stream"
-    "open-file" "open-input" "open-output" "open-stream-p"
+    "make-echo-stream" "make-peek-stream" "make-string-input-stream" "make-string-output-stream"
+    "make-two-way-stream"
+    "open-file" "open-input" "open-output" "open-stream-p" "peek-char"
     "probe-file" "read-all" "read-char" "read-file-lines"
-    "read-file-string" "read-item" "read-line" "read-lines" "rename-file"
-    "terpri" "with-input-from-string" "with-open-file" "with-output-to-string"
+    "read-file-string" "read-item" "read-line" "read-lines" "read-sexpr" "rename-file"
+    "terpri" "unread-char" "with-input-from-string" "with-open-file" "with-output-to-string"
     "write-char" "write-file-string" "write-item" "write-line"
     "write-lines" "write-string"
+    ;; pathnames (functions.md §19)
+    "directory-namestring" "enough-namestring" "file-namestring" "make-pathname"
+    "merge-pathnames" "namestring" "parse-namestring" "pathname-absolute-p"
+    "pathname-directory" "pathname-name" "pathname-type" "to-pathname"
     ;; numeric helpers (§4)
     "abs" "gcd" "lcm" "signum" "random" "expt" "sqrt" "floor" "ceiling"
     "round" "truncate" "floor-div" "ceiling-div" "round-div" "truncate-div"
@@ -207,9 +212,11 @@ stream (CLHS 12.1.6).")
 (defconst typelisp-builtin-types
   '(;; stream traits and concrete stream types (§18)
     "broadcast-stream" "charinput" "charoutput" "concatenated-stream"
-    "echo-stream" "fileerror" "inputstream" "outputstream"
-    "standard-stream" "stream" "string-input-stream" "string-output-stream"
-    "two-way-stream"
+    "echo-stream" "fileerror" "inputstream" "outputstream" "peekinput"
+    "peek-stream" "standard-stream" "stream" "string-input-stream"
+    "string-output-stream" "two-way-stream"
+    ;; pathnames (§19): the type and its designator trait
+    "pathname" "pathish"
     ;; builtin generic/abstract types
     "Option" "Result" "Sexpr" "HashTable" "Vector" "Self"
     ;; builtin concrete error types, one per fallible builtin (§7.1).  `Error'

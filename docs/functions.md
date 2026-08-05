@@ -481,6 +481,13 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 | `print` | `(print control args...)` | `(string, ...)→Unit` | 制御文字列を書式展開し、改行なしで標準出力へ書く |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | 同上、末尾に改行を付ける |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL の `format` 相当。展開した文字列を返す。`dest` が `true`（CL の `t`）なら加えて標準出力へも書く／`false`（CL の `nil`）なら書かず文字列を返すだけ |
+| `format`（ストリーム宛） | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | `dest` が `bool` でなければ CL のストリーム宛。展開した文字列をそのストリームへ書く。戻り値は `()`（CL の `nil` 相当）で、文字列は返らない |
+
+`dest` の型で2つの意味に分かれる（どちらになるかは静的に決まる）。ストリーム宛は
+`(write-string dest (format false control args...))` へ展開されるだけなので、具象ストリーム型・
+`:dyn CharOutput`・`(where (CharOutput S))` の型変数のいずれでも同じように書ける。
+`bool` でもストリームでもない `dest` は「destination は `true`/`false` か `CharOutput` を実装した
+ストリーム」という型エラーになる。
 
 **標準入力を読む**のは専用関数ではなく、標準ストリーム `*standard-input*` に対する
 `CharInput` のメソッド（§18.1）——`(read-line *standard-input*)` / `(read-char *standard-input*)` /
@@ -774,7 +781,7 @@ cons セルは作成後に書き換えられないので、`'(1 2 3)` のよう�
 |---|---|---|---|
 | `parse-int` | `(parse-int s)` | `string→Result<i32,ParseIntError>` | 10進整数（`+`/`-`前置可）。Rust の `str::parse::<i32>` と同じ受理範囲 |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 浮動小数点数。Rust の `str::parse::<f64>` と同じ受理範囲（`inf`/`nan`含む） |
-| `read` | `(read s)` | `string→Result<Sexpr,ReadError>` | `s` から `Sexpr` を1つ読む（`typl`/REPL がソーステキストを読むのと同じ reader を使う）。不完全な括弧・文字列などは `Err` |
+| `read` | `(read s)` | `string→Result<Sexpr,ReadError>` | `s` から `Sexpr` を1つ読む（`typl`/REPL がソーステキストを読むのと同じ reader を使う）。不完全な括弧・文字列などは `Err`。CL の `read-from-string` に当たる——ストリームから読むのは `read-sexpr`（§18.5） |
 | `eval` | `(eval form)` | `Sexpr→Result<Sexpr,EvalError>` | `form` を実行時に型チェックして評価する。CL の `eval` に準拠 |
 
 ### `eval` の意味論（Common Lisp 準拠）
@@ -868,6 +875,7 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 (deftrait OutputStream (Stream) (type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; 文字入力
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; 文字出力
+(deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; 1文字押し戻せる入力
 ```
 
 文字を読む関数は `(where (CharInput S))` か `:dyn CharInput` を取れば、組み込み・ユーザ定義を
@@ -884,6 +892,16 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | 次の改行まで（改行は消費して除去）。改行で終わらない最終行も返る |
 | `read-all` | `(read-all s)` | `(S)→string` | 残り全部 |
 
+`PeekInput`（`CharInput` を継承）は**1文字の押し戻し**を足す。デフォルト本体を持てない唯一の
+入力操作なので別トレイトにしてある——押し戻した文字を置く場所はストリーム自身しか持たない。
+組み込みのリーフストリーム（`file-stream`/`string-input-stream`/`standard-stream`）は実装済み、
+それ以外は `make-peek-stream` で包めば得られる（§18.3）。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `unread-char` | `(unread-char s c)` | `(S,char)→()` | 次の読みが `c` を返すようにする。**唯一の実装必須メソッド**。CL 同様、保証は1文字だけ |
+| `peek-char` | `(peek-char s)` | `(S)→Option<char>` | 消費せずに次の1文字を見る |
+
 `CharOutput` も同様に、実装側が書くのは `write-item` だけ。
 
 | 名前 | 形式 | 型 | 説明 |
@@ -893,7 +911,14 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 | `write-string` | `(write-string s str)` | `(S,string)→()` | 文字列を書く |
 | `write-line` | `(write-line s str)` | `(S,string)→()` | 文字列＋改行 |
 | `terpri` | `(terpri s)` | `(S)→()` | 改行を1つ（CL の名前） |
+| `fresh-line` | `(fresh-line s)` | `(S)→()` | 行頭でなければ改行を1つ |
+| `at-line-start` | `(at-line-start s)` | `(S)→bool` | 次に書く文字が行頭になるか。デフォルトは `false`（＝`fresh-line` は改行を書く。分からないなら書くほうが安全）。組み込みストリームは全て上書き済み |
 | `finish-output` | `(finish-output s)` | `(S)→()` | バッファを送り出す |
+
+`at-line-start` が覚えているのは**そのストリーム経由で書かれた分だけ**。`print`/`println`/
+`(format true ...)` は標準出力へ直接書く（`*standard-output*` のハンドルを通らない）ので、
+両者を混ぜると `(fresh-line *standard-output*)` の判断は `println` が書いた改行を知らない。
+片方に寄せること。
 
 `Stream` は全ストリーム共通:
 
@@ -906,14 +931,14 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 
 | 型 | 作り方 | 実装するトレイト |
 |---|---|---|
-| `file-stream` | `(open-file name direction)` / `open-input` / `open-output` | `CharInput` `CharOutput` |
-| `string-input-stream` | `(make-string-input-stream s)` | `CharInput` |
+| `file-stream` | `(open-file name direction)` / `open-input` / `open-output` | `CharInput` `PeekInput` `CharOutput` |
+| `string-input-stream` | `(make-string-input-stream s)` | `CharInput` `PeekInput` |
 | `string-output-stream` | `(make-string-output-stream)` | `CharOutput` |
-| `standard-stream` | `*standard-input*` `*standard-output*` `*error-output*` | `CharInput` `CharOutput` |
+| `standard-stream` | `*standard-input*` `*standard-output*` `*error-output*` | `CharInput` `PeekInput` `CharOutput` |
 
 `direction` は `direction-input` / `direction-output` / `direction-append` の3定数。
 `open-file` は開けなければ `Err(FileError)` を返す（存在しないファイルは普通の結果であって
-panic ではない）。
+panic ではない）。ファイル名は文字列でも `pathname` でもよい（§19 の `Pathish`）。
 
 `(get-output-stream-string s)` は `string-output-stream` に書かれた内容を返して空にする。
 CL 同様、`close` 後でも取り出せる。
@@ -928,6 +953,7 @@ CL 同様、`close` 後でも取り出せる。
 | `make-two-way-stream` | `(make-two-way-stream in out)` | `in` から読み `out` へ書く |
 | `make-echo-stream` | `(make-echo-stream in out)` | `in` から読み、読んだ文字を `out` にも書く |
 | `make-concatenated-stream` | `(make-concatenated-stream v)` | `Vector<:dyn CharInput>` を順に読み継ぐ |
+| `make-peek-stream` | `(make-peek-stream in)` | 任意の `:dyn CharInput` に1文字の押し戻しを足して `PeekInput` にする（`read-sexpr` 用） |
 
 ### 18.4 マクロ
 
@@ -943,12 +969,16 @@ CL 同様、`close` 後でも取り出せる。
 |---|---|---|---|
 | `copy-stream` | `(copy-stream from to)` | `(I,O)→()` where `CharInput I`,`CharOutput O` | 全部転送 |
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | 残り全行 |
+| `read-sexpr` | `(read-sexpr s)` | `(S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `Sexpr` を1つ読む（CL の `read`）。入力末尾は `Ok(none)`、データでなければ `Err`。ちょうど1個だけ消費する |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | 1行ずつ書く |
-| `read-file-string` | `(read-file-string name)` | `(string)→Result<string,FileError>` | 全内容 |
-| `read-file-lines` | `(read-file-lines name)` | `(string)→Result<Vector<string>,FileError>` | 全行 |
-| `write-file-string` | `(write-file-string name text)` | `(string,string)→Result<(),FileError>` | 書き出す |
-| `probe-file` | `(probe-file name)` | `(string)→bool` | 存在するか |
-| `delete-file` / `rename-file` | | `→Result<(),FileError>` | 削除・改名 |
+| `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | 全内容 |
+| `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 全行 |
+| `write-file-string` | `(write-file-string name text)` | `(P,string)→Result<(),FileError>` where `Pathish P` | 書き出す |
+| `probe-file` | `(probe-file name)` | `(P)→bool` where `Pathish P` | 存在するか |
+| `delete-file` / `rename-file` | | `→Result<(),FileError>` | 削除・改名（引数は `Pathish`） |
+
+ファイルを名指しする引数は全て**文字列でも `pathname` でもよい**——CL のパス名指定子と同じ扱いで、
+実行時の型テストではなく `Pathish` トレイトで解決している（§19）。
 
 ### 18.6 自分の型をストリームにする
 
@@ -962,18 +992,78 @@ CL 同様、`close` 後でも取り出せる。
 (impl OutputStream counter
   (type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
-(impl CharOutput counter)              ; 残り5メソッドは全部デフォルト
+(impl CharOutput counter)              ; 残りのメソッドは全部デフォルト
 
-(write-line (counter::new 0) "四文字")  ; write-line も terpri も動く
+(write-line (counter::new 0) "四文字")  ; write-line も terpri も fresh-line も動く
 ```
+
+入力側も同じで、書くのは `read-item` だけ。押し戻しを自前で持たない型でも、
+`(read-sexpr (make-peek-stream my-stream))` と包めば `read` できる。
 
 ### 18.7 CL との違い
 
 - **クラス階層ではなくトレイト階層**。`input-stream-p` / `output-stream-p` は無い——方向は型が
   持つので、実行時に尋ねる問いではない。
-- **pathname は無い**。ファイルは文字列で指す。
-- **`format` のストリーム宛は無い**。`(write-string s (format false "~a" x))` と書く。
+- **`read` は文字列版とストリーム版で名前が違う**。`(read "...")`（CL の `read-from-string`）と
+  `(read-sexpr s)`（CL の `read`）。単一・静的ディスパッチなので同名の多重定義ができない。
+- **押し戻しは別トレイト**（`PeekInput`）。`read-char` しか要らない型に `unread-char` の実装を
+  強いないため。
 - **閉じるのは明示的**。GC はクローズしない（コレクタは cons アリーナ枯渇時にしか走らないので、
   ファイナライザは予測できない時点で動くか一度も動かない）。`with-open-file` を使うのが安全。
 - ストリーム操作は `format`/`random` と同じく**インタプリタ専用**で、これらを呼ぶ関数は
   JIT/AOT コンパイルされない。
+
+## 19. パス名 (`pathname`)
+
+ファイル名を分解した値。`/` 区切りのディレクトリ成分・名前・型（拡張子）と、ルート始まりかどうか
+を持つ。分解も再構成も純粋な文字列処理なので**この層は全て typelisp で書かれている**——ネイティブ
+側が見るのは `namestring` が描いた文字列だけ。
+
+```lisp
+(let ((p (parse-namestring "/var/log/app.tar.gz")))
+  (pathname-directory p)   ; => ["var" "log"]（Vector<string>）
+  (pathname-name p)        ; => (some "app.tar")   最後のドットで切る
+  (pathname-type p)        ; => (some "gz")
+  (namestring p))          ; => "/var/log/app.tar.gz"
+
+(namestring (merge-pathnames (make-pathname :name "today" :type "log")
+                             "/var/log/"))        ; => "/var/log/today.log"
+```
+
+### 19.1 パス名指定子トレイト `Pathish`
+
+CL がパス名指定子（文字列 or パス名）を受ける場所で、こちらは `Pathish` を受ける。`string` と
+`pathname` の両方が実装しており、**ファイル操作は全てこれをジェネリックに取る**ので、
+`(open-input "a.txt")` と `(open-input p)` はどちらも普通の呼び出し（実行時の型テストは無い）。
+文字列側の `namestring` は自分自身を返すだけなので、文字列を渡す限りパースは走らない。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `namestring` | `(namestring p)` | `(P)→string` | 文字列表現。**唯一の実装必須メソッド**（`to-pathname` と2つ） |
+| `to-pathname` | `(to-pathname p)` | `(P)→pathname` | `pathname` に直す（CL の `pathname` 関数。型名と衝突するので改名） |
+
+### 19.2 関数
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `parse-namestring` | `(parse-namestring s)` | `string→pathname` | 文字列を分解する。末尾 `/`（や空名）は「名前無し」＝ディレクトリ |
+| `make-pathname` | `(make-pathname :directory v :name s :type s :absolute b)` | `→pathname` | 持っている成分だけで組み立てる（全て `&key`）。省略した名前・型は「無い」ままで、`merge-pathnames` が埋める対象になる |
+| `pathname-directory` | `(pathname-directory p)` | `(P)→Vector<string>` | 外側から順のディレクトリ成分 |
+| `pathname-name` | `(pathname-name p)` | `(P)→Option<string>` | 型を除いた名前。ディレクトリなら `none` |
+| `pathname-type` | `(pathname-type p)` | `(P)→Option<string>` | 最後のドット以降。先頭のドットは対象外（`.gitignore` は全部が名前） |
+| `pathname-absolute-p` | `(pathname-absolute-p p)` | `(P)→bool` | ルート始まりか |
+| `directory-namestring` | `(directory-namestring p)` | `(P)→string` | 最後の `/` までの部分 |
+| `file-namestring` | `(file-namestring p)` | `(P)→string` | `name.type` の部分だけ |
+| `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | `p` に無い成分を `default` から補う。相対の `p` は `default` のディレクトリの下に置かれ、絶対の `p` は自分のディレクトリを保つ |
+| `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | `default` を基準にした相対表記。基準の下に無ければ `p` の全体 |
+
+型引数はいずれも `(where (Pathish P))`。
+
+### 19.3 CL との違い
+
+- **ホスト・デバイス・バージョン成分は無い**。ワイルドカードパス名も `directory` による照合も、
+  論理パス名（`logical-pathname`）も無い。CLHS 19 のそれらの部分は、この処理系が走らない
+  ファイルシステムのためにある。区切りは `/` 固定。
+- **`pathname` 関数は `to-pathname`**。型とトレイト・関数が同じ名前空間を共有するため。
+- **`truename` / `file-write-date` / `directory` は無い**（ファイルシステムへの問い合わせ層は
+  `probe-file` だけ）。

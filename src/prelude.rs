@@ -62,7 +62,7 @@ use crate::{Checker, Heap, Interp, Reader};
 /// comment for the key-quoting design decision this forces. `do` (step 8d)
 /// completes the roadmap's step-8 macro set, parallel-stepping multiple
 /// bindings via `gensym`-fresh temporaries (see its own comment).
-pub const SOURCE: &str = r#"
+pub const SOURCE: &str = r##"
 ;; `not`: moved here from a Rust builtin (it has no dependency on the GC
 ;; heap or anything else Rust-only — a plain `if`/`bool` round trip) so it
 ;; compiles through the ordinary `ast_bridge`/`compiler.rs` pipeline like any
@@ -1391,6 +1391,188 @@ pub const SOURCE: &str = r#"
 
 
 ;; ---------------------------------------------------------------------------
+;; Pathnames (CLHS 19).
+;;
+;; A pathname is a file name taken apart: the directory components, the name,
+;; the type (what most systems call the extension), and whether it starts at
+;; the root. Taking it apart and putting it back together is pure string work,
+;; so this whole layer is typelisp -- the native side never sees a pathname,
+;; only the string `namestring` renders.
+;;
+;; Where CL accepts a *pathname designator* -- a string or a pathname --
+;; wherever a file is named, this accepts any `Pathish`. Both types implement
+;; it and every file operation below is generic over it, so `(open-input
+;; "log/today.txt")` and `(open-input p)` are the same ordinary call with no
+;; run-time test between them, and a `string` still costs no parse.
+;;
+;; Deliberately not all of CL's model: no host, device or version component,
+;; no wild pathnames or `directory` matching, and no logical pathnames. Those
+;; answer to filesystems this does not run on. The separator is `/`.
+
+(pub defstruct pathname
+  (directory Vector<string>)
+  (name Option<string>)
+  ;; CL's "type". Named `extension` here to keep the field out of the way of
+  ;; `(type ...)`, which is `impl` syntax; `pathname-type` is the reader.
+  (extension Option<string>)
+  (absolutep bool))
+
+(defun split-on-slash ((s string)) Vector<string>
+  "Every `/`-separated piece, empty ones included -- so a leading `/` yields a
+   leading empty piece, and a trailing one a trailing empty piece."
+  (let ((out (the Vector<string> (Vector::new))) (cur "") (i 0) (n (length s)))
+    (progn
+      (while (< i n)
+        (let ((c (ref s i)))
+          (progn
+            (if (equal c #\/)
+                (progn (push out cur) (setf cur "") ())
+                (progn (setf cur (append cur (char->string c))) ()))
+            (setf i (+ i 1))
+            ())))
+      (push out cur)
+      out)))
+
+(defun name-type-dot ((file string)) i32
+  "Where the `.` separating name from type is, or -1. The *last* dot, and
+   never the first character: `archive.tar.gz` is `archive.tar` of type `gz`,
+   while `.gitignore` is all name, as in CL."
+  (let ((at -1) (i 1) (n (length file)))
+    (progn
+      (while (< i n)
+        (progn
+          (if (equal (ref file i) #\.) (progn (setf at i) ()) ())
+          (setf i (+ i 1))
+          ()))
+      at)))
+
+(pub defun parse-namestring ((s string)) pathname
+  "Take a file name apart. A trailing `/` (or an empty name) means a pathname
+   with no name -- a directory."
+  (let ((parts (split-on-slash s))
+        (dirs (the Vector<string> (Vector::new)))
+        (file "")
+        (i 0))
+    (progn
+      (let ((n (len parts)))
+        (while (< i n)
+          (let ((seg (get parts i)))
+            (progn
+              (if (= i (- n 1))
+                  (progn (setf file seg) ())
+                  ;; Empty pieces are the leading `/` and any doubled one:
+                  ;; both say something about the shape, nothing about a
+                  ;; directory name.
+                  (if (equal seg "") () (progn (push dirs seg) ())))
+              (setf i (+ i 1))
+              ()))))
+      (pathname::new
+        dirs
+        (if (equal file "")
+            (option::none)
+            (let ((at (name-type-dot file)))
+              (if (< at 0) (option::some file) (option::some (substring file 0 at)))))
+        (let ((at (name-type-dot file)))
+          (if (< at 0) (option::none) (option::some (substring file (+ at 1) (length file)))))
+        (and (> (length s) 0) (equal (ref s 0) #\/))))))
+
+(defun pathname-file-part ((p pathname)) string
+  "`name.type`, as text -- \"\" for a pathname naming only a directory."
+  (append
+    (match p::name ((some x) x) ((none) ""))
+    (match p::extension ((some x) (append "." x)) ((none) ""))))
+
+(defun pathname-directory-part ((p pathname)) string
+  "The directory components, each with its `/`, after a leading `/` if the
+   pathname is absolute."
+  (let ((out (if p::absolutep "/" "")) (i 0) (n (len p::directory)))
+    (progn
+      (while (< i n)
+        (progn
+          (setf out (append (append out (get p::directory i)) "/"))
+          (setf i (+ i 1))
+          ()))
+      out)))
+
+;; The pathname designator. Two implementations, and no more are expected:
+;; the point is that a file operation can take either without asking which.
+(deftrait Pathish ()
+  "What can name a file: a `string` or a `pathname`."
+  (namestring ((self Self)) string)
+  (to-pathname ((self Self)) pathname))
+
+(impl Pathish string
+  ;; A string is already its own namestring -- the whole reason file
+  ;; operations take `Pathish` rather than `pathname` is that this case costs
+  ;; nothing.
+  (namestring ((self Self)) string self)
+  (to-pathname ((self Self)) pathname (parse-namestring self)))
+
+(impl Pathish pathname
+  (namestring ((self Self)) string (append (pathname-directory-part self) (pathname-file-part self)))
+  (to-pathname ((self Self)) pathname self))
+
+(pub defun make-pathname (&key (directory Vector<string> (Vector::new))
+                               (name string)
+                               (type string)
+                               (absolute bool false)) pathname
+  "Build a pathname from the components you have. Omitted `name`/`type` stay
+   absent, which is what `merge-pathnames` fills in."
+  (pathname::new directory name type absolute))
+
+(pub defun pathname-directory<P> ((p P)) Vector<string> (where (Pathish P))
+  "The directory components, outermost first."
+  (let ((q (to-pathname p))) q::directory))
+
+(pub defun pathname-name<P> ((p P)) Option<string> (where (Pathish P))
+  "The name, without the type. `none` for a pathname naming a directory."
+  (let ((q (to-pathname p))) q::name))
+
+(pub defun pathname-type<P> ((p P)) Option<string> (where (Pathish P))
+  "The type -- the extension after the last dot."
+  (let ((q (to-pathname p))) q::extension))
+
+(pub defun pathname-absolute-p<P> ((p P)) bool (where (Pathish P))
+  "Whether it starts at the root."
+  (let ((q (to-pathname p))) q::absolutep))
+
+(pub defun directory-namestring<P> ((p P)) string (where (Pathish P))
+  "Everything up to and including the last `/`."
+  (pathname-directory-part (to-pathname p)))
+
+(pub defun file-namestring<P> ((p P)) string (where (Pathish P))
+  "The `name.type` part alone."
+  (pathname-file-part (to-pathname p)))
+
+(pub defun merge-pathnames<P,D> ((p P) (default D)) pathname (where (Pathish P) (Pathish D))
+  "Fill in whatever `p` leaves out from `default`, as CL's does: a missing
+   name or type is taken over, and a *relative* `p` is placed under
+   `default`'s directory. An absolute `p` keeps its own directory."
+  (let ((a (to-pathname p)) (b (to-pathname default)))
+    (pathname::new
+      (if a::absolutep
+          a::directory
+          (let ((dirs (the Vector<string> (Vector::new))))
+            (progn
+              (doiter (d (iter b::directory)) (push dirs d))
+              (doiter (d (iter a::directory)) (push dirs d))
+              dirs)))
+      (match a::name ((some x) (option::some x)) ((none) b::name))
+      (match a::extension ((some x) (option::some x)) ((none) b::extension))
+      (if a::absolutep true b::absolutep))))
+
+(pub defun enough-namestring<P,D> ((p P) (default D)) string (where (Pathish P) (Pathish D))
+  "As much of `p` as it takes to name it relative to `default` -- `p` with
+   `default`'s directory prefix removed, or all of `p` when it does not start
+   there."
+  (let ((full (namestring p)) (prefix (directory-namestring default)))
+    (if (and (> (length prefix) 0)
+             (<= (length prefix) (length full))
+             (equal (substring full 0 (length prefix)) prefix))
+        (substring full (length prefix) (length full))
+        full)))
+
+;; ---------------------------------------------------------------------------
 ;; Streams (CLHS 21) and files (CLHS 20).
 ;;
 ;; Where CL has a class hierarchy this has a *trait* hierarchy, which is the
@@ -1474,6 +1656,25 @@ pub const SOURCE: &str = r#"
           ((some c) (setf out (append out (char->string c))))))
       out)))
 
+;; Pushback. Separate from `CharInput` because it is the one input operation
+;; that cannot have a default body: putting a character back needs somewhere
+;; to put it, and only the stream has that. The native-backed streams keep
+;; theirs in the native layer; anything else gets pushback by wrapping
+;; (`make-peek-stream`, below).
+;;
+;; This is what `read-sexpr` needs and `read-char`/`read-line` do not: finding
+;; where an atom ends means looking at the character *after* it, which the
+;; next read must still see.
+(deftrait PeekInput (CharInput)
+  "A character input stream that can put a character back. One is enough --
+   that is all CL's `unread-char` promises."
+  (unread-char ((self Self) (c char)) ())
+  (peek-char ((self Self)) Option<char>
+    "The next character, without consuming it."
+    (match (read-char self)
+      ((none) (option::none))
+      ((some c) (progn (unread-char self c) (option::some c))))))
+
 (deftrait CharOutput ((OutputStream (Item char)))
   "A character output stream. Every method has a default body."
   (write-char ((self Self) (c char)) ()
@@ -1490,6 +1691,16 @@ pub const SOURCE: &str = r#"
   (write-line ((self Self) (s string)) ()
     "Write `s` followed by a newline."
     (progn (write-string self s) (write-item self #\newline)))
+  (at-line-start ((self Self)) bool
+    "Whether the next character written would begin a line. Answering this
+     needs a memory of what was written last, which only the stream itself
+     has -- so the default is `false`, the answer that makes `fresh-line`
+     write its newline. A stream that would rather not have that newline
+     overrides this (every built-in one does)."
+    false)
+  (fresh-line ((self Self)) ()
+    "A newline, unless the stream is already at the start of a line."
+    (if (at-line-start self) () (write-item self #\newline)))
   (finish-output ((self Self)) ()
     "Push buffered output to its destination. A no-op unless overridden."
     ()))
@@ -1527,11 +1738,14 @@ pub const SOURCE: &str = r#"
   (write-item ((self Self) (c char)) ()
     (unwrap-io (stream-write-string self::h (char->string c)))))
 (impl CharInput file-stream)
+(impl PeekInput file-stream
+  (unread-char ((self Self) (c char)) () (unwrap-io (stream-unread-char self::h c))))
 (impl CharOutput file-stream
   ;; Overridden: one native call per string beats one per character, and this
   ;; is the stream people write bulk output to.
   (write-string ((self Self) (s string)) ()
     (unwrap-io (stream-write-string self::h s)))
+  (at-line-start ((self Self)) bool (unwrap-io (stream-at-line-start self::h)))
   (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
 
 (impl Stream string-input-stream
@@ -1541,6 +1755,8 @@ pub const SOURCE: &str = r#"
   (type Item char)
   (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h))))
 (impl CharInput string-input-stream)
+(impl PeekInput string-input-stream
+  (unread-char ((self Self) (c char)) () (unwrap-io (stream-unread-char self::h c))))
 
 (impl Stream string-output-stream
   (open-stream-p ((self Self)) bool (stream-open-p self::h))
@@ -1551,7 +1767,8 @@ pub const SOURCE: &str = r#"
     (unwrap-io (stream-write-string self::h (char->string c)))))
 (impl CharOutput string-output-stream
   (write-string ((self Self) (s string)) ()
-    (unwrap-io (stream-write-string self::h s))))
+    (unwrap-io (stream-write-string self::h s)))
+  (at-line-start ((self Self)) bool (unwrap-io (stream-at-line-start self::h))))
 
 (impl Stream standard-stream
   (open-stream-p ((self Self)) bool (stream-open-p self::h))
@@ -1564,9 +1781,12 @@ pub const SOURCE: &str = r#"
   (write-item ((self Self) (c char)) ()
     (unwrap-io (stream-write-string self::h (char->string c)))))
 (impl CharInput standard-stream)
+(impl PeekInput standard-stream
+  (unread-char ((self Self) (c char)) () (unwrap-io (stream-unread-char self::h c))))
 (impl CharOutput standard-stream
   (write-string ((self Self) (s string)) ()
     (unwrap-io (stream-write-string self::h s)))
+  (at-line-start ((self Self)) bool (unwrap-io (stream-at-line-start self::h)))
   (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
 
 ;; CL's standard streams. Ordinary assignable globals, not dynamically bound
@@ -1591,6 +1811,19 @@ pub const SOURCE: &str = r#"
 (impl CharOutput broadcast-stream
   (write-string ((self Self) (s string)) ()
     (doiter (p (iter self::parts)) (write-string p s)))
+  ;; Asked of each component separately rather than derived from
+  ;; `at-line-start`: the components need not agree, and one newline decided
+  ;; for all of them would put a blank line into whichever were already at a
+  ;; line start.
+  (fresh-line ((self Self)) ()
+    (doiter (p (iter self::parts)) (fresh-line p)))
+  ;; Only true when every component says so -- a broadcast stream is at the
+  ;; start of a line when writing to it would begin a line everywhere.
+  (at-line-start ((self Self)) bool
+    (let ((all true))
+      (progn
+        (doiter (p (iter self::parts)) (if (at-line-start p) () (progn (setf all false) ())))
+        all)))
   (finish-output ((self Self)) ()
     (doiter (p (iter self::parts)) (finish-output p))))
 
@@ -1607,6 +1840,7 @@ pub const SOURCE: &str = r#"
 (impl CharInput two-way-stream)
 (impl CharOutput two-way-stream
   (write-string ((self Self) (s string)) () (write-string self::out s))
+  (at-line-start ((self Self)) bool (at-line-start self::out))
   (finish-output ((self Self)) () (finish-output self::out)))
 
 ;; Reads from `in`, echoing every character actually read to `out`.
@@ -1641,6 +1875,27 @@ pub const SOURCE: &str = r#"
       answer)))
 (impl CharInput concatenated-stream)
 
+;; Gives any input stream one character of pushback, so that a stream without
+;; pushback of its own (a composite, or a user type) can still be `read` from.
+;; A composite like every other: a struct, one field of state, no native
+;; support.
+(pub defstruct peek-stream (inner :dyn CharInput) (pending Option<char>))
+(impl Stream peek-stream
+  (open-stream-p ((self Self)) bool (open-stream-p self::inner))
+  (close ((self Self)) () (close self::inner)))
+(impl InputStream peek-stream
+  (type Item char)
+  (read-item ((self Self)) Option<char>
+    (match self::pending
+      ((some c) (progn (setf self::pending (option::none)) (option::some c)))
+      ((none) (read-char self::inner)))))
+(impl CharInput peek-stream)
+(impl PeekInput peek-stream
+  ;; A second `unread-char` without a read in between overwrites the first --
+  ;; the one-character promise, and what a program that keeps to it never
+  ;; notices.
+  (unread-char ((self Self) (c char)) () (progn (setf self::pending (option::some c)) ())))
+
 ;; ---------------------------------------------------------------------------
 ;; Constructors and the CL-shaped surface.
 
@@ -1670,25 +1925,32 @@ pub const SOURCE: &str = r#"
 (pub defun make-concatenated-stream ((parts Vector<:dyn CharInput>)) concatenated-stream
   (concatenated-stream::new parts 0))
 
-;; `open`'s direction, as named constants rather than keywords: typelisp has
-;; no keyword arguments on a `defun` that a `&key` would make nicer here, and
-;; three constants read at least as well as `:direction :output`.
+(pub defun make-peek-stream ((in :dyn CharInput)) peek-stream
+  "`in` with one character of pushback added, so it can be `read-sexpr`-ed.
+   The built-in leaf streams already have pushback and need no wrapping."
+  (peek-stream::new in (option::none)))
+
+;; `open`'s direction, as named constants rather than as CL's `:direction`
+;; keyword argument: the direction is required, and three constants read at
+;; least as well as `:direction :output` when there is nothing to default.
+;; (`&key` does exist -- `make-pathname` uses it, where most components are
+;; genuinely optional.)
 (pub defconstant (direction-input i64) 0)
 (pub defconstant (direction-output i64) 1)
 (pub defconstant (direction-append i64) 2)
 
-(pub defun open-file ((name string) (direction i64)) Result<file-stream, FileError>
-  "Open `name`, one of `direction-input` / `direction-output` /
-   `direction-append`. `Err` if the file cannot be opened -- a missing file is
-   an ordinary outcome, not a panic."
-  (match (stream-open-file name direction)
+(pub defun open-file<P> ((name P) (direction i64)) Result<file-stream, FileError> (where (Pathish P))
+  "Open `name` -- a string or a `pathname` -- in one of `direction-input` /
+   `direction-output` / `direction-append`. `Err` if the file cannot be
+   opened: a missing file is an ordinary outcome, not a panic."
+  (match (stream-open-file (namestring name) direction)
     ((ok h) (result::ok (file-stream::new h)))
     ((err e) (result::err e))))
 
-(pub defun open-input ((name string)) Result<file-stream, FileError>
+(pub defun open-input<P> ((name P)) Result<file-stream, FileError> (where (Pathish P))
   (open-file name direction-input))
 
-(pub defun open-output ((name string)) Result<file-stream, FileError>
+(pub defun open-output<P> ((name P)) Result<file-stream, FileError> (where (Pathish P))
   (open-file name direction-output))
 
 ;; CL's `input-stream-p`/`output-stream-p` have no counterpart here, and do
@@ -1696,11 +1958,12 @@ pub const SOURCE: &str = r#"
 ;; implements `CharInput`, so the question is settled where the value is
 ;; bound, not asked again at run time.
 
-;; `fresh-line`: a newline only if the stream is not already at the start of a
-;; line. Only the native-backed streams track a column, so this takes the
-;; concrete type rather than the trait.
-(pub defun fresh-line ((s file-stream)) ()
-  (if (unwrap-io (stream-at-line-start s::h)) () (write-char s #\newline)))
+;; `fresh-line` is a `CharOutput` method (with `at-line-start`), not a
+;; function over one concrete type: the memory of what was written last
+;; belongs to the stream, so the stream is what answers. The native-backed
+;; ones answer from the native layer's `last_written`, the composites ask
+;; their components, and a stream that cannot tell takes the default `false`
+;; and gets its newline.
 
 ;; ---------------------------------------------------------------------------
 ;; Convenience over the traits. These are ordinary generic functions -- the
@@ -1725,6 +1988,210 @@ pub const SOURCE: &str = r#"
         ((none) (break))
         ((some l) (push out l))))
     out))
+
+;; ---------------------------------------------------------------------------
+;; `read` over a stream (CL's `read`; typelisp's own `read` takes a string,
+;; which is CL's `read-from-string`).
+;;
+;; The parsing is not repeated here: these functions only find where the next
+;; datum *ends* -- consuming its exact text, character by character -- and
+;; hand that text to `read`. That split is the whole design. A second reader
+;; written in typelisp would be a second grammar to keep in step with
+;; `src/read/reader.rs`; a scanner only has to know which characters close
+;; what they opened, which is far less to get wrong, and it reports every
+;; syntax error in the one voice the reader already speaks.
+;;
+;; Text is accumulated *verbatim*, whitespace and comments included, so what
+;; `read` parses is what was written -- including the spellings whose meaning
+;; depends on their exact spacing (a `Vector<:dyn CharOutput>` type token
+;; reads as one symbol only while it stays on one line).
+
+(defun reader-whitespacep ((c char)) bool
+  (or (equal c #\space) (equal c #\newline) (equal c #\tab) (equal c #\return) (equal c #\page)))
+
+;; The reader's own token terminators (`is_delimiter` in `src/read/reader.rs`).
+;; `,` is deliberately absent from both: it stays usable inside a token so
+;; that `Pair<K,V>` reads as one symbol.
+(defun reader-delimiterp ((c char)) bool
+  (or (reader-whitespacep c)
+      (equal c #\() (equal c #\)) (equal c #\") (equal c #\') (equal c #\`) (equal c #\;)))
+
+(defun reader-skip-one<S> ((s S)) () (where (CharInput S))
+  "Consume one character, discarding it -- always used where it has just been
+   peeked at, so there is nothing to report."
+  (match (read-char s) (_ ())))
+
+(defun reader-scan-atom<S> ((s S)) string (where (PeekInput S))
+  "An atom's characters, up to (not including) whatever ends it. The
+   terminator is put back -- that, and only that, is why `read-sexpr` needs
+   `PeekInput` rather than plain `CharInput`."
+  (let ((out ""))
+    (loop
+      (match (peek-char s)
+        ((none) (break))
+        ((some c)
+         (if (reader-delimiterp c)
+             (break)
+             (progn (reader-skip-one s) (setf out (append out (char->string c))) ())))))
+    out))
+
+(defun reader-scan-name<S> ((s S)) string (where (PeekInput S))
+  "The rest of a `#\\newline`-style character name: alphanumerics and `-`."
+  (let ((out ""))
+    (loop
+      (match (peek-char s)
+        ((none) (break))
+        ((some c)
+         (if (or (alphap c) (digitp c) (equal c #\-))
+             (progn (reader-skip-one s) (setf out (append out (char->string c))) ())
+             (break)))))
+    out))
+
+(defun reader-scan-string<S> ((s S)) string (where (PeekInput S))
+  "A string literal, from just after the opening quote through the closing
+   one (which is returned with it). An unterminated one runs to end of input
+   and `read` reports it."
+  (let ((out "\""))
+    (loop
+      (match (read-char s)
+        ((none) (break))
+        ((some c)
+         (progn
+           (setf out (append out (char->string c)))
+           (cond
+             ((equal c #\") (break))
+             ;; An escaped character is taken verbatim, so an escaped quote
+             ;; does not end the literal.
+             ((equal c #\\)
+              (match (read-char s)
+                ((none) (break))
+                ((some e) (progn (setf out (append out (char->string e))) ()))))
+             (else ()))))))
+    out))
+
+(defun reader-skip-block-comment<S> ((s S)) () (where (PeekInput S))
+  "A `#| ... |#` comment, from just after the opening `#|`. Nests, as the
+   reader's does."
+  (let ((depth 1))
+    (loop
+      (if (= depth 0) (break) ())
+      (match (read-char s)
+        ((none) (break))
+        ((some c)
+         (cond
+           ((equal c #\#)
+            (match (peek-char s)
+              ((some n) (if (equal n #\|) (progn (reader-skip-one s) (setf depth (+ depth 1)) ()) ()))
+              ((none) ())))
+           ((equal c #\|)
+            (match (peek-char s)
+              ((some n) (if (equal n #\#) (progn (reader-skip-one s) (setf depth (- depth 1)) ()) ()))
+              ((none) ())))
+           (else ())))))))
+
+(defun reader-scan-atmosphere<S> ((s S)) string (where (PeekInput S))
+  "Whitespace and `;` line comments, verbatim. Stops at `#|`, which
+   `reader-scan-datum` handles: telling `#|` from `#\\(` takes the `#`
+   consumed first, and there is only one character of pushback."
+  (let ((out ""))
+    (loop
+      (match (peek-char s)
+        ((none) (break))
+        ((some c)
+         (cond
+           ((reader-whitespacep c)
+            (progn (reader-skip-one s) (setf out (append out (char->string c))) ()))
+           ((equal c #\;)
+            (loop
+              (match (read-char s)
+                ((none) (break))
+                ((some d)
+                 (progn
+                   (setf out (append out (char->string d)))
+                   (if (equal d #\newline) (break) ()))))))
+           (else (break))))))
+    out))
+
+(defun reader-scan-hash<S> ((s S)) string (where (PeekInput S))
+  "A `#`-token, from a peeked `#`. Returns \"\" for `#| ... |#`, which is a
+   comment rather than a datum -- the caller keeps scanning."
+  (progn
+    (reader-skip-one s)
+    (match (peek-char s)
+      ((none) "#")
+      ((some c)
+       (cond
+         ((equal c #\|) (progn (reader-skip-one s) (reader-skip-block-comment s) ""))
+         ((equal c #\\)
+          (progn
+            (reader-skip-one s)
+            (match (read-char s)
+              ((none) "#\\")
+              ((some first)
+               (let ((out (append "#\\" (char->string first))))
+                 ;; A multi-letter name only when it starts alphabetic --
+                 ;; the reader's own rule, and what makes `#\(` end here.
+                 (if (alphap first) (append out (reader-scan-name s)) out))))))
+         ;; Any other `#` syntax is not one the reader has; scan it as a token
+         ;; and let `read` say so.
+         (else (append "#" (reader-scan-atom s))))))))
+
+(defun reader-scan-datum<S> ((s S)) string (where (PeekInput S))
+  "The exact text of the next datum on `s`, or \"\" at end of input.
+   Consumes the datum and the whitespace/comments before it, and nothing
+   after it but the one character that ends an atom, which is put back."
+  (let ((out "") (depth 0) (wanted true) (going true))
+    ;; `depth` counts open parens; `wanted` says a datum is still owed -- true
+    ;; at the start and after a `'`/`` ` ``/`,` prefix, which is what keeps
+    ;; `'(1 2)` from stopping at the quote. The scan ends when a datum has
+    ;; been taken at depth 0.
+    (while going
+      (progn
+        (let ((skipped (reader-scan-atmosphere s)))
+          ;; Leading atmosphere is dropped, interior atmosphere kept: the text
+          ;; handed to `read` starts at the datum but is otherwise as written.
+          (if (equal out "") () (progn (setf out (append out skipped)) ())))
+        (match (peek-char s)
+          ((none) (progn (setf going false) ()))
+          ((some c)
+           (cond
+             ((equal c #\()
+              (progn (reader-skip-one s) (setf out (append out "(")) (setf depth (+ depth 1)) (setf wanted false) ()))
+             ((equal c #\))
+              (progn (reader-skip-one s) (setf out (append out ")")) (setf depth (- depth 1)) (setf wanted false) ()))
+             ((equal c #\")
+              (progn (reader-skip-one s) (setf out (append out (reader-scan-string s))) (setf wanted false) ()))
+             ((or (equal c #\') (equal c #\`))
+              (progn (reader-skip-one s) (setf out (append out (char->string c))) (setf wanted true) ()))
+             ((equal c #\,)
+              (progn
+                (reader-skip-one s)
+                (setf out (append out ","))
+                ;; `,@` is one prefix, not `,` followed by an `@` atom.
+                (match (peek-char s)
+                  ((some n) (if (equal n #\@) (progn (reader-skip-one s) (setf out (append out "@")) ()) ()))
+                  ((none) ()))
+                (setf wanted true)
+                ()))
+             ((equal c #\#)
+              (let ((text (reader-scan-hash s)))
+                (if (equal text "")
+                    ()                                  ; a block comment: no datum yet
+                    (progn (setf out (append out text)) (setf wanted false) ()))))
+             (else (progn (setf out (append out (reader-scan-atom s))) (setf wanted false) ())))))
+        (if (and (= depth 0) (not wanted)) (progn (setf going false) ()) ())))
+    out))
+
+(pub defun read-sexpr<S> ((s S)) Result<Option<Sexpr>, ReadError> (where (PeekInput S))
+  "Read one datum from `s` -- CL's `read`. `Ok(none)` at end of input (so a
+   read loop ends on a value rather than an error), `Err` if what is there is
+   not a datum. Reads exactly one, so the next call gets the next one."
+  (let ((text (reader-scan-datum s)))
+    (if (equal text "")
+        (result::ok (option::none))
+        (match (read text)
+          ((ok v) (result::ok (option::some v)))
+          ((err e) (result::err e))))))
 
 ;; ---------------------------------------------------------------------------
 ;; The `with-...` macros, which are the reason `close` rarely appears in user
@@ -1763,45 +2230,45 @@ pub const SOURCE: &str = r#"
        (progn ,@body (get-output-stream-string ,var)))))
 
 ;; ---------------------------------------------------------------------------
-;; Whole-file convenience (CLHS 20 is otherwise mostly pathnames, which this
-;; language does not have -- a file is named by a string).
+;; Whole-file convenience. `name` is any `Pathish` here as everywhere else, so
+;; a string and a `pathname` are equally ordinary arguments.
 
-(pub defun read-file-string ((name string)) Result<string, FileError>
+(pub defun read-file-string<P> ((name P)) Result<string, FileError> (where (Pathish P))
   "The entire contents of `name`."
   (match (open-input name)
     ((ok s) (let ((text (read-all s))) (progn (close s) (result::ok text))))
     ((err e) (result::err e))))
 
-(pub defun read-file-lines ((name string)) Result<Vector<string>, FileError>
+(pub defun read-file-lines<P> ((name P)) Result<Vector<string>, FileError> (where (Pathish P))
   (match (open-input name)
     ((ok s) (let ((ls (read-lines s))) (progn (close s) (result::ok ls))))
     ((err e) (result::err e))))
 
-(pub defun write-file-string ((name string) (text string)) Result<(), FileError>
+(pub defun write-file-string<P> ((name P) (text string)) Result<(), FileError> (where (Pathish P))
   "Write `text` to `name`, replacing it. `Ok(())` on success -- the write is
    done for its effect, so there is no value to carry back."
   (match (open-output name)
     ((ok s) (progn (write-string s text) (close s) (result::ok ())))
     ((err e) (result::err e))))
 
-(pub defun probe-file ((name string)) bool
+(pub defun probe-file<P> ((name P)) bool (where (Pathish P))
   "Whether `name` exists."
-  (file-exists-p name))
+  (file-exists-p (namestring name)))
 
-(pub defun delete-file ((name string)) Result<(), FileError>
+(pub defun delete-file<P> ((name P)) Result<(), FileError> (where (Pathish P))
   "Remove `name`. `Ok(())` on success."
-  (match (file-delete name)
+  (match (file-delete (namestring name))
     ((ok _) (result::ok ()))
     ((err e) (result::err e))))
 
-(pub defun rename-file ((from string) (to string)) Result<(), FileError>
+(pub defun rename-file<P,Q> ((from P) (to Q)) Result<(), FileError> (where (Pathish P) (Pathish Q))
   "Rename `from` to `to`. `Ok(())` on success."
-  (match (file-rename from to)
+  (match (file-rename (namestring from) (namestring to))
     ((ok _) (result::ok ()))
     ((err e) (result::err e))))
 
 
-"#;
+"##;
 
 /// Read, check, and execute [`SOURCE`] against `heap`/`chk`/`interp`,
 /// registering its definitions exactly as if the caller had typed them

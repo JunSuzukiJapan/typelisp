@@ -132,13 +132,27 @@ fn is_excluded(name: &str) -> bool {
     // on a stream value and never names one of these.
     let native_stream = name.starts_with("stream-") || name.starts_with("file-");
     // Prelude-private helpers with no `pub`: `unwrap-io` turns a native
-    // `Result` into a panic, `io-ok` pins an error type.
-    const PRELUDE_PRIVATE: [&str; 2] = ["unwrap-io", "io-ok"];
+    // `Result` into a panic, `io-ok` pins an error type, and the last four
+    // are the pathname layer's own string surgery (`namestring` and the
+    // `pathname-*` readers are the surface a user writes).
+    const PRELUDE_PRIVATE: [&str; 6] = [
+        "unwrap-io",
+        "io-ok",
+        "split-on-slash",
+        "name-type-dot",
+        "pathname-file-part",
+        "pathname-directory-part",
+    ];
+    // `read-sexpr`'s datum scanner, which finds where one datum ends so the
+    // text can go to `read`. Prelude-private, and a step finer-grained than
+    // anything a user writes.
+    let datum_scanner = name.starts_with("reader-");
 
     operator
         || type_param
         || earmuffed
         || native_stream
+        || datum_scanner
         || PRELUDE_PRIVATE.contains(&name)
         || name.ends_with("-rt")
         || ISLAND_PREFIXES.iter().any(|p| name.starts_with(p))

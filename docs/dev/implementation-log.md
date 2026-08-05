@@ -1,6 +1,6 @@
 # typelisp 実装ログ（アーカイブ）
 
-最終更新: 2026-08-04 / ブランチ: `main`
+最終更新: 2026-08-05 / ブランチ: `main`
 
 このドキュメントは、再実装（read 関数から作り直し）で**完了した**作業の経緯・設計判断を
 記録するアーカイブ。**現在「残っている作業」は [TODO.md](TODO.md) を参照**——TODO.md が
@@ -5703,3 +5703,113 @@ compiled の downcast / 印字 / `equalp`）を回す 5 本。綴りの規約が
 
 `local()` は消えたので、これより前のログ中の `Path::local()` という記述は
 `Path::last_segment()` と読み替えること。
+
+---
+
+## ストリームの残り 3 項目 + パス名層（2026-08-05）
+
+TODO.md に 1 項目だけ残っていた「ストリームの未実装分」を全部片付けた。内訳は
+`fresh-line` が `file-stream` 専用だったこと、`read` のストリーム版が無かったこと、
+`format` のストリーム宛が無かったこと、パス名層が無かったこと（ファイルは文字列で指していた）。
+途中で、ストリームとは関係なく**トレイトのデフォルト本体がモジュールを跨ぐと壊れる**既存バグが
+出てきたので、それも直した（下記 5）。
+
+### 1. `fresh-line` を「ストリームが答える問い」にした
+
+行頭かどうかを覚えているのはストリーム自身なので、`CharOutput` に 2 つのメソッドを足した:
+
+- `at-line-start` — デフォルト本体は `false`。
+- `fresh-line` — `(if (at-line-start self) () (write-item self #\newline))`。
+
+デフォルトを `false` にしたのは、**分からないなら改行を書く方が安全**だから（CL の
+`fresh-line` の目的は「次の出力が行頭から始まること」を保証することで、余分な空行より
+行の連結の方が害が大きい）。組み込みのリーフストリームはネイティブ層の `last_written` から
+答える。合成ストリームでは `broadcast-stream` だけ `fresh-line` 自体を上書きしてある——
+成分ごとに行頭かどうかは違うので、全体で 1 回判断すると既に行頭の成分に空行が入る。
+
+旧 `(pub defun fresh-line ((s file-stream)) ())` は削除した（同名のトレイトメソッドが
+`file-stream` にも同じ動作で生えるので、呼び出し側は変わらない）。
+
+### 2. `read` のストリーム版 = `read-sexpr` + `PeekInput`
+
+**パースは書き直していない。** 新しいのは「次のデータがどこで終わるか」を見つける
+スキャナだけで、見つけた**テキストをそのまま `read` に渡す**。typelisp で 2 つ目の文法を
+持つと `src/read/reader.rs` と歩調を合わせ続ける羽目になるが、スキャナが知るべきことは
+「何が何を閉じるか」だけで、はるかに間違えにくい。構文エラーの文面も reader のものになる。
+
+テキストは**逐語的に**貯める（空白もコメントも込み）。`Vector<:dyn CharOutput>` のような
+総称型トークンは 1 行に収まっている間だけ 1 シンボルとして読めるので、空白を正規化すると
+意味が変わりうる。
+
+原子（atom）の終わりを知るには終端文字を**見て、戻す**必要がある。これがデフォルト本体を
+書けない唯一の入力操作なので、`PeekInput (CharInput)` を別トレイトとして足した
+（`unread-char` が必須、`peek-char` はデフォルト）。ネイティブのリーフ 3 種はネイティブ層の
+pushback で実装し、それ以外は `make-peek-stream` で包めば得られる——`peek-stream` は
+`:dyn CharInput` と `Option<char>` を 1 つ持つだけの、他の合成ストリームと同じ構造体。
+
+戻り値は `Result<Option<Sexpr>, ReadError>`。入力末尾は `Ok(none)` にした（読み切りループが
+値で終われる。エラーで終わると「構文エラー」と区別できない）。名前が `read` でないのは、
+文字列を取る既存の `read`（CL の `read-from-string`）と単一・静的ディスパッチでは
+同名にできないため。
+
+コスト: テキストの蓄積は 1 文字ごとの `append` なので、1 つのデータの長さに対して O(n²)。
+prelude の `read-line`/`read-all` と同じ形で、実用サイズのフォームでは問題にならないが、
+巨大な 1 フォームを読ませると効いてくる。可変長文字列バッファが要るなら、この 3 つを
+まとめて直すのが筋。
+
+### 3. `format` のストリーム宛
+
+`Checker::check_format` は destination を**期待型なしで**先に検査し、`bool` ならこれまで通り、
+それ以外なら `(write-string dest (format false control args...))` へ**書き換えてから
+check し直す**。自前でメソッド呼び出しを組み立てないのは、`write-string` の解決先が受け手
+次第（具象型 / `:dyn CharOutput` / `where` 境界付き型変数）で、その 3 通りを特殊形が
+知らずに済ませたいから。destination は 2 回検査されるが、検査に実行時作用は無い。
+
+戻り値は `write-string` のもの、つまり `()`（CL の `(format stream ...)` も `nil`）。
+`bool` 宛が文字列を返すのと非対称だが、両方返そうとすると一時変数を導入する必要がある。
+`bool` でもストリームでもない destination は、`write-string` が無いという報告ではなく
+destination の型エラーとして報告する（型変数と `:dyn` は書き換え後に判定されるので素通し）。
+
+### 4. パス名層（CLHS 19）
+
+`defstruct pathname`（directory / name / extension / absolutep）と、パス名指定子トレイト
+`Pathish`（`string` と `pathname` が実装）。**ファイルを名指しする関数は全て
+`(where (Pathish P))` に変えた**ので、文字列を渡す既存コードはそのまま、`pathname` も
+そのまま渡せる。`string` 側の `namestring` は自分自身を返すだけなので、文字列経路に
+パースのコストは乗らない。
+
+分解・再構成は純粋な文字列処理なので**全て prelude（typelisp）で書いた**——ネイティブ側は
+`namestring` が描いた文字列しか見ない。CL の `pathname` 関数だけは型名と衝突するため
+`to-pathname`。ホスト/デバイス/バージョン成分、ワイルドカード、論理パス名は採用しない
+（この処理系が走らないファイルシステムのための機能）。
+
+### 5. 途中で見つかった既存バグ: トレイト impl のメソッドが private だった
+
+`(impl CharInput my-type)` が**ファイル（＝モジュール）の中では通らない**ことに気付いた。
+`impl` のメソッドは `public: false` で登録されていて、`assoc_visible` は「現在の名前空間が
+その型のモジュールの中か」で判定する。ところがトレイトのデフォルト本体は**トレイトの
+名前空間**で検査される（`check_defmethod_in` の `body_ns`。デフォルト本体の自由名を
+トレイト側で解決するための正しい仕組み）ので、実装型が別モジュールにあると構造的に
+「外」になり、兄弟メソッドが見えない。prelude の型は全部 root にあり、root の項目は
+どこからでも見えるので、prelude 内では露見していなかった。
+
+呼び出し側も同じ理由で壊れていた（`(module m ...)` の中で `impl Eq` した型に対する
+`(equals ...)` が root から呼べない）。`pub` は `impl` には書けない（docs/syntax.md §pub）
+ので、**private な trait impl は表現できないものを実装が勝手に作っていた**ことになる。
+Rust も trait impl に可視性を持たない（トレイトのメソッドは値がある所ならどこでも呼べる）。
+そこで `check_impl` は常に public でメソッドを登録するようにした。回帰テストは
+`tests/trait_test.rs` の 2 本（デフォルト本体がモジュールを跨ぐ / 実装モジュールの外から呼ぶ）。
+
+なお可視性フラグは fasl に載る。prelude の fasl は SOURCE のハッシュで無効化されるので
+自動で作り直されるが、**この変更以前に作られたユーザモジュールの `.fastl` は古い private の
+まま**なので、変な「no such function」が出たら `~/.typl/cache` を消すこと
+（`registry.rs` 変更時と同じ罠——implementation-log の「古い fasl キャッシュ」の項）。
+
+### 6. その他
+
+`src/prelude.rs` の `SOURCE` は `r#"..."#` から `r##"..."##` にした。typelisp 側で
+`"#"` や `"#\\"` のような文字列リテラルを書くと `"#` が Rust の raw string を閉じてしまう。
+
+テスト: `tests/stream_test.rs` に 20 本追加（fresh-line / format 宛先 / `read-sexpr` /
+peek・unread / 包み方）、`tests/pathname_test.rs` を新設（15 本）、`tests/trait_test.rs` に
+可視性の回帰 2 本。

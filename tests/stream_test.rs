@@ -444,3 +444,288 @@ fn delete_and_rename_succeed_with_a_unit_payload() {
     ));
     assert_eq!(str_of(v), "falsefalse");
 }
+
+// ---- fresh-line ---------------------------------------------------------
+
+#[test]
+fn fresh_line_writes_a_newline_only_when_one_is_needed() {
+    let v = eval_ok(
+        r#"(let ((s (make-string-output-stream)))
+             (write-string s "a")
+             (fresh-line s)
+             (fresh-line s)
+             (write-string s "b")
+             (get-output-stream-string s))"#,
+    );
+    assert_eq!(str_of(v), "a\nb");
+}
+
+#[test]
+fn fresh_line_on_an_untouched_stream_writes_nothing() {
+    let v = eval_ok(
+        r#"(let ((s (make-string-output-stream)))
+             (fresh-line s)
+             (format false "~d" (length (get-output-stream-string s))))"#,
+    );
+    assert_eq!(str_of(v), "0");
+}
+
+#[test]
+fn a_stream_that_cannot_tell_gets_its_newline() {
+    // The `at-line-start` default is `false`, so `fresh-line` on a stream
+    // with no memory of its own always writes — the safe direction.
+    let v = eval_ok(
+        r#"(defstruct sink (text string))
+           (impl Stream sink
+             (open-stream-p ((self Self)) bool true)
+             (close ((self Self)) () ()))
+           (impl OutputStream sink
+             (type Item char)
+             (write-item ((self Self) (c char)) () (setf self::text (append self::text (char->string c)))))
+           (impl CharOutput sink)
+           (let ((k (sink::new "")))
+             (fresh-line k)
+             (fresh-line k)
+             (format false "~d" (length k::text)))"#,
+    );
+    assert_eq!(str_of(v), "2");
+}
+
+#[test]
+fn a_two_way_stream_takes_its_line_position_from_its_output_side() {
+    let v = eval_ok(
+        r#"(let ((out (make-string-output-stream)))
+             (let ((tw (make-two-way-stream (make-string-input-stream "") out)))
+               (write-string tw "x")
+               (fresh-line tw)
+               (fresh-line tw)
+               (get-output-stream-string out)))"#,
+    );
+    assert_eq!(str_of(v), "x\n");
+}
+
+#[test]
+fn a_broadcast_stream_asks_each_component_for_itself() {
+    // `a` is mid-line and `b` is not, so exactly one of them gets a newline.
+    let v = eval_ok(
+        r#"(let ((a (make-string-output-stream))
+                 (b (make-string-output-stream))
+                 (v (the Vector<:dyn CharOutput> (Vector::new))))
+             (write-string a "mid")
+             (push v a)
+             (push v b)
+             (fresh-line (make-broadcast-stream v))
+             (format false "~s ~s" (get-output-stream-string a) (get-output-stream-string b)))"#,
+    );
+    assert_eq!(str_of(v), r#""mid\n" """#);
+}
+
+// ---- format to a stream -------------------------------------------------
+
+#[test]
+fn format_writes_to_a_stream_destination() {
+    let v = eval_ok(
+        r#"(let ((s (make-string-output-stream)))
+             (format s "id=~d name=~a" 42 "x")
+             (get-output-stream-string s))"#,
+    );
+    assert_eq!(str_of(v), "id=42 name=x");
+}
+
+#[test]
+fn format_to_a_stream_works_through_a_trait_bound_and_a_trait_object() {
+    let v = eval_ok(
+        r#"(defun via-bound<S> ((s S)) () (where (CharOutput S)) (format s "[~d]" 1))
+           (defun via-dyn ((s :dyn CharOutput)) () (format s "{~a}" true))
+           (let ((s (make-string-output-stream)))
+             (via-bound s)
+             (via-dyn s)
+             (get-output-stream-string s))"#,
+    );
+    assert_eq!(str_of(v), "[1]{true}");
+}
+
+#[test]
+fn a_bool_destination_still_yields_the_string() {
+    let v = eval_ok(r#"(format false "~d-~d" 1 2)"#);
+    assert_eq!(str_of(v), "1-2");
+}
+
+#[test]
+fn a_destination_that_is_neither_bool_nor_a_stream_is_rejected() {
+    let e = run(r#"(format 3 "~d" 1)"#).expect_err("a number is not a destination");
+    assert!(e.contains("destination"), "unexpected error: {}", e);
+}
+
+#[test]
+fn format_to_a_file_stream_goes_to_the_file() {
+    let d = TmpDir::new("formatfile");
+    let p = d.path("f.txt");
+    let v = eval_ok(&format!(
+        r#"(match (open-output "{p}")
+             ((ok f) (progn (format f "~d~%" 7) (close f)
+                            (match (read-file-string "{p}") ((ok s) s) ((err e) (message e)))))
+             ((err e) (message e)))"#
+    ));
+    assert_eq!(str_of(v), "7\n");
+}
+
+// ---- read over a stream -------------------------------------------------
+
+#[test]
+fn read_sexpr_reads_one_datum_at_a_time() {
+    let v = eval_ok(
+        r#"(let ((s (make-string-input-stream "(+ 1 2) foo \"bar\" 42"))
+                 (out ""))
+             (loop
+               (match (read-sexpr s)
+                 ((ok o) (match o ((none) (break)) ((some d) (setf out (append out (format false "~s|" d))))))
+                 ((err e) (progn (setf out (append out (message e))) (break)))))
+             out)"#,
+    );
+    assert_eq!(str_of(v), "(+ 1 2)|foo|\"bar\"|42|");
+}
+
+#[test]
+fn read_sexpr_consumes_the_datum_and_no_more() {
+    let v = eval_ok(
+        r#"(let ((s (make-string-input-stream "(a b) rest")))
+             (read-sexpr s)
+             (read-all s))"#,
+    );
+    assert_eq!(str_of(v), " rest");
+}
+
+#[test]
+fn read_sexpr_handles_quotes_comments_strings_and_character_literals() {
+    let v = eval_ok(
+        r##"(defun one ((text string)) string
+             (let ((s (make-string-input-stream text)))
+               (match (read-sexpr s)
+                 ((ok o) (match o ((none) "<eof>") ((some d) (format false "~s" d))))
+                 ((err e) (message e)))))
+           (format false "~a ~a ~a ~a ~a"
+             (one "'(a b)")
+             (one "`(c ,d ,@e)")
+             (one "; skipped
+                   #| also #| nested |# skipped |# 7")
+             (one "\"a)b\"")
+             (one "#\\("))"##,
+    );
+    assert_eq!(
+        str_of(v),
+        r##"(quote (a b)) (quasiquote (c (unquote d) (unquote-splicing e))) 7 "a)b" #\("##
+    );
+}
+
+#[test]
+fn an_atom_ends_at_a_paren_without_losing_it() {
+    // The pushback is the whole reason `read-sexpr` wants `PeekInput`: the
+    // `(` that ends `1` has to still be there for the next read.
+    let v = eval_ok(
+        r#"(let ((s (make-string-input-stream "1(2 3)"))
+                 (out ""))
+             (loop
+               (match (read-sexpr s)
+                 ((ok o) (match o ((none) (break)) ((some d) (setf out (append out (format false "~s|" d))))))
+                 ((err e) (break))))
+             out)"#,
+    );
+    assert_eq!(str_of(v), "1|(2 3)|");
+}
+
+#[test]
+fn read_sexpr_reports_an_incomplete_datum_as_an_error() {
+    let v = eval_ok(
+        r#"(let ((s (make-string-input-stream "(1 2")))
+             (match (read-sexpr s)
+               ((ok _) "no error")
+               ((err e) (message e))))"#,
+    );
+    assert!(str_of(v).contains("end of input"));
+}
+
+#[test]
+fn end_of_input_is_a_value_not_an_error() {
+    let v = eval_ok(
+        r#"(let ((s (make-string-input-stream "   ")))
+             (match (read-sexpr s)
+               ((ok o) (match o ((none) "none") ((some _) "some")))
+               ((err e) (message e))))"#,
+    );
+    assert_eq!(str_of(v), "none");
+}
+
+#[test]
+fn read_sexpr_reads_a_file_form_by_form() {
+    let d = TmpDir::new("readfile");
+    let p = d.path("forms.typl");
+    std::fs::write(&p, "(one 1)\n; a comment\n(two 2)\n").unwrap();
+    let v = eval_ok(&format!(
+        r#"(match (open-input "{p}")
+             ((ok f)
+              (let ((out ""))
+                (loop
+                  (match (read-sexpr f)
+                    ((ok o) (match o ((none) (break)) ((some d) (setf out (append out (format false "~s" d))))))
+                    ((err e) (break))))
+                (close f)
+                out))
+             ((err e) (message e)))"#
+    ));
+    assert_eq!(str_of(v), "(one 1)(two 2)");
+}
+
+#[test]
+fn peek_char_looks_without_consuming_and_unread_char_puts_back() {
+    let v = eval_ok(
+        r#"(let ((s (make-string-input-stream "xyz")))
+             (let ((p (peek-char s)) (r (read-char s)))
+               (unread-char s #\Q)
+               (format false "~a~a~a" p r (read-all s))))"#,
+    );
+    assert_eq!(str_of(v), "(some x)(some x)Qyz");
+}
+
+#[test]
+fn a_stream_without_pushback_gets_it_by_wrapping() {
+    // A composite has no pushback of its own; `peek-stream` adds it, which is
+    // what lets `read-sexpr` run over one.
+    let v = eval_ok(
+        r#"(let ((parts (the Vector<:dyn CharInput> (Vector::new))))
+             (push parts (make-string-input-stream "(1 2)"))
+             (push parts (make-string-input-stream " 3"))
+             (let ((p (make-peek-stream (make-concatenated-stream parts)))
+                   (out ""))
+               (loop
+                 (match (read-sexpr p)
+                   ((ok o) (match o ((none) (break)) ((some d) (setf out (append out (format false "~s|" d))))))
+                   ((err e) (break))))
+               out))"#,
+    );
+    assert_eq!(str_of(v), "(1 2)|3|");
+}
+
+#[test]
+fn a_user_defined_input_stream_can_be_read_from() {
+    let v = eval_ok(
+        r#"(defstruct fixed (text string) (at i32))
+           (impl Stream fixed
+             (open-stream-p ((self Self)) bool true)
+             (close ((self Self)) () ()))
+           (impl InputStream fixed
+             (type Item char)
+             (read-item ((self Self)) Option<char>
+               (if (>= self::at (length self::text))
+                   (option::none)
+                   (let ((c (ref self::text self::at)))
+                     (setf self::at (+ self::at 1))
+                     (option::some c)))))
+           (impl CharInput fixed)
+           (let ((p (make-peek-stream (fixed::new "(from a user stream)" 0))))
+             (match (read-sexpr p)
+               ((ok o) (match o ((none) "<eof>") ((some d) (format false "~s" d))))
+               ((err e) (message e))))"#,
+    );
+    assert_eq!(str_of(v), "(from a user stream)");
+}
