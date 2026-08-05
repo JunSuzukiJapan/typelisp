@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use std::rc::Rc;
 
-use crate::{parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, Type, TypeNameSpan, Value};
+use crate::{parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, RootScope, Type, TypeNameSpan, Value};
 use crate::name_lexer::{NameLexer, NameTok};
 use super::semantic::{TypeKind, TypeUse};
 
@@ -4150,6 +4150,11 @@ impl Checker {
             return Err(Error::TypeError("impl: method must be (name (recv params...) ret body...)".into()));
         }
         let recv_pairs_locs = heap.list_to_vec_locs(elems[1])?;
+        // Everything rebuilt below accumulates in Rust `Vec`s while later
+        // rebuilds keep allocating, so each fresh value is rooted as it is
+        // produced — a `Vec<Value>` is invisible to the collector.
+        let mut heap = RootScope::new(heap);
+        let heap = &mut *heap;
         let mut new_recv_pairs = Vec::new();
         for (pair, pair_loc) in &recv_pairs_locs {
             let p_locs = heap.list_to_vec_locs(*pair)?;
@@ -4158,25 +4163,33 @@ impl Checker {
                 return Err(Error::TypeError("impl: receiver/parameter must be (name type)".into()));
             }
             let new_ty = Self::subst_value(heap, p[1], subst)?;
+            heap.push_root(new_ty);
             // Keep each slot's original span when substitution left it
             // unchanged (the usual case for a concrete type annotation),
             // so the rebuilt signature still records/locates like the
             // written one; a substituted `Self` has no span of its own.
             let ty_loc = if new_ty == p[1] { p_locs[1].1.clone() } else { None };
-            new_recv_pairs.push((
-                self.list_from_vec_locs(heap, &[(p[0], p_locs[0].1.clone()), (new_ty, ty_loc)])?,
-                pair_loc.clone(),
-            ));
+            let pair_form = self.list_from_vec_locs(heap, &[(p[0], p_locs[0].1.clone()), (new_ty, ty_loc)])?;
+            heap.push_root(pair_form);
+            new_recv_pairs.push((pair_form, pair_loc.clone()));
         }
         let new_recv_list = self.list_from_vec_locs(heap, &new_recv_pairs)?;
+        heap.push_root(new_recv_list);
         let new_ret = Self::subst_value(heap, elems[2], subst)?;
+        heap.push_root(new_ret);
         let ret_loc = if new_ret == elems[2] { elems_locs[2].1.clone() } else { None };
         let own_where = match elems.get(3) {
             Some(f) if self.is_where_clause(heap, *f)? => Some(Self::subst_value(heap, *f, subst)?),
             _ => None,
         };
+        if let Some(w) = own_where {
+            heap.push_root(w);
+        }
         let rest_start = if own_where.is_some() { 4 } else { 3 };
         let merged = self.merge_where_clauses(heap, impl_where, own_where, subst)?;
+        if let Some(w) = merged {
+            heap.push_root(w);
+        }
         let mut new_elems = vec![elems[0], new_recv_list, new_ret];
         let mut new_elems_locs: Vec<Option<Loc>> = vec![None, None, ret_loc];
         if let Some(w) = merged {
@@ -4215,6 +4228,9 @@ impl Checker {
         for v in vals.iter().rev() {
             let Ok(tail) = out else { break };
             heap.push_root(tail);
+            // core-build-ok: rebuilds a fasl-restored syntax form, not a core
+            // node. Every element is rooted in `vals` above and the growing
+            // tail is rooted across this call.
             out = heap.cons(*v, tail);
             heap.pop_root();
         }
@@ -4238,6 +4254,11 @@ impl Checker {
         if impl_where.is_none() && own_where.is_none() {
             return Ok(None);
         }
+        // As in `subst_method_sig`: substituted bounds pile up in `items` while
+        // later ones keep allocating, and a `Vec<Value>` is invisible to the
+        // collector — so each one is rooted the moment it is built.
+        let mut heap = RootScope::new(heap);
+        let heap = &mut *heap;
         let mut items: Vec<(Value, Option<Loc>)> = Vec::new();
         let mut push_bounds = |v: Value, heap: &mut Heap, subst: &HashMap<String, Value>| -> Result<(), Error> {
             let elems = heap.list_to_vec_locs(v)?;
@@ -4246,7 +4267,9 @@ impl Checker {
                 items.push((elems[0].0, elems[0].1.clone()));
             }
             for (b, l) in &elems[1..] {
-                items.push((Self::subst_value(heap, *b, subst)?, l.clone()));
+                let bound = Self::subst_value(heap, *b, subst)?;
+                heap.push_root(bound);
+                items.push((bound, l.clone()));
             }
             Ok(())
         };
@@ -5605,11 +5628,23 @@ impl Checker {
     /// rebuild so the elements carried over unchanged keep the positions
     /// they were read with.
     fn list_from_vec_locs(&self, heap: &mut Heap, items: &[(Value, Option<Loc>)]) -> Result<Value, Error> {
+        // Both halves of this need rooting across the conses below, since every
+        // `cons` can collect: the partially-built tail, and the items
+        // themselves — an item is often a freshly substituted form
+        // (`Self::subst_value`) reachable from nowhere else yet.
+        let mut s = RootScope::new(heap);
+        for (item, _) in items {
+            s.push_root(*item);
+        }
         let mut out = Value::Empty;
         for (item, loc) in items.iter().rev() {
-            out = heap.cons(*item, out)?;
+            s.push_root(out);
+            // core-build-ok: rebuilds read syntax, not a core node, so it needs
+            // per-cell `set_elem_loc` that `core::list` does not do. Both the
+            // items and the growing tail are rooted in `s` above.
+            out = s.cons(*item, out)?;
             if let (Value::Cons(cr), Some(l)) = (out, loc) {
-                heap.set_elem_loc(cr, l.clone());
+                s.set_elem_loc(cr, l.clone());
             }
         }
         Ok(out)
@@ -5630,9 +5665,17 @@ impl Checker {
             Value::Cons(_) => {
                 let car = heap.car(v)?;
                 let cdr = heap.cdr(v)?;
-                let new_car = Self::subst_value(heap, car, subst)?;
-                let new_cdr = Self::subst_value(heap, cdr, subst)?;
-                heap.cons(new_car, new_cdr)
+                // `new_car` may be a freshly rebuilt subtree that nothing else
+                // references, and rebuilding the cdr allocates — so it has to
+                // be rooted across that call, not just across the final cons.
+                let mut s = RootScope::new(heap);
+                let new_car = Self::subst_value(&mut s, car, subst)?;
+                s.push_root(new_car);
+                let new_cdr = Self::subst_value(&mut s, cdr, subst)?;
+                s.push_root(new_cdr);
+                // core-build-ok: rewrites a read syntax tree in place, not a
+                // core node. Both halves are rooted in `s` just above.
+                s.cons(new_car, new_cdr)
             }
             other => Ok(other),
         }
