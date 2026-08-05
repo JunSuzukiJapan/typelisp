@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "inkwell",
  "lsp-server",
@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-mem"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "num-bigint",
  "num-rational",
@@ -460,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-rt"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "num-bigint",
  "num-integer",

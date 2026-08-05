@@ -1,6 +1,6 @@
 [package]
 name = "typelisp-rt"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2018"
 
 # `staticlib` lets `compile-file`'s AOT output (linked via the system `cc`,
