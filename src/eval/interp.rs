@@ -1005,6 +1005,32 @@ impl Interp {
         }
     }
 
+    /// Whether an *enum field* of type `fty` can be stored in a heap
+    /// `BoxedObj::Enum`.
+    ///
+    /// Wider than "is this type heap-repr", because a field slot holds a `Value`
+    /// and several types that are not themselves heap-resident still have one:
+    ///
+    /// * a boxable scalar (`i64`/`Str`/`bignum`/...) boxes trivially;
+    /// * `Unit` is `Value::Empty`;
+    /// * an LLVM handle is an opaque integer since handles were unified, so it
+    ///   stores as `Value::Int` — this is what lets the compiler island's
+    ///   `Option<llvm-value>` be an ordinary heap enum rather than the native
+    ///   `RtValue::Data` fallback it needed when a handle was a Rust object.
+    ///
+    /// `Type::Fn` is deliberately *not* here. A closure value is heap-repr, but a
+    /// function value can also be a bare built-in name (`RtValue::Builtin`, e.g.
+    /// `gensym` used as a value), which has no `Value` form — so declaring `Fn`
+    /// storable would route `Option<Fn>` bindings to a heap slot that
+    /// `(Option::some gensym)` cannot satisfy. It can be added once built-ins
+    /// become heap closures.
+    fn enum_field_storable(&self, fty: &Type, seen: &mut HashSet<Path>) -> bool {
+        crate::check::checker::is_boxable_scalar(fty)
+            || matches!(fty, Type::Unit)
+            || crate::compile::ast_bridge::is_llvm_handle_ty(fty)
+            || self.is_heap_repr_ty(fty, seen)
+    }
+
     /// Whether `p` names an enum type — one whose runtime value is
     /// *potentially* a boxed `BoxedObj::Enum`: the built-in
     /// `Option`/`Result`/the concrete error types, or a user `defenum` — all
@@ -1045,7 +1071,7 @@ impl Interp {
         } else {
             Vec::new()
         };
-        let ok = field_types.iter().all(|fty| crate::check::checker::is_boxable_scalar(fty) || self.is_heap_repr_ty(fty, seen));
+        let ok = field_types.iter().all(|fty| self.enum_field_storable(fty, seen));
         seen.remove(name);
         ok
     }
