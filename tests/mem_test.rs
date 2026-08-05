@@ -422,6 +422,94 @@ fn gc_stress_keeps_properly_rooted_intermediates_alive() {
     assert_accounting(&h);
 }
 
+// ---- session roots -------------------------------------------------------
+
+#[test]
+fn session_roots_keep_a_value_alive_until_the_bracket_ends() {
+    let mut h = Heap::with_capacity(64);
+    let mark = h.session_root_count();
+
+    let v = h.cons(Value::Int(1), Value::Empty).unwrap();
+    h.push_session_root(v); // the only thing keeping it alive
+    h.gc();
+    assert_eq!(h.car(v).unwrap(), Value::Int(1), "session root did not survive");
+
+    h.truncate_session_roots(mark);
+    h.gc();
+    assert_eq!(h.live_count(), 0, "released session root was not reclaimed");
+    assert_accounting(&h);
+}
+
+/// The reason this is not just `push_root`: compiled code unwinds the LIFO
+/// stack to a recorded base (`rt_truncate_sexpr_roots`) on every `break`/
+/// `return`, which would silently discard a root pushed underneath it by a
+/// runtime shim.
+#[test]
+fn session_roots_survive_a_lifo_unwind() {
+    let mut h = Heap::with_capacity(64);
+
+    let base = h.root_count();
+    let lifo = h.cons(Value::Int(1), Value::Empty).unwrap();
+    h.push_root(lifo);
+
+    let shim = h.cons(Value::Int(2), Value::Empty).unwrap();
+    h.push_session_root(shim);
+
+    // What a compiled `break` does: cut the LIFO stack back to its base.
+    h.truncate_roots(base);
+    h.gc();
+
+    assert_eq!(h.car(shim).unwrap(), Value::Int(2), "the unwind took the session root with it");
+    assert_eq!(h.live_count(), 1, "only the session-rooted value should survive");
+    assert_accounting(&h);
+}
+
+/// Nested compile sessions: the inner bracket must release only its own.
+#[test]
+fn session_root_brackets_nest() {
+    let mut h = Heap::with_capacity(64);
+
+    let outer_mark = h.session_root_count();
+    let outer = h.cons(Value::Int(1), Value::Empty).unwrap();
+    h.push_session_root(outer);
+
+    let inner_mark = h.session_root_count();
+    let inner = h.cons(Value::Int(2), Value::Empty).unwrap();
+    h.push_session_root(inner);
+
+    h.truncate_session_roots(inner_mark);
+    h.gc();
+    assert_eq!(h.car(outer).unwrap(), Value::Int(1), "inner bracket released the outer's root");
+    assert_eq!(h.live_count(), 1);
+
+    h.truncate_session_roots(outer_mark);
+    h.gc();
+    assert_eq!(h.live_count(), 0);
+    assert_accounting(&h);
+}
+
+/// A session-rooted scope box must keep its frames — and their contents —
+/// reachable, which is the whole point for the compiler island.
+#[test]
+fn session_rooted_scopes_keep_their_frames_alive() {
+    let mut h = Heap::with_capacity(256);
+    let scope = h.alloc_scope();
+    h.push_session_root(scope);
+    let id = match scope {
+        Value::Boxed(id) => id,
+        _ => unreachable!(),
+    };
+    h.scope_push_frame(id);
+    let stored = h.cons(Value::Int(7), Value::Empty).unwrap();
+    h.scope_set(id, "x", stored);
+
+    h.gc();
+
+    assert_eq!(h.scope_get(id, "x"), Some(stored));
+    assert_eq!(h.car(stored).unwrap(), Value::Int(7), "frame contents were swept");
+    assert_accounting(&h);
+}
+
 // ---- RootScope -----------------------------------------------------------
 
 #[test]

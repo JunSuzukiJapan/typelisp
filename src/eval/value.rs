@@ -1,7 +1,6 @@
 //! Runtime values and errors for the tree-walking interpreter.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::{error, fmt};
 
@@ -10,108 +9,6 @@ use num_rational::BigRational;
 
 use crate::{BoxId, Heap, Loc, Path, Type, Value};
 
-/// One `Scope<V>` frame — see [`RtValue::Scope`]'s doc comment.
-pub type ScopeFrame = Rc<RefCell<HashMap<String, RtValue>>>;
-
-/// The Rust-native `Scope<V>` representation behind [`RtValue::Scope`] — a
-/// stack of shared frames, encapsulated so the scope-chain invariants
-/// (frames are shared by `Rc`, never copied entry-by-entry; the frame
-/// *stack* is per-scope) live behind this method surface instead of being
-/// re-derived at every call site. The mirror of the heap representation's
-/// `Heap::scope_*` method family (`StructPayload::Frames`, for heap-repr
-/// `V` — see [`RtValue::Scope`]'s doc comment for how the two families
-/// split); the six methods here are the native halves of the same six
-/// builtin methods.
-#[derive(Clone, Debug)]
-pub struct NativeScope {
-    frames: Rc<RefCell<Vec<ScopeFrame>>>,
-}
-
-impl NativeScope {
-    /// One fresh empty frame, already pushed — the frame a function's own
-    /// parameters/captures bind into (`compiler.rs`'s `bind-params`/
-    /// `bind-captures`), matching `HashTable::new`'s "ready to use
-    /// immediately" convention.
-    pub fn new() -> NativeScope {
-        NativeScope { frames: Rc::new(RefCell::new(vec![Rc::new(RefCell::new(HashMap::new()))])) }
-    }
-
-    /// Shares every current frame (by `Rc::clone` — a pointer copy per
-    /// frame, never copying a frame's own entries) into a brand new scope
-    /// with its own independent stack. `compiler.rs`'s `compile-labels`
-    /// uses this to give each `labels` def's own new lexical scope every
-    /// enclosing scope's frames "for free" before pushing that def's own
-    /// fresh parameter frame on top.
-    pub fn clone_frames(&self) -> NativeScope {
-        NativeScope { frames: Rc::new(RefCell::new(self.frames.borrow().clone())) }
-    }
-
-    pub fn push_frame(&self) {
-        self.frames.borrow_mut().push(Rc::new(RefCell::new(HashMap::new())));
-    }
-
-    pub fn pop_frame(&self) {
-        self.frames.borrow_mut().pop();
-    }
-
-    /// Searches from the most-recently-pushed frame outward — see
-    /// `compiler.rs`'s module doc comment for why this terminates at the
-    /// scope's own first (function-entry) frame rather than reaching into
-    /// an *enclosing* function's scope (a different value entirely; there
-    /// is nothing further to search here).
-    pub fn get(&self, name: &str) -> Option<RtValue> {
-        for frame in self.frames.borrow().iter().rev() {
-            if let Some(v) = frame.borrow().get(name) {
-                return Some(v.clone());
-            }
-        }
-        None
-    }
-
-    /// Always writes into the most-recently-pushed frame — never an
-    /// enclosing (shared, via [`clone_frames`](Self::clone_frames)) one, so
-    /// a `let`/`labels` def's own bindings never leak into whatever scope
-    /// it borrowed frames from. Errors if every frame has been popped —
-    /// only reachable through an unbalanced `pop-frame`, kept a catchable
-    /// evaluation error (the same one the heap representation's guard
-    /// reports) rather than a panic.
-    pub fn set(&self, name: &str, value: RtValue) -> Result<(), EvalError> {
-        let frames = self.frames.borrow();
-        let top = frames.last().ok_or_else(|| EvalError::Internal("Scope::set: no frame to write into".into()))?;
-        top.borrow_mut().insert(name.to_string(), value);
-        Ok(())
-    }
-
-    /// The current frame count — `#<scope depth=N>`'s display number.
-    pub fn depth(&self) -> usize {
-        self.frames.borrow().len()
-    }
-
-    /// Visits every value bound in every frame — `collect_sexpr_roots`'s
-    /// hook for rooting the `Sexpr` values a native scope's frames may hold
-    /// (see `Interp::sync_roots`), without exposing the frame storage.
-    pub fn for_each_value(&self, mut f: impl FnMut(&RtValue)) {
-        for frame in self.frames.borrow().iter() {
-            for v in frame.borrow().values() {
-                f(v);
-            }
-        }
-    }
-}
-
-impl Default for NativeScope {
-    fn default() -> Self {
-        NativeScope::new()
-    }
-}
-
-/// Content comparison, frame by frame — the same semantics the raw
-/// `Rc<RefCell<Vec<ScopeFrame>>>` payload's `PartialEq` arm always had.
-impl PartialEq for NativeScope {
-    fn eq(&self, other: &Self) -> bool {
-        *self.frames.borrow() == *other.frames.borrow()
-    }
-}
 
 /// Which of the interpreter's two binding-slot representations a binding
 /// uses — decided *statically*, from the binding's declared type, never from
@@ -318,28 +215,6 @@ pub enum RtValue {
     /// A built-in *instance method* used as a function value (e.g. `+` on
     /// `i32` — see [`Expr::MethodRef`](crate::Expr::MethodRef)).
     BuiltinMethod(Path, String),
-    /// A `Scope<V>` **of a native-repr `V`**: a stack of frames (each an
-    /// ordinary `String`-keyed map),
-    /// used by the (typelisp-hosted) compiler body (`src/compiler.rs`) to
-    /// track lexically-nested name resolution (`env`/`fn-env`) the way a
-    /// real interpreter's environment chain would — see that module's doc
-    /// comment for the "list of scopes" model this implements. A frame is
-    /// `Rc<RefCell<HashMap<..>>>` specifically so a "clone the frame list" operation
-    /// is just a `Vec` of cloned `Rc`s — cheap (pointer copies, no per-entry
-    /// work) and exactly what lets a `labels` def's own new scope start from
-    /// every enclosing scope's frames without copying their contents.
-    ///
-    /// Since the unification's Stage 8 this variant backs only scopes whose
-    /// element type `V` is *not* itself heap-repr — above all the
-    /// compiler's `Scope<llvm-value>`/`Scope<llvm-function>`, whose LLVM
-    /// handles a `mem::Value` cannot carry. A `Scope<V>` of a heap-repr `V`
-    /// (`Sexpr`/boxed structs/`HashTable`/such a scope itself) is instead an
-    /// `RtValue::Sexpr` boxed `StructPayload::Frames` scope, with the same
-    /// share-frames-by-reference semantics; which family a value belongs to
-    /// is decided statically from `V` (`Interp::scope_is_heap`), never from
-    /// the value's shape. The payload is the [`NativeScope`] struct — the
-    /// frame-stack invariants live behind its method surface.
-    Scope(NativeScope),
 }
 
 impl PartialEq for RtValue {
@@ -369,7 +244,6 @@ impl PartialEq for RtValue {
             (RtValue::BuiltinMethod(p1, m1), RtValue::BuiltinMethod(p2, m2)) => {
                 p1 == p2 && m1 == m2
             }
-            (RtValue::Scope(a), RtValue::Scope(b)) => a == b,
             // Any other pair (including a mismatch of variants) is unequal.
             _ => false,
         }

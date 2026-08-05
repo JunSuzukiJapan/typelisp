@@ -25,10 +25,13 @@
 //! * **Mark-sweep.** `gc()` marks everything reachable from the root set
 //!   (iteratively — no native recursion), then rebuilds the cons free list and
 //!   sweeps strings. Cycles are reclaimed (unlike reference counting).
-//! * **Two root sets.** `roots` is a strict LIFO stack (push on scope entry,
+//! * **Three root sets.** `roots` is a strict LIFO stack (push on scope entry,
 //!   pop on scope exit). `permanent_roots` holds values whose owner outlives
 //!   any single activation (e.g. a field inside a heap-external, never-freed
-//!   box) — appended to, never popped. `gc()` marks from both.
+//!   box) — appended to, never popped. `session_roots` holds values that must
+//!   survive a bracketed span of work but not outlive it, released in bulk at
+//!   the bracket's end (see [`Heap::push_session_root`]). `gc()` marks from all
+//!   three.
 //!
 //! All `unsafe` is confined here; the public API is safe.
 
@@ -63,6 +66,8 @@ pub struct Heap {
     gc_stress: bool,
     roots: Vec<Value>,
     permanent_roots: Vec<Value>,
+    // Roots for the duration of a bracketed session — see `push_session_root`.
+    session_roots: Vec<Value>,
 
     // interned symbols (permanent)
     sym_names: Vec<String>,
@@ -195,6 +200,7 @@ impl Heap {
             gc_stress: false,
             roots: Vec::new(),
             permanent_roots: Vec::new(),
+            session_roots: Vec::new(),
             sym_names: Vec::new(),
             sym_ids: HashMap::new(),
             gensym_counter: 0,
@@ -393,6 +399,51 @@ impl Heap {
     /// storage half. See [`Self::permanent_root`].
     pub fn set_permanent_root(&mut self, idx: usize, v: Value) {
         self.permanent_roots[idx] = v;
+    }
+
+    // ---- session roots ----------------------------------------------------
+
+    /// Register `v` as a root for the rest of the current *session* — a
+    /// bracketed span of work whose intermediate values outlive individual
+    /// activations but must not outlive the span. Released in bulk by
+    /// [`truncate_session_roots`](Self::truncate_session_roots).
+    ///
+    /// This is the third root set because neither of the other two can do the
+    /// job for values compiled code holds without rooting them itself:
+    ///
+    /// * `roots` is a strict LIFO stack that compiled code actively unwinds —
+    ///   `rt_truncate_sexpr_roots` cuts it back to a recorded base on every
+    ///   `break`/`return`. A root pushed from underneath, by a runtime shim
+    ///   the compiled frame does not know about, would be silently discarded
+    ///   by the next such unwind (or would desync somebody else's pairing).
+    /// * `permanent_roots` never releases anything, and compiled-global
+    ///   promotion appends to it at interleaved times, so its indices must
+    ///   stay stable — truncating it is not available even in principle.
+    ///
+    /// The motivating case is the self-hosted compiler's `Scope<V>`: the
+    /// committed island bitcode binds scope values at the untraced integer
+    /// kind (they used to be registry handles), so a heap scope living only in
+    /// a compiled local would be swept by any collection during compilation.
+    /// Rooting it at birth, for the compile session, restores exactly the
+    /// lifetime the handle registry used to give it.
+    pub fn push_session_root(&mut self, v: Value) {
+        self.session_roots.push(v);
+    }
+
+    /// The current session-root count — pass to
+    /// [`truncate_session_roots`](Self::truncate_session_roots) to release
+    /// everything registered after this point.
+    pub fn session_root_count(&self) -> usize {
+        self.session_roots.len()
+    }
+
+    /// Release every session root registered since `len` was observed. A no-op
+    /// if `len` is already at or past the current count, like [`Vec::truncate`].
+    ///
+    /// Brackets nest: an inner session releases only its own registrations, so
+    /// a nested compile leaves the outer one's values rooted.
+    pub fn truncate_session_roots(&mut self, len: usize) {
+        self.session_roots.truncate(len);
     }
 
     // ---- symbols ----------------------------------------------------------
@@ -1476,6 +1527,9 @@ impl Heap {
         }
         for i in 0..self.permanent_roots.len() {
             stack.push(self.permanent_roots[i]);
+        }
+        for i in 0..self.session_roots.len() {
+            stack.push(self.session_roots[i]);
         }
         // Every binding cell still referenced by a live `Rc<BoxId>` handle
         // is a root of its own — see `alloc_cell`. Dead entries (the last

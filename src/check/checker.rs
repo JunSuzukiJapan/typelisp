@@ -2907,7 +2907,13 @@ impl Checker {
 
     fn is_heap_repr_seen(&self, ty: &Type, seen: &mut HashSet<Path>) -> bool {
         match ty {
-            Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => self.is_heap_repr_seen(&args[0], seen),
+            // Every `Scope<V>` is a heap scope (`StructPayload::Frames`),
+            // whatever `V` is. This used to recurse on `V` because the
+            // compiler's `Scope<llvm-value>` held Rust-native LLVM objects
+            // that no `Value` could carry; those are opaque handle integers
+            // now, so the one case that forced a second representation is
+            // gone and the recursion with it.
+            Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => true,
             Type::Named(p, _) if *p == Path::root("sexpr") || *p == Path::root("hashtable") => true,
             Type::Named(p, args) => match self.reg.type_def(p) {
                 Some(d) if d.kind == AdtKind::Struct => true,

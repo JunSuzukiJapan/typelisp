@@ -40,7 +40,7 @@ use crate::{BoxId, CompileTarget, Expr, Heap, Loc, MacroExpander, MacroLambda, P
 
 use super::pprint;
 use super::scope;
-use super::value::{EvalError, NativeScope, RtValue, Slot, SlotKind};
+use super::value::{EvalError, RtValue, Slot, SlotKind};
 
 /// A registered function or method body with its parameter names. Lives at
 /// exactly one [`scope::ModuleScope`] tree node — its own defining module —
@@ -994,7 +994,9 @@ impl Interp {
     fn is_heap_repr_ty(&self, ty: &Type, seen: &mut HashSet<Path>) -> bool {
         match ty {
             Type::Named(p, _) if is_sexpr_type(p) || *p == Path::root("hashtable") || matches!(self.root.borrow().find_type(p), Some(scope::TypeEntry::Struct)) => true,
-            Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => self.is_heap_repr_ty(&args[0], seen),
+            // Always heap now — see `Checker::is_heap_repr_seen`'s matching
+            // arm for why the element recursion is gone.
+            Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => true,
             Type::Named(p, args) if self.is_enum_path(p) => self.enum_fields_representable(p, args, seen),
             // A trait object is a `BoxedObj::Dyn` fat box — the twin of
             // `Checker::is_heap_repr_seen`'s `Type::Dyn` arm.
@@ -1048,24 +1050,6 @@ impl Interp {
         ok
     }
 
-    /// Whether a `Scope<V>` type's runtime representation is the heap
-    /// (`StructPayload::Frames`) one — true exactly when `V`'s own runtime
-    /// representation is a heap `Value` ([`Interp::heap_repr_kind`], whose
-    /// matching recursive arm routes scope-typed *bindings* to the same
-    /// tier as the scope *values* this classifies). Monomorphization
-    /// guarantees the `V` seen here is concrete; a non-`Scope` type
-    /// reaching this is a checker/interpreter divergence, trapped loudly
-    /// rather than guessed around.
-    fn scope_is_heap(&self, scope_ty: &Type) -> Result<bool, EvalError> {
-        match scope_ty {
-            Type::Named(p, targs) if *p == Path::root("scope") && targs.len() == 1 => {
-                Ok(matches!(self.heap_repr_kind(&targs[0]), SlotKind::Heap))
-            }
-            other => {
-                Err(EvalError::Internal(format!("expected a Scope<V> type at a scope method call, got {:?}", other)))
-            }
-        }
-    }
 
     /// Recompute the cons heap's root set from every `Sexpr` value reachable
     /// through a currently-live `Native` slot (a `Data`/`Scope` may hold
@@ -1587,7 +1571,7 @@ impl Interp {
                     }
                     None => {
                         let recv_ty = args.first().map(|a| &a.ty);
-                        match eval_builtin_method(self, heap, type_name, method, recv_ty, &argv, &t.ty) {
+                        match eval_builtin_method(heap, type_name, method, recv_ty, &argv, &t.ty) {
                             Some(result) => result,
                             None => Err(EvalError::NoSuchFunction(method_link_name(type_name, method))),
                         }
@@ -1839,7 +1823,7 @@ impl Interp {
                     },
                     RtValue::BuiltinMethod(type_name, method) => {
                         let recv_ty = args.first().map(|a| &a.ty);
-                        match eval_builtin_method(self, heap, &type_name, &method, recv_ty, &argv, &t.ty) {
+                        match eval_builtin_method(heap, &type_name, &method, recv_ty, &argv, &t.ty) {
                             Some(r) => r,
                             None => Err(EvalError::NoSuchFunction(method_link_name(&type_name, &method))),
                         }
@@ -2172,17 +2156,6 @@ impl Interp {
                     crossing_roots += 1;
                     Ok(crate::compile::runtime::encode(sv))
                 }
-                // A native scope crosses as a registry handle: a raw untraced
-                // index (`ast_bridge::is_llvm_handle_ty`'s integer-kind
-                // representation). The registry entry keeps the payload alive
-                // for compiled code to hand back through `rt_llvm_call`/the
-                // return decode; no GC root, the registry itself is the owner.
-                //
-                // An LLVM object needs no arm of its own any more: the
-                // interpreter already holds one *as* its handle integer (see
-                // `NativeHandle`), so it crosses through the `RtValue::Int`
-                // arm unchanged — which is the point of unifying them.
-                RtValue::Scope(s) => Ok(llvm_handle_register(NativeHandle::Scope(s.clone()))),
                 other => Err(EvalError::Internal(format!("compiled call: unsupported argument {:?}", other))),
             };
             match encoded {
@@ -2212,7 +2185,6 @@ impl Interp {
         // would otherwise be misread by `is_boxed_sexpr_type`'s catch-all.
         if crate::compile::ast_bridge::is_llvm_handle_ty(ret_ty) {
             return match llvm_handle_get(raw) {
-                Some(NativeHandle::Scope(s)) => Ok(RtValue::Scope(s)),
                 Some(_) => Ok(RtValue::Int(raw)),
                 None => Err(EvalError::Internal(format!("compiled call returned dangling llvm handle {}", raw))),
             };
@@ -2389,6 +2361,15 @@ impl Interp {
     /// alone is enough — no need to also check field representability the
     /// way `Interp::enum_fields_representable` does for a binding.
     fn is_boxed_sexpr_type(&self, ty: &Type) -> bool {
+        // `Scope<V>` is checked explicitly rather than falling out of the
+        // lookups below: `scope` is a built-in whose `AdtDef` has no variants
+        // and is never registered in the runtime scope tree, so neither
+        // `TypeEntry::Struct` nor `is_enum_path` recognizes it. Without this
+        // arm a compiled function returning a `Scope<V>` would have its
+        // tagged box word handed back as a bare `RtValue::Int`.
+        if matches!(ty, Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1) {
+            return true;
+        }
         matches!(ty, Type::Fn(..))
             || matches!(ty, Type::Named(p, _) if is_sexpr_type(p) || matches!(self.root.borrow().find_type(p), Some(scope::TypeEntry::Struct)) || self.is_enum_path(p))
     }
@@ -2698,8 +2679,12 @@ impl Interp {
         if let Some(cf) = compiled {
             let ret_ty = Type::Named(Path::root("llvm-module"), Vec::new());
             let mark = llvm_handles_mark();
+            let scope_mark = heap.session_root_count();
             let r = self.call_compiled(heap, &cf, &argv, &ret_ty);
             llvm_handles_release(mark);
+            // Scope boxes the island created during this compile are session
+            // roots (see `LlvmRetK::Scope`); release them with the handles.
+            heap.truncate_session_roots(scope_mark);
             r?;
             return Ok(());
         }
@@ -4295,7 +4280,6 @@ fn collect_sexpr_roots(v: &RtValue, out: &mut Vec<Value>) {
                 collect_sexpr_roots(f, out);
             }
         }
-        RtValue::Scope(scope) => scope.for_each_value(|f| collect_sexpr_roots(f, out)),
         _ => {}
     }
 }
@@ -4970,7 +4954,7 @@ fn eval_read(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// what `Scope<V>`'s instance methods dispatch their representation on;
 /// see the `"scope"` arm. `interp` carries the `struct_types` that
 /// classification reads ([`Interp::scope_is_heap`]).
-fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, method: &str, recv_ty: Option<&Type>, args: &[RtValue], ret_ty: &Type) -> Option<Result<RtValue, EvalError>> {
+fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, recv_ty: Option<&Type>, args: &[RtValue], ret_ty: &Type) -> Option<Result<RtValue, EvalError>> {
     if *type_name == Path::root("hashtable") {
         return match method {
             "new" => Some(Ok(RtValue::Sexpr(heap.alloc_hashtable()))),
@@ -4998,49 +4982,27 @@ fn eval_builtin_method(interp: &Interp, heap: &mut Heap, type_name: &Path, metho
         };
     }
     if *type_name == Path::root("scope") {
-        // Two representations, dispatched on the *static* element type `V`
-        // (never the receiver value's shape — [`Interp::scope_is_heap`]):
-        // heap-repr `V` -> the `StructPayload::Frames` heap scope
-        // (unification Stage 8), everything else (LLVM handles above all)
-        // -> the Rust-native `RtValue::Scope`. `new` has no receiver, so it
-        // reads `V` off its own checked return type `Scope<V>` instead.
+        // One representation: every `Scope<V>` is a `StructPayload::Frames`
+        // heap box. The element type `V` is still needed — to encode a value
+        // on the way in and decode it on the way out — and is read from the
+        // call site's checked types, never from the value's shape: the
+        // receiver's `Scope<V>` for an instance method, and for the
+        // receiver-less `new`/`get` the node's own return type.
         if method == "new" {
-            return Some(
-                interp
-                    .scope_is_heap(ret_ty)
-                    .map(|heap_repr| if heap_repr { RtValue::Sexpr(heap.alloc_scope()) } else { scope_new() }),
-            );
+            return Some(Ok(RtValue::Sexpr(heap.alloc_scope())));
         }
-        let heap_repr = match recv_ty {
-            Some(ty) => match interp.scope_is_heap(ty) {
-                Ok(h) => h,
-                Err(e) => return Some(Err(e)),
-            },
-            None => {
-                return Some(Err(EvalError::Internal(format!(
-                    "scope::{}: no receiver type at the call site",
-                    method
-                ))))
-            }
-        };
-        return if heap_repr {
-            match method {
-                "clone-frames" => Some(scope_clone_frames_heap(heap, args)),
-                "push-frame" => Some(scope_push_frame_heap(heap, args)),
-                "pop-frame" => Some(scope_pop_frame_heap(heap, args)),
-                "get" => Some(scope_get_heap(heap, args)),
-                "set" => Some(scope_set_heap(heap, args)),
-                _ => None,
-            }
-        } else {
-            match method {
-                "clone-frames" => Some(scope_clone_frames(args)),
-                "push-frame" => Some(scope_push_frame(args)),
-                "pop-frame" => Some(scope_pop_frame(args)),
-                "get" => Some(scope_get(heap, args)),
-                "set" => Some(scope_set(args)),
-                _ => None,
-            }
+        return match method {
+            "clone-frames" => Some(scope_clone_frames_heap(heap, args)),
+            "push-frame" => Some(scope_push_frame_heap(heap, args)),
+            "pop-frame" => Some(scope_pop_frame_heap(heap, args)),
+            // `get`'s own `Option<V>` return type carries `V`.
+            "get" => Some(scope_get_heap(heap, args, ret_ty)),
+            // `set` takes `V` from the receiver's `Scope<V>`.
+            "set" => Some(match scope_elem_ty(recv_ty) {
+                Ok(elem) => scope_set_heap(heap, args, &elem),
+                Err(e) => Err(e),
+            }),
+            _ => None,
         };
     }
     if *type_name == Path::root("string") {
@@ -7068,50 +7030,6 @@ fn vector_pop(heap: &mut Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtValu
     Ok(option_value(heap, popped))
 }
 
-// The native (`RtValue::Scope`) halves of the six scope builtin methods —
-// thin adapters between the `args` slice and [`NativeScope`]'s method
-// surface, which owns the frame-stack semantics (search order, top-frame
-// writes, `clone-frames` sharing — see that struct's doc comments).
-
-fn expect_scope(v: &RtValue) -> Result<&NativeScope, EvalError> {
-    match v {
-        RtValue::Scope(scope) => Ok(scope),
-        other => Err(EvalError::Internal(format!("expected a Scope, got {:?}", other))),
-    }
-}
-
-fn scope_new() -> RtValue {
-    RtValue::Scope(NativeScope::new())
-}
-
-fn scope_clone_frames(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    Ok(RtValue::Scope(expect_scope(&args[0])?.clone_frames()))
-}
-
-fn scope_push_frame(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    expect_scope(&args[0])?.push_frame();
-    Ok(RtValue::Unit)
-}
-
-fn scope_pop_frame(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    expect_scope(&args[0])?.pop_frame();
-    Ok(RtValue::Unit)
-}
-
-fn scope_get(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let scope = expect_scope(&args[0])?;
-    let name = expect_str(&args[1])?;
-    let found = scope.get(name);
-    Ok(option_value(heap, found))
-}
-
-fn scope_set(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let scope = expect_scope(&args[0])?;
-    let name = expect_str(&args[1])?;
-    scope.set(name, args[2].clone())?;
-    Ok(RtValue::Unit)
-}
-
 // ---- LLVM handle registry + `rt_llvm_call` (interp-closure removal ------
 // ---- Stage 1) -----------------------------------------------------------
 //
@@ -7161,7 +7079,6 @@ pub(crate) enum NativeHandle {
     Function(FunctionValue<'static>),
     BasicBlock(BasicBlock<'static>),
     Value(BasicValueEnum<'static>),
-    Scope(NativeScope),
 }
 
 thread_local! {
@@ -7249,7 +7166,6 @@ pub fn llvm_value_of(v: &RtValue) -> Option<BasicValueEnum<'static>> {
 fn handle_of(v: &RtValue) -> Option<i64> {
     match v {
         RtValue::Int(h) => Some(*h),
-        RtValue::Scope(s) => Some(llvm_handle_register(NativeHandle::Scope(s.clone()))),
         _ => None,
     }
 }
@@ -7257,10 +7173,7 @@ fn handle_of(v: &RtValue) -> Option<i64> {
 /// The interpreter value standing for handle integer `raw`, the inverse of
 /// [`handle_of`].
 fn value_of_handle(raw: i64) -> Option<RtValue> {
-    match llvm_handle_get(raw)? {
-        NativeHandle::Scope(s) => Some(RtValue::Scope(s)),
-        _ => Some(RtValue::Int(raw)),
-    }
+    llvm_handle_get(raw).map(|_| RtValue::Int(raw))
 }
 
 /// The handle integer `v` carries, for the `expect_llvm_*` accessors.
@@ -7293,6 +7206,13 @@ pub(crate) fn llvm_handles_release(mark: usize) {
 enum LlvmArgK {
     /// A registry handle — decode via [`llvm_handle_get`].
     Handle,
+    /// A tagged heap `Value::Boxed` at a `StructPayload::Frames` scope.
+    ///
+    /// Compiled code treats a scope word as opaque: it only ever receives one
+    /// from `rt_llvm_call` and hands it straight back, so what the word *is*
+    /// is settled entirely here, and the committed island bitcode is
+    /// indifferent to the change from registry handle to tagged box.
+    Scope,
     /// A tagged heap `Value::Str` — decode to `RtValue::Str`.
     Str,
     /// A raw untagged integer.
@@ -7306,6 +7226,11 @@ enum LlvmArgK {
 enum LlvmRetK {
     /// Register the value, return its handle.
     Handle,
+    /// A scope box, tagged — see [`LlvmArgK::Scope`]. Registered as a session
+    /// root on the way out: the committed island binds scope words at the
+    /// untraced integer kind, so nothing else keeps the box alive while the
+    /// compile session runs.
+    Scope,
     /// Return `0` (`compile-unit`'s convention).
     Unit,
     /// Raw 0/1.
@@ -7384,12 +7309,17 @@ fn llvm_op_table() -> &'static HashMap<i64, LlvmOp> {
             }
         }
         use LlvmArgK::{Handle as H, Str as S};
-        insert(&mut t, "native-scope", "new".to_string(), vec![], LlvmRetK::Handle);
-        insert(&mut t, "native-scope", "clone-frames".to_string(), vec![H], LlvmRetK::Handle);
-        insert(&mut t, "native-scope", "push-frame".to_string(), vec![H], LlvmRetK::Unit);
-        insert(&mut t, "native-scope", "pop-frame".to_string(), vec![H], LlvmRetK::Unit);
-        insert(&mut t, "native-scope", "get".to_string(), vec![H, S], LlvmRetK::OptHandle);
-        insert(&mut t, "native-scope", "set".to_string(), vec![H, S, H], LlvmRetK::Unit);
+        // The scope receiver is a tagged box word now, not a registry handle
+        // (`LlvmArgK::Scope`). Only the op *ids* are baked into the committed
+        // island bitcode — this table, and so the marshaling shape, is Rust
+        // side and free to change with it.
+        const SC: LlvmArgK = LlvmArgK::Scope;
+        insert(&mut t, "native-scope", "new".to_string(), vec![], LlvmRetK::Scope);
+        insert(&mut t, "native-scope", "clone-frames".to_string(), vec![SC], LlvmRetK::Scope);
+        insert(&mut t, "native-scope", "push-frame".to_string(), vec![SC], LlvmRetK::Unit);
+        insert(&mut t, "native-scope", "pop-frame".to_string(), vec![SC], LlvmRetK::Unit);
+        insert(&mut t, "native-scope", "get".to_string(), vec![SC, S], LlvmRetK::OptHandle);
+        insert(&mut t, "native-scope", "set".to_string(), vec![SC, S, H], LlvmRetK::Unit);
         t
     })
 }
@@ -7450,26 +7380,29 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
                 Value::Str(id) => RtValue::Str(heap.string(id).into()),
                 other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a Str argument, got {:?}", op.type_key, op.method, other)),
             },
+            LlvmArgK::Scope => match crate::compile::runtime::decode(*raw) {
+                v @ Value::Boxed(_) => RtValue::Sexpr(v),
+                other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a scope box, got {:?}", op.type_key, op.method, other)),
+            },
             LlvmArgK::Int => RtValue::Int(*raw),
             LlvmArgK::Bool => RtValue::Bool(*raw != 0),
         });
     }
-    // The native scope `get` returns `Option<V>` — encoded specially, so
-    // it's handled before the generic single-`RtValue` result path.
+    // The scope `get` returns `Option<V>` — encoded specially, so it's
+    // handled before the generic single-`RtValue` result path.
+    //
+    // The stored element word goes into the `Some` payload verbatim: for the
+    // island's `Scope<llvm-value>`/`Scope<llvm-function>` that is the same
+    // `Value::Int(handle)` this produced before scopes moved to the heap, so
+    // the option box the committed bitcode unwraps is bit-identical.
     if op.type_key == "native-scope" && op.method == "get" {
-        let found = match (expect_scope(&vals[0]), expect_str(&vals[1])) {
-            (Ok(scope), Ok(name)) => scope.get(name),
+        let found = match (expect_struct_box(&vals[0]), expect_str(&vals[1])) {
+            (Ok(id), Ok(name)) => heap.scope_get(id, name),
             (Err(e), _) | (_, Err(e)) => rt_llvm_fatal(&format!("rt_llvm_call: native-scope::get: {:?}", e)),
         };
         let boxed = match found {
-            Some(v) => {
-                let h = match handle_of(&v) {
-                    Some(h) => h,
-                    None => rt_llvm_fatal(&format!("rt_llvm_call: native-scope::get: not a handle value: {:?}", v)),
-                };
-                // type-identity-ok: the built-in `Option`, a root name spelled in full
-                heap.alloc_enum("option".to_string(), 0, vec![Value::Int(h)])
-            }
+            // type-identity-ok: the built-in `Option`, a root name spelled in full
+            Some(v) => heap.alloc_enum("option".to_string(), 0, vec![v]),
             // type-identity-ok: the built-in `Option`, a root name spelled in full
             None => heap.alloc_enum("option".to_string(), 1, vec![]),
         };
@@ -7477,11 +7410,16 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
     }
     let result: Result<RtValue, EvalError> = if op.type_key == "native-scope" {
         match op.method.as_str() {
-            "new" => Ok(scope_new()),
-            "clone-frames" => scope_clone_frames(&vals),
-            "push-frame" => scope_push_frame(&vals),
-            "pop-frame" => scope_pop_frame(&vals),
-            "set" => scope_set(&vals),
+            "new" => Ok(RtValue::Sexpr(heap.alloc_scope())),
+            "clone-frames" => scope_clone_frames_heap(heap, &vals),
+            "push-frame" => scope_push_frame_heap(heap, &vals),
+            "pop-frame" => scope_pop_frame_heap(heap, &vals),
+            // The element type is irrelevant here: the value arrives already
+            // in its stored form, so `set` stores the word as given. (The
+            // interpreter's own `set` still encodes through
+            // `rtvalue_to_struct_field`, since there the value is an
+            // `RtValue` that has not crossed a boundary.)
+            "set" => scope_set_raw(heap, &vals),
             other => rt_llvm_fatal(&format!("rt_llvm_call: unknown native-scope method {}", other)),
         }
     } else {
@@ -7498,6 +7436,16 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         LlvmRetK::Handle => match handle_of(&v) {
             Some(h) => h,
             None => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a handle result, got {:?}", op.type_key, op.method, v)),
+        },
+        LlvmRetK::Scope => match v {
+            RtValue::Sexpr(box_v) => {
+                // Root for the compile session: the committed island holds
+                // this word in an untraced local, so nothing else would keep
+                // the box alive across the next collection.
+                heap.push_session_root(box_v);
+                crate::compile::runtime::encode(box_v)
+            }
+            other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a scope result, got {:?}", op.type_key, op.method, other)),
         },
         LlvmRetK::Unit => 0,
         LlvmRetK::Bool => match v {
@@ -7539,10 +7487,23 @@ fn scope_pop_frame_heap(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, Ev
     Ok(RtValue::Unit)
 }
 
-fn scope_get_heap(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+/// The element type of a `Scope<V>` receiver type.
+fn scope_elem_ty(recv_ty: Option<&Type>) -> Result<Type, EvalError> {
+    match recv_ty {
+        Some(Type::Named(p, args)) if *p == Path::root("scope") && args.len() == 1 => Ok(args[0].clone()),
+        other => Err(EvalError::Internal(format!("expected a Scope<V> receiver type, got {:?}", other))),
+    }
+}
+
+fn scope_get_heap(heap: &mut Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtValue, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let name = expect_str(&args[1])?;
-    let found = heap.scope_get(id, name).map(RtValue::Sexpr);
+    let elem = option_payload_ty(ret_ty)?;
+    let raw = heap.scope_get(id, name);
+    let found = match raw {
+        Some(v) => Some(decode_field_typed(heap, v, &elem)),
+        None => None,
+    };
     Ok(option_value(heap, found))
 }
 
@@ -7552,18 +7513,38 @@ fn scope_get_heap(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalErro
 /// same `EvalError` the native `scope_set` does — the `expect_hashable_key`
 /// precedent of keeping a user-reachable condition a catchable evaluation
 /// error rather than a Rust panic.
-fn scope_set_heap(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let id = expect_struct_box(&args[0])?;
-    let name = expect_str(&args[1])?.to_string();
+fn scope_set_heap(heap: &mut Heap, args: &[RtValue], _elem: &Type) -> Result<RtValue, EvalError> {
+    let v = rtvalue_to_struct_field(heap, &args[2])?;
+    scope_store(heap, args, v)
+}
+
+/// `set` for a value that is already in its stored form — the `rt_llvm_call`
+/// path, where the element arrives as the very word compiled code holds and
+/// there is no `RtValue` to encode.
+fn scope_set_raw(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let v = match &args[2] {
+        RtValue::Int(n) => Value::Int(*n),
         RtValue::Sexpr(v) => *v,
         other => {
-            return Err(EvalError::Internal(format!(
-                "heap Scope::set: value is not a heap-repr element: {:?}",
-                other
-            )))
+            return Err(EvalError::Internal(format!("Scope::set: not a stored element word: {:?}", other)))
         }
     };
+    scope_store(heap, args, v)
+}
+
+/// The shared tail of both `set` paths.
+///
+/// `Heap::scope_set` panics on an empty frame stack (the mem layer's
+/// internal-invariant-trap convention); every frame *is* poppable from
+/// typelisp (`pop-frame`), so the guard runs here first and reports a
+/// catchable `EvalError` instead — the `expect_hashable_key` precedent of
+/// keeping a user-reachable condition an evaluation error rather than a Rust
+/// panic. That matters doubly on the `rt_llvm_call` path: a panic unwinding
+/// out of an `extern "C"` shim aborts the process, losing even the
+/// `rt_llvm_fatal` diagnostic.
+fn scope_store(heap: &mut Heap, args: &[RtValue], v: Value) -> Result<RtValue, EvalError> {
+    let id = expect_struct_box(&args[0])?;
+    let name = expect_str(&args[1])?.to_string();
     if heap.scope_frame_count(id) == 0 {
         return Err(EvalError::Internal("Scope::set: no frame to write into".into()));
     }
