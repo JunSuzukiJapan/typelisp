@@ -18,7 +18,7 @@ use crate::type_key::type_key_of;
 use crate::types::{
     path_is_builtin, path_is_builtin_any, LLVM_HANDLE_TYPES, LLVM_METHOD_RECEIVER_TYPES,
 };
-use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, QuotedSexpr, Type, Typed, Value};
+use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, QuotedSexpr, RootScope, Type, Typed, Value};
 #[cfg(test)]
 use crate::Ref;
 
@@ -169,28 +169,34 @@ fn fresh_lambda_name(prefix: &str) -> String {
 /// (`car`/`cdr`). The building block both `tagged` (below) and any
 /// untagged sub-list (e.g. a `labels` def's parameter-name list) use.
 fn list_of(heap: &mut Heap, items: &[Value]) -> Result<Value, Error> {
+    // Every item is rooted up front, for the whole build — not just across
+    // the one `cons` that consumes it. An item is usually a value the caller
+    // just allocated (`heap.alloc_string(name)` for a `(var name is-fn)`
+    // node, say) and holds only in a Rust local, which the collector cannot
+    // see; consing any *other* item can collect it, and a freed string slot
+    // is immediately recycled, so the node ends up naming whatever string was
+    // allocated next. That is a silent miscompile — the symptom is the island
+    // reporting an unbound variable whose name is some unrelated identifier.
+    let mut s = RootScope::new(heap);
+    for item in items {
+        s.push_root(*item);
+    }
     let mut acc = Value::Empty;
     for item in items.iter().rev() {
-        heap.push_root(*item);
-        heap.push_root(acc);
-        let next = heap.cons(*item, acc);
-        heap.pop_root();
-        heap.pop_root();
-        acc = next?;
+        s.push_root(acc);
+        acc = s.cons(*item, acc)?;
     }
     Ok(acc)
 }
 
 /// Conses `tag` onto a list built from `items` — see [`list_of`].
 fn tagged(heap: &mut Heap, tag: &str, items: &[Value]) -> Result<Value, Error> {
-    let list = list_of(heap, items)?;
-    let tag_sym = heap.intern_symbol(tag);
-    heap.push_root(tag_sym);
-    heap.push_root(list);
-    let result = heap.cons(tag_sym, list);
-    heap.pop_root();
-    heap.pop_root();
-    result
+    let mut s = RootScope::new(heap);
+    let list = list_of(&mut s, items)?;
+    s.push_root(list);
+    let tag_sym = s.intern_symbol(tag);
+    s.push_root(tag_sym);
+    s.cons(tag_sym, list)
 }
 
 /// A user-defined free function/`labels` sibling's own LLVM symbol name —
@@ -391,6 +397,7 @@ fn match_scrut_kind(ty: &Type, cx: Ctx) -> Option<i64> {
 fn binding_kind(ty: &Type, enums: &HashSet<Path>) -> i64 {
     if is_sexpr_type(ty)
         || matches!(ty, Type::Str | Type::Bignum | Type::Ratio | Type::Fn(..))
+        || is_scope_ty(ty)
         || is_enum_ty(ty, enums)
     {
         // `bignum`/`ratio` join `Str` here for the same reason
@@ -434,13 +441,17 @@ fn binding_kind(ty: &Type, enums: &HashSet<Path>) -> i64 {
 /// (`Interp::is_jit_tier_ty`) — an interpreted `compile-function` run
 /// JIT-compiling its own `labels` siblings would recurse into itself.
 pub(crate) fn is_llvm_handle_ty(ty: &Type) -> bool {
-    match ty {
-        Type::Named(p, _) if path_is_builtin_any(p, &LLVM_HANDLE_TYPES) => true,
-        Type::Named(p, args) if path_is_builtin(p, "scope") => {
-            args.len() == 1 && is_llvm_handle_ty(&args[0])
-        }
-        _ => false,
-    }
+    matches!(ty, Type::Named(p, _) if path_is_builtin_any(p, &LLVM_HANDLE_TYPES))
+}
+
+/// Whether `ty` is a `Scope<V>`, for any `V`.
+///
+/// Every scope is one heap object (`StructPayload::Frames`) regardless of its
+/// element type, so this needs no recursion — unlike the handle test above,
+/// which a `Scope<llvm-value>` used to satisfy back when such a scope was a
+/// Rust-native object behind a registry handle.
+pub(crate) fn is_scope_ty(ty: &Type) -> bool {
+    matches!(ty, Type::Named(p, args) if path_is_builtin(p, "scope") && args.len() == 1)
 }
 
 /// The stable operation id compiled code passes as `rt_llvm_call`'s first
@@ -636,6 +647,13 @@ pub(crate) fn struct_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &Hash
         // passthrough kind `6` rather than needing a tag of their own.
         Type::Bignum | Type::Ratio => 6,
         _ if is_sexpr_type(ty) => 6,
+        // A `Scope<V>` is a `StructPayload::Frames` box — a tagged pointer
+        // like any other boxed value, so it takes the passthrough kind and
+        // its GC root. It used to reach the untraced integer kind `1` via
+        // `is_llvm_handle_ty`, back when a compiler scope was a registry
+        // handle; the committed island bitcode still binds it that way, which
+        // is what `Heap::push_session_root` exists to cover.
+        _ if is_scope_ty(ty) => 6,
         Type::Named(p, _) if structs.contains(p) => 6,
         _ if is_enum_ty(ty, enums) => 6,
         // A closure value (`Type::Fn`) is a tagged `Sexpr` at a

@@ -32,14 +32,18 @@ use typelisp_mem::{Error, Heap, Loc, RootScope, Value};
 
 /// Cons a proper list from `items`, in order.
 ///
-/// Every partially-built tail is rooted across the next allocation, so this is
-/// safe with a collection at any point. `items` themselves must already be
-/// protected — build them with [`Items`], which does that.
+/// Both the items and every partially-built tail stay rooted for the whole
+/// build, so this is safe with a collection at any point.
 pub fn list(heap: &mut Heap, items: &[Value]) -> Result<Value, Error> {
     let mut s = RootScope::new(heap);
+    // Root every item for the whole build, not just across the `cons` that
+    // consumes it: consing a later item can collect an earlier one. [`Items`]
+    // already keeps them rooted, but a direct caller need not have.
+    for item in items {
+        s.push_root(*item);
+    }
     let mut acc = Value::Empty;
     for item in items.iter().rev() {
-        s.push_root(*item);
         s.push_root(acc);
         acc = s.cons(*item, acc)?;
     }
