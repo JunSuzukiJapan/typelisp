@@ -5813,3 +5813,36 @@ Rust も trait impl に可視性を持たない（トレイトのメソッドは
 テスト: `tests/stream_test.rs` に 20 本追加（fresh-line / format 宛先 / `read-sexpr` /
 peek・unread / 包み方）、`tests/pathname_test.rs` を新設（15 本）、`tests/trait_test.rs` に
 可視性の回帰 2 本。
+
+## edition 2018 → 2021（2026-08-05）
+
+`cargo build --all-targets` が出していた `non_fmt_panics` 警告 2 件
+（`tests/compile_test.rs` の `assert!(..., "built by {build}, printed as {got}")` と
+`tests/format_test.rs` の `assert!(..., "got {s}")`）が発端。edition 2018 では
+`assert!`/`panic!` に**引数無しのリテラル 1 個**を渡すと書式文字列として扱われず、
+`{build}` が文字どおり出力される（`assert_eq!` のメッセージは常に `format_args!` を
+通るので、同じファイルの `assert_eq!(..., "{build}")` は警告対象外だった）。まず明示引数
+（`"built by {}, printed as {}", build, got`）に直して警告を解消し、その上でワークスペース
+3 crate すべてを edition 2021 に上げた。
+
+edition 2021 の破壊的変更のうち、このコードベースに当たるものは無かった:
+
+- **配列の `into_iter()`**（`&T` → `T`）: 該当なし。`x[..].iter()` はすべてスライスで、
+  スライスの `iter()` は edition に依らず `&T`。
+- **クロージャの分割キャプチャ**（Drop の順序・タイミングが変わりうる）: `impl Drop` は
+  `crates/typelisp-mem/src/heap.rs` の `Heap` だけで、値ごとクロージャに捕獲していない。
+  GC ルートの LIFO 不変条件（`sync_roots`）に影響する経路は無い。
+- **`TryFrom`/`TryInto`/`FromIterator` の prelude 入り**、**予約プレフィックス**
+  （`ident"..."`）、**マクロ `:pat` の or パターン**: いずれも当たればコンパイルエラーに
+  なるが、発生しなかった。
+- **`panic!`/`assert!` の書式文字列化**: 上記 2 件が唯一の該当箇所で、先に潰してある。
+
+副次的に、「`u32::try_from` は edition 2018 では暗黙にスコープに無いので範囲チェック +
+`as u32` で済ませた」（`int->char` の項、2026-07-01）の制約は無くなった。既存コードは
+そのままで正しく動くので書き換えていない。
+
+非仮想 workspace のルートパッケージが edition 2021 になったことで、feature の
+resolver も v2 が既定になる。依存グラフに変化は出ていない（`Cargo.lock` 差分無し）。
+
+テスト: `scripts/test-serial.sh`（lib + tests/ 全バイナリを直列・単スレッド）で全緑、
+`cargo build --workspace --all-targets` は警告ゼロ。

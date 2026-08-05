@@ -288,7 +288,7 @@ fn built_in_enum_values_print_their_variant_names() {
 fn a_built_in_error_value_prints_its_type_name() {
     // The message text is the builtin's own wording; only the shape matters.
     let s = fmt(r#"(format false "~a" (parse-int "zz"))"#);
-    assert!(s.starts_with("(err (parseinterror "), "got {s}");
+    assert!(s.starts_with("(err (parseinterror "), "got {}", s);
 }
 
 #[test]

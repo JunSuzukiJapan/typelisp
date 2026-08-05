@@ -5414,7 +5414,7 @@ fn a_value_prints_the_same_whichever_side_built_it() {
     }
     for build in ["m::struct-i", "m::struct-c"] {
         let got = conformance_str(&format!("(format false \"~a\" ({build} 7))"));
-        assert!(got.ends_with("m::pt 7 0>"), "built by {build}, printed as {got}");
+        assert!(got.ends_with("m::pt 7 0>"), "built by {}, printed as {}", build, got);
     }
 }
 
