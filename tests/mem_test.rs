@@ -6,7 +6,9 @@
 //!   * the accounting invariant `free + live == capacity` holds after every op;
 //!   * every unreachable cell is reclaimed (including cycles — which reference
 //!     counting would leak);
-//!   * the arena never grows (exhaustion is an error, not a silent realloc);
+//!   * the arena never grows *by default* (exhaustion is an error, not a silent
+//!     realloc), and when growth is explicitly permitted it appends a chunk
+//!     without invalidating a single existing cons pointer;
 //!   * freed cells are reused;
 //!   * GC handles deep/long structures without a native-stack overflow.
 //!
@@ -289,6 +291,311 @@ fn exhaustion_triggers_gc_then_succeeds_when_garbage_exists() {
     assert_eq!(h.capacity(), 3); // still no growth
     assert_eq!(h.live_count(), 1);
     assert_accounting(&h);
+}
+
+// ---- opt-in bounded growth ----------------------------------------------
+
+#[test]
+fn growth_is_refused_until_a_limit_is_set() {
+    let mut h = Heap::with_capacity(2);
+    for i in 0..2 {
+        let c = h.cons(Value::Int(i), Value::Empty).unwrap();
+        h.push_root(c);
+    }
+    assert_eq!(h.growth_limit(), 0, "growth must be off by default");
+    assert!(matches!(h.cons(Value::Int(9), Value::Empty), Err(Error::HeapExhausted)));
+    assert_eq!(h.capacity(), 2);
+    assert_accounting(&h);
+}
+
+#[test]
+fn growth_appends_a_chunk_once_permitted() {
+    let mut h = Heap::with_capacity(2);
+    h.set_growth_limit(4096);
+    for i in 0..2 {
+        let c = h.cons(Value::Int(i), Value::Empty).unwrap();
+        h.push_root(c);
+    }
+    assert_eq!(h.free_count(), 0);
+    // Nothing is collectible, so this must grow rather than error.
+    let c = h.cons(Value::Int(99), Value::Empty).unwrap();
+    h.push_root(c);
+    assert!(h.capacity() > 2, "arena should have grown, cap={}", h.capacity());
+    assert!(h.capacity() <= 4096);
+    assert_eq!(h.car(c).unwrap(), Value::Int(99));
+    assert_accounting(&h);
+}
+
+/// The whole point of chunking: growth must never move an existing cell, since
+/// every `Value::Cons` is a raw pointer into the arena.
+#[test]
+fn existing_cons_pointers_stay_valid_across_growth() {
+    let mut h = Heap::with_capacity(64);
+    h.set_growth_limit(1 << 16);
+
+    let items: Vec<i64> = (0..40).collect();
+    let head = list_of(&mut h, &items);
+    h.push_root(head);
+    let cap_before = h.capacity();
+
+    // Allocate hard enough to force at least one new chunk, keeping every
+    // result rooted so GC cannot satisfy the demand instead.
+    let mut roots = 0;
+    while h.capacity() == cap_before {
+        let c = h.cons(Value::Int(7), Value::Empty).unwrap();
+        h.push_root(c);
+        roots += 1;
+        assert!(roots < 1 << 16, "arena never grew");
+    }
+
+    // The pre-growth list must still read back intact.
+    assert_eq!(to_vec(&h, head), items);
+    assert_accounting(&h);
+}
+
+#[test]
+fn growth_collects_before_it_grows() {
+    let mut h = Heap::with_capacity(8);
+    h.set_growth_limit(4096);
+    for i in 0..8 {
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap(); // unrooted garbage
+    }
+    assert_eq!(h.free_count(), 0);
+    // Reclaimable garbage exists, so the arena must reuse it rather than grow.
+    let _ = h.cons(Value::Int(42), Value::Empty).unwrap();
+    assert_eq!(h.capacity(), 8, "grew instead of collecting");
+    assert_accounting(&h);
+}
+
+#[test]
+fn growth_stops_at_the_ceiling() {
+    let mut h = Heap::with_capacity(4);
+    h.set_growth_limit(2048);
+    // Root everything so nothing is ever collectible: the only way forward is
+    // growth, and it must stop dead at the ceiling.
+    loop {
+        match h.cons(Value::Int(1), Value::Empty) {
+            Ok(c) => h.push_root(c),
+            Err(Error::HeapExhausted) => break,
+            other => panic!("unexpected {:?}", other),
+        }
+        assert!(h.capacity() <= 2048, "capacity {} passed the ceiling", h.capacity());
+    }
+    assert_eq!(h.capacity(), 2048);
+    assert_accounting(&h);
+}
+
+// ---- gc stress mode ------------------------------------------------------
+
+#[test]
+fn gc_stress_reclaims_an_unrooted_value_at_the_very_next_cons() {
+    let mut h = Heap::with_capacity(64);
+    h.set_gc_stress(true);
+    assert!(h.gc_stress());
+
+    let orphan = h.cons(Value::Int(1), Value::Empty).unwrap(); // never rooted
+    assert_eq!(h.live_count(), 1);
+    // Under stress the next allocation collects first, so the orphan dies now
+    // rather than whenever the free list happens to run dry.
+    let kept = h.cons(Value::Int(2), Value::Empty).unwrap();
+    h.push_root(kept);
+    assert_eq!(h.live_count(), 1, "the orphan should have been reclaimed");
+    let _ = orphan; // deliberately not dereferenced: its cell is now free
+    assert_accounting(&h);
+}
+
+#[test]
+fn gc_stress_keeps_properly_rooted_intermediates_alive() {
+    let mut h = Heap::with_capacity(64);
+    h.set_gc_stress(true);
+
+    // The push/pop discipline every cons-building helper must follow.
+    let mut acc = Value::Empty;
+    for x in (0..20i64).rev() {
+        h.push_root(acc);
+        let next = h.cons(Value::Int(x), acc).unwrap();
+        h.pop_root();
+        acc = next;
+        h.push_root(acc);
+    }
+    assert_eq!(to_vec(&h, acc), (0..20).collect::<Vec<i64>>());
+    assert_accounting(&h);
+}
+
+// ---- RootScope -----------------------------------------------------------
+
+#[test]
+fn root_scope_truncates_back_to_its_base() {
+    use typelisp::RootScope;
+
+    let mut h = Heap::with_capacity(64);
+    let outer = h.cons(Value::Int(0), Value::Empty).unwrap();
+    h.push_root(outer);
+    let before = h.root_count();
+
+    {
+        let mut s = RootScope::new(&mut h);
+        assert_eq!(s.base(), before);
+        for i in 0..5 {
+            let c = s.cons(Value::Int(i), Value::Empty).unwrap();
+            s.push_root(c); // deliberately never popped by hand
+        }
+        assert_eq!(s.root_count(), before + 5);
+    }
+
+    assert_eq!(h.root_count(), before, "scope did not unwind its own roots");
+    // The caller's own root is untouched — a scope never pops past its base.
+    assert_eq!(h.car(outer).unwrap(), Value::Int(0));
+}
+
+/// The failure mode hand-balanced `pop_root` pairs actually have: an early
+/// `?` return skips the pops and leaves the stack permanently unbalanced.
+#[test]
+fn root_scope_unwinds_on_an_early_return() {
+    use typelisp::RootScope;
+
+    fn build(h: &mut Heap, fail: bool) -> Result<Value, Error> {
+        let mut s = RootScope::new(h);
+        let a = s.cons(Value::Int(1), Value::Empty)?;
+        s.push_root(a);
+        if fail {
+            return Err(Error::HeapExhausted); // no manual cleanup anywhere
+        }
+        s.cons(Value::Int(2), a)
+    }
+
+    let mut h = Heap::with_capacity(64);
+    let before = h.root_count();
+
+    assert!(build(&mut h, true).is_err());
+    assert_eq!(h.root_count(), before, "early return leaked roots");
+
+    let ok = build(&mut h, false).unwrap();
+    assert_eq!(h.root_count(), before);
+    h.push_root(ok); // the caller roots the result, per the scope's contract
+    assert_eq!(to_vec(&h, ok), vec![2, 1]);
+    assert_accounting(&h);
+}
+
+/// A scope must actually keep its intermediates alive — the whole reason it
+/// exists. Under `gc_stress` every `cons` collects, so an unrooted intermediate
+/// would be gone before the next one is built.
+#[test]
+fn root_scope_keeps_intermediates_alive_under_gc_stress() {
+    use typelisp::RootScope;
+
+    let mut h = Heap::with_capacity(64);
+    h.set_gc_stress(true);
+
+    let node = {
+        let mut s = RootScope::new(&mut h);
+        let mut acc = Value::Empty;
+        for x in (0..12i64).rev() {
+            s.push_root(acc);
+            acc = s.cons(Value::Int(x), acc).unwrap();
+        }
+        acc
+    };
+    h.push_root(node);
+
+    assert_eq!(to_vec(&h, node), (0..12).collect::<Vec<i64>>());
+    assert_accounting(&h);
+}
+
+#[test]
+fn root_scopes_nest() {
+    use typelisp::RootScope;
+
+    let mut h = Heap::with_capacity(64);
+    let before = h.root_count();
+    {
+        let mut outer = RootScope::new(&mut h);
+        let a = outer.cons(Value::Int(1), Value::Empty).unwrap();
+        outer.push_root(a);
+        {
+            let mut inner = RootScope::new(&mut outer);
+            let b = inner.cons(Value::Int(2), Value::Empty).unwrap();
+            inner.push_root(b);
+            assert_eq!(inner.root_count(), before + 2);
+        }
+        // The inner scope unwound only its own root, not the outer's.
+        assert_eq!(outer.root_count(), before + 1);
+    }
+    assert_eq!(h.root_count(), before);
+}
+
+// ---- lowered-code source locations --------------------------------------
+
+#[test]
+fn code_locs_round_trip_and_outlive_a_reader_clear() {
+    use std::rc::Rc;
+    use typelisp::Loc;
+
+    let mut h = Heap::with_capacity(64);
+    let node = h.cons(Value::Int(1), Value::Empty).unwrap();
+    h.push_root(node);
+    let cr = match node {
+        Value::Cons(cr) => cr,
+        _ => unreachable!(),
+    };
+    let loc = Loc::new(Rc::from("f.typl"), 3, 5).with_end(3, 9);
+    h.set_code_loc(cr, loc.clone());
+    assert_eq!(h.code_loc(node), Some(loc.clone()));
+
+    // Unlike the reader's tables, a lowered-code location survives the
+    // per-read-batch clear — a registered body outlives the batch that read it.
+    h.clear_cons_locs();
+    assert_eq!(h.code_loc(node), Some(loc));
+
+    // Only a cons can carry one.
+    assert_eq!(h.code_loc(Value::Int(1)), None);
+}
+
+/// A reclaimed cell's address gets handed to an unrelated form, so its entry
+/// must not linger — nothing ever overwrites one the way the reader does.
+#[test]
+fn sweep_drops_code_locs_for_reclaimed_cells() {
+    use std::rc::Rc;
+    use typelisp::Loc;
+
+    let mut h = Heap::with_capacity(64);
+    let orphan = h.cons(Value::Int(1), Value::Empty).unwrap(); // never rooted
+    let cr = match orphan {
+        Value::Cons(cr) => cr,
+        _ => unreachable!(),
+    };
+    h.set_code_loc(cr, Loc::new(Rc::from("f.typl"), 1, 1).with_end(1, 2));
+    assert_eq!(h.code_loc_count(), 1);
+
+    h.gc();
+    assert_eq!(h.code_loc_count(), 0, "stale location survived the sweep");
+
+    // The recycled address must come back blank, not wearing the old span.
+    let reused = h.cons(Value::Int(2), Value::Empty).unwrap();
+    h.push_root(reused);
+    assert_eq!(h.code_loc(reused), None);
+    assert_accounting(&h);
+}
+
+#[test]
+fn sweep_keeps_code_locs_for_live_cells() {
+    use std::rc::Rc;
+    use typelisp::Loc;
+
+    let mut h = Heap::with_capacity(64);
+    let node = h.cons(Value::Int(1), Value::Empty).unwrap();
+    h.push_root(node);
+    let cr = match node {
+        Value::Cons(cr) => cr,
+        _ => unreachable!(),
+    };
+    let loc = Loc::new(Rc::from("f.typl"), 7, 2).with_end(7, 8);
+    h.set_code_loc(cr, loc.clone());
+
+    let _ = h.cons(Value::Int(9), Value::Empty).unwrap(); // garbage to collect
+    h.gc();
+
+    assert_eq!(h.code_loc(node), Some(loc));
 }
 
 // ---- reuse / no growth --------------------------------------------------

@@ -14,5 +14,5 @@ pub mod heap;
 pub mod value;
 
 pub use errors::{Error, Loc};
-pub use heap::Heap;
+pub use heap::{Heap, RootScope};
 pub use value::{BoxId, ConsRef, PathId, StrId, SymId, Value};

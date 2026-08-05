@@ -2,14 +2,21 @@
 //!
 //! # Design
 //!
-//! * **Fixed cons arena.** `with_capacity(n)` allocates `n` cons cells once. The
-//!   buffer is never reallocated, so the raw `*mut Cell` inside every
-//!   [`Value::Cons`] stays valid for the heap's lifetime. It is a single owned
-//!   allocation, freed in `Drop` — the backing memory cannot leak.
+//! * **Chunked cons arena.** `with_capacity(n)` allocates `n` cons cells as one
+//!   chunk. A chunk is never reallocated or moved, so the raw `*mut Cell` inside
+//!   every [`Value::Cons`] stays valid for the heap's lifetime; growth only ever
+//!   *appends* a new chunk, leaving every existing cell exactly where it is.
+//!   Each chunk is an owned allocation freed in `Drop` — the backing memory
+//!   cannot leak.
 //! * **Free list.** Unused cells are chained through `Cell::next_free`.
 //!   Allocation pops the head; if the list is empty it runs a GC and retries.
-//!   The arena never grows: a GC that frees nothing makes allocation return
-//!   [`Error::HeapExhausted`] (size the arena up front instead).
+//! * **Growth is opt-in and bounded.** By default the arena never grows: a GC
+//!   that frees nothing makes allocation return [`Error::HeapExhausted`], which
+//!   is what turns a runaway leak into a loud error rather than an out-of-memory
+//!   kill. A driver that genuinely cannot size its heap up front — the
+//!   interpreter, once function bodies are themselves cons structure — calls
+//!   [`Heap::set_growth_limit`] to permit appending chunks up to a ceiling;
+//!   exhaustion is then reported at that ceiling instead.
 //! * **Symbols** are interned (name -> [`SymId`]) and never collected — they are
 //!   few and live for the heap's lifetime, like CL symbols in a package.
 //! * **Strings** live in a slot store and ARE collected: the mark phase marks
@@ -31,11 +38,29 @@ use std::ptr;
 use crate::Error;
 use super::value::{BoxId, BoxedObj, Cell, ConsRef, MemHashKey, PathId, StrId, StructPayload, SymId, Value};
 
+/// One owned run of cons cells. Chunks are only ever appended (see
+/// [`Heap::set_growth_limit`]) and never moved or freed individually, which is
+/// what lets a raw `*mut Cell` stay valid for the heap's whole lifetime.
+struct Chunk {
+    base: *mut Cell,
+    len: usize,
+}
+
 pub struct Heap {
-    base: *mut Cell, // start of the cons arena; owns the allocation
-    cap: usize,
+    // The cons arena, as one or more chunks. Always at least one entry (a
+    // zero-capacity heap holds a single zero-length chunk). Never reordered:
+    // `gc`'s sweep walks it back to front so the rebuilt free list keeps
+    // handing out low addresses first, exactly as the single-chunk version did.
+    chunks: Vec<Chunk>,
+    cap: usize, // sum of every chunk's `len`
+    // Ceiling on `cap` for growth, in cells. `0` (the default) means the arena
+    // is fixed at its initial capacity and exhaustion is an error — see the
+    // module doc comment.
+    growth_limit: usize,
     free: *mut Cell, // head of the free list (null when empty)
     free_count: usize,
+    // When set, every `cons` collects first — see `set_gc_stress`.
+    gc_stress: bool,
     roots: Vec<Value>,
     permanent_roots: Vec<Value>,
 
@@ -111,30 +136,63 @@ pub struct Heap {
     // checker (`list_to_vec_locs`) so an atom node can carry its own `Loc`,
     // which the LSP's hover/goto-definition need (`src/check/locate.rs`).
     elem_locs: HashMap<usize, crate::errors::Loc>,
+
+    // Source spans of *lowered code* nodes, keyed by the node's own head cons
+    // cell (`ConsRef::addr`). The checker records one here as it builds each
+    // node, and the interpreter reads it back to place a runtime error at the
+    // source position the node came from.
+    //
+    // Distinct from `cons_locs`/`elem_locs` above in both lifetime and upkeep,
+    // which is why it is a third table rather than an extra entry in either:
+    //
+    // * Those two describe cells the *reader* just produced and are bulk-cleared
+    //   by `clear_cons_locs` at the start of every read batch. Lowered code
+    //   outlives its read batch — it is what a registered function body *is* —
+    //   so an entry here must survive that clear.
+    // * Surviving the clear means a stale entry can no longer be shrugged off.
+    //   Those tables tolerate a freed cell's address being reused because the
+    //   reader overwrites the entry on every fresh allocation; nothing
+    //   overwrites an entry here, so `gc`'s sweep removes the entry for each
+    //   cell it reclaims (see the SWEEP cons loop).
+    //
+    // Still a pure side table: an entry never keeps a cell alive.
+    code_locs: HashMap<usize, crate::errors::Loc>,
 }
 
 impl Heap {
-    /// Create a heap with `capacity` cons cells pre-allocated.
-    pub fn with_capacity(capacity: usize) -> Heap {
-        let mut v: Vec<Cell> = Vec::with_capacity(capacity);
-        for _ in 0..capacity {
+    /// Allocate `len` blank cells as one owned run and thread them onto a free
+    /// list ending in `tail`. Returns the chunk and the new free-list head
+    /// (`tail` itself when `len` is 0).
+    fn alloc_chunk(len: usize, tail: *mut Cell) -> (Chunk, *mut Cell) {
+        let mut v: Vec<Cell> = Vec::with_capacity(len);
+        for _ in 0..len {
             v.push(Cell::blank());
         }
         let boxed: Box<[Cell]> = v.into_boxed_slice();
         let base: *mut Cell = Box::into_raw(boxed) as *mut Cell;
 
         unsafe {
-            for i in 0..capacity {
+            for i in 0..len {
                 let p = base.add(i);
-                (*p).next_free = if i + 1 < capacity { base.add(i + 1) } else { ptr::null_mut() };
+                (*p).next_free = if i + 1 < len { base.add(i + 1) } else { tail };
             }
         }
 
+        (Chunk { base, len }, if len > 0 { base } else { tail })
+    }
+
+    /// Create a heap with `capacity` cons cells pre-allocated. The arena is
+    /// fixed at that size unless [`Heap::set_growth_limit`] permits otherwise.
+    pub fn with_capacity(capacity: usize) -> Heap {
+        let (chunk, free) = Self::alloc_chunk(capacity, ptr::null_mut());
+
         Heap {
-            base,
+            chunks: vec![chunk],
             cap: capacity,
-            free: if capacity > 0 { base } else { ptr::null_mut() },
+            growth_limit: 0,
+            free,
             free_count: capacity,
+            gc_stress: false,
             roots: Vec::new(),
             permanent_roots: Vec::new(),
             sym_names: Vec::new(),
@@ -152,6 +210,7 @@ impl Heap {
             cell_registry: Vec::new(),
             cons_locs: HashMap::new(),
             elem_locs: HashMap::new(),
+            code_locs: HashMap::new(),
         }
     }
 
@@ -188,6 +247,32 @@ impl Heap {
     pub fn clear_cons_locs(&mut self) {
         self.cons_locs.clear();
         self.elem_locs.clear();
+    }
+
+    // -- Lowered-code source-location side table (see the `code_locs` field) --
+
+    /// Record the source location a *lowered code* node came from, keyed by the
+    /// node's own head cons cell. The checker calls this as it builds each node;
+    /// the interpreter reads it back via [`Heap::code_loc`] to place a runtime
+    /// error. Deliberately survives [`Heap::clear_cons_locs`] — see the
+    /// `code_locs` field doc comment.
+    pub fn set_code_loc(&mut self, cr: ConsRef, loc: crate::errors::Loc) {
+        self.code_locs.insert(cr.addr(), loc);
+    }
+
+    /// The source location recorded for lowered node `v`, if any. Only a cons
+    /// cell can carry one: a node is always a tagged list.
+    pub fn code_loc(&self, v: Value) -> Option<crate::errors::Loc> {
+        match v {
+            Value::Cons(cr) => self.code_locs.get(&cr.addr()).cloned(),
+            _ => None,
+        }
+    }
+
+    /// How many lowered-code locations are currently recorded — for tests that
+    /// check the sweep really does drop a reclaimed cell's entry.
+    pub fn code_loc_count(&self) -> usize {
+        self.code_locs.len()
     }
 
     // ---- statistics -------------------------------------------------------
@@ -1121,12 +1206,82 @@ impl Heap {
 
     // ---- allocation -------------------------------------------------------
 
-    /// Allocate a cons cell `(car . cdr)`. Runs a GC if the free list is empty;
-    /// returns [`Error::HeapExhausted`] if even then no cell is available.
+    /// Allow the arena to grow by appending chunks until it holds `max_cells`,
+    /// instead of reporting [`Error::HeapExhausted`] the moment a GC frees
+    /// nothing. Growth never moves an existing cell (see the module doc
+    /// comment), so live [`Value::Cons`] pointers stay valid across it.
+    ///
+    /// A limit at or below the current capacity disables growth, so
+    /// `set_growth_limit(0)` restores the fixed-arena default. The ceiling is
+    /// the point: it is what still turns a runaway leak into a loud error
+    /// rather than letting the process be OOM-killed.
+    pub fn set_growth_limit(&mut self, max_cells: usize) {
+        self.growth_limit = max_cells;
+    }
+
+    /// The current growth ceiling in cells (`0` when the arena is fixed).
+    pub fn growth_limit(&self) -> usize {
+        self.growth_limit
+    }
+
+    /// Collect before *every* cons allocation. Enormously slow — this is a
+    /// test/debug mode, never a production setting.
+    ///
+    /// It exists because a missing GC root is otherwise close to undebuggable:
+    /// the allocation that frees an unrooted intermediate is rarely the one
+    /// that later reads the corrupted value, so the symptom appears far from
+    /// the cause and only under whatever allocation pattern happens to empty
+    /// the free list. Under stress mode the two coincide — the very next
+    /// `cons` after a value goes unrooted is the one that collects it — so a
+    /// test that would fail once in a hundred runs fails every run.
+    pub fn set_gc_stress(&mut self, on: bool) {
+        self.gc_stress = on;
+    }
+
+    /// Whether [`Heap::set_gc_stress`] is currently on.
+    pub fn gc_stress(&self) -> bool {
+        self.gc_stress
+    }
+
+    /// Append one chunk, doubling the arena but never passing `growth_limit`.
+    /// Returns false when growth is disabled or the ceiling is already reached,
+    /// which is what makes the caller report [`Error::HeapExhausted`].
+    fn grow(&mut self) -> bool {
+        if self.growth_limit <= self.cap {
+            return false;
+        }
+        // Doubling keeps the amortized cost of growth constant. `MIN_CHUNK`
+        // stops a heap created with a tiny (or zero) capacity from growing one
+        // cell at a time.
+        const MIN_CHUNK: usize = 1024;
+        let want = self.cap.max(MIN_CHUNK);
+        let len = want.min(self.growth_limit - self.cap);
+        if len == 0 {
+            return false;
+        }
+        let (chunk, free) = Self::alloc_chunk(len, self.free);
+        self.chunks.push(chunk);
+        self.cap += len;
+        self.free = free;
+        self.free_count += len;
+        true
+    }
+
+    /// Allocate a cons cell `(car . cdr)`. Runs a GC if the free list is empty,
+    /// then grows the arena if [`Heap::set_growth_limit`] permits; returns
+    /// [`Error::HeapExhausted`] if even then no cell is available.
     pub fn cons(&mut self, car: Value, cdr: Value) -> Result<Value, Error> {
+        if self.gc_stress {
+            // Deliberately collect before *every* allocation so a caller that
+            // failed to root an intermediate value is caught here, at the
+            // allocation that invalidates it, instead of surfacing later as
+            // corruption far from the missing root. Test-only — see
+            // `set_gc_stress`.
+            self.gc();
+        }
         if self.free.is_null() {
             self.gc();
-            if self.free.is_null() {
+            if self.free.is_null() && !self.grow() {
                 return Err(Error::HeapExhausted);
             }
         }
@@ -1359,21 +1514,35 @@ impl Heap {
             }
         }
 
-        // SWEEP cons: rebuild the free list over the whole arena.
+        // SWEEP cons: rebuild the free list over every chunk. Walking chunks
+        // (and cells within a chunk) back to front leaves the rebuilt list
+        // ordered lowest-address-first, the same allocation order the
+        // single-chunk arena had.
         let old_free = self.free_count;
         let mut new_free: *mut Cell = ptr::null_mut();
         let mut new_free_count = 0usize;
-        for i in (0..self.cap).rev() {
-            unsafe {
-                let p = self.base.add(i);
-                if (*p).mark {
-                    (*p).mark = false;
-                } else {
-                    (*p).car = Value::Empty;
-                    (*p).cdr = Value::Empty;
-                    (*p).next_free = new_free;
-                    new_free = p;
-                    new_free_count += 1;
+        for chunk in self.chunks.iter().rev() {
+            for i in (0..chunk.len).rev() {
+                unsafe {
+                    let p = chunk.base.add(i);
+                    if (*p).mark {
+                        (*p).mark = false;
+                    } else {
+                        // A cell being reclaimed loses whatever source location
+                        // was recorded for it: its address is about to be handed
+                        // to an unrelated form, and `code_locs` (unlike the
+                        // reader's `cons_locs`) is never bulk-cleared, so a stale
+                        // entry would silently mislabel that form. See the
+                        // `code_locs` field doc comment.
+                        if !self.code_locs.is_empty() {
+                            self.code_locs.remove(&(p as usize));
+                        }
+                        (*p).car = Value::Empty;
+                        (*p).cdr = Value::Empty;
+                        (*p).next_free = new_free;
+                        new_free = p;
+                        new_free_count += 1;
+                    }
                 }
             }
         }
@@ -1400,12 +1569,79 @@ impl Heap {
     }
 }
 
+/// A scoped guard over the LIFO root stack: it records the root count on entry
+/// and truncates back to it on drop, however the scope is left.
+///
+/// Hand-balanced `push_root`/`pop_root` pairs are the standard way to keep an
+/// intermediate alive across an allocation that might collect, but they are
+/// fragile at scale — one builder in `compile::ast_bridge` balances *sixteen*
+/// pops by hand, and every `?` early return is a chance to skip them. This
+/// guard makes the unwind automatic, so an error path cannot leave the stack
+/// unbalanced and a later `sync_roots`-style "pop what I pushed" caller cannot
+/// pop somebody else's roots.
+///
+/// Derefs to the [`Heap`], so a scope is used exactly like the heap it wraps:
+///
+/// ```ignore
+/// let node = {
+///     let mut s = RootScope::new(heap);
+///     let a = s.cons(x, Value::Empty)?;
+///     s.push_root(a);              // popped automatically below
+///     s.cons(head, a)?
+/// };                               // roots truncated here
+/// heap.push_root(node);            // caller roots the result before allocating again
+/// ```
+///
+/// The returned value is *not* rooted when the scope ends — truncating the
+/// stack frees nothing by itself, but the next allocation may collect, so the
+/// caller must root a result it intends to keep before allocating again. That
+/// is the same contract every builder in this codebase already follows.
+pub struct RootScope<'h> {
+    heap: &'h mut Heap,
+    base: usize,
+}
+
+impl<'h> RootScope<'h> {
+    /// Open a scope over `heap`'s current root stack.
+    pub fn new(heap: &'h mut Heap) -> RootScope<'h> {
+        let base = heap.root_count();
+        RootScope { heap, base }
+    }
+
+    /// The root count this scope will truncate back to.
+    pub fn base(&self) -> usize {
+        self.base
+    }
+}
+
+impl std::ops::Deref for RootScope<'_> {
+    type Target = Heap;
+    fn deref(&self) -> &Heap {
+        self.heap
+    }
+}
+
+impl std::ops::DerefMut for RootScope<'_> {
+    fn deref_mut(&mut self) -> &mut Heap {
+        self.heap
+    }
+}
+
+impl Drop for RootScope<'_> {
+    fn drop(&mut self) {
+        self.heap.truncate_roots(self.base);
+    }
+}
+
 impl Drop for Heap {
     fn drop(&mut self) {
-        if !self.base.is_null() {
-            // Reconstitute the owning Box and drop it, freeing the arena.
+        for chunk in self.chunks.drain(..) {
+            if chunk.base.is_null() {
+                continue;
+            }
+            // Reconstitute each chunk's owning Box and drop it, freeing it.
             unsafe {
-                let raw = ptr::slice_from_raw_parts_mut(self.base, self.cap);
+                let raw = ptr::slice_from_raw_parts_mut(chunk.base, chunk.len);
                 drop(Box::from_raw(raw));
             }
         }
