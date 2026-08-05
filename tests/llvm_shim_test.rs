@@ -32,15 +32,15 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
-/// The `i64` constant an `RtValue::LlvmValue` holds, for asserting a
+/// The `i64` constant an `llvm-value` handle holds, for asserting a
 /// compiled `b::const-i64` round-tripped through the handle registry.
 fn const_int_of(v: &RtValue) -> i64 {
     match v {
-        RtValue::LlvmValue(bv) => bv
+        ref v if typelisp::llvm_value_of(v).is_some() => typelisp::llvm_value_of(v).unwrap()
             .into_int_value()
             .get_sign_extended_constant()
             .expect("expected a constant llvm-value"),
-        other => panic!("expected an RtValue::LlvmValue, got {:?}", other),
+        other => panic!("expected an llvm-value handle, got {:?}", other),
     }
 }
 

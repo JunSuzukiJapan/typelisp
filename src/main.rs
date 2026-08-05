@@ -558,11 +558,6 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
         RtValue::Scope(scope) => format!("#<scope depth={}>", scope.depth()),
         // Compiler-internal handles; not meant to be printed by user code,
         // so a terse opaque tag is enough.
-        RtValue::LlvmModule(_) => "#<llvm-module>".to_string(),
-        RtValue::LlvmBuilder(_) => "#<llvm-builder>".to_string(),
-        RtValue::LlvmFunction(_) => "#<llvm-function>".to_string(),
-        RtValue::LlvmBasicBlock(_) => "#<llvm-basic-block>".to_string(),
-        RtValue::LlvmValue(_) => "#<llvm-value>".to_string(),
     }
 }
 

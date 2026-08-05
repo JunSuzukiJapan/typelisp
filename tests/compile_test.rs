@@ -186,7 +186,7 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
     let module = match eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '(assoc "i64" "+" true (0 var "a" false) (0 var "b" false)))"#,
     ) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     // See `compile::COMPILE_LOCK`'s doc comment — every LLVM-Context-touching
@@ -219,7 +219,7 @@ fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
     let module = match eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" (0 var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" (0 int 5))))"#,
     ) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -260,7 +260,7 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
              (let ((ignored (add-function m "rt_push_sexpr_root"))) ())
              (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (0 var "k" false) (0 var "offset" false)))) (apply "go" (0 var "n" false)))))"#,
     ) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -296,7 +296,7 @@ fn the_built_module_actually_jit_executes_to_42() {
         (build-answer-module-raw)
     "#;
     let module = match eval_ok(src) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -335,7 +335,7 @@ fn a_function_using_load_arg_and_build_add_computes_correctly() {
         (build-add-fn-raw)
     "#;
     let module = match eval_ok(src) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -387,7 +387,7 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
         (build-quadruple-module)
     "#;
     let module = match eval_ok(src) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -452,7 +452,7 @@ fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
         (build-and-run-closure-module)
     "#;
     let module = match eval_ok(src) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -669,7 +669,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
           (compile-function m "quadruple" '((n . 0)) '(call "double" (0 call "double" (0 var "n" false)))))
         "#,
     ) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -1088,7 +1088,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
              (let ((ignored-envget (add-function m "rt_closure_env_get"))) ())
              (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int 5)))))"#,
     ) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -1130,7 +1130,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
              (let ((ignored-push (add-function m "rt_push_sexpr_root"))) ())
              (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "go" true) (0 int 5)))))"#,
     ) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -1444,7 +1444,7 @@ fn the_compiler_body_compiles_an_i64_comparison() {
         r#"(compile-function (llvm-module::create "mod") "lt" '((a . 0) (b . 0))
               '(assoc "i64" "<" true (0 var "a" false) (0 var "b" false)))"#,
     ) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -1479,7 +1479,7 @@ fn the_compiler_body_compiles_an_if_expression() {
                    (var "a" false)
                    (var "b" false)))"#,
     ) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -1503,7 +1503,7 @@ fn let_shadowing_is_correctly_restored_after_the_let_ends() {
                  (0 let (((x . 0) . (int 99))) (var "x" false))
                  (0 var "x" false)))"#,
     ) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -1791,7 +1791,7 @@ fn build_shl_and_build_ashr_round_trip_a_signed_fixnum_payload() {
         (build-fixnum-round-trip-module)
     "#;
     let module = match eval_ok(src) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -1834,7 +1834,7 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
         (build-tag-round-trip-module)
     "#;
     let module = match eval_ok(src) {
-        RtValue::LlvmModule(m) => m,
+        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
         other => panic!("expected an LlvmModule, got {:?}", other),
     };
     let _guard = COMPILE_LOCK.lock().unwrap();

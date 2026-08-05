@@ -5,10 +5,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::{error, fmt};
 
-use inkwell::basic_block::BasicBlock;
-use inkwell::builder::Builder;
-use inkwell::module::Module;
-use inkwell::values::{BasicValueEnum, FunctionValue};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
@@ -344,20 +340,6 @@ pub enum RtValue {
     /// the value's shape. The payload is the [`NativeScope`] struct — the
     /// frame-stack invariants live behind its method surface.
     Scope(NativeScope),
-    /// An in-progress LLVM module being built by the (typelisp-hosted)
-    /// compiler. `Rc<RefCell<..>>` because `inkwell::module::Module` owns
-    /// the underlying LLVM module and isn't `Clone` (dropping it disposes
-    /// the LLVM-side object).
-    LlvmModule(Rc<RefCell<Module<'static>>>),
-    /// An LLVM IR builder positioned at some point in a function. Same
-    /// `Rc<RefCell<..>>` reasoning as `LlvmModule`.
-    LlvmBuilder(Rc<RefCell<Builder<'static>>>),
-    /// A declared/defined LLVM function. Inkwell's value/block handles
-    /// (unlike `Module`/`Builder`) are cheap `Copy` references into the
-    /// owning module, not separately-owned resources.
-    LlvmFunction(FunctionValue<'static>),
-    LlvmBasicBlock(BasicBlock<'static>),
-    LlvmValue(BasicValueEnum<'static>),
 }
 
 impl PartialEq for RtValue {
@@ -388,9 +370,7 @@ impl PartialEq for RtValue {
                 p1 == p2 && m1 == m2
             }
             (RtValue::Scope(a), RtValue::Scope(b)) => a == b,
-            // Compiler-internal LLVM handles have no meaningful structural
-            // equality, and inkwell's types don't implement `PartialEq`
-            // anyway — they (and any other non-matching pair) fall through.
+            // Any other pair (including a mismatch of variants) is unequal.
             _ => false,
         }
     }

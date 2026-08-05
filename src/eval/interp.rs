@@ -2172,19 +2172,17 @@ impl Interp {
                     crossing_roots += 1;
                     Ok(crate::compile::runtime::encode(sv))
                 }
-                // A Rust-native LLVM value / native scope crosses as an
-                // LLVM handle: a raw untraced registry index (interp-closure
-                // removal Stage 1 — `ast_bridge::is_llvm_handle_ty`'s
-                // integer-kind representation). The registry entry keeps the
-                // `Rc`/`Copy` payload alive for compiled code to hand back
-                // through `rt_llvm_call`/the return decode; no GC root, the
-                // registry itself is the owner.
-                RtValue::LlvmModule(_)
-                | RtValue::LlvmBuilder(_)
-                | RtValue::LlvmFunction(_)
-                | RtValue::LlvmBasicBlock(_)
-                | RtValue::LlvmValue(_)
-                | RtValue::Scope(_) => Ok(llvm_handle_register(v.clone())),
+                // A native scope crosses as a registry handle: a raw untraced
+                // index (`ast_bridge::is_llvm_handle_ty`'s integer-kind
+                // representation). The registry entry keeps the payload alive
+                // for compiled code to hand back through `rt_llvm_call`/the
+                // return decode; no GC root, the registry itself is the owner.
+                //
+                // An LLVM object needs no arm of its own any more: the
+                // interpreter already holds one *as* its handle integer (see
+                // `NativeHandle`), so it crosses through the `RtValue::Int`
+                // arm unchanged — which is the point of unifying them.
+                RtValue::Scope(s) => Ok(llvm_handle_register(NativeHandle::Scope(s.clone()))),
                 other => Err(EvalError::Internal(format!("compiled call: unsupported argument {:?}", other))),
             };
             match encoded {
@@ -2206,16 +2204,16 @@ impl Interp {
     /// result exactly like a top-level compiled call's, by the callee's
     /// declared (here: the closure's `Type::Fn` return) type.
     fn decode_compiled_return(&self, heap: &mut Heap, raw: i64, ret_ty: &Type) -> Result<RtValue, EvalError> {
-        // An LLVM-handle-typed result (interp-closure removal Stage 1) is a
-        // raw registry index — resolve it back to the Rust-native
-        // `RtValue::Llvm*`/`Scope` the interpreter works with, the exact
-        // inverse of `encode_crossing_args`' handle registration. Checked
-        // before every other arm since these are `Type::Named` and would
-        // otherwise be misread by `is_boxed_sexpr_type`'s catch-all or fall
-        // through to the bare `RtValue::Int`.
+        // An LLVM-handle-typed result is a raw registry index. For an LLVM
+        // object that is already the interpreter's own representation, so it
+        // just *is* the result; only a `Scope<llvm-*>` still has to be resolved
+        // back to the Rust-native `RtValue::Scope` the interpreter works with.
+        // Checked before every other arm since these are `Type::Named` and
+        // would otherwise be misread by `is_boxed_sexpr_type`'s catch-all.
         if crate::compile::ast_bridge::is_llvm_handle_ty(ret_ty) {
             return match llvm_handle_get(raw) {
-                Some(v) => Ok(v),
+                Some(NativeHandle::Scope(s)) => Ok(RtValue::Scope(s)),
+                Some(_) => Ok(RtValue::Int(raw)),
                 None => Err(EvalError::Internal(format!("compiled call returned dangling llvm handle {}", raw))),
             };
         }
@@ -2688,7 +2686,7 @@ impl Interp {
     ) -> Result<(), EvalError> {
         let compiler_path = Path::root("compile-function");
         let argv = vec![
-            RtValue::LlvmModule(module),
+            llvm_module_value_rc(module),
             RtValue::Str(internal_name.into()),
             RtValue::Sexpr(param_list),
             RtValue::Sexpr(body_sexpr),
@@ -5310,45 +5308,50 @@ fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) ->
     None
 }
 
-fn expect_llvm_module(v: &RtValue) -> Result<&Rc<RefCell<Module<'static>>>, EvalError> {
-    match v {
-        RtValue::LlvmModule(m) => Ok(m),
-        other => Err(EvalError::Internal(format!("expected an LlvmModule, got {:?}", other))),
+// The five accessors below resolve a handle integer back to its native
+// object. They return owned values (an `Rc` clone for the two shared ones)
+// rather than references, because the object lives in a thread-local registry
+// that cannot lend out a borrow.
+
+fn expect_llvm_module(v: &RtValue) -> Result<Rc<RefCell<Module<'static>>>, EvalError> {
+    match expect_handle(v, "LlvmModule")? {
+        NativeHandle::Module(m) => Ok(m),
+        _ => Err(EvalError::Internal(format!("expected an LlvmModule, got {:?}", v))),
     }
 }
 
 fn expect_llvm_function(v: &RtValue) -> Result<FunctionValue<'static>, EvalError> {
-    match v {
-        RtValue::LlvmFunction(f) => Ok(*f),
-        other => Err(EvalError::Internal(format!("expected an LlvmFunction, got {:?}", other))),
+    match expect_handle(v, "LlvmFunction")? {
+        NativeHandle::Function(f) => Ok(f),
+        _ => Err(EvalError::Internal(format!("expected an LlvmFunction, got {:?}", v))),
     }
 }
 
-fn expect_llvm_builder(v: &RtValue) -> Result<&Rc<RefCell<Builder<'static>>>, EvalError> {
-    match v {
-        RtValue::LlvmBuilder(b) => Ok(b),
-        other => Err(EvalError::Internal(format!("expected an LlvmBuilder, got {:?}", other))),
+fn expect_llvm_builder(v: &RtValue) -> Result<Rc<RefCell<Builder<'static>>>, EvalError> {
+    match expect_handle(v, "LlvmBuilder")? {
+        NativeHandle::Builder(b) => Ok(b),
+        _ => Err(EvalError::Internal(format!("expected an LlvmBuilder, got {:?}", v))),
     }
 }
 
 fn expect_llvm_basic_block(v: &RtValue) -> Result<BasicBlock<'static>, EvalError> {
-    match v {
-        RtValue::LlvmBasicBlock(b) => Ok(*b),
-        other => Err(EvalError::Internal(format!("expected an LlvmBasicBlock, got {:?}", other))),
+    match expect_handle(v, "LlvmBasicBlock")? {
+        NativeHandle::BasicBlock(b) => Ok(b),
+        _ => Err(EvalError::Internal(format!("expected an LlvmBasicBlock, got {:?}", v))),
     }
 }
 
 fn expect_llvm_value(v: &RtValue) -> Result<BasicValueEnum<'static>, EvalError> {
-    match v {
-        RtValue::LlvmValue(v) => Ok(*v),
-        other => Err(EvalError::Internal(format!("expected an LlvmValue, got {:?}", other))),
+    match expect_handle(v, "LlvmValue")? {
+        NativeHandle::Value(x) => Ok(x),
+        _ => Err(EvalError::Internal(format!("expected an LlvmValue, got {:?}", v))),
     }
 }
 
 fn llvm_module_create(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let name = expect_str(&args[0])?;
     let module = crate::compile::llvm_context().create_module(name);
-    Ok(RtValue::LlvmModule(Rc::new(RefCell::new(module))))
+    Ok(llvm_module_value(module))
 }
 
 /// Every compiled function gets the same fixed C ABI — `i64 name(i64* args,
@@ -5387,7 +5390,7 @@ fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let name = expect_str(&args[1])?;
     let existing = module.borrow().get_function(name);
     let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(name, compiled_fn_type(), None));
-    Ok(RtValue::LlvmFunction(function))
+    Ok(llvm_function_value(function))
 }
 
 /// Forward-declares `name` in `module` with the standard compiled-function
@@ -5764,17 +5767,19 @@ fn llvm_module_add_function_with_env(args: &[RtValue]) -> Result<RtValue, EvalEr
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(&args[1])?;
     let function = module.borrow_mut().add_function(name, compiled_fn_type_with_env(), None);
-    Ok(RtValue::LlvmFunction(function))
+    Ok(llvm_function_value(function))
 }
 
 fn llvm_module_verify(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let module = expect_llvm_module(&args[0])?;
-    Ok(RtValue::Bool(module.borrow().verify().is_ok()))
+    let ok = module.borrow().verify().is_ok();
+    Ok(RtValue::Bool(ok))
 }
 
 fn llvm_module_to_string(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let module = expect_llvm_module(&args[0])?;
-    Ok(RtValue::Str(module.borrow().print_to_string().to_string().into()))
+    let text = module.borrow().print_to_string().to_string();
+    Ok(RtValue::Str(text.into()))
 }
 
 /// Looks up an already-`add-function`-declared `llvm-function` by name —
@@ -5784,10 +5789,9 @@ fn llvm_module_to_string(args: &[RtValue]) -> Result<RtValue, EvalError> {
 fn llvm_module_get_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(&args[1])?;
-    module
-        .borrow()
-        .get_function(name)
-        .map(RtValue::LlvmFunction)
+    let found = module.borrow().get_function(name);
+    found
+        .map(llvm_function_value)
         .ok_or_else(|| EvalError::Panic(format!("get-function: no function named \"{}\" in this module", name)))
 }
 
@@ -5795,12 +5799,12 @@ fn llvm_function_append_block(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let function = expect_llvm_function(&args[0])?;
     let name = expect_str(&args[1])?;
     let block = crate::compile::llvm_context().append_basic_block(function, name);
-    Ok(RtValue::LlvmBasicBlock(block))
+    Ok(llvm_block_value(block))
 }
 
 fn llvm_builder_create() -> Result<RtValue, EvalError> {
     let builder = crate::compile::llvm_context().create_builder();
-    Ok(RtValue::LlvmBuilder(Rc::new(RefCell::new(builder))))
+    Ok(llvm_builder_value(builder))
 }
 
 fn llvm_builder_position_at_end(args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -5817,7 +5821,7 @@ fn llvm_builder_const_i64(args: &[RtValue]) -> Result<RtValue, EvalError> {
         other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
     };
     let value = crate::compile::llvm_context().i64_type().const_int(n as u64, false);
-    Ok(RtValue::LlvmValue(value.into()))
+    Ok(llvm_value_value(value.into()))
 }
 
 fn llvm_builder_build_ret(args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -5854,7 +5858,7 @@ fn llvm_builder_load_arg(args: &[RtValue]) -> Result<RtValue, EvalError> {
     };
     let loaded =
         b.build_load(ctx.i64_type(), elem_ptr, "arg_val").map_err(|e| EvalError::Internal(format!("load-arg: {}", e)))?;
-    Ok(RtValue::LlvmValue(loaded))
+    Ok(llvm_value_value(loaded))
 }
 
 /// Reads logical captured slot `index` out of `function`'s env array
@@ -5882,7 +5886,7 @@ fn llvm_builder_load_env(args: &[RtValue]) -> Result<RtValue, EvalError> {
     };
     let loaded =
         b.build_load(ctx.i64_type(), elem_ptr, "env_val").map_err(|e| EvalError::Internal(format!("load-env: {}", e)))?;
-    Ok(RtValue::LlvmValue(loaded))
+    Ok(llvm_value_value(loaded))
 }
 
 /// Shared by `build-add`/`build-sub`/`build-mul`: unwrap both `llvm-value`
@@ -5897,7 +5901,7 @@ fn llvm_builder_build_int_op(
     let a = expect_llvm_value(&args[1])?.into_int_value();
     let b = expect_llvm_value(&args[2])?.into_int_value();
     let result = op(&builder.borrow(), a, b, name).map_err(|e| EvalError::Internal(format!("build-{}: {}", name, e)))?;
-    Ok(RtValue::LlvmValue(result.into()))
+    Ok(llvm_value_value(result.into()))
 }
 
 /// Shared by `build-fadd`/`build-fsub`/`build-fmul`/`build-fdiv`/`build-frem`
@@ -5924,7 +5928,7 @@ fn llvm_builder_build_float_op(
     let b = bld.build_bit_cast(b_bits, f64_ty, "b_f").map_err(err)?.into_float_value();
     let result = op(&bld, a, b, name).map_err(err)?;
     let bits = bld.build_bit_cast(result, ctx.i64_type(), name).map_err(err)?;
-    Ok(RtValue::LlvmValue(bits))
+    Ok(llvm_value_value(bits))
 }
 
 /// The `f64` comparison counterpart of [`llvm_builder_build_int_op`]/
@@ -5947,7 +5951,7 @@ fn llvm_builder_build_fcmp(args: &[RtValue], name: &str, predicate: inkwell::Flo
     let b = bld.build_bit_cast(b_bits, f64_ty, "b_f").map_err(err)?.into_float_value();
     let cmp = bld.build_float_compare(predicate, a, b, name).map_err(err)?;
     let widened = bld.build_int_z_extend(cmp, ctx.i64_type(), name).map_err(err)?;
-    Ok(RtValue::LlvmValue(widened.into()))
+    Ok(llvm_value_value(widened.into()))
 }
 
 /// The unary transcendental/rounding counterpart of
@@ -5984,7 +5988,7 @@ fn llvm_builder_build_float_unary_intrinsic(args: &[RtValue], name: &str, intrin
         inkwell::values::ValueKind::Instruction(_) => return Err(err(format!("{} produced no value", intrinsic_name))),
     };
     let bits = bld.build_bit_cast(result, ctx.i64_type(), name).map_err(|e| err(e.to_string()))?;
-    Ok(RtValue::LlvmValue(bits))
+    Ok(llvm_value_value(bits))
 }
 
 /// `expt` (`f64,f64->f64`): the binary counterpart of
@@ -6018,7 +6022,7 @@ fn llvm_builder_build_float_binary_intrinsic(args: &[RtValue], name: &str, intri
         inkwell::values::ValueKind::Instruction(_) => return Err(err(format!("{} produced no value", intrinsic_name))),
     };
     let bits = bld.build_bit_cast(result, ctx.i64_type(), name).map_err(|e| err(e.to_string()))?;
-    Ok(RtValue::LlvmValue(bits))
+    Ok(llvm_value_value(bits))
 }
 
 fn llvm_builder_build_fpow(args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -6043,7 +6047,7 @@ fn llvm_builder_build_select(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let zero = ctx.i64_type().const_zero();
     let is_nonzero = bld.build_int_compare(inkwell::IntPredicate::NE, cond, zero, "select_cond").map_err(|e| err(e.to_string()))?;
     let result = bld.build_select(is_nonzero, then_v, else_v, "select").map_err(|e| err(e.to_string()))?;
-    Ok(RtValue::LlvmValue(result.into_int_value().into()))
+    Ok(llvm_value_value(result.into_int_value().into()))
 }
 
 /// `float->int` (`f64->i32`, narrowing, truncating toward zero): `bitcast`
@@ -6078,7 +6082,7 @@ fn llvm_builder_build_fptosi(args: &[RtValue]) -> Result<RtValue, EvalError> {
         inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
         inkwell::values::ValueKind::Instruction(_) => return Err(err("llvm.fptosi.sat produced no value".into())),
     };
-    Ok(RtValue::LlvmValue(result.into()))
+    Ok(llvm_value_value(result.into()))
 }
 
 /// Stack-allocates a `[count x i64]` array and returns its base pointer, to
@@ -6098,7 +6102,7 @@ fn llvm_builder_alloca_args(args: &[RtValue]) -> Result<RtValue, EvalError> {
     let ctx = crate::compile::llvm_context();
     let array_ty = ctx.i64_type().array_type(count);
     let ptr = builder.borrow().build_alloca(array_ty, "call_args").map_err(|e| EvalError::Internal(format!("alloca-args: {}", e)))?;
-    Ok(RtValue::LlvmValue(ptr.into()))
+    Ok(llvm_value_value(ptr.into()))
 }
 
 /// Writes `value` into slot `index` of an `alloca-args` array — the same
@@ -6142,7 +6146,7 @@ fn llvm_builder_load_raw(args: &[RtValue]) -> Result<RtValue, EvalError> {
         b.build_gep(ctx.i64_type(), array_ptr, &[idx_val], "load_raw_ptr").map_err(|e| EvalError::Internal(format!("load-raw: {}", e)))?
     };
     let loaded = b.build_load(ctx.i64_type(), elem_ptr, "load_raw_val").map_err(|e| EvalError::Internal(format!("load-raw: {}", e)))?;
-    Ok(RtValue::LlvmValue(loaded))
+    Ok(llvm_value_value(loaded))
 }
 
 /// Shared by every `build-icmp-*` builtin (if/let/comparisons, labels/closures
@@ -6161,7 +6165,7 @@ fn llvm_builder_build_icmp(args: &[RtValue], name: &str, predicate: inkwell::Int
     let cmp = bld.build_int_compare(predicate, a, b, name).map_err(|e| EvalError::Internal(format!("{}: {}", name, e)))?;
     let ctx = crate::compile::llvm_context();
     let widened = bld.build_int_z_extend(cmp, ctx.i64_type(), name).map_err(|e| EvalError::Internal(format!("{}: {}", name, e)))?;
-    Ok(RtValue::LlvmValue(widened.into()))
+    Ok(llvm_value_value(widened.into()))
 }
 
 /// `compile-if`'s branch primitive: branches to `then_block` when `cond`
@@ -6222,7 +6226,7 @@ fn llvm_builder_build_call(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .build_call(target, &[args_ptr.into(), argc_val.into()], "call_result")
         .map_err(|e| EvalError::Internal(format!("build-call: {}", e)))?;
     match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => Ok(RtValue::LlvmValue(v)),
+        inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),
         inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-call: callee produced no value".into())),
     }
 }
@@ -6256,7 +6260,7 @@ fn llvm_builder_build_dyn_call(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .build_indirect_call(compiled_fn_type(), fn_ptr, &[args_ptr.into(), argc_val.into()], "dyn_call_result")
         .map_err(|e| EvalError::Internal(format!("build-dyn-call: {}", e)))?;
     match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => Ok(RtValue::LlvmValue(v)),
+        inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),
         inkwell::values::ValueKind::Instruction(_) => {
             Err(EvalError::Internal("build-dyn-call: callee produced no value".into()))
         }
@@ -6288,7 +6292,7 @@ fn llvm_builder_build_call_with_env(args: &[RtValue]) -> Result<RtValue, EvalErr
         .build_call(target, &[args_ptr.into(), argc_val.into(), env_ptr.into(), env_len_val.into()], "call_result")
         .map_err(|e| EvalError::Internal(format!("build-call-with-env: {}", e)))?;
     match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => Ok(RtValue::LlvmValue(v)),
+        inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),
         inkwell::values::ValueKind::Instruction(_) => {
             Err(EvalError::Internal("build-call-with-env: callee produced no value".into()))
         }
@@ -6370,7 +6374,7 @@ fn llvm_builder_build_make_closure(args: &[RtValue]) -> Result<RtValue, EvalErro
         .build_call(rt_closure_new, &[ctor_args_ptr.into(), argc_val.into()], "closure_new_result")
         .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
     match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => Ok(RtValue::LlvmValue(v)),
+        inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),
         inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-make-closure: rt_closure_new produced no value".into())),
     }
 }
@@ -6504,7 +6508,7 @@ fn llvm_builder_build_closure_apply(args: &[RtValue]) -> Result<RtValue, EvalErr
         )
         .map_err(err)?;
     match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => Ok(RtValue::LlvmValue(v)),
+        inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),
         inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-closure-apply: callee produced no value".into())),
     }
 }
@@ -6539,7 +6543,7 @@ fn llvm_builder_build_malloc(args: &[RtValue]) -> Result<RtValue, EvalError> {
         .borrow()
         .build_array_malloc(ctx.i64_type(), count_val, "box")
         .map_err(|e| EvalError::Internal(format!("build-malloc: {}", e)))?;
-    Ok(RtValue::LlvmValue(ptr.into()))
+    Ok(llvm_value_value(ptr.into()))
 }
 
 /// Frees a pointer `build-malloc` returned (or any other `llvm-value`
@@ -6568,7 +6572,7 @@ fn llvm_builder_build_int_to_ptr(args: &[RtValue]) -> Result<RtValue, EvalError>
         .borrow()
         .build_int_to_ptr(v, ptr_ty, "int_to_ptr")
         .map_err(|e| EvalError::Internal(format!("build-int-to-ptr: {}", e)))?;
-    Ok(RtValue::LlvmValue(ptr.into()))
+    Ok(llvm_value_value(ptr.into()))
 }
 
 /// The inverse of `build-int-to-ptr` — `compile-construct`'s final step,
@@ -6583,7 +6587,7 @@ fn llvm_builder_build_ptr_to_int(args: &[RtValue]) -> Result<RtValue, EvalError>
         .borrow()
         .build_ptr_to_int(ptr, ctx.i64_type(), "ptr_to_int")
         .map_err(|e| EvalError::Internal(format!("build-ptr-to-int: {}", e)))?;
-    Ok(RtValue::LlvmValue(v.into()))
+    Ok(llvm_value_value(v.into()))
 }
 
 /// Builds an enum value (`Option`/`Result`/user `defenum`) for `type_name`'s
@@ -7130,27 +7134,142 @@ fn scope_set(args: &[RtValue]) -> Result<RtValue, EvalError> {
 // them). Thread-local for the same reason `set_active_heap` is: `cargo
 // test` workers each drive their own independent `Heap`/LLVM session.
 
-thread_local! {
-    static LLVM_HANDLES: RefCell<Vec<RtValue>> = const { RefCell::new(Vec::new()) };
+/// A Rust-native object that has no representation in the value heap, held
+/// here so a typelisp value can refer to it by an opaque integer handle.
+///
+/// These are the compiler's own working objects — an LLVM module, builder,
+/// function, block, value, and a `Scope` whose `V` is one of those. They
+/// cannot live on the GC heap (an inkwell handle is not a `Value` and has no
+/// traceable shape), and they used to be carried as `RtValue::Llvm*`/`Scope`
+/// variants instead: a second, Rust-side value universe running alongside the
+/// heap one, which is what forced every binding to be routed by static type
+/// (`SlotKind`) rather than just being a `Value`.
+///
+/// Keeping the object here and handing out an `i64` collapses that: at the
+/// language level an `llvm-value` is an integer like any other, and the same
+/// representation already crosses to compiled code
+/// (`ast_bridge::is_llvm_handle_ty`'s integer kind), so interpreted and
+/// compiled tiers now agree by construction rather than by conversion. Type
+/// safety is unaffected — `LLVM_HANDLE_TYPES` keeps these distinct from `i32`
+/// statically, which is where it was always enforced.
+///
+/// `src/eval/stream.rs` represents OS streams the same way.
+#[derive(Clone)]
+pub(crate) enum NativeHandle {
+    Module(Rc<RefCell<Module<'static>>>),
+    Builder(Rc<RefCell<Builder<'static>>>),
+    Function(FunctionValue<'static>),
+    BasicBlock(BasicBlock<'static>),
+    Value(BasicValueEnum<'static>),
+    Scope(NativeScope),
 }
 
-/// Registers `v` and returns its handle — the raw `i64` compiled code
-/// carries in place of the Rust-native value.
-pub(crate) fn llvm_handle_register(v: RtValue) -> i64 {
+thread_local! {
+    static LLVM_HANDLES: RefCell<Vec<NativeHandle>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Registers `h` and returns its handle — the `i64` both the interpreter and
+/// compiled code carry in place of the Rust-native object.
+pub(crate) fn llvm_handle_register(h: NativeHandle) -> i64 {
     LLVM_HANDLES.with(|t| {
         let mut t = t.borrow_mut();
-        t.push(v);
+        t.push(h);
         (t.len() - 1) as i64
     })
 }
 
-/// The value behind handle `h`, or `None` for a never-issued (or already
+/// The object behind handle `h`, or `None` for a never-issued (or already
 /// released) handle.
-pub(crate) fn llvm_handle_get(h: i64) -> Option<RtValue> {
+pub(crate) fn llvm_handle_get(h: i64) -> Option<NativeHandle> {
     if h < 0 {
         return None;
     }
     LLVM_HANDLES.with(|t| t.borrow().get(h as usize).cloned())
+}
+
+/// Register `h` as the interpreter-level value standing for it.
+fn handle_value(h: NativeHandle) -> RtValue {
+    RtValue::Int(llvm_handle_register(h))
+}
+
+fn llvm_module_value(m: Module<'static>) -> RtValue {
+    handle_value(NativeHandle::Module(Rc::new(RefCell::new(m))))
+}
+
+fn llvm_module_value_rc(m: Rc<RefCell<Module<'static>>>) -> RtValue {
+    handle_value(NativeHandle::Module(m))
+}
+
+fn llvm_builder_value(b: Builder<'static>) -> RtValue {
+    handle_value(NativeHandle::Builder(Rc::new(RefCell::new(b))))
+}
+
+fn llvm_function_value(f: FunctionValue<'static>) -> RtValue {
+    handle_value(NativeHandle::Function(f))
+}
+
+fn llvm_block_value(b: BasicBlock<'static>) -> RtValue {
+    handle_value(NativeHandle::BasicBlock(b))
+}
+
+fn llvm_value_value(v: BasicValueEnum<'static>) -> RtValue {
+    handle_value(NativeHandle::Value(v))
+}
+
+/// The LLVM module `v` is a handle for, or `None` if it is not one.
+///
+/// An `llvm-module` is an opaque integer at the value level, so a caller
+/// outside this module (a test inspecting generated IR, say) needs this to get
+/// at the object behind it.
+pub fn llvm_module_of(v: &RtValue) -> Option<Rc<RefCell<Module<'static>>>> {
+    match llvm_handle_get(match v {
+        RtValue::Int(h) => *h,
+        _ => return None,
+    })? {
+        NativeHandle::Module(m) => Some(m),
+        _ => None,
+    }
+}
+
+/// The LLVM value `v` is a handle for — [`llvm_module_of`]'s counterpart.
+pub fn llvm_value_of(v: &RtValue) -> Option<BasicValueEnum<'static>> {
+    match llvm_handle_get(match v {
+        RtValue::Int(h) => *h,
+        _ => return None,
+    })? {
+        NativeHandle::Value(x) => Some(x),
+        _ => None,
+    }
+}
+
+/// The handle integer standing for `v` at the compiled boundary.
+///
+/// An LLVM object already *is* its handle, so this is the identity on it; only
+/// a native scope still has to be registered on the way out.
+fn handle_of(v: &RtValue) -> Option<i64> {
+    match v {
+        RtValue::Int(h) => Some(*h),
+        RtValue::Scope(s) => Some(llvm_handle_register(NativeHandle::Scope(s.clone()))),
+        _ => None,
+    }
+}
+
+/// The interpreter value standing for handle integer `raw`, the inverse of
+/// [`handle_of`].
+fn value_of_handle(raw: i64) -> Option<RtValue> {
+    match llvm_handle_get(raw)? {
+        NativeHandle::Scope(s) => Some(RtValue::Scope(s)),
+        _ => Some(RtValue::Int(raw)),
+    }
+}
+
+/// The handle integer `v` carries, for the `expect_llvm_*` accessors.
+fn expect_handle(v: &RtValue, want: &str) -> Result<NativeHandle, EvalError> {
+    let h = match v {
+        RtValue::Int(n) => *n,
+        other => return Err(EvalError::Internal(format!("expected an {}, got {:?}", want, other))),
+    };
+    llvm_handle_get(h).ok_or_else(|| EvalError::Internal(format!("expected an {}, got dangling handle {}", want, h)))
 }
 
 /// The current registry length — pass to [`llvm_handles_release`] to drop
@@ -7323,7 +7442,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
     let mut vals: Vec<RtValue> = Vec::with_capacity(raw_args.len());
     for (raw, k) in raw_args.iter().zip(&op.args) {
         vals.push(match k {
-            LlvmArgK::Handle => match llvm_handle_get(*raw) {
+            LlvmArgK::Handle => match value_of_handle(*raw) {
                 Some(v) => v,
                 None => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: dangling llvm handle {}", op.type_key, op.method, raw)),
             },
@@ -7344,7 +7463,10 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         };
         let boxed = match found {
             Some(v) => {
-                let h = llvm_handle_register(v);
+                let h = match handle_of(&v) {
+                    Some(h) => h,
+                    None => rt_llvm_fatal(&format!("rt_llvm_call: native-scope::get: not a handle value: {:?}", v)),
+                };
                 // type-identity-ok: the built-in `Option`, a root name spelled in full
                 heap.alloc_enum("option".to_string(), 0, vec![Value::Int(h)])
             }
@@ -7373,7 +7495,10 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         Err(e) => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: {:?}", op.type_key, op.method, e)),
     };
     match op.ret {
-        LlvmRetK::Handle => llvm_handle_register(v),
+        LlvmRetK::Handle => match handle_of(&v) {
+            Some(h) => h,
+            None => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a handle result, got {:?}", op.type_key, op.method, v)),
+        },
         LlvmRetK::Unit => 0,
         LlvmRetK::Bool => match v {
             RtValue::Bool(b) => i64::from(b),
