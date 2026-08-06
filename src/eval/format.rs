@@ -1888,6 +1888,9 @@ impl Renderer {
                 out.push_str(&format!("#<scope depth={}>", heap.scope_frame_count(id)))
             }
             Value::Boxed(id) if heap.is_compiled_closure(id) => out.push_str("#<closure>"),
+            // Unreadable, like CL's own — the seed is an implementation
+            // detail, not part of the value.
+            Value::Boxed(id) if heap.is_random_state(id) => out.push_str("#<random-state>"),
             // The other function value: a built-in reified as a value, shown
             // by name (there is nothing else to it).
             Value::Boxed(id) if heap.is_builtin_fn(id) => {

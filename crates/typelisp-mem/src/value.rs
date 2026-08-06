@@ -264,6 +264,20 @@ pub(crate) enum BoxedObj {
     /// interpreter refuses to marshal one across the boundary, so this box
     /// stays interpreter-side until `rt_apply_any` exists.
     Builtin { recv_type: Option<PathId>, name: StrId },
+    /// A `random-state` (CL's `random-state`): the current seed of a mutable
+    /// PRNG stream, advanced in place on every draw.
+    ///
+    /// A box rather than an immediate because CL gives a `random-state`
+    /// *identity* — every binding that shares one observes the same draws, and
+    /// an independent stream is only ever made explicitly, by
+    /// `random-state-copy`. That is exactly "one mutable cell, shared by
+    /// reference", which a `BoxId` gives and a copied `u64` would destroy.
+    ///
+    /// It was an `Rc<Cell<u64>>` on the interpreter's side of the fence, which
+    /// the collector could not see and no `Value` could carry — the last
+    /// `RtValue` variant with no heap form, and so the last thing keeping
+    /// `rtvalue_to_struct_field` partial.
+    RandomState(u64),
     /// A trait object (`:dyn Trait`, TODO T4): a vtable identifier alongside
     /// the concrete value it dispatches for.
     ///

@@ -528,9 +528,6 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
         RtValue::Float(f) => format_float(*f),
         RtValue::Bignum(n) => n.to_string(),
         RtValue::Ratio(r) => format!("{}/{}", r.numer(), r.denom()),
-        // CL prints `random-state` unreadably (implementation-defined) too —
-        // there is nothing else meaningful to show.
-        RtValue::RandomState(_) => "#<random-state>".to_string(),
         RtValue::Bool(b) => b.to_string(),
         RtValue::Char(c) => format!("#\\{}", c),
         RtValue::Str(s) => format!("{:?}", s),
@@ -616,6 +613,9 @@ fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
                 heap.builtin_fn_name(id)
             ),
         },
+        // CL prints a `random-state` unreadably (implementation-defined) too —
+        // its seed is an implementation detail, not part of the value.
+        Value::Boxed(id) if heap.is_random_state(id) => "#<random-state>".to_string(),
         Value::Boxed(id) if heap.is_bignum(id) => heap.bignum_value(id).to_string(),
         Value::Boxed(id) if heap.is_ratio(id) => {
             let r = heap.ratio_value(id);

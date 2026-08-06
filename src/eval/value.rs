@@ -139,16 +139,6 @@ pub enum RtValue {
     /// A `ratio` value (exact rational, CL's ratio), same `Rc`-wrapping
     /// rationale as [`RtValue::Bignum`].
     Ratio(Rc<BigRational>),
-    /// A `random-state` value: a mutable PRNG stream (CL's `random-state`).
-    /// `Rc<Cell<u64>>`, not `Rc<BigInt>`/`Rc<BigRational>` like `Bignum`/
-    /// `Ratio` above — those are immutable once built, so a plain `Rc` gives
-    /// cheap sharing; this one is mutated in place on every draw
-    /// (`interp::eval_random_state_next`), and every binding that shares the
-    /// same `random-state` (CL identity semantics — copies are only ever
-    /// made explicitly, via `random-state-copy`) must observe that mutation,
-    /// which is exactly what a shared `Cell` gives for a `Copy` payload
-    /// without needing `RefCell`'s borrow checking.
-    RandomState(Rc<Cell<u64>>),
     Bool(bool),
     Char(char),
     /// `Rc<str>`, not a plain owned `String` — this language's `string`
@@ -226,10 +216,6 @@ impl PartialEq for RtValue {
             (RtValue::Float(a), RtValue::Float(b)) => a == b,
             (RtValue::Bignum(a), RtValue::Bignum(b)) => a == b,
             (RtValue::Ratio(a), RtValue::Ratio(b)) => a == b,
-            // Identity, like a closure's `Sexpr` box — a `random-state` has
-            // no meaningful structural equality (its `u64` seed is an
-            // implementation detail, not a value CL programs ever compare).
-            (RtValue::RandomState(a), RtValue::RandomState(b)) => Rc::ptr_eq(a, b),
             (RtValue::Bool(a), RtValue::Bool(b)) => a == b,
             (RtValue::Char(a), RtValue::Char(b)) => a == b,
             (RtValue::Str(a), RtValue::Str(b)) => a == b,

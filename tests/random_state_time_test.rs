@@ -80,6 +80,66 @@ fn random_state_copy_replays_the_same_sequence() {
     assert_eq!(eval_ok(src), RtValue::Bool(true));
 }
 
+/// The other half of `random_state_copy_replays_the_same_sequence`: drawing
+/// twice from *one* state must not replay, because both draws advance the same
+/// stream. This is what makes a `random-state` an identity rather than a value
+/// — the property that used to come from sharing one `Rc<Cell<u64>>` and now
+/// comes from sharing one `BoxedObj::RandomState`. Without it, "a copy replays"
+/// would also pass for an implementation that copied on every read.
+#[test]
+fn two_draws_from_one_state_advance_the_same_stream() {
+    let src = "(defun draws ((s random-state)) i64
+                 (let ((acc (the i64 0)) (i 0))
+                   (while (< i 15)
+                     (setf acc (+ (* acc 10) (as i64 (random 10 s))))
+                     (setf i (+ i 1)))
+                   acc))
+               (let ((a (make-random-state)))
+                 (= (draws a) (draws a)))";
+    assert_eq!(eval_ok(src), RtValue::Bool(false));
+}
+
+/// A `random-state` is a collectible heap box now, not a Rust-side `Rc`, so it
+/// has to stay reachable from a root for as long as the binding holding it
+/// does. `gc_stress` collects on every allocation, so a missed root fails every
+/// run rather than once the free list happens to run dry.
+///
+/// The global is the case that matters: a `defvar`'s slot is what the prelude's
+/// own `*random-state*` lives in, and it outlives every form that draws from it.
+#[test]
+fn a_random_state_global_survives_constant_collection() {
+    let mut h = Heap::with_capacity(1 << 18);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+
+    let mut eval = |h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str| -> RtValue {
+        let vs = r.read_all(h, src).expect("read failed");
+        let mut last = RtValue::Unit;
+        for v in vs {
+            let tl = chk.check_form(h, interp, v).expect("check failed");
+            if let Some(v) = interp.exec(h, tl).expect("eval failed") {
+                last = v;
+            }
+        }
+        last
+    };
+
+    eval(&mut h, &mut chk, &mut interp, "(defvar (*rs* random-state) (make-random-state))");
+    h.set_gc_stress(true);
+    // Draw across several separate top-level forms, so the global is re-read
+    // from its slot after any number of intervening collections.
+    for _ in 0..3 {
+        let v = eval(&mut h, &mut chk, &mut interp, "(random 10 *rs*)");
+        match v {
+            RtValue::Int(n) => assert!((0..10).contains(&n), "draw {} out of bounds", n),
+            other => panic!("expected an integer draw, got {:?}", other),
+        }
+    }
+}
+
 #[test]
 fn random_with_an_explicit_state_stays_within_bounds() {
     let src = "(let ((s (make-random-state)))

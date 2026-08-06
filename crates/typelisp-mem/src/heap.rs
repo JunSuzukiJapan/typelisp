@@ -987,6 +987,40 @@ impl Heap {
         }
     }
 
+    // ---- random states ------------------------------------------------------
+
+    /// Store a `random-state` at `seed`, returning its `Value::Boxed` — see
+    /// [`BoxedObj::RandomState`] for why a stream is a box rather than an
+    /// immediate. Allocates one box slot and never collects.
+    pub fn alloc_random_state(&mut self, seed: u64) -> Value {
+        self.alloc_boxed(BoxedObj::RandomState(seed))
+    }
+
+    /// True if `id` holds a `BoxedObj::RandomState`.
+    pub fn is_random_state(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::RandomState(_)))
+    }
+
+    /// A `random-state`'s current seed. Panics if `id` doesn't hold a
+    /// `BoxedObj::RandomState` — the same internal-invariant-trap convention as
+    /// [`float_value`](Self::float_value).
+    pub fn random_state_seed(&self, id: BoxId) -> u64 {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::RandomState(seed)) => *seed,
+            _ => panic!("BoxId does not hold a RandomState"),
+        }
+    }
+
+    /// Advance a `random-state` to `seed`, in place — every holder of this box
+    /// observes the change, which is what makes it one shared stream. Panics
+    /// like [`random_state_seed`](Self::random_state_seed).
+    pub fn set_random_state_seed(&mut self, id: BoxId, seed: u64) {
+        match &mut self.box_slots[id.0 as usize] {
+            Some(BoxedObj::RandomState(s)) => *s = seed,
+            _ => panic!("BoxId does not hold a RandomState"),
+        }
+    }
+
     /// A compiled closure's native entry point. Panics if `id` doesn't hold
     /// a `BoxedObj::CompiledClosure` — the same internal-invariant-trap
     /// convention as [`float_value`](Self::float_value).
@@ -1490,7 +1524,9 @@ impl Heap {
         match obj {
             // `Bignum`/`Ratio` payloads live in ordinary Rust memory (like a
             // `Str`'s buffer) and hold no nested `Value` — nothing to trace.
-            BoxedObj::Float(_) | BoxedObj::Bignum(_) | BoxedObj::Ratio(_) => {}
+            // A `RandomState`'s payload is a bare `u64` seed — same "ordinary
+            // Rust memory, nothing nested" case as the numeric boxes.
+            BoxedObj::Float(_) | BoxedObj::Bignum(_) | BoxedObj::Ratio(_) | BoxedObj::RandomState(_) => {}
             BoxedObj::Struct { payload: StructPayload::Fields(fields), .. } => {
                 for &v in fields {
                     stack.push(v);

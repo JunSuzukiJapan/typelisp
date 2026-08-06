@@ -1001,6 +1001,14 @@ impl Interp {
             // A trait object is a `BoxedObj::Dyn` fat box — the twin of
             // `Checker::is_heap_repr_seen`'s `Type::Dyn` arm.
             Type::Dyn(..) => true,
+            // A `random-state` is a `BoxedObj::RandomState`. This *must* be
+            // here, not merely may: a `Slot::Heap` is rooted by the heap's own
+            // `cell_registry` walk, which `gc` runs every time, whereas a
+            // `Slot::Native` only becomes a root when `sync_roots` next runs —
+            // so a `Native`-routed binding holding a collectible box is live
+            // only between syncs. A `random-state` global went missing on the
+            // very first allocation under `gc_stress` before this arm existed.
+            Type::RandomState => true,
             _ => false,
         }
     }
@@ -3435,9 +3443,9 @@ impl Interp {
             name if name.starts_with("stream-") || name.starts_with("file-") => {
                 self.eval_stream_builtin(heap, name, args)
             }
-            "make-random-state-fresh" => Some(eval_make_random_state_fresh(args)),
-            "random-state-copy" => Some(eval_random_state_copy(args)),
-            "random-state-next" => Some(eval_random_state_next(args)),
+            "make-random-state-fresh" => Some(eval_make_random_state_fresh(heap, args)),
+            "random-state-copy" => Some(eval_random_state_copy(heap, args)),
+            "random-state-next" => Some(eval_random_state_next(heap, args)),
             "get-universal-time" => Some(eval_get_universal_time(args)),
             "get-internal-real-time" => Some(eval_get_internal_real_time(args)),
             "parse-int" => Some(eval_parse_int(heap, args)),
@@ -4858,9 +4866,12 @@ fn fresh_random_seed() -> u64 {
         | 1
 }
 
-fn expect_random_state(v: &RtValue) -> Result<&Rc<Cell<u64>>, EvalError> {
+/// The box behind a `random-state` value. A *positive* `is_random_state` test,
+/// so a differently-shaped box (a float, a struct) is reported rather than
+/// read as a seed by the accessors below, which panic on a mismatch.
+fn expect_random_state(heap: &Heap, v: &RtValue) -> Result<BoxId, EvalError> {
     match v {
-        RtValue::RandomState(s) => Ok(s),
+        RtValue::Sexpr(Value::Boxed(id)) if heap.is_random_state(*id) => Ok(*id),
         other => Err(EvalError::Internal(format!("expected a random-state, got {:?}", other))),
     }
 }
@@ -4868,31 +4879,32 @@ fn expect_random_state(v: &RtValue) -> Result<&Rc<Cell<u64>>, EvalError> {
 /// `make-random-state-fresh`: a brand new, independently-seeded stream —
 /// every `(defvar *random-state* ...)` in the prelude gets one at load time,
 /// and it backs CL's `(make-random-state t)` case.
-fn eval_make_random_state_fresh(_args: &[RtValue]) -> Result<RtValue, EvalError> {
-    Ok(RtValue::RandomState(Rc::new(Cell::new(fresh_random_seed()))))
+fn eval_make_random_state_fresh(heap: &mut Heap, _args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Sexpr(heap.alloc_random_state(fresh_random_seed())))
 }
 
 /// `random-state-copy`: an independent stream starting from the same point
 /// `state` is at right now — CL's `(make-random-state state)` case. Later
 /// draws against the copy never affect `state` (or vice versa) — distinct
 /// `Rc`s over distinct `Cell`s, not a second handle to the same one.
-fn eval_random_state_copy(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let s = expect_random_state(&args[0])?;
-    Ok(RtValue::RandomState(Rc::new(Cell::new(s.get()))))
+fn eval_random_state_copy(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_random_state(heap, &args[0])?;
+    let seed = heap.random_state_seed(id);
+    Ok(RtValue::Sexpr(heap.alloc_random_state(seed)))
 }
 
 /// `random-state-next`: advances `state` one xorshift step and returns the
 /// draw reduced into `[0, bound)`. The prelude's `random` (an ordinary
 /// `&optional`-taking `defun`) is the only caller — this is the one place
 /// that actually touches a `random-state`'s seed.
-fn eval_random_state_next(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let s = expect_random_state(&args[0])?;
+fn eval_random_state_next(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let id = expect_random_state(heap, &args[0])?;
     let n = rt_i64(&args[1])?;
     if n <= 0 {
         return Err(EvalError::Panic(format!("random: bound must be positive, got {}", n)));
     }
-    let next = xorshift64_step(s.get());
-    s.set(next);
+    let next = xorshift64_step(heap.random_state_seed(id));
+    heap.set_random_state_seed(id, next);
     Ok(RtValue::Int((next % n as u64) as i64))
 }
 
@@ -6947,11 +6959,16 @@ pub(super) fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Result<Va
 /// so a form that produces no value (a `defvar` initializer's side effect,
 /// an empty `progn`) reads back as `()`/nil. `Unit` used to need its own arm
 /// here because a struct field couldn't hold one; now that it can, the two
-/// agree by construction rather than by two copies of the same rule. The
-/// non-representable set stays `None`: a native-repr `Data` enum (holding an
-/// LLVM handle/native `Scope`), a bare `Builtin` function value, a native
-/// `Scope<V>`, and the compiler-internal `Llvm*` handles have no `Sexpr`
-/// encoding.
+/// agree by construction rather than by two copies of the same rule.
+///
+/// The non-representable set has shrunk to exactly one variant,
+/// [`RtValue::Data`]. Everything that used to be in it has since been given a
+/// heap form: the LLVM handles and native `Scope<V>` (Phase 1a), built-in
+/// function values (`BoxedObj::Builtin`), and `random-state`
+/// (`BoxedObj::RandomState`). And `Data` is only ever *built* by
+/// `build_enum_value`'s fallback, which fires only when a field fails this
+/// very conversion — so with nothing else able to fail it, no `Data` can be
+/// constructed and this returns `None` for nothing at all.
 pub(super) fn rtvalue_to_sexpr(heap: &mut Heap, v: &RtValue) -> Option<Value> {
     rtvalue_to_struct_field(heap, v).ok()
 }
