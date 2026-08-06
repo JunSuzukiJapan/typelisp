@@ -553,10 +553,6 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
             }
         }
         RtValue::Sexpr(sv) => format_sexpr(heap, reg, *sv),
-        RtValue::Builtin(name) => format!("#<builtin {}>", name),
-        RtValue::BuiltinMethod(type_name, method) => format!("#<builtin {}::{}>", type_name, method),
-        // Compiler-internal handles; not meant to be printed by user code,
-        // so a terse opaque tag is enough.
     }
 }
 
@@ -609,12 +605,27 @@ fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
         // closure since interp-closure removal Stage 8c (`BoxedObj::Closure`
         // is gone); `BoxedObj::CompiledClosure` is the only closure box left.
         Value::Boxed(id) if heap.is_compiled_closure(id) => "#<closure>".to_string(),
+        // The other kind of function value: a built-in reified as a value,
+        // which prints as its name rather than opaquely — there is nothing
+        // else to show, and the name is exactly what identifies it.
+        Value::Boxed(id) if heap.is_builtin_fn(id) => match heap.builtin_fn_recv(id) {
+            None => format!("#<builtin {}>", heap.builtin_fn_name(id)),
+            Some(pid) => format!(
+                "#<builtin {}::{}>",
+                crate::types::path_from_id(heap, pid),
+                heap.builtin_fn_name(id)
+            ),
+        },
         Value::Boxed(id) if heap.is_bignum(id) => heap.bignum_value(id).to_string(),
         Value::Boxed(id) if heap.is_ratio(id) => {
             let r = heap.ratio_value(id);
             format!("{}/{}", r.numer(), r.denom())
         }
-        Value::Boxed(id) => format_float(heap.float_value(id)),
+        // Positively `is_float`: the bare fall-through this replaces read
+        // every other box kind as an `f64`, which `float_value` answers with
+        // a panic.
+        Value::Boxed(id) if heap.is_float(id) => format_float(heap.float_value(id)),
+        Value::Boxed(_) => "#<unprintable>".to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),
         Value::Symbol(id) => heap.symbol_name(id).to_string(),

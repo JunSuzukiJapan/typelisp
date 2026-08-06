@@ -2970,15 +2970,14 @@ impl Checker {
     ///   `Option<llvm-value>` be an ordinary heap enum rather than the native
     ///   `RtValue::Data` fallback it needed when a handle was a Rust object.
     ///
-    /// `Type::Fn` is deliberately *not* here. A closure value is heap-repr, but a
-    /// function value can also be a bare built-in name (`RtValue::Builtin`, e.g.
-    /// `gensym` used as a value), which has no `Value` form — so declaring `Fn`
-    /// storable would route `Option<Fn>` bindings to a heap slot that
-    /// `(Option::some gensym)` cannot satisfy. It can be added once built-ins
-    /// become heap closures.
+    /// * `Type::Fn` is a box either way now: a `lambda`/`labels`/reified user
+    ///   function is a `BoxedObj::CompiledClosure`, and a built-in used as a
+    ///   value (`gensym`, `i32::+`) is a `BoxedObj::Builtin`. It was excluded
+    ///   until the latter existed, because `(Option::some gensym)` then had
+    ///   no `Value` to store and had to fall back to `RtValue::Data`.
     fn enum_field_storable(&self, fty: &Type, seen: &mut HashSet<Path>) -> bool {
         is_boxable_scalar(fty)
-            || matches!(fty, Type::Unit)
+            || matches!(fty, Type::Unit | Type::Fn(..))
             || crate::compile::ast_bridge::is_llvm_handle_ty(fty)
             || self.is_heap_repr_seen(fty, seen)
     }

@@ -1018,15 +1018,14 @@ impl Interp {
     ///   `Option<llvm-value>` be an ordinary heap enum rather than the native
     ///   `RtValue::Data` fallback it needed when a handle was a Rust object.
     ///
-    /// `Type::Fn` is deliberately *not* here. A closure value is heap-repr, but a
-    /// function value can also be a bare built-in name (`RtValue::Builtin`, e.g.
-    /// `gensym` used as a value), which has no `Value` form — so declaring `Fn`
-    /// storable would route `Option<Fn>` bindings to a heap slot that
-    /// `(Option::some gensym)` cannot satisfy. It can be added once built-ins
-    /// become heap closures.
+    /// * `Type::Fn` is a box either way now: a `lambda`/`labels`/reified user
+    ///   function is a `BoxedObj::CompiledClosure`, and a built-in used as a
+    ///   value (`gensym`, `i32::+`) is a `BoxedObj::Builtin`. It was excluded
+    ///   until the latter existed, because `(Option::some gensym)` then had
+    ///   no `Value` to store and had to fall back to `RtValue::Data`.
     fn enum_field_storable(&self, fty: &Type, seen: &mut HashSet<Path>) -> bool {
         crate::check::checker::is_boxable_scalar(fty)
-            || matches!(fty, Type::Unit)
+            || matches!(fty, Type::Unit | Type::Fn(..))
             || crate::compile::ast_bridge::is_llvm_handle_ty(fty)
             || self.is_heap_repr_ty(fty, seen)
     }
@@ -1415,11 +1414,14 @@ impl Interp {
                 // call sites since interp-closure removal Stage 8c).
                 Some(_) => self.jit_closure(heap, env, t, &[]),
                 // Otherwise a built-in operator (lives at the root, simple path).
-                None => Ok(RtValue::Builtin(r.resolved.last_segment().to_string())),
+                None => Ok(RtValue::Sexpr(heap.alloc_builtin_fn(None, r.resolved.last_segment()))),
             },
             Expr::MethodRef { type_name, method, home, .. } => match self.root.borrow().resolve_method(home, type_name, method) {
                 Some(_) => self.jit_closure(heap, env, t, &[]),
-                None => Ok(RtValue::BuiltinMethod(type_name.clone(), method.clone())),
+                None => {
+                    let recv = crate::types::intern_path_id(heap, type_name);
+                    Ok(RtValue::Sexpr(heap.alloc_builtin_fn(Some(recv), method)))
+                }
             },
             Expr::If(..) => {
                 // Walks a right-leaning `if`/`else-if` chain (`(if c1 b1 (if
@@ -1843,15 +1845,28 @@ impl Interp {
                         }
                         self.decode_compiled_return(heap, raw, &t.ty)
                     }
-                    RtValue::Builtin(name) => match self.eval_builtin(heap, &name, &argv) {
-                        Some(r) => r,
-                        None => Err(EvalError::NoSuchFunction(name)),
-                    },
-                    RtValue::BuiltinMethod(type_name, method) => {
-                        let recv_ty = args.first().map(|a| &a.ty);
-                        match eval_builtin_method(heap, &type_name, &method, recv_ty, &argv, &t.ty) {
-                            Some(r) => r,
-                            None => Err(EvalError::NoSuchFunction(method_link_name(&type_name, &method))),
+                    // A built-in used as a function value — dispatched by name
+                    // through the very same `eval_builtin`/
+                    // `eval_builtin_method` a direct `(gensym)`/`(+ a b)` call
+                    // site goes through; the box carries only which name.
+                    RtValue::Sexpr(Value::Boxed(id)) if heap.is_builtin_fn(id) => {
+                        match heap.builtin_fn_recv(id) {
+                            None => {
+                                let name = heap.builtin_fn_name(id).to_string();
+                                match self.eval_builtin(heap, &name, &argv) {
+                                    Some(r) => r,
+                                    None => Err(EvalError::NoSuchFunction(name)),
+                                }
+                            }
+                            Some(pid) => {
+                                let type_name = crate::types::path_from_id(heap, pid);
+                                let method = heap.builtin_fn_name(id).to_string();
+                                let recv_ty = args.first().map(|a| &a.ty);
+                                match eval_builtin_method(heap, &type_name, &method, recv_ty, &argv, &t.ty) {
+                                    Some(r) => r,
+                                    None => Err(EvalError::NoSuchFunction(method_link_name(&type_name, &method))),
+                                }
+                            }
                         }
                     }
                     _ => Err(EvalError::Internal("apply of a non-function value".into())),
@@ -2138,6 +2153,22 @@ impl Interp {
                 // ordinary `RtValue::Sexpr` arm; compiled code on both sides
                 // already agrees on its shape. Already rooted by the pre-pass
                 // above, so this only encodes.
+                // A built-in used as a function value is a box too since the
+                // built-in-function-value unification, so it would otherwise
+                // fall into the arm above and cross as an ordinary tagged
+                // word — which compiled code would hand to `rt_closure_fnptr`
+                // and *abort* on (`is_compiled_closure` fails there, and
+                // `fatal` cannot be caught). Rejected here instead, where it
+                // is still an ordinary catchable error, exactly as the
+                // pre-unification `RtValue::Builtin` was. Lifted once
+                // `rt_apply_any` exists (plan Phase 3).
+                RtValue::Sexpr(Value::Boxed(id)) if heap.is_builtin_fn(*id) => {
+                    let name = heap.builtin_fn_name(*id).to_string();
+                    Err(EvalError::Internal(format!(
+                        "compiled call: the built-in \"{}\" cannot be passed as a function value to compiled code",
+                        name
+                    )))
+                }
                 RtValue::Sexpr(sv) => Ok(crate::compile::runtime::encode(*sv)),
                 RtValue::Int(n) => Ok(*n),
                 // `()` crosses as the plain `0` `compile-unit` compiles a

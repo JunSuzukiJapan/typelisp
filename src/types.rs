@@ -12,7 +12,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use crate::name_lexer::{NameLexer, NameTok};
-use crate::{Error, Heap, Loc, Value};
+use crate::{Error, Heap, Loc, PathId, SymId, Value};
 
 /// A structured, fully-qualified path identifying a type, free function, or
 /// module — a sequence of lowercase segments (e.g. `geo::point` is
@@ -105,6 +105,37 @@ impl fmt::Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.0.join("::"))
     }
+}
+
+/// `p` as an interned heap [`PathId`] — the segments interned as symbols,
+/// then the sequence interned as a path. Both tables are permanent, so the id
+/// stays valid for the heap's lifetime and equal paths always share one id.
+///
+/// This is the *structural* Path↔heap correspondence (the one the reader
+/// itself produces for a `::`-qualified token), deliberately not the
+/// `type_key.rs` string form: it addresses a name, not a heap value's type
+/// identity, so nothing here may be compared against a stored type key.
+pub fn intern_path_id(heap: &mut Heap, p: &Path) -> PathId {
+    let segs: Vec<SymId> = p
+        .segments()
+        .iter()
+        .map(|s| match heap.intern_symbol(s) {
+            Value::Symbol(id) => id,
+            _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
+        })
+        .collect();
+    match heap.intern_path(&segs) {
+        Value::Path(id) => id,
+        _ => unreachable!("Heap::intern_path always returns Value::Path"),
+    }
+}
+
+/// The [`Path`] an interned heap path spells — the inverse of
+/// [`intern_path_id`].
+pub fn path_from_id(heap: &Heap, id: PathId) -> Path {
+    Path::from_segments(
+        heap.path_segments(id).iter().map(|s| heap.symbol_name(*s).to_string()).collect(),
+    )
 }
 
 /// Whether `p` is the built-in type `name`.

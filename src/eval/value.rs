@@ -209,12 +209,14 @@ pub enum RtValue {
     /// fields) — the dedicated `RtValue::Data` variant is gone, and the
     /// same one heap object is what compiled code reads/writes through
     /// `rt_data_*`.
+    /// Since the built-in-function-value unification this is also where a
+    /// *built-in used as a function value* lives (`gensym` passed to a
+    /// higher-order function, `+` reified as `i32::+`): a `Value::Boxed`
+    /// pointing at a `BoxedObj::Builtin` (an optional receiver type + the
+    /// name), replacing the dedicated `Builtin(String)`/
+    /// `BuiltinMethod(Path, String)` variants — so *every* `Type::Fn` value
+    /// is a heap box now, which is what makes `Fn` storable in an enum field.
     Sexpr(Value),
-    /// A built-in *free* function used as a function value (e.g. `gensym`).
-    Builtin(String),
-    /// A built-in *instance method* used as a function value (e.g. `+` on
-    /// `i32` — see [`Expr::MethodRef`](crate::Expr::MethodRef)).
-    BuiltinMethod(Path, String),
 }
 
 impl PartialEq for RtValue {
@@ -240,10 +242,6 @@ impl PartialEq for RtValue {
             // own `Boxed(id) == Boxed(id)`, i.e. identity, matching the old
             // dedicated variant's `Rc` semantics.
             (RtValue::Sexpr(a), RtValue::Sexpr(b)) => a == b,
-            (RtValue::Builtin(a), RtValue::Builtin(b)) => a == b,
-            (RtValue::BuiltinMethod(p1, m1), RtValue::BuiltinMethod(p2, m2)) => {
-                p1 == p2 && m1 == m2
-            }
             // Any other pair (including a mismatch of variants) is unequal.
             _ => false,
         }

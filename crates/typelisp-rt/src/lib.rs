@@ -577,8 +577,14 @@ pub unsafe extern "C" fn rt_float_value(args: *const i64, argc: u32) -> i64 {
         fatal("rt_float_value: expected 1 argument");
     }
     match decode(*args) {
-        Value::Boxed(id) => active_heap().float_value(id).to_bits() as i64,
-        _ => fatal("rt_float_value: argument is not a boxed Sexpr"),
+        // Positively `is_float`, not "any box": every other `BoxedObj` kind
+        // would make `float_value` *panic*, and a panic out of this
+        // `nounwind` shim aborts the process instead of reporting anything —
+        // so the doc'd fatal has to be an explicit test.
+        Value::Boxed(id) if active_heap().is_float(id) => {
+            active_heap().float_value(id).to_bits() as i64
+        }
+        _ => fatal("rt_float_value: argument is not a boxed float"),
     }
 }
 

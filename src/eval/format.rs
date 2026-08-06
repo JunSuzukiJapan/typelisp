@@ -1193,11 +1193,12 @@ fn float_of(heap: &Heap, v: Value) -> Option<f64> {
         Value::Int(n) => Some(n as f64),
         Value::Boxed(id) if heap.is_bignum(id) => heap.bignum_value(id).to_f64(),
         Value::Boxed(id) if heap.is_ratio(id) => heap.ratio_value(id).to_f64(),
-        Value::Boxed(id) if !heap.is_struct(id) && !heap.is_enum(id) && !heap.is_hashtable(id)
-            && !heap.is_scope(id) && !heap.is_compiled_closure(id) && !heap.is_dyn(id) =>
-        {
-            Some(heap.float_value(id))
-        }
+        // Positively `is_float`. This used to be "any box that isn't one of
+        // the six aggregate kinds", which meant every new `BoxedObj` variant
+        // silently became a float here until someone remembered to extend the
+        // negative chain — and `float_value` panics on a non-float, so the
+        // failure was an abort, not a `None`.
+        Value::Boxed(id) if heap.is_float(id) => Some(heap.float_value(id)),
         _ => None,
     }
 }
@@ -1887,6 +1888,19 @@ impl Renderer {
                 out.push_str(&format!("#<scope depth={}>", heap.scope_frame_count(id)))
             }
             Value::Boxed(id) if heap.is_compiled_closure(id) => out.push_str("#<closure>"),
+            // The other function value: a built-in reified as a value, shown
+            // by name (there is nothing else to it).
+            Value::Boxed(id) if heap.is_builtin_fn(id) => {
+                let text = match heap.builtin_fn_recv(id) {
+                    None => format!("#<builtin {}>", heap.builtin_fn_name(id)),
+                    Some(pid) => format!(
+                        "#<builtin {}::{}>",
+                        crate::types::path_from_id(heap, pid),
+                        heap.builtin_fn_name(id)
+                    ),
+                };
+                out.push_str(&text);
+            }
             // A trait object prints as the value it wraps: the box is a dispatch
             // mechanism, not part of the datum. (Must precede the float
             // fall-through, which reads any other `Boxed` as an `f64` — see
@@ -1896,7 +1910,14 @@ impl Renderer {
                 let inner = heap.dyn_value(id);
                 self.render(heap, ctx, inner, standard, depth, out)?;
             }
-            Value::Boxed(id) => out.push_str(&trim_float(heap.float_value(id))),
+            // Positively `is_float` for the same reason `float_of` is: the
+            // bare `Value::Boxed(id)` fall-through this replaces turned every
+            // unhandled box kind into a `float_value` panic.
+            Value::Boxed(id) if heap.is_float(id) => out.push_str(&trim_float(heap.float_value(id))),
+            // A `BoxedObj::Cell` — a binding slot, never a value handed to the
+            // printer. Reaching here is an interpreter bug, reported rather
+            // than mis-rendered as a float.
+            Value::Boxed(_) => return Err("print: unprintable boxed object".to_string()),
             Value::Cons(_) => {
                 out.push('(');
                 let mut cur = v;

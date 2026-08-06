@@ -938,10 +938,53 @@ impl Heap {
         self.alloc_boxed(BoxedObj::CompiledClosure { fn_ptr, env, sexpr_mask })
     }
 
-    /// True if `id` holds a `BoxedObj::CompiledClosure` — the only closure
-    /// box there is since interp-closure removal Stage 8c.
+    /// True if `id` holds a `BoxedObj::CompiledClosure` — the only *compiled*
+    /// closure box there is since interp-closure removal Stage 8c. A built-in
+    /// used as a function value is [`is_builtin_fn`](Self::is_builtin_fn)
+    /// instead; the two together are every `Type::Fn` value.
     pub fn is_compiled_closure(&self, id: BoxId) -> bool {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::CompiledClosure { .. }))
+    }
+
+    /// Store a built-in used as a function value, returning its
+    /// `Value::Boxed` — `recv_type` is the receiver type for a built-in
+    /// *method* (`i32::+`) and `None` for a free built-in (`gensym`). See
+    /// [`BoxedObj::Builtin`].
+    ///
+    /// `name` is interned, so the box is two permanent indices wide and
+    /// allocating one never triggers a collection (like
+    /// [`alloc_cell`](Self::alloc_cell)).
+    pub fn alloc_builtin_fn(&mut self, recv_type: Option<PathId>, name: &str) -> Value {
+        let name = match self.intern_string(name) {
+            Value::Str(id) => id,
+            _ => unreachable!("intern_string always returns Value::Str"),
+        };
+        self.alloc_boxed(BoxedObj::Builtin { recv_type, name })
+    }
+
+    /// True if `id` holds a `BoxedObj::Builtin`.
+    pub fn is_builtin_fn(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Builtin { .. }))
+    }
+
+    /// A built-in function value's receiver type — `None` for a free
+    /// built-in. Panics if `id` doesn't hold a `BoxedObj::Builtin`, the same
+    /// internal-invariant-trap convention as
+    /// [`float_value`](Self::float_value).
+    pub fn builtin_fn_recv(&self, id: BoxId) -> Option<PathId> {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Builtin { recv_type, .. }) => *recv_type,
+            _ => panic!("BoxId does not hold a Builtin"),
+        }
+    }
+
+    /// A built-in function value's name. Panics like
+    /// [`builtin_fn_recv`](Self::builtin_fn_recv).
+    pub fn builtin_fn_name(&self, id: BoxId) -> &str {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Builtin { name, .. }) => self.string(*name),
+            _ => panic!("BoxId does not hold a Builtin"),
+        }
     }
 
     /// A compiled closure's native entry point. Panics if `id` doesn't hold
@@ -1461,6 +1504,13 @@ impl Heap {
                     stack.push(v);
                 }
             }
+            // A built-in function value's `name` is already permanently
+            // rooted (`intern_string`) and its `recv_type` is a permanent
+            // `PathId`, so nothing here can be swept — tracing the name
+            // anyway keeps "a live box keeps its own constituents live" true
+            // from the mark phase alone, the same belt-and-suspenders the
+            // `Map` arm below applies to its interned string keys.
+            BoxedObj::Builtin { name, .. } => stack.push(Value::Str(*name)),
             // A live trait object keeps the concrete value it wraps live.
             // `vtable_id` names a table outside the heap whose entries are
             // method identities and raw function pointers, so there is

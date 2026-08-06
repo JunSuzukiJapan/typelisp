@@ -241,6 +241,29 @@ pub(crate) enum BoxedObj {
     /// exact raw word it stored (`rt_closure_env_get` re-encodes masked
     /// slots and unwraps unmasked ones).
     CompiledClosure { fn_ptr: usize, env: Vec<Value>, sexpr_mask: u64 },
+    /// A *built-in* function used as a function value: `gensym` passed to a
+    /// higher-order function, `+` reified as `i32::+`. The second function
+    /// case alongside [`CompiledClosure`](BoxedObj::CompiledClosure), and the
+    /// reason it exists is that a built-in has no compiled entry point to
+    /// point at — it is a name the interpreter's own `eval_builtin`/
+    /// `eval_builtin_method` dispatch on.
+    ///
+    /// This box carries only that name (plus the receiver type for a method),
+    /// which is the whole point: the interpreter used to hold built-in
+    /// function values in Rust-side `RtValue::Builtin(String)`/
+    /// `BuiltinMethod(Path, String)` variants with no `Value` form at all,
+    /// and that gap is what made `Type::Fn` unstorable in a heap
+    /// `Enum`/`Struct` field — `(Option::some gensym)` had to fall back to
+    /// the heap-invisible `RtValue::Data`. Giving them a box closes it.
+    ///
+    /// `name` is a [`super::heap::Heap::intern_string`] id and `recv_type` an
+    /// interned [`PathId`], so both are permanent and low-cardinality (there
+    /// are finitely many built-ins) — nothing here is per-value allocation.
+    /// A built-in is *not* callable from compiled code: the `rt_closure_*`
+    /// shims all test `is_compiled_closure` and refuse anything else, and the
+    /// interpreter refuses to marshal one across the boundary, so this box
+    /// stays interpreter-side until `rt_apply_any` exists.
+    Builtin { recv_type: Option<PathId>, name: StrId },
     /// A trait object (`:dyn Trait`, TODO T4): a vtable identifier alongside
     /// the concrete value it dispatches for.
     ///
