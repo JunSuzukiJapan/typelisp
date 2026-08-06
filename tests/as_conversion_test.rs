@@ -13,7 +13,7 @@ use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Rt
 
 /// Loads the prelude first — `unwrap`/`is-some`/`is-none` are `defmethod`s
 /// in `src/prelude.rs`, not checker-native.
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run_with_heap(src: &str) -> Result<(Heap, RtValue), EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -27,7 +27,11 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
             last = val;
         }
     }
-    Ok(last)
+    Ok((h, last))
+}
+
+fn run(src: &str) -> Result<RtValue, EvalError> {
+    run_with_heap(src).map(|(_, v)| v)
 }
 
 fn eval_ok(src: &str) -> RtValue {
@@ -57,20 +61,31 @@ fn bignum(s: &str) -> num_bigint::BigInt {
     s.parse().unwrap()
 }
 
-fn assert_bignum(actual: RtValue, expected: &str) {
-    match actual {
-        RtValue::Bignum(n) => assert_eq!(*n, bignum(expected)),
-        other => panic!("expected a Bignum, got {:?}", other),
+/// Evaluate `src` and assert its result is the `bignum` `expected`.
+///
+/// Takes the source rather than an already-evaluated `RtValue` because a
+/// `bignum` is a GC-heap box now, not a Rust-side `Rc` — reading one back
+/// needs the heap it lives in, and `run` drops its heap on return.
+fn assert_bignum(src: &str, expected: &str) {
+    let (h, v) = run_with_heap(src).expect("eval failed");
+    match v {
+        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_bignum(id) => {
+            assert_eq!(*h.bignum_value(id), bignum(expected))
+        }
+        other => panic!("expected a bignum, got {:?}", other),
     }
 }
 
-fn assert_ratio(actual: RtValue, numer: &str, denom: &str) {
-    match actual {
-        RtValue::Ratio(r) => {
+/// The `ratio` counterpart of [`assert_bignum`].
+fn assert_ratio(src: &str, numer: &str, denom: &str) {
+    let (h, v) = run_with_heap(src).expect("eval failed");
+    match v {
+        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_ratio(id) => {
+            let r = h.ratio_value(id);
             assert_eq!(*r.numer(), bignum(numer));
             assert_eq!(*r.denom(), bignum(denom));
         }
-        other => panic!("expected a Ratio, got {:?}", other),
+        other => panic!("expected a ratio, got {:?}", other),
     }
 }
 
@@ -133,14 +148,14 @@ fn try_as_int_f64_round_trip_always_succeeds() {
 
 #[test]
 fn as_widens_int_to_bignum_and_ratio() {
-    assert_bignum(eval_ok("(as bignum 42)"), "42");
-    assert_bignum(eval_ok("(as bignum (the i64 42))"), "42");
-    assert_ratio(eval_ok("(as ratio 42)"), "42", "1");
+    assert_bignum("(as bignum 42)", "42");
+    assert_bignum("(as bignum (the i64 42))", "42");
+    assert_ratio("(as ratio 42)", "42", "1");
 }
 
 #[test]
 fn as_widens_bignum_to_ratio_and_f64() {
-    assert_ratio(eval_ok("(as ratio 99999999999999999999999999999)"), "99999999999999999999999999999", "1");
+    assert_ratio("(as ratio 99999999999999999999999999999)", "99999999999999999999999999999", "1");
     match eval_ok("(as f64 99999999999999999999999999999)") {
         RtValue::Float(f) => assert!(f > 9.9e28 && f < 1.1e29, "unexpected float: {}", f),
         other => panic!("expected a Float, got {:?}", other),
@@ -159,17 +174,17 @@ fn as_widens_ratio_to_f64() {
 fn as_converts_f64_to_bignum_and_ratio() {
     // `float->bignum` truncates toward zero (like `float->int`); `float->ratio`
     // is exact. Both methods already existed — `as` now reaches them.
-    assert_bignum(eval_ok("(as bignum 3.9)"), "3");
-    assert_bignum(eval_ok("(as bignum (- 0.0 3.9))"), "-3");
-    assert_ratio(eval_ok("(as ratio 0.5)"), "1", "2");
+    assert_bignum("(as bignum 3.9)", "3");
+    assert_bignum("(as bignum (- 0.0 3.9))", "-3");
+    assert_ratio("(as ratio 0.5)", "1", "2");
 }
 
 #[test]
 fn as_narrows_ratio_to_bignum_by_truncating() {
     // `ratio->bignum` truncates toward zero, consistent with `float->int`.
-    assert_bignum(eval_ok("(as bignum 2/3)"), "0");
-    assert_bignum(eval_ok("(as bignum 7/2)"), "3");
-    assert_bignum(eval_ok("(as bignum -7/2)"), "-3");
+    assert_bignum("(as bignum 2/3)", "0");
+    assert_bignum("(as bignum 7/2)", "3");
+    assert_bignum("(as bignum -7/2)", "-3");
 }
 
 // ---- total conversion: char <-> int -------------------------------------------

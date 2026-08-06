@@ -526,8 +526,6 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
     match v {
         RtValue::Int(i) => i.to_string(),
         RtValue::Float(f) => format_float(*f),
-        RtValue::Bignum(n) => n.to_string(),
-        RtValue::Ratio(r) => format!("{}/{}", r.numer(), r.denom()),
         RtValue::Bool(b) => b.to_string(),
         RtValue::Char(c) => format!("#\\{}", c),
         RtValue::Str(s) => format!("{:?}", s),

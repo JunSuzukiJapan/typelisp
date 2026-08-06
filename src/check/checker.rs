@@ -2912,10 +2912,11 @@ impl Checker {
             // silently answer `false` and make every `Type::Dyn` unstorable
             // in a `Sexpr`.)
             Type::Dyn(..) => true,
-            // A `random-state` is a `BoxedObj::RandomState` — see
-            // `Interp::is_heap_repr_ty`'s matching arm for why routing this to
-            // a heap slot is a correctness requirement rather than a choice.
-            Type::RandomState => true,
+            // `random-state`/`bignum`/`ratio` are boxes with no `Type::Named`
+            // spelling — see `Interp::is_heap_repr_ty`'s matching arm for why
+            // routing these to a heap slot is a correctness requirement rather
+            // than a choice.
+            Type::RandomState | Type::Bignum | Type::Ratio => true,
             _ => false,
         }
     }

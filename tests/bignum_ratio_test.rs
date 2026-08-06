@@ -47,21 +47,35 @@ fn bignum(s: &str) -> num_bigint::BigInt {
     s.parse().unwrap()
 }
 
+/// A `bignum`/`ratio` is a GC-heap box now rather than a Rust-side `Rc`, so
+/// reading one back needs the heap it lives in — which is the same
+/// thread-local `CTX` the evaluation used, so the call sites stay unchanged.
+fn with_heap<R>(f: impl FnOnce(&Heap) -> R) -> R {
+    CTX.with(|cell| {
+        let opt = cell.borrow();
+        let (h, _, _) = opt.as_ref().expect("no evaluation has run yet");
+        f(h)
+    })
+}
+
 fn assert_bignum(actual: RtValue, expected: &str) {
-    match actual {
-        RtValue::Bignum(n) => assert_eq!(*n, bignum(expected)),
-        other => panic!("expected a Bignum, got {:?}", other),
-    }
+    with_heap(|h| match actual {
+        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_bignum(id) => {
+            assert_eq!(*h.bignum_value(id), bignum(expected))
+        }
+        other => panic!("expected a bignum, got {:?}", other),
+    })
 }
 
 fn assert_ratio(actual: RtValue, numer: &str, denom: &str) {
-    match actual {
-        RtValue::Ratio(r) => {
+    with_heap(|h| match actual {
+        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_ratio(id) => {
+            let r = h.ratio_value(id);
             assert_eq!(*r.numer(), bignum(numer));
             assert_eq!(*r.denom(), bignum(denom));
         }
-        other => panic!("expected a Ratio, got {:?}", other),
-    }
+        other => panic!("expected a ratio, got {:?}", other),
+    })
 }
 
 // ---- reader literals --------------------------------------------------------

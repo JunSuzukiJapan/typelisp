@@ -76,6 +76,20 @@ fn run_with_compiler_and_prelude(src: &str) -> Result<RtValue, EvalError> {
 /// `typelisp-rt`'s own `rt_push_sexpr_root` tests use a tiny capacity rather
 /// than the generous default every other test here gets.
 fn run_with_compiler_and_prelude_and_capacity(src: &str, capacity: usize) -> Result<RtValue, EvalError> {
+    run_and_read(src, capacity, |_, v| v)
+}
+
+/// Like [`run_with_compiler_and_prelude_and_capacity`], but handing the
+/// result to `f` *while the run's `Heap` is still alive*.
+///
+/// Every runner here drops its heap on return, which was invisible as long as
+/// each compared type was self-contained in `RtValue`. It stops being
+/// invisible as the scalar unification moves types onto the heap: a
+/// `bignum`/`ratio` result is a `Value::Boxed(BoxId)` into a heap that no
+/// longer exists by the time the caller looks, and two runs' ids are
+/// unrelated even when the values agree. So anything compared *between* runs
+/// has to be read out here — see [`Readback`].
+fn run_and_read<R>(src: &str, capacity: usize, f: impl FnOnce(&Heap, RtValue) -> R) -> Result<R, EvalError> {
     let mut h = Heap::with_capacity(capacity);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -90,7 +104,40 @@ fn run_with_compiler_and_prelude_and_capacity(src: &str, capacity: usize) -> Res
             last = val;
         }
     }
-    Ok(last)
+    Ok(f(&h, last))
+}
+
+/// A run's result in a heap-independent form, so that an interpreted run and
+/// a compiled run can be compared to each other.
+///
+/// The numbers are kept as their decimal spellings rather than as `BigInt`s:
+/// `BigInt`/`BigRational` print canonically (and a `ratio` is stored already
+/// reduced), so equal spellings mean equal values, and an unequal pair reads
+/// as the two numbers rather than as two box ids.
+#[derive(Debug, PartialEq)]
+enum Readback {
+    Bignum(String),
+    Ratio(String, String),
+    /// A result that `RtValue` still carries by value — `Int`, `Float`,
+    /// `Bool`, `Unit`, `Str`.
+    Scalar(RtValue),
+}
+
+fn run_readback(src: &str) -> Result<Readback, EvalError> {
+    run_and_read(src, 1 << 16, |h, v| match v {
+        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_bignum(id) => {
+            Readback::Bignum(h.bignum_value(id).to_string())
+        }
+        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_ratio(id) => {
+            let r = h.ratio_value(id);
+            Readback::Ratio(r.numer().to_string(), r.denom().to_string())
+        }
+        RtValue::Sexpr(other) => panic!(
+            "run_readback only knows how to read a bignum/ratio box out of its heap, got {:?}",
+            other
+        ),
+        scalar => Readback::Scalar(scalar),
+    })
 }
 
 fn expect_str(v: RtValue) -> String {
@@ -4413,8 +4460,8 @@ fn compile_dispatches_numeric_helpers_and_agrees_with_the_interpreter() {
         ("(defun f ((a ratio) (b ratio)) ratio (expt a b))", "(f 2/3 (int->ratio 3))"),
     ];
     for (src, call) in cases {
-        let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).unwrap_or_else(|e| panic!("interp {}: {:?}", call, e));
-        let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile f)\n{call}")).unwrap_or_else(|e| panic!("compiled {}: {:?}", call, e));
+        let interpreted = run_readback(&format!("{src}\n{call}")).unwrap_or_else(|e| panic!("interp {}: {:?}", call, e));
+        let compiled = run_readback(&format!("{src}\n(compile f)\n{call}")).unwrap_or_else(|e| panic!("compiled {}: {:?}", call, e));
         assert_eq!(compiled, interpreted, "compiled {call} agrees with the interpreter");
     }
 }
@@ -4636,8 +4683,8 @@ fn compile_constructs_a_bignum_literal_and_agrees_with_the_interpreter() {
     let src = r#"
         (defun big () bignum 123456789012345678901234567890)
     "#;
-    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(big)")).expect("interpreted failed");
-    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile big)\n(big)")).expect("compiled failed");
+    let interpreted = run_readback(&format!("{src}\n(big)")).expect("interpreted failed");
+    let compiled = run_readback(&format!("{src}\n(compile big)\n(big)")).expect("compiled failed");
     assert_eq!(compiled, interpreted, "compiled bignum literal agrees with the interpreter");
 }
 
@@ -4650,8 +4697,8 @@ fn compile_dispatches_bignum_arithmetic_and_agrees_with_the_interpreter() {
           (+ (* a b) (mod (- a b) b)))
     "#;
     let call = "(combine 123456789012345678901234567890 98765432109876543210)";
-    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).expect("interpreted failed");
-    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n{call}")).expect("compiled failed");
+    let interpreted = run_readback(&format!("{src}\n{call}")).expect("interpreted failed");
+    let compiled = run_readback(&format!("{src}\n(compile combine)\n{call}")).expect("compiled failed");
     assert_eq!(compiled, interpreted, "compiled bignum arithmetic agrees with the interpreter");
 }
 
@@ -4667,8 +4714,8 @@ fn compile_dispatches_bignum_division_and_agrees_with_the_interpreter() {
         (defun quotient ((a bignum) (b bignum)) bignum (/ a b))
     "#;
     let call = "(quotient 100000000000000000000 (int->bignum 3))";
-    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).expect("interpreted failed");
-    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile quotient)\n{call}")).expect("compiled failed");
+    let interpreted = run_readback(&format!("{src}\n{call}")).expect("interpreted failed");
+    let compiled = run_readback(&format!("{src}\n(compile quotient)\n{call}")).expect("compiled failed");
     assert_eq!(compiled, interpreted, "compiled bignum division agrees with the interpreter");
 }
 
@@ -4709,8 +4756,8 @@ fn compile_dispatches_bignum_conversions_and_agrees_with_the_interpreter() {
         ("(defun f ((a bignum)) ratio (bignum->ratio a))", "(f (int->bignum 5))"),
     ];
     for (def, call) in cases {
-        let interpreted = run_with_compiler_and_prelude(&format!("{def}\n{call}")).expect("interpreted failed");
-        let compiled = run_with_compiler_and_prelude(&format!("{def}\n(compile f)\n{call}")).expect("compiled failed");
+        let interpreted = run_readback(&format!("{def}\n{call}")).expect("interpreted failed");
+        let compiled = run_readback(&format!("{def}\n(compile f)\n{call}")).expect("compiled failed");
         assert_eq!(compiled, interpreted, "compiled `{def}` agrees with the interpreter");
     }
 }
@@ -4739,8 +4786,8 @@ fn compile_constructs_a_ratio_literal_and_agrees_with_the_interpreter() {
     let src = r#"
         (defun frac () ratio 4/6)
     "#;
-    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(frac)")).expect("interpreted failed");
-    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile frac)\n(frac)")).expect("compiled failed");
+    let interpreted = run_readback(&format!("{src}\n(frac)")).expect("interpreted failed");
+    let compiled = run_readback(&format!("{src}\n(compile frac)\n(frac)")).expect("compiled failed");
     assert_eq!(compiled, interpreted, "compiled ratio literal agrees with the interpreter (reduced to 2/3)");
 }
 
@@ -4752,8 +4799,8 @@ fn compile_dispatches_ratio_arithmetic_and_agrees_with_the_interpreter() {
           (/ (+ a b) (* a b)))
     "#;
     let call = "(combine 1/2 2/3)";
-    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).expect("interpreted failed");
-    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n{call}")).expect("compiled failed");
+    let interpreted = run_readback(&format!("{src}\n{call}")).expect("interpreted failed");
+    let compiled = run_readback(&format!("{src}\n(compile combine)\n{call}")).expect("compiled failed");
     assert_eq!(compiled, interpreted, "compiled ratio arithmetic agrees with the interpreter");
 }
 
@@ -4790,8 +4837,8 @@ fn compile_dispatches_ratio_conversions_and_agrees_with_the_interpreter() {
         ("(defun f ((r ratio)) bignum (denominator r))", "(f 4/6)"),
     ];
     for (def, call) in cases {
-        let interpreted = run_with_compiler_and_prelude(&format!("{def}\n{call}")).expect("interpreted failed");
-        let compiled = run_with_compiler_and_prelude(&format!("{def}\n(compile f)\n{call}")).expect("compiled failed");
+        let interpreted = run_readback(&format!("{def}\n{call}")).expect("interpreted failed");
+        let compiled = run_readback(&format!("{def}\n(compile f)\n{call}")).expect("compiled failed");
         assert_eq!(compiled, interpreted, "compiled `{def}` agrees with the interpreter");
     }
 }

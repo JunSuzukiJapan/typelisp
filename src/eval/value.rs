@@ -4,9 +4,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::{error, fmt};
 
-use num_bigint::BigInt;
-use num_rational::BigRational;
-
 use crate::{BoxId, Heap, Loc, Type, Value};
 
 
@@ -140,14 +137,6 @@ impl Slot {
 pub enum RtValue {
     Int(i64),
     Float(f64),
-    /// A `bignum` value (arbitrary-precision integer, CL's bignum). `Rc`-wrapped
-    /// for the same reason `Str` is (see that variant's doc comment): a
-    /// binding read/clone should be a cheap pointer/refcount bump, not a deep
-    /// copy of however many limbs the integer holds.
-    Bignum(Rc<BigInt>),
-    /// A `ratio` value (exact rational, CL's ratio), same `Rc`-wrapping
-    /// rationale as [`RtValue::Bignum`].
-    Ratio(Rc<BigRational>),
     Bool(bool),
     Char(char),
     /// `Rc<str>`, not a plain owned `String` — this language's `string`
@@ -190,6 +179,12 @@ pub enum RtValue {
     /// fields) — the same one heap object compiled code reads/writes through
     /// `rt_data_*`. Every enum value, with no exceptions: the native `Data`
     /// twin this variant used to share the job with is gone.
+    /// Since the scalar unification this is also where a `bignum`/`ratio`
+    /// lives: a `Value::Boxed` at a `BoxedObj::Bignum`/`Ratio`, the same box
+    /// compiled code's `rt_bignum_*`/`rt_ratio_*` already read and write. The
+    /// `Rc<BigInt>`/`Rc<BigRational>` variants this replaces had no heap
+    /// presence, so every crossing — into a struct field, into compiled code,
+    /// back out again — copied the whole multi-precision value.
     /// Since the built-in-function-value unification this is also where a
     /// *built-in used as a function value* lives (`gensym` passed to a
     /// higher-order function, `+` reified as `i32::+`): a `Value::Boxed`
@@ -205,8 +200,6 @@ impl PartialEq for RtValue {
         match (self, other) {
             (RtValue::Int(a), RtValue::Int(b)) => a == b,
             (RtValue::Float(a), RtValue::Float(b)) => a == b,
-            (RtValue::Bignum(a), RtValue::Bignum(b)) => a == b,
-            (RtValue::Ratio(a), RtValue::Ratio(b)) => a == b,
             (RtValue::Bool(a), RtValue::Bool(b)) => a == b,
             (RtValue::Char(a), RtValue::Char(b)) => a == b,
             (RtValue::Str(a), RtValue::Str(b)) => a == b,
