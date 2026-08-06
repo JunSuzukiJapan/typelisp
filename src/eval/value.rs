@@ -1,13 +1,13 @@
 //! Runtime values and errors for the tree-walking interpreter.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::{error, fmt};
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-use crate::{BoxId, Heap, Loc, Path, Type, Value};
+use crate::{BoxId, Heap, Loc, Type, Value};
 
 
 /// Which of the interpreter's two binding-slot representations a binding
@@ -111,7 +111,7 @@ impl Slot {
                 Ok(())
             }
             Slot::TypedCell(id, _ty) => {
-                let encoded = super::interp::rtvalue_to_struct_field(heap, &v)?;
+                let encoded = super::interp::rtvalue_to_struct_field(heap, &v);
                 heap.cell_set(**id, encoded);
                 Ok(())
             }
@@ -119,14 +119,23 @@ impl Slot {
     }
 }
 
-/// A runtime value. Data-type instances (constructors of `Option`/`Result`/
-/// user structs) are represented uniformly by [`RtValue::Data`]; `Sexpr` is
-/// the one exception — it is the cons/nil-bearing builtin the GC-managed cons
-/// heap exists for, so its values live there instead, in [`RtValue::Sexpr`].
+/// A runtime value.
 ///
-/// `PartialEq` is hand-written, not derived: the `Llvm*` variants wrap
-/// inkwell types that don't implement it (and structural equality wouldn't
-/// be meaningful for them anyway — see [`RtValue::eq`]).
+/// Every aggregate — a `defstruct` instance, `Vector<T>`, `HashTable<K,V>`,
+/// `Scope<V>`, a closure, a built-in used as a function value, an enum value
+/// (`Option`/`Result`/a user `defenum`) — lives in the GC heap behind
+/// [`RtValue::Sexpr`]. There is no second, Rust-side aggregate representation
+/// left: the `Data` variant that used to hold enum instantiations the heap
+/// could not carry was deleted once every such field type had gained a heap
+/// form (`Phase 1a`'s LLVM handles and `Scope<V>`, then `BoxedObj::Builtin`
+/// and `BoxedObj::RandomState`).
+///
+/// What remains are the scalars, which the `Sexpr`/`RtValue` unification is
+/// still working through.
+///
+/// `PartialEq` is hand-written rather than derived because `Data`'s recursive
+/// `Vec<RtValue>` needed it; it stays hand-written so the mismatch case is
+/// explicit (see [`RtValue::eq`]).
 #[derive(Clone, Debug)]
 pub enum RtValue {
     Int(i64),
@@ -157,24 +166,6 @@ pub enum RtValue {
     /// equal/equalp section.
     Str(Rc<str>),
     Unit,
-    /// An enum value (`Option`/`Result`/user `defenum` instance) **of a
-    /// native-repr instantiation only**: one whose variant fields include a
-    /// type the GC heap cannot store — an LLVM handle, a native-`V`
-    /// `Scope`, a function type (whose value may be a [`RtValue::Builtin`],
-    /// not a heap closure box), or `Unit` — e.g. the `Option<llvm-value>`
-    /// the (typelisp-hosted) compiler body's `scope::get` returns. Every
-    /// *other* enum instantiation is a heap `BoxedObj::Enum` behind
-    /// [`RtValue::Sexpr`] since the enum-representation unification; the
-    /// tier is decided statically from the concrete instantiated type
-    /// (`Interp::enum_ty_is_native` / the checker's `is_heap_repr` twin),
-    /// never from a value's shape — the exact split [`RtValue::Scope`]
-    /// already established for `Scope<V>`, and for the same reason: an
-    /// LLVM handle can never reach the GC heap through any container.
-    Data {
-        type_name: Path,
-        variant: usize,
-        fields: Vec<RtValue>,
-    },
     /// A `Sexpr` value (`Nil`/`Int`/`Float`/`Char`/`Bool`/`Sym`/`Str`/`Cons`),
     /// backed by the GC-managed cons heap shared with the reader rather than a
     /// Rust-heap encoding — so `cons` cells built at runtime are subject to the
@@ -196,9 +187,9 @@ pub enum RtValue {
     /// Since the enum-representation unification this is also where an
     /// *enum value* (`Option`/`Result`/`Error`/user `defenum`) lives: a
     /// `Value::Boxed` pointing at a `BoxedObj::Enum` (variant index +
-    /// fields) — the dedicated `RtValue::Data` variant is gone, and the
-    /// same one heap object is what compiled code reads/writes through
-    /// `rt_data_*`.
+    /// fields) — the same one heap object compiled code reads/writes through
+    /// `rt_data_*`. Every enum value, with no exceptions: the native `Data`
+    /// twin this variant used to share the job with is gone.
     /// Since the built-in-function-value unification this is also where a
     /// *built-in used as a function value* lives (`gensym` passed to a
     /// higher-order function, `+` reified as `i32::+`): a `Value::Boxed`
@@ -220,10 +211,6 @@ impl PartialEq for RtValue {
             (RtValue::Char(a), RtValue::Char(b)) => a == b,
             (RtValue::Str(a), RtValue::Str(b)) => a == b,
             (RtValue::Unit, RtValue::Unit) => true,
-            (
-                RtValue::Data { type_name: tn1, variant: v1, fields: f1 },
-                RtValue::Data { type_name: tn2, variant: v2, fields: f2 },
-            ) => tn1 == tn2 && v1 == v2 && f1 == f2,
             // Closures compare as the `Sexpr` boxes they are — `Value`'s
             // own `Boxed(id) == Boxed(id)`, i.e. identity, matching the old
             // dedicated variant's `Rc` semantics.

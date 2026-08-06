@@ -115,7 +115,7 @@ fn a_random_state_global_survives_constant_collection() {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
 
-    let mut eval = |h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str| -> RtValue {
+    let eval = |h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str| -> RtValue {
         let vs = r.read_all(h, src).expect("read failed");
         let mut last = RtValue::Unit;
         for v in vs {

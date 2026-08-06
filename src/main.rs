@@ -532,23 +532,6 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
         RtValue::Char(c) => format!("#\\{}", c),
         RtValue::Str(s) => format!("{:?}", s),
         RtValue::Unit => "()".to_string(),
-        // The native-repr fallback for an enum instantiated over a type
-        // the heap cannot represent (`build_enum_value`'s doc comment) —
-        // e.g. an `Option<llvm-value>` surfacing at a REPL somehow. Prints
-        // the same shape `format_sexpr`'s boxed-enum arm does.
-        RtValue::Data { type_name, variant, fields } => {
-            let name = reg
-                .type_def(type_name)
-                .and_then(|d| d.variants.get(*variant))
-                .map(|v| v.name.as_str())
-                .unwrap_or("<unknown-variant>");
-            if fields.is_empty() {
-                name.to_string()
-            } else {
-                let parts: Vec<String> = fields.iter().map(|f| format_value(heap, reg, f)).collect();
-                format!("({} {})", name, parts.join(" "))
-            }
-        }
         RtValue::Sexpr(sv) => format_sexpr(heap, reg, *sv),
     }
 }
