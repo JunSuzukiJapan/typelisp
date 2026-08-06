@@ -7,7 +7,10 @@
 //! exercises `HashTable<K,V>`.
 
 extern crate typelisp;
+use inkwell::module::Module;
 use inkwell::OptimizationLevel;
+use std::cell::RefCell;
+use std::rc::Rc;
 use typelisp::compile::COMPILE_LOCK;
 use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue, Value};
 
@@ -29,6 +32,19 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
 
 fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
+}
+
+/// The `llvm-module` `v` is a handle for.
+///
+/// [`typelisp::llvm_module_of`] answers `None` both for a value that is no
+/// handle at all and for a handle to something other than a module, so this
+/// `expect` is the whole check. Each of these call sites used to spell it as
+/// a `match` with a second arm for "not an `LlvmModule`" — a leftover from
+/// when `RtValue` had its own `LlvmModule` variant, and dead (with a dead
+/// message) since the handle registry replaced it, as `unreachable pattern`
+/// warnings pointed out.
+fn expect_llvm_module(v: RtValue) -> Rc<RefCell<Module<'static>>> {
+    typelisp::llvm_module_of(&v).expect("expected an llvm-module handle")
 }
 
 /// Like [`run`], but with the (typelisp-hosted) compiler body
@@ -230,12 +246,9 @@ fn the_compiler_body_compiles_an_int_literal_node() {
 /// `(+ a b)`'s typed AST (an `i64::+` instance-method call on two `Var`s).
 #[test]
 fn the_compiler_body_compiles_a_two_parameter_addition() {
-    let module = match eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '(assoc "i64" "+" true (0 var "a" false) (0 var "b" false)))"#,
-    ) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    ));
     // See `compile::COMPILE_LOCK`'s doc comment — every LLVM-Context-touching
     // call, even from a test driving the raw builtins directly rather than
     // going through `Interp::compile_function`, must hold this.
@@ -263,12 +276,9 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
 /// out to verify.
 #[test]
 fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
-    let module = match eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" (0 var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" (0 int 5))))"#,
-    ) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
         .borrow()
@@ -302,14 +312,11 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
     // forward-declaration (see
     // `the_compiler_body_boxes_a_bare_labels_sibling_reference`'s doc
     // comment for the same idiom).
-    let module = match eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored (add-function m "rt_push_sexpr_root"))) ())
              (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (0 var "k" false) (0 var "offset" false)))) (apply "go" (0 var "n" false)))))"#,
-    ) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
         .borrow()
@@ -342,10 +349,7 @@ fn the_built_module_actually_jit_executes_to_42() {
                     m))))))
         (build-answer-module-raw)
     "#;
-    let module = match eval_ok(src) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
         .borrow()
@@ -381,10 +385,7 @@ fn a_function_using_load_arg_and_build_add_computes_correctly() {
                         m))))))))
         (build-add-fn-raw)
     "#;
-    let module = match eval_ok(src) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
         .borrow()
@@ -433,10 +434,7 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
                 m))))
         (build-quadruple-module)
     "#;
-    let module = match eval_ok(src) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
         .borrow()
@@ -498,10 +496,7 @@ fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
                 m))))
         (build-and-run-closure-module)
     "#;
-    let module = match eval_ok(src) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
         .borrow()
@@ -709,16 +704,13 @@ fn a_sibling_that_never_references_a_capture_still_forwards_it_to_another_siblin
 /// into `compile-value`.
 #[test]
 fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
-    let module = match eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_with_compiler(
         r#"
         (let ((m (llvm-module::create "mod")))
           (compile-function m "double" '((x . 0)) '(assoc "i64" "+" true (0 var "x" false) (0 var "x" false)))
           (compile-function m "quadruple" '((n . 0)) '(call "double" (0 call "double" (0 var "n" false)))))
         "#,
-    ) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
         .borrow()
@@ -1127,17 +1119,14 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
     // test binary, the same idiom `rt_root_count`/`rt_truncate_sexpr_roots`
     // need elsewhere in this file. `Heap` must be registered active for the
     // call too, since `rt_closure_new` allocates on it.
-    let module = match eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_closure_new"))) ())
              (let ((ignored-fnptr (add-function m "rt_closure_fnptr"))) ())
              (let ((ignored-envlen (add-function m "rt_closure_env_len"))) ())
              (let ((ignored-envget (add-function m "rt_closure_env_get"))) ())
              (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int 5)))))"#,
-    ) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
         .borrow()
@@ -1168,7 +1157,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
     // — see `the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value`'s
     // own doc comment (`bind-captures` unconditionally roots every captured
     // value, closure-representation unification Stage 4).
-    let module = match eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_closure_new"))) ())
              (let ((ignored-fnptr (add-function m "rt_closure_fnptr"))) ())
@@ -1176,10 +1165,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
              (let ((ignored-envget (add-function m "rt_closure_env_get"))) ())
              (let ((ignored-push (add-function m "rt_push_sexpr_root"))) ())
              (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("go" ((k . 0)) (assoc "i64" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "go" true) (0 int 5)))))"#,
-    ) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
         .borrow()
@@ -1487,13 +1473,10 @@ fn the_compiler_body_compiles_a_bool_literal_node() {
 /// `build-icmp-lt` end to end, JIT-executed both ways.
 #[test]
 fn the_compiler_body_compiles_an_i64_comparison() {
-    let module = match eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "lt" '((a . 0) (b . 0))
               '(assoc "i64" "<" true (0 var "a" false) (0 var "b" false)))"#,
-    ) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
     let lt = unsafe { engine.get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("lt").expect("failed to look up `lt`") };
@@ -1519,16 +1502,13 @@ fn the_compiler_body_compiles_an_i64_comparison() {
 /// to prove both the `then` and `else` arm are reachable and correct.
 #[test]
 fn the_compiler_body_compiles_an_if_expression() {
-    let module = match eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "maxab" '((a . 0) (b . 0))
               '(if false
                    (assoc "i64" ">" true (0 var "a" false) (0 var "b" false))
                    (var "a" false)
                    (var "b" false)))"#,
-    ) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
     let maxab =
@@ -1544,15 +1524,12 @@ fn the_compiler_body_compiles_an_if_expression() {
 /// x)`'s second `x` must read the real parameter, not 99.
 #[test]
 fn let_shadowing_is_correctly_restored_after_the_let_ends() {
-    let module = match eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "shadow_test" '((x . 0))
               '(assoc "i64" "+" true
                  (0 let (((x . 0) . (int 99))) (var "x" false))
                  (0 var "x" false)))"#,
-    ) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
     let f = unsafe {
@@ -1837,10 +1814,7 @@ fn build_shl_and_build_ashr_round_trip_a_signed_fixnum_payload() {
                           m)))))))))
         (build-fixnum-round-trip-module)
     "#;
-    let module = match eval_ok(src) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
         .borrow()
@@ -1880,10 +1854,7 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
                             m))))))))))
         (build-tag-round-trip-module)
     "#;
-    let module = match eval_ok(src) {
-        v => typelisp::llvm_module_of(&v).expect("expected an llvm-module handle"),
-        other => panic!("expected an LlvmModule, got {:?}", other),
-    };
+    let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = module
         .borrow()
