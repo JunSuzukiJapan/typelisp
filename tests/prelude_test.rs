@@ -72,6 +72,20 @@ fn eval_f64(src: &str) -> f64 {
     })
 }
 
+/// The text of a `string` result — the [`eval_f64`] counterpart, reading from
+/// the same thread-local `CTX` heap the evaluation used.
+fn eval_string(src: &str) -> String {
+    let v = eval_ok(src);
+    CTX.with(|cell| {
+        let opt = cell.borrow();
+        let (h, _, _) = opt.as_ref().expect("no evaluation has run yet");
+        match v {
+            RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+            other => panic!("expected a string, got {:?}", other),
+        }
+    })
+}
+
 fn type_error(src: &str) {
     with_ctx(|h, chk, interp| {
         let r = Reader::new();
@@ -383,7 +397,7 @@ fn int_to_char_panics_past_the_max_scalar_value() {
 fn symbol_to_string_extracts_the_name() {
     // `symbol->string : Symbol -> string`. A `Symbol` is produced by
     // `string->symbol` (or `gensym`), not by a quoted-datum `Sexpr`.
-    assert_eq!(eval_ok(r#"(symbol->string (string->symbol "foo"))"#), RtValue::Str("foo".into()));
+    assert_eq!(eval_string(r#"(symbol->string (string->symbol "foo"))"#), "foo");
 }
 
 #[test]
@@ -418,7 +432,7 @@ fn cons_pair_elements_can_have_different_types() {
     // `car` is an `i32`, `cdr` is a `string` — a genuinely heterogeneous pair,
     // unlike a homogeneous `Vector<T>`.
     assert_eq!(eval_ok(r#"(car (cons 7 "x"))"#), RtValue::Int(7));
-    assert_eq!(eval_ok(r#"(cdr (cons 7 "x"))"#), RtValue::Str("x".into()));
+    assert_eq!(eval_string(r#"(cdr (cons 7 "x"))"#), "x");
 }
 
 #[test]

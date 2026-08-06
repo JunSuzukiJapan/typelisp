@@ -31,6 +31,32 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+/// The text of a `string` result.
+///
+/// A `string` is a heap `Value::Str` since the scalar unification, so reading
+/// one needs the heap it lives in — and `run` above drops its heap on return.
+/// Hence this parallel runner, which reads the text out first.
+fn eval_string(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 fn eval_err(src: &str) -> String {
     run(src).expect_err("expected a type error")
 }
@@ -59,7 +85,7 @@ fn a_concrete_value_is_boxed_implicitly_at_a_dyn_parameter() {
          (defun render ((d :dyn Drawable)) string (draw d))
          (render (circle::new 3))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Str("circle".into()));
+    assert_eq!(eval_string(&src), "circle");
 }
 
 #[test]
@@ -70,7 +96,7 @@ fn the_same_call_site_dispatches_to_each_implementation() {
          (defun render ((d :dyn Drawable)) string (draw d))
          (append (render (circle::new 3)) (render (square::new 2)))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Str("circlesquare".into()));
+    assert_eq!(eval_string(&src), "circlesquare");
 }
 
 #[test]
@@ -105,7 +131,7 @@ fn as_boxes_a_trait_object_explicitly() {
          (defun render ((d :dyn Drawable)) string (draw d))
          (render (as :dyn Drawable (square::new 2)))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Str("square".into()));
+    assert_eq!(eval_string(&src), "square");
 }
 
 #[test]
@@ -130,7 +156,7 @@ fn a_vector_of_trait_objects_holds_different_concrete_types() {
            (doiter (d (iter v)) (setf out (append out (draw d))))
            out)"
     );
-    assert_eq!(eval_ok(&src), RtValue::Str("circlesquare".into()));
+    assert_eq!(eval_string(&src), "circlesquare");
 }
 
 // ---- associated types ---------------------------------------------------
@@ -287,7 +313,7 @@ fn a_dyn_subtrait_can_call_an_inherited_method() {
          (defun describe ((g :dyn Greeter)) string (name g))
          (describe (dog::new 1))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Str("dog".into()));
+    assert_eq!(eval_string(&src), "dog");
 }
 
 #[test]
@@ -298,7 +324,7 @@ fn an_inherited_slot_dispatches_per_implementation() {
            (append (name g) (append \":\" (greeting g))))
          (append (describe (dog::new 1)) (append \"/\" (describe (cat::new 2))))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Str("dog:woof/cat:meow".into()));
+    assert_eq!(eval_string(&src), "dog:woof/cat:meow");
 }
 
 #[test]
@@ -312,7 +338,7 @@ fn inherited_slots_precede_the_subtraits_own() {
          (defun what ((x :dyn Greeter)) string (greeting x))
          (append (who (cat::new 1)) (what (cat::new 1)))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Str("catmeow".into()));
+    assert_eq!(eval_string(&src), "catmeow");
 }
 
 #[test]
@@ -347,7 +373,7 @@ fn a_dyn_subtrait_upcasts_to_its_supertrait() {
          (defun via ((g :dyn Greeter)) string (label g))
          (append (via (dog::new 1)) (via (cat::new 2)))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Str("dogcat".into()));
+    assert_eq!(eval_string(&src), "dogcat");
 }
 
 #[test]
@@ -360,7 +386,7 @@ fn an_upcast_value_still_dispatches_to_its_own_concrete_type() {
          (defun via ((g :dyn Greeter)) string (append (label g) (greeting g)))
          (append (via (dog::new 1)) (via (cat::new 2)))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Str("dogwoofcatmeow".into()));
+    assert_eq!(eval_string(&src), "dogwoofcatmeow");
 }
 
 #[test]
@@ -371,7 +397,7 @@ fn an_explicit_as_upcasts_a_trait_object() {
          (defun via ((g :dyn Greeter)) string (label (as :dyn Named g)))
          (via (dog::new 1))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Str("dog".into()));
+    assert_eq!(eval_string(&src), "dog");
 }
 
 #[test]

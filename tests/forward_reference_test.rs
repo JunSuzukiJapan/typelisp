@@ -54,6 +54,29 @@ fn eval_ok_with_island(src: &str) -> RtValue {
     run_inner(src, true).expect("eval failed")
 }
 
+/// The text of a `string` result. A `string` is a heap `Value::Str` since the
+/// scalar unification, so reading one needs the heap it lives in — and
+/// `run_inner` drops its heap on return, hence this parallel runner.
+fn eval_string(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 18);
+    let r = Reader::new();
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    chk.predeclare_program(&mut h, &vs);
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 fn expect_err(src: &str) -> String {
     match run(src) {
         Ok(v) => panic!("expected an error, got {:?}", v),
@@ -115,7 +138,7 @@ fn mutual_recursion_still_holds_after_compiling_one_of_the_pair() {
 fn a_forward_call_infers_the_return_type_from_the_predeclared_signature() {
     // The caller is checked before the callee's body ever is, so the only
     // thing that can give `(b)` its type is the pre-declared signature.
-    assert_eq!(eval_ok("(defun a () string (append (b) \"!\")) (defun b () string \"hi\") (a)"), RtValue::Str("hi!".into()));
+    assert_eq!(eval_string("(defun a () string (append (b) \"!\")) (defun b () string \"hi\") (a)"), "hi!");
 }
 
 #[test]

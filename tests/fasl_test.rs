@@ -282,7 +282,10 @@ fn fasl_capture_preserves_docstrings_for_documentation() {
     module_fasl.load_into(&mut fh, &mut fc, &mut fi).expect("module load_into");
 
     let result = eval_in(&mut fh, &mut fc, &mut fi, r#"(unwrap-or (documentation add) "none")"#).expect("eval");
-    assert_eq!(result, RtValue::Str("Adds two integers.".into()));
+    match result {
+        RtValue::Sexpr(Value::Str(id)) => assert_eq!(fh.string(id), "Adds two integers."),
+        other => panic!("expected a string, got {:?}", other),
+    }
 }
 
 /// Completion candidates (prelude functions/macros) are the same set whether

@@ -52,6 +52,28 @@ fn eval_ok_with_prelude(src: &str) -> RtValue {
     run_with_prelude(src).expect("eval failed")
 }
 
+/// The text of a `string` result. A `string` is a heap `Value::Str` since the
+/// scalar unification, so reading one needs the heap it lives in — and [`run`]
+/// drops its heap on return, hence this parallel runner.
+fn eval_string(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 16);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 fn type_error(src: &str) {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
@@ -72,12 +94,12 @@ fn type_error(src: &str) {
 
 #[test]
 fn string_upcase() {
-    assert_eq!(eval_ok(r#"(upcase "abc")"#), RtValue::Str("ABC".into()));
+    assert_eq!(eval_string(r#"(upcase "abc")"#), "ABC");
 }
 
 #[test]
 fn string_downcase() {
-    assert_eq!(eval_ok(r#"(downcase "ABC")"#), RtValue::Str("abc".into()));
+    assert_eq!(eval_string(r#"(downcase "ABC")"#), "abc");
 }
 
 #[test]
@@ -102,12 +124,12 @@ fn string_ref_negative_index_panics() {
 
 #[test]
 fn string_substring_returns_the_given_range() {
-    assert_eq!(eval_ok(r#"(substring "hello" 1 4)"#), RtValue::Str("ell".into()));
+    assert_eq!(eval_string(r#"(substring "hello" 1 4)"#), "ell");
 }
 
 #[test]
 fn string_substring_empty_range_is_the_empty_string() {
-    assert_eq!(eval_ok(r#"(substring "hello" 2 2)"#), RtValue::Str("".into()));
+    assert_eq!(eval_string(r#"(substring "hello" 2 2)"#), "");
 }
 
 #[test]
@@ -122,16 +144,51 @@ fn string_substring_start_after_end_panics() {
 
 #[test]
 fn string_append_concatenates() {
-    assert_eq!(eval_ok(r#"(append "foo" "bar")"#), RtValue::Str("foobar".into()));
+    assert_eq!(eval_string(r#"(append "foo" "bar")"#), "foobar");
 }
 
 #[test]
 fn string_eq_is_identity_not_value_equality() {
-    // `eq` is real CL identity (see `RtValue::Str`'s doc comment and
+    // `eq` is real CL identity (see `string_identity_eq` and
     // `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section) — two
     // separately-evaluated literals with equal content are not `eq`.
     // Content comparison is `equal`/`equalp` instead (below).
     assert_eq!(eval_ok(r#"(eq "abc" "abc")"#), RtValue::Bool(false));
+    // Nor are two separately-built strings with equal content.
+    assert_eq!(eval_ok(r#"(eq (append "a" "b") (append "a" "b"))"#), RtValue::Bool(false));
+}
+
+/// The positive half of [`string_eq_is_identity_not_value_equality`]: a
+/// string threaded through a binding, a call, a global, a `cons` cell, or a
+/// struct field is still the *same* string.
+///
+/// These are the cases the scalar unification had to preserve when `string`
+/// moved from a Rust-side `Rc<str>` to a heap `Value::Str`, and the last two
+/// are cases it *fixed*: the old encoding copied the text onto the heap when
+/// building a `Sexpr::Str` node or storing a struct field, so `eq` came back
+/// false where CL says a cons cell and a slot store the object itself. Only
+/// the first three were previously true.
+#[test]
+fn string_eq_survives_being_stored_and_read_back() {
+    assert_eq!(eval_ok(r#"(let ((s "abc")) (eq s s))"#), RtValue::Bool(true));
+    assert_eq!(
+        eval_ok(r#"(defun id ((s string)) string s) (let ((s "abc")) (eq s (id s)))"#),
+        RtValue::Bool(true),
+        "through a call"
+    );
+    assert_eq!(eval_ok(r#"(defvar (*s* string) "abc") (eq *s* *s*)"#), RtValue::Bool(true), "through a global");
+    assert_eq!(
+        eval_ok(
+            r#"(let ((s "abc")) (let ((c (sexpr-cons (Str s) (quote ())))) (eq s (sexpr-str (sexpr-car c)))))"#
+        ),
+        RtValue::Bool(true),
+        "through a cons cell"
+    );
+    assert_eq!(
+        eval_ok(r#"(defstruct bx (s string)) (let ((s "abc")) (let ((b (bx::new s))) (eq s b::s)))"#),
+        RtValue::Bool(true),
+        "through a struct field"
+    );
 }
 
 #[test]

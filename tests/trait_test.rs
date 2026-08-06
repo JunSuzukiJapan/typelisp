@@ -39,6 +39,30 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+/// The text of a `string` result.
+///
+/// A `string` is a heap `Value::Str` since the scalar unification, so reading
+/// one needs the heap it lives in — and `run` above drops its heap on return.
+/// Hence this parallel runner, which reads the text out first.
+fn eval_string(src: &str) -> String {
+    let mut h = Heap::with_capacity(8192);
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 /// A minimal trait/impl pair, independent of `Vector`/`Iter`, exercising
 /// just `deftrait`+`impl`+ordinary (concrete-receiver) dispatch.
 const COUNTER_PRELUDE: &str = "
@@ -533,7 +557,7 @@ fn a_trailing_string_on_a_bodyless_signature_is_a_default_body_not_a_docstring()
                (defstruct s (n i32))
                (impl T s)
                (f (s::new 1))";
-    assert_eq!(eval_ok(src), RtValue::Str("doc".into()));
+    assert_eq!(eval_string(src), "doc");
 }
 
 // ---- a trait's methods are as visible as the trait ----------------------
@@ -565,7 +589,7 @@ fn a_trait_method_is_callable_from_outside_the_implementing_module() {
           (pub defstruct tag (n i32))
           (impl Named tag (label ((self Self)) string \"tag\")))
         (label (m::tag::new 1))";
-    assert_eq!(eval_ok(src), RtValue::Str("tag".into()));
+    assert_eq!(eval_string(src), "tag");
 }
 
 // ---- default bodies are checked at the declaration -----------------------

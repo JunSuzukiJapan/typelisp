@@ -13,11 +13,14 @@
 //! because `pprint` writes to stdout by definition.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, Checker, Heap, Interp, Reader, RtValue};
 
-/// Evaluate `src` (prelude loaded, as in real programs) and return the last
-/// top-level value.
-fn run(src: &str) -> Result<RtValue, EvalError> {
+/// The text of a `string` result.
+///
+/// A `string` is a heap `Value::Str` since the scalar unification, so reading
+/// one needs the heap it lives in — and `run` above drops its heap on return.
+/// Hence this parallel runner, which reads the text out first.
+fn eval_string(src: &str) -> String {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -27,19 +30,19 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     let mut last = RtValue::Unit;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;
         }
     }
-    Ok(last)
+    match last {
+        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
 }
 
 /// The string the last form produced, panicking on any check/eval error.
 fn fmt(src: &str) -> String {
-    match run(src).expect("eval failed") {
-        RtValue::Str(s) => s.to_string(),
-        other => panic!("expected a string, got {:?}", other),
-    }
+    eval_string(src)
 }
 
 /// A self-referential type plus a constructor that ties the knot: `(cycle)`

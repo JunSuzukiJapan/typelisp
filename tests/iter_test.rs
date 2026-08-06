@@ -46,6 +46,7 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+
 #[test]
 fn next_on_an_empty_vector_returns_none() {
     let src = "(defun make-v () Vector<i32> (Vector::new))

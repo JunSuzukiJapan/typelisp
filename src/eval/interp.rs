@@ -644,7 +644,7 @@ impl Interp {
     /// encoding is only unambiguous with the static type in hand, exactly
     /// like a `defstruct` field read).
     fn typed_cell_slot(&self, heap: &mut Heap, ty: Type, v: RtValue) -> Result<Slot, EvalError> {
-        let encoded = rtvalue_to_struct_field(heap, &v);
+        let encoded = rtvalue_to_struct_field(&v);
         Ok(Slot::TypedCell(heap.alloc_cell(encoded), ty))
     }
 
@@ -1009,22 +1009,25 @@ impl Interp {
             // A trait object is a `BoxedObj::Dyn` fat box — the twin of
             // `Checker::is_heap_repr`'s `Type::Dyn` arm.
             Type::Dyn(..) => true,
-            // These four are boxes with no `Type::Named` spelling, so nothing
-            // above catches them, and each *must* be here rather than merely
-            // may: a `Slot::Heap` is rooted by the heap's own `cell_registry`
-            // walk, which `gc` runs every time, whereas a `Slot::Native` only
+            // These five have no `Type::Named` spelling, so nothing above
+            // catches them, and each *must* be here rather than merely may: a
+            // `Slot::Heap` is rooted by the heap's own `cell_registry` walk,
+            // which `gc` runs every time, whereas a `Slot::Native` only
             // becomes a root when `sync_roots` next runs — so a
-            // `Native`-routed binding holding a collectible box is live only
-            // between syncs. A `random-state`, a `bignum`, and an `f64`
-            // global each went missing under `gc_stress` before its arm
-            // existed (`tests/random_state_time_test.rs`,
-            // `tests/bignum_ratio_gc_test.rs`, `tests/float_gc_test.rs`).
+            // `Native`-routed binding holding a collectible heap value is
+            // live only between syncs. A `random-state`, a `bignum`, an
+            // `f64`, and a `string` global each went missing under
+            // `gc_stress` before its arm existed
+            // (`tests/random_state_time_test.rs`,
+            // `tests/bignum_ratio_gc_test.rs`, `tests/float_gc_test.rs`,
+            // `tests/string_gc_test.rs` — the last as an outright "dangling
+            // StrId" trap rather than a silently recycled slot).
             //
-            // `F64` is here purely because a float became a `BoxedObj::Float`
-            // in the scalar unification; it says nothing about the *compiled*
-            // representation, where `binding_kind` still keeps floats in
-            // native registers.
-            Type::RandomState | Type::Bignum | Type::Ratio | Type::F64 => true,
+            // `F64`/`Str` are here purely because the scalar unification made
+            // each a heap value; they say nothing about the *compiled*
+            // representation, where `binding_kind` still keeps a float in a
+            // native register and a string as a tagged passthrough word.
+            Type::RandomState | Type::Bignum | Type::Ratio | Type::F64 | Type::Str => true,
             _ => false,
         }
     }
@@ -1342,7 +1345,7 @@ impl Interp {
             Expr::Ratio(r) => Ok(ratio_rt(heap, r.clone())),
             Expr::Bool(b) => Ok(RtValue::Bool(*b)),
             Expr::Char(c) => Ok(RtValue::Char(*c)),
-            Expr::Str(s) => Ok(RtValue::Str(s.as_str().into())),
+            Expr::Str(s) => Ok(str_rt(heap, s.as_str())),
             // A keyword literal is its own interned symbol — the same carrier
             // a `Sexpr::Sym` holds, so `(eq :foo :foo)` is true for free.
             Expr::SymLit(name) => Ok(RtValue::Sexpr(heap.intern_symbol(name))),
@@ -1368,7 +1371,7 @@ impl Interp {
                     // same way `rt_global_get` does.
                     let perm_idx = crate::compile::runtime::global_perm_idx(id)
                         .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", r.resolved, id)))?;
-                    Ok(decode_field_typed(heap, heap.permanent_root(perm_idx), &t.ty))
+                    Ok(decode_field_typed(heap.permanent_root(perm_idx), &t.ty))
                 } else {
                     self.resolve_global_ref(r)
                         .map(|s| s.get(heap))
@@ -1742,7 +1745,7 @@ impl Interp {
                     self.construct_sexpr(heap, *variant, args, env)
                 } else if *mutable {
                     let (fields, _slots) = self.eval_args(heap, args, env)?;
-                    let mem_fields = fields.iter().map(|f| rtvalue_to_struct_field(heap, f)).collect();
+                    let mem_fields = fields.iter().map(|f| rtvalue_to_struct_field(f)).collect();
                     Ok(RtValue::Sexpr(alloc_typed_struct(heap, type_name, mem_fields)))
                 } else {
                     // An enum value (`Option`/`Result`/user `defenum`) — see
@@ -1859,12 +1862,12 @@ impl Interp {
                 // concrete now that generic accessors are monomorphized —
                 // so the decode is fully type-directed; see
                 // `decode_field_typed`.
-                Ok(decode_field_typed(heap, raw, &t.ty))
+                Ok(decode_field_typed(raw, &t.ty))
             }
             Expr::FieldSet(obj, idx, value) => {
                 let id = expect_struct_box(&self.eval(heap, obj, env)?)?;
                 let v = self.eval(heap, value, env)?;
-                let mv = rtvalue_to_struct_field(heap, &v);
+                let mv = rtvalue_to_struct_field(&v);
                 heap.struct_set_field(id, *idx, mv);
                 Ok(RtValue::Unit)
             }
@@ -1903,7 +1906,7 @@ impl Interp {
                     // the `Heap::permanent_root` position directly.
                     let perm_idx = crate::compile::runtime::global_perm_idx(id)
                         .ok_or_else(|| EvalError::Internal(format!("global \"{}\": unknown compiled id {}", r.resolved, id)))?;
-                    let mv = rtvalue_to_struct_field(heap, &v);
+                    let mv = rtvalue_to_struct_field(&v);
                     heap.set_permanent_root(perm_idx, mv);
                     Ok(v)
                 } else {
@@ -1926,7 +1929,7 @@ impl Interp {
                 Err(EvalError::Return(Box::new(v)))
             }
             Expr::Panic(msg) => match self.eval(heap, msg, env)? {
-                RtValue::Str(s) => Err(EvalError::Panic(s.to_string())),
+                RtValue::Sexpr(Value::Str(id)) => Err(EvalError::Panic(heap.string(id).to_string())),
                 _ => Err(EvalError::Panic(String::new())),
             },
             Expr::Quote(qs) => {
@@ -1969,7 +1972,15 @@ impl Interp {
             // the resulting `Sexpr::Sym` — extract its `Value::Symbol` directly
             // (no re-interning through a string).
             SEXPR_SYM => rt_sexpr(&vs[0])?,
-            SEXPR_STR => heap.alloc_string(rt_str(vs[0].clone())?),
+            // Like `SEXPR_SYM`/`SEXPR_FLOAT`/`SEXPR_BIGNUM`: the field value
+            // *is* the heap string since the scalar unification, so the
+            // resulting `Sexpr::Str` node is that same `Value::Str`, not a
+            // fresh copy — which is what makes `(eq s (sexpr-str (sexpr-car
+            // (sexpr-cons (Str s) ()))))` true, as CL requires.
+            SEXPR_STR => {
+                rt_str(heap, &vs[0])?;
+                rt_sexpr(&vs[0])?
+            }
             SEXPR_CONS => {
                 let car = rt_sexpr(&vs[0])?;
                 let cdr = rt_sexpr(&vs[1])?;
@@ -2213,22 +2224,16 @@ impl Interp {
                 RtValue::Unit => Ok(0),
                 // The remaining scalar crossings, by the same encodings
                 // compiled code uses internally: `bool` and `char` are raw
-                // `i64`s (0/1 / code point); a string becomes a tagged heap
-                // `Value::Str` (what `rt_str_*` expect).
+                // `i64`s (0/1 / code point).
                 RtValue::Bool(b) => Ok(i64::from(*b)),
                 RtValue::Char(c) => Ok(*c as i64),
-                RtValue::Str(s) => {
-                    let sv = heap.alloc_string(s.to_string());
-                    heap.push_root(sv);
-                    crossing_roots += 1;
-                    Ok(crate::compile::runtime::encode(sv))
-                }
-                // `bignum`/`ratio` need no arm of their own: each is already
-                // a `Value::Boxed` at a `BoxedObj::Bignum`/`Ratio`, which the
-                // `RtValue::Sexpr` arm above roots and encodes — the exact
-                // tagged `i64` `rt_bignum_*`/`rt_ratio_*` expect. They used to
-                // be `Rc`-managed with no heap presence, so crossing meant
-                // copying each one onto the heap fresh for every call.
+                // `string`/`bignum`/`ratio` need no arm of their own: each is
+                // already a heap `Value` (a `Value::Str`, or a `Value::Boxed`
+                // at a `BoxedObj::Bignum`/`Ratio`), which the `RtValue::Sexpr`
+                // arm above roots and encodes — the exact tagged `i64`
+                // `rt_str_*`/`rt_bignum_*`/`rt_ratio_*` expect. Each used to
+                // be Rust-side with no heap presence, so crossing meant
+                // copying it onto the heap fresh for every call.
                 // No catch-all: every `RtValue` variant now has a crossing
                 // encoding, and the compiler will say so if that stops being
                 // true rather than a call silently failing at run time. The
@@ -2316,9 +2321,9 @@ impl Interp {
             // bare `RtValue::Int` case below (the formerly-documented gap
             // `compile_of_a_function_referencing_a_str_option_global_...`'s
             // doc comment used to note). Decoded to an interp-side
-            // `RtValue::Str` exactly like the `sexpr-str` builtin does.
+            // string value exactly like the `sexpr-str` builtin does.
             match crate::compile::runtime::decode(raw) {
-                Value::Str(id) => RtValue::Str(heap.string(id).into()),
+                v @ Value::Str(_) => RtValue::Sexpr(v),
                 other => {
                     return Err(EvalError::Internal(format!(
                         "compiled call returned {:?} for a string result, which is not a Str",
@@ -2574,7 +2579,7 @@ impl Interp {
             .get_global(path)
             .ok_or_else(|| EvalError::Internal(format!("compile: global \"{}\" is not defined", path)))?;
         let v = slot.get(heap);
-        let value = rtvalue_to_struct_field(heap, &v);
+        let value = rtvalue_to_struct_field(&v);
         let id = crate::compile::runtime::global_new(heap, value);
         self.compiled_globals.borrow_mut().insert(path.clone(), id);
         Ok(id)
@@ -2741,7 +2746,7 @@ impl Interp {
         let compiler_path = Path::root("compile-function");
         let argv = vec![
             llvm_module_value_rc(module),
-            RtValue::Str(internal_name.into()),
+            str_rt(heap, internal_name),
             RtValue::Sexpr(param_list),
             RtValue::Sexpr(body_sexpr),
         ];
@@ -3436,11 +3441,11 @@ impl Interp {
             // runs against a *fresh* `Heap`/`Checker`/`Interp` rather than
             // the caller's (`self`'s), unlike `compile` above.
             "compile-file" => {
-                let source_path = match expect_str(&args[0]) {
+                let source_path = match expect_str(heap, &args[0]) {
                     Ok(s) => s.to_string(),
                     Err(e) => return Some(Err(e)),
                 };
-                let output_path = match expect_str(&args[1]) {
+                let output_path = match expect_str(heap, &args[1]) {
                     Ok(s) => s.to_string(),
                     Err(e) => return Some(Err(e)),
                 };
@@ -3477,7 +3482,7 @@ impl Interp {
                     Ok(b) => b,
                     Err(e) => return Some(Err(e)),
                 };
-                let control = match expect_str(&args[1]) {
+                let control = match expect_str(heap, &args[1]) {
                     Ok(s) => s.to_string(),
                     Err(e) => return Some(Err(e)),
                 };
@@ -3495,11 +3500,11 @@ impl Interp {
                     if dest {
                         self.emit(heap, out, false)?;
                     }
-                    Ok(RtValue::Str(text.into()))
+                    Ok(str_rt(heap, text))
                 })())
             }
             "print-rt" | "println-rt" => {
-                let control = match expect_str(&args[0]) {
+                let control = match expect_str(heap, &args[0]) {
                     Ok(s) => s.to_string(),
                     Err(e) => return Some(Err(e)),
                 };
@@ -3525,7 +3530,7 @@ impl Interp {
             // `pprint` emits a newline *before* the object and none after,
             // while the three layout-specific ones emit no newline at all.
             "pprint-rt" => {
-                let form = match expect_str(&args[0]) {
+                let form = match expect_str(heap, &args[0]) {
                     Ok(s) => s.to_string(),
                     Err(e) => return Some(Err(e)),
                 };
@@ -3573,7 +3578,7 @@ impl Interp {
                     Ok(v) => v,
                     Err(e) => return Some(Err(e)),
                 };
-                let prefix = match expect_str(&args[1]) {
+                let prefix = match expect_str(heap, &args[1]) {
                     Ok(s) => s.to_string(),
                     Err(e) => return Some(Err(e)),
                 };
@@ -3581,7 +3586,7 @@ impl Interp {
                     Ok(b) => b,
                     Err(e) => return Some(Err(e)),
                 };
-                let suffix = match expect_str(&args[3]) {
+                let suffix = match expect_str(heap, &args[3]) {
                     Ok(s) => s.to_string(),
                     Err(e) => return Some(Err(e)),
                 };
@@ -3692,10 +3697,13 @@ impl Interp {
             // `symbol->string` reads its interned name and `string->symbol`
             // interns a fresh one — the same intern table `gensym`/`read` use.
             "symbol->string" => Some(match rt_sexpr(&args[0]) {
-                Ok(Value::Symbol(id)) => Ok(RtValue::Str(heap.symbol_name(id).into())),
+                Ok(Value::Symbol(id)) => {
+                    let name = heap.symbol_name(id).to_string();
+                    Ok(str_rt(heap, name))
+                }
                 _ => Err(EvalError::Panic("symbol->string: not a symbol".into())),
             }),
-            "string->symbol" => Some(match rt_str(args[0].clone()) {
+            "string->symbol" => Some(match rt_str(heap, &args[0]) {
                 Ok(s) => Ok(RtValue::Sexpr(heap.intern_symbol(&s))),
                 Err(e) => Err(e),
             }),
@@ -3789,14 +3797,19 @@ impl Interp {
                 _ => Some(Err(EvalError::Internal("sexpr-float: expected a Sexpr argument".into()))),
             },
             "sexpr-str" => match args.first() {
-                Some(RtValue::Sexpr(Value::Str(id))) => Some(Ok(RtValue::Str(heap.string(*id).into()))),
+                // The node *is* the heap string since the scalar
+                // unification, so reading the payload out is the identity.
+                Some(v @ RtValue::Sexpr(Value::Str(_))) => Some(Ok(v.clone())),
                 Some(RtValue::Sexpr(_)) => Some(Err(EvalError::Panic("sexpr-str: expected a Str Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-str: expected a Sexpr argument".into()))),
             },
             // `(Sym v)` binds `v : Symbol`, then `symbol->string` reads its name;
             // this fuses the two, matching the old defun `(symbol->string v)`.
             "sexpr-sym-name" => match args.first() {
-                Some(RtValue::Sexpr(Value::Symbol(id))) => Some(Ok(RtValue::Str(heap.symbol_name(*id).into()))),
+                Some(RtValue::Sexpr(Value::Symbol(id))) => {
+                    let name = heap.symbol_name(*id).to_string();
+                    Some(Ok(str_rt(heap, name)))
+                }
                 Some(RtValue::Sexpr(_)) => Some(Err(EvalError::Panic("sexpr-sym-name: expected a Sym Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-sym-name: expected a Sexpr argument".into()))),
             },
@@ -3870,7 +3883,7 @@ impl Interp {
         let result = self.apply(heap, &f, vec![RtValue::Sexpr(v), RtValue::Bool(escape)]);
         self.printing.borrow_mut().pop();
         match result.map_err(|e| e.to_string())? {
-            RtValue::Str(s) => Ok(Some(s.to_string())),
+            RtValue::Sexpr(Value::Str(id)) => Ok(Some(heap.string(id).to_string())),
             other => Err(format!("print-object on `{}` returned {:?}, not a string", type_path, other)),
         }
     }
@@ -4152,7 +4165,7 @@ impl Interp {
         let result: Value = match def_name {
             Some(n) => heap.intern_symbol(&n),
             None => match out {
-                Some(rt) => rtvalue_to_sexpr(heap, &rt),
+                Some(rt) => rtvalue_to_sexpr(&rt),
                 // `use`/`module`, or an empty body — nothing to hand back but `()`.
                 None => Value::Empty,
             },
@@ -4379,9 +4392,9 @@ fn rt_bool(v: &RtValue) -> Result<bool, EvalError> {
     }
 }
 
-fn rt_str(v: RtValue) -> Result<String, EvalError> {
+fn rt_str(heap: &Heap, v: &RtValue) -> Result<String, EvalError> {
     match v {
-        RtValue::Str(s) => Ok(s.to_string()),
+        RtValue::Sexpr(Value::Str(id)) => Ok(heap.string(*id).to_string()),
         _ => Err(EvalError::Internal("sexpr: expected a str field".into())),
     }
 }
@@ -4640,6 +4653,17 @@ fn bignum_rt(heap: &mut Heap, n: BigInt) -> RtValue {
 /// A `ratio` value — the [`bignum_rt`] counterpart.
 fn ratio_rt(heap: &mut Heap, r: BigRational) -> RtValue {
     RtValue::Sexpr(heap.alloc_ratio(r))
+}
+
+/// A `string` value: `s` allocated onto the GC heap. The one constructor.
+///
+/// `Heap::alloc_string` deliberately does *not* dedupe (unlike
+/// `intern_string`, which the symbol/path tables use), so two separately
+/// evaluated literals with equal content get distinct `StrId`s — which is
+/// what keeps `eq` a genuine identity test rather than collapsing to content
+/// comparison. See [`string_identity_eq`].
+fn str_rt(heap: &mut Heap, s: impl Into<String>) -> RtValue {
+    RtValue::Sexpr(heap.alloc_string(s.into()))
 }
 
 /// An `f64` value: `f` boxed onto the GC heap — the [`bignum_rt`] counterpart
@@ -5015,7 +5039,7 @@ fn write_stdout(text: &str, newline: bool) -> Result<RtValue, EvalError> {
 /// `str::parse`), `Err` on anything else rather than a panic (unlike the
 /// reader's own integer literals, this reads *untrusted* runtime text).
 fn eval_parse_int(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let s = expect_str(&args[0])?;
+    let s = expect_str(heap, &args[0])?;
     match s.parse::<i32>() {
         Ok(n) => Ok(result_ok(heap, RtValue::Int(n as i64))),
         Err(_) => Ok(result_err(heap, PARSE_INT_ERROR, format!("parse-int: invalid integer literal: {:?}", s))),
@@ -5026,7 +5050,7 @@ fn eval_parse_int(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalErro
 /// `str::parse` (accepts everything Rust's own `FromStr for f64` does,
 /// including `inf`/`nan`), `Err` on anything else.
 fn eval_parse_float(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let s = expect_str(&args[0])?;
+    let s = expect_str(heap, &args[0])?;
     match s.parse::<f64>() {
         Ok(f) => {
             let v = float_rt(heap, f);
@@ -5043,7 +5067,7 @@ fn eval_parse_float(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalEr
 /// on malformed input, e.g. an unterminated list or string — this reads
 /// data the running program doesn't control.
 fn eval_read(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let s = expect_str(&args[0])?.to_string();
+    let s = expect_str(heap, &args[0])?.to_string();
     let reader = crate::read::Reader::new();
     match reader.read(heap, &s) {
         Ok(v) => Ok(result_ok(heap, RtValue::Sexpr(v))),
@@ -5124,14 +5148,14 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, recv_ty:
     }
     if *type_name == Path::root("string") {
         return match method {
-            "upcase" => Some(expect_str(&args[0]).map(|s| RtValue::Str(s.to_ascii_uppercase().into()))),
-            "downcase" => Some(expect_str(&args[0]).map(|s| RtValue::Str(s.to_ascii_lowercase().into()))),
-            "length" => Some(string_length(args)),
-            "ref" => Some(string_ref(args)),
-            "substring" => Some(string_substring(args)),
-            "append" => Some(string_append(args)),
-            "lt" => Some(string_lt(args)),
-            "<" | "<=" | ">" | ">=" => Some(string_compare(method, args)),
+            "upcase" => Some(expect_str(heap, &args[0]).map(|s| s.to_ascii_uppercase()).map(|s| str_rt(heap, s))),
+            "downcase" => Some(expect_str(heap, &args[0]).map(|s| s.to_ascii_lowercase()).map(|s| str_rt(heap, s))),
+            "length" => Some(string_length(heap, args)),
+            "ref" => Some(string_ref(heap, args)),
+            "substring" => Some(string_substring(heap, args)),
+            "append" => Some(string_append(heap, args)),
+            "lt" => Some(string_lt(heap, args)),
+            "<" | "<=" | ">" | ">=" => Some(string_compare(heap, method, args)),
             // `eq`/`eql`: true identity (`Rc::ptr_eq` — see `RtValue::Str`'s
             // doc comment). `equal`/`equalp`: content comparison, the
             // (case-sensitive/-insensitive) CL predicates a naive "string
@@ -5139,10 +5163,10 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, recv_ty:
             // comment and `docs/cl-equivalence-catalog.md`'s eq/eql/equal/
             // equalp section.
             "eq" | "eql" => Some(string_identity_eq(args)),
-            "equal" => Some(string_content_eq(args)),
-            "equalp" => Some(string_content_eqp(args)),
-            "print" => Some(expect_str(&args[0]).and_then(|s| write_stdout(s, false))),
-            "println" => Some(expect_str(&args[0]).and_then(|s| write_stdout(s, true))),
+            "equal" => Some(string_content_eq(heap, args)),
+            "equalp" => Some(string_content_eqp(heap, args)),
+            "print" => Some(expect_str(heap, &args[0]).and_then(|s| write_stdout(s, false))),
+            "println" => Some(expect_str(heap, &args[0]).and_then(|s| write_stdout(s, true))),
             _ => None,
         };
     }
@@ -5159,9 +5183,7 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, recv_ty:
             // is case-insensitive (see `registry::char_assoc`'s doc comment).
             "eq" | "eql" | "equal" => Some(char_eq(args)),
             "equalp" => Some(char_eqp(args)),
-            "char->string" => {
-                Some(expect_char(&args[0]).map(|c| RtValue::Str(c.to_string().into())))
-            }
+            "char->string" => Some(expect_char(&args[0]).map(|c| c.to_string()).map(|s| str_rt(heap, s))),
             "char->int" => Some(char_to_int(args)),
             "print" => Some(expect_char(&args[0]).and_then(|c| write_stdout(&c.to_string(), false))),
             "println" => Some(expect_char(&args[0]).and_then(|c| write_stdout(&c.to_string(), true))),
@@ -5289,7 +5311,7 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, recv_ty:
             _ => None,
         };
     }
-    eval_llvm_builtin_method(type_name, method, args)
+    eval_llvm_builtin_method(heap, type_name, method, args)
 }
 
 /// The (typelisp-hosted) compiler's view of LLVM — `llvm-module`/
@@ -5299,22 +5321,22 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, recv_ty:
 /// Every arm holds [`crate::compile::COMPILE_LOCK`] for its duration — see
 /// that constant's doc comment for why concurrent access to the one
 /// process-wide LLVM `Context` must never happen.
-fn eval_llvm_builtin_method(type_name: &Path, method: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     if *type_name == Path::root("llvm-module") {
         return match method {
-            "create" => Some(llvm_module_create(args)),
-            "add-function" => Some(llvm_module_add_function(args)),
+            "create" => Some(llvm_module_create(heap, args)),
+            "add-function" => Some(llvm_module_add_function(heap, args)),
             "verify" => Some(llvm_module_verify(args)),
-            "to-string" => Some(llvm_module_to_string(args)),
-            "get-function" => Some(llvm_module_get_function(args)),
-            "add-function-with-env" => Some(llvm_module_add_function_with_env(args)),
+            "to-string" => Some(llvm_module_to_string(heap, args)),
+            "get-function" => Some(llvm_module_get_function(heap, args)),
+            "add-function-with-env" => Some(llvm_module_add_function_with_env(heap, args)),
             _ => None,
         };
     }
     if *type_name == Path::root("llvm-function") {
         return match method {
-            "append-block" => Some(llvm_function_append_block(args)),
+            "append-block" => Some(llvm_function_append_block(heap, args)),
             _ => None,
         };
     }
@@ -5427,8 +5449,8 @@ fn expect_llvm_value(v: &RtValue) -> Result<BasicValueEnum<'static>, EvalError> 
     }
 }
 
-fn llvm_module_create(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let name = expect_str(&args[0])?;
+fn llvm_module_create(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let name = expect_str(heap, &args[0])?;
     let module = crate::compile::llvm_context().create_module(name);
     Ok(llvm_module_value(module))
 }
@@ -5464,9 +5486,9 @@ fn compiled_fn_type() -> inkwell::types::FunctionType<'static> {
 /// declaration. A no-op generalization for every call site that predates
 /// Stage 5: none of them ever collided with a pre-existing declaration under
 /// the same name.
-fn llvm_module_add_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn llvm_module_add_function(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let module = expect_llvm_module(&args[0])?;
-    let name = expect_str(&args[1])?;
+    let name = expect_str(heap, &args[1])?;
     let existing = module.borrow().get_function(name);
     let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(name, compiled_fn_type(), None));
     Ok(llvm_function_value(function))
@@ -5842,9 +5864,9 @@ fn compiled_fn_type_with_env() -> inkwell::types::FunctionType<'static> {
 
 /// `llvm-builder::load-env` reads a logical captured slot back out of `env`,
 /// the same way `load-arg` reads a logical parameter out of `args`.
-fn llvm_module_add_function_with_env(args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn llvm_module_add_function_with_env(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let module = expect_llvm_module(&args[0])?;
-    let name = expect_str(&args[1])?;
+    let name = expect_str(heap, &args[1])?;
     let function = module.borrow_mut().add_function(name, compiled_fn_type_with_env(), None);
     Ok(llvm_function_value(function))
 }
@@ -5855,28 +5877,28 @@ fn llvm_module_verify(args: &[RtValue]) -> Result<RtValue, EvalError> {
     Ok(RtValue::Bool(ok))
 }
 
-fn llvm_module_to_string(args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn llvm_module_to_string(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let module = expect_llvm_module(&args[0])?;
     let text = module.borrow().print_to_string().to_string();
-    Ok(RtValue::Str(text.into()))
+    Ok(str_rt(heap, text))
 }
 
 /// Looks up an already-`add-function`-declared `llvm-function` by name —
 /// see `registry::llvm_module_def`'s doc comment on `get-function` for why
 /// this is the core lookup every direct call (self-recursion, `labels`
 /// siblings, top-level `defun`-to-`defun` calls) is built on.
-fn llvm_module_get_function(args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn llvm_module_get_function(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let module = expect_llvm_module(&args[0])?;
-    let name = expect_str(&args[1])?;
+    let name = expect_str(heap, &args[1])?;
     let found = module.borrow().get_function(name);
     found
         .map(llvm_function_value)
         .ok_or_else(|| EvalError::Panic(format!("get-function: no function named \"{}\" in this module", name)))
 }
 
-fn llvm_function_append_block(args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn llvm_function_append_block(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let function = expect_llvm_function(&args[0])?;
-    let name = expect_str(&args[1])?;
+    let name = expect_str(heap, &args[1])?;
     let block = crate::compile::llvm_context().append_basic_block(function, name);
     Ok(llvm_block_value(block))
 }
@@ -6687,7 +6709,7 @@ fn llvm_builder_build_ptr_to_int(args: &[RtValue]) -> Result<RtValue, EvalError>
 /// alone (`enum_fields_representable`) and the two could — and did — disagree
 /// without anything observable breaking, which is a bad place to be.
 fn build_enum_value(heap: &mut Heap, type_name: Path, variant: usize, fields: Vec<RtValue>) -> RtValue {
-    let mem_fields = fields.iter().map(|f| rtvalue_to_struct_field(heap, f)).collect();
+    let mem_fields = fields.iter().map(|f| rtvalue_to_struct_field(f)).collect();
     RtValue::Sexpr(alloc_typed_enum(heap, &type_name, variant, mem_fields))
 }
 
@@ -6727,12 +6749,12 @@ impl Interp {
             "stream-stdin" => Ok(RtValue::Int(t.stdin())),
             "stream-stdout" => Ok(RtValue::Int(t.stdout())),
             "stream-stderr" => Ok(RtValue::Int(t.stderr())),
-            "stream-string-input" => match expect_str(&args[0]) {
+            "stream-string-input" => match expect_str(heap, &args[0]) {
                 Ok(s) => Ok(RtValue::Int(t.string_input(&s))),
                 Err(e) => Err(e),
             },
             "stream-string-output" => Ok(RtValue::Int(t.string_output())),
-            "stream-open-file" => match (expect_str(&args[0]), h(1)) {
+            "stream-open-file" => match (expect_str(heap, &args[0]), h(1)) {
                 (Ok(p), Ok(mode)) => wrap!(t.open_file(&p, mode), |v: i64| RtValue::Int(v)),
                 (Err(e), _) | (_, Err(e)) => Err(e),
             },
@@ -6767,7 +6789,7 @@ impl Interp {
                 Ok(x) => wrap!(t.listen(x), |v: bool| RtValue::Bool(v)),
                 Err(e) => Err(e),
             },
-            "stream-write-string" => match (h(0), expect_str(&args[1])) {
+            "stream-write-string" => match (h(0), expect_str(heap, &args[1])) {
                 (Ok(x), Ok(s)) => wrap!(t.write_str(x, &s), |_v: ()| RtValue::Unit),
                 (Err(e), _) | (_, Err(e)) => Err(e),
             },
@@ -6781,23 +6803,26 @@ impl Interp {
             },
             "stream-take-output-string" => match h(0) {
                 Ok(x) => match t.take_output_string(x) {
-                    Ok(s) => Ok(result_ok(heap, RtValue::Str(s.into()))),
+                    Ok(s) => {
+                        let sv = str_rt(heap, s);
+                        Ok(result_ok(heap, sv))
+                    }
                     Err(m) => Ok(result_err(heap, FILE_ERROR, m)),
                 },
                 Err(e) => Err(e),
             },
-            "file-exists-p" => match expect_str(&args[0]) {
+            "file-exists-p" => match expect_str(heap, &args[0]) {
                 Ok(p) => Ok(RtValue::Bool(std::path::Path::new(&*p).exists())),
                 Err(e) => Err(e),
             },
-            "file-delete" => match expect_str(&args[0]) {
+            "file-delete" => match expect_str(heap, &args[0]) {
                 Ok(p) => match std::fs::remove_file(&*p) {
                     Ok(()) => Ok(result_ok(heap, RtValue::Unit)),
                     Err(e) => Ok(result_err(heap, FILE_ERROR, format!("delete-file: {}: {}", p, e))),
                 },
                 Err(e) => Err(e),
             },
-            "file-rename" => match (expect_str(&args[0]), expect_str(&args[1])) {
+            "file-rename" => match (expect_str(heap, &args[0]), expect_str(heap, &args[1])) {
                 (Ok(a), Ok(b)) => match std::fs::rename(&*a, &*b) {
                     Ok(()) => Ok(result_ok(heap, RtValue::Unit)),
                     Err(e) => Ok(result_err(heap, FILE_ERROR, format!("rename-file: {}: {}", a, e))),
@@ -6832,7 +6857,8 @@ fn result_ok(heap: &mut Heap, v: RtValue) -> RtValue {
 /// `err_type` must name one of those four — its variant index is 0, the only
 /// one each has.
 fn result_err(heap: &mut Heap, err_type: &str, msg: String) -> RtValue {
-    let err_val = build_enum_value(heap, Path::root(err_type), 0, vec![RtValue::Str(msg.into())]);
+    let msg_val = str_rt(heap, msg);
+    let err_val = build_enum_value(heap, Path::root(err_type), 0, vec![msg_val]);
     build_enum_value(heap, Path::root("result"), 1, vec![err_val])
 }
 
@@ -6847,7 +6873,7 @@ fn result_err(heap: &mut Heap, err_type: &str, msg: String) -> RtValue {
 /// `Heap` — mirroring the pre-unification `HashKey::from_rtvalue`'s contract.
 fn expect_hashable_key(v: &RtValue) -> Result<(), EvalError> {
     match v {
-        RtValue::Int(_) | RtValue::Bool(_) | RtValue::Char(_) | RtValue::Str(_) => Ok(()),
+        RtValue::Int(_) | RtValue::Bool(_) | RtValue::Char(_) | RtValue::Sexpr(Value::Str(_)) => Ok(()),
         other => Err(EvalError::Panic(format!("HashTable: unsupported key type {:?}", other))),
     }
 }
@@ -6855,17 +6881,17 @@ fn expect_hashable_key(v: &RtValue) -> Result<(), EvalError> {
 fn hashtable_get(heap: &mut Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtValue, EvalError> {
     let id = expect_struct_box(&args[0])?;
     expect_hashable_key(&args[1])?;
-    let key = rtvalue_to_struct_field(heap, &args[1]);
+    let key = rtvalue_to_struct_field(&args[1]);
     let val_ty = option_payload_ty(ret_ty)?;
-    let found = heap.hashtable_get(id, key).map(|v| decode_field_typed(heap, v, &val_ty));
+    let found = heap.hashtable_get(id, key).map(|v| decode_field_typed(v, &val_ty));
     Ok(option_value(heap, found))
 }
 
 fn hashtable_set(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let id = expect_struct_box(&args[0])?;
     expect_hashable_key(&args[1])?;
-    let key = rtvalue_to_struct_field(heap, &args[1]);
-    let val = rtvalue_to_struct_field(heap, &args[2]);
+    let key = rtvalue_to_struct_field(&args[1]);
+    let val = rtvalue_to_struct_field(&args[2]);
     heap.hashtable_set(id, key, val);
     Ok(RtValue::Unit)
 }
@@ -6873,9 +6899,9 @@ fn hashtable_set(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError
 fn hashtable_remove(heap: &mut Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtValue, EvalError> {
     let id = expect_struct_box(&args[0])?;
     expect_hashable_key(&args[1])?;
-    let key = rtvalue_to_struct_field(heap, &args[1]);
+    let key = rtvalue_to_struct_field(&args[1]);
     let val_ty = option_payload_ty(ret_ty)?;
-    let removed = heap.hashtable_remove(id, key).map(|v| decode_field_typed(heap, v, &val_ty));
+    let removed = heap.hashtable_remove(id, key).map(|v| decode_field_typed(v, &val_ty));
     Ok(option_value(heap, removed))
 }
 
@@ -6972,13 +6998,12 @@ fn expect_struct_box(v: &RtValue) -> Result<BoxId, EvalError> {
 /// heap-repr enum instead of sending [`build_enum_value`] down its
 /// native-`RtValue::Data` fallback — which is what let a `()` payload cross
 /// into compiled code at all.
-pub(super) fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Value {
+pub(super) fn rtvalue_to_struct_field(v: &RtValue) -> Value {
     match v {
         RtValue::Unit => Value::Empty,
         RtValue::Int(n) => Value::Int(*n),
         RtValue::Bool(b) => Value::Bool(*b),
         RtValue::Char(c) => Value::Char(*c),
-        RtValue::Str(s) => heap.alloc_string(s.to_string()),
         RtValue::Sexpr(v) => *v,
     }
 }
@@ -7001,8 +7026,8 @@ pub(super) fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Value {
 /// `build_enum_value`'s fallback, which fires only when a field fails this
 /// very conversion — so with nothing else able to fail it, no `Data` can be
 /// constructed and this returns `None` for nothing at all.
-pub(super) fn rtvalue_to_sexpr(heap: &mut Heap, v: &RtValue) -> Value {
-    rtvalue_to_struct_field(heap, v)
+pub(super) fn rtvalue_to_sexpr(v: &RtValue) -> Value {
+    rtvalue_to_struct_field(v)
 }
 
 /// Decodes a `mem::Value` read out of a `BoxedObj::Struct` field (or
@@ -7026,13 +7051,13 @@ pub(super) fn rtvalue_to_sexpr(heap: &mut Heap, v: &RtValue) -> Value {
 /// datum `()`. It needs no shape test for that reason — a `()`-declared slot
 /// has exactly one possible value, so the declared type alone decides, which
 /// is precisely what this function is for.
-pub(super) fn decode_field_typed(heap: &Heap, v: Value, ty: &Type) -> RtValue {
+pub(super) fn decode_field_typed(v: Value, ty: &Type) -> RtValue {
     if matches!(ty, Type::Unit) {
         RtValue::Unit
     } else if is_sexpr_ty(ty) {
         RtValue::Sexpr(v)
     } else {
-        decode_nonsexpr_field(heap, v)
+        decode_nonsexpr_field(v)
     }
 }
 
@@ -7041,7 +7066,7 @@ pub(super) fn decode_field_typed(heap: &Heap, v: Value, ty: &Type) -> RtValue {
 /// `sexpr_fields` bit and `ty` its `field_types` entry. Shared by the boxed
 /// *enum* and boxed *struct* destructuring arms of [`match_pattern`], which
 /// decode a field identically and would otherwise drift apart.
-fn decode_ctor_field(heap: &Heap, raw: Value, sexpr: bool, ty: Option<&Type>) -> RtValue {
+fn decode_ctor_field(raw: Value, sexpr: bool, ty: Option<&Type>) -> RtValue {
     if sexpr {
         RtValue::Sexpr(raw)
     } else if matches!(ty, Some(Type::Unit)) {
@@ -7049,7 +7074,7 @@ fn decode_ctor_field(heap: &Heap, raw: Value, sexpr: bool, ty: Option<&Type>) ->
         // see `decode_field_typed`, whose rule this mirrors.
         RtValue::Unit
     } else {
-        decode_nonsexpr_field(heap, raw)
+        decode_nonsexpr_field(raw)
     }
 }
 
@@ -7067,13 +7092,13 @@ fn decode_ctor_field(heap: &Heap, raw: Value, sexpr: bool, ty: Option<&Type>) ->
 /// boxed-struct arm, whose per-field `Pattern::Ctor::sexpr_fields` (baked at
 /// check time, exact post-monomorphization) is precisely the
 /// "`Sexpr`-declared or not" bit `decode_field_typed` reads off a `Type`.
-fn decode_nonsexpr_field(heap: &Heap, v: Value) -> RtValue {
+fn decode_nonsexpr_field(v: Value) -> RtValue {
     match v {
         Value::Int(n) => RtValue::Int(n),
         Value::Bool(b) => RtValue::Bool(b),
         Value::Char(c) => RtValue::Char(c),
-        Value::Str(id) => RtValue::Str(heap.string(id).into()),
-        // Floats and `bignum`/`ratio` need no arm: the box the field already
+        // Strings, floats, and `bignum`/`ratio` need no arm: the heap value
+        // the field already
         // holds *is* the value's representation, so the catch-all passes it
         // straight through. Each used to be copied back out here into a
         // Rust-side variant (`f64` / an `Rc`-managed multi-precision value).
@@ -7090,7 +7115,7 @@ fn expect_int_index(v: &RtValue) -> Result<usize, EvalError> {
 
 fn vector_push(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let id = expect_struct_box(&args[0])?;
-    let v = rtvalue_to_struct_field(heap, &args[1]);
+    let v = rtvalue_to_struct_field(&args[1]);
     heap.struct_push_field(id, v);
     Ok(RtValue::Unit)
 }
@@ -7106,7 +7131,7 @@ fn vector_get(heap: &mut Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtValu
         return Err(EvalError::Panic(format!("Vector: index {} out of bounds", i)));
     }
     let raw = heap.struct_field(id, i);
-    Ok(decode_field_typed(heap, raw, ret_ty))
+    Ok(decode_field_typed(raw, ret_ty))
 }
 
 fn vector_set(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
@@ -7115,7 +7140,7 @@ fn vector_set(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     if i >= heap.struct_field_count(id) {
         return Err(EvalError::Panic(format!("Vector: index {} out of bounds", i)));
     }
-    let v = rtvalue_to_struct_field(heap, &args[2]);
+    let v = rtvalue_to_struct_field(&args[2]);
     heap.struct_set_field(id, i, v);
     Ok(RtValue::Unit)
 }
@@ -7134,7 +7159,7 @@ fn vector_len(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
 fn vector_pop(heap: &mut Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtValue, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let val_ty = option_payload_ty(ret_ty)?;
-    let popped = heap.struct_pop_field(id).map(|v| decode_field_typed(heap, v, &val_ty));
+    let popped = heap.struct_pop_field(id).map(|v| decode_field_typed(v, &val_ty));
     Ok(option_value(heap, popped))
 }
 
@@ -7485,7 +7510,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
                 None => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: dangling llvm handle {}", op.type_key, op.method, raw)),
             },
             LlvmArgK::Str => match crate::compile::runtime::decode(*raw) {
-                Value::Str(id) => RtValue::Str(heap.string(id).into()),
+                v @ Value::Str(_) => RtValue::Sexpr(v),
                 other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a Str argument, got {:?}", op.type_key, op.method, other)),
             },
             LlvmArgK::Scope => match crate::compile::runtime::decode(*raw) {
@@ -7504,7 +7529,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
     // `Value::Int(handle)` this produced before scopes moved to the heap, so
     // the option box the committed bitcode unwraps is bit-identical.
     if op.type_key == "native-scope" && op.method == "get" {
-        let found = match (expect_struct_box(&vals[0]), expect_str(&vals[1])) {
+        let found = match (expect_struct_box(&vals[0]), expect_str(heap, &vals[1])) {
             (Ok(id), Ok(name)) => heap.scope_get(id, name),
             (Err(e), _) | (_, Err(e)) => rt_llvm_fatal(&format!("rt_llvm_call: native-scope::get: {:?}", e)),
         };
@@ -7531,7 +7556,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
             other => rt_llvm_fatal(&format!("rt_llvm_call: unknown native-scope method {}", other)),
         }
     } else {
-        match eval_llvm_builtin_method(&Path::root(op.type_key), &op.method, &vals) {
+        match eval_llvm_builtin_method(heap, &Path::root(op.type_key), &op.method, &vals) {
             Some(r) => r,
             None => rt_llvm_fatal(&format!("rt_llvm_call: {} has no builtin method {}", op.type_key, op.method)),
         }
@@ -7561,7 +7586,8 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
             other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a Bool result, got {:?}", op.type_key, op.method, other)),
         },
         LlvmRetK::Str => match v {
-            RtValue::Str(s) => crate::compile::runtime::encode(heap.alloc_string(s.to_string())),
+            // Already a heap string; encoding is the tagged word, no copy.
+            RtValue::Sexpr(sv @ Value::Str(_)) => crate::compile::runtime::encode(sv),
             other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a Str result, got {:?}", op.type_key, op.method, other)),
         },
         LlvmRetK::OptHandle => rt_llvm_fatal("rt_llvm_call: OptHandle result outside native-scope::get"),
@@ -7605,11 +7631,11 @@ fn scope_elem_ty(recv_ty: Option<&Type>) -> Result<Type, EvalError> {
 
 fn scope_get_heap(heap: &mut Heap, args: &[RtValue], ret_ty: &Type) -> Result<RtValue, EvalError> {
     let id = expect_struct_box(&args[0])?;
-    let name = expect_str(&args[1])?;
+    let name = expect_str(heap, &args[1])?;
     let elem = option_payload_ty(ret_ty)?;
     let raw = heap.scope_get(id, name);
     let found = match raw {
-        Some(v) => Some(decode_field_typed(heap, v, &elem)),
+        Some(v) => Some(decode_field_typed(v, &elem)),
         None => None,
     };
     Ok(option_value(heap, found))
@@ -7622,7 +7648,7 @@ fn scope_get_heap(heap: &mut Heap, args: &[RtValue], ret_ty: &Type) -> Result<Rt
 /// precedent of keeping a user-reachable condition a catchable evaluation
 /// error rather than a Rust panic.
 fn scope_set_heap(heap: &mut Heap, args: &[RtValue], _elem: &Type) -> Result<RtValue, EvalError> {
-    let v = rtvalue_to_struct_field(heap, &args[2]);
+    let v = rtvalue_to_struct_field(&args[2]);
     scope_store(heap, args, v)
 }
 
@@ -7652,7 +7678,7 @@ fn scope_set_raw(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError
 /// `rt_llvm_fatal` diagnostic.
 fn scope_store(heap: &mut Heap, args: &[RtValue], v: Value) -> Result<RtValue, EvalError> {
     let id = expect_struct_box(&args[0])?;
-    let name = expect_str(&args[1])?.to_string();
+    let name = expect_str(heap, &args[1])?.to_string();
     if heap.scope_frame_count(id) == 0 {
         return Err(EvalError::Internal("Scope::set: no frame to write into".into()));
     }
@@ -7669,9 +7695,15 @@ fn checked_index(i: i64, len: usize) -> Option<usize> {
     if i >= 0 && (i as usize) < len { Some(i as usize) } else { None }
 }
 
-fn expect_str(v: &RtValue) -> Result<&str, EvalError> {
+/// The `&str` behind a `string` value, borrowed from the heap it lives in.
+///
+/// Borrowed rather than owned (unlike [`expect_bignum`]) because most callers
+/// only read it; the ones that go on to build a new string end the borrow
+/// with an explicit `.to_string()` first, so the copy is visible at the site
+/// that needs it rather than paid by every caller.
+fn expect_str<'h>(heap: &'h Heap, v: &RtValue) -> Result<&'h str, EvalError> {
     match v {
-        RtValue::Str(s) => Ok(s.as_ref()),
+        RtValue::Sexpr(Value::Str(id)) => Ok(heap.string(*id)),
         other => Err(EvalError::Internal(format!("expected a Str, got {:?}", other))),
     }
 }
@@ -7691,12 +7723,12 @@ fn char_to_int(args: &[RtValue]) -> Result<RtValue, EvalError> {
     expect_char(&args[0]).map(|c| RtValue::Int(c as i64))
 }
 
-fn string_length(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    Ok(RtValue::Int(expect_str(&args[0])?.chars().count() as i64))
+fn string_length(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Int(expect_str(heap, &args[0])?.chars().count() as i64))
 }
 
-fn string_ref(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let chars: Vec<char> = expect_str(&args[0])?.chars().collect();
+fn string_ref(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let chars: Vec<char> = expect_str(heap, &args[0])?.chars().collect();
     let i = rt_i64(&args[1])?;
     match checked_index(i, chars.len()) {
         Some(idx) => Ok(RtValue::Char(chars[idx])),
@@ -7704,8 +7736,8 @@ fn string_ref(args: &[RtValue]) -> Result<RtValue, EvalError> {
     }
 }
 
-fn string_substring(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let chars: Vec<char> = expect_str(&args[0])?.chars().collect();
+fn string_substring(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let chars: Vec<char> = expect_str(heap, &args[0])?.chars().collect();
     let start = rt_i64(&args[1])?;
     let end = rt_i64(&args[2])?;
     let len = chars.len() as i64;
@@ -7713,22 +7745,30 @@ fn string_substring(args: &[RtValue]) -> Result<RtValue, EvalError> {
         return Err(EvalError::Panic(format!("substring: invalid range {}..{} (length {})", start, end, len)));
     }
     let s: String = chars[start as usize..end as usize].iter().collect();
-    Ok(RtValue::Str(s.into()))
+    Ok(str_rt(heap, s))
 }
 
-fn string_append(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    Ok(RtValue::Str(format!("{}{}", expect_str(&args[0])?, expect_str(&args[1])?).into()))
+fn string_append(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let joined = format!("{}{}", expect_str(heap, &args[0])?, expect_str(heap, &args[1])?);
+    Ok(str_rt(heap, joined))
 }
 
-/// True CL identity for `string` — same underlying `Rc<str>` allocation, not
-/// merely equal content (that's [`string_content_eq`]/[`string_content_eqp`]
-/// instead — CL's `eq`/`eql` never do structural string comparison, only
-/// `equal`/`equalp` do). See `RtValue::Str`'s doc comment for why `Rc` is
-/// what makes this meaningful at all (a plain owned `String`, re-cloned on
-/// every variable read, would have no stable identity to compare).
+/// True CL identity for `string` — the same heap string, not merely equal
+/// content (that's [`string_content_eq`]/[`string_content_eqp`] instead — CL's
+/// `eq`/`eql` never do structural string comparison, only `equal`/`equalp`
+/// do).
+///
+/// `StrId` equality is what makes this meaningful, and it is meaningful only
+/// because `Heap::alloc_string` does not dedupe: two separately evaluated
+/// literals with equal content get distinct ids, so `(eq "abc" "abc")` stays
+/// false while a value threaded through a binding, a call, a `cons` cell, or
+/// a struct field stays `eq` to itself. This replaces an `Rc::ptr_eq` on a
+/// Rust-side `Rc<str>`, which had the same identity semantics for the first
+/// three but *lost* it through a `cons` cell or a struct field, where the
+/// old encoding copied the text onto the heap.
 fn string_identity_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
     match (&args[0], &args[1]) {
-        (RtValue::Str(a), RtValue::Str(b)) => Ok(RtValue::Bool(Rc::ptr_eq(a, b))),
+        (RtValue::Sexpr(Value::Str(a)), RtValue::Sexpr(Value::Str(b))) => Ok(RtValue::Bool(a == b)),
         (other0, other1) => Err(EvalError::Internal(format!("string::eq: expected two Str arguments, got {:?}/{:?}", other0, other1))),
     }
 }
@@ -7737,25 +7777,25 @@ fn string_identity_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// (identity — see `RtValue::Str`'s doc comment and `docs/cl-equivalence-catalog.md`'s
 /// eq/eql/equal/equalp section). Named for what it computes, not for which
 /// builtin method currently calls it.
-fn string_content_eq(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    Ok(RtValue::Bool(expect_str(&args[0])? == expect_str(&args[1])?))
+fn string_content_eq(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bool(expect_str(heap, &args[0])? == expect_str(heap, &args[1])?))
 }
 
 /// Content equality ignoring ASCII case — CL's `equalp` for strings.
-fn string_content_eqp(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    Ok(RtValue::Bool(expect_str(&args[0])?.eq_ignore_ascii_case(expect_str(&args[1])?)))
+fn string_content_eqp(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bool(expect_str(heap, &args[0])?.eq_ignore_ascii_case(expect_str(heap, &args[1])?)))
 }
 
-fn string_lt(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    Ok(RtValue::Bool(expect_str(&args[0])? < expect_str(&args[1])?))
+fn string_lt(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    Ok(RtValue::Bool(expect_str(heap, &args[0])? < expect_str(heap, &args[1])?))
 }
 
 /// The `<`/`<=`/`>`/`>=` comparison operators on `string`, lexicographic (byte
 /// order) — the counterpart of `eval_int_builtin`'s numeric comparisons, kept
 /// in one function for the same reason (one match over the operator symbol).
-fn string_compare(method: &str, args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let a = expect_str(&args[0])?;
-    let b = expect_str(&args[1])?;
+fn string_compare(heap: &Heap, method: &str, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let a = expect_str(heap, &args[0])?;
+    let b = expect_str(heap, &args[1])?;
     Ok(RtValue::Bool(match method {
         "<" => a < b,
         "<=" => a <= b,
@@ -8017,7 +8057,7 @@ fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(Str
                 let mut binds = Vec::new();
                 for (i, p) in args.iter().enumerate() {
                     let raw = heap.enum_field(*id, i);
-                    let f = decode_ctor_field(heap, raw, sexpr_fields.get(i).copied().unwrap_or(false), field_types.get(i));
+                    let f = decode_ctor_field(raw, sexpr_fields.get(i).copied().unwrap_or(false), field_types.get(i));
                     binds.extend(match_pattern(heap, p, &f)?);
                 }
                 Some(binds)
@@ -8045,7 +8085,7 @@ fn match_pattern(heap: &mut Heap, pat: &Pattern, v: &RtValue) -> Option<Vec<(Str
                     // monomorphized) are what `decode_field_typed` reads off
                     // a live `Type` — same type-directed decode, precomputed
                     // per field.
-                    let f = decode_ctor_field(heap, raw, sexpr_fields.get(i).copied().unwrap_or(false), field_types.get(i));
+                    let f = decode_ctor_field(raw, sexpr_fields.get(i).copied().unwrap_or(false), field_types.get(i));
                     binds.extend(match_pattern(heap, p, &f)?);
                 }
                 Some(binds)
@@ -8104,9 +8144,9 @@ fn match_sexpr_ctor(heap: &mut Heap, variant: usize, args: &[Pattern], v: Value)
             // `RtValue::Sexpr(Value::Symbol(id))`, not its textual name.
             match_pattern(heap, &args[0], &RtValue::Sexpr(Value::Symbol(id)))
         }
-        (SEXPR_STR, Value::Str(id)) => {
-            match_pattern(heap, &args[0], &RtValue::Str(heap.string(id).into()))
-        }
+        // The scrutinee *is* the heap string; binding it is a passthrough,
+        // like the `bignum`/`ratio`/float arms.
+        (SEXPR_STR, Value::Str(_)) => match_pattern(heap, &args[0], &RtValue::Sexpr(v)),
         (SEXPR_CONS, Value::Cons(_)) => {
             let car = heap.car(v).ok()?;
             let cdr = heap.cdr(v).ok()?;

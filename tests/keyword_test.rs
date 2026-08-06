@@ -33,6 +33,32 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+/// The text of a `string` result.
+///
+/// A `string` is a heap `Value::Str` since the scalar unification, so reading
+/// one needs the heap it lives in — and `run` above drops its heap on return.
+/// Hence this parallel runner, which reads the text out first.
+fn eval_string(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 fn read_err(src: &str) -> String {
     let mut h = Heap::with_capacity(4096);
     let r = Reader::new();
@@ -56,13 +82,13 @@ fn a_keyword_evaluates_to_itself_without_being_bound() {
     // The interned name keeps the leading colon: typelisp has no package
     // system, so the colon *is* the whole of what makes a keyword a keyword
     // (unlike CL, where `symbol-name` drops the package-marker colon).
-    assert_eq!(eval_ok("(symbol->string :foo)"), RtValue::Str(":foo".into()));
+    assert_eq!(eval_string("(symbol->string :foo)"), ":foo");
 }
 
 #[test]
 fn a_keyword_is_typed_as_symbol_and_flows_where_a_symbol_is_expected() {
-    let out = eval_ok("(defun name-of ((s symbol)) string (symbol->string s)) (name-of :hello)");
-    assert_eq!(out, RtValue::Str(":hello".into()));
+    let out = eval_string("(defun name-of ((s symbol)) string (symbol->string s)) (name-of :hello)");
+    assert_eq!(out, ":hello");
 }
 
 #[test]
@@ -81,8 +107,8 @@ fn keywords_are_case_folded_like_every_other_symbol() {
 fn a_keyword_can_be_stored_in_a_sexpr_datum() {
     // The `Symbol -> Sexpr` transparent retype already in `check_inner`
     // covers this — a keyword needs no wrapping constructor.
-    let out = eval_ok("(match (sexpr-car (list :a :b)) ((sym s) (symbol->string s)) (_ \"not a symbol\"))");
-    assert_eq!(out, RtValue::Str(":a".into()));
+    let out = eval_string("(match (sexpr-car (list :a :b)) ((sym s) (symbol->string s)) (_ \"not a symbol\"))");
+    assert_eq!(out, ":a");
 }
 
 // ---- keywordp -----------------------------------------------------------

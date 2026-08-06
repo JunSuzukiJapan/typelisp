@@ -161,11 +161,19 @@ fn run(src: &str) -> Result<RtValue, Error> {
     })
 }
 
+/// A `string` is a heap `Value::Str` since the scalar unification, so reading
+/// one needs the heap it lives in — the same thread-local `CTX` the
+/// evaluation used, so call sites stay unchanged.
 fn run_str(src: &str) -> String {
-    match run(src).expect("eval failed") {
-        RtValue::Str(s) => s.to_string(),
-        other => panic!("expected a string, got {:?}", other),
-    }
+    let v = run(src).expect("eval failed");
+    CTX.with(|cell| {
+        let opt = cell.borrow();
+        let (h, _, _) = opt.as_ref().expect("no evaluation has run yet");
+        match v {
+            RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+            other => panic!("expected a string, got {:?}", other),
+        }
+    })
 }
 
 fn assert_prelude_type_error(src: &str) {

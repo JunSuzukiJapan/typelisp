@@ -33,6 +33,32 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+/// The text of a `string` result.
+///
+/// A `string` is a heap `Value::Str` since the scalar unification, so reading
+/// one needs the heap it lives in — and `run` above drops its heap on return.
+/// Hence this parallel runner, which reads the text out first.
+fn eval_string(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 /// Like [`run`], but with the prelude loaded first — needed for `while`/
 /// `dotimes`/`dolist`/`when`/`unless`/`and`/`or`/`cond`/`if-let`, which are
 /// `defmacro`s in `src/prelude.rs` rather than checker-native special forms
@@ -66,7 +92,7 @@ fn literals() {
     assert_eq!(eval_ok("42"), RtValue::Int(42));
     assert_eq!(eval_ok("true"), RtValue::Bool(true));
     assert_eq!(eval_ok("#\\a"), RtValue::Char('a'));
-    assert_eq!(eval_ok("\"hi\""), RtValue::Str("hi".into()));
+    assert_eq!(eval_string("\"hi\""), "hi");
     assert_eq!(eval_ok("()"), RtValue::Unit);
 }
 

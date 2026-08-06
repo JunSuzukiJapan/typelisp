@@ -30,6 +30,32 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+/// The text of a `string` result.
+///
+/// A `string` is a heap `Value::Str` since the scalar unification, so reading
+/// one needs the heap it lives in — and `run` above drops its heap on return.
+/// Hence this parallel runner, which reads the text out first.
+fn eval_string(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 /// Type-checks `src` (prelude loaded, so `documentation`/`unwrap-or`/etc. are
 /// in scope) and returns the `TypeError` message from the first form that
 /// fails to check.
@@ -63,7 +89,7 @@ fn defun_docstring_is_returned_by_documentation() {
           (+ x y))
         (unwrap-or (documentation add) "none")
     "#;
-    assert_eq!(eval_ok(src), RtValue::Str("Adds two integers.".into()));
+    assert_eq!(eval_string(src), "Adds two integers.");
 }
 
 #[test]
@@ -80,7 +106,7 @@ fn defun_single_string_body_is_the_return_value_not_a_docstring() {
     // A lone string with nothing after it is CL's ambiguous case: it must
     // stay the return value, not be swallowed as documentation.
     let src = r#"(defun greeting () string "just a value") (greeting)"#;
-    assert_eq!(eval_ok(src), RtValue::Str("just a value".into()));
+    assert_eq!(eval_string(src), "just a value");
     let src2 = r#"
         (defun greeting () string "just a value")
         (is-none (documentation greeting))
@@ -96,7 +122,7 @@ fn defun_opt_key_docstring_is_returned_by_documentation() {
           name)
         (unwrap-or (documentation greet) "none")
     "#;
-    assert_eq!(eval_ok(src), RtValue::Str("Greets someone, optionally loudly.".into()));
+    assert_eq!(eval_string(src), "Greets someone, optionally loudly.");
 }
 
 // ---- defmacro -----------------------------------------------------------------
@@ -109,7 +135,7 @@ fn defmacro_docstring_is_returned_by_documentation() {
           (list 'if test then '()))
         (unwrap-or (documentation my-when) "none")
     "#;
-    assert_eq!(eval_ok(src), RtValue::Str("A minimal `when`.".into()));
+    assert_eq!(eval_string(src), "A minimal `when`.");
 }
 
 // ---- defvar / defconstant (trailing docstring) -------------------------------
@@ -120,7 +146,7 @@ fn defvar_trailing_docstring_is_returned_by_documentation() {
         (defvar (limit i32) 100 "The maximum allowed count.")
         (unwrap-or (documentation limit) "none")
     "#;
-    assert_eq!(eval_ok(src), RtValue::Str("The maximum allowed count.".into()));
+    assert_eq!(eval_string(src), "The maximum allowed count.");
 }
 
 #[test]
@@ -129,7 +155,7 @@ fn defconstant_trailing_docstring_is_returned_by_documentation() {
         (defconstant (pi-ish f64) 3.14 "An approximation of pi.")
         (unwrap-or (documentation pi-ish) "none")
     "#;
-    assert_eq!(eval_ok(src), RtValue::Str("An approximation of pi.".into()));
+    assert_eq!(eval_string(src), "An approximation of pi.");
 }
 
 #[test]
@@ -158,7 +184,7 @@ fn defstruct_docstring_is_returned_by_documentation() {
           (y i32))
         (unwrap-or (documentation point) "none")
     "#;
-    assert_eq!(eval_ok(src), RtValue::Str("A 2D point.".into()));
+    assert_eq!(eval_string(src), "A 2D point.");
 }
 
 #[test]
@@ -171,7 +197,7 @@ fn defenum_docstring_is_returned_by_documentation() {
           (blue))
         (unwrap-or (documentation color) "none")
     "#;
-    assert_eq!(eval_ok(src), RtValue::Str("Primary colors.".into()));
+    assert_eq!(eval_string(src), "Primary colors.");
 }
 
 #[test]
@@ -193,7 +219,7 @@ fn deftrait_docstring_is_returned_by_documentation() {
           (describe ((self Self)) string))
         (unwrap-or (documentation describable) "none")
     "#;
-    assert_eq!(eval_ok(src), RtValue::Str("Types that can describe themselves.".into()));
+    assert_eq!(eval_string(src), "Types that can describe themselves.");
 }
 
 #[test]
@@ -208,7 +234,7 @@ fn defmethod_docstring_via_impl_is_returned_by_documentation() {
             "a point"))
         (unwrap-or (documentation point::describe) "none")
     "#;
-    assert_eq!(eval_ok(src), RtValue::Str("Describes this point as a string.".into()));
+    assert_eq!(eval_string(src), "Describes this point as a string.");
 }
 
 #[test]
@@ -220,7 +246,7 @@ fn defmethod_docstring_direct_is_returned_by_documentation() {
           0)
         (unwrap-or (documentation point::magnitude) "none")
     "#;
-    assert_eq!(eval_ok(src), RtValue::Str("Returns a magnitude-ish value.".into()));
+    assert_eq!(eval_string(src), "Returns a magnitude-ish value.");
 }
 
 // ---- documentation error cases ------------------------------------------------

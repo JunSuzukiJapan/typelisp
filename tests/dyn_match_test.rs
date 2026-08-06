@@ -31,6 +31,32 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+/// The text of a `string` result.
+///
+/// A `string` is a heap `Value::Str` since the scalar unification, so reading
+/// one needs the heap it lives in — and `run` above drops its heap on return.
+/// Hence this parallel runner, which reads the text out first.
+fn eval_string(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 const SHAPES: &str = r#"
 (deftrait Drawable () (draw ((self Self)) string))
 (defstruct circle (r i32))
@@ -92,7 +118,7 @@ fn a_trait_object_match_still_dispatches_dynamically_in_the_same_function() {
              (_ (draw d))))
          (append (describe (circle::new 1)) (describe (square::new 1)))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Str("circle!square".into()));
+    assert_eq!(eval_string(&src), "circle!square");
 }
 
 // ---- printing -----------------------------------------------------------
@@ -105,7 +131,7 @@ fn a_trait_object_prints_as_the_value_it_wraps() {
          (show (circle::new 3))"
     );
     let plain = format!("{SHAPES} (format false \"~a\" (circle::new 3))");
-    assert_eq!(eval_ok(&src), eval_ok(&plain));
+    assert_eq!(eval_string(&src), eval_string(&plain));
 }
 
 // ---- comparison ---------------------------------------------------------
@@ -151,5 +177,5 @@ fn a_trait_object_can_be_stored_in_a_sexpr_list() {
            (match (sexpr-car xs) ((circle r) \"circle\") (_ \"other\")))
          (first-draw (box-it (circle::new 3)))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Str("circle".into()));
+    assert_eq!(eval_string(&src), "circle");
 }

@@ -31,6 +31,17 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed").0
 }
 
+/// The text of a `string` result. A `string` is a heap `Value::Str` since the
+/// scalar unification, so reading one needs the heap — which [`run`] already
+/// hands back.
+fn eval_string(src: &str) -> String {
+    let (v, h) = run(src).expect("eval failed");
+    match v {
+        RtValue::Sexpr(Value::Str(id)) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 /// Like [`run_with_capacity`], but checks against a separate, generously
 /// sized heap with the prelude loaded — needed for `dotimes` (a `defmacro`
 /// in `src/prelude.rs`, expanded during checking, not a checker-native
@@ -148,7 +159,7 @@ fn set_then_get_returns_some() {
                    (set h 1 \"a\")
                    (match (get h 1) ((Some v) v) ((None) \"missing\"))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Str("a".into()));
+    assert_eq!(eval_string(src), "a");
 }
 
 #[test]
@@ -158,7 +169,7 @@ fn get_missing_key_returns_none() {
                  (let ((h (make-h)))
                    (match (get h 1) ((Some v) v) ((None) \"missing\"))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Str("missing".into()));
+    assert_eq!(eval_string(src), "missing");
 }
 
 #[test]
@@ -170,7 +181,7 @@ fn set_overwrites_existing_key() {
                    (set h 1 \"b\")
                    (match (get h 1) ((Some v) v) ((None) \"missing\"))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Str("b".into()));
+    assert_eq!(eval_string(src), "b");
 }
 
 #[test]
@@ -200,7 +211,7 @@ fn remove_returns_removed_value_and_drops_key() {
     // After removing key 1, `get h 1` is None, so the result is whatever
     // `remove` returned (proving it returned the removed value, "a", not
     // just dropping the key).
-    assert_eq!(eval_ok(src), RtValue::Str("a".into()));
+    assert_eq!(eval_string(src), "a");
 }
 
 #[test]
@@ -210,7 +221,7 @@ fn remove_missing_key_returns_none() {
                  (let ((h (make-h)))
                    (match (remove h 1) ((Some v) v) ((None) \"missing\"))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Str("missing".into()));
+    assert_eq!(eval_string(src), "missing");
 }
 
 #[test]

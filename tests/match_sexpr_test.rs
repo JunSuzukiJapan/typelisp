@@ -30,6 +30,30 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+/// The text of a `string` result.
+///
+/// A `string` is a heap `Value::Str` since the scalar unification, so reading
+/// one needs the heap it lives in — and `run` above drops its heap on return.
+/// Hence this parallel runner, which reads the text out first.
+fn eval_string(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 /// Like [`run`], but reading the `f64` result out before the run's `Heap`
 /// drops: an `f64` is a `BoxedObj::Float` since the scalar unification, so
 /// the value is an index into that heap rather than self-contained.
@@ -103,15 +127,12 @@ fn match_refines_a_float_payload_to_f64() {
 
 #[test]
 fn match_refines_a_str_payload_to_str() {
-    assert_eq!(eval_ok("(match (Str \"hello\") ((str s) s) (_ \"no\"))"), RtValue::Str("hello".into()));
+    assert_eq!(eval_string("(match (Str \"hello\") ((str s) s) (_ \"no\"))"), "hello");
 }
 
 #[test]
 fn match_refines_a_sym_payload_to_symbol() {
-    assert_eq!(
-        eval_ok("(match (quote foo) ((sym s) (symbol->string s)) (_ \"no\"))"),
-        RtValue::Str("foo".into())
-    );
+    assert_eq!(eval_string("(match (quote foo) ((sym s) (symbol->string s)) (_ \"no\"))"), "foo");
 }
 
 #[test]
@@ -162,10 +183,7 @@ fn match_dispatches_and_destructures_the_path_arm() {
     );
     // Segments stay real `sym`s, not re-stringified text: the first one is
     // reachable through ordinary list access.
-    assert_eq!(
-        eval_ok("(match (quote dep::head) ((path s) (sexpr-sym-name (sexpr-car s))) (_ \"no\"))"),
-        RtValue::Str("dep".into())
-    );
+    assert_eq!(eval_string("(match (quote dep::head) ((path s) (sexpr-sym-name (sexpr-car s))) (_ \"no\"))"), "dep");
     // `Path` also constructs one back from a segment list — the inverse of
     // the match arm above.
     assert_eq!(

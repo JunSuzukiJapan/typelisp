@@ -25,6 +25,16 @@ fn run_with_capacity(src: &str, capacity: usize) -> Result<(RtValue, Heap), Eval
     Ok((last, h))
 }
 
+/// A `(value, heap)` pair's value as a `string`. A `string` is a heap
+/// `Value::Str` since the scalar unification, so reading one needs the heap
+/// the runner already hands back.
+fn assert_string((v, h): (RtValue, Heap), expected: &str) {
+    match v {
+        RtValue::Sexpr(Value::Str(id)) => assert_eq!(h.string(id), expected),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 fn eval_ok(src: &str) -> (RtValue, Heap) {
     run(src).expect("eval failed")
 }
@@ -554,11 +564,11 @@ fn cond_with_several_clauses_selects_the_first_true_one() {
                        ((< n 10) \"small\")
                        ((< n 100) \"medium\")
                        (else \"large\")))";
-    assert_eq!(eval_ok_with_prelude(&format!("{src} (band -1)")).0, RtValue::Str("neg".into()));
-    assert_eq!(eval_ok_with_prelude(&format!("{src} (band 0)")).0, RtValue::Str("zero".into()));
-    assert_eq!(eval_ok_with_prelude(&format!("{src} (band 5)")).0, RtValue::Str("small".into()));
-    assert_eq!(eval_ok_with_prelude(&format!("{src} (band 50)")).0, RtValue::Str("medium".into()));
-    assert_eq!(eval_ok_with_prelude(&format!("{src} (band 500)")).0, RtValue::Str("large".into()));
+    assert_string(eval_ok_with_prelude(&format!("{src} (band -1)")), "neg");
+    assert_string(eval_ok_with_prelude(&format!("{src} (band 0)")), "zero");
+    assert_string(eval_ok_with_prelude(&format!("{src} (band 5)")), "small");
+    assert_string(eval_ok_with_prelude(&format!("{src} (band 50)")), "medium");
+    assert_string(eval_ok_with_prelude(&format!("{src} (band 500)")), "large");
 }
 
 #[test]

@@ -49,6 +49,32 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+/// The text of a `string` result.
+///
+/// A `string` is a heap `Value::Str` since the scalar unification, so reading
+/// one needs the heap it lives in — and `run` above drops its heap on return.
+/// Hence this parallel runner, which reads the text out first.
+fn eval_string(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 /// A `(1 2 3)`-valued `Vector<i32>` builder (no variadic `vector-of` builder
 /// exists — the language has no value-level `&rest`).
 const V123: &str = "(defun make-v () Vector<i32> (Vector::new))
@@ -94,8 +120,8 @@ fn append_rejects_mismatched_element_types() {
 
 #[test]
 fn append_on_strings_still_resolves_to_the_builtin_method() {
-    let got = eval_ok("(append \"ab\" \"cd\")");
-    assert_eq!(got, RtValue::Str("abcd".into()));
+    let got = eval_string("(append \"ab\" \"cd\")");
+    assert_eq!(got, "abcd");
 }
 
 // ---- nth / elt --------------------------------------------------------------
@@ -266,7 +292,7 @@ fn sort_orders_strings_lexicographically() {
                (let ((v (make-v)))
                  (push v \"pear\") (push v \"apple\") (push v \"fig\")
                  (get (sort (iter v) (lambda ((a string) (b string)) bool (< a b))) 0))";
-    assert_eq!(eval_ok(src), RtValue::Str("apple".into()));
+    assert_eq!(eval_string(src), "apple");
 }
 
 #[test]

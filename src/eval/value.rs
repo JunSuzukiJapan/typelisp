@@ -82,7 +82,7 @@ impl Slot {
         match self {
             Slot::Heap(id) => RtValue::Sexpr(heap.cell_get(**id)),
             Slot::Native(rc) => rc.borrow().clone(),
-            Slot::TypedCell(id, ty) => super::interp::decode_field_typed(heap, heap.cell_get(**id), ty),
+            Slot::TypedCell(id, ty) => super::interp::decode_field_typed(heap.cell_get(**id), ty),
         }
     }
 
@@ -108,7 +108,7 @@ impl Slot {
                 Ok(())
             }
             Slot::TypedCell(id, _ty) => {
-                let encoded = super::interp::rtvalue_to_struct_field(heap, &v);
+                let encoded = super::interp::rtvalue_to_struct_field(&v);
                 heap.cell_set(**id, encoded);
                 Ok(())
             }
@@ -138,21 +138,6 @@ pub enum RtValue {
     Int(i64),
     Bool(bool),
     Char(char),
-    /// `Rc<str>`, not a plain owned `String` — this language's `string`
-    /// values are immutable, and cloning a `String` on every variable read
-    /// (the interpreter's ordinary evaluation pattern) would otherwise
-    /// silently deep-copy the buffer each time, leaving no way to observe
-    /// "the same string object" ever again — not even `(let ((s "hi"))
-    /// (eq s s))`, since each read of `s` would hand back an independently
-    /// allocated copy. `Rc::clone` is a pointer/refcount bump instead, so
-    /// two reads of the same binding stay the *same* object, and `eq`'s
-    /// `Rc::ptr_eq` (`eval_builtin_method`'s `"eq"` case for `Str`) can
-    /// give this type genuine CL identity semantics rather than falling
-    /// back to (incorrect) content comparison or a meaningless "always
-    /// false". Content comparison itself now lives under `eql`/`equal`/
-    /// `equalp` instead — see `docs/cl-equivalence-catalog.md`'s eq/eql/
-    /// equal/equalp section.
-    Str(Rc<str>),
     Unit,
     /// A `Sexpr` value (`Nil`/`Int`/`Float`/`Char`/`Bool`/`Sym`/`Str`/`Cons`),
     /// backed by the GC-managed cons heap shared with the reader rather than a
@@ -200,7 +185,6 @@ impl PartialEq for RtValue {
             (RtValue::Int(a), RtValue::Int(b)) => a == b,
             (RtValue::Bool(a), RtValue::Bool(b)) => a == b,
             (RtValue::Char(a), RtValue::Char(b)) => a == b,
-            (RtValue::Str(a), RtValue::Str(b)) => a == b,
             (RtValue::Unit, RtValue::Unit) => true,
             // Closures compare as the `Sexpr` boxes they are — `Value`'s
             // own `Boxed(id) == Boxed(id)`, i.e. identity, matching the old

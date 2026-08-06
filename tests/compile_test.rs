@@ -34,6 +34,35 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+/// The text of a `string` result.
+///
+/// A `string` is a heap `Value::Str` since the scalar unification, so reading
+/// one needs the heap it lives in — and every runner here drops its heap on
+/// return. Hence the `*_string` runners below, which read the text out first.
+fn read_str(h: &Heap, v: RtValue) -> String {
+    match v {
+        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        other => panic!("expected a Str, got {:?}", other),
+    }
+}
+
+/// [`eval_ok`]'s string-returning counterpart.
+fn eval_string(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 16);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    read_str(&h, last)
+}
+
 /// The `llvm-module` `v` is a handle for.
 ///
 /// [`typelisp::llvm_module_of`] answers `None` both for a value that is no
@@ -75,6 +104,29 @@ fn run_with_compiler_and_capacity(src: &str, capacity: usize) -> Result<RtValue,
 
 fn eval_ok_with_compiler(src: &str) -> RtValue {
     run_with_compiler(src).expect("eval failed")
+}
+
+/// [`eval_ok_with_compiler`]'s string-returning counterpart — see
+/// [`read_str`].
+fn eval_string_with_compiler_and_capacity(src: &str, capacity: usize) -> String {
+    let mut h = Heap::with_capacity(capacity);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    read_str(&h, last)
+}
+
+fn eval_string_with_compiler(src: &str) -> String {
+    eval_string_with_compiler_and_capacity(src, 1 << 16)
 }
 
 /// Like [`run_with_compiler`], but with the prelude (`prelude::SOURCE` —
@@ -138,8 +190,9 @@ enum Readback {
     /// deterministic, so a tolerance would only hide a real divergence; the
     /// tests that *do* want one read the number out with [`run_f64`].
     Float(f64),
+    Str(String),
     /// A result that `RtValue` still carries by value — `Int`, `Bool`,
-    /// `Unit`, `Str`.
+    /// `Unit`.
     Scalar(RtValue),
 }
 
@@ -153,8 +206,9 @@ fn run_readback(src: &str) -> Result<Readback, EvalError> {
             Readback::Ratio(r.numer().to_string(), r.denom().to_string())
         }
         RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(id) => Readback::Float(h.float_value(id)),
+        RtValue::Sexpr(typelisp::Value::Str(id)) => Readback::Str(h.string(id).to_string()),
         RtValue::Sexpr(other) => panic!(
-            "run_readback only knows how to read a bignum/ratio/float box out of its heap, got {:?}",
+            "run_readback only knows how to read a bignum/ratio/float/string out of its heap, got {:?}",
             other
         ),
         scalar => Readback::Scalar(scalar),
@@ -167,13 +221,6 @@ fn run_f64(src: &str) -> f64 {
     match run_readback(src).expect("eval failed") {
         Readback::Float(f) => f,
         other => panic!("expected an f64, got {:?}", other),
-    }
-}
-
-fn expect_str(v: RtValue) -> String {
-    match v {
-        RtValue::Str(s) => s.to_string(),
-        other => panic!("expected a Str, got {:?}", other),
     }
 }
 
@@ -204,7 +251,7 @@ const BUILD_ANSWER_MODULE: &str = r#"
 #[test]
 fn builds_a_module_with_a_constant_returning_function() {
     let src = format!("{}\n(build-answer-module)", BUILD_ANSWER_MODULE);
-    let ir = expect_str(eval_ok(&src));
+    let ir = eval_string(&src);
     assert!(ir.contains("define i64 @answer("), "IR was:\n{}", ir);
     assert!(ir.contains("ret i64 42"), "IR was:\n{}", ir);
 }
@@ -234,9 +281,9 @@ fn a_freshly_built_module_verifies_successfully() {
 /// compiler body consuming it). No parameters, hence the empty `'()`.
 #[test]
 fn the_compiler_body_compiles_an_int_literal_node() {
-    let ir = expect_str(eval_ok_with_compiler(
+    let ir = eval_string_with_compiler(
         r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(int 42)))"#,
-    ));
+    );
     assert!(ir.contains("define i64 @answer"), "IR was:\n{}", ir);
     assert!(ir.contains("ret i64 42"), "IR was:\n{}", ir);
 }
@@ -629,7 +676,7 @@ fn two_modules_built_back_to_back_do_not_interfere() {
     // twice in the same process is the cheapest possible check that the
     // shared process-wide `Context` (see `compile::llvm_context`) tolerates
     // repeated use rather than e.g. colliding on the function name.
-    let ir = expect_str(eval_ok(&src));
+    let ir = eval_string(&src);
     assert!(ir.contains("ret i64 42"), "IR was:\n{}", ir);
 }
 
@@ -749,9 +796,9 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
 /// of this stage's scope, see `compiler.rs`'s `compile-call` doc comment).
 #[test]
 fn the_compiler_body_compiles_a_self_referencing_call() {
-    let ir = expect_str(eval_ok_with_compiler(
+    let ir = eval_string_with_compiler(
         r#"(to-string (compile-function (llvm-module::create "mod") "f" '((n . 0)) '(call "f" (0 var "n" false))))"#,
-    ));
+    );
     assert!(ir.contains("define i64 @f("), "IR was:\n{}", ir);
     assert!(ir.contains("call i64 @f("), "IR was:\n{}", ir);
 }
@@ -1212,11 +1259,11 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
 /// explains — this module is built by a direct `compile-function` call.
 #[test]
 fn the_compiler_body_boxes_a_labels_sibling_that_bare_references_itself() {
-    let ir = expect_str(eval_ok_with_compiler(
+    let ir = eval_string_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored (add-function m "rt_closure_new"))) ())
              (to-string (compile-function m "outer" '() '(labels () (("f" () (var "f" true))) (apply "f")))))"#,
-    ));
+    );
     assert!(ir.contains("call i64 @rt_closure_new"), "IR was:\n{}", ir);
 }
 
@@ -1477,9 +1524,9 @@ fn compile_a_captured_cell_survives_gc_pressure_across_many_calls() {
 /// so `true`/`false` compile straight to `1`/`0`.
 #[test]
 fn the_compiler_body_compiles_a_bool_literal_node() {
-    let ir = expect_str(eval_ok_with_compiler(
+    let ir = eval_string_with_compiler(
         r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(bool true)))"#,
-    ));
+    );
     assert!(ir.contains("ret i64 1"), "IR was:\n{}", ir);
 }
 
@@ -3353,7 +3400,7 @@ fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
 /// fallthrough would have misdecoded as a bare `RtValue::Int`.
 #[test]
 fn compile_match_binds_and_returns_a_sym_payload() {
-    let v = eval_ok_with_compiler(
+    let v = eval_string_with_compiler(
         r#"
         (defun get-sym ((s Sexpr)) Symbol
           (match s ((sym x) x) (_ (panic "not a sym"))))
@@ -3361,7 +3408,7 @@ fn compile_match_binds_and_returns_a_sym_payload() {
         (symbol->string (get-sym (quote hello)))
         "#,
     );
-    assert_eq!(v, RtValue::Str("hello".into()));
+    assert_eq!(v, "hello");
 }
 
 /// The `path` variant (`registry::sexpr_def`'s eleventh, added alongside
@@ -3640,7 +3687,7 @@ fn compile_of_a_function_referencing_a_generic_defenum_global_round_trips() {
 /// `Option<string>`.
 #[test]
 fn compile_of_a_function_referencing_a_str_option_global_survives_gc() {
-    let v = run_with_compiler_and_capacity(
+    let v = eval_string_with_compiler_and_capacity(
         r#"
         (defvar (maybe Option<string>) (Option::some "hello"))
         (defun touch-maybe () string (match maybe ((Some s) s) ((None) "")))
@@ -3654,12 +3701,8 @@ fn compile_of_a_function_referencing_a_str_option_global_survives_gc() {
         (match maybe ((Some s) s) ((None) ""))
         "#,
         1 << 14,
-    )
-    .expect("eval failed");
-    match v {
-        RtValue::Str(s) => assert_eq!(&*s, "hello"),
-        other => panic!("expected a Str, got {:?}", other),
-    }
+    );
+    assert_eq!(v, "hello");
 }
 
 /// The `defenum` mirror of the `Option<string>` GC test above: a user
@@ -3668,7 +3711,7 @@ fn compile_of_a_function_referencing_a_str_option_global_survives_gc() {
 /// survive collections between promotion and read-back.
 #[test]
 fn compile_of_a_function_referencing_a_str_defenum_global_survives_gc() {
-    let v = run_with_compiler_and_capacity(
+    let v = eval_string_with_compiler_and_capacity(
         r#"
         (defenum named (N string) (Anon))
         (defvar (who named) (named::N "hello"))
@@ -3683,12 +3726,8 @@ fn compile_of_a_function_referencing_a_str_defenum_global_survives_gc() {
         (match who ((N s) s) ((Anon) ""))
         "#,
         1 << 14,
-    )
-    .expect("eval failed");
-    match v {
-        RtValue::Str(s) => assert_eq!(&*s, "hello"),
-        other => panic!("expected a Str, got {:?}", other),
-    }
+    );
+    assert_eq!(v, "hello");
 }
 
 // ---- `Expr::Panic`/`Expr::MethodRef`/`Expr::Quote` in compiled code --------
@@ -5122,7 +5161,7 @@ fn compile_dispatches_a_result_carrying_a_user_error_type() {
 /// passed in — which is exactly how a built-in error reaches native code.)
 #[test]
 fn compile_dispatches_a_match_on_a_builtin_error_type() {
-    let v = run_with_compiler_and_prelude(
+    let v = run_readback(
         r#"
         (defun classify ((r Result<i32,ParseIntError>)) string
           (match r ((Ok _) "ok") ((Err e) (message e))))
@@ -5131,7 +5170,7 @@ fn compile_dispatches_a_match_on_a_builtin_error_type() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Str("okparse-int: invalid integer literal: \"xy\"".into()));
+    assert_eq!(v, Readback::Str("okparse-int: invalid integer literal: \"xy\"".to_string()));
 }
 
 /// The uniform-handling shape from `docs/dev/language-design.md` §7.4, in
@@ -5140,7 +5179,7 @@ fn compile_dispatches_a_match_on_a_builtin_error_type() {
 /// (`ParseIntError`, whose `impl` lives in the prelude) as one of them.
 #[test]
 fn compile_dispatches_message_on_a_dyn_error() {
-    let v = run_with_compiler_and_prelude(
+    let v = run_readback(
         r#"
         (defstruct app-err (why string))
         (impl Error app-err
@@ -5155,7 +5194,7 @@ fn compile_dispatches_message_on_a_dyn_error() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Str("mine/builtin".into()));
+    assert_eq!(v, Readback::Str("mine/builtin".to_string()));
 }
 
 // ---- `()`-typed fields cross the compiled boundary ----------------------
@@ -5205,7 +5244,7 @@ fn a_struct_built_by_compiled_code_reads_back_in_the_interpreter() {
 fn compile_handles_a_result_with_a_unit_ok_payload() {
     // The motivating case for the whole encoding — `Result<(), E>` is what
     // the prelude's file-writing functions wanted and couldn't have.
-    let v = run_with_compiler_and_prelude(
+    let v = run_readback(
         r#"
         (defun check ((n i64)) Result<(), string>
           (if (> n 0) (result::ok ()) (result::err "negative")))
@@ -5217,7 +5256,7 @@ fn compile_handles_a_result_with_a_unit_ok_payload() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Str("oknegative".into()));
+    assert_eq!(v, Readback::Str("oknegative".to_string()));
 }
 
 #[test]
@@ -5376,9 +5415,10 @@ fn conformance_int(expr: &str) -> i64 {
 
 /// Runs `expr` with [`CONFORMANCE_MODULE`] in scope, expecting a string.
 fn conformance_str(expr: &str) -> String {
-    expect_str(
-        run_with_compiler_and_prelude(&format!("{CONFORMANCE_MODULE}\n{expr}")).expect("eval failed"),
-    )
+    match run_readback(&format!("{CONFORMANCE_MODULE}\n{expr}")).expect("eval failed") {
+        Readback::Str(s) => s,
+        other => panic!("expected a Str, got {:?}", other),
+    }
 }
 
 #[test]

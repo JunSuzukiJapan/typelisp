@@ -47,6 +47,7 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+
 /// Like [`run`], but also returns the `Heap` — needed to inspect a
 /// `defstruct` instance's contents directly, since it's now `RtValue::Sexpr(
 /// Value::Boxed(_))` (a boxed struct, see the `Sexpr`/`RtValue` unification

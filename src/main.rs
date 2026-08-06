@@ -527,7 +527,6 @@ fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
         RtValue::Int(i) => i.to_string(),
         RtValue::Bool(b) => b.to_string(),
         RtValue::Char(c) => format!("#\\{}", c),
-        RtValue::Str(s) => format!("{:?}", s),
         RtValue::Unit => "()".to_string(),
         RtValue::Sexpr(sv) => format_sexpr(heap, reg, *sv),
     }
