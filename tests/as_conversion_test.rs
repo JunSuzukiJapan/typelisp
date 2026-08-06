@@ -89,12 +89,23 @@ fn assert_ratio(src: &str, numer: &str, denom: &str) {
     }
 }
 
+/// The `f64` counterpart of [`assert_bignum`]: an `f64` is a
+/// `BoxedObj::Float` since the scalar unification, so reading one needs the
+/// heap it lives in.
+fn eval_f64(src: &str) -> f64 {
+    let (h, v) = run_with_heap(src).expect("eval failed");
+    match v {
+        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(id) => h.float_value(id),
+        other => panic!("expected an f64, got {:?}", other),
+    }
+}
+
 // ---- identity ----------------------------------------------------------------
 
 #[test]
 fn as_on_the_same_type_is_a_no_op() {
     assert_eq!(eval_ok("(as i32 5)"), RtValue::Int(5));
-    assert_eq!(eval_ok("(as f64 2.5)"), RtValue::Float(2.5));
+    assert_eq!(eval_f64("(as f64 2.5)"), 2.5);
     assert_eq!(eval_ok("(as char #\\a)"), RtValue::Char('a'));
 }
 
@@ -125,8 +136,8 @@ fn try_as_crosses_i32_and_i64_and_wraps_in_some() {
 
 #[test]
 fn as_widens_an_int_to_f64() {
-    assert_eq!(eval_ok("(as f64 42)"), RtValue::Float(42.0));
-    assert_eq!(eval_ok("(as f64 (the i64 42))"), RtValue::Float(42.0));
+    assert_eq!(eval_f64("(as f64 42)"), 42.0);
+    assert_eq!(eval_f64("(as f64 (the i64 42))"), 42.0);
 }
 
 #[test]
@@ -139,7 +150,7 @@ fn as_narrows_f64_to_int_truncating_toward_zero() {
 
 #[test]
 fn try_as_int_f64_round_trip_always_succeeds() {
-    assert_eq!(eval_ok("(unwrap (try-as f64 42))"), RtValue::Float(42.0));
+    assert_eq!(eval_f64("(unwrap (try-as f64 42))"), 42.0);
     assert_eq!(eval_ok("(unwrap (try-as i32 3.9))"), RtValue::Int(3));
     assert_eq!(eval_ok("(unwrap (try-as i64 3.9))"), RtValue::Int(3));
 }
@@ -156,18 +167,14 @@ fn as_widens_int_to_bignum_and_ratio() {
 #[test]
 fn as_widens_bignum_to_ratio_and_f64() {
     assert_ratio("(as ratio 99999999999999999999999999999)", "99999999999999999999999999999", "1");
-    match eval_ok("(as f64 99999999999999999999999999999)") {
-        RtValue::Float(f) => assert!(f > 9.9e28 && f < 1.1e29, "unexpected float: {}", f),
-        other => panic!("expected a Float, got {:?}", other),
-    }
+    let f = eval_f64("(as f64 99999999999999999999999999999)");
+    assert!(f > 9.9e28 && f < 1.1e29, "unexpected float: {}", f);
 }
 
 #[test]
 fn as_widens_ratio_to_f64() {
-    match eval_ok("(as f64 2/3)") {
-        RtValue::Float(f) => assert!((f - 2.0 / 3.0).abs() < 1e-12, "unexpected float: {}", f),
-        other => panic!("expected a Float, got {:?}", other),
-    }
+    let f = eval_f64("(as f64 2/3)");
+    assert!((f - 2.0 / 3.0).abs() < 1e-12, "unexpected float: {}", f);
 }
 
 #[test]

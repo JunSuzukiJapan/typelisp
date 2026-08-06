@@ -30,6 +30,28 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+/// Like [`run`], but reading the `f64` result out before the run's `Heap`
+/// drops: an `f64` is a `BoxedObj::Float` since the scalar unification, so
+/// the value is an index into that heap rather than self-contained.
+fn eval_f64(src: &str) -> f64 {
+    let mut h = Heap::with_capacity(1 << 16);
+    let r = Reader::new();
+    let vs = r.read_all(&mut h, src).expect("read failed");
+    let mut chk = Checker::new();
+    let interp = Interp::new();
+    let mut last = RtValue::Unit;
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(id) => h.float_value(id),
+        other => panic!("expected an f64, got {:?}", other),
+    }
+}
+
 /// Like [`run`], but with the prelude loaded first — for `if-let`/
 /// `while-let`, which are `defmacro`s expanding to a two-armed `match`
 /// (`src/prelude.rs`), not checker-native special forms.
@@ -76,7 +98,7 @@ fn match_refines_an_int_payload_to_i64() {
 
 #[test]
 fn match_refines_a_float_payload_to_f64() {
-    assert_eq!(eval_ok("(match (Float 2.5) ((float f) f) (_ 0.0))"), RtValue::Float(2.5));
+    assert_eq!(eval_f64("(match (Float 2.5) ((float f) f) (_ 0.0))"), 2.5);
 }
 
 #[test]

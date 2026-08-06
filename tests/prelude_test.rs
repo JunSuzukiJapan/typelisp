@@ -57,6 +57,21 @@ fn eval_ok(src: &str) -> RtValue {
     run(src).expect("eval failed")
 }
 
+/// The `f64` a run produced. An `f64` is a `BoxedObj::Float` since the scalar
+/// unification, so reading one needs the heap it lives in — the same
+/// thread-local `CTX` the evaluation used.
+fn eval_f64(src: &str) -> f64 {
+    let v = eval_ok(src);
+    CTX.with(|cell| {
+        let opt = cell.borrow();
+        let (h, _, _) = opt.as_ref().expect("no evaluation has run yet");
+        match v {
+            RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(id) => h.float_value(id),
+            other => panic!("expected an f64, got {:?}", other),
+        }
+    })
+}
+
 fn type_error(src: &str) {
     with_ctx(|h, chk, interp| {
         let r = Reader::new();
@@ -326,12 +341,12 @@ fn equalp_on_sexpr_still_rejects_other_mismatched_types() {
 
 #[test]
 fn int_to_float_converts_i32() {
-    assert_eq!(eval_ok("(int->float 3)"), RtValue::Float(3.0));
+    assert_eq!(eval_f64("(int->float 3)"), 3.0);
 }
 
 #[test]
 fn int_to_float_converts_i64() {
-    assert_eq!(eval_ok("(int->float (the i64 3))"), RtValue::Float(3.0));
+    assert_eq!(eval_f64("(int->float (the i64 3))"), 3.0);
 }
 
 #[test]

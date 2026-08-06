@@ -398,7 +398,13 @@ fn sexpr_typed_field_holding_a_quoted_float_reads_back_as_a_sexpr() {
     let src = "(defstruct holder (content Sexpr)) \
                (let ((h (holder::new '2.5))) \
                  (sexpr-float (content h)))";
-    assert_eq!(eval_ok(src), RtValue::Float(2.5));
+    // A float is a `BoxedObj::Float` since the scalar unification, so reading
+    // the result needs the heap it lives in.
+    let (h, v) = run_with_heap(src).expect("eval failed");
+    match v {
+        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(id) => assert_eq!(h.float_value(id), 2.5),
+        other => panic!("expected an f64, got {:?}", other),
+    }
 }
 
 #[test]

@@ -65,11 +65,24 @@ fn type_error(src: &str) {
     assert!(result.is_err(), "expected a type error");
 }
 
+/// The `f64` a result carries. An `f64` is a `BoxedObj::Float` since the
+/// scalar unification, so reading one needs the heap it lives in — which is
+/// the same thread-local `CTX` the evaluation used, so call sites stay
+/// unchanged.
+fn as_f64(actual: RtValue) -> f64 {
+    CTX.with(|cell| {
+        let opt = cell.borrow();
+        let (h, _, _) = opt.as_ref().expect("no evaluation has run yet");
+        match actual {
+            RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(id) => h.float_value(id),
+            other => panic!("expected an f64, got {:?}", other),
+        }
+    })
+}
+
 fn assert_close(actual: RtValue, expected: f64) {
-    match actual {
-        RtValue::Float(f) => assert!((f - expected).abs() < 1e-9, "{} != {}", f, expected),
-        other => panic!("expected a Float, got {:?}", other),
-    }
+    let f = as_f64(actual);
+    assert!((f - expected).abs() < 1e-9, "{} != {}", f, expected);
 }
 
 // ---- i64 ----------------------------------------------------------------------
@@ -138,7 +151,7 @@ fn i32_value_cannot_be_passed_where_i64_is_expected() {
 #[test]
 fn f64_arithmetic() {
     let src = "(defun add ((a f64) (b f64)) f64 (+ a b)) (add 1.5 2.5)";
-    assert_eq!(eval_ok(src), RtValue::Float(4.0));
+    assert_eq!(as_f64(eval_ok(src)), 4.0);
 }
 
 #[test]
@@ -150,10 +163,8 @@ fn f64_comparison() {
 #[test]
 fn f64_division_by_zero_is_infinity_not_a_panic() {
     let src = "(defun f ((a f64) (b f64)) f64 (/ a b)) (f 1.0 0.0)";
-    match eval_ok(src) {
-        RtValue::Float(f) => assert!(f.is_infinite() && f > 0.0),
-        other => panic!("expected a Float, got {:?}", other),
-    }
+    let f = as_f64(eval_ok(src));
+    assert!(f.is_infinite() && f > 0.0);
 }
 
 #[test]
@@ -295,7 +306,7 @@ fn f64_operator_as_a_value() {
     // to other receiver types, not just the one the regression surfaced on.
     let src = "(defun apply2 ((f (fn (f64 f64) f64)) (a f64) (b f64)) f64 (f a b)) \
                (apply2 + 1.5 2.5)";
-    assert_eq!(eval_ok(src), RtValue::Float(4.0));
+    assert_eq!(as_f64(eval_ok(src)), 4.0);
 }
 
 // ---- random ---------------------------------------------------------------------

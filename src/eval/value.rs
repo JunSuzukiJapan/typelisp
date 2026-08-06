@@ -136,7 +136,6 @@ impl Slot {
 #[derive(Clone, Debug)]
 pub enum RtValue {
     Int(i64),
-    Float(f64),
     Bool(bool),
     Char(char),
     /// `Rc<str>`, not a plain owned `String` — this language's `string`
@@ -199,7 +198,6 @@ impl PartialEq for RtValue {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (RtValue::Int(a), RtValue::Int(b)) => a == b,
-            (RtValue::Float(a), RtValue::Float(b)) => a == b,
             (RtValue::Bool(a), RtValue::Bool(b)) => a == b,
             (RtValue::Char(a), RtValue::Char(b)) => a == b,
             (RtValue::Str(a), RtValue::Str(b)) => a == b,

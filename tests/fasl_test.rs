@@ -178,6 +178,19 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
     Ok(last)
 }
 
+/// An evaluation result in a heap-independent form, so results from two
+/// separately-loaded environments (each with its own `Heap`) can be compared.
+/// `value_to_owned` already mirrors the `Value` side structurally; since the
+/// scalar unification an `f64` lives there too — as a `BoxedObj::Float` —
+/// rather than self-contained inside `RtValue`, so comparing the `RtValue`s
+/// directly would compare two unrelated box ids.
+fn owned_result(h: &Heap, v: &RtValue) -> String {
+    match v {
+        RtValue::Sexpr(sv) => format!("{:?}", value_to_owned(h, *sv).expect("value_to_owned")),
+        other => format!("{:?}", other),
+    }
+}
+
 /// The heart of S2: for a battery of programs exercising prelude macros,
 /// generic combinators (template re-instantiation), and literals, the
 /// fasl-loaded environment must produce the same values as the
@@ -206,7 +219,12 @@ fn fasl_loaded_prelude_evaluates_identically_to_source_loaded() {
         let (mut fh, mut fc, mut fi) = fasl_loaded(&fasl);
         let fasl_result = eval_in(&mut fh, &mut fc, &mut fi, prog).expect("fasl-loaded eval");
 
-        assert_eq!(src_result, fasl_result, "mismatch for program:\n{}", prog);
+        assert_eq!(
+            owned_result(&sh, &src_result),
+            owned_result(&fh, &fasl_result),
+            "mismatch for program:\n{}",
+            prog
+        );
     }
 }
 

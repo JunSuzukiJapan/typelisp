@@ -1009,17 +1009,22 @@ impl Interp {
             // A trait object is a `BoxedObj::Dyn` fat box — the twin of
             // `Checker::is_heap_repr`'s `Type::Dyn` arm.
             Type::Dyn(..) => true,
-            // These three are boxes with no `Type::Named` spelling, so nothing
+            // These four are boxes with no `Type::Named` spelling, so nothing
             // above catches them, and each *must* be here rather than merely
             // may: a `Slot::Heap` is rooted by the heap's own `cell_registry`
             // walk, which `gc` runs every time, whereas a `Slot::Native` only
             // becomes a root when `sync_roots` next runs — so a
             // `Native`-routed binding holding a collectible box is live only
-            // between syncs. Both a `random-state` global and a `bignum`
-            // global went missing under `gc_stress` before their arms existed
-            // (`tests/random_state_time_test.rs`,
-            // `tests/bignum_ratio_gc_test.rs`).
-            Type::RandomState | Type::Bignum | Type::Ratio => true,
+            // between syncs. A `random-state`, a `bignum`, and an `f64`
+            // global each went missing under `gc_stress` before its arm
+            // existed (`tests/random_state_time_test.rs`,
+            // `tests/bignum_ratio_gc_test.rs`, `tests/float_gc_test.rs`).
+            //
+            // `F64` is here purely because a float became a `BoxedObj::Float`
+            // in the scalar unification; it says nothing about the *compiled*
+            // representation, where `binding_kind` still keeps floats in
+            // native registers.
+            Type::RandomState | Type::Bignum | Type::Ratio | Type::F64 => true,
             _ => false,
         }
     }
@@ -1332,7 +1337,7 @@ impl Interp {
     fn eval_inner(&self, heap: &mut Heap, t: &Typed, env: &Env) -> Result<RtValue, EvalError> {
         match &t.expr {
             Expr::Int(n) => Ok(RtValue::Int(*n)),
-            Expr::Float(f) => Ok(RtValue::Float(*f)),
+            Expr::Float(f) => Ok(float_rt(heap, *f)),
             Expr::Bignum(n) => Ok(bignum_rt(heap, n.clone())),
             Expr::Ratio(r) => Ok(ratio_rt(heap, r.clone())),
             Expr::Bool(b) => Ok(RtValue::Bool(*b)),
@@ -1534,8 +1539,8 @@ impl Interp {
                             // which requires `f.sig` to be `Some` — so this
                             // is an internal invariant, not a user-reachable
                             // error.
-                            let ret_ty = &f.sig.as_ref().expect("a compiled function always has a type signature").1;
-                            return self.call_compiled(heap, &compiled, &argv, ret_ty);
+                            let sig = f.sig.as_ref().expect("a compiled function always has a type signature");
+                            return self.call_compiled(heap, &compiled, &argv, &sig.0, &sig.1);
                         }
                         self.apply(heap, &f, argv)
                     }
@@ -1556,8 +1561,8 @@ impl Interp {
                         // plain function's parameters never do.
                         let compiled = f.compiled.borrow().clone();
                         if let Some(compiled) = compiled {
-                            let ret_ty = &f.sig.as_ref().expect("a compiled method always has a type signature").1;
-                            return self.call_compiled(heap, &compiled, &argv, ret_ty);
+                            let sig = f.sig.as_ref().expect("a compiled method always has a type signature");
+                            return self.call_compiled(heap, &compiled, &argv, &sig.0, &sig.1);
                         }
                         self.apply(heap, &f, argv)
                     }
@@ -1717,8 +1722,8 @@ impl Interp {
                     Some(f) => {
                         let compiled = f.compiled.borrow().clone();
                         if let Some(compiled) = compiled {
-                            let ret_ty = &f.sig.as_ref().expect("a compiled method always has a type signature").1;
-                            return self.call_compiled(heap, &compiled, &argv, ret_ty);
+                            let sig = f.sig.as_ref().expect("a compiled method always has a type signature");
+                            return self.call_compiled(heap, &compiled, &argv, &sig.0, &sig.1);
                         }
                         self.apply(heap, &f, argv)
                     }
@@ -1798,7 +1803,20 @@ impl Interp {
                     // `call_compiled` call, via the same two halves that split
                     // out of it.
                     RtValue::Sexpr(Value::Boxed(id)) if heap.is_compiled_closure(id) => {
-                        let (int_args, crossing_roots) = self.encode_crossing_args(heap, &argv)?;
+                        // The callee's own declared type carries the parameter
+                        // types `encode_crossing_args` needs to tell an `f64`
+                        // parameter from a `Sexpr` one holding a float.
+                        let (param_tys, rest_ty) = match &callee.ty {
+                            Type::Fn(ps, rest, _) => (ps.as_slice(), rest.as_deref()),
+                            other => {
+                                return Err(EvalError::Internal(format!(
+                                    "compiled closure call: callee has type {:?}, not a function type",
+                                    other
+                                )))
+                            }
+                        };
+                        let (int_args, crossing_roots) =
+                            self.encode_crossing_args(heap, &argv, param_tys, rest_ty)?;
                         crate::compile::runtime::set_active_heap(heap as *mut Heap);
                         let raw = Self::call_closure_box(heap, id, &int_args);
                         for _ in 0..crossing_roots {
@@ -1937,7 +1955,13 @@ impl Interp {
         let v = match variant {
             SEXPR_NIL => Value::Empty,
             SEXPR_INT => Value::Int(rt_i64(&vs[0])?),
-            SEXPR_FLOAT => heap.alloc_float(rt_f64(&vs[0])?),
+            // The field value *is* a `BoxedObj::Float` since the scalar
+            // unification, so — like `SEXPR_SYM`/`SEXPR_BIGNUM` — the
+            // resulting `Sexpr::Float` node is that same box, not a re-box.
+            SEXPR_FLOAT => {
+                rt_f64(heap, &vs[0])?;
+                rt_sexpr(&vs[0])?
+            }
             SEXPR_CHAR => Value::Char(rt_char(&vs[0])?),
             SEXPR_BOOL => Value::Bool(rt_bool(&vs[0])?),
             // `(Sym x)` where `x : Symbol`. A `Symbol` value is already carried
@@ -2054,8 +2078,18 @@ impl Interp {
     /// never touched by compiled code) hits the same wall an analogous top-level
     /// `Expr::Call` already would for a general-ADT parameter — a clear
     /// internal error here, not a silent misread of unrelated bits.
-    fn call_compiled(&self, heap: &mut Heap, compiled: &crate::compile::CompiledFn, argv: &[RtValue], ret_ty: &Type) -> Result<RtValue, EvalError> {
-        let (int_args, crossing_roots) = self.encode_crossing_args(heap, argv)?;
+    fn call_compiled(
+        &self,
+        heap: &mut Heap,
+        compiled: &crate::compile::CompiledFn,
+        argv: &[RtValue],
+        param_tys: &[Type],
+        ret_ty: &Type,
+    ) -> Result<RtValue, EvalError> {
+        // A `defun`/`defmethod`'s `sig` lists only its fixed parameters; a
+        // `&rest` one that reached compilation would land in the "no declared
+        // type" error above rather than be guessed at.
+        let (int_args, crossing_roots) = self.encode_crossing_args(heap, argv, param_tys, None)?;
         // Registers `heap` as this thread's active `Heap` (see
         // `compile::runtime::set_active_heap`'s doc comment) so any
         // `rt-cons`/`rt-car`/... call the compiled code makes — directly or
@@ -2082,7 +2116,22 @@ impl Interp {
     /// `argv`'s own runtime shape rather than each parameter's static type,
     /// and why every heap-backed argument is rooted for the marshaling+call
     /// window.
-    fn encode_crossing_args(&self, heap: &mut Heap, argv: &[RtValue]) -> Result<(Vec<i64>, usize), EvalError> {
+    /// `param_tys` are the callee's *declared* parameter types, and they are
+    /// required rather than advisory: since the scalar unification an `f64`
+    /// and a `Sexpr` holding a float are the same runtime shape
+    /// (`RtValue::Sexpr(Value::Boxed(float))`), and they cross the boundary
+    /// differently — an `f64` parameter takes raw `f64::to_bits`, a `Sexpr`
+    /// parameter takes the tagged box pointer. The value cannot say which;
+    /// only the declared type can. Reading it off the value instead made
+    /// `(which (Float 1.5))` miss its `(float _)` arm in compiled code while
+    /// the interpreted call still matched.
+    fn encode_crossing_args(
+        &self,
+        heap: &mut Heap,
+        argv: &[RtValue],
+        param_tys: &[Type],
+        rest_ty: Option<&Type>,
+    ) -> Result<(Vec<i64>, usize), EvalError> {
         let mut crossing_roots = 0usize;
         let mut int_args: Vec<i64> = Vec::with_capacity(argv.len());
         // Root every already-heap-resident `Sexpr` argument up front, before
@@ -2105,7 +2154,10 @@ impl Interp {
                 crossing_roots += 1;
             }
         }
-        for v in argv {
+        for (i, v) in argv.iter().enumerate() {
+            // Past the fixed parameters, every remaining argument has the
+            // `&rest` element type (`Type::Fn`'s second field).
+            let param_ty = param_tys.get(i).or(rest_ty);
             let encoded = match v {
                 // A closure crossing into compiled code is always a
                 // `BoxedObj::CompiledClosure` now (interp-closure removal
@@ -2130,6 +2182,26 @@ impl Interp {
                         name
                     )))
                 }
+                // A compiled `f64` parameter is its raw `f64::to_bits` pattern
+                // carried in an `i64` (`compile-float`/
+                // `llvm_builder_build_float_op`'s convention) — the exact
+                // inverse of the `Type::F64` return decode below. Guarded by
+                // the *declared* type, not by the value: a `Sexpr` parameter
+                // holding a float has the identical runtime shape and must
+                // cross as a tagged pointer instead, so it falls through to
+                // the `RtValue::Sexpr` arm below. (`bignum`/`ratio` are
+                // always the tagged-pointer case — that is exactly what
+                // `rt_bignum_*`/`rt_ratio_*` read — so they need no arm.)
+                RtValue::Sexpr(Value::Boxed(id)) if heap.is_float(*id) && matches!(param_ty, Some(Type::F64)) => {
+                    Ok(heap.float_value(*id).to_bits() as i64)
+                }
+                // A float with no declared type to consult. Not decidable
+                // here, and guessing either encoding would corrupt the call
+                // silently, so it is an error — the same treatment the
+                // built-in-as-function-value case below gets.
+                RtValue::Sexpr(Value::Boxed(id)) if heap.is_float(*id) && param_ty.is_none() => Err(EvalError::Internal(
+                    format!("compiled call: no declared type for argument {} — cannot tell an `f64` from a `Sexpr` holding a float", i),
+                )),
                 RtValue::Sexpr(sv) => Ok(crate::compile::runtime::encode(*sv)),
                 RtValue::Int(n) => Ok(*n),
                 // `()` crosses as the plain `0` `compile-unit` compiles a
@@ -2145,11 +2217,6 @@ impl Interp {
                 // `Value::Str` (what `rt_str_*` expect).
                 RtValue::Bool(b) => Ok(i64::from(*b)),
                 RtValue::Char(c) => Ok(*c as i64),
-                // A compiled `f64` is its raw `f64::to_bits` pattern carried in
-                // an `i64` (`compile-float`/`llvm_builder_build_float_op`'s
-                // convention) — the exact inverse of the `Type::F64` return
-                // decode below.
-                RtValue::Float(f) => Ok(f.to_bits() as i64),
                 RtValue::Str(s) => {
                     let sv = heap.alloc_string(s.to_string());
                     heap.push_root(sv);
@@ -2239,8 +2306,8 @@ impl Interp {
             // A compiled `f64` result is its raw bit pattern in the `i64`
             // return register (`llvm_builder_build_float_op`'s final
             // `bitcast`); reinterpret it back to an `f64`, the inverse of the
-            // `RtValue::Float` argument encode above.
-            RtValue::Float(f64::from_bits(raw as u64))
+            // float argument encode above.
+            float_rt(heap, f64::from_bits(raw as u64))
         } else if matches!(ret_ty, Type::Str) {
             // A compiled `string` value is a tagged `Value::Str` word
             // (`Type::Str`'s passthrough kind); `Type::Str` isn't
@@ -2686,7 +2753,9 @@ impl Interp {
             let ret_ty = Type::Named(Path::root("llvm-module"), Vec::new());
             let mark = llvm_handles_mark();
             let scope_mark = heap.session_root_count();
-            let r = self.call_compiled(heap, &cf, &argv, &ret_ty);
+            let param_tys =
+                &compiler_def.sig.as_ref().expect("the compiler body always has a type signature").0;
+            let r = self.call_compiled(heap, &cf, &argv, param_tys, &ret_ty);
             llvm_handles_release(mark);
             // Scope boxes the island created during this compile are session
             // roots (see `LlvmRetK::Scope`); release them with the handles.
@@ -3713,7 +3782,9 @@ impl Interp {
             // fence so a `Sexpr::Float` payload can still be read out without a
             // `(match s ((Float f) f) ..)`.
             "sexpr-float" => match args.first() {
-                Some(RtValue::Sexpr(Value::Boxed(id))) if heap.is_float(*id) => Some(Ok(RtValue::Float(heap.float_value(*id)))),
+                // The node *is* the float box since the scalar
+                // unification, so reading the payload out is the identity.
+                Some(v @ RtValue::Sexpr(Value::Boxed(id))) if heap.is_float(*id) => Some(Ok(v.clone())),
                 Some(RtValue::Sexpr(_)) => Some(Err(EvalError::Panic("sexpr-float: expected a Float Sexpr node".into()))),
                 _ => Some(Err(EvalError::Internal("sexpr-float: expected a Sexpr argument".into()))),
             },
@@ -4287,9 +4358,9 @@ fn rt_i64(v: &RtValue) -> Result<i64, EvalError> {
     }
 }
 
-fn rt_f64(v: &RtValue) -> Result<f64, EvalError> {
+fn rt_f64(heap: &Heap, v: &RtValue) -> Result<f64, EvalError> {
     match v {
-        RtValue::Float(n) => Ok(*n),
+        RtValue::Sexpr(Value::Boxed(id)) if heap.is_float(*id) => Ok(heap.float_value(*id)),
         _ => Err(EvalError::Internal("sexpr: expected an f64 field".into())),
     }
 }
@@ -4438,9 +4509,9 @@ fn int_unary(args: &[RtValue], f: fn(i64) -> i64) -> Result<RtValue, EvalError> 
     Ok(RtValue::Int(f(rt_i64(&args[0])?)))
 }
 
-fn expect_float(v: &RtValue) -> Result<f64, EvalError> {
+fn expect_float(heap: &Heap, v: &RtValue) -> Result<f64, EvalError> {
     match v {
-        RtValue::Float(f) => Ok(*f),
+        RtValue::Sexpr(Value::Boxed(id)) if heap.is_float(*id) => Ok(heap.float_value(*id)),
         other => Err(EvalError::Internal(format!("expected a Float, got {:?}", other))),
     }
 }
@@ -4448,9 +4519,9 @@ fn expect_float(v: &RtValue) -> Result<f64, EvalError> {
 /// `int->float` (`registry::int_assoc`): widen an `i32`/`i64` to `f64`. Both
 /// widths share `RtValue::Int(i64)` at runtime (see `eval_int_builtin`'s doc
 /// comment), so one implementation covers both.
-fn int_to_float(args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn int_to_float(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     match args.first() {
-        Some(RtValue::Int(n)) => Ok(RtValue::Float(*n as f64)),
+        Some(RtValue::Int(n)) => Ok(float_rt(heap, *n as f64)),
         other => Err(EvalError::Internal(format!("int->float: expected an integer, got {:?}", other))),
     }
 }
@@ -4458,9 +4529,9 @@ fn int_to_float(args: &[RtValue]) -> Result<RtValue, EvalError> {
 /// `float->int` (`registry::float_assoc`): narrow an `f64` to an integer,
 /// truncating toward zero (Rust's `as i64`, same rounding direction as CL's
 /// `truncate`).
-fn float_to_int(args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn float_to_int(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     match args.first() {
-        Some(RtValue::Float(f)) => Ok(RtValue::Int(*f as i64)),
+        Some(RtValue::Sexpr(Value::Boxed(id))) if heap.is_float(*id) => Ok(RtValue::Int(heap.float_value(*id) as i64)),
         other => Err(EvalError::Internal(format!("float->int: expected a float, got {:?}", other))),
     }
 }
@@ -4502,35 +4573,37 @@ fn try_int_to_char(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalErr
 /// a zero divisor — IEEE-754 division yields `inf`/`NaN` instead, the natural
 /// float semantics (no "can't express nonzero" gap to plug). `mod`/`rem` are
 /// defined in `prelude.rs` as typelisp methods (`a - b*floor|truncate(a/b)`).
-fn eval_float_builtin(name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
-    let (a, b) = match (args.first(), args.get(1)) {
-        (Some(RtValue::Float(a)), Some(RtValue::Float(b))) => (*a, *b),
+fn eval_float_builtin(heap: &mut Heap, name: &str, args: &[RtValue]) -> Option<Result<RtValue, EvalError>> {
+    let (a, b) = match (args.first().map(|v| expect_float(heap, v)), args.get(1).map(|v| expect_float(heap, v))) {
+        (Some(Ok(a)), Some(Ok(b))) => (a, b),
         _ => return Some(Err(EvalError::Internal(format!("{}: expected two floats", name)))),
     };
     let v = match name {
-        "+" => RtValue::Float(a + b),
-        "-" => RtValue::Float(a - b),
-        "*" => RtValue::Float(a * b),
-        "/" => RtValue::Float(a / b),
+        "+" => float_rt(heap, a + b),
+        "-" => float_rt(heap, a - b),
+        "*" => float_rt(heap, a * b),
+        "/" => float_rt(heap, a / b),
         "<" => RtValue::Bool(a < b),
         "<=" => RtValue::Bool(a <= b),
         ">" => RtValue::Bool(a > b),
         ">=" => RtValue::Bool(a >= b),
         "=" => RtValue::Bool(a == b),
         "/=" => RtValue::Bool(a != b),
-        "max" => RtValue::Float(a.max(b)),
-        "min" => RtValue::Float(a.min(b)),
+        "max" => float_rt(heap, a.max(b)),
+        "min" => float_rt(heap, a.min(b)),
         _ => unreachable!(),
     };
     Some(Ok(v))
 }
 
-fn float_unary(args: &[RtValue], f: fn(f64) -> f64) -> Result<RtValue, EvalError> {
-    Ok(RtValue::Float(f(expect_float(&args[0])?)))
+fn float_unary(heap: &mut Heap, args: &[RtValue], f: fn(f64) -> f64) -> Result<RtValue, EvalError> {
+    let r = f(expect_float(heap, &args[0])?);
+    Ok(float_rt(heap, r))
 }
 
-fn float_expt(args: &[RtValue]) -> Result<RtValue, EvalError> {
-    Ok(RtValue::Float(expect_float(&args[0])?.powf(expect_float(&args[1])?)))
+fn float_expt(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+    let r = expect_float(heap, &args[0])?.powf(expect_float(heap, &args[1])?);
+    Ok(float_rt(heap, r))
 }
 
 /// The `BigInt` behind a `bignum` value, cloned out of its heap box.
@@ -4567,6 +4640,23 @@ fn bignum_rt(heap: &mut Heap, n: BigInt) -> RtValue {
 /// A `ratio` value — the [`bignum_rt`] counterpart.
 fn ratio_rt(heap: &mut Heap, r: BigRational) -> RtValue {
     RtValue::Sexpr(heap.alloc_ratio(r))
+}
+
+/// An `f64` value: `f` boxed onto the GC heap — the [`bignum_rt`] counterpart
+/// for floats, and the one constructor.
+///
+/// A float was the last type with *two* runtime shapes: a Rust-side
+/// `RtValue::Float(f64)` while the interpreter held it, and a
+/// `BoxedObj::Float` once it reached a struct field, a `Sexpr`, or compiled
+/// code — with a conversion at each crossing and a standing risk that a
+/// reader of one shape met the other. There is only the box now.
+///
+/// This does *not* make float arithmetic allocate where it did not before:
+/// the compiled tier keeps floats in native registers (`binding_kind`'s float
+/// kind), and the interpreter was already boxing at every boundary. It is the
+/// interpreter's own locals that move onto the heap.
+fn float_rt(heap: &mut Heap, f: f64) -> RtValue {
+    RtValue::Sexpr(heap.alloc_float(f))
 }
 
 /// Evaluate a built-in `bignum` arithmetic/comparison instance method
@@ -4733,9 +4823,10 @@ fn try_bignum_to_int(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalE
 /// a magnitude beyond `f64`'s 53-bit mantissa (IEEE-754 rounds to the
 /// nearest representable value, same as any other narrowing-precision
 /// numeric conversion).
-fn bignum_to_float(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn bignum_to_float(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let n = expect_bignum(heap, &args[0])?;
-    Ok(RtValue::Float(n.to_f64().unwrap_or(f64::INFINITY.copysign(if n.sign() == num_bigint::Sign::Minus { -1.0 } else { 1.0 }))))
+    let f = n.to_f64().unwrap_or(f64::INFINITY.copysign(if n.sign() == num_bigint::Sign::Minus { -1.0 } else { 1.0 }));
+    Ok(float_rt(heap, f))
 }
 
 /// `bignum->ratio` (`registry::bignum_assoc`): always-exact widening.
@@ -4750,7 +4841,7 @@ fn bignum_to_ratio(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalErr
 /// "value outside the representable range" panic precedent as
 /// `int->char`/`bignum->int`.
 fn float_to_bignum(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let f = expect_float(&args[0])?;
+    let f = expect_float(heap, &args[0])?;
     if !f.is_finite() {
         return Err(EvalError::Panic(format!("float->bignum: {} is not finite", f)));
     }
@@ -4762,7 +4853,7 @@ fn float_to_bignum(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalErr
 /// lossy-round-trip-through-decimal `rationalize`). Panics on a non-finite
 /// float, same precedent as [`float_to_bignum`].
 fn float_to_ratio(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
-    let f = expect_float(&args[0])?;
+    let f = expect_float(heap, &args[0])?;
     BigRational::from_float(f)
         .map(|r| ratio_rt(heap, r))
         .ok_or_else(|| EvalError::Panic(format!("float->ratio: {} is not finite", f)))
@@ -4777,9 +4868,10 @@ fn ratio_to_bignum(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalErr
 
 /// `ratio->float` (`registry::ratio_assoc`): widening, possibly lossy
 /// (IEEE-754 rounds to the nearest representable `f64`).
-fn ratio_to_float(heap: &Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
+fn ratio_to_float(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let r = expect_ratio(heap, &args[0])?;
-    Ok(RtValue::Float(r.to_f64().unwrap_or(f64::NAN)))
+    let f = r.to_f64().unwrap_or(f64::NAN);
+    Ok(float_rt(heap, f))
 }
 
 /// `numerator`/`denominator` (`registry::ratio_assoc`): the reduced
@@ -4936,7 +5028,10 @@ fn eval_parse_int(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalErro
 fn eval_parse_float(heap: &mut Heap, args: &[RtValue]) -> Result<RtValue, EvalError> {
     let s = expect_str(&args[0])?;
     match s.parse::<f64>() {
-        Ok(f) => Ok(result_ok(heap, RtValue::Float(f))),
+        Ok(f) => {
+            let v = float_rt(heap, f);
+            Ok(result_ok(heap, v))
+        }
         Err(_) => Ok(result_err(heap, PARSE_FLOAT_ERROR, format!("parse-float: invalid float literal: {:?}", s))),
     }
 }
@@ -5087,7 +5182,7 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, recv_ty:
             // of these four is meaningful to register even though none can
             // diverge from `=` here).
             "eq" | "eql" | "equal" | "equalp" => eval_int_builtin("=", args),
-            "int->float" => Some(int_to_float(args)),
+            "int->float" => Some(int_to_float(heap, args)),
             "int->char" => Some(int_to_char(args)),
             "try-int->char" => Some(try_int_to_char(heap, args)),
             "int->bignum" => Some(int_to_bignum(heap, args)),
@@ -5100,34 +5195,34 @@ fn eval_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, recv_ty:
     if *type_name == Path::root("f64") {
         return match method {
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
-                eval_float_builtin(method, args)
+                eval_float_builtin(heap, method, args)
             }
-            "eq" | "eql" | "equal" | "equalp" => eval_float_builtin("=", args),
-            "expt" => Some(float_expt(args)),
-            "sqrt" => Some(float_unary(args, f64::sqrt)),
-            "floor" => Some(float_unary(args, f64::floor)),
-            "ceiling" => Some(float_unary(args, f64::ceil)),
-            "round" => Some(float_unary(args, f64::round)),
-            "truncate" => Some(float_unary(args, f64::trunc)),
-            "sin" => Some(float_unary(args, f64::sin)),
-            "cos" => Some(float_unary(args, f64::cos)),
-            "tan" => Some(float_unary(args, f64::tan)),
-            "asin" => Some(float_unary(args, f64::asin)),
-            "acos" => Some(float_unary(args, f64::acos)),
-            "atan" => Some(float_unary(args, f64::atan)),
-            "sinh" => Some(float_unary(args, f64::sinh)),
-            "cosh" => Some(float_unary(args, f64::cosh)),
-            "tanh" => Some(float_unary(args, f64::tanh)),
-            "asinh" => Some(float_unary(args, f64::asinh)),
-            "acosh" => Some(float_unary(args, f64::acosh)),
-            "atanh" => Some(float_unary(args, f64::atanh)),
-            "exp" => Some(float_unary(args, f64::exp)),
-            "log" => Some(float_unary(args, f64::ln)),
-            "float->int" => Some(float_to_int(args)),
+            "eq" | "eql" | "equal" | "equalp" => eval_float_builtin(heap, "=", args),
+            "expt" => Some(float_expt(heap, args)),
+            "sqrt" => Some(float_unary(heap, args, f64::sqrt)),
+            "floor" => Some(float_unary(heap, args, f64::floor)),
+            "ceiling" => Some(float_unary(heap, args, f64::ceil)),
+            "round" => Some(float_unary(heap, args, f64::round)),
+            "truncate" => Some(float_unary(heap, args, f64::trunc)),
+            "sin" => Some(float_unary(heap, args, f64::sin)),
+            "cos" => Some(float_unary(heap, args, f64::cos)),
+            "tan" => Some(float_unary(heap, args, f64::tan)),
+            "asin" => Some(float_unary(heap, args, f64::asin)),
+            "acos" => Some(float_unary(heap, args, f64::acos)),
+            "atan" => Some(float_unary(heap, args, f64::atan)),
+            "sinh" => Some(float_unary(heap, args, f64::sinh)),
+            "cosh" => Some(float_unary(heap, args, f64::cosh)),
+            "tanh" => Some(float_unary(heap, args, f64::tanh)),
+            "asinh" => Some(float_unary(heap, args, f64::asinh)),
+            "acosh" => Some(float_unary(heap, args, f64::acosh)),
+            "atanh" => Some(float_unary(heap, args, f64::atanh)),
+            "exp" => Some(float_unary(heap, args, f64::exp)),
+            "log" => Some(float_unary(heap, args, f64::ln)),
+            "float->int" => Some(float_to_int(heap, args)),
             "float->bignum" => Some(float_to_bignum(heap, args)),
             "float->ratio" => Some(float_to_ratio(heap, args)),
-            "print" => Some(rt_f64(&args[0]).and_then(|f| write_stdout(&format_float_for_print(f), false))),
-            "println" => Some(rt_f64(&args[0]).and_then(|f| write_stdout(&format_float_for_print(f), true))),
+            "print" => Some(rt_f64(heap, &args[0]).and_then(|f| write_stdout(&format_float_for_print(f), false))),
+            "println" => Some(rt_f64(heap, &args[0]).and_then(|f| write_stdout(&format_float_for_print(f), true))),
             _ => None,
         };
     }
@@ -6884,7 +6979,6 @@ pub(super) fn rtvalue_to_struct_field(heap: &mut Heap, v: &RtValue) -> Value {
         RtValue::Bool(b) => Value::Bool(*b),
         RtValue::Char(c) => Value::Char(*c),
         RtValue::Str(s) => heap.alloc_string(s.to_string()),
-        RtValue::Float(f) => heap.alloc_float(*f),
         RtValue::Sexpr(v) => *v,
     }
 }
@@ -6961,14 +7055,15 @@ fn decode_ctor_field(heap: &Heap, raw: Value, sexpr: bool, ty: Option<&Type>) ->
 
 /// [`decode_field_typed`]'s non-`Sexpr` half: for every declared type
 /// *other than* `Sexpr`, `rtvalue_to_struct_field`'s encoding is injective —
-/// `Int`/`Bool`/`Char`/`Str` map straight back, a `Boxed` holding a float
-/// (`Heap::is_float` — the *positive* test, since structs, `HashTable`s,
-/// heap scopes, and closures are boxed too) is `RtValue::Float`, and every
-/// other `Boxed` (a nested `defstruct`/`Vector<T>`/`cons-cell<K,V>`/
+/// `Int`/`Bool`/`Char`/`Str` map straight back, and every `Boxed` (a float,
+/// a `bignum`/`ratio`, a nested `defstruct`/`Vector<T>`/`cons-cell<K,V>`/
 /// `HashTable<K,V>`/heap `Scope<V>`/closure, whose declared type is some
 /// concrete named heap-repr type) becomes `RtValue::Sexpr`, the same
 /// wrapper a top-level struct value itself uses — so the stored shape alone
-/// determines the result with no ambiguity. Also reached directly by `match_pattern`'s
+/// determines the result with no ambiguity. The float arm this used to need
+/// (`Heap::is_float`, copying the payload back out into a Rust-side
+/// `RtValue::Float`) went away with the scalar unification: the box already
+/// *is* the value. Also reached directly by `match_pattern`'s
 /// boxed-struct arm, whose per-field `Pattern::Ctor::sexpr_fields` (baked at
 /// check time, exact post-monomorphization) is precisely the
 /// "`Sexpr`-declared or not" bit `decode_field_typed` reads off a `Type`.
@@ -6978,11 +7073,10 @@ fn decode_nonsexpr_field(heap: &Heap, v: Value) -> RtValue {
         Value::Bool(b) => RtValue::Bool(b),
         Value::Char(c) => RtValue::Char(c),
         Value::Str(id) => RtValue::Str(heap.string(id).into()),
-        Value::Boxed(id) if heap.is_float(id) => RtValue::Float(heap.float_value(id)),
-        // `bignum`/`ratio` need no arm: the box the field already holds *is*
-        // the value's representation, so the catch-all passes it straight
-        // through. They used to be copied back out into `Rc`-managed
-        // Rust-side variants here.
+        // Floats and `bignum`/`ratio` need no arm: the box the field already
+        // holds *is* the value's representation, so the catch-all passes it
+        // straight through. Each used to be copied back out here into a
+        // Rust-side variant (`f64` / an `Rc`-managed multi-precision value).
         other => RtValue::Sexpr(other),
     }
 }
@@ -7992,9 +8086,9 @@ fn match_sexpr_ctor(heap: &mut Heap, variant: usize, args: &[Pattern], v: Value)
     match (variant, v) {
         (SEXPR_NIL, Value::Empty) => Some(Vec::new()),
         (SEXPR_INT, Value::Int(n)) => match_pattern(heap, &args[0], &RtValue::Int(n)),
-        (SEXPR_FLOAT, Value::Boxed(id)) if heap.is_float(id) => {
-            match_pattern(heap, &args[0], &RtValue::Float(heap.float_value(id)))
-        }
+        // Like `bignum`/`ratio` below: the scrutinee box *is* the float
+        // since the scalar unification, so binding it is a passthrough.
+        (SEXPR_FLOAT, Value::Boxed(id)) if heap.is_float(id) => match_pattern(heap, &args[0], &RtValue::Sexpr(v)),
         // The scrutinee box is already the `bignum`/`ratio` value; binding it
         // is a passthrough, not a re-box.
         (SEXPR_BIGNUM, Value::Boxed(id)) if heap.is_bignum(id) => {

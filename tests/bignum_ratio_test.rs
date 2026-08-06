@@ -67,6 +67,15 @@ fn assert_bignum(actual: RtValue, expected: &str) {
     })
 }
 
+/// The `f64` counterpart: a float is a `BoxedObj::Float` since the scalar
+/// unification, so it needs the heap too.
+fn assert_float(actual: RtValue, expected: f64) {
+    with_heap(|h| match actual {
+        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(id) => assert_eq!(h.float_value(id), expected),
+        other => panic!("expected an f64, got {:?}", other),
+    })
+}
+
 fn assert_ratio(actual: RtValue, numer: &str, denom: &str) {
     with_heap(|h| match actual {
         RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_ratio(id) => {
@@ -281,7 +290,7 @@ fn bignum_to_int_out_of_range_panics() {
 #[test]
 fn bignum_to_float_and_back() {
     let src = "(defun f ((a bignum)) f64 (bignum->float a)) (f (int->bignum 2))";
-    assert_eq!(eval_ok(src), RtValue::Float(2.0));
+    assert_float(eval_ok(src), 2.0);
     let src = "(defun f ((a f64)) bignum (float->bignum a)) (f 2.0)";
     assert_bignum(eval_ok(src), "2");
 }
@@ -309,7 +318,7 @@ fn ratio_to_bignum_truncates_toward_zero() {
 #[test]
 fn ratio_to_float() {
     let src = "(defun f ((r ratio)) f64 (ratio->float r)) (f 1/2)";
-    assert_eq!(eval_ok(src), RtValue::Float(0.5));
+    assert_float(eval_ok(src), 0.5);
 }
 
 #[test]

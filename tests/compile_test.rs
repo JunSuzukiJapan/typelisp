@@ -134,8 +134,12 @@ fn run_and_read<R>(src: &str, capacity: usize, f: impl FnOnce(&Heap, RtValue) ->
 enum Readback {
     Bignum(String),
     Ratio(String, String),
-    /// A result that `RtValue` still carries by value — `Int`, `Float`,
-    /// `Bool`, `Unit`, `Str`.
+    /// An `f64`, compared exactly. Two runs of the same computation are
+    /// deterministic, so a tolerance would only hide a real divergence; the
+    /// tests that *do* want one read the number out with [`run_f64`].
+    Float(f64),
+    /// A result that `RtValue` still carries by value — `Int`, `Bool`,
+    /// `Unit`, `Str`.
     Scalar(RtValue),
 }
 
@@ -148,12 +152,22 @@ fn run_readback(src: &str) -> Result<Readback, EvalError> {
             let r = h.ratio_value(id);
             Readback::Ratio(r.numer().to_string(), r.denom().to_string())
         }
+        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(id) => Readback::Float(h.float_value(id)),
         RtValue::Sexpr(other) => panic!(
-            "run_readback only knows how to read a bignum/ratio box out of its heap, got {:?}",
+            "run_readback only knows how to read a bignum/ratio/float box out of its heap, got {:?}",
             other
         ),
         scalar => Readback::Scalar(scalar),
     })
+}
+
+/// The `f64` a run produced, for the comparisons that want a tolerance
+/// rather than exact equality.
+fn run_f64(src: &str) -> f64 {
+    match run_readback(src).expect("eval failed") {
+        Readback::Float(f) => f,
+        other => panic!("expected an f64, got {:?}", other),
+    }
 }
 
 fn expect_str(v: RtValue) -> String {
@@ -4343,30 +4357,26 @@ fn compile_dispatches_string_equalp() {
 // `ceiling`/`round`/`truncate`/`expt`) to the matching LLVM intrinsic
 // (`build-fsqrt`/.../`build-fpow`), and `float->int` to a single `fptosi`
 // instruction (`build-fptosi`). The JIT boundary encodes an `f64` argument as
-// its bits and decodes an `f64` result back (`Interp::call_compiled`).
-// `float->bignum`/`float->ratio` alone stay out of scope (`bignum`/`ratio`
-// have no compiled representation at all yet), falling through to
-// `compile-assoc-user`.
+// its bits and decodes an `f64` result back (`Interp::call_compiled`) — an
+// `f64` is a `BoxedObj::Float` on the interpreter side since the scalar
+// unification, but the compiled side still keeps one in a native register,
+// so the boundary is where the two representations meet.
 
 /// Float arithmetic returning an `f64` across the JIT boundary — exercises
 /// `build-fadd`/`build-fsub`/`build-fmul`/`build-fdiv` and the `f64`
 /// argument/return marshaling.
 #[test]
 fn compile_dispatches_f64_arithmetic() {
-    let v = run_with_compiler_and_prelude(
+    let v = run_f64(
         r#"
         (defun combine ((a f64) (b f64)) f64
           (/ (* (+ a b) (- a b)) 2.0))
         (compile combine)
         (combine 5.0 3.0)
         "#,
-    )
-    .expect("eval failed");
+    );
     // (5+3)*(5-3)/2 = 8*2/2 = 8.0
-    match v {
-        RtValue::Float(f) => assert!((f - 8.0).abs() < 1e-9, "expected 8.0, got {}", f),
-        other => panic!("expected an f64, got {:?}", other),
-    }
+    assert!((v - 8.0).abs() < 1e-9, "expected 8.0, got {}", v);
 }
 
 /// `mod` on `i64`/`i32` is floored (CL, sign of the divisor) in both the
@@ -4393,24 +4403,14 @@ fn compile_dispatches_f64_mod_and_rem_floored_vs_truncated() {
     let src = "(defun m ((a f64) (b f64)) f64 (mod a b)) (defun r ((a f64) (b f64)) f64 (rem a b))";
     let call_m = "(m (- 0.0 5.5) 2.0)";
     let call_r = "(r (- 0.0 5.5) 2.0)";
-    let im = run_with_compiler_and_prelude(&format!("{src}\n{call_m}")).expect("interp m");
-    let cm = run_with_compiler_and_prelude(&format!("{src}\n(compile m)\n{call_m}")).expect("compiled m");
-    let ir = run_with_compiler_and_prelude(&format!("{src}\n{call_r}")).expect("interp r");
-    let cr = run_with_compiler_and_prelude(&format!("{src}\n(compile r)\n{call_r}")).expect("compiled r");
-    match (im, cm) {
-        (RtValue::Float(i), RtValue::Float(c)) => {
-            assert!((i - 0.5).abs() < 1e-9, "-5.5 mod 2.0 = 0.5 (floored), got {}", i);
-            assert!((i - c).abs() < 1e-12, "compiled f64 mod agrees with interp");
-        }
-        other => panic!("expected floats, got {:?}", other),
-    }
-    match (ir, cr) {
-        (RtValue::Float(i), RtValue::Float(c)) => {
-            assert!((i - (-1.5)).abs() < 1e-9, "-5.5 rem 2.0 = -1.5 (truncated), got {}", i);
-            assert!((i - c).abs() < 1e-12, "compiled f64 rem agrees with interp");
-        }
-        other => panic!("expected floats, got {:?}", other),
-    }
+    let im = run_f64(&format!("{src}\n{call_m}"));
+    let cm = run_f64(&format!("{src}\n(compile m)\n{call_m}"));
+    let ir = run_f64(&format!("{src}\n{call_r}"));
+    let cr = run_f64(&format!("{src}\n(compile r)\n{call_r}"));
+    assert!((im - 0.5).abs() < 1e-9, "-5.5 mod 2.0 = 0.5 (floored), got {}", im);
+    assert!((im - cm).abs() < 1e-12, "compiled f64 mod agrees with interp");
+    assert!((ir - (-1.5)).abs() < 1e-9, "-5.5 rem 2.0 = -1.5 (truncated), got {}", ir);
+    assert!((ir - cr).abs() < 1e-12, "compiled f64 rem agrees with interp");
 }
 
 /// The CL numeric helpers (`abs`/`signum`/`gcd`/`lcm`/`rem`/`expt`) are
@@ -4498,12 +4498,9 @@ fn compile_dispatches_f64_transcendentals_and_agrees_with_the_interpreter() {
                 (+ (ceiling x)
                    (+ (round x) (truncate x))))))
     "#;
-    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(combine 6.25)")).expect("interpreted failed");
-    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n(combine 6.25)")).expect("compiled failed");
-    match (interpreted, compiled) {
-        (RtValue::Float(i), RtValue::Float(c)) => assert!((i - c).abs() < 1e-9, "interpreted {} vs compiled {}", i, c),
-        other => panic!("expected two f64s, got {:?}", other),
-    }
+    let interpreted = run_f64(&format!("{src}\n(combine 6.25)"));
+    let compiled = run_f64(&format!("{src}\n(compile combine)\n(combine 6.25)"));
+    assert!((interpreted - compiled).abs() < 1e-9, "interpreted {} vs compiled {}", interpreted, compiled);
 }
 
 /// The `f64` trigonometric/hyperbolic/exponential family added alongside
@@ -4520,12 +4517,9 @@ fn compile_dispatches_f64_transcendental_functions_and_agrees_with_the_interpret
              (+ (atan x) (+ (sinh x) (+ (cosh x) (+ (tanh x)
                 (+ (asinh x) (+ (acosh (+ x 1.0)) (+ (atanh x) (+ (exp x) (log (+ x 1.0))))))))))))))))
     "#;
-    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(combine 0.5)")).expect("interpreted failed");
-    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n(combine 0.5)")).expect("compiled failed");
-    match (interpreted, compiled) {
-        (RtValue::Float(i), RtValue::Float(c)) => assert!((i - c).abs() < 1e-9, "interpreted {} vs compiled {}", i, c),
-        other => panic!("expected two f64s, got {:?}", other),
-    }
+    let interpreted = run_f64(&format!("{src}\n(combine 0.5)"));
+    let compiled = run_f64(&format!("{src}\n(compile combine)\n(combine 0.5)"));
+    assert!((interpreted - compiled).abs() < 1e-9, "interpreted {} vs compiled {}", interpreted, compiled);
 }
 
 /// `max`/`min` (`icmp`+`select`, branch-free) for every numeric type:
@@ -4588,9 +4582,9 @@ fn compile_dispatches_f64_expt_and_agrees_with_the_interpreter() {
     let src = r#"
         (defun power ((base f64) (exp f64)) f64 (expt base exp))
     "#;
-    let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(power 2.0 10.0)")).expect("interpreted failed");
-    let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile power)\n(power 2.0 10.0)")).expect("compiled failed");
-    assert_eq!(interpreted, RtValue::Float(1024.0));
+    let interpreted = run_readback(&format!("{src}\n(power 2.0 10.0)")).expect("interpreted failed");
+    let compiled = run_readback(&format!("{src}\n(compile power)\n(power 2.0 10.0)")).expect("compiled failed");
+    assert_eq!(interpreted, Readback::Float(1024.0));
     assert_eq!(compiled, interpreted, "compiled expt agrees with the interpreter");
 }
 
@@ -4842,8 +4836,8 @@ fn compile_dispatches_sexpr_accessors_and_agrees_with_the_interpreter() {
         ("(defun f ((s Sexpr)) string (sexpr-sym-name (sexpr-car s)))", "(f '(hello))"),
     ];
     for (def, call) in cases {
-        let interpreted = run_with_compiler_and_prelude(&format!("{def}\n{call}")).expect("interpreted failed");
-        let compiled = run_with_compiler_and_prelude(&format!("{def}\n(compile f)\n{call}")).expect("compiled failed");
+        let interpreted = run_readback(&format!("{def}\n{call}")).expect("interpreted failed");
+        let compiled = run_readback(&format!("{def}\n(compile f)\n{call}")).expect("compiled failed");
         assert_eq!(compiled, interpreted, "compiled `{def}` agrees with the interpreter");
     }
 }
