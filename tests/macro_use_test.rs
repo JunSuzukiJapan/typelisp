@@ -28,7 +28,7 @@ use typelisp::*;
 /// parent dirs created as needed), then load `entry` through the real
 /// loader pipeline and execute everything. Returns the last top-level
 /// expression value, or the first error as its display string.
-fn run_project(name: &str, files: &[(&str, &str)], entry: &str) -> Result<Option<RtValue>, String> {
+fn run_project(name: &str, files: &[(&str, &str)], entry: &str) -> Result<Option<Value>, String> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("module-test-tmp").join(name);
     let _ = std::fs::remove_dir_all(&dir); // stale fixtures from a previous run
     for (rel, src) in files {
@@ -66,14 +66,14 @@ fn run_project(name: &str, files: &[(&str, &str)], entry: &str) -> Result<Option
 /// Read, check, and execute `src` with no file/loader involved (the REPL's
 /// shape: `Checker::check_form` driven directly in the root namespace).
 /// Returns the last expression's value or the first error's display string.
-fn run_forms(src: &str) -> Result<RtValue, String> {
+fn run_forms(src: &str) -> Result<Value, String> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).map_err(|e| e.to_string())?;
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).map_err(|e| e.to_string())?;
         if let Some(val) = interp.exec(&mut h, tl).map_err(|e| e.to_string())? {
@@ -99,7 +99,7 @@ fn macro_generated_use_loads_the_dependency() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(9))));
+    assert_eq!(result, Ok(Some(Value::Int(9))));
 }
 
 /// A macro expanding to another macro call that finally yields the `use` —
@@ -120,7 +120,7 @@ fn macro_chain_ending_in_use() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(13))));
+    assert_eq!(result, Ok(Some(Value::Int(13))));
 }
 
 /// A macro expanding to a whole `(module ...)` form whose body contains the
@@ -145,7 +145,7 @@ fn macro_generated_module_containing_use() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(21))));
+    assert_eq!(result, Ok(Some(Value::Int(21))));
 }
 
 /// A macro-generated `use` inside a subdirectory file resolves a sibling by
@@ -168,7 +168,7 @@ fn macro_generated_use_resolves_a_sibling_file() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(8))));
+    assert_eq!(result, Ok(Some(Value::Int(8))));
 }
 
 /// A macro-generated `use` of a module with no file behind it reports the
@@ -221,7 +221,7 @@ fn macro_generated_defun_defines_a_callable_function() {
     let result = run_forms(
         "(defmacro make-forty () '(defun forty () i32 40))\n(make-forty)\n(forty)",
     );
-    assert_eq!(result, Ok(RtValue::Int(40)));
+    assert_eq!(result, Ok(Value::Int(40)));
 }
 
 // ---- cross-module macro calls (`Checker::resolve_macro_path`) -------------
@@ -239,7 +239,7 @@ fn cross_module_macro_call_in_expression_position() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(12))));
+    assert_eq!(result, Ok(Some(Value::Int(12))));
 }
 
 /// The same `mod::name` resolution also works when the macro call is itself
@@ -256,7 +256,7 @@ fn cross_module_macro_call_at_top_level() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(50))));
+    assert_eq!(result, Ok(Some(Value::Int(50))));
 }
 
 /// A non-`pub` macro is invisible from outside its defining module — same
@@ -293,7 +293,7 @@ fn quoted_path_inside_a_macro_body_resolves_when_expanded() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(55))));
+    assert_eq!(result, Ok(Some(Value::Int(55))));
 }
 
 /// `(quote ...)` directly (no macro involved) also accepts a `::`-path
@@ -318,5 +318,5 @@ fn cross_module_macro_generating_a_quoted_path_to_a_third_module() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(77))));
+    assert_eq!(result, Ok(Some(Value::Int(77))));
 }

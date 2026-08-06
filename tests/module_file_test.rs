@@ -21,7 +21,7 @@ use typelisp::*;
 /// parent dirs created as needed), then load `entry` through the real
 /// loader pipeline and execute everything. Returns the last top-level
 /// expression value, or the first error as its display string.
-fn run_project(name: &str, files: &[(&str, &str)], entry: &str) -> Result<Option<RtValue>, String> {
+fn run_project(name: &str, files: &[(&str, &str)], entry: &str) -> Result<Option<Value>, String> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("module-test-tmp").join(name);
     let _ = std::fs::remove_dir_all(&dir); // stale fixtures from a previous run
     for (rel, src) in files {
@@ -65,7 +65,7 @@ fn run_project_with_cache(
     dir: &std::path::Path,
     entry: &str,
     cache: &ModuleCache,
-) -> (Result<Option<RtValue>, String>, usize, usize) {
+) -> (Result<Option<Value>, String>, usize, usize) {
     let mut heap = Heap::with_capacity(1 << 16);
     let reader = Reader::new();
     let mut checker = Checker::new();
@@ -123,11 +123,11 @@ fn a_second_load_session_hits_the_module_cache() {
     let cache: ModuleCache = Rc::new(RefCell::new(HashMap::new()));
 
     let (r1, hits1, misses1) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r1, Ok(Some(RtValue::Int(42))));
+    assert_eq!(r1, Ok(Some(Value::Int(42))));
     assert_eq!((hits1, misses1), (0, 1), "first pass: miss then populate the cache");
 
     let (r2, hits2, misses2) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r2, Ok(Some(RtValue::Int(42))));
+    assert_eq!(r2, Ok(Some(Value::Int(42))));
     assert_eq!((hits2, misses2), (1, 0), "second pass: cache hit, no re-check");
 }
 
@@ -146,12 +146,12 @@ fn editing_a_cached_dependency_invalidates_its_cache_entry() {
     let cache: ModuleCache = Rc::new(RefCell::new(HashMap::new()));
 
     let (r1, ..) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r1, Ok(Some(RtValue::Int(42))));
+    assert_eq!(r1, Ok(Some(Value::Int(42))));
 
     std::fs::write(dir.join("geo/point.typl"), "(pub defun origin-x () i32 99)").unwrap();
 
     let (r2, hits2, misses2) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r2, Ok(Some(RtValue::Int(99))), "edited dependency's new definition must be seen");
+    assert_eq!(r2, Ok(Some(Value::Int(99))), "edited dependency's new definition must be seen");
     assert_eq!((hits2, misses2), (0, 1), "stale entry must miss, not silently serve old code");
 }
 
@@ -171,10 +171,10 @@ fn a_dependency_with_a_nested_load_is_never_cached() {
     let cache: ModuleCache = Rc::new(RefCell::new(HashMap::new()));
 
     let (r1, ..) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r1, Ok(Some(RtValue::Int(7))));
+    assert_eq!(r1, Ok(Some(Value::Int(7))));
 
     let (r2, hits2, misses2) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r2, Ok(Some(RtValue::Int(7))));
+    assert_eq!(r2, Ok(Some(Value::Int(7))));
     assert_eq!((hits2, misses2), (0, 1), "a nested (load) dependency must never be cached");
 }
 
@@ -196,17 +196,17 @@ fn changing_a_transitive_dependency_invalidates_the_cache_entry_that_pulled_it_i
     let cache: ModuleCache = Rc::new(RefCell::new(HashMap::new()));
 
     let (r1, hits1, misses1) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r1, Ok(Some(RtValue::Int(1))));
+    assert_eq!(r1, Ok(Some(Value::Int(1))));
     assert_eq!((hits1, misses1), (0, 2), "first pass: miss for both mid and leaf");
 
     let (r2, hits2, misses2) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r2, Ok(Some(RtValue::Int(1))));
+    assert_eq!(r2, Ok(Some(Value::Int(1))));
     assert_eq!((hits2, misses2), (1, 0), "second pass: one hit for `mid` covers `leaf` transitively");
 
     std::fs::write(dir.join("leaf.typl"), "(pub defun leaf-value () i32 2)").unwrap();
 
     let (r3, hits3, misses3) = run_project_with_cache(&dir, "main.typl", &cache);
-    assert_eq!(r3, Ok(Some(RtValue::Int(2))), "leaf's new definition must be seen through mid");
+    assert_eq!(r3, Ok(Some(Value::Int(2))), "leaf's new definition must be seen through mid");
     assert_eq!((hits3, misses3), (0, 2), "leaf's change must invalidate mid's cache entry too");
 }
 
@@ -220,7 +220,7 @@ fn use_loads_a_sibling_file_and_calls_into_it() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(42))));
+    assert_eq!(result, Ok(Some(Value::Int(42))));
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn nested_directories_become_nested_path_segments() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(7))));
+    assert_eq!(result, Ok(Some(Value::Int(7))));
 }
 
 #[test]
@@ -248,7 +248,7 @@ fn explicit_module_nests_inside_the_derived_file_module() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(11))));
+    assert_eq!(result, Ok(Some(Value::Int(11))));
 }
 
 #[test]
@@ -264,7 +264,7 @@ fn item_level_use_finds_the_file_by_longest_prefix() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(5))));
+    assert_eq!(result, Ok(Some(Value::Int(5))));
 }
 
 #[test]
@@ -305,7 +305,7 @@ fn defvar_initializers_run_deferred_but_before_the_dependent() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(1))));
+    assert_eq!(result, Ok(Some(Value::Int(1))));
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn manifest_src_key_moves_the_source_root() {
         ],
         "src/main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(42))));
+    assert_eq!(result, Ok(Some(Value::Int(42))));
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn without_a_manifest_the_entry_directory_is_the_root() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(3))));
+    assert_eq!(result, Ok(Some(Value::Int(3))));
 }
 
 /// A `use` inside `geo/point.typl` names a sibling `geo/vector.typl` by its
@@ -352,7 +352,7 @@ fn use_resolves_a_sibling_file_by_its_bare_name() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(1))));
+    assert_eq!(result, Ok(Some(Value::Int(1))));
 }
 
 /// Sibling-relative resolution is a fallback tried only *after* root-relative
@@ -371,7 +371,7 @@ fn use_prefers_a_root_relative_module_over_a_same_named_sibling() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(100))), "root-relative `helper` wins over the sibling");
+    assert_eq!(result, Ok(Some(Value::Int(100))), "root-relative `helper` wins over the sibling");
 }
 
 /// A `use` inside a nested `(module inner ...)` block still resolves a
@@ -389,7 +389,7 @@ fn use_inside_a_nested_module_still_resolves_against_the_files_directory() {
         ],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(5))));
+    assert_eq!(result, Ok(Some(Value::Int(5))));
 }
 
 // ---- prelude/builtin visibility from a bare entry file -----------------
@@ -407,7 +407,7 @@ fn bare_prelude_fn_is_reachable_from_a_wrapped_entry_file() {
     // `not` is a plain (non-pub) `defun` in the prelude, at root. `main.typl`
     // is wrapped into module `main` — `not` must still resolve there.
     let result = run_project("prelude-not", &[("main.typl", "(not false)")], "main.typl");
-    assert_eq!(result, Ok(Some(RtValue::Bool(true))));
+    assert_eq!(result, Ok(Some(Value::Bool(true))));
 }
 
 #[test]
@@ -417,7 +417,7 @@ fn bare_prelude_fn_and_struct_field_accessor_are_reachable_from_a_wrapped_entry_
     // exercises `resolve_fn`'s ancestor-chain walk, the latter
     // `assoc_visible`'s root-is-always-in-scope case.
     let result = run_project("prelude-cons", &[("main.typl", "(car (cons 1 2))")], "main.typl");
-    assert_eq!(result, Ok(Some(RtValue::Int(1))));
+    assert_eq!(result, Ok(Some(Value::Int(1))));
 }
 
 #[test]
@@ -426,7 +426,7 @@ fn builtin_option_ctor_and_method_are_reachable_from_a_wrapped_entry_file() {
     // never `pub`), and `unwrap` is a `defmethod` in the prelude dispatched
     // through the receiver's type — both live at root.
     let result = run_project("prelude-option", &[("main.typl", "(unwrap (Option::some 5))")], "main.typl");
-    assert_eq!(result, Ok(Some(RtValue::Int(5))));
+    assert_eq!(result, Ok(Some(Value::Int(5))));
 }
 
 #[test]
@@ -446,7 +446,7 @@ fn a_grandchild_module_sees_a_non_pub_ancestors_definitions() {
         )],
         "main.typl",
     );
-    assert_eq!(result, Ok(Some(RtValue::Int(42))));
+    assert_eq!(result, Ok(Some(Value::Int(42))));
 }
 
 #[test]

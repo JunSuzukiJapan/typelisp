@@ -8,7 +8,7 @@
 
 extern crate typelisp;
 use std::cell::RefCell;
-use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
 // Every test below shares one (Heap, Checker, Interp) per thread instead of
 // reloading the prelude from scratch each time — loading it ~100+ times is
@@ -38,11 +38,11 @@ fn with_ctx<R>(f: impl FnOnce(&mut Heap, &mut Checker, &mut Interp) -> R) -> R {
     })
 }
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     with_ctx(|h, chk, interp| {
         let r = Reader::new();
         let vs = r.read_all(h, src).expect("read failed");
-        let mut last = RtValue::Unit;
+        let mut last = Value::Empty;
         for v in vs {
             let tl = chk.check_form(h, &*interp, v).expect("check failed");
             if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
@@ -53,7 +53,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     })
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -66,7 +66,7 @@ fn eval_f64(src: &str) -> f64 {
         let opt = cell.borrow();
         let (h, _, _) = opt.as_ref().expect("no evaluation has run yet");
         match v {
-            RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(id) => h.float_value(id),
+            typelisp::Value::Boxed(id) if h.is_float(id) => h.float_value(id),
             other => panic!("expected an f64, got {:?}", other),
         }
     })
@@ -80,7 +80,7 @@ fn eval_string(src: &str) -> String {
         let opt = cell.borrow();
         let (h, _, _) = opt.as_ref().expect("no evaluation has run yet");
         match v {
-            RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+            typelisp::Value::Str(id) => h.string(id).to_string(),
             other => panic!("expected a string, got {:?}", other),
         }
     })
@@ -105,39 +105,39 @@ fn type_error(src: &str) {
 
 #[test]
 fn not_negates() {
-    assert_eq!(eval_ok("(not true)"), RtValue::Bool(false));
-    assert_eq!(eval_ok("(not false)"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(not true)"), Value::Bool(false));
+    assert_eq!(eval_ok("(not false)"), Value::Bool(true));
 }
 
 // ---- eq, across every type that has it -----------------------------------------
 
 #[test]
 fn eq_on_bool() {
-    assert_eq!(eval_ok("(eq true true)"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(eq true false)"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(eq true true)"), Value::Bool(true));
+    assert_eq!(eval_ok("(eq true false)"), Value::Bool(false));
 }
 
 #[test]
 fn eq_on_i32() {
-    assert_eq!(eval_ok("(eq 1 1)"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(eq 1 2)"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(eq 1 1)"), Value::Bool(true));
+    assert_eq!(eval_ok("(eq 1 2)"), Value::Bool(false));
 }
 
 #[test]
 fn eq_on_i64() {
     let src = "(defun f ((a i64) (b i64)) bool (eq a b)) (f 1 1)";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
 fn eq_on_f64() {
     let src = "(defun f ((a f64) (b f64)) bool (eq a b)) (f 1.5 1.5)";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
 fn eq_on_char() {
-    assert_eq!(eval_ok(r"(eq #\a #\a)"), RtValue::Bool(true));
+    assert_eq!(eval_ok(r"(eq #\a #\a)"), Value::Bool(true));
 }
 
 #[test]
@@ -148,14 +148,14 @@ fn eq_on_string_is_identity_not_content() {
     // `Rc<str>` is what makes this distinction meaningful at all (a plain
     // owned `String`, re-cloned on every read, would have no stable
     // identity to test).
-    assert_eq!(eval_ok(r#"(eq "a" "a")"#), RtValue::Bool(false));
+    assert_eq!(eval_ok(r#"(eq "a" "a")"#), Value::Bool(false));
 }
 
 #[test]
 fn eq_on_string_self_is_true() {
     // The same binding read twice stays the same object — reading a
     // variable clones the `Rc` pointer, not the string buffer.
-    assert_eq!(eval_ok(r#"(let ((s "a")) (eq s s))"#), RtValue::Bool(true));
+    assert_eq!(eval_ok(r#"(let ((s "a")) (eq s s))"#), Value::Bool(true));
 }
 
 // ---- eql: identity, plus same-type/value numbers and characters ---------------
@@ -167,37 +167,37 @@ fn eq_on_string_self_is_true() {
 
 #[test]
 fn eql_on_bool() {
-    assert_eq!(eval_ok("(eql true true)"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(eql true false)"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(eql true true)"), Value::Bool(true));
+    assert_eq!(eval_ok("(eql true false)"), Value::Bool(false));
 }
 
 #[test]
 fn eql_on_i32() {
-    assert_eq!(eval_ok("(eql 1 1)"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(eql 1 2)"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(eql 1 1)"), Value::Bool(true));
+    assert_eq!(eval_ok("(eql 1 2)"), Value::Bool(false));
 }
 
 #[test]
 fn eql_on_char() {
-    assert_eq!(eval_ok(r"(eql #\a #\a)"), RtValue::Bool(true));
+    assert_eq!(eval_ok(r"(eql #\a #\a)"), Value::Bool(true));
 }
 
 #[test]
 fn eql_on_string_is_identity_not_content() {
     // `eql` does *not* add structural string comparison beyond `eq` in CL —
     // only `equal`/`equalp` do.
-    assert_eq!(eval_ok(r#"(eql "a" "a")"#), RtValue::Bool(false));
+    assert_eq!(eval_ok(r#"(eql "a" "a")"#), Value::Bool(false));
 }
 
 #[test]
 fn eql_on_sexpr_atoms_compares_by_value() {
-    assert_eq!(eval_ok("(eql (quote a) (quote a))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(eql (quote a) (quote a))"), Value::Bool(true));
 }
 
 #[test]
 fn eq_on_sexpr_atoms_compares_by_value() {
     let src = "(eq (quote a) (quote a))";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
@@ -205,7 +205,7 @@ fn eq_on_sexpr_cons_is_identity_not_structural() {
     // Two separately-built (quote (a)) cons cells have equal content but are
     // not the *same* cell — `eq` says false, `equal` says true (see below).
     let src = "(eq (quote (a)) (quote (a)))";
-    assert_eq!(eval_ok(src), RtValue::Bool(false));
+    assert_eq!(eval_ok(src), Value::Bool(false));
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn eq_on_sexpr_float_is_identity_not_value() {
     // separately-quoted equal floats are `Cons`/`Str`-like: not the same
     // box, hence not `eq` — see `eql_on_sexpr_float_compares_by_value` for
     // the predicate that *does* treat them as equivalent.
-    assert_eq!(eval_ok("(eq (quote 1.5) (quote 1.5))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(eq (quote 1.5) (quote 1.5))"), Value::Bool(false));
 }
 
 #[test]
@@ -222,12 +222,12 @@ fn eql_on_sexpr_float_compares_by_value() {
     // CL's `eql`: two numbers of the same type and value are `eql` even when
     // they aren't the same object — the one case `eql` actually diverges
     // from `eq` in this representation (`sexpr_eql`'s doc comment).
-    assert_eq!(eval_ok("(eql (quote 1.5) (quote 1.5))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(eql (quote 1.5) (quote 1.5))"), Value::Bool(true));
 }
 
 #[test]
 fn eql_on_sexpr_float_is_false_for_different_values() {
-    assert_eq!(eval_ok("(eql (quote 1.5) (quote 2.5))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(eql (quote 1.5) (quote 2.5))"), Value::Bool(false));
 }
 
 #[test]
@@ -235,20 +235,20 @@ fn equal_on_sexpr_float_compares_by_value() {
     // `equal` delegates to `eql` for non-`Cons`/`Str` atoms (CL's own
     // definition) — regression check for the catch-all arm switching from
     // `eq` to `eql` when `Sexpr::Float` became heap-boxed.
-    assert_eq!(eval_ok("(equal (quote 1.5) (quote 1.5))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(equal (quote 1.5) (quote 1.5))"), Value::Bool(true));
 }
 
 #[test]
 fn equal_on_sexpr_float_nested_in_a_cons_compares_by_value() {
     assert_eq!(
         eval_ok("(equal (quote (1.5 2.5)) (quote (1.5 2.5)))"),
-        RtValue::Bool(true)
+        Value::Bool(true)
     );
 }
 
 #[test]
 fn equalp_on_sexpr_float_compares_by_value() {
-    assert_eq!(eval_ok("(equalp (quote 1.5) (quote 1.5))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(equalp (quote 1.5) (quote 1.5))"), Value::Bool(true));
 }
 
 // ---- consp / null / atom ----------------------------------------------------
@@ -256,19 +256,19 @@ fn equalp_on_sexpr_float_compares_by_value() {
 #[test]
 fn equal_is_true_for_separately_built_equal_lists() {
     let src = "(equal (quote (a b c)) (quote (a b c)))";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
 fn equal_is_false_for_different_lists() {
     let src = "(equal (quote (a b c)) (quote (a b d)))";
-    assert_eq!(eval_ok(src), RtValue::Bool(false));
+    assert_eq!(eval_ok(src), Value::Bool(false));
 }
 
 #[test]
 fn equal_is_false_for_different_lengths() {
     let src = "(equal (quote (a b)) (quote (a b c)))";
-    assert_eq!(eval_ok(src), RtValue::Bool(false));
+    assert_eq!(eval_ok(src), Value::Bool(false));
 }
 
 #[test]
@@ -276,13 +276,13 @@ fn equal_compares_string_content_not_identity() {
     // Two separately-built `Sexpr::Str`s with the same text: `eq` would say
     // false (different heap allocations), `equal` must say true.
     let src = r#"(equal (quote ("hi")) (quote ("hi")))"#;
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
 fn equal_on_atoms_matches_eq() {
-    assert_eq!(eval_ok("(equal (quote a) (quote a))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(equal (quote a) (quote b))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(equal (quote a) (quote a))"), Value::Bool(true));
+    assert_eq!(eval_ok("(equal (quote a) (quote b))"), Value::Bool(false));
 }
 
 #[test]
@@ -292,8 +292,8 @@ fn equal_on_i32_compares_by_value() {
     // specifically so `case` can dispatch uniformly across types including
     // `string` — see `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp
     // section.
-    assert_eq!(eval_ok("(equal 1 1)"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(equal 1 2)"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(equal 1 1)"), Value::Bool(true));
+    assert_eq!(eval_ok("(equal 1 2)"), Value::Bool(false));
 }
 
 #[test]
@@ -309,30 +309,30 @@ fn equal_rejects_mismatched_types() {
 
 #[test]
 fn equalp_on_string_ignores_ascii_case() {
-    assert_eq!(eval_ok(r#"(equalp "ABC" "abc")"#), RtValue::Bool(true));
-    assert_eq!(eval_ok(r#"(equalp "abc" "abd")"#), RtValue::Bool(false));
+    assert_eq!(eval_ok(r#"(equalp "ABC" "abc")"#), Value::Bool(true));
+    assert_eq!(eval_ok(r#"(equalp "abc" "abd")"#), Value::Bool(false));
 }
 
 #[test]
 fn equalp_on_char_ignores_ascii_case() {
-    assert_eq!(eval_ok(r"(equalp #\A #\a)"), RtValue::Bool(true));
+    assert_eq!(eval_ok(r"(equalp #\A #\a)"), Value::Bool(true));
 }
 
 #[test]
 fn equalp_on_i32_compares_by_value() {
-    assert_eq!(eval_ok("(equalp 1 1)"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(equalp 1 2)"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(equalp 1 1)"), Value::Bool(true));
+    assert_eq!(eval_ok("(equalp 1 2)"), Value::Bool(false));
 }
 
 #[test]
 fn equalp_on_sexpr_recurses_with_case_insensitive_strings() {
     let src = r#"(equalp (quote ("HI")) (quote ("hi")))"#;
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
 fn equalp_is_false_for_different_sexpr_lists() {
-    assert_eq!(eval_ok("(equalp (quote (a b c)) (quote (a b d)))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(equalp (quote (a b c)) (quote (a b d)))"), Value::Bool(false));
 }
 
 // ---- equalp: Int<->Float cross-type numeric comparison, via `int->float` --------
@@ -341,14 +341,14 @@ fn equalp_is_false_for_different_sexpr_lists() {
 
 #[test]
 fn equalp_on_sexpr_crosses_int_and_float() {
-    assert_eq!(eval_ok("(equalp (quote 1) (quote 1.0))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(equalp (quote 1.0) (quote 1))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(equalp (quote 1) (quote 2.0))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(equalp (quote 1) (quote 1.0))"), Value::Bool(true));
+    assert_eq!(eval_ok("(equalp (quote 1.0) (quote 1))"), Value::Bool(true));
+    assert_eq!(eval_ok("(equalp (quote 1) (quote 2.0))"), Value::Bool(false));
 }
 
 #[test]
 fn equalp_on_sexpr_still_rejects_other_mismatched_types() {
-    assert_eq!(eval_ok(r#"(equalp (quote 1) (quote "1"))"#), RtValue::Bool(false));
+    assert_eq!(eval_ok(r#"(equalp (quote 1) (quote "1"))"#), Value::Bool(false));
 }
 
 // ---- int->float / float->int: numeric conversion primitives --------------------
@@ -365,20 +365,20 @@ fn int_to_float_converts_i64() {
 
 #[test]
 fn float_to_int_truncates_toward_zero() {
-    assert_eq!(eval_ok("(float->int 3.9)"), RtValue::Int(3));
-    assert_eq!(eval_ok("(float->int -3.9)"), RtValue::Int(-3));
+    assert_eq!(eval_ok("(float->int 3.9)"), Value::Int(3));
+    assert_eq!(eval_ok("(float->int -3.9)"), Value::Int(-3));
 }
 
 // ---- char->int / int->char: Unicode scalar value conversion --------------------
 
 #[test]
 fn char_to_int_returns_the_scalar_value() {
-    assert_eq!(eval_ok(r"(char->int #\A)"), RtValue::Int(65));
+    assert_eq!(eval_ok(r"(char->int #\A)"), Value::Int(65));
 }
 
 #[test]
 fn int_to_char_round_trips_char_to_int() {
-    assert_eq!(eval_ok("(int->char 65)"), RtValue::Char('A'));
+    assert_eq!(eval_ok("(int->char 65)"), Value::Char('A'));
 }
 
 #[test]
@@ -409,7 +409,7 @@ fn symbol_to_string_rejects_a_non_symbol_at_check_time() {
 
 #[test]
 fn string_to_symbol_round_trips_symbol_to_string() {
-    assert_eq!(eval_ok(r#"(equal (string->symbol "foo") (quote foo))"#), RtValue::Bool(true));
+    assert_eq!(eval_ok(r#"(equal (string->symbol "foo") (quote foo))"#), Value::Bool(true));
 }
 
 // `set-car`/`set-cdr` (destructive `Sexpr` cons mutation) were removed with the
@@ -423,22 +423,22 @@ fn string_to_symbol_round_trips_symbol_to_string() {
 
 #[test]
 fn cons_builds_a_pair_and_car_cdr_project_it() {
-    assert_eq!(eval_ok("(car (cons 1 2))"), RtValue::Int(1));
-    assert_eq!(eval_ok("(cdr (cons 1 2))"), RtValue::Int(2));
+    assert_eq!(eval_ok("(car (cons 1 2))"), Value::Int(1));
+    assert_eq!(eval_ok("(cdr (cons 1 2))"), Value::Int(2));
 }
 
 #[test]
 fn cons_pair_elements_can_have_different_types() {
     // `car` is an `i32`, `cdr` is a `string` — a genuinely heterogeneous pair,
     // unlike a homogeneous `Vector<T>`.
-    assert_eq!(eval_ok(r#"(car (cons 7 "x"))"#), RtValue::Int(7));
+    assert_eq!(eval_ok(r#"(car (cons 7 "x"))"#), Value::Int(7));
     assert_eq!(eval_string(r#"(cdr (cons 7 "x"))"#), "x");
 }
 
 #[test]
 fn cons_pair_car_is_mutable_via_setf() {
     let src = "(let ((p (cons 1 2))) (setf p::car 9) (car p))";
-    assert_eq!(eval_ok(src), RtValue::Int(9));
+    assert_eq!(eval_ok(src), Value::Int(9));
 }
 
 #[test]
@@ -449,12 +449,12 @@ fn car_of_a_non_pair_is_a_type_error() {
 }
 
 fn eval_true(src: &str) {
-    assert_eq!(eval_ok(src), RtValue::Bool(true), "expected true: {}", src);
+    assert_eq!(eval_ok(src), Value::Bool(true), "expected true: {}", src);
 }
 
 #[test]
 fn unwrap_returns_the_some_payload() {
-    assert_eq!(eval_ok("(unwrap (option::some 5))"), RtValue::Int(5));
+    assert_eq!(eval_ok("(unwrap (option::some 5))"), Value::Int(5));
 }
 
 #[test]
@@ -465,33 +465,33 @@ fn unwrap_panics_on_none() {
 
 #[test]
 fn unwrap_or_returns_the_payload_when_some() {
-    assert_eq!(eval_ok("(unwrap-or (option::some 5) 9)"), RtValue::Int(5));
+    assert_eq!(eval_ok("(unwrap-or (option::some 5) 9)"), Value::Int(5));
 }
 
 #[test]
 fn unwrap_or_returns_the_default_when_none() {
     let src = "(defun get-opt () Option<i32> (option::none)) (unwrap-or (get-opt) 9)";
-    assert_eq!(eval_ok(src), RtValue::Int(9));
+    assert_eq!(eval_ok(src), Value::Int(9));
 }
 
 #[test]
 fn is_some_distinguishes_some_from_none() {
     eval_true("(is-some (option::some 1))");
     let src = "(defun get-opt () Option<i32> (option::none)) (is-some (get-opt))";
-    assert_eq!(eval_ok(src), RtValue::Bool(false));
+    assert_eq!(eval_ok(src), Value::Bool(false));
 }
 
 #[test]
 fn is_none_distinguishes_none_from_some() {
     let src = "(defun get-opt () Option<i32> (option::none)) (is-none (get-opt))";
     eval_true(src);
-    assert_eq!(eval_ok("(is-none (option::some 1))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(is-none (option::some 1))"), Value::Bool(false));
 }
 
 #[test]
 fn result_unwrap_returns_the_ok_payload() {
     let src = "(defun get-r () Result<i32,ParseIntError> (result::ok 7)) (unwrap (get-r))";
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
@@ -503,7 +503,7 @@ fn result_unwrap_panics_on_err() {
 #[test]
 fn result_unwrap_or_returns_the_default_on_err() {
     let src = r#"(defun get-r () Result<i32,ParseIntError> (result::err (ParseIntError::ParseIntError "boom"))) (unwrap-or (get-r) 99)"#;
-    assert_eq!(eval_ok(src), RtValue::Int(99));
+    assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
@@ -523,20 +523,20 @@ fn unwrap_resolves_to_the_correct_method_per_receiver_type() {
         (defun get-r () Result<i32,ParseIntError> (result::ok 3))
         (+ (unwrap (option::some 4)) (unwrap (get-r)))
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 // ---- higher-order helpers (step 7c) -----------------------------------------
 
 #[test]
 fn identity_returns_its_argument_at_any_type() {
-    assert_eq!(eval_ok("(identity 42)"), RtValue::Int(42));
+    assert_eq!(eval_ok("(identity 42)"), Value::Int(42));
     eval_true("(identity true)");
 }
 
 #[test]
 fn const_ignores_its_second_argument() {
-    assert_eq!(eval_ok("(const 7 true)"), RtValue::Int(7));
+    assert_eq!(eval_ok("(const 7 true)"), Value::Int(7));
 }
 
 #[test]
@@ -546,7 +546,7 @@ fn compose_applies_g_then_f() {
         (defun double ((n i32)) i32 (* n 2))
         ((compose double add1) 5)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(12)); // double(add1(5)) = double(6) = 12
+    assert_eq!(eval_ok(src), Value::Int(12)); // double(add1(5)) = double(6) = 12
 }
 
 #[test]
@@ -555,57 +555,57 @@ fn flip_swaps_the_argument_order() {
         (defun sub ((a i32) (b i32)) i32 (- a b))
         ((flip sub) 3 10)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(7)); // sub(10, 3) = 7
+    assert_eq!(eval_ok(src), Value::Int(7)); // sub(10, 3) = 7
 }
 
 // ---- remaining numeric/list helpers (step 7c) -------------------------------
 
 #[test]
 fn abs_negates_only_negative_numbers() {
-    assert_eq!(eval_ok("(abs (- 0 5))"), RtValue::Int(5));
-    assert_eq!(eval_ok("(abs 5)"), RtValue::Int(5));
-    assert_eq!(eval_ok("(abs 0)"), RtValue::Int(0));
+    assert_eq!(eval_ok("(abs (- 0 5))"), Value::Int(5));
+    assert_eq!(eval_ok("(abs 5)"), Value::Int(5));
+    assert_eq!(eval_ok("(abs 0)"), Value::Int(0));
 }
 
 #[test]
 fn gcd_of_coprime_numbers_is_one() {
-    assert_eq!(eval_ok("(gcd 12 18)"), RtValue::Int(6));
-    assert_eq!(eval_ok("(gcd 7 13)"), RtValue::Int(1));
+    assert_eq!(eval_ok("(gcd 12 18)"), Value::Int(6));
+    assert_eq!(eval_ok("(gcd 7 13)"), Value::Int(1));
 }
 
 #[test]
 fn gcd_ignores_argument_sign() {
-    assert_eq!(eval_ok("(gcd -12 18)"), RtValue::Int(6));
-    assert_eq!(eval_ok("(gcd 12 -18)"), RtValue::Int(6));
+    assert_eq!(eval_ok("(gcd -12 18)"), Value::Int(6));
+    assert_eq!(eval_ok("(gcd 12 -18)"), Value::Int(6));
 }
 
 #[test]
 fn gcd_with_zero_is_the_other_argument() {
-    assert_eq!(eval_ok("(gcd 0 5)"), RtValue::Int(5));
+    assert_eq!(eval_ok("(gcd 0 5)"), Value::Int(5));
 }
 
 #[test]
 fn lcm_of_four_and_six_is_twelve() {
-    assert_eq!(eval_ok("(lcm 4 6)"), RtValue::Int(12));
+    assert_eq!(eval_ok("(lcm 4 6)"), Value::Int(12));
 }
 
 #[test]
 fn lcm_with_zero_is_zero() {
-    assert_eq!(eval_ok("(lcm 0 5)"), RtValue::Int(0));
+    assert_eq!(eval_ok("(lcm 0 5)"), Value::Int(0));
 }
 
 #[test]
 fn signum_classifies_positive_negative_and_zero() {
-    assert_eq!(eval_ok("(signum 5)"), RtValue::Int(1));
-    assert_eq!(eval_ok("(signum -5)"), RtValue::Int(-1));
-    assert_eq!(eval_ok("(signum 0)"), RtValue::Int(0));
+    assert_eq!(eval_ok("(signum 5)"), Value::Int(1));
+    assert_eq!(eval_ok("(signum -5)"), Value::Int(-1));
+    assert_eq!(eval_ok("(signum 0)"), Value::Int(0));
 }
 
 #[test]
 fn until_runs_the_body_while_the_test_is_false() {
     assert_eq!(
         eval_ok("(let ((i 0)) (until (= i 5) (setf i (+ i 1))) i)"),
-        RtValue::Int(5)
+        Value::Int(5)
     );
 }
 
@@ -613,7 +613,7 @@ fn until_runs_the_body_while_the_test_is_false() {
 fn until_does_not_run_the_body_when_the_test_is_already_true() {
     assert_eq!(
         eval_ok("(let ((i 9)) (until (= i 9) (setf i 0)) i)"),
-        RtValue::Int(9)
+        Value::Int(9)
     );
 }
 
@@ -628,7 +628,7 @@ fn while_let_drains_an_option_producing_call_until_none() {
           sum)
     "#;
     // 5 + 4 + 3 + 2 + 1 = 15
-    assert_eq!(eval_ok(src), RtValue::Int(15));
+    assert_eq!(eval_ok(src), Value::Int(15));
 }
 
 #[test]
@@ -639,29 +639,29 @@ fn while_let_does_not_run_the_body_when_the_pattern_never_matches() {
           (while-let ((some x) (get-opt)) (setf ran true))
           ran)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Bool(false));
+    assert_eq!(eval_ok(src), Value::Bool(false));
 }
 
 // ---- case (step 8c) ----------------------------------------------------------
 
 #[test]
 fn case_matches_the_first_equal_clause() {
-    assert_eq!(eval_ok("(case 1 (1 100) (2 200) (else 999))"), RtValue::Int(100));
+    assert_eq!(eval_ok("(case 1 (1 100) (2 200) (else 999))"), Value::Int(100));
 }
 
 #[test]
 fn case_matches_a_later_clause() {
-    assert_eq!(eval_ok("(case 2 (1 100) (2 200) (else 999))"), RtValue::Int(200));
+    assert_eq!(eval_ok("(case 2 (1 100) (2 200) (else 999))"), Value::Int(200));
 }
 
 #[test]
 fn case_falls_through_to_else_when_nothing_matches() {
-    assert_eq!(eval_ok("(case 3 (1 100) (2 200) (else 999))"), RtValue::Int(999));
+    assert_eq!(eval_ok("(case 3 (1 100) (2 200) (else 999))"), Value::Int(999));
 }
 
 #[test]
 fn case_matches_explicitly_quoted_symbol_keys() {
-    assert_eq!(eval_ok("(case (quote b) ('a 1) ('b 2) (else 0))"), RtValue::Int(2));
+    assert_eq!(eval_ok("(case (quote b) ('a 1) ('b 2) (else 0))"), Value::Int(2));
 }
 
 #[test]
@@ -673,7 +673,7 @@ fn case_matches_string_keys_by_content() {
     // key matches by content even though the scrutinee and the key literal
     // are always separately allocated `Str`s.
     let src = r#"(case "b" ("a" 1) ("b" 2) (else 0))"#;
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -683,7 +683,7 @@ fn case_evaluates_its_expr_exactly_once() {
         (defun next-call () i32 (progn (setf calls (+ calls 1)) calls))
         (progn (case (next-call) (1 100) (else 0)) calls)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 // ---- do (step 8d) -------------------------------------------------------------
@@ -692,18 +692,18 @@ fn case_evaluates_its_expr_exactly_once() {
 fn do_runs_its_body_and_steps_a_single_binding() {
     let src = "(let ((acc 0)) (do ((i 0 (+ i 1))) ((= i 5) acc) (setf acc (+ acc i))) acc)";
     // 0 + 1 + 2 + 3 + 4 = 10
-    assert_eq!(eval_ok(src), RtValue::Int(10));
+    assert_eq!(eval_ok(src), Value::Int(10));
 }
 
 #[test]
 fn do_returns_the_result_forms_value() {
-    assert_eq!(eval_ok("(do ((i 0 (+ i 1))) ((= i 3) (* i 100)) ())"), RtValue::Int(300));
+    assert_eq!(eval_ok("(do ((i 0 (+ i 1))) ((= i 3) (* i 100)) ())"), Value::Int(300));
 }
 
 #[test]
 fn do_does_not_run_the_body_when_the_test_is_already_true() {
     let src = "(let ((ran false)) (do ((i 0 (+ i 1))) ((= i 0) 0) (setf ran true)) ran)";
-    assert_eq!(eval_ok(src), RtValue::Bool(false));
+    assert_eq!(eval_ok(src), Value::Bool(false));
 }
 
 #[test]
@@ -713,5 +713,5 @@ fn do_steps_multiple_bindings_in_parallel() {
     // (`(+ a b)`) needs `a`'s pre-step value even though `a` is listed
     // first and could otherwise have already been reassigned.
     let src = "(do ((a 0 b) (b 1 (+ a b)) (n 0 (+ n 1))) ((= n 6) a) ())";
-    assert_eq!(eval_ok(src), RtValue::Int(8));
+    assert_eq!(eval_ok(src), Value::Int(8));
 }

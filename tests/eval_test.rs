@@ -1,7 +1,7 @@
 //! Tests for the tree-walking interpreter over the typed AST (step 4a).
 
 extern crate typelisp;
-use typelisp::{load_prelude, load_compiler, Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
+use typelisp::{load_prelude, load_compiler, Checker, EvalError, Heap, Interp, Reader, Value};
 
 /// Read, type-check, and evaluate a program; return the last expression's value.
 ///
@@ -11,7 +11,7 @@ use typelisp::{load_prelude, load_compiler, Checker, EvalError, Heap, Interp, Re
 /// tests here that evaluate through `eval_ok` need it loaded. Loading before
 /// the read also keeps the program's GC roots off the stack while the island
 /// loads; the heap is sized for prelude + island accordingly.
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -19,7 +19,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -29,7 +29,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -46,7 +46,7 @@ fn eval_string(src: &str) -> String {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -54,7 +54,7 @@ fn eval_string(src: &str) -> String {
         }
     }
     match last {
-        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        typelisp::Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
 }
@@ -63,7 +63,7 @@ fn eval_string(src: &str) -> String {
 /// `dotimes`/`dolist`/`when`/`unless`/`and`/`or`/`cond`/`if-let`, which are
 /// `defmacro`s in `src/prelude.rs` rather than checker-native special forms
 /// (see that file's "loop/branch primitive reduction" comment).
-fn run_with_prelude(src: &str) -> Result<RtValue, EvalError> {
+fn run_with_prelude(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -71,7 +71,7 @@ fn run_with_prelude(src: &str) -> Result<RtValue, EvalError> {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -81,7 +81,7 @@ fn run_with_prelude(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok_with_prelude(src: &str) -> RtValue {
+fn eval_ok_with_prelude(src: &str) -> Value {
     run_with_prelude(src).expect("eval failed")
 }
 
@@ -89,25 +89,25 @@ fn eval_ok_with_prelude(src: &str) -> RtValue {
 
 #[test]
 fn literals() {
-    assert_eq!(eval_ok("42"), RtValue::Int(42));
-    assert_eq!(eval_ok("true"), RtValue::Bool(true));
-    assert_eq!(eval_ok("#\\a"), RtValue::Char('a'));
+    assert_eq!(eval_ok("42"), Value::Int(42));
+    assert_eq!(eval_ok("true"), Value::Bool(true));
+    assert_eq!(eval_ok("#\\a"), Value::Char('a'));
     assert_eq!(eval_string("\"hi\""), "hi");
-    assert_eq!(eval_ok("()"), RtValue::Unit);
+    assert_eq!(eval_ok("()"), Value::Empty);
 }
 
 #[test]
 fn if_and_let() {
-    assert_eq!(eval_ok("(if true 1 2)"), RtValue::Int(1));
-    assert_eq!(eval_ok("(if false 1 2)"), RtValue::Int(2));
-    assert_eq!(eval_ok("(let ((x 5) (y 7)) y)"), RtValue::Int(7));
+    assert_eq!(eval_ok("(if true 1 2)"), Value::Int(1));
+    assert_eq!(eval_ok("(if false 1 2)"), Value::Int(2));
+    assert_eq!(eval_ok("(let ((x 5) (y 7)) y)"), Value::Int(7));
 }
 
 // ---- functions --------------------------------------------------------------
 
 #[test]
 fn defun_and_call() {
-    assert_eq!(eval_ok("(defun id ((x i32)) i32 x) (id 7)"), RtValue::Int(7));
+    assert_eq!(eval_ok("(defun id ((x i32)) i32 x) (id 7)"), Value::Int(7));
 }
 
 // ---- constructors / match ---------------------------------------------------
@@ -117,7 +117,7 @@ fn unwrap_or_some() {
     let src = "(defun unwrap-or ((o Option<i32>) (d i32)) i32 \
                  (match o ((Some v) v) ((None) d))) \
                (unwrap-or (option::some 5) 0)";
-    assert_eq!(eval_ok(src), RtValue::Int(5));
+    assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 #[test]
@@ -125,14 +125,14 @@ fn unwrap_or_none() {
     let src = "(defun unwrap-or ((o Option<i32>) (d i32)) i32 \
                  (match o ((Some v) v) ((None) d))) \
                (unwrap-or (option::none) 9)";
-    assert_eq!(eval_ok(src), RtValue::Int(9));
+    assert_eq!(eval_ok(src), Value::Int(9));
 }
 
 #[test]
 fn result_match() {
     let prog = "(defun unwrap-i ((r Result<i32,ParseIntError>)) i32 \
                   (match r ((Ok v) v) ((Err e) (panic \"err\")))) ";
-    assert_eq!(eval_ok(&format!("{} (unwrap-i (result::ok 9))", prog)), RtValue::Int(9));
+    assert_eq!(eval_ok(&format!("{} (unwrap-i (result::ok 9))", prog)), Value::Int(9));
     assert_eq!(
         run(&format!("{} (unwrap-i (result::err (ParseIntError::ParseIntError \"boom\")))", prog)),
         Err(EvalError::Panic("err".into()))
@@ -150,18 +150,18 @@ fn panic_propagates() {
 #[test]
 fn module_function_runs() {
     let src = "(module m (pub defun id ((x i32)) i32 x)) (m::id 42)";
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 // ---- builtin arithmetic / comparison (i32) ---------------------------------
 
 #[test]
 fn arithmetic() {
-    assert_eq!(eval_ok("(+ 2 3)"), RtValue::Int(5));
-    assert_eq!(eval_ok("(- 10 4)"), RtValue::Int(6));
-    assert_eq!(eval_ok("(* 6 7)"), RtValue::Int(42));
-    assert_eq!(eval_ok("(/ 20 5)"), RtValue::Int(4));
-    assert_eq!(eval_ok("(mod 17 5)"), RtValue::Int(2));
+    assert_eq!(eval_ok("(+ 2 3)"), Value::Int(5));
+    assert_eq!(eval_ok("(- 10 4)"), Value::Int(6));
+    assert_eq!(eval_ok("(* 6 7)"), Value::Int(42));
+    assert_eq!(eval_ok("(/ 20 5)"), Value::Int(4));
+    assert_eq!(eval_ok("(mod 17 5)"), Value::Int(2));
 }
 
 /// CL `mod` is floored — the result takes the sign of the divisor. (`mod` is a
@@ -169,25 +169,25 @@ fn arithmetic() {
 /// method — is covered in `numeric_test`/`bignum_ratio_test`, which load it.)
 #[test]
 fn mod_is_floored() {
-    assert_eq!(eval_ok("(mod -7 3)"), RtValue::Int(2));
-    assert_eq!(eval_ok("(mod 7 -3)"), RtValue::Int(-2));
-    assert_eq!(eval_ok("(mod -7 -3)"), RtValue::Int(-1));
-    assert_eq!(eval_ok("(mod 7 3)"), RtValue::Int(1));
+    assert_eq!(eval_ok("(mod -7 3)"), Value::Int(2));
+    assert_eq!(eval_ok("(mod 7 -3)"), Value::Int(-2));
+    assert_eq!(eval_ok("(mod -7 -3)"), Value::Int(-1));
+    assert_eq!(eval_ok("(mod 7 3)"), Value::Int(1));
 }
 
 #[test]
 fn comparison() {
-    assert_eq!(eval_ok("(< 1 2)"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(<= 2 2)"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(> 1 2)"), RtValue::Bool(false));
-    assert_eq!(eval_ok("(= 3 3)"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(/= 3 4)"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(< 1 2)"), Value::Bool(true));
+    assert_eq!(eval_ok("(<= 2 2)"), Value::Bool(true));
+    assert_eq!(eval_ok("(> 1 2)"), Value::Bool(false));
+    assert_eq!(eval_ok("(= 3 3)"), Value::Bool(true));
+    assert_eq!(eval_ok("(/= 3 4)"), Value::Bool(true));
 }
 
 #[test]
 fn recursive_factorial() {
     let src = "(defun fact ((n i32)) i32 (if (<= n 1) 1 (* n (fact (- n 1))))) (fact 5)";
-    assert_eq!(eval_ok(src), RtValue::Int(120));
+    assert_eq!(eval_ok(src), Value::Int(120));
 }
 
 #[test]
@@ -195,7 +195,7 @@ fn recursive_fibonacci() {
     let src = "(defun fib ((n i32)) i32 \
                  (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2))))) \
                (fib 10)";
-    assert_eq!(eval_ok(src), RtValue::Int(55));
+    assert_eq!(eval_ok(src), Value::Int(55));
 }
 
 #[test]
@@ -208,38 +208,38 @@ fn divide_by_zero_panics() {
 
 #[test]
 fn when_and_unless_are_unit() {
-    assert_eq!(eval_ok_with_prelude("(when (< 1 2) 5)"), RtValue::Unit);
-    assert_eq!(eval_ok_with_prelude("(unless (< 2 1) 5)"), RtValue::Unit);
+    assert_eq!(eval_ok_with_prelude("(when (< 1 2) 5)"), Value::Empty);
+    assert_eq!(eval_ok_with_prelude("(unless (< 2 1) 5)"), Value::Empty);
 }
 
 #[test]
 fn and_short_circuits_to_bool() {
-    assert_eq!(eval_ok_with_prelude("(and (< 1 2) (< 2 3))"), RtValue::Bool(true));
-    assert_eq!(eval_ok_with_prelude("(and (< 1 2) (< 3 2))"), RtValue::Bool(false));
-    assert_eq!(eval_ok_with_prelude("(and)"), RtValue::Bool(true));
+    assert_eq!(eval_ok_with_prelude("(and (< 1 2) (< 2 3))"), Value::Bool(true));
+    assert_eq!(eval_ok_with_prelude("(and (< 1 2) (< 3 2))"), Value::Bool(false));
+    assert_eq!(eval_ok_with_prelude("(and)"), Value::Bool(true));
 }
 
 #[test]
 fn or_short_circuits_to_bool() {
-    assert_eq!(eval_ok_with_prelude("(or (< 3 2) (< 1 2))"), RtValue::Bool(true));
-    assert_eq!(eval_ok_with_prelude("(or (< 3 2) (< 4 2))"), RtValue::Bool(false));
-    assert_eq!(eval_ok_with_prelude("(or)"), RtValue::Bool(false));
+    assert_eq!(eval_ok_with_prelude("(or (< 3 2) (< 1 2))"), Value::Bool(true));
+    assert_eq!(eval_ok_with_prelude("(or (< 3 2) (< 4 2))"), Value::Bool(false));
+    assert_eq!(eval_ok_with_prelude("(or)"), Value::Bool(false));
 }
 
 #[test]
 fn cond_selects_first_true_clause() {
-    assert_eq!(eval_ok_with_prelude("(cond ((< 1 2) 10) (else 20))"), RtValue::Int(10));
+    assert_eq!(eval_ok_with_prelude("(cond ((< 1 2) 10) (else 20))"), Value::Int(10));
     assert_eq!(
         eval_ok_with_prelude("(cond ((< 3 2) 10) ((< 1 2) 20) (else 30))"),
-        RtValue::Int(20)
+        Value::Int(20)
     );
-    assert_eq!(eval_ok_with_prelude("(cond ((< 3 2) 10) (else 30))"), RtValue::Int(30));
+    assert_eq!(eval_ok_with_prelude("(cond ((< 3 2) 10) (else 30))"), Value::Int(30));
 }
 
 #[test]
 fn let_star_binds_sequentially() {
-    assert_eq!(eval_ok("(let* ((x 1) (y (+ x 1))) y)"), RtValue::Int(2));
-    assert_eq!(eval_ok("(let* ((x 2) (y (* x x)) (z (+ y 1))) z)"), RtValue::Int(5));
+    assert_eq!(eval_ok("(let* ((x 1) (y (+ x 1))) y)"), Value::Int(2));
+    assert_eq!(eval_ok("(let* ((x 2) (y (* x x)) (z (+ y 1))) z)"), Value::Int(5));
 }
 
 // ---- mutable variables: setf + while ---------------------------------------
@@ -251,17 +251,17 @@ fn while_loop_with_setf() {
                    (while (< i n) (setf sum (+ sum i)) (setf i (+ i 1))) \
                    sum)) \
                (sum-to 5)";
-    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(10)); // 0+1+2+3+4
+    assert_eq!(eval_ok_with_prelude(src), Value::Int(10)); // 0+1+2+3+4
 }
 
 #[test]
 fn setf_returns_assigned_value() {
-    assert_eq!(eval_ok("(let ((x 0)) (setf x 7))"), RtValue::Int(7));
+    assert_eq!(eval_ok("(let ((x 0)) (setf x 7))"), Value::Int(7));
 }
 
 #[test]
 fn while_is_unit() {
-    assert_eq!(eval_ok_with_prelude("(let ((i 0)) (while (< i 0) (setf i 1)))"), RtValue::Unit);
+    assert_eq!(eval_ok_with_prelude("(let ((i 0)) (while (< i 0) (setf i 1)))"), Value::Empty);
 }
 
 #[test]
@@ -271,21 +271,21 @@ fn factorial_via_loop() {
                    (while (<= i n) (setf acc (* acc i)) (setf i (+ i 1))) \
                    acc)) \
                (fact 5)";
-    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(120));
+    assert_eq!(eval_ok_with_prelude(src), Value::Int(120));
 }
 
 // ---- lambda / closures ------------------------------------------------------
 
 #[test]
 fn lambda_called_immediately() {
-    assert_eq!(eval_ok("((lambda ((x i32)) i32 (+ x 1)) 10)"), RtValue::Int(11));
+    assert_eq!(eval_ok("((lambda ((x i32)) i32 (+ x 1)) 10)"), Value::Int(11));
 }
 
 #[test]
 fn lambda_bound_in_let() {
     assert_eq!(
         eval_ok("(let ((f (lambda ((x i32)) i32 (* x x)))) (f 5))"),
-        RtValue::Int(25)
+        Value::Int(25)
     );
 }
 
@@ -293,14 +293,14 @@ fn lambda_bound_in_let() {
 fn higher_order_function() {
     let src = "(defun apply-twice ((f (fn (i32) i32)) (x i32)) i32 (f (f x))) \
                (apply-twice (lambda ((n i32)) i32 (+ n 1)) 5)";
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
 fn closure_captures_variable() {
     let src = "(defun adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n))) \
                (let ((add5 (adder 5))) (add5 10))";
-    assert_eq!(eval_ok(src), RtValue::Int(15));
+    assert_eq!(eval_ok(src), Value::Int(15));
 }
 
 #[test]
@@ -309,7 +309,7 @@ fn closure_captures_mutable_state() {
     let src = "(defun make-counter () (fn () i32) \
                  (let ((c 0)) (lambda () i32 (setf c (+ c 1))))) \
                (let ((next (make-counter))) (next) (next))";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 // ---- named functions as values ---------------------------------------------
@@ -319,14 +319,14 @@ fn named_function_as_value() {
     let src = "(defun inc ((x i32)) i32 (+ x 1)) \
                (defun call2 ((f (fn (i32) i32))) i32 (f (f 0))) \
                (call2 inc)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
 fn builtin_as_value() {
     let src = "(defun apply2 ((f (fn (i32 i32) i32)) (a i32) (b i32)) i32 (f a b)) \
                (apply2 + 3 4)";
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn module_function_as_value() {
     let src = "(module m (pub defun inc ((x i32)) i32 (+ x 1))) \
                (defun c ((f (fn (i32) i32))) i32 (f 9)) \
                (c m::inc)";
-    assert_eq!(eval_ok(src), RtValue::Int(10));
+    assert_eq!(eval_ok(src), Value::Int(10));
 }
 
 // ---- dotimes ----------------------------------------------------------------
@@ -343,7 +343,7 @@ fn module_function_as_value() {
 fn dotimes_accumulates() {
     assert_eq!(
         eval_ok_with_prelude("(let ((sum 0)) (dotimes (i 5) (setf sum (+ sum i))) sum)"),
-        RtValue::Int(10) // 0+1+2+3+4
+        Value::Int(10) // 0+1+2+3+4
     );
 }
 
@@ -352,24 +352,24 @@ fn dotimes_factorial() {
     let src = "(defun fact ((n i32)) i32 \
                  (let ((acc 1)) (dotimes (i n) (setf acc (* acc (+ i 1)))) acc)) \
                (fact 5)";
-    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(120));
+    assert_eq!(eval_ok_with_prelude(src), Value::Int(120));
 }
 
 #[test]
 fn dotimes_is_unit() {
-    assert_eq!(eval_ok_with_prelude("(dotimes (i 3) ())"), RtValue::Unit);
+    assert_eq!(eval_ok_with_prelude("(dotimes (i 3) ())"), Value::Empty);
 }
 
 // ---- loop / break / return ---------------------------------------------------
 
 #[test]
 fn loop_break_with_no_value_is_unit() {
-    assert_eq!(eval_ok("(loop (break))"), RtValue::Unit);
+    assert_eq!(eval_ok("(loop (break))"), Value::Empty);
 }
 
 #[test]
 fn loop_return_yields_its_value() {
-    assert_eq!(eval_ok("(loop (return 42))"), RtValue::Int(42));
+    assert_eq!(eval_ok("(loop (return 42))"), Value::Int(42));
 }
 
 #[test]
@@ -378,7 +378,7 @@ fn loop_runs_until_break_with_accumulated_state() {
     let src = "(let ((sum 0) (i 0)) \
                  (loop (if (>= i 5) (break) ()) (setf sum (+ sum i)) (setf i (+ i 1))) \
                  sum)";
-    assert_eq!(eval_ok(src), RtValue::Int(10));
+    assert_eq!(eval_ok(src), Value::Int(10));
 }
 
 #[test]
@@ -386,7 +386,7 @@ fn loop_return_short_circuits_the_body() {
     // `return` exits immediately, skipping the rest of the body and any
     // further iterations.
     let src = "(let ((i 0)) (loop (setf i (+ i 1)) (return i) (setf i 999)))";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -394,7 +394,7 @@ fn break_exits_while_early() {
     let src = "(let ((i 0)) \
                  (while true (if (>= i 3) (break) ()) (setf i (+ i 1))) \
                  i)";
-    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(3));
+    assert_eq!(eval_ok_with_prelude(src), Value::Int(3));
 }
 
 #[test]
@@ -402,7 +402,7 @@ fn return_exits_dotimes_early() {
     let src = "(let ((i 0)) \
                  (dotimes (n 100) (setf i n) (if (= n 2) (return) ())) \
                  i)";
-    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(2));
+    assert_eq!(eval_ok_with_prelude(src), Value::Int(2));
 }
 
 #[test]
@@ -410,7 +410,7 @@ fn break_in_inner_loop_does_not_exit_outer() {
     let src = "(let ((outer 0)) \
                  (dotimes (i 3) (loop (break)) (setf outer (+ outer 1))) \
                  outer)";
-    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(3));
+    assert_eq!(eval_ok_with_prelude(src), Value::Int(3));
 }
 
 #[test]
@@ -421,7 +421,7 @@ fn nested_loop_factorial_via_return() {
                          (setf acc (* acc i)) \
                          (setf i (+ i 1))))) \
                (fact 5)";
-    assert_eq!(eval_ok(src), RtValue::Int(120));
+    assert_eq!(eval_ok(src), Value::Int(120));
 }
 
 // ---- cons / car / cdr / list / dolist ---------------------------------------
@@ -435,7 +435,7 @@ fn eval_sexpr(src: &str) -> (Heap, Value) {
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -443,8 +443,7 @@ fn eval_sexpr(src: &str) -> (Heap, Value) {
         }
     }
     match last {
-        RtValue::Sexpr(v) => (h, v),
-        other => panic!("expected a Sexpr value, got {:?}", other),
+        v => (h, v),
     }
 }
 
@@ -519,17 +518,17 @@ fn sexpr_car_and_cdr_of_non_cons_panic() {
 fn sexpr_tag_predicates_read_the_runtime_tag() {
     // The `sexpr-consp`/`sexpr-null`/`sexpr-atom` predicates inspect the runtime
     // tag directly (no `match`), so they survive Phase 5's `match`-to-enum fence.
-    assert_eq!(eval_ok("(sexpr-consp (sexpr-cons (Int 1) (Nil)))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(sexpr-consp (Nil))"), RtValue::Bool(false));
-    assert_eq!(eval_ok("(sexpr-consp (Int 3))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(sexpr-consp (sexpr-cons (Int 1) (Nil)))"), Value::Bool(true));
+    assert_eq!(eval_ok("(sexpr-consp (Nil))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-consp (Int 3))"), Value::Bool(false));
 
-    assert_eq!(eval_ok("(sexpr-null (Nil))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(sexpr-null (sexpr-cons (Int 1) (Nil)))"), RtValue::Bool(false));
-    assert_eq!(eval_ok("(sexpr-null (Int 3))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(sexpr-null (Nil))"), Value::Bool(true));
+    assert_eq!(eval_ok("(sexpr-null (sexpr-cons (Int 1) (Nil)))"), Value::Bool(false));
+    assert_eq!(eval_ok("(sexpr-null (Int 3))"), Value::Bool(false));
 
-    assert_eq!(eval_ok("(sexpr-atom (Nil))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(sexpr-atom (Int 3))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(sexpr-atom (sexpr-cons (Int 1) (Nil)))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(sexpr-atom (Nil))"), Value::Bool(true));
+    assert_eq!(eval_ok("(sexpr-atom (Int 3))"), Value::Bool(true));
+    assert_eq!(eval_ok("(sexpr-atom (sexpr-cons (Int 1) (Nil)))"), Value::Bool(false));
 }
 
 #[test]
@@ -593,13 +592,13 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
         .collect();
 
     let mut rt_heap = Heap::with_capacity(2);
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for tl in tls {
         if let Some(val) = check_interp.exec(&mut rt_heap, tl).expect("eval failed") {
             last = val;
         }
     }
-    assert_eq!(last, RtValue::Sexpr(Value::Int(1)));
+    assert_eq!(last, Value::Int(1));
     // GC is lazy (it only runs when an allocation needs space), so one more
     // collection reclaims whatever the evaluation left behind — *everything*:
     // `kept`'s binding was a heap cell (`Slot::Heap`) whose liveness follows
@@ -616,12 +615,12 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
 
 #[test]
 fn defvar_global_read() {
-    assert_eq!(eval_ok("(defvar (g i32) 42) g"), RtValue::Int(42));
+    assert_eq!(eval_ok("(defvar (g i32) 42) g"), Value::Int(42));
 }
 
 #[test]
 fn defvar_visible_in_function() {
-    assert_eq!(eval_ok("(defvar (g i32) 10) (defun f () i32 g) (f)"), RtValue::Int(10));
+    assert_eq!(eval_ok("(defvar (g i32) 10) (defun f () i32 g) (f)"), Value::Int(10));
 }
 
 #[test]
@@ -629,22 +628,22 @@ fn defvar_is_mutable() {
     let src = "(defvar (c i32) 0) \
                (defun bump () i32 (setf c (+ c 1))) \
                (bump) (bump) c";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
 fn defconstant_read() {
-    assert_eq!(eval_ok("(defconstant (k i32) 5) k"), RtValue::Int(5));
+    assert_eq!(eval_ok("(defconstant (k i32) 5) k"), Value::Int(5));
 }
 
 #[test]
 fn typed_defvar() {
-    assert_eq!(eval_ok("(defvar (g i32) 7) g"), RtValue::Int(7));
+    assert_eq!(eval_ok("(defvar (g i32) 7) g"), Value::Int(7));
 }
 
 #[test]
 fn module_global_via_path() {
-    assert_eq!(eval_ok("(module m (pub defvar (g i32) 7)) m::g"), RtValue::Int(7));
+    assert_eq!(eval_ok("(module m (pub defvar (g i32) 7)) m::g"), Value::Int(7));
 }
 
 #[test]
@@ -652,7 +651,7 @@ fn cond_with_classify() {
     let src = "(defun classify ((n i32)) i32 \
                  (cond ((< n 0) (- 0 1)) ((= n 0) 0) (else 1))) \
                (classify 7)";
-    assert_eq!(eval_ok_with_prelude(src), RtValue::Int(1));
+    assert_eq!(eval_ok_with_prelude(src), Value::Int(1));
 }
 
 // ---- labels (roadmap step 9) -------------------------------------------------
@@ -660,7 +659,7 @@ fn cond_with_classify() {
 #[test]
 fn labels_self_recursion() {
     let src = "(labels ((fact ((n i32)) i32 (if (= n 0) 1 (* n (fact (- n 1)))))) (fact 5))";
-    assert_eq!(eval_ok(src), RtValue::Int(120));
+    assert_eq!(eval_ok(src), Value::Int(120));
 }
 
 #[test]
@@ -668,13 +667,13 @@ fn labels_mutual_recursion() {
     let src = "(labels ((is-even ((n i32)) bool (if (= n 0) true (is-odd (- n 1))))
                         (is-odd ((n i32)) bool (if (= n 0) false (is-even (- n 1)))))
                  (is-even 10))";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
 fn labels_trailing_body_can_call_multiple_functions() {
     let src = "(labels ((double ((n i32)) i32 (* n 2))) (+ (double 3) (double 4)))";
-    assert_eq!(eval_ok(src), RtValue::Int(14));
+    assert_eq!(eval_ok(src), Value::Int(14));
 }
 
 #[test]
@@ -683,14 +682,14 @@ fn labels_nested_inside_a_defun_still_self_recurses() {
                   (labels ((sum-to ((n i32)) i32 (if (= n 0) 0 (+ n (sum-to (- n 1))))))
                     (sum-to 4)))
                 (run-it)";
-    assert_eq!(eval_ok(src), RtValue::Int(10));
+    assert_eq!(eval_ok(src), Value::Int(10));
 }
 
 #[test]
 fn labels_function_can_be_bound_to_a_variable_like_any_other() {
     let src = "(labels ((add1 ((n i32)) i32 (+ n 1)))
                   (let ((f add1)) (f 10)))";
-    assert_eq!(eval_ok(src), RtValue::Int(11));
+    assert_eq!(eval_ok(src), Value::Int(11));
 }
 
 // ---- &rest / apply (roadmap step 10) -----------------------------------------
@@ -715,7 +714,7 @@ fn defun_rest_collects_extra_arguments_into_a_list() {
          (count-extra 1 2 3 4)",
         LEN_HELPER
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(3));
+    assert_eq!(eval_ok(&src), Value::Int(3));
 }
 
 #[test]
@@ -726,7 +725,7 @@ fn defun_rest_with_no_extra_arguments_is_an_empty_list() {
          (count-extra 1)",
         LEN_HELPER
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(0));
+    assert_eq!(eval_ok(&src), Value::Int(0));
 }
 
 #[test]
@@ -736,7 +735,7 @@ fn defun_rest_with_no_fixed_params_collects_every_argument() {
          (defun count-all (&rest (xs i32)) i32 (len xs)) (count-all 1 2 3)",
         LEN_HELPER
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(3));
+    assert_eq!(eval_ok(&src), Value::Int(3));
 }
 
 #[test]
@@ -748,7 +747,7 @@ fn defun_rest_elements_keep_their_order_and_values() {
     let src = "(defun second-extra ((a i32) &rest (xs i32)) i64
                  (sexpr-int (sexpr-car (sexpr-cdr xs))))
                (second-extra 1 10 20 30)";
-    assert_eq!(eval_ok(src), RtValue::Int(20));
+    assert_eq!(eval_ok(src), Value::Int(20));
 }
 
 #[test]
@@ -758,14 +757,14 @@ fn lambda_rest_collects_extra_arguments_into_a_list() {
          ((lambda ((a i32) &rest (xs i32)) i32 (len xs)) 1 2 3)",
         LEN_HELPER
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(2));
+    assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 #[test]
 fn generic_rest_function_works_at_different_element_types() {
     let src = "(defun firstn<T> ((a T) &rest (xs T)) T a)
                (firstn (firstn 1 2 3) (firstn 4 5))";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -773,7 +772,7 @@ fn apply_calls_a_named_variadic_function_with_a_runtime_list() {
     let src = "(defun first-extra ((a i32) &rest (xs i32)) i64
                  (sexpr-int (sexpr-car xs)))
                (apply first-extra 1 (quote (10 20)))";
-    assert_eq!(eval_ok(src), RtValue::Int(10));
+    assert_eq!(eval_ok(src), Value::Int(10));
 }
 
 #[test]
@@ -784,7 +783,7 @@ fn apply_calls_a_variadic_lambda_value() {
            (apply f 10 (quote (1 2))))",
         LEN_HELPER
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(12));
+    assert_eq!(eval_ok(&src), Value::Int(12));
 }
 
 #[test]
@@ -795,14 +794,14 @@ fn apply_with_no_fixed_arguments_passes_the_whole_list_as_rest() {
          (apply count-all (quote (1 2 3)))",
         LEN_HELPER
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(3));
+    assert_eq!(eval_ok(&src), Value::Int(3));
 }
 
 // ---- the (type annotation) ---------------------------------------------------
 
 #[test]
 fn the_is_transparent_at_runtime() {
-    assert_eq!(eval_ok("(the i64 5)"), RtValue::Int(5));
+    assert_eq!(eval_ok("(the i64 5)"), Value::Int(5));
 }
 
 // ---- unreachable / todo -------------------------------------------------------
@@ -826,7 +825,7 @@ fn todo_panics() {
 /// against a tiny `rt_cells`-cell heap so the churn forces repeated
 /// collections — any `Sexpr`-typed binding not protected by its heap cell
 /// (`Slot::Heap` / `Heap::alloc_cell`'s registry) would be corrupted.
-fn eval_under_gc_pressure(src: &str, rt_cells: usize) -> RtValue {
+fn eval_under_gc_pressure(src: &str, rt_cells: usize) -> Value {
     let mut src_heap = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let mut chk = Checker::new();
@@ -839,7 +838,7 @@ fn eval_under_gc_pressure(src: &str, rt_cells: usize) -> RtValue {
         .map(|v| chk.check_form(&mut src_heap, &interp, v).expect("check failed"))
         .collect();
     let mut rt_heap = Heap::with_capacity(rt_cells);
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for tl in tls {
         if let Some(val) = interp.exec(&mut rt_heap, tl).expect("eval failed") {
             last = val;
@@ -857,7 +856,7 @@ fn setf_on_a_sexpr_binding_survives_gc_and_releases_the_old_value() {
                  (setf s (cons (Int 5) (Nil))) \
                  (dotimes (i 40) (cons (Int 2) (Nil))) \
                  (car s))";
-    assert_eq!(eval_under_gc_pressure(src, 3), RtValue::Sexpr(Value::Int(5)));
+    assert_eq!(eval_under_gc_pressure(src, 3), Value::Int(5));
 }
 
 #[test]
@@ -868,7 +867,7 @@ fn a_sexpr_car_bound_sexpr_survives_gc_pressure() {
     let src = "(let ((s (sexpr-cons (Int 8) (Nil)))) \
                  (let ((h (sexpr-car s))) \
                    (dotimes (i 40) (sexpr-cons (Int 2) (Nil))) h))";
-    assert_eq!(eval_under_gc_pressure(src, 4), RtValue::Sexpr(Value::Int(8)));
+    assert_eq!(eval_under_gc_pressure(src, 4), Value::Int(8));
 }
 
 #[test]
@@ -876,7 +875,7 @@ fn a_defvar_sexpr_global_survives_gc_pressure_across_forms() {
     let src = "(defvar (g Sexpr) (sexpr-cons (Int 3) (Nil))) \
                (dotimes (i 40) (sexpr-cons (Int 2) (Nil))) \
                (sexpr-car g)";
-    assert_eq!(eval_under_gc_pressure(src, 3), RtValue::Sexpr(Value::Int(3)));
+    assert_eq!(eval_under_gc_pressure(src, 3), Value::Int(3));
 }
 
 #[test]
@@ -891,7 +890,7 @@ fn a_lambda_captured_sexpr_binding_survives_gc_pressure() {
                  (let ((f (lambda () Sexpr (car s)))) \
                    (dotimes (i 200) (cons (Int 2) (Nil))) \
                    (f)))";
-    assert_eq!(eval_under_gc_pressure(src, 48), RtValue::Sexpr(Value::Int(6)));
+    assert_eq!(eval_under_gc_pressure(src, 48), Value::Int(6));
 }
 
 // ---- heap-boxed closures (Sexpr/RtValue unification Stage 6b) ----------------
@@ -908,7 +907,7 @@ fn an_unnamed_callee_survives_argument_evaluation_under_gc_pressure() {
                  (let ((f (mk (sexpr-cons (Int 4) (Nil))))) \
                    (dotimes (i 200) (sexpr-cons (Int 2) (Nil))) \
                    (f 0)))";
-    assert_eq!(eval_under_gc_pressure(src, 48), RtValue::Sexpr(Value::Int(4)));
+    assert_eq!(eval_under_gc_pressure(src, 48), Value::Int(4));
 }
 
 #[test]
@@ -923,7 +922,7 @@ fn labels_siblings_mutually_recurse_under_gc_pressure() {
                         (is-odd ((n i32)) bool (if (= n 0) false (is-even (- n 1))))) \
                  (dotimes (i 200) (cons (Int 2) (Nil))) \
                  (if (is-even 10) (Int 1) (Int 0)))";
-    assert_eq!(eval_under_gc_pressure(src, 64), RtValue::Sexpr(Value::Int(1)));
+    assert_eq!(eval_under_gc_pressure(src, 64), Value::Int(1));
 }
 
 #[test]
@@ -936,7 +935,7 @@ fn setf_through_a_shared_capture_is_visible_to_the_sibling_closure() {
                        (read (lambda () Sexpr (car s)))) \
                    (write) \
                    (read)))";
-    assert_eq!(eval_ok_with_prelude(src), RtValue::Sexpr(Value::Int(9)));
+    assert_eq!(eval_ok_with_prelude(src), Value::Int(9));
 }
 
 // (Removed `the_closure_side_table_shrinks_when_the_gc_sweeps_closure_boxes`

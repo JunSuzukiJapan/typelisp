@@ -385,13 +385,12 @@ fn history_path() -> PathBuf {
 /// "need more input" error, leaves `pending` untouched so the caller keeps
 /// accumulating lines. On success or a real error, clears `pending`.
 ///
-/// GC-root discipline: `read_all`'s temporary roots must never be left on
-/// `heap`'s root stack across an `Interp::exec` call, since `Interp`'s
-/// (private) `sync_roots` pops a self-tracked count assuming nothing else
-/// pushed on top of it. So: pop back to `mark` immediately on any read
-/// failure (nothing left to check yet), or only after every form in the
-/// batch has been through `check_form` (whose output never retains the raw
-/// `Value`) — never pop in between, and never exec before popping.
+/// GC-root discipline: `read_all`'s temporary roots protect the raw forms
+/// across checking (macro expansion conses, and can collect), and are the
+/// only thing doing so — `check_form`'s output never retains the raw
+/// `Value`. So: pop back to `mark` immediately on any read failure (nothing
+/// left to check yet), or only after every form in the batch has been
+/// through `check_form` — never pop in between.
 ///
 /// One exception: a `(defmacro ...)` form is `exec`'d *immediately* once
 /// checked, right here in the check loop, instead of waiting for the batch
@@ -399,8 +398,7 @@ fn history_path() -> PathBuf {
 /// the macro's body already present in `Interp` to expand during checking
 /// (see `MacroExpander`/`check::checker::check_list`). This doesn't violate
 /// the invariant above: `Interp::exec` on a `Defmacro` is just a `HashMap`
-/// insert, so it never touches the heap's root stack (unlike a real
-/// expression `exec`, which runs `sync_roots`).
+/// insert, so it allocates nothing and cannot collect.
 fn try_run_pending(
     heap: &mut Heap,
     reader: &Reader,
@@ -522,13 +520,13 @@ fn is_incomplete(e: &Error) -> bool {
 
 /// Format an `RtValue` for REPL output, in the reader's own syntax where
 /// possible (so the printed form can be pasted back in).
-fn format_value(heap: &Heap, reg: &Registry, v: &RtValue) -> String {
+fn format_value(heap: &Heap, reg: &Registry, v: &Value) -> String {
     match v {
-        RtValue::Int(i) => i.to_string(),
-        RtValue::Bool(b) => b.to_string(),
-        RtValue::Char(c) => format!("#\\{}", c),
-        RtValue::Unit => "()".to_string(),
-        RtValue::Sexpr(sv) => format_sexpr(heap, reg, *sv),
+        Value::Int(i) => i.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Char(c) => format!("#\\{}", c),
+        Value::Empty => "()".to_string(),
+        sv => format_sexpr(heap, reg, *sv),
     }
 }
 

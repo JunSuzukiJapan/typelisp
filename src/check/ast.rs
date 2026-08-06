@@ -426,14 +426,16 @@ pub enum Pattern {
     /// `_` — matches anything, binds nothing.
     Wildcard,
     /// A variable pattern — matches anything, binding it to the named
-    /// variable. The `bool` is whether the binding's static type (known at
-    /// this pattern position at check time — `Checker::check_pattern`'s
-    /// `expected`) has the heap-cell runtime representation (`Sexpr`/boxed
-    /// struct/`HashTable<K,V>` — `Checker::is_heap_repr`), which decides the
-    /// binding-slot routing (`Interp`'s `Slot::Heap` vs `Slot::Native`) —
-    /// baked here because the evaluator's `match_pattern` otherwise sees
-    /// only the bound *value*, and slot routing is deliberately static-type-
-    /// driven, never value-shape-driven.
+    /// variable.
+    ///
+    /// The `bool` is **inert**. It used to say whether the binding's static
+    /// type had the heap-cell runtime representation, so the evaluator could
+    /// route the binding slot by static type rather than by the bound value's
+    /// shape (`match_pattern` sees only the value). Since every binding is a
+    /// heap cell there is nothing to route: the checker still computes the
+    /// bit at `check_pattern`, and nothing reads it. It goes away with this
+    /// AST rather than on its own, so that the `fasl` shape and the four
+    /// walkers that destructure this variant change exactly once.
     Bind(String, bool),
     Int(i64),
     Bool(bool),

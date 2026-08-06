@@ -12,7 +12,7 @@
 //! does to a fixed artifact: if `(compile compile-function)` works here, the
 //! island can be lifted to native code.
 
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
 fn fresh() -> (Heap, Checker, Interp) {
     let mut h = Heap::with_capacity(1 << 18);
@@ -23,10 +23,10 @@ fn fresh() -> (Heap, Checker, Interp) {
     (h, chk, interp)
 }
 
-fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<RtValue, EvalError> {
+fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<Value, EvalError> {
     let r = Reader::new();
     let vs = r.read_all(h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(h, interp, v).expect("check failed");
         if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {

@@ -1717,8 +1717,8 @@ impl Heap {
 /// fragile at scale — one builder in `compile::ast_bridge` balances *sixteen*
 /// pops by hand, and every `?` early return is a chance to skip them. This
 /// guard makes the unwind automatic, so an error path cannot leave the stack
-/// unbalanced and a later `sync_roots`-style "pop what I pushed" caller cannot
-/// pop somebody else's roots.
+/// unbalanced and a later "pop back to my own mark" caller cannot pop
+/// somebody else's roots.
 ///
 /// Derefs to the [`Heap`], so a scope is used exactly like the heap it wraps:
 ///

@@ -20,7 +20,7 @@
 //! two permanently-allowed exceptions.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
 /// The compiler body must be loaded (`Interp::jit_define_closure` looks up
 /// `compile-function` in `self.fns`) even though nothing here ever calls
@@ -28,7 +28,7 @@ use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Re
 /// self-hosted `compile-function` entry point `(compile fn)` does, just for
 /// a synthetic constructor rather than a user-named `defun`. The prelude is
 /// loaded too since some of these programs use `dotimes`/`while`.
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -36,7 +36,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -46,7 +46,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -55,7 +55,7 @@ fn fnref_of_a_plain_function_is_callable() {
     let src = "(defun inc ((x i32)) i32 (+ x 1)) \
                (defun call2 ((f (fn (i32) i32))) i32 (f (f 0))) \
                (call2 inc)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -64,21 +64,21 @@ fn methodref_of_a_defstruct_field_accessor_is_callable() {
                (defun make-point ((a i64) (b i64)) point (point::new a b)) \
                (defun call-getter ((f (fn (point) i64)) (p point)) i64 (f p)) \
                (call-getter x (make-point 7 1))";
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
 fn lambda_with_no_captures_is_callable() {
     let src = "(defun apply-twice ((f (fn (i32) i32)) (x i32)) i32 (f (f x))) \
                (apply-twice (lambda ((n i32)) i32 (+ n 1)) 5)";
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
 fn lambda_captures_an_outer_variable() {
     let src = "(defun adder ((n i32)) (fn (i32) i32) (lambda ((x i32)) i32 (+ x n))) \
                (let ((add5 (adder 5))) (add5 10))";
-    assert_eq!(eval_ok(src), RtValue::Int(15));
+    assert_eq!(eval_ok(src), Value::Int(15));
 }
 
 /// The `make-counter` idiom: a shared mutable capture, `setf` through the
@@ -91,7 +91,7 @@ fn make_counter_shares_a_mutable_capture_across_calls() {
     let src = "(defun make-counter () (fn () i32) \
                  (let ((c 0)) (lambda () i32 (setf c (+ c 1))))) \
                (let ((next (make-counter))) (next) (next))";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 /// Two closures from two separate `make-counter` calls must *not* share a
@@ -103,7 +103,7 @@ fn two_counters_from_the_same_maker_have_independent_cells() {
                (let ((a (make-counter)) (b (make-counter))) \
                  (a) (a) (b) \
                  (+ (a) (b)))";
-    assert_eq!(eval_ok(src), RtValue::Int(5));
+    assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 /// `labels` mutual recursion, JIT'd one sibling at a time — each sibling
@@ -116,7 +116,7 @@ fn labels_mutual_recursion_via_independent_sibling_jit() {
     let src = "(labels ((is-even ((n i32)) bool (if (= n 0) true (is-odd (- n 1))))
                         (is-odd ((n i32)) bool (if (= n 0) false (is-even (- n 1)))))
                  (is-even 10))";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 /// A capture shared between two `labels` siblings (not just a sibling and
@@ -131,7 +131,7 @@ fn setf_through_one_labels_sibling_is_visible_through_another_sharing_the_same_c
                      (let ((ignored2 (bump)))
                        (read-it)))))
                (make-pair 10)";
-    assert_eq!(eval_ok(src), RtValue::Int(12));
+    assert_eq!(eval_ok(src), Value::Int(12));
 }
 
 /// A `labels` sibling whose own parameter *shadows* a name the block
@@ -152,7 +152,7 @@ fn a_labels_param_shadows_a_captured_name_of_the_same_spelling() {
                (outer 5)";
     // use-cap: 1 + captured n(5) = 6; shadow-it: param n(100) = 100; sum 106.
     // (Before the fix shadow-it read the captured n(5), giving 11.)
-    assert_eq!(eval_ok(src), RtValue::Int(106));
+    assert_eq!(eval_ok(src), Value::Int(106));
 }
 
 /// A `Unit`-returning closure JITs too (closure unification Stage 8):
@@ -168,7 +168,7 @@ fn a_unit_returning_closure_performs_its_effect_and_returns_unit() {
                  (run-thunk (lambda () () (setf hits (+ hits 1)) ())) \
                  (run-thunk (lambda () () (setf hits (+ hits 1)) ())) \
                  hits)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 /// A variadic (`&rest`) lambda JITs like any other (closure unification
@@ -180,7 +180,7 @@ fn a_unit_returning_closure_performs_its_effect_and_returns_unit() {
 fn a_variadic_lambda_jits_and_collects_its_rest_list() {
     let src = "(defun sexpr-len ((s Sexpr)) i64 (if (sexpr-consp s) (+ (the i64 1) (sexpr-len (sexpr-cdr s))) (the i64 0))) \
                ((lambda ((a i64) &rest (xs i64)) i64 (+ a (sexpr-len xs))) 1 2 3)";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+    assert_eq!(eval_ok(src), Value::Int(3));
 }
 
 /// `FnRef` of a variadic named function — the reified forwarding closure
@@ -193,7 +193,7 @@ fn fnref_of_a_variadic_function_jits_and_forwards_the_rest_list() {
                (defun count-extra ((base i64) &rest (xs i64)) i64 (+ base (sexpr-len xs))) \
                (defun use-it ((f (fn (i64 &rest i64) i64))) i64 (f 10 1 2 3)) \
                (use-it count-extra)";
-    assert_eq!(eval_ok(src), RtValue::Int(13));
+    assert_eq!(eval_ok(src), Value::Int(13));
 }
 
 /// Regression for the macro-expansion JIT-suppression flag
@@ -210,7 +210,7 @@ fn a_macro_expansion_and_a_real_closure_coexist() {
                (let ((next (make-counter)) (total 0)) \
                  (dotimes (i 3) (setf total (+ total (next)))) \
                  total)";
-    assert_eq!(eval_ok(src), RtValue::Int(6));
+    assert_eq!(eval_ok(src), Value::Int(6));
 }
 
 /// interp-closure removal Stage 6 (retiring `jit_suppressed`): a closure the
@@ -229,5 +229,5 @@ fn a_closure_built_inside_a_macro_body_jits_during_expansion() {
                    (let ((mk (lambda ((s Sexpr)) Sexpr (sexpr-cons op s)))) \
                      (mk (quote (1 2)))))) \
                (plus-list)";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+    assert_eq!(eval_ok(src), Value::Int(3));
 }

@@ -6,9 +6,9 @@
 //! any other expression is evaluated.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -16,7 +16,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -26,7 +26,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -43,7 +43,7 @@ fn eval_string(src: &str) -> String {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -51,7 +51,7 @@ fn eval_string(src: &str) -> String {
         }
     }
     match last {
-        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        typelisp::Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
 }
@@ -98,7 +98,7 @@ fn defun_without_docstring_has_no_documentation() {
         (defun add ((x i32) (y i32)) i32 (+ x y))
         (is-none (documentation add))
     "#;
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn defun_single_string_body_is_the_return_value_not_a_docstring() {
         (defun greeting () string "just a value")
         (is-none (documentation greeting))
     "#;
-    assert_eq!(eval_ok(src2), RtValue::Bool(true));
+    assert_eq!(eval_ok(src2), Value::Bool(true));
 }
 
 #[test]
@@ -164,7 +164,7 @@ fn defvar_without_docstring_still_checks_normally() {
         (defvar (limit i32) 100)
         limit
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(100));
+    assert_eq!(eval_ok(src), Value::Int(100));
 }
 
 #[test]
@@ -206,7 +206,7 @@ fn defstruct_without_docstring_has_no_documentation() {
         (defstruct point (x i32) (y i32))
         (is-none (documentation point))
     "#;
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 // ---- deftrait / defmethod (impl) ---------------------------------------------

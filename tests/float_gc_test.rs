@@ -22,7 +22,7 @@
 //! these tests passed while the root was genuinely missing
 //! (`tests/bignum_ratio_gc_test.rs`).
 
-use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
 fn env() -> (Heap, Checker, Interp) {
     let mut h = Heap::with_capacity(1 << 18);
@@ -32,10 +32,10 @@ fn env() -> (Heap, Checker, Interp) {
     (h, chk, interp)
 }
 
-fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<RtValue, EvalError> {
+fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<Value, EvalError> {
     let r = Reader::new();
     let vs = r.read_all(h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(h, interp, v).expect("check failed");
         if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
@@ -45,9 +45,9 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
     Ok(last)
 }
 
-fn assert_float(h: &Heap, v: &RtValue, expected: f64) {
+fn assert_float(h: &Heap, v: &Value, expected: f64) {
     match v {
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(*id) => {
+        typelisp::Value::Boxed(id) if h.is_float(*id) => {
             let got = h.float_value(*id);
             assert!((got - expected).abs() < 1e-9, "expected {}, got {}", expected, got);
         }

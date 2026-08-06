@@ -8,15 +8,15 @@
 //! (d) that non-generic `defun` keeps behaving exactly as before.
 
 extern crate typelisp;
-use typelisp::{Checker, Error, Heap, Interp, Reader, RtValue, TopLevel};
+use typelisp::{Checker, Error, Heap, Interp, Reader, Value, TopLevel};
 
-fn run(src: &str) -> Result<(RtValue, Heap), Error> {
+fn run(src: &str) -> Result<(Value, Heap), Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -26,7 +26,7 @@ fn run(src: &str) -> Result<(RtValue, Heap), Error> {
     Ok((last, h))
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed").0
 }
 
@@ -59,11 +59,11 @@ fn assert_type_error(src: &str) {
 fn identity_resolves_per_call_site_type() {
     assert_eq!(
         eval_ok("(defun identity<T> ((x T)) T x) (identity 42)"),
-        RtValue::Int(42)
+        Value::Int(42)
     );
     assert_eq!(
         eval_ok("(defun identity<T> ((x T)) T x) (identity true)"),
-        RtValue::Bool(true)
+        Value::Bool(true)
     );
 }
 
@@ -75,7 +75,7 @@ fn generic_defun_with_two_type_params() {
         (defun pick-first<A,B> ((x A) (y B)) A x)
         (pick-first 7 true)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn recursive_generic_defun() {
           (if (= n 0) x (last-of (- n 1) x)))
         (last-of 3 99)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(99));
+    assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 // ---- interaction with existing generic ADTs ---------------------------------
@@ -104,7 +104,7 @@ fn unwrap_option_propagates_bound_type_through_match() {
           (match opt ((some x) x) ((none) (panic "unwrap: None"))))
         (unwrap (option::some 5))
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(5));
+    assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn generic_defun_returning_option() {
         (defun wrap<T> ((x T)) Option<T> (option::some x))
         (match (wrap 9) ((some x) x) ((none) 0))
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(9));
+    assert_eq!(eval_ok(src), Value::Int(9));
 }
 
 // ---- inference failure -------------------------------------------------------
@@ -139,6 +139,6 @@ fn mismatched_concrete_argument_types_still_rejected() {
 fn ordinary_defun_without_type_params_still_works() {
     assert_eq!(
         eval_ok("(defun add1 ((x i32)) i32 (+ x 1)) (add1 41)"),
-        RtValue::Int(42)
+        Value::Int(42)
     );
 }

@@ -6,7 +6,7 @@
 //! covered elsewhere (`check_test.rs`'s `setf_*` tests, `struct_test.rs`).
 
 extern crate typelisp;
-use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, RtValue, TopLevel};
+use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
 
 fn check(src: &str) -> Result<TopLevel, Error> {
     let mut h = Heap::with_capacity(8192);
@@ -21,13 +21,13 @@ fn check(src: &str) -> Result<TopLevel, Error> {
     Ok(last.expect("no forms"))
 }
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(v) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -37,7 +37,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -46,25 +46,25 @@ fn eval_ok(src: &str) -> RtValue {
 #[test]
 fn incf_defaults_delta_to_one() {
     let src = "(let ((x 10)) (incf x) x)";
-    assert_eq!(eval_ok(src), RtValue::Int(11));
+    assert_eq!(eval_ok(src), Value::Int(11));
 }
 
 #[test]
 fn incf_with_explicit_delta() {
     let src = "(let ((x 10)) (incf x 5) x)";
-    assert_eq!(eval_ok(src), RtValue::Int(15));
+    assert_eq!(eval_ok(src), Value::Int(15));
 }
 
 #[test]
 fn incf_evaluates_to_the_new_value() {
     let src = "(let ((x 10)) (incf x 5))";
-    assert_eq!(eval_ok(src), RtValue::Int(15));
+    assert_eq!(eval_ok(src), Value::Int(15));
 }
 
 #[test]
 fn decf_with_explicit_delta() {
     let src = "(let ((x 10)) (decf x 3) x)";
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
@@ -84,20 +84,20 @@ fn incf_on_a_hashtable_value_type_mismatch_is_rejected() {
 fn rotatef_two_variables() {
     let src = "(let ((a 1) (b 2)) (rotatef a b) (- (* a 10) b))";
     // a should now be 2, b should now be 1 -> 2*10 - 1 = 19
-    assert_eq!(eval_ok(src), RtValue::Int(19));
+    assert_eq!(eval_ok(src), Value::Int(19));
 }
 
 #[test]
 fn rotatef_three_variables_shifts_cyclically() {
     let src = "(let ((a 1) (b 2) (c 3)) (rotatef a b c) (+ (* a 100) (+ (* b 10) c)))";
     // new a = old b = 2, new b = old c = 3, new c = old a = 1 -> 231
-    assert_eq!(eval_ok(src), RtValue::Int(231));
+    assert_eq!(eval_ok(src), Value::Int(231));
 }
 
 #[test]
 fn rotatef_single_place_is_a_no_op() {
     let src = "(let ((a 5)) (rotatef a) a)";
-    assert_eq!(eval_ok(src), RtValue::Int(5));
+    assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 #[test]
@@ -109,20 +109,20 @@ fn rotatef_with_no_places_checks_as_unit() {
 #[test]
 fn shiftf_returns_the_first_places_old_value() {
     let src = "(let ((a 1) (b 2)) (shiftf a b 99))";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
 fn shiftf_shifts_values_left_and_appends_the_new_value() {
     let src = "(let ((a 1) (b 2)) (shiftf a b 99) (+ (* a 100) b))";
     // new a = old b = 2, new b = 99 -> 299
-    assert_eq!(eval_ok(src), RtValue::Int(299));
+    assert_eq!(eval_ok(src), Value::Int(299));
 }
 
 #[test]
 fn shiftf_single_place() {
     let src = "(let ((a 1)) (shiftf a 42) a)";
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn rotatef_call_form_places_dedup_shared_subexpressions() {
                  (push v 20)
                  (rotatef (get v 0) (get v 1))
                  (+ (* (get v 0) 100) (get v 1)))";
-    assert_eq!(eval_ok(src), RtValue::Int(2010));
+    assert_eq!(eval_ok(src), Value::Int(2010));
 }
 
 // ---- setf on a call-form place --------------------------------------------
@@ -153,7 +153,7 @@ fn setf_get_writes_through_a_hashtable_entry() {
                  (set h \"a\" 1)
                  (setf (get h \"a\") 41)
                  (match (get h \"a\") ((Some x) x) ((None) -1)))";
-    assert_eq!(eval_ok(src), RtValue::Int(41));
+    assert_eq!(eval_ok(src), Value::Int(41));
 }
 
 #[test]
@@ -191,7 +191,7 @@ fn setf_on_a_user_defined_accessor_uses_the_set_prefix_convention() {
                (let ((c (make-c)))
                  (setf (at c 0) 99)
                  (at c 0))";
-    assert_eq!(eval_ok(src), RtValue::Int(99));
+    assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]

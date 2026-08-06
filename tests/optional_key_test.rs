@@ -10,9 +10,9 @@
 //! needs to know either section exists.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -20,7 +20,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -30,7 +30,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -40,7 +40,7 @@ fn eval_ok(src: &str) -> RtValue {
 /// already takes it internally for the `(compile ...)` form itself (see
 /// `eval::interp`'s own `COMPILE_LOCK` call sites) — locking it again around
 /// this whole call would self-deadlock on the same thread.
-fn eval_ok_compiled(def_and_calls: &str, compile_name: &str) -> RtValue {
+fn eval_ok_compiled(def_and_calls: &str, compile_name: &str) -> Value {
     let src = def_and_calls.replacen("%COMPILE%", &format!("(compile {})", compile_name), 1);
     eval_ok(&src)
 }
@@ -71,21 +71,21 @@ fn check_err(src: &str) -> String {
 #[test]
 fn optional_default_is_used_when_the_argument_is_omitted() {
     let src = "(defun f ((a i32) &optional (b i32 10)) i32 (+ a b)) (f 1)";
-    assert_eq!(eval_ok(src), RtValue::Int(11));
+    assert_eq!(eval_ok(src), Value::Int(11));
 }
 
 #[test]
 fn optional_supplied_value_overrides_the_default() {
     let src = "(defun f ((a i32) &optional (b i32 10)) i32 (+ a b)) (f 1 5)";
-    assert_eq!(eval_ok(src), RtValue::Int(6));
+    assert_eq!(eval_ok(src), Value::Int(6));
 }
 
 #[test]
 fn optional_default_and_supplied_agree_between_interp_and_compile() {
     let def = "(defun f ((a i32) &optional (b i32 10)) i32 (+ a b)) %COMPILE% (f 1)";
-    assert_eq!(eval_ok_compiled(def, "f"), RtValue::Int(11));
+    assert_eq!(eval_ok_compiled(def, "f"), Value::Int(11));
     let def2 = "(defun f ((a i32) &optional (b i32 10)) i32 (+ a b)) %COMPILE% (f 1 5)";
-    assert_eq!(eval_ok_compiled(def2, "f"), RtValue::Int(6));
+    assert_eq!(eval_ok_compiled(def2, "f"), Value::Int(6));
 }
 
 // ---- &optional, no default (Option<T>) ------------------------------------
@@ -93,13 +93,13 @@ fn optional_default_and_supplied_agree_between_interp_and_compile() {
 #[test]
 fn optional_without_default_binds_option_none_when_omitted() {
     let src = "(defun f (&optional (b i32)) i32 (unwrap-or b 99)) (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(99));
+    assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
 fn optional_without_default_auto_wraps_a_supplied_value_into_some() {
     let src = "(defun f (&optional (b i32)) i32 (unwrap-or b 99)) (f 5)";
-    assert_eq!(eval_ok(src), RtValue::Int(5));
+    assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 // ---- &key, with default ----------------------------------------------------
@@ -107,21 +107,21 @@ fn optional_without_default_auto_wraps_a_supplied_value_into_some() {
 #[test]
 fn key_default_is_used_when_omitted() {
     let src = "(defun make-point (&key (x i32 0) (y i32 0)) i32 (+ x y)) (make-point)";
-    assert_eq!(eval_ok(src), RtValue::Int(0));
+    assert_eq!(eval_ok(src), Value::Int(0));
 }
 
 #[test]
 fn key_arguments_are_matched_by_label_not_position() {
     let src = "(defun make-point (&key (x i32 0) (y i32 0)) i32 (+ x (* 10 y))) (make-point :y 4 :x 3)";
-    assert_eq!(eval_ok(src), RtValue::Int(43));
+    assert_eq!(eval_ok(src), Value::Int(43));
 }
 
 #[test]
 fn key_default_and_supplied_agree_between_interp_and_compile() {
     let def = "(defun make-point (&key (x i32 0) (y i32 0)) i32 (+ x (* 10 y))) %COMPILE% (make-point :y 4 :x 3)";
-    assert_eq!(eval_ok_compiled(def, "make-point"), RtValue::Int(43));
+    assert_eq!(eval_ok_compiled(def, "make-point"), Value::Int(43));
     let def2 = "(defun make-point (&key (x i32 0) (y i32 0)) i32 (+ x (* 10 y))) %COMPILE% (make-point)";
-    assert_eq!(eval_ok_compiled(def2, "make-point"), RtValue::Int(0));
+    assert_eq!(eval_ok_compiled(def2, "make-point"), Value::Int(0));
 }
 
 // ---- &key, no default (Option<T>) ------------------------------------------
@@ -134,8 +134,8 @@ fn key_without_default_is_none_when_omitted_and_some_when_supplied() {
     // case) — the plain value a caller supplies, auto-wrapped into `Some`.
     let omitted = eval_ok("(defun f (&key (test symbol)) bool (is-some test)) (f)");
     let supplied = eval_ok("(defun f (&key (test symbol)) bool (is-some test)) (f :test :eq)");
-    assert_eq!(omitted, RtValue::Bool(false));
-    assert_eq!(supplied, RtValue::Bool(true));
+    assert_eq!(omitted, Value::Bool(false));
+    assert_eq!(supplied, Value::Bool(true));
 }
 
 // ---- &key error cases -------------------------------------------------------
@@ -163,7 +163,7 @@ fn key_call_with_a_duplicate_keyword_is_a_type_error() {
 #[test]
 fn optional_combines_with_a_trailing_rest() {
     let src = "(defun f ((a i32) &optional (b i32 10) &rest (xs i32)) i32 (+ a b)) (f 1 2 3 4 5)";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+    assert_eq!(eval_ok(src), Value::Int(3));
 }
 
 // ---- forbidden combinations -------------------------------------------------
@@ -198,7 +198,7 @@ fn generic_key_infers_type_param_from_required_arg() {
     // `y` (no default, so effectively `Option<T>`) must still resolve to
     // `Option<i32>` from that inference, not stay abstract.
     let src = "(defun f<T> ((x T) &key (y T)) T (unwrap-or y x)) (f 5)";
-    assert_eq!(eval_ok(src), RtValue::Int(5));
+    assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 #[test]
@@ -206,7 +206,7 @@ fn generic_key_infers_type_param_from_supplied_key_arg() {
     // `T` appears *only* on the `&key` parameter `y` here — inference can
     // only come from actually supplying it, not from `n` (plain `i32`).
     let src = "(defun f<T> ((n i32) &key (y T)) i32 (+ n (if (is-some y) 1 0))) (f 10 :y 42)";
-    assert_eq!(eval_ok(src), RtValue::Int(11));
+    assert_eq!(eval_ok(src), Value::Int(11));
 }
 
 #[test]
@@ -226,8 +226,8 @@ fn generic_optional_where_bound_is_validated() {
         (defstruct no-eq (n i32))
         (defun check-eq<T> ((a T) (b T) &optional (verbose bool false)) bool (where (eq2 T)) (same a b))
     ";
-    assert_eq!(eval_ok(&format!("{} (check-eq 1 1)", prog)), RtValue::Bool(true));
-    assert_eq!(eval_ok(&format!("{} (check-eq 1 2)", prog)), RtValue::Bool(false));
+    assert_eq!(eval_ok(&format!("{} (check-eq 1 1)", prog)), Value::Bool(true));
+    assert_eq!(eval_ok(&format!("{} (check-eq 1 2)", prog)), Value::Bool(false));
     let msg = check_err(&format!(
         "{} (check-eq (no-eq::new 1) (no-eq::new 1))",
         prog
@@ -266,7 +266,7 @@ fn generic_key_specialization_agrees_between_interp_and_compile() {
         %COMPILE%
         (run-i32)
     ";
-    assert_eq!(eval_ok_compiled(prog_i32, "run-i32"), RtValue::Int(1));
+    assert_eq!(eval_ok_compiled(prog_i32, "run-i32"), Value::Int(1));
 
     let prog_bool = "
         (defun pick<T> ((a T) (b T) &key (use-a bool true)) T (if use-a a b))
@@ -274,7 +274,7 @@ fn generic_key_specialization_agrees_between_interp_and_compile() {
         %COMPILE%
         (run-bool)
     ";
-    assert_eq!(eval_ok_compiled(prog_bool, "run-bool"), RtValue::Bool(false));
+    assert_eq!(eval_ok_compiled(prog_bool, "run-bool"), Value::Bool(false));
 }
 
 #[test]
@@ -285,5 +285,5 @@ fn generic_optional_self_recursive() {
     // the self-recursive call resolves instead of hitting `check_redef` or
     // an unregistered-function error.
     let src = "(defun rep<T> ((x T) &optional (n i32 3)) T (if (= n 0) x (rep x (- n 1)))) (rep 5)";
-    assert_eq!(eval_ok(src), RtValue::Int(5));
+    assert_eq!(eval_ok(src), Value::Int(5));
 }

@@ -2,7 +2,7 @@
 //! generalization of `dolist` (`docs/TODO.md`'s `doiter` entry).
 
 extern crate typelisp;
-use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, RtValue, TopLevel};
+use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
 
 fn check(src: &str) -> Result<TopLevel, Error> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -19,7 +19,7 @@ fn check(src: &str) -> Result<TopLevel, Error> {
     Ok(last.expect("no forms"))
 }
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -27,7 +27,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(v) = interp.exec(&mut h, tl)? {
@@ -37,7 +37,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -50,7 +50,7 @@ fn doiter_sums_a_vector() {
                  (push v 3)
                  (doiter (x (iter v)) (setf acc (+ acc x)))
                  acc)";
-    assert_eq!(eval_ok(src), RtValue::Int(6));
+    assert_eq!(eval_ok(src), Value::Int(6));
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn doiter_over_an_empty_vector_runs_zero_times() {
                (let ((v (make-v)) (acc 0))
                  (doiter (x (iter v)) (setf acc (+ acc 1)))
                  acc)";
-    assert_eq!(eval_ok(src), RtValue::Int(0));
+    assert_eq!(eval_ok(src), Value::Int(0));
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn break_exits_a_doiter_early() {
                    (if (= x 2) (break) ())
                    (setf acc (+ acc x)))
                  acc)";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn return_with_no_value_exits_the_doiter_loop_itself() {
                    (if (= (mod x 2) 0) (return) ())
                    (setf acc (+ acc x)))
                  acc)";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -119,7 +119,7 @@ fn doiter_works_inside_a_where_bounded_generic_function() {
                  (let ((n 0)) (doiter (x it) (setf n (+ n 1))) n))
                (defun make-v () Vector<i32> (Vector::new))
                (let ((v (make-v))) (push v 10) (push v 20) (count-iter (iter v)))";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn doiter_sums_inside_a_where_bounded_generic_function_with_a_pinned_item() {
                  (let ((n 0)) (doiter (x it) (setf n (+ n x))) n))
                (defun make-v () Vector<i32> (Vector::new))
                (let ((v (make-v))) (push v 10) (push v 20) (sum-iter (iter v)))";
-    assert_eq!(eval_ok(src), RtValue::Int(30));
+    assert_eq!(eval_ok(src), Value::Int(30));
 }
 
 #[test]
@@ -164,7 +164,7 @@ fn a_where_pin_to_a_type_variable_is_inferred_from_the_iterator_alone() {
                (defun make-v () Vector<i32> (Vector::new))
                (let ((v (make-v))) (push v 10) (push v 20) (push v 30)
                  (unwrap-or (last-of (iter v)) -1))";
-    assert_eq!(eval_ok(src), RtValue::Int(30));
+    assert_eq!(eval_ok(src), Value::Int(30));
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn generic_iter_combinators_work_over_a_hashtable() {
                (let ((h (make-h)))
                  (set h 1 10) (set h 2 20) (set h 3 30)
                  (count-if (iter h) (lambda ((p cons-cell<i32,i32>)) bool (> p::cdr 15))))";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 // `Sexpr` has no `Iter` impl (see `src/prelude.rs`'s comment above
@@ -196,7 +196,7 @@ fn doiter_sums_hashtable_values() {
                  (set h 3 30)
                  (doiter (p (iter h)) (setf acc (+ acc (cdr p))))
                  acc)";
-    assert_eq!(eval_ok(src), RtValue::Int(60));
+    assert_eq!(eval_ok(src), Value::Int(60));
 }
 
 #[test]
@@ -205,7 +205,7 @@ fn doiter_over_an_empty_hashtable_runs_zero_times() {
                (let ((h (make-h)) (acc 0))
                  (doiter (p (iter h)) (setf acc (+ acc 1)))
                  acc)";
-    assert_eq!(eval_ok(src), RtValue::Int(0));
+    assert_eq!(eval_ok(src), Value::Int(0));
 }
 
 #[test]
@@ -219,5 +219,5 @@ fn nested_doiter_loops_do_not_interfere() {
                      (setf acc (+ acc (* x y)))))
                  acc)";
     // (1*10 + 1*20) + (2*10 + 2*20) = 30 + 60 = 90
-    assert_eq!(eval_ok(src), RtValue::Int(90));
+    assert_eq!(eval_ok(src), Value::Int(90));
 }

@@ -103,7 +103,7 @@ fn rebuild_protects_its_intermediates_from_mid_rebuild_gc() {
 
 use typelisp::fasl::{registry_mark, source_hash, Fasl};
 use typelisp::{
-    completion_candidates, load_compiler, load_prelude, Checker, EvalError, Interp, RtValue, TopLevel,
+    completion_candidates, load_compiler, load_prelude, Checker, EvalError, Interp, TopLevel,
 };
 
 /// Load the prelude by source into a fresh environment.
@@ -165,10 +165,10 @@ fn fasl_loaded(fasl: &Fasl) -> (Heap, Checker, Interp) {
 }
 
 /// Evaluate `src`'s forms in `(h, chk, interp)`, returning the last value.
-fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<RtValue, EvalError> {
+fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<Value, EvalError> {
     let r = Reader::new();
     let vs = r.read_all(h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(h, &*interp, v).map_err(|e| EvalError::Internal(format!("check: {}", e)))?;
         if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
@@ -184,11 +184,8 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
 /// scalar unification an `f64` lives there too — as a `BoxedObj::Float` —
 /// rather than self-contained inside `RtValue`, so comparing the `RtValue`s
 /// directly would compare two unrelated box ids.
-fn owned_result(h: &Heap, v: &RtValue) -> String {
-    match v {
-        RtValue::Sexpr(sv) => format!("{:?}", value_to_owned(h, *sv).expect("value_to_owned")),
-        other => format!("{:?}", other),
-    }
+fn owned_result(h: &Heap, v: &Value) -> String {
+    format!("{:?}", value_to_owned(h, *v).expect("value_to_owned"))
 }
 
 /// The heart of S2: for a battery of programs exercising prelude macros,
@@ -283,7 +280,7 @@ fn fasl_capture_preserves_docstrings_for_documentation() {
 
     let result = eval_in(&mut fh, &mut fc, &mut fi, r#"(unwrap-or (documentation add) "none")"#).expect("eval");
     match result {
-        RtValue::Sexpr(Value::Str(id)) => assert_eq!(fh.string(id), "Adds two integers."),
+        Value::Str(id) => assert_eq!(fh.string(id), "Adds two integers."),
         other => panic!("expected a string, got {:?}", other),
     }
 }
@@ -341,7 +338,7 @@ fn load_ctx(name: &str) -> (Heap, Checker, Interp, PathBuf) {
 }
 
 /// Evaluate a single expression string in an existing environment.
-fn eval1(h: &mut Heap, c: &mut Checker, i: &mut Interp, src: &str) -> RtValue {
+fn eval1(h: &mut Heap, c: &mut Checker, i: &mut Interp, src: &str) -> Value {
     eval_in(h, c, i, src).expect("eval1")
 }
 
@@ -354,7 +351,7 @@ fn load_reads_a_source_file_into_the_current_environment() {
     load_file_flat(&mut h, &reader, &mut c, &mut i, &dir, "helpers").expect("load_file_flat");
 
     // The loaded definition is now callable.
-    assert_eq!(eval1(&mut h, &mut c, &mut i, "(triple 4)"), RtValue::Int(12));
+    assert_eq!(eval1(&mut h, &mut c, &mut i, "(triple 4)"), Value::Int(12));
 }
 
 #[test]
@@ -370,7 +367,7 @@ fn load_form_makes_definitions_available_to_later_forms_in_the_same_file() {
     load_source_flat(&mut h, &reader, &mut c, &mut i, &main, &std::fs::read_to_string(&main).unwrap())
         .expect("load_source_flat");
 
-    assert_eq!(eval1(&mut h, &mut c, &mut i, "(run)"), RtValue::Int(42));
+    assert_eq!(eval1(&mut h, &mut c, &mut i, "(run)"), Value::Int(42));
 }
 
 #[test]
@@ -402,7 +399,7 @@ fn load_prefers_a_fresh_fasl_over_source() {
 
     let reader = R2::new();
     load_file_flat(&mut h, &reader, &mut c, &mut i, &dir, "m").expect("load");
-    assert_eq!(eval1(&mut h, &mut c, &mut i, "(mul 5)"), RtValue::Int(20), "loaded from fasl");
+    assert_eq!(eval1(&mut h, &mut c, &mut i, "(mul 5)"), Value::Int(20), "loaded from fasl");
 }
 
 #[test]
@@ -433,7 +430,7 @@ fn load_falls_back_to_source_when_fasl_is_stale() {
 
     let reader = R2::new();
     load_file_flat(&mut h, &reader, &mut c, &mut i, &dir, "m").expect("load");
-    assert_eq!(eval1(&mut h, &mut c, &mut i, "(v 1)"), RtValue::Int(101), "used current source, not stale fasl");
+    assert_eq!(eval1(&mut h, &mut c, &mut i, "(v 1)"), Value::Int(101), "used current source, not stale fasl");
 }
 
 #[test]
@@ -473,8 +470,8 @@ fn compile_module_output_is_loadable() {
     let (mut h, mut c, mut i) = source_loaded();
     let reader = R2::new();
     load_file_flat(&mut h, &reader, &mut c, &mut i, &dir, "lib").expect("load produced fasl");
-    assert_eq!(eval1(&mut h, &mut c, &mut i, "(cube 3)"), RtValue::Int(27), "defun from fasl");
-    assert_eq!(eval1(&mut h, &mut c, &mut i, "(twice 21)"), RtValue::Int(42), "macro from fasl");
+    assert_eq!(eval1(&mut h, &mut c, &mut i, "(cube 3)"), Value::Int(27), "defun from fasl");
+    assert_eq!(eval1(&mut h, &mut c, &mut i, "(twice 21)"), Value::Int(42), "macro from fasl");
 }
 
 /// `compile-module` refuses a source file containing a bare top-level

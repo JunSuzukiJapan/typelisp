@@ -12,16 +12,16 @@
 //! unused blanket impl — see the group at the bottom.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, Checker, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<RtValue, String> {
+fn run(src: &str) -> Result<Value, String> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).map_err(|e| format!("{:?}", e))?;
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).map_err(|e| format!("{:?}", e))?;
         if let Some(val) = interp.exec(&mut h, tl).map_err(|e| format!("{:?}", e))? {
@@ -31,7 +31,7 @@ fn run(src: &str) -> Result<RtValue, String> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -57,7 +57,7 @@ const CLAMP: &str = "
 #[test]
 fn a_blanket_impl_supplies_a_method_to_a_qualifying_type() {
     let src = format!("{CLAMP} (clamped (cell::new 9) (cell::new 1) (cell::new 5))");
-    assert_eq!(eval_ok(&src), RtValue::Int(5));
+    assert_eq!(eval_ok(&src), Value::Int(5));
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn one_blanket_impl_covers_two_concrete_types() {
          (+ (clamped (cell::new 9) (cell::new 1) (cell::new 5))
             (clamped (tick::new 9) (tick::new 1) (tick::new 5)))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(15));
+    assert_eq!(eval_ok(&src), Value::Int(15));
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn a_blanket_impl_satisfies_a_where_bound() {
          (defun mid<T> ((x T) (lo T) (hi T)) i32 (where (Clamp T)) (clamped x lo hi))
          (mid (cell::new 9) (cell::new 1) (cell::new 5))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(5));
+    assert_eq!(eval_ok(&src), Value::Int(5));
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn an_explicit_impl_wins_over_the_blanket() {
          (impl Clamp tick (clamped ((self Self) (lo Self) (hi Self)) i32 999))
          (clamped (tick::new 9) (tick::new 1) (tick::new 5))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(999));
+    assert_eq!(eval_ok(&src), Value::Int(999));
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn a_blanket_provided_method_is_reachable_through_a_trait_object() {
         (impl<T> Doubled T (where (Ranked T)))
         (defun peek ((d :dyn Doubled)) i32 (doubled d))
         (peek (cell::new 7))";
-    assert_eq!(eval_ok(src), RtValue::Int(14));
+    assert_eq!(eval_ok(src), Value::Int(14));
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn a_blanket_impls_body_may_use_its_declared_bounds() {
            (doubled ((self Self)) i32 (* 2 (rank self))))
          (doubled (cell::new 7))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(14));
+    assert_eq!(eval_ok(&src), Value::Int(14));
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn a_blanket_impls_body_may_call_a_sibling_method_on_self() {
            (twice-halved ((self Self)) i32 (/ (halved self) 2)))
          (twice-halved (cell::new 20))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(5));
+    assert_eq!(eval_ok(&src), Value::Int(5));
 }
 
 #[test]
@@ -242,7 +242,7 @@ fn a_blanket_impls_body_is_checked_against_its_associated_type_binding() {
            (type Item i32)
            (unwrap ((self Self)) Item (rank self)))"
     );
-    assert_eq!(eval_ok(&ok), RtValue::Unit);
+    assert_eq!(eval_ok(&ok), Value::Empty);
     let bad = format!(
         "{boxed}
          (impl<T> Boxed T (where (Ranked T))
@@ -278,5 +278,5 @@ fn an_impl_over_a_type_constructor_is_not_a_blanket_impl() {
         (impl<T> Sized2 Vector<T> (size ((self Self)) i32 7))
         (defun build () Vector<i32> (Vector::new))
         (let ((v (build))) (push v 1) (size v))";
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }

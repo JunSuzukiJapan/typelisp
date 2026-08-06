@@ -4,7 +4,7 @@
 //! rejected the first time `Vector<T>` was attempted).
 
 extern crate typelisp;
-use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, RtValue, TopLevel};
+use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
 
 fn check(src: &str) -> Result<TopLevel, Error> {
     let mut h = Heap::with_capacity(8192);
@@ -19,13 +19,13 @@ fn check(src: &str) -> Result<TopLevel, Error> {
     Ok(last.expect("no forms"))
 }
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(v) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -35,7 +35,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -50,7 +50,7 @@ fn eval_string(src: &str) -> String {
     let interp = Interp::new();
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -58,7 +58,7 @@ fn eval_string(src: &str) -> String {
         }
     }
     match last {
-        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        typelisp::Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
 }
@@ -67,7 +67,7 @@ fn eval_string(src: &str) -> String {
 fn new_makes_an_empty_vector_with_len_zero() {
     let src = "(defun make-v () Vector<i32> (Vector::new))
                (len (make-v))";
-    assert_eq!(eval_ok(src), RtValue::Int(0));
+    assert_eq!(eval_ok(src), Value::Int(0));
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn push_then_get_round_trips() {
                  (push v 2)
                  (push v 3)
                  (get v 1))";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn push_increments_len() {
                  (push v 10)
                  (push v 20)
                  (len v))";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn set_overwrites_an_existing_element() {
                  (push v 2)
                  (set v 0 99)
                  (get v 0))";
-    assert_eq!(eval_ok(src), RtValue::Int(99));
+    assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn pop_removes_and_returns_some_of_the_last_element() {
                    (push v 3)
                    (match (pop v) ((Some x) x) ((None) -1))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+    assert_eq!(eval_ok(src), Value::Int(3));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn pop_shrinks_len_by_one() {
                  (push v 2)
                  (pop v)
                  (len v))";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn pop_on_an_empty_vector_returns_none() {
                  (let ((v (make-v)))
                    (match (pop v) ((Some x) x) ((None) -1))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(-1));
+    assert_eq!(eval_ok(src), Value::Int(-1));
 }
 
 #[test]
@@ -175,7 +175,7 @@ fn two_vectors_with_different_element_types_coexist() {
                  (push vi 1)
                  (push vs \"x\")
                  (+ (get vi 0) (len vs)))";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -192,7 +192,7 @@ fn vector_of_sexpr_gets_elements_back_as_sexprs() {
                  (push v '41)
                  (push v '42)
                  (sexpr-int (get v 1)))";
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 // ---- CL-order `push`/setf-able `(get ...)` place -----------------------------
@@ -208,7 +208,7 @@ fn push_accepts_cl_argument_order_too() {
                  (push v 2)
                  (push 3 v)
                  (get v 2))";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+    assert_eq!(eval_ok(src), Value::Int(3));
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn setf_get_writes_through_a_vector_element() {
                  (push v 2)
                  (setf (get v 0) 99)
                  (get v 0))";
-    assert_eq!(eval_ok(src), RtValue::Int(99));
+    assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
@@ -234,5 +234,5 @@ fn incf_on_a_call_form_place_evaluates_the_index_exactly_once() {
                  (push v 20)
                  (incf (get v (progn (setf idx (+ idx 1)) idx)) 10)
                  (get v 0))";
-    assert_eq!(eval_ok(src), RtValue::Int(20));
+    assert_eq!(eval_ok(src), Value::Int(20));
 }

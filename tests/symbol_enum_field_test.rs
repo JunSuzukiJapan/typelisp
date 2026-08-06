@@ -30,7 +30,7 @@
 //! from a runtime value shape at all, and it goes away structurally when
 //! `RtValue::Data` — the thing it falls back to — is deleted.
 
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
 fn env() -> (Heap, Checker, Interp) {
     let mut h = Heap::with_capacity(1 << 16);
@@ -41,10 +41,10 @@ fn env() -> (Heap, Checker, Interp) {
     (h, chk, interp)
 }
 
-fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<RtValue, EvalError> {
+fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<Value, EvalError> {
     let r = Reader::new();
     let vs = r.read_all(h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(h, interp, v).expect("check failed");
         if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
@@ -62,9 +62,9 @@ const TAG_ENUM: &str = "(defenum tag (named Symbol) (anon)) \
                         (defun tag-name ((t tag)) Symbol \
                           (match t ((named s) s) ((anon) :anon)))";
 
-fn assert_named(h: &Heap, v: &RtValue, expected: &str) {
+fn assert_named(h: &Heap, v: &Value, expected: &str) {
     match v {
-        RtValue::Sexpr(typelisp::Value::Symbol(id)) => assert_eq!(h.symbol_name(*id), expected),
+        typelisp::Value::Symbol(id) => assert_eq!(h.symbol_name(*id), expected),
         other => panic!("expected the symbol `{}`, got {:?}", expected, other),
     }
 }
@@ -77,7 +77,7 @@ fn an_interpreted_enum_with_a_symbol_field_is_a_heap_box() {
     let v = eval_in(&mut h, &mut chk, &mut interp, &format!("{} (tag::named :hello)", TAG_ENUM))
         .expect("eval failed");
     match v {
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) => {
+        typelisp::Value::Boxed(id) => {
             assert!(h.is_enum(id), "expected a heap enum box");
             assert_eq!(h.enum_field_count(id), 1);
             match h.enum_field(id, 0) {
@@ -134,7 +134,7 @@ fn a_compiled_function_returning_the_enum_decodes_it_as_an_enum() {
     }
     let v = eval_in(&mut h, &mut chk, &mut interp, "(make-tag :hello)").expect("compiled call failed");
     match v {
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) => {
+        typelisp::Value::Boxed(id) => {
             assert!(h.is_enum(id), "expected a heap enum box");
             match h.enum_field(id, 0) {
                 typelisp::Value::Symbol(s) => assert_eq!(h.symbol_name(s), ":hello"),

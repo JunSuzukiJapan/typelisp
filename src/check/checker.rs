@@ -4825,10 +4825,10 @@ impl Checker {
             // substitution changed them) are freshly allocated and reachable
             // from nothing anyone else roots, while checking the body below
             // allocates — macro expansion, at least. Rooted permanently, like
-            // the forms `materialize_blanket_impl` builds: the root stack is
-            // LIFO and a macro expansion runs the interpreter, whose
-            // `sync_roots` owns that stack. The body forms are the caller's
-            // to keep alive, exactly as in `check_impl`.
+            // the forms `materialize_blanket_impl` builds: the LIFO root
+            // stack cannot express "alive until this check finishes" when a
+            // macro expansion runs the interpreter in between. The body forms
+            // are the caller's to keep alive, exactly as in `check_impl`.
             for &e in &elems[..body_start.min(elems.len())] {
                 heap.push_permanent_root(e);
             }

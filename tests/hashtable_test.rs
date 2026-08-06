@@ -3,21 +3,21 @@
 //! (see `Checker::check_assoc_call`'s `AssocCall`/`subst` handling).
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue, Value};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
 /// Read, type-check, and evaluate a program; return the last expression's
 /// value alongside the heap (so `Sexpr` results can be inspected).
-fn run(src: &str) -> Result<(RtValue, Heap), EvalError> {
+fn run(src: &str) -> Result<(Value, Heap), EvalError> {
     run_with_capacity(src, 1 << 16)
 }
 
-fn run_with_capacity(src: &str, capacity: usize) -> Result<(RtValue, Heap), EvalError> {
+fn run_with_capacity(src: &str, capacity: usize) -> Result<(Value, Heap), EvalError> {
     let mut h = Heap::with_capacity(capacity);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl)? {
@@ -27,7 +27,7 @@ fn run_with_capacity(src: &str, capacity: usize) -> Result<(RtValue, Heap), Eval
     Ok((last, h))
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed").0
 }
 
@@ -37,7 +37,7 @@ fn eval_ok(src: &str) -> RtValue {
 fn eval_string(src: &str) -> String {
     let (v, h) = run(src).expect("eval failed");
     match v {
-        RtValue::Sexpr(Value::Str(id)) => h.string(id).to_string(),
+        Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
 }
@@ -65,7 +65,7 @@ fn eval_string(src: &str) -> String {
 /// form, and checking that later form needs the earlier one already
 /// registered, the same per-form check-then-exec interleaving
 /// `crate::prelude::load` itself uses.
-fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(RtValue, Heap), EvalError> {
+fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(Value, Heap), EvalError> {
     let mut check_heap = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut check_interp = Interp::new();
@@ -83,7 +83,7 @@ fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(RtValue,
     }
 
     let mut h = Heap::with_capacity(capacity);
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for tl in tls {
         if let Some(val) = check_interp.exec(&mut h, tl)? {
             last = val;
@@ -146,7 +146,7 @@ fn new_infers_type_args_from_return_type() {
     // type), the same way a field-less `None` learns its type argument.
     let src = "(defun make-h () HashTable<i32,string> (HashTable::new))
                (count (make-h))";
-    assert_eq!(eval_ok(src), RtValue::Int(0));
+    assert_eq!(eval_ok(src), Value::Int(0));
 }
 
 // ---- CRUD ---------------------------------------------------------------------
@@ -194,7 +194,7 @@ fn count_tracks_distinct_keys() {
                    (set h 1 \"c\")
                    (count h)))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -234,7 +234,7 @@ fn clear_empties_the_table() {
                    (clear h)
                    (count h)))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(0));
+    assert_eq!(eval_ok(src), Value::Int(0));
 }
 
 // ---- key types ------------------------------------------------------------
@@ -247,7 +247,7 @@ fn string_keys_work() {
                    (set h \"x\" 42)
                    (match (get h \"x\") ((Some v) v) ((None) 0))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 // ---- static typing --------------------------------------------------------
@@ -275,7 +275,7 @@ fn instance_method_dispatch_substitutes_k_and_v_independently() {
                    (set b \"k\" \"v\")
                    (match (get a 1) ((Some v) v) ((None) 0))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(100));
+    assert_eq!(eval_ok(src), Value::Int(100));
 }
 
 // ---- traversal (keys/values/entries) ---------------------------------------
@@ -289,7 +289,7 @@ fn keys_returns_a_vector_with_one_entry_per_distinct_key() {
                    (set h 2 \"b\")
                    (len (keys h))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -301,7 +301,7 @@ fn values_returns_a_vector_with_one_entry_per_distinct_key() {
                    (set h 2 \"b\")
                    (len (values h))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -314,7 +314,7 @@ fn entries_returns_a_vector_with_one_entry_per_distinct_key() {
                    (set h 1 \"c\")
                    (len (entries h))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -324,7 +324,7 @@ fn keys_values_entries_on_an_empty_table_are_empty() {
                  (let ((h (make-h)))
                    (+ (len (keys h)) (+ (len (values h)) (len (entries h))))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(0));
+    assert_eq!(eval_ok(src), Value::Int(0));
 }
 
 // ---- GC pressure ------------------------------------------------------------
@@ -351,8 +351,7 @@ fn sexpr_values_survive_gc_pressure() {
                (f)";
     let (v, h) = run_with_capacity_and_prelude(src, 96).expect("eval failed");
     match v {
-        RtValue::Sexpr(sv) => assert_eq!(sexpr_to_string(&h, sv), "(a b c d e)"),
-        other => panic!("expected a Sexpr value, got {:?}", other),
+        sv => assert_eq!(sexpr_to_string(&h, sv), "(a b c d e)"),
     }
 }
 

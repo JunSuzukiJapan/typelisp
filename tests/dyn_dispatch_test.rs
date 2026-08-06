@@ -7,9 +7,9 @@
 //! JIT tier and `compile_file_test.rs` the AOT one.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, Heap, Interp, Reader, RtValue};
+use typelisp::{load_compiler, load_prelude, Checker, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<RtValue, String> {
+fn run(src: &str) -> Result<Value, String> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -17,7 +17,7 @@ fn run(src: &str) -> Result<RtValue, String> {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).map_err(|e| format!("{:?}", e))?;
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).map_err(|e| format!("{:?}", e))?;
         if let Some(val) = interp.exec(&mut h, tl).map_err(|e| format!("{:?}", e))? {
@@ -27,7 +27,7 @@ fn run(src: &str) -> Result<RtValue, String> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -44,7 +44,7 @@ fn eval_string(src: &str) -> String {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -52,7 +52,7 @@ fn eval_string(src: &str) -> String {
         }
     }
     match last {
-        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        typelisp::Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
 }
@@ -108,7 +108,7 @@ fn a_second_slot_dispatches_independently_of_the_first() {
          (defun count-sides ((d :dyn Drawable)) i32 (sides d))
          (+ (count-sides (circle::new 3)) (count-sides (square::new 2)))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(4));
+    assert_eq!(eval_ok(&src), Value::Int(4));
 }
 
 #[test]
@@ -119,7 +119,7 @@ fn a_method_argument_and_return_value_cross_the_vtable() {
         (impl Scaler fixed (scale ((self Self) (k i32)) i32 (* self::n k)))
         (defun apply-scale ((s :dyn Scaler) (k i32)) i32 (scale s k))
         (apply-scale (fixed::new 6) 7)"#;
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 // ---- explicit boxing ----------------------------------------------------
@@ -178,7 +178,7 @@ fn an_associated_type_is_pinned_positionally() {
           (push v 10)
           (push v 32)
           (total (iter v)))"#;
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]
@@ -439,7 +439,7 @@ fn upcasting_to_a_non_first_supertrait_switches_to_that_supertraits_vtable() {
          (defun via ((d :dyn D)) i32 (only-c d))
          (via (cell::new 0))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(2));
+    assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 #[test]
@@ -452,7 +452,7 @@ fn a_non_first_supertrait_upcast_still_dispatches_per_concrete_type() {
          (defun via ((d :dyn D)) i32 (only-c d))
          (+ (* 10 (via (cell::new 0))) (via (pair::new 0)))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(25));
+    assert_eq!(eval_ok(&src), Value::Int(25));
 }
 
 #[test]
@@ -463,7 +463,7 @@ fn an_explicit_as_upcasts_to_a_non_first_supertrait() {
          (defun via ((d :dyn D)) i32 (only-c (as :dyn C d)))
          (via (cell::new 0))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(2));
+    assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 #[test]
@@ -488,7 +488,7 @@ fn upcasting_twice_reaches_a_supertrait_of_the_supertrait() {
         (defun only-c ((c :dyn C)) i32 (only-a c))
         (defun via ((d :dyn D)) i32 (only-c d))
         (via (cell::new 0))"#;
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -516,7 +516,7 @@ fn upcasting_reaches_a_trait_that_is_a_prefix_of_the_source_but_not_of_the_step(
         (defun only-c ((c :dyn C)) i32 (only-a c))
         (defun via ((d :dyn D)) i32 (only-c d))
         (via (cell::new 0))"#;
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -530,7 +530,7 @@ fn an_upcast_box_is_still_a_trait_object_for_match() {
          (defun via ((d :dyn D)) i32 (name-of d))
          (+ (via (cell::new 0)) (via (pair::new 0)))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(30));
+    assert_eq!(eval_ok(&src), Value::Int(30));
 }
 
 #[test]
@@ -546,5 +546,5 @@ fn upcasting_to_the_first_supertrait_of_a_multi_supertrait_chain_works() {
         (defun only-b ((b :dyn B)) i32 (b-tag b))
         (defun via ((d :dyn D)) i32 (only-b d))
         (via (cell::new 0))"#;
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }

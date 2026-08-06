@@ -13,7 +13,7 @@
 
 extern crate typelisp;
 use std::cell::RefCell;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
 // `abs`/`signum`/`gcd`/`lcm`/`rem` (and `f64` `mod`/`rem`) are `prelude.rs`
 // methods, not registry builtins, so the prelude must be loaded. Shared
@@ -22,7 +22,7 @@ thread_local! {
     static CTX: RefCell<Option<(Heap, Checker, Interp)>> = const { RefCell::new(None) };
 }
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     CTX.with(|cell| {
         let mut opt = cell.borrow_mut();
         let (h, chk, interp) = opt.get_or_insert_with(|| {
@@ -34,7 +34,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
         });
         let r = Reader::new();
         let vs = r.read_all(h, src).expect("read failed");
-        let mut last = RtValue::Unit;
+        let mut last = Value::Empty;
         for v in vs {
             let tl = chk.check_form(h, &*interp, v).expect("check failed");
             if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
@@ -45,7 +45,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     })
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -69,18 +69,18 @@ fn type_error(src: &str) {
 /// scalar unification, so reading one needs the heap it lives in — which is
 /// the same thread-local `CTX` the evaluation used, so call sites stay
 /// unchanged.
-fn as_f64(actual: RtValue) -> f64 {
+fn as_f64(actual: Value) -> f64 {
     CTX.with(|cell| {
         let opt = cell.borrow();
         let (h, _, _) = opt.as_ref().expect("no evaluation has run yet");
         match actual {
-            RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(id) => h.float_value(id),
+            typelisp::Value::Boxed(id) if h.is_float(id) => h.float_value(id),
             other => panic!("expected an f64, got {:?}", other),
         }
     })
 }
 
-fn assert_close(actual: RtValue, expected: f64) {
+fn assert_close(actual: Value, expected: f64) {
     let f = as_f64(actual);
     assert!((f - expected).abs() < 1e-9, "{} != {}", f, expected);
 }
@@ -90,13 +90,13 @@ fn assert_close(actual: RtValue, expected: f64) {
 #[test]
 fn i64_arithmetic() {
     let src = "(defun add ((a i64) (b i64)) i64 (+ a b)) (add 3 4)";
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
 fn i64_comparison() {
     let src = "(defun lt ((a i64) (b i64)) bool (< a b)) (lt 3 4)";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
@@ -109,16 +109,16 @@ fn i64_divide_by_zero_panics() {
 fn i64_mod_is_floored_and_rem_is_truncated() {
     let m = "(defun f ((a i64) (b i64)) i64 (mod a b)) (f -7 3)";
     let r = "(defun f ((a i64) (b i64)) i64 (rem a b)) (f -7 3)";
-    assert_eq!(eval_ok(m), RtValue::Int(2));
-    assert_eq!(eval_ok(r), RtValue::Int(-1));
+    assert_eq!(eval_ok(m), Value::Int(2));
+    assert_eq!(eval_ok(r), Value::Int(-1));
 }
 
 #[test]
 fn i64_abs_and_signum() {
     let a = "(defun f ((x i64)) i64 (abs x)) (f -9000000000)";
     let s = "(defun f ((x i64)) i64 (signum x)) (f -9000000000)";
-    assert_eq!(eval_ok(a), RtValue::Int(9000000000));
-    assert_eq!(eval_ok(s), RtValue::Int(-1));
+    assert_eq!(eval_ok(a), Value::Int(9000000000));
+    assert_eq!(eval_ok(s), Value::Int(-1));
 }
 
 #[test]
@@ -126,9 +126,9 @@ fn i64_gcd_and_lcm() {
     let g = "(defun f ((a i64) (b i64)) i64 (gcd a b)) (f 12 18)";
     let l = "(defun f ((a i64) (b i64)) i64 (lcm a b)) (f 4 6)";
     let l0 = "(defun f ((a i64) (b i64)) i64 (lcm a b)) (f 0 5)";
-    assert_eq!(eval_ok(g), RtValue::Int(6));
-    assert_eq!(eval_ok(l), RtValue::Int(12));
-    assert_eq!(eval_ok(l0), RtValue::Int(0));
+    assert_eq!(eval_ok(g), Value::Int(6));
+    assert_eq!(eval_ok(l), Value::Int(12));
+    assert_eq!(eval_ok(l0), Value::Int(0));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn int_literal_adopts_i64_from_the_dispatched_operands_expected_type() {
     // method expects `i64` for its second operand too — the literal `1`
     // adopts that expected type rather than forcing dispatch back to `i32`.
     let src = "(defun f ((a i64)) i64 (+ a 1)) (f 1)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn f64_arithmetic() {
 #[test]
 fn f64_comparison() {
     let src = "(defun lt ((a f64) (b f64)) bool (< a b)) (lt 1.0 2.0)";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
@@ -218,30 +218,30 @@ fn f64_truncate() {
 #[test]
 fn i64_floor_div() {
     // CL: (floor 7 2) => 3, 1 ; (floor -7 2) => -4, 1
-    assert_eq!(eval_ok("(car (floor-div 7 2))"), RtValue::Int(3));
-    assert_eq!(eval_ok("(cdr (floor-div 7 2))"), RtValue::Int(1));
-    assert_eq!(eval_ok("(car (floor-div -7 2))"), RtValue::Int(-4));
-    assert_eq!(eval_ok("(cdr (floor-div -7 2))"), RtValue::Int(1));
+    assert_eq!(eval_ok("(car (floor-div 7 2))"), Value::Int(3));
+    assert_eq!(eval_ok("(cdr (floor-div 7 2))"), Value::Int(1));
+    assert_eq!(eval_ok("(car (floor-div -7 2))"), Value::Int(-4));
+    assert_eq!(eval_ok("(cdr (floor-div -7 2))"), Value::Int(1));
 }
 
 #[test]
 fn i64_ceiling_div() {
     // CL: (ceiling 7 2) => 4, -1 ; (ceiling -7 2) => -3, -1 ; exact division
     // carries no remainder.
-    assert_eq!(eval_ok("(car (ceiling-div 7 2))"), RtValue::Int(4));
-    assert_eq!(eval_ok("(cdr (ceiling-div 7 2))"), RtValue::Int(-1));
-    assert_eq!(eval_ok("(car (ceiling-div -7 2))"), RtValue::Int(-3));
-    assert_eq!(eval_ok("(cdr (ceiling-div -7 2))"), RtValue::Int(-1));
-    assert_eq!(eval_ok("(car (ceiling-div 6 2))"), RtValue::Int(3));
-    assert_eq!(eval_ok("(cdr (ceiling-div 6 2))"), RtValue::Int(0));
+    assert_eq!(eval_ok("(car (ceiling-div 7 2))"), Value::Int(4));
+    assert_eq!(eval_ok("(cdr (ceiling-div 7 2))"), Value::Int(-1));
+    assert_eq!(eval_ok("(car (ceiling-div -7 2))"), Value::Int(-3));
+    assert_eq!(eval_ok("(cdr (ceiling-div -7 2))"), Value::Int(-1));
+    assert_eq!(eval_ok("(car (ceiling-div 6 2))"), Value::Int(3));
+    assert_eq!(eval_ok("(cdr (ceiling-div 6 2))"), Value::Int(0));
 }
 
 #[test]
 fn i64_truncate_div() {
     // CL: (truncate -7 2) => -3, -1 (remainder's sign follows the dividend,
     // unlike `floor-div`'s).
-    assert_eq!(eval_ok("(car (truncate-div -7 2))"), RtValue::Int(-3));
-    assert_eq!(eval_ok("(cdr (truncate-div -7 2))"), RtValue::Int(-1));
+    assert_eq!(eval_ok("(car (truncate-div -7 2))"), Value::Int(-3));
+    assert_eq!(eval_ok("(cdr (truncate-div -7 2))"), Value::Int(-1));
 }
 
 #[test]
@@ -249,14 +249,14 @@ fn i64_round_div_ties_to_even() {
     // CL round-half-to-even: (round 7 2) => 4, -1 (3.5 -> 4, even);
     // (round 5 2) => 2, 1 (2.5 -> 2, even); (round 3 2) => 2, -1 (1.5 -> 2,
     // even); (round -5 2) => -2, -1 (-2.5 -> -2, even).
-    assert_eq!(eval_ok("(car (round-div 7 2))"), RtValue::Int(4));
-    assert_eq!(eval_ok("(cdr (round-div 7 2))"), RtValue::Int(-1));
-    assert_eq!(eval_ok("(car (round-div 5 2))"), RtValue::Int(2));
-    assert_eq!(eval_ok("(cdr (round-div 5 2))"), RtValue::Int(1));
-    assert_eq!(eval_ok("(car (round-div 3 2))"), RtValue::Int(2));
-    assert_eq!(eval_ok("(cdr (round-div 3 2))"), RtValue::Int(-1));
-    assert_eq!(eval_ok("(car (round-div -5 2))"), RtValue::Int(-2));
-    assert_eq!(eval_ok("(cdr (round-div -5 2))"), RtValue::Int(-1));
+    assert_eq!(eval_ok("(car (round-div 7 2))"), Value::Int(4));
+    assert_eq!(eval_ok("(cdr (round-div 7 2))"), Value::Int(-1));
+    assert_eq!(eval_ok("(car (round-div 5 2))"), Value::Int(2));
+    assert_eq!(eval_ok("(cdr (round-div 5 2))"), Value::Int(1));
+    assert_eq!(eval_ok("(car (round-div 3 2))"), Value::Int(2));
+    assert_eq!(eval_ok("(cdr (round-div 3 2))"), Value::Int(-1));
+    assert_eq!(eval_ok("(car (round-div -5 2))"), Value::Int(-2));
+    assert_eq!(eval_ok("(cdr (round-div -5 2))"), Value::Int(-1));
 }
 
 #[test]
@@ -316,7 +316,7 @@ fn random_is_within_bounds() {
     let src = "(defun f () i32 (random 10)) (f)";
     for _ in 0..50 {
         match eval_ok(src) {
-            RtValue::Int(n) => assert!((0..10).contains(&n), "{} out of range", n),
+            Value::Int(n) => assert!((0..10).contains(&n), "{} out of range", n),
             other => panic!("expected an Int, got {:?}", other),
         }
     }
@@ -329,7 +329,7 @@ fn random_varies_across_calls() {
     let src = "(defun f () i32 (random 1000000)) (f)";
     let mut seen = std::collections::HashSet::new();
     for _ in 0..20 {
-        if let RtValue::Int(n) = eval_ok(src) {
+        if let Value::Int(n) = eval_ok(src) {
             seen.insert(n);
         }
     }

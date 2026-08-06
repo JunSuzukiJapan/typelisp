@@ -11,16 +11,16 @@
 //! the process's stdout, so the suite is safe to run in parallel.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, Checker, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<RtValue, String> {
+fn run(src: &str) -> Result<Value, String> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).map_err(|e| format!("{:?}", e))?;
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).map_err(|e| format!("{:?}", e))?;
         if let Some(val) = interp.exec(&mut h, tl).map_err(|e| format!("{:?}", e))? {
@@ -42,7 +42,7 @@ fn eval_string(src: &str) -> String {
     load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -50,7 +50,7 @@ fn eval_string(src: &str) -> String {
         }
     }
     match last {
-        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        typelisp::Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
 }

@@ -15,9 +15,9 @@
 //! specializer matches the call.
 
 extern crate typelisp;
-use typelisp::{load_prelude, load_compiler, Checker, Error, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, load_compiler, Checker, Error, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<RtValue, String> {
+fn run(src: &str) -> Result<Value, String> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let mut chk = Checker::new();
@@ -25,7 +25,7 @@ fn run(src: &str) -> Result<RtValue, String> {
     load_prelude(&mut h, &mut chk, &mut interp);
     load_compiler(&mut h, &mut chk, &mut interp);
     let vs = r.read_all(&mut h, src).map_err(|e| format!("{:?}", e))?;
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).map_err(|e| format!("{:?}", e))?;
         if let Some(val) = interp.exec(&mut h, tl).map_err(|e| format!("{:?}", e))? {
@@ -35,7 +35,7 @@ fn run(src: &str) -> Result<RtValue, String> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -51,7 +51,7 @@ fn remove_resolves_to_hashtable_instance_method_for_a_hashtable_receiver() {
           (set h 1 9)
           (unwrap (remove h 1)))
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(9));
+    assert_eq!(eval_ok(src), Value::Int(9));
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn count_resolves_to_hashtable_instance_method_for_a_hashtable_receiver() {
           (set h 1 9)
           (count h))
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn count_if_resolves_to_the_free_generic_combinator_over_an_iterator() {
     let src = "(defun mkv () Vector<i32> \
                  (let ((v (the Vector<i32> (Vector::new)))) (push v 1) (push v 2) (push v 1) v)) \
                (count-if (iter (mkv)) (lambda ((n i32)) bool (= n 1)))";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn integer_literal_still_gets_the_free_functions_exact_parameter_width() {
     // against the real parameter type, this would fail to type-check at all
     // (a function expecting `i64` would see an `i32` literal).
     let src = "(defun takes-i64 ((x i64)) i64 x) (takes-i64 42)";
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]

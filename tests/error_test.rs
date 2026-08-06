@@ -5,7 +5,7 @@
 
 extern crate typelisp;
 use std::cell::RefCell;
-use typelisp::{load_prelude, Checker, Error, Heap, Interp, Path, Reader, RtValue, TopLevel, Type};
+use typelisp::{load_prelude, Checker, Error, Heap, Interp, Path, Reader, Value, TopLevel, Type};
 
 fn program(src: &str) -> Result<TopLevel, Error> {
     let mut h = Heap::with_capacity(4096);
@@ -146,11 +146,11 @@ fn with_ctx<R>(f: impl FnOnce(&mut Heap, &mut Checker, &mut Interp) -> R) -> R {
 
 /// Check and run `src` against the prelude-loaded context, returning the last
 /// value produced.
-fn run(src: &str) -> Result<RtValue, Error> {
+fn run(src: &str) -> Result<Value, Error> {
     with_ctx(|h, chk, interp| {
         let r = Reader::new();
         let vs = r.read_all(h, src).expect("read failed");
-        let mut last = RtValue::Unit;
+        let mut last = Value::Empty;
         for v in vs {
             let tl = chk.check_form(h, &*interp, v).map_err(Error::into_kind)?;
             if let Some(val) = interp.exec(h, tl).map_err(|e| Error::TypeError(e.to_string()))? {
@@ -170,7 +170,7 @@ fn run_str(src: &str) -> String {
         let opt = cell.borrow();
         let (h, _, _) = opt.as_ref().expect("no evaluation has run yet");
         match v {
-            RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+            typelisp::Value::Str(id) => h.string(id).to_string(),
             other => panic!("expected a string, got {:?}", other),
         }
     })

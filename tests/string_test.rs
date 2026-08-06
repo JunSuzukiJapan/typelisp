@@ -7,15 +7,15 @@
 //! same pattern as `HashTable`.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -25,20 +25,20 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
 /// Like [`run`], but with the prelude loaded first — needed for `and` (a
 /// `defmacro` in `src/prelude.rs`, not a checker-native special form).
-fn run_with_prelude(src: &str) -> Result<RtValue, EvalError> {
+fn run_with_prelude(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -48,7 +48,7 @@ fn run_with_prelude(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok_with_prelude(src: &str) -> RtValue {
+fn eval_ok_with_prelude(src: &str) -> Value {
     run_with_prelude(src).expect("eval failed")
 }
 
@@ -61,7 +61,7 @@ fn eval_string(src: &str) -> String {
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -69,7 +69,7 @@ fn eval_string(src: &str) -> String {
         }
     }
     match last {
-        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        typelisp::Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
 }
@@ -104,12 +104,12 @@ fn string_downcase() {
 
 #[test]
 fn string_length() {
-    assert_eq!(eval_ok(r#"(length "hello")"#), RtValue::Int(5));
+    assert_eq!(eval_ok(r#"(length "hello")"#), Value::Int(5));
 }
 
 #[test]
 fn string_ref_returns_the_char_at_an_index() {
-    assert_eq!(eval_ok(r#"(ref "hello" 1)"#), RtValue::Char('e'));
+    assert_eq!(eval_ok(r#"(ref "hello" 1)"#), Value::Char('e'));
 }
 
 #[test]
@@ -153,9 +153,9 @@ fn string_eq_is_identity_not_value_equality() {
     // `docs/cl-equivalence-catalog.md`'s eq/eql/equal/equalp section) — two
     // separately-evaluated literals with equal content are not `eq`.
     // Content comparison is `equal`/`equalp` instead (below).
-    assert_eq!(eval_ok(r#"(eq "abc" "abc")"#), RtValue::Bool(false));
+    assert_eq!(eval_ok(r#"(eq "abc" "abc")"#), Value::Bool(false));
     // Nor are two separately-built strings with equal content.
-    assert_eq!(eval_ok(r#"(eq (append "a" "b") (append "a" "b"))"#), RtValue::Bool(false));
+    assert_eq!(eval_ok(r#"(eq (append "a" "b") (append "a" "b"))"#), Value::Bool(false));
 }
 
 /// The positive half of [`string_eq_is_identity_not_value_equality`]: a
@@ -170,43 +170,43 @@ fn string_eq_is_identity_not_value_equality() {
 /// the first three were previously true.
 #[test]
 fn string_eq_survives_being_stored_and_read_back() {
-    assert_eq!(eval_ok(r#"(let ((s "abc")) (eq s s))"#), RtValue::Bool(true));
+    assert_eq!(eval_ok(r#"(let ((s "abc")) (eq s s))"#), Value::Bool(true));
     assert_eq!(
         eval_ok(r#"(defun id ((s string)) string s) (let ((s "abc")) (eq s (id s)))"#),
-        RtValue::Bool(true),
+        Value::Bool(true),
         "through a call"
     );
-    assert_eq!(eval_ok(r#"(defvar (*s* string) "abc") (eq *s* *s*)"#), RtValue::Bool(true), "through a global");
+    assert_eq!(eval_ok(r#"(defvar (*s* string) "abc") (eq *s* *s*)"#), Value::Bool(true), "through a global");
     assert_eq!(
         eval_ok(
             r#"(let ((s "abc")) (let ((c (sexpr-cons (Str s) (quote ())))) (eq s (sexpr-str (sexpr-car c)))))"#
         ),
-        RtValue::Bool(true),
+        Value::Bool(true),
         "through a cons cell"
     );
     assert_eq!(
         eval_ok(r#"(defstruct bx (s string)) (let ((s "abc")) (let ((b (bx::new s))) (eq s b::s)))"#),
-        RtValue::Bool(true),
+        Value::Bool(true),
         "through a struct field"
     );
 }
 
 #[test]
 fn string_equal_compares_value_equality() {
-    assert_eq!(eval_ok(r#"(equal "abc" "abc")"#), RtValue::Bool(true));
-    assert_eq!(eval_ok(r#"(equal "abc" "abd")"#), RtValue::Bool(false));
+    assert_eq!(eval_ok(r#"(equal "abc" "abc")"#), Value::Bool(true));
+    assert_eq!(eval_ok(r#"(equal "abc" "abd")"#), Value::Bool(false));
 }
 
 #[test]
 fn string_equalp_ignores_ascii_case() {
-    assert_eq!(eval_ok(r#"(equalp "ABC" "abc")"#), RtValue::Bool(true));
-    assert_eq!(eval_ok(r#"(equalp "abc" "abd")"#), RtValue::Bool(false));
+    assert_eq!(eval_ok(r#"(equalp "ABC" "abc")"#), Value::Bool(true));
+    assert_eq!(eval_ok(r#"(equalp "abc" "abd")"#), Value::Bool(false));
 }
 
 #[test]
 fn string_lt_compares_lexicographically() {
-    assert_eq!(eval_ok(r#"(lt "abc" "abd")"#), RtValue::Bool(true));
-    assert_eq!(eval_ok(r#"(lt "abd" "abc")"#), RtValue::Bool(false));
+    assert_eq!(eval_ok(r#"(lt "abc" "abd")"#), Value::Bool(true));
+    assert_eq!(eval_ok(r#"(lt "abd" "abc")"#), Value::Bool(false));
 }
 
 #[test]
@@ -218,44 +218,44 @@ fn string_method_on_wrong_type_is_a_type_error() {
 
 #[test]
 fn char_upcase() {
-    assert_eq!(eval_ok(r"(upcase #\a)"), RtValue::Char('A'));
+    assert_eq!(eval_ok(r"(upcase #\a)"), Value::Char('A'));
 }
 
 #[test]
 fn char_downcase() {
-    assert_eq!(eval_ok(r"(downcase #\A)"), RtValue::Char('a'));
+    assert_eq!(eval_ok(r"(downcase #\A)"), Value::Char('a'));
 }
 
 #[test]
 fn char_eq_compares_value_equality() {
-    assert_eq!(eval_ok(r"(eq #\a #\a)"), RtValue::Bool(true));
-    assert_eq!(eval_ok(r"(eq #\a #\b)"), RtValue::Bool(false));
+    assert_eq!(eval_ok(r"(eq #\a #\a)"), Value::Bool(true));
+    assert_eq!(eval_ok(r"(eq #\a #\b)"), Value::Bool(false));
 }
 
 #[test]
 fn char_lt_compares_by_code_point() {
-    assert_eq!(eval_ok(r"(lt #\a #\b)"), RtValue::Bool(true));
-    assert_eq!(eval_ok(r"(lt #\b #\a)"), RtValue::Bool(false));
+    assert_eq!(eval_ok(r"(lt #\a #\b)"), Value::Bool(true));
+    assert_eq!(eval_ok(r"(lt #\b #\a)"), Value::Bool(false));
 }
 
 #[test]
 fn char_alpha_is_true_for_letters() {
-    assert_eq!(eval_ok(r"(alphap #\a)"), RtValue::Bool(true));
+    assert_eq!(eval_ok(r"(alphap #\a)"), Value::Bool(true));
 }
 
 #[test]
 fn char_alpha_is_false_for_digits() {
-    assert_eq!(eval_ok(r"(alphap #\5)"), RtValue::Bool(false));
+    assert_eq!(eval_ok(r"(alphap #\5)"), Value::Bool(false));
 }
 
 #[test]
 fn char_digit_is_true_for_digits() {
-    assert_eq!(eval_ok(r"(digitp #\5)"), RtValue::Bool(true));
+    assert_eq!(eval_ok(r"(digitp #\5)"), Value::Bool(true));
 }
 
 #[test]
 fn char_digit_is_false_for_letters() {
-    assert_eq!(eval_ok(r"(digitp #\a)"), RtValue::Bool(false));
+    assert_eq!(eval_ok(r"(digitp #\a)"), Value::Bool(false));
 }
 
 #[test]
@@ -277,5 +277,5 @@ fn eq_dispatches_separately_per_receiver_type() {
     // string half (`eq` on `Str` is identity, not content — see
     // `string_eq_is_identity_not_value_equality`).
     let src = r#"(defun f () bool (and (equal "x" "x") (eq #\x #\x))) (f)"#;
-    assert_eq!(eval_ok_with_prelude(src), RtValue::Bool(true));
+    assert_eq!(eval_ok_with_prelude(src), Value::Bool(true));
 }

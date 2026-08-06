@@ -7,9 +7,9 @@
 //! see straight through it.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, Heap, Interp, Reader, RtValue};
+use typelisp::{load_compiler, load_prelude, Checker, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<RtValue, String> {
+fn run(src: &str) -> Result<Value, String> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -17,7 +17,7 @@ fn run(src: &str) -> Result<RtValue, String> {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).map_err(|e| format!("{:?}", e))?;
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).map_err(|e| format!("{:?}", e))?;
         if let Some(val) = interp.exec(&mut h, tl).map_err(|e| format!("{:?}", e))? {
@@ -27,7 +27,7 @@ fn run(src: &str) -> Result<RtValue, String> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -44,7 +44,7 @@ fn eval_string(src: &str) -> String {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -52,7 +52,7 @@ fn eval_string(src: &str) -> String {
         }
     }
     match last {
-        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        typelisp::Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
 }
@@ -78,7 +78,7 @@ fn matching_a_trait_object_recovers_the_concrete_type_by_name() {
              (_ 0)))
          (+ (area (circle::new 2)) (area (square::new 5)))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(37));
+    assert_eq!(eval_ok(&src), Value::Int(37));
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn a_the_pattern_binds_the_whole_concrete_value() {
              (_ 0)))
          (side-of (square::new 7))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(7));
+    assert_eq!(eval_ok(&src), Value::Int(7));
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn an_unmatched_concrete_type_falls_through_to_the_catchall() {
            (match d ((circle r) r) (_ -1)))
          (area (square::new 5))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(-1));
+    assert_eq!(eval_ok(&src), Value::Int(-1));
 }
 
 #[test]
@@ -145,14 +145,14 @@ fn comparison_sees_through_the_box() {
          (defun same ((a :dyn Drawable) (b :dyn Drawable)) bool (equalp a b))
          (same (circle::new 3) (circle::new 3))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Bool(true));
+    assert_eq!(eval_ok(&src), Value::Bool(true));
 
     let differing = format!(
         "{SHAPES}
          (defun same ((a :dyn Drawable) (b :dyn Drawable)) bool (equalp a b))
          (same (circle::new 3) (circle::new 4))"
     );
-    assert_eq!(eval_ok(&differing), RtValue::Bool(false));
+    assert_eq!(eval_ok(&differing), Value::Bool(false));
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn identity_is_the_wrapped_object_not_the_box() {
          (defun same ((a :dyn Drawable) (b :dyn Drawable)) bool (eq a b))
          (let ((c (circle::new 3))) (same c c))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Bool(true));
+    assert_eq!(eval_ok(&src), Value::Bool(true));
 }
 
 // ---- storing in a Sexpr -------------------------------------------------

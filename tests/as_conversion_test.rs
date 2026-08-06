@@ -9,18 +9,18 @@
 //! table and the `i32`/`i64`-target relabeling it does.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
 /// Loads the prelude first — `unwrap`/`is-some`/`is-none` are `defmethod`s
 /// in `src/prelude.rs`, not checker-native.
-fn run_with_heap(src: &str) -> Result<(Heap, RtValue), EvalError> {
+fn run_with_heap(src: &str) -> Result<(Heap, Value), EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -30,11 +30,11 @@ fn run_with_heap(src: &str) -> Result<(Heap, RtValue), EvalError> {
     Ok((h, last))
 }
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     run_with_heap(src).map(|(_, v)| v)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -69,7 +69,7 @@ fn bignum(s: &str) -> num_bigint::BigInt {
 fn assert_bignum(src: &str, expected: &str) {
     let (h, v) = run_with_heap(src).expect("eval failed");
     match v {
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_bignum(id) => {
+        typelisp::Value::Boxed(id) if h.is_bignum(id) => {
             assert_eq!(*h.bignum_value(id), bignum(expected))
         }
         other => panic!("expected a bignum, got {:?}", other),
@@ -80,7 +80,7 @@ fn assert_bignum(src: &str, expected: &str) {
 fn assert_ratio(src: &str, numer: &str, denom: &str) {
     let (h, v) = run_with_heap(src).expect("eval failed");
     match v {
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_ratio(id) => {
+        typelisp::Value::Boxed(id) if h.is_ratio(id) => {
             let r = h.ratio_value(id);
             assert_eq!(*r.numer(), bignum(numer));
             assert_eq!(*r.denom(), bignum(denom));
@@ -95,7 +95,7 @@ fn assert_ratio(src: &str, numer: &str, denom: &str) {
 fn eval_f64(src: &str) -> f64 {
     let (h, v) = run_with_heap(src).expect("eval failed");
     match v {
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(id) => h.float_value(id),
+        typelisp::Value::Boxed(id) if h.is_float(id) => h.float_value(id),
         other => panic!("expected an f64, got {:?}", other),
     }
 }
@@ -104,32 +104,32 @@ fn eval_f64(src: &str) -> f64 {
 
 #[test]
 fn as_on_the_same_type_is_a_no_op() {
-    assert_eq!(eval_ok("(as i32 5)"), RtValue::Int(5));
+    assert_eq!(eval_ok("(as i32 5)"), Value::Int(5));
     assert_eq!(eval_f64("(as f64 2.5)"), 2.5);
-    assert_eq!(eval_ok("(as char #\\a)"), RtValue::Char('a'));
+    assert_eq!(eval_ok("(as char #\\a)"), Value::Char('a'));
 }
 
 #[test]
 fn try_as_on_the_same_type_wraps_in_some() {
     assert_eq!(
         eval_ok("(unwrap (try-as i32 5))"),
-        RtValue::Int(5)
+        Value::Int(5)
     );
-    assert_eq!(eval_ok("(is-some (try-as i32 5))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(is-some (try-as i32 5))"), Value::Bool(true));
 }
 
 // ---- i32 <-> i64: pure relabel ------------------------------------------------
 
 #[test]
 fn as_crosses_i32_and_i64_by_relabeling() {
-    assert_eq!(eval_ok("(as i64 (the i32 7))"), RtValue::Int(7));
-    assert_eq!(eval_ok("(as i32 (the i64 7))"), RtValue::Int(7));
+    assert_eq!(eval_ok("(as i64 (the i32 7))"), Value::Int(7));
+    assert_eq!(eval_ok("(as i32 (the i64 7))"), Value::Int(7));
 }
 
 #[test]
 fn try_as_crosses_i32_and_i64_and_wraps_in_some() {
-    assert_eq!(eval_ok("(is-some (try-as i64 (the i32 7)))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(unwrap (try-as i64 (the i32 7)))"), RtValue::Int(7));
+    assert_eq!(eval_ok("(is-some (try-as i64 (the i32 7)))"), Value::Bool(true));
+    assert_eq!(eval_ok("(unwrap (try-as i64 (the i32 7)))"), Value::Int(7));
 }
 
 // ---- total conversions: int <-> f64 -------------------------------------------
@@ -142,17 +142,17 @@ fn as_widens_an_int_to_f64() {
 
 #[test]
 fn as_narrows_f64_to_int_truncating_toward_zero() {
-    assert_eq!(eval_ok("(as i32 3.9)"), RtValue::Int(3));
-    assert_eq!(eval_ok("(as i32 (- 0.0 3.9))"), RtValue::Int(-3));
+    assert_eq!(eval_ok("(as i32 3.9)"), Value::Int(3));
+    assert_eq!(eval_ok("(as i32 (- 0.0 3.9))"), Value::Int(-3));
     // i64 target: same underlying `float->int` call, relabeled.
-    assert_eq!(eval_ok("(as i64 3.9)"), RtValue::Int(3));
+    assert_eq!(eval_ok("(as i64 3.9)"), Value::Int(3));
 }
 
 #[test]
 fn try_as_int_f64_round_trip_always_succeeds() {
     assert_eq!(eval_f64("(unwrap (try-as f64 42))"), 42.0);
-    assert_eq!(eval_ok("(unwrap (try-as i32 3.9))"), RtValue::Int(3));
-    assert_eq!(eval_ok("(unwrap (try-as i64 3.9))"), RtValue::Int(3));
+    assert_eq!(eval_ok("(unwrap (try-as i32 3.9))"), Value::Int(3));
+    assert_eq!(eval_ok("(unwrap (try-as i64 3.9))"), Value::Int(3));
 }
 
 // ---- total conversions: int/bignum/ratio widening -----------------------------
@@ -198,21 +198,21 @@ fn as_narrows_ratio_to_bignum_by_truncating() {
 
 #[test]
 fn as_widens_char_to_int() {
-    assert_eq!(eval_ok("(as i32 #\\A)"), RtValue::Int(65));
-    assert_eq!(eval_ok("(as i64 #\\A)"), RtValue::Int(65));
+    assert_eq!(eval_ok("(as i32 #\\A)"), Value::Int(65));
+    assert_eq!(eval_ok("(as i64 #\\A)"), Value::Int(65));
 }
 
 #[test]
 fn try_as_char_to_int_always_succeeds() {
-    assert_eq!(eval_ok("(unwrap (try-as i32 #\\A))"), RtValue::Int(65));
+    assert_eq!(eval_ok("(unwrap (try-as i32 #\\A))"), Value::Int(65));
 }
 
 // ---- partial conversion: int -> char ------------------------------------------
 
 #[test]
 fn as_narrows_a_valid_scalar_int_to_char() {
-    assert_eq!(eval_ok("(as char 65)"), RtValue::Char('A'));
-    assert_eq!(eval_ok("(as char (the i64 65))"), RtValue::Char('A'));
+    assert_eq!(eval_ok("(as char 65)"), Value::Char('A'));
+    assert_eq!(eval_ok("(as char (the i64 65))"), Value::Char('A'));
 }
 
 #[test]
@@ -223,17 +223,17 @@ fn as_panics_converting_an_invalid_scalar_int_to_char() {
 
 #[test]
 fn try_as_returns_some_or_none_converting_int_to_char() {
-    assert_eq!(eval_ok("(unwrap (try-as char 65))"), RtValue::Char('A'));
-    assert_eq!(eval_ok("(is-none (try-as char -1))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(unwrap (try-as char 65))"), Value::Char('A'));
+    assert_eq!(eval_ok("(is-none (try-as char -1))"), Value::Bool(true));
     // i64 source reaches the same `try-int->char` builtin.
-    assert_eq!(eval_ok("(is-none (try-as char (the i64 -1)))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(is-none (try-as char (the i64 -1)))"), Value::Bool(true));
 }
 
 // ---- partial conversion: bignum -> int ----------------------------------------
 
 #[test]
 fn as_narrows_an_in_range_bignum_to_int() {
-    assert_eq!(eval_ok("(as i32 42)"), RtValue::Int(42));
+    assert_eq!(eval_ok("(as i32 42)"), Value::Int(42));
 }
 
 #[test]
@@ -246,16 +246,16 @@ fn as_panics_narrowing_an_out_of_range_bignum_to_int() {
 
 #[test]
 fn try_as_returns_none_narrowing_an_out_of_range_bignum_to_int() {
-    assert_eq!(eval_ok("(is-none (try-as i32 99999999999999999999999999999))"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(is-none (try-as i64 99999999999999999999999999999))"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(is-none (try-as i32 99999999999999999999999999999))"), Value::Bool(true));
+    assert_eq!(eval_ok("(is-none (try-as i64 99999999999999999999999999999))"), Value::Bool(true));
 }
 
 #[test]
 fn try_as_returns_some_narrowing_an_in_range_bignum_to_int() {
     // `(as bignum 42)` widens a plain int literal into a genuine `bignum`
     // value that comfortably fits back in an `i64`.
-    assert_eq!(eval_ok("(unwrap (try-as i32 (as bignum 42)))"), RtValue::Int(42));
-    assert_eq!(eval_ok("(unwrap (try-as i64 (as bignum 42)))"), RtValue::Int(42));
+    assert_eq!(eval_ok("(unwrap (try-as i32 (as bignum 42)))"), Value::Int(42));
+    assert_eq!(eval_ok("(unwrap (try-as i64 (as bignum 42)))"), Value::Int(42));
 }
 
 // ---- excluded pairs and out-of-domain types (check-time errors) --------------

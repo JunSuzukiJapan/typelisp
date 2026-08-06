@@ -10,7 +10,7 @@
 //! `&rest`/`format` args already did.
 
 extern crate typelisp;
-use typelisp::{load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, RtValue, TopLevel, Value};
+use typelisp::{load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
 
 fn check(src: &str) -> Result<TopLevel, Error> {
     let mut h = Heap::with_capacity(8192);
@@ -25,13 +25,13 @@ fn check(src: &str) -> Result<TopLevel, Error> {
     Ok(last.expect("no forms"))
 }
 
-fn run_with_heap(src: &str) -> Result<(Heap, RtValue), EvalError> {
+fn run_with_heap(src: &str) -> Result<(Heap, Value), EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(v) = interp.exec(&mut h, tl)? {
@@ -41,7 +41,7 @@ fn run_with_heap(src: &str) -> Result<(Heap, RtValue), EvalError> {
     Ok((h, last))
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run_with_heap(src).expect("eval failed").1
 }
 
@@ -61,7 +61,7 @@ fn list_mixes_a_struct_instance_with_a_scalar() {
     let (h, v) = run_with_heap("(defstruct point (x i32) (y i32)) (list (point::new 1 2) 42)")
         .expect("eval failed");
     match v {
-        RtValue::Sexpr(car_cell) => {
+        car_cell => {
             let car = h.car(car_cell).expect("cons");
             match car {
                 Value::Boxed(id) => {
@@ -77,7 +77,6 @@ fn list_mixes_a_struct_instance_with_a_scalar() {
             // not a retype), so it decodes as a `Sexpr::Int` payload.
             assert_eq!(cadr, Value::Int(42));
         }
-        other => panic!("expected a Sexpr cons, got {:?}", other),
     }
 }
 
@@ -88,7 +87,7 @@ fn list_holds_an_enum_variant() {
     )
     .expect("eval failed");
     match v {
-        RtValue::Sexpr(car_cell) => {
+        car_cell => {
             let car = h.car(car_cell).expect("cons");
             match car {
                 Value::Boxed(id) => {
@@ -98,7 +97,6 @@ fn list_holds_an_enum_variant() {
                 other => panic!("expected boxed enum in car, got {:?}", other),
             }
         }
-        other => panic!("expected a Sexpr cons, got {:?}", other),
     }
 }
 
@@ -115,7 +113,7 @@ fn setf_on_a_struct_shared_via_a_list_is_visible_through_the_list() {
              l))",
     )
     .expect("eval failed");
-    let RtValue::Sexpr(car_cell) = v else { panic!("expected a Sexpr cons") };
+    let car_cell = v;
     let car = h.car(car_cell).expect("cons");
     let Value::Boxed(id) = car else { panic!("expected boxed struct") };
     assert_eq!(h.struct_field(id, 0), Value::Int(99));
@@ -155,14 +153,14 @@ fn a_struct_instance_flows_through_a_compiled_function_still_shared() {
              l))";
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind).expect("eval failed") {
             last = val;
         }
     }
-    let RtValue::Sexpr(car_cell) = last else { panic!("expected a Sexpr cons") };
+    let car_cell = last;
     let car = h.car(car_cell).expect("cons");
     let Value::Boxed(id) = car else { panic!("expected boxed struct") };
     assert_eq!(h.struct_field(id, 0), Value::Int(7));
@@ -178,7 +176,7 @@ fn match_destructures_a_struct_downcast_pattern() {
            ((point a b) (+ a b))
            (_ 0))",
     );
-    assert_eq!(v, RtValue::Int(3));
+    assert_eq!(v, Value::Int(3));
 }
 
 #[test]
@@ -192,7 +190,7 @@ fn match_destructures_a_bare_enum_variant_after_use() {
            ((blue) 2)
            (_ 99))",
     );
-    assert_eq!(v, RtValue::Int(1));
+    assert_eq!(v, Value::Int(1));
 }
 
 #[test]
@@ -204,7 +202,7 @@ fn match_destructures_a_qualified_enum_variant_without_use() {
            ((color::blue) 2)
            (_ 99))",
     );
-    assert_eq!(v, RtValue::Int(2));
+    assert_eq!(v, Value::Int(2));
 }
 
 #[test]
@@ -223,7 +221,7 @@ fn the_pattern_binds_the_whole_value_preserving_struct_identity() {
            l)",
     )
     .expect("eval failed");
-    let RtValue::Sexpr(car_cell) = v else { panic!("expected a Sexpr cons") };
+    let car_cell = v;
     let car = h.car(car_cell).expect("cons");
     let Value::Boxed(id) = car else { panic!("expected boxed struct") };
     assert_eq!(h.struct_field(id, 0), Value::Int(42));
@@ -241,7 +239,7 @@ fn a_struct_downcast_pattern_does_not_false_match_nil() {
            ((point a b) (+ a b))
            (_ -1))",
     );
-    assert_eq!(v, RtValue::Int(-1));
+    assert_eq!(v, Value::Int(-1));
 }
 
 #[test]
@@ -256,7 +254,7 @@ fn a_struct_downcast_pattern_does_not_false_match_a_different_same_shape_struct(
            ((point x y) (+ x y))
            (_ -1))",
     );
-    assert_eq!(v, RtValue::Int(-1));
+    assert_eq!(v, Value::Int(-1));
 }
 
 #[test]
@@ -268,7 +266,7 @@ fn equalp_recursively_compares_two_distinct_struct_instances() {
         "(defstruct point (x i32) (y i32))
          (equalp (point::new 1 2) (point::new 1 2))",
     );
-    assert_eq!(v, RtValue::Bool(true));
+    assert_eq!(v, Value::Bool(true));
 }
 
 #[test]
@@ -278,7 +276,7 @@ fn equalp_distinguishes_structs_by_type_name_even_with_matching_fields() {
          (defstruct pair (a i32) (b i32))
          (equalp (point::new 1 2) (pair::new 1 2))",
     );
-    assert_eq!(v, RtValue::Bool(false));
+    assert_eq!(v, Value::Bool(false));
 }
 
 #[test]

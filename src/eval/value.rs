@@ -1,200 +1,60 @@
 //! Runtime values and errors for the tree-walking interpreter.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::{error, fmt};
 
-use crate::{BoxId, Heap, Loc, Type, Value};
+use crate::{BoxId, Heap, Loc, Value};
 
 
-/// Which of the interpreter's two binding-slot representations a binding
-/// uses — decided *statically*, from the binding's declared type, never from
-/// a value's runtime shape:
+/// A mutable variable slot, shared so `setf` mutations are visible to every
+/// holder of the binding (e.g. across `loop` iterations).
 ///
-/// * `Heap` — the type's runtime representation is always
-///   `RtValue::Sexpr(Value)` (the built-in `Sexpr`, `defstruct`/`Vector<T>`/
-///   `cons-cell<K,V>` boxed structs, `HashTable<K,V>`, and — Stage 8 — a
-///   `Scope<V>` whose `V` is itself in this list), so the binding lives
-///   in a GC-heap `BoxedObj::Cell` the collector traces directly.
-/// * `Native` — everything else: scalars (whose `mem::Value` encodings would
-///   be ambiguous to decode — a cell holding `Value::Int(42)` couldn't say
-///   whether it was an `i32` or a quoted `Sexpr` datum), `Str` (whose
-///   `Rc::ptr_eq` `eq`-identity a `StrId` round-trip would destroy),
-///   `Data`/function values/`Scope<V>` of any *other* `V` (not
-///   `Value`-representable), and the
-///   five LLVM FFI handle kinds (never `Value`-representable **by design** —
-///   this split is what keeps the compiler-internal LLVM universe strictly
-///   out of the GC heap).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SlotKind {
-    Heap,
-    Native,
-}
-
-/// A mutable variable slot (shared so `setf` mutations are visible to every
-/// holder of the binding, e.g. across `loop` iterations). Two-tier, routed
-/// by the binding's *static type* ([`SlotKind`], never a value's runtime
-/// shape):
+/// One representation: a GC-heap `BoxedObj::Cell` (see `Heap::alloc_cell`).
+/// This used to be a three-way split routed by the binding's static type —
+/// a `Heap` cell for types whose runtime form was already a heap `Value`, a
+/// Rust-side `Rc<RefCell<RtValue>>` for the rest, and a `TypedCell` for a
+/// scalar a nested closure captured. The split existed only because
+/// `RtValue` was a second value universe: a cell holding `Value::Int(42)`
+/// could not say whether it meant an `i32` or a quoted `Sexpr` datum, so a
+/// declared `Type` had to ride along to pick the `RtValue` wrapper back out.
+/// With `RtValue` gone there is no wrapper to pick and the encode/decode pair
+/// is the identity, so every binding is simply a cell.
 ///
-/// * `Heap` — a GC-heap `BoxedObj::Cell` (see `Heap::alloc_cell`), for
-///   bindings whose runtime representation is always `RtValue::Sexpr`. The
-///   collector traces the cell (and thus its current contents) directly;
-///   [`Interp::sync_roots`] only has to push one root per live cell. The
-///   `Rc` wrapper exists purely so cell liveness is observable through a
-///   `Weak` (a bare `BoxId` is `Copy` and its drop invisible) — the cell
-///   payload itself lives in the heap, not behind this `Rc`.
-/// * `Native` — the classic `Rc<RefCell<RtValue>>`, for every type whose
-///   values a `mem::Value` can't (or must not) carry — scalars, `Str`,
-///   `Data`, function values, `Scope<V>` of a native-repr `V`, and the five
-///   compiler-internal LLVM
-///   handle kinds, which this split keeps out of the GC heap *structurally*:
-///   a `Slot::Heap` can only ever be created from an `RtValue::Sexpr`.
+/// That also removes `Interp::sync_roots`: the collector walks its own
+/// `cell_registry` on *every* collection, so a cell-backed binding is rooted
+/// without the interpreter pushing anything. The `Rc<BoxId>` wrapper is what
+/// makes cell liveness observable through that registry's `Weak` (a bare
+/// `BoxId` is `Copy`, and its drop invisible); the payload lives in the heap,
+/// not behind this `Rc`.
 ///
-/// (`PartialEq`/`Debug` exist only for `Closure`'s own derives: a `Heap`
-/// slot compares by cell identity (`BoxId`), a `Native` one by contents —
-/// the same contents-comparison `Rc<RefCell<..>>` always had here.)
+/// (`PartialEq`/`Debug` exist only for derives elsewhere; slots compare by
+/// cell identity.)
 #[derive(Clone, Debug, PartialEq)]
-pub enum Slot {
-    Heap(Rc<BoxId>),
-    Native(Rc<RefCell<RtValue>>),
-    /// A GC-heap `BoxedObj::Cell` for a binding whose static type is
-    /// otherwise `Native` (a scalar, `Str`, `Fn`, ...) — closure
-    /// unification Stage 7's answer to "a nested `lambda`/`labels` captures
-    /// this name, and the capture must be visible to *compiled* code too".
-    /// The underlying cell (`Heap::alloc_cell`/`cell_get`/`cell_set`) is
-    /// already generic over any `Value`, not `Sexpr`-only — `Slot::Heap`'s
-    /// restriction to `RtValue::Sexpr` is this wrapper's own choice, not the
-    /// heap's, so this variant simply carries the declared `Type` alongside
-    /// the cell and routes get/set through the same
-    /// encode/decode(`rtvalue_to_struct_field`/`decode_field_typed`) a
-    /// `defstruct` field already uses — a scalar-typed capture becomes a
-    /// tagged `i64` `rt_cell_get`/`rt_cell_set` on the compiled side can
-    /// read/write directly, without requiring a heap-repr type. Chosen only
-    /// at binding sites `freevars::names_captured_by_nested` marks as
-    /// captured-by-a-nested-closure (see `Interp::apply`/`Expr::Let`); every
-    /// other `Native`-typed binding is untouched.
-    TypedCell(Rc<BoxId>, Type),
-}
+pub struct Slot(Rc<BoxId>);
 
 impl Slot {
+    pub fn new(id: Rc<BoxId>) -> Slot {
+        Slot(id)
+    }
+
+    /// The cell this binding lives in — for the JIT, which hands compiled
+    /// code the cell directly so a capture is shared rather than copied.
+    pub fn cell(&self) -> &Rc<BoxId> {
+        &self.0
+    }
+
     /// The binding's current value.
-    pub fn get(&self, heap: &Heap) -> RtValue {
-        match self {
-            Slot::Heap(id) => RtValue::Sexpr(heap.cell_get(**id)),
-            Slot::Native(rc) => rc.borrow().clone(),
-            Slot::TypedCell(id, ty) => super::interp::decode_field_typed(heap.cell_get(**id), ty),
-        }
+    pub fn get(&self, heap: &Heap) -> Value {
+        heap.cell_get(*self.0)
     }
 
-    /// Overwrites the binding (`setf`). Writing a non-`Sexpr` value into a
-    /// `Heap` slot is an internal invariant violation — the checker
-    /// guarantees a binding's static type (and hence its runtime
-    /// representation) never changes over its lifetime — reported loudly
-    /// rather than silently mis-stored.
-    pub fn set(&self, heap: &mut Heap, v: RtValue) -> Result<(), EvalError> {
-        match self {
-            Slot::Heap(id) => match v {
-                RtValue::Sexpr(val) => {
-                    heap.cell_set(**id, val);
-                    Ok(())
-                }
-                other => Err(EvalError::Internal(format!(
-                    "heap-cell binding assigned a non-Sexpr value: {:?}",
-                    other
-                ))),
-            },
-            Slot::Native(rc) => {
-                *rc.borrow_mut() = v;
-                Ok(())
-            }
-            Slot::TypedCell(id, _ty) => {
-                let encoded = super::interp::rtvalue_to_struct_field(&v);
-                heap.cell_set(**id, encoded);
-                Ok(())
-            }
-        }
+    /// Overwrites the binding (`setf`).
+    pub fn set(&self, heap: &mut Heap, v: Value) -> Result<(), EvalError> {
+        heap.cell_set(*self.0, v);
+        Ok(())
     }
 }
 
-/// A runtime value.
-///
-/// Every aggregate — a `defstruct` instance, `Vector<T>`, `HashTable<K,V>`,
-/// `Scope<V>`, a closure, a built-in used as a function value, an enum value
-/// (`Option`/`Result`/a user `defenum`) — lives in the GC heap behind
-/// [`RtValue::Sexpr`]. There is no second, Rust-side aggregate representation
-/// left: the `Data` variant that used to hold enum instantiations the heap
-/// could not carry was deleted once every such field type had gained a heap
-/// form (`Phase 1a`'s LLVM handles and `Scope<V>`, then `BoxedObj::Builtin`
-/// and `BoxedObj::RandomState`).
-///
-/// What remains are the scalars, which the `Sexpr`/`RtValue` unification is
-/// still working through.
-///
-/// `PartialEq` is hand-written rather than derived because `Data`'s recursive
-/// `Vec<RtValue>` needed it; it stays hand-written so the mismatch case is
-/// explicit (see [`RtValue::eq`]).
-#[derive(Clone, Debug)]
-pub enum RtValue {
-    Int(i64),
-    Bool(bool),
-    Char(char),
-    Unit,
-    /// A `Sexpr` value (`Nil`/`Int`/`Float`/`Char`/`Bool`/`Sym`/`Str`/`Cons`),
-    /// backed by the GC-managed cons heap shared with the reader rather than a
-    /// Rust-heap encoding — so `cons` cells built at runtime are subject to the
-    /// same mark-sweep collection as ones read from source. Since the
-    /// `Sexpr`/`RtValue` unification's Stage 2, this is also where a
-    /// `defstruct` instance/`Vector<T>`/`cons-cell<K,V>` lives: each is a
-    /// `Value::Boxed` pointing at a `BoxedObj::Struct` (see `crate::mem`),
-    /// wrapped in this same variant rather than a dedicated `RtValue::Struct`
-    /// — `heap.is_struct`/`struct_type_name`/`struct_field`/etc. distinguish
-    /// it from a boxed float or a genuine quoted `Sexpr` datum at each read
-    /// site (`interp.rs`'s `expect_struct_box`/`decode_field_typed`).
-    /// This is also where a *closure* lives: a `Value::Boxed` pointing at a
-    /// `BoxedObj::CompiledClosure` (a JIT/AOT function pointer + its captured
-    /// environment) — so closure identity and GC tracing come from the same
-    /// heap machinery as every other boxed value, and no dedicated
-    /// `RtValue::Closure` variant exists. (The interpreted `BoxedObj::Closure`
-    /// that stood here through Stages 6b–8b was removed in interp-closure
-    /// removal Stage 8c; every closure is compiled now.)
-    /// Since the enum-representation unification this is also where an
-    /// *enum value* (`Option`/`Result`/`Error`/user `defenum`) lives: a
-    /// `Value::Boxed` pointing at a `BoxedObj::Enum` (variant index +
-    /// fields) — the same one heap object compiled code reads/writes through
-    /// `rt_data_*`. Every enum value, with no exceptions: the native `Data`
-    /// twin this variant used to share the job with is gone.
-    /// Since the scalar unification this is also where a `bignum`/`ratio`
-    /// lives: a `Value::Boxed` at a `BoxedObj::Bignum`/`Ratio`, the same box
-    /// compiled code's `rt_bignum_*`/`rt_ratio_*` already read and write. The
-    /// `Rc<BigInt>`/`Rc<BigRational>` variants this replaces had no heap
-    /// presence, so every crossing — into a struct field, into compiled code,
-    /// back out again — copied the whole multi-precision value.
-    /// Since the built-in-function-value unification this is also where a
-    /// *built-in used as a function value* lives (`gensym` passed to a
-    /// higher-order function, `+` reified as `i32::+`): a `Value::Boxed`
-    /// pointing at a `BoxedObj::Builtin` (an optional receiver type + the
-    /// name), replacing the dedicated `Builtin(String)`/
-    /// `BuiltinMethod(Path, String)` variants — so *every* `Type::Fn` value
-    /// is a heap box now, which is what makes `Fn` storable in an enum field.
-    Sexpr(Value),
-}
-
-impl PartialEq for RtValue {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (RtValue::Int(a), RtValue::Int(b)) => a == b,
-            (RtValue::Bool(a), RtValue::Bool(b)) => a == b,
-            (RtValue::Char(a), RtValue::Char(b)) => a == b,
-            (RtValue::Unit, RtValue::Unit) => true,
-            // Closures compare as the `Sexpr` boxes they are — `Value`'s
-            // own `Boxed(id) == Boxed(id)`, i.e. identity, matching the old
-            // dedicated variant's `Rc` semantics.
-            (RtValue::Sexpr(a), RtValue::Sexpr(b)) => a == b,
-            // Any other pair (including a mismatch of variants) is unequal.
-            _ => false,
-        }
-    }
-}
 
 /// A runtime error. `Panic` is a deliberate `panic`; `Break`/`Return` are not
 /// errors at all but internal non-local-exit signals (`break`/`return`
@@ -216,7 +76,7 @@ pub enum EvalError {
     /// `break`: unwinding to the nearest enclosing loop, no value.
     Break,
     /// `return value`: unwinding to the nearest enclosing loop with `value`.
-    Return(Box<RtValue>),
+    Return(Box<Value>),
     /// A runtime error carrying the source location where it occurred. Wraps
     /// the underlying error; [`fmt::Display`] prefixes it with `file:line:col`.
     /// Built only via [`EvalError::at`], which never wraps the `Break`/`Return`

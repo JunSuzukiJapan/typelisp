@@ -7,7 +7,7 @@
 
 extern crate typelisp;
 use std::cell::RefCell;
-use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
 // `abs`/`signum`/`gcd`/`lcm`/`rem`/`expt` (and `f64`/`ratio` `mod`/`rem`) are
 // `prelude.rs` methods, not registry builtins, so the prelude must be loaded.
@@ -16,7 +16,7 @@ thread_local! {
     static CTX: RefCell<Option<(Heap, Checker, Interp)>> = const { RefCell::new(None) };
 }
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     CTX.with(|cell| {
         let mut opt = cell.borrow_mut();
         let (h, chk, interp) = opt.get_or_insert_with(|| {
@@ -28,7 +28,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
         });
         let r = Reader::new();
         let vs = r.read_all(h, src).expect("read failed");
-        let mut last = RtValue::Unit;
+        let mut last = Value::Empty;
         for v in vs {
             let tl = chk.check_form(h, &*interp, v).expect("check failed");
             if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
@@ -39,7 +39,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     })
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -58,9 +58,9 @@ fn with_heap<R>(f: impl FnOnce(&Heap) -> R) -> R {
     })
 }
 
-fn assert_bignum(actual: RtValue, expected: &str) {
+fn assert_bignum(actual: Value, expected: &str) {
     with_heap(|h| match actual {
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_bignum(id) => {
+        typelisp::Value::Boxed(id) if h.is_bignum(id) => {
             assert_eq!(*h.bignum_value(id), bignum(expected))
         }
         other => panic!("expected a bignum, got {:?}", other),
@@ -69,16 +69,16 @@ fn assert_bignum(actual: RtValue, expected: &str) {
 
 /// The `f64` counterpart: a float is a `BoxedObj::Float` since the scalar
 /// unification, so it needs the heap too.
-fn assert_float(actual: RtValue, expected: f64) {
+fn assert_float(actual: Value, expected: f64) {
     with_heap(|h| match actual {
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(id) => assert_eq!(h.float_value(id), expected),
+        typelisp::Value::Boxed(id) if h.is_float(id) => assert_eq!(h.float_value(id), expected),
         other => panic!("expected an f64, got {:?}", other),
     })
 }
 
-fn assert_ratio(actual: RtValue, numer: &str, denom: &str) {
+fn assert_ratio(actual: Value, numer: &str, denom: &str) {
     with_heap(|h| match actual {
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_ratio(id) => {
+        typelisp::Value::Boxed(id) if h.is_ratio(id) => {
             let r = h.ratio_value(id);
             assert_eq!(*r.numer(), bignum(numer));
             assert_eq!(*r.denom(), bignum(denom));
@@ -112,7 +112,7 @@ fn a_ratio_literal_that_reduces_to_an_integer_reads_as_an_int_not_a_ratio() {
     // `4/2` reduces to the integer `2` at read time (CL's own ratio-literal
     // normalization) — it must type-check as a plain `i32`, not `ratio`.
     let src = "(defun f () i32 4/2) (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -161,7 +161,7 @@ fn bignum_divide_by_zero_panics() {
 fn bignum_comparison() {
     let src = "(defun f ((a bignum) (b bignum)) bool (< a b)) \
                (f 99999999999999999999 100000000000000000000)";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
@@ -239,7 +239,7 @@ fn ratio_division_by_zero_panics() {
 #[test]
 fn ratio_comparison() {
     let src = "(defun f ((a ratio) (b ratio)) bool (< a b)) (f 1/3 1/2)";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
@@ -277,7 +277,7 @@ fn int_to_bignum_and_back() {
     let src = "(defun f ((a i32)) bignum (int->bignum a)) (f 42)";
     assert_bignum(eval_ok(src), "42");
     let src = "(defun f ((a bignum)) i32 (bignum->int a)) (f (int->bignum 42))";
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]
@@ -333,13 +333,13 @@ fn float_to_ratio_is_exact() {
 fn bignum_equal_family_is_value_comparison() {
     let src = "(defun f ((a bignum) (b bignum)) bool (equal a b)) \
                (f 100000000000000000000 100000000000000000000)";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
 fn ratio_equal_family_is_value_comparison() {
     let src = "(defun f ((a ratio) (b ratio)) bool (equal a b)) (f 1/2 2/4)";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 // ---- quoted Sexpr datum round-trip -------------------------------------------
@@ -347,5 +347,5 @@ fn ratio_equal_family_is_value_comparison() {
 #[test]
 fn a_quoted_bignum_survives_a_round_trip_through_equal() {
     let src = "(defun f () bool (equal (quote 99999999999999999999) (quote 99999999999999999999))) (f)";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }

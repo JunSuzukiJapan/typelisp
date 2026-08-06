@@ -12,7 +12,7 @@
 //! `seq_ops_test.rs`.
 
 extern crate typelisp;
-use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, RtValue, TopLevel};
+use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
 
 fn check(src: &str) -> Result<TopLevel, Error> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -29,7 +29,7 @@ fn check(src: &str) -> Result<TopLevel, Error> {
     Ok(last.expect("no forms"))
 }
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -37,7 +37,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(v) = interp.exec(&mut h, tl)? {
@@ -47,7 +47,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -68,7 +68,7 @@ fn map_applies_a_same_type_function_elementwise() {
          (let ((out (map (iter v) (lambda ((x i32)) i32 (* x 10)))))
            (+ (+ (get out 0) (get out 1)) (get out 2)))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(60));
+    assert_eq!(eval_ok(&src), Value::Int(60));
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn map_can_change_the_element_type() {
            (if (get out 0) 1 (if (get out 1) 2 (if (get out 2) 3 0))))"
     );
     // element 0 is (> 1 1) = false, element 1 is (> 2 1) = true -> 2
-    assert_eq!(eval_ok(&src), RtValue::Int(2));
+    assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn map_over_an_empty_vector_yields_an_empty_vector() {
     let src = "(defun make-v () Vector<i32> (Vector::new))
                (let ((v (make-v)))
                  (len (map (iter v) (lambda ((x i32)) i32 x))))";
-    assert_eq!(eval_ok(src), RtValue::Int(0));
+    assert_eq!(eval_ok(src), Value::Int(0));
 }
 
 // ---- filter -----------------------------------------------------------------
@@ -102,7 +102,7 @@ fn filter_keeps_only_matching_elements() {
          (len (filter (iter v) (lambda ((x i32)) bool (= (mod x 2) 0))))"
     );
     // 2 and 4 are even -> 2 kept
-    assert_eq!(eval_ok(&src), RtValue::Int(2));
+    assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn filter_that_matches_nothing_is_empty() {
         "{V123}
          (len (filter (iter v) (lambda ((x i32)) bool (> x 100))))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(0));
+    assert_eq!(eval_ok(&src), Value::Int(0));
 }
 
 // ---- foldl / foldr ----------------------------------------------------------
@@ -122,7 +122,7 @@ fn foldl_accumulates_left_to_right() {
         "{V123}
          (foldl (iter v) (lambda ((acc i32) (x i32)) i32 (+ acc x)) 0)"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(6));
+    assert_eq!(eval_ok(&src), Value::Int(6));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn foldl_can_use_a_different_accumulator_type() {
            false)"
     );
     // 2 is even -> true
-    assert_eq!(eval_ok(&src), RtValue::Bool(true));
+    assert_eq!(eval_ok(&src), Value::Bool(true));
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn foldr_associates_to_the_right() {
         "{V123}
          (foldr (iter v) (lambda ((x i32) (acc i32)) i32 (- x acc)) 0)"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(2));
+    assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn foldl_associates_to_the_left() {
         "{V123}
          (foldl (iter v) (lambda ((acc i32) (x i32)) i32 (- acc x)) 0)"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(-6));
+    assert_eq!(eval_ok(&src), Value::Int(-6));
 }
 
 // ---- reverse ----------------------------------------------------------------
@@ -170,7 +170,7 @@ fn reverse_flips_element_order() {
            (+ (+ (* (get out 0) 100) (* (get out 1) 10)) (get out 2)))"
     );
     // reversed is (3 2 1) -> 321
-    assert_eq!(eval_ok(&src), RtValue::Int(321));
+    assert_eq!(eval_ok(&src), Value::Int(321));
 }
 
 // ---- find-if ------------------------------------------------------------------
@@ -182,7 +182,7 @@ fn find_if_returns_the_first_match() {
          (match (find-if (iter v) (lambda ((x i32)) bool (> x 1)))
            ((some n) n) ((none) -1))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(2));
+    assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 #[test]
@@ -192,7 +192,7 @@ fn find_if_returns_none_when_no_element_matches() {
          (match (find-if (iter v) (lambda ((x i32)) bool (> x 100)))
            ((some n) n) ((none) -1))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(-1));
+    assert_eq!(eval_ok(&src), Value::Int(-1));
 }
 
 // ---- position-if ----------------------------------------------------------------
@@ -204,7 +204,7 @@ fn position_if_returns_the_index_of_the_first_match() {
          (match (position-if (iter v) (lambda ((x i32)) bool (= x 3)))
            ((some i) i) ((none) -1))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(2));
+    assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 #[test]
@@ -214,7 +214,7 @@ fn position_if_returns_none_when_absent() {
          (match (position-if (iter v) (lambda ((x i32)) bool (= x 99)))
            ((some i) i) ((none) -1))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(-1));
+    assert_eq!(eval_ok(&src), Value::Int(-1));
 }
 
 // ---- count-if -------------------------------------------------------------------
@@ -227,7 +227,7 @@ fn count_if_tallies_matching_elements() {
          (count-if (iter v) (lambda ((x i32)) bool (= (mod x 2) 0)))"
     );
     // 2, 4, 6 are even -> 3
-    assert_eq!(eval_ok(&src), RtValue::Int(3));
+    assert_eq!(eval_ok(&src), Value::Int(3));
 }
 
 // ---- find / position / count (item-based, CL's own `find`/`position`/`count`) ---
@@ -235,31 +235,31 @@ fn count_if_tallies_matching_elements() {
 #[test]
 fn find_returns_the_matching_element_by_equality() {
     let src = format!("{V123} (match (find 2 (iter v)) ((some n) n) ((none) -1))");
-    assert_eq!(eval_ok(&src), RtValue::Int(2));
+    assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 #[test]
 fn find_returns_none_when_absent() {
     let src = format!("{V123} (match (find 99 (iter v)) ((some n) n) ((none) -1))");
-    assert_eq!(eval_ok(&src), RtValue::Int(-1));
+    assert_eq!(eval_ok(&src), Value::Int(-1));
 }
 
 #[test]
 fn position_returns_the_index_of_the_matching_element() {
     let src = format!("{V123} (match (position 3 (iter v)) ((some i) i) ((none) -1))");
-    assert_eq!(eval_ok(&src), RtValue::Int(2));
+    assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 #[test]
 fn position_returns_none_when_absent() {
     let src = format!("{V123} (match (position 99 (iter v)) ((some i) i) ((none) -1))");
-    assert_eq!(eval_ok(&src), RtValue::Int(-1));
+    assert_eq!(eval_ok(&src), Value::Int(-1));
 }
 
 #[test]
 fn count_tallies_elements_equal_to_the_item() {
     let src = format!("{V123} (push v 2) (count 2 (iter v))");
-    assert_eq!(eval_ok(&src), RtValue::Int(2));
+    assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 // ---- append -----------------------------------------------------------------
@@ -274,7 +274,7 @@ fn append_concatenates_two_vectors() {
                    (+ (* (len out) 1000)
                       (+ (+ (get out 0) (get out 1)) (+ (get out 2) (get out 3))))))";
     // len 4 -> 4000, sum 1+2+3+4 = 10 -> 4010
-    assert_eq!(eval_ok(src), RtValue::Int(4010));
+    assert_eq!(eval_ok(src), Value::Int(4010));
 }
 
 #[test]
@@ -286,7 +286,7 @@ fn append_does_not_mutate_its_inputs() {
                  (append (iter a) (iter b))
                  (+ (len a) (len b)))";
     // both inputs still length 1 -> 2
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 // ---- also works on non-i32 element types ------------------------------------
@@ -302,7 +302,7 @@ fn ops_work_over_a_vector_of_strings() {
                         (lambda ((acc i32) (n i32)) i32 (+ acc n))
                         0))";
     // lengths 2 + 1 + 3 = 6
-    assert_eq!(eval_ok(src), RtValue::Int(6));
+    assert_eq!(eval_ok(src), Value::Int(6));
 }
 
 // ---- type errors ------------------------------------------------------------

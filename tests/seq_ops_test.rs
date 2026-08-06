@@ -10,7 +10,7 @@
 //! check time.
 
 extern crate typelisp;
-use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, RtValue, TopLevel};
+use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
 
 fn check(src: &str) -> Result<TopLevel, Error> {
     let mut h = Heap::with_capacity(1 << 16);
@@ -27,7 +27,7 @@ fn check(src: &str) -> Result<TopLevel, Error> {
     Ok(last.expect("no forms"))
 }
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -35,7 +35,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(v) = interp.exec(&mut h, tl)? {
@@ -45,7 +45,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -62,7 +62,7 @@ fn eval_string(src: &str) -> String {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -70,7 +70,7 @@ fn eval_string(src: &str) -> String {
         }
     }
     match last {
-        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        typelisp::Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
 }
@@ -90,20 +90,20 @@ const VEMPTY: &str = "(defun make-v () Vector<i32> (Vector::new))
 #[test]
 fn length_counts_the_elements() {
     let src = format!("{V123} (length (iter v))");
-    assert_eq!(eval_ok(&src), RtValue::Int(3));
+    assert_eq!(eval_ok(&src), Value::Int(3));
 }
 
 #[test]
 fn length_of_an_empty_iterator_is_zero() {
     let src = format!("{VEMPTY} (length (iter v))");
-    assert_eq!(eval_ok(&src), RtValue::Int(0));
+    assert_eq!(eval_ok(&src), Value::Int(0));
 }
 
 #[test]
 fn length_on_a_string_still_resolves_to_the_builtin_method() {
     // Instance-method dispatch by receiver type must win over the new free
     // generic `length` — the self-hosted compiler island depends on it.
-    assert_eq!(eval_ok("(length \"abc\")"), RtValue::Int(3));
+    assert_eq!(eval_ok("(length \"abc\")"), Value::Int(3));
 }
 
 // ---- append -----------------------------------------------------------------
@@ -130,20 +130,20 @@ fn append_on_strings_still_resolves_to_the_builtin_method() {
 fn nth_returns_the_element_at_the_index() {
     // CL argument order: index first.
     let src = format!("{V123} (unwrap (nth 1 (iter v)))");
-    assert_eq!(eval_ok(&src), RtValue::Int(2));
+    assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 #[test]
 fn nth_out_of_range_and_negative_are_none() {
     let src = format!("{V123} (+ (unwrap-or (nth 9 (iter v)) -1) (unwrap-or (nth -1 (iter v)) -10))");
-    assert_eq!(eval_ok(&src), RtValue::Int(-11));
+    assert_eq!(eval_ok(&src), Value::Int(-11));
 }
 
 #[test]
 fn elt_takes_the_sequence_first() {
     // CL argument order: sequence first (the mirror of `nth`).
     let src = format!("{V123} (unwrap (elt (iter v) 2))");
-    assert_eq!(eval_ok(&src), RtValue::Int(3));
+    assert_eq!(eval_ok(&src), Value::Int(3));
 }
 
 // ---- take / subseq ----------------------------------------------------------
@@ -152,20 +152,20 @@ fn elt_takes_the_sequence_first() {
 fn take_returns_the_first_n_elements() {
     let src = format!("{V123} (let ((out (take (iter v) 2))) (+ (* (len out) 100) (+ (get out 0) (get out 1))))");
     // len 2 -> 200, 1+2 = 3 -> 203
-    assert_eq!(eval_ok(&src), RtValue::Int(203));
+    assert_eq!(eval_ok(&src), Value::Int(203));
 }
 
 #[test]
 fn take_zero_is_empty_and_over_length_takes_everything() {
     let src = format!("{V123} (+ (* (len (take (iter v) 0)) 10) (len (take (iter v) 9)))");
-    assert_eq!(eval_ok(&src), RtValue::Int(3));
+    assert_eq!(eval_ok(&src), Value::Int(3));
 }
 
 #[test]
 fn subseq_extracts_the_half_open_range() {
     let src = format!("{V123} (let ((out (subseq (iter v) 1 3))) (+ (* (len out) 100) (+ (get out 0) (get out 1))))");
     // [1,3) of (1 2 3) -> (2 3): len 2 -> 200, 2+3 = 5 -> 205
-    assert_eq!(eval_ok(&src), RtValue::Int(205));
+    assert_eq!(eval_ok(&src), Value::Int(205));
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn subseq_start_past_the_end_is_empty_and_end_is_clamped() {
     // `end` past the input's length is clamped (more lenient than CL, which
     // signals an error).
     let src = format!("{V123} (+ (* (len (subseq (iter v) 5 8)) 10) (len (subseq (iter v) 1 99)))");
-    assert_eq!(eval_ok(&src), RtValue::Int(2));
+    assert_eq!(eval_ok(&src), Value::Int(2));
 }
 
 // ---- last / butlast ---------------------------------------------------------
@@ -182,20 +182,20 @@ fn subseq_start_past_the_end_is_empty_and_end_is_clamped() {
 fn last_returns_the_final_element() {
     // The final *element*, not CL's final cons.
     let src = format!("{V123} (unwrap (last (iter v)))");
-    assert_eq!(eval_ok(&src), RtValue::Int(3));
+    assert_eq!(eval_ok(&src), Value::Int(3));
 }
 
 #[test]
 fn last_of_an_empty_iterator_is_none() {
     let src = format!("{VEMPTY} (unwrap-or (last (iter v)) -1)");
-    assert_eq!(eval_ok(&src), RtValue::Int(-1));
+    assert_eq!(eval_ok(&src), Value::Int(-1));
 }
 
 #[test]
 fn butlast_drops_only_the_final_element() {
     let src = format!("{V123} (let ((out (butlast (iter v)))) (+ (* (len out) 100) (+ (get out 0) (get out 1))))");
     // (1 2): len 2 -> 200, 1+2 = 3 -> 203
-    assert_eq!(eval_ok(&src), RtValue::Int(203));
+    assert_eq!(eval_ok(&src), Value::Int(203));
 }
 
 #[test]
@@ -205,7 +205,7 @@ fn butlast_of_empty_and_singleton_is_empty() {
          (+ (len (butlast (iter v)))
             (len (butlast (iter (the Vector<i32> (Vector::new))))))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(0));
+    assert_eq!(eval_ok(&src), Value::Int(0));
 }
 
 // ---- member (Eq) ------------------------------------------------------------
@@ -213,7 +213,7 @@ fn butlast_of_empty_and_singleton_is_empty() {
 #[test]
 fn member_finds_and_misses_by_equality() {
     let src = format!("{V123} (if (member 2 (iter v)) (if (member 9 (iter v)) 0 1) 0)");
-    assert_eq!(eval_ok(&src), RtValue::Int(1));
+    assert_eq!(eval_ok(&src), Value::Int(1));
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn member_on_strings_compares_content_not_identity() {
                (let ((v (make-v)))
                  (push v \"ab\")
                  (member (append \"a\" \"b\") (iter v)))";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn every_is_true_on_empty_and_any_is_false_on_empty() {
              (if (any (iter v) (lambda ((x i32)) bool true)) 0 1)
              0)"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(1));
+    assert_eq!(eval_ok(&src), Value::Int(1));
 }
 
 #[test]
@@ -258,7 +258,7 @@ fn every_and_any_report_over_real_elements() {
                (+ (if (any (iter v) (lambda ((x i32)) bool (= x 3))) 1000 0)
                   (if (any (iter v) (lambda ((x i32)) bool (= x 9))) 10000 0))))"
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(1010));
+    assert_eq!(eval_ok(&src), Value::Int(1010));
 }
 
 // ---- sort (explicit comparator, CL's own `(sort sequence predicate)`) --------
@@ -272,7 +272,7 @@ fn sort_orders_i32_ascending_without_mutating_the_input() {
                    (+ (* (get v 0) 1000)
                       (+ (* (get out 0) 100) (+ (* (get out 1) 10) (get out 2))))))";
     // input head still 3 -> 3000; sorted (1 2 3) -> 123
-    assert_eq!(eval_ok(src), RtValue::Int(3123));
+    assert_eq!(eval_ok(src), Value::Int(3123));
 }
 
 #[test]
@@ -283,7 +283,7 @@ fn sort_orders_i32_descending_given_a_flipped_comparator() {
                  (let ((out (sort (iter v) (lambda ((a i32) (b i32)) bool (> a b)))))
                    (+ (* (get out 0) 100) (+ (* (get out 1) 10) (get out 2)))))";
     // descending (3 2 1) -> 321
-    assert_eq!(eval_ok(src), RtValue::Int(321));
+    assert_eq!(eval_ok(src), Value::Int(321));
 }
 
 #[test]
@@ -298,7 +298,7 @@ fn sort_orders_strings_lexicographically() {
 #[test]
 fn sort_of_an_empty_iterator_is_empty() {
     let src = format!("{VEMPTY} (len (sort (iter v) (lambda ((a i32) (b i32)) bool (< a b))))");
-    assert_eq!(eval_ok(&src), RtValue::Int(0));
+    assert_eq!(eval_ok(&src), Value::Int(0));
 }
 
 #[test]
@@ -310,7 +310,7 @@ fn sort_works_over_a_type_with_no_ord_impl_given_an_explicit_comparator() {
                (let ((v (make-v)))
                  (push v true) (push v false)
                  (get (sort (iter v) (lambda ((a bool) (b bool)) bool (if a false b))) 0))";
-    assert_eq!(eval_ok(src), RtValue::Bool(false));
+    assert_eq!(eval_ok(src), Value::Bool(false));
 }
 
 #[test]
@@ -327,7 +327,7 @@ fn sort_is_stable_for_equal_keys() {
                  (let ((out (sort (iter v) (lambda ((a rec) (b rec)) bool (< a::k b::k)))))
                    (let ((first (get out 0)) (second (get out 1)))
                      (+ (* first::tag 100) second::tag))))";
-    assert_eq!(eval_ok(src), RtValue::Int(1020));
+    assert_eq!(eval_ok(src), Value::Int(1020));
 }
 
 // ---- user-type Eq -----------------------------------------------------------
@@ -345,7 +345,7 @@ fn member_works_over_a_user_type_with_an_eq_impl() {
                  (if (member (point::new 3 4) (iter v))
                      (if (member (point::new 3 5) (iter v)) 0 1)
                      0))";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 // ---- assoc ------------------------------------------------------------------
@@ -357,7 +357,7 @@ fn assoc_finds_the_pair_in_an_alist_and_projects_with_cdr() {
                  (push al (cons \"one\" 1))
                  (push al (cons \"two\" 2))
                  (cdr (unwrap (assoc \"two\" (iter al)))))";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -366,7 +366,7 @@ fn assoc_misses_with_none() {
                (let ((al (make-alist)))
                  (push al (cons \"one\" 1))
                  (is-none (assoc \"nope\" (iter al))))";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
@@ -379,7 +379,7 @@ fn assoc_works_over_a_hashtable_iterator() {
                  (set h \"a\" 10)
                  (set h \"b\" 20)
                  (cdr (unwrap (assoc \"b\" (iter h)))))";
-    assert_eq!(eval_ok(src), RtValue::Int(20));
+    assert_eq!(eval_ok(src), Value::Int(20));
 }
 
 // ---- cons-cell Eq/Ord (recursive impls with where clauses) -------------------
@@ -388,7 +388,7 @@ fn assoc_works_over_a_hashtable_iterator() {
 fn pairs_compare_structurally_with_equals() {
     let src = "(+ (if (equals (cons 1 2) (cons 1 2)) 1 0)
                   (if (equals (cons 1 2) (cons 1 3)) 10 0))";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -396,14 +396,14 @@ fn mixed_type_pairs_compare_fieldwise() {
     let src = "(if (equals (cons \"a\" 1) (cons \"a\" 1))
                    (if (equals (cons \"a\" 1) (cons \"b\" 1)) 0 1)
                    0)";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
 fn nested_pairs_recurse_through_the_impl() {
     let src = "(+ (if (equals (cons (cons 1 2) 3) (cons (cons 1 2) 3)) 1 0)
                   (if (equals (cons (cons 1 2) 3) (cons (cons 1 9) 3)) 10 0))";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -413,7 +413,7 @@ fn pairs_order_lexicographically_with_less() {
     let src = "(+ (if (less (cons 1 9) (cons 2 0)) 1 0)
                   (+ (if (less (cons 1 2) (cons 1 3)) 10 0)
                      (if (less (cons 1 3) (cons 1 3)) 100 0)))";
-    assert_eq!(eval_ok(src), RtValue::Int(11));
+    assert_eq!(eval_ok(src), Value::Int(11));
 }
 
 #[test]
@@ -429,7 +429,7 @@ fn member_and_sort_work_over_a_vector_of_pairs() {
                         (+ (if (member (cons 9 9) (iter v)) 100 0)
                            (+ (* first::car 10) first::cdr))))))";
     // member hit -> 1000, miss -> 0, sorted head (1 . 3) -> 13
-    assert_eq!(eval_ok(src), RtValue::Int(1013));
+    assert_eq!(eval_ok(src), Value::Int(1013));
 }
 
 #[test]
@@ -457,5 +457,5 @@ fn member_specializes_at_two_element_types_in_one_program() {
                  (push vi 7)
                  (push vs \"x\")
                  (if (member 7 (iter vi)) (if (member \"x\" (iter vs)) 1 0) 0))";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }

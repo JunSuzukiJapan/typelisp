@@ -19,7 +19,7 @@
 //! `gc_stress` collects on every single allocation, so a missing root fails
 //! every run instead of once the free list happens to run dry.
 
-use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
 fn env() -> (Heap, Checker, Interp) {
     let mut h = Heap::with_capacity(1 << 18);
@@ -29,10 +29,10 @@ fn env() -> (Heap, Checker, Interp) {
     (h, chk, interp)
 }
 
-fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<RtValue, EvalError> {
+fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<Value, EvalError> {
     let r = Reader::new();
     let vs = r.read_all(h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(h, interp, v).expect("check failed");
         if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
@@ -42,9 +42,9 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
     Ok(last)
 }
 
-fn assert_bignum(h: &Heap, v: &RtValue, expected: &str) {
+fn assert_bignum(h: &Heap, v: &Value, expected: &str) {
     match v {
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_bignum(*id) => {
+        typelisp::Value::Boxed(id) if h.is_bignum(*id) => {
             assert_eq!(h.bignum_value(*id).to_string(), expected)
         }
         other => panic!("expected the bignum {}, got {:?}", expected, other),
@@ -76,7 +76,7 @@ fn a_ratio_global_survives_constant_collection() {
     for _ in 0..3 {
         let v = eval_in(&mut h, &mut chk, &mut interp, "*r*").expect("eval under gc stress failed");
         match v {
-            RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_ratio(id) => {
+            typelisp::Value::Boxed(id) if h.is_ratio(id) => {
                 let r = h.ratio_value(id);
                 assert_eq!((r.numer().to_string(), r.denom().to_string()), ("3".into(), "4".into()));
             }

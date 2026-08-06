@@ -15,7 +15,7 @@
 //! fail deterministically if the session rooting were missing or released too
 //! early, rather than depending on the free list happening to run dry.
 
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
 /// A prelude+island environment whose heap collects on every allocation.
 ///
@@ -32,10 +32,10 @@ fn stressed() -> (Heap, Checker, Interp) {
     (h, chk, interp)
 }
 
-fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<RtValue, EvalError> {
+fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<Value, EvalError> {
     let r = Reader::new();
     let vs = r.read_all(h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(h, interp, v).expect("check failed");
         if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
@@ -71,12 +71,24 @@ fn compiling_the_islands_scope_constructors_survives_constant_collection() {
 ///
 /// It is localized to the *compiled* path: `tests/checker_gc_stress_test.rs`
 /// runs interpretation-only workloads under the same stress with no overflow.
-/// The prime suspect is the documented `Interp::sync_roots` LIFO hazard — it
-/// pops however many roots it pushed last time and so assumes its batch is on
-/// top of the stack, which compiled code's own `rt_push_sexpr_root`/
-/// `rt_truncate_sexpr_roots` traffic can violate. Phase 1c deletes
-/// `sync_roots` outright, so this is expected to go away there; if it does
-/// not, it must be chased before Phase 2 relies on `gc_stress`.
+///
+/// **The original suspect has been ruled out.** It was `Interp::sync_roots`'s
+/// LIFO hazard (it popped however many roots it pushed last time, assuming its
+/// batch was on top of the stack, which compiled code's own
+/// `rt_push_sexpr_root`/`rt_truncate_sexpr_roots` traffic could violate), and
+/// Phase 1c deleted `sync_roots` outright — these two still fail identically.
+///
+/// What the overflow means, more precisely than "some root is stale": a cell
+/// that was on the free list *before* this collection came back marked. A free
+/// cell's `cdr` is the free-list link, so marking one makes the walk follow
+/// that chain and mark the whole list — which is why the reclaim count doesn't
+/// just come up short, it goes negative. So the fault is a root holding a
+/// `Value::Cons` that was already reclaimed by an earlier collection: pushed
+/// after being freed, rather than merely forgotten. The remaining root sets
+/// that can carry one are `roots` (including compiled code's own traffic),
+/// `permanent_roots`, and `session_roots`.
+///
+/// Must be chased before Phase 2 relies on `gc_stress`.
 #[ignore = "pre-existing GC root bug on the compiled path (see doc comment); reproduces at f4b2480"]
 fn compiling_a_nested_binding_function_survives_constant_collection() {
     let (mut h, mut chk, mut interp) = stressed();
@@ -88,7 +100,7 @@ fn compiling_a_nested_binding_function_survives_constant_collection() {
                (compile deep)
                (deep 3 4)";
     let got = eval_in(&mut h, &mut chk, &mut interp, src).expect("compile+run failed under gc stress");
-    assert_eq!(got, RtValue::Int(11));
+    assert_eq!(got, Value::Int(11));
 }
 
 /// `labels` is what pushes and clones scope frames most heavily
@@ -105,12 +117,24 @@ fn compiling_a_nested_binding_function_survives_constant_collection() {
 ///
 /// It is localized to the *compiled* path: `tests/checker_gc_stress_test.rs`
 /// runs interpretation-only workloads under the same stress with no overflow.
-/// The prime suspect is the documented `Interp::sync_roots` LIFO hazard — it
-/// pops however many roots it pushed last time and so assumes its batch is on
-/// top of the stack, which compiled code's own `rt_push_sexpr_root`/
-/// `rt_truncate_sexpr_roots` traffic can violate. Phase 1c deletes
-/// `sync_roots` outright, so this is expected to go away there; if it does
-/// not, it must be chased before Phase 2 relies on `gc_stress`.
+///
+/// **The original suspect has been ruled out.** It was `Interp::sync_roots`'s
+/// LIFO hazard (it popped however many roots it pushed last time, assuming its
+/// batch was on top of the stack, which compiled code's own
+/// `rt_push_sexpr_root`/`rt_truncate_sexpr_roots` traffic could violate), and
+/// Phase 1c deleted `sync_roots` outright — these two still fail identically.
+///
+/// What the overflow means, more precisely than "some root is stale": a cell
+/// that was on the free list *before* this collection came back marked. A free
+/// cell's `cdr` is the free-list link, so marking one makes the walk follow
+/// that chain and mark the whole list — which is why the reclaim count doesn't
+/// just come up short, it goes negative. So the fault is a root holding a
+/// `Value::Cons` that was already reclaimed by an earlier collection: pushed
+/// after being freed, rather than merely forgotten. The remaining root sets
+/// that can carry one are `roots` (including compiled code's own traffic),
+/// `permanent_roots`, and `session_roots`.
+///
+/// Must be chased before Phase 2 relies on `gc_stress`.
 #[ignore = "pre-existing GC root bug on the compiled path (see doc comment); reproduces at f4b2480"]
 fn compiling_labels_survives_constant_collection() {
     let (mut h, mut chk, mut interp) = stressed();
@@ -121,7 +145,7 @@ fn compiling_labels_survives_constant_collection() {
                (compile sum-to)
                (sum-to 5)";
     let got = eval_in(&mut h, &mut chk, &mut interp, src).expect("compile+run failed under gc stress");
-    assert_eq!(got, RtValue::Int(15));
+    assert_eq!(got, Value::Int(15));
 }
 
 /// A compiled function must still agree with the interpreter when every
@@ -134,12 +158,12 @@ fn a_function_compiled_under_stress_agrees_with_the_interpreter() {
 
     let (mut h, mut chk, mut interp) = stressed();
     eval_in(&mut h, &mut chk, &mut interp, src).expect("define failed");
-    let interpreted: Vec<RtValue> = (0..6)
+    let interpreted: Vec<Value> = (0..6)
         .map(|n| eval_in(&mut h, &mut chk, &mut interp, &format!("(f {})", n)).expect("interpreted call failed"))
         .collect();
 
     eval_in(&mut h, &mut chk, &mut interp, "(compile f)").expect("compile failed under gc stress");
-    let compiled: Vec<RtValue> = (0..6)
+    let compiled: Vec<Value> = (0..6)
         .map(|n| eval_in(&mut h, &mut chk, &mut interp, &format!("(f {})", n)).expect("compiled call failed"))
         .collect();
 
@@ -164,5 +188,5 @@ fn interpreted_scopes_survive_constant_collection() {
                      ((None) -1))))
                (f)";
     let got = eval_in(&mut h, &mut chk, &mut interp, src).expect("interpreted scope failed under gc stress");
-    assert_eq!(got, RtValue::Int(42));
+    assert_eq!(got, Value::Int(42));
 }

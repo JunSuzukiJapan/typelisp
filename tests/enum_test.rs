@@ -11,7 +11,7 @@
 //! available; `match` itself is a checker special form and needs no prelude.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue, TopLevel};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
 
 /// Check every form in `src` (with the prelude loaded); return the last node.
 fn check(src: &str) -> Result<TopLevel, Error> {
@@ -29,14 +29,14 @@ fn check(src: &str) -> Result<TopLevel, Error> {
 }
 
 /// Check, then execute, every form in `src`; return the last value produced.
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(v) = interp.exec(&mut h, tl)? {
@@ -46,7 +46,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -62,7 +62,7 @@ fn eval_enum(src: &str) -> (usize, Vec<typelisp::Value>) {
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(v) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -70,7 +70,7 @@ fn eval_enum(src: &str) -> (usize, Vec<typelisp::Value>) {
         }
     }
     match last {
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_enum(id) => {
+        typelisp::Value::Boxed(id) if h.is_enum(id) => {
             (h.enum_variant(id), (0..h.enum_field_count(id)).map(|i| h.enum_field(id, i)).collect())
         }
         other => panic!("expected an enum value, got {:?}", other),
@@ -124,7 +124,7 @@ fn a_bare_symbol_nullary_variant_is_accepted() {
 fn match_binds_a_variant_payload() {
     let src = "(defenum Maybe<T> (Just T) (Nothing)) \
                (match (Maybe::Just 5) ((Just v) v) ((Nothing) 0))";
-    assert_eq!(eval_ok(src), RtValue::Int(5));
+    assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn match_selects_the_nullary_arm() {
     let src = "(defenum Maybe<T> (Just T) (Nothing)) \
                (defun mk () Maybe<i32> (Maybe::Nothing)) \
                (match (mk) ((Just v) v) ((Nothing) 99))";
-    assert_eq!(eval_ok(src), RtValue::Int(99));
+    assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn a_generic_enum_infers_its_type_argument() {
     // The nullary `Nothing` learns T=i32 from the arm result type unification.
     let src = "(defenum Maybe<T> (Just T) (Nothing)) \
                (match (Maybe::Just 42) ((Just v) v) ((Nothing) 0))";
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn a_non_exhaustive_match_is_rejected() {
 fn a_wildcard_makes_a_match_exhaustive() {
     let src = "(defenum Color (Red) (Green) (Blue)) \
                (match (Color::Blue) ((Red) 1) (_ 0))";
-    assert_eq!(eval_ok(src), RtValue::Int(0));
+    assert_eq!(eval_ok(src), Value::Int(0));
 }
 
 // ---- if-let (prelude macro over match) --------------------------------------
@@ -166,7 +166,7 @@ fn a_wildcard_makes_a_match_exhaustive() {
 fn if_let_binds_a_matching_variant() {
     let src = "(defenum Maybe<T> (Just T) (Nothing)) \
                (if-let ((Just v) (Maybe::Just 5)) v 0)";
-    assert_eq!(eval_ok(src), RtValue::Int(5));
+    assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn if_let_takes_the_else_branch_on_a_mismatch() {
     let src = "(defenum Maybe<T> (Just T) (Nothing)) \
                (defun mk () Maybe<i32> (Maybe::Nothing)) \
                (if-let ((Just v) (mk)) v 0)";
-    assert_eq!(eval_ok(src), RtValue::Int(0));
+    assert_eq!(eval_ok(src), Value::Int(0));
 }
 
 // ---- constructor visibility (qualified / use) -------------------------------
@@ -226,5 +226,5 @@ fn the_angle_bracket_defenum_header_works() {
     // `Maybe<T>` reads as one symbol and splits into name + type params.
     let src = "(defenum Maybe<T> (Just T) (Nothing)) \
                (match (Maybe::Just 3) ((Just v) v) ((Nothing) 0))";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+    assert_eq!(eval_ok(src), Value::Int(3));
 }

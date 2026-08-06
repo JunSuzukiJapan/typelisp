@@ -9,9 +9,9 @@
 //! (`read::reader::validate_keyword`).
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader, RtValue};
+use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<RtValue, String> {
+fn run(src: &str) -> Result<Value, String> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -19,7 +19,7 @@ fn run(src: &str) -> Result<RtValue, String> {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).map_err(|e| format!("{:?}", e))?;
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).map_err(|e| format!("{:?}", e))?;
         if let Some(val) = interp.exec(&mut h, tl).map_err(|e| format!("{:?}", e))? {
@@ -29,7 +29,7 @@ fn run(src: &str) -> Result<RtValue, String> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -46,7 +46,7 @@ fn eval_string(src: &str) -> String {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -54,7 +54,7 @@ fn eval_string(src: &str) -> String {
         }
     }
     match last {
-        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        typelisp::Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
 }
@@ -94,13 +94,13 @@ fn a_keyword_is_typed_as_symbol_and_flows_where_a_symbol_is_expected() {
 #[test]
 fn the_same_keyword_read_twice_is_the_same_object() {
     // Interning, not structural equality: `eq` is identity.
-    assert_eq!(eval_ok("(eq :foo :foo)"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(eq :foo :bar)"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(eq :foo :foo)"), Value::Bool(true));
+    assert_eq!(eval_ok("(eq :foo :bar)"), Value::Bool(false));
 }
 
 #[test]
 fn keywords_are_case_folded_like_every_other_symbol() {
-    assert_eq!(eval_ok("(eq :foo :FOO)"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(eq :foo :FOO)"), Value::Bool(true));
 }
 
 #[test]
@@ -115,9 +115,9 @@ fn a_keyword_can_be_stored_in_a_sexpr_datum() {
 
 #[test]
 fn keywordp_distinguishes_keywords_from_ordinary_symbols() {
-    assert_eq!(eval_ok("(keywordp :foo)"), RtValue::Bool(true));
-    assert_eq!(eval_ok("(keywordp (string->symbol \"foo\"))"), RtValue::Bool(false));
-    assert_eq!(eval_ok("(keywordp (string->symbol \"\"))"), RtValue::Bool(false));
+    assert_eq!(eval_ok("(keywordp :foo)"), Value::Bool(true));
+    assert_eq!(eval_ok("(keywordp (string->symbol \"foo\"))"), Value::Bool(false));
+    assert_eq!(eval_ok("(keywordp (string->symbol \"\"))"), Value::Bool(false));
 }
 
 // ---- malformed keywords are read errors ---------------------------------
@@ -142,7 +142,7 @@ fn a_leading_double_colon_is_still_the_absolute_path_syntax() {
     // `::foo` must not be mistaken for a malformed keyword — it reads as a
     // `Value::Path` whose first segment is empty ("from root").
     let out = eval_ok("(defun f () i32 7) (module m (pub defun g () i32 (::f))) (m::g)");
-    assert_eq!(out, RtValue::Int(7));
+    assert_eq!(out, Value::Int(7));
 }
 
 // ---- the existing `&key` macro arguments still work ---------------------
@@ -150,5 +150,5 @@ fn a_leading_double_colon_is_still_the_absolute_path_syntax() {
 #[test]
 fn defmacro_key_arguments_still_parse_as_keywords() {
     let out = eval_ok("(defmacro pick (&key (a 1) (b 2)) `(- ,a ,b)) (pick :b 10 :a 30)");
-    assert_eq!(out, RtValue::Int(20));
+    assert_eq!(out, Value::Int(20));
 }

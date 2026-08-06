@@ -12,15 +12,15 @@ use inkwell::OptimizationLevel;
 use std::cell::RefCell;
 use std::rc::Rc;
 use typelisp::compile::COMPILE_LOCK;
-use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue, Value};
+use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -30,7 +30,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -39,9 +39,9 @@ fn eval_ok(src: &str) -> RtValue {
 /// A `string` is a heap `Value::Str` since the scalar unification, so reading
 /// one needs the heap it lives in — and every runner here drops its heap on
 /// return. Hence the `*_string` runners below, which read the text out first.
-fn read_str(h: &Heap, v: RtValue) -> String {
+fn read_str(h: &Heap, v: Value) -> String {
     match v {
-        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        typelisp::Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a Str, got {:?}", other),
     }
 }
@@ -53,7 +53,7 @@ fn eval_string(src: &str) -> String {
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -72,27 +72,27 @@ fn eval_string(src: &str) -> String {
 /// when `RtValue` had its own `LlvmModule` variant, and dead (with a dead
 /// message) since the handle registry replaced it, as `unreachable pattern`
 /// warnings pointed out.
-fn expect_llvm_module(v: RtValue) -> Rc<RefCell<Module<'static>>> {
+fn expect_llvm_module(v: Value) -> Rc<RefCell<Module<'static>>> {
     typelisp::llvm_module_of(&v).expect("expected an llvm-module handle")
 }
 
 /// Like [`run`], but with the (typelisp-hosted) compiler body
 /// (`compiler::SOURCE`) loaded first, for tests that call
 /// `compile-constant-function`/`compile-value`.
-fn run_with_compiler(src: &str) -> Result<RtValue, EvalError> {
+fn run_with_compiler(src: &str) -> Result<Value, EvalError> {
     run_with_compiler_and_capacity(src, 1 << 16)
 }
 
 /// Like [`run_with_compiler`], but with a caller-chosen `Heap` capacity —
 /// see [`run_with_compiler_and_prelude_and_capacity`]'s doc comment for why.
-fn run_with_compiler_and_capacity(src: &str, capacity: usize) -> Result<RtValue, EvalError> {
+fn run_with_compiler_and_capacity(src: &str, capacity: usize) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(capacity);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -102,7 +102,7 @@ fn run_with_compiler_and_capacity(src: &str, capacity: usize) -> Result<RtValue,
     Ok(last)
 }
 
-fn eval_ok_with_compiler(src: &str) -> RtValue {
+fn eval_ok_with_compiler(src: &str) -> Value {
     run_with_compiler(src).expect("eval failed")
 }
 
@@ -115,7 +115,7 @@ fn eval_string_with_compiler_and_capacity(src: &str, capacity: usize) -> String 
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -133,7 +133,7 @@ fn eval_string_with_compiler(src: &str) -> String {
 /// `while`/`dotimes`/`dolist`/...) loaded too, for tests that exercise a
 /// macro built on `loop`/`break`/`return`/`setf` rather than those
 /// primitives directly.
-fn run_with_compiler_and_prelude(src: &str) -> Result<RtValue, EvalError> {
+fn run_with_compiler_and_prelude(src: &str) -> Result<Value, EvalError> {
     run_with_compiler_and_prelude_and_capacity(src, 1 << 16)
 }
 
@@ -143,7 +143,7 @@ fn run_with_compiler_and_prelude(src: &str) -> Result<RtValue, EvalError> {
 /// partway through a compiled function's execution, the same reason
 /// `typelisp-rt`'s own `rt_push_sexpr_root` tests use a tiny capacity rather
 /// than the generous default every other test here gets.
-fn run_with_compiler_and_prelude_and_capacity(src: &str, capacity: usize) -> Result<RtValue, EvalError> {
+fn run_with_compiler_and_prelude_and_capacity(src: &str, capacity: usize) -> Result<Value, EvalError> {
     run_and_read(src, capacity, |_, v| v)
 }
 
@@ -157,7 +157,7 @@ fn run_with_compiler_and_prelude_and_capacity(src: &str, capacity: usize) -> Res
 /// longer exists by the time the caller looks, and two runs' ids are
 /// unrelated even when the values agree. So anything compared *between* runs
 /// has to be read out here — see [`Readback`].
-fn run_and_read<R>(src: &str, capacity: usize, f: impl FnOnce(&Heap, RtValue) -> R) -> Result<R, EvalError> {
+fn run_and_read<R>(src: &str, capacity: usize, f: impl FnOnce(&Heap, Value) -> R) -> Result<R, EvalError> {
     let mut h = Heap::with_capacity(capacity);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -165,7 +165,7 @@ fn run_and_read<R>(src: &str, capacity: usize, f: impl FnOnce(&Heap, RtValue) ->
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -193,24 +193,29 @@ enum Readback {
     Str(String),
     /// A result that `RtValue` still carries by value — `Int`, `Bool`,
     /// `Unit`.
-    Scalar(RtValue),
+    Scalar(Value),
 }
 
 fn run_readback(src: &str) -> Result<Readback, EvalError> {
     run_and_read(src, 1 << 16, |h, v| match v {
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_bignum(id) => {
+        typelisp::Value::Boxed(id) if h.is_bignum(id) => {
             Readback::Bignum(h.bignum_value(id).to_string())
         }
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_ratio(id) => {
+        typelisp::Value::Boxed(id) if h.is_ratio(id) => {
             let r = h.ratio_value(id);
             Readback::Ratio(r.numer().to_string(), r.denom().to_string())
         }
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) if h.is_float(id) => Readback::Float(h.float_value(id)),
-        RtValue::Sexpr(typelisp::Value::Str(id)) => Readback::Str(h.string(id).to_string()),
-        RtValue::Sexpr(other) => panic!(
+        typelisp::Value::Boxed(id) if h.is_float(id) => Readback::Float(h.float_value(id)),
+        typelisp::Value::Str(id) => Readback::Str(h.string(id).to_string()),
+        // Any *other* heap box is a value this reader cannot compare across
+        // heaps, so it must fail loudly rather than silently compare box ids
+        // — the guard that caught the float crossing bug in 1b-5.
+        other @ typelisp::Value::Boxed(_) => panic!(
             "run_readback only knows how to read a bignum/ratio/float/string out of its heap, got {:?}",
             other
         ),
+        // Scalars are self-contained, so they outlive their heap and compare
+        // directly.
         scalar => Readback::Scalar(scalar),
     })
 }
@@ -224,9 +229,9 @@ fn run_f64(src: &str) -> f64 {
     }
 }
 
-fn expect_bool(v: RtValue) -> bool {
+fn expect_bool(v: Value) -> bool {
     match v {
-        RtValue::Bool(b) => b,
+        Value::Bool(b) => b,
         other => panic!("expected a Bool, got {:?}", other),
     }
 }
@@ -588,7 +593,7 @@ fn compile_dispatches_a_defun_call_to_native_code() {
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 42),
+        Value::Int(n) => assert_eq!(n, 42),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -618,7 +623,7 @@ fn a_variadic_function_compiles_and_dispatches_to_native_code() {
     )
     .expect("eval failed");
     match v {
-        RtValue::Int(n) => assert_eq!(n, 1),
+        Value::Int(n) => assert_eq!(n, 1),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -652,7 +657,7 @@ fn fnref_of_a_variadic_function_forwards_the_rest_list() {
         (run-it)
         "#,
     );
-    assert_eq!(v, RtValue::Int(10));
+    assert_eq!(v, Value::Int(10));
 }
 
 #[test]
@@ -661,7 +666,7 @@ fn an_uncompiled_function_still_tree_walks_normally() {
     // ordinary path for a function nobody asked to `compile`.
     let v = eval_ok_with_compiler(r#"(defun answer () i64 42) (answer)"#);
     match v {
-        RtValue::Int(n) => assert_eq!(n, 42),
+        Value::Int(n) => assert_eq!(n, 42),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -699,7 +704,7 @@ fn compile_dispatches_a_defun_with_a_labels_body_to_native_code() {
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 25),
+        Value::Int(n) => assert_eq!(n, 25),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -722,7 +727,7 @@ fn compile_dispatches_a_defun_with_a_capturing_labels_body_to_native_code() {
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 15),
+        Value::Int(n) => assert_eq!(n, 15),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -749,7 +754,7 @@ fn a_sibling_that_never_references_a_capture_still_forwards_it_to_another_siblin
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 15),
+        Value::Int(n) => assert_eq!(n, 15),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -823,7 +828,7 @@ fn compile_dispatches_a_defun_that_calls_another_compiled_function() {
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 25),
+        Value::Int(n) => assert_eq!(n, 25),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -846,7 +851,7 @@ fn compile_transitively_compiles_a_called_function() {
         "#,
     )
     .expect("transitive compile of `square` should succeed");
-    assert_eq!(v, RtValue::Int(25), "3*3 + 4*4 = 25, with `square` auto-compiled");
+    assert_eq!(v, Value::Int(25), "3*3 + 4*4 = 25, with `square` auto-compiled");
 }
 
 /// The end-to-end self-recursion counterpart of
@@ -891,7 +896,7 @@ fn compile_dispatches_a_defun_with_a_two_statement_body_to_native_code() {
         (+ (bump 1) (* counter 1000))
         "#,
     );
-    assert_eq!(v, RtValue::Int(1101), "bump(1)=101 or the setf never ran (counter would still read 0)");
+    assert_eq!(v, Value::Int(1101), "bump(1)=101 or the setf never ran (counter would still read 0)");
 }
 
 /// The `lambda` counterpart of the two-statement `defun` test above: an
@@ -914,7 +919,7 @@ fn compile_dispatches_an_escaping_lambda_with_a_two_statement_body_to_native_cod
         (+ (apply-fn (make-adder 5) 10) (* calls 1000))
         "#,
     );
-    assert_eq!(v, RtValue::Int(1015), "adder(10)=15 with n=5, plus 1000*calls proving the setf statement ran once");
+    assert_eq!(v, Value::Int(1015), "adder(10)=15 with n=5, plus 1000*calls proving the setf statement ran once");
 }
 
 /// The `labels` sibling counterpart: one sibling's own body has two
@@ -936,7 +941,7 @@ fn compile_dispatches_a_labels_sibling_with_a_two_statement_body_to_native_code(
         (+ (sum-of-squares 3 4) (* calls 1000))
         "#,
     );
-    assert_eq!(v, RtValue::Int(2025), "3*3+4*4=25, plus 1000*calls (square called twice) proving each call's first statement ran");
+    assert_eq!(v, Value::Int(2025), "3*3+4*4=25, plus 1000*calls (square called twice) proving each call's first statement ran");
 }
 
 /// The `labels` *trailing body* counterpart: the block's own trailing body
@@ -957,7 +962,7 @@ fn compile_dispatches_a_labels_trailing_body_with_two_statements_to_native_code(
         (+ (sum-of-squares 3 4) (* calls 1000))
         "#,
     );
-    assert_eq!(v, RtValue::Int(1025), "3*3+4*4=25, plus 1000*calls proving the trailing body's first statement ran");
+    assert_eq!(v, Value::Int(1025), "3*3+4*4=25, plus 1000*calls proving the trailing body's first statement ran");
 }
 
 /// The `match` arm counterpart: one arm's own body has two statements —
@@ -977,7 +982,7 @@ fn compile_matches_with_a_two_statement_arm_body_to_native_code() {
         (+ (m 7) (* calls 1000))
         "#,
     );
-    assert_eq!(v, RtValue::Int(1007), "m(7)=7 via the Just arm, plus 1000*calls proving its first statement ran");
+    assert_eq!(v, Value::Int(1007), "m(7)=7 via the Just arm, plus 1000*calls proving its first statement ran");
 }
 
 /// The end-to-end Stage 4 slice (immediate-call, non-capturing): an IIFE
@@ -995,7 +1000,7 @@ fn compile_dispatches_a_defun_with_an_immediately_invoked_lambda_to_native_code(
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 10),
+        Value::Int(n) => assert_eq!(n, 10),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1014,7 +1019,7 @@ fn compile_dispatches_a_defun_with_a_capturing_immediately_invoked_lambda_to_nat
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 105),
+        Value::Int(n) => assert_eq!(n, 105),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1043,7 +1048,7 @@ fn compile_dispatches_an_escaping_capturing_lambda_called_through_another_compil
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 15),
+        Value::Int(n) => assert_eq!(n, 15),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1077,7 +1082,7 @@ fn compile_dispatches_a_top_level_function_passed_by_name_through_apply_fn() {
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 25),
+        Value::Int(n) => assert_eq!(n, 25),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1102,7 +1107,7 @@ fn compile_interp_applies_a_closure_returned_by_compiled_code() {
         (let ((adder (make-adder 3))) (adder 5))
         "#,
     );
-    assert_eq!(v, RtValue::Int(8));
+    assert_eq!(v, Value::Int(8));
 }
 
 /// Stage 3's other half: a compiled-produced `Fn` value crossing back into
@@ -1129,7 +1134,7 @@ fn compile_a_compiled_produced_closure_survives_interp_apply_then_crosses_into_a
         "#,
     );
     // direct = 3 + 5 = 8; apply-fn adder 10 = 3 + 10 = 13; 8 + 13 = 21.
-    assert_eq!(v, RtValue::Int(21));
+    assert_eq!(v, Value::Int(21));
 }
 
 /// Closure-representation unification, Stage 3 (`struct_field_kind` gap
@@ -1156,7 +1161,7 @@ fn compile_dispatches_a_defstruct_field_of_fn_type_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(8));
+    assert_eq!(v, Value::Int(8));
 }
 
 /// Follow-up to Stage 4: a `labels` sibling referenced *as a value* (not
@@ -1289,7 +1294,7 @@ fn compile_dispatches_an_escaping_labels_sibling_returned_bare() {
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 15),
+        Value::Int(n) => assert_eq!(n, 15),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1317,7 +1322,7 @@ fn compile_dispatches_an_escaping_labels_sibling_chosen_correctly_among_several(
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 15),
+        Value::Int(n) => assert_eq!(n, 15),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1347,7 +1352,7 @@ fn compile_dispatches_an_escaping_lambda_that_indirectly_captures_a_labels_sibli
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 42),
+        Value::Int(n) => assert_eq!(n, 42),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1386,7 +1391,7 @@ fn repeated_calls_through_a_captured_closure_survive_gc_pressure() {
         20000,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(15), "the captured closure keeps working after many unrelated conses force repeated gc() runs");
+    assert_eq!(v, Value::Int(15), "the captured closure keeps working after many unrelated conses force repeated gc() runs");
 }
 
 /// The escaping-closure counterpart of the test above: `make-wrapper`
@@ -1422,7 +1427,7 @@ fn an_escaping_lambdas_captured_closure_survives_gc_pressure() {
         20000,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(10), "the wrapper's captured inner closure survives many unrelated conses forcing repeated gc() runs");
+    assert_eq!(v, Value::Int(10), "the wrapper's captured inner closure survives many unrelated conses forcing repeated gc() runs");
 }
 
 /// Closure-representation unification, Stage 4 (shared-cell captures): a
@@ -1451,7 +1456,7 @@ fn compile_a_setf_on_a_captured_name_is_visible_on_the_next_call_through_the_sam
     // closure, same cell: start 1 -> 2, returns 2 (b = 2). 1 + 200 = 201 —
     // only possible if both calls mutated and read the *same* cell.
     match v {
-        RtValue::Int(n) => assert_eq!(n, 201),
+        Value::Int(n) => assert_eq!(n, 201),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1479,7 +1484,7 @@ fn compile_a_setf_through_one_labels_sibling_is_visible_through_another_sharing_
     // bump: 10 -> 11, bump: 11 -> 12, read-it: 12 — read-it never itself
     // writes, so it can only see 12 by reading the exact cell bump wrote to.
     match v {
-        RtValue::Int(n) => assert_eq!(n, 12),
+        Value::Int(n) => assert_eq!(n, 12),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1514,7 +1519,7 @@ fn compile_a_captured_cell_survives_gc_pressure_across_many_calls() {
         20000,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(1), "the counter's cell survives many unrelated conses forcing repeated gc() runs, then the single (c) call sees start still at 0");
+    assert_eq!(v, Value::Int(1), "the counter's cell survives many unrelated conses forcing repeated gc() runs, then the single (c) call sees start still at 0");
 }
 
 // --- if/let/comparisons (labels/closures Stage 5) ---
@@ -1620,7 +1625,7 @@ fn compile_dispatches_a_self_recursive_function_with_a_base_case_to_native_code(
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 3628800),
+        Value::Int(n) => assert_eq!(n, 3628800),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1647,7 +1652,7 @@ fn compile_dispatches_a_setf_on_a_let_bound_local_to_native_code() {
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 5),
+        Value::Int(n) => assert_eq!(n, 5),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1669,7 +1674,7 @@ fn compile_dispatches_a_bare_return_inside_a_loop_to_native_code() {
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 42),
+        Value::Int(n) => assert_eq!(n, 42),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1692,7 +1697,7 @@ fn compile_dispatches_a_value_less_return_from_a_loop_to_native_code() {
         "#,
     );
     match v {
-        RtValue::Unit => {}
+        Value::Empty => {}
         other => panic!("expected Unit, got {:?}", other),
     }
 }
@@ -1719,7 +1724,7 @@ fn compile_dispatches_a_counting_loop_with_setf_and_conditional_return_to_native
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 15, "0+1+2+3+4+5"),
+        Value::Int(n) => assert_eq!(n, 15, "0+1+2+3+4+5"),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1747,7 +1752,7 @@ fn compile_dispatches_a_loop_exited_via_a_bare_break_to_native_code() {
         "#,
     );
     match v {
-        RtValue::Unit => {}
+        Value::Empty => {}
         other => panic!("expected Unit, got {:?}", other),
     }
 }
@@ -1781,7 +1786,7 @@ fn compile_dispatches_nested_loops_where_an_inner_break_only_exits_the_inner_loo
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 6),
+        Value::Int(n) => assert_eq!(n, 6),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1812,7 +1817,7 @@ fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
     )
     .expect("eval failed");
     match v {
-        RtValue::Unit => {}
+        Value::Empty => {}
         other => panic!("expected Unit, got {:?}", other),
     }
 }
@@ -1845,7 +1850,7 @@ fn compile_dispatches_a_dolist_summing_a_sexpr_list() {
     )
     .expect("eval failed");
     match v {
-        RtValue::Int(n) => assert_eq!(n, 15),
+        Value::Int(n) => assert_eq!(n, 15),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -1960,7 +1965,7 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Sexpr(Value::Int(42)));
+    assert_eq!(v, Value::Int(42));
 
     let v = run_with_compiler_and_prelude(
         r#"
@@ -1970,7 +1975,7 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Sexpr(Value::Bool(true)));
+    assert_eq!(v, Value::Bool(true));
 
     let v = run_with_compiler_and_prelude(
         r#"
@@ -1980,7 +1985,7 @@ fn compile_dispatches_a_function_that_constructs_sexpr_immediates_to_native_code
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Sexpr(Value::Empty));
+    assert_eq!(v, Value::Empty);
 }
 
 /// `str::append`/`str::length` (`compile-assoc`'s `str` branch): `append`
@@ -2002,7 +2007,7 @@ fn compile_dispatches_a_function_that_appends_strings_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(6), "\"foo\" ++ \"bar\" has 6 characters");
+    assert_eq!(v, Value::Int(6), "\"foo\" ++ \"bar\" has 6 characters");
 }
 
 /// A `let`-bound `Type::Str` local survives many unrelated allocations —
@@ -2039,7 +2044,7 @@ fn compile_dispatches_a_function_that_keeps_a_let_bound_str_local_rooted_across_
         20000,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(11), "\"hello world\" has 11 characters, even after many unrelated conses force a gc()");
+    assert_eq!(v, Value::Int(11), "\"hello world\" has 11 characters, even after many unrelated conses force a gc()");
 }
 
 /// A general ADT (`Option<i64>`'s `Some`, `AdtKind::Sum`) constructs via
@@ -2062,7 +2067,7 @@ fn compile_dispatches_a_function_that_constructs_a_general_adt_box_to_native_cod
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(42));
+    assert_eq!(v, Value::Int(42));
 }
 
 // ---- enum-representation unification (Stage 4): newly-opened scenarios ----
@@ -2094,7 +2099,7 @@ fn compile_dispatches_a_function_taking_an_enum_typed_argument_to_native_code() 
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(99));
+    assert_eq!(v, Value::Int(99));
 }
 
 /// A nested enum (`Option<Option<i64>>`): `struct_field_kind`'s recursive
@@ -2114,7 +2119,7 @@ fn compile_dispatches_a_function_constructing_a_nested_option_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(7));
+    assert_eq!(v, Value::Int(7));
 }
 
 /// A user `defenum` whose variant carries a builtin `Option<T>` field —
@@ -2131,7 +2136,7 @@ fn compile_dispatches_a_function_constructing_a_user_defenum_with_an_option_fiel
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(5));
+    assert_eq!(v, Value::Int(5));
 }
 
 /// `Vector<Option<i64>>::push`/`get` — the element `kind`
@@ -2152,7 +2157,7 @@ fn compile_dispatches_vector_push_and_get_of_an_option_element_to_native_code() 
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(3));
+    assert_eq!(v, Value::Int(3));
 }
 
 /// `HashTable<i64, Option<i64>>::get` returns `Option<Option<i64>>` — the
@@ -2175,7 +2180,7 @@ fn compile_dispatches_hashtable_get_of_an_option_typed_value_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(42));
+    assert_eq!(v, Value::Int(42));
 }
 
 /// A `defstruct` field of enum type — `struct_field_kind`'s kind `6` for
@@ -2192,7 +2197,7 @@ fn compile_dispatches_a_defstruct_field_of_option_type_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(8));
+    assert_eq!(v, Value::Int(8));
 }
 
 /// GC stress: constructs many enum values inside a loop with a small heap,
@@ -2218,7 +2223,7 @@ fn compile_dispatches_a_function_that_keeps_an_enum_scrutinee_rooted_across_many
         1 << 15,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(123));
+    assert_eq!(v, Value::Int(123));
 }
 
 /// A `mutable` `AdtKind::Struct` (`defstruct`) instance, unlike `Some`'s
@@ -2267,7 +2272,7 @@ fn compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_
     )
     .expect("eval failed");
     match v {
-        RtValue::Sexpr(Value::Boxed(_)) => {}
+        Value::Boxed(_) => {}
         other => panic!("expected a boxed struct Sexpr (compile-construct-boxed-struct), got {:?}", other),
     }
 }
@@ -2299,7 +2304,7 @@ fn compile_dispatches_a_defstruct_field_accessor_method_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(3));
+    assert_eq!(v, Value::Int(3));
 }
 
 /// The `FieldSet` counterpart, through `(setf p::x v)`'s own desugaring to
@@ -2323,7 +2328,7 @@ fn compile_dispatches_a_defstruct_field_setter_method_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(99));
+    assert_eq!(v, Value::Int(99));
 }
 
 /// The composability gap described in the
@@ -2350,7 +2355,7 @@ fn compile_dispatches_a_function_that_calls_a_compiled_method_in_its_own_body() 
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(7));
+    assert_eq!(v, Value::Int(7));
 }
 
 /// A self-recursive `defmethod` (CLOS-style call syntax, `(countdown self)`
@@ -2389,7 +2394,7 @@ fn compile_dispatches_a_self_recursive_method_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(0));
+    assert_eq!(v, Value::Int(0));
 }
 
 /// The method-call counterpart of `compile_transitively_compiles_a_called_function`
@@ -2408,7 +2413,7 @@ fn compile_transitively_compiles_a_called_user_method() {
         "#,
     )
     .expect("transitive compile of the `point` accessors should succeed");
-    assert_eq!(v, RtValue::Int(7), "3 + 4 = 7, with `point::x`/`point::y` auto-compiled");
+    assert_eq!(v, Value::Int(7), "3 + 4 = 7, with `point::x`/`point::y` auto-compiled");
 }
 
 /// The other half of `Interp::compile_function`'s `Expr::Assoc`-target check:
@@ -2513,7 +2518,7 @@ fn compile_bare_name_prefers_the_callers_own_module_over_a_same_named_sibling() 
         (a::get-it)
         "#,
     );
-    assert_eq!(v, RtValue::Int(1));
+    assert_eq!(v, Value::Int(1));
 }
 
 /// The `defmethod`/`defstruct`-accessor counterpart of the sibling test
@@ -2549,7 +2554,7 @@ fn compile_a_same_named_method_in_two_sibling_modules_does_not_alias_the_others_
         (sum-both (make-a) (make-b))
         "#,
     );
-    assert_eq!(v, RtValue::Int(300));
+    assert_eq!(v, Value::Int(300));
 }
 
 /// `(compile "name")`/`(compile "type::method")` — a string literal, not an
@@ -2600,7 +2605,7 @@ fn compile_dispatches_a_nested_labels_inner_sibling_calling_an_outer_sibling_dir
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 11),
+        Value::Int(n) => assert_eq!(n, 11),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -2627,7 +2632,7 @@ fn compile_dispatches_a_nested_labels_inner_sibling_calling_a_capturing_outer_si
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 110),
+        Value::Int(n) => assert_eq!(n, 110),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -2650,7 +2655,7 @@ fn compile_dispatches_a_nested_labels_trailing_body_calling_an_outer_sibling() {
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 110),
+        Value::Int(n) => assert_eq!(n, 110),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -2679,7 +2684,7 @@ fn compile_dispatches_a_nested_labels_inner_sibling_with_a_capture_of_its_own_be
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 1110),
+        Value::Int(n) => assert_eq!(n, 1110),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -2704,7 +2709,7 @@ fn compile_dispatches_a_triple_nested_labels_call_skipping_the_middle_level() {
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 110),
+        Value::Int(n) => assert_eq!(n, 110),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -2731,7 +2736,7 @@ fn compile_dispatches_a_nested_labels_inner_sibling_that_boxes_an_outer_sibling_
         "#,
     );
     match v {
-        RtValue::Int(n) => assert_eq!(n, 110),
+        Value::Int(n) => assert_eq!(n, 110),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -2771,7 +2776,7 @@ fn a_where_bounded_generic_specializes_and_dispatches_into_compiled_methods() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(7));
+    assert_eq!(v, Value::Int(7));
 }
 
 /// The multi-impl counterpart: two call sites instantiate `describe <box-a>`
@@ -2801,7 +2806,7 @@ fn a_where_bounded_generic_specializes_per_impl_and_dispatches_into_compiled_met
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(3 + 6));
+    assert_eq!(v, Value::Int(3 + 6));
 }
 
 
@@ -2834,7 +2839,7 @@ fn compile_let_does_not_emit_instructions_after_an_early_return_from_its_body() 
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(42));
+    assert_eq!(v, Value::Int(42));
 }
 
 /// The general fix `compile_let_does_not_emit_instructions_after_an_early_return_from_its_body`'s
@@ -2895,7 +2900,7 @@ fn compile_return_truncates_a_sexpr_lets_gc_root_on_every_call_not_just_the_firs
         for v in r.read_all(&mut h, "(trivial)").expect("read failed") {
             let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
             let result = interp.exec(&mut h, tl).expect("exec failed").expect("trivial should produce a value");
-            assert_eq!(result, RtValue::Int(7));
+            assert_eq!(result, Value::Int(7));
         }
     }
     let trivial_growth = h.root_count() - before_trivial;
@@ -2905,7 +2910,7 @@ fn compile_return_truncates_a_sexpr_lets_gc_root_on_every_call_not_just_the_firs
         for v in r.read_all(&mut h, "(leaky-inner)").expect("read failed") {
             let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
             let result = interp.exec(&mut h, tl).expect("exec failed").expect("leaky-inner should produce a value");
-            assert_eq!(result, RtValue::Int(7));
+            assert_eq!(result, Value::Int(7));
         }
     }
     let leaky_growth = h.root_count() - before_leaky;
@@ -2949,7 +2954,7 @@ fn compile_dispatches_a_function_that_constructs_a_nested_defstruct_to_native_co
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(41));
+    assert_eq!(v, Value::Int(41));
 }
 
 /// The `FieldSet` counterpart: a compiled setter whose value operand is a
@@ -2976,7 +2981,7 @@ fn compile_dispatches_a_nested_defstruct_field_setter_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(9));
+    assert_eq!(v, Value::Int(9));
 }
 
 /// A user-defined method on a *primitive* receiver — the prelude's `impl Eq
@@ -2999,7 +3004,7 @@ fn compile_dispatches_a_user_method_on_a_primitive_receiver() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Bool(true));
+    assert_eq!(v, Value::Bool(true));
 }
 
 /// The `Ord` counterpart of the previous test: `i32::less` (body
@@ -3017,7 +3022,7 @@ fn compile_dispatches_less_on_a_primitive_receiver() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Bool(true));
+    assert_eq!(v, Value::Bool(true));
 }
 
 /// A user method on a *primitive* receiver (the prelude's `impl Eq i32` ->
@@ -3038,7 +3043,7 @@ fn compile_transitively_compiles_a_called_primitive_receiver_method() {
         "#,
     )
     .expect("transitive compile of `i32::equals` should succeed");
-    assert_eq!(v, RtValue::Int(1), "eq2(5,5) true and eq2(5,6) false, with `i32::equals` auto-compiled");
+    assert_eq!(v, Value::Int(1), "eq2(5,5) true and eq2(5,6) false, with `i32::equals` auto-compiled");
 }
 
 /// The `string` counterpart: `string::equals`'s body is `(equal self
@@ -3062,7 +3067,7 @@ fn compile_dispatches_string_equals_and_less() {
     )
     .expect("eval failed");
     // equal content (built separately) -> 0, "abc" < "abd" -> -10, "b" > "a" -> 100
-    assert_eq!(v, RtValue::Int(90));
+    assert_eq!(v, Value::Int(90));
 }
 
 /// And `char`: a compiled `char` is a raw `i64` code point, so
@@ -3085,7 +3090,7 @@ fn compile_dispatches_char_equals_and_less() {
     )
     .expect("eval failed");
     // 'a'=='a' -> 0, 'a'<'b' -> -10, 'b'>'a' -> 100
-    assert_eq!(v, RtValue::Int(90));
+    assert_eq!(v, Value::Int(90));
 }
 
 // ---- `< <= > >=` comparison operators on char/string, compiled --------------
@@ -3109,7 +3114,7 @@ fn compile_dispatches_char_comparison_operators() {
     )
     .expect("eval failed");
     // 'a'<'b' -> 1 ; 'b' vs 'a': >  -> 3 -> 30 ; 'a' vs 'a': <= -> 2 -> 200
-    assert_eq!(v, RtValue::Int(231));
+    assert_eq!(v, Value::Int(231));
 }
 
 #[test]
@@ -3126,7 +3131,7 @@ fn compile_dispatches_string_comparison_operators() {
     )
     .expect("eval failed");
     // "a"<"b" -> 1 ; "b" vs "a": > -> 3 -> 30 ; "x" vs "x": <= -> 2 -> 200
-    assert_eq!(v, RtValue::Int(231));
+    assert_eq!(v, Value::Int(231));
 }
 
 #[test]
@@ -3146,7 +3151,7 @@ fn compile_string_ge_and_le_derive_from_rt_str_lt() {
     )
     .expect("eval failed");
     // sle("a","a")=1 ; sle("b","a")=0 ; sge("a","a")=1 ->100 ; sge("a","b")=0
-    assert_eq!(v, RtValue::Int(101));
+    assert_eq!(v, Value::Int(101));
 }
 
 // ---- `defenum` / sum-ADT `match` in compiled code (box scrutinee) ----------
@@ -3172,7 +3177,7 @@ fn compile_matches_a_payload_variant_and_extracts_its_field() {
         (m 7)
         "#,
     );
-    assert_eq!(v, RtValue::Int(7));
+    assert_eq!(v, Value::Int(7));
 }
 
 /// A compiled `match` discriminates across three nullary variants by the
@@ -3187,7 +3192,7 @@ fn compile_matches_discriminates_among_nullary_variants() {
         (classify)
         "#,
     );
-    assert_eq!(v, RtValue::Int(30));
+    assert_eq!(v, Value::Int(30));
 }
 
 /// A runtime-chosen variant (both arms reachable): the `if` merges two boxes,
@@ -3207,8 +3212,8 @@ fn compile_matches_a_runtime_chosen_variant() {
         (compile pick)
         (pick %ARG%)
     "#;
-    assert_eq!(eval_ok_with_compiler(&src.replace("%ARG%", "0")), RtValue::Int(0));
-    assert_eq!(eval_ok_with_compiler(&src.replace("%ARG%", "5")), RtValue::Int(99));
+    assert_eq!(eval_ok_with_compiler(&src.replace("%ARG%", "0")), Value::Int(0));
+    assert_eq!(eval_ok_with_compiler(&src.replace("%ARG%", "5")), Value::Int(99));
 }
 
 /// The compiled result must agree with the tree-walking interpreter for the
@@ -3222,7 +3227,7 @@ fn compile_and_interpret_agree_on_a_defenum_match() {
     let compiled = eval_ok_with_compiler(&format!("{}\n(compile m)\n(m 41)", prog));
     let interpreted = eval_ok(&format!("{}\n(m 41)", prog));
     assert_eq!(compiled, interpreted);
-    assert_eq!(compiled, RtValue::Int(42));
+    assert_eq!(compiled, Value::Int(42));
 }
 
 /// Built-in `Option` is itself a sum-ADT box, so a compiled `match` on it now
@@ -3239,7 +3244,7 @@ fn compile_matches_a_builtin_option() {
         (u 5)
         "#,
     );
-    assert_eq!(v, RtValue::Int(5));
+    assert_eq!(v, Value::Int(5));
 }
 
 // ---- boxed-struct (`defstruct`) `match` in compiled code -------------------
@@ -3265,7 +3270,7 @@ fn compile_matches_and_destructures_a_defstruct_instance() {
         (sum (point::new 3 4))
         "#,
     );
-    assert_eq!(v, RtValue::Int(7));
+    assert_eq!(v, Value::Int(7));
 }
 
 /// A wildcard sub-pattern skips field extraction entirely, and binding order
@@ -3281,7 +3286,7 @@ fn compile_match_on_a_defstruct_binds_fields_by_position_and_skips_wildcards() {
         (diff (point::new 9 100 3))
         "#,
     );
-    assert_eq!(v, RtValue::Int(6));
+    assert_eq!(v, Value::Int(6));
 }
 
 /// Compiled and interpreted `match` agree over the same `defstruct` instance
@@ -3295,7 +3300,7 @@ fn compile_and_interpret_agree_on_a_defstruct_match() {
     let compiled = eval_ok_with_compiler(&format!("{}\n(compile sum)\n(sum (point::new 5 6))", prog));
     let interpreted = eval_ok(&format!("{}\n(sum (point::new 5 6))", prog));
     assert_eq!(compiled, interpreted);
-    assert_eq!(compiled, RtValue::Int(11));
+    assert_eq!(compiled, Value::Int(11));
 }
 
 // ---- compiled `match` on a `Sexpr` scrutinee ---------------------------------
@@ -3322,7 +3327,7 @@ fn compile_matches_a_sexpr_scrutinee_and_extracts_payloads() {
         (+ (f (Int 40)) (f (sexpr-cons (Int 2) (Str "tail"))))
         "#,
     );
-    assert_eq!(v, RtValue::Int(42));
+    assert_eq!(v, Value::Int(42));
 }
 
 /// A user `defun` literally named `rt_cons` gets its own distinct LLVM
@@ -3348,7 +3353,7 @@ fn compile_of_a_user_function_literally_named_rt_cons_does_not_collide_with_the_
     // rt_cons(3,4) = 3+4 = 7 (the user's own definition); the built-in
     // sexpr-cons/car/cdr machinery still produces 5+9 = 14 unaffected;
     // 7+14 = 21.
-    assert_eq!(v, RtValue::Int(21));
+    assert_eq!(v, Value::Int(21));
 }
 
 /// The three numeric boxed variants share `TAG_BOXED`, so their arms dispatch
@@ -3370,7 +3375,7 @@ fn compile_match_distinguishes_float_bignum_and_ratio_boxes() {
            (* (the i64 100) (which (Ratio 2/3))))
         "#,
     );
-    assert_eq!(v, RtValue::Int(321));
+    assert_eq!(v, Value::Int(321));
 }
 
 /// Tag-only dispatch covers every variant, including `sym`.
@@ -3387,7 +3392,7 @@ fn compile_match_dispatches_nil_sym_str_and_bool_by_tag() {
            (+ (* (the i64 100) (tag (Str "s"))) (* (the i64 1000) (tag (Bool false)))))
         "#,
     );
-    assert_eq!(v, RtValue::Int(4321));
+    assert_eq!(v, Value::Int(4321));
 }
 
 /// A `sym`'s `Symbol` payload — unlike `bignum`/`ratio` (still `unsupported`)
@@ -3427,7 +3432,7 @@ fn compile_match_dispatches_and_extracts_the_path_variant() {
         (equal (path-segs (quote dep::head)) (list (quote dep) (quote head)))
         "#,
     );
-    assert_eq!(v, RtValue::Bool(true));
+    assert_eq!(v, Value::Bool(true));
 }
 
 /// `(Path segs)` construction, the inverse of the extraction test above: a
@@ -3449,7 +3454,7 @@ fn compile_construct_and_round_trips_the_path_variant() {
           (_ false))
         "#,
     );
-    assert_eq!(v, RtValue::Bool(true));
+    assert_eq!(v, Value::Bool(true));
 }
 
 /// Compiled and interpreted `match` agree over the same Sexpr inputs.
@@ -3470,7 +3475,7 @@ fn compile_and_interpret_agree_on_a_sexpr_match() {
     };
     let interp_v = eval_ok_with_compiler(&src(""));
     let compiled_v = eval_ok_with_compiler(&src("(compile sum)"));
-    assert_eq!(interp_v, RtValue::Int(10));
+    assert_eq!(interp_v, Value::Int(10));
     assert_eq!(compiled_v, interp_v);
 }
 
@@ -3487,7 +3492,7 @@ fn compile_dispatches_a_function_that_reads_a_global_to_native_code() {
         (read-counter)
         "#,
     );
-    assert_eq!(v, RtValue::Int(41));
+    assert_eq!(v, Value::Int(41));
 }
 
 /// A `compile`d function can assign a `defvar` global (`Expr::SetGlobal`'s
@@ -3510,7 +3515,7 @@ fn compile_dispatches_a_function_that_writes_a_global_to_native_code() {
         counter
         "#,
     );
-    assert_eq!(v, RtValue::Int(2));
+    assert_eq!(v, Value::Int(2));
 }
 
 /// `Option<T>`/`Result<T,E>` globals compile: reading one back through
@@ -3530,7 +3535,7 @@ fn compile_of_a_function_referencing_an_option_typed_global_round_trips() {
     )
     .expect("eval failed");
     match v {
-        RtValue::Int(n) => assert_eq!(n, 42),
+        Value::Int(n) => assert_eq!(n, 42),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -3549,7 +3554,7 @@ fn compile_of_a_function_referencing_a_none_typed_global_round_trips() {
     )
     .expect("eval failed");
     match v {
-        RtValue::Int(n) => assert_eq!(n, -1),
+        Value::Int(n) => assert_eq!(n, -1),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -3572,7 +3577,7 @@ fn compile_can_set_an_option_typed_global_and_the_interpreter_sees_the_write() {
     )
     .expect("eval failed");
     match v {
-        RtValue::Int(n) => assert_eq!(n, 7),
+        Value::Int(n) => assert_eq!(n, 7),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -3596,7 +3601,7 @@ fn compile_of_a_function_referencing_a_user_defenum_global_round_trips() {
     )
     .expect("eval failed");
     match v {
-        RtValue::Int(n) => assert_eq!(n, 2),
+        Value::Int(n) => assert_eq!(n, 2),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -3618,7 +3623,7 @@ fn compile_of_a_function_referencing_a_payload_defenum_global_round_trips() {
     )
     .expect("eval failed");
     match v {
-        RtValue::Int(n) => assert_eq!(n, 12),
+        Value::Int(n) => assert_eq!(n, 12),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -3642,7 +3647,7 @@ fn compile_can_set_a_defenum_global_and_the_interpreter_sees_the_write() {
     )
     .expect("eval failed");
     match v {
-        RtValue::Int(n) => assert_eq!(n, 7),
+        Value::Int(n) => assert_eq!(n, 7),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -3665,7 +3670,7 @@ fn compile_of_a_function_referencing_a_generic_defenum_global_round_trips() {
     )
     .expect("eval failed");
     match v {
-        RtValue::Int(n) => assert_eq!(n, 42),
+        Value::Int(n) => assert_eq!(n, 42),
         other => panic!("expected an Int, got {:?}", other),
     }
 }
@@ -3748,7 +3753,7 @@ fn compile_dispatches_a_function_with_an_untaken_panic_branch_to_native_code() {
         (safe-add 10 2)
         "#,
     );
-    assert_eq!(v, RtValue::Int(12));
+    assert_eq!(v, Value::Int(12));
 }
 
 /// A bare `char` literal now has a real compiled representation
@@ -3770,7 +3775,7 @@ fn compile_dispatches_a_function_containing_a_bare_char_literal_to_native_code()
         (if (is-a #\A) 1 (if (is-a #\B) 2 0))
         "#,
     );
-    assert_eq!(v, RtValue::Int(1));
+    assert_eq!(v, Value::Int(1));
 }
 
 /// A `char`-returning compiled function's result crosses the JIT-call
@@ -3789,7 +3794,7 @@ fn compile_returns_a_char_across_the_jit_boundary() {
         (echo-char #\Z)
         "#,
     );
-    assert_eq!(v, RtValue::Char('Z'));
+    assert_eq!(v, Value::Char('Z'));
 }
 
 /// The decode also runs on a `char` a compiled function *selects* rather than
@@ -3805,7 +3810,7 @@ fn compile_returns_a_selected_char_literal_across_the_jit_boundary() {
         (grade true)
         "#,
     );
-    assert_eq!(v, RtValue::Char('P'));
+    assert_eq!(v, Value::Char('P'));
 }
 
 /// `+` reified as a value (`Expr::MethodRef`, `Checker::method_value`) and
@@ -3825,7 +3830,7 @@ fn compile_dispatches_a_builtin_operator_reified_as_a_value_to_native_code() {
         (use-plus 3 4)
         "#,
     );
-    assert_eq!(v, RtValue::Int(7));
+    assert_eq!(v, Value::Int(7));
 }
 
 /// A user-defined instance method (not a native-arithmetic builtin) reified
@@ -3847,7 +3852,7 @@ fn compile_dispatches_a_user_defined_method_reified_as_a_value_to_native_code() 
         (use-double (point::new 21))
         "#,
     );
-    assert_eq!(v, RtValue::Int(42));
+    assert_eq!(v, Value::Int(42));
 }
 
 /// `(quote (1 2 3))` compiles to the same `compile-construct-sexpr`
@@ -3866,7 +3871,7 @@ fn compile_dispatches_a_function_that_constructs_a_quoted_list_to_native_code() 
         (sum (make-quoted))
         "#,
     );
-    assert_eq!(v, RtValue::Int(6));
+    assert_eq!(v, Value::Int(6));
 }
 
 /// Compiled and interpreted agree on the same quoted literal — the
@@ -3880,7 +3885,7 @@ fn compile_and_interpret_agree_on_a_quoted_list() {
     let compiled = eval_ok_with_compiler(&format!("{}\n(compile make-quoted)\n(compile sum)\n(sum (make-quoted))", prog));
     let interpreted = eval_ok(&format!("{}\n(sum (make-quoted))", prog));
     assert_eq!(compiled, interpreted);
-    assert_eq!(compiled, RtValue::Int(6));
+    assert_eq!(compiled, Value::Int(6));
 }
 
 /// A quoted symbol compiles: `translate_quote`'s `Sym` arm embeds the name
@@ -3944,7 +3949,7 @@ fn compile_of_a_function_matching_a_quoted_symbol_dispatches_by_tag() {
         (q)
         "#,
     );
-    assert_eq!(v, RtValue::Int(1));
+    assert_eq!(v, Value::Int(1));
 }
 
 
@@ -3978,7 +3983,7 @@ fn compile_dispatches_vector_push_and_get_of_an_i64_element_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(20), "the element pushed at index 1");
+    assert_eq!(v, Value::Int(20), "the element pushed at index 1");
 }
 
 /// `set` overwrites an element in place (`rt_struct_field_set` with a
@@ -3998,7 +4003,7 @@ fn compile_dispatches_vector_set_in_place_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(99), "index 0 was overwritten from 10 to 99");
+    assert_eq!(v, Value::Int(99), "index 0 was overwritten from 10 to 99");
 }
 
 /// `len` (`rt_struct_field_count`, one of the two new primitives) returns the
@@ -4018,7 +4023,7 @@ fn compile_dispatches_vector_len_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(3), "three pushes -> length 3");
+    assert_eq!(v, Value::Int(3), "three pushes -> length 3");
 }
 
 /// `pop` returns `Option<T>` (unlike `get`, an empty vector is `None`, not a
@@ -4040,7 +4045,7 @@ fn compile_dispatches_vector_pop_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(30), "pop returns Some of the last-pushed element");
+    assert_eq!(v, Value::Int(30), "pop returns Some of the last-pushed element");
 }
 
 /// `pop` shrinks `len` by one, observable through a subsequent compiled
@@ -4060,7 +4065,7 @@ fn compile_dispatches_vector_pop_shrinks_len_to_native_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(1), "one pop after two pushes -> length 1");
+    assert_eq!(v, Value::Int(1), "one pop after two pushes -> length 1");
 }
 
 /// Popping an empty vector returns `None` in compiled code too, not a
@@ -4078,7 +4083,7 @@ fn compile_dispatches_vector_pop_of_an_empty_vector_returns_none() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(-1), "popping an empty vector is None");
+    assert_eq!(v, Value::Int(-1), "popping an empty vector is None");
 }
 
 /// A passthrough (kind `6`) element type: a `Vector<string>` stores each
@@ -4100,7 +4105,7 @@ fn compile_dispatches_vector_get_of_a_passthrough_string_element_to_native_code(
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(5), "\"world\" has 5 characters");
+    assert_eq!(v, Value::Int(5), "\"world\" has 5 characters");
 }
 
 /// The JIT result of a function summing a `Vector<i64>` by index must match
@@ -4120,7 +4125,7 @@ fn compile_of_a_vector_summing_function_agrees_with_the_interpreter() {
         .expect("interpreted eval failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile build-and-sum)\n(build-and-sum)"))
         .expect("compiled eval failed");
-    assert_eq!(interpreted, RtValue::Int(12), "3 + 4 + 5 = 12, interpreted");
+    assert_eq!(interpreted, Value::Int(12), "3 + 4 + 5 = 12, interpreted");
     assert_eq!(compiled, interpreted, "JIT result matches the interpreter");
 }
 
@@ -4154,7 +4159,7 @@ fn compile_transitively_compiles_a_doiter_loop_over_a_vector() {
     "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(run)")).expect("interpreted failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile sum-vec)\n(compile run)\n(run)")).expect("compiled failed");
-    assert_eq!(interpreted, RtValue::Int(12), "3 + 4 + 5 = 12 (interpreted)");
+    assert_eq!(interpreted, Value::Int(12), "3 + 4 + 5 = 12 (interpreted)");
     assert_eq!(compiled, interpreted, "the transitively-compiled doiter loop agrees with the interpreter");
 }
 
@@ -4174,7 +4179,7 @@ fn compile_transitively_compiles_the_member_combinator_over_a_vector() {
     "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(run)")).expect("interpreted failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile has-it)\n(compile run)\n(run)")).expect("compiled failed");
-    assert_eq!(interpreted, RtValue::Int(10), "20 is a member (10), 99 is not (0) -> 10 (interpreted)");
+    assert_eq!(interpreted, Value::Int(10), "20 is a member (10), 99 is not (0) -> 10 (interpreted)");
     assert_eq!(compiled, interpreted, "the transitively-compiled member combinator agrees with the interpreter");
 }
 
@@ -4195,7 +4200,7 @@ fn compile_transitively_compiles_the_map_combinator_over_a_vector() {
     "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(run)")).expect("interpreted failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile double-all)\n(compile run)\n(run)")).expect("compiled failed");
-    assert_eq!(interpreted, RtValue::Int(8), "doubled [2,4,6], out[0]+out[2] = 2+6 = 8 (interpreted)");
+    assert_eq!(interpreted, Value::Int(8), "doubled [2,4,6], out[0]+out[2] = 2+6 = 8 (interpreted)");
     assert_eq!(compiled, interpreted, "the transitively-compiled map combinator agrees with the interpreter");
 }
 
@@ -4230,7 +4235,7 @@ fn compile_transitively_compiles_iteration_over_a_hashtable() {
     "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(run)")).expect("interpreted failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile sum-values)\n(compile run)\n(run)")).expect("compiled failed");
-    assert_eq!(interpreted, RtValue::Int(60), "10 + 20 + 30 = 60 (interpreted)");
+    assert_eq!(interpreted, Value::Int(60), "10 + 20 + 30 = 60 (interpreted)");
     assert_eq!(compiled, interpreted, "the transitively-compiled HashTable iteration agrees with the interpreter");
 }
 
@@ -4251,7 +4256,7 @@ fn compile_dispatches_hashtable_count_and_keys_to_native_code() {
         "#,
     )
     .expect("compiled failed");
-    assert_eq!(v, RtValue::Int(202), "count 2 (*100) + keys length 2 = 202");
+    assert_eq!(v, Value::Int(202), "count 2 (*100) + keys length 2 = 202");
 }
 
 // ---- HashTable::get/remove compile (Option-returning) ----------------------
@@ -4280,7 +4285,7 @@ fn compile_dispatches_hashtable_get_of_a_present_key_to_native_code() {
         "#,
     )
     .expect("compiled failed");
-    assert_eq!(v, RtValue::Int(100));
+    assert_eq!(v, Value::Int(100));
 }
 
 /// `get` on an absent key returns `None`, taking the runtime "not found"
@@ -4300,7 +4305,7 @@ fn compile_dispatches_hashtable_get_of_an_absent_key_to_native_code() {
         "#,
     )
     .expect("compiled failed");
-    assert_eq!(v, RtValue::Int(-1), "key 99 was never set, so `get` returns None -> the -1 default");
+    assert_eq!(v, Value::Int(-1), "key 99 was never set, so `get` returns None -> the -1 default");
 }
 
 /// `remove` both returns the removed value (`Some(v)`) *and* deletes the
@@ -4319,7 +4324,7 @@ fn compile_dispatches_hashtable_remove_to_native_code() {
         "#,
     )
     .expect("compiled failed");
-    assert_eq!(v, RtValue::Int(100000), "removed value 100 (*1000) + 0 (gone after remove) = 100000");
+    assert_eq!(v, Value::Int(100000), "removed value 100 (*1000) + 0 (gone after remove) = 100000");
 }
 
 /// `get`/`remove` over a `HashTable<i64,string>` — a passthrough (kind `6`)
@@ -4339,7 +4344,7 @@ fn compile_dispatches_hashtable_get_of_a_passthrough_string_value_to_native_code
         "#,
     )
     .expect("compiled failed");
-    assert_eq!(v, RtValue::Int(5), "\"hello\" has 5 characters");
+    assert_eq!(v, Value::Int(5), "\"hello\" has 5 characters");
 }
 
 // ---- `equalp` (ASCII case-insensitive) on char/string, compiled ------------
@@ -4365,7 +4370,7 @@ fn compile_dispatches_char_equalp() {
     )
     .expect("eval failed");
     // A vs a: equalp but not equal -> 1 (*100); A vs A: equal -> 2 (*10); A vs b: neither -> 0
-    assert_eq!(v, RtValue::Int(120));
+    assert_eq!(v, Value::Int(120));
 }
 
 /// `string::equalp` — `"ABC"`/`"abc"` are `equalp` but not `equal`, over
@@ -4384,7 +4389,7 @@ fn compile_dispatches_string_equalp() {
     )
     .expect("eval failed");
     // ABC vs abc: equalp not equal -> 1 (*100); abc vs abc: equal -> 2 (*10); abc vs abd: neither -> 0
-    assert_eq!(v, RtValue::Int(120));
+    assert_eq!(v, Value::Int(120));
 }
 
 // ---- `f64` arithmetic/comparison methods, compiled -------------------------
@@ -4428,7 +4433,7 @@ fn compile_dispatches_i32_floored_mod_and_agrees_with_the_interpreter() {
     let call = "(m -7 3)";
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n{call}")).expect("interpreted failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile m)\n{call}")).expect("compiled failed");
-    assert_eq!(interpreted, RtValue::Int(2), "-7 mod 3 = 2 (floored)");
+    assert_eq!(interpreted, Value::Int(2), "-7 mod 3 = 2 (floored)");
     assert_eq!(compiled, interpreted, "compiled floored mod agrees with the interpreter");
 }
 
@@ -4499,7 +4504,7 @@ fn compile_of_a_user_function_named_like_a_libm_symbol_does_not_collide() {
     .expect("eval failed");
     // pow(3,4) = 3+4 = 7 (the user's own definition, not libm's);
     // float->int(2.0 ** 3.0) = float->int(8.0) = 8; 7+8 = 15.
-    assert_eq!(v, RtValue::Int(15));
+    assert_eq!(v, Value::Int(15));
 }
 
 /// Float comparisons lower to `build-fcmp-*` (ordered `<`/`<=`/`>`/`>=`/`=`,
@@ -4520,7 +4525,7 @@ fn compile_dispatches_f64_comparisons_and_agrees_with_the_interpreter() {
         "{src}\n(compile classify)\n(+ (* 100 (classify 1.0 2.0)) (+ (* 10 (classify 2.0 2.0)) (classify 3.0 2.0)))"
     ))
     .expect("compiled failed");
-    assert_eq!(interpreted, RtValue::Int(123), "1<2 ->1, 2=2 ->2, 3>2 ->3 (interpreted)");
+    assert_eq!(interpreted, Value::Int(123), "1<2 ->1, 2=2 ->2, 3>2 ->3 (interpreted)");
     assert_eq!(compiled, interpreted, "compiled f64 comparisons agree with the interpreter");
 }
 
@@ -4612,7 +4617,7 @@ fn compile_dispatches_variadic_arithmetic_and_comparison_sugar() {
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(combine 1 2 3)")).expect("interpreted failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile combine)\n(combine 1 2 3)")).expect("compiled failed");
     assert_eq!(compiled, interpreted, "compiled variadic +/< sugar agrees with the interpreter");
-    assert_eq!(compiled, RtValue::Bool(true));
+    assert_eq!(compiled, Value::Bool(true));
 }
 
 /// `expt` (binary, `f64,f64->f64`) lowers to `build-fpow` (`llvm.pow.f64`).
@@ -4636,7 +4641,7 @@ fn compile_dispatches_float_to_int_and_agrees_with_the_interpreter() {
     "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src}\n(truncate-it 7.9)")).expect("interpreted failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile truncate-it)\n(truncate-it 7.9)")).expect("compiled failed");
-    assert_eq!(interpreted, RtValue::Int(7));
+    assert_eq!(interpreted, Value::Int(7));
     assert_eq!(compiled, interpreted, "compiled float->int agrees with the interpreter");
 }
 
@@ -4665,7 +4670,7 @@ fn compile_dispatches_float_to_int_on_nan_and_out_of_range_inputs_and_agrees_wit
             .unwrap_or_else(|e| panic!("interpreted failed for {}: {}", expr, e));
         let compiled = run_with_compiler_and_prelude(&format!("{src}\n(compile to-int)\n(to-int {expr})"))
             .unwrap_or_else(|e| panic!("compiled failed for {}: {}", expr, e));
-        assert_eq!(interpreted, RtValue::Int(*expected), "interpreted float->int of {expr}");
+        assert_eq!(interpreted, Value::Int(*expected), "interpreted float->int of {expr}");
         assert_eq!(compiled, interpreted, "compiled float->int of {expr} agrees with the interpreter");
     }
 }
@@ -4905,7 +4910,7 @@ fn compile_dispatches_a_trait_object_call_through_its_vtable() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(12));
+    assert_eq!(v, Value::Int(12));
 }
 
 /// Slot numbering must survive into native code: `deftrait` order decides
@@ -4930,7 +4935,7 @@ fn compile_indexes_the_right_vtable_slot_for_each_method() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(73));
+    assert_eq!(v, Value::Int(73));
 }
 
 /// The inherited half of the same contract: a supertrait's methods occupy
@@ -4961,7 +4966,7 @@ fn compile_indexes_inherited_vtable_slots_before_the_subtraits_own() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(123));
+    assert_eq!(v, Value::Int(123));
 }
 
 /// Upcasting to a *non-leftmost* supertrait is the one conversion that
@@ -4992,7 +4997,7 @@ fn compile_upcasts_to_a_non_first_supertrait_through_the_conversion_table() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(25));
+    assert_eq!(v, Value::Int(25));
 }
 
 /// The conversion has to work when the box is made *interpreted* and only
@@ -5016,7 +5021,7 @@ fn compile_upcasts_a_trait_object_boxed_by_interpreted_code() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(2));
+    assert_eq!(v, Value::Int(2));
 }
 
 /// A method argument and a boxed return value cross the vtable boundary
@@ -5035,7 +5040,7 @@ fn compile_passes_arguments_through_a_trait_object_call() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(42));
+    assert_eq!(v, Value::Int(42));
 }
 
 /// Compiled and interpreted tiers must agree, including on the `match`
@@ -5057,7 +5062,7 @@ fn compile_and_interpret_agree_on_a_trait_object_match() {
         "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src} (go)")).expect("eval failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src} (compile go) (go)")).expect("eval failed");
-    assert_eq!(interpreted, RtValue::Int(304));
+    assert_eq!(interpreted, Value::Int(304));
     assert_eq!(compiled, interpreted);
 }
 
@@ -5080,7 +5085,7 @@ fn compile_dispatches_when_only_the_dispatching_function_is_compiled() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(12));
+    assert_eq!(v, Value::Int(12));
 }
 
 /// An `impl` added *after* the dispatching function was compiled: its method
@@ -5101,7 +5106,7 @@ fn compile_dispatches_to_an_impl_added_after_the_call_site_was_compiled() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(12));
+    assert_eq!(v, Value::Int(12));
 }
 
 /// A trait whose implementations have *generic* owners (prelude's `Iter`,
@@ -5129,7 +5134,7 @@ fn compile_dispatches_a_trait_object_whose_impl_owner_is_generic() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(42));
+    assert_eq!(v, Value::Int(42));
 }
 
 // ---- user-defined error types (TODO T3) ---------------------------------
@@ -5151,7 +5156,7 @@ fn compile_dispatches_a_result_carrying_a_user_error_type() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(742));
+    assert_eq!(v, Value::Int(742));
 }
 
 /// A *built-in* error type crossing into native code: `ParseIntError` is an
@@ -5220,7 +5225,7 @@ fn compile_round_trips_a_unit_typed_struct_field() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(7));
+    assert_eq!(v, Value::Int(7));
 }
 
 #[test]
@@ -5237,7 +5242,7 @@ fn a_struct_built_by_compiled_code_reads_back_in_the_interpreter() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(4));
+    assert_eq!(v, Value::Int(4));
 }
 
 #[test]
@@ -5272,7 +5277,7 @@ fn compile_accepts_a_unit_typed_parameter() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(9));
+    assert_eq!(v, Value::Int(9));
 }
 
 #[test]
@@ -5291,7 +5296,7 @@ fn compile_round_trips_a_vector_of_units() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(2));
+    assert_eq!(v, Value::Int(2));
 }
 
 // ---- a built-in type is identified by its whole path, not its last segment --
@@ -5316,7 +5321,7 @@ fn a_module_type_named_vector_keeps_its_own_methods_when_compiled() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(300));
+    assert_eq!(v, Value::Int(300));
 }
 
 #[test]
@@ -5334,7 +5339,7 @@ fn a_module_type_named_hashtable_keeps_its_own_methods_when_compiled() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(42));
+    assert_eq!(v, Value::Int(42));
 }
 
 #[test]
@@ -5356,7 +5361,7 @@ fn the_real_builtin_vector_still_lowers_from_inside_a_module() {
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, RtValue::Int(42));
+    assert_eq!(v, Value::Int(42));
 }
 
 // ---- cross-boundary conformance: a value is the same value either side ----
@@ -5408,7 +5413,7 @@ fn conformance_int(expr: &str) -> i64 {
     match run_with_compiler_and_prelude(&format!("{CONFORMANCE_MODULE}\n{expr}"))
         .expect("eval failed")
     {
-        RtValue::Int(n) => n,
+        Value::Int(n) => n,
         other => panic!("expected an Int, got {:?}", other),
     }
 }

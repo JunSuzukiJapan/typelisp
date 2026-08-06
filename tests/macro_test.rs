@@ -1,21 +1,21 @@
 //! Tests for `quote`/quasiquote/`gensym`/`defmacro` (CL-style macros).
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
+use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
 /// Read, type-check, and evaluate a program; return the last expression's
 /// value alongside the heap (so `Sexpr` results can be inspected).
-fn run(src: &str) -> Result<(RtValue, Heap), EvalError> {
+fn run(src: &str) -> Result<(Value, Heap), EvalError> {
     run_with_capacity(src, 1 << 16)
 }
 
-fn run_with_capacity(src: &str, capacity: usize) -> Result<(RtValue, Heap), EvalError> {
+fn run_with_capacity(src: &str, capacity: usize) -> Result<(Value, Heap), EvalError> {
     let mut h = Heap::with_capacity(capacity);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl)? {
@@ -28,28 +28,28 @@ fn run_with_capacity(src: &str, capacity: usize) -> Result<(RtValue, Heap), Eval
 /// A `(value, heap)` pair's value as a `string`. A `string` is a heap
 /// `Value::Str` since the scalar unification, so reading one needs the heap
 /// the runner already hands back.
-fn assert_string((v, h): (RtValue, Heap), expected: &str) {
+fn assert_string((v, h): (Value, Heap), expected: &str) {
     match v {
-        RtValue::Sexpr(Value::Str(id)) => assert_eq!(h.string(id), expected),
+        Value::Str(id) => assert_eq!(h.string(id), expected),
         other => panic!("expected a string, got {:?}", other),
     }
 }
 
-fn eval_ok(src: &str) -> (RtValue, Heap) {
+fn eval_ok(src: &str) -> (Value, Heap) {
     run(src).expect("eval failed")
 }
 
 /// Like `run`, but with the prelude loaded first — `,@` (unquote-splicing)
 /// desugars to a call to the prelude's `append` (`Checker::check_qq_template`),
 /// so any test exercising it needs this instead of plain `run`.
-fn run_with_prelude(src: &str) -> Result<(RtValue, Heap), EvalError> {
+fn run_with_prelude(src: &str) -> Result<(Value, Heap), EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl)? {
@@ -59,7 +59,7 @@ fn run_with_prelude(src: &str) -> Result<(RtValue, Heap), EvalError> {
     Ok((last, h))
 }
 
-fn eval_ok_with_prelude(src: &str) -> (RtValue, Heap) {
+fn eval_ok_with_prelude(src: &str) -> (Value, Heap) {
     run_with_prelude(src).expect("eval failed")
 }
 
@@ -88,7 +88,7 @@ fn eval_ok_with_prelude(src: &str) -> (RtValue, Heap) {
 /// `crate::prelude::load` itself uses. The last form (the actual
 /// GC-stress loop) is deliberately left un-exec'd here — it only ever
 /// needs to run once, against the tiny heap below.
-fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(RtValue, Heap), EvalError> {
+fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(Value, Heap), EvalError> {
     let mut check_heap = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut check_interp = Interp::new();
@@ -106,7 +106,7 @@ fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(RtValue,
     }
 
     let mut h = Heap::with_capacity(capacity);
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for tl in tls {
         if let Some(val) = check_interp.exec(&mut h, tl)? {
             last = val;
@@ -143,10 +143,9 @@ fn sexpr_to_string(heap: &Heap, v: Value) -> String {
     }
 }
 
-fn as_sexpr_string(v: RtValue, h: &Heap) -> String {
+fn as_sexpr_string(v: Value, h: &Heap) -> String {
     match v {
-        RtValue::Sexpr(sv) => sexpr_to_string(h, sv),
-        other => panic!("expected a Sexpr value, got {:?}", other),
+        sv => sexpr_to_string(h, sv),
     }
 }
 
@@ -241,8 +240,8 @@ fn quasiquote_dotted_unquote_tail() {
 fn gensym_returns_a_symbol() {
     let (v, h) = eval_ok("(gensym)");
     match v {
-        RtValue::Sexpr(Value::Symbol(_)) => {}
-        other => panic!("expected a Sexpr Symbol, got {:?}", other),
+        Value::Symbol(_) => {}
+        other => panic!("expected a Symbol, got {:?}", other),
     }
     let _ = h;
 }
@@ -251,12 +250,11 @@ fn gensym_returns_a_symbol() {
 fn gensym_is_fresh_each_call() {
     let (v, h) = eval_ok("(let ((a (gensym)) (b (gensym))) (list a b))");
     match v {
-        RtValue::Sexpr(sv) => {
+        sv => {
             let a = h.car(sv).unwrap();
             let b = h.car(h.cdr(sv).unwrap()).unwrap();
             assert_ne!(a, b, "two `gensym` calls produced the same symbol");
         }
-        other => panic!("expected a Sexpr, got {:?}", other),
     }
 }
 
@@ -276,7 +274,7 @@ fn basic_conditional_macro() {
          (my-unless (< 2 1) 99 100)",
     );
     // test = (< 2 1) = false -> `then` (99) runs.
-    assert_eq!(v, RtValue::Int(99));
+    assert_eq!(v, Value::Int(99));
 }
 
 #[test]
@@ -290,7 +288,7 @@ fn macro_used_in_same_batch_as_its_definition() {
          (defmacro quadruple (x) `(double (double ,x)))
          (quadruple 3)",
     );
-    assert_eq!(v, RtValue::Int(12));
+    assert_eq!(v, Value::Int(12));
 }
 
 #[test]
@@ -333,7 +331,7 @@ fn macro_is_unhygienic_and_capture_is_observable() {
            tmp)",
     );
     // A correct swap would leave `tmp` as 2; capture leaves it unchanged.
-    assert_eq!(v, RtValue::Int(1));
+    assert_eq!(v, Value::Int(1));
 }
 
 #[test]
@@ -350,7 +348,7 @@ fn gensym_fixes_macro_hygiene() {
     );
     // With a gensym'd temp name instead of a literal `tmp`, the swap is
     // correct: `tmp` (1) and `x` (2) actually exchange.
-    assert_eq!(v, RtValue::Int(2));
+    assert_eq!(v, Value::Int(2));
 }
 
 #[test]
@@ -384,7 +382,7 @@ fn rest_only_macro_collects_args_into_a_list() {
         "(defmacro my-progn (&rest body) (sexpr-cons (quote progn) body))
          (my-progn 1 2 3)",
     );
-    assert_eq!(v, RtValue::Int(3));
+    assert_eq!(v, Value::Int(3));
 }
 
 #[test]
@@ -495,7 +493,7 @@ fn splice_without_a_surrounding_quote_requires_the_prelude() {
     let (v, _) = eval_ok_with_prelude(
         "(defmacro my-progn (&rest body) `(progn ,@body)) (my-progn 1 2 3)",
     );
-    assert_eq!(v, RtValue::Int(3));
+    assert_eq!(v, Value::Int(3));
 }
 
 #[test]
@@ -504,7 +502,7 @@ fn splicing_the_same_rest_param_twice_runs_its_forms_twice() {
         "(defmacro twice (&rest body) `(progn ,@body ,@body))
          (let ((x 0)) (twice (setf x (+ x 1))) x)",
     );
-    assert_eq!(v, RtValue::Int(2));
+    assert_eq!(v, Value::Int(2));
 }
 
 #[test]
@@ -544,12 +542,12 @@ fn if_let_binds_in_then_branch_and_falls_through_to_else() {
         "(defun f ((o Option<i64>) (default i64)) i64 (if-let ((Some x) o) (+ x 1) default))
          (f (option::some 41) -1)",
     );
-    assert_eq!(v, RtValue::Int(42));
+    assert_eq!(v, Value::Int(42));
     let (v2, _) = eval_ok_with_prelude(
         "(defun f ((o Option<i64>) (default i64)) i64 (if-let ((Some x) o) (+ x 1) default))
          (f (option::none) -1)",
     );
-    assert_eq!(v2, RtValue::Int(-1));
+    assert_eq!(v2, Value::Int(-1));
 }
 
 #[test]
@@ -574,7 +572,7 @@ fn cond_with_several_clauses_selects_the_first_true_one() {
 #[test]
 fn cond_with_no_matching_clause_and_no_else_is_unit() {
     let (v, _) = eval_ok_with_prelude("(cond ((= 1 2) ()))");
-    assert_eq!(v, RtValue::Unit);
+    assert_eq!(v, Value::Empty);
 }
 
 // ---- Phase F: defmacro &optional / &key (TODO T2) ---------------------------

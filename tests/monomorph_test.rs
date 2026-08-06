@@ -10,9 +10,9 @@
 //! tests below pin that contract down.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader, RtValue, TopLevel, Value, MONO_BUNDLE_MODULE, Path};
+use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader, Value, TopLevel, MONO_BUNDLE_MODULE, Path};
 
-fn run(src: &str) -> Result<RtValue, Error> {
+fn run(src: &str) -> Result<Value, Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -25,7 +25,7 @@ fn run(src: &str) -> Result<RtValue, Error> {
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -35,7 +35,7 @@ fn run(src: &str) -> Result<RtValue, Error> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -113,8 +113,8 @@ fn a_non_generic_call_is_not_bundled() {
 
 #[test]
 fn a_generic_call_evaluates_through_its_specialization() {
-    assert_eq!(eval_ok("(defun identity<T> ((x T)) T x) (identity 42)"), RtValue::Int(42));
-    assert_eq!(eval_ok("(defun identity<T> ((x T)) T x) (identity true)"), RtValue::Bool(true));
+    assert_eq!(eval_ok("(defun identity<T> ((x T)) T x) (identity 42)"), Value::Int(42));
+    assert_eq!(eval_ok("(defun identity<T> ((x T)) T x) (identity true)"), Value::Bool(true));
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn self_recursion_reuses_the_same_specialization() {
           (if (= n 0) x (last-of (- n 1) x)))
         (last-of 3 99)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(99));
+    assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn mutually_recursive_generics_converge_on_the_worklist() {
           (if (= n 0) x (pong n x)))
         (ping 2 7)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
@@ -153,7 +153,7 @@ fn generic_body_calling_another_generic_specializes_transitively() {
         (defun outer<T> ((x T)) T (inner x))
         (outer 5)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(5));
+    assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn a_generic_instantiated_from_a_defvar_initializer_works() {
         (defvar (g i32) (identity 11))
         g
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(11));
+    assert_eq!(eval_ok(src), Value::Int(11));
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn a_generic_instantiated_inside_a_module_works() {
           (pub defun use-it () i32 (identity 3)))
         (m::use-it)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+    assert_eq!(eval_ok(src), Value::Int(3));
 }
 
 #[test]
@@ -187,7 +187,7 @@ fn a_generic_instantiated_from_a_macro_body_works() {
         (defmacro pass (x) (identity x))
         (pass 42)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn a_generic_rest_function_specializes() {
         (defun firstn<T> ((a T) &rest (xs T)) T a)
         (firstn 1 2 3)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -209,7 +209,7 @@ fn a_type_parameter_shadows_a_user_type_of_the_same_name() {
         (defun identity<T> ((x T)) T x)
         (identity 42)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 // ---- generic-owner methods (defmethod / defstruct accessors) ------------------
@@ -246,7 +246,7 @@ fn a_generic_method_call_evaluates_through_its_specialization() {
         (defmethod get-v ((self box<T>)) T self::v)
         (get-v (box::new 42))
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn a_generic_method_with_a_match_body_specializes() {
           (match self ((some x) x) ((none) (panic "none"))))
         (unwrap2 (option::some 9))
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(9));
+    assert_eq!(eval_ok(src), Value::Int(9));
 }
 
 #[test]
@@ -267,7 +267,7 @@ fn generic_defstruct_field_read_and_setf_work_through_specialized_accessors() {
         (setf b::v 5)
         b::v
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(5));
+    assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 #[test]
@@ -278,7 +278,7 @@ fn one_generic_type_instantiated_at_two_types_gets_independent_methods() {
         (let ((a (box::new 1)) (b (box::new true)))
           (if (get-v b) (get-v a) 0))
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 // ---- type-directed decoding (the erasure misdecode, fixed) --------------------
@@ -298,7 +298,7 @@ fn a_sexpr_instantiated_generic_field_returns_the_datum_not_a_misdecoded_scalar(
         b::v
     "#;
     match run(src).expect("eval failed") {
-        RtValue::Sexpr(Value::Int(42)) => {}
+        Value::Int(42) => {}
         other => panic!("expected the Sexpr datum 42, got {:?}", other),
     }
 }
@@ -313,7 +313,7 @@ fn a_vector_of_sexpr_element_returns_the_datum() {
         (get v 0)
     "#;
     match run(src).expect("eval failed") {
-        RtValue::Sexpr(Value::Int(7)) => {}
+        Value::Int(7) => {}
         other => panic!("expected the Sexpr datum 7, got {:?}", other),
     }
 }
@@ -327,7 +327,7 @@ fn a_generic_function_passed_as_an_argument_specializes_from_the_parameter_type(
         (defun call-it ((f (fn (i32) i32)) (n i32)) i32 (f n))
         (call-it identity 41)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(41));
+    assert_eq!(eval_ok(src), Value::Int(41));
 }
 
 #[test]
@@ -337,7 +337,7 @@ fn a_generic_function_annotated_with_the_specializes() {
         (defun apply1 ((f (fn (bool) bool))) bool (f true))
         (apply1 (the (fn (bool) bool) identity))
     "#;
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
@@ -348,7 +348,7 @@ fn a_generic_method_passed_as_an_argument_specializes() {
         (defun call-it ((f (fn (box<i32>) i32)) (b box<i32>)) i32 (f b))
         (call-it get-v (box::new 7))
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
@@ -373,7 +373,7 @@ fn a_generic_function_value_in_a_typed_defvar_specializes() {
         (defvar (f (fn (i32) i32)) identity)
         (f 41)
     "#;
-    assert_eq!(eval_ok(src), RtValue::Int(41));
+    assert_eq!(eval_ok(src), Value::Int(41));
 }
 
 #[test]

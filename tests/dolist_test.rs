@@ -5,7 +5,7 @@
 //! orthogonal (Pattern A), rather than fusing the `match` into the loop.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, RtValue, TopLevel};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
 
 // `dolist` is a pure-interpreter prelude macro (`let`/`while`/`match`/`setf`/
 // `sexpr-*`), so these tests only need `load_prelude` — not `load_compiler`.
@@ -13,14 +13,14 @@ use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Rt
 // `LLVMContext`, so it stays safe under `cargo test`'s default thread
 // parallelism (unlike `doiter_test`/`compile_test`, which must run serially —
 // see `scripts/test-serial.sh`).
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(v) = interp.exec(&mut h, tl)? {
@@ -44,7 +44,7 @@ fn check(src: &str) -> Result<TopLevel, Error> {
     Ok(last.expect("no forms"))
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -56,7 +56,7 @@ fn dolist_iterates_with_a_plain_body() {
                  (dolist (x (quote (10 20 30)))
                    (setf n (+ n 1)))
                  n)";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+    assert_eq!(eval_ok(src), Value::Int(3));
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn dolist_dispatches_on_element_shape() {
                        (_ ())))
                    (+ (* ints 100) (+ (* syms 10) strs)))"#;
     // 2 ints, 2 syms, 1 str -> 221
-    assert_eq!(eval_ok(src), RtValue::Int(221));
+    assert_eq!(eval_ok(src), Value::Int(221));
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn dolist_sums_matched_int_bindings() {
                  (dolist (x (quote (1 2 3 4)))
                    (match x ((int n) (setf acc (+ acc n)) ()) (_ ())))
                  acc)";
-    assert_eq!(eval_ok(src), RtValue::Int(10));
+    assert_eq!(eval_ok(src), Value::Int(10));
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn dolist_over_empty_list_runs_zero_times() {
                  (dolist (x (quote ()))
                    (setf n (+ n 1)))
                  n)";
-    assert_eq!(eval_ok(src), RtValue::Int(0));
+    assert_eq!(eval_ok(src), Value::Int(0));
 }
 
 #[test]
@@ -103,13 +103,13 @@ fn dolist_returns_its_result_form() {
     let src = "(let ((acc (the i64 0)))
                  (dolist (x (quote (5 7 9)) acc)
                    (match x ((int n) (setf acc (+ acc n)) ()) (_ ()))))";
-    assert_eq!(eval_ok(src), RtValue::Int(21));
+    assert_eq!(eval_ok(src), Value::Int(21));
 }
 
 #[test]
 fn dolist_without_result_form_is_unit() {
     let src = "(dolist (x (quote (1 2 3))) ())";
-    assert_eq!(eval_ok(src), RtValue::Unit);
+    assert_eq!(eval_ok(src), Value::Empty);
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn break_exits_dolist_early() {
                      ((int n) (if (= n 2) (break) (progn (setf acc (+ acc n)) ())))
                      (_ ())))
                  acc)";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn dolist_stops_at_a_dotted_tail() {
                  (dolist (x (sexpr-cons (Int 1) (sexpr-cons (Int 2) (Int 3))))
                    (setf n (+ n 1)))
                  n)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]

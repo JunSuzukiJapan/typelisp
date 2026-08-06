@@ -12,15 +12,15 @@
 //! semantics — that equivalence is the point.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue, Value};
+use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
@@ -30,7 +30,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -39,7 +39,7 @@ fn eval_ok(src: &str) -> RtValue {
 /// return that heap alongside the value so `Sexpr` results can be
 /// inspected — the same split (and for the same reasons) as
 /// `hashtable_test.rs`'s helper of the same name.
-fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(RtValue, Heap), EvalError> {
+fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(Value, Heap), EvalError> {
     let mut check_heap = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut check_interp = Interp::new();
@@ -57,7 +57,7 @@ fn run_with_capacity_and_prelude(src: &str, capacity: usize) -> Result<(RtValue,
     }
 
     let mut h = Heap::with_capacity(capacity);
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for tl in tls {
         if let Some(val) = check_interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
             last = val;
@@ -93,7 +93,7 @@ fn new_scope_supports_set_then_get() {
                    (set s \"x\" 42)
                    (match (get s \"x\") ((Some v) v) ((None) 0))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn get_missing_key_returns_none() {
                  (let ((s (make-s)))
                    (match (get s \"missing\") ((Some v) v) ((None) -1))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(-1));
+    assert_eq!(eval_ok(src), Value::Int(-1));
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn push_frame_shadows_the_same_name_in_the_new_top_frame() {
                    (set s \"x\" 2)
                    (match (get s \"x\") ((Some v) v) ((None) 0))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn pop_frame_reveals_the_shadowed_outer_binding_again() {
                    (pop-frame s)
                    (match (get s \"x\") ((Some v) v) ((None) 0))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
                    (pop-frame s)
                    (match (get s \"y\") ((Some v) v) ((None) -1))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(-1));
+    assert_eq!(eval_ok(src), Value::Int(-1));
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn set_always_writes_into_the_most_recently_pushed_frame() {
                    (+ (match (get s \"a\") ((Some v) v) ((None) 0))
                       (match (get s \"b\") ((Some v) v) ((None) 0)))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(3));
+    assert_eq!(eval_ok(src), Value::Int(3));
 }
 
 #[test]
@@ -174,7 +174,7 @@ fn clone_frames_shares_existing_frames_without_copying_their_entries() {
                    (let ((s2 (clone-frames s)))
                      (match (get s2 \"x\") ((Some v) v) ((None) -1)))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
@@ -190,7 +190,7 @@ fn clone_frames_mutation_through_the_shared_frame_is_visible_in_both() {
                      (set s2 \"x\" 2)
                      (match (get s \"x\") ((Some v) v) ((None) -1)))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn pushing_a_frame_on_the_clone_does_not_affect_the_original() {
                      (set s2 \"only-in-clone\" 5))
                    (match (get s \"only-in-clone\") ((Some v) v) ((None) -1))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(-1));
+    assert_eq!(eval_ok(src), Value::Int(-1));
 }
 
 // ---- heap-repr `V` (`Scope<Sexpr>` etc. — `StructPayload::Frames`) ---------
@@ -228,7 +228,7 @@ fn heap_scope_set_then_get_roundtrips() {
                      ((Some v) (sexpr-int v))
                      ((None) -1))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]
@@ -238,7 +238,7 @@ fn heap_scope_get_missing_key_returns_none() {
                  (let ((s (make-s)))
                    (match (get s \"missing\") ((Some v) 0) ((None) -1))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(-1));
+    assert_eq!(eval_ok(src), Value::Int(-1));
 }
 
 #[test]
@@ -258,7 +258,7 @@ fn heap_scope_push_frame_shadows_and_pop_frame_unshadows() {
                      (let ((unshadowed (as-int (get s \"x\"))))
                        (if (eq shadowed 2) (eq unshadowed 1) false)))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
@@ -271,7 +271,7 @@ fn heap_scope_pop_frame_removes_a_name_only_visible_in_the_popped_frame() {
                    (pop-frame s)
                    (match (get s \"y\") ((Some v) 0) ((None) -1))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(-1));
+    assert_eq!(eval_ok(src), Value::Int(-1));
 }
 
 #[test]
@@ -285,7 +285,7 @@ fn heap_scope_clone_frames_shares_existing_frames() {
                        ((Some v) (sexpr-int v))
                        ((None) -1)))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 #[test]
@@ -300,7 +300,7 @@ fn heap_scope_clone_frames_mutation_through_the_shared_frame_is_visible_in_both(
                        ((Some v) (sexpr-int v))
                        ((None) -1)))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
@@ -313,7 +313,7 @@ fn heap_scope_pushing_a_frame_on_the_clone_does_not_affect_the_original() {
                      (set s2 \"only-in-clone\" (quote 5)))
                    (match (get s \"only-in-clone\") ((Some v) 0) ((None) -1))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(-1));
+    assert_eq!(eval_ok(src), Value::Int(-1));
 }
 
 /// `Heap::scope_set` panics on an empty frame stack (the mem layer's
@@ -352,7 +352,7 @@ fn heap_scope_stores_a_boxed_struct_element_by_reference() {
                        ((None) ()))
                      (len v))))
                (f)";
-    assert_eq!(eval_ok(src), RtValue::Int(2));
+    assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 /// The heap-scope GC contract end to end: values stored in a
@@ -374,7 +374,6 @@ fn heap_scope_sexpr_values_survive_gc_pressure() {
                (f)";
     let (v, h) = run_with_capacity_and_prelude(src, 96).expect("eval failed");
     match v {
-        RtValue::Sexpr(sv) => assert_eq!(sexpr_to_string(&h, sv), "(a b c d e)"),
-        other => panic!("expected a Sexpr value, got {:?}", other),
+        sv => assert_eq!(sexpr_to_string(&h, sv), "(a b c d e)"),
     }
 }

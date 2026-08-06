@@ -20,7 +20,7 @@
 //! function type — which is a list, `(fn (i32) i32)` — cannot be written as
 //! one. A `defenum` variant's field is an ordinary type expression, so it can.
 
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, RtValue};
+use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
 fn env() -> (Heap, Checker, Interp) {
     let mut h = Heap::with_capacity(1 << 16);
@@ -31,10 +31,10 @@ fn env() -> (Heap, Checker, Interp) {
     (h, chk, interp)
 }
 
-fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<RtValue, EvalError> {
+fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<Value, EvalError> {
     let r = Reader::new();
     let vs = r.read_all(h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(h, interp, v).expect("check failed");
         if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
@@ -44,7 +44,7 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     let (mut h, mut chk, mut interp) = env();
     eval_in(&mut h, &mut chk, &mut interp, src).expect("eval failed")
 }
@@ -65,7 +65,7 @@ const OP_ENUM: &str = "(defenum op (binary (fn (i32 i32) i32)) (nullary (fn () S
 fn a_builtin_method_passed_as_an_argument_is_applied() {
     let src = "(defun call2 ((f (fn (i32 i32) i32)) (a i32) (b i32)) i32 (f a b)) \
                (call2 + 3 4)";
-    assert_eq!(eval_ok(src), RtValue::Int(7));
+    assert_eq!(eval_ok(src), Value::Int(7));
 }
 
 /// Two separate reifications of one built-in must both dispatch to the same
@@ -75,7 +75,7 @@ fn a_builtin_method_passed_as_an_argument_is_applied() {
 fn two_reifications_of_one_builtin_both_apply() {
     let src = "(defun call2 ((f (fn (i32 i32) i32)) (a i32) (b i32)) i32 (f a b)) \
                (+ (call2 + 1 2) (call2 + 10 20))";
-    assert_eq!(eval_ok(src), RtValue::Int(33));
+    assert_eq!(eval_ok(src), Value::Int(33));
 }
 
 #[test]
@@ -86,9 +86,9 @@ fn a_free_builtin_passed_as_an_argument_is_applied() {
 
 /// `gensym` mints a fresh symbol per call, so the only thing to assert is the
 /// shape — that the built-in really ran rather than the box being handed back.
-fn assert_sym(v: RtValue) {
+fn assert_sym(v: Value) {
     match v {
-        RtValue::Sexpr(typelisp::Value::Symbol(_)) => {}
+        typelisp::Value::Symbol(_) => {}
         other => panic!("expected a gensym'd symbol, got {:?}", other),
     }
 }
@@ -101,7 +101,7 @@ fn assert_sym(v: RtValue) {
 #[test]
 fn a_builtin_method_stored_in_an_enum_field_is_recovered_and_applied() {
     let src = format!("{} (run-binary (op::binary +) 20 22)", OP_ENUM);
-    assert_eq!(eval_ok(&src), RtValue::Int(42));
+    assert_eq!(eval_ok(&src), Value::Int(42));
 }
 
 /// The free-built-in half — `recv_type: None` rather than a receiver path.
@@ -120,7 +120,7 @@ fn a_closure_and_a_builtin_share_the_same_enum_field() {
         "{} (+ (run-binary (op::binary +) 1 2) (run-binary (op::binary (lambda ((x i32) (y i32)) i32 (* x y))) 3 4))",
         OP_ENUM
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(15));
+    assert_eq!(eval_ok(&src), Value::Int(15));
 }
 
 /// The payload-free variant, so the enum's storability classification is
@@ -128,7 +128,7 @@ fn a_closure_and_a_builtin_share_the_same_enum_field() {
 #[test]
 fn the_payload_free_variant_still_matches() {
     let src = format!("{} (run-binary (op::none) 20 22)", OP_ENUM);
-    assert_eq!(eval_ok(&src), RtValue::Int(-1));
+    assert_eq!(eval_ok(&src), Value::Int(-1));
 }
 
 /// The enum really is a heap `BoxedObj::Enum` now — the whole point of making
@@ -140,7 +140,7 @@ fn an_enum_holding_a_builtin_is_a_heap_box_not_native_data() {
     let v = eval_in(&mut h, &mut chk, &mut interp, &format!("{} (op::binary +)", OP_ENUM))
         .expect("eval failed");
     match v {
-        RtValue::Sexpr(typelisp::Value::Boxed(id)) => {
+        typelisp::Value::Boxed(id) => {
             assert!(h.is_enum(id), "expected a heap enum box");
             assert_eq!(h.enum_field_count(id), 1);
             match h.enum_field(id, 0) {
@@ -169,7 +169,7 @@ fn a_stored_builtin_survives_constant_collection() {
     h.set_gc_stress(true);
     let got = eval_in(&mut h, &mut chk, &mut interp, "(run-binary (op::binary +) 20 22)")
         .expect("eval under gc stress failed");
-    assert_eq!(got, RtValue::Int(42));
+    assert_eq!(got, Value::Int(42));
 }
 
 // Printing a built-in function value has no test here because it has no

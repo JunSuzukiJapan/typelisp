@@ -243,7 +243,7 @@ fn errors_on_a_non_defun_top_level_form() {
 /// is shared, not two parallel implementations that happen to look similar.
 #[test]
 fn jit_and_aot_agree_on_the_same_source() {
-    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+    use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     // `i32`, not `i64` — see `compiles_and_runs_arithmetic_in_main`'s doc
     // comment.
@@ -265,7 +265,7 @@ fn jit_and_aot_agree_on_the_same_source() {
         }
     }
     let jit_value = match jit_result {
-        Some(RtValue::Int(n)) => n,
+        Some(Value::Int(n)) => n,
         other => panic!("expected an Int from the JIT path, got {:?}", other),
     };
 
@@ -279,7 +279,7 @@ fn jit_and_aot_agree_on_the_same_source() {
 /// scope) rather than bare arithmetic.
 #[test]
 fn jit_and_aot_agree_on_a_labels_body() {
-    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+    use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     let src = r#"
         (defun main () i64
@@ -302,7 +302,7 @@ fn jit_and_aot_agree_on_a_labels_body() {
         }
     }
     let jit_value = match jit_result {
-        Some(RtValue::Int(n)) => n,
+        Some(Value::Int(n)) => n,
         other => panic!("expected an Int from the JIT path, got {:?}", other),
     };
 
@@ -321,7 +321,7 @@ fn jit_and_aot_agree_on_a_labels_body() {
 /// that module's doc comment).
 #[test]
 fn jit_and_aot_agree_on_a_cross_function_call() {
-    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+    use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     let src = r#"
         (defun square ((x i64)) i64 (* x x))
@@ -344,7 +344,7 @@ fn jit_and_aot_agree_on_a_cross_function_call() {
         }
     }
     let jit_value = match jit_result {
-        Some(RtValue::Int(n)) => n,
+        Some(Value::Int(n)) => n,
         other => panic!("expected an Int from the JIT path, got {:?}", other),
     };
 
@@ -361,7 +361,7 @@ fn jit_and_aot_agree_on_a_cross_function_call() {
 /// reason as `jit_and_aot_agree_on_a_cross_function_call`.
 #[test]
 fn jit_and_aot_agree_on_an_escaping_capturing_lambda() {
-    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+    use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     let src = r#"
         (defun adder ((n i64)) (fn (i64) i64) (lambda ((x i64)) i64 (+ x n)))
@@ -385,7 +385,7 @@ fn jit_and_aot_agree_on_an_escaping_capturing_lambda() {
         }
     }
     let jit_value = match jit_result {
-        Some(RtValue::Int(n)) => n,
+        Some(Value::Int(n)) => n,
         other => panic!("expected an Int from the JIT path, got {:?}", other),
     };
 
@@ -401,7 +401,7 @@ fn jit_and_aot_agree_on_an_escaping_capturing_lambda() {
 /// `jit_and_aot_agree_on_a_cross_function_call`.
 #[test]
 fn jit_and_aot_agree_on_a_self_recursive_function_with_a_base_case() {
-    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+    use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     let src = r#"
         (defun fact ((n i64)) i64 (if (<= n 1) 1 (* n (fact (- n 1)))))
@@ -424,7 +424,7 @@ fn jit_and_aot_agree_on_a_self_recursive_function_with_a_base_case() {
         }
     }
     let jit_value = match jit_result {
-        Some(RtValue::Int(n)) => n,
+        Some(Value::Int(n)) => n,
         other => panic!("expected an Int from the JIT path, got {:?}", other),
     };
 
@@ -439,7 +439,7 @@ fn jit_and_aot_agree_on_a_self_recursive_function_with_a_base_case() {
 /// before `main`'s, same reason as `jit_and_aot_agree_on_a_cross_function_call`.
 #[test]
 fn jit_and_aot_agree_on_a_loop_based_function() {
-    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+    use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     let src = r#"
         (defun sum-to ((n i32)) i32
@@ -467,7 +467,7 @@ fn jit_and_aot_agree_on_a_loop_based_function() {
         }
     }
     let jit_value = match jit_result {
-        Some(RtValue::Int(n)) => n,
+        Some(Value::Int(n)) => n,
         other => panic!("expected an Int from the JIT path, got {:?}", other),
     };
 
@@ -512,7 +512,7 @@ fn compiles_and_runs_main_that_writes_a_global() {
 /// (see `Interp::promote_global`'s doc comment).
 #[test]
 fn jit_and_aot_agree_on_a_global_read_and_write() {
-    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+    use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     let src = r#"
         (defvar (counter i64) 0)
@@ -536,7 +536,7 @@ fn jit_and_aot_agree_on_a_global_read_and_write() {
         }
     }
     let jit_value = match jit_result {
-        Some(RtValue::Int(n)) => n,
+        Some(Value::Int(n)) => n,
         other => panic!("expected an Int from the JIT path, got {:?}", other),
     };
 
@@ -565,7 +565,7 @@ fn compiles_and_runs_main_that_reads_a_defenum_global() {
 /// enum-typed global.
 #[test]
 fn jit_and_aot_agree_on_a_defenum_global_read_and_write() {
-    use typelisp::{Checker, Heap, Interp, Reader, RtValue};
+    use typelisp::{Checker, Heap, Interp, Reader, Value};
 
     let src = r#"
         (defenum counter (At i64))
@@ -591,7 +591,7 @@ fn jit_and_aot_agree_on_a_defenum_global_read_and_write() {
         }
     }
     let jit_value = match jit_result {
-        Some(RtValue::Int(n)) => n,
+        Some(Value::Int(n)) => n,
         other => panic!("expected an Int from the JIT path, got {:?}", other),
     };
 

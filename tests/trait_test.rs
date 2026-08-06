@@ -4,7 +4,7 @@
 //! duck-typing rule) was chosen.
 
 extern crate typelisp;
-use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, RtValue, TopLevel};
+use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevel};
 
 fn check(src: &str) -> Result<TopLevel, Error> {
     let mut h = Heap::with_capacity(8192);
@@ -19,13 +19,13 @@ fn check(src: &str) -> Result<TopLevel, Error> {
     Ok(last.expect("no forms"))
 }
 
-fn run(src: &str) -> Result<RtValue, EvalError> {
+fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
     let interp = Interp::new();
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(v) = interp.exec(&mut h, tl)? {
@@ -35,7 +35,7 @@ fn run(src: &str) -> Result<RtValue, EvalError> {
     Ok(last)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
@@ -50,7 +50,7 @@ fn eval_string(src: &str) -> String {
     let interp = Interp::new();
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -58,7 +58,7 @@ fn eval_string(src: &str) -> String {
         }
     }
     match last {
-        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        typelisp::Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
 }
@@ -81,7 +81,7 @@ fn deftrait_registers_with_no_error() {
 #[test]
 fn impl_on_a_concrete_type_dispatches_as_an_ordinary_method() {
     let src = format!("{} (let ((b (box::new 42))) (count b))", COUNTER_PRELUDE);
-    assert_eq!(eval_ok(&src), RtValue::Int(42));
+    assert_eq!(eval_ok(&src), Value::Int(42));
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn impl_on_a_primitive_type_dispatches_as_an_ordinary_method() {
 (impl Doubling i32
   (add-twice ((self Self) (other Self)) Self (+ self (* other 2))))
 (add-twice 40 1)";
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn generic_function_calls_a_trait_method_via_where_bound() {
             (describe (box::new 7))",
         COUNTER_PRELUDE
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(7));
+    assert_eq!(eval_ok(&src), Value::Int(7));
 }
 
 #[test]
@@ -151,7 +151,7 @@ fn two_types_implementing_the_same_trait_dispatch_independently() {
         (impl Counted box-b (count ((self Self)) i32 (* 2 self::n)))
         (defun describe<T> ((it T)) i32 (where (Counted T)) (count it))
         (+ (describe (box-a::new 3)) (describe (box-b::new 3)))";
-    assert_eq!(eval_ok(src), RtValue::Int(3 + 6));
+    assert_eq!(eval_ok(src), Value::Int(3 + 6));
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn defmethod_on_a_generic_owner_can_carry_a_where_clause() {
             (count-both (pair::new (box::new 20) (box::new 22)))",
         COUNTER_PRELUDE
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(42));
+    assert_eq!(eval_ok(&src), Value::Int(42));
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn impl_method_with_a_where_clause_supports_recursive_structural_dispatch() {
         (if (same (pr::new (pr::new 1 2) 3) (pr::new (pr::new 1 2) 3))
             (if (same (pr::new (pr::new 1 2) 3) (pr::new (pr::new 1 9) 3)) 0 1)
             0)";
-    assert_eq!(eval_ok(src), RtValue::Int(1));
+    assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn forwarding_a_bare_type_parameter_with_a_matching_where_bound_type_checks_and_
             (forwards (box::new 7))",
         COUNTER_PRELUDE
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(7));
+    assert_eq!(eval_ok(&src), Value::Int(7));
 }
 
 /// A minimal trait/impl scaffold with an *associated type*, independent of
@@ -313,7 +313,7 @@ fn forwarding_a_wrapped_open_type_variable_specializes_and_runs_at_a_satisfying_
             (outer (wrap::new 42))",
         BOXED_PRELUDE
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(42));
+    assert_eq!(eval_ok(&src), Value::Int(42));
 }
 
 /// The deferred-validation side of the same mechanism: `outer` itself never
@@ -363,7 +363,7 @@ fn a_supertrait_method_is_callable_on_a_bound_type_parameter() {
          (both (cell::new 3))",
         SUPER_PRELUDE
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(33));
+    assert_eq!(eval_ok(&src), Value::Int(33));
 }
 
 #[test]
@@ -377,7 +377,7 @@ fn a_supertrait_bound_discharges_a_callees_bound_on_the_base_trait() {
          (outer (cell::new 7))",
         SUPER_PRELUDE
     );
-    assert_eq!(eval_ok(&src), RtValue::Int(7));
+    assert_eq!(eval_ok(&src), Value::Int(7));
 }
 
 #[test]
@@ -458,7 +458,7 @@ fn a_diamond_inherits_the_shared_method_once() {
         (defun sum<T> ((x T)) i32 (where (D T))
           (+ (tag x) (+ (b-tag x) (+ (c-tag x) (d-tag x)))))
         (sum (cell::new 1))";
-    assert_eq!(eval_ok(src), RtValue::Int(10));
+    assert_eq!(eval_ok(src), Value::Int(10));
 }
 
 #[test]
@@ -491,7 +491,7 @@ fn a_supertrait_associated_type_pin_resolves_an_inherited_method() {
         (impl CharSrc counter (rewind ((self Self)) () ()))
         (defun peek<T> ((x T)) i32 (where (CharSrc T)) (next x))
         (peek (counter::new 5))";
-    assert_eq!(eval_ok(src), RtValue::Int(5));
+    assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 // ---- default method bodies ----------------------------------------------
@@ -508,13 +508,13 @@ const DEFAULTED: &str = "
 #[test]
 fn an_omitted_method_uses_the_traits_default_body() {
     let src = format!("{} (differs (point::new 1) (point::new 2))", DEFAULTED);
-    assert_eq!(eval_ok(&src), RtValue::Bool(true));
+    assert_eq!(eval_ok(&src), Value::Bool(true));
 }
 
 #[test]
 fn a_default_body_calls_the_impls_own_core_method() {
     let src = format!("{} (differs (point::new 3) (point::new 3))", DEFAULTED);
-    assert_eq!(eval_ok(&src), RtValue::Bool(false));
+    assert_eq!(eval_ok(&src), Value::Bool(false));
 }
 
 #[test]
@@ -529,7 +529,7 @@ fn an_impl_can_override_a_default_body() {
           ;; deliberately wrong, to prove the written body wins
           (differs ((self Self) (other Self)) bool false))
         (differs (point::new 1) (point::new 2))";
-    assert_eq!(eval_ok(src), RtValue::Bool(false));
+    assert_eq!(eval_ok(src), Value::Bool(false));
 }
 
 #[test]
@@ -545,7 +545,7 @@ fn a_default_body_resolves_names_in_the_traits_module() {
         (defstruct box (n i32))
         (impl m::Doubler box (base ((self Self)) i32 self::n))
         (doubled (box::new 21))";
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]
@@ -577,7 +577,7 @@ fn a_default_body_reaches_the_impls_own_methods_across_module_lines() {
           (pub defstruct point (x i32))
           (impl Eq3 point (same ((self Self) (other Self)) bool (= self::x other::x))))
         (differs (m::point::new 1) (m::point::new 2))";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]

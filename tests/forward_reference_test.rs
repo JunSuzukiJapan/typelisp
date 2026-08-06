@@ -14,14 +14,14 @@
 //! pre-pass would just be testing the old behaviour.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader, RtValue};
+use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader, Value};
 
 /// Read, pre-declare, then check+exec every form — the shape every real
 /// driver has. `with_island` additionally loads the prelude and the compiler
 /// island, which anything building a closure or calling `(compile ...)` needs
 /// (since interp-closure removal Stage 8c every closure value is a compiled
 /// one, and compiling needs the island).
-fn run_inner(src: &str, with_island: bool) -> Result<RtValue, Error> {
+fn run_inner(src: &str, with_island: bool) -> Result<Value, Error> {
     let mut h = Heap::with_capacity(1 << 18);
     let r = Reader::new();
     let mut chk = Checker::new();
@@ -32,7 +32,7 @@ fn run_inner(src: &str, with_island: bool) -> Result<RtValue, Error> {
     }
     let vs = r.read_all(&mut h, src).expect("read failed");
     chk.predeclare_program(&mut h, &vs);
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -42,15 +42,15 @@ fn run_inner(src: &str, with_island: bool) -> Result<RtValue, Error> {
     Ok(last)
 }
 
-fn run(src: &str) -> Result<RtValue, Error> {
+fn run(src: &str) -> Result<Value, Error> {
     run_inner(src, false)
 }
 
-fn eval_ok(src: &str) -> RtValue {
+fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
-fn eval_ok_with_island(src: &str) -> RtValue {
+fn eval_ok_with_island(src: &str) -> Value {
     run_inner(src, true).expect("eval failed")
 }
 
@@ -64,7 +64,7 @@ fn eval_string(src: &str) -> String {
     let interp = Interp::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     chk.predeclare_program(&mut h, &vs);
-    let mut last = RtValue::Unit;
+    let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
@@ -72,7 +72,7 @@ fn eval_string(src: &str) -> String {
         }
     }
     match last {
-        RtValue::Sexpr(typelisp::Value::Str(id)) => h.string(id).to_string(),
+        typelisp::Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
 }
@@ -107,7 +107,7 @@ fn warnings_of(src: &str) -> Vec<String> {
 
 #[test]
 fn a_defun_can_call_one_defined_below_it() {
-    assert_eq!(eval_ok("(defun a () i64 (b)) (defun b () i64 7) (a)"), RtValue::Int(7));
+    assert_eq!(eval_ok("(defun a () i64 (b)) (defun b () i64 7) (a)"), Value::Int(7));
 }
 
 #[test]
@@ -119,7 +119,7 @@ fn two_top_level_defuns_can_be_mutually_recursive() {
         (defun even2? ((n i64)) bool (if (= n 0) true  (odd2? (- n 1))))
         (defun odd2?  ((n i64)) bool (if (= n 0) false (even2? (- n 1))))
         (even2? 10)";
-    assert_eq!(eval_ok(src), RtValue::Bool(true));
+    assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
@@ -131,7 +131,7 @@ fn mutual_recursion_still_holds_after_compiling_one_of_the_pair() {
         (defun odd2?  ((n i64)) bool (if (= n 0) false (even2? (- n 1))))
         (compile even2?)
         (even2? 11)";
-    assert_eq!(eval_ok_with_island(src), RtValue::Bool(false));
+    assert_eq!(eval_ok_with_island(src), Value::Bool(false));
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn a_forward_call_to_a_generic_defun_specializes() {
     // A generic needs more than its signature: `request_fn_specialization`
     // consults the retained `FnTemplate`, so the pre-pass has to register
     // that too.
-    assert_eq!(eval_ok("(defun use-it ((n i64)) i64 (idg n)) (defun idg<T> ((x T)) T x) (use-it 7)"), RtValue::Int(7));
+    assert_eq!(eval_ok("(defun use-it ((n i64)) i64 (idg n)) (defun idg<T> ((x T)) T x) (use-it 7)"), Value::Int(7));
 }
 
 #[test]
@@ -155,7 +155,7 @@ fn a_forward_call_passes_a_rest_argument() {
         (defun a () i64 (total 1 2 3))
         (defun total (&rest (xs i64)) i64 (sexpr-list-length-i64 xs))
         (a)";
-    assert_eq!(eval_ok_with_island(src), RtValue::Int(3));
+    assert_eq!(eval_ok_with_island(src), Value::Int(3));
 }
 
 #[test]
@@ -173,7 +173,7 @@ fn forward_references_work_inside_a_nested_module() {
           (pub defun a () i64 (b))
           (pub defun b () i64 42))
         (m::a)";
-    assert_eq!(eval_ok(src), RtValue::Int(42));
+    assert_eq!(eval_ok(src), Value::Int(42));
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn a_lambda_body_can_call_a_defun_defined_below() {
         (defun a () i64 (let ((f (lambda () i64 (b)))) (f)))
         (defun b () i64 5)
         (a)";
-    assert_eq!(eval_ok_with_island(src), RtValue::Int(5));
+    assert_eq!(eval_ok_with_island(src), Value::Int(5));
 }
 
 // ---- what deliberately still does not ------------------------------------
