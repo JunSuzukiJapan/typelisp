@@ -77,6 +77,10 @@ enum Op {
     FieldGet,
     FieldSet,
     Match,
+    Set,
+    Loop,
+    Break,
+    Return,
 }
 
 impl Op {
@@ -108,6 +112,10 @@ impl Op {
             "field-get" => Op::FieldGet,
             "field-set" => Op::FieldSet,
             "match" => Op::Match,
+            "set" => Op::Set,
+            "loop" => Op::Loop,
+            "break" => Op::Break,
+            "return" => Op::Return,
             _ => return None,
         })
     }
@@ -310,6 +318,61 @@ impl Interp {
                 Ok(Step::Done(Value::Empty))
             }
             Op::Match => self.match_core(heap, form, env),
+
+            // ---- assignment and loops ------------------------------------
+            Op::Set => {
+                let sym = self.sym_field(heap, form, 0, "set")?;
+                let val = core::field(heap, form, 1)
+                    .ok_or_else(|| EvalError::Internal("eval: (set ..) has no value".to_string()))?;
+                let v = self.eval_core(heap, val, env)?;
+                let cell = env_lookup(heap, env, sym)
+                    .ok_or_else(|| EvalError::Unbound(heap.symbol_name(sym).to_string()))?;
+                // Written through the cell rather than rebuilding the frame,
+                // which is what makes the assignment visible through every
+                // other reference to the same binding — a closure's capture,
+                // or compiled code handed the same cell.
+                match cell {
+                    Value::Boxed(id) if heap.is_cell(id) => heap.cell_set(id, v),
+                    other => return Err(EvalError::Internal(format!("eval: binding does not hold a cell: {:?}", other))),
+                }
+                Ok(Step::Done(v))
+            }
+            // `break`/`return` are not errors: they are non-local exits
+            // riding `Result`'s propagation, so that every intervening frame
+            // unwinds without each one having to know about them. The
+            // enclosing `loop` is the only thing that catches them, and the
+            // checker guarantees there is one.
+            Op::Break => Err(EvalError::Break),
+            Op::Return => match core::field(heap, form, 0) {
+                Some(val) => {
+                    let v = self.eval_core(heap, val, env)?;
+                    Err(EvalError::Return(Box::new(v)))
+                }
+                None => Err(EvalError::Return(Box::new(Value::Empty))),
+            },
+            // Not a tail jump: the body repeats, so this is a real Rust loop
+            // rather than a `Step::Tail`. Each iteration's `eval_core` balances
+            // its own roots, so the root stack does not grow with the
+            // iteration count.
+            Op::Loop => {
+                let body = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (loop ..): {}", e)))?;
+                loop {
+                    for e in &body {
+                        match self.eval_core(heap, *e, env) {
+                            Ok(_) => {}
+                            // The exit value travels in a Rust `Box`, where
+                            // the collector cannot see it — safe only because
+                            // unwinding allocates nothing: a `RootScope`'s
+                            // drop truncates, it does not cons. The value is
+                            // handed straight back to the trampoline, which
+                            // roots it before anything else runs.
+                            Err(EvalError::Break) => return Ok(Step::Done(Value::Empty)),
+                            Err(EvalError::Return(v)) => return Ok(Step::Done(*v)),
+                            Err(e) => return Err(e),
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1224,12 +1287,17 @@ mod tests {
     /// A tag with no evaluation yet names itself, rather than being taken for
     /// something else. That is what keeps the passing count an honest measure
     /// of progress while the tags are implemented one at a time.
+    ///
+    /// The first example moves as stages land — it named `loop` until `loop`
+    /// was implemented, and this test failing for that reason is the measure
+    /// working, not breaking. `unlowered` is the fixed half: it is
+    /// scaffolding, so it never gets an evaluation at all.
     #[test]
     fn a_tag_with_no_evaluation_names_itself() {
         let mut h = stress_heap();
-        let e = eval_src(&mut h, "(loop (break))").unwrap_err();
+        let e = eval_src(&mut h, "(assoc i64 + true () (int 1) (int 2))").unwrap_err();
         assert!(
-            matches!(e.kind(), EvalError::Internal(m) if m.contains("`loop`")),
+            matches!(e.kind(), EvalError::Internal(m) if m.contains("`assoc`")),
             "{:?}",
             e
         );
@@ -1549,6 +1617,137 @@ mod tests {
             "{:?}",
             e
         );
+    }
+
+    // ---- set / loop / break / return -------------------------------------
+
+    #[test]
+    fn set_writes_the_binding_and_yields_the_value() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(&mut h, "(let ((x int (int 1))) (set x (int 9)))"),
+            Value::Int(9)
+        );
+        assert_eq!(
+            eval_ok(&mut h, "(let ((x int (int 1))) (set x (int 9)) (var x))"),
+            Value::Int(9)
+        );
+    }
+
+    /// The write goes through the binding *cell*, so it is visible from any
+    /// scope that resolves to the same binding — an inner frame does not get
+    /// a copy. That is what makes a closure capture and a compiled callee see
+    /// the same value later.
+    #[test]
+    fn set_writes_through_the_cell_an_inner_scope_resolves_to() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(let ((x int (int 1)))
+                   (match (int 0) ((pat-bind ignored) (set x (int 9))))
+                   (var x))",
+            ),
+            Value::Int(9)
+        );
+    }
+
+    #[test]
+    fn setting_an_unbound_name_says_so() {
+        let mut h = stress_heap();
+        let e = eval_src(&mut h, "(set nope (int 1))").unwrap_err();
+        assert!(matches!(e.kind(), EvalError::Unbound(n) if n == "nope"), "{:?}", e);
+    }
+
+    #[test]
+    fn break_leaves_a_loop_with_unit_and_return_with_a_value() {
+        let mut h = stress_heap();
+        assert_eq!(eval_ok(&mut h, "(loop (break))"), Value::Empty);
+        assert_eq!(eval_ok(&mut h, "(loop (return (int 7)))"), Value::Int(7));
+        assert_eq!(eval_ok(&mut h, "(loop (return))"), Value::Empty);
+        // Forms after the exit do not run.
+        assert_eq!(
+            eval_ok(&mut h, r#"(loop (break) (panic (str "ran past the break")))"#),
+            Value::Empty
+        );
+    }
+
+    /// A loop that actually iterates: walk a list, keeping the last element.
+    /// Arithmetic is an instance method rather than a free function, and
+    /// `assoc` has no evaluation yet — so the counter is a list instead.
+    #[test]
+    fn a_loop_repeats_its_body_until_something_exits() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(let ((xs sexpr (call (sexpr-cons) () sexpr-cons (int 1)
+                                   (call (sexpr-cons) () sexpr-cons (int 2)
+                                     (call (sexpr-cons) () sexpr-cons (int 3) (unit)))))
+                       (last sexpr (unit)))
+                   (loop
+                     (if (call (sexpr-null) () sexpr-null (var xs)) (break) (unit))
+                     (set last (call (sexpr-car) () sexpr-car (var xs)))
+                     (set xs (call (sexpr-cdr) () sexpr-cdr (var xs))))
+                   (var last))",
+            ),
+            Value::Int(3)
+        );
+    }
+
+    /// CL semantics: `break` leaves the *nearest* enclosing loop and no
+    /// further. If it escaped further, the `set` below would never run.
+    #[test]
+    fn break_leaves_only_the_nearest_loop() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(let ((n sexpr (unit)))
+                   (loop
+                     (loop (break))
+                     (set n (int 5))
+                     (break))
+                   (var n))",
+            ),
+            Value::Int(5)
+        );
+        // The same for `return`, whose value belongs to the inner loop.
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(let ((n sexpr (unit)))
+                   (loop
+                     (set n (loop (return (int 4))))
+                     (break))
+                   (var n))",
+            ),
+            Value::Int(4)
+        );
+    }
+
+    /// A loop is not a tail jump — the body repeats — so its iterations must
+    /// not accumulate roots. Ten thousand allocating iterations under
+    /// `gc_stress` is what would show it.
+    #[test]
+    fn a_long_running_loop_does_not_grow_the_root_stack() {
+        let mut h = Heap::with_capacity(1 << 16);
+        h.set_growth_limit(1 << 20);
+        h.set_gc_stress(true);
+
+        let form = read1(
+            &mut h,
+            "(let ((xs sexpr (unit)) (n sexpr (unit)))
+               (loop
+                 (if (call (sexpr-null) () sexpr-null (var n)) (unit) (break))
+                 (set xs (call (sexpr-cons) () sexpr-cons (int 1) (unit)))
+                 (set n (call (sexpr-car) () sexpr-car (var xs)))))",
+        );
+        h.push_root(form);
+        let before = h.root_count();
+        let interp = Interp::new();
+        interp.eval_core(&mut h, form, Value::Empty).expect("loop failed");
+        assert_eq!(h.root_count(), before, "an iteration leaked a root");
     }
 
     #[test]
