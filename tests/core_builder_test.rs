@@ -87,7 +87,7 @@ fn items_keeps_every_sibling_alive_while_the_rest_are_built() {
     };
     h.push_root(node);
 
-    assert_eq!(core::print(&h, node), "(if (bool #t) (int 1) (int 2))");
+    assert_eq!(core::print(&h, node), "(if (bool true) (int 1) (int 2))");
 }
 
 #[test]
@@ -233,7 +233,7 @@ fn print_renders_every_atom_kind() {
     };
     h.push_root(node);
 
-    assert_eq!(core::print(&h, node), r#"(mixed -3 #f #\a "hi" m::f ())"#);
+    assert_eq!(core::print(&h, node), r#"(mixed -3 false #\a "hi" m::f ())"#);
 }
 
 #[test]

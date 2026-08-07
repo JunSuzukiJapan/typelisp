@@ -231,7 +231,11 @@ fn write_form(heap: &Heap, v: Value, out: &mut String) {
         Value::Int(n) => {
             let _ = write!(out, "{}", n);
         }
-        Value::Bool(b) => out.push_str(if b { "#t" } else { "#f" }),
+        // The language's own spelling, not Scheme's `#t`/`#f`. That is what
+        // makes a printed core form *readable back*: the reader accepts
+        // `true`/`false`, so `read(print(f)) == f` holds and a test can write
+        // its expected form in exactly the syntax the reader takes.
+        Value::Bool(b) => out.push_str(if b { "true" } else { "false" }),
         Value::Char(c) => {
             let _ = write!(out, "#\\{}", c);
         }
