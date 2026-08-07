@@ -84,6 +84,10 @@ enum Op {
     Lambda,
     Labels,
     Apply,
+    Quote,
+    DynNew,
+    DynUpcast,
+    DynValue,
 }
 
 impl Op {
@@ -122,6 +126,10 @@ impl Op {
             "lambda" => Op::Lambda,
             "labels" => Op::Labels,
             "apply" => Op::Apply,
+            "quote" => Op::Quote,
+            "dyn-new" => Op::DynNew,
+            "dyn-upcast" => Op::DynUpcast,
+            "dyn-value" => Op::DynValue,
             _ => return None,
         })
     }
@@ -378,6 +386,34 @@ impl Interp {
             Op::Labels => self.labels_core(heap, form, env),
             Op::Apply => self.apply_core(heap, form, env),
 
+            // ---- quoted data ---------------------------------------------
+            //
+            // The datum is handed back as it stands. The old evaluator kept a
+            // quoted literal as an owned Rust tree (`QuotedSexpr`) and rebuilt
+            // it into the heap on *every* evaluation, because a saved function
+            // body was invisible to the collector and a live heap pointer in
+            // it would have dangled. A core form is itself heap data and is
+            // rooted like any other, so the datum can simply be the node's
+            // field.
+            //
+            // That also makes the same `quote` form yield the *same* object
+            // each time, where rebuilding gave a fresh copy — which is what CL
+            // specifies for a literal, and the reason its consequences are
+            // undefined if one is destructively modified.
+            Op::Quote => self.literal_field(heap, form).map(Step::Done),
+
+            // ---- trait objects -------------------------------------------
+            Op::DynNew => self.dyn_new_core(heap, form, env).map(Step::Done),
+            Op::DynUpcast => self.dyn_upcast_core(heap, form, env).map(Step::Done),
+            Op::DynValue => {
+                let inner = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (dyn-value ..) has no operand".to_string()))?;
+                match self.eval_core(heap, inner, env)? {
+                    Value::Boxed(id) if heap.is_dyn(id) => Ok(Step::Done(heap.dyn_value(id))),
+                    other => Err(EvalError::Internal(format!("eval: (dyn-value ..): not a trait object: {:?}", other))),
+                }
+            }
+
             // Not a tail jump: the body repeats, so this is a real Rust loop
             // rather than a `Step::Tail`. Each iteration's `eval_core` balances
             // its own roots, so the root stack does not grow with the
@@ -440,6 +476,79 @@ impl Interp {
         } else {
             Ok(super::build_enum_value(&mut s, path, variant, argv))
         }
+    }
+
+    /// `(dyn-new STR PATH ((PATH SYM)...) ((PATH ((PATH SYM)...))...) E)`.
+    ///
+    /// Boxing is where the concrete type is still known, so it is where every
+    /// vtable this value could ever be viewed through gets interned — its own
+    /// and each supertrait's. An upcast later has only the runtime vtable id
+    /// to go on, and could not re-derive them.
+    fn dyn_new_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
+        let concrete_key = match core::field(heap, form, 0) {
+            Some(Value::Str(id)) => heap.string(id).to_string(),
+            other => return Err(EvalError::Internal(format!("eval: (dyn-new ..) concrete key is {:?}", other))),
+        };
+        let trait_path = path_field(heap, form, 1, "dyn-new")?;
+        let slots = method_list(heap, form, 2, "dyn-new")?;
+        let supers = super_list(heap, form, 3)?;
+        let value = core::field(heap, form, 4)
+            .ok_or_else(|| EvalError::Internal("eval: (dyn-new ..) has no value".to_string()))?;
+
+        let v = self.eval_core(heap, value, env)?;
+        let mut s = RootScope::new(heap);
+        // `alloc_dyn` cannot collect, but `register_dyn_box` reaches the
+        // compiler for a trait some compiled body dispatches on, and that
+        // can. The boxed value is reachable from nothing else meanwhile.
+        s.push_root(v);
+        let ids = self.register_dyn_box(&concrete_key, &trait_path, &slots, &supers);
+        let id = *ids
+            .first()
+            .ok_or_else(|| EvalError::Internal("eval: (dyn-new ..) registered no vtable".to_string()))?;
+        self.publish_vtable(id);
+        Ok(s.alloc_dyn(id, v))
+    }
+
+    /// `(dyn-upcast PATH E)` — view a trait object through a supertrait.
+    ///
+    /// The concrete type is gone by now, so the target table is found through
+    /// the map the boxing site filled in, keyed by the runtime vtable id. A
+    /// miss is a compiler bug rather than anything user code can provoke: the
+    /// boxing site registers a table for every trait the checker admits an
+    /// upcast to.
+    fn dyn_upcast_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
+        let to_trait = path_field(heap, form, 0, "dyn-upcast")?;
+        let value = core::field(heap, form, 1)
+            .ok_or_else(|| EvalError::Internal("eval: (dyn-upcast ..) has no operand".to_string()))?;
+        let v = self.eval_core(heap, value, env)?;
+
+        let id = match v {
+            Value::Boxed(id) if heap.is_dyn(id) => id,
+            other => {
+                return Err(EvalError::Internal(format!(
+                    "eval: (dyn-upcast {} ..): not a trait object: {:?}",
+                    to_trait, other
+                )))
+            }
+        };
+        let from = heap.dyn_vtable_id(id);
+        let trait_id = self.trait_id_for(&to_trait);
+        let to = self.dyn_upcasts.borrow().get(&(from, trait_id)).copied().ok_or_else(|| {
+            EvalError::Internal(format!(
+                "eval: (dyn-upcast {} ..): vtable {} has no supertrait table registered",
+                to_trait, from
+            ))
+        })?;
+        // Upcasting to the trait it already is leaves the box alone, so the
+        // identity of a `:dyn` value is not disturbed by a no-op view.
+        if to == from {
+            return Ok(v);
+        }
+        let inner = heap.dyn_value(id);
+        self.publish_vtable(to);
+        let mut s = RootScope::new(heap);
+        s.push_root(inner);
+        Ok(s.alloc_dyn(to, inner))
     }
 
     /// `(labels ((SYM ((SYM R)...) RET-R E...) ...) E...)`.
@@ -1026,6 +1135,69 @@ fn tail_after_value(heap: &Heap, list: Value, n: usize) -> Result<Value, EvalErr
         cur = heap.cdr(cur).map_err(heap_err)?;
     }
     Ok(cur)
+}
+
+/// A field holding a vtable's slots: `((PATH SYM)...)`, the owning type and
+/// method name for each of the trait's methods, in slot order.
+fn method_list(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<(crate::Path, String)>, EvalError> {
+    let field = core::field(heap, form, i)
+        .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) has no field {}", what, i)))?;
+    let entries = heap
+        .list_to_vec(field)
+        .map_err(|e| EvalError::Internal(format!("eval: ({} ..) field {}: {}", what, i, e)))?;
+    entries.iter().map(|e| method_entry(heap, *e)).collect()
+}
+
+/// One `(PATH SYM)` slot entry.
+fn method_entry(heap: &Heap, entry: Value) -> Result<(crate::Path, String), EvalError> {
+    let parts = heap
+        .list_to_vec(entry)
+        .map_err(|e| EvalError::Internal(format!("eval: vtable slot: {}", e)))?;
+    let [ty, name] = parts[..] else {
+        return Err(EvalError::Internal(format!("eval: vtable slot is not (PATH SYM): {}", core::print(heap, entry))));
+    };
+    let ty = match ty {
+        Value::Path(id) => crate::types::path_from_id(heap, id),
+        Value::Symbol(id) => crate::Path::root(heap.symbol_name(id)),
+        other => return Err(EvalError::Internal(format!("eval: vtable slot type is {:?}", other))),
+    };
+    let Value::Symbol(name) = name else {
+        return Err(EvalError::Internal(format!("eval: vtable slot method is {:?}", name)));
+    };
+    Ok((ty, heap.symbol_name(name).to_string()))
+}
+
+/// The supertrait tables field: `((PATH ((PATH SYM)...))...)`.
+fn super_list(heap: &Heap, form: Value, i: usize) -> Result<Vec<(crate::Path, Vec<(crate::Path, String)>)>, EvalError> {
+    let field = core::field(heap, form, i)
+        .ok_or_else(|| EvalError::Internal(format!("eval: (dyn-new ..) has no field {}", i)))?;
+    let entries = heap
+        .list_to_vec(field)
+        .map_err(|e| EvalError::Internal(format!("eval: (dyn-new ..) supertraits: {}", e)))?;
+    entries
+        .iter()
+        .map(|e| {
+            let parts = heap
+                .list_to_vec(*e)
+                .map_err(|err| EvalError::Internal(format!("eval: (dyn-new ..) supertrait: {}", err)))?;
+            let [path, slots] = parts[..] else {
+                return Err(EvalError::Internal(format!(
+                    "eval: (dyn-new ..) supertrait is not (PATH SLOTS): {}",
+                    core::print(heap, *e)
+                )));
+            };
+            let path = match path {
+                Value::Path(id) => crate::types::path_from_id(heap, id),
+                Value::Symbol(id) => crate::Path::root(heap.symbol_name(id)),
+                other => return Err(EvalError::Internal(format!("eval: (dyn-new ..) supertrait path is {:?}", other))),
+            };
+            let slots = heap
+                .list_to_vec(slots)
+                .map_err(|err| EvalError::Internal(format!("eval: (dyn-new ..) supertrait slots: {}", err)))?;
+            let slots = slots.iter().map(|s| method_entry(heap, *s)).collect::<Result<_, _>>()?;
+            Ok((path, slots))
+        })
+        .collect()
 }
 
 /// The names a parameter list `((SYM R)...)` binds, in order.
@@ -2155,6 +2327,141 @@ mod tests {
         let e = interp.eval_core(&mut h, form, env).unwrap_err();
         assert!(
             matches!(e.kind(), EvalError::Internal(m) if m.contains("compiled closure")),
+            "{:?}",
+            e
+        );
+    }
+
+    // ---- quote -----------------------------------------------------------
+
+    #[test]
+    fn quote_yields_its_datum() {
+        let mut h = stress_heap();
+        assert_eq!(eval_ok(&mut h, "(quote ())"), Value::Empty);
+        assert_eq!(eval_ok(&mut h, "(quote 42)"), Value::Int(42));
+
+        let v = eval_ok(&mut h, "(quote (a b))");
+        h.push_root(v);
+        assert_eq!(core::print(&h, v), "(a b)");
+    }
+
+    /// The same `quote` form yields the *same* object each time, where the old
+    /// evaluator rebuilt a fresh copy from an owned Rust tree on every
+    /// evaluation. Returning the node's own field is both cheaper and what CL
+    /// specifies for a literal — and it is only possible because a core form
+    /// is heap data the collector can see, which the old `Typed` body was not.
+    #[test]
+    fn a_quoted_datum_is_the_same_object_every_time() {
+        let mut h = stress_heap();
+        let form = read1(&mut h, "(let () (quote (a b)))");
+        h.push_root(form);
+        let interp = Interp::new();
+        let a = interp.eval_core(&mut h, form, Value::Empty).unwrap();
+        h.push_root(a);
+        let b = interp.eval_core(&mut h, form, Value::Empty).unwrap();
+        assert_eq!(a, b, "two evaluations of one quote form gave different objects");
+    }
+
+    // ---- trait objects ---------------------------------------------------
+
+    /// Boxing interns the vtable, and `dyn-value` gets the concrete value
+    /// back out — the round trip that makes a `:dyn` box a view rather than a
+    /// conversion.
+    #[test]
+    fn a_trait_object_wraps_and_unwraps_its_value() {
+        let mut h = stress_heap();
+        let v = eval_ok(
+            &mut h,
+            r#"(dyn-new "point" shape ((point area)) () (construct point 0 true (int 3)))"#,
+        );
+        h.push_root(v);
+        match v {
+            Value::Boxed(id) => assert!(h.is_dyn(id), "expected a trait object"),
+            other => panic!("expected a box, got {:?}", other),
+        }
+        let inner = eval_ok(
+            &mut h,
+            r#"(field-get (dyn-value (dyn-new "point" shape ((point area)) () (construct point 0 true (int 3)))) 0)"#,
+        );
+        assert_eq!(inner, Value::Int(3));
+    }
+
+    /// An upcast switches the view to a supertrait's table, keeping the same
+    /// concrete value. The tables it can switch to are the ones interned at
+    /// the boxing site, because that is the only place the concrete type is
+    /// still known.
+    #[test]
+    fn an_upcast_switches_the_table_and_keeps_the_value() {
+        let mut h = stress_heap();
+        let v = eval_ok(
+            &mut h,
+            r#"(dyn-upcast named
+                 (dyn-new "point" shape ((point area)) ((named ((point name)))) (construct point 0 true (int 3))))"#,
+        );
+        h.push_root(v);
+        let inner = match v {
+            Value::Boxed(id) => {
+                assert!(h.is_dyn(id), "expected a trait object");
+                h.dyn_value(id)
+            }
+            other => panic!("expected a box, got {:?}", other),
+        };
+        h.push_root(inner);
+        match inner {
+            Value::Boxed(id) => assert_eq!(h.struct_field(id, 0), Value::Int(3)),
+            other => panic!("expected the concrete struct, got {:?}", other),
+        }
+    }
+
+    /// Upcasting to the trait a box already has is the identity, so a no-op
+    /// view does not disturb the value's identity.
+    ///
+    /// The box needs a supertrait for this to be reachable at all: a box with
+    /// none registers no upcast tables, and the checker only emits an upcast
+    /// where one is admitted — so a self-upcast of a supertrait-less box is
+    /// not a state a program can reach.
+    #[test]
+    fn upcasting_to_the_same_trait_returns_the_same_box() {
+        let mut h = stress_heap();
+        let form = read1(
+            &mut h,
+            r#"(let ((b sexpr (dyn-new "point" shape ((point area)) ((named ((point name))))
+                                (construct point 0 true (int 3)))))
+                 (call (sexpr-cons) () sexpr-cons (var b) (dyn-upcast shape (var b))))"#,
+        );
+        h.push_root(form);
+        let interp = Interp::new();
+        let v = interp.eval_core(&mut h, form, Value::Empty).unwrap();
+        h.push_root(v);
+        assert_eq!(h.car(v).unwrap(), h.cdr(v).unwrap());
+    }
+
+    /// A trait the boxing site never registered has no table, and that is a
+    /// compiler bug rather than anything user code can provoke — so it says
+    /// which vtable and which trait rather than guessing at a view.
+    #[test]
+    fn an_upcast_with_no_registered_table_says_so() {
+        let mut h = stress_heap();
+        let e = eval_src(
+            &mut h,
+            r#"(dyn-upcast never-registered
+                 (dyn-new "point" shape ((point area)) ((named ((point name))))
+                   (construct point 0 true (int 3))))"#,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(e.kind(), EvalError::Internal(m) if m.contains("no supertrait table registered")),
+            "{:?}",
+            e
+        );
+    }
+
+    #[test]
+    fn dyn_value_of_something_that_is_not_a_trait_object_says_so() {
+        let mut h = stress_heap();
+        let e = eval_src(&mut h, "(dyn-value (int 1))").unwrap_err();
+        assert!(
+            matches!(e.kind(), EvalError::Internal(m) if m.contains("not a trait object")),
             "{:?}",
             e
         );
