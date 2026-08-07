@@ -317,8 +317,6 @@ fn ratio_literal_form(heap: &mut Heap, r: &num_rational::BigRational) -> Result<
 /// value exactly like any other `Sexpr` — it needs the very same root
 /// protection, nothing ARC-specific, so `Type::Fn` now maps to `KIND_SEXPR`
 /// below and `1` is retired rather than reassigned.
-const KIND_PLAIN: i64 = 0;
-const KIND_SEXPR: i64 = 2;
 
 /// Whether `ty` is the built-in `Sexpr` type — shared by every place that
 /// needs to single it out specifically: [`translate_match`] (a `Sexpr`
@@ -395,32 +393,11 @@ fn match_scrut_kind(ty: &Type, cx: Ctx) -> Option<i64> {
 /// static type — see `compiler.rs`'s `retain-bindings`/`release-bindings`/
 /// `bind-let-values`.
 fn binding_kind(ty: &Type, enums: &HashSet<Path>) -> i64 {
-    if is_sexpr_type(ty)
-        || matches!(ty, Type::Str | Type::Bignum | Type::Ratio | Type::Fn(..))
-        || is_scope_ty(ty)
-        || is_enum_ty(ty, enums)
-    {
-        // `bignum`/`ratio` join `Str` here for the same reason
-        // `struct_field_kind` gives them its own passthrough kind `6`: a
-        // bare `Type::Bignum`/`Type::Ratio` value's compiled representation
-        // *is* the tagged `TAG_BOXED` pointer a boxed `Sexpr::Bignum`/
-        // `Ratio` already is, so it needs the exact same GC-root push/pop
-        // protection across a binding boundary — leaving it `KIND_PLAIN`
-        // would silently drop the GC root on a value that's actually a
-        // live heap pointer. An enum-typed binding (`Option`/`Result`/user
-        // `defenum`) joins them since the enum-representation unification's
-        // compiler flip: it's now a real `BoxedObj::Enum` heap value (every
-        // enum type compiled code can ever mention is heap-repr by
-        // construction — see `struct_field_kind`'s doc comment), not the
-        // un-GC-managed leaked `malloc` box the pre-flip design never
-        // needed root protection for. `Type::Fn` joins them since the
-        // closure-representation unification: a compiled closure is now a
-        // `BoxedObj::CompiledClosure` reference the same way, not the
-        // un-GC-managed `ClosureBox` the old ARC scheme protected instead.
-        KIND_SEXPR
-    } else {
-        KIND_PLAIN
-    }
+    // Structs are unreachable through this signature — no struct set is passed
+    // — which is exactly the asymmetry `Repr::binding_kind` documents. Kept
+    // faithfully: an empty set classifies a `defstruct` name as `Repr::None`,
+    // whose binding kind is the same `KIND_PLAIN` this always produced.
+    crate::check::repr::Repr::of(ty, &HashSet::new(), enums).binding_kind()
 }
 
 /// Whether `ty`'s compiled representation is an *LLVM handle*: an index
@@ -517,12 +494,12 @@ fn llvm_assoc_key(type_name: &Path, instance: bool, args: &[Typed], node_ty: &Ty
 }
 
 /// Whether `ty` is `Option`/`Result`/a built-in error type/a user `defenum`
-/// in `enums` —
-/// [`binding_kind`]'s enum test, split out since it also needs the
-/// `Option`/`Result` structural checks [`struct_field_kind`] inlines
-/// directly (no `Ctx` available at every `binding_kind` call site to reuse
-/// that function outright).
-fn is_enum_ty(ty: &Type, enums: &HashSet<Path>) -> bool {
+/// in `enums`.
+///
+/// The `enums` set alone is not enough: `Option`/`Result` and the concrete
+/// error types are recognized *structurally*, so a caller that has no set to
+/// hand over still classifies them correctly.
+pub(crate) fn is_enum_ty(ty: &Type, enums: &HashSet<Path>) -> bool {
     match ty {
         Type::Named(p, args) if path_is_builtin(p, "option") && args.len() == 1 => true,
         Type::Named(p, args) if path_is_builtin(p, "result") && args.len() == 2 => true,
@@ -634,65 +611,7 @@ pub(crate) fn tagged_sym_list(
 /// `ClosureBox` this gap used to describe is gone). Both now join
 /// `Str`/`Symbol`'s passthrough kind `6` like any other already-boxed value.
 pub(crate) fn struct_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> i64 {
-    match ty {
-        _ if ty.is_integer() => 1,
-        // An LLVM handle (interp-closure removal Stage 1) shares the
-        // integer kind: its compiled representation *is* a plain untraced
-        // `i64` registry index, so the int tag/detag bit ops are exactly
-        // right and no GC root is ever wanted — see [`is_llvm_handle_ty`]'s
-        // doc comment for why it doesn't get a kind of its own.
-        _ if is_llvm_handle_ty(ty) => 1,
-        _ if ty.is_float() => 2,
-        Type::Char => 3,
-        Type::Bool => 4,
-        Type::Str => 6,
-        // A `Symbol` value is an already-tagged immediate (an interned
-        // `Value::Symbol`), the same passthrough case as `Str`/`Sexpr`.
-        Type::Symbol => 6,
-        // `bignum`/`ratio` are always a tagged `TAG_BOXED` pointer at a
-        // `BoxedObj::Bignum`/`Ratio` (no fixed-width native form the way
-        // `f64` has — see `crates/typelisp-rt/src/lib.rs`'s "bignum/ratio
-        // compiled representation" section), so they join `Str`/`Symbol`'s
-        // passthrough kind `6` rather than needing a tag of their own.
-        Type::Bignum | Type::Ratio => 6,
-        _ if is_sexpr_type(ty) => 6,
-        // A `Scope<V>` is a `StructPayload::Frames` box — a tagged pointer
-        // like any other boxed value, so it takes the passthrough kind and
-        // its GC root. It used to reach the untraced integer kind `1` via
-        // `is_llvm_handle_ty`, back when a compiler scope was a registry
-        // handle; the committed island bitcode still binds it that way, which
-        // is what `Heap::push_session_root` exists to cover.
-        _ if is_scope_ty(ty) => 6,
-        Type::Named(p, _) if structs.contains(p) => 6,
-        _ if is_enum_ty(ty, enums) => 6,
-        // A closure value (`Type::Fn`) is a tagged `Sexpr` at a
-        // `BoxedObj::CompiledClosure` now (the closure-representation
-        // unification's compiled flip), the exact same passthrough shape a
-        // `Str`/nested struct already gets — see `compile-tag-struct-field`/
-        // `compile-sexpr-field` in `compiler.rs` for the kind-`6` encode/
-        // decode this now routes a `Fn`-typed field through unchanged.
-        Type::Fn(..) => 6,
-        // A trait object is a tagged `Sexpr` at a `BoxedObj::Dyn` fat box —
-        // the same passthrough kind as any other boxed value.
-        Type::Dyn(..) => 6,
-        // The unit type `()`. The first kind past the `Sexpr` variant
-        // numbering this table otherwise reuses: `Unit` is not a `Sexpr`
-        // variant, so there is no existing number to borrow, and `nil`'s
-        // own `0` is taken by the "not representable" catch-all below.
-        //
-        // Its stored slot is the tagged `Value::Empty` word
-        // (`interp::rtvalue_to_struct_field`, so an interpreted and a
-        // compiled writer agree); the value it decodes back to is the plain
-        // `0` `compile-unit` produces. Both directions therefore *ignore*
-        // the word they are handed and emit a constant — a unit type has
-        // exactly one value, already known from the declared type, so the
-        // slot carries no information and only has to hold something the GC
-        // can `decode` safely (an immediate nil references nothing). See
-        // `compiler.rs`'s `compile-tag-struct-field`/`compile-sexpr-field`
-        // for the two constants.
-        Type::Unit => 11,
-        _ => 0,
-    }
+    crate::check::repr::Repr::of(ty, structs, enums).field_kind()
 }
 
 /// [`struct_field_kind`]'s counterpart for a `defvar`'s own declared type —
@@ -3324,6 +3243,13 @@ fn collect_calls(typed: &Typed, targets: &mut CallTargets) {
 
 #[cfg(test)]
 mod tests {
+    /// The two binding kinds, spelled out here rather than imported: these
+    /// tests pin the *numbers* the frozen island reads, so they must not move
+    /// when `Repr::binding_kind`'s own definition does.
+    const KIND_PLAIN: i64 = 0;
+    #[allow(dead_code)]
+    const KIND_SEXPR: i64 = 2;
+
     use super::*;
     use crate::Type;
 

@@ -6,6 +6,7 @@
 
 pub mod ast;
 pub mod core;
+pub mod repr;
 pub mod registry;
 pub mod checker;
 pub mod locate;
