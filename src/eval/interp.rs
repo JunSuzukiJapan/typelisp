@@ -42,6 +42,13 @@ use super::pprint;
 use super::scope;
 use super::value::{EvalError, Slot};
 
+/// The evaluator over core forms — the cons-cell program representation that
+/// replaces the `Typed` tree. A child module rather than a sibling of
+/// `interp`, so it can reach this module's private items (the builtin
+/// dispatch, the module tree) while it is being built alongside the evaluator
+/// it will replace.
+mod core_eval;
+
 /// A registered function or method body with its parameter names. Lives at
 /// exactly one [`scope::ModuleScope`] tree node — its own defining module —
 /// rather than in a flat program-wide table; see that module's doc comment.
