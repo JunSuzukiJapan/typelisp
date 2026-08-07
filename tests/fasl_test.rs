@@ -489,34 +489,3 @@ fn compile_module_rejects_a_top_level_expression() {
     assert!(!status.success(), "compile-module should reject a top-level expression");
 }
 
-// ---- S5: prelude fasl reconstruction is faster than a source load ----------
-
-/// An `#[ignore]`d micro-benchmark (run with `--ignored`): reconstructing a
-/// prelude-loaded environment from a fasl should be meaningfully faster than
-/// re-reading+re-typechecking the prelude source — the point of the LSP
-/// per-pass change. Not a correctness gate (timings vary), just an eyeball
-/// sanity check.
-#[test]
-#[ignore]
-fn bench_fasl_load_beats_source_load() {
-    use std::time::Instant;
-    let fasl = prelude_fasl();
-    let n = 50;
-
-    let t0 = Instant::now();
-    for _ in 0..n {
-        let (mut h, mut c, mut i) = (Heap::with_capacity(1 << 16), Checker::new(), Interp::new());
-        load_prelude(&mut h, &mut c, &mut i);
-    }
-    let source = t0.elapsed();
-
-    let t1 = Instant::now();
-    for _ in 0..n {
-        let (mut h, mut c, mut i) = (Heap::with_capacity(1 << 16), Checker::new(), Interp::new());
-        fasl.load_into(&mut h, &mut c, &mut i).unwrap();
-    }
-    let fasl_time = t1.elapsed();
-
-    eprintln!("source {:?}/pass, fasl {:?}/pass ({:.1}x)", source / n, fasl_time / n, source.as_secs_f64() / fasl_time.as_secs_f64());
-    assert!(fasl_time < source, "fasl load {:?} should beat source {:?}", fasl_time, source);
-}

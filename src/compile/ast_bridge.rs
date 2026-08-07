@@ -569,16 +569,25 @@ pub(crate) fn tagged_sym_list(
         } else {
             binding_kind(ty, enums)
         });
-        heap.push_root(sym);
-        let pair = heap.cons(sym, kind);
-        heap.pop_root();
-        let pair = pair?;
-        heap.push_root(pair);
-        heap.push_root(acc);
-        let next = heap.cons(pair, acc);
-        heap.pop_root();
-        heap.pop_root();
-        acc = next?;
+        // `acc` — the list built so far — has to stay rooted across *both*
+        // conses below, not just the second one. It used to be rooted only
+        // for `cons(pair, acc)`, which left the whole accumulated list
+        // unrooted across `cons(sym, kind)`; a collection there reclaimed it
+        // and the next iteration rooted a freed cell. Under `gc_stress` (a
+        // collection before every `cons`) that is every list of two or more
+        // names, which is what made the two compiled-path
+        // `tests/scope_gc_stress_test.rs` cases fail with a negative reclaim
+        // count.
+        //
+        // A `RootScope` rather than hand-balanced pairs because the `?`s here
+        // are early returns: the old code's pops were skipped on a
+        // `HeapExhausted`, leaving the stack unbalanced for everyone above.
+        let mut h = RootScope::new(heap);
+        h.push_root(acc);
+        h.push_root(sym);
+        let pair = h.cons(sym, kind)?;
+        h.push_root(pair);
+        acc = h.cons(pair, acc)?;
     }
     Ok(acc)
 }

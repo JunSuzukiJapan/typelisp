@@ -61,35 +61,10 @@ fn compiling_the_islands_scope_constructors_survives_constant_collection() {
 /// every nested binding — the case where a scope box lives across many
 /// allocations inside one compile session.
 #[test]
-/// **Ignored: blocked by a pre-existing bug, not by the scope change.**
-///
-/// Compiling this under `gc_stress` trips `attempt to subtract with overflow`
-/// in `Heap::gc`'s reclaim count, which means a cell that was on the free list
-/// came back marked — i.e. some root points into already-freed memory. It
-/// reproduces identically at commit f4b2480, before scopes moved to the heap,
-/// so it is not caused by that work.
-///
-/// It is localized to the *compiled* path: `tests/checker_gc_stress_test.rs`
-/// runs interpretation-only workloads under the same stress with no overflow.
-///
-/// **The original suspect has been ruled out.** It was `Interp::sync_roots`'s
-/// LIFO hazard (it popped however many roots it pushed last time, assuming its
-/// batch was on top of the stack, which compiled code's own
-/// `rt_push_sexpr_root`/`rt_truncate_sexpr_roots` traffic could violate), and
-/// Phase 1c deleted `sync_roots` outright — these two still fail identically.
-///
-/// What the overflow means, more precisely than "some root is stale": a cell
-/// that was on the free list *before* this collection came back marked. A free
-/// cell's `cdr` is the free-list link, so marking one makes the walk follow
-/// that chain and mark the whole list — which is why the reclaim count doesn't
-/// just come up short, it goes negative. So the fault is a root holding a
-/// `Value::Cons` that was already reclaimed by an earlier collection: pushed
-/// after being freed, rather than merely forgotten. The remaining root sets
-/// that can carry one are `roots` (including compiled code's own traffic),
-/// `permanent_roots`, and `session_roots`.
-///
-/// Must be chased before Phase 2 relies on `gc_stress`.
-#[ignore = "pre-existing GC root bug on the compiled path (see doc comment); reproduces at f4b2480"]
+/// Spent a long time `#[ignore]`d: it tripped `attempt to subtract with
+/// overflow` in `Heap::gc`'s reclaim count, which was blamed on the scope work
+/// but reproduced at `f4b2480`, before scopes moved to the heap. The real cause
+/// was a missing GC root in `ast_bridge::tagged_sym_list` — see that function.
 fn compiling_a_nested_binding_function_survives_constant_collection() {
     let (mut h, mut chk, mut interp) = stressed();
     let src = "(defun deep ((a i32) (b i32)) i32
@@ -107,35 +82,10 @@ fn compiling_a_nested_binding_function_survives_constant_collection() {
 /// (`clone-frames` per sibling), so it is the densest exercise of the scope
 /// surface within a single session.
 #[test]
-/// **Ignored: blocked by a pre-existing bug, not by the scope change.**
-///
-/// Compiling this under `gc_stress` trips `attempt to subtract with overflow`
-/// in `Heap::gc`'s reclaim count, which means a cell that was on the free list
-/// came back marked — i.e. some root points into already-freed memory. It
-/// reproduces identically at commit f4b2480, before scopes moved to the heap,
-/// so it is not caused by that work.
-///
-/// It is localized to the *compiled* path: `tests/checker_gc_stress_test.rs`
-/// runs interpretation-only workloads under the same stress with no overflow.
-///
-/// **The original suspect has been ruled out.** It was `Interp::sync_roots`'s
-/// LIFO hazard (it popped however many roots it pushed last time, assuming its
-/// batch was on top of the stack, which compiled code's own
-/// `rt_push_sexpr_root`/`rt_truncate_sexpr_roots` traffic could violate), and
-/// Phase 1c deleted `sync_roots` outright — these two still fail identically.
-///
-/// What the overflow means, more precisely than "some root is stale": a cell
-/// that was on the free list *before* this collection came back marked. A free
-/// cell's `cdr` is the free-list link, so marking one makes the walk follow
-/// that chain and mark the whole list — which is why the reclaim count doesn't
-/// just come up short, it goes negative. So the fault is a root holding a
-/// `Value::Cons` that was already reclaimed by an earlier collection: pushed
-/// after being freed, rather than merely forgotten. The remaining root sets
-/// that can carry one are `roots` (including compiled code's own traffic),
-/// `permanent_roots`, and `session_roots`.
-///
-/// Must be chased before Phase 2 relies on `gc_stress`.
-#[ignore = "pre-existing GC root bug on the compiled path (see doc comment); reproduces at f4b2480"]
+/// Spent a long time `#[ignore]`d: it tripped `attempt to subtract with
+/// overflow` in `Heap::gc`'s reclaim count, which was blamed on the scope work
+/// but reproduced at `f4b2480`, before scopes moved to the heap. The real cause
+/// was a missing GC root in `ast_bridge::tagged_sym_list` — see that function.
 fn compiling_labels_survives_constant_collection() {
     let (mut h, mut chk, mut interp) = stressed();
     let src = "(defun sum-to ((n i32)) i32

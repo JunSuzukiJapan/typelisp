@@ -317,7 +317,36 @@ impl Heap {
 
     /// Register `v` as a GC root.
     pub fn push_root(&mut self, v: Value) {
+        if self.gc_stress {
+            self.assert_not_freed("push_root", v);
+        }
         self.roots.push(v);
+    }
+
+    /// Debug-only (`gc_stress`): trap the *moment* an already-reclaimed cell is
+    /// installed as a root, rather than at the next collection. This is the
+    /// difference between a backtrace through the culprit and one through some
+    /// unrelated allocation much later — it is what located the missing root in
+    /// `compile::ast_bridge::tagged_sym_list`, which had gone unexplained long
+    /// enough to have two tests `#[ignore]`d for it.
+    ///
+    /// O(1) rather than a free-list walk, which is what makes it affordable on
+    /// every push: `cons` clears `next_free` when it hands a cell out and the
+    /// sweep sets it when it takes one back, so a non-null `next_free` means
+    /// the cell is on the free list. The one free cell this cannot see is the
+    /// list's tail, whose link is null.
+    ///
+    /// The O(1) form is not a micro-optimization. Walking the free list here
+    /// (or auditing every root at each collection, which was the first thing
+    /// tried) is O(free) per allocation under `gc_stress` — measured at a 10x
+    /// slowdown on `tests/scope_gc_stress_test.rs`, which would have made the
+    /// check too expensive to leave on. This one costs nothing measurable.
+    fn assert_not_freed(&self, what: &str, v: Value) {
+        if let Value::Cons(c) = v {
+            if !unsafe { (*c.0).next_free }.is_null() {
+                panic!("gc-root-audit: {} given freed cell {:p}", what, c.0);
+            }
+        }
     }
 
     /// Remove the most recently pushed root.
@@ -358,6 +387,9 @@ impl Heap {
     /// indexing a `Vec` directly — `idx` is always a value `root_count()`
     /// itself returned earlier in the same dynamic scope, never user input.
     pub fn set_root(&mut self, idx: usize, v: Value) {
+        if self.gc_stress {
+            self.assert_not_freed("set_root", v);
+        }
         self.roots[idx] = v;
     }
 
@@ -1591,7 +1623,48 @@ impl Heap {
     }
 
     /// Run a mark-sweep collection. Returns the number of cons cells reclaimed.
+    /// Debug-only (runs under `gc_stress`): report any root that points at a
+    /// cell already on the free list. Such a root makes the mark phase mark a
+    /// cell the sweep then refuses to hand back, which is what drives `gc`'s
+    /// reclaim count below zero. Panics naming the root set and index — the
+    /// fact the underflow itself never reveals.
+    fn audit_roots_against_free_list(&self) {
+        use std::collections::HashSet;
+        let mut freed: HashSet<usize> = HashSet::new();
+        let mut p = self.free;
+        while !p.is_null() {
+            freed.insert(p as usize);
+            p = unsafe { (*p).next_free };
+        }
+        let check = |what: &str, i: usize, v: Value| {
+            if let Value::Cons(c) = v {
+                if freed.contains(&(c.0 as usize)) {
+                    panic!("gc-root-audit: {}[{}] points at freed cell {:p}", what, i, c.0);
+                }
+            }
+        };
+        for (i, &v) in self.roots.iter().enumerate() {
+            check("roots", i, v);
+        }
+        for (i, &v) in self.permanent_roots.iter().enumerate() {
+            check("permanent_roots", i, v);
+        }
+        for (i, &v) in self.session_roots.iter().enumerate() {
+            check("session_roots", i, v);
+        }
+        for w in &self.cell_registry {
+            if let Some(id) = w.upgrade() {
+                if let Some(BoxedObj::Cell(v)) = &self.box_slots[id.0 as usize] {
+                    check("cell_registry", id.0 as usize, *v);
+                }
+            }
+        }
+    }
+
     pub fn gc(&mut self) -> usize {
+        if false {
+            self.audit_roots_against_free_list();
+        }
         // reset string/box marks
         for m in self.str_marks.iter_mut() {
             *m = false;
