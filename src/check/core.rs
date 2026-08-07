@@ -30,6 +30,48 @@
 
 use typelisp_mem::{Error, Heap, Loc, RootScope, Value};
 
+use crate::types::Type;
+
+/// What checking one expression produces: the lowered core form, and the type
+/// the checker proved for it.
+///
+/// The type is the checker's own working value — it drives the next inference
+/// step, the next arity check, the next `Repr` — and it stops here. It is not
+/// written into `form`, and nothing downstream of the checker can ask for it.
+/// That is the whole distinction between this and the `Typed` node it replaces:
+/// `Typed` carried a `Type` into evaluation and compilation, so both had to be
+/// prepared to read one back.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Checked {
+    pub form: Value,
+    pub ty: Type,
+}
+
+impl Checked {
+    pub fn new(form: Value, ty: Type) -> Checked {
+        Checked { form, ty }
+    }
+}
+
+/// A `(unlowered "WHAT")` marker: this construct has no lowering yet.
+///
+/// Not a fallback, and not something a finished checker can emit — it is
+/// scaffolding for the one branch where the carrier type changes ahead of the
+/// lowerings, so `cargo build` stays green while the syntaxes are converted one
+/// at a time and the passing-test count climbs monotonically. The evaluator
+/// rejects it with an internal error naming `what`, so anything still reaching
+/// it says exactly which construct is missing rather than misbehaving.
+///
+/// The same convention `compile::ast_bridge` already uses for
+/// `(unsupported "<Variant>")`. Every one of these is gone by the end of
+/// Phase 2; `tests/` counts them as the progress measure.
+pub fn unlowered(heap: &mut Heap, what: &str) -> Result<Value, Error> {
+    let s = heap.alloc_string(what.to_string());
+    let mut f = Items::new(heap);
+    f.push(s);
+    f.finish("unlowered")
+}
+
 /// Cons a proper list from `items`, in order.
 ///
 /// Both the items and every partially-built tail stay rooted for the whole
@@ -236,6 +278,32 @@ fn write_form(heap: &Heap, v: Value, out: &mut String) {
             }
             out.push(')');
         }
-        Value::Boxed(_) => out.push_str("#<boxed>"),
+        // A core form's own structure never contains a box, but its *data*
+        // does: a `(float F)`/`(bignum B)`/`(ratio R)` literal carries one as
+        // its field, and so does any `(quote D)` over the same. Rendering
+        // those as an opaque `#<boxed>` would make an assertion over a literal
+        // vacuous — every float would compare equal to every other — so each
+        // numeric box prints its value. Anything else is not supposed to be
+        // here at all, and says what it is so a failing assertion names the
+        // surprise instead of hiding it.
+        Value::Boxed(id) if heap.is_float(id) => {
+            let f = heap.float_value(id);
+            // `{:?}` so an integral float keeps its point (`1.0`, not `1`) and
+            // stays distinguishable from `(int 1)` in a comparison.
+            let _ = write!(out, "{:?}", f);
+        }
+        Value::Boxed(id) if heap.is_bignum(id) => {
+            let _ = write!(out, "{}", heap.bignum_value(id));
+        }
+        Value::Boxed(id) if heap.is_ratio(id) => {
+            let r = heap.ratio_value(id);
+            let _ = write!(out, "{}/{}", r.numer(), r.denom());
+        }
+        Value::Boxed(id) => match crate::type_key::heap_type_path(heap, id) {
+            Some(p) => {
+                let _ = write!(out, "#<{}>", p);
+            }
+            None => out.push_str("#<boxed>"),
+        },
     }
 }

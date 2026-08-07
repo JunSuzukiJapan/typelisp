@@ -243,3 +243,59 @@ fn print_shows_an_improper_tail_rather_than_hiding_it() {
     h.push_root(pair);
     assert_eq!(core::print(&h, pair), "(1 . 2)");
 }
+
+/// The numeric literals a core form carries are heap boxes. Printing one as an
+/// opaque `#<boxed>` would make every assertion over a literal vacuous — each
+/// float comparing equal to every other — so the printer has to read them.
+/// This matters because `core::print` is the basis for asserting the checker's
+/// lowered output as text.
+#[test]
+fn print_reads_the_numeric_boxes_a_literal_carries() {
+    let mut h = stress_heap();
+
+    let f = h.alloc_float(1.5);
+    h.push_root(f);
+    let node = core::tagged(&mut h, "float", &[f]).unwrap();
+    h.push_root(node);
+    assert_eq!(core::print(&h, node), "(float 1.5)");
+
+    // An integral float keeps its point, so it cannot be confused with `(int 1)`.
+    let whole = h.alloc_float(1.0);
+    h.push_root(whole);
+    let node = core::tagged(&mut h, "float", &[whole]).unwrap();
+    h.push_root(node);
+    assert_eq!(core::print(&h, node), "(float 1.0)");
+
+    let b = h.alloc_bignum("123456789012345678901234567890".parse().unwrap());
+    h.push_root(b);
+    let node = core::tagged(&mut h, "bignum", &[b]).unwrap();
+    h.push_root(node);
+    assert_eq!(core::print(&h, node), "(bignum 123456789012345678901234567890)");
+
+    let r = h.alloc_ratio(num_rational::BigRational::new(1.into(), 3.into()));
+    h.push_root(r);
+    let node = core::tagged(&mut h, "ratio", &[r]).unwrap();
+    h.push_root(node);
+    assert_eq!(core::print(&h, node), "(ratio 1/3)");
+
+    // Two different floats must not print alike — the property that makes an
+    // assertion mean anything.
+    let a = h.alloc_float(1.5);
+    h.push_root(a);
+    let b2 = h.alloc_float(2.5);
+    h.push_root(b2);
+    assert_ne!(core::print(&h, a), core::print(&h, b2));
+}
+
+/// `unlowered` is Phase 2's scaffolding marker — the placeholder a `check_*`
+/// carries while its own lowering is still being written. It has to name the
+/// construct, because the whole point is that a still-unconverted syntax says
+/// which one it is instead of misbehaving.
+#[test]
+fn unlowered_names_the_construct_it_stands_in_for() {
+    let mut h = stress_heap();
+    let node = core::unlowered(&mut h, "CheckIf").unwrap();
+    h.push_root(node);
+    assert_eq!(core::print(&h, node), r#"(unlowered "CheckIf")"#);
+    assert_eq!(core::op(&h, node), Some("unlowered"));
+}
