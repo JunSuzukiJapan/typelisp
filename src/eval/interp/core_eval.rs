@@ -73,6 +73,10 @@ enum Op {
     If,
     Call,
     Panic,
+    Construct,
+    FieldGet,
+    FieldSet,
+    Match,
 }
 
 impl Op {
@@ -100,6 +104,10 @@ impl Op {
             "if" => Op::If,
             "call" => Op::Call,
             "panic" => Op::Panic,
+            "construct" => Op::Construct,
+            "field-get" => Op::FieldGet,
+            "field-set" => Op::FieldSet,
+            "match" => Op::Match,
             _ => return None,
         })
     }
@@ -269,7 +277,113 @@ impl Interp {
 
             // ---- calls ---------------------------------------------------
             Op::Call => self.call_core(heap, form, env).map(Step::Done),
+
+            // ---- data ----------------------------------------------------
+            Op::Construct => self.construct_core(heap, form, env).map(Step::Done),
+            Op::FieldGet => {
+                let obj = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (field-get ..) has no object".to_string()))?;
+                let idx = int_field(heap, form, 1, "field-get")? as usize;
+                let obj = self.eval_core(heap, obj, env)?;
+                let id = super::expect_struct_box(&obj)?;
+                // No decode. The old evaluator ran the stored word through
+                // `decode_field_typed`, which needed the field's declared
+                // type; with one value world left that function is the
+                // identity, so the field *is* the value.
+                Ok(Step::Done(heap.struct_field(id, idx)))
+            }
+            Op::FieldSet => {
+                let obj = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (field-set ..) has no object".to_string()))?;
+                let idx = int_field(heap, form, 1, "field-set")? as usize;
+                let val = core::field(heap, form, 2)
+                    .ok_or_else(|| EvalError::Internal("eval: (field-set ..) has no value".to_string()))?;
+                let mut s = RootScope::new(heap);
+                let obj = self.eval_core(&mut s, obj, env)?;
+                // The box has to stay reachable while the value expression
+                // runs — that expression can allocate, and nothing else
+                // refers to the box.
+                s.push_root(obj);
+                let v = self.eval_core(&mut s, val, env)?;
+                let id = super::expect_struct_box(&obj)?;
+                s.struct_set_field(id, idx, v);
+                Ok(Step::Done(Value::Empty))
+            }
+            Op::Match => self.match_core(heap, form, env),
         }
+    }
+
+    /// `(construct PATH N MUTABLE E...)`.
+    ///
+    /// Three shapes behind one tag, exactly as the old `Expr::Construct`:
+    /// the built-in `Sexpr`, whose "fields" are really constructor arguments
+    /// for a datum; a mutable `defstruct` box; and an enum (`Option`,
+    /// `Result`, a user `defenum`). `MUTABLE` is what tells the last two
+    /// apart — a struct is the mutable one.
+    fn construct_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
+        let path = path_field(heap, form, 0, "construct")?;
+        let variant = int_field(heap, form, 1, "construct")? as usize;
+        let mutable = bool_field(heap, form, 2, "construct")?;
+
+        let arg_forms = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (construct ..): {}", e)))?;
+        if arg_forms.len() < 3 {
+            return Err(EvalError::Internal(format!("eval: malformed construct: {}", core::print(heap, form))));
+        }
+        let arg_forms = arg_forms[3..].to_vec();
+
+        let mut s = RootScope::new(heap);
+        let mut argv = Vec::with_capacity(arg_forms.len());
+        for a in &arg_forms {
+            let v = self.eval_core(&mut s, *a, env)?;
+            s.push_root(v);
+            argv.push(v);
+        }
+
+        if super::is_sexpr_type(&path) {
+            construct_sexpr_core(&mut s, variant, &argv)
+        } else if mutable {
+            // The old evaluator mapped each field through
+            // `rtvalue_to_struct_field` first; that function is the identity
+            // now, so the values go in as they are.
+            Ok(crate::type_key::alloc_typed_struct(&mut s, &path, argv))
+        } else {
+            Ok(super::build_enum_value(&mut s, path, variant, argv))
+        }
+    }
+
+    /// `(match E (P E...) ...)` — the first arm whose pattern matches wins.
+    fn match_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Step, EvalError> {
+        let scrut = core::field(heap, form, 0)
+            .ok_or_else(|| EvalError::Internal("eval: (match ..) has no scrutinee".to_string()))?;
+        let v = self.eval_core(heap, scrut, env)?;
+
+        let mut s = RootScope::new(heap);
+        // The scrutinee is reachable from nothing else, and matching a
+        // `Sexpr` path pattern allocates, so it is rooted for the whole
+        // search rather than just across one arm.
+        s.push_root(v);
+        let arms = core::fields(&s, form).map_err(|e| EvalError::Internal(format!("eval: (match ..): {}", e)))?;
+
+        for arm in &arms[1..] {
+            let parts = s
+                .list_to_vec(*arm)
+                .map_err(|e| EvalError::Internal(format!("eval: (match ..) arm: {}", e)))?;
+            let Some((pat, body)) = parts.split_first() else {
+                return Err(EvalError::Internal("eval: (match ..) arm is empty".to_string()));
+            };
+            let Some(binds) = match_core_pattern(&mut s, *pat, v)? else {
+                continue;
+            };
+            let env = extend_env(&mut s, &binds, env)?;
+            let Some((last, rest)) = body.split_last() else {
+                return Ok(Step::Done(Value::Empty));
+            };
+            for e in rest {
+                self.eval_core(&mut s, *e, env)?;
+            }
+            return Ok(Step::Tail(*last, env));
+        }
+        Err(EvalError::Internal("eval: no matching match arm".to_string()))
     }
 
     /// A one-field literal node's payload.
@@ -306,7 +420,7 @@ impl Interp {
         }
 
         let mut s = RootScope::new(heap);
-        let mut frame = Value::Empty;
+        let mut pairs = Vec::with_capacity(binds.len());
         for b in &binds {
             // A binding is `(SYM R E)` — a plain three-element list, not a
             // tagged node, so its elements are read positionally.
@@ -324,23 +438,13 @@ impl Interp {
                 return Err(EvalError::Internal(format!("eval: (let ..) binding name is {:?}", name)));
             };
             let v = self.eval_core(&mut s, init, env)?;
+            // Rooted for the rest of the initialisers, not just across the
+            // next allocation: a value bound three initialisers ago is just
+            // as collectible as this one.
             s.push_root(v);
-            // The cell allocation cannot itself collect (only `cons` does),
-            // but the two conses below can, so each intermediate is rooted
-            // before the next allocation rather than after. `frame` is rooted
-            // by the previous iteration (and is `Empty`, which needs no root,
-            // on the first).
-            let cell = s.alloc_cell_unregistered(v);
-            s.push_root(cell);
-            let pair = s.cons(Value::Symbol(sym), cell).map_err(heap_err)?;
-            s.push_root(pair);
-            frame = s.cons(pair, frame).map_err(heap_err)?;
-            s.push_root(frame);
+            pairs.push((sym, v));
         }
-        // `env` is rooted by the caller and `frame` by the loop above, so the
-        // cons that joins them is safe; the result is handed straight back to
-        // the trampoline, which roots it before anything else can allocate.
-        s.cons(frame, env).map_err(heap_err)
+        extend_env(&mut s, &pairs, env)
     }
 
     /// `(call WRITTEN HOME PATH ARG...)`.
@@ -401,6 +505,319 @@ impl Interp {
                 other => Err(EvalError::Internal(format!("eval: ({} ..) field {} holds {:?}", what, i, other))),
             })
             .collect()
+    }
+}
+
+/// Link a frame holding `binds` onto `env`.
+///
+/// Every value in `binds` must already be rooted by the caller: this
+/// allocates a cell and two conses per binding, and any of them can collect.
+/// The result is *not* rooted — the caller roots it, or hands it straight to
+/// something that does.
+fn extend_env(heap: &mut Heap, binds: &[(SymId, Value)], env: Value) -> Result<Value, EvalError> {
+    // No bindings, no frame. `progn` is `(let () ...)` and a `_` match arm
+    // binds nothing, so this is the common case, not an edge one: consing an
+    // empty frame for each would put an allocation (and so a possible
+    // collection) on a path with no reason to have one, and lengthen the
+    // chain every lookup walks.
+    if binds.is_empty() {
+        return Ok(env);
+    }
+    let mut s = RootScope::new(heap);
+    let mut frame = Value::Empty;
+    for (sym, v) in binds {
+        // The cell allocation cannot itself collect (only `cons` does), but
+        // the two conses below can, so each intermediate is rooted before the
+        // next allocation rather than after. `frame` is rooted by the previous
+        // iteration, and is `Empty` — which needs no root — on the first.
+        let cell = s.alloc_cell_unregistered(*v);
+        s.push_root(cell);
+        let pair = s.cons(Value::Symbol(*sym), cell).map_err(heap_err)?;
+        s.push_root(pair);
+        frame = s.cons(pair, frame).map_err(heap_err)?;
+        s.push_root(frame);
+    }
+    s.cons(frame, env).map_err(heap_err)
+}
+
+/// Match `pat` against `v`, returning the bindings it makes, or `None` if it
+/// does not match.
+///
+/// Each bound value is rooted as it is collected, and stays rooted until the
+/// caller's scope closes. That is not belt-and-braces: the `Path` pattern
+/// builds its binding *fresh* rather than pointing into the scrutinee, so a
+/// later sub-pattern's allocation would collect it.
+fn match_core_pattern(heap: &mut Heap, pat: Value, v: Value) -> Result<Option<Vec<(SymId, Value)>>, EvalError> {
+    let tag = match heap.car(pat) {
+        Ok(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
+        _ => return Err(EvalError::Internal(format!("eval: not a pattern: {}", core::print(heap, pat)))),
+    };
+    match tag.as_str() {
+        "pat-wild" => Ok(Some(Vec::new())),
+        "pat-bind" => match core::field(heap, pat, 0) {
+            Some(Value::Symbol(sym)) => {
+                heap.push_root(v);
+                Ok(Some(vec![(sym, v)]))
+            }
+            other => Err(EvalError::Internal(format!("eval: (pat-bind ..) names {:?}", other))),
+        },
+        "pat-lit" => {
+            let lit = core::field(heap, pat, 0)
+                .ok_or_else(|| EvalError::Internal("eval: (pat-lit ..) has no literal".to_string()))?;
+            // Read rather than evaluated. A literal pattern only ever holds an
+            // `int`/`bool`/`char` — the three the language has pattern syntax
+            // for — and those are exactly the values whose `==` is what a
+            // pattern means. A string would compile to `Value::Str`, whose
+            // equality is *identity*, so it would silently never match; that
+            // is why anything else is refused here instead of compared.
+            let want = match core::op(heap, lit) {
+                Some("int") | Some("bool") | Some("char") => core::field(heap, lit, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (pat-lit ..) literal has no value".to_string()))?,
+                _ => {
+                    return Err(EvalError::Internal(format!(
+                        "eval: (pat-lit ..) holds {}, which has no by-value equality",
+                        core::print(heap, lit)
+                    )))
+                }
+            };
+            Ok(if want == v { Some(Vec::new()) } else { None })
+        }
+        "pat-ctor" => {
+            let path = path_field(heap, pat, 0, "pat-ctor")?;
+            let variant = int_field(heap, pat, 1, "pat-ctor")? as usize;
+            // Field 2 is the downcast flag. The interpreter applies the type
+            // guard below either way, so it changes nothing here; it is the
+            // *compiled* side that emits an instance test only when it is set.
+            let subs = core::fields(heap, pat).map_err(|e| EvalError::Internal(format!("eval: (pat-ctor ..): {}", e)))?;
+            if subs.len() < 3 {
+                return Err(EvalError::Internal(format!("eval: malformed pattern: {}", core::print(heap, pat))));
+            }
+            let subs = subs[3..].to_vec();
+            match_ctor(heap, &path, variant, &subs, v)
+        }
+        "pat-typetest" => {
+            let path = path_field(heap, pat, 0, "pat-typetest")?;
+            let inner = core::field(heap, pat, 1)
+                .ok_or_else(|| EvalError::Internal("eval: (pat-typetest ..) has no sub-pattern".to_string()))?;
+            // `(the sexpr p)` tests nothing: every value is a `Sexpr`.
+            if crate::types::path_is_builtin(&path, "sexpr") {
+                return match_core_pattern(heap, inner, v);
+            }
+            match v {
+                Value::Boxed(id) if crate::type_key::heap_type_is(heap, id, &path) => match_core_pattern(heap, inner, v),
+                _ => Ok(None),
+            }
+        }
+        other => Err(EvalError::Internal(format!("eval: no matching for pattern `{}`", other))),
+    }
+}
+
+/// `(pat-ctor PATH N DOWNCAST P...)` against `v`.
+///
+/// The `PATH` guard is what keeps two unrelated ADTs that happen to share a
+/// shape apart once a heterogeneous `Sexpr` can hold either — a variant index
+/// and a field count are not an identity. It is also why a genuine `Sexpr`
+/// datum must only reach the `Sexpr` arm when `PATH` really is `sexpr`: that
+/// arm indexes by *bare* variant number, where a struct's sole variant 0 would
+/// spuriously match `Sexpr::Nil`.
+fn match_ctor(
+    heap: &mut Heap,
+    path: &crate::Path,
+    variant: usize,
+    subs: &[Value],
+    v: Value,
+) -> Result<Option<Vec<(SymId, Value)>>, EvalError> {
+    match v {
+        Value::Boxed(id)
+            if heap.is_enum(id)
+                && crate::type_key::heap_type_is(heap, id, path)
+                && heap.enum_variant(id) == variant
+                && heap.enum_field_count(id) == subs.len() =>
+        {
+            let mut binds = Vec::new();
+            for (i, p) in subs.iter().enumerate() {
+                // No per-field decode: the stored word *is* the value. The
+                // old pattern carried a `sexpr_fields` bit and a
+                // `field_types` entry purely to drive one, and both reduced
+                // to the identity once the value worlds merged.
+                let f = heap.enum_field(id, i);
+                match match_core_pattern(heap, *p, f)? {
+                    Some(b) => binds.extend(b),
+                    None => return Ok(None),
+                }
+            }
+            Ok(Some(binds))
+        }
+        // A `defstruct` has exactly one variant (`new`, index 0), so only the
+        // field count and the sub-patterns can fail here.
+        Value::Boxed(id)
+            if heap.is_struct(id)
+                && crate::type_key::heap_type_is(heap, id, path)
+                && variant == 0
+                && heap.struct_field_count(id) == subs.len() =>
+        {
+            let mut binds = Vec::new();
+            for (i, p) in subs.iter().enumerate() {
+                let f = heap.struct_field(id, i);
+                match match_core_pattern(heap, *p, f)? {
+                    Some(b) => binds.extend(b),
+                    None => return Ok(None),
+                }
+            }
+            Ok(Some(binds))
+        }
+        sv if *path == crate::Path::root("sexpr") => match_sexpr_core(heap, variant, subs, sv),
+        _ => Ok(None),
+    }
+}
+
+/// A `Sexpr` constructor pattern, destructured through the heap.
+fn match_sexpr_core(
+    heap: &mut Heap,
+    variant: usize,
+    subs: &[Value],
+    v: Value,
+) -> Result<Option<Vec<(SymId, Value)>>, EvalError> {
+    use super::{SEXPR_BIGNUM, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_FLOAT, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_STR, SEXPR_SYM};
+
+    // Each of these binds the scrutinee (or a piece of it) straight through:
+    // a float/bignum/ratio/string box *is* its value, so there is nothing to
+    // unwrap and re-wrap.
+    let one = |heap: &mut Heap, bound: Value| -> Result<Option<Vec<(SymId, Value)>>, EvalError> {
+        match subs.first() {
+            Some(p) => match_core_pattern(heap, *p, bound),
+            None => Err(EvalError::Internal("eval: sexpr pattern has no sub-pattern".to_string())),
+        }
+    };
+
+    match (variant, v) {
+        (SEXPR_NIL, Value::Empty) => Ok(Some(Vec::new())),
+        (SEXPR_INT, Value::Int(_)) => one(heap, v),
+        (SEXPR_CHAR, Value::Char(_)) => one(heap, v),
+        (SEXPR_BOOL, Value::Bool(_)) => one(heap, v),
+        (SEXPR_SYM, Value::Symbol(_)) => one(heap, v),
+        (SEXPR_STR, Value::Str(_)) => one(heap, v),
+        (SEXPR_FLOAT, Value::Boxed(id)) if heap.is_float(id) => one(heap, v),
+        (SEXPR_BIGNUM, Value::Boxed(id)) if heap.is_bignum(id) => one(heap, v),
+        (SEXPR_RATIO, Value::Boxed(id)) if heap.is_ratio(id) => one(heap, v),
+        (SEXPR_CONS, Value::Cons(_)) => {
+            let car = heap.car(v).map_err(heap_err)?;
+            let cdr = heap.cdr(v).map_err(heap_err)?;
+            let (Some(pa), Some(pd)) = (subs.first(), subs.get(1)) else {
+                return Err(EvalError::Internal("eval: cons pattern needs two sub-patterns".to_string()));
+            };
+            let Some(mut binds) = match_core_pattern(heap, *pa, car)? else {
+                return Ok(None);
+            };
+            match match_core_pattern(heap, *pd, cdr)? {
+                Some(b) => {
+                    binds.extend(b);
+                    Ok(Some(binds))
+                }
+                None => Ok(None),
+            }
+        }
+        // `(Path segs)` binds a *fresh* proper list of the path's segments, in
+        // written order — the inverse of `construct_sexpr_core`'s `Path` arm.
+        // The one pattern that allocates, which is why every bound value in
+        // this file is rooted as it is collected.
+        (SEXPR_PATH, Value::Path(id)) => {
+            let segs = heap.path_segments(id).to_vec();
+            let mut acc = Value::Empty;
+            for seg in segs.into_iter().rev() {
+                heap.push_root(acc);
+                acc = heap.cons(Value::Symbol(seg), acc).map_err(heap_err)?;
+            }
+            // Rooted, and deliberately never popped here. This list *is* the
+            // binding and nothing else refers to it, so a `RootScope` around
+            // this arm would truncate the root away the moment the arm
+            // returns — leaving the binding collectible before the frame is
+            // built, or before a later sub-pattern's own allocation. The
+            // caller's scope is what releases it, which is the same contract
+            // every other bound value here has.
+            heap.push_root(acc);
+            one(heap, acc)
+        }
+        _ => Ok(None),
+    }
+}
+
+/// `(construct sexpr N E...)` — build a `Sexpr` datum from evaluated fields.
+fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Value]) -> Result<Value, EvalError> {
+    use super::{SEXPR_BIGNUM, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_FLOAT, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_STR, SEXPR_SYM};
+
+    let arg = |i: usize| -> Result<Value, EvalError> {
+        argv.get(i)
+            .copied()
+            .ok_or_else(|| EvalError::Internal(format!("eval: (construct sexpr {} ..) is missing field {}", variant, i)))
+    };
+    match variant {
+        SEXPR_NIL => Ok(Value::Empty),
+        // Each of these validates the argument and then passes the value
+        // itself through: the box *is* the datum, so `(eq s (sexpr-str (Str
+        // s)))` holds, as CL requires.
+        SEXPR_INT => Ok(Value::Int(super::rt_i64(&arg(0)?)?)),
+        SEXPR_CHAR => Ok(Value::Char(super::rt_char(&arg(0)?)?)),
+        SEXPR_BOOL => Ok(Value::Bool(super::rt_bool(&arg(0)?)?)),
+        SEXPR_SYM => arg(0),
+        SEXPR_FLOAT => {
+            let v = arg(0)?;
+            super::rt_f64(heap, &v)?;
+            Ok(v)
+        }
+        SEXPR_STR => {
+            let v = arg(0)?;
+            super::rt_str(heap, &v)?;
+            Ok(v)
+        }
+        // `bignum`/`ratio` are the two that really do re-box: the argument is
+        // read back out as a Rust value and a fresh box allocated, matching
+        // the old evaluator exactly.
+        SEXPR_BIGNUM => {
+            let n = super::rt_bignum(heap, &arg(0)?)?;
+            Ok(heap.alloc_bignum(n))
+        }
+        SEXPR_RATIO => {
+            let r = super::rt_ratio(heap, &arg(0)?)?;
+            Ok(heap.alloc_ratio(r))
+        }
+        // The arguments are rooted by the caller, which is what makes this
+        // allocation safe.
+        SEXPR_CONS => heap.cons(arg(0)?, arg(1)?).map_err(heap_err),
+        SEXPR_PATH => {
+            let ids = super::sexpr_list_to_symbols(heap, arg(0)?)?;
+            Ok(heap.intern_path(&ids))
+        }
+        _ => Err(EvalError::Internal(format!("eval: (construct sexpr {} ..): unknown variant", variant))),
+    }
+}
+
+/// A field holding an absolute path, as a [`crate::Path`].
+///
+/// A single-segment path reads back as a bare `Value::Symbol` rather than a
+/// `Value::Path` — the reader only builds the latter when it sees `::` — so
+/// both spellings are accepted and mean the same one-segment path.
+fn path_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<crate::Path, EvalError> {
+    match core::field(heap, form, i) {
+        Some(Value::Path(id)) => Ok(crate::types::path_from_id(heap, id)),
+        Some(Value::Symbol(id)) => Ok(crate::Path::root(heap.symbol_name(id))),
+        other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not a path: {:?}", what, i, other))),
+    }
+}
+
+/// A field holding an integer.
+fn int_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<i64, EvalError> {
+    match core::field(heap, form, i) {
+        Some(Value::Int(n)) => Ok(n),
+        other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not an integer: {:?}", what, i, other))),
+    }
+}
+
+/// A field holding a boolean.
+fn bool_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<bool, EvalError> {
+    match core::field(heap, form, i) {
+        Some(Value::Bool(b)) => Ok(b),
+        other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not a boolean: {:?}", what, i, other))),
     }
 }
 
@@ -819,6 +1236,316 @@ mod tests {
         let e = eval_src(&mut h, r#"(unlowered "CheckWhile")"#).unwrap_err();
         assert!(
             matches!(e.kind(), EvalError::Internal(m) if m.contains("`unlowered`")),
+            "{:?}",
+            e
+        );
+    }
+
+    // ---- data: construct / field-get / field-set -------------------------
+
+    /// A struct is a mutable box, so `field-set` is visible through any other
+    /// reference to the same value — the property that makes `setf` on a
+    /// struct field mean anything.
+    #[test]
+    fn a_struct_is_built_read_and_written_through_the_same_box() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(&mut h, "(field-get (construct point 0 true (int 1) (int 2)) 1)"),
+            Value::Int(2)
+        );
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(let ((p sexpr (construct point 0 true (int 1) (int 2))))
+                   (let ((q sexpr (var p)))
+                     (field-set (var q) 0 (int 9))
+                     (field-get (var p) 0)))",
+            ),
+            Value::Int(9)
+        );
+    }
+
+    /// `field-set`'s object has to outlive the evaluation of its value, which
+    /// allocates. Nothing else refers to the box.
+    #[test]
+    fn field_set_survives_a_collection_while_its_value_is_evaluated() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(let ((p sexpr (construct point 0 true (int 1) (int 2))))
+                   (field-set (var p) 0 (call (sexpr-cons) () sexpr-cons (int 8) (unit)))
+                   (call (sexpr-car) () sexpr-car (field-get (var p) 0)))",
+            ),
+            Value::Int(8)
+        );
+    }
+
+    /// An enum is a different box kind with a variant tag, and `MUTABLE` is
+    /// what tells the two apart at the construct site.
+    #[test]
+    fn an_enum_carries_its_variant_and_fields() {
+        let mut h = stress_heap();
+        let v = eval_ok(&mut h, "(construct my-enum 2 false (int 41) (bool true))");
+        match v {
+            Value::Boxed(id) => {
+                assert!(h.is_enum(id), "expected an enum box");
+                assert_eq!(h.enum_variant(id), 2);
+                assert_eq!(h.enum_field_count(id), 2);
+                assert_eq!(h.enum_field(id, 0), Value::Int(41));
+                assert_eq!(h.enum_field(id, 1), Value::Bool(true));
+            }
+            other => panic!("expected a box, got {:?}", other),
+        }
+    }
+
+    /// `(construct sexpr N ...)` builds a datum rather than a box. The
+    /// pass-through arms are the interesting ones: the argument box *is* the
+    /// datum, which is what makes `eq` hold across the construction.
+    #[test]
+    fn constructing_a_sexpr_datum() {
+        let mut h = stress_heap();
+        assert_eq!(eval_ok(&mut h, "(construct sexpr 0 false)"), Value::Empty);
+        assert_eq!(eval_ok(&mut h, "(construct sexpr 1 false (int 3))"), Value::Int(3));
+
+        let v = eval_ok(&mut h, "(construct sexpr 7 false (int 1) (int 2))");
+        assert_eq!(h.car(v).unwrap(), Value::Int(1));
+        assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
+
+        // A string field passes the very same `Value::Str` through, so the
+        // datum is `eq` to the string it was built from.
+        let v = eval_ok(
+            &mut h,
+            r#"(let ((s sexpr (str "hi"))) (call (sexpr-cons) () sexpr-cons (var s) (construct sexpr 6 false (var s))))"#,
+        );
+        assert_eq!(h.car(v).unwrap(), h.cdr(v).unwrap());
+    }
+
+    // ---- match -----------------------------------------------------------
+
+    #[test]
+    fn match_takes_the_first_arm_that_matches() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(match (int 2) ((pat-lit (int 1)) (int 10)) ((pat-lit (int 2)) (int 20)) ((pat-wild) (int 99)))",
+            ),
+            Value::Int(20)
+        );
+        // The wildcard is reached only when the literals miss.
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(match (int 7) ((pat-lit (int 1)) (int 10)) ((pat-wild) (int 99)))",
+            ),
+            Value::Int(99)
+        );
+        // An earlier arm wins even when a later one would also match.
+        assert_eq!(
+            eval_ok(&mut h, "(match (int 1) ((pat-wild) (int 10)) ((pat-lit (int 1)) (int 20)))"),
+            Value::Int(10)
+        );
+    }
+
+    #[test]
+    fn a_bind_pattern_binds_the_whole_scrutinee() {
+        let mut h = stress_heap();
+        assert_eq!(eval_ok(&mut h, "(match (int 5) ((pat-bind x) (var x)))"), Value::Int(5));
+    }
+
+    /// A literal pattern is by-value equality, and only for the three types
+    /// the language has pattern syntax for. A string would compare by
+    /// identity and so never match, which is why it is refused rather than
+    /// compared.
+    #[test]
+    fn a_literal_pattern_that_cannot_be_compared_by_value_is_refused() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(&mut h, r"(match (char #\a) ((pat-lit (char #\a)) (int 1)) ((pat-wild) (int 2)))"),
+            Value::Int(1)
+        );
+        let e = eval_src(&mut h, r#"(match (str "a") ((pat-lit (str "a")) (int 1)))"#).unwrap_err();
+        assert!(
+            matches!(e.kind(), EvalError::Internal(m) if m.contains("no by-value equality")),
+            "{:?}",
+            e
+        );
+    }
+
+    #[test]
+    fn a_ctor_pattern_destructures_a_struct_and_an_enum() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(match (construct point 0 true (int 1) (int 2))
+                   ((pat-ctor point 0 false (pat-bind a) (pat-bind b)) (var b)))",
+            ),
+            Value::Int(2)
+        );
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(match (construct my-enum 1 false (int 42))
+                   ((pat-ctor my-enum 0 false (pat-bind x)) (int 0))
+                   ((pat-ctor my-enum 1 false (pat-bind x)) (var x)))",
+            ),
+            Value::Int(42)
+        );
+    }
+
+    /// The path guard. Two ADTs with the same variant index and field count
+    /// are not the same type, and a variant index alone cannot tell them
+    /// apart — the reason the pattern carries a path at all.
+    #[test]
+    fn a_ctor_pattern_does_not_match_a_same_shaped_other_type() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(match (construct point 0 true (int 1))
+                   ((pat-ctor other 0 false (pat-bind a)) (int 10))
+                   ((pat-wild) (int 99)))",
+            ),
+            Value::Int(99)
+        );
+    }
+
+    #[test]
+    fn a_sexpr_ctor_pattern_destructures_a_datum() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(match (call (sexpr-cons) () sexpr-cons (int 1) (int 2))
+                   ((pat-ctor sexpr 0 false) (int 100))
+                   ((pat-ctor sexpr 7 false (pat-bind a) (pat-bind d)) (var d)))",
+            ),
+            Value::Int(2)
+        );
+        assert_eq!(
+            eval_ok(&mut h, "(match (unit) ((pat-ctor sexpr 0 false) (int 100)) ((pat-wild) (int 0)))"),
+            Value::Int(100)
+        );
+    }
+
+    /// The `Path` pattern is the only one that *builds* its binding rather
+    /// than pointing into the scrutinee, so the fresh list has to be rooted
+    /// while the rest of the match runs. Under `gc_stress` the body's own
+    /// allocation is what would collect it.
+    ///
+    /// The scrutinee is handed in through the environment: a `Value::Path`
+    /// has no literal spelling in this vocabulary yet — `quote` arrives with
+    /// the next tag — and building the environment directly is what the
+    /// evaluator does anyway.
+    #[test]
+    fn a_path_pattern_binds_a_freshly_built_segment_list() {
+        let mut h = stress_heap();
+        let a = match h.intern_symbol("m") {
+            Value::Symbol(id) => id,
+            _ => unreachable!(),
+        };
+        let b = match h.intern_symbol("f") {
+            Value::Symbol(id) => id,
+            _ => unreachable!(),
+        };
+        let path = h.intern_path(&[a, b]);
+        h.push_root(path);
+        let name = match h.intern_symbol("p") {
+            Value::Symbol(id) => id,
+            _ => unreachable!(),
+        };
+        let env = extend_env(&mut h, &[(name, path)], Value::Empty).unwrap();
+        h.push_root(env);
+
+        let form = read1(
+            &mut h,
+            "(match (var p) ((pat-ctor sexpr 10 false (pat-bind segs))
+               (call (sexpr-cons) () sexpr-cons (int 0) (var segs))))",
+        );
+        h.push_root(form);
+
+        let interp = Interp::new();
+        let v = interp.eval_core(&mut h, form, env).expect("path match failed");
+        // `(0 m f)` — the segments, in written order, behind the marker.
+        assert_eq!(h.car(v).unwrap(), Value::Int(0));
+        let segs = h.cdr(v).unwrap();
+        assert_eq!(h.car(segs).unwrap(), Value::Symbol(a));
+        let rest = h.cdr(segs).unwrap();
+        assert_eq!(h.car(rest).unwrap(), Value::Symbol(b));
+        assert_eq!(h.cdr(rest).unwrap(), Value::Empty);
+    }
+
+    /// Two `Path` patterns in one arm: the second one's allocation is what
+    /// collects the first one's binding if that binding's root does not
+    /// outlive the sub-pattern that made it.
+    ///
+    /// This is the case the single-`Path` test above cannot see. There, the
+    /// freshly built list happens to survive because the very next allocation
+    /// is the binding cell that already holds it. Put a second allocating
+    /// pattern in between and that accident is gone.
+    #[test]
+    fn two_path_patterns_in_one_arm_both_keep_their_bindings() {
+        let mut h = stress_heap();
+        let sym = |h: &mut Heap, n: &str| match h.intern_symbol(n) {
+            Value::Symbol(id) => id,
+            _ => unreachable!(),
+        };
+        let (a, b, c, d) = (sym(&mut h, "a"), sym(&mut h, "b"), sym(&mut h, "c"), sym(&mut h, "d"));
+        let p1 = h.intern_path(&[a, b]);
+        h.push_root(p1);
+        let p2 = h.intern_path(&[c, d]);
+        h.push_root(p2);
+        let pair = h.cons(p1, p2).unwrap();
+        h.push_root(pair);
+        let name = sym(&mut h, "v");
+        let env = extend_env(&mut h, &[(name, pair)], Value::Empty).unwrap();
+        h.push_root(env);
+
+        let form = read1(
+            &mut h,
+            "(match (var v)
+               ((pat-ctor sexpr 7 false
+                  (pat-ctor sexpr 10 false (pat-bind l))
+                  (pat-ctor sexpr 10 false (pat-bind r)))
+                 (call (sexpr-cons) () sexpr-cons (var l) (var r))))",
+        );
+        h.push_root(form);
+
+        let interp = Interp::new();
+        let v = interp.eval_core(&mut h, form, env).expect("two-path match failed");
+        // Both halves must still be the two-symbol lists they were built as.
+        let left = h.car(v).unwrap();
+        let right = h.cdr(v).unwrap();
+        assert_eq!(h.car(left).unwrap(), Value::Symbol(a));
+        assert_eq!(h.car(h.cdr(left).unwrap()).unwrap(), Value::Symbol(b));
+        assert_eq!(h.car(right).unwrap(), Value::Symbol(c));
+        assert_eq!(h.car(h.cdr(right).unwrap()).unwrap(), Value::Symbol(d));
+    }
+
+    /// A match arm's bindings live in a frame built exactly like a `let`'s,
+    /// so they must survive a collection the arm body triggers.
+    #[test]
+    fn match_bindings_survive_a_collection_in_the_arm_body() {
+        let mut h = stress_heap();
+        let v = eval_ok(
+            &mut h,
+            "(match (construct point 0 true (int 7) (int 8))
+               ((pat-ctor point 0 false (pat-bind a) (pat-bind b))
+                 (call (sexpr-cons) () sexpr-cons (int 1) (int 2))
+                 (call (sexpr-cons) () sexpr-cons (var a) (var b))))",
+        );
+        assert_eq!(h.car(v).unwrap(), Value::Int(7));
+        assert_eq!(h.cdr(v).unwrap(), Value::Int(8));
+    }
+
+    #[test]
+    fn a_match_with_no_matching_arm_says_so() {
+        let mut h = stress_heap();
+        let e = eval_src(&mut h, "(match (int 1) ((pat-lit (int 2)) (int 0)))").unwrap_err();
+        assert!(
+            matches!(e.kind(), EvalError::Internal(m) if m.contains("no matching match arm")),
             "{:?}",
             e
         );
