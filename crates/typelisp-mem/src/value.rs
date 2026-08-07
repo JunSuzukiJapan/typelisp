@@ -241,6 +241,25 @@ pub(crate) enum BoxedObj {
     /// exact raw word it stored (`rt_closure_env_get` re-encodes masked
     /// slots and unwraps unmasked ones).
     CompiledClosure { fn_ptr: usize, env: Vec<Value>, sexpr_mask: u64 },
+    /// An *interpreted* closure: a `lambda` or a `labels` sibling the
+    /// evaluator walks rather than a native entry point it jumps to.
+    ///
+    /// A closure box of this kind existed before and was deleted at
+    /// interp-closure removal Stage 8c, when every closure became
+    /// JIT-compiled at definition time. It could not carry its own body:
+    /// the body was a checked Rust AST, invisible to the collector, so the
+    /// box held a `body_token` into an interpreter-side table instead. With
+    /// the program itself made of cons cells there is no side table and no
+    /// token — `params`, `body` and `env` are ordinary `Value`s the mark
+    /// phase traces like any other, which is what lets a closure be
+    /// collected (and a `labels` cycle reclaimed) by the same rules
+    /// everything else follows.
+    ///
+    /// Its return is what demotes the JIT from *required* to an
+    /// optimisation: a `lambda` whose parameters have no compiled
+    /// representation used to be a hard error at definition time, and can
+    /// now simply be interpreted.
+    Closure { params: Value, body: Value, env: Value },
     /// A *built-in* function used as a function value: `gensym` passed to a
     /// higher-order function, `+` reified as `i32::+`. The second function
     /// case alongside [`CompiledClosure`](BoxedObj::CompiledClosure), and the

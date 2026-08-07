@@ -81,6 +81,9 @@ enum Op {
     Loop,
     Break,
     Return,
+    Lambda,
+    Labels,
+    Apply,
 }
 
 impl Op {
@@ -116,6 +119,9 @@ impl Op {
             "loop" => Op::Loop,
             "break" => Op::Break,
             "return" => Op::Return,
+            "lambda" => Op::Lambda,
+            "labels" => Op::Labels,
+            "apply" => Op::Apply,
             _ => return None,
         })
     }
@@ -350,6 +356,28 @@ impl Interp {
                 }
                 None => Err(EvalError::Return(Box::new(Value::Empty))),
             },
+            // ---- closures ------------------------------------------------
+            //
+            // No JIT attempt. The old evaluator compiled every `lambda` and
+            // `labels` sibling at definition time and raised a hard error if
+            // the compiler declined — the closure had nowhere else to live,
+            // since its body was a Rust AST the box could not hold. With the
+            // body a core form there is somewhere, so the JIT becomes an
+            // optimisation the checker's own driver applies rather than a
+            // requirement of the representation. Re-attaching it is the
+            // switch commit's business, not this stage's.
+            Op::Lambda => {
+                let params = core::field(heap, form, 0)
+                    .ok_or_else(|| EvalError::Internal("eval: (lambda ..) has no parameter list".to_string()))?;
+                // Field 1 is the return repr, for the bridge.
+                let body = tail_after(heap, form, 2)?;
+                // `alloc_closure` cannot collect (only `cons` does), so the
+                // three values need no rooting across it.
+                Ok(Step::Done(heap.alloc_closure(params, body, env)))
+            }
+            Op::Labels => self.labels_core(heap, form, env),
+            Op::Apply => self.apply_core(heap, form, env),
+
             // Not a tail jump: the body repeats, so this is a real Rust loop
             // rather than a `Step::Tail`. Each iteration's `eval_core` balances
             // its own roots, so the root stack does not grow with the
@@ -412,6 +440,131 @@ impl Interp {
         } else {
             Ok(super::build_enum_value(&mut s, path, variant, argv))
         }
+    }
+
+    /// `(labels ((SYM ((SYM R)...) RET-R E...) ...) E...)`.
+    ///
+    /// The siblings are mutually recursive, so each one has to capture an
+    /// environment that already contains all of them. That is not a cycle to
+    /// tie off after the fact: the frame is built first with an empty *cell*
+    /// per name, so the environment is complete before any closure is made,
+    /// and filling a cell afterwards is an ordinary write the closures see
+    /// because they share it. It is the same mechanism `set` uses.
+    fn labels_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Step, EvalError> {
+        let defs = core::field(heap, form, 0)
+            .ok_or_else(|| EvalError::Internal("eval: (labels ..) has no definitions".to_string()))?;
+        let defs = heap
+            .list_to_vec(defs)
+            .map_err(|e| EvalError::Internal(format!("eval: (labels ..) definitions: {}", e)))?;
+
+        let mut s = RootScope::new(heap);
+        let placeholders: Vec<(SymId, Value)> = defs
+            .iter()
+            .map(|d| match s.car(*d) {
+                Ok(Value::Symbol(sym)) => Ok((sym, Value::Empty)),
+                other => Err(EvalError::Internal(format!("eval: (labels ..) definition names {:?}", other))),
+            })
+            .collect::<Result<_, _>>()?;
+        let env = extend_env(&mut s, &placeholders, env)?;
+        s.push_root(env);
+
+        for d in &defs {
+            // A definition is `(SYM PARAMS RET-R E...)` — positional, like a
+            // `let` binding and unlike a tagged node.
+            let (sym, _) = match s.car(*d) {
+                Ok(Value::Symbol(sym)) => (sym, ()),
+                other => return Err(EvalError::Internal(format!("eval: (labels ..) definition names {:?}", other))),
+            };
+            let rest = s.cdr(*d).map_err(heap_err)?;
+            let params = s.car(rest).map_err(heap_err)?;
+            let body = tail_after_value(&s, rest, 2)?;
+            let f = s.alloc_closure(params, body, env);
+            let cell = env_lookup(&s, env, sym)
+                .ok_or_else(|| EvalError::Internal(format!("eval: (labels ..) lost the slot for `{}`", s.symbol_name(sym))))?;
+            match cell {
+                Value::Boxed(id) if s.is_cell(id) => s.cell_set(id, f),
+                other => return Err(EvalError::Internal(format!("eval: (labels ..) slot is {:?}", other))),
+            }
+        }
+
+        let body = tail_after(&mut s, form, 1)?;
+        let body = s
+            .list_to_vec(body)
+            .map_err(|e| EvalError::Internal(format!("eval: (labels ..) body: {}", e)))?;
+        let Some((last, rest)) = body.split_last() else {
+            return Ok(Step::Done(Value::Empty));
+        };
+        for e in rest {
+            self.eval_core(&mut s, *e, env)?;
+        }
+        Ok(Step::Tail(*last, env))
+    }
+
+    /// `(apply E E...)` — call the value `E` produces.
+    ///
+    /// An interpreted closure's body is entered as a *tail jump*, so a
+    /// self-call or a mutual call in tail position costs no stack. The old
+    /// evaluator could not do that: a closure was always native code, and
+    /// entering it meant a real call.
+    fn apply_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Step, EvalError> {
+        let callee = core::field(heap, form, 0)
+            .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no callee".to_string()))?;
+        let arg_forms = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (apply ..): {}", e)))?;
+        let arg_forms = arg_forms[1..].to_vec();
+
+        let mut s = RootScope::new(heap);
+        let f = self.eval_core(&mut s, callee, env)?;
+        // An unnamed callee — `((make-adder 1) 2)` — has no binding keeping
+        // its box alive while the arguments allocate.
+        s.push_root(f);
+        let mut argv = Vec::with_capacity(arg_forms.len());
+        for a in &arg_forms {
+            let v = self.eval_core(&mut s, *a, env)?;
+            s.push_root(v);
+            argv.push(v);
+        }
+
+        let id = match f {
+            Value::Boxed(id) if s.is_closure(id) => id,
+            Value::Boxed(id) if s.is_compiled_closure(id) => {
+                return Err(EvalError::Internal(
+                    "eval: applying a compiled closure: not until the JIT is re-attached".to_string(),
+                ))
+            }
+            Value::Boxed(id) if s.is_builtin_fn(id) => {
+                return Err(EvalError::Internal(
+                    "eval: applying a built-in used as a function value: not until the checker lowers function references"
+                        .to_string(),
+                ))
+            }
+            other => return Err(EvalError::Internal(format!("eval: (apply ..) callee is not a function: {:?}", other))),
+        };
+
+        let (params, body, closure_env) = s.closure_parts(id);
+        let names = param_names(&s, params)?;
+        if names.len() != argv.len() {
+            return Err(EvalError::Internal(format!(
+                "eval: arity mismatch: the closure takes {} argument(s), given {}",
+                names.len(),
+                argv.len()
+            )));
+        }
+        let binds: Vec<(SymId, Value)> = names.into_iter().zip(argv).collect();
+        // Over the *captured* environment, not the caller's: that is what
+        // makes this lexical scope rather than dynamic.
+        let call_env = extend_env(&mut s, &binds, closure_env)?;
+        s.push_root(call_env);
+
+        let body = s
+            .list_to_vec(body)
+            .map_err(|e| EvalError::Internal(format!("eval: closure body: {}", e)))?;
+        let Some((last, rest)) = body.split_last() else {
+            return Ok(Step::Done(Value::Empty));
+        };
+        for e in rest {
+            self.eval_core(&mut s, *e, call_env)?;
+        }
+        Ok(Step::Tail(*last, call_env))
     }
 
     /// `(match E (P E...) ...)` — the first arm whose pattern matches wins.
@@ -853,6 +1006,39 @@ fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Value]) -> Resu
         }
         _ => Err(EvalError::Internal(format!("eval: (construct sexpr {} ..): unknown variant", variant))),
     }
+}
+
+/// The tail of a node's field list, starting at field `n`.
+///
+/// A body is kept as the node's own tail rather than copied into a fresh
+/// list: it is already a proper list of forms sitting in the node, so a
+/// closure can hold it directly with no allocation and no second copy to keep
+/// in step.
+fn tail_after(heap: &Heap, form: Value, n: usize) -> Result<Value, EvalError> {
+    tail_after_value(heap, heap.cdr(form).map_err(heap_err)?, n)
+}
+
+/// [`tail_after`] over an already-taken tail — for a positional list (a
+/// `labels` definition) that has no tag to skip.
+fn tail_after_value(heap: &Heap, list: Value, n: usize) -> Result<Value, EvalError> {
+    let mut cur = list;
+    for _ in 0..n {
+        cur = heap.cdr(cur).map_err(heap_err)?;
+    }
+    Ok(cur)
+}
+
+/// The names a parameter list `((SYM R)...)` binds, in order.
+fn param_names(heap: &Heap, params: Value) -> Result<Vec<SymId>, EvalError> {
+    let ps = heap
+        .list_to_vec(params)
+        .map_err(|e| EvalError::Internal(format!("eval: parameter list: {}", e)))?;
+    ps.iter()
+        .map(|p| match heap.car(*p) {
+            Ok(Value::Symbol(sym)) => Ok(sym),
+            other => Err(EvalError::Internal(format!("eval: parameter is not (SYM R): {:?}", other))),
+        })
+        .collect()
 }
 
 /// A field holding an absolute path, as a [`crate::Path`].
@@ -1748,6 +1934,230 @@ mod tests {
         let interp = Interp::new();
         interp.eval_core(&mut h, form, Value::Empty).expect("loop failed");
         assert_eq!(h.root_count(), before, "an iteration leaked a root");
+    }
+
+    // ---- closures --------------------------------------------------------
+
+    #[test]
+    fn a_lambda_is_applied_to_its_arguments() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(&mut h, "(apply (lambda ((x int)) int (var x)) (int 5))"),
+            Value::Int(5)
+        );
+        assert_eq!(
+            eval_ok(&mut h, "(apply (lambda () int (int 7)) )"),
+            Value::Int(7)
+        );
+        // Parameters shadow an outer binding of the same name.
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(let ((x int (int 1))) (apply (lambda ((x int)) int (var x)) (int 2)))",
+            ),
+            Value::Int(2)
+        );
+    }
+
+    /// Lexical, not dynamic: the body runs in the environment the `lambda`
+    /// was *written* in, not the one it is called from. The caller here binds
+    /// the same name to a different value, and the closure must not see it.
+    #[test]
+    fn a_closure_captures_its_defining_environment() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(let ((n int (int 10)))
+                   (let ((f sexpr (lambda () int (var n))))
+                     (let ((n int (int 99)))
+                       (apply (var f)))))",
+            ),
+            Value::Int(10)
+        );
+    }
+
+    /// The capture is the binding *cell*, so a later `set` through any
+    /// reference to that binding is visible inside the closure. A copy would
+    /// give 1 here.
+    #[test]
+    fn a_capture_shares_the_binding_rather_than_copying_it() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(let ((n int (int 1)))
+                   (let ((f sexpr (lambda () int (var n))))
+                     (set n (int 42))
+                     (apply (var f))))",
+            ),
+            Value::Int(42)
+        );
+    }
+
+    #[test]
+    fn applying_the_wrong_number_of_arguments_says_so() {
+        let mut h = stress_heap();
+        let e = eval_src(&mut h, "(apply (lambda ((x int)) int (var x)))").unwrap_err();
+        assert!(matches!(e.kind(), EvalError::Internal(m) if m.contains("arity mismatch")), "{:?}", e);
+    }
+
+    #[test]
+    fn applying_something_that_is_not_a_function_says_so() {
+        let mut h = stress_heap();
+        let e = eval_src(&mut h, "(apply (int 1))").unwrap_err();
+        assert!(matches!(e.kind(), EvalError::Internal(m) if m.contains("not a function")), "{:?}", e);
+    }
+
+    /// `labels` siblings can see each other, which is the whole reason the
+    /// frame is built with empty cells before any closure exists.
+    #[test]
+    fn labels_siblings_can_call_each_other() {
+        let mut h = stress_heap();
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(labels ((f ((x int)) int (apply (var g) (var x)))
+                          (g ((y int)) int (var y)))
+                   (apply (var f) (int 3)))",
+            ),
+            Value::Int(3)
+        );
+        // And a sibling can call itself.
+        assert_eq!(
+            eval_ok(
+                &mut h,
+                "(labels ((f ((xs sexpr)) sexpr
+                            (if (call (sexpr-null) () sexpr-null (var xs))
+                                (int 0)
+                                (apply (var f) (call (sexpr-cdr) () sexpr-cdr (var xs))))))
+                   (apply (var f) (call (sexpr-cons) () sexpr-cons (int 1)
+                                    (call (sexpr-cons) () sexpr-cons (int 2) (unit)))))",
+            ),
+            Value::Int(0)
+        );
+    }
+
+    /// A tail call is a jump. The old evaluator entered a closure through a
+    /// real native call, so a hundred thousand of these would not have been
+    /// expressible at all — here the depth costs nothing.
+    ///
+    /// Driven by consing a list down to nil, since arithmetic is an instance
+    /// method and `assoc` has no evaluation yet.
+    #[test]
+    fn a_tail_call_does_not_grow_the_stack() {
+        const DEPTH: usize = 100_000;
+        let mut h = Heap::with_capacity(1 << 18);
+        h.set_growth_limit(1 << 22);
+
+        // Built with stress off — the setup is `DEPTH` conses and collecting
+        // at each would be quadratic. The recursion below is what is tested.
+        let mut xs = Value::Empty;
+        h.push_root(xs);
+        for _ in 0..DEPTH {
+            xs = h.cons(Value::Int(1), xs).unwrap();
+            h.push_root(xs);
+        }
+        let name = match h.intern_symbol("xs") {
+            Value::Symbol(id) => id,
+            _ => unreachable!(),
+        };
+        let env = extend_env(&mut h, &[(name, xs)], Value::Empty).unwrap();
+        h.push_root(env);
+
+        let form = read1(
+            &mut h,
+            "(labels ((walk ((l sexpr)) sexpr
+                        (if (call (sexpr-null) () sexpr-null (var l))
+                            (int 0)
+                            (apply (var walk) (call (sexpr-cdr) () sexpr-cdr (var l))))))
+               (apply (var walk) (var xs)))",
+        );
+        h.push_root(form);
+
+        let before = h.root_count();
+        let interp = Interp::new();
+        let v = interp.eval_core(&mut h, form, env).expect("deep tail recursion failed");
+        assert_eq!(v, Value::Int(0));
+        assert_eq!(h.root_count(), before, "a tail call grew the root stack");
+    }
+
+    /// A closure keeps its own code alive.
+    ///
+    /// The trampoline roots the form it is evaluating, so for as long as the
+    /// `lambda` node is being walked its body is reachable that way — which
+    /// is why this test deliberately gets rid of the form. It replaces the
+    /// form's root with the closure, collects, and only then calls it. If the
+    /// mark phase did not trace `params`/`body` inside the box, the body
+    /// cells would be on the free list by then.
+    #[test]
+    fn a_closure_body_survives_collection_after_its_form_is_gone() {
+        let mut h = Heap::with_capacity(1 << 12);
+        // Taken *before* the read: `Reader::read_all` roots every form it
+        // returns and leaves the root in place, so the form outlives any
+        // slot this test manages itself. Truncating back to here is the only
+        // way to actually let go of it — a `set_root` on a later slot leaves
+        // the reader's own root holding the form, and the test then proves
+        // nothing.
+        let base = h.root_count();
+        let form = read1(&mut h, "(lambda ((x int)) int (var x))");
+
+        let interp = Interp::new();
+        let f = interp.eval_core(&mut h, form, Value::Empty).expect("lambda failed");
+        // The form is now referenced by nothing but the closure's own field.
+        h.truncate_roots(base);
+        h.push_root(f);
+
+        // Deliberate garbage, so the collection below has something to
+        // reclaim and the assertion can show it actually ran. Without it the
+        // count proves nothing: most of the form's cells stay live *through
+        // the closure*, which is the very thing under test, so a reclaim
+        // count of zero is what a correct implementation gives here.
+        const GARBAGE: usize = 50;
+        for _ in 0..GARBAGE {
+            h.cons(Value::Int(0), Value::Empty).unwrap();
+        }
+        let reclaimed = h.gc();
+        assert!(reclaimed >= GARBAGE, "only {} cells were reclaimed — the collection did not run", reclaimed);
+
+        // Call it through a fresh form, in a fresh environment.
+        let name = match h.intern_symbol("g") {
+            Value::Symbol(id) => id,
+            _ => unreachable!(),
+        };
+        let env = extend_env(&mut h, &[(name, f)], Value::Empty).unwrap();
+        h.push_root(env);
+        let call = read1(&mut h, "(apply (var g) (int 5))");
+        h.push_root(call);
+        h.gc();
+
+        let v = interp.eval_core(&mut h, call, env).expect("calling the closure failed");
+        assert_eq!(v, Value::Int(5));
+    }
+
+    /// A closure value is opaque to `apply`'s two other callee kinds, and
+    /// each says which one it is rather than being taken for a closure.
+    #[test]
+    fn a_compiled_callee_is_named_rather_than_guessed_at() {
+        let mut h = stress_heap();
+        let form = read1(&mut h, "(apply (var f))");
+        h.push_root(form);
+        let fake = h.alloc_compiled_closure(0, Vec::new(), 0);
+        h.push_root(fake);
+        let name = match h.intern_symbol("f") {
+            Value::Symbol(id) => id,
+            _ => unreachable!(),
+        };
+        let env = extend_env(&mut h, &[(name, fake)], Value::Empty).unwrap();
+        h.push_root(env);
+
+        let interp = Interp::new();
+        let e = interp.eval_core(&mut h, form, env).unwrap_err();
+        assert!(
+            matches!(e.kind(), EvalError::Internal(m) if m.contains("compiled closure")),
+            "{:?}",
+            e
+        );
     }
 
     #[test]

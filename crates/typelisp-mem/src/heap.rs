@@ -978,6 +978,34 @@ impl Heap {
         matches!(self.box_slots[id.0 as usize], Some(BoxedObj::CompiledClosure { .. }))
     }
 
+    /// Store an *interpreted* closure — parameter list, body, and captured
+    /// environment, all core forms and all `Value` — returning its
+    /// `Value::Boxed`. See [`BoxedObj::Closure`].
+    pub fn alloc_closure(&mut self, params: Value, body: Value, env: Value) -> Value {
+        self.alloc_boxed(BoxedObj::Closure { params, body, env })
+    }
+
+    /// True if `id` holds a [`BoxedObj::Closure`].
+    pub fn is_closure(&self, id: BoxId) -> bool {
+        matches!(self.box_slots[id.0 as usize], Some(BoxedObj::Closure { .. }))
+    }
+
+    /// An interpreted closure's parts: `(params, body, env)`. Panics if `id`
+    /// does not hold one — the same internal-invariant-trap convention as
+    /// [`float_value`](Self::float_value).
+    pub fn closure_parts(&self, id: BoxId) -> (Value, Value, Value) {
+        match &self.box_slots[id.0 as usize] {
+            Some(BoxedObj::Closure { params, body, env }) => (*params, *body, *env),
+            _ => panic!("BoxId does not hold a Closure"),
+        }
+    }
+
+    /// An interpreted closure is immutable, deliberately: `labels` needs a
+    /// group of siblings that can all see each other, and it gets that by
+    /// putting empty *cells* in a frame first and filling them in after each
+    /// closure is built. The closures capture the finished environment from
+    /// the start, so there is nothing to tie back — and so no setter here.
+
     /// Store a built-in used as a function value, returning its
     /// `Value::Boxed` — `recv_type` is the receiver type for a built-in
     /// *method* (`i32::+`) and `None` for a free built-in (`gensym`). See
@@ -1579,6 +1607,15 @@ impl Heap {
             // from the mark phase alone, the same belt-and-suspenders the
             // `Map` arm below applies to its interned string keys.
             BoxedObj::Builtin { name, .. } => stack.push(Value::Str(*name)),
+            // An interpreted closure keeps its own code alive, not just its
+            // captures: `params`/`body` are cons cells like any other, and
+            // nothing else necessarily refers to a `lambda`'s body once the
+            // form that built it is gone.
+            BoxedObj::Closure { params, body, env } => {
+                stack.push(*params);
+                stack.push(*body);
+                stack.push(*env);
+            }
             // A live trait object keeps the concrete value it wraps live.
             // `vtable_id` names a table outside the heap whose entries are
             // method identities and raw function pointers, so there is
