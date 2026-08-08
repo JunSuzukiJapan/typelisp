@@ -5494,15 +5494,29 @@ fn two_values_of_one_type_are_equalp_across_the_boundary() {
 /// first: a node whose fields the bridge failed to root would be reclaimed
 /// before the node containing it exists.
 fn bridge_to_island_text(core_src: &str) -> String {
+    bridge_to_island_text_with(&[], core_src)
+}
+
+/// The same, with `defs` — each a `defstruct`/`defenum` core form — recorded
+/// first, which is where a field's kind comes from.
+fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
     use typelisp::check::core;
+    use typelisp::compile::core_bridge::{Ctx, Definitions};
     let mut h = Heap::with_capacity(1 << 16);
     h.set_gc_stress(true);
     let r = Reader::new();
+    let mut definitions = Definitions::new();
+    for d in defs {
+        for v in r.read_all(&mut h, d).expect("read failed") {
+            definitions.record(&h, v).expect("recording the definition failed");
+        }
+    }
     let mut vs = r.read_all(&mut h, core_src).expect("read failed");
     assert_eq!(vs.len(), 1, "expected one core form");
     let form = vs.pop().unwrap();
     h.push_root(form);
-    let island = typelisp::compile::core_bridge::to_island(&mut h, form).expect("bridge failed");
+    let island = typelisp::compile::core_bridge::to_island(&mut h, form, Ctx { defs: &definitions })
+        .expect("bridge failed");
     core::print(&h, island)
 }
 
@@ -5573,4 +5587,80 @@ fn the_island_compiles_a_bridged_let_and_if() {
         let argv = [a, b];
         assert_eq!(unsafe { absdiff.call(argv.as_ptr(), argv.len() as u32) }, (a - b).abs(), "a={} b={}", a, b);
     }
+}
+
+/// Every runtime function the island can emit a call to.
+///
+/// `Interp::compile_function` declares the whole set into its module before
+/// compiling anything (its `declare_external_function` loop). A test calling
+/// `compile-function` directly gets an empty module instead, so any body that
+/// touches the runtime at all — anything past pure arithmetic — has to declare
+/// them itself or the island's `get-function` aborts. `add-function` builds
+/// the same uniform signature `declare_external_function` does, so declaring
+/// them from typelisp source is equivalent.
+///
+/// Taken from `compiler.rs`'s own `(get-function m "rt_...")` sites, so it
+/// cannot drift out of date silently: a name the island learns to call and
+/// this list does not have fails loudly, by aborting.
+const ISLAND_RUNTIME_CALLS: &[&str] = &[
+    "rt_bignum_cmp", "rt_bignum_new", "rt_bignum_to_int_raw", "rt_box_kind",
+    "rt_car", "rt_cdr", "rt_cell_get", "rt_cell_new",
+    "rt_cell_set", "rt_char_equalp", "rt_cons", "rt_data_field",
+    "rt_data_new", "rt_data_variant", "rt_dyn_new", "rt_dyn_upcast",
+    "rt_dyn_value", "rt_dyn_vtable", "rt_float_new", "rt_float_to_bignum",
+    "rt_float_to_ratio", "rt_float_value", "rt_global_get", "rt_global_new",
+    "rt_global_set", "rt_hashtable_clear", "rt_hashtable_contains", "rt_hashtable_count",
+    "rt_hashtable_new", "rt_hashtable_set", "rt_int_to_bignum", "rt_int_to_ratio",
+    "rt_intern_path", "rt_intern_symbol", "rt_list_to_path", "rt_llvm_call",
+    "rt_match_fail", "rt_panic", "rt_path_to_list", "rt_pop_sexpr_root",
+    "rt_push_permanent_sexpr_root", "rt_push_sexpr_root", "rt_ratio_cmp", "rt_ratio_from_bignums",
+    "rt_root_count", "rt_set_sexpr_root", "rt_sexpr_instance_test", "rt_str_append",
+    "rt_str_eq", "rt_str_equalp", "rt_str_length", "rt_str_lt",
+    "rt_str_new", "rt_str_ref", "rt_struct_field_count", "rt_struct_field_get",
+    "rt_struct_field_set", "rt_struct_new", "rt_struct_pop_field", "rt_struct_push_field",
+    "rt_truncate_sexpr_roots", "rt_vtable_slot",
+];
+
+/// `(compile-function ...)` wrapped in a module with the runtime declared.
+fn compile_function_source(name: &str, params: &str, body: &str) -> String {
+    let decls: String =
+        ISLAND_RUNTIME_CALLS.iter().map(|n| format!("(add-function m \"{}\")\n", n)).collect();
+    format!(
+        r#"(let ((m (llvm-module::create "mod")))
+             {}
+             (compile-function m "{}" '{} '{}))"#,
+        decls, name, params, body
+    )
+}
+
+/// `construct`/`field-get`/`match` through the real `compile-function`.
+///
+/// Verified rather than run: every one of these allocates on the GC heap at
+/// run time (`rt_struct_new`/`rt_data_new`), and the heap the driver built
+/// this module with is gone by the time a JIT'd function could be called —
+/// unlike the pure-arithmetic bodies above, which touch nothing. `verify` is
+/// still a real acceptance check: the island compiled the bridged form and
+/// LLVM validated the module that came out.
+#[test]
+fn the_island_accepts_a_bridged_construct_field_and_match() {
+    let defs = ["(defstruct point (int int))", "(defenum maybe-int (none some) (() (int)))"];
+    let body = bridge_to_island_text_with(
+        &defs,
+        "(let ((p struct (construct point 0 true (var a) (var b))))
+           (match (construct maybe-int 1 false (field-get (var p) 1 int)) enum
+             ((pat-ctor maybe-int 0 false) (int -1))
+             ((pat-ctor maybe-int 1 false (pat-bind x)) (var x))))",
+    );
+    let src = compile_function_source("second", "((a . 0) (b . 0))", &body);
+    let ir = eval_string_with_compiler(&format!("(to-string {})", src));
+    // The struct is built and read, and the enum box is built and tested —
+    // i.e. the island really took each of the three tags, rather than
+    // compiling something degenerate that happens to verify.
+    for expected in ["rt_struct_new", "rt_struct_field_get", "rt_data_new", "define i64 @second"] {
+        assert!(ir.contains(expected), "expected {} in the IR:\n{}", expected, ir);
+    }
+    assert!(
+        expect_bool(eval_ok_with_compiler(&format!("(verify {})", src))),
+        "the module the island built from the bridged form did not verify"
+    );
 }

@@ -54,15 +54,101 @@
 //! not good enough — `ast_bridge` balances sixteen pops by hand in one
 //! function, and one `?` skips them all.
 
+use std::collections::HashMap;
+
 use typelisp_mem::{Error, Heap, RootScope, Value};
 
 use crate::check::core::{self, Items};
 use crate::check::repr::Repr;
+use crate::type_key::type_key_of;
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES};
 
 use super::ast_bridge::{
     llvm_op_id, user_symbol_name, HASHTABLE_BUILTIN_METHODS, VECTOR_BUILTIN_METHODS,
 };
+
+/// Every field representation of every type this translation can mention.
+///
+/// A field's `Repr` is a property of the *type*, so the core IR records it
+/// once, on the `defstruct`/`defenum` — not once per `construct` and once more
+/// per pattern the way `Pattern::Ctor`'s `field_types`/`sexpr_fields` did. The
+/// price is that the bridge needs the definitions on hand, which is what this
+/// is: a snapshot taken from the same core forms, so there is still no live
+/// `Registry` anywhere in this module.
+#[derive(Default, Debug)]
+pub struct Definitions {
+    /// A `defstruct`'s fields.
+    structs: HashMap<Path, Vec<Repr>>,
+    /// A `defenum`'s fields, per variant.
+    enums: HashMap<Path, Vec<Vec<Repr>>>,
+}
+
+impl Definitions {
+    pub fn new() -> Definitions {
+        Definitions::default()
+    }
+
+    /// Record a `(defstruct PATH (R...))` or
+    /// `(defenum PATH (SYM...) ((R...)...))` core form.
+    ///
+    /// Anything else is ignored rather than refused: this is meant to be fed
+    /// a whole program's top level, and every other form there is simply not a
+    /// type definition.
+    pub fn record(&mut self, heap: &Heap, form: Value) -> Result<(), Error> {
+        let Some(tag) = core::op(heap, form) else { return Ok(()) };
+        match tag {
+            "defstruct" => {
+                let parts = core::fields(heap, form)?;
+                let [path, fields] = parts[..] else { return Err(malformed(heap, form)) };
+                let path = as_path(heap, path).ok_or_else(|| malformed(heap, form))?;
+                self.structs.insert(path, repr_list(heap, fields)?);
+            }
+            "defenum" => {
+                let parts = core::fields(heap, form)?;
+                let [path, _variants, fields] = parts[..] else { return Err(malformed(heap, form)) };
+                let path = as_path(heap, path).ok_or_else(|| malformed(heap, form))?;
+                let per_variant = heap
+                    .list_to_vec(fields)?
+                    .into_iter()
+                    .map(|v| repr_list(heap, v))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.enums.insert(path, per_variant);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// The field representations of `path`'s `variant`, or `None` if this is
+    /// not a type with fields to read — a built-in `sexpr` constructor, whose
+    /// field shapes the island derives from the variant number itself.
+    fn fields_of(&self, path: &Path, variant: usize) -> Option<&[Repr]> {
+        if let Some(fs) = self.structs.get(path) {
+            return Some(fs);
+        }
+        self.enums.get(path)?.get(variant).map(Vec::as_slice)
+    }
+
+    /// Whether `path` is a `defstruct` — which the island needs because a
+    /// struct has exactly one variant and so gets no tag test, only field
+    /// extraction.
+    fn is_struct(&self, path: &Path) -> bool {
+        self.structs.contains_key(path)
+    }
+}
+
+/// What a whole translation reads and never changes.
+#[derive(Clone, Copy)]
+pub struct Ctx<'a> {
+    pub defs: &'a Definitions,
+}
+
+/// The island's three scrutinee representations, which decide the tag test it
+/// emits: a tagged `sexpr` (bit tests), a sum-ADT box (a variant slot), or a
+/// boxed struct (single-variant, so no test at all — only field extraction).
+const MATCH_KIND_SEXPR: i64 = 0;
+const MATCH_KIND_BOX: i64 = 1;
+const MATCH_KIND_STRUCT: i64 = 2;
 
 /// A tag this stage has no translation for yet.
 ///
@@ -80,7 +166,7 @@ fn malformed(heap: &Heap, form: Value) -> Error {
 }
 
 /// Translate one core form.
-pub fn to_island(heap: &mut Heap, form: Value) -> Result<Value, Error> {
+pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let Some(tag) = core::op(heap, form).map(str::to_string) else {
         return Err(malformed(heap, form));
     };
@@ -147,14 +233,14 @@ pub fn to_island(heap: &mut Heap, form: Value) -> Result<Value, Error> {
         }
 
         // ---- binding and control -----------------------------------------
-        "let" => translate_let(heap, form),
+        "let" => translate_let(heap, form, cx),
         "if" => {
             let parts = core::fields(heap, form)?;
             let [cond, then, els] = parts[..] else { return Err(malformed(heap, form)) };
             let mut f = Items::new(heap);
             f.push(Value::Bool(false)); // `is-fn`, unread
             for part in [cond, then, els] {
-                let v = to_island(f.heap(), part)?;
+                let v = to_island(f.heap(), part, cx)?;
                 f.push(v);
             }
             f.finish("if")
@@ -162,14 +248,20 @@ pub fn to_island(heap: &mut Heap, form: Value) -> Result<Value, Error> {
         "panic" => {
             let msg = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
-            let v = to_island(f.heap(), msg)?;
+            let v = to_island(f.heap(), msg, cx)?;
             f.push(v);
             f.finish("panic")
         }
 
         // ---- calls -------------------------------------------------------
-        "call" => translate_call(heap, form),
-        "assoc" => translate_assoc(heap, form),
+        "call" => translate_call(heap, form, cx),
+        "assoc" => translate_assoc(heap, form, cx),
+
+        // ---- data --------------------------------------------------------
+        "construct" => translate_construct(heap, form, cx),
+        "field-get" => translate_field(heap, form, "field-get", cx),
+        "field-set" => translate_field(heap, form, "field-set", cx),
+        "match" => translate_match(heap, form, cx),
 
         other => Err(untranslated(other)),
     }
@@ -180,7 +272,7 @@ pub fn to_island(heap: &mut Heap, form: Value) -> Result<Value, Error> {
 /// The binding's own `R` is what the island's `bind-let-values` reads as a
 /// kind, so unlike every other position this one needed nothing added to the
 /// core IR — a `let` has always had to say what it binds.
-fn translate_let(heap: &mut Heap, form: Value) -> Result<Value, Error> {
+fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
     let Some((binds, body)) = parts.split_first() else { return Err(malformed(heap, form)) };
     let binds = heap.list_to_vec(*binds)?;
@@ -196,7 +288,7 @@ fn translate_let(heap: &mut Heap, form: Value) -> Result<Value, Error> {
             let Some(repr) = Repr::read(&s, repr) else { return Err(malformed(&s, *b)) };
             let name_pair = s.cons(name, Value::Int(repr.binding_kind()))?;
             s.push_root(name_pair);
-            let init = to_island(&mut s, init)?;
+            let init = to_island(&mut s, init, cx)?;
             s.push_root(init);
             let pair = s.cons(name_pair, init)?;
             s.push_root(pair);
@@ -208,7 +300,7 @@ fn translate_let(heap: &mut Heap, form: Value) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     f.push(bindings);
     for e in &body {
-        let v = to_island(f.heap(), *e)?;
+        let v = to_island(f.heap(), *e, cx)?;
         f.push(v);
     }
     f.finish("let")
@@ -222,7 +314,7 @@ fn translate_let(heap: &mut Heap, form: Value) -> Result<Value, Error> {
 /// three `sexpr-car`/`sexpr-cdr`/`sexpr-cons` builtins are the exception:
 /// `compile-call` matches those literal names and emits `rt_car`/`rt_cdr`/
 /// `rt_cons` directly, so prefixing them would break the match.
-fn translate_call(heap: &mut Heap, form: Value) -> Result<Value, Error> {
+fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
     if parts.len() < 4 {
         return Err(malformed(heap, form));
@@ -241,7 +333,7 @@ fn translate_call(heap: &mut Heap, form: Value) -> Result<Value, Error> {
 
     let mut f = Items::new(heap);
     f.push(name_v);
-    let pairs = arg_pairs(f.heap(), &reprs, &args)?;
+    let pairs = arg_pairs(f.heap(), &reprs, &args, cx)?;
     f.extend(pairs);
     f.finish("call")
 }
@@ -257,7 +349,7 @@ fn translate_call(heap: &mut Heap, form: Value) -> Result<Value, Error> {
 /// a result representation at all: `(vector::new)` and `(scope::new)` have no
 /// receiver, and the result is the only thing that says which container they
 /// are building.
-fn translate_assoc(heap: &mut Heap, form: Value) -> Result<Value, Error> {
+fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
     if parts.len() < 6 {
         return Err(malformed(heap, form));
@@ -273,16 +365,16 @@ fn translate_assoc(heap: &mut Heap, form: Value) -> Result<Value, Error> {
     let self_repr = if instance { reprs.first().unwrap_or(&ret) } else { &ret }.clone();
 
     if path_is_builtin(&type_name, "vector") && VECTOR_BUILTIN_METHODS.contains(&method.as_str()) {
-        return translate_vector_op(heap, &method, &self_repr, &args);
+        return translate_vector_op(heap, &method, &self_repr, &args, cx);
     }
     if path_is_builtin(&type_name, "hashtable") && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
-        return translate_hashtable_op(heap, &method, &self_repr, &args);
+        return translate_hashtable_op(heap, &method, &self_repr, &args, cx);
     }
     if let Some(key) = llvm_op_key(&type_name, &self_repr) {
         let opid = Value::Int(llvm_op_id(key, &method));
         let mut f = Items::new(heap);
         f.push(opid);
-        let pairs = arg_pairs(f.heap(), &reprs, &args)?;
+        let pairs = arg_pairs(f.heap(), &reprs, &args, cx)?;
         f.extend(pairs);
         return f.finish("llvm-op");
     }
@@ -297,7 +389,7 @@ fn translate_assoc(heap: &mut Heap, form: Value) -> Result<Value, Error> {
     let method_v = f.heap().alloc_string(method);
     f.push(method_v);
     f.push(Value::Bool(instance));
-    let pairs = arg_pairs(f.heap(), &reprs, &args)?;
+    let pairs = arg_pairs(f.heap(), &reprs, &args, cx)?;
     f.extend(pairs);
     f.finish("assoc")
 }
@@ -334,7 +426,7 @@ fn llvm_op_key(type_name: &Path, self_repr: &Repr) -> Option<&'static str> {
 /// element to tag, so it carries `0` and a `"vector"` type-name literal
 /// instead; `pop` returns `Option<T>` and needs an `"option"` literal to build
 /// the result with.
-fn translate_vector_op(heap: &mut Heap, method: &str, self_repr: &Repr, args: &[Value]) -> Result<Value, Error> {
+fn translate_vector_op(heap: &mut Heap, method: &str, self_repr: &Repr, args: &[Value], cx: Ctx) -> Result<Value, Error> {
     let kind = match self_repr {
         Repr::Vector(t) if method != "new" => t.field_kind(),
         _ => 0,
@@ -348,7 +440,7 @@ fn translate_vector_op(heap: &mut Heap, method: &str, self_repr: &Repr, args: &[
         f.push(name);
     } else {
         for a in args {
-            let v = to_island(f.heap(), *a)?;
+            let v = to_island(f.heap(), *a, cx)?;
             f.push(v);
         }
     }
@@ -371,6 +463,7 @@ fn translate_hashtable_op(
     method: &str,
     self_repr: &Repr,
     args: &[Value],
+    cx: Ctx,
 ) -> Result<Value, Error> {
     let (kk, vk) = match self_repr {
         Repr::HashTable(k, v) => (k.field_kind(), v.field_kind()),
@@ -386,11 +479,293 @@ fn translate_hashtable_op(
     f.push(option_name);
     if method != "new" {
         for a in args {
-            let v = to_island(f.heap(), *a)?;
+            let v = to_island(f.heap(), *a, cx)?;
             f.push(v);
         }
     }
     f.finish("hashtable-op")
+}
+
+/// `(construct PATH N MUTABLE E...)` -> `(construct is-sexpr mutable
+/// type-name-form variant field...)`.
+///
+/// The three-way choice the island makes off the header — build one of
+/// `sexpr`'s own variants, build a mutable `BoxedObj::Struct`, or build a
+/// `BoxedObj::Enum` — is decided here, from the type path and the `mutable`
+/// flag the checker already resolved, which is what keeps `compiler.rs`
+/// registry-free.
+///
+/// The fields' kinds come from the *type's* definition rather than from the
+/// argument expressions, which is the whole reason [`Definitions`] exists. A
+/// `sexpr` construct is the exception: its variants' shapes follow from the
+/// variant number, so the island derives them and the fields go untagged.
+fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let parts = core::fields(heap, form)?;
+    if parts.len() < 3 {
+        return Err(malformed(heap, form));
+    }
+    let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+    let Value::Int(variant) = parts[1] else { return Err(malformed(heap, form)) };
+    let Value::Bool(mutable) = parts[2] else { return Err(malformed(heap, form)) };
+    let args = parts[3..].to_vec();
+    let is_sexpr = path == Path::root("sexpr");
+
+    // The *fully qualified* path, because this string is the value's runtime
+    // type identity: interpreted and compiled code both write it and test it,
+    // so the two have to spell it the same way.
+    let type_name = if is_sexpr { Value::Empty } else { str_form(heap, &type_key_of(&path))? };
+    let mut f = Items::new(heap);
+    f.push(Value::Bool(is_sexpr));
+    f.push(Value::Bool(mutable));
+    f.push(type_name);
+    f.push(Value::Int(variant));
+
+    if is_sexpr {
+        for a in &args {
+            let v = to_island(f.heap(), *a, cx)?;
+            f.push(v);
+        }
+        return f.finish("construct");
+    }
+    let field_reprs = cx.defs.fields_of(&path, variant as usize).ok_or_else(|| {
+        Error::TypeError(format!("compile: no definition recorded for the type `{}` (internal error)", path))
+    })?;
+    if field_reprs.len() != args.len() {
+        return Err(Error::TypeError(format!(
+            "compile: `{}` variant {} has {} fields, constructed with {} (internal error)",
+            path,
+            variant,
+            field_reprs.len(),
+            args.len()
+        )));
+    }
+    // A struct field and an enum field cross the same tagged boundary, so both
+    // take `field_kind` — not `binding_kind`, which only says whether a root
+    // is wanted. Here the exact tagged shape to build is what matters.
+    let kinds: Vec<Repr> = field_reprs.to_vec();
+    let pairs = arg_pairs_with(f.heap(), &kinds, &args, Repr::field_kind, cx)?;
+    f.extend(pairs);
+    f.finish("construct")
+}
+
+/// `(field-get E N R)` -> `(field-get idx-list kind obj)`, and the same for
+/// `field-set` with the value appended.
+///
+/// `idx-list` is a list of exactly `N` (otherwise meaningless) elements. The
+/// island's slot index is an `i32` and its only numeric literal decodes to
+/// `i64`, with no narrowing primitive exposed to compiled code — but
+/// `sexpr-list-length` already returns `i32`, so a list of the right length
+/// sidesteps the missing conversion. Field indices are small.
+fn translate_field(heap: &mut Heap, form: Value, tag: &str, cx: Ctx) -> Result<Value, Error> {
+    let parts = core::fields(heap, form)?;
+    let (obj, idx, repr, value) = match parts[..] {
+        [obj, idx, repr] if tag == "field-get" => (obj, idx, repr, None),
+        [obj, idx, repr, value] if tag == "field-set" => (obj, idx, repr, Some(value)),
+        _ => return Err(malformed(heap, form)),
+    };
+    let Value::Int(idx) = idx else { return Err(malformed(heap, form)) };
+    let repr = Repr::read(heap, repr).ok_or_else(|| malformed(heap, form))?;
+
+    let idx_list = core::list(heap, &vec![Value::Bool(false); idx as usize])?;
+    let mut f = Items::new(heap);
+    f.push(idx_list);
+    f.push(Value::Int(repr.field_kind()));
+    let obj = to_island(f.heap(), obj, cx)?;
+    f.push(obj);
+    if let Some(value) = value {
+        let v = to_island(f.heap(), value, cx)?;
+        f.push(v);
+    }
+    f.finish(tag)
+}
+
+/// `(match E R (P E...) ...)` -> `(match is-fn scrut ((pat . body)...) kind)`.
+///
+/// An arm's body is collapsed to one form — a `let` with no bindings, which is
+/// what `progn` already is on both sides — because the island's
+/// `compile-match-arms` compiles exactly one form per arm.
+fn translate_match(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let parts = core::fields(heap, form)?;
+    if parts.len() < 2 {
+        return Err(malformed(heap, form));
+    }
+    let scrut = parts[0];
+    let scrut_repr = Repr::read(heap, parts[1]).ok_or_else(|| malformed(heap, form))?;
+    let kind = match_kind_of(&scrut_repr).ok_or_else(|| {
+        Error::TypeError(format!(
+            "compile: a match on a `{}` scrutinee has no lowering",
+            scrut_repr.tag()
+        ))
+    })?;
+    let arms = parts[2..].to_vec();
+
+    let mut f = Items::new(heap);
+    f.push(Value::Bool(false)); // `is-fn`, unread
+    let scrut = to_island(f.heap(), scrut, cx)?;
+    f.push(scrut);
+
+    let arm_pairs = {
+        let mut s = RootScope::new(f.heap());
+        let mut pairs = Vec::with_capacity(arms.len());
+        for arm in &arms {
+            let items = s.list_to_vec(*arm)?;
+            let Some((pat, body)) = items.split_first() else { return Err(malformed(&s, *arm)) };
+            let pat = translate_pattern(&mut s, *pat, cx)?;
+            s.push_root(pat);
+            let body = match body {
+                [one] => to_island(&mut s, *one, cx)?,
+                many => {
+                    let mut b = Items::new(&mut s);
+                    let empty = core::list(b.heap(), &[])?;
+                    b.push(empty);
+                    for e in many {
+                        let v = to_island(b.heap(), *e, cx)?;
+                        b.push(v);
+                    }
+                    b.finish("let")?
+                }
+            };
+            s.push_root(body);
+            let pair = s.cons(pat, body)?;
+            s.push_root(pair);
+            pairs.push(pair);
+        }
+        core::list(&mut s, &pairs)?
+    };
+    f.push(arm_pairs);
+    // The trailing kind, which the island reads off each `pat-ctor` instead —
+    // see the module comment on dead fields.
+    f.push(Value::Int(kind));
+    f.finish("match")
+}
+
+/// A scrutinee representation's island classification, or `None` for one that
+/// is never a `match` scrutinee in compiled code.
+///
+/// A scalar is the `None` case, and deliberately so: the old bridge refused
+/// exactly the same set (its classification only accepted a named type), so a
+/// `match` on an `int` was never something the island compiled. Refusing here
+/// keeps that, rather than inventing a lowering nothing has tested.
+fn match_kind_of(repr: &Repr) -> Option<i64> {
+    match repr {
+        Repr::Sexpr => Some(MATCH_KIND_SEXPR),
+        Repr::Struct | Repr::Vector(_) => Some(MATCH_KIND_STRUCT),
+        Repr::Enum => Some(MATCH_KIND_BOX),
+        _ => None,
+    }
+}
+
+/// One pattern.
+///
+/// A constructor pattern carries its *own* type's classification rather than
+/// inheriting the match's, because a nested sub-pattern can differ from its
+/// parent — a `sexpr`-typed field inside an enum box, say.
+fn translate_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Error> {
+    let Some(tag) = core::op(heap, pat).map(str::to_string) else {
+        return Err(malformed(heap, pat));
+    };
+    match tag.as_str() {
+        "pat-wild" => core::tagged(heap, "pat-wild", &[]),
+        "pat-bind" => {
+            let name = symbol_field(heap, pat, 0)?;
+            let name_v = heap.alloc_string(name);
+            let mut f = Items::new(heap);
+            f.push(name_v);
+            f.finish("pat-bind")
+        }
+        // The island compares against one `const-i64`, whatever the literal's
+        // kind, so the conversion happens here: there is no `char`/`bool` to
+        // `i64` primitive in the compiled language to do it there.
+        "pat-lit" => {
+            let lit = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
+            let n = match (core::op(heap, lit), core::field(heap, lit, 0)) {
+                (Some("int"), Some(Value::Int(n))) => n,
+                (Some("bool"), Some(Value::Bool(b))) => i64::from(b),
+                (Some("char"), Some(Value::Char(c))) => c as i64,
+                _ => return Err(malformed(heap, pat)),
+            };
+            core::tagged(heap, "pat-lit", &[Value::Int(n)])
+        }
+        "pat-ctor" => translate_ctor_pattern(heap, pat, cx),
+        "pat-typetest" => {
+            let path = as_path(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
+                .ok_or_else(|| malformed(heap, pat))?;
+            let inner = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
+            let name = str_form(heap, &type_key_of(&path))?;
+            let mut f = Items::new(heap);
+            f.push(name);
+            let inner = translate_pattern(f.heap(), inner, cx)?;
+            f.push(inner);
+            f.finish("pat-typetest")
+        }
+        other => Err(untranslated(other)),
+    }
+}
+
+/// `(pat-ctor PATH N DOWNCAST P...)` -> `(pat-ctor variant (subpat...) kind
+/// (field-kind...) downcast type-name-form)`.
+fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value, Error> {
+    let parts = core::fields(heap, pat)?;
+    if parts.len() < 3 {
+        return Err(malformed(heap, pat));
+    }
+    let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, pat))?;
+    let Value::Int(variant) = parts[1] else { return Err(malformed(heap, pat)) };
+    let Value::Bool(downcast) = parts[2] else { return Err(malformed(heap, pat)) };
+    let subpats = parts[3..].to_vec();
+
+    let kind = if path == Path::root("sexpr") {
+        MATCH_KIND_SEXPR
+    } else if cx.defs.is_struct(&path) {
+        MATCH_KIND_STRUCT
+    } else {
+        MATCH_KIND_BOX
+    };
+
+    let subs = {
+        let mut s = RootScope::new(heap);
+        let mut vs = Vec::with_capacity(subpats.len());
+        for p in &subpats {
+            let v = translate_pattern(&mut s, *p, cx)?;
+            s.push_root(v);
+            vs.push(v);
+        }
+        core::list(&mut s, &vs)?
+    };
+    let mut f = Items::new(heap);
+    f.push(Value::Int(variant));
+    f.push(subs);
+    f.push(Value::Int(kind));
+
+    // A `sexpr` scrutinee's field shapes follow from its variant number, so
+    // the island derives them and this list stays empty. The other two need
+    // the definition's fields, one kind per sub-pattern.
+    let kinds: Vec<Value> = if kind == MATCH_KIND_SEXPR {
+        Vec::new()
+    } else {
+        let reprs = cx.defs.fields_of(&path, variant as usize).ok_or_else(|| {
+            Error::TypeError(format!("compile: no definition recorded for the type `{}` (internal error)", path))
+        })?;
+        if reprs.len() != subpats.len() {
+            return Err(Error::TypeError(format!(
+                "compile: `{}` variant {} has {} fields, matched with {} sub-patterns (internal error)",
+                path,
+                variant,
+                reprs.len(),
+                subpats.len()
+            )));
+        }
+        reprs.iter().map(|r| Value::Int(r.field_kind())).collect()
+    };
+    let kinds = core::list(f.heap(), &kinds)?;
+    f.push(kinds);
+    f.push(Value::Bool(downcast));
+    // Only compiled when `downcast` is true: an ordinary pattern already knows
+    // the scrutinee's type from its static type, and only a downcast has to
+    // test it at run time.
+    let type_name = if downcast { str_form(f.heap(), &type_key_of(&path))? } else { Value::Empty };
+    f.push(type_name);
+    f.finish("pat-ctor")
 }
 
 // ---- shared pieces --------------------------------------------------------
@@ -401,7 +776,22 @@ fn translate_hashtable_op(
 /// around the evaluated argument: a later argument's evaluation can allocate
 /// and collect an earlier one, which is unrooted for exactly as long as it
 /// sits in the argument array.
-fn arg_pairs(heap: &mut Heap, reprs: &[Repr], args: &[Value]) -> Result<Vec<Value>, Error> {
+fn arg_pairs(heap: &mut Heap, reprs: &[Repr], args: &[Value], cx: Ctx) -> Result<Vec<Value>, Error> {
+    arg_pairs_with(heap, reprs, args, Repr::binding_kind, cx)
+}
+
+/// [`arg_pairs`] over either projection.
+///
+/// A call's arguments take `binding_kind` — the island only wants to know
+/// whether to root one. A `construct`'s fields take `field_kind`: they are
+/// being written into a box, so the exact tagged shape is what matters.
+fn arg_pairs_with(
+    heap: &mut Heap,
+    reprs: &[Repr],
+    args: &[Value],
+    kind_of: impl Fn(&Repr) -> i64,
+    cx: Ctx,
+) -> Result<Vec<Value>, Error> {
     if reprs.len() != args.len() {
         return Err(Error::TypeError(format!(
             "compile: {} argument representations for {} arguments (internal error)",
@@ -412,9 +802,9 @@ fn arg_pairs(heap: &mut Heap, reprs: &[Repr], args: &[Value]) -> Result<Vec<Valu
     let mut s = RootScope::new(heap);
     let mut pairs = Vec::with_capacity(args.len());
     for (r, a) in reprs.iter().zip(args) {
-        let form = to_island(&mut s, *a)?;
+        let form = to_island(&mut s, *a, cx)?;
         s.push_root(form);
-        let pair = s.cons(Value::Int(r.binding_kind()), form)?;
+        let pair = s.cons(Value::Int(kind_of(r)), form)?;
         s.push_root(pair);
         pairs.push(pair);
     }
@@ -494,27 +884,57 @@ mod tests {
     /// to root would be reclaimed before the node holding it exists. That is
     /// the failure mode `ast_bridge` shipped twice.
     fn bridged(src: &str) -> String {
+        bridged_with(&[], src)
+    }
+
+    /// Translate `src` with `defs` (each a `defstruct`/`defenum` core form)
+    /// recorded first.
+    fn bridged_with(defs: &[&str], src: &str) -> String {
         let mut h = Heap::with_capacity(1 << 16);
         h.set_gc_stress(true);
         let r = Reader::new();
+        let definitions = record_all(&mut h, &r, defs);
+        let cx = Ctx { defs: &definitions };
         let mut vs = r.read_all(&mut h, src).expect("read failed");
         assert_eq!(vs.len(), 1, "expected one form in {:?}", src);
         let core_form = vs.pop().unwrap();
         h.push_root(core_form);
-        let island = to_island(&mut h, core_form).unwrap_or_else(|e| panic!("{:?} did not translate: {}", src, e));
+        let island =
+            to_island(&mut h, core_form, cx).unwrap_or_else(|e| panic!("{:?} did not translate: {}", src, e));
         core::print(&h, island)
     }
 
+    fn record_all(h: &mut Heap, r: &Reader, defs: &[&str]) -> Definitions {
+        let mut definitions = Definitions::new();
+        for d in defs {
+            let vs = r.read_all(h, d).expect("read failed");
+            for v in vs {
+                definitions.record(h, v).expect("recording the definition failed");
+            }
+        }
+        definitions
+    }
+
     fn refused(src: &str) -> String {
+        refused_with(&[], src)
+    }
+
+    fn refused_with(defs: &[&str], src: &str) -> String {
         let mut h = Heap::with_capacity(1 << 16);
         let r = Reader::new();
+        let definitions = record_all(&mut h, &r, defs);
+        let cx = Ctx { defs: &definitions };
         let mut vs = r.read_all(&mut h, src).expect("read failed");
         let core_form = vs.pop().unwrap();
-        match to_island(&mut h, core_form) {
+        match to_island(&mut h, core_form, cx) {
             Ok(v) => panic!("{:?} unexpectedly translated to {}", src, core::print(&h, v)),
             Err(e) => format!("{}", e),
         }
     }
+
+    /// A `point` with two int fields and an `option` over a `sexpr`, which is
+    /// enough to show both a struct's and an enum's field kinds.
+    const DEFS: [&str; 2] = ["(defstruct point (int int))", "(defenum option (none some) (() (sexpr)))"];
 
     #[test]
     fn the_word_sized_literals_pass_through_unchanged() {
@@ -684,6 +1104,117 @@ mod tests {
             bridged("(assoc scope get true () enum ((scope int) str) (var e) (var n))"),
             r#"(assoc "scope" "get" true (2 var "e" false) (2 var "n" false))"#
         );
+    }
+
+    // ---- data ------------------------------------------------------------
+
+    /// A construct's field kinds come from the *type*, not from the argument
+    /// expressions — which is why the bridge needs the definitions at all.
+    #[test]
+    fn a_construct_tags_its_fields_from_the_types_definition() {
+        assert_eq!(
+            bridged_with(&DEFS, "(construct point 0 true (int 1) (int 2))"),
+            r#"(construct false true (str (int 112) (int 111) (int 105) (int 110) (int 116)) 0 (1 int 1) (1 int 2))"#
+        );
+        // An enum field of `sexpr` is already tagged, hence the passthrough
+        // kind 6 — read off the variant's own field list.
+        assert_eq!(
+            bridged_with(&DEFS, "(construct option 1 false (var x))"),
+            r#"(construct false false (str (int 111) (int 112) (int 116) (int 105) (int 111) (int 110)) 1 (6 var "x" false))"#
+        );
+        // `sexpr`'s own variants take untagged fields: their shapes follow
+        // from the variant number, so the island derives them.
+        assert_eq!(bridged_with(&DEFS, "(construct sexpr 7 false (int 1) (int 2))"), "(construct true false () 7 (int 1) (int 2))");
+    }
+
+    /// A construct whose arity disagrees with its definition is an internal
+    /// error: the island would tag a field with another field's kind.
+    #[test]
+    fn a_construct_that_disagrees_with_its_definition_is_refused() {
+        let e = refused_with(&DEFS, "(construct point 0 true (int 1))");
+        assert!(e.contains("has 2 fields, constructed with 1"), "{}", e);
+        let e = refused_with(&[], "(construct point 0 true (int 1) (int 2))");
+        assert!(e.contains("no definition recorded"), "{}", e);
+    }
+
+    /// The index becomes a list of that length: the island's slot index is an
+    /// `i32`, its only numeric literal decodes to `i64`, and it has no
+    /// narrowing primitive — but it can measure a list.
+    #[test]
+    fn a_field_access_encodes_its_index_as_a_list_length() {
+        assert_eq!(bridged("(field-get (var p) 0 int)"), r#"(field-get () 1 (var "p" false))"#);
+        assert_eq!(bridged("(field-get (var p) 2 sexpr)"), r#"(field-get (false false) 6 (var "p" false))"#);
+        assert_eq!(
+            bridged("(field-set (var p) 1 int (int 5))"),
+            r#"(field-set (false) 1 (var "p" false) (int 5))"#
+        );
+    }
+
+    // ---- match -----------------------------------------------------------
+
+    /// Each arm becomes a `(pattern . body)` pair, and a constructor pattern
+    /// carries its own type's classification rather than the match's — a
+    /// nested sub-pattern's can differ from its parent's.
+    #[test]
+    fn a_match_pairs_every_pattern_with_its_body() {
+        assert_eq!(
+            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor option 0 false) (int 0)) ((pat-ctor option 1 false (pat-bind x)) (var x)))"),
+            r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int 0) ((pat-ctor 1 ((pat-bind "x")) 1 (6) false ()) var "x" false)) 1)"#
+        );
+        // A struct scrutinee: kind 2, and the field kinds come from the
+        // `defstruct`.
+        assert_eq!(
+            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor point 0 false (pat-bind a) (pat-wild)) (var a)))"),
+            r#"(match false (var "p" false) (((pat-ctor 0 ((pat-bind "a") (pat-wild)) 2 (1 1) false ()) var "a" false)) 2)"#
+        );
+    }
+
+    /// A multi-form arm body collapses to a `let` with no bindings, which is
+    /// what `progn` already is on both sides — the island compiles exactly one
+    /// form per arm.
+    #[test]
+    fn a_multi_form_arm_body_becomes_a_progn() {
+        assert_eq!(
+            bridged_with(&DEFS, "(match (var v) sexpr ((pat-wild) (int 1) (int 2)))"),
+            r#"(match false (var "v" false) (((pat-wild) let () (int 1) (int 2))) 0)"#
+        );
+    }
+
+    /// Whatever the literal's kind, the island compares against one
+    /// `const-i64` — there is no `char`/`bool` conversion primitive in the
+    /// compiled language, so the conversion happens here.
+    #[test]
+    fn a_literal_pattern_is_reduced_to_one_integer() {
+        let printed = bridged_with(
+            &DEFS,
+            r"(match (var v) sexpr ((pat-lit (int 7)) (int 1)) ((pat-lit (bool true)) (int 2)) ((pat-lit (char #\A)) (int 3)))",
+        );
+        assert!(printed.contains("(pat-lit 7)"), "{}", printed);
+        assert!(printed.contains("(pat-lit 1)"), "{}", printed);
+        assert!(printed.contains("(pat-lit 65)"), "{}", printed);
+    }
+
+    /// A downcast pattern carries the type name it has to test at run time;
+    /// an ordinary one already knows the type statically and carries a
+    /// placeholder.
+    #[test]
+    fn only_a_downcast_pattern_carries_a_type_name() {
+        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point 0 false (pat-wild) (pat-wild)) (int 1)))");
+        assert!(plain.contains("(pat-ctor 0 ((pat-wild) (pat-wild)) 2 (1 1) false ())"), "{}", plain);
+        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point 0 true (pat-wild) (pat-wild)) (int 1)))");
+        assert!(down.contains("true (str (int 112)"), "{}", down);
+        // A whole-value type test always tests, so it always carries one.
+        let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest point (pat-bind p)) (var p)))");
+        assert!(tt.contains(r#"(pat-typetest (str (int 112) (int 111) (int 105) (int 110) (int 116)) (pat-bind "p"))"#), "{}", tt);
+    }
+
+    /// A scalar scrutinee is refused, exactly as the old bridge refused it:
+    /// its classification only accepted a named type, so the island never
+    /// compiled such a match. Keeping that rather than inventing a lowering.
+    #[test]
+    fn a_match_on_a_scalar_is_refused() {
+        let e = refused_with(&DEFS, "(match (var n) int ((pat-lit (int 1)) (int 10)))");
+        assert!(e.contains("a match on a `int` scrutinee has no lowering"), "{}", e);
     }
 
     /// A tag with no translation yet says which tag, rather than emitting
