@@ -5502,6 +5502,7 @@ fn bridge_to_island_text(core_src: &str) -> String {
 fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
     use typelisp::check::core;
     use typelisp::compile::core_bridge::{Ctx, Definitions};
+    use std::collections::HashMap;
     let mut h = Heap::with_capacity(1 << 16);
     h.set_gc_stress(true);
     let r = Reader::new();
@@ -5515,8 +5516,12 @@ fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
     assert_eq!(vs.len(), 1, "expected one core form");
     let form = vs.pop().unwrap();
     h.push_root(form);
-    let island = typelisp::compile::core_bridge::to_island(&mut h, form, Ctx { defs: &definitions })
-        .expect("bridge failed");
+    // No globals: a body reaching one would be an internal error here, which
+    // is exactly what should happen — the real driver promotes them first.
+    let globals = HashMap::new();
+    let island =
+        typelisp::compile::core_bridge::to_island(&mut h, form, Ctx::new(&definitions, &globals))
+            .expect("bridge failed");
     core::print(&h, island)
 }
 
@@ -5663,4 +5668,46 @@ fn the_island_accepts_a_bridged_construct_field_and_match() {
         expect_bool(eval_ok_with_compiler(&format!("(verify {})", src))),
         "the module the island built from the bridged form did not verify"
     );
+}
+
+/// A `loop`/`set`/`break`/`return` body, compiled by the real
+/// `compile-function` and actually run.
+///
+/// Runnable, unlike the `construct`/`match` test above, because integer
+/// bindings and arithmetic touch no GC heap — so this is the one that shows
+/// the bridged control flow *behaves*, not merely that it verifies. It
+/// multiplies by repeated addition, which needs the loop to iterate, the
+/// accumulator's `set` to stick across iterations, and `break` to leave with
+/// the right value.
+#[test]
+fn the_island_runs_a_bridged_loop() {
+    let body = bridge_to_island_text(
+        "(let ((acc int (int 0)) (i int (int 0)))
+           (loop
+             (if (assoc i64 < true () bool (int int) (var i) (var b))
+                 (unit)
+                 (break))
+             (set acc (assoc i64 + true () int (int int) (var acc) (var a)))
+             (set i (assoc i64 + true () int (int int) (var i) (int 1))))
+           (var acc))",
+    );
+    let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
+        "mul",
+        "((a . 0) (b . 0))",
+        &body,
+    )));
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let mul = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("mul")
+            .expect("failed to look up the compiled `mul` function")
+    };
+    for (a, b) in [(6i64, 7i64), (0, 5), (3, 0), (-4, 3)] {
+        let argv = [a, b];
+        assert_eq!(unsafe { mul.call(argv.as_ptr(), argv.len() as u32) }, a * b.max(0), "a={} b={}", a, b);
+    }
 }

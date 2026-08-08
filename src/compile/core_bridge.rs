@@ -56,7 +56,7 @@
 
 use std::collections::HashMap;
 
-use typelisp_mem::{Error, Heap, RootScope, Value};
+use typelisp_mem::{Error, Heap, RootScope, SymId, Value};
 
 use crate::check::core::{self, Items};
 use crate::check::repr::Repr;
@@ -137,10 +137,49 @@ impl Definitions {
     }
 }
 
-/// What a whole translation reads and never changes.
+/// What a translation reads: the fixed part, and the lexical part that grows
+/// as it descends.
+///
+/// `Copy`, so a nested scope re-binds only the field that changed
+/// (`Ctx { reprs: &extended, ..cx }`) instead of restating the rest.
 #[derive(Clone, Copy)]
 pub struct Ctx<'a> {
+    /// The field representations of every type this body can mention.
     pub defs: &'a Definitions,
+    /// Every global this body may reference, already promoted to the
+    /// compiled-global id the island bakes in as a constant. Populated before
+    /// translation starts, so a miss is an internal error rather than
+    /// something to resolve lazily.
+    pub globals: &'a HashMap<Path, usize>,
+    /// Every name in lexical scope, with the representation it was bound at.
+    ///
+    /// The core IR does not repeat a name's representation at each *use* — a
+    /// binder states it once, which is the whole reason `let` has always
+    /// carried one. So the uses that need it (`set`, and the `cellvar` split a
+    /// captured name gets) read it back from here.
+    ///
+    /// Innermost last, and searched backwards, so a shadowing binding wins the
+    /// same way it does at run time.
+    reprs: &'a [(SymId, Repr)],
+}
+
+impl<'a> Ctx<'a> {
+    /// Start a translation with nothing in lexical scope.
+    pub fn new(defs: &'a Definitions, globals: &'a HashMap<Path, usize>) -> Ctx<'a> {
+        Ctx { defs, globals, reprs: &[] }
+    }
+
+    /// This scope's bindings, plus `more` — for a caller to hold while it
+    /// translates the body they are in scope for.
+    fn extended(&self, more: impl IntoIterator<Item = (SymId, Repr)>) -> Vec<(SymId, Repr)> {
+        let mut v = self.reprs.to_vec();
+        v.extend(more);
+        v
+    }
+
+    fn repr_of(&self, name: SymId) -> Option<&Repr> {
+        self.reprs.iter().rev().find(|(n, _)| *n == name).map(|(_, r)| r)
+    }
 }
 
 /// The island's three scrutinee representations, which decide the tag test it
@@ -257,6 +296,49 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         "call" => translate_call(heap, form, cx),
         "assoc" => translate_assoc(heap, form, cx),
 
+        // ---- assignment, loops and globals -------------------------------
+        "set" => translate_set(heap, form, cx),
+        "loop" => {
+            let body = core::fields(heap, form)?;
+            let mut f = Items::new(heap);
+            for e in &body {
+                // Untagged, unlike a call's arguments: these run for effect,
+                // and only whichever `break`/`return` leaves the loop carries
+                // a value out.
+                let v = to_island(f.heap(), *e, cx)?;
+                f.push(v);
+            }
+            f.finish("loop")
+        }
+        "break" => core::tagged(heap, "break", &[]),
+        "return" => {
+            let value = core::field(heap, form, 0);
+            let mut f = Items::new(heap);
+            f.push(Value::Bool(false)); // `is-fn`, unread
+            // A value-less `(return)` becomes an explicit `(unit)` rather than
+            // a tag of its own, so `compile-return` has one shape to handle.
+            let v = match value {
+                Some(value) => to_island(f.heap(), value, cx)?,
+                None => core::tagged(f.heap(), "unit", &[])?,
+            };
+            f.push(v);
+            f.finish("return")
+        }
+        "global" => {
+            let (id, kind) = global_id_and_kind(heap, form, cx)?;
+            core::tagged(heap, "global", &[Value::Int(id), Value::Int(kind)])
+        }
+        "set-global" => {
+            let (id, kind) = global_id_and_kind(heap, form, cx)?;
+            let value = core::field(heap, form, 4).ok_or_else(|| malformed(heap, form))?;
+            let mut f = Items::new(heap);
+            f.push(Value::Int(id));
+            f.push(Value::Int(kind));
+            let v = to_island(f.heap(), value, cx)?;
+            f.push(v);
+            f.finish("set-global")
+        }
+
         // ---- data --------------------------------------------------------
         "construct" => translate_construct(heap, form, cx),
         "field-get" => translate_field(heap, form, "field-get", cx),
@@ -296,6 +378,18 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         }
         core::list(&mut s, &pairs)?
     };
+
+    // The body is translated with the bindings in scope: a `set` on one of
+    // them reads its representation back from there.
+    let mut bound = Vec::with_capacity(binds.len());
+    for b in &binds {
+        let items = heap.list_to_vec(*b)?;
+        let [Value::Symbol(name), repr, _] = items[..] else { return Err(malformed(heap, *b)) };
+        let repr = Repr::read(heap, repr).ok_or_else(|| malformed(heap, *b))?;
+        bound.push((name, repr));
+    }
+    let inner = cx.extended(bound);
+    let cx = Ctx { reprs: &inner, ..cx };
 
     let mut f = Items::new(heap);
     f.push(bindings);
@@ -484,6 +578,60 @@ fn translate_hashtable_op(
         }
     }
     f.finish("hashtable-op")
+}
+
+/// `(set SYM E)` -> `(set "name" kind value-form)`.
+///
+/// `kind` is the *target's* representation, which is why the core IR does not
+/// repeat one here: the binder already stated it, and repeating it at every
+/// assignment would be the same fact recorded twice. The island needs it
+/// because a `setf` overwrites the slot in place while the GC root pushed at
+/// bind time is a snapshot — left unupdated, the new value would sit unrooted
+/// for the rest of the binding's scope, so `compile-set` fixes that same root
+/// entry when the kind says there is one.
+fn translate_set(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let parts = core::fields(heap, form)?;
+    let [Value::Symbol(name), value] = parts[..] else { return Err(malformed(heap, form)) };
+    let repr = cx.repr_of(name).ok_or_else(|| {
+        Error::TypeError(format!(
+            "compile: assignment to `{}`, which is not in scope here (internal error)",
+            heap.symbol_name(name)
+        ))
+    })?;
+    let kind = repr.binding_kind();
+    let name_v = heap.alloc_string(heap.symbol_name(name).to_string());
+    let mut f = Items::new(heap);
+    f.push(name_v);
+    f.push(Value::Int(kind));
+    let v = to_island(f.heap(), value, cx)?;
+    f.push(v);
+    f.finish("set")
+}
+
+/// The compiled-global id and kind shared by `(global ...)` and
+/// `(set-global ...)`, whose leading fields are the same.
+///
+/// The id is looked up rather than resolved: every path this body can reach is
+/// promoted before translation starts, so a miss means the promoter and this
+/// walk have gone out of step — an internal error, not a user-facing one.
+///
+/// A global's storage always holds a properly tagged value, so the kind is
+/// `field_kind`: reading one back into a plain `int` needs the untagging a
+/// struct field read already does, and writing one needs the same tagging.
+fn global_id_and_kind(heap: &Heap, form: Value, cx: Ctx) -> Result<(i64, i64), Error> {
+    let path = core::field(heap, form, 2)
+        .and_then(|v| as_path(heap, v))
+        .ok_or_else(|| malformed(heap, form))?;
+    let repr = core::field(heap, form, 3)
+        .and_then(|v| Repr::read(heap, v))
+        .ok_or_else(|| malformed(heap, form))?;
+    let id = cx.globals.get(&path).copied().ok_or_else(|| {
+        Error::TypeError(format!(
+            "compile: the global `{}` was not promoted before translation (internal error)",
+            path
+        ))
+    })?;
+    Ok((id as i64, repr.field_kind()))
 }
 
 /// `(construct PATH N MUTABLE E...)` -> `(construct is-sexpr mutable
@@ -876,6 +1024,7 @@ fn bignum_form(heap: &mut Heap, n: &num_bigint::BigInt) -> Result<Value, Error> 
 mod tests {
     use super::*;
     use crate::Reader;
+    use std::collections::HashMap;
 
     /// Translate one hand-written core form and print the island form.
     ///
@@ -887,6 +1036,13 @@ mod tests {
         bridged_with(&[], src)
     }
 
+    /// The promoted globals the `global`/`set-global` examples refer to.
+    fn globals() -> HashMap<Path, usize> {
+        [(Path::root("counter"), 3usize), (Path::of(&["m", "total"]), 7)]
+            .into_iter()
+            .collect()
+    }
+
     /// Translate `src` with `defs` (each a `defstruct`/`defenum` core form)
     /// recorded first.
     fn bridged_with(defs: &[&str], src: &str) -> String {
@@ -894,7 +1050,8 @@ mod tests {
         h.set_gc_stress(true);
         let r = Reader::new();
         let definitions = record_all(&mut h, &r, defs);
-        let cx = Ctx { defs: &definitions };
+        let globals = globals();
+        let cx = Ctx::new(&definitions, &globals);
         let mut vs = r.read_all(&mut h, src).expect("read failed");
         assert_eq!(vs.len(), 1, "expected one form in {:?}", src);
         let core_form = vs.pop().unwrap();
@@ -923,7 +1080,8 @@ mod tests {
         let mut h = Heap::with_capacity(1 << 16);
         let r = Reader::new();
         let definitions = record_all(&mut h, &r, defs);
-        let cx = Ctx { defs: &definitions };
+        let globals = globals();
+        let cx = Ctx::new(&definitions, &globals);
         let mut vs = r.read_all(&mut h, src).expect("read failed");
         let core_form = vs.pop().unwrap();
         match to_island(&mut h, core_form, cx) {
@@ -1217,11 +1375,77 @@ mod tests {
         assert!(e.contains("a match on a `int` scrutinee has no lowering"), "{}", e);
     }
 
+    // ---- assignment, loops and globals -----------------------------------
+
+    /// `set`'s kind is the *target's* representation, read back from the
+    /// binder that stated it — the core IR does not repeat one at the
+    /// assignment.
+    #[test]
+    fn set_takes_its_kind_from_the_binding_it_targets() {
+        assert_eq!(
+            bridged("(let ((x int (int 1))) (set x (int 2)))"),
+            r#"(let (((x . 0) int 1)) (set "x" 0 (int 2)))"#
+        );
+        // A `sexpr` binding is the one with a GC root to keep in step.
+        assert_eq!(
+            bridged(r#"(let ((s sexpr (str "a"))) (set s (str "b")))"#),
+            r#"(let (((s . 2) str (int 97))) (set "s" 2 (str (int 98))))"#
+        );
+        // An inner binding shadows an outer one of a different kind.
+        let shadowed = bridged(r#"(let ((x sexpr (str "a"))) (let ((x int (int 1))) (set x (int 2))))"#);
+        assert!(shadowed.contains(r#"(set "x" 0"#), "the inner binding should win: {}", shadowed);
+    }
+
+    /// Assigning to a name no binder introduced is an internal error: the
+    /// island would need a kind, and there is nothing honest to give it.
+    #[test]
+    fn assigning_to_a_name_that_is_not_in_scope_is_refused() {
+        let e = refused("(set nope (int 1))");
+        assert!(e.contains("`nope`, which is not in scope"), "{}", e);
+    }
+
+    #[test]
+    fn a_loop_keeps_its_body_untagged() {
+        assert_eq!(
+            bridged("(loop (int 1) (break))"),
+            "(loop (int 1) (break))"
+        );
+        assert_eq!(bridged("(break)"), "(break)");
+    }
+
+    /// A value-less `return` becomes an explicit unit, so the island has one
+    /// shape to compile rather than two.
+    #[test]
+    fn return_always_carries_a_value() {
+        assert_eq!(bridged("(return (int 3))"), "(return false (int 3))");
+        assert_eq!(bridged("(return)"), "(return false (unit))");
+    }
+
+    /// A global reference is an id resolved here, not a name resolved at run
+    /// time, and a kind that says how to untag the stored value.
+    #[test]
+    fn a_global_becomes_its_promoted_id_and_kind() {
+        assert_eq!(bridged("(global (counter) () counter int)"), "(global 3 1)");
+        assert_eq!(bridged("(global (total) (m) m::total sexpr)"), "(global 7 6)");
+        assert_eq!(
+            bridged("(set-global (counter) () counter int (int 5))"),
+            "(set-global 3 1 (int 5))"
+        );
+    }
+
+    /// A global the driver never promoted is an internal error — the promoter
+    /// and this walk have gone out of step.
+    #[test]
+    fn an_unpromoted_global_is_refused() {
+        let e = refused("(global (missing) () missing int)");
+        assert!(e.contains("was not promoted before translation"), "{}", e);
+    }
+
     /// A tag with no translation yet says which tag, rather than emitting
     /// something the island would misread.
     #[test]
     fn an_untranslated_tag_names_itself() {
-        assert!(refused("(loop (break))").contains("`loop`"), "{}", refused("(loop (break))"));
+        assert!(refused("(lambda ((x int)) int (var x))").contains("`lambda`"));
         assert!(refused("(quote (a b))").contains("`quote`"));
     }
 
