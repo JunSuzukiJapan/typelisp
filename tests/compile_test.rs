@@ -5483,3 +5483,94 @@ fn two_values_of_one_type_are_equalp_across_the_boundary() {
     assert!(conformance_str("(format false \"~a\" (equalp (m::enum-c 5) (m::enum-nested 5)))") == "true");
     assert!(conformance_str("(format false \"~a\" (equalp (m::struct-i 7) (m::struct-c 7)))") == "true");
 }
+
+// ---- the new cons-to-cons bridge ----------------------------------------
+
+/// Translate a hand-written core form with `compile::core_bridge` and give
+/// back the island form as text, ready to splice into a `compile-function`
+/// call.
+///
+/// `gc_stress` is on, so every allocation the translation makes collects
+/// first: a node whose fields the bridge failed to root would be reclaimed
+/// before the node containing it exists.
+fn bridge_to_island_text(core_src: &str) -> String {
+    use typelisp::check::core;
+    let mut h = Heap::with_capacity(1 << 16);
+    h.set_gc_stress(true);
+    let r = Reader::new();
+    let mut vs = r.read_all(&mut h, core_src).expect("read failed");
+    assert_eq!(vs.len(), 1, "expected one core form");
+    let form = vs.pop().unwrap();
+    h.push_root(form);
+    let island = typelisp::compile::core_bridge::to_island(&mut h, form).expect("bridge failed");
+    core::print(&h, island)
+}
+
+/// The whole point of building the bridge before the checker switches: the
+/// island really accepts what it produces.
+///
+/// `the_compiler_body_compiles_a_two_parameter_addition` above hand-writes
+/// the island form and JITs it. This runs the *same* function body through
+/// the same `compile-function`, except that the form comes out of the new
+/// bridge instead of being typed by hand — so a disagreement between the two
+/// vocabularies fails here, while the tree is green and nothing has been
+/// switched over.
+///
+/// The parameter list stays hand-written: it comes from the top-level `defun`
+/// node, which is a later stage. Only the *body* is bridged here.
+#[test]
+fn the_island_compiles_a_body_the_new_bridge_produced() {
+    let body = bridge_to_island_text("(assoc i64 + true () int (int int) (var a) (var b))");
+    // The bridge reproduces exactly the text the hand-written test above
+    // feeds `compile-function` — the two are checked against each other here
+    // rather than only against the island, so a change to either is visible.
+    assert_eq!(body, r#"(assoc "i64" "+" true (0 var "a" false) (0 var "b" false))"#);
+
+    let module = expect_llvm_module(eval_ok_with_compiler(&format!(
+        r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '{})"#,
+        body
+    )));
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let add2 = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("add2")
+            .expect("failed to look up the compiled `add2` function")
+    };
+    let argv: [i64; 2] = [10, 32];
+    assert_eq!(unsafe { add2.call(argv.as_ptr(), argv.len() as u32) }, 42);
+}
+
+/// A body exercising the tags this stage covers beyond a bare method call:
+/// `let` with a kind-carrying binding, `if`, and an integer comparison —
+/// compiled for real, not just compared as text.
+#[test]
+fn the_island_compiles_a_bridged_let_and_if() {
+    let body = bridge_to_island_text(
+        "(let ((d int (assoc i64 - true () int (int int) (var a) (var b))))
+           (if (assoc i64 < true () bool (int int) (var d) (int 0))
+               (assoc i64 - true () int (int int) (int 0) (var d))
+               (var d)))",
+    );
+    let module = expect_llvm_module(eval_ok_with_compiler(&format!(
+        r#"(compile-function (llvm-module::create "mod") "absdiff" '((a . 0) (b . 0)) '{})"#,
+        body
+    )));
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let absdiff = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("absdiff")
+            .expect("failed to look up the compiled `absdiff` function")
+    };
+    for (a, b) in [(10i64, 4i64), (4, 10), (7, 7)] {
+        let argv = [a, b];
+        assert_eq!(unsafe { absdiff.call(argv.as_ptr(), argv.len() as u32) }, (a - b).abs(), "a={} b={}", a, b);
+    }
+}

@@ -638,7 +638,7 @@ fn global_field_kind(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) 
 /// normal compiled method, so it stays on the `assoc` path. `HashTable<K,V>`
 /// shares the `new`/`get`/`set` names but a different `type_name`, so the
 /// [`path_is_builtin`] guard at the call site keeps them apart.
-const VECTOR_BUILTIN_METHODS: [&str; 6] = ["new", "get", "set", "len", "push", "pop"];
+pub(crate) const VECTOR_BUILTIN_METHODS: [&str; 6] = ["new", "get", "set", "len", "push", "pop"];
 
 /// The element `kind` ([`struct_field_kind`]) for a `Vector<T>` method call:
 /// `T` from the receiver's `Vector<T>` type (`args[0]`), or `0` for `new`
@@ -742,7 +742,7 @@ fn translate_vector_method(heap: &mut Heap, method: &str, kind: i64, args: &[Typ
 /// `Expr::Construct` path — there is no *source* `Option::some`/`none` call
 /// site here to translate, so [`translate_hashtable_method`] supplies the
 /// `"option"` type-name form itself.
-const HASHTABLE_BUILTIN_METHODS: [&str; 9] = ["new", "set", "get", "remove", "count", "clear", "keys", "values", "entries"];
+pub(crate) const HASHTABLE_BUILTIN_METHODS: [&str; 9] = ["new", "set", "get", "remove", "count", "clear", "keys", "values", "entries"];
 
 /// The `(K-kind, V-kind)` ([`struct_field_kind`]) for a `HashTable<K,V>`
 /// method call — from the receiver's `HashTable<K,V>` type (`args[0]`), or the
