@@ -34,6 +34,28 @@
 //! The top-level forms have no such counterpart to check against: the bridge
 //! never expressed one, because `TopLevel` was a Rust enum that never reached
 //! the island.
+//!
+//! # Where the representations go
+//!
+//! Settling the vocabulary against one consumer and then writing the other is
+//! what turned this up: the island tags things the first draft had no way to
+//! say. `src/compiler.rs` keeps compiled locals in untagged native registers,
+//! so it needs a `Repr` at every point a value crosses between that world and
+//! the tagged heap — and an *argument* is such a point (`(kind . form)`, read
+//! by `compile-call-args` to decide the GC-root bookkeeping around it), as is
+//! a struct field read or write, and as is a `match` scrutinee.
+//!
+//! The old bridge read all of these off the `Type` hanging on each AST node.
+//! Nothing downstream of the checker has a `Type` any more, so each one is
+//! written into the form instead — as a repr list beside the argument list
+//! (`(call (f) () f (int int) (int 1) (int 2))`), the same parallel-list idiom
+//! `defstruct`/`defenum` already use, rather than as a wrapper around every
+//! argument.
+//!
+//! Deliberately *not* one `Repr` on every node: most nodes' own
+//! representations are never asked for, and putting one everywhere would
+//! recreate `Typed`'s "every node carries a type" shape under a new name. The
+//! rule is that a representation appears exactly where a consumer reads one.
 
 extern crate typelisp;
 use typelisp::check::core;
@@ -162,22 +184,39 @@ fn binding_and_control() {
 
 /// A call carries the same written/home/path triple a global does, and for the
 /// same reason: diagnostics need the name as written, visibility needs the
-/// module it was written in, and dispatch needs the resolved path.
+/// module it was written in, and dispatch needs the resolved path. Then the
+/// argument representations, then the arguments — one list per argument, in
+/// the same order.
+///
+/// `assoc` carries one more: its own *result* representation, ahead of the
+/// argument list. That is what tells the bridge which of the island's builtin
+/// operations a call is, in the case where the receiver is absent —
+/// `(vector::new)` is a `vector-op` and `(scope::new)` over LLVM handles is a
+/// `native-scope` op, and with no receiver to look at, the result is the only
+/// place that says so.
 ///
 /// `fnref`/`methodref`/`compile-fn` have no island counterpart — the bridge
-/// turns a function reference into a closure construction.
+/// turns a function reference into a closure construction, and to build one it
+/// needs the referenced function's parameter representations, since there is
+/// no call site here to read them from. A `&rest` parameter is simply the last
+/// entry (always `sexpr`), so no separate flag is needed.
 #[test]
 fn calls() {
     all_round_trip(&[
-        "(call (f) () f (int 1) (int 2))",
-        "(call (helper) (m) m::helper)",
-        // An instance method on `i64`, `true` meaning it takes a receiver.
-        "(assoc i64 + true () (var a) (var b))",
+        "(call (f) () f (int int) (int 1) (int 2))",
+        "(call (helper) (m) m::helper ())",
+        // An instance method on `i64`, `true` meaning it takes a receiver,
+        // returning an int, over two int arguments.
+        "(assoc i64 + true () int (int int) (var a) (var b))",
         // A static associated function: no receiver.
-        "(assoc point new false () (int 1) (int 2))",
-        "(fnref (f) () f)",
-        "(methodref point new ())",
-        "(apply (var g) (int 1))",
+        "(assoc point new false () struct (int int) (int 1) (int 2))",
+        // A builtin whose result is what identifies it: an empty vector of
+        // ints, which the bridge lowers to a `vector-op` rather than a method
+        // call, because there is no compiled body to call.
+        "(assoc vector new false () (vector int) ())",
+        "(fnref (f) () f (int int))",
+        "(methodref point new () (int int))",
+        "(apply (var g) (int) (int 1))",
         "(compile-fn (fn (f) () f))",
         "(compile-fn (method point new ()))",
     ]);
@@ -191,19 +230,34 @@ fn calls() {
 /// `construct` names the type, the variant index, and whether the value is
 /// mutable. Fields are read and written by index — the *name* was resolved at
 /// check time and is not needed again.
+///
+/// `construct` needs no field representations: it names its type, and a
+/// field's representation is a property of the type, so the bridge reads them
+/// from that type's `defstruct`/`defenum`. `field-get`/`field-set` cannot do
+/// the same — they name only the *index*, and the object is an arbitrary
+/// expression whose type is exactly what the IR no longer carries — so each
+/// spells out the one field's representation it touches.
 #[test]
 fn data() {
     all_round_trip(&[
         "(construct point 0 false (int 1) (int 2))",
         "(construct option 1 false (int 9))",
-        "(field-get (var p) 0)",
-        "(field-set (var p) 1 (int 5))",
+        "(field-get (var p) 0 int)",
+        "(field-set (var p) 1 int (int 5))",
     ]);
 }
 
 // ---- patterns -----------------------------------------------------------
 
-/// A `match` arm is `(pattern body...)`.
+/// A `match` names its scrutinee's representation, then its arms; an arm is
+/// `(pattern body...)`.
+///
+/// The scrutinee representation is what a whole-value `(pat-bind x)` binds at,
+/// since such a pattern names no type of its own. It is also how the island
+/// classifies the scrutinee — tagged `sexpr`, enum box, or boxed struct — for
+/// the tag test it emits, though there it is redundant: each `pat-ctor` names
+/// its own type, and a nested sub-pattern's may differ from its parent's, so
+/// the island reads the per-pattern one and ignores this.
 ///
 /// A constructor pattern carries only the type, the variant index, and whether
 /// it is a downcast. It does *not* carry its fields' representations: a
@@ -214,13 +268,13 @@ fn data() {
 #[test]
 fn patterns() {
     all_round_trip(&[
-        "(match (var v) ((pat-wild) (int 0)))",
-        "(match (var v) ((pat-bind x) (var x)))",
-        "(match (var v) ((pat-lit (int 1)) (int 10)) ((pat-wild) (int 0)))",
-        "(match (var v) ((pat-ctor option 0 false) (int 0)) ((pat-ctor option 1 false (pat-bind x)) (var x)))",
+        "(match (var v) sexpr ((pat-wild) (int 0)))",
+        "(match (var v) int ((pat-bind x) (var x)))",
+        "(match (var v) sexpr ((pat-lit (int 1)) (int 10)) ((pat-wild) (int 0)))",
+        "(match (var v) enum ((pat-ctor option 0 false) (int 0)) ((pat-ctor option 1 false (pat-bind x)) (var x)))",
         // A downcast arm, for matching a trait object against a concrete type.
-        "(match (var d) ((pat-ctor point 0 true (pat-bind p)) (var p)))",
-        "(match (var d) ((pat-typetest point (pat-bind p)) (var p)))",
+        "(match (var d) sexpr ((pat-ctor point 0 true (pat-bind p)) (var p)))",
+        "(match (var d) sexpr ((pat-typetest point (pat-bind p)) (var p)))",
     ]);
     // Each pattern tag standalone as well: a pattern only ever appears nested
     // inside a `match` arm, and `record_tags` reads the outermost head only.
@@ -243,7 +297,7 @@ fn functions() {
     all_round_trip(&[
         "(lambda ((x int)) int (var x))",
         "(lambda () unit (unit))",
-        "(labels ((go ((i int)) int (var i))) (call (go) () go (int 1)))",
+        "(labels ((go ((i int)) int (var i))) (call (go) () go (int) (int 1)))",
     ]);
 }
 
@@ -258,7 +312,10 @@ fn trait_objects() {
         r#"(dyn-new "point" shape ((point area)) () (var p))"#,
         r#"(dyn-new "point" shape ((point area)) ((drawable ((point draw)))) (var p))"#,
         "(dyn-upcast drawable (var d))",
-        "(dyn-call shape area 0 ((point area)) (var d))",
+        // The trailing repr list and arguments are an ordinary call's, the
+        // receiver included — a dynamic call reaches the island as a call
+        // through a vtable slot, so its arguments cross the same boundary.
+        "(dyn-call shape area 0 ((point area)) (dyn) (var d))",
         "(dyn-value (var d))",
     ]);
 }
@@ -275,9 +332,9 @@ fn trait_objects() {
 #[test]
 fn top_level() {
     all_round_trip(&[
-        "(defun m::add ((a int) (b int)) int true (assoc i64 + true () (var a) (var b)))",
+        "(defun m::add ((a int) (b int)) int true (assoc i64 + true () int (int int) (var a) (var b)))",
         "(defun m::nothing () unit false (unit))",
-        "(defmethod point area false ((self struct)) int true (field-get (var self) 0))",
+        "(defmethod point area false ((self struct)) int true (field-get (var self) 0 int))",
         // params, then whether it takes `&rest`, then the `&optional`/`&key`
         // structure, then `pub`, then the body.
         "(defmacro m::when (c body) true (1 () ()) false (quote ()))",

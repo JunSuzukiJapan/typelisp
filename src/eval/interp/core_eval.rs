@@ -306,6 +306,8 @@ impl Interp {
                 let obj = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (field-get ..) has no object".to_string()))?;
                 let idx = int_field(heap, form, 1, "field-get")? as usize;
+                // Field 2 is the field's representation, read by the bridge
+                // and by nothing here.
                 let obj = self.eval_core(heap, obj, env)?;
                 let id = super::expect_struct_box(&obj)?;
                 // No decode. The old evaluator ran the stored word through
@@ -318,7 +320,8 @@ impl Interp {
                 let obj = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (field-set ..) has no object".to_string()))?;
                 let idx = int_field(heap, form, 1, "field-set")? as usize;
-                let val = core::field(heap, form, 2)
+                // Field 2 is the field's representation — see `field-get`.
+                let val = core::field(heap, form, 3)
                     .ok_or_else(|| EvalError::Internal("eval: (field-set ..) has no value".to_string()))?;
                 let mut s = RootScope::new(heap);
                 let obj = self.eval_core(&mut s, obj, env)?;
@@ -609,7 +612,7 @@ impl Interp {
         Ok(Step::Tail(*last, env))
     }
 
-    /// `(apply E E...)` — call the value `E` produces.
+    /// `(apply E (R...) E...)` — call the value `E` produces.
     ///
     /// An interpreted closure's body is entered as a *tail jump*, so a
     /// self-call or a mutual call in tail position costs no stack. The old
@@ -619,7 +622,12 @@ impl Interp {
         let callee = core::field(heap, form, 0)
             .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no callee".to_string()))?;
         let arg_forms = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (apply ..): {}", e)))?;
-        let arg_forms = arg_forms[1..].to_vec();
+        // The callee, the argument representations (the bridge's, not read
+        // here), then the arguments.
+        if arg_forms.len() < 2 {
+            return Err(EvalError::Internal(format!("eval: malformed apply: {}", core::print(heap, form))));
+        }
+        let arg_forms = arg_forms[2..].to_vec();
 
         let mut s = RootScope::new(heap);
         let f = self.eval_core(&mut s, callee, env)?;
@@ -676,7 +684,7 @@ impl Interp {
         Ok(Step::Tail(*last, call_env))
     }
 
-    /// `(match E (P E...) ...)` — the first arm whose pattern matches wins.
+    /// `(match E R (P E...) ...)` — the first arm whose pattern matches wins.
     fn match_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Step, EvalError> {
         let scrut = core::field(heap, form, 0)
             .ok_or_else(|| EvalError::Internal("eval: (match ..) has no scrutinee".to_string()))?;
@@ -689,7 +697,8 @@ impl Interp {
         s.push_root(v);
         let arms = core::fields(&s, form).map_err(|e| EvalError::Internal(format!("eval: (match ..): {}", e)))?;
 
-        for arm in &arms[1..] {
+        // The scrutinee, its representation (the bridge's), then the arms.
+        for arm in arms.iter().skip(2) {
             let parts = s
                 .list_to_vec(*arm)
                 .map_err(|e| EvalError::Internal(format!("eval: (match ..) arm: {}", e)))?;
@@ -772,7 +781,7 @@ impl Interp {
         extend_env(&mut s, &pairs, env)
     }
 
-    /// `(call WRITTEN HOME PATH ARG...)`.
+    /// `(call WRITTEN HOME PATH (R...) ARG...)`.
     ///
     /// Only built-in operators are reachable so far. A call to a user-defined
     /// function needs `FnDef::body` to be a core form, which happens in the
@@ -785,11 +794,13 @@ impl Interp {
         let home = self.name_list(heap, form, 1, "call")?;
 
         let arg_forms = core::fields(heap, form).map_err(|e| EvalError::Internal(format!("eval: (call ..): {}", e)))?;
-        // written, home, path, then the arguments.
-        if arg_forms.len() < 3 {
+        // written, home, path, the argument representations, then the
+        // arguments. The representations are the bridge's; evaluation is
+        // uniform over `Value` and skips them.
+        if arg_forms.len() < 4 {
             return Err(EvalError::Internal(format!("eval: malformed call: {}", core::print(heap, form))));
         }
-        let arg_forms = &arg_forms[3..];
+        let arg_forms = &arg_forms[4..];
 
         let mut s = RootScope::new(heap);
         let mut argv = Vec::with_capacity(arg_forms.len());
@@ -1465,9 +1476,9 @@ mod tests {
         let v = eval_ok(
             &mut h,
             "(let ((x int (int 7)) (y int (int 8)))
-               (call (sexpr-cons) () sexpr-cons
-                 (call (sexpr-cons) () sexpr-cons (int 1) (int 2))
-                 (call (sexpr-cons) () sexpr-cons (var x) (var y))))",
+               (call (sexpr-cons) () sexpr-cons (sexpr sexpr)
+                 (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1) (int 2))
+                 (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var x) (var y))))",
         );
         let tail = h.cdr(v).unwrap();
         assert_eq!(h.car(tail).unwrap(), Value::Int(7));
@@ -1482,7 +1493,7 @@ mod tests {
         let v = eval_ok(
             &mut h,
             "(let ((x int (int 7)))
-               (call (sexpr-cons) () sexpr-cons (int 1) (int 2))
+               (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1) (int 2))
                (var x))",
         );
         assert_eq!(v, Value::Int(7));
@@ -1581,14 +1592,14 @@ mod tests {
     #[test]
     fn a_builtin_call_evaluates_its_arguments_and_applies() {
         let mut h = stress_heap();
-        let v = eval_ok(&mut h, "(call (sexpr-cons) () sexpr-cons (int 1) (int 2))");
+        let v = eval_ok(&mut h, "(call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1) (int 2))");
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
 
         // Arguments are themselves core forms, evaluated left to right.
         let v = eval_ok(
             &mut h,
-            "(let ((a int (int 5))) (call (sexpr-cons) () sexpr-cons (var a) (call (sexpr-cons) () sexpr-cons (int 6) (unit))))",
+            "(let ((a int (int 5))) (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var a) (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 6) (unit))))",
         );
         assert_eq!(h.car(v).unwrap(), Value::Int(5));
         let rest = h.cdr(v).unwrap();
@@ -1598,7 +1609,7 @@ mod tests {
     #[test]
     fn a_call_to_nothing_says_so() {
         let mut h = stress_heap();
-        let e = eval_src(&mut h, "(call (no-such-thing) () no-such-thing)").unwrap_err();
+        let e = eval_src(&mut h, "(call (no-such-thing) () no-such-thing ())").unwrap_err();
         assert!(matches!(e.kind(), EvalError::NoSuchFunction(n) if n == "no-such-thing"), "{:?}", e);
     }
 
@@ -1676,7 +1687,7 @@ mod tests {
     fn a_struct_is_built_read_and_written_through_the_same_box() {
         let mut h = stress_heap();
         assert_eq!(
-            eval_ok(&mut h, "(field-get (construct point 0 true (int 1) (int 2)) 1)"),
+            eval_ok(&mut h, "(field-get (construct point 0 true (int 1) (int 2)) 1 int)"),
             Value::Int(2)
         );
         assert_eq!(
@@ -1684,8 +1695,8 @@ mod tests {
                 &mut h,
                 "(let ((p sexpr (construct point 0 true (int 1) (int 2))))
                    (let ((q sexpr (var p)))
-                     (field-set (var q) 0 (int 9))
-                     (field-get (var p) 0)))",
+                     (field-set (var q) 0 int (int 9))
+                     (field-get (var p) 0 int)))",
             ),
             Value::Int(9)
         );
@@ -1700,8 +1711,8 @@ mod tests {
             eval_ok(
                 &mut h,
                 "(let ((p sexpr (construct point 0 true (int 1) (int 2))))
-                   (field-set (var p) 0 (call (sexpr-cons) () sexpr-cons (int 8) (unit)))
-                   (call (sexpr-car) () sexpr-car (field-get (var p) 0)))",
+                   (field-set (var p) 0 sexpr (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 8) (unit)))
+                   (call (sexpr-car) () sexpr-car (sexpr) (field-get (var p) 0 int)))",
             ),
             Value::Int(8)
         );
@@ -1742,7 +1753,7 @@ mod tests {
         // datum is `eq` to the string it was built from.
         let v = eval_ok(
             &mut h,
-            r#"(let ((s sexpr (str "hi"))) (call (sexpr-cons) () sexpr-cons (var s) (construct sexpr 6 false (var s))))"#,
+            r#"(let ((s sexpr (str "hi"))) (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var s) (construct sexpr 6 false (var s))))"#,
         );
         assert_eq!(h.car(v).unwrap(), h.cdr(v).unwrap());
     }
@@ -1755,7 +1766,7 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (int 2) ((pat-lit (int 1)) (int 10)) ((pat-lit (int 2)) (int 20)) ((pat-wild) (int 99)))",
+                "(match (int 2) int ((pat-lit (int 1)) (int 10)) ((pat-lit (int 2)) (int 20)) ((pat-wild) (int 99)))",
             ),
             Value::Int(20)
         );
@@ -1763,13 +1774,13 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (int 7) ((pat-lit (int 1)) (int 10)) ((pat-wild) (int 99)))",
+                "(match (int 7) int ((pat-lit (int 1)) (int 10)) ((pat-wild) (int 99)))",
             ),
             Value::Int(99)
         );
         // An earlier arm wins even when a later one would also match.
         assert_eq!(
-            eval_ok(&mut h, "(match (int 1) ((pat-wild) (int 10)) ((pat-lit (int 1)) (int 20)))"),
+            eval_ok(&mut h, "(match (int 1) int ((pat-wild) (int 10)) ((pat-lit (int 1)) (int 20)))"),
             Value::Int(10)
         );
     }
@@ -1777,7 +1788,7 @@ mod tests {
     #[test]
     fn a_bind_pattern_binds_the_whole_scrutinee() {
         let mut h = stress_heap();
-        assert_eq!(eval_ok(&mut h, "(match (int 5) ((pat-bind x) (var x)))"), Value::Int(5));
+        assert_eq!(eval_ok(&mut h, "(match (int 5) int ((pat-bind x) (var x)))"), Value::Int(5));
     }
 
     /// A literal pattern is by-value equality, and only for the three types
@@ -1788,10 +1799,10 @@ mod tests {
     fn a_literal_pattern_that_cannot_be_compared_by_value_is_refused() {
         let mut h = stress_heap();
         assert_eq!(
-            eval_ok(&mut h, r"(match (char #\a) ((pat-lit (char #\a)) (int 1)) ((pat-wild) (int 2)))"),
+            eval_ok(&mut h, r"(match (char #\a) char ((pat-lit (char #\a)) (int 1)) ((pat-wild) (int 2)))"),
             Value::Int(1)
         );
-        let e = eval_src(&mut h, r#"(match (str "a") ((pat-lit (str "a")) (int 1)))"#).unwrap_err();
+        let e = eval_src(&mut h, r#"(match (str "a") str ((pat-lit (str "a")) (int 1)))"#).unwrap_err();
         assert!(
             matches!(e.kind(), EvalError::Internal(m) if m.contains("no by-value equality")),
             "{:?}",
@@ -1805,7 +1816,7 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (construct point 0 true (int 1) (int 2))
+                "(match (construct point 0 true (int 1) (int 2)) struct
                    ((pat-ctor point 0 false (pat-bind a) (pat-bind b)) (var b)))",
             ),
             Value::Int(2)
@@ -1813,7 +1824,7 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (construct my-enum 1 false (int 42))
+                "(match (construct my-enum 1 false (int 42)) struct
                    ((pat-ctor my-enum 0 false (pat-bind x)) (int 0))
                    ((pat-ctor my-enum 1 false (pat-bind x)) (var x)))",
             ),
@@ -1830,7 +1841,7 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (construct point 0 true (int 1))
+                "(match (construct point 0 true (int 1)) struct
                    ((pat-ctor other 0 false (pat-bind a)) (int 10))
                    ((pat-wild) (int 99)))",
             ),
@@ -1844,14 +1855,14 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (call (sexpr-cons) () sexpr-cons (int 1) (int 2))
+                "(match (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1) (int 2)) sexpr
                    ((pat-ctor sexpr 0 false) (int 100))
                    ((pat-ctor sexpr 7 false (pat-bind a) (pat-bind d)) (var d)))",
             ),
             Value::Int(2)
         );
         assert_eq!(
-            eval_ok(&mut h, "(match (unit) ((pat-ctor sexpr 0 false) (int 100)) ((pat-wild) (int 0)))"),
+            eval_ok(&mut h, "(match (unit) unit ((pat-ctor sexpr 0 false) (int 100)) ((pat-wild) (int 0)))"),
             Value::Int(100)
         );
     }
@@ -1887,8 +1898,8 @@ mod tests {
 
         let form = read1(
             &mut h,
-            "(match (var p) ((pat-ctor sexpr 10 false (pat-bind segs))
-               (call (sexpr-cons) () sexpr-cons (int 0) (var segs))))",
+            "(match (var p) sexpr ((pat-ctor sexpr 10 false (pat-bind segs))
+               (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 0) (var segs))))",
         );
         h.push_root(form);
 
@@ -1931,11 +1942,11 @@ mod tests {
 
         let form = read1(
             &mut h,
-            "(match (var v)
+            "(match (var v) sexpr
                ((pat-ctor sexpr 7 false
                   (pat-ctor sexpr 10 false (pat-bind l))
                   (pat-ctor sexpr 10 false (pat-bind r)))
-                 (call (sexpr-cons) () sexpr-cons (var l) (var r))))",
+                 (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var l) (var r))))",
         );
         h.push_root(form);
 
@@ -1957,10 +1968,10 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            "(match (construct point 0 true (int 7) (int 8))
+            "(match (construct point 0 true (int 7) (int 8)) struct
                ((pat-ctor point 0 false (pat-bind a) (pat-bind b))
-                 (call (sexpr-cons) () sexpr-cons (int 1) (int 2))
-                 (call (sexpr-cons) () sexpr-cons (var a) (var b))))",
+                 (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1) (int 2))
+                 (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var a) (var b))))",
         );
         assert_eq!(h.car(v).unwrap(), Value::Int(7));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(8));
@@ -1969,7 +1980,7 @@ mod tests {
     #[test]
     fn a_match_with_no_matching_arm_says_so() {
         let mut h = stress_heap();
-        let e = eval_src(&mut h, "(match (int 1) ((pat-lit (int 2)) (int 0)))").unwrap_err();
+        let e = eval_src(&mut h, "(match (int 1) int ((pat-lit (int 2)) (int 0)))").unwrap_err();
         assert!(
             matches!(e.kind(), EvalError::Internal(m) if m.contains("no matching match arm")),
             "{:?}",
@@ -2003,7 +2014,7 @@ mod tests {
             eval_ok(
                 &mut h,
                 "(let ((x int (int 1)))
-                   (match (int 0) ((pat-bind ignored) (set x (int 9))))
+                   (match (int 0) int ((pat-bind ignored) (set x (int 9))))
                    (var x))",
             ),
             Value::Int(9)
@@ -2039,14 +2050,14 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(let ((xs sexpr (call (sexpr-cons) () sexpr-cons (int 1)
-                                   (call (sexpr-cons) () sexpr-cons (int 2)
-                                     (call (sexpr-cons) () sexpr-cons (int 3) (unit)))))
+                "(let ((xs sexpr (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1)
+                                   (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 2)
+                                     (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 3) (unit)))))
                        (last sexpr (unit)))
                    (loop
-                     (if (call (sexpr-null) () sexpr-null (var xs)) (break) (unit))
-                     (set last (call (sexpr-car) () sexpr-car (var xs)))
-                     (set xs (call (sexpr-cdr) () sexpr-cdr (var xs))))
+                     (if (call (sexpr-null) () sexpr-null (sexpr) (var xs)) (break) (unit))
+                     (set last (call (sexpr-car) () sexpr-car (sexpr) (var xs)))
+                     (set xs (call (sexpr-cdr) () sexpr-cdr (sexpr) (var xs))))
                    (var last))",
             ),
             Value::Int(3)
@@ -2097,9 +2108,9 @@ mod tests {
             &mut h,
             "(let ((xs sexpr (unit)) (n sexpr (unit)))
                (loop
-                 (if (call (sexpr-null) () sexpr-null (var n)) (unit) (break))
-                 (set xs (call (sexpr-cons) () sexpr-cons (int 1) (unit)))
-                 (set n (call (sexpr-car) () sexpr-car (var xs)))))",
+                 (if (call (sexpr-null) () sexpr-null (sexpr) (var n)) (unit) (break))
+                 (set xs (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1) (unit)))
+                 (set n (call (sexpr-car) () sexpr-car (sexpr) (var xs)))))",
         );
         h.push_root(form);
         let before = h.root_count();
@@ -2114,18 +2125,18 @@ mod tests {
     fn a_lambda_is_applied_to_its_arguments() {
         let mut h = stress_heap();
         assert_eq!(
-            eval_ok(&mut h, "(apply (lambda ((x int)) int (var x)) (int 5))"),
+            eval_ok(&mut h, "(apply (lambda ((x int)) int (var x)) (int) (int 5))"),
             Value::Int(5)
         );
         assert_eq!(
-            eval_ok(&mut h, "(apply (lambda () int (int 7)) )"),
+            eval_ok(&mut h, "(apply (lambda () int (int 7)) () )"),
             Value::Int(7)
         );
         // Parameters shadow an outer binding of the same name.
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(let ((x int (int 1))) (apply (lambda ((x int)) int (var x)) (int 2)))",
+                "(let ((x int (int 1))) (apply (lambda ((x int)) int (var x)) (int) (int 2)))",
             ),
             Value::Int(2)
         );
@@ -2143,7 +2154,7 @@ mod tests {
                 "(let ((n int (int 10)))
                    (let ((f sexpr (lambda () int (var n))))
                      (let ((n int (int 99)))
-                       (apply (var f)))))",
+                       (apply (var f) ()))))",
             ),
             Value::Int(10)
         );
@@ -2161,7 +2172,7 @@ mod tests {
                 "(let ((n int (int 1)))
                    (let ((f sexpr (lambda () int (var n))))
                      (set n (int 42))
-                     (apply (var f))))",
+                     (apply (var f) ())))",
             ),
             Value::Int(42)
         );
@@ -2170,14 +2181,14 @@ mod tests {
     #[test]
     fn applying_the_wrong_number_of_arguments_says_so() {
         let mut h = stress_heap();
-        let e = eval_src(&mut h, "(apply (lambda ((x int)) int (var x)))").unwrap_err();
+        let e = eval_src(&mut h, "(apply (lambda ((x int)) int (var x)) ())").unwrap_err();
         assert!(matches!(e.kind(), EvalError::Internal(m) if m.contains("arity mismatch")), "{:?}", e);
     }
 
     #[test]
     fn applying_something_that_is_not_a_function_says_so() {
         let mut h = stress_heap();
-        let e = eval_src(&mut h, "(apply (int 1))").unwrap_err();
+        let e = eval_src(&mut h, "(apply (int 1) ())").unwrap_err();
         assert!(matches!(e.kind(), EvalError::Internal(m) if m.contains("not a function")), "{:?}", e);
     }
 
@@ -2189,9 +2200,9 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(labels ((f ((x int)) int (apply (var g) (var x)))
+                "(labels ((f ((x int)) int (apply (var g) (int) (var x)))
                           (g ((y int)) int (var y)))
-                   (apply (var f) (int 3)))",
+                   (apply (var f) (int) (int 3)))",
             ),
             Value::Int(3)
         );
@@ -2200,11 +2211,11 @@ mod tests {
             eval_ok(
                 &mut h,
                 "(labels ((f ((xs sexpr)) sexpr
-                            (if (call (sexpr-null) () sexpr-null (var xs))
+                            (if (call (sexpr-null) () sexpr-null (sexpr) (var xs))
                                 (int 0)
-                                (apply (var f) (call (sexpr-cdr) () sexpr-cdr (var xs))))))
-                   (apply (var f) (call (sexpr-cons) () sexpr-cons (int 1)
-                                    (call (sexpr-cons) () sexpr-cons (int 2) (unit)))))",
+                                (apply (var f) (sexpr) (call (sexpr-cdr) () sexpr-cdr (sexpr) (var xs))))))
+                   (apply (var f) (sexpr) (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 1)
+                                    (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int 2) (unit)))))",
             ),
             Value::Int(0)
         );
@@ -2240,10 +2251,10 @@ mod tests {
         let form = read1(
             &mut h,
             "(labels ((walk ((l sexpr)) sexpr
-                        (if (call (sexpr-null) () sexpr-null (var l))
+                        (if (call (sexpr-null) () sexpr-null (sexpr) (var l))
                             (int 0)
-                            (apply (var walk) (call (sexpr-cdr) () sexpr-cdr (var l))))))
-               (apply (var walk) (var xs)))",
+                            (apply (var walk) (sexpr) (call (sexpr-cdr) () sexpr-cdr (sexpr) (var l))))))
+               (apply (var walk) (sexpr) (var xs)))",
         );
         h.push_root(form);
 
@@ -2299,7 +2310,7 @@ mod tests {
         };
         let env = extend_env(&mut h, &[(name, f)], Value::Empty).unwrap();
         h.push_root(env);
-        let call = read1(&mut h, "(apply (var g) (int 5))");
+        let call = read1(&mut h, "(apply (var g) (int) (int 5))");
         h.push_root(call);
         h.gc();
 
@@ -2312,7 +2323,7 @@ mod tests {
     #[test]
     fn a_compiled_callee_is_named_rather_than_guessed_at() {
         let mut h = stress_heap();
-        let form = read1(&mut h, "(apply (var f))");
+        let form = read1(&mut h, "(apply (var f) ())");
         h.push_root(form);
         let fake = h.alloc_compiled_closure(0, Vec::new(), 0);
         h.push_root(fake);
@@ -2381,7 +2392,7 @@ mod tests {
         }
         let inner = eval_ok(
             &mut h,
-            r#"(field-get (dyn-value (dyn-new "point" shape ((point area)) () (construct point 0 true (int 3)))) 0)"#,
+            r#"(field-get (dyn-value (dyn-new "point" shape ((point area)) () (construct point 0 true (int 3)))) 0 int)"#,
         );
         assert_eq!(inner, Value::Int(3));
     }
@@ -2427,7 +2438,7 @@ mod tests {
             &mut h,
             r#"(let ((b sexpr (dyn-new "point" shape ((point area)) ((named ((point name))))
                                 (construct point 0 true (int 3)))))
-                 (call (sexpr-cons) () sexpr-cons (var b) (dyn-upcast shape (var b))))"#,
+                 (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var b) (dyn-upcast shape (var b))))"#,
         );
         h.push_root(form);
         let interp = Interp::new();

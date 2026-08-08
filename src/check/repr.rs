@@ -21,7 +21,9 @@
 
 use std::collections::HashSet;
 
-use crate::types::{Path, Type};
+use typelisp_mem::{Error, Heap, Value};
+
+use crate::types::{path_is_builtin, Path, Type};
 
 /// A runtime representation.
 ///
@@ -31,7 +33,21 @@ use crate::types::{Path, Type};
 /// `6`. They are kept apart anyway because they are *different things* — the
 /// two projections already treat some of them differently, and a vocabulary
 /// that had pre-merged them could not express that.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// # Why three variants carry an element representation
+///
+/// Neither projection below looks inside a [`Repr::Scope`]/[`Repr::Vector`]/
+/// [`Repr::HashTable`] — a container is one tagged pointer whatever it holds.
+/// The *bridge* does. `src/compiler.rs` has no compiled body for a
+/// `Vector<T>`/`HashTable<K,V>` builtin method, so those calls lower to
+/// dedicated `vector-op`/`hashtable-op` nodes carrying the element kind the
+/// generated code tags and untags the element with; and a `Scope<V>` whose `V`
+/// is an LLVM handle routes to the island's frozen `native-scope` op rather
+/// than the generic method path, which is a decision about `V` alone. The old
+/// bridge read all three straight off the receiver's `Type`. Nothing
+/// downstream of the checker has a `Type` any more, so the element
+/// representation has to be written down here or it is gone.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Repr {
     /// `i32`/`i64` — a raw machine word.
     Int,
@@ -58,8 +74,15 @@ pub enum Repr {
     Enum,
     /// A trait object — a `BoxedObj::Dyn` fat box.
     Dyn,
-    /// `Scope<V>`, the compiler's own binding-frame stack.
-    Scope,
+    /// `Scope<V>`, the compiler's own binding-frame stack, over `V`'s
+    /// representation.
+    Scope(Box<Repr>),
+    /// `Vector<T>` over `T`'s representation. Represented exactly like a
+    /// [`Repr::Struct`] — kept apart only because its element matters; see the
+    /// type's own doc comment.
+    Vector(Box<Repr>),
+    /// `HashTable<K,V>` over `K`'s and `V`'s representations.
+    HashTable(Box<Repr>, Box<Repr>),
     /// A function value: a `BoxedObj::CompiledClosure` reference.
     Fn,
     /// No compiled representation. The one type that genuinely reaches this is
@@ -92,7 +115,23 @@ impl Repr {
             Type::Bignum => Repr::Bignum,
             Type::Ratio => Repr::Ratio,
             Type::Named(p, _) if *p == Path::root("sexpr") => Repr::Sexpr,
-            _ if crate::compile::ast_bridge::is_scope_ty(ty) => Repr::Scope,
+            // The three parametric builtins, ahead of the `structs`/`enums`
+            // arms that would otherwise swallow them. Each classifies to the
+            // same two kinds it did before it had a variant of its own — a
+            // `Vector<T>` is in the struct set, and a `HashTable<K,V>` is in
+            // neither set (it is registered `AdtKind::Sum` but is not one of
+            // the structurally-recognized enums), so they land on
+            // [`Repr::Struct`]'s and [`Repr::None`]'s numbers respectively.
+            Type::Named(p, args) if path_is_builtin(p, "scope") && args.len() == 1 => {
+                Repr::Scope(Box::new(Repr::of(&args[0], structs, enums)))
+            }
+            Type::Named(p, args) if path_is_builtin(p, "vector") && args.len() == 1 => {
+                Repr::Vector(Box::new(Repr::of(&args[0], structs, enums)))
+            }
+            Type::Named(p, args) if path_is_builtin(p, "hashtable") && args.len() == 2 => Repr::HashTable(
+                Box::new(Repr::of(&args[0], structs, enums)),
+                Box::new(Repr::of(&args[1], structs, enums)),
+            ),
             Type::Named(p, _) if structs.contains(p) => Repr::Struct,
             // Not `enums.contains` alone: `Option`/`Result` and the concrete
             // error types are recognized structurally, so they classify
@@ -104,8 +143,9 @@ impl Repr {
         }
     }
 
-    /// The tag written into the core IR, and read back by [`Repr::parse`].
-    pub fn tag(self) -> &'static str {
+    /// This representation's head tag: the whole spelling for a simple one,
+    /// the head of the list for a parametric one.
+    pub fn tag(&self) -> &'static str {
         match self {
             Repr::Int => "int",
             Repr::Float => "float",
@@ -121,34 +161,88 @@ impl Repr {
             Repr::Struct => "struct",
             Repr::Enum => "enum",
             Repr::Dyn => "dyn",
-            Repr::Scope => "scope",
+            Repr::Scope(_) => "scope",
+            Repr::Vector(_) => "vector",
+            Repr::HashTable(..) => "hashtable",
             Repr::Fn => "fn",
             Repr::None => "none",
         }
     }
 
-    /// The inverse of [`Repr::tag`].
-    pub fn parse(tag: &str) -> Option<Repr> {
-        const ALL: [Repr; 17] = [
-            Repr::Int,
-            Repr::Float,
-            Repr::Char,
-            Repr::Bool,
-            Repr::Unit,
-            Repr::Handle,
-            Repr::Str,
-            Repr::Sym,
-            Repr::Bignum,
-            Repr::Ratio,
-            Repr::Sexpr,
-            Repr::Struct,
-            Repr::Enum,
-            Repr::Dyn,
-            Repr::Scope,
-            Repr::Fn,
-            Repr::None,
-        ];
-        ALL.into_iter().find(|r| r.tag() == tag)
+    /// Every simple representation, for [`Repr::read`] and for a test that
+    /// wants to enumerate the vocabulary.
+    pub const SIMPLE: [Repr; 16] = [
+        Repr::Int,
+        Repr::Float,
+        Repr::Char,
+        Repr::Bool,
+        Repr::Unit,
+        Repr::Handle,
+        Repr::Str,
+        Repr::Sym,
+        Repr::Bignum,
+        Repr::Ratio,
+        Repr::Sexpr,
+        Repr::Struct,
+        Repr::Enum,
+        Repr::Dyn,
+        Repr::Fn,
+        Repr::None,
+    ];
+
+    /// Write this representation as the core IR spells it: the bare symbol
+    /// `int`, or the list `(scope handle)` / `(vector int)` /
+    /// `(hashtable str sexpr)`.
+    pub fn write(&self, heap: &mut Heap) -> Result<Value, Error> {
+        match self {
+            Repr::Scope(v) => self.write_parametric(heap, &[v]),
+            Repr::Vector(t) => self.write_parametric(heap, &[t]),
+            Repr::HashTable(k, v) => self.write_parametric(heap, &[k, v]),
+            simple => Ok(simple.write_head(heap)),
+        }
+    }
+
+    fn write_head(&self, heap: &mut Heap) -> Value {
+        heap.intern_symbol(self.tag())
+    }
+
+    fn write_parametric(&self, heap: &mut Heap, args: &[&Repr]) -> Result<Value, Error> {
+        let mut items = Vec::with_capacity(args.len() + 1);
+        let mut scope = typelisp_mem::RootScope::new(heap);
+        items.push(self.write_head(&mut scope));
+        for a in args {
+            let v = a.write(&mut scope)?;
+            scope.push_root(v);
+            items.push(v);
+        }
+        crate::check::core::list(&mut scope, &items)
+    }
+
+    /// The inverse of [`Repr::write`]. `None` for anything that is not a
+    /// representation — a misspelled tag, or a parametric head with the wrong
+    /// number of arguments.
+    pub fn read(heap: &Heap, v: Value) -> Option<Repr> {
+        match v {
+            Value::Symbol(id) => {
+                let name = heap.symbol_name(id);
+                Repr::SIMPLE.iter().find(|r| r.tag() == name).cloned()
+            }
+            Value::Cons(_) => {
+                let items = heap.list_to_vec(v).ok()?;
+                let head = match items.first()? {
+                    Value::Symbol(id) => heap.symbol_name(*id),
+                    _ => return None,
+                };
+                let arg = |i: usize| Repr::read(heap, *items.get(i)?).map(Box::new);
+                match (head, items.len()) {
+                    ("scope", 2) => Some(Repr::Scope(arg(1)?)),
+                    ("vector", 2) => Some(Repr::Vector(arg(1)?)),
+                    ("hashtable", 3) => Some(Repr::HashTable(arg(1)?, arg(2)?)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Whether a binding of this representation needs a GC root pushed around
@@ -170,7 +264,7 @@ impl Repr {
     /// in `release-bindings` off the same number, and that artifact is frozen
     /// until the compiler is rebuilt. Settle it then, with both halves rebuilt
     /// together.
-    pub fn binding_kind(self) -> i64 {
+    pub fn binding_kind(&self) -> i64 {
         /// No bookkeeping at a binding boundary.
         const KIND_PLAIN: i64 = 0;
         /// Push/pop a GC root: the value may point into the managed heap.
@@ -181,7 +275,7 @@ impl Repr {
             | Repr::Bignum
             | Repr::Ratio
             | Repr::Fn
-            | Repr::Scope
+            | Repr::Scope(_)
             | Repr::Enum => KIND_SEXPR,
             Repr::Int
             | Repr::Float
@@ -191,6 +285,10 @@ impl Repr {
             | Repr::Handle
             | Repr::Sym
             | Repr::Struct
+            // A `Vector<T>` is in the struct set and a `HashTable<K,V>` is in
+            // neither, so both already produced this number.
+            | Repr::Vector(_)
+            | Repr::HashTable(..)
             | Repr::Dyn
             | Repr::None => KIND_PLAIN,
         }
@@ -206,7 +304,7 @@ impl Repr {
     /// manipulation instead of duplicating it. `11` is the first number past
     /// that numbering, for `Unit`, which is not a `Sexpr` variant and so has
     /// none to borrow — `0` being taken by the "not representable" case.
-    pub fn field_kind(self) -> i64 {
+    pub fn field_kind(&self) -> i64 {
         match self {
             // A handle joins the integer kind: its representation *is* a plain
             // untraced `i64`, so the int tag/detag bit ops are exactly right
@@ -223,16 +321,25 @@ impl Repr {
             | Repr::Ratio
             | Repr::Sexpr
             | Repr::Struct
+            // Represented exactly like a `defstruct`, which is what it was
+            // classified as before it had a variant of its own.
+            | Repr::Vector(_)
             | Repr::Enum
             | Repr::Dyn
-            | Repr::Scope
+            | Repr::Scope(_)
             | Repr::Fn => 6,
             // Both directions ignore the word they are handed and emit a
             // constant: a unit type has exactly one value, already known from
             // the declared type, so the slot carries no information and only
             // has to hold something the GC can decode safely.
             Repr::Unit => 11,
-            Repr::None => 0,
+            // A `HashTable<K,V>` is in neither the struct set nor the enum
+            // set, so this is the number it already produced. That it shares
+            // the number with the genuine representation gap is an
+            // inconsistency inherited from the classifier this replaced, not a
+            // new one — and, like the `binding_kind` asymmetry above, it is
+            // frozen until the island is rebuilt.
+            Repr::HashTable(..) | Repr::None => 0,
         }
     }
 }
@@ -249,16 +356,55 @@ mod tests {
         (structs, enums)
     }
 
+    /// Every representation the checker can produce survives being written
+    /// into the core IR and read back, nested ones included.
+    ///
+    /// `gc_stress` is on: writing a parametric representation conses, so this
+    /// also says the intermediate element forms stay rooted while their
+    /// siblings are built.
     #[test]
-    fn every_tag_round_trips() {
-        for tag in [
-            "int", "float", "char", "bool", "unit", "handle", "str", "sym", "bignum", "ratio",
-            "sexpr", "struct", "enum", "dyn", "scope", "fn", "none",
-        ] {
-            let r = Repr::parse(tag).unwrap_or_else(|| panic!("no Repr for {:?}", tag));
-            assert_eq!(r.tag(), tag);
+    fn every_representation_round_trips_through_the_core_ir() {
+        let mut h = Heap::with_capacity(1 << 12);
+        h.set_gc_stress(true);
+        let mut all: Vec<Repr> = Repr::SIMPLE.to_vec();
+        all.push(Repr::Scope(Box::new(Repr::Handle)));
+        all.push(Repr::Vector(Box::new(Repr::Int)));
+        all.push(Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr)));
+        // Nested, so `read` is not merely accepting a one-level list.
+        all.push(Repr::Vector(Box::new(Repr::Vector(Box::new(Repr::Enum)))));
+        for r in all {
+            let v = r.write(&mut h).expect("write failed");
+            assert_eq!(Repr::read(&h, v).as_ref(), Some(&r), "did not read back: {:?}", r);
         }
-        assert_eq!(Repr::parse("not-a-repr"), None);
+    }
+
+    /// The spellings themselves, so a rename has to be deliberate.
+    #[test]
+    fn representations_print_as_the_vocabulary_spells_them() {
+        let mut h = Heap::with_capacity(1 << 12);
+        let printed = |h: &mut Heap, r: Repr| {
+            let v = r.write(h).expect("write failed");
+            crate::check::core::print(h, v)
+        };
+        assert_eq!(printed(&mut h, Repr::Int), "int");
+        assert_eq!(printed(&mut h, Repr::Scope(Box::new(Repr::Handle))), "(scope handle)");
+        assert_eq!(printed(&mut h, Repr::Vector(Box::new(Repr::Int))), "(vector int)");
+        assert_eq!(
+            printed(&mut h, Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr))),
+            "(hashtable str sexpr)"
+        );
+    }
+
+    /// Neither a misspelling nor a malformed parametric form is a
+    /// representation.
+    #[test]
+    fn a_malformed_form_is_not_a_representation() {
+        let mut h = Heap::with_capacity(1 << 12);
+        let r = crate::Reader::new();
+        for src in ["not-a-repr", "(vector)", "(vector int int)", "(scope not-a-repr)", "(42)", "()"] {
+            let v = r.read_all(&mut h, src).expect("read failed").pop().unwrap();
+            assert_eq!(Repr::read(&h, v), None, "{:?} should not be a representation", src);
+        }
     }
 
     #[test]
@@ -278,6 +424,16 @@ mod tests {
         assert_eq!(of(Type::Named(Path::root("sexpr"), vec![])), Repr::Sexpr);
         assert_eq!(of(Type::Named(Path::root("point"), vec![])), Repr::Struct);
         assert_eq!(of(Type::Named(Path::root("my-enum"), vec![])), Repr::Enum);
+        // The parametric builtins classify their elements too — the whole
+        // reason they have variants of their own.
+        assert_eq!(
+            of(Type::Named(Path::root("vector"), vec![Type::I64])),
+            Repr::Vector(Box::new(Repr::Int))
+        );
+        assert_eq!(
+            of(Type::Named(Path::root("hashtable"), vec![Type::Str, Type::Bool])),
+            Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Bool))
+        );
         // Recognized structurally rather than through the set — passing an
         // empty one must not turn `Option`/`Result` into `Repr::None`.
         let none: HashSet<Path> = HashSet::new();
@@ -308,21 +464,41 @@ mod tests {
             Repr::Ratio,
             Repr::Sexpr,
             Repr::Struct,
+            Repr::Vector(Box::new(Repr::Int)),
             Repr::Enum,
             Repr::Dyn,
-            Repr::Scope,
+            Repr::Scope(Box::new(Repr::Handle)),
             Repr::Fn,
         ];
         // Every one of them is the passthrough kind at a field boundary...
-        for r in heap_ish {
+        for r in &heap_ish {
             assert_eq!(r.field_kind(), 6, "{:?} should be the passthrough field kind", r);
         }
         // ...but only some of them get a GC root at a binding boundary.
-        let rooted: Vec<Repr> = heap_ish.into_iter().filter(|r| r.binding_kind() == 2).collect();
+        let rooted: Vec<Repr> = heap_ish.iter().filter(|r| r.binding_kind() == 2).cloned().collect();
         assert_eq!(
             rooted,
-            vec![Repr::Str, Repr::Bignum, Repr::Ratio, Repr::Sexpr, Repr::Enum, Repr::Scope, Repr::Fn],
-            "the unrooted heap representations should be exactly Struct/Sym/Dyn"
+            vec![
+                Repr::Str,
+                Repr::Bignum,
+                Repr::Ratio,
+                Repr::Sexpr,
+                Repr::Enum,
+                Repr::Scope(Box::new(Repr::Handle)),
+                Repr::Fn
+            ],
+            "the unrooted heap representations should be exactly Struct/Vector/Sym/Dyn"
         );
+    }
+
+    /// A `HashTable<K,V>` is the one representation that is heap-allocated and
+    /// yet gets neither a root nor a passthrough field kind. Pinned so that
+    /// the inconsistency `field_kind` documents cannot be quietly changed on
+    /// one side while the island's own numbering is frozen.
+    #[test]
+    fn a_hash_table_keeps_the_numbers_it_had_before_it_had_a_variant() {
+        let ht = Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr));
+        assert_eq!(ht.binding_kind(), 0);
+        assert_eq!(ht.field_kind(), 0);
     }
 }
