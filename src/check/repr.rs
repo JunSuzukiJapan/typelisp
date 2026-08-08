@@ -23,7 +23,54 @@ use std::collections::HashSet;
 
 use typelisp_mem::{Error, Heap, Value};
 
-use crate::types::{path_is_builtin, Path, Type};
+use crate::check::registry::AdtKind;
+use crate::types::{path_is_builtin, path_is_builtin_any, Path, Type, LLVM_HANDLE_TYPES};
+
+/// Whether `ty`'s values are LLVM FFI objects held as registry handles — a
+/// plain untraced `i64`, never a heap pointer, which is what keeps the
+/// compiler's own LLVM universe structurally out of the GC heap.
+///
+/// Lives here rather than in the bridge because it is a statement about a
+/// type's *representation*, and [`Repr::of`] is where every such statement is
+/// made. Closure-JIT tier classification must still *exclude* these types
+/// (`Interp::is_jit_tier_ty`) — an interpreted `compile-function` run
+/// JIT-compiling its own `labels` siblings would recurse into itself.
+pub fn is_llvm_handle_ty(ty: &Type) -> bool {
+    matches!(ty, Type::Named(p, _) if path_is_builtin_any(p, &LLVM_HANDLE_TYPES))
+}
+
+/// Whether `ty` is a `Scope<V>`, for any `V`.
+///
+/// Every scope is one heap object (`StructPayload::Frames`) regardless of its
+/// element type, so this needs no recursion — unlike the handle test above,
+/// which a `Scope<llvm-value>` used to satisfy back when such a scope was a
+/// Rust-native object behind a registry handle.
+pub fn is_scope_ty(ty: &Type) -> bool {
+    matches!(ty, Type::Named(p, args) if path_is_builtin(p, "scope") && args.len() == 1)
+}
+
+/// Whether `ty` is `Option`/`Result`/a built-in error type/a user `defenum`,
+/// the latter decided by `kind_of` (see [`Repr::of_by`]).
+///
+/// `kind_of` alone is not enough: `Option`/`Result` and the concrete error
+/// types are recognized *structurally*, so a caller whose lookup does not know
+/// them still classifies them correctly.
+pub fn is_enum_ty_by(ty: &Type, kind_of: &dyn Fn(&Path) -> Option<AdtKind>) -> bool {
+    match ty {
+        Type::Named(p, args) if path_is_builtin(p, "option") && args.len() == 1 => true,
+        Type::Named(p, args) if path_is_builtin(p, "result") && args.len() == 2 => true,
+        Type::Named(p, _) if crate::check::registry::is_builtin_error_type(p) => true,
+        Type::Named(p, _) => kind_of(p) == Some(AdtKind::Sum),
+        _ => false,
+    }
+}
+
+/// [`is_enum_ty_by`] over the pre-resolved set form — the shape the compile
+/// pipeline hands around, where a path is an enum exactly when it is in the
+/// set.
+pub fn is_enum_ty(ty: &Type, enums: &HashSet<Path>) -> bool {
+    is_enum_ty_by(ty, &|p| if enums.contains(p) { Some(AdtKind::Sum) } else { None })
+}
 
 /// A runtime representation.
 ///
@@ -103,9 +150,33 @@ impl Repr {
     /// handle and a `Scope<V>` are both `Type::Named`, and so is every struct
     /// and enum), so each earlier arm is also an exclusion for the later ones.
     pub fn of(ty: &Type, structs: &HashSet<Path>, enums: &HashSet<Path>) -> Repr {
+        Repr::of_by(ty, &|p| {
+            if structs.contains(p) {
+                Some(AdtKind::Struct)
+            } else if enums.contains(p) {
+                Some(AdtKind::Sum)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Classify `ty`, resolving a nominal type's kind through `kind_of`.
+    ///
+    /// The form the checker uses: it has a live [`Registry`](crate::Registry)
+    /// that is still being *added to* as a file is checked (every `defstruct`
+    /// registers one more type), so it cannot hand over a pair of frozen sets
+    /// without either rebuilding them per node or risking a stale answer for a
+    /// type defined earlier in the same file. A lookup asks the registry at the
+    /// moment the question is put.
+    ///
+    /// Order matters: the guards below are not disjoint as written (an LLVM
+    /// handle and a `Scope<V>` are both `Type::Named`, and so is every struct
+    /// and enum), so each earlier arm is also an exclusion for the later ones.
+    pub fn of_by(ty: &Type, kind_of: &dyn Fn(&Path) -> Option<AdtKind>) -> Repr {
         match ty {
             _ if ty.is_integer() => Repr::Int,
-            _ if crate::compile::ast_bridge::is_llvm_handle_ty(ty) => Repr::Handle,
+            _ if is_llvm_handle_ty(ty) => Repr::Handle,
             _ if ty.is_float() => Repr::Float,
             Type::Char => Repr::Char,
             Type::Bool => Repr::Bool,
@@ -115,28 +186,29 @@ impl Repr {
             Type::Bignum => Repr::Bignum,
             Type::Ratio => Repr::Ratio,
             Type::Named(p, _) if *p == Path::root("sexpr") => Repr::Sexpr,
-            // The three parametric builtins, ahead of the `structs`/`enums`
-            // arms that would otherwise swallow them. Each classifies to the
-            // same two kinds it did before it had a variant of its own — a
-            // `Vector<T>` is in the struct set, and a `HashTable<K,V>` is in
-            // neither set (it is registered `AdtKind::Sum` but is not one of
-            // the structurally-recognized enums), so they land on
-            // [`Repr::Struct`]'s and [`Repr::None`]'s numbers respectively.
+            // The three parametric builtins, ahead of the struct/enum arms
+            // that would otherwise swallow them. Each classifies to the same
+            // two kinds it did before it had a variant of its own — a
+            // `Vector<T>` is `AdtKind::Struct`, and a `HashTable<K,V>` is
+            // `AdtKind::Sum` but not one of the structurally-recognized enums,
+            // so they land on [`Repr::Struct`]'s and [`Repr::None`]'s numbers
+            // respectively. Their being ahead is also what keeps a
+            // registry-backed `kind_of` (which *does* know `hashtable`/`scope`
+            // are `Sum`) answering the same as the pre-resolved set form.
             Type::Named(p, args) if path_is_builtin(p, "scope") && args.len() == 1 => {
-                Repr::Scope(Box::new(Repr::of(&args[0], structs, enums)))
+                Repr::Scope(Box::new(Repr::of_by(&args[0], kind_of)))
             }
             Type::Named(p, args) if path_is_builtin(p, "vector") && args.len() == 1 => {
-                Repr::Vector(Box::new(Repr::of(&args[0], structs, enums)))
+                Repr::Vector(Box::new(Repr::of_by(&args[0], kind_of)))
             }
-            Type::Named(p, args) if path_is_builtin(p, "hashtable") && args.len() == 2 => Repr::HashTable(
-                Box::new(Repr::of(&args[0], structs, enums)),
-                Box::new(Repr::of(&args[1], structs, enums)),
-            ),
-            Type::Named(p, _) if structs.contains(p) => Repr::Struct,
-            // Not `enums.contains` alone: `Option`/`Result` and the concrete
-            // error types are recognized structurally, so they classify
-            // correctly even where no set is available.
-            _ if crate::compile::ast_bridge::is_enum_ty(ty, enums) => Repr::Enum,
+            Type::Named(p, args) if path_is_builtin(p, "hashtable") && args.len() == 2 => {
+                Repr::HashTable(Box::new(Repr::of_by(&args[0], kind_of)), Box::new(Repr::of_by(&args[1], kind_of)))
+            }
+            Type::Named(p, _) if kind_of(p) == Some(AdtKind::Struct) => Repr::Struct,
+            // Not the lookup alone: `Option`/`Result` and the concrete error
+            // types are recognized structurally, so they classify correctly
+            // even where the lookup does not know them.
+            _ if is_enum_ty_by(ty, kind_of) => Repr::Enum,
             Type::Dyn(..) => Repr::Dyn,
             Type::Fn(..) => Repr::Fn,
             _ => Repr::None,

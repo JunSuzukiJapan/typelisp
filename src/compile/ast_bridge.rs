@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use super::freevars::{labels_free_vars, lambda_free_vars, names_captured_by_nested};
 use crate::type_key::type_key_of;
 use crate::types::{
-    path_is_builtin, path_is_builtin_any, LLVM_HANDLE_TYPES, LLVM_METHOD_RECEIVER_TYPES,
+    path_is_builtin, path_is_builtin_any, LLVM_METHOD_RECEIVER_TYPES,
 };
 use crate::{Arm, Error, Expr, Heap, LabelDef, Path, Pattern, QuotedSexpr, RootScope, Type, Typed, Value};
 #[cfg(test)]
@@ -417,19 +417,7 @@ fn binding_kind(ty: &Type, enums: &HashSet<Path>) -> i64 {
 /// classification must still *exclude* these types
 /// (`Interp::is_jit_tier_ty`) — an interpreted `compile-function` run
 /// JIT-compiling its own `labels` siblings would recurse into itself.
-pub(crate) fn is_llvm_handle_ty(ty: &Type) -> bool {
-    matches!(ty, Type::Named(p, _) if path_is_builtin_any(p, &LLVM_HANDLE_TYPES))
-}
-
-/// Whether `ty` is a `Scope<V>`, for any `V`.
-///
-/// Every scope is one heap object (`StructPayload::Frames`) regardless of its
-/// element type, so this needs no recursion — unlike the handle test above,
-/// which a `Scope<llvm-value>` used to satisfy back when such a scope was a
-/// Rust-native object behind a registry handle.
-pub(crate) fn is_scope_ty(ty: &Type) -> bool {
-    matches!(ty, Type::Named(p, args) if path_is_builtin(p, "scope") && args.len() == 1)
-}
+pub(crate) use crate::check::repr::is_llvm_handle_ty;
 
 /// The stable operation id compiled code passes as `rt_llvm_call`'s first
 /// argument: FNV-1a over `"type-key::method"`, folded into a tagged-`Sexpr`
@@ -490,22 +478,6 @@ fn llvm_assoc_key(type_name: &Path, instance: bool, args: &[Typed], node_ty: &Ty
             }
         }
         _ => None,
-    }
-}
-
-/// Whether `ty` is `Option`/`Result`/a built-in error type/a user `defenum`
-/// in `enums`.
-///
-/// The `enums` set alone is not enough: `Option`/`Result` and the concrete
-/// error types are recognized *structurally*, so a caller that has no set to
-/// hand over still classifies them correctly.
-pub(crate) fn is_enum_ty(ty: &Type, enums: &HashSet<Path>) -> bool {
-    match ty {
-        Type::Named(p, args) if path_is_builtin(p, "option") && args.len() == 1 => true,
-        Type::Named(p, args) if path_is_builtin(p, "result") && args.len() == 2 => true,
-        Type::Named(p, _) if crate::check::registry::is_builtin_error_type(p) => true,
-        Type::Named(p, _) => enums.contains(p),
-        _ => false,
     }
 }
 

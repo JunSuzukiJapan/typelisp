@@ -15,6 +15,7 @@ use crate::name_lexer::{NameLexer, NameTok};
 use super::semantic::{TypeKind, TypeUse};
 
 use super::ast::{Arm, CompileTarget, Expr, MacroLambda, Pattern, QuotedSexpr, Ref, Typed};
+use super::repr::Repr;
 use super::registry::{AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
@@ -721,6 +722,24 @@ impl Checker {
     /// `textDocument/semanticTokens` (`crate::check::semantic`).
     pub fn take_type_uses(&self) -> Vec<TypeUse> {
         std::mem::take(&mut *self.type_uses.borrow_mut())
+    }
+
+    /// How `ty`'s values are represented at runtime — the only residue of the
+    /// type system the lowered form carries (see [`Repr`]).
+    ///
+    /// Resolved through the live [`Registry`] rather than a pair of frozen
+    /// struct/enum sets: a file's own `defstruct` is registered as that file is
+    /// checked, so a set snapshotted at entry would answer `None` for a type
+    /// defined a few forms earlier.
+    fn repr(&self, ty: &Type) -> Repr {
+        Repr::of_by(ty, &|p| self.reg.type_def(p).map(|d| d.kind))
+    }
+
+    /// [`Self::repr`], written as the core IR spells it — for the repr
+    /// positions in a lowered node (a `let` binding, a call argument, a struct
+    /// field access).
+    fn repr_form(&self, heap: &mut Heap, ty: &Type) -> Result<Value, Error> {
+        self.repr(ty).write(heap)
     }
 
     /// A `Never`-typed placeholder for a sub-expression that failed to check.

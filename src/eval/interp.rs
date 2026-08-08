@@ -660,7 +660,7 @@ impl Interp {
         // otherwise try to JIT its own `labels` siblings, recursing into
         // itself. Once the island is AOT-loaded its closures are built by
         // native code and never reach this classification at all.
-        if crate::compile::ast_bridge::is_llvm_handle_ty(ty) {
+        if crate::check::repr::is_llvm_handle_ty(ty) {
             return false;
         }
         let (struct_types, enum_defs) = self.root.borrow().collect_struct_and_enum_types();
@@ -2094,7 +2094,7 @@ impl Interp {
                     // stay ahead of the catch-all, exactly as the matching
                     // check in `decode_compiled_return` stays ahead of
                     // `is_boxed_sexpr_type`.
-                    Some(t) if crate::compile::ast_bridge::is_llvm_handle_ty(t) => match v {
+                    Some(t) if crate::check::repr::is_llvm_handle_ty(t) => match v {
                         Value::Int(h) => Ok(*h),
                         other => Err(EvalError::Internal(format!(
                             "compiled call: expected an llvm handle argument, got {:?}",
@@ -2138,7 +2138,7 @@ impl Interp {
         // back to the Rust-native `RtValue::Scope` the interpreter works with.
         // Checked before every other arm since these are `Type::Named` and
         // would otherwise be misread by `is_boxed_sexpr_type`'s catch-all.
-        if crate::compile::ast_bridge::is_llvm_handle_ty(ret_ty) {
+        if crate::check::repr::is_llvm_handle_ty(ret_ty) {
             return match llvm_handle_get(raw) {
                 Some(_) => Ok(Value::Int(raw)),
                 None => Err(EvalError::Internal(format!("compiled call returned dangling llvm handle {}", raw))),
@@ -7166,7 +7166,7 @@ struct LlvmOp {
 }
 
 fn llvm_arg_kind(ty: &Type) -> LlvmArgK {
-    if crate::compile::ast_bridge::is_llvm_handle_ty(ty) {
+    if crate::check::repr::is_llvm_handle_ty(ty) {
         LlvmArgK::Handle
     } else if ty.is_integer() {
         LlvmArgK::Int
@@ -7180,7 +7180,7 @@ fn llvm_arg_kind(ty: &Type) -> LlvmArgK {
 }
 
 fn llvm_ret_kind(ty: &Type) -> LlvmRetK {
-    if crate::compile::ast_bridge::is_llvm_handle_ty(ty) {
+    if crate::check::repr::is_llvm_handle_ty(ty) {
         LlvmRetK::Handle
     } else {
         match ty {
