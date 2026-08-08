@@ -5519,9 +5519,12 @@ fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
     // No globals: a body reaching one would be an internal error here, which
     // is exactly what should happen — the real driver promotes them first.
     let globals = HashMap::new();
-    let island =
-        typelisp::compile::core_bridge::to_island(&mut h, form, Ctx::new(&definitions, &globals))
-            .expect("bridge failed");
+    // What the driver does before translating a body: any binding something
+    // nested captures must be a cell from the moment it is bound.
+    let cells = typelisp::compile::core_freevars::names_captured_by_nested(&h, &[form])
+        .expect("the capture walk failed");
+    let cx = Ctx::new(&definitions, &globals).with_cell_names(&cells);
+    let island = typelisp::compile::core_bridge::to_island(&mut h, form, cx).expect("bridge failed");
     core::print(&h, island)
 }
 
@@ -5594,42 +5597,16 @@ fn the_island_compiles_a_bridged_let_and_if() {
     }
 }
 
-/// Every runtime function the island can emit a call to.
-///
-/// `Interp::compile_function` declares the whole set into its module before
-/// compiling anything (its `declare_external_function` loop). A test calling
-/// `compile-function` directly gets an empty module instead, so any body that
-/// touches the runtime at all — anything past pure arithmetic — has to declare
-/// them itself or the island's `get-function` aborts. `add-function` builds
-/// the same uniform signature `declare_external_function` does, so declaring
-/// them from typelisp source is equivalent.
-///
-/// Taken from `compiler.rs`'s own `(get-function m "rt_...")` sites, so it
-/// cannot drift out of date silently: a name the island learns to call and
-/// this list does not have fails loudly, by aborting.
-const ISLAND_RUNTIME_CALLS: &[&str] = &[
-    "rt_bignum_cmp", "rt_bignum_new", "rt_bignum_to_int_raw", "rt_box_kind",
-    "rt_car", "rt_cdr", "rt_cell_get", "rt_cell_new",
-    "rt_cell_set", "rt_char_equalp", "rt_cons", "rt_data_field",
-    "rt_data_new", "rt_data_variant", "rt_dyn_new", "rt_dyn_upcast",
-    "rt_dyn_value", "rt_dyn_vtable", "rt_float_new", "rt_float_to_bignum",
-    "rt_float_to_ratio", "rt_float_value", "rt_global_get", "rt_global_new",
-    "rt_global_set", "rt_hashtable_clear", "rt_hashtable_contains", "rt_hashtable_count",
-    "rt_hashtable_new", "rt_hashtable_set", "rt_int_to_bignum", "rt_int_to_ratio",
-    "rt_intern_path", "rt_intern_symbol", "rt_list_to_path", "rt_llvm_call",
-    "rt_match_fail", "rt_panic", "rt_path_to_list", "rt_pop_sexpr_root",
-    "rt_push_permanent_sexpr_root", "rt_push_sexpr_root", "rt_ratio_cmp", "rt_ratio_from_bignums",
-    "rt_root_count", "rt_set_sexpr_root", "rt_sexpr_instance_test", "rt_str_append",
-    "rt_str_eq", "rt_str_equalp", "rt_str_length", "rt_str_lt",
-    "rt_str_new", "rt_str_ref", "rt_struct_field_count", "rt_struct_field_get",
-    "rt_struct_field_set", "rt_struct_new", "rt_struct_pop_field", "rt_struct_push_field",
-    "rt_truncate_sexpr_roots", "rt_vtable_slot",
-];
-
 /// `(compile-function ...)` wrapped in a module with the runtime declared.
 fn compile_function_source(name: &str, params: &str, body: &str) -> String {
-    let decls: String =
-        ISLAND_RUNTIME_CALLS.iter().map(|n| format!("(add-function m \"{}\")\n", n)).collect();
+    // The declarations `Interp::compile_function` installs. A test calling
+    // `compile-function` directly gets an empty module instead, and the
+    // island's `get-function` aborts the process on a missing name — so the
+    // set is taken from the driver's own rather than guessed at.
+    let decls: String = typelisp::compile::runtime_function_names()
+        .iter()
+        .map(|n| format!("(add-function m \"{}\")\n", n))
+        .collect();
     format!(
         r#"(let ((m (llvm-module::create "mod")))
              {}
@@ -5710,4 +5687,75 @@ fn the_island_runs_a_bridged_loop() {
         let argv = [a, b];
         assert_eq!(unsafe { mul.call(argv.as_ptr(), argv.len() as u32) }, a * b.max(0), "a={} b={}", a, b);
     }
+}
+
+/// A `labels` block with a sibling call, compiled by the real
+/// `compile-function` and run.
+///
+/// Siblings become separate LLVM functions linked by direct calls through the
+/// function environment, which is the claim this shape exists to make — and
+/// runnable, since integer recursion touches no GC heap.
+#[test]
+fn the_island_runs_a_bridged_labels_block() {
+    let body = bridge_to_island_text(
+        "(labels ((go ((n int) (acc int)) int
+                    (if (assoc i64 < true () bool (int int) (var n) (int 1))
+                        (var acc)
+                        (apply (var go) (int int)
+                          (assoc i64 - true () int (int int) (var n) (int 1))
+                          (assoc i64 * true () int (int int) (var acc) (var n))))))
+           (apply (var go) (int int) (var a) (int 1)))",
+    );
+    let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
+        "fact",
+        "((a . 0))",
+        &body,
+    )));
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let fact = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("fact")
+            .expect("failed to look up the compiled `fact` function")
+    };
+    for (n, want) in [(0i64, 1i64), (1, 1), (5, 120), (10, 3628800)] {
+        let argv = [n];
+        assert_eq!(unsafe { fact.call(argv.as_ptr(), argv.len() as u32) }, want, "n={}", n);
+    }
+}
+
+/// A closure that captures a binding, escapes, and is then applied — through
+/// the real `compile-function`.
+///
+/// Verified rather than run: a closure is a GC-heap box, so building one needs
+/// the heap that is gone by the time a JIT'd function could be called. What
+/// this pins is that the island accepts the whole cell/capture shape the
+/// bridge produces — the escaping `lambda`, its captured slot, and the
+/// indirect application of the result.
+#[test]
+fn the_island_accepts_a_bridged_escaping_closure() {
+    let body = bridge_to_island_text(
+        "(let ((n int (var a)))
+           (let ((f fn (lambda ((x int)) int (assoc i64 + true () int (int int) (var x) (var n)))))
+             (apply (var f) (int) (int 1))))",
+    );
+    // The capture really is a cell on both sides of the boundary.
+    assert!(body.contains("(n . 11)"), "the captured binding should be a cell: {}", body);
+    // No leading paren in the pattern: this reference sits in an argument
+    // position, so it is spelled `(0 cellvar "n" 1)` — the kind, then the node.
+    assert!(body.contains(r#"cellvar "n" 1"#), "the closure should read through it: {}", body);
+    assert!(body.contains("apply-indirect"), "the closure should be applied through its value: {}", body);
+
+    let src = compile_function_source("addn", "((a . 0))", &body);
+    let ir = eval_string_with_compiler(&format!("(to-string {})", src));
+    for expected in ["rt_cell_new", "rt_cell_get", "define i64 @addn"] {
+        assert!(ir.contains(expected), "expected {} in the IR:\n{}", expected, ir);
+    }
+    assert!(
+        expect_bool(eval_ok_with_compiler(&format!("(verify {})", src))),
+        "the module the island built from the bridged closure did not verify"
+    );
 }

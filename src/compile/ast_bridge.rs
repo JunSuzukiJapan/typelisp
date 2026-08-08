@@ -158,7 +158,7 @@ pub(crate) fn single_body_expr(body: &[Typed]) -> Typed {
 /// right.
 static LAMBDA_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn fresh_lambda_name(prefix: &str) -> String {
+pub(crate) fn fresh_lambda_name(prefix: &str) -> String {
     let n = LAMBDA_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{}${}", prefix, n)
 }

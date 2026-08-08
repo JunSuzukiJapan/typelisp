@@ -4,10 +4,23 @@
 //! provides the pieces that have to live in Rust: the LLVM context/locking,
 //! and (in later phases) the AST bridge and runtime shims.
 
+/// Every runtime function a compiled body can call, by name.
+///
+/// `Interp::compile_function` declares all of these into its module before it
+/// compiles anything, and the island's `get-function` aborts the process on a
+/// name that is not there. Exposed so anything else that drives
+/// `compile-function` directly — a test standing in for the driver, say — can
+/// install the same declarations, rather than rediscovering the set one abort
+/// at a time. The list is the driver's own, so it cannot drift from it.
+pub fn runtime_function_names() -> Vec<&'static str> {
+    crate::eval::interp::rt_extern_functions().iter().map(|(name, _)| *name).collect()
+}
+
 pub mod aot;
 pub mod ast_bridge;
 pub mod bootstrap;
 pub mod core_bridge;
+pub mod core_freevars;
 pub mod freevars;
 
 /// The shared Rust-only runtime library (`typelisp-rt`, a separate crate —

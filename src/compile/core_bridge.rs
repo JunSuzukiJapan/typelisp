@@ -54,7 +54,7 @@
 //! not good enough — `ast_bridge` balances sixteen pops by hand in one
 //! function, and one `?` skips them all.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use typelisp_mem::{Error, Heap, RootScope, SymId, Value};
 
@@ -64,8 +64,10 @@ use crate::type_key::type_key_of;
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES};
 
 use super::ast_bridge::{
-    llvm_op_id, user_symbol_name, HASHTABLE_BUILTIN_METHODS, VECTOR_BUILTIN_METHODS,
+    fresh_lambda_name, llvm_op_id, user_symbol_name, HASHTABLE_BUILTIN_METHODS,
+    VECTOR_BUILTIN_METHODS,
 };
+use super::core_freevars::{free_vars, names_captured_by_nested};
 
 /// Every field representation of every type this translation can mention.
 ///
@@ -161,12 +163,44 @@ pub struct Ctx<'a> {
     /// Innermost last, and searched backwards, so a shadowing binding wins the
     /// same way it does at run time.
     reprs: &'a [(SymId, Repr)],
+    /// Names that resolve to a *direct* call: the `labels` siblings in scope,
+    /// this def included. Reset to empty inside a `lambda`, which never gets
+    /// direct-call access to an enclosing block's siblings.
+    direct: &'a HashSet<SymId>,
+    /// Names bound to a shared cell rather than an ordinary slot, so that an
+    /// assignment inside a capturing closure is visible everywhere else that
+    /// shares the binding. A reference to one becomes `cellvar` rather than
+    /// `var`, and its binding kind gains the island's `10 +` cell marker.
+    cell_names: &'a HashSet<SymId>,
+    /// Every `labels` sibling reachable from *any* enclosing scope. Unlike
+    /// `direct` this is only ever grown, because a sibling captured as a value
+    /// however many `lambda` boundaries away is still a sibling — the compiler
+    /// boxes it at the capture site — and so must stay out of `cell_names`
+    /// however deep it is found. A sibling can never be assigned to, so there
+    /// is nothing for a cell to share.
+    visible_siblings: &'a HashSet<SymId>,
+    /// The closest enclosing `labels` block's own captured list, copied
+    /// unconditionally into the front of a nested block's.
+    ///
+    /// That padding is what makes every nested block's captured list a prefix
+    /// superset of the one enclosing it: calling an enclosing sibling needs
+    /// that sibling's captures forwarded, and the only way a def here can have
+    /// them to forward is to carry them itself.
+    outer_captured: &'a [SymId],
 }
 
 impl<'a> Ctx<'a> {
     /// Start a translation with nothing in lexical scope.
     pub fn new(defs: &'a Definitions, globals: &'a HashMap<Path, usize>) -> Ctx<'a> {
-        Ctx { defs, globals, reprs: &[] }
+        Ctx {
+            defs,
+            globals,
+            reprs: &[],
+            direct: empty_names(),
+            cell_names: empty_names(),
+            visible_siblings: empty_names(),
+            outer_captured: &[],
+        }
     }
 
     /// This scope's bindings, plus `more` — for a caller to hold while it
@@ -177,9 +211,39 @@ impl<'a> Ctx<'a> {
         v
     }
 
+    /// Start from `names` as the cell set.
+    ///
+    /// A function body's own bindings that something nested inside captures
+    /// have to be cells from the moment they are bound, so the driver computes
+    /// them once — [`core_freevars::names_captured_by_nested`] over the body —
+    /// and hands them in here before translating it. Without this the closure
+    /// would read through a cell the binder never created.
+    ///
+    /// [`core_freevars::names_captured_by_nested`]: super::core_freevars::names_captured_by_nested
+    pub fn with_cell_names(self, names: &'a HashSet<SymId>) -> Ctx<'a> {
+        Ctx { cell_names: names, ..self }
+    }
+
     fn repr_of(&self, name: SymId) -> Option<&Repr> {
         self.reprs.iter().rev().find(|(n, _)| *n == name).map(|(_, r)| r)
     }
+
+    /// The island's kind number for a binding of `name` at `repr`: the plain
+    /// one, or the `10 +` cell marker and the field classification the cell's
+    /// contents are tagged with.
+    fn binding_kind(&self, name: SymId, repr: &Repr) -> i64 {
+        if self.cell_names.contains(&name) {
+            10 + repr.field_kind()
+        } else {
+            repr.binding_kind()
+        }
+    }
+}
+
+/// One shared empty set, so `Ctx::new` can hand out borrows of it.
+fn empty_names() -> &'static HashSet<SymId> {
+    static EMPTY: std::sync::OnceLock<HashSet<SymId>> = std::sync::OnceLock::new();
+    EMPTY.get_or_init(HashSet::new)
 }
 
 /// The island's three scrutinee representations, which decide the tag test it
@@ -198,6 +262,13 @@ const MATCH_KIND_STRUCT: i64 = 2;
 /// checker's side.
 fn untranslated(tag: &str) -> Error {
     Error::TypeError(format!("compile: the bridge has no translation for `{}` yet", tag))
+}
+
+fn unbound(heap: &Heap, name: SymId) -> Error {
+    Error::TypeError(format!(
+        "compile: `{}` is referenced but no binder in scope states its representation (internal error)",
+        heap.symbol_name(name)
+    ))
 }
 
 fn malformed(heap: &Heap, form: Value) -> Error {
@@ -259,16 +330,27 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 
         // ---- variables ---------------------------------------------------
         "var" => {
-            let name = symbol_field(heap, form, 0)?;
-            let name_v = heap.alloc_string(name);
+            let Some(Value::Symbol(name)) = core::field(heap, form, 0) else {
+                return Err(malformed(heap, form));
+            };
+            let is_cell = cx.cell_names.contains(&name);
+            // The slot of a cell binding holds a cell reference rather than
+            // the value, so the island dereferences it and untags the result
+            // per this kind — the same decoder a struct field read uses.
+            let cell_kind =
+                if is_cell { Some(cx.repr_of(name).ok_or_else(|| unbound(heap, name))?.field_kind()) } else { None };
+            let name_v = heap.alloc_string(heap.symbol_name(name).to_string());
             let mut f = Items::new(heap);
             f.push(name_v);
-            // `is-fn`, which `compile-var` does not read — see the module
-            // comment. The `cellvar` split a captured name needs arrives with
-            // `lambda`/`labels`, which is what creates a captured name in the
-            // first place.
-            f.push(Value::Bool(false));
-            f.finish("var")
+            if let Some(kind) = cell_kind {
+                f.push(Value::Int(kind));
+                f.finish("cellvar")
+            } else {
+                // `is-fn`, which `compile-var` does not read — see the module
+                // comment on dead fields.
+                f.push(Value::Bool(false));
+                f.finish("var")
+            }
         }
 
         // ---- binding and control -----------------------------------------
@@ -339,6 +421,13 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             f.finish("set-global")
         }
 
+        // ---- functions ---------------------------------------------------
+        "lambda" => translate_lambda(heap, form, cx),
+        "labels" => translate_labels(heap, form, cx),
+        "apply" => translate_apply(heap, form, cx),
+        "fnref" => translate_fnref(heap, form, cx),
+        "methodref" => translate_methodref(heap, form, cx),
+
         // ---- data --------------------------------------------------------
         "construct" => translate_construct(heap, form, cx),
         "field-get" => translate_field(heap, form, "field-get", cx),
@@ -368,7 +457,8 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             let [name, repr, init] = items[..] else { return Err(malformed(&s, *b)) };
             let Value::Symbol(_) = name else { return Err(malformed(&s, *b)) };
             let Some(repr) = Repr::read(&s, repr) else { return Err(malformed(&s, *b)) };
-            let name_pair = s.cons(name, Value::Int(repr.binding_kind()))?;
+            let Value::Symbol(name_sym) = name else { return Err(malformed(&s, *b)) };
+            let name_pair = s.cons(name, Value::Int(cx.binding_kind(name_sym, &repr)))?;
             s.push_root(name_pair);
             let init = to_island(&mut s, init, cx)?;
             s.push_root(init);
@@ -598,14 +688,19 @@ fn translate_set(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             heap.symbol_name(name)
         ))
     })?;
-    let kind = repr.binding_kind();
+    let is_cell = cx.cell_names.contains(&name);
+    // A cell target takes the field classification, not the root-or-not one:
+    // the island re-tags the new value and writes it *through* the cell, and
+    // the cell reference — the binding's permanent root for its whole
+    // activation — never moves, so there is no root index to fix up.
+    let kind = if is_cell { repr.field_kind() } else { repr.binding_kind() };
     let name_v = heap.alloc_string(heap.symbol_name(name).to_string());
     let mut f = Items::new(heap);
     f.push(name_v);
     f.push(Value::Int(kind));
     let v = to_island(f.heap(), value, cx)?;
     f.push(v);
-    f.finish("set")
+    f.finish(if is_cell { "cellset" } else { "set" })
 }
 
 /// The compiled-global id and kind shared by `(global ...)` and
@@ -632,6 +727,418 @@ fn global_id_and_kind(heap: &Heap, form: Value, cx: Ctx) -> Result<(i64, i64), E
         ))
     })?;
     Ok((id as i64, repr.field_kind()))
+}
+
+/// A `((SYM . kind) ...)` list — a lambda's parameters, or a captured
+/// environment's slots, in the shape `bind-params`/`bind-captures` read.
+fn name_kind_list(heap: &mut Heap, names: &[(SymId, Repr)], cx: Ctx) -> Result<Value, Error> {
+    let mut s = RootScope::new(heap);
+    let mut pairs = Vec::with_capacity(names.len());
+    for (name, repr) in names {
+        let pair = s.cons(Value::Symbol(*name), Value::Int(cx.binding_kind(*name, repr)))?;
+        s.push_root(pair);
+        pairs.push(pair);
+    }
+    core::list(&mut s, &pairs)
+}
+
+/// A `(SYM R)` parameter list, as names with their representations.
+fn params_of(heap: &Heap, list: Value) -> Result<Vec<(SymId, Repr)>, Error> {
+    heap.list_to_vec(list)?
+        .into_iter()
+        .map(|p| {
+            let items = heap.list_to_vec(p)?;
+            match items[..] {
+                [Value::Symbol(name), repr] => Repr::read(heap, repr)
+                    .map(|r| (name, r))
+                    .ok_or_else(|| malformed(heap, p)),
+                _ => Err(malformed(heap, p)),
+            }
+        })
+        .collect()
+}
+
+/// Pair each captured name with the representation the binder that introduced
+/// it stated — which is the whole reason the walk returns bare names.
+fn captured_with_reprs(heap: &Heap, names: &[SymId], cx: Ctx) -> Result<Vec<(SymId, Repr)>, Error> {
+    names
+        .iter()
+        .map(|n| cx.repr_of(*n).cloned().map(|r| (*n, r)).ok_or_else(|| unbound(heap, *n)))
+        .collect()
+}
+
+/// Collapse a body to the single form the island compiles per function:
+/// itself if there is one, a `let` with no bindings — which is what `progn`
+/// already is on both sides — if there are several.
+fn body_form(heap: &mut Heap, body: &[Value], cx: Ctx) -> Result<Value, Error> {
+    match body {
+        [one] => to_island(heap, *one, cx),
+        many => {
+            let mut f = Items::new(heap);
+            let empty = core::list(f.heap(), &[])?;
+            f.push(empty);
+            for e in many {
+                let v = to_island(f.heap(), *e, cx)?;
+                f.push(v);
+            }
+            f.finish("let")
+        }
+    }
+}
+
+/// `(lambda ((SYM R)...) RET-R E...)` -> `(lambda name (captured...)
+/// (param...) body)`.
+///
+/// Every `lambda` tag the island sees is, by construction, one that *escapes*:
+/// a lambda called immediately at its own definition site never reaches here,
+/// because [`translate_apply`] rewrites that into a `labels` block instead. So
+/// `compile-lambda` never has to decide whether to box its result.
+///
+/// The body is translated with an empty `direct` set, matching the walk's own
+/// treatment: a lambda gets no direct-call access to an enclosing block's
+/// siblings, so a sibling named here becomes an ordinary capture — which
+/// resolves correctly, since the island builds this lambda's environment in
+/// the *outer* scope where the sibling is still reachable.
+fn translate_lambda(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let parts = core::fields(heap, form)?;
+    if parts.len() < 2 {
+        return Err(malformed(heap, form));
+    }
+    let params = params_of(heap, parts[0])?;
+    let body: Vec<Value> = parts[2..].to_vec();
+
+    let bound: HashSet<SymId> = params.iter().map(|(n, _)| *n).collect();
+    let captured_names = free_vars(heap, &body, &bound, &HashSet::new())?;
+    let captured = captured_with_reprs(heap, &captured_names, cx)?;
+
+    // This lambda's own cell set: its own bindings that something nested
+    // inside captures, plus every name it captures itself — except a sibling
+    // captured as a value, which is never a mutable binding and so has
+    // nothing for a cell to share.
+    let mut cells = names_captured_by_nested(heap, &body)?;
+    for (n, _) in &captured {
+        if !cx.visible_siblings.contains(n) {
+            cells.insert(*n);
+        }
+    }
+    let no_direct = HashSet::new();
+    let inner_reprs = cx.extended(params.iter().cloned());
+    let inner = Ctx {
+        reprs: &inner_reprs,
+        direct: &no_direct,
+        cell_names: &cells,
+        // A `labels` block nested in this body has no enclosing captured list
+        // to prefix: the island gives a lambda a fresh function environment.
+        outer_captured: &[],
+        ..cx
+    };
+
+    let name_v = heap.alloc_string(fresh_lambda_name("lambda"));
+    let mut f = Items::new(heap);
+    f.push(name_v);
+    // The captured list is classified with the *inner* cell set, since these
+    // names are cells inside the body that receives them.
+    let captured_list = name_kind_list(f.heap(), &captured, inner)?;
+    f.push(captured_list);
+    let param_list = name_kind_list(f.heap(), &params, inner)?;
+    f.push(param_list);
+    let body_v = body_form(f.heap(), &body, inner)?;
+    f.push(body_v);
+    f.finish("lambda")
+}
+
+/// `(labels ((SYM ((SYM R)...) RET-R E...) ...) E...)` -> `(labels
+/// (captured...) ((name (param...) body)...) body)`.
+fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let parts = core::fields(heap, form)?;
+    let Some((defs_list, body)) = parts.split_first() else { return Err(malformed(heap, form)) };
+    let body: Vec<Value> = body.to_vec();
+    let raw_defs = heap.list_to_vec(*defs_list)?;
+
+    struct Def {
+        name: SymId,
+        params: Vec<(SymId, Repr)>,
+        body: Vec<Value>,
+    }
+    let mut defs = Vec::with_capacity(raw_defs.len());
+    for d in &raw_defs {
+        let items = heap.list_to_vec(*d)?;
+        if items.len() < 3 {
+            return Err(malformed(heap, *d));
+        }
+        let Value::Symbol(name) = items[0] else { return Err(malformed(heap, *d)) };
+        defs.push(Def { name, params: params_of(heap, items[1])?, body: items[3..].to_vec() });
+    }
+
+    let mut siblings = cx.direct.clone();
+    siblings.extend(defs.iter().map(|d| d.name));
+
+    // The enclosing block's captured list first, then whatever the defs
+    // themselves refer to — see `Ctx::outer_captured` for why the prefix is
+    // unconditional.
+    let mut captured_names: Vec<SymId> = cx.outer_captured.to_vec();
+    let mut seen: HashSet<SymId> = captured_names.iter().copied().collect();
+    for d in &defs {
+        let bound: HashSet<SymId> = d.params.iter().map(|(n, _)| *n).collect();
+        for n in free_vars(heap, &d.body, &bound, &siblings)? {
+            if seen.insert(n) {
+                captured_names.push(n);
+            }
+        }
+    }
+    let captured = captured_with_reprs(heap, &captured_names, cx)?;
+    // Every name a block captures is a cell, unconditionally.
+    let captured_cells: HashSet<SymId> = captured_names.iter().copied().collect();
+    // Grown, never reset: a lambda nested arbitrarily deep still has to
+    // recognize these names as sibling-derived.
+    let visible: HashSet<SymId> = cx.visible_siblings.union(&siblings).copied().collect();
+
+    let mut f = Items::new(heap);
+    let base = Ctx {
+        direct: &siblings,
+        cell_names: &captured_cells,
+        visible_siblings: &visible,
+        outer_captured: &captured_names,
+        ..cx
+    };
+    let captured_list = name_kind_list(f.heap(), &captured, base)?;
+    f.push(captured_list);
+
+    let defs_out = {
+        let mut s = RootScope::new(f.heap());
+        let mut out = Vec::with_capacity(defs.len());
+        for d in &defs {
+            // A def's own parameter *shadows* a block-captured name it
+            // collides with — they are different bindings that happen to share
+            // a spelling, and inside the def the parameter wins. Subtracting
+            // the parameters before adding this def's own nested captures back
+            // is what keeps a reference to the parameter from reading the
+            // captured cell instead.
+            let param_names: HashSet<SymId> = d.params.iter().map(|(n, _)| *n).collect();
+            let mut cells: HashSet<SymId> = captured_cells.difference(&param_names).copied().collect();
+            cells.extend(names_captured_by_nested(&s, &d.body)?);
+            let inner_reprs = base.extended(d.params.iter().cloned());
+            let inner = Ctx { reprs: &inner_reprs, cell_names: &cells, ..base };
+
+            let def_name = s.symbol_name(d.name).to_string();
+            let name_v = s.alloc_string(def_name);
+            let mut one = Items::new(&mut s);
+            one.push(name_v);
+            let param_list = name_kind_list(one.heap(), &d.params, inner)?;
+            one.push(param_list);
+            let body_v = body_form(one.heap(), &d.body, inner)?;
+            one.push(body_v);
+            let def_v = one.finish_list()?;
+            s.push_root(def_v);
+            out.push(def_v);
+        }
+        core::list(&mut s, &out)?
+    };
+    f.push(defs_out);
+
+    // The trailing body binds no parameters of its own, but a `let` inside it
+    // can still be captured by something nested further in.
+    let mut trailing_cells = captured_cells.clone();
+    trailing_cells.extend(names_captured_by_nested(f.heap(), &body)?);
+    let trailing = Ctx { cell_names: &trailing_cells, ..base };
+    let body_v = body_form(f.heap(), &body, trailing)?;
+    f.push(body_v);
+    f.finish("labels")
+}
+
+/// `(apply E (R...) E...)` -> one of three island nodes, on the callee's
+/// shape.
+///
+/// A `labels` sibling is called directly through the function environment; a
+/// lambda called at its own definition site never escapes, so it needs no
+/// closure at all and becomes a one-def `labels` block instead; anything else
+/// is dispatched through the value at run time.
+fn translate_apply(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let parts = core::fields(heap, form)?;
+    if parts.len() < 2 {
+        return Err(malformed(heap, form));
+    }
+    let callee = parts[0];
+    let reprs = repr_list(heap, parts[1])?;
+    let args = parts[2..].to_vec();
+
+    match (core::op(heap, callee), core::field(heap, callee, 0)) {
+        (Some("var"), Some(Value::Symbol(name))) if cx.direct.contains(&name) => {
+            let name_v = heap.alloc_string(heap.symbol_name(name).to_string());
+            let mut f = Items::new(heap);
+            f.push(name_v);
+            let pairs = arg_pairs(f.heap(), &reprs, &args, cx)?;
+            f.extend(pairs);
+            f.finish("apply")
+        }
+        (Some("lambda"), _) => translate_immediate_lambda_call(heap, callee, parts[1], &args, cx),
+        _ => {
+            let mut f = Items::new(heap);
+            let callee_v = to_island(f.heap(), callee, cx)?;
+            f.push(callee_v);
+            let pairs = arg_pairs(f.heap(), &reprs, &args, cx)?;
+            f.extend(pairs);
+            f.finish("apply-indirect")
+        }
+    }
+}
+
+/// `((lambda (params) body) args...)` — a lambda invoked where it is written.
+///
+/// It never escapes, so it needs no closure. Rather than teach the island a
+/// second way to build essentially the same function, this rewrites the whole
+/// thing into the *core* form for a one-def `labels` block and translates
+/// that. Passing the outer `direct` set through — unlike an escaping lambda —
+/// is deliberate and safe precisely because it does not escape: it is compiled
+/// inside the same scope its call site already has, so it can call outer
+/// siblings directly just as another sibling could.
+fn translate_immediate_lambda_call(
+    heap: &mut Heap,
+    lambda: Value,
+    arg_reprs: Value,
+    args: &[Value],
+    cx: Ctx,
+) -> Result<Value, Error> {
+    let parts = core::fields(heap, lambda)?;
+    if parts.len() < 2 {
+        return Err(malformed(heap, lambda));
+    }
+    let (params, ret, body) = (parts[0], parts[1], parts[2..].to_vec());
+    let name = heap.intern_symbol(&fresh_lambda_name("__lambda"));
+
+    let mut s = RootScope::new(heap);
+    s.push_root(name);
+    // `(SYM ((SYM R)...) RET-R E...)`
+    let def = {
+        let mut items = vec![name, params, ret];
+        items.extend(body.iter().copied());
+        core::list(&mut s, &items)?
+    };
+    s.push_root(def);
+    let defs = core::list(&mut s, &[def])?;
+    s.push_root(defs);
+    // `(apply (var NAME) (R...) ARG...)`
+    let callee = core::tagged(&mut s, "var", &[name])?;
+    s.push_root(callee);
+    let call = {
+        let mut items = vec![callee, arg_reprs];
+        items.extend(args.iter().copied());
+        core::tagged(&mut s, "apply", &items)?
+    };
+    s.push_root(call);
+    let block = core::tagged(&mut s, "labels", &[defs, call])?;
+    s.push_root(block);
+    translate_labels(&mut s, block, cx)
+}
+
+/// `(fnref WRITTEN HOME PATH (R...))` -> a non-capturing `lambda` that
+/// forwards every argument to the named function.
+///
+/// A top-level function used as a value reaches the very same closure
+/// machinery a written `lambda` does, rather than needing a second runtime
+/// representation for "function reference". The parameters are synthesized
+/// positionally, which is why the core form has to state their
+/// representations: there is no call site here to read them from. A `&rest`
+/// parameter is simply the last one.
+fn translate_fnref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let path = core::field(heap, form, 2)
+        .and_then(|v| as_path(heap, v))
+        .ok_or_else(|| malformed(heap, form))?;
+    let reprs = repr_list(heap, core::field(heap, form, 3).ok_or_else(|| malformed(heap, form))?)?;
+    let raw = path.last_segment();
+    let target = if crate::eval::interp::is_rt_builtin_name(raw) {
+        raw.to_string()
+    } else {
+        user_symbol_name(&path.segments().join("::"))
+    };
+    forwarding_lambda(heap, "fnref", &reprs, cx, |heap, forwarded| {
+        let name_v = heap.alloc_string(target);
+        let mut f = Items::new(heap);
+        f.push(name_v);
+        f.extend(forwarded.iter().copied());
+        f.finish("call")
+    })
+}
+
+/// `(methodref PATH SYM HOME (R...))` -> the same forwarding wrapper, onto an
+/// instance method instead. Its receiver is simply the first parameter, the
+/// same convention an ordinary method call uses.
+fn translate_methodref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let path = core::field(heap, form, 0)
+        .and_then(|v| as_path(heap, v))
+        .ok_or_else(|| malformed(heap, form))?;
+    let method = symbol_field(heap, form, 1)?;
+    let reprs = repr_list(heap, core::field(heap, form, 3).ok_or_else(|| malformed(heap, form))?)?;
+    forwarding_lambda(heap, "method", &reprs, cx, move |heap, forwarded| {
+        let type_v = heap.alloc_string(path.to_string());
+        let mut f = Items::new(heap);
+        f.push(type_v);
+        let method_v = f.heap().alloc_string(method);
+        f.push(method_v);
+        f.push(Value::Bool(true));
+        f.extend(forwarded.iter().copied());
+        f.finish("assoc")
+    })
+}
+
+/// The wrapper both function-reference forms build: a `lambda` with no
+/// captures whose parameters are `arg0`, `arg1`, ... and whose body is
+/// whatever `call_site` makes of them.
+fn forwarding_lambda(
+    heap: &mut Heap,
+    prefix: &str,
+    reprs: &[Repr],
+    cx: Ctx,
+    call_site: impl FnOnce(&mut Heap, &[Value]) -> Result<Value, Error>,
+) -> Result<Value, Error> {
+    let params: Vec<(SymId, Repr)> = reprs
+        .iter()
+        .enumerate()
+        .map(|(i, r)| match heap.intern_symbol(&format!("arg{}", i)) {
+            Value::Symbol(id) => (id, r.clone()),
+            _ => unreachable!("intern_symbol always returns a symbol"),
+        })
+        .collect();
+    // Nothing is captured and nothing nested captures anything, so no
+    // parameter here is ever a cell.
+    let no_names = HashSet::new();
+    let inner = Ctx { cell_names: &no_names, ..cx };
+
+    let name_v = heap.alloc_string(fresh_lambda_name(prefix));
+    let mut f = Items::new(heap);
+    f.push(name_v);
+    let empty = core::list(f.heap(), &[])?;
+    f.push(empty);
+    let param_list = name_kind_list(f.heap(), &params, inner)?;
+    f.push(param_list);
+
+    // `(kind . (var "argN" false))` for each parameter — the same tagged shape
+    // every argument list uses, built by hand because these references are
+    // synthesized rather than translated from a core form.
+    let forwarded = {
+        let mut s = RootScope::new(f.heap());
+        let mut pairs = Vec::with_capacity(params.len());
+        for (name, repr) in &params {
+            let text = s.symbol_name(*name).to_string();
+            let name_v = s.alloc_string(text);
+            s.push_root(name_v);
+            let var = core::tagged(&mut s, "var", &[name_v, Value::Bool(false)])?;
+            s.push_root(var);
+            let pair = s.cons(Value::Int(repr.binding_kind()), var)?;
+            s.push_root(pair);
+            pairs.push(pair);
+        }
+        pairs
+    };
+    for p in &forwarded {
+        f.push(*p);
+    }
+    let body = call_site(f.heap(), &forwarded)?;
+    // The forwarded pairs were pushed only to keep them rooted while the body
+    // was built; the node's own fields are the first three plus the body.
+    let mut items: Vec<Value> = f.as_slice()[..3].to_vec();
+    items.push(body);
+    core::tagged(f.heap(), "lambda", &items)
 }
 
 /// `(construct PATH N MUTABLE E...)` -> `(construct is-sexpr mutable
@@ -1051,11 +1558,15 @@ mod tests {
         let r = Reader::new();
         let definitions = record_all(&mut h, &r, defs);
         let globals = globals();
-        let cx = Ctx::new(&definitions, &globals);
         let mut vs = r.read_all(&mut h, src).expect("read failed");
         assert_eq!(vs.len(), 1, "expected one form in {:?}", src);
         let core_form = vs.pop().unwrap();
         h.push_root(core_form);
+        // What the driver does before translating a function body: the
+        // bindings something nested captures have to be cells from the start.
+        let cells = crate::compile::core_freevars::names_captured_by_nested(&h, &[core_form])
+            .expect("the capture walk failed");
+        let cx = Ctx::new(&definitions, &globals).with_cell_names(&cells);
         let island =
             to_island(&mut h, core_form, cx).unwrap_or_else(|e| panic!("{:?} did not translate: {}", src, e));
         core::print(&h, island)
@@ -1441,12 +1952,128 @@ mod tests {
         assert!(e.contains("was not promoted before translation"), "{}", e);
     }
 
+    // ---- functions -------------------------------------------------------
+
+    /// A lambda that captures nothing: an empty environment, and its
+    /// parameters classified by their own representations.
+    ///
+    /// The name is process-wide unique, so the assertion matches around it.
+    #[test]
+    fn a_lambda_lists_its_captures_and_parameters() {
+        let printed = bridged("(lambda ((x int)) int (var x))");
+        assert!(
+            printed.ends_with(r#" () ((x . 0)) (var "x" false))"#),
+            "unexpected lambda shape: {}",
+            printed
+        );
+        assert!(printed.starts_with(r#"(lambda "lambda$"#), "{}", printed);
+    }
+
+    /// A captured name is cell-boxed, and every reference to it inside the
+    /// closure reads through the cell — which is what makes an assignment in
+    /// one place visible in another.
+    #[test]
+    fn a_captured_binding_becomes_a_cell() {
+        let printed = bridged("(let ((n int (int 1))) (lambda () int (var n)))");
+        // The binding itself gains the island's `10 +` cell marker over the
+        // int field classification.
+        assert!(printed.starts_with("(let (((n . 11) int 1))"), "the binder should create the cell: {}", printed);
+        // The capture is a cell in the closure that receives it...
+        assert!(printed.contains("((n . 11))"), "{}", printed);
+        // ...and the reference reads through it.
+        assert!(printed.contains(r#"(cellvar "n" 1)"#), "{}", printed);
+    }
+
+    /// A binding no closure captures stays an ordinary slot, so the cell
+    /// machinery is not simply always on.
+    #[test]
+    fn an_uncaptured_binding_stays_a_plain_slot() {
+        let printed = bridged("(let ((n int (int 1))) (lambda ((m int)) int (var m)))");
+        assert!(printed.starts_with("(let (((n . 0)) int 1))") || printed.contains("(n . 0)"), "{}", printed);
+        assert!(!printed.contains("cellvar"), "nothing is captured here: {}", printed);
+    }
+
+    /// An assignment to a captured binding writes *through* the cell, which
+    /// is a different island tag from an ordinary one.
+    #[test]
+    fn assigning_a_captured_binding_writes_through_the_cell() {
+        let printed = bridged("(let ((n int (int 1))) (lambda () unit (set n (int 2))))");
+        assert!(printed.contains(r#"(cellset "n" 1 (int 2))"#), "{}", printed);
+    }
+
+    /// `labels` siblings are callable directly, through the function
+    /// environment rather than as values — so a call to one is `apply`, and
+    /// the sibling never becomes a captured slot.
+    #[test]
+    fn labels_siblings_are_called_directly() {
+        let printed =
+            bridged("(labels ((go ((i int)) int (var i))) (apply (var go) (int) (int 1)))");
+        assert_eq!(printed, r#"(labels () (("go" ((i . 0)) (var "i" false))) (apply "go" (0 int 1)))"#);
+    }
+
+    /// A `labels` block captures what its defs refer to from outside, and
+    /// every captured name is a cell.
+    #[test]
+    fn a_labels_block_captures_what_its_defs_refer_to() {
+        let printed = bridged(
+            "(let ((k int (int 5))) (labels ((go ((i int)) int (var k))) (apply (var go) (int) (int 1))))",
+        );
+        assert!(printed.contains("(labels ((k . 11))"), "the captured list should be a cell: {}", printed);
+        assert!(printed.contains(r#"(cellvar "k" 1)"#), "{}", printed);
+    }
+
+    /// Calling something that is not a sibling dispatches through the value.
+    #[test]
+    fn an_unknown_callee_is_dispatched_indirectly() {
+        assert_eq!(
+            bridged("(let ((f fn (var g))) (apply (var f) (int) (int 1)))"),
+            r#"(let (((f . 2) var "g" false)) (apply-indirect (var "f" false) (0 int 1)))"#
+        );
+    }
+
+    /// A lambda invoked where it is written never escapes, so it becomes a
+    /// one-def `labels` block rather than a closure — no environment is built
+    /// at all.
+    #[test]
+    fn an_immediately_invoked_lambda_becomes_a_labels_block() {
+        let printed = bridged("(apply (lambda ((x int)) int (var x)) (int) (int 2))");
+        assert!(printed.starts_with("(labels () ((\"__lambda$"), "{}", printed);
+        assert!(printed.ends_with(r#"((x . 0)) (var "x" false))) (apply "__lambda$0" (0 int 2)))"#)
+            || printed.contains(r#"((x . 0)) (var "x" false)))"#), "{}", printed);
+        assert!(!printed.contains("apply-indirect"), "it does not escape: {}", printed);
+    }
+
+    /// A top-level function used as a value becomes a forwarding closure, so
+    /// it reaches the same machinery a written lambda does instead of needing
+    /// a second runtime representation.
+    #[test]
+    fn a_function_reference_becomes_a_forwarding_closure() {
+        let printed = bridged("(fnref (f) () f (int int))");
+        assert!(
+            printed.ends_with(
+                r#" () ((arg0 . 0) (arg1 . 0)) (call "tl_f" (0 var "arg0" false) (0 var "arg1" false)))"#
+            ),
+            "{}",
+            printed
+        );
+    }
+
+    #[test]
+    fn a_method_reference_forwards_onto_the_method() {
+        let printed = bridged("(methodref point area () (struct))");
+        assert!(
+            printed.ends_with(r#" () ((arg0 . 0)) (assoc "point" "area" true (0 var "arg0" false)))"#),
+            "{}",
+            printed
+        );
+    }
+
     /// A tag with no translation yet says which tag, rather than emitting
     /// something the island would misread.
     #[test]
     fn an_untranslated_tag_names_itself() {
-        assert!(refused("(lambda ((x int)) int (var x))").contains("`lambda`"));
         assert!(refused("(quote (a b))").contains("`quote`"));
+        assert!(refused("(dyn-value (var d))").contains("`dyn-value`"));
     }
 
     /// A mismatched representation list is an internal error, not something
