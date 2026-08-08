@@ -5781,3 +5781,59 @@ fn the_island_accepts_a_bridged_quoted_datum() {
         "the module the island built from the bridged datum did not verify"
     );
 }
+
+/// A whole top-level `defun`, from core form to a running compiled function.
+///
+/// The most complete statement Stage B can make: nothing here is hand-written
+/// except the core form itself. The mangled name, the parameter list with its
+/// kinds, and the body all come out of the bridge, and the island compiles the
+/// three of them together through the same `compile-function` boundary the
+/// real driver uses.
+#[test]
+fn the_island_runs_a_whole_bridged_defun() {
+    use typelisp::check::core;
+    use typelisp::compile::core_bridge::{top_level_function, Ctx, Definitions};
+    use std::collections::HashMap;
+
+    let mut h = Heap::with_capacity(1 << 16);
+    h.set_gc_stress(true);
+    let r = Reader::new();
+    let definitions = Definitions::new();
+    let globals = HashMap::new();
+    let form = r
+        .read_all(
+            &mut h,
+            "(defun m::clamp ((x int) (lo int) (hi int)) int true
+               (if (assoc i64 < true () bool (int int) (var x) (var lo))
+                   (var lo)
+                   (if (assoc i64 < true () bool (int int) (var hi) (var x))
+                       (var hi)
+                       (var x))))",
+        )
+        .expect("read failed")[0];
+    h.push_root(form);
+    let f = top_level_function(&mut h, form, Ctx::new(&definitions, &globals))
+        .expect("translation failed")
+        .expect("a defun is compiled");
+    assert_eq!(f.name, "tl_m::clamp");
+    let (name, params, body) = (f.name.clone(), core::print(&h, f.params), core::print(&h, f.body));
+    drop(h);
+
+    let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
+        &name, &params, &body,
+    )));
+    let _guard = COMPILE_LOCK.lock().unwrap();
+    let engine = module
+        .borrow()
+        .create_jit_execution_engine(OptimizationLevel::None)
+        .expect("failed to create JIT execution engine");
+    let clamp = unsafe {
+        engine
+            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>(&name)
+            .expect("failed to look up the compiled function")
+    };
+    for (x, want) in [(-5i64, 0i64), (0, 0), (7, 7), (10, 10), (99, 10)] {
+        let argv = [x, 0, 10];
+        assert_eq!(unsafe { clamp.call(argv.as_ptr(), argv.len() as u32) }, want, "x={}", x);
+    }
+}

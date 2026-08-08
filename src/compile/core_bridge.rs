@@ -64,8 +64,8 @@ use crate::type_key::type_key_of;
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES};
 
 use super::ast_bridge::{
-    fresh_lambda_name, DynTables, llvm_op_id, user_symbol_name, HASHTABLE_BUILTIN_METHODS,
-    VECTOR_BUILTIN_METHODS,
+    fresh_lambda_name, llvm_op_id, user_method_symbol_name, user_symbol_name, DynTables,
+    HASHTABLE_BUILTIN_METHODS, VECTOR_BUILTIN_METHODS,
 };
 use super::core_freevars::{free_vars, names_captured_by_nested};
 
@@ -115,6 +115,14 @@ impl Definitions {
                     .map(|v| repr_list(heap, v))
                     .collect::<Result<Vec<_>, _>>()?;
                 self.enums.insert(path, per_variant);
+            }
+            // A module's children are top-level forms too, and a type
+            // defined inside one is just as reachable from a body being
+            // compiled as one at the root.
+            "module" => {
+                for child in core::fields(heap, form)?.iter().skip(1) {
+                    self.record(heap, *child)?;
+                }
             }
             _ => {}
         }
@@ -790,7 +798,114 @@ fn global_id_and_kind(heap: &Heap, form: Value, cx: Ctx) -> Result<(i64, i64), E
     Ok((id as i64, repr.field_kind()))
 }
 
-/// `sexpr`'s own variant numbers, which a quoted datum is built out of.
+/// What `compile-function` takes for one definition: the boundary between
+/// Rust and the self-hosted compiler.
+///
+/// The signature `(module, name, params, body)` is unchanged from the one the
+/// old pipeline used — deliberately, since the island is frozen. What changes
+/// is where the three pieces come from: a `defun` core form rather than a
+/// `TopLevel` enum variant that never reached the island at all.
+#[derive(Debug)]
+pub struct Function {
+    /// The mangled symbol the island declares and calls it under. It has to
+    /// agree with what a `call`/`assoc` at a use site mangles to, so both go
+    /// through the same two functions.
+    pub name: String,
+    /// `((SYM . kind)...)`, which `bind-params` walks.
+    pub params: Value,
+    /// The single form the body collapses to.
+    pub body: Value,
+}
+
+/// The definition `form` compiles to, or `None` if it is not something the
+/// island compiles.
+///
+/// `None` is not a refusal. Most of the top level is genuinely not compiled: a
+/// type definition contributes representations rather than code, a macro is
+/// gone by this point, a `use` or a `load` is a name-resolution act, and a
+/// bare expression at the top level is run rather than compiled. A `module` is
+/// `None` here too — its children are top-level forms in their own right, and
+/// walking into them is the driver's job, not this function's.
+///
+/// The cell set is computed here rather than asked for, unlike everywhere else
+/// a `Ctx` is threaded: a body's own bindings that something nested captures
+/// have to be cells from the moment they are bound, and getting that wrong is
+/// invisible until a closure reads through a cell the binder never made. It is
+/// derivable from the body alone, so it is derived.
+pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Function>, Error> {
+    let Some(tag) = core::op(heap, form).map(str::to_string) else {
+        return Err(malformed(heap, form));
+    };
+    let parts = core::fields(heap, form)?;
+    let (name, params, body) = match tag.as_str() {
+        // `(defun PATH ((SYM R)...) RET-R PUBLIC E...)`
+        "defun" => {
+            if parts.len() < 4 {
+                return Err(malformed(heap, form));
+            }
+            let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+            let raw = path.last_segment();
+            let name = if crate::eval::interp::is_rt_builtin_name(raw) {
+                raw.to_string()
+            } else {
+                user_symbol_name(&path.segments().join("::"))
+            };
+            (name, params_of(heap, parts[1])?, parts[4..].to_vec())
+        }
+        // `(defmethod PATH SYM INSTANCE ((SYM R)...) RET-R PUBLIC E...)`
+        "defmethod" => {
+            if parts.len() < 6 {
+                return Err(malformed(heap, form));
+            }
+            let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+            let method = symbol_field(heap, form, 1)?;
+            (user_method_symbol_name(&path, &method), params_of(heap, parts[3])?, parts[6..].to_vec())
+        }
+        _ => return Ok(None),
+    };
+    if body.is_empty() {
+        return Err(malformed(heap, form));
+    }
+
+    let cells = names_captured_by_nested(heap, &body)?;
+    let reprs = cx.extended(params.iter().cloned());
+    let inner = Ctx { reprs: &reprs, ..cx }.with_cell_names(&cells);
+
+    let mut s = RootScope::new(heap);
+    let param_list = name_kind_list(&mut s, &params, inner)?;
+    s.push_root(param_list);
+    let body_v = body_form(&mut s, &body, inner)?;
+    Ok(Some(Function { name, params: param_list, body: body_v }))
+}
+
+/// `(defvar PATH R MUTABLE PUBLIC E)` -> `(global-init kind value)`, the node
+/// the ahead-of-time compiler's synthesized initializer sequence runs.
+///
+/// There is no id to look up for the global being defined — the runtime
+/// assigns one by call order as the sequence runs — though the initializer may
+/// well refer to *other* globals, which is what `Ctx::globals` is still for.
+///
+/// `None` for anything that is not a `defvar`.
+pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value>, Error> {
+    if core::op(heap, form) != Some("defvar") {
+        return Ok(None);
+    }
+    let parts = core::fields(heap, form)?;
+    let [_, repr, _, _, value] = parts[..] else { return Err(malformed(heap, form)) };
+    let repr = Repr::read(heap, repr).ok_or_else(|| malformed(heap, form))?;
+    let cells = names_captured_by_nested(heap, std::slice::from_ref(&value))?;
+    let inner = cx.with_cell_names(&cells);
+
+    let mut f = Items::new(heap);
+    // A global's storage always holds a properly tagged value, so this is the
+    // field classification — the same one a `global` read untags with.
+    f.push(Value::Int(repr.field_kind()));
+    let v = to_island(f.heap(), value, inner)?;
+    f.push(v);
+    Ok(Some(f.finish("global-init")?))
+}
+
+/// `sexpr`'s own variant numbers, which a quoted datum is built out of./// `sexpr`'s own variant numbers, which a quoted datum is built out of.
 ///
 /// Not a scheme of this module's: these are the variants of the built-in type
 /// (`registry::sexpr_def`), so `compile-construct-sexpr` builds each one the
@@ -2423,6 +2538,120 @@ mod tests {
     fn compiling_a_compile_form_is_refused() {
         let e = refused("(compile-fn (fn (f) () f))");
         assert!(e.contains("interpreter-only"), "{}", e);
+    }
+
+    // ---- the top level ----------------------------------------------------
+
+    /// Translate one top-level form, giving back the boundary triple as text.
+    fn top_level(defs: &[&str], src: &str) -> Option<(String, String, String)> {
+        let mut h = Heap::with_capacity(1 << 16);
+        h.set_gc_stress(true);
+        let r = Reader::new();
+        let definitions = record_all(&mut h, &r, defs);
+        let globals = globals();
+        let cx = Ctx::new(&definitions, &globals);
+        let mut vs = r.read_all(&mut h, src).expect("read failed");
+        let form = vs.pop().unwrap();
+        h.push_root(form);
+        let f = top_level_function(&mut h, form, cx).expect("translation failed")?;
+        Some((f.name.clone(), core::print(&h, f.params), core::print(&h, f.body)))
+    }
+
+    /// A `defun` becomes the triple `compile-function` takes. The mangled name
+    /// is the same one a call site produces, which is the invariant that
+    /// matters: the definition and every reference have to agree.
+    #[test]
+    fn a_defun_becomes_the_boundary_triple() {
+        let (name, params, body) =
+            top_level(&[], "(defun m::add ((a int) (b int)) int true (assoc i64 + true () int (int int) (var a) (var b)))")
+                .expect("a defun is compiled");
+        assert_eq!(name, "tl_m::add");
+        assert_eq!(params, "((a . 0) (b . 0))");
+        assert_eq!(body, r#"(assoc "i64" "+" true (0 var "a" false) (0 var "b" false))"#);
+        // The same mangling a call to it produces.
+        assert!(bridged("(call (add) (m) m::add ())").contains(r#""tl_m::add""#));
+    }
+
+    /// A method mangles through the type path, so two same-named types in
+    /// different modules cannot collide on one symbol.
+    #[test]
+    fn a_defmethod_mangles_through_its_type() {
+        let (name, params, body) =
+            top_level(&[], "(defmethod m::point area false ((self struct)) int true (field-get (var self) 0 int))")
+                .expect("a defmethod is compiled");
+        assert_eq!(name, "tl_m::point::area");
+        assert_eq!(params, "((self . 0))");
+        assert_eq!(body, r#"(field-get () 1 (var "self" false))"#);
+    }
+
+    /// A multi-form body collapses to a `progn`, the same as everywhere else.
+    #[test]
+    fn a_multi_form_body_collapses() {
+        let (_, _, body) = top_level(&[], "(defun f () unit false (int 1) (unit))").expect("compiled");
+        assert_eq!(body, "(let () (int 1) (unit))");
+    }
+
+    /// The cell set is derived from the body rather than asked for, since
+    /// getting it wrong is invisible until a closure reads through a cell the
+    /// binder never made.
+    #[test]
+    fn a_parameter_a_closure_captures_is_a_cell_without_being_told() {
+        let (_, params, body) =
+            top_level(&[], "(defun f ((n int)) fn true (lambda () int (var n)))").expect("compiled");
+        assert_eq!(params, "((n . 11))", "the parameter should be bound as a cell");
+        assert!(body.contains(r#"(cellvar "n" 1)"#), "{}", body);
+    }
+
+    /// Most of the top level is not compiled, and saying so is not a refusal:
+    /// a type definition contributes representations, a macro is already gone,
+    /// a `use` resolves names, and a module's children are forms in their own
+    /// right for the driver to walk.
+    #[test]
+    fn the_rest_of_the_top_level_is_not_compiled() {
+        for src in [
+            "(defstruct point (int int))",
+            "(defenum m::color (red green blue) (() () ()))",
+            "(defmacro m::when (c body) true (1 () ()) false (quote ()))",
+            "(use m::helper other::helper)",
+            r#"(load "lib.typl")"#,
+            "(expr (int 42))",
+            "(module m (expr (int 1)))",
+        ] {
+            assert!(top_level(&[], src).is_none(), "{} should not be compiled as a function", src);
+        }
+    }
+
+    /// A `defvar` becomes the initializer node instead, since a global is set
+    /// up by running its value rather than by being called.
+    #[test]
+    fn a_defvar_becomes_a_global_initializer() {
+        let mut h = Heap::with_capacity(1 << 16);
+        h.set_gc_stress(true);
+        let r = Reader::new();
+        let definitions = Definitions::new();
+        let globals = globals();
+        let cx = Ctx::new(&definitions, &globals);
+        let form = r.read_all(&mut h, "(defvar m::total sexpr true true (quote ()))").expect("read failed")[0];
+        h.push_root(form);
+        let node = global_init(&mut h, form, cx).expect("translation failed").expect("a defvar has one");
+        assert_eq!(core::print(&h, node), "(global-init 6 (construct true false () 0))");
+        // Nothing else is one.
+        let other = r.read_all(&mut h, "(defun f () unit false (unit))").expect("read failed")[0];
+        assert!(global_init(&mut h, other, cx).expect("translation failed").is_none());
+    }
+
+    /// A type defined inside a module is recorded just as one at the root is —
+    /// a body being compiled can reach either.
+    #[test]
+    fn a_type_inside_a_module_is_recorded_too() {
+        assert_eq!(
+            bridged_with(
+                &["(module m (defstruct m::point (int sexpr)))"],
+                "(construct m::point 0 true (int 1) (quote ()))"
+            )
+            .contains("(1 int 1)"),
+            true
+        );
     }
 
     /// Every *expression* tag now has a translation, so what is left to name
