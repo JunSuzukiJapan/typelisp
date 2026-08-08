@@ -5759,3 +5759,25 @@ fn the_island_accepts_a_bridged_escaping_closure() {
         "the module the island built from the bridged closure did not verify"
     );
 }
+
+/// A quoted list, through the real `compile-function`.
+///
+/// Verified rather than run: rebuilding the datum allocates cons cells, and
+/// the heap that built this module is gone by the time a JIT'd function could
+/// be called. What this pins is that the island takes the `construct` chain
+/// the bridge emits for a datum — the shape that carries no reference to the
+/// compiling heap at all, which is the whole point of taking the literal
+/// apart.
+#[test]
+fn the_island_accepts_a_bridged_quoted_datum() {
+    let body = bridge_to_island_text(r#"(quote (1 foo "hi"))"#);
+    let src = compile_function_source("datum", "()", &body);
+    let ir = eval_string_with_compiler(&format!("(to-string {})", src));
+    for expected in ["rt_cons", "rt_intern_symbol", "rt_str_new", "define i64 @datum"] {
+        assert!(ir.contains(expected), "expected {} in the IR:\n{}", expected, ir);
+    }
+    assert!(
+        expect_bool(eval_ok_with_compiler(&format!("(verify {})", src))),
+        "the module the island built from the bridged datum did not verify"
+    );
+}

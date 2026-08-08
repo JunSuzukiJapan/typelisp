@@ -64,7 +64,7 @@ use crate::type_key::type_key_of;
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES};
 
 use super::ast_bridge::{
-    fresh_lambda_name, llvm_op_id, user_symbol_name, HASHTABLE_BUILTIN_METHODS,
+    fresh_lambda_name, DynTables, llvm_op_id, user_symbol_name, HASHTABLE_BUILTIN_METHODS,
     VECTOR_BUILTIN_METHODS,
 };
 use super::core_freevars::{free_vars, names_captured_by_nested};
@@ -179,6 +179,10 @@ pub struct Ctx<'a> {
     /// however deep it is found. A sibling can never be assigned to, so there
     /// is nothing for a cell to share.
     visible_siblings: &'a HashSet<SymId>,
+    /// The trait-object id tables, interned before translation starts: both
+    /// are baked into the emitted code as constants, so there is nothing to
+    /// resolve mid-translation.
+    pub dyn_tables: DynTables<'a>,
     /// The closest enclosing `labels` block's own captured list, copied
     /// unconditionally into the front of a nested block's.
     ///
@@ -192,9 +196,19 @@ pub struct Ctx<'a> {
 impl<'a> Ctx<'a> {
     /// Start a translation with nothing in lexical scope.
     pub fn new(defs: &'a Definitions, globals: &'a HashMap<Path, usize>) -> Ctx<'a> {
+        Ctx::with_dyn_tables(defs, globals, DynTables { vtables: empty_vtables(), trait_ids: empty_trait_ids() })
+    }
+
+    /// The same, for a body that boxes or dispatches on a trait object.
+    pub fn with_dyn_tables(
+        defs: &'a Definitions,
+        globals: &'a HashMap<Path, usize>,
+        dyn_tables: DynTables<'a>,
+    ) -> Ctx<'a> {
         Ctx {
             defs,
             globals,
+            dyn_tables,
             reprs: &[],
             direct: empty_names(),
             cell_names: empty_names(),
@@ -244,6 +258,16 @@ impl<'a> Ctx<'a> {
 fn empty_names() -> &'static HashSet<SymId> {
     static EMPTY: std::sync::OnceLock<HashSet<SymId>> = std::sync::OnceLock::new();
     EMPTY.get_or_init(HashSet::new)
+}
+
+fn empty_vtables() -> &'static HashMap<(String, Path), u32> {
+    static EMPTY: std::sync::OnceLock<HashMap<(String, Path), u32>> = std::sync::OnceLock::new();
+    EMPTY.get_or_init(HashMap::new)
+}
+
+fn empty_trait_ids() -> &'static HashMap<Path, u32> {
+    static EMPTY: std::sync::OnceLock<HashMap<Path, u32>> = std::sync::OnceLock::new();
+    EMPTY.get_or_init(HashMap::new)
 }
 
 /// The island's three scrutinee representations, which decide the tag test it
@@ -420,6 +444,43 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
             f.push(v);
             f.finish("set-global")
         }
+
+        // ---- quoted data -------------------------------------------------
+        // A quoted datum has no runtime representation to refer to — the
+        // island builds it fresh — so both of these become the `construct`
+        // nodes that build it. `sym` is exactly the one-symbol case.
+        "quote" => {
+            let datum = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
+            quoted_form(heap, datum)
+        }
+        "sym" => {
+            let name = symbol_field(heap, form, 0)?;
+            sexpr_leaf(heap, SEXPR_SYM, |h| str_form(h, &name))
+        }
+
+        // ---- trait objects -----------------------------------------------
+        "dyn-new" => translate_dyn_new(heap, form, cx),
+        "dyn-upcast" => translate_dyn_upcast(heap, form, cx),
+        "dyn-call" => translate_dyn_call(heap, form, cx),
+        // Unwrapping a trait object: the operand is always one, by the
+        // checker's own construction, and a trait object is an untraced word
+        // at a binding boundary — so the kind is not something to look up.
+        "dyn-value" => {
+            let inner = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
+            let mut f = Items::new(heap);
+            let pair = dyn_operand(f.heap(), inner, cx)?;
+            f.push(pair);
+            f.finish("dyn-value")
+        }
+
+        // Reflection: `(compile ...)` JIT-compiles a target against the
+        // *running* interpreter's own heap and scope tree, which has no
+        // meaning inside code being compiled ahead of time. Unreachable from
+        // any compilable source, and refused rather than given a lowering.
+        "compile-fn" => Err(Error::TypeError(
+            "compile: `(compile ...)` is an interpreter-only action and cannot itself be compiled"
+                .to_string(),
+        )),
 
         // ---- functions ---------------------------------------------------
         "lambda" => translate_lambda(heap, form, cx),
@@ -727,6 +788,208 @@ fn global_id_and_kind(heap: &Heap, form: Value, cx: Ctx) -> Result<(i64, i64), E
         ))
     })?;
     Ok((id as i64, repr.field_kind()))
+}
+
+/// `sexpr`'s own variant numbers, which a quoted datum is built out of.
+///
+/// Not a scheme of this module's: these are the variants of the built-in type
+/// (`registry::sexpr_def`), so `compile-construct-sexpr` builds each one the
+/// same way it would from written source.
+const SEXPR_NIL: i64 = 0;
+const SEXPR_INT: i64 = 1;
+const SEXPR_FLOAT: i64 = 2;
+const SEXPR_CHAR: i64 = 3;
+const SEXPR_BOOL: i64 = 4;
+const SEXPR_STR: i64 = 6;
+const SEXPR_CONS: i64 = 7;
+const SEXPR_BIGNUM: i64 = 8;
+const SEXPR_RATIO: i64 = 9;
+/// Past the variant numbering: a symbol and a path are not `sexpr` variants
+/// with a stored payload but names to be *interned* at run time, so
+/// `compile-construct-sym`/`compile-construct-path` recognize them by a marker
+/// the ordinary variants can never collide with.
+const SEXPR_SYM: i64 = 100;
+const SEXPR_PATH: i64 = 101;
+
+/// `(construct true false () variant field...)` — one `sexpr` value.
+fn sexpr_construct(heap: &mut Heap, variant: i64, fields: &[Value]) -> Result<Value, Error> {
+    let mut items = vec![Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(variant)];
+    items.extend_from_slice(fields);
+    core::tagged(heap, "construct", &items)
+}
+
+/// The same with one field, built by `leaf` while it stays rooted.
+fn sexpr_leaf(
+    heap: &mut Heap,
+    variant: i64,
+    leaf: impl FnOnce(&mut Heap) -> Result<Value, Error>,
+) -> Result<Value, Error> {
+    let mut f = Items::new(heap);
+    let v = leaf(f.heap())?;
+    f.push(v);
+    let fields = f.as_slice().to_vec();
+    sexpr_construct(f.heap(), variant, &fields)
+}
+
+/// A quoted datum, as the nodes that rebuild it at run time.
+///
+/// Quoted data cannot be *referred* to: the datum lives in the compiling
+/// heap, and an ahead-of-time compiled program builds its own from scratch at
+/// startup with no object table shared with this one. So the literal is taken
+/// apart here and reassembled there — the same reason a string literal becomes
+/// one node per character.
+fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
+    match datum {
+        Value::Empty => sexpr_construct(heap, SEXPR_NIL, &[]),
+        Value::Int(n) => sexpr_leaf(heap, SEXPR_INT, |h| core::tagged(h, "int", &[Value::Int(n)])),
+        Value::Bool(b) => sexpr_leaf(heap, SEXPR_BOOL, |h| core::tagged(h, "bool", &[Value::Bool(b)])),
+        Value::Char(c) => sexpr_leaf(heap, SEXPR_CHAR, |h| core::tagged(h, "char", &[Value::Char(c)])),
+        Value::Str(id) => {
+            let text = heap.string(id).to_string();
+            sexpr_leaf(heap, SEXPR_STR, |h| str_form(h, &text))
+        }
+        Value::Symbol(id) => {
+            let name = heap.symbol_name(id).to_string();
+            sexpr_leaf(heap, SEXPR_SYM, |h| str_form(h, &name))
+        }
+        // A path's segments become one string literal each, interned back into
+        // a path at run time.
+        Value::Path(id) => {
+            let segs: Vec<String> =
+                heap.path_segments(id).iter().map(|s| heap.symbol_name(*s).to_string()).collect();
+            let mut f = Items::new(heap);
+            for seg in &segs {
+                let v = str_form(f.heap(), seg)?;
+                f.push(v);
+            }
+            let fields = f.as_slice().to_vec();
+            sexpr_construct(f.heap(), SEXPR_PATH, &fields)
+        }
+        Value::Boxed(id) if heap.is_float(id) => {
+            let bits = heap.float_value(id).to_bits();
+            sexpr_leaf(heap, SEXPR_FLOAT, move |h| {
+                core::tagged(
+                    h,
+                    "float",
+                    &[Value::Int((bits >> 32) as i64), Value::Int((bits & 0xFFFF_FFFF) as i64)],
+                )
+            })
+        }
+        Value::Boxed(id) if heap.is_bignum(id) => {
+            let n = heap.bignum_value(id).clone();
+            sexpr_leaf(heap, SEXPR_BIGNUM, move |h| bignum_form(h, &n))
+        }
+        Value::Boxed(id) if heap.is_ratio(id) => {
+            let r = heap.ratio_value(id).clone();
+            sexpr_leaf(heap, SEXPR_RATIO, move |h| {
+                let mut f = Items::new(h);
+                let numer = bignum_form(f.heap(), r.numer())?;
+                f.push(numer);
+                let denom = bignum_form(f.heap(), r.denom())?;
+                f.push(denom);
+                f.finish("ratio")
+            })
+        }
+        Value::Cons(_) => {
+            let (car, cdr) = (heap.car(datum)?, heap.cdr(datum)?);
+            let mut f = Items::new(heap);
+            let car_v = quoted_form(f.heap(), car)?;
+            f.push(car_v);
+            let cdr_v = quoted_form(f.heap(), cdr)?;
+            f.push(cdr_v);
+            let fields = f.as_slice().to_vec();
+            sexpr_construct(f.heap(), SEXPR_CONS, &fields)
+        }
+        // Anything else in a quoted datum is a value the reader cannot
+        // produce, so reaching this means something built a `quote` node by
+        // hand out of a value that is not data.
+        other => Err(Error::TypeError(format!(
+            "compile: {:?} is not something a quoted datum can contain",
+            other
+        ))),
+    }
+}
+
+/// A trait-object node's `(kind . form)` operand.
+///
+/// `dyn-upcast` and `dyn-value` both take a trait object, which is an untraced
+/// word at a binding boundary — so this is a constant, not a lookup.
+fn dyn_operand(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let mut s = RootScope::new(heap);
+    let v = to_island(&mut s, form, cx)?;
+    s.push_root(v);
+    s.cons(Value::Int(Repr::Dyn.binding_kind()), v)
+}
+
+/// `(dyn-new STR PATH ((PATH SYM)...) ((...)...) R E)` -> `(dyn-new vtable-id
+/// (kind . value))`.
+///
+/// The vtable id is a constant: the checker resolved the table's contents and
+/// the driver interned the (type, trait) pair before translation began, so the
+/// emitted code just hands over a number.
+fn translate_dyn_new(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let parts = core::fields(heap, form)?;
+    if parts.len() < 6 {
+        return Err(malformed(heap, form));
+    }
+    let Value::Str(key_id) = parts[0] else { return Err(malformed(heap, form)) };
+    let concrete_key = heap.string(key_id).to_string();
+    let trait_path = as_path(heap, parts[1]).ok_or_else(|| malformed(heap, form))?;
+    let repr = Repr::read(heap, parts[4]).ok_or_else(|| malformed(heap, form))?;
+    let id = *cx.dyn_tables.vtables.get(&(concrete_key.clone(), trait_path.clone())).ok_or_else(|| {
+        Error::TypeError(format!(
+            "compile: no vtable id interned for `{}` as `:dyn {}` (internal error)",
+            concrete_key, trait_path
+        ))
+    })?;
+    let mut f = Items::new(heap);
+    f.push(Value::Int(id as i64));
+    let pairs = arg_pairs(f.heap(), std::slice::from_ref(&repr), &[parts[5]], cx)?;
+    f.extend(pairs);
+    f.finish("dyn-new")
+}
+
+/// `(dyn-upcast PATH E)` -> `(dyn-upcast trait-id (kind . value))`.
+///
+/// The constant is the *trait* id, not a vtable id: which table the result
+/// dispatches through depends on the concrete type inside the box, which this
+/// site no longer knows. The runtime finds it from the box's own vtable id,
+/// through the mapping the boxing site registered.
+fn translate_dyn_upcast(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let to_trait = core::field(heap, form, 0)
+        .and_then(|v| as_path(heap, v))
+        .ok_or_else(|| malformed(heap, form))?;
+    let value = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
+    let id = *cx.dyn_tables.trait_ids.get(&to_trait).ok_or_else(|| {
+        Error::TypeError(format!("compile: no trait id interned for `:dyn {}` (internal error)", to_trait))
+    })?;
+    let mut f = Items::new(heap);
+    f.push(Value::Int(id as i64));
+    let pair = dyn_operand(f.heap(), value, cx)?;
+    f.push(pair);
+    f.finish("dyn-upcast")
+}
+
+/// `(dyn-call PATH SYM N ((PATH SYM)...) (R...) E...)` -> `(dyn-call slot
+/// (kind . recv) (kind . arg)...)`.
+///
+/// The slot is the method's position in the trait's own method order, fixed at
+/// check time, so the emitted code reads the receiver's vtable id, indexes
+/// that slot, and calls through the pointer — no lookup by name or type at run
+/// time.
+fn translate_dyn_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    let parts = core::fields(heap, form)?;
+    if parts.len() < 5 {
+        return Err(malformed(heap, form));
+    }
+    let Value::Int(slot) = parts[2] else { return Err(malformed(heap, form)) };
+    let reprs = repr_list(heap, parts[4])?;
+    let args = parts[5..].to_vec();
+    let mut f = Items::new(heap);
+    f.push(Value::Int(slot));
+    let pairs = arg_pairs(f.heap(), &reprs, &args, cx)?;
+    f.extend(pairs);
+    f.finish("dyn-call")
 }
 
 /// A `((SYM . kind) ...)` list — a lambda's parameters, or a captured
@@ -1543,6 +1806,29 @@ mod tests {
         bridged_with(&[], src)
     }
 
+    /// Translate with trait-object tables interned, as the driver does before
+    /// translation starts.
+    fn bridged_with_dyn(src: &str) -> String {
+        let mut h = Heap::with_capacity(1 << 16);
+        h.set_gc_stress(true);
+        let r = Reader::new();
+        let definitions = Definitions::new();
+        let globals = globals();
+        let vtables: HashMap<(String, Path), u32> =
+            [(("point".to_string(), Path::root("shape")), 11u32)].into_iter().collect();
+        let trait_ids: HashMap<Path, u32> = [(Path::root("drawable"), 22u32)].into_iter().collect();
+        let cx = Ctx::with_dyn_tables(
+            &definitions,
+            &globals,
+            DynTables { vtables: &vtables, trait_ids: &trait_ids },
+        );
+        let mut vs = r.read_all(&mut h, src).expect("read failed");
+        let form = vs.pop().unwrap();
+        h.push_root(form);
+        let island = to_island(&mut h, form, cx).unwrap_or_else(|e| panic!("{:?} did not translate: {}", src, e));
+        core::print(&h, island)
+    }
+
     /// The promoted globals the `global`/`set-global` examples refer to.
     fn globals() -> HashMap<Path, usize> {
         [(Path::root("counter"), 3usize), (Path::of(&["m", "total"]), 7)]
@@ -2068,12 +2354,90 @@ mod tests {
         );
     }
 
-    /// A tag with no translation yet says which tag, rather than emitting
-    /// something the island would misread.
+    // ---- quoted data and trait objects ------------------------------------
+
+    /// Quoted data cannot be *referred* to — the datum lives in the compiling
+    /// heap, and a compiled program builds its own from scratch — so the
+    /// literal is taken apart here and reassembled by the code that runs.
+    #[test]
+    fn a_quoted_datum_becomes_the_nodes_that_rebuild_it() {
+        assert_eq!(bridged("(quote ())"), "(construct true false () 0)");
+        assert_eq!(bridged("(quote 7)"), "(construct true false () 1 (int 7))");
+        assert_eq!(bridged("(quote true)"), "(construct true false () 4 (bool true))");
+        assert_eq!(bridged(r"(quote #\a)"), r"(construct true false () 3 (char #\a))");
+        assert_eq!(
+            bridged(r#"(quote "hi")"#),
+            "(construct true false () 6 (str (int 104) (int 105)))"
+        );
+        // A symbol is interned at run time rather than stored, hence a marker
+        // past the variant numbering.
+        assert_eq!(bridged("(quote foo)"), "(construct true false () 100 (str (int 102) (int 111) (int 111)))");
+        assert_eq!(bridged("(sym foo)"), bridged("(quote foo)"));
+        // A path's segments each become a string, interned back at run time.
+        assert_eq!(
+            bridged("(quote m::x)"),
+            "(construct true false () 101 (str (int 109)) (str (int 120)))"
+        );
+    }
+
+    /// A list is built pair by pair, ending in nil — so nesting is just the
+    /// recursion, with no depth limit of its own.
+    #[test]
+    fn a_quoted_list_is_built_cons_by_cons() {
+        assert_eq!(
+            bridged("(quote (1 2))"),
+            "(construct true false () 7 (construct true false () 1 (int 1)) \
+(construct true false () 7 (construct true false () 1 (int 2)) (construct true false () 0)))"
+        );
+    }
+
+    /// A trait-object node's id is a constant resolved here, not a name
+    /// resolved at run time.
+    #[test]
+    fn a_trait_object_carries_the_ids_interned_for_it() {
+        let printed = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () struct (var p))"#);
+        assert_eq!(printed, r#"(dyn-new 11 (0 var "p" false))"#);
+        assert_eq!(bridged_with_dyn("(dyn-upcast drawable (var d))"), r#"(dyn-upcast 22 (0 var "d" false))"#);
+        assert_eq!(
+            bridged_with_dyn("(dyn-call shape area 0 ((point area)) (dyn) (var d))"),
+            r#"(dyn-call 0 (0 var "d" false))"#
+        );
+        assert_eq!(bridged_with_dyn("(dyn-value (var d))"), r#"(dyn-value (0 var "d" false))"#);
+    }
+
+    /// An enum boxed as a trait object needs a GC root across the boxing call
+    /// where a struct does not — which is the whole reason the node states the
+    /// boxed value's representation rather than deriving it from the concrete
+    /// type's name.
+    #[test]
+    fn the_boxed_values_kind_follows_its_representation() {
+        let as_struct = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () struct (var p))"#);
+        let as_enum = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () enum (var p))"#);
+        assert!(as_struct.contains("(0 var"), "{}", as_struct);
+        assert!(as_enum.contains("(2 var"), "{}", as_enum);
+    }
+
+    /// Reflection cannot be compiled: it acts on the running interpreter's own
+    /// heap and scope tree, which the compiled program does not have.
+    #[test]
+    fn compiling_a_compile_form_is_refused() {
+        let e = refused("(compile-fn (fn (f) () f))");
+        assert!(e.contains("interpreter-only"), "{}", e);
+    }
+
+    /// Every *expression* tag now has a translation, so what is left to name
+    /// itself is the top-level vocabulary — which the old bridge never
+    /// expressed at all, since `TopLevel` was a Rust enum that never reached
+    /// the island.
+    ///
+    /// Not a fallback: reaching one is a bug in whoever routed here, and the
+    /// error says which tag rather than emitting something the island would
+    /// misread. The count of these is the progress measure.
     #[test]
     fn an_untranslated_tag_names_itself() {
-        assert!(refused("(quote (a b))").contains("`quote`"));
-        assert!(refused("(dyn-value (var d))").contains("`dyn-value`"));
+        assert!(refused("(defun m::f () unit true (unit))").contains("`defun`"));
+        assert!(refused("(defvar m::x int true true (int 0))").contains("`defvar`"));
+        assert!(refused("(module m (expr (int 1)))").contains("`module`"));
     }
 
     /// A mismatched representation list is an internal error, not something

@@ -481,7 +481,7 @@ impl Interp {
         }
     }
 
-    /// `(dyn-new STR PATH ((PATH SYM)...) ((PATH ((PATH SYM)...))...) E)`.
+    /// `(dyn-new STR PATH ((PATH SYM)...) ((PATH ((PATH SYM)...))...) R E)`.
     ///
     /// Boxing is where the concrete type is still known, so it is where every
     /// vtable this value could ever be viewed through gets interned — its own
@@ -495,7 +495,9 @@ impl Interp {
         let trait_path = path_field(heap, form, 1, "dyn-new")?;
         let slots = method_list(heap, form, 2, "dyn-new")?;
         let supers = super_list(heap, form, 3)?;
-        let value = core::field(heap, form, 4)
+        // Field 4 is the boxed value's representation, read by the bridge and
+        // by nothing here.
+        let value = core::field(heap, form, 5)
             .ok_or_else(|| EvalError::Internal("eval: (dyn-new ..) has no value".to_string()))?;
 
         let v = self.eval_core(heap, value, env)?;
@@ -2383,7 +2385,7 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            r#"(dyn-new "point" shape ((point area)) () (construct point 0 true (int 3)))"#,
+            r#"(dyn-new "point" shape ((point area)) () struct (construct point 0 true (int 3)))"#,
         );
         h.push_root(v);
         match v {
@@ -2392,7 +2394,7 @@ mod tests {
         }
         let inner = eval_ok(
             &mut h,
-            r#"(field-get (dyn-value (dyn-new "point" shape ((point area)) () (construct point 0 true (int 3)))) 0 int)"#,
+            r#"(field-get (dyn-value (dyn-new "point" shape ((point area)) () struct (construct point 0 true (int 3)))) 0 int)"#,
         );
         assert_eq!(inner, Value::Int(3));
     }
@@ -2407,7 +2409,7 @@ mod tests {
         let v = eval_ok(
             &mut h,
             r#"(dyn-upcast named
-                 (dyn-new "point" shape ((point area)) ((named ((point name)))) (construct point 0 true (int 3))))"#,
+                 (dyn-new "point" shape ((point area)) ((named ((point name)))) struct (construct point 0 true (int 3))))"#,
         );
         h.push_root(v);
         let inner = match v {
@@ -2437,7 +2439,7 @@ mod tests {
         let form = read1(
             &mut h,
             r#"(let ((b sexpr (dyn-new "point" shape ((point area)) ((named ((point name))))
-                                (construct point 0 true (int 3)))))
+                                struct (construct point 0 true (int 3)))))
                  (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var b) (dyn-upcast shape (var b))))"#,
         );
         h.push_root(form);
@@ -2457,7 +2459,7 @@ mod tests {
             &mut h,
             r#"(dyn-upcast never-registered
                  (dyn-new "point" shape ((point area)) ((named ((point name))))
-                   (construct point 0 true (int 3))))"#,
+                   struct (construct point 0 true (int 3))))"#,
         )
         .unwrap_err();
         assert!(

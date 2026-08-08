@@ -309,8 +309,12 @@ fn functions() {
 #[test]
 fn trait_objects() {
     all_round_trip(&[
-        r#"(dyn-new "point" shape ((point area)) () (var p))"#,
-        r#"(dyn-new "point" shape ((point area)) ((drawable ((point draw)))) (var p))"#,
+        // The trailing representation is the boxed value's own. It decides
+        // whether the island roots the value across the boxing call, and a
+        // struct and an enum differ there — so it cannot be derived from the
+        // concrete type's *name*, which is all the rest of the node carries.
+        r#"(dyn-new "point" shape ((point area)) () struct (var p))"#,
+        r#"(dyn-new "point" shape ((point area)) ((drawable ((point draw)))) struct (var p))"#,
         "(dyn-upcast drawable (var d))",
         // The trailing repr list and arguments are an ordinary call's, the
         // receiver included — a dynamic call reaches the island as a call
