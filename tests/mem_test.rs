@@ -612,10 +612,16 @@ fn root_scopes_nest() {
     assert_eq!(h.root_count(), before);
 }
 
-// ---- lowered-code source locations --------------------------------------
+// ---- source locations ---------------------------------------------------
 
+/// Both slots round trip, and only a cons has them.
+///
+/// One slot per fact: the span of the form the cell heads (`set_cons_loc`,
+/// which the reader uses for a list and the checker for a lowered node), and
+/// the span of the element in its `car` (`set_elem_loc`, the only way an atom
+/// gets a position — see `Cell`'s doc comment).
 #[test]
-fn code_locs_round_trip_and_outlive_a_reader_clear() {
+fn a_cell_carries_its_own_and_its_car_s_span() {
     use std::rc::Rc;
     use typelisp::Loc;
 
@@ -626,23 +632,26 @@ fn code_locs_round_trip_and_outlive_a_reader_clear() {
         Value::Cons(cr) => cr,
         _ => unreachable!(),
     };
-    let loc = Loc::new(Rc::from("f.typl"), 3, 5).with_end(3, 9);
-    h.set_code_loc(cr, loc.clone());
-    assert_eq!(h.code_loc(node), Some(loc.clone()));
+    let form = Loc::new(Rc::from("f.typl"), 3, 5).with_end(3, 9);
+    let elem = Loc::new(Rc::from("f.typl"), 3, 6).with_end(3, 7);
+    h.set_cons_loc(cr, form.clone());
+    h.set_elem_loc(cr, elem.clone());
 
-    // Unlike the reader's tables, a lowered-code location survives the
-    // per-read-batch clear — a registered body outlives the batch that read it.
-    h.clear_cons_locs();
-    assert_eq!(h.code_loc(node), Some(loc));
+    assert_eq!(h.cons_loc(node), Some(form));
+    assert_eq!(h.list_to_vec_locs(node).unwrap(), vec![(Value::Int(1), Some(elem))]);
 
     // Only a cons can carry one.
-    assert_eq!(h.code_loc(Value::Int(1)), None);
+    assert_eq!(h.cons_loc(Value::Int(1)), None);
 }
 
-/// A reclaimed cell's address gets handed to an unrelated form, so its entry
-/// must not linger — nothing ever overwrites one the way the reader does.
+/// A recycled cell comes back blank.
+///
+/// This is what replaced two separate upkeep duties the address-keyed side
+/// tables needed — a bulk clear per read batch, and a removal per reclaimed
+/// cell in the sweep. With the location in the cell, `cons` blanking both slots
+/// is the whole of it: there is no entry anywhere else to go stale.
 #[test]
-fn sweep_drops_code_locs_for_reclaimed_cells() {
+fn a_reclaimed_cell_does_not_hand_its_span_to_the_next_form() {
     use std::rc::Rc;
     use typelisp::Loc;
 
@@ -652,21 +661,25 @@ fn sweep_drops_code_locs_for_reclaimed_cells() {
         Value::Cons(cr) => cr,
         _ => unreachable!(),
     };
-    h.set_code_loc(cr, Loc::new(Rc::from("f.typl"), 1, 1).with_end(1, 2));
-    assert_eq!(h.code_loc_count(), 1);
+    h.set_cons_loc(cr, Loc::new(Rc::from("f.typl"), 1, 1).with_end(1, 2));
+    h.set_elem_loc(cr, Loc::new(Rc::from("f.typl"), 1, 2).with_end(1, 3));
 
     h.gc();
-    assert_eq!(h.code_loc_count(), 0, "stale location survived the sweep");
 
-    // The recycled address must come back blank, not wearing the old span.
+    // The recycled address must come back blank, not wearing the old spans.
     let reused = h.cons(Value::Int(2), Value::Empty).unwrap();
     h.push_root(reused);
-    assert_eq!(h.code_loc(reused), None);
+    assert_eq!(h.cons_loc(reused), None, "stale form span on a recycled cell");
+    assert_eq!(
+        h.list_to_vec_locs(reused).unwrap(),
+        vec![(Value::Int(2), None)],
+        "stale element span on a recycled cell"
+    );
     assert_accounting(&h);
 }
 
 #[test]
-fn sweep_keeps_code_locs_for_live_cells() {
+fn a_live_cell_keeps_its_span_across_a_collection() {
     use std::rc::Rc;
     use typelisp::Loc;
 
@@ -678,12 +691,34 @@ fn sweep_keeps_code_locs_for_live_cells() {
         _ => unreachable!(),
     };
     let loc = Loc::new(Rc::from("f.typl"), 7, 2).with_end(7, 8);
-    h.set_code_loc(cr, loc.clone());
+    h.set_cons_loc(cr, loc.clone());
 
     let _ = h.cons(Value::Int(9), Value::Empty).unwrap(); // garbage to collect
     h.gc();
 
-    assert_eq!(h.code_loc(node), Some(loc));
+    assert_eq!(h.cons_loc(node), Some(loc));
+}
+
+/// Spans are interned, so the many cells read from one line share one entry.
+#[test]
+fn identical_spans_intern_to_one_entry() {
+    use std::rc::Rc;
+    use typelisp::Loc;
+
+    let mut h = Heap::with_capacity(64);
+    let loc = Loc::new(Rc::from("f.typl"), 1, 1).with_end(1, 4);
+    let other = Loc::new(Rc::from("f.typl"), 2, 1).with_end(2, 4);
+    for i in 0..8 {
+        let c = h.cons(Value::Int(i), Value::Empty).unwrap();
+        h.push_root(c);
+        let cr = match c {
+            Value::Cons(cr) => cr,
+            _ => unreachable!(),
+        };
+        h.set_cons_loc(cr, loc.clone());
+        h.set_elem_loc(cr, other.clone());
+    }
+    assert_eq!(h.loc_count(), 2, "one entry per distinct span, not per cell");
 }
 
 // ---- reuse / no growth --------------------------------------------------

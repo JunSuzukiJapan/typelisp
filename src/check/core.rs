@@ -105,13 +105,17 @@ pub fn tagged(heap: &mut Heap, tag: &str, items: &[Value]) -> Result<Value, Erro
 /// Build `(tag field...)` and record `loc` as the source position it came from,
 /// so a runtime error raised while evaluating this node can be placed.
 ///
-/// The location goes in `Heap`'s `code_locs` table rather than the reader's
-/// `cons_locs`: a lowered node outlives the read batch it came from (it *is* a
-/// registered function body), and `cons_locs` is bulk-cleared per batch.
+/// The same act, and the same slot, as the reader recording a list form's own
+/// span: a location is a property of the cell (see `Cell` in `typelisp-mem`),
+/// and "the span this form came from" means one thing whether the form was read
+/// or lowered. There used to be a second table here, because the reader's was
+/// bulk-cleared per read batch while a lowered node — a registered function
+/// body — has to outlive its batch; nothing is cleared now, so nothing needs a
+/// table of its own.
 pub fn tagged_at(heap: &mut Heap, tag: &str, items: &[Value], loc: Option<Loc>) -> Result<Value, Error> {
     let node = tagged(heap, tag, items)?;
     if let (Some(loc), Value::Cons(cr)) = (loc, node) {
-        heap.set_code_loc(cr, loc);
+        heap.set_cons_loc(cr, loc);
     }
     Ok(node)
 }

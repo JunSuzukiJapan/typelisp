@@ -179,16 +179,25 @@ fn tagged_at_records_a_location_the_interpreter_can_read_back() {
     let node = core::tagged_at(&mut h, "int", &[Value::Int(1)], Some(loc.clone())).unwrap();
     h.push_root(node);
 
-    assert_eq!(h.code_loc(node), Some(loc));
+    assert_eq!(h.cons_loc(node), Some(loc));
 
     // A node built without one simply has none — synthesized nodes are normal.
     let plain = core::tagged_at(&mut h, "int", &[Value::Int(2)], None).unwrap();
     h.push_root(plain);
-    assert_eq!(h.code_loc(plain), None);
+    assert_eq!(h.cons_loc(plain), None);
 }
 
+/// A lowered node's location survives any number of collections, because it
+/// lives in the node's own cell.
+///
+/// This used to be a test that the location survived the reader's per-batch
+/// table clear — the hazard a lowered body outliving its read batch created
+/// while locations were kept in address-keyed side tables. There is no clear
+/// any more; what is worth fixing instead is that a node the collector *keeps*
+/// keeps its position, under `gc_stress` where a collection runs at every
+/// allocation.
 #[test]
-fn a_lowered_location_outlives_the_readers_per_batch_clear() {
+fn a_lowered_location_survives_collections() {
     use std::rc::Rc;
 
     let mut h = stress_heap();
@@ -196,10 +205,11 @@ fn a_lowered_location_outlives_the_readers_per_batch_clear() {
     let node = core::tagged_at(&mut h, "unit", &[], Some(loc.clone())).unwrap();
     h.push_root(node);
 
-    // A registered body outlives the read batch that produced it, so unlike
-    // `cons_locs` this entry must survive the reader clearing its tables.
-    h.clear_cons_locs();
-    assert_eq!(h.code_loc(node), Some(loc));
+    for i in 0..16 {
+        // Garbage, and a collection with it (`stress_heap` sets `gc_stress`).
+        let _ = h.cons(Value::Int(i), Value::Empty).unwrap();
+    }
+    assert_eq!(h.cons_loc(node), Some(loc));
 }
 
 // ---- printing ------------------------------------------------------------

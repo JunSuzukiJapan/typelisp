@@ -124,7 +124,6 @@ impl Reader {
     /// Like [`Reader::read`], but `file` names the source (used in the location
     /// prefix of any error message).
     pub fn read_in(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Value, Error> {
-        heap.clear_cons_locs();
         let mut cur = Cursor::new(file, src);
         read_datum(&mut cur, heap, &self.features).map_err(|e| e.at(cur.loc()))
     }
@@ -146,31 +145,20 @@ impl Reader {
         Ok(self.read_all_in_spanned(heap, file, src)?.into_iter().map(|(v, _)| v).collect())
     }
 
-    /// Like [`Reader::read_all_in`], but *without* wiping the heap's
-    /// cons-location table first. For reading a dependency file mid-load
-    /// (`crate::project::Loader`): the outer file's forms are read but not
-    /// yet checked, and clearing here would erase their recorded locations —
-    /// every error in the outer file would then lose its `file:line:col`.
-    /// Only the driver that begins a fresh read session (the REPL batch, the
-    /// loader's entry file) clears.
-    pub fn read_all_in_keep_locs(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Vec<Value>, Error> {
-        Ok(self.read_all_in_keep_locs_spanned(heap, file, src)?.into_iter().map(|(v, _)| v).collect())
-    }
-
     /// Like [`Reader::read_all_in`], but each top-level datum comes with the
     /// source span it was read from. This is the only way a *bare atom* at
-    /// top level (e.g. a lone `42`) gets a location: atoms are immediate or
-    /// interned values with no pointer identity, so they cannot be keyed in
-    /// the heap's cons-location tables — the span must travel alongside the
-    /// value to whoever checks it (`Checker::check_form_at`'s `loc_hint`).
+    /// top level (e.g. a lone `42`) gets a location: an atom is an immediate or
+    /// interned value with no per-occurrence identity, so there is no cell of
+    /// its own to record one in — the span must travel alongside the value to
+    /// whoever checks it (`Checker::check_form_at`'s `loc_hint`).
+    ///
+    /// There used to be a `keep_locs` twin of this (and of
+    /// [`Reader::read_all_in`]) that skipped wiping the heap's location tables
+    /// first, because a dependency read mid-load would otherwise erase the
+    /// locations of the outer file's already-read forms. Locations live in the
+    /// cells now, so a read cannot disturb another read's forms and there is
+    /// nothing to wipe or to opt out of.
     pub fn read_all_in_spanned(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Vec<(Value, Loc)>, Error> {
-        heap.clear_cons_locs();
-        self.read_all_in_keep_locs_spanned(heap, file, src)
-    }
-
-    /// [`Reader::read_all_in_spanned`] without wiping the location tables
-    /// first — see [`Reader::read_all_in_keep_locs`] for when that matters.
-    pub fn read_all_in_keep_locs_spanned(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Vec<(Value, Loc)>, Error> {
         let mut cur = Cursor::new(file, src);
         let mut out = Vec::new();
         loop {

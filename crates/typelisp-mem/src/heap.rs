@@ -39,7 +39,7 @@ use std::collections::HashMap;
 use std::ptr;
 
 use crate::Error;
-use super::value::{BoxId, BoxedObj, Cell, ConsRef, MemHashKey, PathId, StrId, StructPayload, SymId, Value};
+use super::value::{BoxId, BoxedObj, Cell, ConsRef, LocId, MemHashKey, PathId, StrId, StructPayload, SymId, Value};
 
 /// One owned run of cons cells. Chunks are only ever appended (see
 /// [`Heap::set_growth_limit`]) and never moved or freed individually, which is
@@ -118,50 +118,20 @@ pub struct Heap {
     // root-resyncing) can never sweep a live binding cell.
     cell_registry: Vec<std::rc::Weak<BoxId>>,
 
-    // Source *spans* (opening `(` through closing `)`) of cons cells produced
-    // by the reader, keyed by the cell's raw address (`ConsRef::addr`), so an
-    // error about a form can be reported with the `file:line:col` it was read
-    // from, and the LSP can underline its full extent. This is a pure
-    // side table: it never keeps a cell alive (the mark phase ignores it) and
-    // a stale entry (a freed cell's address later reused) is harmless because
-    // the reader overwrites it on every fresh allocation and
-    // `clear_cons_locs` wipes it at the start of each read batch. Cleared —
-    // not GC-swept — because the forms it describes stay rooted for the whole
-    // read→check cycle that consults it.
-    cons_locs: HashMap<usize, crate::errors::Loc>,
-
-    // Source spans of *each list element*, keyed by the spine cons cell
-    // whose `car` holds that element (`ConsRef::addr`). Where `cons_locs`
-    // records a list form's own span (head cell), this records the span of
-    // every element — including a bare atom, which has no per-occurrence
-    // identity of its own (interned symbols are shared) — begins. Same pure
-    // side-table discipline as `cons_locs`: never keeps a cell alive, cleared
-    // by `clear_cons_locs`, harmless if a freed cell's address is later reused
-    // (the reader overwrites on every fresh allocation). Consumed by the
-    // checker (`list_to_vec_locs`) so an atom node can carry its own `Loc`,
-    // which the LSP's hover/goto-definition need (`src/check/locate.rs`).
-    elem_locs: HashMap<usize, crate::errors::Loc>,
-
-    // Source spans of *lowered code* nodes, keyed by the node's own head cons
-    // cell (`ConsRef::addr`). The checker records one here as it builds each
-    // node, and the interpreter reads it back to place a runtime error at the
-    // source position the node came from.
+    // Every distinct source span any live cell refers to, indexed by
+    // `LocId` — see `Cell`'s doc comment for why a cell holds an index rather
+    // than the `Loc` itself, and why the location lives in the cell at all.
     //
-    // Distinct from `cons_locs`/`elem_locs` above in both lifetime and upkeep,
-    // which is why it is a third table rather than an extra entry in either:
+    // Index 0 is a reserved dummy so `LocId::NONE` can be the all-zero
+    // pattern a blank cell starts as; the real entries begin at 1.
     //
-    // * Those two describe cells the *reader* just produced and are bulk-cleared
-    //   by `clear_cons_locs` at the start of every read batch. Lowered code
-    //   outlives its read batch — it is what a registered function body *is* —
-    //   so an entry here must survive that clear.
-    // * Surviving the clear means a stale entry can no longer be shrugged off.
-    //   Those tables tolerate a freed cell's address being reused because the
-    //   reader overwrites the entry on every fresh allocation; nothing
-    //   overwrites an entry here, so `gc`'s sweep removes the entry for each
-    //   cell it reclaims (see the SWEEP cons loop).
-    //
-    // Still a pure side table: an entry never keeps a cell alive.
-    code_locs: HashMap<usize, crate::errors::Loc>,
+    // Never shrinks. Interning bounds it by the number of *distinct* spans
+    // ever read, which is on the order of the source's own size, and a span
+    // is 32 bytes. Compaction is possible whenever it is wanted — `gc`'s
+    // sweep already walks every cell, so it could mark the ids in use — and
+    // is deliberately left until a measurement asks for it.
+    locs: Vec<crate::errors::Loc>,
+    loc_ids: HashMap<crate::errors::Loc, LocId>,
 }
 
 impl Heap {
@@ -214,71 +184,77 @@ impl Heap {
             box_free: Vec::new(),
             box_marks: Vec::new(),
             cell_registry: Vec::new(),
-            cons_locs: HashMap::new(),
-            elem_locs: HashMap::new(),
-            code_locs: HashMap::new(),
+            locs: Vec::new(),
+            loc_ids: HashMap::new(),
         }
     }
 
-    // -- Reader source-location side table (see the `cons_locs` field) -------
+    // -- Source locations (see `Cell`'s doc comment) -------------------------
 
-    /// Record the source location a cons cell was read from. The reader calls
-    /// this for each list form's head cell; the checker/interpreter later
-    /// look it up via [`Heap::cons_loc`] to place an error message.
-    pub fn set_cons_loc(&mut self, cr: ConsRef, loc: crate::errors::Loc) {
-        self.cons_locs.insert(cr.addr(), loc);
+    /// Intern `loc`, returning the id a cell stores.
+    fn intern_loc(&mut self, loc: crate::errors::Loc) -> LocId {
+        if let Some(id) = self.loc_ids.get(&loc) {
+            return *id;
+        }
+        // Ids are 1-based so that `LocId::NONE` is the all-zero pattern a blank
+        // cell already has, with no dummy entry to keep in step.
+        self.locs.push(loc.clone());
+        let id = LocId(self.locs.len() as u32);
+        self.loc_ids.insert(loc, id);
+        id
     }
 
-    /// The source location recorded for `v` when it is a cons cell, if any.
-    /// Non-cons values (atoms, symbols, ...) never carry their own location.
+    /// The `Loc` behind an id, or `None` for [`LocId::NONE`].
+    fn loc_of(&self, id: LocId) -> Option<crate::errors::Loc> {
+        if id.is_none() {
+            return None;
+        }
+        self.locs.get(id.0 as usize - 1).cloned()
+    }
+
+    /// Record the span of the form `cr` heads — for the reader, a list form's
+    /// `(` through `)`; for the checker, the source the node it just built was
+    /// lowered from. Read back by [`Heap::cons_loc`].
+    ///
+    /// One setter for both because there is one fact: the span of the form this
+    /// cell is the head of. The two used to be separate tables with separate
+    /// lifetimes (`cons_locs` bulk-cleared per read batch, `code_locs` swept),
+    /// which was a property of living outside the cell, not of the fact itself.
+    pub fn set_cons_loc(&mut self, cr: ConsRef, loc: crate::errors::Loc) {
+        let id = self.intern_loc(loc);
+        unsafe {
+            (*cr.0).self_loc = id;
+        }
+    }
+
+    /// The span of the form `v` heads, if one was recorded. Non-cons values
+    /// (atoms, symbols, ...) never carry their own location — see
+    /// [`Heap::list_to_vec_locs`] for how an atom *element* gets one.
     pub fn cons_loc(&self, v: Value) -> Option<crate::errors::Loc> {
         match v {
-            Value::Cons(cr) => self.cons_locs.get(&cr.addr()).cloned(),
+            Value::Cons(cr) => self.loc_of(unsafe { (*cr.0).self_loc }),
             _ => None,
         }
     }
 
-    /// Record where a list *element* began, keyed by the spine cell `cr` whose
-    /// `car` holds it — see the `elem_locs` field doc comment. The reader calls
-    /// this for every element as it builds a list; the checker later reads it
-    /// back via [`Heap::list_to_vec_locs`].
+    /// Record where the element in `cr`'s `car` began. The reader calls this
+    /// for every element as it builds a list; the checker reads it back via
+    /// [`Heap::list_to_vec_locs`].
+    ///
+    /// This is the only way an atom gets a position: an interned symbol or an
+    /// immediate scalar has no per-occurrence identity of its own, so the span
+    /// hangs on the cell that holds it.
     pub fn set_elem_loc(&mut self, cr: ConsRef, loc: crate::errors::Loc) {
-        self.elem_locs.insert(cr.addr(), loc);
-    }
-
-    /// Drop every recorded source location (both the list-form `cons_locs` and
-    /// the per-element `elem_locs`). The reader calls this at the start of each
-    /// read batch so stale entries from an earlier batch can never mislabel a
-    /// newly read form (see the `cons_locs` field doc comment).
-    pub fn clear_cons_locs(&mut self) {
-        self.cons_locs.clear();
-        self.elem_locs.clear();
-    }
-
-    // -- Lowered-code source-location side table (see the `code_locs` field) --
-
-    /// Record the source location a *lowered code* node came from, keyed by the
-    /// node's own head cons cell. The checker calls this as it builds each node;
-    /// the interpreter reads it back via [`Heap::code_loc`] to place a runtime
-    /// error. Deliberately survives [`Heap::clear_cons_locs`] — see the
-    /// `code_locs` field doc comment.
-    pub fn set_code_loc(&mut self, cr: ConsRef, loc: crate::errors::Loc) {
-        self.code_locs.insert(cr.addr(), loc);
-    }
-
-    /// The source location recorded for lowered node `v`, if any. Only a cons
-    /// cell can carry one: a node is always a tagged list.
-    pub fn code_loc(&self, v: Value) -> Option<crate::errors::Loc> {
-        match v {
-            Value::Cons(cr) => self.code_locs.get(&cr.addr()).cloned(),
-            _ => None,
+        let id = self.intern_loc(loc);
+        unsafe {
+            (*cr.0).car_loc = id;
         }
     }
 
-    /// How many lowered-code locations are currently recorded — for tests that
-    /// check the sweep really does drop a reclaimed cell's entry.
-    pub fn code_loc_count(&self) -> usize {
-        self.code_locs.len()
+    /// How many distinct source spans are interned — for tests about the
+    /// location table's growth.
+    pub fn loc_count(&self) -> usize {
+        self.locs.len()
     }
 
     // ---- statistics -------------------------------------------------------
@@ -1480,6 +1456,12 @@ impl Heap {
             (*p).cdr = cdr;
             (*p).mark = false;
             (*p).next_free = ptr::null_mut();
+            // A recycled cell must not inherit the position of whatever form
+            // used to live at this address. Blanking here is what replaced both
+            // the reader table's per-batch bulk clear and the sweep's
+            // entry-by-entry removal — see `Cell`'s doc comment.
+            (*p).car_loc = LocId::NONE;
+            (*p).self_loc = LocId::NONE;
         }
         self.free_count -= 1;
         Ok(Value::Cons(ConsRef(p)))
@@ -1543,11 +1525,11 @@ impl Heap {
     }
 
     /// Like [`Heap::list_to_vec`], but pairs each element with the source
-    /// location the reader recorded for it (`elem_locs`, keyed by the spine
-    /// cell that holds it) — `None` for an element read from a source with no
-    /// location (e.g. a macro-expanded or otherwise synthesized list). The
-    /// checker uses this so a bare atom in argument position can carry its own
-    /// `Loc`, which the LSP's hover/goto-definition need.
+    /// location the reader recorded for it (the spine cell's own `car_loc`) —
+    /// `None` for an element from a list with no location (e.g. a
+    /// macro-expanded or otherwise synthesized one). The checker uses this so a
+    /// bare atom in argument position can carry its own `Loc`, which the LSP's
+    /// hover/goto-definition need.
     pub fn list_to_vec_locs(&self, v: Value) -> Result<Vec<(Value, Option<crate::errors::Loc>)>, Error> {
         let mut out = Vec::new();
         let mut cur = v;
@@ -1555,7 +1537,7 @@ impl Heap {
             match cur {
                 Value::Empty => return Ok(out),
                 Value::Cons(c) => {
-                    let loc = self.elem_locs.get(&c.addr()).cloned();
+                    let loc = self.loc_of(unsafe { (*c.0).car_loc });
                     out.push((unsafe { (*c.0).car }, loc));
                     cur = unsafe { (*c.0).cdr };
                 }
@@ -1778,15 +1760,14 @@ impl Heap {
                     if (*p).mark {
                         (*p).mark = false;
                     } else {
-                        // A cell being reclaimed loses whatever source location
-                        // was recorded for it: its address is about to be handed
-                        // to an unrelated form, and `code_locs` (unlike the
-                        // reader's `cons_locs`) is never bulk-cleared, so a stale
-                        // entry would silently mislabel that form. See the
-                        // `code_locs` field doc comment.
-                        if !self.code_locs.is_empty() {
-                            self.code_locs.remove(&(p as usize));
-                        }
+                        // Nothing to do about this cell's source locations:
+                        // they are *in* the cell, so they are reclaimed with
+                        // it, and `cons` blanks both slots when the cell is
+                        // handed out again. That is the whole reason the
+                        // location moved inside — the side tables this
+                        // replaced needed a removal here (and a bulk clear per
+                        // read batch) to keep a recycled address from
+                        // mislabelling an unrelated form.
                         (*p).car = Value::Empty;
                         (*p).cdr = Value::Empty;
                         (*p).next_free = new_free;

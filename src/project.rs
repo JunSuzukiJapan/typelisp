@@ -288,12 +288,6 @@ impl Loader {
         src: &str,
     ) -> Result<(), Error> {
         let segs = module_segs_for(file, &self.src_root)?;
-        // A fresh read session: wipe the cons-location table once, here.
-        // Every read below (this file and, recursively, its dependencies)
-        // must *keep* locations — see `Reader::read_all_in_keep_locs` — or a
-        // dependency's read would erase the locations of outer-file forms
-        // that are still waiting to be checked.
-        heap.clear_cons_locs();
         // The entry file is never itself a cache candidate (only its
         // dependencies, loaded through `try_load_module`, are) — discard the
         // `LoadOutcome`.
@@ -360,7 +354,7 @@ impl Loader {
     ) -> Result<LoadOutcome, Error> {
         let file_name = file.to_string_lossy();
         let mark = heap.root_count();
-        let forms = match reader.read_all_in_keep_locs_spanned(heap, &file_name, src) {
+        let forms = match reader.read_all_in_spanned(heap, &file_name, src) {
             Ok(forms) => forms,
             Err(e) => {
                 pop_roots_to(heap, mark);
@@ -805,7 +799,7 @@ pub fn load_source_flat(
 ) -> Result<(), Error> {
     let file_name = file.to_string_lossy();
     let mark = heap.root_count();
-    let forms = match reader.read_all_in_keep_locs_spanned(heap, &file_name, src) {
+    let forms = match reader.read_all_in_spanned(heap, &file_name, src) {
         Ok(forms) => forms,
         Err(e) => {
             pop_roots_to(heap, mark);

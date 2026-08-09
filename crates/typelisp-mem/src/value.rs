@@ -26,20 +26,69 @@ use std::fmt;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
+/// A source location, as a cell holds one: an index into the heap's own
+/// location table, or [`LocId::NONE`].
+///
+/// An index rather than the [`Loc`](crate::Loc) itself because a `Loc` owns an
+/// `Rc<str>` file name and is four `u32`s besides — 32 bytes and not `Copy`,
+/// where the arena wants a cell to stay small and trivially copyable. The
+/// table interns, so the many cells read from one line share one entry.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct LocId(pub(crate) u32);
+
+impl LocId {
+    /// No location recorded. Every freshly allocated cell starts here.
+    pub const NONE: LocId = LocId(0);
+
+    pub(crate) fn is_none(self) -> bool {
+        self == LocId::NONE
+    }
+}
+
 /// One cons cell as laid out in the arena.
 ///
 /// `next_free` chains cells on the free list and is meaningful only while the
 /// cell is free; `mark` is the GC mark bit, meaningful only during a sweep.
+///
+/// # Why the source locations live here
+///
+/// A location is a property of the datum it was read from, so it belongs *in*
+/// the datum. The alternative — side tables keyed by the cell's address — is
+/// what this replaced, and each of that design's three tables existed only to
+/// work around a consequence of being outside the cell: a reader table had to
+/// be bulk-cleared per read batch (so a recycled address could not mislabel a
+/// new form), which meant lowered code needed a *second*, uncleared table to
+/// outlive its batch, which in turn needed the GC's sweep to delete entries
+/// for reclaimed cells. Inline, a location is reclaimed with its cell and a
+/// fresh cell has none by construction — see [`super::heap::Heap::cons`].
+///
+/// Two slots, because a list form and its elements are different spans and
+/// both are needed. `self_loc` is the span of the form this cell heads
+/// (`(` through `)`); `car_loc` is the span of the element in this cell's
+/// `car`. The latter is the only way an *atom* gets a position at all:
+/// symbols are interned and small scalars are immediate, so no atom has a
+/// per-occurrence identity to hang one on — the cell holding it does.
 pub(crate) struct Cell {
     pub(crate) car: Value,
     pub(crate) cdr: Value,
-    pub(crate) mark: bool,
     pub(crate) next_free: *mut Cell,
+    pub(crate) mark: bool,
+    /// The span of this cell's `car` — a list element's own position.
+    pub(crate) car_loc: LocId,
+    /// The span of the form this cell heads.
+    pub(crate) self_loc: LocId,
 }
 
 impl Cell {
     pub(crate) fn blank() -> Cell {
-        Cell { car: Value::Empty, cdr: Value::Empty, mark: false, next_free: std::ptr::null_mut() }
+        Cell {
+            car: Value::Empty,
+            cdr: Value::Empty,
+            next_free: std::ptr::null_mut(),
+            mark: false,
+            car_loc: LocId::NONE,
+            self_loc: LocId::NONE,
+        }
     }
 }
 

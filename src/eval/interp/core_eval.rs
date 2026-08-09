@@ -161,7 +161,7 @@ impl Interp {
             // Read the location before stepping: it names the form the error
             // came from, and `EvalError::at` keeps the innermost one, so a
             // deeper frame that already placed the error wins.
-            let loc = s.code_loc(form);
+            let loc = s.cons_loc(form);
             match self.step_core(&mut s, form, env) {
                 Ok(Step::Done(v)) => return Ok(v),
                 Ok(Step::Tail(next_form, next_env)) => {
@@ -1624,9 +1624,9 @@ mod tests {
         assert!(matches!(e.kind(), EvalError::Panic(m) if m == "boom"), "{:?}", e);
     }
 
-    /// A runtime error is placed at the node it came from, read out of the
-    /// heap's `code_locs` table — the one the checker will fill in as it
-    /// lowers, since the reader's own `cons_locs` is cleared per read batch.
+    /// A runtime error is placed at the node it came from, read off the node's
+    /// own cell — the slot the checker fills in as it lowers, and the same one
+    /// the reader uses for a list form's span.
     #[test]
     fn a_runtime_error_is_placed_at_the_node_that_raised_it() {
         use std::rc::Rc;
@@ -1640,7 +1640,7 @@ mod tests {
         let inner = core::field(&h, form, 1).unwrap();
         let loc = crate::Loc::new(Rc::from("f.typl"), 3, 9).with_end(3, 22);
         match inner {
-            Value::Cons(cr) => h.set_code_loc(cr, loc.clone()),
+            Value::Cons(cr) => h.set_cons_loc(cr, loc.clone()),
             other => panic!("expected a node, got {:?}", other),
         }
 
