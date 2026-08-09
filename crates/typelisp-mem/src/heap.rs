@@ -251,6 +251,13 @@ impl Heap {
         }
     }
 
+    /// The span of the element in `cr`'s `car`, if one was recorded — the
+    /// single-cell counterpart of [`Heap::list_to_vec_locs`], for a caller that
+    /// has the cell rather than the list (`crate::fasl`'s serializer).
+    pub fn elem_loc(&self, cr: ConsRef) -> Option<crate::errors::Loc> {
+        self.loc_of(unsafe { (*cr.0).car_loc })
+    }
+
     /// How many distinct source spans are interned — for tests about the
     /// location table's growth.
     pub fn loc_count(&self) -> usize {

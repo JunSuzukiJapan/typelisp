@@ -53,6 +53,43 @@ fn every_reader_shape_round_trips_through_owned_form() {
     assert_same_shape(&src_heap, v, &dst_heap, rebuilt);
 }
 
+/// A form's source spans survive the round trip: both the span of a list form
+/// and the span of each element inside it.
+///
+/// The spans live in the cons cell (see `Cell` in `typelisp-mem`), so the
+/// serializer has to carry them explicitly and the rebuild has to re-record
+/// them — the old address-keyed tables could not have travelled at all, since
+/// the address belongs to a heap that no longer exists by then.
+#[test]
+fn source_spans_survive_the_owned_form_round_trip() {
+    let mut src = Heap::with_capacity(1 << 12);
+    let r = Reader::new();
+    let v = r
+        .read_all_in(&mut src, "lib.typl", "(inc x)")
+        .expect("read")
+        .pop()
+        .expect("one form");
+
+    let form_span = src.cons_loc(v).expect("the list form has a span");
+    let elem_spans: Vec<_> = src.list_to_vec_locs(v).expect("proper list").into_iter().map(|(_, l)| l).collect();
+    assert!(elem_spans.iter().all(Option::is_some), "every element has a span: {:?}", elem_spans);
+
+    // Through the wire form, so the spans survive serialization and not merely
+    // the in-memory conversion.
+    let owned = value_to_owned(&src, v).expect("value_to_owned");
+    let json = serde_json::to_string(&owned).expect("serialize");
+    let back: OwnedForm = serde_json::from_str(&json).expect("deserialize");
+
+    let mut dst = Heap::with_capacity(1 << 12);
+    let rebuilt = owned_to_value(&mut dst, &back).expect("owned_to_value");
+    dst.push_root(rebuilt);
+
+    assert_eq!(dst.cons_loc(rebuilt), Some(form_span), "the list form's own span");
+    let rebuilt_spans: Vec<_> =
+        dst.list_to_vec_locs(rebuilt).expect("proper list").into_iter().map(|(_, l)| l).collect();
+    assert_eq!(rebuilt_spans, elem_spans, "each element's own span");
+}
+
 /// The rebuilt value must be a real heap citizen: rooted, it survives a GC
 /// forced by an allocation storm; its content is intact afterwards.
 #[test]

@@ -38,6 +38,15 @@ use crate::{Checker, Error, Heap, Interp, Loc, Path, TopLevel, Value};
 /// `QuotedSexpr` (see `check::ast`), plus the [`OwnedForm::Path`] variant
 /// `QuotedSexpr` deliberately lacks (quote strips `::`-paths during
 /// checking; raw template forms still contain them).
+///
+/// A `Cons` carries the two source spans its cell holds, because a location is
+/// a property of the datum and this is that datum written down: dropping them
+/// here would mean a form that came back from a fasl could not say where it was
+/// written, and every runtime error in it would lose its `file:line:col`
+/// (`tests/fasl_test.rs`'s `a_fasl_loaded_function_reports_its_own_source_position`
+/// is the guard). The rebuild re-records them, which is possible precisely
+/// because the location travels *with* the cell rather than in a table keyed by
+/// an address that no longer exists.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum OwnedForm {
     /// `Value::Empty` — the empty list `()`.
@@ -54,7 +63,10 @@ pub enum OwnedForm {
     Float(f64),
     Bignum(BigInt),
     Ratio(BigRational),
-    Cons(Box<OwnedForm>, Box<OwnedForm>),
+    /// A cons cell: `car`, `cdr`, then the spans the cell carries — the
+    /// element in its `car`, and the form it heads. `None` for a cell with
+    /// none (a synthesized or macro-expanded list).
+    Cons(Box<OwnedForm>, Box<OwnedForm>, Option<Loc>, Option<Loc>),
 }
 
 /// Converts a heap `Value` into its owned mirror. Read-only on `heap`.
@@ -76,10 +88,12 @@ pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
         Value::Path(id) => OwnedForm::Path(
             heap.path_segments(id).iter().map(|s| heap.symbol_name(*s).to_string()).collect(),
         ),
-        Value::Cons(_) => {
+        Value::Cons(cr) => {
             let car = value_to_owned(heap, heap.car(v)?)?;
             let cdr = value_to_owned(heap, heap.cdr(v)?)?;
-            OwnedForm::Cons(Box::new(car), Box::new(cdr))
+            let car_loc = heap.elem_loc(cr);
+            let self_loc = heap.cons_loc(v);
+            OwnedForm::Cons(Box::new(car), Box::new(cdr), car_loc, self_loc)
         }
         Value::Boxed(id) if heap.is_float(id) => OwnedForm::Float(heap.float_value(id)),
         Value::Boxed(id) if heap.is_bignum(id) => OwnedForm::Bignum(heap.bignum_value(id).clone()),
@@ -126,7 +140,7 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
         OwnedForm::Float(x) => heap.alloc_float(*x),
         OwnedForm::Bignum(n) => heap.alloc_bignum(n.clone()),
         OwnedForm::Ratio(r) => heap.alloc_ratio(r.clone()),
-        OwnedForm::Cons(car, cdr) => {
+        OwnedForm::Cons(car, cdr, car_loc, self_loc) => {
             let car_v = owned_to_value(heap, car)?;
             heap.push_root(car_v);
             let cdr_v = match owned_to_value(heap, cdr) {
@@ -140,7 +154,19 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
             let cell = heap.cons(car_v, cdr_v);
             heap.pop_root();
             heap.pop_root();
-            cell?
+            let cell = cell?;
+            // The spans go back into the rebuilt cell, not into a table keyed
+            // by the old one's address — which is what makes them survive at
+            // all, since that address belongs to a heap that is gone.
+            if let Value::Cons(cr) = cell {
+                if let Some(loc) = car_loc {
+                    heap.set_elem_loc(cr, loc.clone());
+                }
+                if let Some(loc) = self_loc {
+                    heap.set_cons_loc(cr, loc.clone());
+                }
+            }
+            cell
         }
     })
 }
@@ -514,7 +540,13 @@ fn diff_namespace(ns: &Namespace, path: &mut Vec<String>, mark: &RegistryMark, o
 /// field's doc comment). A cached `DynBox` from before this carries no
 /// `supers`, so an upcast of it would find no table registered and abort at
 /// the conversion — 2026-08-04.
-pub const FASL_FORMAT_VERSION: u32 = 18;
+/// 19: source locations moved into the cons cell (from three side tables keyed
+/// by cell address), so [`OwnedForm::Cons`] gained the two spans a cell carries
+/// and every serialized cons is one JSON element longer. A stale cache would
+/// fail to deserialize the new shape — and, if it somehow did not, would hand
+/// back forms whose positions were never written, silently costing every
+/// runtime error in a cached module its `file:line:col` — 2026-08-09.
+pub const FASL_FORMAT_VERSION: u32 = 19;
 
 /// A compiled module: the complete checked state one `.typl` file produced,
 /// heap-independent and serializable. See the module doc comment.
