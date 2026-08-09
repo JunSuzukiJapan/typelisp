@@ -322,6 +322,80 @@ fn fasl_top_levels_match_a_direct_prelude_check() {
     }
 }
 
+/// A runtime error raised inside a fasl-loaded function still reports the
+/// `file:line:col` it was written at.
+///
+/// The guard for a property that is easy to lose without noticing: a source
+/// location is *not* part of a value, so it only survives serialization if
+/// something deliberately carries it. Today the checked node owns it (a `loc`
+/// field, serialized with the rest of the node); a cons-cell program keeps it
+/// beside the cell instead, and "beside" is exactly what a serializer walking
+/// the cells does not see. The test is written against the property, not the
+/// mechanism, so it holds either way — and fails loudly if a rewrite of the
+/// carrier drops it.
+///
+/// No prelude: `defun`/`panic`/`i64` are all the language's own, so a bare
+/// checker suffices and the test costs milliseconds.
+#[test]
+fn a_fasl_loaded_function_reports_its_own_source_position() {
+    // Line 3, and `(panic ...)` starts at column 20 — both asserted below, so
+    // this layout is load-bearing. Anything that shifts it must update them.
+    let src = "\
+(defun ok () i64 1)
+(pub defun boom () i64
+                   (panic \"from the fasl\"))
+";
+    let file = "lib.typl";
+
+    // Capture: check the module in its own environment, keeping the forms.
+    let fasl = {
+        let mut h = Heap::with_capacity(1 << 14);
+        let mut chk = Checker::new();
+        let interp = Interp::new();
+        let mark = registry_mark(&chk);
+        let r = Reader::new();
+        let forms = r.read_all_in_spanned(&mut h, file, src).expect("read");
+        let plain: Vec<Value> = forms.iter().map(|(v, _)| *v).collect();
+        chk.predeclare_program(&mut h, &plain);
+        let mut top_levels = Vec::new();
+        for (v, loc) in forms {
+            let tl = chk.check_form_at(&mut h, &interp, v, Some(loc)).expect("check");
+            let _ = chk.take_warnings();
+            interp.exec(&mut h, tl.clone()).expect("exec");
+            top_levels.push(tl);
+        }
+        let fasl = Fasl::capture(&h, &chk, &mark, top_levels, source_hash(src)).expect("capture");
+        // Through the wire form, so the position has to survive serialization
+        // rather than merely surviving in memory.
+        let bytes = fasl.to_bytes().expect("to_bytes");
+        Fasl::from_bytes(&bytes).expect("from_bytes")
+    };
+
+    // Load into a *fresh* environment — a different heap, so every cons cell,
+    // symbol id and string id differs from the ones the position was recorded
+    // against.
+    let mut h = Heap::with_capacity(1 << 14);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    fasl.load_into(&mut h, &mut chk, &mut interp).expect("load_into");
+
+    // Not `eval_in`: it strips the location (`EvalError::into_kind`), which is
+    // the very thing under test.
+    let err = {
+        let r = Reader::new();
+        let vs = r.read_all(&mut h, "(boom)").expect("read");
+        let tl = chk.check_form(&mut h, &interp, vs[0]).expect("check the call");
+        interp.exec(&mut h, tl).expect_err("boom panics")
+    };
+    let loc = match &err {
+        EvalError::At(loc, _) => loc.clone(),
+        other => panic!("expected a located error, got {:?}", other),
+    };
+    assert!(matches!(err.kind(), EvalError::Panic(m) if m == "from the fasl"), "{:?}", err);
+    assert_eq!(&*loc.file, file, "the file the function was written in");
+    assert_eq!((loc.line, loc.col), (3, 20), "the `panic` form's own position");
+}
+
 // ---- S3: the `(load "path")` top-level form --------------------------------
 
 use std::path::PathBuf;
