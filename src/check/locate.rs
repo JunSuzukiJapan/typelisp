@@ -5,8 +5,9 @@
 //! the opening through closing parenthesis (`Heap::cons_loc`); for a bare atom
 //! checked as an *element of some enclosing list* (e.g. an argument, a `let`
 //! binding value, a function body form) it's the span the reader recorded
-//! for that specific occurrence (`Heap::elem_locs`, threaded through the
-//! checker as `arg_locs`/`Checker::check_at`) — this is what lets a `Var`
+//! for that specific occurrence (the spine cell's own `car_loc`, read back by
+//! `Heap::list_to_vec_locs` and threaded through the checker as
+//! `arg_locs`/`Checker::check_at`) — this is what lets a `Var`
 //! (local variable) reference be found in its own right. A bare atom at top
 //! level gets its span from the reader directly
 //! (`Reader::read_all_in_spanned` -> `Checker::check_form_at`).

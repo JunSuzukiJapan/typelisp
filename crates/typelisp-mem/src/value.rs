@@ -456,3 +456,31 @@ impl Value {
         matches!(self, Value::Cons(_))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The arena's per-cell cost, written down.
+    ///
+    /// A cell is the unit the whole heap is measured in — the default arena is
+    /// 65,536 of them and `bootstrap` asks for 262,144 — so a field added here
+    /// is multiplied by that. This is not a limit anyone must never exceed; it
+    /// is a number that should change only when someone means to change it.
+    ///
+    /// The two location slots cost 8 of these bytes. They could have been one
+    /// (a `u32` fits in the padding after `mark` for free), but one slot cannot
+    /// hold both facts a form needs: the span of the list and the span of the
+    /// element in the `car` — and the latter is the only position an interned
+    /// atom can ever have. See [`Cell`]'s doc comment.
+    #[test]
+    fn a_cell_is_seven_words() {
+        assert_eq!(std::mem::size_of::<Value>(), 16, "a tagged value is two words");
+        assert_eq!(std::mem::size_of::<LocId>(), 4);
+        assert_eq!(
+            std::mem::size_of::<Cell>(),
+            56,
+            "car(16) + cdr(16) + next_free(8) + mark(1, padded) + two LocIds(8)"
+        );
+    }
+}

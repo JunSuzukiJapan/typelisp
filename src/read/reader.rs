@@ -597,9 +597,10 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap, features: &Features) -> Result<V
 
     // Build the cons chain from the back; the accumulator stays rooted so a GC
     // triggered by `cons` cannot reclaim the part already built. Each spine
-    // cell is tagged with its `car`'s source location (`elem_locs`, walked in
-    // the same reverse order as `elems`) so the checker can give a bare-atom
-    // element its own `Loc` — see `Heap::set_elem_loc`.
+    // cell is tagged with its `car`'s source location (`elem_locs` below,
+    // walked in the same reverse order as `elems`) so the checker can give a
+    // bare-atom element its own `Loc` — see `Heap::set_elem_loc`, which records
+    // it in the spine cell itself.
     let mut acc = tail;
     heap.push_root(acc);
     for (&e, loc) in elems.iter().rev().zip(elem_locs.iter().rev()) {

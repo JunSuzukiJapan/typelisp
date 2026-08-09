@@ -13,7 +13,7 @@ use crate::{Loc, Path, Type};
 ///
 /// `loc` is the source span the node was read from (when known — a list
 /// form always carries one from its own `cons_loc`; a bare atom does too
-/// when it was read as a list element (`elem_locs`) or as a spanned
+/// when it was read as a list element (the holding cell's `car_loc`) or as a spanned
 /// top-level datum (`Reader::read_all_in_spanned` -> `Checker::
 /// check_form_at`'s `loc_hint`) — see `check::locate`'s module doc comment),
 /// set by [`Checker::check`](crate::Checker) so the interpreter can report a
